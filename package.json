@@ -1,0 +1,17 @@
+{
+  "name": "web-everything",
+  "version": "1.0.0",
+  "description": "Web Everything - Grouping standards for better web library standardization",
+  "scripts": {
+    "start": "eleventy --serve --watch",
+    "build": "eleventy",
+    "clean": "rm -rf _site"
+  },
+  "devDependencies": {
+    "@11ty/eleventy": "^2.0.1",
+    "@11ty/eleventy-plugin-syntaxhighlight": "^4.2.0"
+  },
+  "keywords": ["web-standards", "web-components", "polylfill", "dependency-injection"],
+  "author": "Web Everything Project",
+  "license": "MIT"
+}

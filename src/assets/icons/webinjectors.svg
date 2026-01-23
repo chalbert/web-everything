@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- Medical/Precise Blue Gradient -->
+    <linearGradient id="liquidGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#74c0fc" />
+      <stop offset="50%" stop-color="#4dabf7" /> <!-- Liquid Level -->
+      <stop offset="100%" stop-color="#1971c2" />
+    </linearGradient>
+    
+    <!-- Glass Barrel Gradient -->
+    <linearGradient id="glassGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="rgba(255,255,255,0.4)" />
+        <stop offset="20%" stop-color="rgba(255,255,255,0.1)" />
+        <stop offset="80%" stop-color="rgba(255,255,255,0.1)" />
+        <stop offset="100%" stop-color="rgba(255,255,255,0.4)" />
+    </linearGradient>
+
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Standard Background: Clear Circle Container -->
+  <circle cx="64" cy="64" r="62" fill="#ffffff" stroke="#adb5bd" stroke-width="2"/>
+
+  <g filter="url(#softShadow)" transform="translate(64, 64) scale(0.75) translate(-64, -64) translate(0, 5) rotate(45, 64, 64)">
+      <!-- Needle -->
+      <path d="M64 100 L64 120" stroke="#868e96" stroke-width="3" />
+      <path d="M64 120 L64 124" stroke="#868e96" stroke-width="1" /> <!-- Sharp Tip -->
+
+      <!-- Barrel Body -->
+      <rect x="50" y="40" width="28" height="60" rx="4" fill="url(#glassGrad)" stroke="#adb5bd" stroke-width="2"/>
+      
+      <!-- Liquid Inside (Dependency) -->
+      <rect x="52" y="55" width="24" height="43" fill="url(#liquidGrad)" opacity="0.9">
+          <!-- Bubbles -->
+          <animate attributeName="y" values="55;57;55" dur="4s" repeatCount="indefinite" />
+      </rect>
+      
+      <!-- Measurement lines -->
+      <line x1="56" y1="50" x2="64" y2="50" stroke="#333" stroke-width="1" />
+      <line x1="56" y1="60" x2="64" y2="60" stroke="#333" stroke-width="1" />
+      <line x1="56" y1="70" x2="64" y2="70" stroke="#333" stroke-width="1" />
+      <line x1="56" y1="80" x2="64" y2="80" stroke="#333" stroke-width="1" />
+
+      <!-- Plunger -->
+      <rect x="56" y="10" width="16" height="30" fill="#343a40" />
+      <rect x="44" y="5" width="40" height="8" rx="2" fill="#343a40" /> <!-- Thumb rest -->
+      <rect x="52" y="38" width="24" height="4" fill="#343a40" /> <!-- Piston head -->
+  </g>
+</svg>

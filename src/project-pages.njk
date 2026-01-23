@@ -1,0 +1,69 @@
+---
+pagination:
+    data: projects
+    size: 1
+    alias: project
+permalink: "projects/{{ project.id }}/"
+layout: base.njk
+eleventyComputed:
+    title: "Web Everything - {{ project.name }}"
+---
+
+{% from "project-status.njk" import projectStatus %}
+
+<div class="project-detail-header">
+    <div class="project-detail-icon">
+        {% if project.isSvg %}
+            <img src="{{ project.icon }}" alt="{{ project.name }} icon" width="64" height="64">
+        {% else %}
+            {{ project.icon }}
+        {% endif %}
+    </div>
+    <h1 class="project-detail-title">{{ project.name }}</h1>
+    <p class="project-detail-desc">{{ project.description }}</p>
+    
+    <div class="project-detail-status">
+        {{ projectStatus(project.status) }}
+    </div>
+</div>
+
+<article class="project-content">
+    <h2>Mission Brief</h2>
+    {% if project.details %}
+        <p>{{ project.details }}</p>
+    {% else %}
+        <p>This project is currently in the <strong>{{ project.status }}</strong> phase. 
+        We are working hard to bring this standard to life.</p>
+        <p>Stay tuned for updates!</p>
+    {% endif %}
+
+    {% if project.id == 'webinjectors' %}
+    <h3>The Problem</h3>
+    <p>Loading dependencies in the browser without build tools is hard. Import maps are static and location-based. We need something dynamic.</p>
+    
+    <h3>The Solution: Web Injectors</h3>
+    <p>Web Injectors bring standard dependency injection to the web. It separates the "what" from the "where" and "how".</p>
+    
+    <h4>Key Concepts</h4>
+    <ul>
+        <li><strong>Injector:</strong> A container that holds dependencies.</li>
+        <li><strong>Scope:</strong> An isolated context for dependencies.</li>
+        <li><strong>Provide:</strong> Declare what data flows out of a scope.</li>
+        <li><strong>Consume:</strong> Declare what data is needed.</li>
+    </ul>
+
+    <pre><code>
+// Example Syntax
+scope myScope {
+    const value = 42;
+    provide { value };
+}
+    </code></pre>
+    {% endif %}
+
+    <div class="action-area">
+        <a href="/" class="btn-back">
+            &larr; Back to Home
+        </a>
+    </div>
+</article>

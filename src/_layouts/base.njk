@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title | default("Web Everything") }}</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <header class="site-header">
+        <a href="/" class="site-title">🌐 Web Everything!</a>
+        <p class="site-tagline">Comprehensive tools and standards for the modern web.</p>
+    </header>
+
+    <main>
+        {{ content | safe }}
+    </main>
+
+    <footer class="site-footer">
+        <p>&copy; 2026 Web Everything. No cookies were harmed (or used).</p>
+    </footer>
+</body>
+</html>

@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- Candy Body Gradient: Sweet Blue/Cyan -->
+    <linearGradient id="candyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00d2ff" /> <!-- Cyan Highlight -->
+      <stop offset="45%" stop-color="#0056b3" /> <!-- Brand Blue -->
+      <stop offset="100%" stop-color="#002a5c" /> <!-- Deep Depth -->
+    </linearGradient>
+    
+    <!-- Metallic/Foil Gradient for Wrapper -->
+    <linearGradient id="foilGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#dee2e6" />
+      <stop offset="25%" stop-color="#adb5bd" />
+      <stop offset="50%" stop-color="#e9ecef" /> <!-- Shine -->
+      <stop offset="75%" stop-color="#868e96" />
+      <stop offset="100%" stop-color="#495057" />
+    </linearGradient>
+
+    <!-- Subtle Shadow Filter (Matching webplugs) -->
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.2"/>
+      </feComponentTransfer>
+      <feMerge> 
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/> 
+      </feMerge>
+    </filter>
+    
+    <!-- Inner Glow for Syntax -->
+    <filter id="codeGlow">
+      <feGaussianBlur stdDeviation="1" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="arithmetic" k1="0" k2="1" k3="1" k4="0"/>
+    </filter>
+  </defs>
+
+  <!-- Standard Background: Clear Circle Container -->
+  <circle cx="64" cy="64" r="62" fill="#ffffff" stroke="#adb5bd" stroke-width="2"/>
+
+  <g filter="url(#softShadow)" transform="translate(64, 64) scale(0.75) translate(-64, -64) translate(0, 4)">
+      <!-- Wrapper Wings (Back Layer) -->
+      <!-- Left Wing -->
+      <path d="M30 64 L18 45 L14 48 C12 50 12 78 14 80 L18 83 Z" fill="url(#foilGrad)" stroke="#495057" stroke-width="0.5" />
+      <path d="M30 64 L18 45 Q 22 64 18 83 L30 64" fill="rgba(0,0,0,0.1)" /> <!-- Fold Shadow -->
+
+      <!-- Right Wing -->
+      <path d="M98 64 L110 45 L114 48 C116 50 116 78 114 80 L110 83 Z" fill="url(#foilGrad)" stroke="#495057" stroke-width="0.5" />
+      <path d="M98 64 L110 45 Q 106 64 110 83 L98 64" fill="rgba(0,0,0,0.1)" /> <!-- Fold Shadow -->
+
+      <!-- Candy Body -->
+      <!-- Main Shape -->
+      <rect x="24" y="34" width="80" height="60" rx="30" fill="url(#candyGrad)" />
+      
+      <!-- Top Gloss Highlight -->
+      <path d="M36 44 H92 C100 44 100 56 100 56 C98 50 90 40 50 40 C30 40 28 56 28 56 C28 56 28 44 36 44 Z" fill="rgba(255,255,255,0.4)" />
+      
+      <!-- Bottom Reflected Light -->
+      <path d="M40 86 H88 Q 94 86 94 80" stroke="rgba(255,255,255,0.15)" stroke-width="2" fill="none" stroke-linecap="round"/>
+
+      <!-- Syntax Symbol -->
+      <!-- Curly Braces { } to allow JS sugar metaphor -->
+      <g fill="#ffffff" font-family="monospace" font-weight="bold" font-size="42" text-anchor="middle" filter="url(#codeGlow)" opacity="0.9">
+          <text x="64" y="78">{ }</text>
+      </g>
+      
+      <!-- Shine/Sparkle -->
+      <path d="M88 48 L92 42 L96 48 L92 54 Z" fill="#ffffff" opacity="0.8">
+           <animate attributeName="opacity" values="0.8;0.3;0.8" dur="3s" repeatCount="indefinite" />
+      </path>
+  </g>
+</svg>

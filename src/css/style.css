@@ -1,0 +1,208 @@
+:root {
+    --color-bg: #f8f9fa;
+    --color-text: #333;
+    --color-primary: #0056b3; /* Professional Blue */
+    --color-secondary: #e9ecef; /* Light Gray */
+    --color-tertiary: #ffffff; /* White */
+    --color-quaternary: #28a745; /* Success Green */
+    --font-heading: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+    --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+    --spacing: 1.5rem;
+    --border-width: 1px;
+    --shadow-offset: 4px;
+    --border-radius: 8px;
+}
+
+body {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-body);
+    margin: 0;
+    padding: 0;
+    line-height: 1.6;
+}
+
+.site-header {
+    background: white;
+    padding: var(--spacing);
+    border-bottom: 1px solid #e1e4e8;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    text-align: center;
+}
+
+.site-title {
+    font-family: var(--font-heading);
+    font-size: 2.5rem;
+    font-weight: 700;
+    text-decoration: none;
+    color: var(--color-primary);
+    display: block;
+    margin-bottom: 0.5rem;
+}
+
+.site-tagline {
+    font-weight: normal;
+    background: transparent;
+    color: #666;
+    display: inline-block;
+    padding: 0;
+    margin-top: 0.5rem;
+    font-size: 1.1rem;
+}
+
+main {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: var(--spacing);
+}
+
+h1, h2, h3 {
+    font-family: var(--font-heading);
+    text-transform: uppercase;
+    letter-spacing: -1px;
+}
+
+/* Card Styles for Projects */
+.project-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: var(--spacing);
+    margin-top: var(--spacing);
+}
+
+.project-card {
+    background: white;
+    border: 1px solid #e1e4e8;
+    border-radius: var(--border-radius);
+    padding: var(--spacing);
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    text-decoration: none;
+    color: inherit;
+    display: flex;
+    flex-direction: column;
+}
+
+.project-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 15px rgba(0,0,0,0.1);
+    background-color: white;
+}
+
+.project-icon {
+    font-size: 2.5rem;
+    margin-bottom: 1rem;
+}
+
+.project-title {
+    font-size: 1.25rem;
+    margin: 0 0 0.5rem 0;
+    border-bottom: none;
+    color: var(--color-primary);
+    font-weight: 600;
+}
+
+/* Progress Meter */
+.status-meter {
+    margin-top: auto;
+    padding-top: 1rem;
+}
+
+.status-label {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    display: block;
+    margin-bottom: 0.4rem;
+    color: #666;
+    letter-spacing: 0.5px;
+}
+
+.meter-track {
+    height: 8px;
+    background: #e9ecef;
+    border: none;
+    position: relative;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.meter-fill {
+    height: 100%;
+    background: var(--color-quaternary);
+    width: 0%;
+    transition: width 0.5s ease-out;
+    border-radius: 4px;
+}
+
+.status-concept .meter-fill { width: 10%; background: #6c757d; }
+.status-poc .meter-fill { width: 50%; background: #17a2b8; }
+.status-complete .meter-fill { width: 100%; background: var(--color-quaternary); }
+
+/* Footer */
+.site-footer {
+    text-align: center;
+    padding: var(--spacing);
+    border-top: 1px solid #e1e4e8;
+    background: white;
+    font-weight: normal;
+    color: #666;
+    margin-top: 3rem;
+}
+
+/* Detail Page */
+.project-detail-header {
+    background: white;
+    border: 1px solid #e1e4e8;
+    border-radius: var(--border-radius);
+    padding: 3rem;
+    margin-bottom: var(--spacing);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    text-align: center;
+}
+
+.btn-back {
+    background: var(--color-primary);
+    color: white;
+    padding: 0.8rem 1.5rem;
+    text-decoration: none;
+    font-family: var(--font-heading);
+    font-size: 1rem;
+    border-radius: 4px;
+    display: inline-block;
+    transition: background 0.2s;
+    font-weight: 600;
+}
+
+.btn-back:hover {
+    background: #004494;
+}
+
+.project-detail-icon {
+    font-size: 4rem;
+    margin-bottom: 1rem;
+}
+
+.project-detail-title {
+    margin: 0 0 1rem 0;
+    color: var(--color-text);
+}
+
+.project-detail-desc {
+    font-size: 1.25rem;
+    color: #666;
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.project-detail-status {
+    max-width: 300px;
+    margin: 2rem auto 0;
+}
+
+.action-area {
+    margin-top: 3rem;
+    text-align: center;
+}
+
+

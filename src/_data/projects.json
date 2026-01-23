@@ -1,0 +1,59 @@
+[
+  {
+    "id": "webplugs",
+    "name": "Webplugs",
+    "description": "Missing standards from the browser, usable as polyfills or importable libs.",
+    "status": "concept",
+    "icon": "/assets/icons/webplugs.svg",
+    "isSvg": true
+  },
+  {
+    "id": "webcandies",
+    "name": "Web Candies",
+    "description": "Development sugar syntax to make development easier, easily convertible to/from plain JS.",
+    "status": "concept",
+    "icon": "/assets/icons/webcandies.svg",
+    "isSvg": true
+  },
+  {
+    "id": "webblocks",
+    "name": "Web Blocks",
+    "description": "Series of standard, inter-operable blocks (behaviors, elements, etc.).",
+    "status": "concept",
+    "icon": "/assets/icons/webblocks.svg",
+    "isSvg": true
+  },
+  {
+    "id": "webbehaviors",
+    "name": "Web Behaviors",
+    "description": "Standard to allow custom attributes to add functionality to any HTML element.",
+    "status": "poc",
+    "icon": "/assets/icons/webbehaviors.svg",
+    "isSvg": true
+  },
+  {
+    "id": "webinjectors",
+    "name": "Web Injectors",
+    "description": "Dependency injection system for the web. Supports scopes, provide/consume syntax.",
+    "status": "poc",
+    "icon": "/assets/icons/webinjectors.svg",
+    "details": "The Web Injectors project aims to bring standard dependency injection to the web platform, solving the problem of loading dependencies without build tools or import maps limitations. It introduces 'scope', 'provide', and 'consume' syntax to managing isolated contexts and explicit data flow.",
+    "isSvg": true
+  },
+  {
+    "id": "webregistries",
+    "name": "Web Registries",
+    "description": "Allow creation of custom registries, similar to customElementsRegistry, for many purposes.",
+    "status": "concept",
+    "icon": "/assets/icons/webregistries.svg",
+    "isSvg": true
+  },
+  {
+    "id": "webcontexts",
+    "name": "Web Contexts",
+    "description": "Similar to React context but for the standard web platform.",
+    "status": "concept",
+    "icon": "/assets/icons/webcontexts.svg",
+    "isSvg": true
+  }
+]
