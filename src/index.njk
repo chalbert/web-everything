@@ -6,7 +6,7 @@ title: Web Everything - Home
 {% from "project-status.njk" import projectStatus %}
 
 <section class="intro">
-    <h1>Web Everything Project</h1>
+    <h1>Web Everything</h1>
     <p>
         <strong>Web Everything</strong> is an initiative to group a range of standards allowing for better standardization across web libraries.
         Our goal is to create interoperable blocks, behaviors, and tools that work seamlessly with standard web technologies.
@@ -16,14 +16,16 @@ title: Web Everything - Home
 <div class="project-grid">
     {% for project in projects %}
     <a href="/projects/{{ project.id }}/" class="project-card">
-        <div class="project-icon">
-            {% if project.isSvg %}
-                <img src="{{ project.icon }}" alt="{{ project.name }} icon" width="48" height="48">
-            {% else %}
-                {{ project.icon }}
-            {% endif %}
+        <div class="project-header">
+            <div class="project-icon">
+                {% if project.isSvg %}
+                    <img src="{{ project.icon }}" alt="{{ project.name }} icon" width="48" height="48">
+                {% else %}
+                    {{ project.icon }}
+                {% endif %}
+            </div>
+            <h2 class="project-title">{{ project.name }}</h2>
         </div>
-        <h2 class="project-title">{{ project.name }}</h2>
         <p>{{ project.description }}</p>
         {{ projectStatus(project.status) }}
     </a>

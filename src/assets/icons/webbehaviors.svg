@@ -1,52 +1,33 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
   <defs>
-    <!-- Organic Gradient: Soft flow -->
-    <linearGradient id="nodeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#20c997" /> <!-- Teal/Brain color -->
-      <stop offset="100%" stop-color="#087f5b" />
+    <linearGradient id="behaviorChipGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#14b8a6" /> <!-- Teal-500 -->
+      <stop offset="100%" stop-color="#0f766e" /> <!-- Teal-700 -->
     </linearGradient>
-
-    <!-- Connector Pulse Gradient -->
-    <linearGradient id="pulse" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#20c997" stop-opacity="0"/>
-      <stop offset="50%" stop-color="#ffffff"/>
-      <stop offset="100%" stop-color="#20c997" stop-opacity="0"/>
-    </linearGradient>
-
-    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur in="SourceAlpha" stdDeviation="3" />
+    <filter id="floatShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
       <feOffset dx="2" dy="4" result="offsetblur" />
       <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
       <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
   </defs>
 
-  <!-- Standard Background: Clear Circle Container -->
-  <circle cx="64" cy="64" r="62" fill="#ffffff" stroke="#adb5bd" stroke-width="2"/>
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc" />
 
-  <g filter="url(#softShadow)" transform="translate(64, 64) scale(0.75) translate(-64, -64) translate(0, 5)">
-      <!-- Central HTML Element (The "Host") -->
-      <rect x="44" y="44" width="40" height="40" rx="8" fill="#f8f9fa" stroke="#adb5bd" stroke-width="3" />
-      <text x="64" y="70" font-family="monospace" font-weight="bold" font-size="24" text-anchor="middle" fill="#adb5bd">&lt;/&gt;</text>
+  <!-- Base Board (Socket) -->
+  <g filter="url(#floatShadow)">
+      <rect x="34" y="34" width="60" height="60" rx="4" fill="#e2e8f0" />
+      <!-- Socket Holes -->
+      <rect x="44" y="44" width="40" height="40" rx="2" fill="#cbd5e1" />
+  </g>
 
-      <!-- Custom Behavior Nodes (Brain Synapses) -->
-      <!-- Top Node -->
-      <circle cx="64" cy="24" r="12" fill="url(#nodeGrad)">
-        <animate attributeName="r" values="12;13;12" dur="3s" repeatCount="indefinite"/>
-      </circle>
-      <!-- Left Node -->
-      <circle cx="24" cy="84" r="10" fill="url(#nodeGrad)" opacity="0.9"/>
-      <!-- Right Node -->
-      <circle cx="104" cy="84" r="10" fill="url(#nodeGrad)" opacity="0.9"/>
-
-      <!-- Synaptic Connections (The "Behavior" injection) -->
-      <path d="M64 36 L64 44" stroke="#20c997" stroke-width="4" stroke-linecap="round"/>
-      <path d="M30 76 L44 64" stroke="#20c997" stroke-width="3" stroke-linecap="round"/>
-      <path d="M98 76 L84 64" stroke="#20c997" stroke-width="3" stroke-linecap="round"/>
-
-      <!-- Pulse flow on connection -->
-      <circle cx="64" cy="40" r="2" fill="#fff">
-         <animate attributeName="cy" values="36;44;36" dur="2s" repeatCount="indefinite"/>
-      </circle>
+  <!-- Inserting Chip (The Behavior) -->
+  <g filter="url(#floatShadow)" transform="translate(10, -10)">
+      <!-- Chip Body (No Stroke) -->
+      <rect x="54" y="54" width="30" height="30" rx="4" fill="url(#behaviorChipGrad)" />
+      
+      <!-- Chip Legs (White/Light, "poking out" style instead of dark strokes) -->
+      <path d="M54 60 H48 M54 70 H48 M54 80 H48" stroke="white" stroke-width="2" stroke-linecap="round" />
+      <path d="M84 60 H90 M84 70 H90 M84 80 H90" stroke="white" stroke-width="2" stroke-linecap="round" />
   </g>
 </svg>

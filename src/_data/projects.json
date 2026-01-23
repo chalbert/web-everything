@@ -1,7 +1,7 @@
 [
   {
     "id": "webplugs",
-    "name": "Webplugs",
+    "name": "Web Plugs",
     "description": "Missing standards from the browser, usable as polyfills or importable libs.",
     "status": "concept",
     "icon": "/assets/icons/webplugs.svg",
