@@ -61,6 +61,88 @@ scope myScope {
     </code></pre>
     {% endif %}
 
+    {% if project.id == 'webregistries' %}
+    <h3>The Concept</h3>
+    <p>
+        The <code>CustomRegistry</code> class provides a standardized way to create registry objects similar to the browser's native <code>customElements</code> registry. 
+        It extends the capabilities of a standard Map with a powerful inheritance mechanism.
+    </p>
+
+    <h3>Why do we need this?</h3>
+    <p>
+        As we build more modular web applications, we often need to register "things" (parsers, components, formatters) that are available in specific contexts.
+        Native <code>Map</code> objects don't support inheritance (looking up a key in a parent map if not found locally), which makes scoping difficult.
+    </p>
+
+    <h3>Features</h3>
+    <ul>
+        <li><strong>Hierarchical Lookup:</strong> Registries can extend other registries. <code>get()</code> calls traverse the chain.</li>
+        <li><strong>Standard Interface:</strong> Familiar methods like <code>get</code>, <code>has</code>, <code>keys</code>, <code>values</code>.</li>
+        <li><strong>Type Safety:</strong> generic typing for definitions and keys.</li>
+    </ul>
+
+    <h3>Implementation Example</h3>
+    <pre><code>
+// 1. Create a specialized registry
+class IconRegistry extends CustomRegistry&lt;string&gt; {
+    localName = 'icons';
+    
+    define(name, svgContent) {
+        this.set(name, svgContent);
+    }
+}
+
+// 2. Create the global registry
+const globalIcons = new IconRegistry();
+globalIcons.define('menu', '&lt;svg...&gt;');
+
+// 3. Create a scoped registry that extends the global one
+const scopedIcons = new IconRegistry({ extends: [globalIcons] });
+scopedIcons.define('user', '&lt;svg...&gt;');
+
+// 4. Usage
+scopedIcons.get('user'); // Returns user icon (Found in scope)
+scopedIcons.get('menu'); // Returns menu icon (Found in parent)
+    </code></pre>
+    {% endif %}
+
+    {% if project.id == 'webtokens' %}
+    <h3>The Concept</h3>
+    <p>
+        <strong>Web Tokens</strong> represents a collection of advanced parsing technologies that allow developers to imbue standard DOM text nodes and attributes with custom behavior. 
+        Where standard HTML is static, Tokens make the text itself alive.
+    </p>
+
+    <h3>Components</h3>
+    <ul>
+        <li><strong>Custom Text Nodes:</strong> Define behaviors for specific text patterns within the DOM.</li>
+        <li><strong>Custom Text Node Parsers:</strong> The engine that scans and upgrades text nodes into functional run-time objects.</li>
+        <li><strong>Web Path Parsers:</strong> Registries for resolving complex data paths (like XPath or JSONPath) directly in your templates.</li>
+        <li><strong>Web Attribute Parsers:</strong> Enable custom syntax within attributes (e.g., <code>{{ double_curly }}</code>) to trigger dynamic updates.</li>
+    </ul>
+    {% endif %}
+
+    {% if project.id == 'webdirectives' %}
+    <h3>The Concept</h3>
+    <p>
+        <strong>Web Directives</strong> provides a unified system for control flow and logic in HTML. 
+        It combines standard structural directives (loops, conditionals) with invisible "Comment Directives" and powerful "Template Directives".
+    </p>
+
+    <h3>Three Pillars</h3>
+    <ul>
+        <li><strong>Structural Directives:</strong> Standard attributes (like <code>*if</code> or <code>*for</code>) for manipulating DOM layout.</li>
+        <li><strong>Comment Directives:</strong> Use HTML comments to attach logic without extra wrapper elements. Perfect for "ghost" behaviors (formerly Web Figments).</li>
+        <li><strong>Template Directives:</strong> Advanced extensions for the <code>&lt;template&gt;</code> element to control instantiation and projection.</li>
+    </ul>
+
+    <h3>Why Comment Directives?</h3>
+    <p>
+        Sometimes you need logic (like a conditional render) but you don't want a <code>&lt;div&gt;</code> or <code>&lt;span&gt;</code> wrapper breaking your CSS grid or Flexbox layout. 
+        Comment directives allow you to anchor this logic to invisible markers in the DOM.
+    </p>
+    {% endif %}
+
     <div class="action-area">
         <a href="/" class="btn-back">
             &larr; Back to Home

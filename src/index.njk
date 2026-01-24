@@ -13,21 +13,64 @@ title: Web Everything - Home
     </p>
 </section>
 
-<div class="project-grid">
-    {% for project in projects %}
-    <a href="/projects/{{ project.id }}/" class="project-card">
-        <div class="project-header">
-            <div class="project-icon">
-                {% if project.isSvg %}
-                    <img src="{{ project.icon }}" alt="{{ project.name }} icon" width="48" height="48">
-                {% else %}
-                    {{ project.icon }}
-                {% endif %}
+<section class="mb-12">
+    <h2 class="section-title">Core Standards</h2>
+    <p class="section-desc">Low-level specifications expanding the capabilities of the platform.</p>
+    <div class="project-grid">
+        {% for project in projects %}
+        {% if project.category == 'standard' %}
+        <a href="/projects/{{ project.id }}/" class="project-card">
+            <div class="project-header">
+                <div class="project-icon">
+                    {% if project.isSvg %}
+                        <img src="{{ project.icon }}" alt="{{ project.name }} icon" width="48" height="48">
+                    {% else %}
+                        {{ project.icon }}
+                    {% endif %}
+                </div>
+                <h2 class="project-title">{{ project.name }}</h2>
             </div>
-            <h2 class="project-title">{{ project.name }}</h2>
-        </div>
-        <p>{{ project.description }}</p>
-        {{ projectStatus(project.status) }}
-    </a>
-    {% endfor %}
-</div>
+            <p>{{ project.description }}</p>
+            {{ projectStatus(project.status) }}
+        </a>
+        {% endif %}
+        {% endfor %}
+    </div>
+</section>
+
+<section>
+    <h2 class="section-title">Ecosystem & Utilities</h2>
+    <p class="section-desc">Concrete implementations, polyfills, and developer experience tools.</p>
+    <div class="project-grid">
+        {% for project in projects %}
+        {% if project.category == 'utility' %}
+        <a href="/projects/{{ project.id }}/" class="project-card">
+            <div class="project-header">
+                <div class="project-icon">
+                    {% if project.isSvg %}
+                        <img src="{{ project.icon }}" alt="{{ project.name }} icon" width="48" height="48">
+                    {% else %}
+                        {{ project.icon }}
+                    {% endif %}
+                </div>
+                <h2 class="project-title">{{ project.name }}</h2>
+            </div>
+            <p>{{ project.description }}</p>
+            {{ projectStatus(project.status) }}
+        </a>
+        {% endif %}
+        {% endfor %}
+    </div>
+</section>
+
+<section class="creator-section">
+    <h2>About the Creator</h2>
+    <p>
+        <a href="https://chalbert.github.io/portfolio" target="_blank" rel="noopener noreferrer"><strong>Nicolas Gilbert</strong></a> is a passionate frontend developer and consultant based in Quebec City, Canada.
+        Specializing in modern web applications, Web Components, and developer experience tools.
+    </p>
+    <div class="creator-links">
+        <a href="https://chalbert.github.io/portfolio/contact/" class="creator-link">Work with me</a>
+        <a href="https://patreon.com/" class="creator-link">Support this project</a>
+    </div>
+</section>

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="directiveGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fb7185" /> <!-- Rose-400 -->
+      <stop offset="100%" stop-color="#e11d48" /> <!-- Rose-600 -->
+    </linearGradient>
+    <filter id="floatShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc" />
+
+  <g filter="url(#floatShadow)">
+    <!-- Asterisk composed of 3 bars -->
+    <g transform="translate(64 64)">
+      <!-- Vertical -->
+      <rect x="-6" y="-40" width="12" height="80" rx="6" fill="url(#directiveGrad)" />
+      <!-- Left diagonal -->
+      <rect x="-6" y="-40" width="12" height="80" rx="6" transform="rotate(60)" fill="url(#directiveGrad)" />
+      <!-- Right diagonal -->
+      <rect x="-6" y="-40" width="12" height="80" rx="6" transform="rotate(-60)" fill="url(#directiveGrad)" />
+    </g>
+  </g>
+</svg>
