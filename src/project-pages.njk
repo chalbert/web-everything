@@ -23,7 +23,10 @@ eleventyComputed:
     <p class="project-detail-desc">{{ project.description }}</p>
     
     <div class="project-detail-status">
-        {{ projectStatus(project.status) }}
+        <!-- Status Link -->
+        <a href="/project-lifecycle/" class="status-lifecycle-link" aria-label="Learn about the project lifestyle stages">
+            {{ projectStatus(project.status) }}
+        </a>
     </div>
 </div>
 
@@ -52,58 +55,142 @@ eleventyComputed:
         <li><strong>Consume:</strong> Declare what data is needed.</li>
     </ul>
 
-    <pre><code>
+    {% highlight "javascript" %}
 // Example Syntax
 scope myScope {
     const value = 42;
     provide { value };
 }
-    </code></pre>
+    {% endhighlight %}
     {% endif %}
 
     {% if project.id == 'webregistries' %}
-    <h3>The Concept</h3>
+    <h3>The Protocol</h3>
     <p>
-        The <code>CustomRegistry</code> class provides a standardized way to create registry objects similar to the browser's native <code>customElements</code> registry. 
-        It extends the capabilities of a standard Map with a powerful inheritance mechanism.
+        <strong>Web Registries</strong> define a standard interface for creating scoped, hierarchical registries on the web platform. 
+        Where standard <code>Map</code> or <code>CustomElementRegistry</code> are flat and global, Web Registries are designed for **inheritance** and **scoping**.
     </p>
 
-    <h3>Why do we need this?</h3>
-    <p>
-        As we build more modular web applications, we often need to register "things" (parsers, components, formatters) that are available in specific contexts.
-        Native <code>Map</code> objects don't support inheritance (looking up a key in a parent map if not found locally), which makes scoping difficult.
-    </p>
-
-    <h3>Features</h3>
+    <h3>Key Features</h3>
     <ul>
-        <li><strong>Hierarchical Lookup:</strong> Registries can extend other registries. <code>get()</code> calls traverse the chain.</li>
-        <li><strong>Standard Interface:</strong> Familiar methods like <code>get</code>, <code>has</code>, <code>keys</code>, <code>values</code>.</li>
-        <li><strong>Type Safety:</strong> generic typing for definitions and keys.</li>
+        <li><strong>Standard Interface:</strong> All registries implement a common <code>get</code>, <code>has</code>, <code>set</code> (via <code>define</code>) API.</li>
+        <li><strong>Inheritance:</strong> A registry can extend one or more parent registries. Lookups traverse the chain automatically.</li>
+        <li><strong>Scoping:</strong> Enables different parts of an application to have different definitions for the same key (e.g., scoping icons or formatters to a specific routed view).</li>
     </ul>
 
-    <h3>Implementation Example</h3>
-    <pre><code>
-// 1. Create a specialized registry
-class IconRegistry extends CustomRegistry&lt;string&gt; {
-    localName = 'icons';
+    <h3>Proposed Standards</h3>
+    <p>The <strong>Web Everything</strong> platform proposes standardizing registries for nearly every aspect of the DOM, allowing for unprecedented extensibility:</p>
     
-    define(name, svgContent) {
-        this.set(name, svgContent);
-    }
+    <div class="features-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem; margin-top: 1.5rem;">
+        <div>
+            <h4 style="color: var(--color-primary); margin-bottom: 0.5rem;">DOM Primitives</h4>
+            <ul style="font-size: 0.9rem; padding-left: 1.25rem; color: var(--color-text-muted);">
+                <li><code>CustomElementRegistry</code> (Standard/Polyfilled)</li>
+                <li><code>CustomAttributeRegistry</code></li>
+                <li><code>CustomCommentRegistry</code></li>
+                <li><code>CustomTextNodeRegistry</code></li>
+            </ul>
+        </div>
+        <div>
+            <h4 style="color: var(--color-primary); margin-bottom: 0.5rem;">Parsing Engine</h4>
+            <ul style="font-size: 0.9rem; padding-left: 1.25rem; color: var(--color-text-muted);">
+                <li><code>CustomAttributeParserRegistry</code></li>
+                <li><code>CustomTextNodeParserRegistry</code></li>
+                <li><code>CustomPathExpressionParserRegistry</code></li>
+                <li><code>CustomCommentParserRegistry</code></li>
+            </ul>
+        </div>
+        <div>
+            <h4 style="color: var(--color-primary); margin-bottom: 0.5rem;">Logic & Data</h4>
+            <ul style="font-size: 0.9rem; padding-left: 1.25rem; color: var(--color-text-muted);">
+                <li><code>CustomContextRegistry</code></li>
+                <li><code>CustomStoreRegistry</code></li>
+                <li><code>CustomEventRegistry</code></li>
+                <li><code>HTMLRegistry</code> (Injectors)</li>
+            </ul>
+        </div>
+    </div>
+
+    <h3>Userland Examples</h3>
+    <p>You can define your own registries for application-specific needs:</p>
+
+    {% highlight "javascript" %}
+import { CustomRegistry } from 'web-registries';
+
+// 1. Define the Registry Class
+class IconRegistry extends CustomRegistry {
+  localName = 'icons'; // Used for debugging/identification
+
+  // Implement the abstract 'define' method
+  define(name, svgContent) {
+    this.set(name, svgContent);
+  }
 }
 
-// 2. Create the global registry
+// 2. Create a Global Registry
 const globalIcons = new IconRegistry();
-globalIcons.define('menu', '&lt;svg...&gt;');
+globalIcons.define('menu', '<svg viewBox="0 0 24 24">...</svg>');
+globalIcons.define('close', '<svg viewBox="0 0 24 24">...</svg>');
 
-// 3. Create a scoped registry that extends the global one
-const scopedIcons = new IconRegistry({ extends: [globalIcons] });
-scopedIcons.define('user', '&lt;svg...&gt;');
+// 3. Create a Scoped Registry (e.g., for a specific Admin module)
+const adminIcons = new IconRegistry({ 
+  extends: [globalIcons] 
+});
+
+// Override 'menu' only for this scope
+adminIcons.define('menu', '<svg viewBox="0 0 24 24">...<!-- Admin Menu --></svg>');
 
 // 4. Usage
-scopedIcons.get('user'); // Returns user icon (Found in scope)
-scopedIcons.get('menu'); // Returns menu icon (Found in parent)
-    </code></pre>
+adminIcons.get('menu');  // Returns Admin Menu (Scoped override)
+adminIcons.get('close'); // Returns Global Close (Inherited)
+    {% endhighlight %}
+    {% endif %}
+
+    {% if project.id == 'webcontexts' %}
+    <h3>The Protocol</h3>
+    <p>
+        <strong>Web Contexts</strong> brings a robust, Dependency Injection-based context system to the HTML platform. 
+        It allows data and services to be provided hierarchically down the DOM tree, available to any component that requests them.
+    </p>
+
+    <h3>Key Use Cases</h3>
+    <ul>
+        <li><strong>State Management:</strong> Provide reactive state stores (Redux, Signals) to a subtree of components.</li>
+        <li><strong>Theming:</strong> Cascade design tokens or theme definitions without passing props through every layer.</li>
+        <li><strong>Service Injection:</strong> Make API clients, loggers, or authentication services available to declarative widgets.</li>
+    </ul>
+
+    <div class="comparison-block" style="background: rgba(99, 102, 241, 0.1); padding: 1.5rem; border-radius: 8px; border: 1px solid rgba(99, 102, 241, 0.2); margin: 2rem 0;">
+        <h4 style="margin-top: 0; color: var(--color-primary);">Current Standardization vs. Web Contexts</h4>
+        
+        <p><strong>The Current Standard (Community Protocol):</strong> Relies on <em>Events</em> (<code>context-request</code>). A consumer dispatches an event, which bubbles up until a generic <code>context-provider</code> element catches it.</p>
+        
+        <p><strong>The Limitation:</strong> To provide context to a list of elements (e.g., in a loop), you must wrap them in a parent provider element.</p>
+        {% highlight "html" %}
+<!-- Wrapper required for context -->
+<context-provider>
+   <my-item>...</my-item>
+   <my-item>...</my-item>
+</context-provider>
+        {% endhighlight %}
+        <p><em>This wrapper can break CSS layouts (Grid/Flex) and complicate DOM structure.</em></p>
+
+        <hr style="border: 0; border-top: 1px solid rgba(99, 102, 241, 0.2); margin: 1rem 0;">
+
+        {% highlight "html" %}
+<!-- Virtual Scope: No wrapper element rendered -->
+<!-- scope: theme-context -->
+   <my-item>...</my-item>
+   <my-item>...</my-item>
+        {% endhighlight %}
+        <p><strong>The Result:</strong> Multiple elements receive the single context <em>without</em> a physical DOM parent, maintaining your clean layout.</p>
+    </div>
+
+    <h3>Try It Out</h3>
+    <p>
+        This protocol is fully implemented and available for use today. 
+        Check out the reference implementation in the <strong><a href="/projects/webplugs/">Web Plugs</a></strong> collection.
+    </p>
     {% endif %}
 
     {% if project.id == 'webtokens' %}

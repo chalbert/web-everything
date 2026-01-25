@@ -1,0 +1,111 @@
+---
+layout: base.njk
+title: Project Lifecycle - Web Everything
+---
+
+<div class="content-box">
+    <h1>Project Lifecycle</h1>
+    <p>Every project in the Web Everything ecosystem moves through a rigorous maturation process. This guide explains what you can expect from each stage.</p>
+
+    <div class="lifecycle-stages">
+        <div class="stage-card">
+            <div class="stage-header">
+                <h2>Concept</h2>
+                <span class="stage-percent">10%</span>
+            </div>
+            <div class="status-meter status-concept">
+                <div class="meter-track"><div class="meter-fill"></div></div>
+            </div>
+            <p><strong>Status:</strong> Research & Design</p>
+            <p>The problem space is being defined. No concrete implementation exists yet. We are gathering requirements and sketching APIs.</p>
+        </div>
+
+        <div class="stage-card">
+            <div class="stage-header">
+                <h2>POC (Proof of Concept)</h2>
+                <span class="stage-percent">30%</span>
+            </div>
+            <div class="status-meter status-poc">
+                <div class="meter-track"><div class="meter-fill"></div></div>
+            </div>
+            <p><strong>Status:</strong> Experimental Code</p>
+            <p>A rough implementation exists to prove the solution is viable. The API is volatile and likely to break. Do not use in production.</p>
+        </div>
+
+        <div class="stage-card">
+            <div class="stage-header">
+                <h2>Alpha</h2>
+                <span class="stage-percent">50%</span>
+            </div>
+            <div class="status-meter status-alpha">
+                <div class="meter-track"><div class="meter-fill"></div></div>
+            </div>
+            <p><strong>Status:</strong> Feature Development</p>
+            <p>The core features are built, but edge cases are unhandled. API is stabilizing but may still change based on feedback.</p>
+        </div>
+
+        <div class="stage-card">
+            <div class="stage-header">
+                <h2>Beta</h2>
+                <span class="stage-percent">80%</span>
+            </div>
+            <div class="status-meter status-beta">
+                <div class="meter-track"><div class="meter-fill"></div></div>
+            </div>
+            <p><strong>Status:</strong> Testing & Polish</p>
+            <p>Feature complete. Focus is on bug fixes, performance, and documentation. Safe for early adopters.</p>
+        </div>
+
+        <div class="stage-card">
+            <div class="stage-header">
+                <h2>Stable</h2>
+                <span class="stage-percent">100%</span>
+            </div>
+            <div class="status-meter status-stable">
+                <div class="meter-track"><div class="meter-fill"></div></div>
+            </div>
+            <p><strong>Status:</strong> Production Ready</p>
+            <p>The project follows Semantic Versioning. API is locked. Improvements are additive. Safe for mission-critical use.</p>
+        </div>
+    </div>
+</div>
+
+<style>
+    .lifecycle-stages {
+        display: grid;
+        gap: 2rem;
+        margin-top: 3rem;
+    }
+
+    .stage-card {
+        background: white;
+        padding: 2rem;
+        border-radius: 12px;
+        border: 1px solid var(--color-border);
+        box-shadow: var(--shadow-sm);
+    }
+
+    .stage-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+
+    .stage-header h2 {
+        margin: 0;
+        font-size: 1.5rem;
+        color: var(--color-text-main);
+    }
+
+    .stage-percent {
+        font-weight: 700;
+        color: var(--color-primary);
+        font-family: monospace;
+        font-size: 1.2rem;
+    }
+
+    .stage-card .status-meter {
+        margin-bottom: 1.5rem;
+    }
+</style>

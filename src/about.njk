@@ -1,0 +1,104 @@
+---
+layout: base.njk
+title: Web Everything - The Mission
+permalink: /mission/
+---
+
+<div class="intro">
+    <h1>The Mission</h1>
+    <p class="lead" style="font-size: 1.5rem; line-height: 1.4; color: var(--color-text-muted); margin-bottom: 2rem;">
+        Moving from <strong>Implementation Lock-in</strong> to <strong>Protocol Interoperability</strong>.
+    </p>
+</div>
+
+<div class="content-box" style="margin-bottom: 3rem;">
+    <h2>The Problem: The Framework Silo</h2>
+    <p>
+        For too long, web development has been fragmented. We build the same low-level components—dropdowns, calendars, modals—over and over again, locked inside specific frameworks (React, Angular, Vue). 
+    </p>
+    <p>
+        It is inefficient to rely on a React-specific calendar that uses a React-specific dropdown, completely incompatible with a Vue component sitting right next to it. Even worse, many of these "top-tier" libraries fail to implement the full range of UX, usability, and accessibility recommendations that are well understood but hard to get right.
+    </p>
+    <p>
+        When we fix a usability issue in one library, it doesn't fix it for the web. It only fixes it for that silo.
+    </p>
+
+    <hr style="border: 0; border-top: 1px solid var(--color-border); margin: 3rem 0;">
+
+    <h2>The Vision: Native Protocols</h2>
+    <p>
+        We believe that <strong>web-native versions of these low-level components should exist</strong>. While specific implementations may never become a single standard, the <em>protocols</em> they use can.
+    </p>
+    <p>
+        <strong>Web Everything</strong> is a collection of specifications and implementations to fill the "holes" in the browser platform needed to build these components natively:
+    </p>
+
+    <ul style="display: grid; gap: 1.5rem; margin-top: 2rem; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));">
+        <li>
+            <strong>Dependency Injection (DI):</strong> A standard way to provide services and data deeply into component trees without prop drilling.
+        </li>
+        <li>
+            <strong>Scoping:</strong> A method for teams to create isolated modules without conflict, avoiding the style-isolation pitfalls of ShadowDOM for complex views.
+        </li>
+        <li>
+            <strong>Advanced Binding (Tokens):</strong> Configurable, retro-compatible binding syntaxes that don't force a single template language on developers.
+        </li>
+        <li>
+            <strong>Logic w/o Geometry (Directives):</strong> Adding dynamism to the DOM without polluting the layout with wrapper `div`s.
+        </li>
+    </ul>
+</div>
+
+<h2 class="section-title">The Architecture</h2>
+<p class="section-desc">A three-tiered approach to modernizing the web platform.</p>
+
+<div class="project-grid" style="margin-bottom: 3rem;">
+    <div class="project-card">
+        <div class="project-header">
+            <div class="project-icon" style="background: rgba(99, 102, 241, 0.1); color: var(--color-primary);">
+                <img src="/assets/icons/webplugs.svg" alt="Web Plugs" width="48" height="48">
+            </div>
+            <h3 class="project-title">1. Web Plugs</h3>
+        </div>
+        <p>
+            The foundation. These are the missing standards provided as <strong>polyfills</strong>. They can run "Plugged" (patching native APIs for a seamless experience) or "Unplugged" (as safe standalone libraries), with automatic switching.
+        </p>
+    </div>
+
+    <div class="project-card">
+        <div class="project-header">
+            <div class="project-icon" style="background: rgba(99, 102, 241, 0.1); color: var(--color-primary);">
+                <img src="/assets/icons/webblocks.svg" alt="Web Blocks" width="48" height="48">
+            </div>
+            <h3 class="project-title">2. Web Blocks</h3>
+        </div>
+        <p>
+            The protocols. Standardized interfaces for components, behaviors, and parsers. If a component follows the Block protocol, it can run anywhere, regardless of how it was built.
+        </p>
+    </div>
+
+    <div class="project-card">
+        <div class="project-header">
+            <div class="project-icon" style="background: rgba(99, 102, 241, 0.1); color: var(--color-primary);">
+                <img src="/assets/icons/webcandies.svg" alt="Web Candies" width="48" height="48">
+            </div>
+            <h3 class="project-title">3. Web Candies</h3>
+        </div>
+        <p>
+            The developer experience. "Sugar" syntax (like JSX or Functional Components) that improves ease of use but compiles 1:1 to pure, native Web Everything primitives.
+        </p>
+    </div>
+</div>
+
+<div class="content-box">
+    <h2>The Post-Framework World</h2>
+    <p>
+        In an ideal world, frameworks still exist, but they become thin layers of opinionated "sugar" on top of powerful native APIs. Switching from a React component to an Angular component should be as easy as toggling an option, because underneath, they maximize the use of the same shared <strong>Web Everything</strong> protocols.
+    </p>
+
+    <div style="margin-top: 2rem; text-align: center;">
+        <a href="/" class="btn-back" style="background: var(--color-primary); color: white; padding: 0.75rem 1.5rem; text-decoration: none; border-radius: var(--radius-md); font-weight: 600;">
+            Explore the Projects
+        </a>
+    </div>
+</div>

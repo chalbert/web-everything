@@ -7,10 +7,13 @@ title: Web Everything - Home
 
 <section class="intro">
     <h1>Web Everything</h1>
-    <p>
-        <strong>Web Everything</strong> is an initiative to group a range of standards allowing for better standardization across web libraries.
-        Our goal is to create interoperable blocks, behaviors, and tools that work seamlessly with standard web technologies.
+    <p style="margin-bottom: 2rem;">
+        <strong>Protocol over Implementation.</strong><br>
+        Providing the missing standards to bridge the gap between frameworks and enable true interoperability.
     </p>
+    <a href="/mission/" style="color: var(--color-primary); font-weight: 600; text-decoration: none; border-bottom: 2px solid var(--color-primary);">
+        Read the Manifesto &rarr;
+    </a>
 </section>
 
 <section class="mb-12">
@@ -19,7 +22,8 @@ title: Web Everything - Home
     <div class="project-grid">
         {% for project in projects %}
         {% if project.category == 'standard' %}
-        <a href="/projects/{{ project.id }}/" class="project-card">
+        <div class="project-card">
+            <a href="/projects/{{ project.id }}/" class="project-card-link" aria-label="View {{ project.name }}"></a>
             <div class="project-header">
                 <div class="project-icon">
                     {% if project.isSvg %}
@@ -31,8 +35,10 @@ title: Web Everything - Home
                 <h2 class="project-title">{{ project.name }}</h2>
             </div>
             <p>{{ project.description }}</p>
-            {{ projectStatus(project.status) }}
-        </a>
+            <a href="/project-lifecycle/" class="status-link-wrapper">
+                {{ projectStatus(project.status) }}
+            </a>
+        </div>
         {% endif %}
         {% endfor %}
     </div>
@@ -44,7 +50,8 @@ title: Web Everything - Home
     <div class="project-grid">
         {% for project in projects %}
         {% if project.category == 'utility' %}
-        <a href="/projects/{{ project.id }}/" class="project-card">
+        <div class="project-card">
+            <a href="/projects/{{ project.id }}/" class="project-card-link" aria-label="View {{ project.name }}"></a>
             <div class="project-header">
                 <div class="project-icon">
                     {% if project.isSvg %}
@@ -56,8 +63,10 @@ title: Web Everything - Home
                 <h2 class="project-title">{{ project.name }}</h2>
             </div>
             <p>{{ project.description }}</p>
-            {{ projectStatus(project.status) }}
-        </a>
+            <a href="/project-lifecycle/" class="status-link-wrapper">
+                {{ projectStatus(project.status) }}
+            </a>
+        </div>
         {% endif %}
         {% endfor %}
     </div>

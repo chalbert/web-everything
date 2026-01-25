@@ -1,0 +1,169 @@
+/**
+ * One Dark Theme for PrismJS
+ * Based on Atom One Dark
+ */
+code,
+pre {
+	font-family: Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace;
+    font-size: 1em;
+}
+
+pre {
+	color: #abb2bf;
+	background: #282c34;
+	text-align: left;
+	white-space: pre;
+	word-spacing: normal;
+	word-break: normal;
+	word-wrap: normal;
+	line-height: 1.5;
+	-moz-tab-size: 4;
+	-o-tab-size: 4;
+	tab-size: 4;
+	-webkit-hyphens: none;
+	-moz-hyphens: none;
+	-ms-hyphens: none;
+	hyphens: none;
+    border-radius: 6px;
+    padding: 1em;
+	margin: .5em 0;
+	overflow: auto;
+    position: relative;
+}
+
+/* Inline code default style */
+:not(pre) > code {
+    background: rgba(135, 131, 120, 0.15); /* Subtle gray */
+    color: #eb5757; /* Reddish for contrast - or keep default text color */
+    color: #c7254e; /* Bootstrap-ish red */
+    color: #e06c75; /* One Dark red */
+    padding: 0.2em 0.4em;
+    border-radius: 3px;
+    font-size: 85%;
+}
+
+:not(pre) > code[class*="language-"] {
+	background: #282c34;
+    color: #abb2bf;
+	padding: .1em .3em;
+	border-radius: .3em;
+	white-space: normal;
+    font-size: 1em;
+}
+
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+	color: #5c6370;
+}
+
+.token.punctuation {
+	color: #abb2bf;
+}
+
+.token.selector,
+.token.tag {
+	color: #e06c75;
+}
+
+.token.property,
+.token.boolean,
+.token.number,
+.token.constant,
+.token.symbol,
+.token.attr-name,
+.token.deleted {
+	color: #d19a66;
+}
+
+.token.string,
+.token.char,
+.token.attr-value,
+.token.builtin,
+.token.inserted {
+	color: #98c379;
+}
+
+.token.operator,
+.token.entity,
+.token.url,
+.language-css .token.string,
+.style .token.string {
+	color: #56b6c2;
+}
+
+.token.atrule,
+.token.keyword {
+	color: #c678dd;
+}
+
+.token.function,
+.token.class-name {
+	color: #61afef;
+}
+
+.token.regex,
+.token.important,
+.token.variable {
+	color: #c678dd;
+}
+
+.token.important,
+.token.bold {
+	font-weight: bold;
+}
+
+.token.italic {
+	font-style: italic;
+}
+
+.token.entity {
+	cursor: help;
+}
+
+/* Copy Button Styles */
+.code-wrapper {
+    position: relative;
+    border-radius: 6px;
+    margin: 1.5rem 0;
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+}
+
+.code-wrapper pre {
+    margin: 0; /* Reset margin inside wrapper */
+    border-radius: 6px;
+}
+
+.copy-button {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 4px;
+    color: #abb2bf;
+    font-size: 0.8rem;
+    padding: 4px 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    opacity: 0; /* Hidden by default */
+    z-index: 10;
+}
+
+.code-wrapper:hover .copy-button,
+.copy-button:focus {
+    opacity: 1;
+}
+
+.copy-button:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.copy-button.copied {
+    background: #98c379;
+    color: #282c34;
+    border-color: #98c379;
+}

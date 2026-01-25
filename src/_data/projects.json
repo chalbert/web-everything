@@ -3,7 +3,7 @@
     "id": "webregistries",
     "name": "Web Registries",
     "description": "Allow creation of custom registries, similar to customElementsRegistry, for many purposes.",
-    "status": "concept",
+    "status": "poc",
     "category": "standard",
     "icon": "/assets/icons/webregistries.svg",
     "isSvg": true
@@ -30,7 +30,7 @@
   {
     "id": "webcontexts",
     "name": "Web Contexts",
-    "description": "Similar to React context but for the standard web platform.",
+    "description": "Protocol enabling hierarchical data flow and service provision across component trees, effectively solving prop-drilling natively.",
     "status": "concept",
     "category": "standard",
     "icon": "/assets/icons/webcontexts.svg",
@@ -58,7 +58,7 @@
   {
     "id": "webblocks",
     "name": "Web Blocks",
-    "description": "Series of standard, inter-operable blocks (behaviors, elements, etc.).",
+    "description": "Standard protocols for interoperable modules (components, behaviors) ensuring consistent UX and accessibility across libraries.",
     "status": "concept",
     "category": "utility",
     "icon": "/assets/icons/webblocks.svg",
@@ -67,7 +67,7 @@
   {
     "id": "webplugs",
     "name": "Web Plugs",
-    "description": "Missing standards from the browser, usable as polyfills or importable libs.",
+    "description": "The missing browser standards (polyfilled). Runs 'plugged' (native patches) or 'unplugged' (safe libs) as the foundation for Web Blocks.",
     "status": "concept",
     "category": "utility",
     "icon": "/assets/icons/webplugs.svg",
@@ -76,7 +76,7 @@
   {
     "id": "webcandies",
     "name": "Web Candies",
-    "description": "Development sugar syntax to make development easier, easily convertible to/from plain JS.",
+    "description": "Syntactic sugar (like JSX or Functional Components) that compiles 1:1 to native Web Everything primitives for better DX.",
     "status": "concept",
     "category": "utility",
     "icon": "/assets/icons/webcandies.svg",
