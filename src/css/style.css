@@ -36,11 +36,44 @@ body {
     background: linear-gradient(0deg, #ff9500, #ffd8af);
 }
 
+img, video, svg {
+    max-width: 100%;
+    height: auto;
+    display: block;
+}
+
+code {
+    background-color: rgba(99, 102, 241, 0.1);
+    color: var(--color-primary);
+    padding: 0.2em 0.4em;
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    font-size: 0.85em;
+    vertical-align: baseline;
+}
+
+pre {
+    max-width: 100%;
+    overflow-x: auto;
+    white-space: pre-wrap;
+}
+
+/* Reset for PrismJS blocks so we don't double-style */
+pre code {
+    background: transparent;
+    color: inherit;
+    padding: 0;
+}
+
 /* Layout */
 main {
     max-width: 1200px;
     margin: 0 auto;
     padding: var(--spacing-md);
+}
+
+main.project-page-container {
+    max-width: 1400px;
 }
 
 .site-header {
@@ -179,6 +212,102 @@ h1, h2, h3, h4, h5, h6 {
     padding: var(--spacing-lg);
     box-shadow: var(--shadow-sm);
     text-align: left;
+    margin-bottom: var(--spacing-md);
+}
+
+/* Project Layout (Sidebar + Content) */
+.project-layout {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--spacing-lg);
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: var(--spacing-md);
+    align-items: start;
+}
+
+@media (min-width: 1200px) {
+    .project-layout {
+        grid-template-columns: 240px 1fr;
+    }
+}
+
+/* Constrain content column to prevent grid blowout */
+.project-body {
+    min-width: 0;
+}
+
+/* Sidebar & Sticky TOC */
+.project-sidebar {
+    display: none; /* Hidden on mobile by default or stacked */
+}
+
+@media (min-width: 1200px) {
+    .project-sidebar {
+        display: block;
+        position: sticky;
+        top: calc(var(--spacing-lg) + 20px); 
+    }
+}
+
+.toc-container h3 {
+    font-size: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-muted);
+    margin-bottom: var(--spacing-sm);
+}
+
+.toc .toc-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    border-left: 2px solid var(--color-border);
+}
+
+.toc .toc-list-item {
+    margin: 0;
+}
+
+.toc .toc-link {
+    display: block;
+    padding: 0.5rem 0 0.5rem 1rem;
+    color: var(--color-text-muted);
+    text-decoration: none;
+    font-size: 0.95rem;
+    border-left: 2px solid transparent;
+    margin-left: -2px;
+    transition: all 0.2s;
+}
+
+.toc .toc-link:hover, .toc .is-active-link {
+    color: var(--color-primary);
+    border-left-color: var(--color-primary);
+}
+
+/* Content Sections as Cards */
+.section-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-lg);
+    box-shadow: var(--shadow-sm);
+    margin-bottom: var(--spacing-lg);
+    scroll-margin-top: 100px; /* Offset for sticky headers if any */
+}
+
+.section-card h3 {
+    margin-top: 0;
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+    color: var(--color-text-main);
+    border-bottom: 1px solid var(--color-border);
+    padding-bottom: 0.5rem;
+}
+
+.section-card h4 {
+    margin-top: 1.5rem;
+    margin-bottom: 0.75rem;
 }
 
 .project-header {
@@ -298,15 +427,15 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .status-concept .meter-fill { width: 10%; background: #94a3b8; }
-.status-poc .meter-fill { width: 30%; background: #f59e0b; }
-.status-alpha .meter-fill { width: 50%; background: #a855f7; }
-.status-beta .meter-fill { width: 80%; background: var(--color-primary); }
+.status-poc .meter-fill { width: 30%; background: #06b6d4; }
+.status-draft .meter-fill { width: 50%; background: #a855f7; }
+.status-candidate .meter-fill { width: 80%; background: var(--color-primary); }
 .status-stable .meter-fill { width: 100%; background: #22c55e; }
 
 /* Detail Page */
 .project-detail-header {
     text-align: center;
-    padding: var(--spacing-lg) 0;
+    padding: var(--spacing-md) 0;
 }
 
 .project-detail-icon {
@@ -341,7 +470,7 @@ h1, h2, h3, h4, h5, h6 {
 }
 
 .project-detail-status {
-    margin-top: var(--spacing-md);
+    margin-top: var(--spacing-sm);
     display: inline-block;
     width: 100%;
     max-width: 200px; /* Limit width */

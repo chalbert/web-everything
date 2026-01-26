@@ -14,19 +14,19 @@
             Web Everything
         </a>
         <div class="header-controls">
-            <p class="site-tagline">Comprehensive tools and standards for the modern web.</p>
+            <p class="site-tagline">Defining the missing standards for the modern web.</p>
             <a href="https://github.com/chalbert/webeverything" class="header-icon" aria-label="GitHub">
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
             </a>
         </div>
     </header>
 
-    <main>
+    <main class="{{ mainClass }}">
         {{ content | safe }}
     </main>
 
     <footer class="site-footer">
-        <p>&copy; 2026 Web Everything. No cookies were harmed (or used).</p>
+        <p>&copy; 2026 Web Everything. No cookies were used. | <a href="https://patreon.com/" style="color: inherit; text-decoration: underline; display: inline-flex; align-items: center; gap: 4px;"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg> Support this project</a></p>
 
     <script src="/assets/js/copy-code.js"></script>
     </footer>
