@@ -3,21 +3,159 @@
     "id": "motion",
     "name": "Motion Intent",
     "status": "concept",
-    "summary": "Controls the animation profile.",
-    "description": "<h3>Values</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>natural</code>: Physics-based, smooth (Default).</li><li><code>immediate</code>: Zero latency, no transitions (High productivity).</li><li><code>reduced</code>: Respects `prefers-reduced-motion` strictly.</li></ul>"
+    "summary": "Protocol defining the application's physics, latency tolerance, and transition behavior.",
+    "description": "<h3>Physics Contract</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>natural</code>: Mass-based physics (springs), context-aware transitions.</li><li><code>immediate</code>: <strong>&lt; 16ms</strong> latency. Disables decorative motion for high-performance workflows.</li><li><code>reduced</code>: Semantic motion only (e.g. layout shifts), disabling parallax/scaling. Respects <code>prefers-reduced-motion</code>.</li></ul>"
   },
   {
     "id": "density",
     "name": "Density Intent",
     "status": "concept",
-    "summary": "Controls spacing and touch targets.",
-    "description": "<h3>Values</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>comfortable</code>: Standard touch-friendly targets (Default).</li><li><code>compact</code>: Information dense, mouse-first (Enterprise).</li><li><code>wafer</code>: Extreme density for complex tooling.</li></ul>"
+    "summary": "Protocol defining spatial relationships, touch targets, and information quantity.",
+    "description": "<h3>Spatial Contract</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>comfortable</code>: <strong>44px+</strong> touch targets. Whitespace is used for grouping (Consumer standard).</li><li><code>compact</code>: <strong>32px</strong> targets. High information density, border-based grouping (Enterprise standard).</li><li><code>wafer</code>: <strong>24px</strong> targets. Maximum data visibility for complex tooling/IDE interfaces.</li></ul>"
   },
   {
     "id": "interaction",
     "name": "Interaction Intent",
     "status": "concept",
-    "summary": "Adapts input handling paradigms.",
-    "description": "<h3>Values</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>pointer</code>: Hover states enabled, scrollbars visible.</li><li><code>touch</code>: Larger hit areas, swipe gestures enabled.</li><li><code>gamepad</code>: Focus snapping, spatial navigation priority.</li></ul>"
+    "summary": "Protocol defining the input modality and focus management behavior.",
+    "description": "<h3>Input Contract</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>pointer</code>: Fine-grained control. Hover menus enabled, scrollbars visible.</li><li><code>touch</code>: Coarse control. <strong>Swipe actions</strong> replace hover menus. Hit testing padding applied.</li><li><code>gamepad</code>: Spatial Navigation (D-Pad). Focus is trapped within active regions (Sunsetting <code>tab-index</code> logic).</li></ul>"
+  },
+  {
+    "id": "prefetch",
+    "name": "Prefetch Intent",
+    "status": "draft",
+    "summary": "Controls the eagerness of resource prefetching based on connection and power.",
+    "description": "<h3>Trigger Profile (Eagerness)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>viewport</code>: Active when link enters visual viewport (Lazy).</li><li><code>hover</code>: Active on hover (&gt;200ms) or focus (Moderate).</li><li><code>interaction</code>: Active on <code>pointerdown</code> (Eager).</li></ul><h3>Constraints (The \"No-Go\" List)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Save-Data</strong>: Abort if <code>navigator.connection.saveData</code> is true.</li><li><strong>Battery</strong>: Abort prerendering if battery &lt; 20% or unplugged.</li><li><strong>Slow Connection</strong>: Abort if <code>effectiveType</code> is 2g/slow-2g.</li></ul>"
+  },
+  {
+    "id": "loader",
+    "name": "Loader Intent",
+    "status": "draft",
+    "summary": "Protocol defining how a pending state affects the user interface via Blocking, Scoping, and Timing profiles.",
+    "description": "<h3>Blocking Strategy</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>optimistic</code>: <strong>Non-blocking</strong>. UI remains fully interactive (background sync).</li><li><code>soft</code>: <strong>Input-blocking</strong>. Applies <code>aria-disabled</code> and <code>pointer-events: none</code>. Content remains visible.</li><li><code>hard</code>: <strong>Visual-blocking</strong>. Content is obscured or overlaid (Backdrop).</li><li><code>replacement</code>: <strong>Content-blocking</strong>. Placeholder content (Skeleton) temporarily replaces the view.</li></ul><h3>Scope Definition</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>element</code>: Constrained to the triggering target (e.g., Button spinner).</li><li><code>region</code>: Constrained to the containing landmark (e.g., <code>aria-busy</code> on the Form).</li><li><code>viewport</code>: Global interruption (Glass pane).</li></ul><h3>Timing Contract</h3><p class=\"text-sm text-gray-600 mb-2\">Maps semantic timing profiles to configurable durations (ms). Applications can override defaults or register new profiles.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>immediate</code>: Defaults to 0ms (Configurable).</li><li><code>debounced</code>: Defaults to 400ms (Configurable). Prevents flicker.</li><li><code>[custom]</code>: User-defined keys (e.g., <code>slow: 1000ms</code>).</li></ul><h3>Lifecycle Events</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>enter</code>: Loader becomes visible (after timing delay).</li><li><code>exit</code>: Loader is removed or hidden.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type BlockingStrategy = 'optimistic' | 'soft' | 'hard' | 'replacement';\ntype LoaderScope = 'element' | 'region' | 'viewport';\n\ninterface LoaderIntent {\n    // How the UI is blocked\n    strategy: BlockingStrategy;\n    // What part of the UI is affected\n    scope: LoaderScope;\n    // When the loader appears (referencing Config.timings)\n    timing: 'immediate' | 'debounced' | string;\n    // Accessibility label\n    label?: string;\n    // Motion bindings\n    animations?: Partial<Record<'enter' | 'exit', string>>;\n}</code></pre><h3>Provisioning Example</h3><pre><code class=\"language-typescript\">const LoaderConfig = {\n    timings: {\n        debounced: 400,\n        complex: 800\n    },\n    defaults: {\n        region: { strategy: 'soft', timing: 'debounced' }\n    }\n};\n\ninjector Application {\n    provide { Loader } to '@web-intents' from './components/GlobalLoader';\n    provide { LoaderConfig } to '@web-intents/loader';\n}</code></pre>",
+    "events": [
+      "enter",
+      "exit"
+    ]
+  },
+  {
+    "id": "validation",
+    "name": "Validation Intent",
+    "status": "draft",
+    "summary": "Protocol defining validation lifecycle, message placement contexts, and state commit policies per severity level.",
+    "description": "<h3>Message Context</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>control</code>: Inline with the specific input (e.g., Red border + message).</li><li><code>group</code>: Summary for a fieldset/section (e.g., \"Address is incomplete\").</li><li><code>form</code>: Aggregate list at top (e.g., \"Please fix 3 errors below\").</li><li><code>root</code>: Global toast or banner (e.g., System-wide validation).</li></ul><h3>Severity & Data Commit</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>error</code>: <strong>Substantive</strong>. State is <em>Rejected</em> (not committed). Blocks submission.</li><li><code>warning</code>: <strong>Advisory</strong>. State is <em>Committed</em>. Submission allowed.</li><li><code>caution</code>: <strong>Critical</strong>. State is <em>Held</em> until user overrides confirmation.</li><li><code>info</code>: <strong>Educational</strong>. State is <em>Committed</em>. Helper text only.</li><li><code>[custom]</code>: App-specific levels (e.g. <code>audit</code>). Behavior defined by <code>commits</code> flag.</li></ul><h3>Lifecycle Events</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>enter</code>: Validation message appears.</li><li><code>exit</code>: Validation resolved or field cleared.</li><li><code>pulse</code>: Re-triggering the same error (e.g., Submit clicked again).</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type ValidationContext = 'control' | 'group' | 'form' | 'root' | string;\ntype CommitTrigger = 'change' | 'blur' | 'submit';\n\ninterface ValidationLevel {\n    name: 'error' | 'warning' | 'caution' | 'info' | string;\n    // Does this severity block data persistence?\n    commits: boolean;\n}\n\ninterface ValidationIntent {\n    // Severity configuration including commit policy\n    level: ValidationLevel;\n    \n    // Where the message is displayed\n    context: ValidationContext;\n    \n    // Lifecycle Configuration\n    execution: 'change' | 'blur' | 'submit';\n    visibility: 'immediate' | 'dirty' | 'touched' | 'submitted';\n    \n    // When the data is committed to state (Control context)\n    commitOn: CommitTrigger[];\n    // Motion bindings\n    animations?: Partial<Record<'enter' | 'exit' | 'pulse', string>>;\n}</code></pre>",
+    "events": [
+      "enter",
+      "exit",
+      "pulse"
+    ]
+  },
+  {
+    "id": "modal",
+    "name": "Modal Intent",
+    "status": "draft",
+    "summary": "Protocol defining dialog behavior including stacking, scrolling, sizing, and dismissal strategies.",
+    "description": "<h3>Placement & Docking</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>center</code>: Standard dialog.</li><li><code>top/bottom</code>: Sheet/Drawer behavior (Mobile standard).</li><li><code>start/end</code>: Sidebar/Panel behavior.</li><li><code>fill</code>: Full-screen override.</li></ul><h3>Focus Management</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>trap</code>: Keeps focus within modal (Accessibility Requirement).</li><li><code>restore</code>: Returns focus to trigger when closed.</li><li><code>initial</code>: Default focus element (e.g., First input vs Close button).</li></ul><h3>Lifecycle Events</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>enter</code>: Modal opens and becomes active.</li><li><code>exit</code>: Modal closes.</li><li><code>recede</code>: Modal moves to background (when a new stacked modal opens).</li><li><code>advance</code>: Modal moves to foreground (when the top stacked modal closes).</li></ul><h3>Design System Alignment</h3><div class=\"comparison-table-wrapper\"><table class=\"comparison-table\"><thead><tr><th>System</th><th>Component</th><th>Placement</th><th>Backdrop</th><th>Dismissal</th></tr></thead><tbody><tr><td>Material 3</td><td>Basic Dialog</td><td><code>center</code></td><td><code>dimmed</code></td><td><code>light</code></td></tr><tr><td>Material 3</td><td>Full-screen</td><td><code>fill</code></td><td><code>transparent</code></td><td><code>explicit</code></td></tr><tr><td>Carbon</td><td>Modal</td><td><code>top</code></td><td><code>dimmed</code></td><td><code>explicit</code></td></tr><tr><td>Apple HIG</td><td>Sheet</td><td><code>bottom</code></td><td><code>dimmed</code></td><td><code>light</code></td></tr><tr><td>Radix UI</td><td>Dialog</td><td><code>center</code></td><td><code>dimmed</code></td><td><code>light</code></td></tr></tbody></table></div><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Dismissal = 'light' | 'explicit' | 'none';\ntype Placement = 'center' | 'top' | 'bottom' | 'start' | 'end' | 'fill';\ntype Backdrop = 'dimmed' | 'transparent' | 'blur';\n\ninterface FocusStrategy {\n    trap: boolean;\n    restore: boolean;\n    initial?: string; // Selector\n}\n\ninterface ModalIntent {\n    // Role (ARIA)\n    role: 'dialog' | 'alertdialog';\n    // Visual placement\n    placement: Placement;\n    // Interaction Mode (Blocks background?)\n    mode: 'modal' | 'modeless';\n    // Mobile Snap Points (Sheet)\n    detents?: { initial: 'medium' | 'large' | 'full'; stops: string[] };\n    // Backdrop visual\n    backdrop: Backdrop;\n    // How the modal can be closed\n    dismissal: Dismissal | 'gesture';\n    // Focus Management\n    focus: FocusStrategy;\n    // Allow other modals on top?\n    stackable: boolean;\n    // Scroll strategy\n    scrolling: 'contained' | 'viewport';\n    // Responsive sizing map\n    size: 'auto' | 'fullscreen' | Record&lt;string, string&gt;;\n    // Motion bindings\n    animations?: Partial<Record<'enter' | 'exit' | 'recede' | 'advance', string>>;\n}</code></pre>",
+    "events": [
+      "enter",
+      "exit",
+      "recede",
+      "advance"
+    ]
+  },
+  {
+    "id": "action",
+    "name": "Action Intent",
+    "status": "draft",
+    "summary": "Protocol defining the semantic hierarchy (levels) of interactive elements to establish visual priority.",
+    "description": "<h3>Action Levels</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>primary</code>: Principal call to action. Maps to <strong>FAB</strong> (Material) or <strong>Solid Button</strong> (Fluent).</li><li><code>secondary</code>: Alternative actions. Maps to <strong>Outlined</strong> or <strong>Tonal</strong> buttons.</li><li><code>tertiary</code>: Supplemental actions. Maps to <strong>Text/Ghost</strong> buttons (Low impact).</li><li><code>destructive</code>: Negative actions. Often implies specific color semantics (Red).</li></ul><h3>Busy State Protocol</h3><p class=\"text-sm text-gray-600 mb-2\">Configuration for asynchronous pending states.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>loader</code>: Reference to visual token from Loader definition.</li><li><code>lockWidth</code>: Prevents layout shift during content changes.</li><li><code>loaderPosition</code>: Relative placement of the indicator.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type ActionLevel = 'primary' | 'secondary' | 'tertiary' | 'destructive' | string;\ntype LoaderPosition = 'start' | 'end' | 'center' | 'overlay';\n\ninterface BusySchema {\n    // Disable interaction?\n    disabled: boolean;\n    // Token reference (e.g. 'spinner')\n    loader?: string;\n    // Indicator placement\n    loaderPosition: LoaderPosition;\n    // Temporary text replacement\n    text?: string;\n    // Hide original label?\n    hideLabel?: boolean;\n    // Prevent layout shift?\n    lockWidth: boolean;\n    // Visibility override\n    visibility?: 'visible' | 'hidden' | 'collapsed';\n}\n\ninterface ActionIcon {\n    // Default icon name/glyph\n    name?: string;\n    // Size reference (Icon Intent)\n    size?: 'sm' | 'md' | 'lg' | string;\n    // Placement relative to label\n    position?: 'start' | 'end';\n}\n\ninterface ActionIntent {\n    // The semantic weight\n    level: ActionLevel;\n    // Pending state behavior\n    busy?: Partial<BusySchema>;\n    // Icon configuration\n    icon?: ActionIcon;\n    // Density/Spacing reference (e.g. 'comfortable')\n    density?: string;\n}</code></pre>",
+    "events": []
+  },
+  {
+    "id": "icon",
+    "name": "Icon Intent",
+    "status": "draft",
+    "summary": "Protocol defining iconography standards including sizing scales, weight, and positioning strategies.",
+    "description": "<h3>Sizing Scale</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>sm</code>: Small (e.g., 16px). For inline text or tight density.</li><li><code>md</code>: Medium (e.g., 20px). Standard usage.</li><li><code>lg</code>: Large (e.g., 24px). Feature icons or comfortable buttons.</li><li><code>xl</code>: Extra Large (e.g., 32px+). Hero or empty states.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type IconSize = 'sm' | 'md' | 'lg' | 'xl' | string;\n\ninterface IconIntent {\n    // The visual size identifier\n    size: IconSize;\n    // Name of the icon asset/glyph\n    name: string;\n    // Stroke weight (if variable)\n    weight?: 'light' | 'regular' | 'bold';\n    // Render style\n    style?: 'outlined' | 'filled';\n}</code></pre>"
+  },
+  {
+    "id": "breakpoint",
+    "name": "Breakpoint Intent",
+    "status": "draft",
+    "summary": "Protocol defining display adaptation strategies, abstracting viewport tiers and container queries.",
+    "description": "<h3>Adaptation Strategy</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>mobile-first</code>: Standard accumulation. Used by Tailwind, Bootstrap.</li><li><code>desktop-first</code>: Legacy subtraction.</li><li><code>strict-range</code>: Bucket-based slots. Used by Material Design 3.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Strategy = 'mobile-first' | 'desktop-first' | 'strict-range';\ntype Unit = 'px' | 'em' | 'rem';\n\ninterface BreakpointConfig {\n    unit: Unit;\n    strategy: Strategy;\n    // ordered map of screen sizes\n    steps: Record&lt;string, number | { min: number; max: number }&gt;;\n    // aliases for logical groups\n    aliases?: Record&lt;string, string[]&gt;;\n}\n\ninterface BreakpointIntent {\n    // The current active breakpoint token\n    readonly active: string;\n    // Configuration of the system\n    readonly config: BreakpointConfig;\n    // Query matcher\n    matches(query: string | { up?: string; down?: string; only?: string }): boolean;\n}</code></pre>",
+    "events": [
+      "change"
+    ]
+  },
+  {
+    "id": "typography",
+    "name": "Typography Intent",
+    "status": "draft",
+    "summary": "Protocol abstracting visual hierarchy from semantic HTML, normalizing roles across Design Systems.",
+    "description": "<h3>Role Definition</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>display</code>: Expressive/Decorative (Hero, Splash). Low density.</li><li><code>heading</code>: Structural hierarchy (H1-H6 markers).</li><li><code>body</code>: focused on Readability (Long-form content).</li><li><code>label</code>: focused on Legibility (UI Components, Buttons).</li><li><code>code</code>: Monospace technical data.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type TypographyRole = 'display' | 'heading' | 'body' | 'label' | 'code';\n// T-shirt scale relative to the Role base size\ntype TypographyScale = 'xs' | 'sm' | 'md' | 'lg' | 'xl';\n\ninterface ToneFeatures {\n    // Force monospace numbers (Data Grids)\n    tabular?: boolean;\n    // Overflow behavior\n    truncation?: 'clip' | 'ellipsis' | 'fade';\n    // Disable definition-based optical sizing\n    opticalSizing?: 'auto' | 'none';\n}\n\ninterface TypographyIntent {\n    // The semantic purpose\n    role: TypographyRole;\n    // Relative size/emphasis within that role\n    scale?: TypographyScale;\n    // Rendering constraints\n    features?: ToneFeatures;\n}</code></pre>"
+  },
+  {
+    "id": "surface",
+    "name": "Surface Intent",
+    "status": "draft",
+    "summary": "Protocol defining Z-Axis depth, material texture (Glass/Solid), and interactions across lighting modes.",
+    "description": "<h3>Elevation Semantics (Z-Axis)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>0</code>: Base. Application background.</li><li><code>1-2</code>: Grouping content. (Cards, Lists).</li><li><code>3-5</code>: Floating content. (Sticky Headers, Modals, Tooltips).</li></ul><h3>Material Texture</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>solid</code>: Opaque. Standard for Material Design 3 (Surface Tones).</li><li><code>glass</code>: Blurred background. Standard for macOS/iOS (Vibrancy) and Windows (Mica/Acrylic).</li><li><code>transparent</code>: Layout-only containment.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type SurfaceMaterial = 'solid' | 'glass' | 'transparent';\ntype SurfaceInteraction = 'static' | 'lift' | 'scale';\n\ninterface SurfaceIntent {\n    // Z-axis position relative to parent (0-5)\n    elevation: number;\n    \n    // Physical texture of the surface\n    texture: SurfaceMaterial;\n    \n    // Visual variation (Default vs High Contrast)\n    variant: 'default' | 'alt';\n    \n    // Interaction physics\n    interaction: SurfaceInteraction;\n}</code></pre>"
+  },
+  {
+    "id": "feedback",
+    "name": "Feedback Intent",
+    "status": "draft",
+    "summary": "Protocol defining transient, non-blocking messaging (Toasts/Snackbars) and their queuing logic.",
+    "description": "<h3>Placement Logic</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>top-end</code>: Standard for Desktop notifications (Toasts).</li><li><code>bottom-start</code>: Standard for Material Design (Snackbars). Avoids FAB interaction.</li><li><code>top-center</code>: Mobile alerts.</li></ul><h3>Timing & Duration</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>short</code>: ~4000ms. For simple confirmations (\"Saved\").</li><li><code>long</code>: ~10000ms. If text > 60 chars.</li><li><code>indefinite</code>: Remains until dismissed. Required if an Action is present (Accessibility).</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type FeedbackPlacement = 'top-start' | 'top-end' | 'bottom-start' | 'bottom-end' | 'top-center' | 'bottom-center';\ntype FeedbackSeverity = 'info' | 'success' | 'warning' | 'error';\n\ninterface FeedbackAction {\n    label: string;\n    intent: string;\n}\n\ninterface FeedbackIntent {\n    // Positioning strategy\n    placement: FeedbackPlacement;\n    // Semantic weight\n    severity: FeedbackSeverity;\n    // Persistence\n    duration: 'short' | 'long' | 'indefinite';\n    // Queue Management (1 = Single/Replace, >1 = Stack)\n    stackLimit: number;\n    // Optional interactive element (e.g. \"Undo\")\n    action?: FeedbackAction;\n}</code></pre>"
+  },
+  {
+    "id": "selection",
+    "name": "Selection Intent",
+    "status": "draft",
+    "summary": "Protocol defining choice behaviors (Single vs Multi) and state urgency, distinguishing interactions from form data.",
+    "description": "<h3>Choice Models</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>single</code>: Mutually exclusive. Renders as <strong>Radio</strong> (Forms), <strong>Switch</strong> (Settings), or <strong>Select</strong> (Compact).</li><li><code>multiple</code>: Accumulative. Renders as <strong>Checkbox</strong> (List) or <strong>Filter Chips</strong> (Toolbar).</li></ul><h3>Immediacy Profile</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>live</code>: State changes immediately (Settings toggle).</li><li><code>buffered</code>: State changes on submission (Form field).</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type SelectionModel = 'single' | 'multiple';\ntype SelectionVariant = 'boolean' | 'item' | 'range';\n\ninterface SelectionIntent {\n    // How many can be selected\n    model: SelectionModel;\n    // When the state is committed\n    immediacy: 'live' | 'buffered';\n    // Visual metaphor\n    variant: SelectionVariant;\n    // Constraints\n    constraints?: { min?: number; max?: number };\n}</code></pre>"
+  },
+  {
+    "id": "input",
+    "name": "Input Intent",
+    "status": "draft",
+    "summary": "Protocol for text entry standardization including affordances, privacy masking, and visual variants.",
+    "description": "<h3>Visual Variants</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>outlined</code>: High contrast (Material default). Defined boundary.</li><li><code>filled</code>: High emphasis background (Fluent/Material).</li><li><code>borderless</code>: Minimalist (iOS List style).</li></ul><h3>Affordances</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>clear</code>: 'X' button to reset value.</li><li><code>reveal</code>: Eye icon for passwords.</li><li><code>copy</code>: Clipboard action.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type InputVariant = 'outlined' | 'filled' | 'borderless';\ntype InputAffordance = 'clear' | 'reveal' | 'copy';\n\ninterface InputIntent {\n    // Visual style\n    variant: InputVariant;\n    // Privacy masking (dots)\n    masking: boolean;\n    // Interaction helpers\n    affordances: InputAffordance[];\n    // State\n    status: 'enabled' | 'disabled' | 'readonly';\n}</code></pre>"
+  },
+  {
+    "id": "navigation",
+    "name": "Navigation Intent",
+    "status": "concept",
+    "summary": "Protocol defining application structure (Hierarchical, Lateral, Linear) and view transition logic.",
+    "description": "<h3>Structure Model</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>hierarchical</code>: Parent/Child stack. Managing history and back-navigation.</li><li><code>lateral</code>: Peer switching (Tabs, Bottom Nav). No history stack.</li><li><code>linear</code>: Sequential steps (Wizard). Locked progression.</li></ul>"
+  },
+  {
+    "id": "anchor",
+    "name": "Anchor Intent",
+    "status": "concept",
+    "summary": "Protocol for tethered surfaces (Tooltips, Menus) defining placement and collision physics.",
+    "description": "<h3>Tether Contract</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>tooltip</code>: Informational. Hover/Focus trigger. Non-interactive.</li><li><code>popover</code>: Interactive content. Click trigger. Traps focus if modal.</li><li><code>menu</code>: Action list. Click/Context trigger. Keyboard navigable.</li></ul>"
+  },
+  {
+    "id": "temporal",
+    "name": "Temporal Intent",
+    "status": "concept",
+    "summary": "Protocol abstracting date/time selection paradigms across mouse, touch, and keyboard modalities.",
+    "description": "<h3>Presentation Paradigms</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>media</code>: Spatial surfaces. Wall calendars (Grid) or Analog Clocks.</li><li><code>linear</code>: Sequential lists. Scrolling Wheels (iOS) or Listboxes.</li><li><code>input</code>: Text-based. Masked inputs or simple native fallbacks.</li></ul><h3>Granularity</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>point</code>: Single instance (Date/Time).</li><li><code>range</code>: Span between two points.</li><li><code>multi</code>: Disconnected sets of points.</li></ul>"
+  },
+  {
+    "id": "layout",
+    "name": "Layout Intent",
+    "status": "concept",
+    "summary": "Protocol defining the application shell structure and region mechanics (Drawers, Rails, Panels).",
+    "description": "<h3>Region Behavior</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>push</code>: Region consumes space, shifting the main content (Desktop).</li><li><code>overlay</code>: Region floats above content with a backdrop (Mobile).</li><li><code>rail</code>: Region collapses to a thin strip (Icons) rather than disappearing.</li></ul><h3>Anatomy</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>shell</code>: The global viewport container.</li><li><code>pane</code>: A resizable subdivision of the shell.</li><li><code>dock</code>: A sticky region (Header/Footer).</li></ul>"
+  },
+  {
+    "id": "message",
+    "name": "Message Intent",
+    "status": "concept",
+    "summary": "Protocol defining communication priority (Attention) and structural anatomy across alerts, banners, and dialogs.",
+    "description": "<h3>Attention Hierarchy</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>ambient</code>: Low priority. Status bars or helper text.</li><li><code>routine</code>: Standard priority. Toasts or inline notes.</li><li><code>urgent</code>: High priority. Banners or System Alerts.</li><li><code>critical</code>: Blocking priority. Dialogs or Screen Takeovers.</li></ul><h3>Tone Semantics</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>neutral</code>: Information.</li><li><code>positive</code>: Success/Confirmation.</li><li><code>caution</code>: Warning/Non-blocking error.</li><li><code>negative</code>: Error/Destructive.</li></ul>"
   }
 ]

@@ -1372,8 +1372,17 @@ abstract class CustomScriptType extends HTMLScriptElement {
         <section class="intro-section mb-12">
             <h3 id="mission">Mission</h3>
             <p>
-                <strong>Web Intents</strong> allow applications to declare widespread UX behavior preferences (like density, motion, or interaction models) that all components—regardless of origin—adhere to.
-                Instead of micro-managing prop drilling for every component (e.g., <code>&lt;Button dense /&gt;</code>, <code>&lt;List dense /&gt;</code>), you declare the <strong>Intent</strong> at the root or section level, and the components adapt automatically.
+                <strong>Web Intents</strong> are the architectural configuration used by components to decouple their <em>functional logic</em> from a specific <em>User Experience (UX)</em>.
+            </p>
+            <p>
+                By defining the "intent" of an interaction (e.g. "Selection", "Navigation", "Feedback") rather than its implementation, we allow a single component to be reused across vastly different Design Systems (Material, Fluent, Carbon) and form factors without code changes.
+            </p>
+            <p>
+                This enables the "Write Once, Run Everywhere" promise for UI components: the same <code>&lt;List&gt;</code> component can verify as a dense, mouse-driven data grid on Desktop and a spacious, touch-driven collection on Mobile, purely by swapping the active Intent Provider.
+            </p>
+            <p>
+                Crucially, this system pairs with <strong><a href="/projects/webtraits/">Web Traits</a></strong> to ensure zero overhead. 
+                Since the component only declares <em>intent</em>, the actual code implementation (e.g., the complex physics engine for "Swipe to Archive") is only loaded if that specific intent is active, keeping bundles lean.
             </p>
         </section>
 

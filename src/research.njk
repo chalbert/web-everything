@@ -1,0 +1,34 @@
+---
+layout: base.njk
+title: Research & References
+---
+
+<section class="intro">
+    <h1>Research & References</h1>
+    <p>A curated collection of external standards, proposals, and ecosystem libraries that influence the architectural decisions of Web Everything.</p>
+</section>
+
+<div class="project-grid">
+    {% for section in references %}
+    <div class="project-card" style="display: block; height: auto;">
+        <div class="project-header" style="margin-bottom: 1rem; border-bottom: 1px solid var(--color-border); padding-bottom: 0.5rem;">
+            <h2 class="project-title">{{ section.category }}</h2>
+        </div>
+        <p style="margin-bottom: 1.5rem; color: var(--color-text-muted); font-size: 0.9em;">{{ section.description }}</p>
+        
+        <ul style="list-style: none; padding: 0; margin: 0;">
+            {% for link in section.links %}
+            <li style="margin-bottom: 1rem;">
+                <a href="{{ link.url }}" target="_blank" rel="noopener noreferrer" style="font-weight: 600; text-decoration: none; color: var(--color-primary); display: flex; align-items: center; gap: 0.5rem;">
+                    {{ link.title }}
+                    <svg style="width: 14px; height: 14px; opacity: 0.5;" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg>
+                </a>
+                {% if link.context %}
+                <p style="margin: 0.25rem 0 0 0; font-size: 0.85em; color: var(--color-text-muted);">{{ link.context }}</p>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endfor %}
+</div>

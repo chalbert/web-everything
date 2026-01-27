@@ -1,0 +1,107 @@
+[
+  {
+    "category": "Core & Architecture",
+    "description": "Foundational patterns for Dependency Injection, Registries, and Element definition.",
+    "links": [
+      {
+        "title": "MDN: Custom Elements",
+        "url": "https://developer.mozilla.org/en-US/docs/Web/API/Web_Components/Using_custom_elements",
+        "context": "Basis for Web Components architecture."
+      },
+      {
+        "title": "W3C: Context Protocol",
+        "url": "https://github.com/webcomponents-cg/community-protocols/blob/main/proposals/context.md",
+        "context": "Inspiration for dependency injection and data consumption."
+      }
+    ]
+  },
+  {
+    "category": "State Management",
+    "description": "References for Signals, Stores, and Reactivity.",
+    "links": [
+      {
+        "title": "TC39 Signals Proposal",
+        "url": "https://github.com/tc39/proposal-signals",
+        "context": "Standard for fine-grained reactivity."
+      },
+      {
+        "title": "XState",
+        "url": "https://stately.ai/docs",
+        "context": "Reference for Finite State Machines and statecharts."
+      }
+    ]
+  },
+  {
+    "category": "UI & Interaction",
+    "description": "Design systems, accessibility, and motion standards.",
+    "links": [
+      {
+        "title": "Open UI",
+        "url": "https://open-ui.org/",
+        "context": "Research on standardizing UI components."
+      },
+      {
+        "title": "WAI-ARIA Pattern",
+        "url": "https://www.w3.org/WAI/ARIA/apg/",
+        "context": "Accessibility standards for interactive components."
+      },
+      {
+        "title": "Framer Motion",
+        "url": "https://www.framer.com/motion/",
+        "context": "Inspiration for declarative animation bindings."
+      }
+    ]
+  },
+  {
+    "category": "Reference Design Systems",
+    "description": "Gold-standard implementations used as benchmarks for component behavior, states, and accessibility.",
+    "links": [
+      {
+        "title": "Material Design 3 (Google)",
+        "url": "https://m3.material.io/",
+        "context": "Benchmark for state definitions (Interaction States), elevation, and motion choreography."
+      },
+      {
+        "title": "Carbon Design System (IBM)",
+        "url": "https://carbondesignsystem.com/",
+        "context": "Reference for complex data density, loading patterns, and strict accessibility compliance."
+      },
+      {
+        "title": "Radix UI Primitives",
+        "url": "https://www.radix-ui.com/primitives",
+        "context": "Modern standard for 'Headless' component behavior and ARIA management."
+      },
+      {
+        "title": "Fluent 2 (Microsoft)",
+        "url": "https://fluent2.microsoft.design/",
+        "context": "Reference for productivity-focused interfaces, density controls, and keyboard interaction."
+      },
+      {
+        "title": "Spectrum (Adobe)",
+        "url": "https://spectrum.adobe.com/",
+        "context": "Best-in-class example of adaptive scaling (Touch/Mouse) and theming systems."
+      },
+      {
+        "title": "Human Interface Guidelines (Apple)",
+        "url": "https://developer.apple.com/design/human-interface-guidelines/",
+        "context": "Defines the 'Native Feel' baseline for modal, navigation, and feedback patterns."
+      },
+      {
+        "title": "GOV.UK Design System",
+        "url": "https://design-system.service.gov.uk/",
+        "context": "The gold standard for form validation behaviors, error messaging, and copywriting."
+      }
+    ]
+  },
+  {
+    "category": "Build & Tooling",
+    "description": "Compilers, bundlers, and static site generation.",
+    "links": [
+      {
+        "title": "11ty",
+        "url": "https://www.11ty.dev/",
+        "context": "Our Static Site Generator of choice."
+      }
+    ]
+  }
+]

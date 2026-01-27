@@ -21,9 +21,9 @@ eleventyComputed:
         <p class="lead">{{ state.summary }}</p>
     </div>
 
-    <hr class="my-4">
-
     <div class="block-body content">
-        {{ state.description | safe }}
+        <div class="section-card">
+            {{ state.description | safe }}
+        </div>
     </div>
 </div>

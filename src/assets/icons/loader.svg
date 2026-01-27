@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="loadGrad1" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#94a3b8" />
+      <stop offset="100%" stop-color="#cbd5e1" />
+    </linearGradient>
+    <filter id="floatShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc" />
+
+  <g filter="url(#floatShadow)">
+      <!-- Loader Spinner Ring -->
+      <!-- A ring with a missing segment to imply rotation -->
+      <path d="M64 34 A30 30 0 1 1 34 64" fill="none" stroke="url(#loadGrad1)" stroke-width="12" stroke-linecap="round" />
+      
+      <!-- Primary Active Segment (The "Head") -->
+      <path d="M64 34 A30 30 0 0 1 94 64" fill="none" stroke="#6366f1" stroke-width="12" stroke-linecap="round" />
+  </g>
+</svg>

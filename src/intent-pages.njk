@@ -21,9 +21,9 @@ eleventyComputed:
         <p class="lead">{{ intent.summary }}</p>
     </div>
 
-    <hr class="my-4">
-
     <div class="block-body content">
-        {{ intent.description | safe }}
+        <div class="section-card">
+            {{ intent.description | safe }}
+        </div>
     </div>
 </div>
