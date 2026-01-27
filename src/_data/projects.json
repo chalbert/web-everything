@@ -19,6 +19,15 @@
     "isSvg": true
   },
   {
+    "id": "webcomponents",
+    "name": "Web Components",
+    "description": "Enhanced implementation of Custom Elements supporting Scoped Registries and standard Dependency Injection.",
+    "status": "poc",
+    "category": "standard",
+    "icon": "/assets/icons/webcomponents.svg",
+    "isSvg": true
+  },
+  {
     "id": "webbehaviors",
     "name": "Web Behaviors",
     "description": "Standard to allow custom attributes to add functionality to any HTML element.",
@@ -34,6 +43,15 @@
     "status": "concept",
     "category": "standard",
     "icon": "/assets/icons/webcontexts.svg",
+    "isSvg": true
+  },
+  {
+    "id": "webstates",
+    "name": "Web States",
+    "description": "Standard primitives for observability and state management (signals, stores, and schemas).",
+    "status": "concept",
+    "category": "standard",
+    "icon": "/assets/icons/webstates.svg",
     "isSvg": true
   },
   {
@@ -74,12 +92,39 @@
     "isSvg": true
   },
   {
-    "id": "webcandies",
-    "name": "Web Candies",
-    "description": "Syntactic sugar (like JSX or Functional Components) that compiles 1:1 to native Web Everything primitives for better DX.",
+    "id": "webintents",
+    "name": "Web Intents",
+    "description": "Declarative profiles for application-wide UX/UI behavior (e.g., density, motion, interaction models) that components automatically adhere to.",
+    "status": "concept",
+    "category": "ecosystem",
+    "icon": "/assets/icons/webintents.svg",
+    "isSvg": true
+  },
+  {
+    "id": "webtraits",
+    "name": "Web Traits",
+    "description": "Standard for creating granular, auto-loadable features that bridge the gap between easy developer experience and optimal performance.",
     "status": "concept",
     "category": "utility",
-    "icon": "/assets/icons/webcandies.svg",
+    "icon": "/assets/icons/webtraits.svg",
+    "isSvg": true
+  },
+  {
+    "id": "webadapters",
+    "name": "Web Adapters",
+    "description": "Bridges and syntactic sugars connecting external libraries or languages to Web Everything protocols.",
+    "status": "concept",
+    "category": "utility",
+    "icon": "/assets/icons/webadapters.svg",
+    "isSvg": true
+  },
+  {
+    "id": "webdocs",
+    "name": "Web Docs",
+    "description": "Standard defining documentation specs, static manifests, and usage examples for web projects.",
+    "status": "concept",
+    "category": "utility",
+    "icon": "/assets/icons/webdocs.svg",
     "isSvg": true
   }
 ]

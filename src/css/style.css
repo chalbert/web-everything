@@ -56,6 +56,8 @@ pre {
     max-width: 100%;
     overflow-x: auto;
     white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
 }
 
 /* Reset for PrismJS blocks so we don't double-style */
@@ -616,4 +618,154 @@ h1, h2, h3, h4, h5, h6 {
 
 .mb-12 {
     margin-bottom: 3rem;
+}
+
+/* Utilities for Documentation Badges */
+.flex { display: flex; }
+.items-center { align-items: center; }
+.grid { display: grid; }
+.grid-cols-1 { grid-template-columns: repeat(1, minmax(0, 1fr)); }
+.gap-4 { gap: 1rem; }
+
+@media (min-width: 768px) {
+    .md\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+.mt-6 { margin-top: 1.5rem; }
+.mb-3 { margin-bottom: 0.75rem; }
+.mr-2 { margin-right: 0.5rem; }
+.mb-4 { margin-bottom: 1rem; }
+
+.p-4 { padding: 1rem; }
+.px-2 { padding-left: 0.5rem; padding-right: 0.5rem; }
+.py-0\.5 { padding-top: 0.125rem; padding-bottom: 0.125rem; }
+
+.rounded { border-radius: 0.25rem; }
+.rounded-lg { border-radius: 0.5rem; }
+
+.border { border-width: 1px; border-style: solid; }
+
+.text-xs { font-size: 0.75rem; line-height: 1rem; }
+.text-sm { font-size: 0.875rem; line-height: 1.25rem; }
+.font-medium { font-weight: 500; }
+.font-bold { font-weight: 700; }
+.uppercase { text-transform: uppercase; }
+.tracking-widest { letter-spacing: 0.1em; }
+
+/* Colors */
+.bg-gray-50 { background-color: #f9fafb; }
+.border-gray-100 { border-color: #f3f4f6; }
+.border-gray-200 { border-color: #e5e7eb; }
+.text-gray-500 { color: #6b7280; }
+.text-gray-600 { color: #4b5563; }
+
+.bg-blue-100 { background-color: #dbeafe; }
+.text-blue-800 { color: #1e40af; }
+.border-blue-200 { border-color: #bfdbfe; }
+
+.bg-emerald-100 { background-color: #d1fae5; }
+.text-emerald-800 { color: #065f46; }
+.border-emerald-200 { border-color: #a7f3d0; }
+
+.bg-amber-100 { background-color: #fef3c7; }
+.text-amber-800 { color: #92400e; }
+.border-amber-200 { border-color: #fde68a; }
+
+.my-6 { margin-top: 1.5rem; margin-bottom: 1.5rem; }
+
+
+/* Web Standards / Blocks Styles */
+.standards-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+    margin-top: 1.5rem;
+}
+
+@media (min-width: 768px) {
+    .standards-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+.standards-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    margin-top: 1.5rem;
+}
+
+.standard-card {
+    display: block;
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    padding: 1.5rem;
+    text-decoration: none;
+    color: inherit;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    min-width: 0; /* Prevents grid blowout from long code blocks */
+}
+
+.standard-card:hover {
+    box-shadow: var(--shadow-md);
+    border-color: var(--color-primary);
+    transform: translateY(-2px);
+}
+
+.standard-card h4 {
+    margin-top: 0;
+    margin-bottom: 0.5rem;
+    color: var(--color-text-main);
+}
+
+/* Web Traits Styling */
+.traits-trinity-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--spacing-md);
+}
+
+@media (min-width: 900px) {
+    .traits-trinity-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+.traits-vision-box {
+    background-color: var(--color-surface); /* Using surface white instead of undefined gray-50 */
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: var(--spacing-md); /* 2rem */
+    margin-top: var(--spacing-md);
+}
+
+.traits-vision-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: var(--spacing-md);
+}
+
+@media (min-width: 768px) {
+    .traits-vision-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+.code-block-dark {
+    background-color: #1e293b; /* Slate-800 */
+    color: #f1f5f9; /* Slate-100 */
+    padding: 1rem;
+    border-radius: var(--radius-md);
+    font-family: monospace;
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    margin-bottom: 1rem;
+}
+
+.traits-steps-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
 }

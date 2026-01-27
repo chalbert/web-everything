@@ -48,7 +48,7 @@ title: Web Everything - Home
     <p class="section-desc">Concrete implementations, polyfills, and developer experience utilities.</p>
     <div class="project-grid">
         {% for project in projects %}
-        {% if project.category == 'utility' %}
+        {% if project.category == 'utility' or project.category == 'ecosystem' %}
         <div class="project-card">
             <a href="/projects/{{ project.id }}/" class="project-card-link" aria-label="View {{ project.name }}"></a>
             <div class="project-header">

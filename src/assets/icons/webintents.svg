@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="intentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ef4444" /> <!-- Red-500 -->
+      <stop offset="100%" stop-color="#b91c1c" /> <!-- Red-700 -->
+    </linearGradient>
+    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fca5a5" /> <!-- Red-300 -->
+      <stop offset="100%" stop-color="#f87171" /> <!-- Red-400 -->
+    </linearGradient>
+    
+    <filter id="floatShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc" />
+
+  <g filter="url(#floatShadow)">
+    <!-- Outer Ring (Target) -->
+    <circle cx="64" cy="64" r="32" stroke="url(#ringGrad)" stroke-width="8" fill="none" />
+    
+    <!-- Inner Bullseye -->
+    <circle cx="64" cy="64" r="14" fill="url(#intentGrad)" />
+    
+    <!-- The "Compass Needle" / Direction Indicator -->
+    <!-- A simplistic arrow overlaid or cutting through -->
+    <path d="M 64 28 L 74 54 L 64 64 L 54 54 Z" fill="#ef4444" />
+    <path d="M 64 100 L 74 74 L 64 64 L 54 74 Z" fill="#fca5a5" />
+    
+  </g>
+</svg>

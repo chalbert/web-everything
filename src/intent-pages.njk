@@ -1,0 +1,29 @@
+---
+pagination:
+    data: intents
+    size: 1
+    alias: intent
+permalink: "intents/{{ intent.id }}/"
+layout: base.njk
+eleventyComputed:
+    title: "Web Intents - {{ intent.name }}"
+---
+
+{% from "project-status.njk" import projectStatus %}
+
+<div class="container block-detail-page">
+    <div class="block-header">
+        <a href="/projects/webintents/" class="back-link">&larr; Back to Web Intents</a>
+        <h1 class="block-title">{{ intent.name }}</h1>
+        <div class="mt-4 mb-4" style="max-width: 300px;">
+            {{ projectStatus(intent.status) }}
+        </div>
+        <p class="lead">{{ intent.summary }}</p>
+    </div>
+
+    <hr class="my-4">
+
+    <div class="block-body content">
+        {{ intent.description | safe }}
+    </div>
+</div>

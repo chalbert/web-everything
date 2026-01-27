@@ -1,0 +1,42 @@
+[
+  {
+    "id": "keyboard-shortcuts",
+    "name": "Keyboard Shortcuts",
+    "status": "draft",
+    "type": "Module",
+    "summary": "Standardized keyboard interaction management enabling consistent shortcut handling across shadow boundaries and OS-specific layouts.",
+    "description": "<h2>Protocol: Keyboard Shortcuts</h2><p>This module defines a standard interface for registering and handling keyboard shortcuts that works seamlessly with Shadow DOM and respects user platform conventions.</p><h3>Core Interfaces</h3><pre><code class=\"language-typescript\">interface ShortcutRegistry {  register(context: string, shortcut: string, callback: (e: KeyboardEvent) => void): Subscription;  unregister(subscription: Subscription): void;  resolve(event: KeyboardEvent): ShortcutMatch | null;}</code></pre><h3>HTML Attributes</h3><ul><li><code>shortcut=\"Mod+S\"</code>: Declarative binding of a shortcut to an interactive element.</li><li><code>command=\"save\"</code>: Semantic association of an action name.</li></ul><h3>Adapters</h3><p>Implementation adapters provided for libraries like <code>Mousetrap</code> or <code>TinyKeys</code>.</p>"
+  },
+  {
+    "id": "composite-widget",
+    "name": "Composite Widget",
+    "status": "concept",
+    "type": "Behavior",
+    "summary": "Focus management and navigation protocol for complex widgets like Grids, Trees, and Menus, implementing the Roving Tabindex pattern.",
+    "description": "<h2>Protocol: Composite Widget</h2><p>Defines the interaction model for composite widgets where focus serves as a cursor moving through a collection of items.</p><h3>Behaviors</h3><ul><li><strong>Roving Tabindex:</strong> Automatically manages <code>tabindex=\"-1\"</code> and <code>tabindex=\"0\"</code> on children.</li><li><strong>Navigation:</strong> Standardizes directional keys (ArrowUp, ArrowDown, etc.) based on the widgets layout (Grid vs List).</li><li><strong>Selection:</strong> Handles single and multi-selection models within the composite structure.</li></ul>"
+  },
+  {
+    "id": "droplist",
+    "name": "Droplist",
+    "status": "concept",
+    "type": "Abstract Component",
+    "summary": "Abstract foundation for all overlay-triggering components including Dropdowns, Selects, Comboboxes, and Context Menus.",
+    "description": "<h2>Protocol: Droplist</h2><p>A unified state machine and structure for elements that toggle an overlay list.</p><h3>Anatomy</h3><ul><li><code>[slot=\"trigger\"]</code>: The element that toggles the visibility.</li><li><code>[slot=\"content\"]</code>: The overlay container.</li></ul><h3>State Machine</h3><ul><li><code>idle</code>: Closed state.</li><li><code>opening</code> / <code>closing</code>: Transition states.</li><li><code>open</code>: Content is visible and interactive.</li></ul><h3>Integration</h3><p>Designed to compose with the <strong>Positioning Module</strong> for layout and <strong>Composite Widget</strong> for internal navigation.</p>"
+  },
+  {
+    "id": "positioning",
+    "name": "Positioning",
+    "status": "draft",
+    "type": "Module",
+    "summary": "Declarative anchor positioning protocol compatible with CSS Anchor Positioning and libraries like Floating UI.",
+    "description": "<h2>Protocol: Positioning</h2><p>Standardizes the mechanism for positioning an element relative to an anchor element, handling collision detection and flipping.</p><h3>Attributes</h3><ul><li><code>anchor=\"element-id\"</code>: ID ref involved in the positioning relationship.</li><li><code>placement=\"top|bottom|left|right\"</code>: Preferred placement primary axis.</li><li><code>alignment=\"start|center|end\"</code>: Cross-axis alignment.</li><li><code>fallback=\"flip|shift|hide\"</code>: Strategy when space is constrained.</li></ul><h3>CSS API</h3><p>Aligns with the emerging CSS Anchor Positioning capabilities where supported.</p>"
+  },
+  {
+    "id": "validation",
+    "name": "Validation",
+    "status": "poc",
+    "type": "Behavior Category",
+    "summary": "Integration layer connecting custom form controls with the native Constraint Validation API and ElementInternals.",
+    "description": "<h2>Protocol: Validation</h2><p>A set of standard behaviors to bring native form validation experience to Custom Elements.</p><h3>Key Concepts</h3><ul><li><strong>Constraint Integration:</strong> Maps internal logic to <code>ElementInternals.setValidity()</code>.</li><li><strong>State Reflection:</strong> Automatically reflects validation state to attributes like <code>aria-invalid</code> and CSS pseudo-classes <code>:invalid</code>.</li><li><strong>Message Standardization:</strong> Unified error message distribution system.</li></ul>"
+  }
+]

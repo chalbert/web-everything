@@ -1,0 +1,56 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="compGradPrimary" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#c084fc" /> <!-- Purple-400 -->
+      <stop offset="100%" stop-color="#9333ea" /> <!-- Purple-600 -->
+    </linearGradient>
+    <linearGradient id="compGradSecondary" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f472b6" /> <!-- Pink-400 -->
+      <stop offset="100%" stop-color="#db2777" /> <!-- Pink-600 -->
+    </linearGradient>
+    <linearGradient id="compGradTertiary" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" /> <!-- Sky-400 -->
+      <stop offset="100%" stop-color="#0284c7" /> <!-- Sky-600 -->
+    </linearGradient>
+    
+    <filter id="floatShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background base -->
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc" />
+
+  <g filter="url(#floatShadow)">
+    <!-- The Component "Tag" Metaphor -->
+    
+    <!-- Left Bracket -->
+    <path d="M 52 48 L 36 64 L 52 80" 
+          stroke="url(#compGradPrimary)" 
+          stroke-width="10" 
+          stroke-linecap="round" 
+          stroke-linejoin="round"
+          fill="none" />
+
+    <!-- Right Bracket -->
+    <path d="M 76 48 L 92 64 L 76 80" 
+          stroke="url(#compGradPrimary)" 
+          stroke-width="10" 
+          stroke-linecap="round" 
+          stroke-linejoin="round"
+          fill="none" />
+
+    <!-- The "Custom" Core (The Block) -->
+    <!-- Represents the encapsulated logic/element inside -->
+    <rect x="58" y="52" width="12" height="24" rx="4" fill="url(#compGradSecondary)" transform="rotate(20 64 64)" />
+    
+    <!-- Or maybe a connection point to show it's a pluggable component? -->
+    <!-- Let's add dots to show "properties" or "attributes" -->
+     <circle cx="64" cy="36" r="4" fill="url(#compGradTertiary)" opacity="0.8" />
+     <circle cx="64" cy="92" r="4" fill="url(#compGradTertiary)" opacity="0.8" />
+
+  </g>
+</svg>

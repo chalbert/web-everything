@@ -1,0 +1,29 @@
+---
+pagination:
+    data: states
+    size: 1
+    alias: state
+permalink: "states/{{ state.id }}/"
+layout: base.njk
+eleventyComputed:
+    title: "Web States - {{ state.name }}"
+---
+
+{% from "project-status.njk" import projectStatus %}
+
+<div class="container block-detail-page">
+    <div class="block-header">
+        <a href="/projects/webstates/" class="back-link">&larr; Back to Web States</a>
+        <h1 class="block-title">{{ state.name }}</h1>
+        <div class="mt-4 mb-4" style="max-width: 300px;">
+            {{ projectStatus(state.status) }}
+        </div>
+        <p class="lead">{{ state.summary }}</p>
+    </div>
+
+    <hr class="my-4">
+
+    <div class="block-body content">
+        {{ state.description | safe }}
+    </div>
+</div>

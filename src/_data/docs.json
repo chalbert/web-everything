@@ -1,0 +1,24 @@
+{
+  "intro": "The <strong>Web Docs</strong> project proposes a unified structure for documenting web projects. It breaks down documentation into three distinct specifications: general documentation options, static manifests (schema/API), and usage examples (cases).",
+  "specs": [
+    {
+      "id": "doc-spec",
+      "title": "Doc Spec",
+      "description": "Defines general options for how a project or module is documented and displayed. This includes configuration for documentation generators, layout preferences, and content organization.",
+      "code": "{\n  \"doc\": {\n    \"layout\": \"api-reference\",\n    \"include\": [\"src/**/*.ts\"],\n    \"output\": \"docs/\"\n  }\n}"
+    },
+    {
+      "id": "manifest-spec",
+      "title": "Manifest Spec",
+      "description": "A superset of the Custom Elements Manifest (CEM). It statically extracts details from modules, including components, behaviors, and directives. This ensures tools can discover API surfaces without executing code.",
+      "code": "{\n  \"manifest\": {\n    \"version\": \"1.0.0\",\n    \"modules\": [\n      {\n        \"kind\": \"javascript-module\",\n        \"path\": \"src/button.ts\",\n        \"declarations\": [\n          { \"kind\": \"class\", \"name\": \"Button\", \"tagName\": \"my-button\" }\n        ]\n      }\n    ]\n  }\n}"
+    },
+    {
+      "id": "cases-spec",
+      "title": "Cases Spec",
+      "description": "Defines specific usage cases for the module. These are declarative scenarios that serve as both documentation examples and potential integration tests source inputs.",
+      "note": "There is a close relationship between this spec and testing. Usage cases defined here can be consumed by test runners to verify component behavior in various states.",
+      "code": "{\n  \"cases\": [\n    {\n      \"name\": \"Primary Button\",\n      \"props\": { \"variant\": \"primary\" },\n      \"slot\": \"Click Me\"\n    }\n  ]\n}"
+    }
+  ]
+}

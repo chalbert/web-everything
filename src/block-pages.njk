@@ -1,0 +1,30 @@
+---
+pagination:
+    data: blocks
+    size: 1
+    alias: block
+permalink: "blocks/{{ block.id }}/"
+layout: base.njk
+eleventyComputed:
+    title: "Web Blocks - {{ block.name }}"
+---
+
+{% from "project-status.njk" import projectStatus %}
+
+<div class="container block-detail-page">
+    <div class="block-header">
+        <a href="/projects/webblocks/" class="back-link">&larr; Back to Web Blocks</a>
+        <h1 class="block-title">{{ block.name }}</h1>
+        <span class="badge block-type">{{ block.type }}</span>
+        <div class="mt-4 mb-4" style="max-width: 300px;">
+            {{ projectStatus(block.status) }}
+        </div>
+        <p class="lead">{{ block.summary }}</p>
+    </div>
+
+    <hr class="my-4">
+
+    <div class="block-body content">
+        {{ block.description | safe }}
+    </div>
+</div>

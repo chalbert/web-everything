@@ -1,0 +1,23 @@
+[
+  {
+    "id": "motion",
+    "name": "Motion Intent",
+    "status": "concept",
+    "summary": "Controls the animation profile.",
+    "description": "<h3>Values</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>natural</code>: Physics-based, smooth (Default).</li><li><code>immediate</code>: Zero latency, no transitions (High productivity).</li><li><code>reduced</code>: Respects `prefers-reduced-motion` strictly.</li></ul>"
+  },
+  {
+    "id": "density",
+    "name": "Density Intent",
+    "status": "concept",
+    "summary": "Controls spacing and touch targets.",
+    "description": "<h3>Values</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>comfortable</code>: Standard touch-friendly targets (Default).</li><li><code>compact</code>: Information dense, mouse-first (Enterprise).</li><li><code>wafer</code>: Extreme density for complex tooling.</li></ul>"
+  },
+  {
+    "id": "interaction",
+    "name": "Interaction Intent",
+    "status": "concept",
+    "summary": "Adapts input handling paradigms.",
+    "description": "<h3>Values</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>pointer</code>: Hover states enabled, scrollbars visible.</li><li><code>touch</code>: Larger hit areas, swipe gestures enabled.</li><li><code>gamepad</code>: Focus snapping, spatial navigation priority.</li></ul>"
+  }
+]

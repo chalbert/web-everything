@@ -1,0 +1,32 @@
+[
+  {
+    "id": "syntax",
+    "title": "Syntax Adapters",
+    "description": "Developer-facing layers that provide convenient syntax (Sugar) compiling to standard protocols.",
+    "items": [
+      {
+        "name": "JSX Adapter",
+        "desc": "Converts JSX syntax into standard <code>template</code> and <code>slot</code> structures."
+      },
+      {
+        "name": "Functional Component Adapter",
+        "desc": "Allows writing functional-style components that map to class-based Web Components."
+      }
+    ]
+  },
+  {
+    "id": "lib",
+    "title": "Library Adapters",
+    "description": "Implementation layers that bridge third-party ecosystem libraries to Web Blocks protocols.",
+    "items": [
+      {
+        "name": "Floating UI Adapter",
+        "desc": "Implements the <strong>Positioning Protocol</strong> using the Floating UI library."
+      },
+      {
+        "name": "Mousetrap Adapter",
+        "desc": "Connects the Mousetrap library to the <strong>Keyboard Shortcuts Module</strong>."
+      }
+    ]
+  }
+]

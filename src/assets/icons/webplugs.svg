@@ -24,7 +24,7 @@
   </g>
 
   <!-- Puzzle Piece 2 (Right, about to connect) -->
-  <g filter="url(#floatShadow)" transform="translate(10, 0)">
+  <g filter="url(#floatShadow)">
     <path d="M74 44 H104 V84 H74 V74 A10 10 0 0 0 74 54 V44 Z" fill="url(#puzzleGrad2)" />
   </g>
 </svg>

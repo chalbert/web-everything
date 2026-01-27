@@ -1,0 +1,62 @@
+{
+  "mission": "To enable 'Scale without Weight' by defining a standard for modular features that can be auto-loaded at build-time based on usage. This allows libraries to offer massive capabilities (rich DX) while delivering minimal bundles (optimal UX).",
+  "pillars": [
+    {
+      "title": "The Contract",
+      "subtitle": "Runtime Interface",
+      "icon": "📝",
+      "desc": "Defines how a Trait module interacts with a Host component. Traits are designed as isolated mixins or functional compositions that operate safely on a typed host.",
+      "details": "Must support cleanup lifecycles and strictly typed input requirements."
+    },
+    {
+      "title": "The Map",
+      "subtitle": "Static Definition via <a href='/projects/webdocs/' class='underline decoration-blue-400'>Web Docs</a>",
+      "icon": "🗺️",
+      "desc": "Leverages the <a href='/projects/webdocs/' class='text-blue-600 hover:underline'>Manifest Spec</a> to statically declare relationships between Component Props/Attributes and Trait Modules.",
+      "details": "Example: <code>{ \"props\": { \"sortable\": \"./traits/sort.js\" } }</code>"
+    },
+    {
+      "title": "The Enforcer",
+      "subtitle": "Build-Time Tooling",
+      "icon": "⚙️",
+      "desc": "Plugins (Vite, Rollup, Webpack) that analyze template or code usage and automatically inject the necessary trait imports.",
+      "details": "Eliminates manual 'glue code' for the developer."
+    }
+  ],
+  "example": {
+    "component": "class DataGrid extends HTMLElement {\n  // Core logic only (2KB)\n}",
+    "usage": "<data-grid \n  sortable \n  export-csv \n  theme=\"material\"\n></data-grid>",
+    "result": "// Build output automatically injects:\nimport { withSortable } from './traits/sort.js';\nimport { withExport } from './traits/export.js';\n\n// Result: User gets full features, paying only for what they requested."
+  },
+  "tech_details": {
+    "title": "Reference Implementation: The Assertion Pattern",
+    "warning": "✅ Verified Proof of Concept: This pattern ensures type safety without global namespace pollution.",
+    "steps": [
+      {
+        "title": "1. The Pure Component",
+        "desc": "The host component remains lightweight and unaware of its potential traits. It only contains core logic.",
+        "code": "// src/components/grid/Grid.ts\nexport class DataGrid extends HTMLElement {\n  // Core logic only (2KB)\n  render() { ... }\n}"
+      },
+      {
+        "title": "2. The Trait Definition",
+        "desc": "Defines the interface, the mixin logic, and a special 'Assertion Loader' that upgrades the type safely.",
+        "code": "// src/traits/Sortable.ts\nexport interface SortableTrait {\n  sortBy(dir: 'asc' | 'desc'): void;\n}\n\n// The Loader: runtime logic + compile-time type assertion\nexport function useSortable(grid: DataGrid): asserts grid is DataGrid & SortableTrait {\n  if (!grid.hasAttribute('sortable')) {\n    grid.setAttribute('sortable', ''); // 1. Runtime: Trigger initialization\n    applySortableMixin(grid);          // 2. Logic: Mixin the methods\n  }\n}"
+      },
+      {
+        "title": "3. The Mixin Logic",
+        "desc": "The implementation details. It extends the instance dynamically, bridging the gap between the clean component and the feature.",
+        "code": "function applySortableMixin(grid: DataGrid) {\n  const host = grid as any;\n\n  // Implement the interface\n  host.sortBy = (dir: 'asc' | 'desc') => {\n    console.log(`Sorting ${dir}...`);\n    // Access public properties of the grid\n    grid.items.sort((a, b) => dir === 'asc' ? a - b : b - a);\n    grid.render();\n  };\n}"
+      },
+      {
+        "title": "4. Strict Consumption",
+        "desc": "TypeScript prevents using the trait until you explicitly load it. No more runtime crashes from missing methods.",
+        "code": "const grid = new DataGrid();\n\n// ❌ Error: Property 'sortBy' does not exist on 'DataGrid'\n// grid.sortBy('asc'); \n\n// ✅ Load the Trait (Logic + Types)\nuseSortable(grid);\n\n// ✅ Success: TypeScript now knows 'grid' has 'sortBy'\ngrid.sortBy('asc');"
+      },
+      {
+        "title": "5. Opt-in Automation (Future)",
+        "desc": "While explicit loading is safe, build plugins can opt-in to analyze triggers (props, unique methods) and inject the loader automatically.",
+        "code": "// 1. Attribute Trigger (Template Analysis)\n// <data-grid sortable />  ➡️  useSortable(grid)\n\n// 2. Method Trigger (Code Analysis)\n// grid.sortBy('asc')      ➡️  useSortable(grid); grid.sortBy('asc')"
+      }
+    ]
+  }
+}
