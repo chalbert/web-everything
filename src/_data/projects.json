@@ -19,6 +19,15 @@
     "isSvg": true
   },
   {
+    "id": "webresources",
+    "name": "Web Resources",
+    "description": "Standard protocols for data exchange, interceptors, and resource definition.",
+    "status": "concept",
+    "category": "standard",
+    "icon": "/assets/icons/webresources.svg",
+    "isSvg": true
+  },
+  {
     "id": "webcomponents",
     "name": "Web Components",
     "description": "Enhanced implementation of Custom Elements supporting Scoped Registries and standard Dependency Injection.",
@@ -98,6 +107,15 @@
     "status": "concept",
     "category": "ecosystem",
     "icon": "/assets/icons/webintents.svg",
+    "isSvg": true
+  },
+  {
+    "id": "webanalytics",
+    "name": "Web Analytics",
+    "description": "Standard for vendor-neutral tracking (Identify, Track, Page) using the Segment Spec vocabulary.",
+    "status": "draft",
+    "category": "ecosystem",
+    "icon": "/assets/icons/webanalytics.svg",
     "isSvg": true
   },
   {

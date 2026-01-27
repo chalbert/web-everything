@@ -1,0 +1,29 @@
+---
+pagination:
+    data: resources
+    size: 1
+    alias: resource
+permalink: "resources/{{ resource.id }}/"
+layout: base.njk
+eleventyComputed:
+    title: "Web Resources - {{ resource.name }}"
+---
+
+{% from "project-status.njk" import projectStatus %}
+
+<div class="container block-detail-page">
+    <div class="block-header">
+        <a href="/projects/webresources/" class="back-link">&larr; Back to Web Resources</a>
+        <h1 class="block-title">{{ resource.name }}</h1>
+        <div class="mt-4 mb-4" style="max-width: 300px;">
+            {{ projectStatus(resource.status) }}
+        </div>
+        <p class="lead">{{ resource.summary }}</p>
+    </div>
+
+    <hr class="my-4">
+
+    <div class="block-body content">
+        {{ resource.description | safe }}
+    </div>
+</div>

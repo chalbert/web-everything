@@ -1195,6 +1195,97 @@ abstract class CustomScriptType extends HTMLScriptElement {
         </section>
     {% endif %}
 
+    {% if project.id == 'webresources' %}
+        <section class="intro-section mb-12">
+            <h3 id="mission">Mission</h3>
+            <p>
+                <strong>Web Resources</strong> aims to decouple the <em>specification</em> of a data request from its <em>execution</em>. 
+                It provides a standard interoperability layer for Middleware (Auth, Logging) and Caching that works across any transport (REST, GraphQL, WebSocket).
+            </p>
+        </section>
+
+        <section id="analysis" class="section-card">
+            <h3 id="ecosystem-analysis">Ecosystem Analysis</h3>
+            <p>We analyzed the "Big 4" paradigms in the current ecosystem to identify gaps and interoperability opportunities.</p>
+            
+            <div class="comparison-table-wrapper">
+                <table class="comparison-table">
+                    <thead>
+                        <tr class="bg-gray-50 text-xs uppercase tracking-wide">
+                            <th class="p-4 pl-12 border-b border-gray-200 font-semibold text-gray-500">Feature</th>
+                            <th class="p-4 border-b border-gray-200 font-semibold text-gray-500">Axios (HTTP)</th>
+                            <th class="p-4 border-b border-gray-200 font-semibold text-gray-500">TanStack / SWR</th>
+                            <th class="p-4 border-b border-gray-200 font-semibold text-gray-500">Apollo (GQL)</th>
+                            <th class="p-4 border-b border-gray-200 font-semibold text-gray-500">Standard Fetch</th>
+                            <th class="p-4 pr-12 border-b border-blue-200 font-semibold text-blue-800 bg-blue-50/50">Web Resources</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <!-- Interceptors -->
+                        <tr>
+                            <td class="p-8 pl-12 border-b border-gray-100 font-medium text-gray-900">Interceptors</td>
+                            <td class="p-8 border-b border-gray-100 text-emerald-600">✅ Request/Resp</td>
+                            <td class="p-8 border-b border-gray-100 text-red-500">❌ (Via fetcher)</td>
+                            <td class="p-8 border-b border-gray-100 text-emerald-600">✅ Links Pair</td>
+                            <td class="p-8 border-b border-gray-100 text-red-500">❌ (SW only)</td>
+                            <td class="p-8 pr-12 border-b border-gray-100 font-medium bg-blue-50/30 border-l-4 border-l-blue-500">Standard Middleware</td>
+                        </tr>
+                        <!-- Caching -->
+                        <tr>
+                            <td class="p-8 pl-12 border-b border-gray-100 font-medium text-gray-900">Caching Policy</td>
+                            <td class="p-8 border-b border-gray-100 text-red-500">❌ (Add-on)</td>
+                            <td class="p-8 border-b border-gray-100 text-emerald-600">✅ Time-based</td>
+                            <td class="p-8 border-b border-gray-100 text-emerald-600">✅ Normalized</td>
+                            <td class="p-8 border-b border-gray-100 text-emerald-600">✅ HTTP Cache</td>
+                            <td class="p-8 pr-12 border-b border-gray-100 font-medium bg-blue-50/30 border-l-4 border-l-blue-500">Universal Policy</td>
+                        </tr>
+                        <!-- Resource ID -->
+                        <tr>
+                            <td class="p-8 pl-12 border-b border-gray-100 font-medium text-gray-900">Resource ID</td>
+                            <td class="p-8 border-b border-gray-100 text-gray-600">URL String</td>
+                            <td class="p-8 border-b border-gray-100 text-gray-600">Array Keys</td>
+                            <td class="p-8 border-b border-gray-100 text-gray-600">Type + ID</td>
+                            <td class="p-8 border-b border-gray-100 text-gray-600">URL String</td>
+                            <td class="p-8 pr-12 border-b border-gray-100 font-medium bg-blue-50/30 border-l-4 border-l-blue-500">Configurable Resolver</td>
+                        </tr>
+                        <!-- Transforms -->
+                        <tr>
+                            <td class="p-8 pl-12 font-medium text-gray-900">Transforms</td>
+                            <td class="p-8 text-emerald-600">✅ JSON</td>
+                            <td class="p-8 text-emerald-600">✅ Selectors</td>
+                            <td class="p-8 text-emerald-600">✅ Fragments</td>
+                            <td class="p-8 text-red-500">❌ (.json())</td>
+                            <td class="p-8 pr-12 font-medium bg-blue-50/30 border-l-4 border-l-blue-500">Schemas</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="mt-6 p-4 bg-blue-50 rounded-lg text-sm text-blue-800">
+                <strong>Conclusion:</strong> 
+                Most libraries couple the <em>Transport</em> (HTTP vs GQL) with the <em>Policy</em> (Cache/Auth). 
+                <strong>Web Resources</strong> standardizes the Policy layer so it can be injected into any Transport.
+            </div>
+        </section>
+
+        <section id="proposed-resources" class="section-card">
+            <h3 id="proposed-standards">Proposed Standards</h3>
+            <div class="standards-grid">
+                {% for resource in resources %}
+                <a href="/resources/{{ resource.id }}/" class="standard-card">
+                    <div class="flex justify-between items-start mb-3">
+                        <h4 id="resource-{{ resource.id }}" class="text-lg font-bold m-0 text-gray-900">{{ resource.name }}</h4>
+                    </div>
+                    <p class="text-gray-600 text-sm leading-relaxed mb-4">{{ resource.summary }}</p>
+                    <div style="margin-bottom: 1rem;">
+                        {{ projectStatus(resource.status) }}
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+        </section>
+    {% endif %}
+
     {% if project.id == 'webstates' %}
         <section class="intro-section mb-12">
             <h3 id="mission">Mission</h3>

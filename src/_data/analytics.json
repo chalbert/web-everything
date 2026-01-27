@@ -1,0 +1,16 @@
+[
+  {
+    "id": "events",
+    "name": "Custom Events",
+    "status": "draft",
+    "summary": "Standard for semantic analytics events (Segment Spec / Activity Streams).",
+    "description": "<h3>Design Philosophy</h3><p>Tracking events should be semantic (User Behaviors) rather than tight-coupled to a vendor (Google Analytics). This standard adopts the <strong>Segment Spec</strong> vocabulary, focusing on the <em>Who</em> (Identity), <em>What</em> (Event), and <em>Where</em> (Context).</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">interface CustomAnalyticsEvent {    name: string; // e.g. 'Order Completed'    properties?: Record&lt;string, unknown&gt;; // e.g. { orderId: '50314b8e9bcf000000000000' }    options?: CustomAnalyticsOptions;}interface CustomAnalyticsIdentity {    userId: string;    traits?: Record&lt;string, unknown&gt;; // e.g. { email: 'bill@microsoft.com' }}interface CustomAnalyticsOptions {    integrations?: Record&lt;string, boolean&gt;; // e.g. { 'All': false, 'Mixpanel': true }    timestamp?: Date;}</code></pre>"
+  },
+  {
+    "id": "tracker",
+    "name": "Custom Tracker",
+    "status": "draft",
+    "summary": "Protocol for analytics providers (Identify, Track, Page).",
+    "description": "<h3>Design Philosophy</h3><p>The application should not know about Mixpanel or GA4. It should only know how to <code>track()</code>. Implementations can be swapped via Dependency Injection using <code>@web-analytics</code>.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">interface CustomTracker {    // Who is the user?    identify(userId: string, traits?: Record&lt;string, unknown&gt;, options?: CustomAnalyticsOptions): void;    // What are they doing?    track(event: string, properties?: Record&lt;string, unknown&gt;, options?: CustomAnalyticsOptions): void;    // Where are they?    page(name?: string, category?: string, properties?: Record&lt;string, unknown&gt;, options?: CustomAnalyticsOptions): void;    // Grouping accounts (B2B)    group(groupId: string, traits?: Record&lt;string, unknown&gt;, options?: CustomAnalyticsOptions): void;}</code></pre>"
+  }
+]

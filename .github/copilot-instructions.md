@@ -55,3 +55,10 @@ This project aims to define a set of browser standards (polyfills/specifications
   import { withSortable } from './traits/sort';
   class MyEl extends withSortable(HTMLElement) {}
   ```
+
+## 6. Icon Guidelines (SVG)
+- **Dimensions**: Viewbox `0 0 128 128` (Width/Height 128px).
+- **Background**: Rounded Rect `rx="30"` inside the 128 box (`x="14" y="14" width="100" height="100"`).
+- **Style**: Use **Solid Shapes** with gradients (avoid fine strokes `stroke-width < 6`).
+- **Shadows**: Use the standard `floatShadow` filter for depth.
+- **Colors**: Use Tailwind-like gradients (e.g., Indigo-400 to Indigo-600).

@@ -769,3 +769,22 @@ h1, h2, h3, h4, h5, h6 {
     flex-direction: column;
     gap: var(--spacing-md);
 }
+
+/* Comparison Table */
+.comparison-table-wrapper {
+    overflow-x: auto;
+    margin-top: 1.5rem;
+    width: 100%;
+}
+
+.comparison-table {
+    width: 100%;
+    text-align: left;
+    font-size: 0.875rem;
+    border-collapse: collapse;
+}
+
+.comparison-table td, .comparison-table th {
+    padding: 0.75rem;
+    border: 1px solid var(--color-border);
+}
