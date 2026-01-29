@@ -1,0 +1,37 @@
+<h2>Protocol: Event Behaviors</h2>
+<p>Defines a standard for declaratively binding DOM events to abstract actions using namespaced attributes (e.g.,
+  <code>on:click</code>,
+  <code>on:input</code>). This pattern enables zero-build, framework-agnostic event handling and supports argument passing via
+  <code>arg-*</code>
+  attributes.</p>
+<h3>HTML Attributes</h3>
+<ul>
+  <li>
+    <code>on:click="save"</code>: Binds the
+    <code>click</code>
+    event to the
+    <code>save</code>
+    action.</li>
+  <li>
+    <code>on:input="update" arg-id="123"</code>: Binds the
+    <code>input</code>
+    event to the
+    <code>update</code>
+    action, passing
+    <code>id=123</code>
+    as an argument.</li>
+</ul>
+<h3>Protocol</h3>
+<ul>
+  <li>Event attributes are parsed and attached as listeners at runtime.</li>
+  <li>The attribute value is treated as an
+    <strong>Action ID</strong>
+    (not a function reference).</li>
+  <li>Arguments are passed via
+    <code>arg-*</code>
+    attributes and included in the event payload.</li>
+  <li>Actions are resolved by the nearest handler registry or injector context, supporting both bubbling and DI-forwarding
+    for portals.</li>
+</ul>
+<h3>Usage Example</h3>
+<pre><code class="language-html">&lt;button on:click="submit" arg-id="42"&gt;Submit&lt;/button&gt;</code></pre>

@@ -1,0 +1,257 @@
+<section id="protocol" class="section-card">
+   <h3 id="the-protocol">Web Context Protocol</h3>
+   <p>
+      <strong>Web Contexts</strong> define a protocol for exposing data or services to HTML templates, behaviors, and
+      components via hierarchical, string-based queries. <strong>Contexts always control exactly which data is exposed
+         to tokens, adding a layer of security and encapsulation.</strong> A context is not a registry of all
+      dependencies, but a public interface for data meant for template or behavior consumption.
+   </p>
+   <ul>
+      <li><strong>Binding Resolution:</strong> Bindings parsed from HTML (via customTextNode/attribute parsers) resolve
+         data by walking up the DOM, querying each injector for a matching context type (always a string in HTML).</li>
+      <li><strong>Context Exposure:</strong> Web Contexts expose only data intended for public/template/behavior use,
+         not all internal state or registries. This explicit exposure mechanism ensures that sensitive or internal data
+         is never leaked to tokens or templates unintentionally.</li>
+      <li><strong>Lookup Strategy:</strong> By default, lookup is hierarchical—bindings find the closest matching
+         context. Frameworks may restrict this to the first found, or allow full parent chain traversal for advanced
+         scenarios.</li>
+      <li><strong>Negotiation:</strong> Advanced: Providers may decline to answer a query, deferring to parent injectors
+         for protocol-driven fallback or filtering.</li>
+   </ul>
+   <p>
+      <strong>Summary:</strong> <em>Observation</em> is a property of the injected object (see Web States);
+      <em>lookup</em> is the role of the injector; <em>HTML-scoped queries</em> are the domain of Web Contexts.
+      <strong>Explicit context exposure is a security and encapsulation feature.</strong>
+   </p>
+</section>
+
+
+<section id="use-cases" class="section-card">
+   <h3 id="key-use-cases">Key Use Cases</h3>
+   <ul>
+      <li><strong>Template Data Binding:</strong> Bind HTML attributes or text nodes to the closest exposed context
+         value (e.g., <code>state</code>, <code>theme</code>).</li>
+      <li><strong>Scoped State Provision:</strong> Provide state objects to a subtree, allowing bindings to resolve the
+         nearest state context.</li>
+      <li><strong>Theming:</strong> Expose theme tokens or design variables for template/behavior consumption, without
+         leaking internal registries.</li>
+      <li><strong>Service Lookup:</strong> Allow declarative widgets to access public APIs (e.g., i18n, logger) via
+         context queries.</li>
+      <li><strong>Plugin/Extension Points:</strong> Enable plugins to expose capabilities for template/behavior use,
+         with negotiation for fallback or selection.</li>
+      <li><strong>Strict vs. Flexible Lookup:</strong> Support both strict (stop at first match) and flexible (traverse
+         parent chain) context resolution, as needed by framework or use case.</li>
+   </ul>
+</section>
+
+
+<section id="comparison" class="section-card">
+   <div class="comparison-block"
+      style="background: rgba(99, 102, 241, 0.1); padding: 1.5rem; border-radius: 8px; border: 1px solid rgba(99, 102, 241, 0.2); margin: 2rem 0;">
+      <h4 id="current-standardization-vs-web-contexts" style="margin-top: 0; color: var(--color-primary);">Summary of
+         Research</h4>
+      <p>
+         Community protocols (e.g., <code>context-request</code> events) rely on event bubbling and explicit provider
+         wrappers, which can complicate DOM structure and CSS layouts. Web Contexts, as a protocol, enable virtual
+         scoping and clean, declarative data exposure for HTML templates and behaviors, without requiring extra DOM
+         elements or leaking internal registries.
+      </p>
+      <p>
+         <strong>Key Insight:</strong> Web Contexts are not a registry of all dependencies, but a protocol for exposing
+         only the data intended for public/template/behavior consumption, resolved via hierarchical, string-based
+         queries.
+      </p>
+   </div>
+</section>
+
+<section id="analysis" class="section-card">
+   <h3 id="spec-implementation-analysis">Spec & Implementation Analysis</h3>
+   <p>This section compares major web context APIs, framework implementations, and the HTML Injector approach.</p>
+
+   <div style="overflow-x: auto; max-width: 100%;">
+      <table style="min-width: 700px;">
+         <thead>
+            <tr>
+               <th>Spec/Framework</th>
+               <th>Context Propagation</th>
+               <th>Scoping/Isolation</th>
+               <th>API Shape / Syntax</th>
+               <th>Registry/Lookup Model</th>
+               <th>Observations / Differences</th>
+            </tr>
+         </thead>
+         <tbody>
+            <tr>
+               <td><strong>React Context</strong></td>
+               <td>Virtual tree (component)</td>
+               <td>Per-provider, explicit</td>
+               <td>JS API: <code>&lt;Provider value={}&gt;</code></td>
+               <td>JS object, not DOM</td>
+               <td>Not observable from DOM, not hierarchical in DOM</td>
+            </tr>
+            <tr>
+               <td><strong>Vue Provide/Inject</strong></td>
+               <td>Virtual tree (component)</td>
+               <td>Per-provider, explicit</td>
+               <td>JS API: <code>provide/inject</code></td>
+               <td>JS object, not DOM</td>
+               <td>Similar to React, not DOM-based</td>
+            </tr>
+            <tr>
+               <td><strong>Angular DI</strong></td>
+               <td>Component tree</td>
+               <td>Per-injector, explicit</td>
+               <td>Decorators, tokens</td>
+               <td>Hierarchical injector</td>
+               <td>Not observable from DOM, but hierarchical</td>
+            </tr>
+            <tr>
+               <td><strong>Lit Context (proposed)</strong></td>
+               <td>DOM tree (element)</td>
+               <td>Per-provider, explicit</td>
+               <td>Decorators, JS API</td>
+               <td>Context registry per element</td>
+               <td>DOM-based, but not a standard</td>
+            </tr>
+            <tr>
+               <td><strong>Svelte Context</strong></td>
+               <td>Component tree</td>
+               <td>Per-provider, explicit</td>
+               <td>JS API: <code>setContext/getContext</code></td>
+               <td>JS object, not DOM</td>
+               <td>Not DOM-based</td>
+            </tr>
+            <tr>
+               <td><strong>HTML Injector (Web Everything)</strong></td>
+               <td>DOM tree (attribute/association)</td>
+               <td>Per-injector, opt-in via attribute</td>
+               <td>Declarative: <code>&lt;script type="injector" id="..."&gt;</code></td>
+               <td>Registry per injector node, DOM queryable</td>
+               <td>Closest to DOM-based context, observable, declarative</td>
+            </tr>
+         </tbody>
+      </table>
+   </div>
+
+   <h4>How Close is HTML Injector to a Web Context API?</h4>
+   <ul>
+      <li><strong>Already provides:</strong> DOM-based context association, hierarchical lookup, declarative/observable
+         context, registry model.</li>
+      <li><strong>What a Web Context Standard might add:</strong> Standardized API for context lookup, observable
+         context changes, protocol negotiation, unified registry, lifecycle/fallback handling.</li>
+      <li><strong>Key observation:</strong> HTML Injector is very close to a DOM-native context API; the main gap is a
+         browser-native API for lookup, observation, and richer protocol negotiation.</li>
+   </ul>
+</section>
+
+<section id="feature-analysis" class="section-card">
+   <h3 id="feature-analysis">Feature Analysis: Lookup, Observation, Negotiation</h3>
+   <table style="min-width: 700px; overflow-x: auto;">
+      <thead>
+         <tr>
+            <th>Spec/Framework</th>
+            <th>Lookup</th>
+            <th>Observation</th>
+            <th>Negotiation</th>
+         </tr>
+      </thead>
+      <tbody>
+         <tr>
+            <td><strong>React Context</strong></td>
+            <td>JS API: useContext hook, provider tree</td>
+            <td>Observation via re-render on value change</td>
+            <td>No built-in negotiation; closest provider always answers. Can pass down parent context manually if
+               desired.</td>
+         </tr>
+         <tr>
+            <td><strong>Vue Provide/Inject</strong></td>
+            <td>JS API: inject by key</td>
+            <td>Observation via reactivity (if provided value is reactive)</td>
+            <td>No built-in negotiation; closest provider always answers. Manual fallback possible.</td>
+         </tr>
+         <tr>
+            <td><strong>Angular DI</strong></td>
+            <td>Token-based lookup in injector hierarchy</td>
+            <td>Observation via RxJS/observable patterns (manual)</td>
+            <td>No built-in negotiation; closest injector with token answers. Can provide parent injector's value
+               manually.</td>
+         </tr>
+         <tr>
+            <td><strong>Lit Context (proposed)</strong></td>
+            <td>Element-based context registry, JS API</td>
+            <td>Observation via events or reactivity (proposal-dependent)</td>
+            <td>No built-in negotiation; closest provider always answers. Manual pass-through possible.</td>
+         </tr>
+         <tr>
+            <td><strong>Svelte Context</strong></td>
+            <td>JS API: getContext by key</td>
+            <td>Observation via reactivity (if value is a store)</td>
+            <td>No built-in negotiation; closest provider always answers. Manual fallback possible.</td>
+         </tr>
+         <tr>
+            <td><strong>HTML Injector (Web Everything)</strong></td>
+            <td>DOM query: injector attribute, hierarchical fallback</td>
+            <td>Potential for observation via DOM events or MutationObserver (not yet standardized)</td>
+            <td>Supports lookup by name/domain. True negotiation (provider can decline to answer and defer to parent) is
+               not yet built-in, but could be added for advanced scenarios.</td>
+         </tr>
+      </tbody>
+   </table>
+   <ul>
+      <li><strong>Lookup:</strong> All systems support lookup by key or token; HTML Injector supports domain-based
+         lookup, covering most i18n/service scenarios.</li>
+      <li><strong>Observation:</strong> Frameworks use reactivity or re-rendering; native/HTML approaches could use
+         events or MutationObserver.</li>
+      <li><strong>Negotiation:</strong> Most systems do not support true negotiation (provider declining to answer and
+         deferring to parent) out of the box. Manual pass-through is possible, but built-in negotiation would enable
+         more advanced, protocol-driven fallback and filtering.</li>
+   </ul>
+   <p><strong>Note:</strong> Many common use cases (i18n, theming, service lookup) are already covered by hierarchical
+      lookup. True negotiation is most valuable when a provider needs to filter, transform, or selectively decline
+      requests based on protocol, capability, or runtime conditions.</p>
+   <p><strong>Design Note:</strong> Negotiation is best viewed as an advanced feature of the <em>injector</em> (the
+      provider/registry), rather than of the context consumer. This allows injectors to implement custom logic for
+      filtering, protocol matching, or fallback, while keeping the context API simple for most consumers.</p>
+</section>
+
+<section id="negotiation-use-cases" class="section-card">
+   <h3 id="negotiation-use-cases">Use Cases for Context Negotiation</h3>
+   <ul>
+      <li><strong>Theming with Protocols:</strong> <em>Usually covered by lookup.</em> Negotiation is only needed if a
+         provider wants to filter or transform requests (e.g., only answer for certain theme types).</li>
+      <li><strong>Internationalization (i18n):</strong> <em>Covered by lookup.</em> Negotiation is only needed if
+         multiple translation services are present and selection is dynamic.</li>
+      <li><strong>State Store Interop:</strong> <em>Covered by lookup.</em> Negotiation is only needed if a provider
+         wants to filter by protocol or runtime capability.</li>
+      <li><strong>Feature Detection & Polyfill Interop:</strong> <em>Strong use case for negotiation.</em> Providers can
+         decline to answer if native support is present, letting polyfills or parents handle the request.</li>
+      <li><strong>Accessibility Services:</strong> <em>Covered by lookup.</em> Negotiation is only needed if multiple
+         announcers or services are present and selection is dynamic.</li>
+      <li><strong>Plugin/Extension Points:</strong> <em>Strong use case for negotiation.</em> Multiple plugins may
+         register for a protocol; negotiation allows the best or most appropriate to answer, or for fallback to occur.
+      </li>
+   </ul>
+   <p><strong>Summary:</strong> Most context use cases are covered by hierarchical lookup. True negotiation is most
+      valuable for advanced scenarios: polyfill interop, plugin selection, or protocol-based filtering where a provider
+      may choose to defer to a parent or another provider.</p>
+</section>
+
+<section id="try-it" class="section-card">
+   <h3 id="try-it-out">Try It Out</h3>
+   <p>
+      This protocol is fully implemented and available for use today.
+      Check out the reference implementation in the <strong><a href="/projects/webplugs/">Web Plugs</a></strong>
+      collection.
+   </p>
+</section>
+
+<section>
+   <h3>Design Note: Observation vs. Context</h3>
+   <p>
+      <strong>Observation</strong> (reactivity, change notification, or subscription) is a property of the injected
+      object itself—such as a <em>store</em> or <em>signal</em>—not of the context or injector. The context/injector
+      provides access to dependencies (including stateful objects), but does not provide observation APIs. To observe
+      changes, subscribe to the injected object using its own API. This separation ensures that protocols
+      (contexts/injectors) provide access, while behaviors (states/signals) provide observation.
+   </p>
+</section>

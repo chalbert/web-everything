@@ -1,0 +1,10 @@
+{#
+  Template: block-description.njk
+  Usage: {% include "block-description.njk" description=block.description %}
+#}
+
+{% if description %}
+  <div class="block-description">
+    {{ description | safe }}
+  </div>
+{% endif %}

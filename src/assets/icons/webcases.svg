@@ -1,52 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 128 128" width="128" height="128" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <!-- GLOBAL FILTER: Do Not Modify -->
-    <filter id="floatShadow" x="-50%" y="-50%" width="200%" height="200%">
-      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
-      <feOffset dx="2" dy="4" result="offsetblur" />
-      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
-      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    <linearGradient id="casesGradient" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#818cf8"/>
+      <stop offset="1" stop-color="#38bdf8"/>
+    </linearGradient>
+    <filter id="floatShadow" x="0" y="0" width="128" height="128" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000" flood-opacity="0.10"/>
     </filter>
-
-    <!-- PALETTE: Tailwind-inspired Gradients -->
-    
-    <!-- Red (Intents) -->
-    <linearGradient id="gradRed" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ef4444" />
-      <stop offset="100%" stop-color="#b91c1c" />
-    </linearGradient>
-
-    <!-- Indigo (States) -->
-    <linearGradient id="gradIndigo" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#818cf8" />
-      <stop offset="100%" stop-color="#4f46e5" />
-    </linearGradient>
-
-    <!-- Purple (Injectors/Structure) -->
-    <linearGradient id="gradPurple" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#c084fc" />
-      <stop offset="100%" stop-color="#9333ea" />
-    </linearGradient>
-
-    <!-- Sky (Plugs/Utilities) -->
-    <linearGradient id="gradSky" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#38bdf8" />
-      <stop offset="100%" stop-color="#0284c7" />
-    </linearGradient>
-
   </defs>
-
-  <!-- BASE: Rounded Container (Slate-50) -->
-  <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc" />
-
-  <!-- CONTENT: Apply filter="url(#floatShadow)" to the group -->
+  <!-- Background -->
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc"/>
+  <!-- Main Content Group with shadow -->
   <g filter="url(#floatShadow)">
-      <!-- 
-          RULES:
-          1. Stroke Width: Min 6px for outlines. 
-          2. Gradients: Use defined gradients for fills/strokes.
-          3. Padding: Keep content within 22px margin (approx 84x84 safe area).
-      -->
-      <circle cx="64" cy="64" r="24" fill="url(#gradIndigo)" />
+    <!-- Stacked cards/cases: 3 rectangles, offset, with gradient fill -->
+    <rect x="38" y="54" width="52" height="32" rx="8" fill="url(#casesGradient)" fill-opacity="0.7"/>
+    <rect x="44" y="44" width="52" height="32" rx="8" fill="url(#casesGradient)" fill-opacity="0.85"/>
+    <rect x="50" y="34" width="52" height="32" rx="8" fill="url(#casesGradient)"/>
+    <!-- Accent: checkmark on top card -->
+    <path d="M66 50l8 8 14-14" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
   </g>
+
 </svg>

@@ -1,0 +1,32 @@
+<h2>Protocol: Resource Loader</h2><p>A comprehensive container for "Load in Place" scenarios (GET requests), implemented as a <strong>Virtual Element</strong>.</p><h3>Registry-First Philosophy</h3><p>Loaders are best defined in a global <strong>CustomResourceRegistry</strong> rather than inline. This ensures consistent loading skeletons and error states across the application.</p><pre><code class="language-typescript">// Definition
+customResources.define('user-profile', {
+    loader: 'skeleton-profile',
+    error: 'error-card'
+});</code></pre><h3>Virtual Implementation</h3><p>Uses Custom Comments (e.g. <code>&lt;!-- resource:loader --&gt;</code>) to wrap content. This ensures no extra <code>&lt;div&gt;</code> wrappers are introduced, maintaining strict parent-child layout relationships (Grid/Flex) while swapping between states.</p><h3>State Machine</h3><ul><li><strong>Idle:</strong> Initial state before request limits.</li><li><strong>Pending:</strong> Active request. Renders <code>loading</code> template.</li><li><strong>Success:</strong> Data available. Renders <code>default</code> content.</li><li><strong>Empty:</strong> Success but no data. Renders <code>empty</code> template.</li><li><strong>Error:</strong> Failed. Renders <code>error</code> template.</li></ul>
+<h2>Protocol: Resource Loader</h2>
+<p>
+    A comprehensive container for "Load in Place" scenarios (GET requests), implemented as a <strong>Virtual Element</strong>.
+</p>
+<h3>Registry-First Philosophy</h3>
+<p>
+    Loaders are best defined in a global <strong>CustomResourceRegistry</strong> rather than inline. This ensures consistent loading skeletons and error states across the application.
+</p>
+<pre><code class="language-typescript">
+// Definition
+customResources.define('user-profile', {
+        loader: 'skeleton-profile',
+        error: 'error-card'
+});
+</code></pre>
+<h3>Virtual Implementation</h3>
+<p>
+    Uses Custom Comments (e.g. <code>&lt;!-- resource:loader --&gt;</code>) to wrap content. This ensures no extra <code>&lt;div&gt;</code> wrappers are introduced, maintaining strict parent-child layout relationships (Grid/Flex) while swapping between states.
+</p>
+<h3>State Machine</h3>
+<ul>
+    <li><strong>Idle:</strong> Initial state before request limits.</li>
+    <li><strong>Pending:</strong> Active request. Renders <code>loading</code> template.</li>
+    <li><strong>Success:</strong> Data available. Renders <code>default</code> content.</li>
+    <li><strong>Empty:</strong> Success but no data. Renders <code>empty</code> template.</li>
+    <li><strong>Error:</strong> Failed. Renders <code>error</code> template.</li>
+</ul>

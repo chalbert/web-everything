@@ -1,16 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
   <defs>
-    <linearGradient id="ctxGrad1" x1="20%" y1="20%" x2="80%" y2="80%">
-      <stop offset="0%" stop-color="#e0e7ff" />
-      <stop offset="100%" stop-color="#c7d2fe" />
-    </linearGradient>
-    <linearGradient id="ctxGrad2" x1="20%" y1="20%" x2="80%" y2="80%">
-      <stop offset="0%" stop-color="#c7d2fe" />
-      <stop offset="100%" stop-color="#a5b4fc" />
-    </linearGradient>
-    <linearGradient id="ctxGrad3" x1="20%" y1="20%" x2="80%" y2="80%">
-      <stop offset="0%" stop-color="#818cf8" />
-      <stop offset="100%" stop-color="#4f46e5" />
+    <linearGradient id="resourceGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#0284c7" />
     </linearGradient>
     <filter id="floatShadow" x="-50%" y="-50%" width="200%" height="200%">
       <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
@@ -22,13 +14,13 @@
 
   <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc" />
 
-  <!-- Overlapping Context Layers with Volume -->
   <g filter="url(#floatShadow)">
-      <!-- Base Layer -->
-      <circle cx="50" cy="50" r="25" fill="url(#ctxGrad1)" fill-opacity="0.9" />
-      <!-- Middle Layer -->
-      <circle cx="78" cy="50" r="25" fill="url(#ctxGrad2)" fill-opacity="0.9" />
-      <!-- Top Layer -->
-      <circle cx="64" cy="78" r="25" fill="url(#ctxGrad3)" fill-opacity="0.95" />
+    <!-- Stacked database disks -->
+     <circle cx="64" cy="64" r="34" fill="url(#resourceGrad)" />
+     <!-- Globe lines -->
+     <ellipse cx="64" cy="64" rx="20" ry="12" fill="none" stroke="#fff" stroke-width="3" />
+     <ellipse cx="64" cy="64" rx="8" ry="24" fill="none" stroke="#fff" stroke-width="3" />
+     <!-- Accent dot -->
+     <circle cx="92" cy="52" r="4" fill="url(#resourceAccent)" />
   </g>
 </svg>

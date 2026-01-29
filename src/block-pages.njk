@@ -24,7 +24,7 @@ eleventyComputed:
 
     <div class="block-body content">
         <div class="section-card">
-            {{ block.description | safe }}
+            {% include "block-descriptions/" + block.id + ".njk" %}
         </div>
 
         {% set blockCases = cases[block.id] %}

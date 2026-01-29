@@ -1,0 +1,19 @@
+<h2>Protocol: Composite Widget</h2>
+<p>Defines the interaction model for composite widgets where focus serves as a cursor
+  moving through a collection of items.</p>
+<h3>Behaviors</h3>
+<ul>
+  <li>
+    <strong>Roving Tabindex:</strong>
+    Automatically manages
+    <code>tabindex="-1"</code>
+    and
+    <code>tabindex="0"</code>
+    on children.</li>
+  <li>
+    <strong>Navigation:</strong>
+    Standardizes directional keys (ArrowUp, ArrowDown, etc.) based on the widgets layout (Grid vs List).</li>
+  <li>
+    <strong>Selection:</strong>
+    Handles single and multi-selection models within the composite structure.</li>
+</ul>

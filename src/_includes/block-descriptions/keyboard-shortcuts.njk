@@ -1,0 +1,17 @@
+<h2>Protocol: Keyboard Shortcuts</h2>
+<p>This module defines a standard interface for registering and handling keyboard shortcuts that works seamlessly with
+  Shadow DOM and respects user platform conventions.</p>
+<h3>Core Interfaces</h3>
+<pre><code class="language-typescript">interface ShortcutRegistry {  register(context: string, shortcut: string, callback: (e: KeyboardEvent) => void): Subscription;  unregister(subscription: Subscription): void;  resolve(event: KeyboardEvent): ShortcutMatch | null;}</code></pre>
+<h3>HTML Attributes</h3>
+<ul>
+  <li>
+    <code>shortcut="Mod+S"</code>: Declarative binding of a shortcut to an interactive element.</li>
+  <li>
+    <code>command="save"</code>: Semantic association of an action name.</li>
+</ul>
+<h3>Adapters</h3>
+<p>Implementation adapters provided for libraries like
+  <code>Mousetrap</code>
+  or
+  <code>TinyKeys</code>.</p>

@@ -1,0 +1,24 @@
+<h2>Protocol: Resource Action</h2>
+<p>Manages the lifecycle of a mutation (POST/PUT/DELETE) triggered by user input.</p>
+<h3>Interaction Model</h3>
+<ul>
+  <li>
+    <strong>Trigger:</strong>
+    The actionable element (Button). Acquires
+    <code>busy</code>
+    state (See
+    <strong>Action Intent</strong>).</li>
+  <li>
+    <strong>Feedback:</strong>
+    Optimistic UI updates or Toast notifications (See
+    <strong>Message Intent</strong>).</li>
+  <li>
+    <strong>Locking:</strong>
+    Prevents double-submission by disabling triggers or debouncing.</li>
+</ul>
+<h3>Virtual Implementation</h3>
+<p>Attached via Virtual Element markers or Attribute Directives to existing controls. This allows any arbitrary element
+  to become a stateful action trigger without wrapping it in a web component container.</p>
+<h3>Error Handling</h3>
+<p>Errors are typically
+  <strong>Forgivable</strong>, handled via Toast/Alert interactions rather than layout replacement.</p>
