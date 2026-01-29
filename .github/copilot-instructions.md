@@ -23,7 +23,7 @@ This project aims to define a set of browser standards (polyfills/specifications
 - **Traits**: Use **`with[Capability]`** (e.g., `withSortable`, `withDraggable`). 
   - ❌ Avoid `use[Capability]` (reserved for React Hooks).
 - **Injectors**:
-  - Use **`provide fallback`** for default implementations (not `provide default`).
+  - Use the provider syntax as defined in the Web Injectors specification for default and fallback implementations. Refer to the spec for up-to-date syntax and usage patterns.
   - Domains must start with `@` (e.g., `@web-intents`, `@date/core`).
 - **Registries**: Follow the pattern `Custom[Name]Registry` (e.g., `CustomStoreRegistry`).
 - **Implementations**:
@@ -61,12 +61,7 @@ This project aims to define a set of browser standards (polyfills/specifications
 
 ## 6. Technical Context
 - **Web Injectors Syntax**:
-  ```typescript
-  injector App {
-      provide { token } to '@domain' from './file';
-      provide fallback { defaultToken } from './defaults'; // Use 'fallback'
-  }
-  ```
+  Refer to the Web Injectors specification for the latest provider syntax, including default and fallback implementations. The syntax may evolve; always consult the spec for up-to-date usage.
 - **Web Traits Syntax**:
   ```typescript
   import { withSortable } from './traits/sort';

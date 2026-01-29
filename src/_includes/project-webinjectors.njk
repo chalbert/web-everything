@@ -66,10 +66,59 @@ provide * from "./consumer";
     </p>
     {% highlight "typescript" %}
 injector Component extends import.injector {
-// Will be ignored if 'Logger' exists in the parent scope
-provide fallback { Logger } from './console-logger';
+    // Will be ignored if 'Logger' exists in the parent scope
+    provide { Logger } from import.injector, './console-logger';
 }
     {% endhighlight %}
+</section>
+
+<!-- CASE STUDY MOVED BELOW -->
+</section>
+
+
+<section id="declarative-html-example" class="section-card">
+  <h3 id="declarative-html-injector">Declarative HTML Injector Example</h3>
+  <p>
+    You can use Web Injectors declaratively in HTML by associating a <code>&lt;script type="injector"&gt;</code> block with a node via the standard <code>id</code> and <code>injector</code> attributes. This enables zero-build, framework-agnostic dependency injection directly in markup.
+  </p>
+
+    {% highlight "html" %}
+<!-- Define an injector with a unique id -->
+<script type="injector" id="theme-injector">
+    provide { theme } from './theme-dark.js';
+</script>
+
+<!-- Associate a node with the injector by id -->
+<my-widget injector="theme-injector"></my-widget>
+    {% endhighlight %}
+    <p>
+        The <code>&lt;script type="injector" id="theme-injector"&gt;</code> block provides the <code>theme</code> value from <code>./theme-dark.js</code>. Any element with <code>injector="theme-injector"</code> will consume dependencies from that injector context.
+    </p>
+
+        <h4 id="injector-meta-property">Referencing the Injector Meta Property</h4>
+        <p>
+            To reference the current injector context (such as for meta/configuration), use <code>injector</code> only in the <strong>from</strong> clause. For example, to provide all custom elements registered in the current injector context:
+        </p>
+        {% highlight "html" %}
+<script type="injector" id="custom-elements-injector">
+    provide * of 'customElements' from injector;
+</script>
+        {% endhighlight %}
+        <p>
+            Here, <code>injector</code> refers to the current injector context and exposes all custom elements to consumers. The <code>injector</code> identifier is <strong>only</strong> valid in the <code>from</code> clause.
+        </p>
+    <h4 id="isolate-attribute">The <code>isolate</code> Attribute</h4>
+    <p>
+        By default, an injector context extends its parent injector. To prevent inheritance and create a fully isolated injector, add the boolean <code>isolate</code> attribute:
+    </p>
+    {% highlight "html" %}
+<script type="injector" id="isolated-injector" isolate>
+    provide { theme } from './theme-contrast.js';
+</script>
+    {% endhighlight %}
+    <p>
+        When <code>isolate</code> is present, the injector does <strong>not</strong> inherit from any parent context. This is analogous to <code>hidden</code>, <code>inert</code>, and other boolean HTML attributes.
+    </p>
 </section>
 
 <section id="case-study" class="section-card">
@@ -164,6 +213,7 @@ provide * to '@ui/icons'      from FontAwesomeIcons;
 // <hollow-calendar> will automatically receive the provided implementations.
     {% endhighlight %}
 </section>
+
 
 <section id="why" class="section-card">
     <h3 id="why-this-matters">Why This Matters?</h3>

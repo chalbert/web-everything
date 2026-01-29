@@ -2,5 +2,5 @@
 // component.ts
 injector Component extends import.injector {
     // Will be ignored if 'Logger' exists in the parent scope
-    provide fallback { Logger } from './console-logger';
+    provide { Logger } from import.injector, './console-logger';
 }
