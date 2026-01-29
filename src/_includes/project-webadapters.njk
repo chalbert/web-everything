@@ -1,0 +1,22 @@
+<section class="intro-section mb-12">
+    <h3 id="overview">Overview</h3>
+    <p><strong>Web Adapters</strong> are the pragmatic bridge between the ideal world of Web Everything standards and the rich ecosystem of existing tools. They fall into two main categories: Syntactic improvements for better Developer Experience (DX), and Library bridges that make third-party tools compliant with our protocols.</p>
+</section>
+<section class="adapters-section">
+    {% for category in adapters %}
+    <div class="adapter-category mb-12">
+        <h3 id="category-title" class="text-xl font-bold mb-4 border-b border-gray-200 pb-2">{{ category.title }}</h3>
+        <p class="mb-6 text-gray-600">{{ category.description }}</p>
+        <div class="standards-grid">
+            {% for item in category.items %}
+            <div class="standard-card">
+                <div class="flex justify-between items-start mb-3">
+                    <h4 id="item-name" class="text-lg font-bold m-0 text-gray-900">{{ item.name }}</h4>
+                </div>
+                <p class="text-gray-600 text-sm leading-relaxed mb-0">{{ item.desc | safe }}</p>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</section>

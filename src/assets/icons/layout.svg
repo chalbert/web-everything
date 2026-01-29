@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <filter id="floatShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <linearGradient id="gradRed" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ef4444" />
+      <stop offset="100%" stop-color="#b91c1c" />
+    </linearGradient>
+  </defs>
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc" />
+  <g filter="url(#floatShadow)" stroke="url(#gradRed)" stroke-width="6" fill="white">
+        <!-- Layout Shell -->
+        <rect x="34" y="34" width="60" height="60" rx="4" />
+        <!-- Header -->
+        <path d="M34 50 L 94 50" />
+        <!-- Sidebar -->
+        <path d="M54 50 L 54 94" />
+  </g>
+</svg>

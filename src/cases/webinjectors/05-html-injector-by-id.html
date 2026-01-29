@@ -1,0 +1,14 @@
+<!-- WEB CASE 5: Declarative HTML Injector by ID -->
+<div id="target" data-injector="my-injector">
+  Hello, I am the target node.
+</div>
+<script type="injector" id="my-injector">
+  // This script will be used as an injector for the node with data-injector="my-injector"
+  // Example: attach behavior, dependency, or logic to #target
+  document.getElementById('target').style.color = 'blue';
+</script>
+<!--
+  Pattern: The <div> declares which injector to use via data-injector="my-injector".
+  The <script type="injector" id="my-injector"> block contains the logic to be applied.
+  This allows for flexible, declarative, and reusable injector attachment by id.
+-->

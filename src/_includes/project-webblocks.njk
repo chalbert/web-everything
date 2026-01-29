@@ -1,0 +1,24 @@
+<section class="intro-section mb-12">
+    <h3 id="mission">Mission</h3>
+    <p>The <strong>Web Blocks</strong> project aims to establish a set of standard protocols for interoperable modules—both visual components and behavioral traits. By focusing on the <em>protocol</em> rather than the implementation, we ensure that parts from different libraries can work together to provide consistent UX and accessibility.</p>
+    <p>This initiative defines the "how it works" and "how it communicates" portion of web development, leaving the "how it looks" to the implementer.</p>
+</section>
+<section class="standards-section">
+    <h3 id="proposed-standards">Proposed Standards</h3>
+    <div class="standards-grid">
+        {% for block in blocks %}
+        <a href="/blocks/{{ block.id }}/" class="standard-card">
+            <div class="flex justify-between items-start mb-3" style="gap: 12px; display: flex; justify-content: space-between;">
+                <h4 id="block-name" class="text-lg font-bold m-0 text-gray-900">{{ block.name }}</h4>
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800" style="white-space: nowrap;">
+                    {{ block.type }}
+                </span>
+            </div>
+            <p class="text-gray-600 text-sm leading-relaxed mb-4">{{ block.summary }}</p>
+            <div style="margin-bottom: 1rem;">
+                {{ projectStatus(block.status) }}
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+</section>

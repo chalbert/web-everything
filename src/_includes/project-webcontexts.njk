@@ -1,0 +1,52 @@
+<section id="protocol" class="section-card">
+            <h3 id="the-protocol">The Protocol</h3>
+            <p>
+                <strong>Web Contexts</strong> brings a robust, Dependency Injection-based context system to the HTML platform. 
+                It allows data and services to be provided hierarchically down the DOM tree, available to any component that requests them.
+            </p>
+        </section>
+
+        <section id="use-cases" class="section-card">
+            <h3 id="key-use-cases">Key Use Cases</h3>
+            <ul>
+                <li><strong>State Management:</strong> Provide reactive state stores (Redux, Signals) to a subtree of components.</li>
+                <li><strong>Theming:</strong> Cascade design tokens or theme definitions without passing props through every layer.</li>
+                <li><strong>Service Injection:</strong> Make API clients, loggers, or authentication services available to declarative widgets.</li>
+            </ul>
+        </section>
+
+        <section id="comparison" class="section-card">
+            <div class="comparison-block" style="background: rgba(99, 102, 241, 0.1); padding: 1.5rem; border-radius: 8px; border: 1px solid rgba(99, 102, 241, 0.2); margin: 2rem 0;">
+                <h4 id="current-standardization-vs-web-contexts" style="margin-top: 0; color: var(--color-primary);">Current Standardization vs. Web Contexts</h4>
+                
+                <p><strong>The Current Standard (Community Protocol):</strong> Relies on <em>Events</em> (<code>context-request</code>). A consumer dispatches an event, which bubbles up until a generic <code>context-provider</code> element catches it.</p>
+                
+                <p><strong>The Limitation:</strong> To provide context to a list of elements (e.g., in a loop), you must wrap them in a parent provider element.</p>
+                {% highlight "html" %}
+<!-- Wrapper required for context -->
+<context-provider>
+   <my-item>...</my-item>
+   <my-item>...</my-item>
+</context-provider>
+                {% endhighlight %}
+                <p><em>This wrapper can break CSS layouts (Grid/Flex) and complicate DOM structure.</em></p>
+
+                <hr style="border: 0; border-top: 1px solid rgba(99, 102, 241, 0.2); margin: 1rem 0;">
+
+                {% highlight "html" %}
+<!-- Virtual Scope: No wrapper element rendered -->
+<!-- scope: theme-context -->
+   <my-item>...</my-item>
+   <my-item>...</my-item>
+                {% endhighlight %}
+                <p><strong>The Result:</strong> Multiple elements receive the single context <em>without</em> a physical DOM parent, maintaining your clean layout.</p>
+            </div>
+        </section>
+
+        <section id="try-it" class="section-card">
+            <h3 id="try-it-out">Try It Out</h3>
+            <p>
+                This protocol is fully implemented and available for use today. 
+                Check out the reference implementation in the <strong><a href="/projects/webplugs/">Web Plugs</a></strong> collection.
+            </p>
+        </section>

@@ -1,0 +1,14 @@
+<!-- 
+  WEB CASE 5: Asynchronous Collection (Deferred)
+  Binding to a Promise or Observable that resolves to an array.
+  Shows loading state until the array is available.
+-->
+<!-- control:for-each items="usersPromise" -->
+  <template>
+    <user-card data-bind="username"></user-card>
+  </template>
+
+  <template slot="loading">
+    <skeleton-list rows="3"></skeleton-list>
+  </template>
+<!-- /control:for-each -->

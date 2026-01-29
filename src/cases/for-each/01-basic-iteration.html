@@ -1,0 +1,13 @@
+<!-- 
+  WEB CASE 1: Basic Iteration (Happy Path)
+  Iterates over an array provided by the 'items' attribute (bound to context).
+  The default template is stamped for each item.
+-->
+<!-- control:for-each items="users" -->
+  <template>
+    <div class="user-row">
+      <span data-bind="name"></span>
+      <span data-bind="email"></span>
+    </div>
+  </template>
+<!-- /control:for-each -->

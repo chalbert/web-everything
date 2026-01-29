@@ -1,0 +1,13 @@
+<!-- 
+  WEB CASE 4: Keyed Rendering (Performance)
+  Hints the engine to use a specific property as a unique key for DOM reuse.
+  Crucial for lists that reorder or update frequently.
+-->
+<!-- control:for-each items="todos" key="id" -->
+  <template>
+    <div class="todo-item">
+      <input type="checkbox" data-bind="done">
+      <span data-bind="text"></span>
+    </div>
+  </template>
+<!-- /control:for-each -->

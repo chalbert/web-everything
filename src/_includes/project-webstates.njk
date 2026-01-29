@@ -1,0 +1,23 @@
+<section class="intro-section mb-12">
+    <h3 id="mission">Mission</h3>
+    <p>
+        <strong>Web States</strong> standardizes how state is managed, observed, and validated in the browser. 
+        By elevating Stores, Signals, and Schemas to first-class primitives, we decouple state logic from UI frameworks.
+    </p>
+</section>
+<section id="proposed-states" class="section-card">
+    <h3 id="proposed-standards">Proposed Standards</h3>
+    <div class="standards-grid">
+        {% for state in states %}
+        <a href="/states/{{ state.id }}/" class="standard-card">
+            <div class="flex justify-between items-start mb-3">
+                <h4 id="state-{{ state.id }}" class="text-lg font-bold m-0 text-gray-900">{{ state.name }}</h4>
+            </div>
+            <p class="text-gray-600 text-sm leading-relaxed mb-4">{{ state.summary }}</p>
+            <div style="margin-bottom: 1rem;">
+                {{ projectStatus(state.status) }}
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+</section>

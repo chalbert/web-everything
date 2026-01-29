@@ -1,0 +1,13 @@
+<!-- 
+  WEB CASE 3: Index Tracking
+  Accessing loop metadata like index, first, last, odd, even.
+  Uses special binding variables starting with $.
+-->
+<!-- control:for-each items="menuItems" -->
+  <template>
+    <li class="menu-item" data-active="$first">
+      <span data-bind="label"></span>
+      <small>Index: <span data-bind="$index"></span></small>
+    </li>
+  </template>
+<!-- /control:for-each -->

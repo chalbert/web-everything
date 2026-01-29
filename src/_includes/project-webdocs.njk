@@ -1,0 +1,30 @@
+<section class="intro-section mb-12">
+    <h3 id="overview">Overview</h3>
+    <p>{{ docs.intro | safe }}</p>
+</section>
+<section class="docs-section">
+    <h3 id="specifications" class="text-xl font-bold mb-6">Specifications</h3>
+    <div class="standards-stack">
+        {% for spec in docs.specs %}
+        <div class="standard-card flex flex-col">
+            <div class="mb-3">
+                <h4 id="spec-title" class="text-lg font-bold m-0 text-gray-900">{{ spec.title }}</h4>
+                {% if spec.subtitle %}
+                    <span class="text-sm text-gray-500 font-normal">{{ spec.subtitle }}</span>
+                {% endif %}
+            </div>
+            <p class="text-gray-600 text-sm leading-relaxed mb-4 flex-grow">{{ spec.description }}</p>
+            {% if spec.note %}
+            <div class="bg-blue-50 border-l-4 border-blue-400 p-3 mb-4 text-xs text-blue-800">
+                <strong>Note:</strong> {{ spec.note }}
+            </div>
+            {% endif %}
+            {% if spec.code %}
+            <div class="mt-auto">
+                <pre class="bg-gray-800 text-gray-100 p-3 rounded text-xs overflow-x-auto font-mono mb-0"><code>{{ spec.code }}</code></pre>
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</section>

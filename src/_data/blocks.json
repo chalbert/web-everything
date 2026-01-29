@@ -18,25 +18,49 @@
   {
     "id": "droplist",
     "name": "Droplist",
-    "status": "concept",
-    "type": "Abstract Component",
-    "summary": "Abstract foundation for all overlay-triggering components including Dropdowns, Selects, Comboboxes, and Context Menus.",
-    "description": "<h2>Protocol: Droplist</h2><p>A unified state machine and structure for elements that toggle an overlay list.</p><h3>Anatomy</h3><ul><li><code>[slot=\"trigger\"]</code>: The element that toggles the visibility.</li><li><code>[slot=\"content\"]</code>: The overlay container.</li></ul><h3>State Machine</h3><ul><li><code>idle</code>: Closed state.</li><li><code>opening</code> / <code>closing</code>: Transition states.</li><li><code>open</code>: Content is visible and interactive.</li></ul><h3>Integration</h3><p>Designed to compose with the <strong>Positioning Module</strong> for layout and <strong>Composite Widget</strong> for internal navigation.</p>"
-  },
-  {
-    "id": "positioning",
-    "name": "Positioning",
     "status": "draft",
-    "type": "Module",
-    "summary": "Declarative anchor positioning protocol compatible with CSS Anchor Positioning and libraries like Floating UI.",
-    "description": "<h2>Protocol: Positioning</h2><p>Standardizes the mechanism for positioning an element relative to an anchor element, handling collision detection and flipping.</p><h3>Attributes</h3><ul><li><code>anchor=\"element-id\"</code>: ID ref involved in the positioning relationship.</li><li><code>placement=\"top|bottom|left|right\"</code>: Preferred placement primary axis.</li><li><code>alignment=\"start|center|end\"</code>: Cross-axis alignment.</li><li><code>fallback=\"flip|shift|hide\"</code>: Strategy when space is constrained.</li></ul><h3>CSS API</h3><p>Aligns with the emerging CSS Anchor Positioning capabilities where supported.</p>"
+    "type": "Component",
+    "summary": "Accessible dropdown menu supporting keyboard navigation, typeahead, and ARIA roles.",
+    "description": "<h2>Protocol: Droplist</h2><p>Defines the interaction model for dropdown menus, including keyboard navigation, ARIA roles, and typeahead support.</p><h3>Features</h3><ul><li>Keyboard navigation (Arrow keys, Home/End)</li><li>Typeahead search</li><li>ARIA roles and properties</li></ul>"
   },
   {
     "id": "validation",
     "name": "Validation",
-    "status": "poc",
-    "type": "Behavior Category",
-    "summary": "Integration layer connecting custom form controls with the native Constraint Validation API and ElementInternals.",
+    "status": "draft",
+    "type": "Behavior",
+    "summary": "Standard behaviors for native-like form validation in custom elements.",
     "description": "<h2>Protocol: Validation</h2><p>A set of standard behaviors to bring native form validation experience to Custom Elements.</p><h3>Key Concepts</h3><ul><li><strong>Constraint Integration:</strong> Maps internal logic to <code>ElementInternals.setValidity()</code>.</li><li><strong>State Reflection:</strong> Automatically reflects validation state to attributes like <code>aria-invalid</code> and CSS pseudo-classes <code>:invalid</code>.</li><li><strong>Message Standardization:</strong> Unified error message distribution system.</li></ul>"
+  },
+  {
+    "id": "resource-loader",
+    "name": "Resource Loader",
+    "status": "draft",
+    "type": "Directive",
+    "summary": "Structural directive using comment-based virtual elements to handle async state without polluting the DOM.",
+    "description": "<h2>Protocol: Resource Loader</h2><p>A comprehensive container for \"Load in Place\" scenarios (GET requests), implemented as a <strong>Virtual Element</strong>.</p><h3>Registry-First Philosophy</h3><p>Loaders are best defined in a global <strong>CustomResourceRegistry</strong> rather than inline. This ensures consistent loading skeletons and error states across the application.</p><pre><code class=\"language-typescript\">// Definition\ncustomResources.define('user-profile', {\n    loader: 'skeleton-profile',\n    error: 'error-card'\n});</code></pre><h3>Virtual Implementation</h3><p>Uses Custom Comments (e.g. <code>&lt;!-- resource:loader --&gt;</code>) to wrap content. This ensures no extra <code>&lt;div&gt;</code> wrappers are introduced, maintaining strict parent-child layout relationships (Grid/Flex) while swapping between states.</p><h3>State Machine</h3><ul><li><strong>Idle:</strong> Initial state before request limits.</li><li><strong>Pending:</strong> Active request. Renders <code>loading</code> template.</li><li><strong>Success:</strong> Data available. Renders <code>default</code> content.</li><li><strong>Empty:</strong> Success but no data. Renders <code>empty</code> template.</li><li><strong>Error:</strong> Failed. Renders <code>error</code> template.</li></ul>"
+  },
+  {
+    "id": "resource-action",
+    "name": "Resource Action",
+    "status": "draft",
+    "type": "Directive",
+    "summary": "Behavioral directive that attaches async lifecycle management to triggers via virtual markers.",
+    "description": "<h2>Protocol: Resource Action</h2><p>Manages the lifecycle of a mutation (POST/PUT/DELETE) triggered by user input.</p><h3>Interaction Model</h3><ul><li><strong>Trigger:</strong> The actionable element (Button). Acquires <code>busy</code> state (See <strong>Action Intent</strong>).</li><li><strong>Feedback:</strong> Optimistic UI updates or Toast notifications (See <strong>Message Intent</strong>).</li><li><strong>Locking:</strong> Prevents double-submission by disabling triggers or debouncing.</li></ul><h3>Virtual Implementation</h3><p>Attached via Virtual Element markers or Attribute Directives to existing controls. This allows any arbitrary element to become a stateful action trigger without wrapping it in a web component container.</p><h3>Error Handling</h3><p>Errors are typically <strong>Forgivable</strong>, handled via Toast/Alert interactions rather than layout replacement.</p>"
+  },
+  {
+    "id": "for-each",
+    "name": "For Each",
+    "status": "draft",
+    "type": "Directive",
+    "summary": "Structural directive for rendering lists of items based on an array.",
+    "description": "<h2>Protocol: For Each</h2><p>Iterates over a collection (Array, Observable, or Promise) and stamps a template for each item.</p><h3>Virtual Implementation</h3><p>Uses Custom Comments (e.g. <code>&lt;!-- control:for-each --&gt;</code>) to mark the list boundaries. This behaves like a Repeater without a wrapper element.</p><h3>Usage Example</h3><pre><code class=\"language-html\">&lt;!-- control:for-each \n  items=\"users\" \n  key=\"id\" \n--&gt;\n  &lt;template&gt;\n    &lt;div class=\"user-row\"&gt;\n       &lt;span data-bind=\"name\"&gt;&lt;/span&gt;\n    &lt;/div&gt;\n  &lt;/template&gt;\n&lt;!-- /control:for-each --&gt;</code></pre>"
+  },
+  {
+    "id": "event-behaviors",
+    "name": "Event Behaviors (on:*)",
+    "status": "draft",
+    "type": "Behavior Category",
+    "summary": "Declarative event-to-action mapping using namespaced attributes (e.g., on:click) and argument passing (arg-*).",
+    "description": "<h2>Protocol: Event Behaviors</h2><p>Defines a standard for declaratively binding DOM events to abstract actions using namespaced attributes (e.g., <code>on:click</code>, <code>on:input</code>). This pattern enables zero-build, framework-agnostic event handling and supports argument passing via <code>arg-*</code> attributes.</p><h3>HTML Attributes</h3><ul><li><code>on:click=\"save\"</code>: Binds the <code>click</code> event to the <code>save</code> action.</li><li><code>on:input=\"update\" arg-id=\"123\"</code>: Binds the <code>input</code> event to the <code>update</code> action, passing <code>id=123</code> as an argument.</li></ul><h3>Protocol</h3><ul><li>Event attributes are parsed and attached as listeners at runtime.</li><li>The attribute value is treated as an <strong>Action ID</strong> (not a function reference).</li><li>Arguments are passed via <code>arg-*</code> attributes and included in the event payload.</li><li>Actions are resolved by the nearest handler registry or injector context, supporting both bubbling and DI-forwarding for portals.</li></ul><h3>Usage Example</h3><pre><code class=\"language-html\">&lt;button on:click=\"submit\" arg-id=\"42\"&gt;Submit&lt;/button&gt;</code></pre>"
   }
 ]

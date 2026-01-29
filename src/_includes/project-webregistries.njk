@@ -1,0 +1,106 @@
+<section id="protocol" class="section-card">
+            <h3 id="the-protocol">The Protocol</h3>
+            <p>
+                <strong>Web Registries</strong> define a standard interface for creating scoped, hierarchical registries on the web platform. 
+                Where standard <code>Map</code> or <code>CustomElementRegistry</code> are flat and global, Web Registries are designed for **inheritance** and **scoping**.
+            </p>
+        </section>
+
+        <section id="features" class="section-card">
+            <h3 id="key-features">Key Features</h3>
+            <ul>
+                <li><strong>Standard Interface:</strong> All registries implement a common <code>get</code>, <code>has</code>, <code>set</code> (via <code>define</code>) API.</li>
+                <li><strong>Inheritance:</strong> A registry can extend one or more parent registries. Lookups traverse the chain automatically.</li>
+                <li><strong>Scoping:</strong> Enables different parts of an application to have different definitions for the same key (e.g., scoping icons or formatters to a specific routed view).</li>
+            </ul>
+        </section>
+
+        <section id="standards" class="section-card">
+            <h3 id="proposed-standards">Proposed Standards</h3>
+            <p>The <strong>Web Everything</strong> platform proposes standardizing registries for nearly every aspect of the DOM, allowing for unprecedented extensibility:</p>
+            
+            <div class="features-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem; margin-top: 1.5rem;">
+                <div>
+                    <h4 id="dom-primitives" style="color: var(--color-primary); margin-bottom: 0.5rem;">DOM Primitives</h4>
+                    <ul style="font-size: 0.9rem; padding-left: 1.25rem; color: var(--color-text-muted);">
+                        <li><code>CustomElementRegistry</code> (Standard/Polyfilled)</li>
+                        <li><code>CustomAttributeRegistry</code></li>
+                        <li><code>CustomCommentRegistry</code></li>
+                        <li><code>CustomTextNodeRegistry</code></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 id="parsing-engine" style="color: var(--color-primary); margin-bottom: 0.5rem;">Parsing Engine</h4>
+                    <ul style="font-size: 0.9rem; padding-left: 1.25rem; color: var(--color-text-muted);">
+                        <li><code>CustomAttributeParserRegistry</code></li>
+                        <li><code>CustomTextNodeParserRegistry</code></li>
+                        <li><code>CustomPathExpressionParserRegistry</code></li>
+                        <li><code>CustomCommentParserRegistry</code></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 id="logic-data" style="color: var(--color-primary); margin-bottom: 0.5rem;">Logic & Data</h4>
+                    <ul style="font-size: 0.9rem; padding-left: 1.25rem; color: var(--color-text-muted);">
+                        <li><code>CustomContextRegistry</code></li>
+                        <li><code>CustomStoreRegistry</code></li>
+                        <li><code>CustomEventRegistry</code></li>
+                        <li><code>HTMLRegistry</code> (Injectors)</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <section id="examples" class="section-card">
+            <h3 id="userland-examples">Userland Examples</h3>
+            
+            <h4 id="example-1-icon-system">Example 1: Icon System</h4>
+            <p>You can define your own registries for application-specific needs. Here is how you might build an Icon Registry that supports overriding icons in different contexts.</p>
+
+            {% highlight "javascript" %}
+import { CustomRegistry } from '@web-plugs/web-registries';
+
+// 1. Define the Registry Class
+class IconRegistry extends CustomRegistry {
+  localName = 'icons'; // Used for debugging/identification
+}
+
+// 2. Create the registries
+const globalIcons = new IconRegistry();
+globalIcons.define('menu', '<svg viewBox="0 0 24 24">...</svg>');
+globalIcons.define('close', '<svg viewBox="0 0 24 24">...</svg>');
+
+// 3. Create a Scoped Registry (e.g., for a specific Admin module)
+// It inherits everything from globalIcons, but can shadow them
+const adminIcons = new IconRegistry({ 
+  extends: [globalIcons] 
+});
+
+// Override 'menu' only for this scope
+adminIcons.define('menu', '<svg viewBox="0 0 24 24">...<!-- Admin Menu --></svg>');
+            {% endhighlight %}
+
+            <p><strong>Connecting to Components:</strong> A theoretical <code>&lt;ui-icon&gt;</code> component illustrating how to consume the registry.</p>
+
+            {% highlight "html" %}
+<script type="module">
+  // Hypothetical component that consumes our IconRegistry
+  class UIIcon extends HTMLElement {
+    connectedCallback() {
+      // In a real app, 'adminIcons' might be provided via Context or Dependency Injection
+      // For this POC demonstration, we import it directly.
+      const registry = this.hasAttribute('admin') ? adminIcons : globalIcons;
+      
+      const iconName = this.getAttribute('name');
+      if (registry.has(iconName)) {
+         this.innerHTML = registry.get(iconName);
+      }
+    }
+  }
+  customElements.define('ui-icon', UIIcon);
+</script>
+
+<!-- Usage -->
+<ui-icon name="menu"></ui-icon>         <!-- Renders standard menu -->
+<ui-icon name="menu" admin></ui-icon>   <!-- Renders admin menu (via scoped registry) -->
+            {% endhighlight %}
+        </section>

@@ -1,0 +1,18 @@
+<!--
+  WEB CASE 1: Standalone Handler Resolution (No Global, No Custom Elements)
+  Demonstrates declarative event binding in HTML using a local handler registry and DOM scan, without global scope or custom elements.
+-->
+<button on:click="save">Save</button>
+<button on:click="cancel">Cancel</button>
+<script>
+  // Local handler registry (not global)
+  const handlers = {
+    save: () => alert('Saved!'),
+    cancel: () => alert('Cancelled!')
+  };
+  // Attach handlers by scanning for on:click attributes
+  document.querySelectorAll('[on\\:click]').forEach(el => {
+    const name = el.getAttribute('on:click');
+    if (handlers[name]) el.addEventListener('click', handlers[name]);
+  });
+</script>

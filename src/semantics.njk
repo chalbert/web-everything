@@ -1,0 +1,44 @@
+---
+layout: base.njk
+title: Web Everything - Semantics
+---
+
+<div class="container">
+    <div class="block-header">
+        <a href="/" class="back-link">&larr; Back Home</a>
+        <h1 class="block-title">Semantics & Glossary</h1>
+        <p class="lead">Ubiquitous language and precise definitions to remove ambiguity from the Web Everything protocols.</p>
+    </div>
+
+    <div class="content">
+
+        {# Alpha Index #}
+        <div class="flex flex-wrap gap-2 mb-24 justify-center w-full">
+            {% for item in semantics %}
+                <a href="#term-{{ item.term | slugify }}" 
+                   class="px-3 py-1 text-sm font-code text-slate-600 hover:text-indigo-600 hover:bg-white rounded transition-colors break-words"
+                   title="{{ item.definition }}">
+                    {{ item.term }}
+                </a>
+            {% endfor %}
+        </div>
+
+        <div class="section-card p-0 overflow-hidden">
+            {% for item in semantics %}
+            <div id="term-{{ item.term | slugify }}" class="semantic-item p-6 border-b border-slate-200 scroll-mt-24 target:bg-indigo-50 transition-colors">
+                <div class="flex flex-wrap items-baseline gap-3 mb-2">
+                    <h3 class="text-xl font-mono font-bold text-slate-900 break-words">{{ item.term }}</h3>
+                    <a href="#term-{{ item.term | slugify }}" class="text-slate-300 hover:text-indigo-400">#</a>
+                </div>
+                <p class="text-slate-800 mb-3 text-lg leading-relaxed break-words">{{ item.definition }}</p>
+                {% if item.usage %}
+                <div class="bg-slate-50 p-3 rounded text-sm text-slate-600 border border-slate-100 overflow-x-auto">
+                    <span class="font-bold text-slate-500 block uppercase text-xs mb-1 tracking-wider">Context & Usage</span>
+                    <span class="break-words">{{ item.usage | safe }}</span>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+</div>

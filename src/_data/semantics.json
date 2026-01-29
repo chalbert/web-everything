@@ -1,0 +1,256 @@
+[
+  {
+    "term": "Action",
+    "definition": "The abstract concept of a user trigger that initiates a process or side-effect (e.g., 'Save', 'Delete'). It decouples the trigger (Button) from the handler.",
+    "usage": "Standardized by Action Intent."
+  },
+  {
+    "term": "Anchor",
+    "definition": "A positioning reference point that allows an element to place itself relative to another element (the anchor), handling collision and flipping.",
+    "usage": "Standardized by Anchor Intent (CSS Anchor Positioning)."
+  },
+  {
+    "term": "Behavior",
+    "definition": "A reusable functionality pattern attached to a component via composition rather than inheritance.",
+    "usage": "Implemented via Web Behaviors."
+  },
+  {
+    "term": "Blocking",
+    "definition": "The UX state where user interaction is prevented to ensure data integrity during a critical process.",
+    "usage": "Defined in Loader Intent (Blocking Profile)."
+  },
+  {
+    "term": "Block",
+    "definition": "A modular, visual UI component that follows strict interoperability standards.",
+    "usage": "Standardized by Web Blocks."
+  },
+  {
+    "term": "Breakpoint",
+    "definition": "Viewport width thresholds that trigger layout changes. In Web Everything, these are tokenized to ensure consistency across JS and CSS.",
+    "usage": "Standardized by Breakpoint Intent."
+  },
+  {
+    "term": "Case",
+    "definition": "A raw HTML file representing a specific usage scenario. Serves as the Single Source of Truth for documentation examples and E2E test fixtures.",
+    "usage": "Located in `src/cases/`."
+  },
+  {
+    "term": "Component",
+    "definition": "An encapsulated custom element with its own shadow DOM and lifestyle."
+  },
+  {
+    "term": "Composite Widget",
+    "definition": "A UI component managing focus for its children (e.g., Listbox, Grid) via specific keyboard patterns like Roving Tabindex.",
+    "usage": "Standardized by Composite Widget Protocol."
+  },
+  {
+    "term": "Context",
+    "definition": "A mechanism for hierarchical data flow and service provision across component trees, independent of the DOM structure.",
+    "usage": "Implemented by Web Contexts."
+  },
+  {
+    "term": "Dependency Injection",
+    "definition": "A design pattern where a component's dependencies are provided to it, rather than created by it. Enables loose coupling and easy testing.",
+    "usage": "Implemented by Web Injectors."
+  },
+  {
+    "term": "Directive",
+    "definition": "Structural markers (loops, conditionals) and comment logic that manipulate the DOM structure.",
+    "usage": "Implemented by Web Directives."
+  },
+  {
+    "term": "Directionality",
+    "definition": "The handling of text direction (LTR vs RTL) and its impact on layout, icons, and interaction logic.",
+    "usage": "Core consideration for internationalization."
+  },
+  {
+    "term": "Elevation",
+    "definition": "The simulated Z-axis depth of an element, typically conveyed via shadows or layering, indicating hierarchy.",
+    "usage": "Managed by Surface Intent."
+  },
+  {
+    "term": "Fit",
+    "definition": "The strategy for forcing content into a container (Cover, Contain, Fill) preserving aspect ratio.",
+    "usage": "Used across Media and Layout blocks."
+  },
+  {
+    "term": "Focus",
+    "definition": "The orchestration of keyboard navigation and active element state. Includes trapping, restoring, and cycling focus.",
+    "usage": "Managed by Interaction Intent."
+  },
+  {
+    "term": "Forgivable",
+    "definition": "Error tolerance level where the operation failed but the application state remains valid.",
+    "usage": "A core principle of Reliability Intent."
+  },
+  {
+    "term": "Iconography",
+    "definition": "Visual symbols standards including sizing scales, stroke weights, and positioning strategies to ensure optical balance.",
+    "usage": "Standardized by Icon Intent."
+  },
+  {
+    "term": "Input",
+    "definition": "Standardization of data entry interfaces, including affordances, privacy masking, virtual keyboard types, and validation feedback.",
+    "usage": "Standardized by Input Intent."
+  },
+  {
+    "term": "Interaction",
+    "definition": "The handling of input modalities (pointer, touch, gamepad, keyboard) and the feedback loops required for each.",
+    "usage": "Standardized by Interaction Intent."
+  },
+  {
+    "term": "Keyboard Shortcuts",
+    "definition": "A system for registering and handling key combinations that works with Shadow DOM and standard OS conventions.",
+    "usage": "Standardized by Web Blocks."
+  },
+  {
+    "term": "Layered Architecture",
+    "definition": "The organization of protocols from abstract intents down to concrete implementation details.",
+    "usage": "Core philosophy of Web Everything."
+  },
+  {
+    "term": "Layout",
+    "definition": "The application shell structure and region mechanics (Drawers, Rails, Panels) that define the macro-layout.",
+    "usage": "Standardized by Layout Intent."
+  },
+  {
+    "term": "Lifecycle",
+    "definition": "The standardized state machine (Idle -> Loading -> Success/Error) that drives the UI. It separates the 'Process' (Time) from the 'Outcome' (Data).",
+    "usage": "Resource Loaders and Actions must expose their lifecycle capabilities."
+  },
+  {
+    "term": "Loading State",
+    "definition": "The visualization of pending operations, defining how the UI reacts (Blocking, Skeleton, Spinner) to latency.",
+    "usage": "Standardized by Loader Intent."
+  },
+  {
+    "term": "Messaging",
+    "definition": "The system for prioritizing and displaying communication to the user, from subtle toasts to blocking alerts.",
+    "usage": "Standardized by Message Intent."
+  },
+  {
+    "term": "Modal",
+    "definition": "A dialog or overlay that forces user interaction before returning to the main content. Defines stacking, scrolling, and dismissal behavior.",
+    "usage": "Standardized by Modal Intent."
+  },
+  {
+    "term": "Module",
+    "definition": "A self-contained unit of functionality or UI that expects a specific host context.",
+    "usage": "Building block of Web Architecture."
+  },
+  {
+    "term": "Motion",
+    "definition": "The physics, latency tolerance, and transition behaviors that define the 'feel' of the application.",
+    "usage": "Standardized by Motion Intent."
+  },
+  {
+    "term": "Navigation",
+    "definition": "The structure of application flow (Hierarchical, Lateral, Linear) and the mechanism for transitioning between views.",
+    "usage": "Standardized by Navigation Intent."
+  },
+  {
+    "term": "Polyfill",
+    "definition": "Code that implements a feature on web browsers that do not support the feature.",
+    "usage": "Provided by Web Plugs."
+  },
+  {
+    "term": "Positioning",
+    "definition": "Declarative strategies for placing elements relative to the viewport or other elements.",
+    "usage": "Standardized by Layout and Anchor logic."
+  },
+  {
+    "term": "Prefetching",
+    "definition": "The strategy of loading resources before they are required, balanced against bandwidth and battery constraints.",
+    "usage": "Standardized by Prefetch Intent."
+  },
+  {
+    "term": "Registry",
+    "definition": "A system for defining and looking up capabilities or components via a global or scoped lookup mechanism.",
+    "usage": "Implemented by Web Registries."
+  },
+  {
+    "term": "Reliability",
+    "definition": "Strategies for error recovery, retry policies, and maintaining a viable state during failure conditions.",
+    "usage": "Standardized by Reliability Intent."
+  },
+  {
+    "term": "Resource Action",
+    "definition": "A behavioral directive that attaches asynchronous mutation lifecycle management to UI triggers.",
+    "usage": "Part of Web Blocks."
+  },
+  {
+    "term": "Resource Loader",
+    "definition": "A structural pattern used to handle asynchronous data fetching and state display in-place.",
+    "usage": "Part of Web Blocks."
+  },
+  {
+    "term": "Roving Tabindex",
+    "definition": "A focus management pattern where `tabindex=\"0\"` moves to the currently active item, while others are set to `-1`.",
+    "usage": "Used in Composite Widgets."
+  },
+  {
+    "term": "Selection",
+    "definition": "The behavior of choosing items from a set, defining cardinality (Single vs Multi) and required state.",
+    "usage": "Standardized by Selection Intent."
+  },
+  {
+    "term": "State Management",
+    "definition": "Standard primitives for observability, data binding, and reaction to data changes (Signals, Stores).",
+    "usage": "Implemented by Web States."
+  },
+  {
+    "term": "Surface",
+    "definition": "The definition of visual depth (Z-Axis), material qualities (Opaque, Transparent), and their interactive properties.",
+    "usage": "Standardized by Surface Intent."
+  },
+  {
+    "term": "Time & Date",
+    "definition": "The unified handling of temporal selection and display across different input modalities (Calendar, Dial, Text).",
+    "usage": "Standardized by Temporal Intent."
+  },
+  {
+    "term": "Token",
+    "definition": "A parsed unit of meaning within a text node or attribute, often used for data binding.",
+    "usage": "Handled by Web Tokens."
+  },
+  {
+    "term": "Trace",
+    "definition": "A record of an execution path through the application. Composed of multiple 'Spans' (units of work).",
+    "usage": "Standardized by Web Traces."
+  },
+  {
+    "term": "Tracer",
+    "definition": "An engine responsible for recording execution flow (Traces) and context. It can be injected into any scope.",
+    "usage": "Standardized by Web Traces."
+  },
+  {
+    "term": "Tracing Type",
+    "definition": "A categorization tag for traces (e.g., 'Network', 'Render', 'UserInteraction') allowing different tracers to subscribe to specific domains.",
+    "usage": "Standardized by Web Traces."
+  },
+  {
+    "term": "Trait",
+    "definition": "A granular, composable capability mixed into a component class (e.g., `withSortable`).",
+    "usage": "Standardized by Web Traits."
+  },
+  {
+    "term": "Typography",
+    "definition": "The abstraction of visual text hierarchy (Headline, Body, Caption) from semantic HTML elements.",
+    "usage": "Standardized by Typography Intent."
+  },
+  {
+    "term": "Validation",
+    "definition": "The lifecycle of data integrity checking, error message placement, and submission blocking.",
+    "usage": "Standardized by Validation Intent."
+  },
+  {
+    "term": "Virtual Element",
+    "definition": "An element implementation using markers (e.g., comments) to avoid introducing redundant container nodes in the DOM.",
+    "usage": "Used elsewhere to preserve CSS Grid/Flex relationships."
+  },
+  {
+    "term": "Web Case",
+    "definition": "See 'Case'.",
+    "usage": "See 'Case'."
+  }
+]

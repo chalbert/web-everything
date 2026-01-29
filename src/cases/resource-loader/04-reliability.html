@@ -1,0 +1,11 @@
+<!-- 
+  WEB CASE 4: Reliability Strategies (Intent Configuration)
+  Configuring the 'Reliability Intent' inline. 
+  'forgivable' = Toast error, keep stale content if available.
+  'critical' = Replace content with error boundary.
+-->
+<!-- resource:loader name="weather-widget" reliability="forgivable" timeout="5000" -->
+  <template>
+    <weather-display data-bind="result"></weather-display>
+  </template>
+<!-- /resource:loader -->

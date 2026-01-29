@@ -1,0 +1,10 @@
+<!-- 
+  WEB CASE 3: Parameterization (Dynamic Data)
+  Passing arguments to the registry fetcher function using 'args-*' attributes.
+  Ensures the component is declarative but dynamic.
+-->
+<!-- resource:loader name="search-results" args-query="design systems" args-limit="10" -->
+  <template>
+    <results-list data-bind="result"></results-list>
+  </template>
+<!-- /resource:loader -->

@@ -1,0 +1,9 @@
+{
+  "id": "webportals",
+  "name": "Web Portals",
+  "description": "Standard protocol for rendering a subtree of the logical component hierarchy at a different location in the DOM, while preserving context, event, and focus relationships. Enables overlays, modals, tooltips, and other UI elements to visually escape their parent container without losing access to their logical ancestors' data, services, or handlers.",
+  "status": "concept",
+  "category": "standard",
+  "icon": "/assets/icons/webportals.svg",
+  "isSvg": true
+}

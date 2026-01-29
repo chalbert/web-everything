@@ -114,8 +114,26 @@
     "name": "Web Analytics",
     "description": "Standard for vendor-neutral tracking (Identify, Track, Page) using the Segment Spec vocabulary.",
     "status": "draft",
-    "category": "ecosystem",
+    "category": "standard",
     "icon": "/assets/icons/webanalytics.svg",
+    "isSvg": true
+  },
+  {
+    "id": "webtraces",
+    "name": "Web Traces",
+    "description": "Standard for execution flow monitoring and distributed tracing, aligning with W3C Trace Context and OpenTelemetry.",
+    "status": "concept",
+    "category": "standard",
+    "icon": "/assets/icons/webtraces.svg",
+    "isSvg": true
+  },
+  {
+    "id": "webportals",
+    "name": "Web Portals",
+    "description": "Standard protocol for rendering a subtree of the logical component hierarchy at a different location in the DOM, while preserving context, event, and focus relationships. Enables overlays, modals, tooltips, and other UI elements to visually escape their parent container without losing access to their logical ancestors' data, services, or handlers.",
+    "status": "concept",
+    "category": "standard",
+    "icon": "/assets/icons/webportals.svg",
     "isSvg": true
   },
   {
@@ -137,9 +155,27 @@
     "isSvg": true
   },
   {
+    "id": "webcases",
+    "name": "Web Cases",
+    "description": "A collection of isolated HTML test cases serving as the source of truth for protocol conformity and documentation examples.",
+    "status": "concept",
+    "category": "utility",
+    "icon": "/assets/icons/webcases.svg",
+    "isSvg": true
+  },
+  {
+    "id": "webmanifests",
+    "name": "Web Manifests",
+    "description": "Standard for defining project metadata, dependencies, and capabilities in a framework-agnostic way.",
+    "status": "concept",
+    "category": "utility",
+    "icon": "/assets/icons/webmanifests.svg",
+    "isSvg": true
+  },
+  {
     "id": "webdocs",
     "name": "Web Docs",
-    "description": "Standard defining documentation specs, static manifests, and usage examples for web projects.",
+    "description": "The meta-standard that orchestrates Web Manifests and Web Cases to generate comprehensive documentation sites.",
     "status": "concept",
     "category": "utility",
     "icon": "/assets/icons/webdocs.svg",

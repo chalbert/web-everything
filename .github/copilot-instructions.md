@@ -5,13 +5,21 @@ This project aims to define a set of browser standards (polyfills/specifications
 
 ## 1. Architectural Principles
 - **Protocol over Implementation**: Define the interface (TS Interface), not the library.
-- **Intents are Protocols**: Intents describe the *desired interaction* (the "what/why"), not the specific UI implementation (the "how"). They are documentation of app behavior, not a component library.
+- **Intents are UX Protocols**: Intents describe the *desired interaction* (the "what/why") at a project level. They are documentation of app behavior, not a component library.
+- **Behaviors are Implementations**: Custom attributes (e.g., `layout:grid`) are "Web Behaviors" that attach functionality. They are *not* Intents.
 - **Design System Superset**: Intents must be abstract enough to configure ANY major design system (Material, Carbon, Fluent, etc.). A Design System is just a configuration file for Web Intents + CSS.
 - **Native Alignment**: Align with existing Web APIs (e.g., `Storage`, `EventTarget`, `CustomElementRegistry`) rather than framework-specific patterns.
 - **Dependency Injection**: Use "Web Injectors" for all composition.
 - **Zero-Build First**: Everything must work in the browser (ES Modules), but allow for build-time optimization.
 
 ## 2. Naming Conventions
+- **Attributes**:
+  - **Component Properties**: Prefer single-word or concatenated lowercase attributes (e.g., `multiple`, `autofocus`) for standard configuration.
+  - **Behavior Attributes**: Recommendation to use colon-separated namespaces (e.g., `layout:grid`) when using Web Behaviors to attach functionality. Note: Web Intents are project-level protocols/configurations, not attributes.
+  - **Event Behaviors**: Use `namespace:event` (e.g., `on:click`) to bind user interactions to abstract Actions.
+    - **Protocol**: The attribute value represents the **Action ID** (e.g., `save`, `next`).
+    - **Arguments**: Use `arg-[name]` attributes (e.g., `arg-id="123"`) to pass static data to the Action.
+  - ❌ Avoid hyphenated attributes (e.g., `allow-multiple`) except when specifically mirroring `aria-*` or `data-*` conventions.
 - **Traits**: Use **`with[Capability]`** (e.g., `withSortable`, `withDraggable`). 
   - ❌ Avoid `use[Capability]` (reserved for React Hooks).
 - **Injectors**:
@@ -22,7 +30,14 @@ This project aims to define a set of browser standards (polyfills/specifications
   - Interfaces: `Implemented[Name]` (e.g., `ImplementedStore`).
   - Definitions: `[Name]Definition` (e.g., `StoreDefinition`).
 
-## 3. Documentation Standards (11ty/Nunjucks)
+## 3. Glossary Philosophy
+- **Term First**: Identify the abstract concept (e.g., "Action", "Layout"), not the project artifact (e.g., "Action Intent").
+- **Content Strategy**:
+  - **Term**: The general web/UI concept.
+  - **Definition**: Universal explanation of the concept.
+  - **Usage**: Mention the Web Everything implementation (e.g., "standardized by Web Intents").
+
+## 4. Documentation Standards (11ty/Nunjucks)
 - **Data Source**: Content lives in `src/_data/*.json` (e.g., `projects.json`, `states.json`, `intents.json`).
 - **Templates**: Use Nunjucks (`.njk`) for rendering.
 - **Code Blocks**:
@@ -32,7 +47,7 @@ This project aims to define a set of browser standards (polyfills/specifications
   - **Main Project Page**: High-level "Mission" + Grid of clickable cards for sub-specs.
   - **Sub-Spec Pages**: Dedicated detailing pages (e.g., `/states/stores/`).
 
-## 4. Project Inventory (Current State)
+## 5. Project Inventory (Current State)
 - **Core Standards**:
   - `webinjectors`: Dependency Injection (`injector`, `provide`, `consume`).
   - `webstates` (New): `CustomStore` (Storage+Events), `CustomSignal` (TC39), `CustomSchema` (Validation).
@@ -44,7 +59,7 @@ This project aims to define a set of browser standards (polyfills/specifications
   - `webtraits`: Mixins/Decorators (`with*`).
   - `webplugs`: Polyfills & Patches.
 
-## 5. Technical Context
+## 6. Technical Context
 - **Web Injectors Syntax**:
   ```typescript
   injector App {
@@ -58,7 +73,7 @@ This project aims to define a set of browser standards (polyfills/specifications
   class MyEl extends withSortable(HTMLElement) {}
   ```
 
-## 6. Icon Guidelines (SVG)
+## 7. Icon Guidelines (SVG)
 The canonical template is available at `src/assets/icons/_template.svg`.
 
 ### Construction
@@ -80,7 +95,7 @@ Use these gradients (Defined in `defs` of `_template.svg`) for consistency:
 - **Sky** (`@web-plugs`): Utilities/Polyfills. (`#38bdf8` -> `#0284c7`)
 - **Gradient**: Always Top-Left (`0%, 0%`) to Bottom-Right (`100%, 100%`).
 
-## 7. Reference Material (Design System Benchmarks)
+## 8. Reference Material (Design System Benchmarks)
 Use these standards to ensure Intents are comprehensive "Supersets":
 - **Material Design 3**: Interaction States, Motion, Elevation.
 - **Carbon (IBM)**: Data Density, Loading Patterns.
@@ -88,3 +103,21 @@ Use these standards to ensure Intents are comprehensive "Supersets":
 - **Fluent 2 (Microsoft)**: Productivity Patterns, Input Modalities.
 - **Human Interface Guidelines (Apple)**: Native Feel, Modality.
 - **WAI-ARIA Pattern**: Accessibility Contracts.
+
+## 9. Web Cases Philosophy
+"Web Cases" are the source of truth for protocol conformity. They serve a dual purpose: live documentation examples and input fixtures for end-to-end conformance testing.
+
+### Structure
+- **Directory**: `src/cases/<protocol-id>/`
+- **Naming**: `01-registry-standard.html`, `02-edge-case.html` (Ordered).
+- **Format**: Raw HTML fragments.
+  - ❌ Do NOT wrap in `<body>`, `<html>` or `div.wrapper`.
+  - ✅ Contains ONLY the directive/component and its direct children.
+
+### Mandatory Coverage
+Every protocol MUST provide cases covering:
+1.  **Registry Standard**: The "Happy Path" relying purely on valid defaults from the registry.
+2.  **Visual Overrides**: Customizing slots/templates inline (breaking the standard).
+3.  **Parameterization**: Passing arguments via attributes (e.g., `args-*`).
+4.  **Reliability**: Error handling, timeouts, and "forgivable" failure modes.
+5.  **Deferred/Lazy**: Interaction with the "Interaction Intent" (e.g., load mostly on visibility).

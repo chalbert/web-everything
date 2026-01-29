@@ -1,0 +1,33 @@
+<!-- 
+  WEB CASE 2: Visual Overrides (Slot Injection)
+  Demonstrates overriding the standard registry templates for a specific context.
+  Useful for one-off layouts or dashboard widgets.
+-->
+<!-- resource:loader name="user-profile" -->
+    
+    <!-- Default: Success Content -->
+    <template>
+      <profile-card data-bind="result"></profile-card>
+    </template>
+
+    <!-- Override: Semantic Skeleton -->
+    <template slot="loading">
+      <div class="custom-spinner">Loading Profile...</div>
+    </template>
+
+    <!-- Override: Contextual Empty State -->
+    <template slot="empty">
+      <div class="empty-state">
+        <icon-user-missing></icon-user-missing>
+        <p>No profile found. <a href="#create">Create one?</a></p>
+      </div>
+    </template>
+
+    <!-- Override: Inline Error Recovery -->
+    <template slot="error">
+      <div class="error-banner">
+        Failed to load. <button onclick="this.closest('resource-loader').retry()">Retry</button>
+      </div>
+    </template>
+
+<!-- /resource:loader -->

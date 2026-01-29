@@ -1,0 +1,91 @@
+        <section class="intro-section mb-12">
+            <h3 id="mission">Mission</h3>
+            <p>
+                <strong>Web Intents</strong> are the architectural configuration used by components to decouple their <em>functional logic</em> from a specific <em>User Experience (UX)</em>.
+            </p>
+            <p>
+                By defining the "intent" of an interaction (e.g. "Selection", "Navigation", "Feedback") rather than its implementation, we allow a single component to be reused across vastly different Design Systems (Material, Fluent, Carbon) and form factors without code changes.
+            </p>
+            <p>
+                This enables the "Write Once, Run Everywhere" promise for UI components: the same <code>&lt;List&gt;</code> component can verify as a dense, mouse-driven data grid on Desktop and a spacious, touch-driven collection on Mobile, purely by swapping the active Intent Provider.
+            </p>
+            <p>
+                Crucially, this system pairs with <strong><a href="/projects/webtraits/">Web Traits</a></strong> to ensure zero overhead. 
+                Since the component only declares <em>intent</em>, the actual code implementation (e.g., the complex physics engine for "Swipe to Archive") is only loaded if that specific intent is active, keeping bundles lean.
+            </p>
+        </section>
+
+        <section id="proposed-intents" class="section-card">
+            <h3 id="proposed-standard-intents">Proposed Intents</h3>
+            
+            <div class="standards-grid">
+                {% for intent in intents %}
+                <a href="/intents/{{ intent.id }}/" class="standard-card">
+                    <div class="flex justify-between items-start mb-3">
+                        <h4 id="intent-{{ intent.id }}" class="text-lg font-bold m-0 text-gray-900">{{ intent.name }}</h4>
+                    </div>
+                    <p class="text-gray-600 text-sm leading-relaxed mb-4">{{ intent.summary }}</p>
+                    <div style="margin-bottom: 1rem;">
+                        {{ projectStatus(intent.status) }}
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+        </section>
+
+         <section id="implementation" class="section-card">
+            <h3 id="implementation-details">How It Works</h3>
+            <p>
+                Intents can be applied in two ways, depending on your architecture:
+            </p>
+            <ul class="mb-4 list-disc pl-5">
+                <li><strong>Runtime Contexts</strong>: For dynamic preferences (e.g., user toggles settings). implementations are loaded and swapped on the fly.</li>
+                <li><strong>Build-Time Selection</strong>: For fixed application profiles. This allows for dead-code elimination (e.g. if "Compact" is selected, "Comfortable" code is never bundled).</li>
+            </ul>
+            <p class="mb-4">
+                Both strategies rely on the same <a href="/projects/webinjectors/">Web Injectors</a> syntax. 
+                In a dynamic environment, the resolution happens at runtime. If a compiler is present, it can resolve the dependency at build-time for optimization (Dead Code Elimination).
+            </p>
+           {% highlight "json" %}
+// myapp.intents.json
+{
+  "intents": {
+    "motion": "immediate",
+    "density": "compact",
+    "mode": "night"
+  }
+}
+            {% endhighlight %}
+            {% highlight "typescript" %}
+// Application Injector Setup
+injector App {
+    provide { intents } to '@web-intents' from './intents';
+    // Or
+    provide { intents } to '@web-intents' from './intents.json' with { type: 'json' };
+    // Or for run-time resolution, actual .json content can be swapped dynamically
+    provide { intents } to '@web-intents' from 'https://myapp.com/intents.json' with { type: 'json' };
+}
+            {% endhighlight %}
+            {% highlight "typescript" %}
+// Component Injector Setup
+injector Component extends import.injector {
+    consume { mode, density } of '@web-intents';
+    const { withMode } = await import(`./traits/mode.${mode}`);
+    const { density } = await import(`./constants/density.${density}`);
+    // Provide to default domain
+    provide { withMode, density };
+}
+            {% endhighlight %}            
+            {% highlight "typescript" %}
+// Component Source
+consume { density, withMode };
+
+class MyComponent extends HTMLElement {
+    connectedCallback() {
+        this.style.padding = density.spacing.md;
+    }
+}
+
+withMode(Component); // applies mode trait
+            {% endhighlight %}
+        </section>

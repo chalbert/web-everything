@@ -1,0 +1,13 @@
+<!-- 
+  WEB CASE 2: Empty State
+  Renders the 'empty' slot when the array is null, undefined, or length 0.
+-->
+<!-- control:for-each items="emptyList" -->
+  <template>
+    <div class="item" data-bind="label"></div>
+  </template>
+
+  <template slot="empty">
+    <div class="empty-message">No items found.</div>
+  </template>
+<!-- /control:for-each -->

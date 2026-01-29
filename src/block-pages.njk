@@ -26,5 +26,28 @@ eleventyComputed:
         <div class="section-card">
             {{ block.description | safe }}
         </div>
+
+        {% set blockCases = cases[block.id] %}
+        {% if blockCases %}
+        <div class="section-card mt-8">
+            <h2 class="text-2xl font-bold mb-4">Web Cases</h2>
+            <p class="mb-6 text-slate-600">Standardized scenarios for testing and documentation. These definitions are sourced directly from the conformance suite.</p>
+            
+            <div class="grid gap-8">
+                {% for webCase in blockCases %}
+                <div class="case-item border-l-4 border-slate-200 pl-4">
+                    <h3 class="text-lg font-bold text-slate-900 mb-1">
+                        <span class="text-slate-400 font-mono mr-2">#{{ loop.index }}</span>
+                        {{ webCase.title }}
+                    </h3>
+                    <p class="text-slate-600 mb-3 text-sm leading-relaxed">{{ webCase.description }}</p>
+                    <div class="case-code">
+                        {% highlight "html" %}{{ webCase.code | safe }}{% endhighlight %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
     </div>
 </div>

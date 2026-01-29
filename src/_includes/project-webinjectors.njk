@@ -1,0 +1,175 @@
+<section id="concept" class="section-card">
+    <h3 id="the-concept">The Concept</h3>
+    <p>
+        <strong>Web Injectors</strong> introduces a first-class language construct related to managing dependency injection and scope flow directly in TypeScript/JavaScript.
+        It moves beyond "Import Maps" by allowing dynamic, hierarchical, and domain-based resolution of resources.
+    </p>
+</section>
+
+<section id="syntax" class="section-card">
+    <h3 id="core-syntax">Core Syntax</h3>
+    <ul>
+        <li><code>injector</code>: Declares a new dependency container. Similar to a <code>namespace</code> or <code>module</code> but specifically for dependency resolution.</li>
+        <li><code>provide</code>: Exposes values from an injector to a specific domain or globally.</li>
+        <li><code>consume</code>: Injects values from a specific domain into the current scope.</li>
+        <li><code>domain</code>: A string identifier (e.g., <code>'@app/core'</code>). <strong>This is the contract.</strong> It acts as a universal namespace that prevents naming collisions (e.g., <code>@auth/session</code> vs <code>@analytics/session</code>) and decouples the interface from the implementation.</li>
+    </ul>
+</section>
+
+<section id="deep-dive" class="section-card">
+    <h3 id="deep-dive-syntax-usage">Deep Dive: Syntax & Usage</h3>
+
+    <h4 id="1-basic-injector-definition">1. Basic Injector Definition</h4>
+    <p>An <code>injector</code> is a block that encapsulates resources. You can export it just like a class or variable.</p>
+    {% highlight "typescript" %}
+// definitions.ts
+export injector definitions {
+// Define resources inside the injector
+const Resource = 100;
+
+// Expose them to the outside world
+provide { Resource };
+}
+    {% endhighlight %}
+
+    <h4 id="2-consuming-dependencies">2. Consuming Dependencies</h4>
+    <p>Consumers request resources from a specific "domain" string. This decouples the consumer from the concrete implementation file.</p>
+    {% highlight "typescript" %}
+// consumer.ts
+// We don't import from 'definitions.ts'. 
+// We consume from the abstract domain '@definitions'.
+consume { Resource } of '@definitions';
+
+const r: number = Resource; // 'Resource' is now available in this scope
+    {% endhighlight %}
+
+    <h4 id="3-composition-wiring">3. Composition & Wiring</h4>
+    <p>The "Main" or "Root" of the application wires the concrete implementation (<code>definitions</code>) to the abstract domain (<code>@definitions</code>).</p>
+    {% highlight "typescript" %}
+// main.ts
+import { definitions } from "./definitions";
+
+export injector main {
+// 1. Contextualize: Map the concrete 'definitions' injector 
+//    to the abstract identifier '@definitions'.
+provide * to '@definitions' from definitions;
+
+// 2. Include the consumer code into this execution context
+provide * from "./consumer";
+}
+    {% endhighlight %}
+
+    <h4 id="4-fallback-providers">4. Fallback Providers (Polyfills)</h4>
+    <p>
+        Injectors can provide fallback implementations that are only used if the dependency hasn't been provided by an ancestor.
+        This allows libraries to be self-sufficient while remaining extensible.
+    </p>
+    {% highlight "typescript" %}
+injector Component extends import.injector {
+// Will be ignored if 'Logger' exists in the parent scope
+provide fallback { Logger } from './console-logger';
+}
+    {% endhighlight %}
+</section>
+
+<section id="case-study" class="section-card">
+    <h3 id="case-study-the-hollow-calendar-widget">Case Study: The "Hollow" Calendar Widget</h3>
+    <p>
+        Modern UI libraries (like <code>react-calendar</code> or <code>mui-datepicker</code>) are often monolithic bundles containing date math, formatting logic, positioning engines, and styling.
+        With <strong>Web Injectors</strong>, we can build a "hollow" widget that delegates all complexity to injected protocols.
+    </p>
+
+    <h4 id="deconstructing-the-calendar">Deconstructing the Calendar</h4>
+    <p>A rich calendar widget actually encapsulates several distinct domains:</p>
+    <div class="features-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
+        <div class="content-box" style="padding: 1rem;">
+            <strong>Date Logic</strong>
+            <p style="font-size: 0.9rem; margin: 0; color: var(--color-text-muted);">Adding months, calculating start-of-week, validation.</p>
+            <code style="font-size: 0.8rem; display: block; margin-top: 0.5rem; color: var(--color-primary);">@date/core</code>
+        </div>
+        <div class="content-box" style="padding: 1rem;">
+            <strong>Localization</strong>
+            <p style="font-size: 0.9rem; margin: 0; color: var(--color-text-muted);">Formatting "MMMM YYYY", day names "Mon/Tue".</p>
+            <code style="font-size: 0.8rem; display: block; margin-top: 0.5rem; color: var(--color-primary);">@date/fmt</code>
+        </div>
+        <div class="content-box" style="padding: 1rem;">
+            <strong>Positioning</strong>
+            <p style="font-size: 0.9rem; margin: 0; color: var(--color-text-muted);">Floating element anchor, collision detection.</p>
+            <code style="font-size: 0.8rem; display: block; margin-top: 0.5rem; color: var(--color-primary);">@ui/floating</code>
+        </div>
+        <div class="content-box" style="padding: 1rem;">
+            <strong>Icons</strong>
+            <p style="font-size: 0.9rem; margin: 0; color: var(--color-text-muted);">Chevron Left/Right, Calendar icon.</p>
+            <code style="font-size: 0.8rem; display: block; margin-top: 0.5rem; color: var(--color-primary);">@ui/icons</code>
+        </div>
+    </div>
+
+    <h4 id="the-widget-implementation">The Widget Implementation</h4>
+    <p>Notice how the component below contains <strong>zero</strong> implementation logic. It is purely an orchestrator.</p>
+
+    {% highlight "typescript" %}
+// components/calendar.ts
+// -----------------------
+// 1. Declare dependencies on abstract domains
+consume { addMonths, startOfMonth, getDaysInMonth } of '@date/core';
+consume { format }                                  of '@date/fmt';
+consume { useFloating, offset, flip }               of '@ui/floating';
+consume { ChevronLeft, ChevronRight }               of '@ui/icons';
+
+export class HollowCalendar extends HTMLElement {
+connectedCallback() {
+this.render();
+}
+
+render() {
+// 2. Use the injected 'format' function
+// The widget doesn't know if this is using Intl, date-fns, or moment.
+const title = format(new Date(), 'MMMM yyyy');
+
+// 3. Use the injected 'Chevron' icons
+// The widget doesn't know if these are SVGs, FontAwesome, or Images.
+this.innerHTML = `
+<header>
+    <button>${ChevronLeft}</button>
+    <span>${title}</span>
+    <button>${ChevronRight}</button>
+</header>
+<div class="grid">
+    <!-- Days rendered here using injected math -->
+</div>
+`;
+}
+}
+{% endhighlight %}
+
+<h4 id="the-wiring-application-root">The Wiring (Application Root)</h4>
+<p>This is where we decide <em>how</em> the calendar behaves in this specific application.</p>
+
+{% highlight "typescript" %}
+// app.ts
+import { DateFnsAdapter } from "./adapters/date-fns";
+import { FloatingUIDOM } from "./adapters/floating-ui";
+import { FontAwesomeIcons } from "./theme/fa-icons";
+
+// Create the unified environment
+export injector AppEnvironment {
+// Bind specific libraries to the abstract domains
+provide * to '@date/core'     from DateFnsAdapter;
+provide * to '@date/fmt'      from DateFnsAdapter;
+provide * to '@ui/floating'   from FloatingUIDOM;
+provide * to '@ui/icons'      from FontAwesomeIcons;
+}
+
+// Now render the app
+// <hollow-calendar> will automatically receive the provided implementations.
+    {% endhighlight %}
+</section>
+
+<section id="why" class="section-card">
+    <h3 id="why-this-matters">Why This Matters?</h3>
+    <p>
+        This pattern allows for true <strong>Inversion of Control</strong> at the language level. 
+        Your <code>consumer.ts</code> never needs to know where <code>Resource</code> comes from, or even if it was mocked for testing. 
+        The <code>main</code> injector acts as the composition root, binding <code>RealService</code> to <code>@service</code> in production, or <code>MockService</code> to <code>@service</code> in tests.
+    </p>
+</section>

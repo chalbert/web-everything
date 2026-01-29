@@ -1,0 +1,68 @@
+<!-- 
+  WEB CASE 1: Standard Accordion
+  Demonstrates the standard interaction pattern using Web Intents.
+-->
+<script type="module" src="/js/patterns/accordion/index.js"></script>
+
+<style>
+  /* Basic Visuals for the Case */
+  accordion-header {
+    display: block;
+    border: 1px solid #ccc;
+    background: #f9f9f9;
+    padding: 0.5rem;
+  }
+  accordion-header button {
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    font: inherit;
+    cursor: pointer;
+  }
+  accordion-panel {
+    display: block;
+    border: 1px solid #ccc; /* Border collapse not handled here */
+    border-top: none;
+    padding: 1rem;
+  }
+  accordion-panel[hidden] {
+    display: none;
+  }
+  accordion-header[expanded="true"] button {
+    font-weight: bold;
+  }
+</style>
+
+<accordion-group allow-collapse-all>
+  
+  <accordion-item>
+    <accordion-header>
+       <h3><button type="button">Section 1: Personal Info</button></h3>
+    </accordion-header>
+    <accordion-panel>
+       <p>Name: Nicolas</p>
+       <p>Role: Tech Lead</p>
+    </accordion-panel>
+  </accordion-item>
+
+  <accordion-item>
+    <accordion-header>
+       <h3><button type="button">Section 2: Preferences</button></h3>
+    </accordion-header>
+    <accordion-panel>
+       <p>Theme: Dark</p>
+       <p>Notifications: Enabled</p>
+    </accordion-panel>
+  </accordion-item>
+
+  <accordion-item>
+    <accordion-header>
+       <h3><button type="button">Section 3: Security</button></h3>
+    </accordion-header>
+    <accordion-panel>
+       <p>2FA: Disabled</p>
+    </accordion-panel>
+  </accordion-item>
+
+</accordion-group>

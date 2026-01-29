@@ -1,0 +1,240 @@
+ <section id="concept" class="section-card">
+            <h3 id="the-concept">The Concept</h3>
+            <p>
+                <strong>Web Behaviors</strong> enable developers to attach rich functionality to any DOM element using custom attributes.
+                This brings the "Decorator" pattern to HTML, allowing for powerful composition without the need for component wrappers. Web Behaviors are registered to the <code>CustomAttributeRegistry</code>.
+            </p>
+        </section>
+
+        <section id="case-study" class="section-card">
+            <h3 id="case-study-router-links">Case Study: Router Links</h3>
+            <p>
+                In many SPAs, you need a special component (like <code>&lt;Link&gt;</code> or <code>&lt;router-link&gt;</code>) to handle navigation without reloading the page.
+                This forces you to replace standard <code>&lt;a&gt;</code> tags with framework-specific components that might struggle to emulate all native behavior (accessibility, drag-to-tab, context menus).
+            </p>
+            <p><strong>With Web Behaviors:</strong> You simply enhance the standard anchor tag.</p>
+
+            {% highlight "html" %}
+<!-- Standard HTML, upgraded behavior -->
+<a href="/profile" history-link>My Profile</a>
+
+<!-- Composition: A button that acts as a link -->
+<button history-link="/dashboard">Go to Dashboard</button>
+            {% endhighlight %}
+
+            <div class="comparison-block" style="background: rgba(99, 102, 241, 0.05); padding: 1.25rem; border-radius: 8px; border-left: 4px solid var(--color-primary); margin: 2rem 0;">
+                <h4 id="note-vs-customized-built-in-elements" style="margin-top: 0; color: var(--color-primary); font-size: 1rem;">Note: vs Customized Built-in Elements</h4>
+                <p style="margin-bottom: 0.5rem; font-size: 0.95rem;">
+                    The Web Components standard allows extending native elements using the <code>is</code> attribute (e.g., <code>&lt;button is="my-button"&gt;</code>).
+                </p>
+                <p style="margin-bottom: 0; font-size: 0.95rem;">
+                    <strong>The limitation?</strong> An element can only have <em>one</em> <code>is</code> value (single inheritance). 
+                    <strong>Web Behaviors</strong> allow for <strong style="color: var(--color-primary);">composition</strong>, meaning you can attach as many independent functional attributes as needed to a single element.
+                </p>
+            </div>
+        </section>
+
+        <section id="implementation" class="section-card">
+            <h3 id="the-implementation">The Implementation</h3>
+            <p>
+                Following the reference implementation in <strong>Web Plugs</strong>, a Behavior is a class that receives the <code>ownerElement</code> and uses standard lifecycle hooks.
+            </p>
+
+            {% highlight "typescript" %}
+import { CustomAttribute } from '@web-plugs/web-behaviors';
+
+class HistoryLink extends CustomAttribute {
+    // Observe changes to the 'href' attribute
+    static get observedAttributes() { return ['href']; }
+
+    connectedCallback() {
+        // Enhance the element with a click listener
+        this.ownerElement.addEventListener('click', this.navigate);
+    }
+    
+    disconnectedCallback() {
+        this.ownerElement.removeEventListener('click', this.navigate);
+    }
+
+    navigate = (e) => {
+        // Prevent full page reload
+        e.preventDefault();
+        
+        // Determine URL from attribute value OR element's href
+        const url = this.value || this.ownerElement.getAttribute('href');
+        
+        // Push to History API
+        window.history.pushState(null, '', url);
+    }
+}
+
+// Register the behavior
+customAttributes.define('history-link', HistoryLink);
+            {% endhighlight %}
+        </section>
+
+        <section id="specs" class="section-card">
+            <h3 id="standard-specification-draft">Standard Specification (Draft)</h3>
+            <p>To formalize Web Behaviors as a platform standard, the following interfaces and augmentations would be introduced to the HTML specification.</p>
+
+            <h4 id="1-new-class-customattribute">1. new class CustomAttribute</h4>
+            <p>
+                The base class for all behaviors. It mirrors the lifecycle of Custom Elements but is scoped to an attribute.
+                <strong>Requirement:</strong> Attribute names must contain a hyphen (e.g., <code>my-attr</code>) to avoid collision with standard HTML attributes.
+            </p>
+            {% highlight "typescript" %}
+interface CustomAttribute {
+    // Properties
+    readonly ownerElement: Element;
+    readonly name: string;
+    readonly value: string;
+
+    // Lifecycle Callbacks
+    connectedCallback?(): void;
+    disconnectedCallback?(): void;
+    attributeChangedCallback?(
+        name: string, 
+        oldValue: string | null, 
+        newValue: string | null
+    ): void;
+
+    // Static
+    static readonly observedAttributes?: string[];
+}
+            {% endhighlight %}
+
+            <h4 id="2-new-interface-customattributeregistry">2. new interface CustomAttributeRegistry</h4>
+            <p>The global registry handling behavior definitions, similar to <code>customElements</code>.</p>
+            {% highlight "typescript" %}
+interface CustomAttributeRegistry {
+    define(name: string, constructor: CustomAttributeConstructor, options?: any): void;
+    get(name: string): CustomAttributeConstructor | undefined;
+    upgrade(root: Node): void;
+    whenDefined(name: string): Promise<CustomAttributeConstructor>;
+}
+            {% endhighlight %}
+
+            <h4 id="3-extensions-to-window">3. Extensions to Window</h4>
+            <p>Exposing the registry on the global object.</p>
+            {% highlight "typescript" %}
+interface Window {
+    readonly customAttributes: CustomAttributeRegistry;
+}
+            {% endhighlight %}
+
+            <h4 id="4-ecosystem-dependencies">4. Ecosystem Dependencies</h4>
+            <div class="content-box">
+                <ul style="margin: 0; padding-left: 1.25rem;">
+                    <li><strong>Web Registries:</strong> The <code>CustomAttributeRegistry</code> must implement the unified Registry interface defined by the Web Registries spec.</li>
+                    <li><strong>DOM Mutation API:</strong> The polyfill implementation (Web Plug) relies on <code>MutationObserver</code> to detect attribute additions/removals. A native browser implementation would optimize this event loop internally.</li>
+                </ul>
+            </div>
+        </section>
+
+        <section id="examples" class="section-card">
+            <h3 id="userland-examples">Userland Examples</h3>
+            <p>
+                Behaviors are exceptionally versatile. Here is a showcase of potential use cases ranging from UI interactions to data management.
+            </p>
+
+            <div class="features-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-top: 1.5rem; margin-bottom: 2rem;">
+                
+                <!-- UI Interactions -->
+                <div class="content-box">
+                    <h4 id="ui-interactions" style="color: var(--color-primary); margin: 0 0 0.5rem 0;">UI Interactions</h4>
+                    <ul style="font-size: 0.95rem; padding-left: 1.25rem; color: var(--color-text-muted);">
+                        <li>
+                            <code>click-outside</code>:
+                            <br><span>Detects clicks outside the element (useful for modals/dropdowns).</span>
+                        </li>
+                        <li>
+                            <code>ripple-effect</code>:
+                            <br><span>Material Design-style ink ripple on click.</span>
+                        </li>
+                        <li>
+                            <code>draggable-item</code>:
+                            <br><span>Makes an element draggable within a container (Kanban style).</span>
+                        </li>
+                        <li>
+                            <code>scroll-lock</code>:
+                            <br><span>Prevents scroll on body when this element is active/open.</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Data & Forms -->
+                <div class="content-box">
+                    <h4 id="forms-data" style="color: var(--color-primary); margin: 0 0 0.5rem 0;">Forms & Data</h4>
+                    <ul style="font-size: 0.95rem; padding-left: 1.25rem; color: var(--color-text-muted);">
+                        <li>
+                            <code>bind-value="prop"</code>:
+                            <br><span>Two-way data binding between an input and a state property.</span>
+                        </li>
+                        <li>
+                            <code>validate-email</code>:
+                            <br><span>Adds custom validity checks to an input field.</span>
+                        </li>
+                        <li>
+                            <code>auto-grow</code>:
+                            <br><span>Automatically resizes a <code>&lt;textarea&gt;</code> based on content height.</span>
+                        </li>
+                        <li>
+                            <code>copy-to-clipboard</code>:
+                            <br><span>Copies the element's text content on click.</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Visibility & Layout -->
+                <div class="content-box">
+                    <h4 id="visibility-lifecycle" style="color: var(--color-primary); margin: 0 0 0.5rem 0;">Visibility & Lifecycle</h4>
+                    <ul style="font-size: 0.95rem; padding-left: 1.25rem; color: var(--color-text-muted);">
+                        <li>
+                            <code>lazy-load</code>:
+                            <br><span>Only loads content (image/iframe) when element enters viewport.</span>
+                        </li>
+                        <li>
+                            <code>animate-on-scroll</code>:
+                            <br><span>Triggers a CSS animation class when scrolled into view.</span>
+                        </li>
+                        <li>
+                            <code>hide-element="condition"</code>:
+                            <br><span>Toggles <code>display: none</code> based on a reactive state.</span>
+                        </li>
+                        <li>
+                            <code>pop-element</code>:
+                            <br><span>Manages <code>popover</code> API behavior with enhanced positioning.</span>
+                        </li>
+                    </ul>
+                </div>
+
+                <!-- Advanced Logic -->
+                <div class="content-box">
+                    <h4 id="advanced-patterns" style="color: var(--color-primary); margin: 0 0 0.5rem 0;">Advanced Patterns</h4>
+                    <ul style="font-size: 0.95rem; padding-left: 1.25rem; color: var(--color-text-muted);">
+                        <li>
+                            <code>provide-store="key"</code>:
+                            <br><span>Exposes a store instance to the subtree context.</span>
+                        </li>
+                        <li>
+                            <code>track-analytics="event"</code>:
+                            <br><span>Sends a telemetry event when the user interacts with the element.</span>
+                        </li>
+                        <li>
+                            <code>composite-widget</code>:
+                            <br><span>Orchestrates multiple child behaviors into a single logical unit.</span>
+                        </li>
+                    </ul>
+                </div>
+
+            </div>
+        </section>
+
+        <section id="why" class="section-card">
+            <h3 id="why-this-matters">Why This Matters?</h3>
+            <ul>
+                <li><strong>Styling Preserved:</strong> No extra <code>&lt;div&gt;</code> wrappers breaking Flexbox or Grid layouts.</li>
+                <li><strong>Accessibility:</strong> You enhance native elements definition (progressive enhancement) rather than replacing them with semantically ambiguous custom tags.</li>
+                <li><strong>Composition:</strong> An element can have multiple behaviors simultaneously: <br><code>&lt;input validate-email track-change auto-save&gt;</code>.</li>
+            </ul>
+        </section>
