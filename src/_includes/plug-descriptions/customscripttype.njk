@@ -1,0 +1,89 @@
+<h4 id="overview">Overview</h4>
+<p>
+    <strong>CustomScriptType</strong> is the base class for creating custom script types. It extends <code>HTMLScriptElement</code> and provides lifecycle callbacks similar to Custom Elements.
+</p>
+
+<h4 id="interface">Interface</h4>
+{% highlight "typescript" %}
+export interface CustomScriptTypeOptions {
+    content?: string;
+}
+
+abstract class CustomScriptType<Options extends CustomScriptTypeOptions = CustomScriptTypeOptions> extends HTMLScriptElement {
+    options?: Partial<Options & CustomScriptTypeOptions>;
+
+    static observedAttributes?: string[];
+
+    constructor(options: Options & CustomScriptTypeOptions);
+
+    connectedCallback?(): void;
+    disconnectedCallback?(): void;
+    adoptedCallback?(): void;
+}
+{% endhighlight %}
+
+<h4 id="lifecycle-callbacks">Lifecycle Callbacks</h4>
+<dl class="ml-4 text-sm">
+    <dt class="font-bold text-gray-800 mt-3"><code>connectedCallback()</code></dt>
+    <dd class="text-gray-600 ml-4">Invoked when the script element is inserted into the DOM. This is where you would typically parse and execute the script's custom logic.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>disconnectedCallback()</code></dt>
+    <dd class="text-gray-600 ml-4">Invoked when the script element is removed from the DOM. Use for cleanup and resource deallocation.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>adoptedCallback()</code></dt>
+    <dd class="text-gray-600 ml-4">Invoked when the script element is moved to a new document. Useful for cross-document scenarios.</dd>
+</dl>
+
+<h4 id="creating-custom-script">Creating a Custom Script Type</h4>
+{% highlight "typescript" %}
+class ContextScript extends CustomScriptType {
+    connectedCallback() {
+        // Access the script's content
+        const code = this.innerHTML;
+
+        // Parse context-specific syntax
+        const contextData = this.parseContextSyntax(code);
+
+        // Attach to the nearest injector
+        const injector = this.parentElement?.getClosestInjector();
+        if (injector) {
+            const contextRegistry = injector.get('customContexts');
+            contextRegistry.set(this.id, contextData);
+        }
+    }
+
+    disconnectedCallback() {
+        // Cleanup when script is removed
+        const injector = this.parentElement?.getClosestInjector();
+        if (injector) {
+            const contextRegistry = injector.get('customContexts');
+            contextRegistry.delete(this.id);
+        }
+    }
+
+    parseContextSyntax(code: string) {
+        // Custom parsing logic
+        return eval(`(${code})`);
+    }
+}
+
+// Register
+window.customScriptTypes.define('context', ContextScript);
+{% endhighlight %}
+
+<h4 id="use-cases">Use Cases</h4>
+<ul class="list-disc ml-5 mb-4 text-sm text-gray-600">
+    <li><strong>Injector Blocks:</strong> Declarative dependency injection via <code>&lt;script is="injector"&gt;</code></li>
+    <li><strong>Context Definitions:</strong> Declarative context providers via <code>&lt;script is="context"&gt;</code></li>
+    <li><strong>Inline Modules:</strong> Importable inline JavaScript modules</li>
+    <li><strong>Template Expressions:</strong> Custom expression languages for data binding</li>
+</ul>
+
+<h4 id="design-notes">Design Notes</h4>
+<p class="text-sm text-gray-600 mb-2">
+    Custom Elements cannot extend <code>HTMLScriptElement</code> due to browser restrictions. CustomScriptType provides an alternative mechanism using prototype manipulation and the <code>is</code> attribute pattern, similar to customized built-in elements.
+</p>
+
+<p class="text-sm text-gray-600">
+    This approach was chosen because it enables declarative scripting patterns while maintaining compatibility with HTML parsing and avoiding the need for custom syntax or build tools.
+</p>

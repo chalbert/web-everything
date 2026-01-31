@@ -47,4 +47,114 @@ description: Comparative analysis of web context APIs, framework implementations
 
 ---
 
+## 4. DOM API for Contexts Protocol
+
+This section documents the proposed DOM API extensions needed to implement the contexts protocol. These APIs extend existing DOM interfaces to support hierarchical context lookup and management.
+
+### 4.1 Node Interface Extensions
+
+The `Node` interface (inherited by all DOM nodes) is extended with the following methods and properties:
+
+#### Injector Methods
+
+- **`node.getOwnInjector(): HTMLInjector | null`**
+  - Returns the injector owned by this specific node, or `null` if the node doesn't have its own injector
+  - Only returns an injector if this node explicitly defines one (via injector attribute or script type="injector")
+
+- **`node.hasOwnInjector(): boolean`**
+  - Returns `true` if this node has its own injector, `false` otherwise
+  - Convenience method equivalent to `Boolean(node.getOwnInjector())`
+
+- **`node.getClosestInjector(): HTMLInjector | null`**
+  - Returns the closest injector in the DOM tree hierarchy, walking up from this node
+  - Searches through parent elements, shadow roots, and template boundaries
+  - Returns `null` if no injector is found in the ancestry
+
+- **`node.injectors(): Generator<HTMLInjector>`**
+  - Returns a generator that yields all injectors in the hierarchy, starting from the closest
+  - Each iteration yields the next ancestor injector, walking up to the root
+  - Useful for exhaustive searches across multiple context layers
+
+#### Context Creation & Lookup
+
+- **`node.createElement(tagName: string, options?: ElementCreationOptions): HTMLElement`**
+  - Creates an element using the context-aware custom element registry
+  - Searches through the injector hierarchy for custom element definitions
+  - Falls back to standard `document.createElement()` if no custom definition is found
+
+- **`node.createContext(contextType: string): CustomContext | undefined`**
+  - Creates a new context instance of the specified type
+  - Searches through the injector hierarchy for registered context constructors
+  - Returns `undefined` if the context type is not registered in any ancestor injector
+
+- **`node.getContext(contextType: string): any | undefined`**
+  - Retrieves the closest context instance of the specified type
+  - Searches through the injector hierarchy from closest to root
+  - Returns the first matching context found, or `undefined` if none exists
+
+- **`node.ensureContext(contextType: string): CustomContext`**
+  - Gets an existing context or creates a new one if it doesn't exist
+  - First checks for an owned context via `getOwnContext()`
+  - If not found, creates a new context using `createContext()` and attaches it to this node
+  - Returns the existing or newly created context
+
+- **`node.getOwnContext(contextType: string): any | null`**
+  - Returns the context of the specified type owned by this node
+  - Only returns a context if this specific node provides it
+  - Returns `null` if this node doesn't own a context of that type
+
+#### Context Queries
+
+- **`node.hasContext(contextType: string): boolean`**
+  - Returns `true` if a context of the specified type exists in the hierarchy
+  - Searches from this node up through all ancestor injectors
+  - Convenience method equivalent to `Boolean(node.getContext(contextType))`
+
+- **`node.hasOwnContext(contextType: string): boolean`**
+  - Returns `true` if this specific node owns a context of the specified type
+  - Only checks the node's own injector, not ancestors
+  - Convenience method for owned context checking
+
+- **`node.queryContext(contextType: string, query: any): any`**
+  - Queries a context with a custom query parameter
+  - Allows contexts to support advanced query protocols
+  - Returns the result of the context's query handler, or `undefined` if not found
+
+### 4.2 Usage Examples
+
+```javascript
+// Get the closest injector
+const injector = element.getClosestInjector();
+
+// Create a custom element from context
+const customEl = element.createElement('my-component');
+
+// Get or create a theme context
+const theme = element.ensureContext('theme');
+
+// Check if a context exists
+if (element.hasContext('auth')) {
+  const auth = element.getContext('auth');
+  // Use auth context
+}
+
+// Query a context with parameters
+const user = element.queryContext('auth', { userId: '123' });
+
+// Iterate through all injectors
+for (const injector of element.injectors()) {
+  console.log('Found injector:', injector);
+}
+```
+
+### 4.3 Key Design Principles
+
+- **Hierarchical**: All context lookups traverse the DOM tree hierarchy
+- **Lazy**: Contexts are created on-demand via `ensureContext()`
+- **Scoped**: Each node can own its own contexts and injectors
+- **Traversal-aware**: Context lookup respects shadow DOM and template boundaries
+- **Generator-based**: The `injectors()` API uses generators for efficient iteration
+
+---
+
 *This analysis can be extended with deeper dives into specific APIs or proposals as needed.*

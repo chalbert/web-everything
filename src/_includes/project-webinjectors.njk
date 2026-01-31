@@ -119,6 +119,11 @@ injector Component extends import.injector {
     <p>
         When <code>isolate</code> is present, the injector does <strong>not</strong> inherit from any parent context. This is analogous to <code>hidden</code>, <code>inert</code>, and other boolean HTML attributes.
     </p>
+
+    <h4 id="implementation-note">Implementation Note</h4>
+    <p>
+        The <code>&lt;script type="injector"&gt;</code> functionality uses the <strong>customScriptType</strong> registry, an extensibility point that enables custom script behaviors in HTML. This registry allows defining new script types with specialized upgrade and lifecycle logic. While currently used internally for injectors and contexts (see <a href="/projects/webcontexts/">Web Contexts</a>), this pattern may be formalized for userland use if additional compelling use cases emerge.
+    </p>
 </section>
 
 <section id="case-study" class="section-card">
@@ -218,8 +223,75 @@ provide * to '@ui/icons'      from FontAwesomeIcons;
 <section id="why" class="section-card">
     <h3 id="why-this-matters">Why This Matters?</h3>
     <p>
-        This pattern allows for true <strong>Inversion of Control</strong> at the language level. 
-        Your <code>consumer.ts</code> never needs to know where <code>Resource</code> comes from, or even if it was mocked for testing. 
+        This pattern allows for true <strong>Inversion of Control</strong> at the language level.
+        Your <code>consumer.ts</code> never needs to know where <code>Resource</code> comes from, or even if it was mocked for testing.
         The <code>main</code> injector acts as the composition root, binding <code>RealService</code> to <code>@service</code> in production, or <code>MockService</code> to <code>@service</code> in tests.
     </p>
+</section>
+
+<section id="dom-api" class="section-card">
+  <h3 id="dom-api-reference">DOM API Reference</h3>
+  <p>
+    This section documents the proposed DOM API extensions for working with injectors. These APIs extend the <code>Node</code> interface to support hierarchical injector lookup and management throughout the DOM tree.
+  </p>
+
+  <h4 id="injector-lookup">Injector Lookup Methods</h4>
+  <p>Methods for accessing and navigating the injector hierarchy:</p>
+
+  <dl style="margin-left: 1rem;">
+    <dt><code>node.getOwnInjector(): HTMLInjector | null</code></dt>
+    <dd>Returns the injector owned by this specific node, or <code>null</code> if the node doesn't have its own injector. Only returns an injector if this node explicitly defines one (via <code>injector</code> attribute or <code>&lt;script type="injector"&gt;</code>).</dd>
+
+    <dt><code>node.hasOwnInjector(): boolean</code></dt>
+    <dd>Returns <code>true</code> if this node has its own injector, <code>false</code> otherwise. Convenience method equivalent to <code>Boolean(node.getOwnInjector())</code>.</dd>
+
+    <dt><code>node.getClosestInjector(): HTMLInjector | null</code></dt>
+    <dd>Returns the closest injector in the DOM tree hierarchy, walking up from this node. Searches through parent elements, shadow roots, and template boundaries. Returns <code>null</code> if no injector is found in the ancestry.</dd>
+
+    <dt><code>node.injectors(): Generator&lt;HTMLInjector&gt;</code></dt>
+    <dd>Returns a generator that yields all injectors in the hierarchy, starting from the closest. Each iteration yields the next ancestor injector, walking up to the root. Useful for exhaustive searches across multiple injector layers.</dd>
+  </dl>
+
+  <h4 id="element-creation">Element Creation</h4>
+  <p>Context-aware element creation using the injector hierarchy:</p>
+
+  <dl style="margin-left: 1rem;">
+    <dt><code>node.createElement(tagName: string, options?: ElementCreationOptions): HTMLElement</code></dt>
+    <dd>Creates an element using the context-aware custom element registry. Searches through the injector hierarchy for custom element definitions. Falls back to standard <code>document.createElement()</code> if no custom definition is found. This enables scoped custom element registration per injector.</dd>
+  </dl>
+
+  <h4 id="usage-examples">Usage Examples</h4>
+  {% highlight "javascript" %}
+// Get the closest injector
+const injector = element.getClosestInjector();
+
+// Check if an element has its own injector
+if (element.hasOwnInjector()) {
+  console.log('Element defines its own dependency scope');
+}
+
+// Create a custom element from the injector's registry
+const customEl = element.createElement('my-component');
+
+// Iterate through all injectors in the hierarchy
+for (const injector of element.injectors()) {
+  console.log('Found injector:', injector);
+  // Access injector's provided values
+  const theme = injector.get('theme');
+}
+
+// Access a specific dependency from the injector
+const currentInjector = node.getClosestInjector();
+const logger = currentInjector.get('logger');
+logger.info('Accessed from injector hierarchy');
+  {% endhighlight %}
+
+  <h4 id="design-principles">Key Design Principles</h4>
+  <ul>
+    <li><strong>Hierarchical:</strong> Injector lookups traverse the DOM tree hierarchy, enabling nested scopes</li>
+    <li><strong>Lazy:</strong> Injectors are created on-demand when first accessed</li>
+    <li><strong>Scoped:</strong> Each node can own its own injector with isolated or inherited dependencies</li>
+    <li><strong>Traversal-aware:</strong> Injector lookup respects shadow DOM and template boundaries</li>
+    <li><strong>Generator-based:</strong> The <code>injectors()</code> API uses generators for efficient iteration without building arrays</li>
+  </ul>
 </section>

@@ -1,513 +1,74 @@
- <section id="overview" class="section-card">
-            <h3 id="overview">Overview</h3>
-            <p>
-                <strong>Web Plugs</strong> is the foundational layer of the Web Everything platform. 
-                It provides the necessary polyfills and patches to the native browser environment to enable the advanced features required by downstream projects.
-            </p>
-            <p>
-                Each "Plug" is a modular slice of functionality. They are designed to depend on each other hierarchically, allowing you to only load what you need.
-            </p>
+{% from "project-status.njk" import projectStatus %}
 
-            <div class="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-100">
-                <h4 id="plug-types" class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Plug Types</h4>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                    <div class="flex items-center">
-                        <span class="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 mr-2 border border-blue-200">New Primitive</span>
-                        <span class="text-gray-600 text-xs">Abstract base classes</span>
+<section id="overview" class="section-card">
+    <h3 id="overview">Overview</h3>
+    <p>
+        <strong>Web Plugs</strong> is the foundational layer of the Web Everything platform.
+        It provides the necessary polyfills and patches to the native browser environment to enable the advanced features required by downstream projects.
+    </p>
+    <p>
+        Each "Plug" is a modular slice of functionality. Plugs are organized by the projects they support—many plugs are shared across multiple projects, demonstrating the composable architecture of the platform.
+    </p>
+
+    <div class="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-100">
+        <h4 id="plug-types" class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-3">Plug Types</h4>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div class="flex items-center">
+                <span class="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 mr-2 border border-blue-200">Global</span>
+                <span class="text-gray-600 text-xs">New objects on window</span>
+            </div>
+            <div class="flex items-center">
+                <span class="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 mr-2 border border-amber-200">Patch</span>
+                <span class="text-gray-600 text-xs">Modifies native API</span>
+            </div>
+        </div>
+    </div>
+</section>
+
+{% macro renderProjectPlugs(projectId, projectName) %}
+    {% set projectPlugs = plugs | filterByProject(projectId) %}
+    {% if projectPlugs.length > 0 %}
+    <section class="section-card">
+        <h3 id="{{ projectId }}">
+            <a href="/projects/{{ projectId }}/">{{ projectName }}</a>
+        </h3>
+        <div class="standards-grid">
+            {% for plug in projectPlugs %}
+                <a href="/plugs/{{ plug.id }}/" class="standard-card">
+                    <div class="flex justify-between items-start mb-3" style="gap: 12px; display: flex; justify-content: space-between;">
+                        <h4 id="plug-{{ plug.id }}" class="text-lg font-bold m-0 text-gray-900">{{ plug.name }}</h4>
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {% if plug.type == 'Global' %}bg-blue-100 text-blue-800 border border-blue-200{% else %}bg-amber-100 text-amber-800 border border-amber-200{% endif %}" style="white-space: nowrap;">
+                            {{ plug.type }}
+                        </span>
                     </div>
-                    <div class="flex items-center">
-                        <span class="px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800 mr-2 border border-emerald-200">New Global</span>
-                        <span class="text-gray-600 text-xs">New window objects</span>
+                    <p class="text-gray-600 text-sm leading-relaxed mb-4">{{ plug.summary }}</p>
+                    {% if plug.projects.length > 1 %}
+                    <div class="mb-3">
+                        <div class="text-xs text-gray-500 mb-1">Also used by:</div>
+                        <div class="flex flex-wrap gap-1">
+                            {% for project in plug.projects %}
+                                {% if project != projectId %}
+                                <span class="px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-600">{{ project | replace("web", "") }}</span>
+                                {% endif %}
+                            {% endfor %}
+                        </div>
                     </div>
-                     <div class="flex items-center">
-                        <span class="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 mr-2 border border-amber-200">Patch</span>
-                        <span class="text-gray-600 text-xs">Modifies native API</span>
+                    {% endif %}
+                    <div style="margin-bottom: 1rem;">
+                        {{ projectStatus(plug.status) }}
                     </div>
-                </div>
-            </div>
-        </section>
+                </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+{% endmacro %}
 
-        <section id="core-patches" class="section-card">
-            <h3 id="core-dom-patches">Core DOM Patches</h3>
-            <p class="mb-4">These patches are modularized to allow for tree-shaking and specific feature usage. They can be imported individually or as part of the full suite.</p>
-
-            <h4 id="web-injectors-patches" class="mt-8 mb-4 text-gray-800 border-b border-gray-200 pb-2">Web Injectors Patches</h4>
-            <p class="mb-4 text-sm text-gray-600"><strong>Module:</strong> <code>plateau/src/plugs/web-injectors</code></p>
-
-            <div class="mb-6">
-                <h5 class="font-bold text-gray-800">Node (Injector Patch)</h5>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">Patch</span></p>
-                <p>Replaces the global <code>Node</code> constructor to capture the <code>creationInjector</code> context. It also mixes in the Injection API.</p>
-                <strong>Adds API:</strong>
-                <ul class="list-disc ml-5 mb-2 text-sm text-gray-600">
-                    <li><code>getClosestInjector()</code></li>
-                    <li><code>getOwnInjector()</code></li>
-                    <li><code>createContext()</code> / <code>getContext()</code></li>
-                </ul>
-            </div>
-
-            <div class="mb-6">
-                <h5 class="font-bold text-gray-800">Element (Injector Patch)</h5>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">Patch</span></p>
-                <p>Intersects <code>innerHTML</code> to propagate the current injector scope to newly created nodes.</p>
-            </div>
-
-            <h4 id="web-components-patches" class="mt-8 mb-4 text-gray-800 border-b border-gray-200 pb-2">Web Components Patches</h4>
-            <p class="mb-4 text-sm text-gray-600"><strong>Module:</strong> <code>plateau/src/plugs/web-components</code></p>
-
-            <div class="mb-6">
-                <h5 class="font-bold text-gray-800">Node (Component Patch)</h5>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">Patch</span></p>
-                <p>Patches <code>cloneNode</code> to ensure Custom Elements and enhanced nodes are correctly reconstructed during cloning (preserving prototype and options).</p>
-            </div>
-
-            <div class="mb-6">
-                <h5 class="font-bold text-gray-800">Element (Component Patch)</h5>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">Patch</span></p>
-                <p> Patriales DOM insertion methods to "lazy upgrade" definitions when elements connect to the DOM.</p>
-                <strong>Patched Methods:</strong>
-                <ul class="list-disc ml-5 mb-2 text-sm text-gray-600">
-                    <li><code>innerHTML</code></li>
-                    <li><code>append</code>, <code>prepend</code>, <code>after</code>, <code>before</code></li>
-                    <li><code>replaceChildren</code>, <code>replaceWith</code></li>
-                </ul>
-            </div>
-
-            <div class="mb-6">
-                <h5 class="font-bold text-gray-800">HTMLElement (Patch)</h5>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">Patch</span></p>
-                <p>Wraps native constructors to enable the dynamic registry system.</p>
-            </div>
-
-            <div class="mb-6">
-                <h5 class="font-bold text-gray-800">Document (Patch)</h5>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">Patch</span></p>
-                <p>Patches <code>createElement</code> to apply correct prototypes.</p>
-            </div>
-
-             <div class="mb-6">
-                <h5 class="font-bold text-gray-800">DocumentFragment (Patch)</h5>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">Patch</span></p>
-                <p>Fixes <code>ownerTemplate</code> properties.</p>
-            </div>
-
-             <div class="mb-6">
-                <h5 class="font-bold text-gray-800">HTMLTemplateElement (Patch)</h5>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">Patch</span></p>
-                <p>Patches the <code>content</code> getter.</p>
-            </div>
-
-        </section>
-
-        <section id="registry-plugs" class="section-card">
-            <h3 id="web-registries-plugs">Web Registries Plugs</h3>
-            <p class="mb-4"><strong>Required by:</strong> <a href="/projects/webregistries/">Web Registries</a></p>
-
-            <div>
-                <h4 id="customregistry">CustomRegistry</h4>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">New Primitive</span></p>
-                <p>The abstract base class for all scoped registries. It standardizes the API for storing and retrieving definitions, supporting inheritance from parent registries.</p>
-                
-                <strong>Interface:</strong>
-                {% highlight "typescript" %}
-interface CustomRegistry<Definition, Key> {
-    abstract readonly localName: string;
-    
-    // Core Registry API
-    define(name: Key, definition: Definition): void;
-    get(name: Key): Definition | undefined;
-}
-                {% endhighlight %}
-            </div>
-
-            <hr class="my-6 border-gray-200">
-
-            <div>
-                <h4 id="htmlregistry">HTMLRegistry</h4>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">New Primitive</span></p>
-                <p><strong>Dependency:</strong> <code>CustomRegistry</code></p>
-                <p>
-                    A specialized abstract registry for storing constructors that are bound to DOM nodes. 
-                    It handles the complexity of "Upgrading" and "Downgrading" nodes when definitions are added or removed.
-                </p>
-
-                <strong>Interface:</strong>
-                {% highlight "typescript" %}
-interface HTMLRegistry<Definition, DefType> extends CustomRegistry<
-    Definition, 
-    string
-> {
-    abstract readonly localName: string;
-
-    // Node Lifecycle
-    abstract upgrade(node: Node): void;
-    abstract downgrade(node: Node): void;
-    
-    // Reverse Lookup
-    getLocalNameOf(constructor: DefType): string | undefined;
-}
-                {% endhighlight %}
-            </div>
-            
-            <hr class="my-6 border-gray-200">
-
-            <div>
-                <h4 id="customelementregistry-patch">CustomElementRegistry (Patch)</h4>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 border border-amber-200">Patch / Extension</span></p>
-                <p><strong>Dependency:</strong> <code>HTMLRegistry</code></p>
-                <p>
-                    Replaces the native <code>window.customElements</code> with a version that extends <code>HTMLRegistry</code>. 
-                    This keeps the native API compatible while unlocking the features of <strong>Web Registries</strong> (polyfilled scoping and inheritance).
-                </p>
-
-                <strong>Interface:</strong>
-                 {% highlight "typescript" %}
-class CustomElementRegistry extends HTMLRegistry<
-    ElementDefinition, 
-    ImplementedElement
-> {
-    // Standard CustomElementRegistry API
-    define(
-        name: string, 
-        constructor: CustomElementConstructor, 
-        options?: ElementDefinitionOptions
-    ): void;
-    get(name: string): CustomElementConstructor | undefined;
-    whenDefined(name: string): Promise<CustomElementConstructor>;
-    upgrade(root: Node): void;
-}
-                 {% endhighlight %}
-            </div>
-        </section>
-
-        <section id="behaviors" class="section-card">
-            <h3 id="web-behaviors-plugs">Web Behaviors Plugs</h3>
-            <p class="mb-4"><strong>Required by:</strong> <a href="/projects/webbehaviors/">Web Behaviors</a></p>
-
-            <div>
-                <h4 id="customattributesregistry">CustomAttributesRegistry</h4>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">New Global</span></p>
-                <p><strong>Dependency:</strong> <code>HTMLRegistry</code></p>
-                <p>
-                    Exposes <code>window.customAttributes</code>. It monitors the DOM for attribute changes and facilitates the "Upgrade" of standard attributes into enhanced behaviors.
-                </p>
-                <strong>Interface:</strong>
-                {% highlight "typescript" %}
-interface CustomAttributesRegistry extends HTMLRegistry<
-    AttributeDefinition, 
-    ImplementedAttribute
-> {
-    readonly localName = 'customAttributes';
-
-    // Same behavior as CustomElementRegistry but for attributes
-    define(
-        name: string, 
-        constructor: ImplementedAttribute, 
-        options?: CustomAttributesOptions
-    ): void;
-}
-                {% endhighlight %}
-            </div>
-
-            <hr class="my-6 border-gray-200">
-
-            <div>
-                <h4 id="customattribute">CustomAttribute</h4>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">New Primitive</span></p>
-                <p>
-                    The base class for creating behaviors, similar to <code>HTMLElement</code>.
-                </p>
-                <strong>Interface:</strong>
-                {% highlight "typescript" %}
-abstract class CustomAttribute {
-    // Instance Properties
-    readonly ownerElement: Element;
-    readonly name: string;
-    readonly value: string;
-    
-    // Lifecycle Callbacks
-    connectedCallback?(): void;
-    disconnectedCallback?(): void;
-    attributeChangedCallback?(
-        name: string, 
-        oldValue: string | null, 
-        newValue: string | null
-    ): void;
-    
-    // Static Configuration
-    static readonly observedAttributes?: string[];
-    static readonly formAssociated?: boolean;
-}
-                {% endhighlight %}
-            </div>
-
-            <hr class="my-6 border-gray-200">
-
-            <div>
-                <h4 id="customattributeparserregistry">CustomAttributeParserRegistry</h4>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">New Global</span></p>
-                <p><strong>Dependency:</strong> <code>CustomRegistry</code></p>
-                <p>Allows defining parsing logic for attribute values.</p>
-                <strong>Interface:</strong>
-                {% highlight "typescript" %}
-interface CustomAttributeParserRegistry extends CustomRegistry<CustomAttributeParser> {
-    readonly localName = 'CustomAttributeParsers';
-    define(
-        name: string, 
-        parser: CustomAttributeParser
-    ): void;
-}
-                {% endhighlight %}
-            </div>
-        </section>
-
-        <section id="contexts" class="section-card">
-            <h3 id="web-contexts-plugs">Web Contexts Plugs</h3>
-            <p class="mb-4"><strong>Required by:</strong> <a href="/projects/webcontexts/">Web Contexts</a></p>
-
-            <div>
-                <h4 id="customcontextregistry">CustomContextRegistry</h4>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">New Global</span></p>
-                <p><strong>Dependency:</strong> <code>HTMLRegistry</code></p>
-                <p>
-                    Exposes <code>window.customContextTypes</code>. It allows registering context definitions that provide data flow deeply to children.
-                </p>
-                <strong>Interface:</strong>
-                {% highlight "typescript" %}
-interface CustomContextRegistry extends HTMLRegistry<
-    ContextDefinition, 
-    ImplementedContext
-> {
-    readonly localName = 'customContextTypes';
-
-    define(name: string, Context: ImplementedContext): void;
-}
-                {% endhighlight %}
-            </div>
-
-            <hr class="my-6 border-gray-200">
-
-            <div>
-                <h4 id="customcontext">CustomContext</h4>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">New Primitive</span></p>
-                <p>
-                    Base class for defining a context provider.
-                </p>
-                <strong>Interface:</strong>
-                {% highlight "typescript" %}
-abstract class CustomContext<ContextValue> {
-    // Similar to CustomElement
-    connectedCallback?(): void;
-    disconnectedCallback?(): void;
-    adoptedCallback?(): void;
-
-    // Context Specific
-    contextConsumedCallback?(
-        callback: (...args: unknown[]) => ContextValue
-    ): void;
-    static readonly observedContexts?: string[];
-}
-                {% endhighlight %}
-            </div>
-        </section>
-
-        <section id="injectors" class="section-card">
-            <h3 id="web-injectors-plugs">Web Injectors Plugs</h3>
-            <p class="mb-4"><strong>Required by:</strong> <a href="/projects/webinjectors/">Web Injectors</a></p>
-
-            <div>
-                <h4 id="injectorroot">InjectorRoot</h4>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">New Global</span></p>
-                <p>
-                    The root container for dependency injection. It handles the map of all active injectors in the DOM tree.
-                </p>
-                <strong>Interface:</strong>
-                {% highlight "typescript" %}
-class InjectorRoot {
-    // Retrieval Methods used by resolution algorithm
-    static getInjectorRootOf(node: Node): InjectorRoot | undefined;
-    static getProviderOf(node: Node, providerName: string): Provider | undefined;
-    static getProvidersOf(node: Node): Map<string, Provider>;
-}
-                {% endhighlight %}
-            </div>
-        </section>
-
-        <section id="tokens" class="section-card">
-            <h3 id="web-tokens-plugs">Web Tokens Plugs</h3>
-            <p class="mb-4"><strong>Required by:</strong> <a href="/projects/webtokens/">Web Tokens</a></p>
-
-            <div>
-                <h4 id="customtextnoderegistry">CustomTextNodeRegistry</h4>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">New Global</span></p>
-                <p><strong>Dependency:</strong> <code>HTMLRegistry</code></p>
-                <p>Allows defining parsers for text content (e.g., Mustache syntax <code>{{ '{}' }}</code>).</p>
-                <strong>Interface:</strong>
-                {% highlight "typescript" %}
-interface CustomTextNodeRegistry extends HTMLRegistry<
-    TextNodeDefinition, 
-    ImplementedTextNode
-> {
-    readonly localName = 'customTextNodes';
-    define(name: string, TextNode: ImplementedTextNode): void;
-}
-                {% endhighlight %}
-            </div>
-
-            <hr class="my-6 border-gray-200">
-
-            <div>
-                <h4 id="customtextnodeparserregistry">CustomTextNodeParserRegistry</h4>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">New Global</span></p>
-                <p><strong>Dependency:</strong> <code>CustomRegistry</code></p>
-                <p>Manages parsers that can interpret text node content.</p>
-                <strong>Interface:</strong>
-                {% highlight "typescript" %}
-interface CustomTextNodeParserRegistry extends CustomRegistry<CustomTextNodeParser> {
-    readonly localName = 'customTextNodeParsers';
-    define(
-        name: string, 
-        parser: CustomTextNodeParser
-    ): void;
-}
-                {% endhighlight %}
-            </div>
-            
-            <hr class="my-6 border-gray-200">
-
-             <div>
-                <h4 id="custompathexpressionparserregistry">CustomPathExpressionParserRegistry</h4>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">New Global</span></p>
-                <p><strong>Dependency:</strong> <code>CustomRegistry</code></p>
-                <p>Registry for path expression parsers.</p>
-                <strong>Interface:</strong>
-                {% highlight "typescript" %}
-interface CustomPathExpressionParserRegistry extends CustomRegistry<
-    CustomPathExpressionParser
-> {
-    readonly localName = 'customPathExpressionParsers';
-    define(
-        name: string, 
-        parser: CustomPathExpressionParser
-    ): void;
-    
-    // Returns a Consumable that provides the resolved parser
-    query(): Consumable<CustomPathExpressionParser>;
-}
-                {% endhighlight %}
-            </div>
-
-            <hr class="my-6 border-gray-200">
-
-             <div>
-                <h4 id="custompathexpressionparser">CustomPathExpressionParser</h4>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">New Primitive</span></p>
-                <p>Standardizes how strings are parsed into executable paths (e.g. keypaths in bindings).</p>
-                 <strong>Interface:</strong>
-                {% highlight "typescript" %}
-abstract class CustomPathExpressionParser {
-    abstract parse(text: string): Graph;
-}
-                {% endhighlight %}
-            </div>
-        </section>
-
-        <section id="directives" class="section-card">
-            <h3 id="web-directives-plugs">Web Directives Plugs</h3>
-            <p class="mb-4"><strong>Required by:</strong> <a href="/projects/webdirectives/">Web Directives</a></p>
-
-            <div>
-                <h4 id="customcommentregistry">CustomCommentRegistry</h4>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">New Global</span></p>
-                <p><strong>Dependency:</strong> <code>HTMLRegistry</code></p>
-                <p>Enables attaching behavior to comment nodes, useful for structural directives (like `virtual-element`).</p>
-                <strong>Interface:</strong>
-                {% highlight "typescript" %}
-interface CustomCommentRegistry extends HTMLRegistry<
-    CommentDefinition, 
-    ImplementedComment
-> {
-    readonly localName = 'customComments';
-    define(name: string, comment: ImplementedComment): void;
-}
-                {% endhighlight %}
-            </div>
-
-            <hr class="my-6 border-gray-200">
-
-            <div>
-                <h4 id="customcomment">CustomComment</h4>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">New Primitive</span></p>
-                <p>Base class for enhanced comments.</p>
-                <strong>Interface:</strong>
-                {% highlight "typescript" %}
-class CustomComment extends Comment {
-    connectedCallback?(): void;
-    disconnectedCallback?(): void;
-    optionsChangedCallback?(oldValue: unknown, newValue: unknown): void;
-}
-                {% endhighlight %}
-            </div>
-
-            <hr class="my-6 border-gray-200">
-
-            <div>
-                <h4 id="customcommentparserregistry">CustomCommentParserRegistry</h4>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">New Global</span></p>
-                <p><strong>Dependency:</strong> <code>CustomRegistry</code></p>
-                <p>Parses comment content to identify custom comments.</p>
-                <strong>Interface:</strong>
-                {% highlight "typescript" %}
-interface CustomCommentParserRegistry extends CustomRegistry<CustomCommentParser> {
-    readonly localName = 'customCommentParsers';
-    define(
-        name: string, 
-        parser: CustomCommentParser
-    ): void;
-}
-                {% endhighlight %}
-            </div>
-        </section>
-
-        <section id="scripting" class="section-card">
-            <h3 id="web-scripting-plugs">Web Scripting Plugs</h3>
-            <p class="mb-4"><strong>Experimental</strong></p>
-
-             <div>
-                <h4 id="customscripttypesregistry">CustomScriptTypesRegistry</h4>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800 border border-emerald-200">New Global</span></p>
-                <p><strong>Dependency:</strong> <code>HTMLRegistry</code></p>
-                <p>Allows defining custom behavior for <code>&lt;script type="..."&gt;</code> tags.</p>
-                <strong>Interface:</strong>
-                {% highlight "typescript" %}
-interface CustomScriptTypesRegistry extends HTMLRegistry<
-    ScriptTypeDefinition, 
-    ImplementedCustomScriptType
-> {
-    readonly localName = 'customScriptTypes';
-    define(
-        name: string, 
-        scriptType: ImplementedCustomScriptType
-    ): void;
-}
-                {% endhighlight %}
-            </div>
-
-            <hr class="my-6 border-gray-200">
-
-            <div>
-                <h4 id="customscripttype">CustomScriptType</h4>
-                <p><strong>Type:</strong> <span class="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">New Primitive</span></p>
-                <p>Base class extending <code>HTMLScriptElement</code>.</p>
-                <strong>Interface:</strong>
-                {% highlight "typescript" %}
-abstract class CustomScriptType extends HTMLScriptElement {
-    connectedCallback?(): void;
-    disconnectedCallback?(): void;
-    adoptedCallback?(): void;
-}
-                {% endhighlight %}
-            </div>
-        </section>
-
-        </section>
+{{ renderProjectPlugs("webregistries", "Web Registries") }}
+{{ renderProjectPlugs("webinjectors", "Web Injectors") }}
+{{ renderProjectPlugs("webcontexts", "Web Contexts") }}
+{{ renderProjectPlugs("webcomponents", "Web Components") }}
+{{ renderProjectPlugs("webbehaviors", "Web Behaviors") }}
+{{ renderProjectPlugs("webdirectives", "Web Directives") }}
+{{ renderProjectPlugs("webtokens", "Web Tokens") }}
+{{ renderProjectPlugs("webstates", "Web States") }}

@@ -1,0 +1,45 @@
+<h4 id="overview">Overview</h4>
+<p><strong>Patch File:</strong> <code>custom-elements/Node.patch.ts</code></p>
+<p>
+    Adds context methods to the <code>Node</code> prototype, enabling hierarchical context lookup and management for declarative HTML token resolution.
+</p>
+
+<h4 id="added-methods">Added Methods</h4>
+<dl class="ml-4 text-sm">
+    <dt class="font-bold text-gray-800 mt-3"><code>createContext(contextType: string): CustomContext | undefined</code></dt>
+    <dd class="text-gray-600 ml-4">Creates a new context instance of the specified type by looking up the context constructor in the injector hierarchy.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>getContext(contextType: string): any | undefined</code></dt>
+    <dd class="text-gray-600 ml-4">Retrieves a context value by walking up the injector hierarchy. Returns the first matching context instance found.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>ensureContext(contextType: string): CustomContext</code></dt>
+    <dd class="text-gray-600 ml-4">Gets the own context if it exists, or creates and attaches a new context instance if it doesn't.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>getOwnContext(contextType: string): any | null</code></dt>
+    <dd class="text-gray-600 ml-4">Returns the context owned by this specific node, without walking up the hierarchy.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>hasContext(contextType: string): boolean</code></dt>
+    <dd class="text-gray-600 ml-4">Returns true if a context of the specified type exists anywhere in the hierarchy.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>hasOwnContext(contextType: string): boolean</code></dt>
+    <dd class="text-gray-600 ml-4">Returns true if this node owns a context of the specified type.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>queryContext(contextType: string, query: any): Consumable</code></dt>
+    <dd class="text-gray-600 ml-4">Queries a context with a specific query parameter, returning a Consumable that resolves the result.</dd>
+</dl>
+
+<h4 id="usage-example">Usage Example</h4>
+{% highlight "javascript" %}
+// Get a context value from the hierarchy
+const theme = element.getContext('theme');
+
+// Ensure a context exists on this node
+const localTheme = element.ensureContext('theme');
+
+// Query a context with parameters
+const userName = element.queryContext('user', { field: 'name' });
+{% endhighlight %}
+
+<p class="text-sm text-gray-600 mt-4">
+    See <a href="/projects/webcontexts/">Web Contexts</a> for complete DOM API and usage patterns.
+</p>

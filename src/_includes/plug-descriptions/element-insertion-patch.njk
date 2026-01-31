@@ -1,0 +1,20 @@
+<h4 id="overview">Overview</h4>
+<p><strong>Patch File:</strong> <code>custom-elements/Element.patch.ts</code></p>
+<p>
+    Patches DOM insertion methods to enable "lazy upgrade" of custom elements when they connect to the DOM.
+</p>
+
+<h4 id="patched-methods">Patched Methods</h4>
+<ul class="list-disc ml-5 mb-4 text-sm text-gray-600">
+    <li><code>append(...nodes)</code></li>
+    <li><code>prepend(...nodes)</code></li>
+    <li><code>after(...nodes)</code></li>
+    <li><code>before(...nodes)</code></li>
+    <li><code>replaceChildren(...nodes)</code></li>
+    <li><code>replaceWith(...nodes)</code></li>
+    <li><code>insertAdjacentElement(position, element)</code></li>
+</ul>
+
+<p class="text-sm text-gray-600 mt-4">
+    These patches ensure that when elements are inserted into the DOM, they are properly upgraded according to their scoped registry definitions. This enables lazy loading and scoped custom element definitions.
+</p>

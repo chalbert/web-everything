@@ -1,0 +1,27 @@
+<h4 id="overview">Overview</h4>
+<p><strong>Dependency:</strong> <code>CustomRegistry</code></p>
+<p>
+    A specialized abstract registry for storing constructors that are bound to DOM nodes.
+    It handles the complexity of "Upgrading" and "Downgrading" nodes when definitions are added or removed.
+</p>
+
+<h4 id="interface">Interface</h4>
+{% highlight "typescript" %}
+interface HTMLRegistry<Definition, DefType> extends CustomRegistry<
+    Definition,
+    string
+> {
+    abstract readonly localName: string;
+
+    // Node Lifecycle
+    abstract upgrade(node: Node): void;
+    abstract downgrade(node: Node): void;
+
+    // Reverse Lookup
+    getLocalNameOf(constructor: DefType): string | undefined;
+}
+{% endhighlight %}
+
+<p class="text-sm text-gray-600 mt-4">
+    HTMLRegistry extends CustomRegistry to add DOM-specific lifecycle management. Concrete registries like CustomElementRegistry and CustomAttributesRegistry extend this base.
+</p>

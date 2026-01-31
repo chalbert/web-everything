@@ -1,0 +1,15 @@
+<h4 id="overview">Overview</h4>
+<p><strong>Patch File:</strong> <code>custom-elements/Document.patch.ts</code></p>
+<p>
+    Patches <code>Document.createElement</code> to apply correct prototypes from the patched constructors.
+</p>
+
+<p class="text-sm text-gray-600 mt-4">
+    When creating elements via <code>document.createElement()</code>, this patch ensures that elements receive the correct prototype chain from the patched window constructors, enabling features like scoped registries and enhanced lifecycle management.
+</p>
+
+{% highlight "javascript" %}
+// Creates element with correct prototype
+const div = document.createElement('div');
+// div has enhanced HTMLDivElement prototype with registry support
+{% endhighlight %}

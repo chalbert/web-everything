@@ -1,0 +1,14 @@
+<h4 id="overview">Overview</h4>
+<p><strong>Dependency:</strong> <code>CustomRegistry</code></p>
+<p>Parses comment content to identify and upgrade custom comments into active directives.</p>
+
+<h4 id="interface">Interface</h4>
+{% highlight "typescript" %}
+interface CustomCommentParserRegistry extends CustomRegistry<CustomCommentParser> {
+    readonly localName = 'customCommentParsers';
+    define(
+        name: string,
+        parser: CustomCommentParser
+    ): void;
+}
+{% endhighlight %}

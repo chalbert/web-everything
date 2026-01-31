@@ -1,0 +1,22 @@
+<h4 id="overview">Overview</h4>
+<p>Base class for enhanced comments with lifecycle callbacks for comment-based directives.</p>
+
+<h4 id="interface">Interface</h4>
+{% highlight "typescript" %}
+class CustomComment extends Comment {
+    connectedCallback?(): void;
+    disconnectedCallback?(): void;
+    optionsChangedCallback?(oldValue: unknown, newValue: unknown): void;
+}
+{% endhighlight %}
+
+<h4 id="use-cases">Use Cases</h4>
+<ul class="list-disc ml-5 mb-4 text-sm text-gray-600">
+    <li>Structural directives (*if, *for)</li>
+    <li>Virtual elements that don't pollute DOM structure</li>
+    <li>Template projection markers</li>
+</ul>
+
+<p class="text-sm text-gray-600 mt-4">
+    See <a href="/projects/webdirectives/">Web Directives</a> for implementation patterns.
+</p>

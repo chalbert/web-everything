@@ -1,0 +1,18 @@
+<h4 id="overview">Overview</h4>
+<p><strong>Dependency:</strong> <code>HTMLRegistry</code></p>
+<p>Enables attaching behavior to comment nodes, useful for structural directives like virtual elements.</p>
+
+<h4 id="interface">Interface</h4>
+{% highlight "typescript" %}
+interface CustomCommentRegistry extends HTMLRegistry<
+    CommentDefinition,
+    ImplementedComment
+> {
+    readonly localName = 'customComments';
+    define(name: string, comment: ImplementedComment): void;
+}
+{% endhighlight %}
+
+<p class="text-sm text-gray-600 mt-4">
+    See <a href="/projects/webdirectives/">Web Directives</a> for structural directive patterns.
+</p>

@@ -1,0 +1,26 @@
+<h4 id="overview">Overview</h4>
+<p><strong>Patch File:</strong> <code>custom-elements/Element.patch.ts</code></p>
+<p>
+    Intercepts the <code>innerHTML</code> setter to propagate injector scope to newly created nodes.
+</p>
+
+<h4 id="behavior">Behavior</h4>
+<p class="text-sm text-gray-600">
+    When HTML is set via <code>innerHTML</code>, the patch:
+</p>
+<ol class="list-decimal ml-5 mb-4 text-sm text-gray-600">
+    <li>Saves the current creation injector</li>
+    <li>Sets the creation injector to this element's closest injector</li>
+    <li>Calls the native innerHTML setter</li>
+    <li>Walks the newly created tree to apply correct prototypes</li>
+    <li>Restores the previous creation injector</li>
+</ol>
+
+<p class="text-sm text-gray-600 mt-4">
+    This ensures that elements created through innerHTML inherit the proper injector context and have access to scoped registries.
+</p>
+
+{% highlight "javascript" %}
+// Elements created here inherit parent's injector scope
+element.innerHTML = '<my-component></my-component>';
+{% endhighlight %}

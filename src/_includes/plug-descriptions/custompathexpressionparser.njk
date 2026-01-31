@@ -1,0 +1,16 @@
+<h4 id="overview">Overview</h4>
+<p>Standardizes how strings are parsed into executable paths for use in data bindings and expressions.</p>
+
+<h4 id="interface">Interface</h4>
+{% highlight "typescript" %}
+abstract class CustomPathExpressionParser {
+    abstract parse(text: string): Graph;
+}
+{% endhighlight %}
+
+<h4 id="use-cases">Use Cases</h4>
+<ul class="list-disc ml-5 mb-4 text-sm text-gray-600">
+    <li>Keypath expressions: <code>user.profile.name</code></li>
+    <li>Computed properties: <code>items.length</code></li>
+    <li>Method calls: <code>formatDate(date, 'YYYY-MM-DD')</code></li>
+</ul>

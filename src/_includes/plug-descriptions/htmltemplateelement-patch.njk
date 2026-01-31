@@ -1,0 +1,24 @@
+<h4 id="overview">Overview</h4>
+<p><strong>Patch File:</strong> <code>custom-elements/HTMLTemplateElement.patch.ts</code></p>
+<p>
+    Patches the <code>content</code> getter on HTMLTemplateElement to support enhanced template functionality.
+</p>
+
+<h4 id="behavior">Behavior</h4>
+<p class="text-sm text-gray-600 mb-4">
+    This patch ensures that:
+</p>
+<ul class="list-disc ml-5 mb-4 text-sm text-gray-600">
+    <li>The DocumentFragment returned by <code>template.content</code> has the correct prototype</li>
+    <li>The fragment maintains a reference to its owner template via <code>ownerTemplate</code></li>
+    <li>Template cloning preserves metadata and injector context</li>
+</ul>
+
+{% highlight "javascript" %}
+const template = document.createElement('template');
+template.innerHTML = '<my-component></my-component>';
+
+// content is a properly enhanced DocumentFragment
+const fragment = template.content;
+console.log(fragment.ownerTemplate === template); // true
+{% endhighlight %}

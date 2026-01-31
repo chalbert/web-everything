@@ -1,0 +1,17 @@
+<h4 id="overview">Overview</h4>
+<p><strong>Patch File:</strong> <code>custom-elements/Node.patch.ts</code></p>
+<p>
+    Patches <code>cloneNode</code> to properly preserve Custom Elements, Custom Comments, and Custom Text Nodes during cloning operations.
+</p>
+
+<h4 id="what-it-preserves">What it Preserves</h4>
+<ul class="list-disc ml-5 mb-4 text-sm text-gray-600">
+    <li><strong>Custom Elements:</strong> Reconstructs elements using their constructor with original options</li>
+    <li><strong>Custom Comments:</strong> Preserves comment behavior prototypes and options</li>
+    <li><strong>Custom Text Nodes:</strong> Maintains parser information and reactive bindings</li>
+    <li><strong>Undetermined Nodes:</strong> Preserves upgrade state for nodes awaiting parser determination</li>
+</ul>
+
+<p class="text-sm text-gray-600 mt-4">
+    Without this patch, cloned nodes would lose their enhanced prototypes and revert to native HTML elements, comments, and text nodes.
+</p>

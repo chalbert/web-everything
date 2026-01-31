@@ -1,0 +1,14 @@
+<h4 id="overview">Overview</h4>
+<p><strong>Dependency:</strong> <code>CustomRegistry</code></p>
+<p>Allows defining parsing logic for attribute values, enabling custom syntax and transformations.</p>
+
+<h4 id="interface">Interface</h4>
+{% highlight "typescript" %}
+interface CustomAttributeParserRegistry extends CustomRegistry<CustomAttributeParser> {
+    readonly localName = 'customAttributeParsers';
+    define(
+        name: string,
+        parser: CustomAttributeParser
+    ): void;
+}
+{% endhighlight %}

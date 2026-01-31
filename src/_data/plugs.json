@@ -1,0 +1,268 @@
+[
+  {
+    "id": "customregistry",
+    "name": "CustomRegistry",
+    "status": "implemented",
+    "type": "Global",
+    "summary": "Abstract base class for all scoped registries, standardizing API for storing and retrieving definitions with inheritance support.",
+    "projects": ["webregistries"]
+  },
+  {
+    "id": "htmlregistry",
+    "name": "HTMLRegistry",
+    "status": "implemented",
+    "type": "Global",
+    "summary": "Specialized abstract registry for storing constructors bound to DOM nodes, handling node upgrade and downgrade lifecycles.",
+    "projects": ["webregistries"]
+  },
+  {
+    "id": "customelementregistry-patch",
+    "name": "CustomElementRegistry",
+    "status": "implemented",
+    "type": "Patch",
+    "summary": "Replaces native window.customElements with an extended version supporting scoped registries and inheritance.",
+    "projects": ["webregistries"],
+    "patchFile": "custom-elements/CustomElementRegistry.ts"
+  },
+  {
+    "id": "injectorroot",
+    "name": "InjectorRoot",
+    "status": "implemented",
+    "type": "Global",
+    "summary": "Root container for dependency injection, handling the map of all active injectors in the DOM tree.",
+    "projects": ["webinjectors"]
+  },
+  {
+    "id": "htmlinjector",
+    "name": "HTMLInjector",
+    "status": "implemented",
+    "type": "Global",
+    "summary": "Injector instance bound to a specific DOM node, providing hierarchical dependency resolution.",
+    "projects": ["webinjectors"]
+  },
+  {
+    "id": "node-injector-patch",
+    "name": "Node (Injector Methods)",
+    "status": "implemented",
+    "type": "Patch",
+    "summary": "Adds injector hierarchy methods to Node prototype: getClosestInjector(), getOwnInjector(), hasOwnInjector(), injectors(), createElement().",
+    "projects": ["webinjectors"],
+    "patchFile": "custom-elements/Node.patch.ts"
+  },
+  {
+    "id": "element-innerhtml-patch",
+    "name": "Element.innerHTML",
+    "status": "implemented",
+    "type": "Patch",
+    "summary": "Intercepts innerHTML setter to propagate injector scope to newly created nodes.",
+    "projects": ["webinjectors"],
+    "patchFile": "custom-elements/Element.patch.ts"
+  },
+  {
+    "id": "customcontextregistry",
+    "name": "CustomContextRegistry",
+    "status": "implemented",
+    "type": "Global",
+    "summary": "Exposes window.customContextTypes for registering context definitions that provide hierarchical data flow.",
+    "projects": ["webcontexts"]
+  },
+  {
+    "id": "customcontext",
+    "name": "CustomContext",
+    "status": "implemented",
+    "type": "Global",
+    "summary": "Base class for defining context providers with lifecycle callbacks and consumption tracking.",
+    "projects": ["webcontexts"]
+  },
+  {
+    "id": "node-context-patch",
+    "name": "Node (Context Methods)",
+    "status": "implemented",
+    "type": "Patch",
+    "summary": "Adds context methods to Node prototype: createContext(), getContext(), ensureContext(), getOwnContext(), hasContext(), hasOwnContext(), queryContext().",
+    "projects": ["webcontexts"],
+    "patchFile": "custom-elements/Node.patch.ts"
+  },
+  {
+    "id": "customelement",
+    "name": "CustomElement",
+    "status": "implemented",
+    "type": "Global",
+    "summary": "Base class for custom elements with enhanced lifecycle and options support.",
+    "projects": ["webcomponents"]
+  },
+  {
+    "id": "node-clonenode-patch",
+    "name": "Node.cloneNode",
+    "status": "implemented",
+    "type": "Patch",
+    "summary": "Patches cloneNode to preserve Custom Elements, Custom Comments, and Custom Text Nodes with their prototypes and options.",
+    "projects": ["webcomponents"],
+    "patchFile": "custom-elements/Node.patch.ts"
+  },
+  {
+    "id": "element-insertion-patch",
+    "name": "Element (Insertion Methods)",
+    "status": "implemented",
+    "type": "Patch",
+    "summary": "Patches DOM insertion methods (append, prepend, after, before, replaceChildren, replaceWith) for lazy element upgrade.",
+    "projects": ["webcomponents"],
+    "patchFile": "custom-elements/Element.patch.ts"
+  },
+  {
+    "id": "htmlelement-patch",
+    "name": "HTMLElement Constructors",
+    "status": "implemented",
+    "type": "Patch",
+    "summary": "Wraps native HTMLElement constructors to enable the dynamic registry system.",
+    "projects": ["webcomponents"],
+    "patchFile": "custom-elements/HTMLElement.patch.ts"
+  },
+  {
+    "id": "document-createelement-patch",
+    "name": "Document.createElement",
+    "status": "implemented",
+    "type": "Patch",
+    "summary": "Patches createElement to apply correct prototypes from the patched constructors.",
+    "projects": ["webcomponents"],
+    "patchFile": "custom-elements/Document.patch.ts"
+  },
+  {
+    "id": "documentfragment-patch",
+    "name": "DocumentFragment.ownerTemplate",
+    "status": "implemented",
+    "type": "Patch",
+    "summary": "Adds ownerTemplate property to DocumentFragment for template ownership tracking.",
+    "projects": ["webcomponents"],
+    "patchFile": "custom-elements/DocumentFragment.patch.ts"
+  },
+  {
+    "id": "htmltemplateelement-patch",
+    "name": "HTMLTemplateElement.content",
+    "status": "implemented",
+    "type": "Patch",
+    "summary": "Patches the content getter to support enhanced template functionality.",
+    "projects": ["webcomponents"],
+    "patchFile": "custom-elements/HTMLTemplateElement.patch.ts"
+  },
+  {
+    "id": "customattributesregistry",
+    "name": "CustomAttributesRegistry",
+    "status": "implemented",
+    "type": "Global",
+    "summary": "Exposes window.customAttributes, monitoring DOM for attribute changes and facilitating upgrade of attributes into behaviors.",
+    "projects": ["webbehaviors"]
+  },
+  {
+    "id": "customattribute",
+    "name": "CustomAttribute",
+    "status": "implemented",
+    "type": "Global",
+    "summary": "Base class for creating behaviors, similar to HTMLElement, with lifecycle callbacks for attribute-based components.",
+    "projects": ["webbehaviors"]
+  },
+  {
+    "id": "customattributeparserregistry",
+    "name": "CustomAttributeParserRegistry",
+    "status": "implemented",
+    "type": "Global",
+    "summary": "Allows defining parsing logic for attribute values, enabling custom syntax and transformations.",
+    "projects": ["webbehaviors"]
+  },
+  {
+    "id": "customcommentregistry",
+    "name": "CustomCommentRegistry",
+    "status": "implemented",
+    "type": "Global",
+    "summary": "Enables attaching behavior to comment nodes, useful for structural directives like virtual elements.",
+    "projects": ["webdirectives"]
+  },
+  {
+    "id": "customcomment",
+    "name": "CustomComment",
+    "status": "implemented",
+    "type": "Global",
+    "summary": "Base class for enhanced comments with lifecycle callbacks for comment-based directives.",
+    "projects": ["webdirectives"]
+  },
+  {
+    "id": "customcommentparserregistry",
+    "name": "CustomCommentParserRegistry",
+    "status": "implemented",
+    "type": "Global",
+    "summary": "Parses comment content to identify and upgrade custom comments into active directives.",
+    "projects": ["webdirectives"]
+  },
+  {
+    "id": "customtemplatedirective",
+    "name": "CustomTemplateDirective",
+    "status": "concept",
+    "type": "Global",
+    "summary": "Base class for template directives that control template instantiation and projection.",
+    "projects": ["webdirectives"]
+  },
+  {
+    "id": "customtextnoderegistry",
+    "name": "CustomTextNodeRegistry",
+    "status": "implemented",
+    "type": "Global",
+    "summary": "Allows defining parsers for text content, enabling custom template syntax like Mustache-style interpolation.",
+    "projects": ["webtokens"]
+  },
+  {
+    "id": "customtextnode",
+    "name": "CustomTextNode",
+    "status": "implemented",
+    "type": "Global",
+    "summary": "Base class for enhanced text nodes with reactive binding capabilities.",
+    "projects": ["webtokens"]
+  },
+  {
+    "id": "customtextnodeparserregistry",
+    "name": "CustomTextNodeParserRegistry",
+    "status": "implemented",
+    "type": "Global",
+    "summary": "Manages parsers that can interpret text node content and transform it into reactive components.",
+    "projects": ["webtokens"]
+  },
+  {
+    "id": "custompathexpressionparserregistry",
+    "name": "CustomPathExpressionParserRegistry",
+    "status": "implemented",
+    "type": "Global",
+    "summary": "Registry for path expression parsers, standardizing how strings are parsed into executable paths.",
+    "projects": ["webtokens"]
+  },
+  {
+    "id": "custompathexpressionparser",
+    "name": "CustomPathExpressionParser",
+    "status": "implemented",
+    "type": "Global",
+    "summary": "Standardizes how strings are parsed into executable paths for use in data bindings and expressions.",
+    "projects": ["webtokens"]
+  },
+  {
+    "id": "customscripttypesregistry",
+    "name": "CustomScriptTypesRegistry",
+    "status": "experimental",
+    "type": "Global",
+    "summary": "Allows defining custom behavior for script tags with custom type attributes, enabling declarative scripting patterns.",
+    "projects": ["webinjectors", "webcontexts"]
+  },
+  {
+    "id": "customscripttype",
+    "name": "CustomScriptType",
+    "status": "experimental",
+    "type": "Global",
+    "summary": "Base class extending HTMLScriptElement with lifecycle callbacks for custom script types.",
+    "projects": ["webinjectors", "webcontexts"]
+  },
+  {
+    "id": "customstoreregistry",
+    "name": "CustomStoreRegistry",
+    "status": "concept",
+    "type": "Global",
+    "summary": "Registry for state management stores, enabling reactive data flow patterns.",
+    "projects": ["webstates"]
+  }
+]

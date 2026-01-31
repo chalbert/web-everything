@@ -1,0 +1,47 @@
+---
+pagination:
+    data: plugs
+    size: 1
+    alias: plug
+permalink: "plugs/{{ plug.id }}/"
+layout: base.njk
+eleventyComputed:
+    title: "Web Plugs - {{ plug.name }}"
+---
+
+{% from "project-status.njk" import projectStatus %}
+
+<div class="container block-detail-page">
+    <div class="block-header">
+        <a href="/projects/webplugs/" class="back-link">&larr; Back to Web Plugs</a>
+        <h1 class="block-title">{{ plug.name }}</h1>
+        <div class="flex items-center gap-3 mt-4 mb-4">
+            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {% if plug.type == 'Global' %}bg-blue-100 text-blue-800 border border-blue-200{% else %}bg-amber-100 text-amber-800 border border-amber-200{% endif %}">
+                {{ plug.type }}
+            </span>
+            <div style="max-width: 300px;">
+                {{ projectStatus(plug.status) }}
+            </div>
+        </div>
+        <p class="lead">{{ plug.summary }}</p>
+        
+        {% if plug.projects.length > 0 %}
+        <div class="mt-4">
+            <div class="text-sm text-gray-600 mb-2">Part of:</div>
+            <div class="flex flex-wrap gap-2">
+                {% for project in plug.projects %}
+                <a href="/projects/{{ project }}/" class="px-3 py-1.5 rounded text-sm bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200">
+                    {{ project | replace("web", "Web ") | title }}
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+
+    <div class="block-body content">
+        <div class="section-card">
+            {% include "plug-descriptions/" + plug.id + ".njk" %}
+        </div>
+    </div>
+</div>

@@ -1,0 +1,14 @@
+<h4 id="overview">Overview</h4>
+<p><strong>Dependency:</strong> <code>CustomRegistry</code></p>
+<p>Manages parsers that can interpret text node content and transform it into reactive components.</p>
+
+<h4 id="interface">Interface</h4>
+{% highlight "typescript" %}
+interface CustomTextNodeParserRegistry extends CustomRegistry<CustomTextNodeParser> {
+    readonly localName = 'customTextNodeParsers';
+    define(
+        name: string,
+        parser: CustomTextNodeParser
+    ): void;
+}
+{% endhighlight %}

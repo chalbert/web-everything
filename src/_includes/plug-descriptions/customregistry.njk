@@ -1,0 +1,72 @@
+<h4 id="overview">Overview</h4>
+<p>
+    <strong>CustomRegistry</strong> is the abstract base class for all scoped registries in the Web Everything platform.
+    It standardizes the API for storing and retrieving definitions while supporting inheritance from parent registries.
+</p>
+
+<p class="text-sm text-gray-600 mb-4">
+    <strong>Required by:</strong> <a href="/projects/webregistries/">Web Registries</a>
+</p>
+
+<h4 id="interface">Interface</h4>
+{% highlight "typescript" %}
+interface CustomRegistry<Definition, Key> {
+    abstract readonly localName: string;
+
+    // Core Registry API
+    define(name: Key, definition: Definition): void;
+    get(name: Key): Definition | undefined;
+}
+{% endhighlight %}
+
+<h4 id="key-concepts">Key Concepts</h4>
+<dl class="ml-4 text-sm">
+    <dt class="font-bold text-gray-800 mt-3">Scoped Resolution</dt>
+    <dd class="text-gray-600 ml-4">
+        Each registry can have a parent registry. When looking up a definition, the registry first checks its own map, then delegates to its parent if not found. This enables hierarchical scoping similar to JavaScript's prototype chain.
+    </dd>
+
+    <dt class="font-bold text-gray-800 mt-3">Uniform Interface</dt>
+    <dd class="text-gray-600 ml-4">
+        All registries (customElements, customAttributes, customContexts, etc.) extend CustomRegistry and share the same core API: <code>define()</code> and <code>get()</code>. This consistency simplifies the mental model and enables generic registry manipulation.
+    </dd>
+
+    <dt class="font-bold text-gray-800 mt-3">Local Name</dt>
+    <dd class="text-gray-600 ml-4">
+        Each registry has a <code>localName</code> that identifies it within an injector. For example, <code>customElements</code> or <code>customContexts</code>. This enables the uniform access pattern: <code>injector.get('customElements')</code>.
+    </dd>
+</dl>
+
+<h4 id="registry-hierarchy">Registry Hierarchy</h4>
+<pre class="text-sm bg-gray-50 p-4 rounded border">
+CustomRegistry (Abstract Base)
+  ├─ HTMLRegistry (Abstract, for DOM-bound registries)
+  │   ├─ CustomElementRegistry
+  │   ├─ CustomAttributesRegistry
+  │   ├─ CustomContextRegistry
+  │   ├─ CustomCommentRegistry
+  │   ├─ CustomTextNodeRegistry
+  │   └─ CustomScriptTypesRegistry
+  └─ Other registries (CustomCommentParserRegistry, etc.)
+</pre>
+
+<h4 id="usage-example">Usage Example</h4>
+{% highlight "typescript" %}
+// Access a registry from an injector
+const injector = element.getClosestInjector();
+const elementsRegistry = injector.get('customElements');
+
+// Define a component in the scoped registry
+elementsRegistry.define('my-component', MyComponent);
+
+// Retrieve a definition
+const definition = elementsRegistry.get('my-component');
+{% endhighlight %}
+
+<h4 id="design-principles">Design Principles</h4>
+<ul class="list-disc ml-5 mb-4 text-sm text-gray-600">
+    <li><strong>Composable:</strong> Registries can be composed and nested via injector hierarchies</li>
+    <li><strong>Generic:</strong> Type parameters allow strong typing for specific registry types</li>
+    <li><strong>Extensible:</strong> New registry types can be created by extending CustomRegistry</li>
+    <li><strong>Uniform:</strong> All registries follow the same access pattern within injectors</li>
+</ul>

@@ -1,0 +1,77 @@
+<section class="intro-section mb-12">
+  <h3 id="mission">Mission</h3>
+  <p><strong>Web Traces</strong> aims to standardize execution flow monitoring and distributed tracing for the web, aligning with <a href="https://www.w3.org/TR/trace-context/">W3C Trace Context</a> and <a href="https://opentelemetry.io/">OpenTelemetry</a>. This document summarizes research into current standards, proposals, and libraries, and clarifies the terminology landscape.</p>
+</section>
+
+<details class="section-card" style="margin-top: 2rem;">
+  <summary style="cursor: pointer; font-size: 1.25rem; font-weight: 600; padding: 1rem; background: rgba(99, 102, 241, 0.05); border-radius: 8px; user-select: none; list-style: none;">
+    <span style="display: inline-block; transition: transform 0.2s;">▶</span> Research & Analysis
+  </summary>
+  <div style="padding: 1rem 0;">
+
+<section class="section-card">
+  <h3 id="research">Research & Terminology</h3>
+  <ul>
+    <li><strong>OpenTelemetry</strong>: Industry standard for distributed tracing, metrics, and logging. Key terms: <em>trace</em>, <em>span</em>, <em>context</em>, <em>attribute</em>. API: <code>startSpan</code>, <code>setAttribute</code>, context propagation.</li>
+    <li><strong>W3C Trace Context</strong>: Standard for propagating distributed trace context via HTTP headers (<code>traceparent</code>, <code>tracestate</code>).</li>
+    <li><strong>MobX/Redux DevTools</strong>: State management tools using <em>trace</em>, <em>action</em>, <em>effect</em> to log state changes and side effects.</li>
+    <li><strong>Provenance Libraries</strong> (e.g., ProvJS): Academic/enterprise tools for data lineage, using <em>provenance</em>, <em>trace</em>, <em>transformation</em>, <em>effect</em>.</li>
+  </ul>
+
+  <h4>Terminology Comparison</h4>
+  <div style="overflow-x:auto;">
+    <table>
+      <thead>
+        <tr><th>Keyword</th><th>Domain/Use Case</th><th>What it Covers</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>trace</strong></td><td>Tracing, state mgmt, provenance</td><td>Tracking data/operation lineage</td></tr>
+        <tr><td><strong>effect</strong></td><td>State mgmt, FP, tracing</td><td>Transformation or side effect</td></tr>
+        <tr><td><strong>action</strong></td><td>State mgmt, UI, events</td><td>Discrete event/command causing change</td></tr>
+        <tr><td><strong>provenance</strong></td><td>Data science, audit, pipelines</td><td>Full data origin/history/lineage</td></tr>
+        <tr><td><strong>transformation</strong></td><td>Data processing, FP, state mgmt</td><td>Data-changing operation</td></tr>
+        <tr><td><strong>span</strong></td><td>Distributed tracing</td><td>Single operation within a trace</td></tr>
+        <tr><td><strong>context</strong></td><td>Tracing, state, environment</td><td>Execution environment, trace propagation</td></tr>
+        <tr><td><strong>attributes</strong></td><td>Tracing, logging, events</td><td>Metadata for enrichment/filtering</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4>Best Practices & Recommendations</h4>
+  <ul>
+    <li>Use <strong>trace</strong> for tagging and following data/operation lineage.</li>
+    <li>Use <strong>effect</strong> for logging or tracking transformations/side effects.</li>
+    <li>Support <strong>attributes</strong> and <strong>context</strong> for extensibility and distributed scenarios.</li>
+    <li>For distributed tracing, align with OpenTelemetry's span/context model; for local state, use clear, idiomatic APIs.</li>
+  </ul>
+
+  <h4>Key Concepts in Tracing Systems</h4>
+  <ul>
+    <li><strong>Multiple Tracers:</strong> Support for multiple tracing sources or domains in the same app.</li>
+    <li><strong>Exception Recording:</strong> Ability to record and associate exceptions/errors with traces or effects.</li>
+    <li><strong>Tagging/Labeling:</strong> Tag effects/spans with strings or key-value pairs for identification and filtering.</li>
+    <li><strong>Inheritance/Parent-Child:</strong> Effects/spans can inherit from or be nested under others, forming a hierarchy.</li>
+    <li><strong>Context Propagation:</strong> Pass trace context (IDs, metadata) across async boundaries or between client/server.</li>
+    <li><strong>Attributes/Tags:</strong> Attach arbitrary metadata to spans/effects for analysis.</li>
+    <li><strong>Events/Logs:</strong> Attach time-stamped events or logs to a span/effect for granular insight.</li>
+    <li><strong>Sampling:</strong> Control which traces are recorded to manage overhead.</li>
+    <li><strong>Baggage:</strong> Propagate custom key-value pairs alongside trace context for cross-cutting concerns.</li>
+    <li><strong>Start/End Timestamps:</strong> Manual or automatic control over span/effect timing.</li>
+    <li><strong>Links:</strong> Relate spans that are not in a strict parent/child relationship (e.g., async fan-in/fan-out).</li>
+    <li><strong>Status Codes:</strong> Mark spans/effects as success, error, or custom status.</li>
+    <li><strong>Resource/Service Identity:</strong> Identify the logical service/component emitting the trace.</li>
+    <li><strong>Exporter/Reporter:</strong> Pluggable mechanism to send traces to backends (e.g., Jaeger, Zipkin, Sentry).</li>
+    <li><strong>Auto-Instrumentation:</strong> Automatic tracing of common browser APIs (XHR, fetch, navigation, etc.).</li>
+    <li><strong>Trace/Span IDs:</strong> Unique identifiers for correlating traces and spans across systems.</li>
+    <li><strong>Trace Correlation:</strong> Ability to correlate logs, metrics, and traces for unified observability.</li>
+  </ul>
+
+  <h4>Suggested API Shape</h4>
+  <pre><code>trace(value, { attributes });
+effect(operation, { input, output, attributes });
+  </code></pre>
+  <p>This approach is compatible with both distributed and local tracing needs, and aligns with industry and academic best practices.</p>
+</section>
+
+  </div>
+</details>

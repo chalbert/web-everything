@@ -1,0 +1,73 @@
+<h4 id="overview">Overview</h4>
+<p>
+    <strong>CustomTextNode</strong> is the base class for enhanced text nodes with reactive binding capabilities, enabling custom template syntax and dynamic content updates.
+</p>
+
+<h4 id="interface">Interface</h4>
+{% highlight "typescript" %}
+abstract class CustomTextNode extends Text {
+    // Instance Properties
+    readonly options?: CustomTextNodeOptions;
+    readonly parserName?: string;
+    readonly determined: boolean;
+    
+    // Lifecycle Callbacks
+    connectedCallback?(): void;
+    disconnectedCallback?(): void;
+    
+    // Static Configuration
+    static readonly observedAttributes?: string[];
+}
+{% endhighlight %}
+
+<h4 id="key-concepts">Key Concepts</h4>
+<dl class="ml-4 text-sm">
+    <dt class="font-bold text-gray-800 mt-3">Undetermined Text Nodes</dt>
+    <dd class="text-gray-600 ml-4">
+        Text nodes with interpolation syntax (e.g., <code>{{ '{{value}}' }}</code>) start as "undetermined" and are upgraded to specific CustomTextNode types by parsers.
+    </dd>
+
+    <dt class="font-bold text-gray-800 mt-3">Reactive Bindings</dt>
+    <dd class="text-gray-600 ml-4">
+        CustomTextNode instances can subscribe to data changes and automatically update their textContent when dependencies change.
+    </dd>
+
+    <dt class="font-bold text-gray-800 mt-3">Parser Integration</dt>
+    <dd class="text-gray-600 ml-4">
+        The <code>parserName</code> property identifies which parser should handle this text node's syntax.
+    </dd>
+</dl>
+
+<h4 id="usage-example">Creating a Custom Text Node</h4>
+{% highlight "typescript" %}
+class InterpolationTextNode extends CustomTextNode {
+    #expression: string;
+    
+    connectedCallback() {
+        // Parse the expression
+        this.#expression = this.textContent || '';
+        
+        // Subscribe to changes and update
+        this.subscribe();
+    }
+    
+    subscribe() {
+        // Set up reactive binding
+        const value = this.evaluateExpression(this.#expression);
+        this.textContent = String(value);
+    }
+    
+    evaluateExpression(expr: string) {
+        // Evaluate against context
+        const context = this.getContext('data');
+        return eval(expr);
+    }
+}
+
+// Register
+window.customTextNodes.define('interpolation', InterpolationTextNode);
+{% endhighlight %}
+
+<p class="text-sm text-gray-600 mt-4">
+    See <a href="/projects/webtokens/">Web Tokens</a> for template syntax and binding patterns.
+</p>

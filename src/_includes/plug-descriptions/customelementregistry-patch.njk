@@ -1,0 +1,28 @@
+<h4 id="overview">Overview</h4>
+<p><strong>Dependency:</strong> <code>HTMLRegistry</code></p>
+<p>
+    Replaces the native <code>window.customElements</code> with a version that extends <code>HTMLRegistry</code>.
+    This keeps the native API compatible while unlocking the features of <strong>Web Registries</strong> (polyfilled scoping and inheritance).
+</p>
+
+<h4 id="interface">Interface</h4>
+{% highlight "typescript" %}
+class CustomElementRegistry extends HTMLRegistry<
+    ElementDefinition,
+    ImplementedElement
+> {
+    // Standard CustomElementRegistry API
+    define(
+        name: string,
+        constructor: CustomElementConstructor,
+        options?: ElementDefinitionOptions
+    ): void;
+    get(name: string): CustomElementConstructor | undefined;
+    whenDefined(name: string): Promise<CustomElementConstructor>;
+    upgrade(root: Node): void;
+}
+{% endhighlight %}
+
+<p class="text-sm text-gray-600 mt-4">
+    See <a href="/projects/webregistries/">Web Registries</a> for more information on scoped registry capabilities.
+</p>

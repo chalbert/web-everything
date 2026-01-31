@@ -1,0 +1,29 @@
+<h4 id="overview">Overview</h4>
+<p>The base class for creating behaviors, similar to <code>HTMLElement</code>.</p>
+
+<h4 id="interface">Interface</h4>
+{% highlight "typescript" %}
+abstract class CustomAttribute {
+    // Instance Properties
+    readonly ownerElement: Element;
+    readonly name: string;
+    readonly value: string;
+
+    // Lifecycle Callbacks
+    connectedCallback?(): void;
+    disconnectedCallback?(): void;
+    attributeChangedCallback?(
+        name: string,
+        oldValue: string | null,
+        newValue: string | null
+    ): void;
+
+    // Static Configuration
+    static readonly observedAttributes?: string[];
+    static readonly formAssociated?: boolean;
+}
+{% endhighlight %}
+
+<p class="text-sm text-gray-600 mt-4">
+    CustomAttribute provides a component model for attribute-based behaviors. See <a href="/projects/webbehaviors/">Web Behaviors</a> for implementation patterns.
+</p>

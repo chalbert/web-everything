@@ -1,0 +1,18 @@
+<h4 id="overview">Overview</h4>
+<p>
+    The root container for dependency injection. It handles the map of all active injectors in the DOM tree.
+</p>
+
+<h4 id="interface">Interface</h4>
+{% highlight "typescript" %}
+class InjectorRoot {
+    // Retrieval Methods used by resolution algorithm
+    static getInjectorRootOf(node: Node): InjectorRoot | undefined;
+    static getProviderOf(node: Node, providerName: string): Provider | undefined;
+    static getProvidersOf(node: Node): Map<string, Provider>;
+}
+{% endhighlight %}
+
+<p class="text-sm text-gray-600 mt-4">
+    See <a href="/projects/webinjectors/">Web Injectors</a> for the full dependency injection system documentation.
+</p>

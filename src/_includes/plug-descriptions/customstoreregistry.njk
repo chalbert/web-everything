@@ -1,0 +1,33 @@
+<h4 id="overview">Overview</h4>
+<p>
+    <strong>CustomStoreRegistry</strong> is a registry for state management stores, enabling reactive data flow patterns.
+</p>
+
+<h4 id="status">Status</h4>
+<p class="text-sm text-gray-600 mb-4">
+    <strong>Concept Phase:</strong> The API and implementation are still being designed. This plug is planned but not yet implemented.
+</p>
+
+<h4 id="intended-use">Intended Use Cases</h4>
+<ul class="list-disc ml-5 mb-4 text-sm text-gray-600">
+    <li>Global application state management</li>
+    <li>Scoped state containers</li>
+    <li>Reactive data subscriptions</li>
+    <li>State persistence and synchronization</li>
+</ul>
+
+<h4 id="tentative-interface">Tentative Interface</h4>
+{% highlight "typescript" %}
+interface CustomStoreRegistry extends HTMLRegistry<
+    StoreDefinition,
+    ImplementedStore
+> {
+    readonly localName = 'customStores';
+    
+    define(name: string, Store: ImplementedStore): void;
+}
+{% endhighlight %}
+
+<p class="text-sm text-gray-600 mt-4">
+    See <a href="/projects/webstates/">Web States</a> for state management patterns.
+</p>

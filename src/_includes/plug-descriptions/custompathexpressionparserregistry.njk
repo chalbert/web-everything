@@ -1,0 +1,19 @@
+<h4 id="overview">Overview</h4>
+<p><strong>Dependency:</strong> <code>CustomRegistry</code></p>
+<p>Registry for path expression parsers, standardizing how strings are parsed into executable paths.</p>
+
+<h4 id="interface">Interface</h4>
+{% highlight "typescript" %}
+interface CustomPathExpressionParserRegistry extends CustomRegistry<
+    CustomPathExpressionParser
+> {
+    readonly localName = 'customPathExpressionParsers';
+    define(
+        name: string,
+        parser: CustomPathExpressionParser
+    ): void;
+
+    // Returns a Consumable that provides the resolved parser
+    query(): Consumable<CustomPathExpressionParser>;
+}
+{% endhighlight %}

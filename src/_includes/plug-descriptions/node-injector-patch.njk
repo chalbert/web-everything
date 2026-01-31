@@ -1,0 +1,46 @@
+<h4 id="overview">Overview</h4>
+<p><strong>Patch File:</strong> <code>custom-elements/Node.patch.ts</code></p>
+<p>
+    Adds injector hierarchy navigation methods to the <code>Node</code> prototype, enabling hierarchical dependency resolution throughout the DOM tree.
+</p>
+
+<h4 id="added-methods">Added Methods</h4>
+<dl class="ml-4 text-sm">
+    <dt class="font-bold text-gray-800 mt-3"><code>getClosestInjector(): HTMLInjector | null</code></dt>
+    <dd class="text-gray-600 ml-4">Returns the closest injector in the DOM hierarchy, walking up from this node through parents, shadow roots, and template boundaries.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>getOwnInjector(): HTMLInjector | null</code></dt>
+    <dd class="text-gray-600 ml-4">Returns the injector owned by this specific node, or null if the node doesn't have its own injector.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>hasOwnInjector(): boolean</code></dt>
+    <dd class="text-gray-600 ml-4">Returns true if this node has its own injector. Convenience method equivalent to Boolean(node.getOwnInjector()).</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>injectors(): Generator&lt;HTMLInjector&gt;</code></dt>
+    <dd class="text-gray-600 ml-4">Returns a generator that yields all injectors in the hierarchy, starting from the closest. Each iteration yields the next ancestor injector.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>createElement(tagName: string, options?: ElementCreationOptions): HTMLElement</code></dt>
+    <dd class="text-gray-600 ml-4">Creates an element using the context-aware custom element registry. Searches through the injector hierarchy for custom element definitions.</dd>
+</dl>
+
+<h4 id="usage-example">Usage Example</h4>
+{% highlight "javascript" %}
+// Get the closest injector
+const injector = element.getClosestInjector();
+
+// Check if an element has its own injector
+if (element.hasOwnInjector()) {
+  console.log('Element defines its own dependency scope');
+}
+
+// Create a custom element from the injector's registry
+const customEl = element.createElement('my-component');
+
+// Iterate through all injectors in the hierarchy
+for (const injector of element.injectors()) {
+  console.log('Found injector:', injector);
+}
+{% endhighlight %}
+
+<p class="text-sm text-gray-600 mt-4">
+    See <a href="/projects/webinjectors/">Web Injectors</a> for complete DOM API documentation.
+</p>

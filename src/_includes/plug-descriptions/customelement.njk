@@ -1,0 +1,49 @@
+<h4 id="overview">Overview</h4>
+<p>
+    <strong>CustomElement</strong> is the base class for custom elements with enhanced lifecycle and options support.
+</p>
+
+<h4 id="interface">Interface</h4>
+{% highlight "typescript" %}
+abstract class CustomElement<Options = any> extends HTMLElement {
+    // Instance Properties
+    readonly options?: Options;
+    
+    // Standard Custom Element Lifecycle
+    connectedCallback?(): void;
+    disconnectedCallback?(): void;
+    adoptedCallback?(): void;
+    attributeChangedCallback?(
+        name: string,
+        oldValue: string | null,
+        newValue: string | null
+    ): void;
+    
+    // Static Configuration
+    static readonly observedAttributes?: string[];
+    static readonly formAssociated?: boolean;
+}
+{% endhighlight %}
+
+<h4 id="key-features">Key Features</h4>
+<ul class="list-disc ml-5 mb-4 text-sm text-gray-600">
+    <li><strong>Options Support:</strong> Elements can be instantiated with configuration options</li>
+    <li><strong>Proper Cloning:</strong> Options are preserved during cloneNode operations</li>
+    <li><strong>Scoped Registries:</strong> Integrates with the scoped custom element registry system</li>
+</ul>
+
+<h4 id="usage-example">Usage Example</h4>
+{% highlight "typescript" %}
+class MyComponent extends CustomElement<{ variant: string }> {
+    connectedCallback() {
+        const variant = this.options?.variant || 'default';
+        this.className = `component--${variant}`;
+    }
+}
+
+// Register
+customElements.define('my-component', MyComponent);
+
+// Create with options
+const component = new MyComponent({ variant: 'primary' });
+{% endhighlight %}

@@ -1,19 +1,9 @@
 <section class="intro-section mb-12">
     <h3 id="mission">Mission</h3>
     <p>
-        <strong>Web Resources</strong> aims to decouple the <em>specification</em> of a data request from its <em>execution</em>. 
+        <strong>Web Resources</strong> aims to decouple the <em>specification</em> of a data request from its <em>execution</em>.
         It provides a standard interoperability layer for Middleware (Auth, Logging) and Caching that works across any transport (REST, GraphQL, WebSocket).
     </p>
-</section>
-<section id="analysis" class="section-card">
-    <h3 id="ecosystem-analysis">Ecosystem Analysis</h3>
-    <p>We analyzed the "Big 4" paradigms in the current ecosystem to identify gaps and interoperability opportunities.</p>
-    <!-- Table and content omitted for brevity; copy from main template if needed -->
-    <div class="mt-6 p-4 bg-blue-50 rounded-lg text-sm text-blue-800">
-        <strong>Conclusion:</strong> 
-        Most libraries couple the <em>Transport</em> (HTTP vs GQL) with the <em>Policy</em> (Cache/Auth). 
-        <strong>Web Resources</strong> standardizes the Policy layer so it can be injected into any Transport.
-    </div>
 </section>
 <section id="proposed-resources" class="section-card">
     <h3 id="proposed-standards">Proposed Standards</h3>
@@ -31,3 +21,23 @@
         {% endfor %}
     </div>
 </section>
+
+<details class="section-card" style="margin-top: 2rem;">
+   <summary style="cursor: pointer; font-size: 1.25rem; font-weight: 600; padding: 1rem; background: rgba(99, 102, 241, 0.05); border-radius: 8px; user-select: none; list-style: none;">
+      <span style="display: inline-block; transition: transform 0.2s;">▶</span> Research & Analysis
+   </summary>
+   <div style="padding: 1rem 0;">
+
+<section id="analysis" class="section-card">
+   <h3 id="ecosystem-analysis">Ecosystem Analysis</h3>
+   <p>We analyzed the "Big 4" paradigms in the current ecosystem to identify gaps and interoperability opportunities.</p>
+   <!-- Table and content omitted for brevity; copy from main template if needed -->
+   <div class="mt-6 p-4 bg-blue-50 rounded-lg text-sm text-blue-800">
+      <strong>Conclusion:</strong>
+      Most libraries couple the <em>Transport</em> (HTTP vs GQL) with the <em>Policy</em> (Cache/Auth).
+      <strong>Web Resources</strong> standardizes the Policy layer so it can be injected into any Transport.
+   </div>
+</section>
+
+   </div>
+</details>

@@ -1,12 +1,13 @@
 <section id="protocol-draft" class="section-card">
   <h3 id="draft-claim-query-protocol">Draft: Web Context Claim/Query Protocol</h3>
   <p>
-    The <strong>Web Context Claim/Query Protocol</strong> enables HTML-native, hierarchical, and selective data exposure for templates, behaviors, and components. Contexts are registered in a central registry and can <em>claim</em> or <em>decline</em> to provide data in response to a query, supporting advanced scenarios like scoped state, feature flags, and conditional context activation.
+    The <strong>Web Context Claim/Query Protocol</strong> enables HTML-native, hierarchical, and selective data exposure for declarative HTML—specifically for tokens embedded in text nodes and attributes. Context instances are attached to nodes via their injector's registry, and can <em>claim</em> or <em>decline</em> to provide data in response to a query, supporting advanced scenarios like scoped state, feature flags, and conditional context activation.
   </p>
   <h4>Protocol Summary</h4>
   <ul>
-    <li><strong>Context Registration:</strong> Context types are registered in a <code>CustomContextRegistry</code> and can be instantiated declaratively via HTML (e.g., <code>&lt;script type="context" context="state"&gt;</code>).</li>
-    <li><strong>Claim/Query Mechanism:</strong> When a binding or consumer issues a query (e.g., <code>bind-text="user.name"</code>), each context up the DOM tree can <em>claim</em> the query based on its own logic (expression, source element, type, etc.).</li>
+    <li><strong>Context Registration:</strong> Context instances are registered on injectors using the uniform registry pattern. Context types may optionally be defined to provide schema and defaults (API details TBD).</li>
+    <li><strong>Instance Attachment:</strong> Context instances are attached to specific nodes via their injector, making them available to descendant elements.</li>
+    <li><strong>Claim/Query Mechanism:</strong> When a binding or consumer issues a query (e.g., <code>bind-text="user.name"</code>), the query walks up the injector chain. Each context instance can <em>claim</em> the query based on its own logic (expression, source element, type, etc.).</li>
     <li><strong>Selective Exposure:</strong> Contexts only expose data they explicitly claim, ensuring encapsulation and security.</li>
     <li><strong>Reactive Updates:</strong> Claimed queries are tracked and updated when context data changes, supporting reactivity.</li>
   </ul>
@@ -19,6 +20,24 @@
   <button bind-text="component-state/count" on-click="component-state/increment"></button>
 </my-widget>
   {% endhighlight %}
+  <p class="note" style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 0.5rem;">
+    <strong>Note:</strong> The <code>&lt;script type="context"&gt;</code> functionality uses the <strong>customScriptType</strong> registry (shared with <a href="/projects/webinjectors/">Web Injectors</a>), an extensibility point that enables custom script behaviors in HTML. This pattern may be formalized for userland use if additional use cases emerge.
+  </p>
+
+  <h4>Example: Attaching Context Instances</h4>
+  {% highlight "javascript" %}
+// Get the context registry from the injector (uniform pattern)
+const injector = element.getClosestInjector();
+const contextRegistry = injector.get('customContexts');
+
+// Create and attach a context instance
+const themeContext = new ThemeContext({ primaryColor: '#blue' });
+contextRegistry.set('theme', themeContext);
+
+// Now descendants can query this context
+const theme = element.getContext('theme');
+  {% endhighlight %}
+
   <h4>Example: Claim Logic for Selective Resolution</h4>
   {% highlight "typescript" %}
 class UserContext extends CustomContext {
@@ -51,7 +70,7 @@ class AppStateContext extends CustomContext {
 <section id="protocol" class="section-card">
   <h3 id="the-protocol">Web Context Protocol</h3>
   <p>
-    <strong>Web Contexts</strong> define a protocol for exposing data or services to HTML templates, behaviors, and components via hierarchical, string-based queries. <strong>Contexts always control exactly which data is exposed to tokens, adding a layer of security and encapsulation.</strong> A context is not a registry of all dependencies, but a public interface for data meant for template or behavior consumption.
+    <strong>Web Contexts</strong> define a protocol for exposing data or services to declarative HTML—specifically to tokens parsed from text nodes and attributes—via hierarchical, string-based queries. <strong>Contexts always control exactly which data is exposed to tokens, adding a layer of security and encapsulation.</strong> While behaviors and components can access injectors directly through JavaScript, Web Contexts provide a controlled interface specifically for declarative HTML consumption.
   </p>
   <ul>
     <li><strong>Binding Resolution:</strong> Bindings parsed from HTML (via customTextNode/attribute parsers) resolve data by walking up the DOM, querying each injector for a matching context type (always a string in HTML).</li>
@@ -78,11 +97,111 @@ class AppStateContext extends CustomContext {
 </section>
 
 
+        <section id="dom-api" class="section-card">
+  <h3 id="dom-api-reference">DOM API Reference</h3>
+  <p>
+    This section documents the proposed DOM API extensions for implementing the contexts protocol. These APIs extend the <code>Node</code> interface to support hierarchical context lookup and management throughout the DOM tree.
+  </p>
+
+  <div class="content-box" style="background: rgba(99, 102, 241, 0.05); padding: 1rem; margin-bottom: 1.5rem; border-left: 4px solid var(--color-primary);">
+    <p style="margin: 0;"><strong>Dependency:</strong> Web Contexts builds on top of <strong><a href="/projects/webinjectors/">Web Injectors</a></strong>. The injector lookup methods (<code>getOwnInjector()</code>, <code>getClosestInjector()</code>, <code>injectors()</code>, etc.) are documented in the Web Injectors DOM API section. Context methods use the injector hierarchy for resolution.</p>
+  </div>
+
+  <h4 id="context-creation-lookup">Context Creation & Lookup</h4>
+  <p>Methods for creating and retrieving context instances:</p>
+
+  <dl style="margin-left: 1rem;">
+    <dt><code>node.createContext(contextType: string): CustomContext | undefined</code></dt>
+    <dd>Creates a new context instance of the specified type. Searches through the injector hierarchy for registered context constructors. Returns <code>undefined</code> if the context type is not registered in any ancestor injector.</dd>
+
+    <dt><code>node.getContext(contextType: string): any | undefined</code></dt>
+    <dd>Retrieves the closest context instance of the specified type. Searches through the injector hierarchy from closest to root. Returns the first matching context found, or <code>undefined</code> if none exists.</dd>
+
+    <dt><code>node.ensureContext(contextType: string): CustomContext</code></dt>
+    <dd>Gets an existing context or creates a new one if it doesn't exist. First checks for an owned context via <code>getOwnContext()</code>. If not found, creates a new context using <code>createContext()</code> and attaches it to this node. Returns the existing or newly created context.</dd>
+
+    <dt><code>node.getOwnContext(contextType: string): any | null</code></dt>
+    <dd>Returns the context of the specified type owned by this node. Only returns a context if this specific node provides it. Returns <code>null</code> if this node doesn't own a context of that type.</dd>
+  </dl>
+
+  <h4 id="context-queries">Context Queries</h4>
+  <p>Methods for checking and querying contexts:</p>
+
+  <dl style="margin-left: 1rem;">
+    <dt><code>node.hasContext(contextType: string): boolean</code></dt>
+    <dd>Returns <code>true</code> if a context of the specified type exists in the hierarchy. Searches from this node up through all ancestor injectors. Convenience method equivalent to <code>Boolean(node.getContext(contextType))</code>.</dd>
+
+    <dt><code>node.hasOwnContext(contextType: string): boolean</code></dt>
+    <dd>Returns <code>true</code> if this specific node owns a context of the specified type. Only checks the node's own injector, not ancestors. Convenience method for owned context checking.</dd>
+
+    <dt><code>node.queryContext(contextType: string, query: any): any</code></dt>
+    <dd>Queries a context with a custom query parameter. Allows contexts to support advanced query protocols. Returns the result of the context's query handler, or <code>undefined</code> if not found.</dd>
+  </dl>
+
+  <h4 id="usage-examples">Usage Examples</h4>
+  {% highlight "javascript" %}
+// Get or create a theme context
+const theme = element.ensureContext('theme');
+
+// Check if a context exists
+if (element.hasContext('auth')) {
+  const auth = element.getContext('auth');
+  // Use auth context
+  console.log('Current user:', auth.currentUser);
+}
+
+// Query a context with parameters
+const user = element.queryContext('auth', { userId: '123' });
+
+// Check if an element provides its own context
+if (element.hasOwnContext('theme')) {
+  const localTheme = element.getOwnContext('theme');
+  console.log('Element has its own theme:', localTheme);
+}
+
+// Create a new context instance
+const stateContext = element.createContext('app-state');
+if (stateContext) {
+  stateContext.attach(element);
+}
+  {% endhighlight %}
+
+  <h4 id="design-principles">Key Design Principles</h4>
+  <ul>
+    <li><strong>Built on Injectors:</strong> Contexts use the injector hierarchy for resolution and scoping</li>
+    <li><strong>Hierarchical:</strong> All context lookups traverse the DOM tree via injectors</li>
+    <li><strong>Lazy:</strong> Contexts are created on-demand via <code>ensureContext()</code></li>
+    <li><strong>Type-based:</strong> Contexts are identified and queried by string type names</li>
+    <li><strong>Query Protocol:</strong> Advanced querying via <code>queryContext()</code> enables selective resolution</li>
+  </ul>
+</section>
+
+        <section id="try-it" class="section-card">
+            <h3 id="try-it-out">Try It Out</h3>
+            <p>
+                This protocol is fully implemented and available for use today.
+                Check out the reference implementation in the <strong><a href="/projects/webplugs/">Web Plugs</a></strong> collection.
+            </p>
+        </section>
+
+<section>
+  <h3>Design Note: Observation vs. Context</h3>
+  <p>
+    <strong>Observation</strong> (reactivity, change notification, or subscription) is a property of the injected object itself—such as a <em>store</em> or <em>signal</em>—not of the context or injector. The context/injector provides access to dependencies (including stateful objects), but does not provide observation APIs. To observe changes, subscribe to the injected object using its own API. This separation ensures that protocols (contexts/injectors) provide access, while behaviors (states/signals) provide observation.
+  </p>
+</section>
+
+<details class="section-card" style="margin-top: 2rem;">
+  <summary style="cursor: pointer; font-size: 1.25rem; font-weight: 600; padding: 1rem; background: rgba(99, 102, 241, 0.05); border-radius: 8px; user-select: none; list-style: none;">
+    <span style="display: inline-block; transition: transform 0.2s;">▶</span> Research & Analysis
+  </summary>
+  <div style="padding: 1rem 0;">
+
 <section id="comparison" class="section-card">
   <div class="comparison-block" style="background: rgba(99, 102, 241, 0.1); padding: 1.5rem; border-radius: 8px; border: 1px solid rgba(99, 102, 241, 0.2); margin: 2rem 0;">
     <h4 id="current-standardization-vs-web-contexts" style="margin-top: 0; color: var(--color-primary);">Summary of Research</h4>
     <p>
-      Community protocols (e.g., <code>context-request</code> events) rely on event bubbling and explicit provider wrappers, which can complicate DOM structure and CSS layouts. Web Contexts, as a protocol, enable virtual scoping and clean, declarative data exposure for HTML templates and behaviors, without requiring extra DOM elements or leaking internal registries.
+      Community protocols (e.g., <code>context-request</code> events) use event bubbling for context resolution. This approach requires an HTML element to serve as the provider (the event listener), which creates constraints for element-less structures like comment directives. Additionally, event propagation does not cross portal boundaries (see <a href="/projects/webportals/">Web Portals</a>), making it challenging to support portal-based compositions without modifying the event system. A dedicated context API can address these scenarios by enabling virtual scoping (element-less providers) and explicit query proxying across portal chains.
     </p>
     <p>
       <strong>Key Insight:</strong> Web Contexts are not a registry of all dependencies, but a protocol for exposing only the data intended for public/template/behavior consumption, resolved via hierarchical, string-based queries.
@@ -90,7 +209,7 @@ class AppStateContext extends CustomContext {
   </div>
 </section>
 
-        <section id="analysis" class="section-card">
+<section id="analysis" class="section-card">
   <h3 id="spec-implementation-analysis">Spec & Implementation Analysis</h3>
   <p>This section compares major web context APIs, framework implementations, and the HTML Injector approach.</p>
 
@@ -239,17 +358,5 @@ class AppStateContext extends CustomContext {
   <p><strong>Summary:</strong> Most context use cases are covered by hierarchical lookup. True negotiation is most valuable for advanced scenarios: polyfill interop, plugin selection, or protocol-based filtering where a provider may choose to defer to a parent or another provider.</p>
 </section>
 
-        <section id="try-it" class="section-card">
-            <h3 id="try-it-out">Try It Out</h3>
-            <p>
-                This protocol is fully implemented and available for use today. 
-                Check out the reference implementation in the <strong><a href="/projects/webplugs/">Web Plugs</a></strong> collection.
-            </p>
-        </section>
-
-<section>
-  <h3>Design Note: Observation vs. Context</h3>
-  <p>
-    <strong>Observation</strong> (reactivity, change notification, or subscription) is a property of the injected object itself—such as a <em>store</em> or <em>signal</em>—not of the context or injector. The context/injector provides access to dependencies (including stateful objects), but does not provide observation APIs. To observe changes, subscribe to the injected object using its own API. This separation ensures that protocols (contexts/injectors) provide access, while behaviors (states/signals) provide observation.
-  </p>
-</section>
+  </div>
+</details>

@@ -1,0 +1,49 @@
+<h4 id="overview">Overview</h4>
+<p>
+    <strong>HTMLInjector</strong> is an injector instance bound to a specific DOM node, providing hierarchical dependency resolution throughout the DOM tree.
+</p>
+
+<h4 id="key-features">Key Features</h4>
+<ul class="list-disc ml-5 mb-4 text-sm text-gray-600">
+    <li><strong>Hierarchical Resolution:</strong> Each injector can have a parent injector, enabling scoped dependency lookup</li>
+    <li><strong>Registry Access:</strong> Provides access to scoped registries (customElements, customAttributes, etc.)</li>
+    <li><strong>Node Binding:</strong> Each injector is associated with a specific DOM node or shadow root</li>
+    <li><strong>Uniform Pattern:</strong> All registries are accessed via <code>injector.get(registryName)</code></li>
+</ul>
+
+<h4 id="interface">Interface</h4>
+{% highlight "typescript" %}
+class HTMLInjector {
+    // Parent injector in the hierarchy
+    readonly parentInjector: HTMLInjector | null;
+    
+    // Get a registry or value by name
+    get(name: string): any;
+    
+    // Register a value or registry
+    register(name: string, value: any): void;
+    
+    // Query for a consumable value
+    consume(path: string, consumer: Node): Consumable;
+}
+{% endhighlight %}
+
+<h4 id="usage-example">Usage Example</h4>
+{% highlight "javascript" %}
+// Get the injector for a node
+const injector = element.getClosestInjector();
+
+// Access scoped registries
+const customElements = injector.get('customElements');
+const customContexts = injector.get('customContexts');
+
+// Look up a custom element definition
+const MyComponent = customElements.get('my-component');
+
+// Access a context value
+const theme = injector.get('customContexts:theme');
+{% endhighlight %}
+
+<p class="text-sm text-gray-600 mt-4">
+    See <a href="/projects/webinjectors/">Web Injectors</a> for architectural details and patterns.
+</p>

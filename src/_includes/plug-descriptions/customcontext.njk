@@ -1,0 +1,22 @@
+<h4 id="overview">Overview</h4>
+<p>Base class for defining context providers.</p>
+
+<h4 id="interface">Interface</h4>
+{% highlight "typescript" %}
+abstract class CustomContext<ContextValue> {
+    // Similar to CustomElement
+    connectedCallback?(): void;
+    disconnectedCallback?(): void;
+    adoptedCallback?(): void;
+
+    // Context Specific
+    contextConsumedCallback?(
+        callback: (...args: unknown[]) => ContextValue
+    ): void;
+    static readonly observedContexts?: string[];
+}
+{% endhighlight %}
+
+<p class="text-sm text-gray-600 mt-4">
+    See <a href="/projects/webcontexts/">Web Contexts</a> for implementation details.
+</p>
