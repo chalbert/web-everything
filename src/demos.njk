@@ -1,0 +1,51 @@
+---
+layout: base.njk
+title: Web Everything - Demos
+---
+
+{% from "project-status.njk" import projectStatus %}
+
+<div class="page-header">
+    <h1>Demos</h1>
+    <p class="page-description">
+        End-to-end demonstrations integrating multiple Web Everything standards to showcase real-world use cases and implementation patterns.
+    </p>
+</div>
+
+<div class="container">
+    {% if demos.length > 0 %}
+    <div class="standards-grid">
+        {% for demo in demos %}
+        <a href="/demos/{{ demo.id }}/" class="standard-card">
+            <div class="flex justify-between items-start mb-3">
+                <h2 id="demo-{{ demo.id }}" class="text-lg font-bold m-0 text-gray-900">{{ demo.name }}</h2>
+            </div>
+            <p class="text-gray-600 text-sm leading-relaxed mb-4">{{ demo.summary }}</p>
+            {% if demo.projects %}
+            <div class="mb-3">
+                <div class="text-xs text-gray-500 mb-1">Uses:</div>
+                <div style="display: flex; flex-wrap: gap; gap: 0.25rem;">
+                    {% for projectId in demo.projects %}
+                    <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                        {{ projectId }}
+                    </span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+            <div style="margin-bottom: 1rem;">
+                {{ projectStatus(demo.status) }}
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="section-card" style="text-align: center; padding: 3rem 2rem;">
+        <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin: 0 auto 1rem; opacity: 0.3;"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        <h3 style="font-size: 1.25rem; margin-bottom: 0.5rem; color: var(--color-text-muted);">No Demos Yet</h3>
+        <p style="color: var(--color-text-muted); max-width: 500px; margin: 0 auto;">
+            Demos are being developed to showcase integrated use cases of Web Everything standards. Check back soon!
+        </p>
+    </div>
+    {% endif %}
+</div>

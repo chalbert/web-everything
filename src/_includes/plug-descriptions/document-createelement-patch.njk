@@ -1,15 +1,58 @@
-<h4 id="overview">Overview</h4>
-<p><strong>Patch File:</strong> <code>custom-elements/Document.patch.ts</code></p>
+{% from "mode-selector.njk" import pluggedContent, unpluggedContent, comparisonContent, endContent %}
+
+<h3 id="overview">Overview</h3>
 <p>
     Patches <code>Document.createElement</code> to apply correct prototypes from the patched constructors.
 </p>
 
-<p class="text-sm text-gray-600 mt-4">
-    When creating elements via <code>document.createElement()</code>, this patch ensures that elements receive the correct prototype chain from the patched window constructors, enabling features like scoped registries and enhanced lifecycle management.
+<h3 id="behavior">Behavior</h3>
+<p class="text-sm text-gray-600 mb-4">
+    When creating elements via <code>document.createElement()</code>, this patch ensures that elements receive the correct prototype chain from the patched window constructors, enabling scoped registries and enhanced lifecycle management.
 </p>
 
+<h3 id="usage-example">Usage Example</h3>
+
+{{ pluggedContent("createelement-example", code=true) }}
 {% highlight "javascript" %}
 // Creates element with correct prototype
 const div = document.createElement('div');
-// div has enhanced HTMLDivElement prototype with registry support
+// div has enhanced HTMLDivElement prototype
+
+// Custom elements get scoped registry lookup
+const myComp = document.createElement('my-component');
 {% endhighlight %}
+
+{{ unpluggedContent("createelement-example", code=true) }}
+{% highlight "javascript" %}
+consume { createElement } of '@web-components';
+
+// Use the explicit function
+const div = createElement(document, 'div');
+// div has enhanced HTMLDivElement prototype
+
+// Custom elements get scoped registry lookup
+const myComp = createElement(document, 'my-component');
+{% endhighlight %}
+
+{{ comparisonContent("createelement-example", code=true) }}
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0;">
+    <div>
+        <div style="font-size: 0.7rem; font-weight: 600; color: #059669; padding: 0.5rem 1rem; text-transform: uppercase; letter-spacing: 0.05em; background: #f0fdf4; border-bottom: 1px solid #e5e7eb;">Plugged</div>
+{% highlight "javascript" %}
+// Native method, patched
+const el = document.createElement('div');
+{% endhighlight %}
+    </div>
+    <div style="border-left: 1px solid #e5e7eb;">
+        <div style="font-size: 0.7rem; font-weight: 600; color: #475569; padding: 0.5rem 1rem; text-transform: uppercase; letter-spacing: 0.05em; background: #f8fafc; border-bottom: 1px solid #e5e7eb;">Unplugged</div>
+{% highlight "javascript" %}
+consume {
+  createElement
+} of '@web-components';
+
+const el = createElement(document, 'div');
+{% endhighlight %}
+    </div>
+</div>
+
+{{ endContent() }}

@@ -1,27 +1,12 @@
-<h4 id="overview">Overview</h4>
-<p><strong>Dependency:</strong> <code>HTMLRegistry</code></p>
+{% from "mode-selector.njk" import pluggedContent, unpluggedContent, comparisonContent, endContent %}
+
+<h3 id="overview">Overview</h3>
 <p>
     The <strong>CustomScriptTypesRegistry</strong> allows defining custom behavior for <code>&lt;script&gt;</code> tags with custom type attributes.
-    This enables declarative scripting patterns such as injector blocks, context definitions, and other domain-specific script behaviors.
+    This enables declarative scripting patterns such as injector blocks and context definitions.
 </p>
 
-<h4 id="current-implementation">Current Implementation Status</h4>
-<p>
-    The registry infrastructure is fully implemented in the plateau codebase. The base framework includes:
-</p>
-<ul class="list-disc ml-5 mb-4 text-sm text-gray-600">
-    <li>CustomScriptTypesRegistry class extending HTMLRegistry</li>
-    <li>Global <code>window.customScriptTypes</code> registry</li>
-    <li>MutationObserver-based automatic upgrade/downgrade</li>
-    <li>Uses <code>is</code> attribute pattern (e.g., <code>&lt;script is="injector"&gt;</code>)</li>
-</ul>
-
-<p class="text-sm text-gray-600 mb-4">
-    <strong>Note:</strong> While the framework is complete, no concrete script types have been registered yet.
-    The documentation shows <code>type="injector"</code> and <code>type="context"</code> patterns, but the actual implementation will use the <code>is</code> attribute.
-</p>
-
-<h4 id="interface">Interface</h4>
+<h3 id="interface">Interface</h3>
 {% highlight "typescript" %}
 interface CustomScriptTypesRegistry extends HTMLRegistry<
     ScriptTypeDefinition,
@@ -34,40 +19,77 @@ interface CustomScriptTypesRegistry extends HTMLRegistry<
         scriptType: ImplementedCustomScriptType
     ): void;
 
-    // Inherited from HTMLRegistry
     upgrade(root: Node): void;
     downgrade(root: Node): void;
 }
 {% endhighlight %}
 
-<h4 id="usage">Usage Example</h4>
-{% highlight "typescript" %}
+<h3 id="usage-example">Usage Example</h3>
+
+{{ pluggedContent("scripttypes-reg-example", code=true) }}
+{% highlight "javascript" %}
 // Define a custom script type
 class InjectorScript extends CustomScriptType {
     connectedCallback() {
-        // Parse and execute injector-specific logic
         const code = this.textContent;
         // ... process injector syntax
     }
 }
 
-// Register the script type
-window.customScriptTypes.define('injector', InjectorScript);
+// Register globally
+customScriptTypes.define('injector', InjectorScript);
 {% endhighlight %}
 
+{{ unpluggedContent("scripttypes-reg-example", code=true) }}
+{% highlight "javascript" %}
+consume {
+  CustomScriptType,
+  customScriptTypes
+} of '@web-injectors';
+
+// Define a custom script type
+class InjectorScript extends CustomScriptType {
+    connectedCallback() {
+        const code = this.textContent;
+        // ... process injector syntax
+    }
+}
+
+// Register via consumed registry
+customScriptTypes.define('injector', InjectorScript);
+{% endhighlight %}
+
+{{ comparisonContent("scripttypes-reg-example", code=true) }}
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0;">
+    <div>
+        <div style="font-size: 0.7rem; font-weight: 600; color: #059669; padding: 0.5rem 1rem; text-transform: uppercase; letter-spacing: 0.05em; background: #f0fdf4; border-bottom: 1px solid #e5e7eb;">Plugged</div>
+{% highlight "javascript" %}
+// Global registry
+customScriptTypes.define(
+  'injector', InjectorScript
+);
+{% endhighlight %}
+    </div>
+    <div style="border-left: 1px solid #e5e7eb;">
+        <div style="font-size: 0.7rem; font-weight: 600; color: #475569; padding: 0.5rem 1rem; text-transform: uppercase; letter-spacing: 0.05em; background: #f8fafc; border-bottom: 1px solid #e5e7eb;">Unplugged</div>
+{% highlight "javascript" %}
+consume {
+  customScriptTypes
+} of '@web-injectors';
+
+customScriptTypes.define(
+  'injector', InjectorScript
+);
+{% endhighlight %}
+    </div>
+</div>
+
+{{ endContent() }}
+
+<h3 id="html-usage">HTML Usage</h3>
 {% highlight "html" %}
-<!-- Use in HTML -->
+<!-- Use in HTML with is attribute -->
 <script is="injector" id="my-injector">
     provide { theme } from './theme-dark.js';
 </script>
 {% endhighlight %}
-
-<h4 id="implementation-details">Implementation Details</h4>
-<p class="text-sm text-gray-600">
-    The registry uses a MutationObserver to watch for script elements being added or removed from the DOM.
-    When a script with a matching <code>is</code> attribute is found, the registry upgrades it by setting its prototype to the custom script type's prototype and invoking its <code>connectedCallback</code>.
-</p>
-
-<p class="text-sm text-gray-600">
-    This approach allows script elements to have lifecycle callbacks similar to Custom Elements, enabling rich declarative behaviors while maintaining the familiar script element syntax.
-</p>

@@ -1,0 +1,268 @@
+<h2>Template String Adapter</h2>
+<p>
+    The Template String Adapter enables authoring Web Everything components using tagged template literals (<code>html\`...\`</code>).
+    This format is familiar to users of lit-html, htm, or similar libraries, and compiles to the same primitives as HTML and JSX.
+</p>
+
+<section class="section-card">
+    <h3 id="design-principles">Design Principles</h3>
+    <ul>
+        <li><strong>No Build Step Required:</strong> Template literals can be interpreted at runtime or compiled ahead of time.</li>
+        <li><strong>Semantic Equivalence:</strong> Every template string construct has direct HTML and JSX equivalents.</li>
+        <li><strong>Efficient Updates:</strong> Static parts are parsed once; only dynamic expressions are re-evaluated.</li>
+        <li><strong>AST Reversibility:</strong> Bidirectional transformation with HTML and JSX formats.</li>
+    </ul>
+</section>
+
+<section class="section-card">
+    <h3 id="basic-syntax">Basic Syntax</h3>
+    <p>The <code>html</code> tag creates template fragments:</p>
+
+    {% highlight "typescript" %}
+import { html } from '@web-adapters/template-string';
+
+// Simple template
+const greeting = html`<h1>Hello, ${name}!</h1>`;
+
+// Component-like function
+const UserCard = (user) => html`
+    <div class="user-card">
+        <img src=${user.avatar} alt=${user.name} />
+        <span>${user.name}</span>
+    </div>
+`;
+    {% endhighlight %}
+</section>
+
+<section class="section-card">
+    <h3 id="directive-syntax">Directive Syntax</h3>
+    <p>Web Directives are expressed using component-like tags or special syntax:</p>
+
+    <h4 id="for-each-directive">For Each</h4>
+    {% highlight "typescript" %}
+// Template String
+const UserList = (users) => html`
+    <For each=${users} key="id">
+        ${(user) => html`
+            <li class="user-item">${user.name}</li>
+        `}
+    </For>
+`;
+
+// Equivalent HTML
+<template is="for-each" items="users" key="id">
+    <li class="user-item" data-bind="name"></li>
+</template>
+    {% endhighlight %}
+
+    <h4 id="conditional-directive">Conditionals</h4>
+    {% highlight "typescript" %}
+// Template String
+const ConditionalContent = (isVisible) => html`
+    <Show when=${isVisible}>
+        <modal-dialog title="Hello"></modal-dialog>
+    </Show>
+`;
+
+// Or using ternary (compiles to same primitive)
+const ConditionalAlt = (isVisible) => html`
+    ${isVisible ? html`<modal-dialog title="Hello"></modal-dialog>` : null}
+`;
+    {% endhighlight %}
+
+    <h4 id="resource-loader-directive">Resource Loader</h4>
+    {% highlight "typescript" %}
+// Template String - Using named templates
+const UserProfile = (userQuery) => html`
+    <Resource source=${userQuery}>
+        <template slot="loading">
+            <skeleton-card></skeleton-card>
+        </template>
+        <template slot="error">
+            ${(err) => html`<error-card message=${err.message}></error-card>`}
+        </template>
+        <template slot="empty">
+            <empty-state></empty-state>
+        </template>
+        ${(data) => html`<user-profile-card .user=${data}></user-profile-card>`}
+    </Resource>
+`;
+    {% endhighlight %}
+</section>
+
+<section class="section-card">
+    <h3 id="property-binding">Property vs Attribute Binding</h3>
+    <p>Template strings distinguish between attributes and properties:</p>
+
+{% highlight "typescript" %}
+{% raw %}// Attribute binding (string coercion)
+html`<input type="text" value=${stringValue} />`;
+
+// Property binding (preserves type) - dot prefix
+html`<my-element .items=${arrayValue} .config=${{ deep: true }}></my-element>`;
+
+// Boolean attribute (present/absent)
+html`<input type="checkbox" ?checked=${isChecked} />`;
+
+// Event binding - @ prefix
+html`<button @click=${handleClick}>Submit</button>`;{% endraw %}
+{% endhighlight %}
+</section>
+
+<section class="section-card">
+    <h3 id="behaviors">Behaviors</h3>
+    <p>Web Behaviors are applied as hyphenated attributes:</p>
+
+    {% highlight "typescript" %}
+// Template String - Behaviors as attributes
+const NavButton = (url, onClose) => html`
+    <button
+        history-link=${url}
+        click-outside=${onClose}
+        trusted-html="sanitize"
+    >
+        Navigate
+    </button>
+`;
+    {% endhighlight %}
+</section>
+
+<section class="section-card">
+    <h3 id="composition">Composition &amp; Nesting</h3>
+    <p>Templates compose naturally through interpolation:</p>
+
+    {% highlight "typescript" %}
+// Composing templates
+const Header = (title) => html`<header><h1>${title}</h1></header>`;
+const Footer = () => html`<footer>© 2024</footer>`;
+
+const Page = (title, content) => html`
+    <div class="page">
+        ${Header(title)}
+        <main>${content}</main>
+        ${Footer()}
+    </div>
+`;
+
+// Array rendering
+const items = ['Apple', 'Banana', 'Cherry'];
+const List = html`
+    <ul>
+        ${items.map(item => html`<li>${item}</li>`)}
+    </ul>
+`;
+    {% endhighlight %}
+</section>
+
+<section class="section-card">
+    <h3 id="slots-projection">Slots &amp; Content Projection</h3>
+    <p>Named slots work with the standard slot attribute:</p>
+
+    {% highlight "typescript" %}
+// Template String
+const CardUsage = () => html`
+    <card-element>
+        <span slot="header">Title</span>
+        <div slot="body">Content here</div>
+        <div slot="footer">
+            <button>Action</button>
+        </div>
+    </card-element>
+`;
+
+// Equivalent HTML
+<card-element>
+    <span slot="header">Title</span>
+    <div slot="body">Content here</div>
+    <div slot="footer">
+        <button>Action</button>
+    </div>
+</card-element>
+    {% endhighlight %}
+</section>
+
+<section class="section-card">
+    <h3 id="events">Event Handling</h3>
+    <p>Events use the <code>@</code> prefix or <code>on:</code> syntax:</p>
+
+    {% highlight "typescript" %}
+// @ prefix (lit-html style)
+html`<button @click=${handleClick}>Submit</button>`;
+
+// on: prefix (Web Everything style)
+html`<button on:click=${handleClick}>Submit</button>`;
+
+// With modifiers
+html`
+    <button
+        on:keydown.enter=${handleSubmit}
+        on:focus.once=${handleFirstFocus}
+    >
+        Submit
+    </button>
+`;
+    {% endhighlight %}
+</section>
+
+<section class="section-card">
+    <h3 id="runtime-vs-compile">Runtime vs Compile-Time</h3>
+    <p>The Template String Adapter supports both modes:</p>
+
+    <h4 id="runtime-mode">Runtime Mode</h4>
+    <p>Templates are parsed and rendered at runtime—no build step needed:</p>
+    {% highlight "typescript" %}
+import { html, render } from '@web-adapters/template-string';
+
+const template = html`<h1>Hello, ${name}!</h1>`;
+render(template, document.body);
+    {% endhighlight %}
+
+    <h4 id="compile-mode">Compile-Time Mode</h4>
+    <p>A build plugin extracts and optimizes templates:</p>
+    {% highlight "typescript" %}
+// vite.config.ts
+import { templateStringPlugin } from '@web-adapters/template-string/vite';
+
+export default {
+    plugins: [templateStringPlugin({
+        // Compile to HTML for SSR
+        output: 'html',
+        // Or compile to optimized runtime
+        output: 'runtime'
+    })]
+};
+    {% endhighlight %}
+</section>
+
+<section class="section-card">
+    <h3 id="ast-transformation">AST Transformation</h3>
+    <p>Bidirectional transformation with other formats:</p>
+
+    {% highlight "typescript" %}
+import { templateToHtml, htmlToTemplate, templateToJsx } from '@web-adapters/template-string';
+
+// Convert template literal AST to HTML
+const htmlAst = templateToHtml(templateAst);
+
+// Convert HTML AST to template literal
+const templateAst = htmlToTemplate(htmlAst, {
+    tagName: 'html',
+    propertyBinding: 'dot'  // .prop vs prop=
+});
+
+// Convert to JSX
+const jsxAst = templateToJsx(templateAst, {
+    componentCase: 'PascalCase'
+});
+    {% endhighlight %}
+</section>
+
+<section class="section-card">
+    <h3 id="related">Related</h3>
+    <ul style="margin-bottom: 0;">
+        <li><a href="/adapters/html-adapter/">HTML Adapter</a> — The canonical format</li>
+        <li><a href="/adapters/jsx-adapter/">JSX Adapter</a> — JSX/TSX alternative</li>
+        <li><a href="/projects/webdirectives/">Web Directives</a> — Structural directives documentation</li>
+        <li><a href="/projects/webbehaviors/">Web Behaviors</a> — Custom attribute behaviors</li>
+    </ul>
+</section>

@@ -54,5 +54,21 @@
     "status": "draft",
     "type": "Behavior Category",
     "summary": "Declarative event-to-action mapping using namespaced attributes (e.g., on:click) and argument passing (arg-*)."
+  },
+  {
+    "id": "trusted-html",
+    "name": "Trusted HTML",
+    "status": "draft",
+    "type": "Directive",
+    "summary": "Structural directive enforcing Trusted Types policies on dynamic HTML content via comment-based virtual elements.",
+    "related": ["trusted-html-behavior"]
+  },
+  {
+    "id": "trusted-html-behavior",
+    "name": "Trusted HTML Behavior",
+    "status": "draft",
+    "type": "Behavior",
+    "summary": "Attribute-based behavior that enforces Trusted Types policies on an element's innerHTML mutations.",
+    "related": ["trusted-html"]
   }
 ]

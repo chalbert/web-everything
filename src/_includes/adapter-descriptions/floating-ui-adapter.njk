@@ -1,0 +1,38 @@
+<h2>Floating UI Adapter</h2>
+<p>
+    The Floating UI Adapter implements the Web Everything <strong>Positioning Protocol</strong> using the <a href="https://floating-ui.com/">Floating UI</a> library.
+</p>
+
+<section class="section-card">
+    <h3 id="status">Status</h3>
+    <p class="text-sm text-gray-600">
+        <strong>Concept Phase:</strong> This adapter is in early design.
+    </p>
+</section>
+
+<section class="section-card">
+    <h3 id="concept">Concept</h3>
+    <p>
+        Floating UI provides robust positioning for tooltips, popovers, dropdowns, and other floating elements. This adapter bridges it to Web Everything's positioning protocol:
+    </p>
+
+    {% highlight "typescript" %}
+import { FloatingUIAdapter } from '@web-adapters/floating-ui';
+
+// Register the adapter
+positioningRegistry.define('floating-ui', FloatingUIAdapter);
+
+// Use in components
+<dropdown-menu positioning="floating-ui">
+    <button slot="trigger">Open Menu</button>
+    <menu-items slot="content">...</menu-items>
+</dropdown-menu>
+    {% endhighlight %}
+</section>
+
+<section class="section-card">
+    <h3 id="related">Related</h3>
+    <ul style="margin-bottom: 0;">
+        <li><a href="/blocks/droplist/">Droplist Block</a></li>
+    </ul>
+</section>

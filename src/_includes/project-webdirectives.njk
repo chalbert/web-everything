@@ -1,22 +1,401 @@
 <section id="concept" class="section-card">
     <h3 id="the-concept">The Concept</h3>
     <p>
-        <strong>Web Directives</strong> provides a unified system for control flow and logic in HTML. 
-        It combines standard structural directives (loops, conditionals) with invisible "Comment Directives" and powerful "Template Directives".
+        <strong>Web Directives</strong> extends HTML with structural control flow via two complementary primitives:
+        <code>CustomTemplateDirective</code> for authoring and <code>CustomComment</code> for runtime debugging.
     </p>
-</section>
-<section id="pillars" class="section-card">
-    <h3 id="three-pillars">Three Pillars</h3>
-    <ul>
-        <li><strong>Structural Directives:</strong> Standard attributes (like <code>*if</code> or <code>*for</code>) for manipulating DOM layout.</li>
-        <li><strong>Comment Directives:</strong> Use HTML comments to attach logic without extra wrapper elements. Perfect for "ghost" behaviors (formerly Web Figments).</li>
-        <li><strong>Template Directives:</strong> Advanced extensions for the <code>&lt;template&gt;</code> element to control instantiation and projection.</li>
-    </ul>
-</section>
-<section id="why" class="section-card">
-    <h3 id="why-comment-directives">Why Comment Directives?</h3>
     <p>
-        Sometimes you need logic (like a conditional render) but you don't want a <code>&lt;div&gt;</code> or <code>&lt;span&gt;</code> wrapper breaking your CSS grid or Flexbox layout. 
-        Comment directives allow you to anchor this logic to invisible markers in the DOM.
+        The key innovation is <strong>virtual elements</strong>—logic anchors that don't pollute the DOM tree.
+        Unlike framework-specific syntax, Web Directives work at runtime with standard HTML, no build step required.
     </p>
+</section>
+
+<section id="case-study" class="section-card">
+    <h3 id="case-study-layout-preservation">Case Study: Layout Preservation</h3>
+    <p>
+        Consider a CSS Grid with direct children. Traditional frameworks force you to wrap conditional content in elements, breaking the grid relationship:
+    </p>
+
+    {% highlight "html" %}
+<!-- Problem: Framework wrapper breaks grid -->
+<div class="grid grid-cols-3">
+    <div class="grid-item">Always visible</div>
+    <div class="framework-if-wrapper">  <!-- Extra node! -->
+        <div class="grid-item">Conditional</div>
+    </div>
+    <div class="grid-item">Always visible</div>
+</div>
+    {% endhighlight %}
+
+    <p><strong>With Web Directives:</strong> The rendered output uses comment markers—invisible to layout.</p>
+
+    {% highlight "html" %}
+<!-- Runtime: Virtual element preserves layout -->
+<div class="grid grid-cols-3">
+    <div class="grid-item">Always visible</div>
+    <!-- control:if condition="showMiddle" -->
+    <div class="grid-item">Conditional</div>
+    <!-- /control:if -->
+    <div class="grid-item">Always visible</div>
+</div>
+    {% endhighlight %}
+
+    <div class="comparison-block" style="background: rgba(99, 102, 241, 0.05); padding: 1.25rem; border-radius: 8px; border-left: 4px solid var(--color-primary); margin: 2rem 0;">
+        <h4 id="devtools-vision" style="margin-top: 0; color: var(--color-primary); font-size: 1rem;">DevTools Vision</h4>
+        <p style="margin-bottom: 0; font-size: 0.95rem;">
+            Imagine Chrome DevTools rendering these comment markers as <strong>first-class entities</strong> in the Elements panel—collapsible groups with a distinct color, showing directive state and options.
+            The comments aren't just debug artifacts; they're the foundation for tooling integration.
+        </p>
+    </div>
+</section>
+
+{% from "format-selector.njk" import formatSelector, jsxContent, templateContent, endFormat %}
+
+<section id="two-layers" class="section-card">
+    <h3 id="authoring-vs-runtime">Two Layers: Authoring &amp; Runtime</h3>
+
+    <p>Web Directives separates <strong>how you write</strong> directives from <strong>how they appear</strong> in the live DOM.</p>
+
+    <h4 style="margin-top: 1.5rem; margin-bottom: 0.75rem;">Authoring Layer</h4>
+    <p style="font-size: 0.9rem; color: var(--color-text-muted); margin-bottom: 1rem;">
+        Write directives in your preferred format. All compile to the same runtime primitives.
+    </p>
+
+    {{ formatSelector("for-each-simple") }}
+{% highlight "html" %}
+<!-- HTML: CustomTemplateDirective with is="" -->
+<template is="for-each" items="users" key="id">
+    <div class="user-row">
+        <span data-bind="name"></span>
+    </div>
+</template>
+{% endhighlight %}
+    {{ jsxContent("for-each-simple") }}
+{% highlight "tsx" %}
+// JSX: For component
+<For each={users} key="id">
+    {(user) => (
+        <div class="user-row">
+            <span>{user.name}</span>
+        </div>
+    )}
+</For>
+{% endhighlight %}
+    {{ templateContent("for-each-simple") }}
+{% highlight "typescript" %}
+// Template String: For tag
+html`
+    <For each=${users} key="id">
+        ${(user) => html`
+            <div class="user-row">
+                <span>${user.name}</span>
+            </div>
+        `}
+    </For>
+`
+{% endhighlight %}
+    {{ endFormat() }}
+
+    <p style="font-size: 0.85rem; color: var(--color-text-muted); margin-top: 0.5rem;">
+        The directive handles instantiation. Comments are injected automatically at runtime.
+    </p>
+
+    <h4 style="margin-top: 1.5rem; margin-bottom: 0.75rem;">Runtime Layer</h4>
+    <p style="font-size: 0.9rem; color: var(--color-text-muted); margin-bottom: 1rem;">
+        <code>CustomComment</code> markers appear in the live DOM, providing boundaries for debugging and tooling.
+    </p>
+
+    <div style="border: 1px solid #bbf7d0; border-radius: 0.5rem; overflow: hidden;">
+        <div style="padding: 0.5rem 0.75rem; background: #f0fdf4; border-bottom: 1px solid #bbf7d0;">
+            <span style="font-size: 0.75rem; font-weight: 600; color: #166534; text-transform: uppercase; letter-spacing: 0.05em;">Rendered DOM</span>
+        </div>
+{% highlight "html" %}
+<!-- control:for-each items="users" key="id" -->
+<div class="user-row">
+    <span>Alice</span>
+</div>
+<div class="user-row">
+    <span>Bob</span>
+</div>
+<!-- /control:for-each -->
+{% endhighlight %}
+    </div>
+    <p style="font-size: 0.85rem; color: var(--color-text-muted); margin-top: 0.5rem;">
+        Template is gone. Comments remain as inspectable debug markers.
+    </p>
+</section>
+
+<section id="complex-directives" class="section-card">
+    <h3 id="multi-template-directives">Multi-Template Directives</h3>
+    <p>
+        Some directives require <strong>multiple templates</strong> for different states or slots:
+    </p>
+
+    {{ formatSelector("resource-loader") }}
+{% highlight "html" %}
+<!-- HTML: Comment directive with multiple templates -->
+<!-- resource:loader name="user-profile" -->
+    <template slot="loading">
+        <skeleton-card></skeleton-card>
+    </template>
+    <template slot="success">
+        <user-card data-bind="data"></user-card>
+    </template>
+    <template slot="empty">
+        <p>No user found.</p>
+    </template>
+    <template slot="error">
+        <error-message data-bind="error"></error-message>
+    </template>
+<!-- /resource:loader -->
+{% endhighlight %}
+    {{ jsxContent("resource-loader") }}
+{% highlight "tsx" %}
+// JSX: Resource component with render props
+<Resource
+    source={userProfileQuery}
+    loading={<SkeletonCard />}
+    empty={<p>No user found.</p>}
+    error={(err) => <ErrorMessage message={err.message} />}
+>
+    {(data) => <UserCard user={data} />}
+</Resource>
+{% endhighlight %}
+    {{ templateContent("resource-loader") }}
+{% highlight "typescript" %}
+// Template String: Resource tag with slots
+html`
+    <Resource source=${userProfileQuery}>
+        <template slot="loading">
+            <skeleton-card></skeleton-card>
+        </template>
+        <template slot="success">
+            ${(data) => html`<user-card .user=${data}></user-card>`}
+        </template>
+        <template slot="empty">
+            <p>No user found.</p>
+        </template>
+        <template slot="error">
+            ${(err) => html`<error-message .message=${err.message}></error-message>`}
+        </template>
+    </Resource>
+`
+{% endhighlight %}
+    {{ endFormat() }}
+
+    <div class="content-box" style="margin-top: 1.5rem;">
+        <h4 id="when-to-use-which" style="margin: 0 0 0.75rem 0; color: var(--color-primary);">When to Use Which</h4>
+        <table style="width: 100%; font-size: 0.9rem; border-collapse: collapse;">
+            <thead>
+                <tr style="border-bottom: 2px solid #e5e7eb;">
+                    <th style="text-align: left; padding: 0.5rem 0;">Pattern</th>
+                    <th style="text-align: left; padding: 0.5rem 0;">Syntax</th>
+                    <th style="text-align: left; padding: 0.5rem 0;">Example</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr style="border-bottom: 1px solid #e5e7eb;">
+                    <td style="padding: 0.5rem 0;">Single template</td>
+                    <td style="padding: 0.5rem 0;"><code>&lt;template is="..."&gt;</code></td>
+                    <td style="padding: 0.5rem 0;"><code>for-each</code>, <code>if</code></td>
+                </tr>
+                <tr>
+                    <td style="padding: 0.5rem 0;">Multiple templates / slots</td>
+                    <td style="padding: 0.5rem 0;"><code>&lt;!-- directive --&gt;</code></td>
+                    <td style="padding: 0.5rem 0;"><code>resource:loader</code>, <code>switch</code></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section id="specs" class="section-card">
+    <h3 id="standard-specification-draft">Standard Specification (Draft)</h3>
+
+    <h4 id="1-customtemplatedirective">1. class CustomTemplateDirective</h4>
+    <p>
+        Extends <code>HTMLTemplateElement</code> as a customized built-in element. Uses native <code>customElements</code> registry—no separate registry needed.
+    </p>
+    {% highlight "typescript" %}
+abstract class CustomTemplateDirective extends HTMLTemplateElement {
+    // Parsed options from attributes
+    readonly options: Record<string, unknown>;
+
+    // Instantiate the template content with context
+    instantiate(context?: Record<string, unknown>): DocumentFragment;
+
+    // Lifecycle Callbacks (standard Custom Elements)
+    connectedCallback?(): void;
+    disconnectedCallback?(): void;
+    attributeChangedCallback?(name: string, oldValue: string, newValue: string): void;
+}
+
+// Registration via native customElements
+customElements.define('for-each', ForEachDirective, { extends: 'template' });
+
+// Usage: <template is="for-each" items="users">
+    {% endhighlight %}
+
+    <h4 id="2-customcomment">2. class CustomComment</h4>
+    <p>
+        Extends the native <code>Comment</code> node with lifecycle callbacks. Used for runtime boundaries and complex multi-template directives.
+    </p>
+    {% highlight "typescript" %}
+interface CustomComment extends Comment {
+    // Parsed options from comment content
+    readonly options: Record<string, unknown>;
+
+    // Lifecycle Callbacks
+    connectedCallback?(): void;
+    disconnectedCallback?(): void;
+    optionsChangedCallback?(oldValue: unknown, newValue: unknown): void;
+}
+
+// Registration
+customComments.define('resource:loader', ResourceLoaderDirective);
+    {% endhighlight %}
+
+    <h4 id="3-comment-syntax">3. Comment Syntax (Configurable)</h4>
+    <p>
+        The comment format is <strong>not part of the core spec</strong>. A <code>CustomCommentParserRegistry</code> handles parsing, allowing projects or frameworks to define their own syntax.
+    </p>
+    {% highlight "typescript" %}
+interface CustomCommentParser {
+    // Returns directive info if this parser recognizes the comment
+    parse(commentText: string): { name: string; options: Record<string, unknown> } | null;
+}
+
+// Register a custom parser
+customCommentParsers.define('my-parser', {
+    parse(text) {
+        // Custom parsing logic...
+    }
+});
+    {% endhighlight %}
+
+    <p style="margin-top: 1rem;">The default parser uses a namespaced format:</p>
+    {% highlight "html" %}
+<!-- namespace:directive-name
+    option1="value1"
+    option2="value2"
+-->
+    ...content...
+<!-- /namespace:directive-name -->
+    {% endhighlight %}
+    <ul class="text-sm text-gray-600 mt-2">
+        <li><strong>Namespace:</strong> Groups related directives (e.g., <code>control:</code>, <code>resource:</code>, <code>trusted:</code>)</li>
+        <li><strong>Options:</strong> Key-value pairs parsed from the comment body</li>
+        <li><strong>Closing marker:</strong> <code>/namespace:name</code> marks the directive boundary</li>
+    </ul>
+    <p class="text-sm text-gray-600 mt-3">
+        A framework could use Angular-style <code>*ngFor</code>, Svelte-style <code>{% raw %}{#each}{% endraw %}</code>, or any other format by providing a custom parser.
+    </p>
+
+    <h4 id="4-registries">4. CustomCommentRegistry</h4>
+    <p>
+        Only <code>CustomComment</code> requires a dedicated registry since comments aren't elements. Template directives use the native <code>customElements</code> registry.
+    </p>
+    {% highlight "typescript" %}
+interface CustomCommentRegistry {
+    define(name: string, constructor: CustomCommentConstructor): void;
+    get(name: string): CustomCommentConstructor | undefined;
+    upgrade(root: Node): void;
+    whenDefined(name: string): Promise<CustomCommentConstructor>;
+}
+
+// Global instance
+declare const customComments: CustomCommentRegistry;
+    {% endhighlight %}
+
+    <h4 id="5-safari-polyfill">5. Safari &amp; Customized Built-ins</h4>
+    <div class="content-box">
+        <p style="margin: 0; font-size: 0.9rem;">
+            Safari doesn't natively support customized built-in elements (<code>is=""</code>).
+            Web Plugs provides a polyfill that fits naturally with the "plugged/unplugged" model—the same infrastructure already patches other native APIs.
+        </p>
+    </div>
+</section>
+
+<section id="examples" class="section-card">
+    <h3 id="directive-examples">Directive Examples</h3>
+
+    <div class="features-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-top: 1.5rem; margin-bottom: 2rem;">
+
+        <!-- Simple (template is="") -->
+        <div class="content-box">
+            <h4 id="simple-directives" style="color: var(--color-primary); margin: 0 0 0.5rem 0;">Simple Directives</h4>
+            <p style="font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 0.5rem;">Single template, use <code>&lt;template is=""&gt;</code></p>
+            <ul style="font-size: 0.95rem; padding-left: 1.25rem; color: var(--color-text-muted);">
+                <li>
+                    <code>for-each</code>
+                    <br><span>Iterate over collections with keyed diffing.</span>
+                </li>
+                <li>
+                    <code>if</code>
+                    <br><span>Conditional rendering based on expression.</span>
+                </li>
+                <li>
+                    <code>lazy</code>
+                    <br><span>Defer instantiation until triggered.</span>
+                </li>
+                <li>
+                    <code>portal</code>
+                    <br><span>Render content at a different DOM location.</span>
+                </li>
+            </ul>
+        </div>
+
+        <!-- Complex (comment wrapper) -->
+        <div class="content-box">
+            <h4 id="complex-directives-list" style="color: var(--color-primary); margin: 0 0 0.5rem 0;">Complex Directives</h4>
+            <p style="font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 0.5rem;">Multiple templates, use <code>&lt;!-- directive --&gt;</code></p>
+            <ul style="font-size: 0.95rem; padding-left: 1.25rem; color: var(--color-text-muted);">
+                <li>
+                    <code>resource:loader</code>
+                    <br><span>Loading/success/empty/error state templates.</span>
+                </li>
+                <li>
+                    <code>resource:action</code>
+                    <br><span>Mutation lifecycle with idle/pending/done states.</span>
+                </li>
+                <li>
+                    <code>switch</code>
+                    <br><span>Multi-branch with case templates.</span>
+                </li>
+                <li>
+                    <code>async:boundary</code>
+                    <br><span>Suspense-like with fallback template.</span>
+                </li>
+            </ul>
+        </div>
+
+        <!-- Security -->
+        <div class="content-box">
+            <h4 id="security-directives" style="color: var(--color-primary); margin: 0 0 0.5rem 0;">Security Directives</h4>
+            <p style="font-size: 0.85rem; color: var(--color-text-muted); margin-bottom: 0.5rem;">Enforce content policies</p>
+            <ul style="font-size: 0.95rem; padding-left: 1.25rem; color: var(--color-text-muted);">
+                <li>
+                    <code>trusted:html</code>
+                    <br><span>Enforce Trusted Types on content zones.</span>
+                </li>
+                <li>
+                    <code>sanitize:content</code>
+                    <br><span>Apply DOMPurify to user content.</span>
+                </li>
+            </ul>
+        </div>
+
+    </div>
+</section>
+
+<section id="why" class="section-card">
+    <h3 id="why-this-matters">Why This Matters</h3>
+    <ul>
+        <li><strong>Layout Integrity:</strong> No wrapper elements breaking CSS Grid, Flexbox, or table structures.</li>
+        <li><strong>Clean Authoring:</strong> Simple directives use <code>&lt;template is=""&gt;</code>—no boilerplate comments.</li>
+        <li><strong>Debuggable Runtime:</strong> Comment markers persist for inspection, even when templates are gone.</li>
+        <li><strong>Runtime Flexibility:</strong> Works with server-rendered HTML, no build step required.</li>
+        <li><strong>Progressive Enhancement:</strong> Enhance existing markup rather than replacing it.</li>
+        <li><strong>Familiar Patterns:</strong> Lifecycle callbacks mirror Custom Elements, reducing learning curve.</li>
+    </ul>
 </section>

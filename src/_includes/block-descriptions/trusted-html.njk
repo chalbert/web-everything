@@ -1,0 +1,48 @@
+<h2>Protocol: Trusted HTML</h2>
+<p>
+    A structural directive enforcing <a href="https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API">Trusted Types</a> policies on dynamic HTML content, implemented as a <strong>Virtual Element</strong>.
+</p>
+
+<h3>Why Trusted Types?</h3>
+<p>
+    DOM XSS attacks occur when untrusted strings flow into dangerous sinks like <code>innerHTML</code>. Trusted Types lock down these sinks to only accept typed objects (<code>TrustedHTML</code>, <code>TrustedScript</code>, <code>TrustedScriptURL</code>), forcing sanitization at the source.
+</p>
+
+<h3>Virtual Implementation</h3>
+<p>
+    Uses Custom Comments (e.g. <code>&lt;!-- trusted:html --&gt;</code>) to wrap content zones. All HTML injected within this boundary must pass through the specified policy. This integrates with the existing <code>Element.innerHTML</code> patch and <code>HTMLInjector</code> scope propagation.
+</p>
+
+<h3>Usage Example</h3>
+<pre><code class="language-html">&lt;!-- trusted:html policy="sanitize-user-content" --&gt;
+  &lt;template&gt;
+    &lt;div data-bind="userGeneratedHtml"&gt;&lt;/div&gt;
+  &lt;/template&gt;
+&lt;!-- /trusted:html --&gt;</code></pre>
+
+<h3>Policy Scoping via Injectors</h3>
+<p>
+    Policies can be scoped hierarchically through the <code>HTMLInjector</code> system. A <code>CustomTrustedTypesRegistry</code> holds named policies, allowing different application zones to enforce different sanitization rules.
+</p>
+<pre><code class="language-typescript">// Register a policy in the injector
+trustedTypesRegistry.define('sanitize-user-content', {
+    createHTML: (input) => DOMPurify.sanitize(input)
+});
+
+// Strict policy for admin zones
+trustedTypesRegistry.define('admin-only', {
+    createHTML: (input) => {
+        if (!isAdmin()) throw new Error('Unauthorized');
+        return input;
+    }
+});</code></pre>
+
+<h3>Fallback Behavior</h3>
+<p>
+    When Trusted Types are not supported by the browser, the directive degrades gracefully by applying the policy's <code>createHTML</code> function directly to string inputs before injection.
+</p>
+
+<h3>Related</h3>
+<p>
+    For attribute-based enforcement on individual elements, see <a href="/blocks/trusted-html-behavior/">Trusted HTML Behavior</a>.
+</p>

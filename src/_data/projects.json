@@ -64,12 +64,12 @@
     "isSvg": true
   },
   {
-    "id": "webtokens",
-    "name": "Web Tokens",
-    "description": "Advanced parsing system for custom text nodes, attributes, and path expressions within the DOM.",
+    "id": "webexpressions",
+    "name": "Web Expressions",
+    "description": "Parser-agnostic infrastructure for dynamic content interpolation in HTML, supporting custom template syntax.",
     "status": "poc",
     "category": "standard",
-    "icon": "/assets/icons/webtokens.svg",
+    "icon": "/assets/icons/webexpressions.svg",
     "isSvg": true
   },
   {
@@ -130,7 +130,7 @@
   {
     "id": "webportals",
     "name": "Web Portals",
-    "description": "Standard protocol for rendering a subtree of the logical component hierarchy at a different location in the DOM, while preserving context, event, and focus relationships. Enables overlays, modals, tooltips, and other UI elements to visually escape their parent container without losing access to their logical ancestors' data, services, or handlers.",
+    "description": "Mimics React portals: render an element outside its logical parent in the DOM, but retain its web contexts. Enables overlays, modals, and tooltips to visually escape their parent while staying connected to their logical ancestors' data and services.",
     "status": "concept",
     "category": "standard",
     "icon": "/assets/icons/webportals.svg",

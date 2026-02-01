@@ -8,6 +8,14 @@ module.exports = function (eleventyConfig) {
     return plugs.filter(plug => plug.projects && plug.projects.includes(projectId));
   });
 
+  // Flatten adapters from categories for pagination
+  eleventyConfig.addCollection("flatAdapters", function(collectionApi) {
+    const adapters = require("./src/_data/adapters.json");
+    return adapters.flatMap(category =>
+      category.items.map(item => ({ ...item, category: category.id, categoryTitle: category.title }))
+    );
+  });
+
   eleventyConfig.addPassthroughCopy("src/css");
   eleventyConfig.addPassthroughCopy("src/assets");
 

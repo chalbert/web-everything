@@ -1,0 +1,45 @@
+<h2>Functional Component Adapter</h2>
+<p>
+    The Functional Component Adapter allows writing functional-style components that map to class-based Web Components.
+</p>
+
+<section class="section-card">
+    <h3 id="status">Status</h3>
+    <p class="text-sm text-gray-600">
+        <strong>Concept Phase:</strong> This adapter is in early design. The API and implementation details are being explored.
+    </p>
+</section>
+
+<section class="section-card">
+    <h3 id="concept">Concept</h3>
+    <p>
+        Write components as simple functions while the adapter generates class-based Custom Elements under the hood:
+    </p>
+
+    {% highlight "typescript" %}
+// Functional style
+const Counter = (props) => {
+    const [count, setCount] = useState(0);
+
+    return html`
+        <button @click=${() => setCount(count + 1)}>
+            Count: ${count}
+        </button>
+    `;
+};
+
+// Compiles to class-based Custom Element
+class CounterElement extends HTMLElement {
+    // Generated implementation...
+}
+customElements.define('counter-element', CounterElement);
+    {% endhighlight %}
+</section>
+
+<section class="section-card">
+    <h3 id="related">Related</h3>
+    <ul style="margin-bottom: 0;">
+        <li><a href="/adapters/jsx-adapter/">JSX Adapter</a></li>
+        <li><a href="/adapters/template-string-adapter/">Template String Adapter</a></li>
+    </ul>
+</section>

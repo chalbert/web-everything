@@ -42,7 +42,7 @@
   },
   {
     "id": "node-injector-patch",
-    "name": "Node (Injector Methods)",
+    "name": "Node",
     "status": "implemented",
     "type": "Patch",
     "summary": "Adds injector hierarchy methods to Node prototype: getClosestInjector(), getOwnInjector(), hasOwnInjector(), injectors(), createElement().",
@@ -76,7 +76,7 @@
   },
   {
     "id": "node-context-patch",
-    "name": "Node (Context Methods)",
+    "name": "Node",
     "status": "implemented",
     "type": "Patch",
     "summary": "Adds context methods to Node prototype: createContext(), getContext(), ensureContext(), getOwnContext(), hasContext(), hasOwnContext(), queryContext().",
@@ -102,7 +102,7 @@
   },
   {
     "id": "element-insertion-patch",
-    "name": "Element (Insertion Methods)",
+    "name": "Element",
     "status": "implemented",
     "type": "Patch",
     "summary": "Patches DOM insertion methods (append, prepend, after, before, replaceChildren, replaceWith) for lazy element upgrade.",
@@ -167,7 +167,7 @@
     "status": "implemented",
     "type": "Global",
     "summary": "Allows defining parsing logic for attribute values, enabling custom syntax and transformations.",
-    "projects": ["webbehaviors"]
+    "projects": ["webexpressions"]
   },
   {
     "id": "customcommentregistry",
@@ -207,7 +207,7 @@
     "status": "implemented",
     "type": "Global",
     "summary": "Allows defining parsers for text content, enabling custom template syntax like Mustache-style interpolation.",
-    "projects": ["webtokens"]
+    "projects": ["webexpressions"]
   },
   {
     "id": "customtextnode",
@@ -215,7 +215,7 @@
     "status": "implemented",
     "type": "Global",
     "summary": "Base class for enhanced text nodes with reactive binding capabilities.",
-    "projects": ["webtokens"]
+    "projects": ["webexpressions"]
   },
   {
     "id": "customtextnodeparserregistry",
@@ -223,7 +223,7 @@
     "status": "implemented",
     "type": "Global",
     "summary": "Manages parsers that can interpret text node content and transform it into reactive components.",
-    "projects": ["webtokens"]
+    "projects": ["webexpressions"]
   },
   {
     "id": "custompathexpressionparserregistry",
@@ -231,7 +231,7 @@
     "status": "implemented",
     "type": "Global",
     "summary": "Registry for path expression parsers, standardizing how strings are parsed into executable paths.",
-    "projects": ["webtokens"]
+    "projects": ["webexpressions"]
   },
   {
     "id": "custompathexpressionparser",
@@ -239,7 +239,7 @@
     "status": "implemented",
     "type": "Global",
     "summary": "Standardizes how strings are parsed into executable paths for use in data bindings and expressions.",
-    "projects": ["webtokens"]
+    "projects": ["webexpressions"]
   },
   {
     "id": "customscripttypesregistry",

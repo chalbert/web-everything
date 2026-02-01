@@ -14,6 +14,7 @@
     --spacing-sm: 1rem;
     --spacing-md: 2rem;
     --spacing-lg: 4rem;
+    --spacing-xl: 8rem;
     
     --radius-md: 8px;
     --radius-lg: 16px;
@@ -65,6 +66,45 @@ pre code {
     background: transparent;
     color: inherit;
     padding: 0;
+}
+
+/* Mode selector code blocks - remove margins for seamless container */
+.mode-selector-container .mode-content .code-wrapper,
+.mode-selector-container .mode-content pre {
+    margin: 0 !important;
+    border-radius: 0 !important;
+}
+
+.mode-selector-container .mode-content pre {
+    overflow-x: auto;
+    white-space: pre;
+}
+
+.mode-selector-container .mode-content pre code {
+    border-radius: 0 !important;
+    white-space: pre;
+}
+
+/* Comparison mode - equal height columns */
+.mode-selector-container .mode-content[data-mode="comparison"] > div {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+}
+
+.mode-selector-container .mode-content[data-mode="comparison"] > div > div {
+    display: flex;
+    flex-direction: column;
+}
+
+.mode-selector-container .mode-content[data-mode="comparison"] > div > div .code-wrapper,
+.mode-selector-container .mode-content[data-mode="comparison"] > div > div pre {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.mode-selector-container .mode-content[data-mode="comparison"] > div > div pre code {
+    flex: 1;
 }
 
 /* Layout */
@@ -439,7 +479,9 @@ h1, h2, h3, h4, h5, h6 {
 .status-concept .meter-fill { width: 10%; background: #94a3b8; }
 .status-poc .meter-fill { width: 30%; background: #06b6d4; }
 .status-draft .meter-fill { width: 50%; background: #a855f7; }
+.status-experimental .meter-fill { width: 60%; background: #a855f7; }
 .status-candidate .meter-fill { width: 80%; background: var(--color-primary); }
+.status-implemented .meter-fill { width: 100%; background: #a855f7; }
 .status-stable .meter-fill { width: 100%; background: #22c55e; }
 
 /* Detail Page */
@@ -484,6 +526,91 @@ h1, h2, h3, h4, h5, h6 {
     display: inline-block;
     width: 100%;
     max-width: 200px; /* Limit width */
+}
+
+.plug-detail-header {
+    padding: var(--spacing-md) 0 var(--spacing-md);
+    margin: 0 var(--spacing-sm);
+}
+
+.plug-detail-header-inner {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 0 var(--spacing-md);
+}
+
+.plug-breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    margin-bottom: var(--spacing-md);
+    font-size: 0.9375rem;
+}
+
+.plug-crumb {
+    color: var(--color-text-muted);
+    text-decoration: none;
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.25rem;
+    transition: all 0.15s;
+}
+
+a.plug-crumb:hover {
+    color: var(--color-primary);
+    background: var(--color-surface);
+}
+
+.plug-crumb-current {
+    color: var(--color-text-main);
+    font-weight: 500;
+}
+
+.plug-crumb-chevron {
+    color: var(--color-text-muted);
+    flex-shrink: 0;
+}
+
+.plug-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
+.plug-title {
+    font-size: 2rem;
+    font-weight: 700;
+    margin: 0;
+    color: var(--color-text-main);
+}
+
+.plug-type-sup {
+    font-size: 0.4em;
+    font-weight: 500;
+    padding: 0.2em 0.5em;
+    border-radius: 9999px;
+    margin-left: 0.4em;
+    vertical-align: super;
+    position: relative;
+    top: -0.2em;
+}
+
+.plug-type-global {
+    background: #dbeafe;
+    color: #1e40af;
+    border: 1px solid #bfdbfe;
+}
+
+.plug-type-patch {
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fde68a;
+}
+
+.plug-status {
+    width: 240px;
+    flex-shrink: 0;
 }
 
 .status-lifecycle-link {

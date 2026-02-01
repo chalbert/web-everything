@@ -25,19 +25,84 @@
     </div>
 </section>
 
+<section id="plugged-unplugged" class="section-card">
+    <h3>Plugged vs Unplugged</h3>
+    <p>
+        Web Plugs can be consumed in two distinct modes, offering a choice between native-like integration and explicit library usage.
+    </p>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1.5rem;">
+        <div style="padding: 1.5rem; background: #ecfdf5; border-radius: 0.5rem; border: 1px solid #a7f3d0;">
+            <div class="flex items-center gap-2 mb-3">
+                <svg style="width: 20px; height: 20px; flex-shrink: 0;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" stroke="#059669"/>
+                </svg>
+                <h4 class="text-lg font-bold text-emerald-800 m-0">Plugged</h4>
+            </div>
+            <p class="text-sm text-emerald-900 mb-3">
+                Monkey patches the browser's native APIs to simulate a real specification. The DOM self-upgrades automatically in every situation.
+            </p>
+            <div class="text-xs text-emerald-700 space-y-1">
+                <div class="flex items-start gap-2">
+                    <span class="text-emerald-500">✓</span>
+                    <span>Transparent integration—works like native browser features</span>
+                </div>
+                <div class="flex items-start gap-2">
+                    <span class="text-emerald-500">✓</span>
+                    <span>Automatic DOM upgrades on insertion, parsing, innerHTML</span>
+                </div>
+                <div class="flex items-start gap-2">
+                    <span class="text-emerald-500">✓</span>
+                    <span>No manual intervention required</span>
+                </div>
+            </div>
+        </div>
+
+        <div style="padding: 1.5rem; background: #f8fafc; border-radius: 0.5rem; border: 1px solid #cbd5e1;">
+            <div class="flex items-center gap-2 mb-3">
+                <svg style="width: 20px; height: 20px; flex-shrink: 0;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z" stroke="#475569"/>
+                </svg>
+                <h4 class="text-lg font-bold text-slate-800 m-0">Unplugged</h4>
+            </div>
+            <p class="text-sm text-slate-700 mb-3">
+                Import and consume from a library without patching browser natives. Requires explicit DOM upgrades via a single <code class="text-xs bg-slate-200 px-1 rounded">upgrade()</code> method.
+            </p>
+            <div class="text-xs text-slate-600 space-y-1">
+                <div class="flex items-start gap-2">
+                    <span class="text-slate-400">✓</span>
+                    <span>No modifications to global objects</span>
+                </div>
+                <div class="flex items-start gap-2">
+                    <span class="text-slate-400">✓</span>
+                    <span>Explicit control over when upgrades occur</span>
+                </div>
+                <div class="flex items-start gap-2">
+                    <span class="text-slate-400">✓</span>
+                    <span>Effect of <code class="bg-slate-200 px-1 rounded">upgrade()</code> depends on activated plugs</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div style="margin-top: 1.5rem; padding: 1rem; background: #eff6ff; border-radius: 0.5rem; border: 1px solid #bfdbfe;">
+        <p class="text-sm text-blue-800 m-0">
+            <strong>Note:</strong> In unplugged mode, a single <code class="text-xs bg-blue-100 px-1 rounded">upgrade(root)</code> call processes the DOM tree based on which plugs have been activated for your project. This provides a unified entry point regardless of the specific features you're using.
+        </p>
+    </div>
+</section>
+
 {% macro renderProjectPlugs(projectId, projectName) %}
     {% set projectPlugs = plugs | filterByProject(projectId) %}
     {% if projectPlugs.length > 0 %}
     <section class="section-card">
-        <h3 id="{{ projectId }}">
-            <a href="/projects/{{ projectId }}/">{{ projectName }}</a>
-        </h3>
+        <h3 id="{{ projectId }}">{{ projectName }} Plugs</h3>
         <div class="standards-grid">
             {% for plug in projectPlugs %}
                 <a href="/plugs/{{ plug.id }}/" class="standard-card">
                     <div class="flex justify-between items-start mb-3" style="gap: 12px; display: flex; justify-content: space-between;">
                         <h4 id="plug-{{ plug.id }}" class="text-lg font-bold m-0 text-gray-900">{{ plug.name }}</h4>
-                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {% if plug.type == 'Global' %}bg-blue-100 text-blue-800 border border-blue-200{% else %}bg-amber-100 text-amber-800 border border-amber-200{% endif %}" style="white-space: nowrap;">
+                        <span class="px-2.5 py-0.5 rounded-full text-xs font-medium {% if plug.type == 'Global' %}bg-blue-100 text-blue-800 border border-blue-200{% else %}bg-amber-100 text-amber-800 border border-amber-200{% endif %}" style="white-space: nowrap; align-self: flex-start; line-height: 1.5;">
                             {{ plug.type }}
                         </span>
                     </div>
@@ -70,5 +135,5 @@
 {{ renderProjectPlugs("webcomponents", "Web Components") }}
 {{ renderProjectPlugs("webbehaviors", "Web Behaviors") }}
 {{ renderProjectPlugs("webdirectives", "Web Directives") }}
-{{ renderProjectPlugs("webtokens", "Web Tokens") }}
+{{ renderProjectPlugs("webexpressions", "Web Expressions") }}
 {{ renderProjectPlugs("webstates", "Web States") }}

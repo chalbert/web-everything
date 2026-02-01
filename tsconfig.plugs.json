@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022", "DOM"],
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist/plugs",
+    "rootDir": "./plugs",
+    "baseUrl": "./plugs",
+    "paths": {
+      "@core/*": ["core/*"],
+      "@webregistries/*": ["webregistries/*"],
+      "@webinjectors/*": ["webinjectors/*"],
+      "@webcomponents/*": ["webcomponents/*"],
+      "@webcontexts/*": ["webcontexts/*"]
+    }
+  },
+  "include": ["plugs/**/*"],
+  "exclude": ["plugs/**/__tests__/**/*", "plugs/**/*.test.ts", "plugs/**/*.spec.ts"]
+}

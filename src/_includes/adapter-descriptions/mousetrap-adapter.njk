@@ -1,0 +1,38 @@
+<h2>Mousetrap Adapter</h2>
+<p>
+    The Mousetrap Adapter connects the <a href="https://craig.is/killing/mice">Mousetrap</a> library to Web Everything's <strong>Keyboard Shortcuts Module</strong>.
+</p>
+
+<section class="section-card">
+    <h3 id="status">Status</h3>
+    <p class="text-sm text-gray-600">
+        <strong>Concept Phase:</strong> This adapter is in early design.
+    </p>
+</section>
+
+<section class="section-card">
+    <h3 id="concept">Concept</h3>
+    <p>
+        Mousetrap is a popular library for handling keyboard shortcuts. This adapter allows using Mousetrap's binding syntax while integrating with Web Everything's keyboard module:
+    </p>
+
+    {% highlight "typescript" %}
+import { MousetrapAdapter } from '@web-adapters/mousetrap';
+
+// Register the adapter
+keyboardRegistry.define('mousetrap', MousetrapAdapter);
+
+// Use Mousetrap-style bindings
+<div keyboard-shortcuts="mousetrap">
+    <button shortcut="mod+s" on:shortcut="save">Save</button>
+    <button shortcut="mod+shift+s" on:shortcut="saveAs">Save As</button>
+</div>
+    {% endhighlight %}
+</section>
+
+<section class="section-card">
+    <h3 id="related">Related</h3>
+    <ul style="margin-bottom: 0;">
+        <li><a href="/blocks/keyboard-shortcuts/">Keyboard Shortcuts Block</a></li>
+    </ul>
+</section>

@@ -1,34 +1,81 @@
-<h4 id="overview">Overview</h4>
-<p><strong>Patch File:</strong> <code>custom-elements/Node.patch.ts</code></p>
+{% from "mode-selector.njk" import pluggedContent, unpluggedContent, comparisonContent, endContent %}
+
+<h3 id="overview">Overview</h3>
 <p>
     Adds context methods to the <code>Node</code> prototype, enabling hierarchical context lookup and management for declarative HTML token resolution.
 </p>
 
-<h4 id="added-methods">Added Methods</h4>
+<h3 id="api-reference">API Reference</h3>
+
+{{ pluggedContent("context-api") }}
 <dl class="ml-4 text-sm">
-    <dt class="font-bold text-gray-800 mt-3"><code>createContext(contextType: string): CustomContext | undefined</code></dt>
-    <dd class="text-gray-600 ml-4">Creates a new context instance of the specified type by looking up the context constructor in the injector hierarchy.</dd>
+    <dt class="font-bold text-gray-800 mt-3"><code>node.createContext(contextType)</code></dt>
+    <dd class="text-gray-600 ml-4">Creates a new context instance of the specified type.</dd>
 
-    <dt class="font-bold text-gray-800 mt-3"><code>getContext(contextType: string): any | undefined</code></dt>
-    <dd class="text-gray-600 ml-4">Retrieves a context value by walking up the injector hierarchy. Returns the first matching context instance found.</dd>
+    <dt class="font-bold text-gray-800 mt-3"><code>node.getContext(contextType)</code></dt>
+    <dd class="text-gray-600 ml-4">Retrieves a context value by walking up the hierarchy.</dd>
 
-    <dt class="font-bold text-gray-800 mt-3"><code>ensureContext(contextType: string): CustomContext</code></dt>
-    <dd class="text-gray-600 ml-4">Gets the own context if it exists, or creates and attaches a new context instance if it doesn't.</dd>
+    <dt class="font-bold text-gray-800 mt-3"><code>node.ensureContext(contextType)</code></dt>
+    <dd class="text-gray-600 ml-4">Gets the own context if it exists, or creates a new one.</dd>
 
-    <dt class="font-bold text-gray-800 mt-3"><code>getOwnContext(contextType: string): any | null</code></dt>
-    <dd class="text-gray-600 ml-4">Returns the context owned by this specific node, without walking up the hierarchy.</dd>
+    <dt class="font-bold text-gray-800 mt-3"><code>node.getOwnContext(contextType)</code></dt>
+    <dd class="text-gray-600 ml-4">Returns the context owned by this specific node only.</dd>
 
-    <dt class="font-bold text-gray-800 mt-3"><code>hasContext(contextType: string): boolean</code></dt>
-    <dd class="text-gray-600 ml-4">Returns true if a context of the specified type exists anywhere in the hierarchy.</dd>
+    <dt class="font-bold text-gray-800 mt-3"><code>node.hasContext(contextType)</code></dt>
+    <dd class="text-gray-600 ml-4">Returns true if a context exists in the hierarchy.</dd>
 
-    <dt class="font-bold text-gray-800 mt-3"><code>hasOwnContext(contextType: string): boolean</code></dt>
-    <dd class="text-gray-600 ml-4">Returns true if this node owns a context of the specified type.</dd>
+    <dt class="font-bold text-gray-800 mt-3"><code>node.hasOwnContext(contextType)</code></dt>
+    <dd class="text-gray-600 ml-4">Returns true if this node owns a context of the type.</dd>
 
-    <dt class="font-bold text-gray-800 mt-3"><code>queryContext(contextType: string, query: any): Consumable</code></dt>
-    <dd class="text-gray-600 ml-4">Queries a context with a specific query parameter, returning a Consumable that resolves the result.</dd>
+    <dt class="font-bold text-gray-800 mt-3"><code>node.queryContext(contextType, query)</code></dt>
+    <dd class="text-gray-600 ml-4">Queries a context with parameters, returning a Consumable.</dd>
 </dl>
 
-<h4 id="usage-example">Usage Example</h4>
+{{ unpluggedContent("context-api") }}
+<dl class="ml-4 text-sm">
+    <dt class="font-bold text-gray-800 mt-3"><code>createContext(node, contextType)</code></dt>
+    <dd class="text-gray-600 ml-4">Creates a new context instance of the specified type.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>getContext(node, contextType)</code></dt>
+    <dd class="text-gray-600 ml-4">Retrieves a context value by walking up the hierarchy.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>ensureContext(node, contextType)</code></dt>
+    <dd class="text-gray-600 ml-4">Gets the own context if it exists, or creates a new one.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>getOwnContext(node, contextType)</code></dt>
+    <dd class="text-gray-600 ml-4">Returns the context owned by this specific node only.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>hasContext(node, contextType)</code></dt>
+    <dd class="text-gray-600 ml-4">Returns true if a context exists in the hierarchy.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>hasOwnContext(node, contextType)</code></dt>
+    <dd class="text-gray-600 ml-4">Returns true if this node owns a context of the type.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>queryContext(node, contextType, query)</code></dt>
+    <dd class="text-gray-600 ml-4">Queries a context with parameters, returning a Consumable.</dd>
+</dl>
+
+{{ comparisonContent("context-api") }}
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+    <div>
+        <div style="font-size: 0.7rem; font-weight: 600; color: #059669; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em;">Plugged</div>
+        <code class="text-sm" style="display: block; background: #ecfdf5; padding: 0.5rem; border-radius: 0.25rem; margin-bottom: 0.5rem;">node.getContext(type)</code>
+        <code class="text-sm" style="display: block; background: #ecfdf5; padding: 0.5rem; border-radius: 0.25rem; margin-bottom: 0.5rem;">node.ensureContext(type)</code>
+        <code class="text-sm" style="display: block; background: #ecfdf5; padding: 0.5rem; border-radius: 0.25rem;">node.hasContext(type)</code>
+    </div>
+    <div>
+        <div style="font-size: 0.7rem; font-weight: 600; color: #475569; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em;">Unplugged</div>
+        <code class="text-sm" style="display: block; background: #f1f5f9; padding: 0.5rem; border-radius: 0.25rem; margin-bottom: 0.5rem;">getContext(node, type)</code>
+        <code class="text-sm" style="display: block; background: #f1f5f9; padding: 0.5rem; border-radius: 0.25rem; margin-bottom: 0.5rem;">ensureContext(node, type)</code>
+        <code class="text-sm" style="display: block; background: #f1f5f9; padding: 0.5rem; border-radius: 0.25rem;">hasContext(node, type)</code>
+    </div>
+</div>
+
+{{ endContent() }}
+
+<h3 id="usage-example">Usage Example</h3>
+
+{{ pluggedContent("context-example", code=true) }}
 {% highlight "javascript" %}
 // Get a context value from the hierarchy
 const theme = element.getContext('theme');
@@ -38,8 +85,79 @@ const localTheme = element.ensureContext('theme');
 
 // Query a context with parameters
 const userName = element.queryContext('user', { field: 'name' });
+
+// Check if context exists before using
+if (element.hasContext('auth')) {
+    const auth = element.getContext('auth');
+}
+{% endhighlight %}
+
+{{ unpluggedContent("context-example", code=true) }}
+{% highlight "javascript" %}
+consume { getContext, ensureContext, queryContext, hasContext } of '@web-contexts';
+
+// Get a context value from the hierarchy
+const theme = getContext(element, 'theme');
+
+// Ensure a context exists on this node
+const localTheme = ensureContext(element, 'theme');
+
+// Query a context with parameters
+const userName = queryContext(element, 'user', { field: 'name' });
+
+// Check if context exists before using
+if (hasContext(element, 'auth')) {
+    const auth = getContext(element, 'auth');
+}
+{% endhighlight %}
+
+{{ comparisonContent("context-example", code=true) }}
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0;">
+    <div>
+        <div style="font-size: 0.7rem; font-weight: 600; color: #059669; padding: 0.5rem 1rem; text-transform: uppercase; letter-spacing: 0.05em; background: #f0fdf4; border-bottom: 1px solid #e5e7eb;">Plugged</div>
+{% highlight "javascript" %}
+// Native-like API
+const theme = el.getContext('theme');
+el.ensureContext('theme');
+if (el.hasContext('auth')) {
+  // ...
+}
+{% endhighlight %}
+    </div>
+    <div style="border-left: 1px solid #e5e7eb;">
+        <div style="font-size: 0.7rem; font-weight: 600; color: #475569; padding: 0.5rem 1rem; text-transform: uppercase; letter-spacing: 0.05em; background: #f8fafc; border-bottom: 1px solid #e5e7eb;">Unplugged</div>
+{% highlight "javascript" %}
+consume {
+  getContext,
+  ensureContext,
+  hasContext
+} of '@web-contexts';
+
+const theme = getContext(el, 'theme');
+ensureContext(el, 'theme');
+if (hasContext(el, 'auth')) {
+  // ...
+}
+{% endhighlight %}
+    </div>
+</div>
+
+{{ endContent() }}
+
+<h3 id="upgrade-unplugged">Manual Upgrade (Unplugged)</h3>
+<p class="text-sm text-gray-600 mb-3">
+    In unplugged mode, you must explicitly upgrade DOM trees to enable context functionality:
+</p>
+{% highlight "javascript" %}
+consume { upgrade } of '@web-contexts';
+
+// Upgrade a DOM tree to enable context methods
+upgrade(document.body);
+
+// Now contexts work on all nodes in the tree
+const theme = getContext(myElement, 'theme');
 {% endhighlight %}
 
 <p class="text-sm text-gray-600 mt-4">
-    See <a href="/projects/webcontexts/">Web Contexts</a> for complete DOM API and usage patterns.
+    See <a href="/projects/webcontexts/">Web Contexts</a> for complete documentation and usage patterns.
 </p>

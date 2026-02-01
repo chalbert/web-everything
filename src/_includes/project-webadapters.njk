@@ -1,22 +1,161 @@
-<section class="intro-section mb-12">
-    <h3 id="overview">Overview</h3>
-    <p><strong>Web Adapters</strong> are the pragmatic bridge between the ideal world of Web Everything standards and the rich ecosystem of existing tools. They fall into two main categories: Syntactic improvements for better Developer Experience (DX), and Library bridges that make third-party tools compliant with our protocols.</p>
+{% from "project-status.njk" import projectStatus %}
+
+<section id="overview" class="section-card">
+    <h3 id="overview-heading">Overview</h3>
+    <p>
+        <strong>Web Adapters</strong> bridge the Web Everything standards with the broader ecosystem—whether that's alternative authoring syntaxes (JSX, template literals) or third-party libraries (Floating UI, Mousetrap).
+    </p>
+    <p>
+        The goal is pragmatic interoperability: use the tools and syntax you prefer while compiling to the same underlying primitives.
+    </p>
 </section>
-<section class="adapters-section">
-    {% for category in adapters %}
-    <div class="adapter-category mb-12">
-        <h3 id="category-title" class="text-xl font-bold mb-4 border-b border-gray-200 pb-2">{{ category.title }}</h3>
-        <p class="mb-6 text-gray-600">{{ category.description }}</p>
-        <div class="standards-grid">
-            {% for item in category.items %}
-            <div class="standard-card">
-                <div class="flex justify-between items-start mb-3">
-                    <h4 id="item-name" class="text-lg font-bold m-0 text-gray-900">{{ item.name }}</h4>
-                </div>
-                <p class="text-gray-600 text-sm leading-relaxed mb-0">{{ item.desc | safe }}</p>
-            </div>
-            {% endfor %}
-        </div>
+
+<section id="rendering" class="section-card">
+    <h3 id="rendering-adapters">Rendering Adapters</h3>
+    <p>
+        Rendering Adapters enable <strong>format-agnostic authoring</strong>. Write components in HTML, JSX, or tagged template literals—they all compile to the same Web Everything primitives and can be <strong>converted between each other</strong> via AST transformers.
+    </p>
+
+    <div class="comparison-block" style="background: rgba(99, 102, 241, 0.05); padding: 1.25rem; border-radius: 8px; border-left: 4px solid var(--color-primary); margin: 1.5rem 0;">
+        <h4 id="interconvertibility" style="margin-top: 0; color: var(--color-primary); font-size: 1rem;">The Interconvertibility Principle</h4>
+        <p style="margin-bottom: 0; font-size: 0.95rem;">
+            Every Web Everything feature must be expressible in <strong>all three formats</strong> (HTML, JSX, Template Strings) in a way that automated, AST-based transformers can reliably convert a component from one format to another.
+            This enables teams to migrate between syntaxes, share components across codebases, and choose the right tool for each context.
+        </p>
     </div>
+
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 1.5rem;">
+        {% for category in adapters %}
+            {% if category.id == "rendering" %}
+                {% for adapter in category.items %}
+                <a href="/adapters/{{ adapter.id }}/" class="standard-card" style="text-decoration: none;">
+                    <div class="flex justify-between items-start mb-2">
+                        <h4 style="margin: 0; font-size: 1rem; color: var(--color-text);">{{ adapter.name }}</h4>
+                        {% if adapter.isCanonical %}
+                        <span style="font-size: 0.65rem; padding: 0.2rem 0.5rem; background: #dbeafe; color: #1e40af; border-radius: 4px; white-space: nowrap;">Canonical</span>
+                        {% endif %}
+                    </div>
+                    <p style="font-size: 0.85rem; color: var(--color-text-muted); margin: 0 0 0.75rem 0;">{{ adapter.summary | safe }}</p>
+                    {{ projectStatus(adapter.status) }}
+                </a>
+                {% endfor %}
+            {% endif %}
+        {% endfor %}
+    </div>
+
+    <h4 id="format-comparison" style="margin-top: 2rem;">Format Comparison</h4>
+    <p>The same component expressed in all three formats:</p>
+
+    <div style="margin-top: 1rem;">
+        <div style="font-size: 0.75rem; font-weight: 600; color: #1e40af; padding: 0.5rem 1rem; text-transform: uppercase; letter-spacing: 0.05em; background: #eff6ff; border-bottom: 1px solid #bfdbfe; border-radius: 8px 8px 0 0;">HTML (Canonical)</div>
+        {% highlight "html" %}
+<user-card>
+    <template shadowrootmode="open">
+        <template is="for-each" items="users" key="id">
+            <div class="user" trusted-html="sanitize">
+                <span data-bind="name"></span>
+            </div>
+        </template>
+    </template>
+</user-card>
+        {% endhighlight %}
+    </div>
+
+    <div style="margin-top: 1rem;">
+        <div style="font-size: 0.75rem; font-weight: 600; color: #7c3aed; padding: 0.5rem 1rem; text-transform: uppercase; letter-spacing: 0.05em; background: #f5f3ff; border-bottom: 1px solid #ddd6fe; border-radius: 8px 8px 0 0;">JSX</div>
+        {% highlight "tsx" %}
+class UserCard extends HTMLElement {
+    render() {
+        return (
+            <For each={this.users} key="id">
+                {(user) => (
+                    <div class="user" trusted-html="sanitize">
+                        <span>{user.name}</span>
+                    </div>
+                )}
+            </For>
+        );
+    }
+}
+        {% endhighlight %}
+    </div>
+
+    <div style="margin-top: 1rem;">
+        <div style="font-size: 0.75rem; font-weight: 600; color: #059669; padding: 0.5rem 1rem; text-transform: uppercase; letter-spacing: 0.05em; background: #ecfdf5; border-bottom: 1px solid #a7f3d0; border-radius: 8px 8px 0 0;">Template String</div>
+        {% highlight "typescript" %}
+class UserCard extends HTMLElement {
+    render() {
+        return html`
+            <For each=${this.users} key="id">
+                ${(user) => html`
+                    <div class="user" trusted-html="sanitize">
+                        <span>${user.name}</span>
+                    </div>
+                `}
+            </For>
+        `;
+    }
+}
+        {% endhighlight %}
+    </div>
+</section>
+
+<section id="ast-transformation" class="section-card">
+    <h3 id="ast-transformers">AST Transformation</h3>
+    <p>
+        Because all three formats compile to the same primitives, bidirectional conversion is possible:
+    </p>
+    <ul>
+        <li><strong>HTML → JSX:</strong> Migrate existing Web Components to a JSX codebase</li>
+        <li><strong>JSX → HTML:</strong> Export components for server-side rendering or static sites</li>
+        <li><strong>Template String ↔ JSX:</strong> Switch between lit-html style and React style</li>
+    </ul>
+    <p>
+        The transformers operate on the AST level, preserving semantics while adapting syntax. This enables tooling like:
+    </p>
+    <ul style="margin-bottom: 0;">
+        <li>IDE refactoring across format boundaries</li>
+        <li>Build-time format selection based on target environment</li>
+        <li>Component library publishing in multiple formats from a single source</li>
+    </ul>
+</section>
+
+<section id="syntax" class="section-card">
+    <h3 id="syntax-adapters">Syntax Adapters</h3>
+    {% for category in adapters %}
+        {% if category.id == "syntax" %}
+    <p>{{ category.description }}</p>
+    <div class="standards-grid" style="margin-top: 1rem;">
+            {% for adapter in category.items %}
+        <div class="standard-card">
+            <div class="flex justify-between items-start mb-2">
+                <h4 style="margin: 0; font-size: 1rem;">{{ adapter.name }}</h4>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--color-text-muted); margin: 0 0 0.75rem 0;">{{ adapter.summary | safe }}</p>
+            {{ projectStatus(adapter.status) }}
+        </div>
+            {% endfor %}
+    </div>
+        {% endif %}
+    {% endfor %}
+</section>
+
+<section id="lib" class="section-card">
+    <h3 id="library-adapters">Library Adapters</h3>
+    {% for category in adapters %}
+        {% if category.id == "lib" %}
+    <p>{{ category.description }}</p>
+    <div class="standards-grid" style="margin-top: 1rem;">
+            {% for adapter in category.items %}
+        <div class="standard-card">
+            <div class="flex justify-between items-start mb-2">
+                <h4 style="margin: 0; font-size: 1rem;">{{ adapter.name }}</h4>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--color-text-muted); margin: 0 0 0.75rem 0;">{{ adapter.summary | safe }}</p>
+            {{ projectStatus(adapter.status) }}
+        </div>
+            {% endfor %}
+    </div>
+        {% endif %}
     {% endfor %}
 </section>

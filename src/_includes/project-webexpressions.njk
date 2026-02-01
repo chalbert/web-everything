@@ -1,0 +1,583 @@
+<section class="intro-section mb-12">
+    <h3 id="mission">Mission</h3>
+    <p>
+        <strong>Web Expressions</strong> provides a parser-agnostic infrastructure for dynamic content in HTML.
+        It enables custom template syntax (like <code>{{ '{{' }} value {{ '}}' }}</code> or <code>[[ value ]]</code>) without mandating any specific format—
+        the binding syntax is entirely delegated to pluggable parsers.
+    </p>
+</section>
+
+<section id="philosophy" class="section-card">
+    <h3 id="design-philosophy">Design Philosophy</h3>
+    <p>
+        Unlike frameworks that hardcode a specific interpolation syntax, <strong>Web Expressions</strong> separates concerns into three distinct layers:
+    </p>
+    <ul class="list-disc ml-6 mt-3 text-gray-600">
+        <li><strong>Parsers</strong> — Define <em>how</em> to detect expressions (opening/closing delimiters)</li>
+        <li><strong>Registries</strong> — Store and resolve parser definitions</li>
+        <li><strong>Custom Nodes</strong> — Define <em>what</em> to do with parsed content</li>
+    </ul>
+    <p class="mt-4">
+        This means you can use Mustache-style <code>{{ '{{' }}{{ '}}' }}</code>, Polymer-style <code>[[]]</code>, or any custom syntax—
+        all within the same application, each handled by its own parser.
+    </p>
+</section>
+
+<section id="architecture" class="section-card">
+    <h3 id="architecture-overview">Architecture Overview</h3>
+    <div class="mt-4">
+        <h4 class="font-semibold text-gray-800 mb-2">1. Text Node Parsing</h4>
+        <p class="text-gray-600 text-sm mb-4">
+            When HTML is parsed, text containing expressions (e.g., <code>Hello {{ '{{' }}name{{ '}}' }}</code>) is split into regular text nodes and <strong>UndeterminedTextNodes</strong>.
+            These undetermined nodes are then upgraded to specific <code>CustomTextNode</code> implementations based on the registered parser.
+        </p>
+
+        <h4 class="font-semibold text-gray-800 mb-2">2. Attribute Parsing</h4>
+        <p class="text-gray-600 text-sm mb-4">
+            Attribute values can also contain expressions. The <code>CustomAttributeParser</code> extracts the expression from attributes like <code>title="[[user.name]]"</code>
+            for further processing by the binding system.
+        </p>
+
+        <h4 class="font-semibold text-gray-800 mb-2">3. Path Expression Parsing</h4>
+        <p class="text-gray-600 text-sm">
+            Once an expression is extracted, its content (e.g., <code>user.profile.name</code>) needs to be parsed into an executable path.
+            <code>CustomPathExpressionParser</code> handles this, supporting keypaths, method calls, and computed properties.
+        </p>
+    </div>
+</section>
+
+<section id="upgrade-triggers" class="section-card">
+    <h3 id="expression-upgrade-triggers">Expression Upgrade Triggers</h3>
+    <p class="text-gray-600 text-sm mb-4">
+        Rather than observing every DOM mutation (which would be expensive), expressions are upgraded at specific, well-defined moments.
+        The table below lists all DOM update scenarios and indicates when expression parsing is applied.
+    </p>
+    <div class="comparison-table-wrapper mt-4">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>DOM Operation</th>
+                    <th>Upgrade Expressions?</th>
+                    <th>Rationale</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>DOMContentLoaded</code></td>
+                    <td><strong>Yes</strong></td>
+                    <td>Initial page load — all static HTML is parsed</td>
+                </tr>
+                <tr>
+                    <td><code>template.content.cloneNode()</code></td>
+                    <td><strong>Yes</strong></td>
+                    <td>Templates are explicitly instantiated for use</td>
+                </tr>
+                <tr>
+                    <td><code>element.innerHTML = ...</code></td>
+                    <td><strong>Yes</strong></td>
+                    <td>Explicit HTML insertion implies intent to render</td>
+                </tr>
+                <tr>
+                    <td><code>element.outerHTML = ...</code></td>
+                    <td><strong>Yes</strong></td>
+                    <td>Explicit HTML replacement of the element itself</td>
+                </tr>
+                <tr>
+                    <td><code>insertAdjacentHTML()</code></td>
+                    <td><strong>Yes</strong></td>
+                    <td>Explicit HTML insertion</td>
+                </tr>
+                <tr>
+                    <td><code>element.setHTMLUnsafe()</code></td>
+                    <td><strong>Yes</strong></td>
+                    <td>Explicit HTML insertion (Sanitizer API)</td>
+                </tr>
+                <tr>
+                    <td><code>Range.createContextualFragment()</code></td>
+                    <td><strong>Yes</strong></td>
+                    <td>Creates DocumentFragment from HTML string</td>
+                </tr>
+                <tr>
+                    <td><code>DOMParser.parseFromString()</code></td>
+                    <td>No</td>
+                    <td>Returns detached document — upgrade via explicit call</td>
+                </tr>
+                <tr>
+                    <td><code>document.write()</code></td>
+                    <td>No</td>
+                    <td>Legacy API — not intercepted; use at document parse time</td>
+                </tr>
+                <tr>
+                    <td><code>document.createElement()</code></td>
+                    <td>No</td>
+                    <td>Element created but not populated</td>
+                </tr>
+                <tr>
+                    <td><code>document.createTextNode()</code></td>
+                    <td>No</td>
+                    <td>Manual text node — user controls content</td>
+                </tr>
+                <tr>
+                    <td><code>element.append(node)</code></td>
+                    <td>No*</td>
+                    <td>Node already exists; upgrade at creation point</td>
+                </tr>
+                <tr>
+                    <td><code>element.appendChild(node)</code></td>
+                    <td>No*</td>
+                    <td>Node already exists; upgrade at creation point</td>
+                </tr>
+                <tr>
+                    <td><code>element.insertBefore(node, ref)</code></td>
+                    <td>No*</td>
+                    <td>Node already exists; upgrade at creation point</td>
+                </tr>
+                <tr>
+                    <td><code>element.replaceChild(new, old)</code></td>
+                    <td>No*</td>
+                    <td>Node already exists; upgrade at creation point</td>
+                </tr>
+                <tr>
+                    <td><code>node.textContent = ...</code></td>
+                    <td>No</td>
+                    <td>Direct assignment — expressions would be unexpected</td>
+                </tr>
+                <tr>
+                    <td><code>customExpressions.upgrade(el)</code></td>
+                    <td><strong>Yes</strong></td>
+                    <td>Explicit opt-in for manual control</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <p class="text-sm text-gray-500 mt-3">* Nodes cloned from templates are already upgraded at clone time.</p>
+</section>
+
+<section id="escaping" class="section-card">
+    <h3 id="escaping-expressions">Escaping Expressions</h3>
+    <p class="text-gray-600 text-sm mb-4">
+        To output literal delimiter characters without triggering expression parsing, use HTML character entities.
+        The browser's HTML parser converts entities before expression parsing occurs, so delimiters are never matched.
+    </p>
+
+    <h4 class="font-semibold text-gray-800 mt-4 mb-2">HTML Character Entities</h4>
+    <p class="text-gray-600 text-sm mb-3">
+        Escape the opening delimiter using numeric or named entities:
+    </p>
+<pre><code class="language-html">&lt;!-- Renders literally as: {{ '{{' }}name{{ '}}' }} --&gt;
+&lt;span&gt;&amp;#123;&amp;#123;name&amp;#125;&amp;#125;&lt;/span&gt;
+
+&lt;!-- Renders literally as: [[value]] --&gt;
+&lt;span&gt;&amp;#91;&amp;#91;value&amp;#93;&amp;#93;&lt;/span&gt;
+
+&lt;!-- Only the opening delimiter needs escaping --&gt;
+&lt;span&gt;&amp;#123;{name}}&lt;/span&gt;</code></pre>
+
+    <p class="text-gray-600 text-sm mt-3">
+        Common character codes: <code>&amp;#123;</code> = <code>{{ '{' }}</code>, <code>&amp;#125;</code> = <code>{{ '}' }}</code>,
+        <code>&amp;#91;</code> = <code>[</code>, <code>&amp;#93;</code> = <code>]</code>
+    </p>
+
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">Excluded Elements</h4>
+    <p class="text-gray-600 text-sm mb-3">
+        Parsers can define elements where expression parsing is skipped by default.
+        Text nodes inside these elements are left as plain text:
+    </p>
+<pre><code class="language-typescript">class DoubleCurlyBracketParser extends CustomTextNodeParser {
+    openingIdentifier = '{{ '{{' }}';
+    closingIdentifier = '{{ '}}' }}';
+
+    // Skip parsing inside these elements
+    excludedElements = ['code', 'pre', 'script', 'style', 'textarea'];
+}</code></pre>
+    <p class="text-gray-600 text-sm mt-3">
+        With this configuration, <code>&lt;code&gt;{{ '{{' }}name{{ '}}' }}&lt;/code&gt;</code> renders literally without needing character entities.
+        To opt back in, use <code>customExpressions.upgrade(el)</code> on the specific element.
+    </p>
+</section>
+
+<section id="fouc" class="section-card">
+    <h3 id="avoiding-fouc">Avoiding Flash of Unparsed Content</h3>
+    <p class="text-gray-600 text-sm mb-4">
+        When expressions are present in visible HTML, users may briefly see raw syntax like <code>{{ '{{' }}name{{ '}}' }}</code> before the parser upgrades them.
+        The right strategy depends on where expressions appear and how content is rendered.
+    </p>
+
+    <h4 class="font-semibold text-gray-800 mt-4 mb-2">Rendering Contexts</h4>
+    <div class="comparison-table-wrapper mt-4">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Context</th>
+                    <th>FOUC Risk</th>
+                    <th>Recommended Strategy</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Document HTML</strong><br><span class="text-xs text-gray-500">Expressions in initial HTML source</span></td>
+                    <td>High</td>
+                    <td>SSR with hydration, or CSS cloak</td>
+                </tr>
+                <tr>
+                    <td><strong>Template instantiation</strong><br><span class="text-xs text-gray-500">Expressions inside <code>&lt;template&gt;</code></span></td>
+                    <td>None</td>
+                    <td>No action needed — templates are inert until cloned</td>
+                </tr>
+                <tr>
+                    <td><strong>Component shadow DOM</strong><br><span class="text-xs text-gray-500">Expressions in custom element internals</span></td>
+                    <td>None*</td>
+                    <td>Render in <code>connectedCallback</code> after data is ready</td>
+                </tr>
+                <tr>
+                    <td><strong>Dynamic insertion</strong><br><span class="text-xs text-gray-500"><code>innerHTML</code>, <code>insertAdjacentHTML</code></span></td>
+                    <td>Low</td>
+                    <td>Expressions upgrade synchronously at insertion</td>
+                </tr>
+                <tr>
+                    <td><strong>Lazy-loaded content</strong><br><span class="text-xs text-gray-500">HTML fetched via AJAX</span></td>
+                    <td>Low</td>
+                    <td>Upgrade before inserting, or insert into hidden container</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <p class="text-sm text-gray-500 mt-3">* Assuming shadow DOM content is populated programmatically, not via <code>declarative shadow DOM</code> in HTML source.</p>
+
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">Strategy 1: CSS Cloak</h4>
+    <p class="text-gray-600 text-sm mb-3">
+        Hide elements containing expressions until they're upgraded. The simplest client-side approach:
+    </p>
+<pre><code class="language-css">/* Hide elements with unprocessed expressions */
+[cloak] {
+    display: none !important;
+}
+
+/* Or use opacity for layout stability */
+[cloak] {
+    opacity: 0;
+}</code></pre>
+<pre><code class="language-html">&lt;!-- Add cloak attribute to elements with expressions --&gt;
+&lt;div cloak&gt;
+    Hello, {{ '{{' }}user.name{{ '}}' }}!
+&lt;/div&gt;
+
+&lt;!-- Expression parser removes cloak after upgrade --&gt;</code></pre>
+    <p class="text-gray-600 text-sm mt-3">
+        The parser automatically removes the <code>cloak</code> attribute after upgrading expressions within the element.
+    </p>
+
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">Strategy 2: Template-Only Expressions</h4>
+    <p class="text-gray-600 text-sm mb-3">
+        Keep expressions exclusively inside <code>&lt;template&gt;</code> elements. Document HTML contains only static content:
+    </p>
+<pre><code class="language-html">&lt;!-- Static shell in document --&gt;
+&lt;div id="user-card"&gt;&lt;/div&gt;
+
+&lt;!-- Expressions safely hidden in template --&gt;
+&lt;template id="user-template"&gt;
+    &lt;div class="card"&gt;
+        &lt;h2&gt;{{ '{{' }}user.name{{ '}}' }}&lt;/h2&gt;
+        &lt;p&gt;{{ '{{' }}user.email{{ '}}' }}&lt;/p&gt;
+    &lt;/div&gt;
+&lt;/template&gt;
+
+&lt;script&gt;
+    const template = document.getElementById('user-template');
+    const clone = template.content.cloneNode(true); // Expressions upgrade here
+    document.getElementById('user-card').append(clone);
+&lt;/script&gt;</code></pre>
+
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">Strategy 3: Server-Side Rendering</h4>
+    <p class="text-gray-600 text-sm mb-3">
+        Render values on the server, hydrate for reactivity on the client. Several hydration approaches are possible:
+    </p>
+    <div class="comparison-table-wrapper mt-4">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Hydration Method</th>
+                    <th>Server Output</th>
+                    <th>Trade-offs</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Comment markers</strong></td>
+                    <td><code>&lt;!--expr:user.name--&gt;John&lt;!--/expr--&gt;</code></td>
+                    <td>Invisible, but adds DOM nodes</td>
+                </tr>
+                <tr>
+                    <td><strong>Data attributes</strong></td>
+                    <td><code>&lt;span data-expr="user.name"&gt;John&lt;/span&gt;</code></td>
+                    <td>Clean markup, requires wrapper element</td>
+                </tr>
+                <tr>
+                    <td><strong>JSON hydration map</strong></td>
+                    <td><code>&lt;span id="e1"&gt;John&lt;/span&gt;</code> + JSON</td>
+                    <td>Cleanest markup, extra coordination</td>
+                </tr>
+                <tr>
+                    <td><strong>Re-parse on client</strong></td>
+                    <td><code>&lt;span&gt;{{ '{{' }}user.name{{ '}}' }}&lt;/span&gt;</code></td>
+                    <td>Simplest, but causes FOUC</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">Strategy 4: Loading States</h4>
+    <p class="text-gray-600 text-sm mb-3">
+        Show a placeholder or skeleton until content is ready:
+    </p>
+<pre><code class="language-html">&lt;!-- Skeleton shown until expressions upgrade --&gt;
+&lt;div class="user-card"&gt;
+    &lt;div class="skeleton" cloak-placeholder&gt;
+        &lt;div class="skeleton-line"&gt;&lt;/div&gt;
+        &lt;div class="skeleton-line short"&gt;&lt;/div&gt;
+    &lt;/div&gt;
+    &lt;div cloak&gt;
+        &lt;h2&gt;{{ '{{' }}user.name{{ '}}' }}&lt;/h2&gt;
+        &lt;p&gt;{{ '{{' }}user.email{{ '}}' }}&lt;/p&gt;
+    &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+<pre><code class="language-css">[cloak] { display: none; }
+[cloak-placeholder]:has(+ :not([cloak])) { display: none; }</code></pre>
+</section>
+
+<section id="parser-priority" class="section-card">
+    <h3 id="parser-priority-resolution">Parser Priority</h3>
+    <p class="text-gray-600 text-sm mb-4">
+        When multiple parsers are registered, they are evaluated in <strong>registration order</strong>.
+        The first parser whose delimiters match wins. This allows layering parsers with overlapping patterns:
+    </p>
+<pre><code class="language-typescript">// Register more specific parser first
+customTextNodeParsers.define('raw', new TripleCurlyParser());    // {{ '{{{' }} {{ '}}}' }}
+customTextNodeParsers.define('mustache', new DoubleCurlyParser()); // {{ '{{' }} {{ '}}' }}
+
+// {{ '{{{' }}raw{{ '}}}' }} matches 'raw' parser (first match)
+// {{ '{{' }}name{{ '}}' }} matches 'mustache' parser</code></pre>
+</section>
+
+<section id="flow" class="section-card">
+    <h3 id="parsing-flow">Parsing Flow</h3>
+    <div class="bg-slate-50 rounded-lg p-4 mt-4 text-sm">
+        <pre class="text-gray-700"><code>HTML Input: &lt;span&gt;Hello {{ '{{' }}user.name{{ '}}' }}!&lt;/span&gt;
+
+1. Text Node Parser (DoubleCurlyBracket)
+   ├── Detects {{ '{{' }} ... {{ '}}' }} pattern
+   ├── Creates: Text("Hello "), UndeterminedTextNode("user.name"), Text("!")
+   └── Tags node with parserName: "mustache"
+
+2. Custom Text Node Registry
+   ├── Looks up "mustache" → InterpolationNode class
+   └── Upgrades UndeterminedTextNode → InterpolationNode
+
+3. Path Expression Parser
+   ├── Parses "user.name" → { type: 'keypath', parts: ['user', 'name'] }
+   └── Returns executable graph for binding system
+
+4. Binding System (outside Web Expressions scope)
+   └── Subscribes to data changes, updates textContent</code></pre>
+    </div>
+</section>
+
+<section id="examples" class="section-card">
+    <h3 id="usage-examples">Usage Examples</h3>
+
+    <h4 class="font-semibold text-gray-800 mt-4 mb-2">Defining a Text Node Parser</h4>
+    <p class="text-gray-600 text-sm mb-3">
+        Create parsers by extending <code>CustomTextNodeParser</code> and specifying delimiters:
+    </p>
+<pre><code class="language-typescript">// Mustache-style: {{ '{{' }} expression {{ '}}' }}
+class DoubleCurlyBracketParser extends CustomTextNodeParser {
+    openingIdentifier = '{{ '{{' }}';
+    closingIdentifier = '{{ '}}' }}';
+}
+
+// Polymer-style: [[ expression ]]
+class DoubleSquareBracketParser extends CustomTextNodeParser {
+    openingIdentifier = '[[';
+    closingIdentifier = ']]';
+}
+
+// Register globally
+customTextNodeParsers.define('mustache', new DoubleCurlyBracketParser());
+customTextNodeParsers.define('polymer', new DoubleSquareBracketParser());</code></pre>
+
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">Defining a Custom Text Node</h4>
+    <p class="text-gray-600 text-sm mb-3">
+        Implement the behavior for parsed expressions by extending <code>CustomTextNode</code>:
+    </p>
+<pre><code class="language-typescript">class InterpolationNode extends CustomTextNode {
+    #expression: string;
+    #unsubscribe?: () => void;
+
+    connectedCallback() {
+        // Get the parsed expression from the undetermined text
+        this.#expression = this.textContent || '';
+
+        // Subscribe to data context changes
+        const context = this.getContext('data');
+        this.#unsubscribe = context.subscribe(
+            this.#expression,
+            (value) => {
+                this.textContent = String(value);
+            }
+        );
+    }
+
+    disconnectedCallback() {
+        this.#unsubscribe?.();
+    }
+}
+
+// Register the implementation
+customTextNodes.define('interpolation', InterpolationNode);</code></pre>
+
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">Defining a Path Expression Parser</h4>
+    <p class="text-gray-600 text-sm mb-3">
+        Parse expression strings into executable structures:
+    </p>
+<pre><code class="language-typescript">class KeypathParser extends CustomPathExpressionParser {
+    parse(text: string) {
+        // Handle simple keypaths: "user.profile.name"
+        const parts = text.split('.');
+        return {
+            type: 'keypath',
+            parts,
+            resolve: (context: any) => {
+                return parts.reduce(
+                    (obj, key) => obj?.[key],
+                    context
+                );
+            }
+        };
+    }
+}
+
+customPathExpressionParsers.define('keypath', new KeypathParser());</code></pre>
+
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">HTML Template Example</h4>
+    <p class="text-gray-600 text-sm mb-3">
+        Once parsers are registered, use them directly in HTML:
+    </p>
+<pre><code class="language-html">&lt;!-- Using Mustache-style syntax --&gt;
+&lt;div class="user-card"&gt;
+    &lt;h2&gt;{{ '{{' }}user.name{{ '}}' }}&lt;/h2&gt;
+    &lt;p&gt;Email: {{ '{{' }}user.email{{ '}}' }}&lt;/p&gt;
+    &lt;span class="status"&gt;{{ '{{' }}user.status | uppercase{{ '}}' }}&lt;/span&gt;
+&lt;/div&gt;
+
+&lt;!-- Using Polymer-style syntax (same page, different parser) --&gt;
+&lt;data-table items="[[items]]"&gt;
+    &lt;template&gt;
+        &lt;tr&gt;
+            &lt;td&gt;[[item.id]]&lt;/td&gt;
+            &lt;td&gt;[[item.name]]&lt;/td&gt;
+        &lt;/tr&gt;
+    &lt;/template&gt;
+&lt;/data-table&gt;</code></pre>
+</section>
+
+<section id="interfaces" class="section-card">
+    <h3 id="core-interfaces">Core Interfaces</h3>
+
+    <h4 class="font-semibold text-gray-800 mt-4 mb-2">CustomTextNodeParser</h4>
+<pre><code class="language-typescript">abstract class CustomTextNodeParser {
+    // Delimiters to detect (e.g., '{{ '{{' }}' and '{{ '}}' }}')
+    abstract openingIdentifier: string;
+    abstract closingIdentifier: string;
+
+    // Parser name (set by registry)
+    localName: string | null;
+
+    // Splits text into Text and UndeterminedTextNode instances
+    parse(text: string): Text[];
+}</code></pre>
+
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">CustomTextNode</h4>
+<pre><code class="language-typescript">abstract class CustomTextNode extends Text {
+    // The parser that created this node
+    readonly parserName: string | null;
+
+    // Lifecycle callbacks
+    connectedCallback?(): void;
+    disconnectedCallback?(): void;
+    textChangedCallback?(oldValue: string, newValue: string): void;
+}</code></pre>
+
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">CustomPathExpressionParser</h4>
+<pre><code class="language-typescript">abstract class CustomPathExpressionParser {
+    // Parses a string into an executable graph
+    abstract parse(text: string): Graph;
+}</code></pre>
+</section>
+
+<section id="comparison" class="section-card">
+    <h3 id="framework-comparison">Comparison with Frameworks</h3>
+    <div class="comparison-table-wrapper mt-4">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Aspect</th>
+                    <th>Web Expressions</th>
+                    <th>Angular</th>
+                    <th>Vue</th>
+                    <th>Lit</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Syntax</td>
+                    <td><strong>Configurable</strong></td>
+                    <td>{{ '{{' }}{{ '}}' }} only</td>
+                    <td>{{ '{{' }}{{ '}}' }} / v-bind</td>
+                    <td>${} in templates</td>
+                </tr>
+                <tr>
+                    <td>Multiple Syntaxes</td>
+                    <td><strong>Yes</strong></td>
+                    <td>No</td>
+                    <td>Limited</td>
+                    <td>No</td>
+                </tr>
+                <tr>
+                    <td>Works in HTML</td>
+                    <td><strong>Yes</strong></td>
+                    <td>Template only</td>
+                    <td>Template only</td>
+                    <td>Tagged literals</td>
+                </tr>
+                <tr>
+                    <td>Scoped Parsers</td>
+                    <td><strong>Yes (DI)</strong></td>
+                    <td>No</td>
+                    <td>No</td>
+                    <td>No</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</section>
+
+<section id="plugs" class="section-card">
+    <h3 id="related-plugs">Related Plugs</h3>
+    <div class="standards-grid mt-4">
+        {% set expressionPlugs = plugs | filterByProject("webexpressions") %}
+        {% for plug in expressionPlugs %}
+        <a href="/plugs/{{ plug.id }}/" class="standard-card">
+            <div class="flex justify-between items-start mb-3" style="gap: 12px; display: flex; justify-content: space-between;">
+                <h4 id="plug-{{ plug.id }}" class="text-lg font-bold m-0 text-gray-900">{{ plug.name }}</h4>
+                <span class="px-2.5 py-0.5 rounded-full text-xs font-medium {% if plug.type == 'Global' %}bg-blue-100 text-blue-800 border border-blue-200{% else %}bg-amber-100 text-amber-800 border border-amber-200{% endif %}" style="white-space: nowrap; align-self: flex-start; line-height: 1.5;">
+                    {{ plug.type }}
+                </span>
+            </div>
+            <p class="text-gray-600 text-sm leading-relaxed mb-4">{{ plug.summary }}</p>
+            <div style="margin-bottom: 1rem;">
+                {{ projectStatus(plug.status) }}
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+</section>

@@ -11,17 +11,25 @@ eleventyComputed:
 
 {% from "project-status.njk" import projectStatus %}
 
-<div class="container block-detail-page">
-    <div class="block-header">
-        <a href="/projects/webblocks/" class="back-link">&larr; Back to Web Blocks</a>
-        <h1 class="block-title">{{ block.name }}</h1>
-        <span class="badge block-type">{{ block.type }}</span>
-        <div class="mt-4 mb-4" style="max-width: 300px;">
-            {{ projectStatus(block.status) }}
+<div class="plug-detail-header">
+    <div class="plug-detail-header-inner">
+        <nav class="plug-breadcrumb">
+            <a href="/projects/webblocks/" class="plug-crumb">Web Blocks</a>
+            <svg class="plug-crumb-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            <span class="plug-crumb plug-crumb-current">{{ block.name }}</span>
+        </nav>
+        <div class="plug-title-row">
+            <h1 class="plug-title">
+                {{ block.name }}<sup class="plug-type-sup plug-type-global">{{ block.type }}</sup>
+            </h1>
+            <div class="plug-status">
+                {{ projectStatus(block.status) }}
+            </div>
         </div>
-        <p class="lead">{{ block.summary }}</p>
     </div>
+</div>
 
+<div class="container block-detail-page">
     <div class="block-body content">
         <div class="section-card">
             {% include "block-descriptions/" + block.id + ".njk" %}
@@ -32,7 +40,7 @@ eleventyComputed:
         <div class="section-card mt-8">
             <h2 class="text-2xl font-bold mb-4">Web Cases</h2>
             <p class="mb-6 text-slate-600">Standardized scenarios for testing and documentation. These definitions are sourced directly from the conformance suite.</p>
-            
+
             <div class="grid gap-8">
                 {% for webCase in blockCases %}
                 <div class="case-item border-l-4 border-slate-200 pl-4">

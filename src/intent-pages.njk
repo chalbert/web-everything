@@ -11,16 +11,23 @@ eleventyComputed:
 
 {% from "project-status.njk" import projectStatus %}
 
-<div class="container block-detail-page">
-    <div class="block-header">
-        <a href="/projects/webintents/" class="back-link">&larr; Back to Web Intents</a>
-        <h1 class="block-title">{{ intent.name }}</h1>
-        <div class="mt-4 mb-4" style="max-width: 300px;">
-            {{ projectStatus(intent.status) }}
+<div class="plug-detail-header">
+    <div class="plug-detail-header-inner">
+        <nav class="plug-breadcrumb">
+            <a href="/projects/webintents/" class="plug-crumb">Web Intents</a>
+            <svg class="plug-crumb-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            <span class="plug-crumb plug-crumb-current">{{ intent.name }}</span>
+        </nav>
+        <div class="plug-title-row">
+            <h1 class="plug-title">{{ intent.name }}</h1>
+            <div class="plug-status">
+                {{ projectStatus(intent.status) }}
+            </div>
         </div>
-        <p class="lead">{{ intent.summary }}</p>
     </div>
+</div>
 
+<div class="container block-detail-page">
     <div class="block-body content">
         <div class="section-card">
             {{ intent.description | safe }}

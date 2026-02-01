@@ -1,0 +1,85 @@
+---
+pagination:
+    data: demos
+    size: 1
+    alias: demo
+permalink: "demos/{{ demo.id }}/"
+layout: base.njk
+eleventyComputed:
+    title: "Web Everything - {{ demo.name }}"
+---
+
+{% from "project-status.njk" import projectStatus %}
+
+<div class="plug-detail-header">
+    <div class="plug-detail-header-inner">
+        <nav class="plug-breadcrumb">
+            <a href="/demos/" class="plug-crumb">Demos</a>
+            <svg class="plug-crumb-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            <span class="plug-crumb plug-crumb-current">{{ demo.name }}</span>
+        </nav>
+        <div class="plug-title-row">
+            <h1 class="plug-title">{{ demo.name }}</h1>
+            <div class="plug-status">
+                {{ projectStatus(demo.status) }}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="container block-detail-page">
+    <div class="block-body content">
+        {% if demo.projects %}
+        <div class="section-card" style="margin-bottom: 2rem;">
+            <h3 style="font-size: 0.875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); margin-bottom: 0.75rem;">
+                Standards Used
+            </h3>
+            <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                {% for projectId in demo.projects %}
+                {% set project = projects | selectattr('id', 'equalto', projectId) | first %}
+                {% if project %}
+                <a href="/projects/{{ project.id }}/" class="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors" style="text-decoration: none;">
+                    {{ project.name }}
+                </a>
+                {% else %}
+                <span class="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-50 text-gray-700 border border-gray-200">
+                    {{ projectId }}
+                </span>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="section-card">
+            <h2>Overview</h2>
+            {{ demo.description | safe }}
+        </div>
+
+        {% if demo.liveUrl %}
+        <div class="section-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+                <div>
+                    <h3 style="color: white; margin-bottom: 0.5rem;">Live Demo</h3>
+                    <p style="margin: 0; opacity: 0.9;">Experience this demo in action</p>
+                </div>
+                <a href="{{ demo.liveUrl }}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1.5rem; background: white; color: #667eea; border-radius: 0.5rem; font-weight: 600; text-decoration: none; transition: transform 0.2s;">
+                    Open Demo
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                </a>
+            </div>
+        </div>
+        {% endif %}
+
+        {% if demo.codeUrl %}
+        <div class="section-card">
+            <h2>Source Code</h2>
+            <p>View the complete source code for this demo on GitHub:</p>
+            <a href="{{ demo.codeUrl }}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1.5rem; background: #24292e; color: white; border-radius: 0.5rem; font-weight: 600; text-decoration: none; transition: background 0.2s;">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
+                View on GitHub
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</div>

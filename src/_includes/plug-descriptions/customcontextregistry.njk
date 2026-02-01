@@ -1,10 +1,11 @@
-<h4 id="overview">Overview</h4>
-<p><strong>Dependency:</strong> <code>HTMLRegistry</code></p>
+{% from "mode-selector.njk" import pluggedContent, unpluggedContent, comparisonContent, endContent %}
+
+<h3 id="overview">Overview</h3>
 <p>
     Exposes <code>window.customContextTypes</code> for registering context definitions that provide hierarchical data flow to children.
 </p>
 
-<h4 id="interface">Interface</h4>
+<h3 id="interface">Interface</h3>
 {% highlight "typescript" %}
 interface CustomContextRegistry extends HTMLRegistry<
     ContextDefinition,
@@ -15,6 +16,65 @@ interface CustomContextRegistry extends HTMLRegistry<
     define(name: string, Context: ImplementedContext): void;
 }
 {% endhighlight %}
+
+<h3 id="usage-example">Usage Example</h3>
+
+{{ pluggedContent("registry-example", code=true) }}
+{% highlight "javascript" %}
+// Access the global registry
+const registry = window.customContextTypes;
+
+// Define a context type
+customContextTypes.define('user', UserContext);
+
+// Check if a context is defined
+if (customContextTypes.get('user')) {
+    console.log('User context is registered');
+}
+{% endhighlight %}
+
+{{ unpluggedContent("registry-example", code=true) }}
+{% highlight "javascript" %}
+consume { customContextTypes } of '@web-contexts';
+
+// Access the consumed registry
+const registry = customContextTypes;
+
+// Define a context type
+customContextTypes.define('user', UserContext);
+
+// Check if a context is defined
+if (customContextTypes.get('user')) {
+    console.log('User context is registered');
+}
+{% endhighlight %}
+
+{{ comparisonContent("registry-example", code=true) }}
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0;">
+    <div>
+        <div style="font-size: 0.7rem; font-weight: 600; color: #059669; padding: 0.5rem 1rem; text-transform: uppercase; letter-spacing: 0.05em; background: #f0fdf4; border-bottom: 1px solid #e5e7eb;">Plugged</div>
+{% highlight "javascript" %}
+// Global registry
+customContextTypes.define(
+  'user', UserContext
+);
+{% endhighlight %}
+    </div>
+    <div style="border-left: 1px solid #e5e7eb;">
+        <div style="font-size: 0.7rem; font-weight: 600; color: #475569; padding: 0.5rem 1rem; text-transform: uppercase; letter-spacing: 0.05em; background: #f8fafc; border-bottom: 1px solid #e5e7eb;">Unplugged</div>
+{% highlight "javascript" %}
+consume {
+  customContextTypes
+} of '@web-contexts';
+
+customContextTypes.define(
+  'user', UserContext
+);
+{% endhighlight %}
+    </div>
+</div>
+
+{{ endContent() }}
 
 <p class="text-sm text-gray-600 mt-4">
     See <a href="/projects/webcontexts/">Web Contexts</a> for usage patterns and examples.

@@ -1,0 +1,1229 @@
+{% from "project-status.njk" import projectStatus %}
+{% from "format-selector.njk" import formatSelector, jsxContent, templateContent, endFormat %}
+
+<section class="intro-section mb-12">
+  <h3 id="mission">Mission</h3>
+  <p>
+    <strong>Web Portals</strong> provides a <strong>polyfillable</strong> protocol for rendering content at a different DOM location while preserving logical relationships (context, events, focus). Unlike the Popover API and CSS Anchor Positioning—which cannot be fully polyfilled—Web Portals works in all browsers today.
+  </p>
+  <p>
+    The pattern is well-established in frameworks like React (<code>createPortal</code>), Vue (<code>&lt;Teleport&gt;</code>), and Angular (CDK Portal). Web Portals brings this capability to declarative HTML, integrating with <a href="/projects/webinjectors/">Web Injectors</a> and <a href="/projects/webcontexts/">Web Contexts</a>.
+  </p>
+
+  <div class="comparison-block" style="background: rgba(251, 191, 36, 0.1); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #d97706; font-size: 1rem;">Key Insight: Polyfillability</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      The <strong>top layer cannot be polyfilled</strong>—it's browser-controlled. CSS Anchor Positioning has a <a href="https://github.com/oddbird/css-anchor-positioning">complex polyfill</a> with significant limitations (no dynamic content, breaks CSS selectors, no shadow DOM). DOM relocation with context preservation is <strong>fully polyfillable</strong>, making Web Portals a reliable cross-browser solution.
+    </p>
+  </div>
+</section>
+
+<section id="when-needed" class="section-card">
+  <h3 id="when-you-need-portals">When You Actually Need Portals</h3>
+  <p>
+    With the Popover API and CSS Anchor Positioning, many traditional portal use cases (modals, tooltips, dropdowns) can now be solved without moving DOM nodes. <strong>Portals are for when you need content to render in a specific container</strong>, not just escape stacking contexts.
+  </p>
+
+  <div class="features-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; margin-top: 1.5rem;">
+
+    <div class="content-box">
+      <h4 style="color: var(--color-primary); margin: 0 0 0.75rem 0;">Content Slots Across Page Regions</h4>
+      <p style="font-size: 0.9rem; margin: 0; color: var(--color-text-muted);">
+        A deeply nested component needs to contribute content to a sidebar, header breadcrumbs, or page title area. The content's <em>logic</em> belongs to the component, but its <em>rendering</em> belongs elsewhere.
+      </p>
+      <p style="font-size: 0.85rem; margin: 0.75rem 0 0 0; color: var(--color-text-muted); font-style: italic;">
+        Example: Route components contributing to breadcrumb navigation
+      </p>
+    </div>
+
+    <div class="content-box">
+      <h4 style="color: var(--color-primary); margin: 0 0 0.75rem 0;">Centralized Notification Systems</h4>
+      <p style="font-size: 0.9rem; margin: 0; color: var(--color-text-muted);">
+        Toast notifications triggered from anywhere in the app render to a single notification container. Each notification needs access to the triggering component's context for actions like "Undo".
+      </p>
+      <p style="font-size: 0.85rem; margin: 0.75rem 0 0 0; color: var(--color-text-muted); font-style: italic;">
+        Example: "Item deleted" toast with undo action from the deleting component
+      </p>
+    </div>
+
+    <div class="content-box">
+      <h4 style="color: var(--color-primary); margin: 0 0 0.75rem 0;">Responsive Layout Relocation</h4>
+      <p style="font-size: 0.9rem; margin: 0; color: var(--color-text-muted);">
+        Content renders inline on mobile but portals to a sidebar on desktop. Same component, same context, different physical location based on viewport.
+      </p>
+      <p style="font-size: 0.85rem; margin: 0.75rem 0 0 0; color: var(--color-text-muted); font-style: italic;">
+        Example: Table of contents inline on mobile, sidebar on desktop
+      </p>
+    </div>
+
+    <div class="content-box">
+      <h4 style="color: var(--color-primary); margin: 0 0 0.75rem 0;">Dashboard Widget Systems</h4>
+      <p style="font-size: 0.9rem; margin: 0; color: var(--color-text-muted);">
+        Widgets that can be dragged between containers or panes. The widget maintains its state and context regardless of which container it's currently rendered in.
+      </p>
+      <p style="font-size: 0.85rem; margin: 0.75rem 0 0 0; color: var(--color-text-muted); font-style: italic;">
+        Example: Analytics widgets moveable between dashboard sections
+      </p>
+    </div>
+
+    <div class="content-box">
+      <h4 style="color: var(--color-primary); margin: 0 0 0.75rem 0;">Multi-Pane Applications</h4>
+      <p style="font-size: 0.9rem; margin: 0; color: var(--color-text-muted);">
+        A single logical component renders across multiple panes (main content + detail panel). The detail panel content comes from the selected item but renders in a fixed sidebar.
+      </p>
+      <p style="font-size: 0.85rem; margin: 0.75rem 0 0 0; color: var(--color-text-muted); font-style: italic;">
+        Example: Email list item rendering preview in adjacent reading pane
+      </p>
+    </div>
+
+    <div class="content-box">
+      <h4 style="color: var(--color-primary); margin: 0 0 0.75rem 0;">Browser Compatibility</h4>
+      <p style="font-size: 0.9rem; margin: 0; color: var(--color-text-muted);">
+        You need modal/tooltip/dropdown behavior <strong>today</strong> in browsers where Popover API or CSS Anchor Positioning aren't available or polyfillable (the top layer fundamentally cannot be polyfilled).
+      </p>
+      <p style="font-size: 0.85rem; margin: 0.75rem 0 0 0; color: var(--color-text-muted); font-style: italic;">
+        Example: Enterprise apps requiring older browser support
+      </p>
+    </div>
+
+  </div>
+</section>
+
+<section id="when-not-needed" class="section-card">
+  <h3 id="when-you-dont-need-portals">When You Don't Need Portals</h3>
+  <p>
+    If your only goal is <strong>visual escaping</strong> (z-index, overflow, stacking contexts) and you can target modern browsers, use native APIs instead:
+  </p>
+
+  {{ formatSelector("native-modal") }}
+{% highlight "html" %}
+<!-- No portal needed: popover escapes stacking contexts natively -->
+<my-widget>
+  <button popovertarget="widget-menu" id="trigger">Options</button>
+  <!-- Element stays in DOM, renders in top layer, context works naturally -->
+  <div popover id="widget-menu" anchor="trigger">
+    <menu-item data-bind="items[0]"></menu-item>
+    <menu-item data-bind="items[1]"></menu-item>
+  </div>
+</my-widget>
+{% endhighlight %}
+  {{ jsxContent("native-modal") }}
+{% highlight "tsx" %}
+// No portal needed: popover escapes stacking contexts natively
+function MyWidget() {
+  const { items } = useWidgetContext();
+
+  return (
+    <>
+      <button popoverTarget="widget-menu" id="trigger">Options</button>
+      {/* Element stays in DOM, renders in top layer, context works naturally */}
+      <div popover="auto" id="widget-menu" anchor="trigger">
+        <MenuItem item={items[0]} />
+        <MenuItem item={items[1]} />
+      </div>
+    </>
+  );
+}
+{% endhighlight %}
+  {{ templateContent("native-modal") }}
+{% highlight "typescript" %}
+// No portal needed: popover escapes stacking contexts natively
+html`
+  <my-widget>
+    <button popovertarget="widget-menu" id="trigger">Options</button>
+    <!-- Element stays in DOM, renders in top layer, context works naturally -->
+    <div popover id="widget-menu" anchor="trigger">
+      <menu-item .item=${items[0]}></menu-item>
+      <menu-item .item=${items[1]}></menu-item>
+    </div>
+  </my-widget>
+`
+{% endhighlight %}
+  {{ endFormat() }}
+
+  <div class="comparison-block" style="background: rgba(34, 197, 94, 0.1); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #22c55e; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #16a34a; font-size: 1rem;">Use Native APIs When:</h4>
+    <ul style="margin: 0.5rem 0 0 0; padding-left: 1.25rem; font-size: 0.9rem;">
+      <li>You only need to escape stacking contexts (use <code>popover</code> or <code>&lt;dialog&gt;</code>)</li>
+      <li>You only need positioning relative to a trigger (use CSS Anchor Positioning)</li>
+      <li>Content stays logically "in place"—you just need it to render on top</li>
+      <li>You're targeting browsers with Popover API support (Baseline 2024)</li>
+    </ul>
+  </div>
+</section>
+
+<section id="concept" class="section-card">
+  <h3 id="the-concept">How Web Portals Works</h3>
+  <p>
+    Web Portals uses a <code>&lt;template is="portal"&gt;</code> directive (via <a href="/projects/webdirectives/">Web Directives</a>) that renders content at a target DOM location while maintaining logical relationships:
+  </p>
+  <ul>
+    <li><strong>Context Preservation:</strong> Portaled content queries contexts from its <em>logical</em> ancestors via <a href="/projects/webcontexts/">Web Contexts</a>, not its physical DOM location.</li>
+    <li><strong>Injector Chain:</strong> The <a href="/projects/webinjectors/">Web Injectors</a> hierarchy follows the logical tree.</li>
+    <li><strong>Event Proxying:</strong> Events can bubble through the logical tree, enabling handlers on logical ancestors.</li>
+  </ul>
+
+  <h4 style="margin-top: 1.5rem;">Example: Sidebar Content from Nested Component</h4>
+  {{ formatSelector("sidebar-portal") }}
+{% highlight "html" %}
+<!-- Page layout with main content and sidebar -->
+<div class="layout">
+  <main>
+    <article-view>
+      <!-- Article is deeply nested, but contributes to sidebar -->
+      <template is="portal" target="#sidebar-content">
+        <nav class="table-of-contents">
+          <!-- Accesses article's headings context -->
+          <h3>In this article</h3>
+          <template is="for-each" items="headings">
+            <a href="#{{ id }}" data-bind="text"></a>
+          </template>
+        </nav>
+      </template>
+
+      <h1 data-bind="title"></h1>
+      <div data-bind="content"></div>
+    </article-view>
+  </main>
+
+  <aside>
+    <!-- Table of contents renders here, but logic lives in article-view -->
+    <div id="sidebar-content"></div>
+  </aside>
+</div>
+{% endhighlight %}
+  {{ jsxContent("sidebar-portal") }}
+{% highlight "tsx" %}
+// Page layout with main content and sidebar
+function ArticleView() {
+  const { title, content, headings } = useArticleContext();
+
+  return (
+    <>
+      {/* Article contributes to sidebar while maintaining context */}
+      <Portal target="#sidebar-content">
+        <nav className="table-of-contents">
+          <h3>In this article</h3>
+          {headings.map((heading) => (
+            <a key={heading.id} href={`#${heading.id}`}>{heading.text}</a>
+          ))}
+        </nav>
+      </Portal>
+
+      <h1>{title}</h1>
+      <div>{content}</div>
+    </>
+  );
+}
+
+// Layout
+function PageLayout({ children }) {
+  return (
+    <div className="layout">
+      <main>{children}</main>
+      <aside>
+        <div id="sidebar-content"></div>
+      </aside>
+    </div>
+  );
+}
+{% endhighlight %}
+  {{ templateContent("sidebar-portal") }}
+{% highlight "typescript" %}
+// Article contributes to sidebar while maintaining context
+html`
+  <div class="layout">
+    <main>
+      <article-view>
+        <Portal target="#sidebar-content">
+          <nav class="table-of-contents">
+            <h3>In this article</h3>
+            <For each=${headings}>
+              ${(h) => html`<a href="#${h.id}">${h.text}</a>`}
+            </For>
+          </nav>
+        </Portal>
+
+        <h1>${title}</h1>
+        <div>${content}</div>
+      </article-view>
+    </main>
+
+    <aside>
+      <div id="sidebar-content"></div>
+    </aside>
+  </div>
+`
+{% endhighlight %}
+  {{ endFormat() }}
+
+  <h4 style="margin-top: 1.5rem;">Key Behaviors</h4>
+  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-top: 1rem;">
+    <div class="content-box">
+      <h5 style="margin: 0 0 0.5rem 0; color: var(--color-primary);">Context Preservation</h5>
+      <p style="font-size: 0.85rem; margin: 0; color: var(--color-text-muted);">
+        Portaled content queries contexts from its <em>logical</em> position in the component tree, not its physical DOM location.
+      </p>
+    </div>
+    <div class="content-box">
+      <h5 style="margin: 0 0 0.5rem 0; color: var(--color-primary);">Event Bubbling</h5>
+      <p style="font-size: 0.85rem; margin: 0; color: var(--color-text-muted);">
+        Events bubble through the logical hierarchy. A click inside the portal can trigger handlers on logical ancestors.
+      </p>
+    </div>
+    <div class="content-box">
+      <h5 style="margin: 0 0 0.5rem 0; color: var(--color-primary);">Lifecycle Sync</h5>
+      <p style="font-size: 0.85rem; margin: 0; color: var(--color-text-muted);">
+        When the portal directive disconnects, its rendered content is automatically removed from the target.
+      </p>
+    </div>
+  </div>
+</section>
+
+<section id="primitives" class="section-card">
+  <h3 id="proposed-primitives">Proposed Primitives (Draft)</h3>
+  <p>
+    To enable native portal functionality equivalent to framework implementations, we propose the following browser primitives. These build on <a href="/projects/webinjectors/">Web Injectors</a> and <a href="/projects/webcontexts/">Web Contexts</a>.
+  </p>
+
+  <div class="comparison-block" style="background: rgba(99, 102, 241, 0.05); padding: 1.25rem; border-radius: 8px; border-left: 4px solid var(--color-primary); margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: var(--color-primary); font-size: 1rem;">Design Principle</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      The key insight from framework research is that portals require a <strong>logical tree</strong> independent of the DOM tree. We use the <strong>injector hierarchy</strong> as this logical backbone, since injectors already provide context propagation, lifecycle management, and parent-child relationships.
+    </p>
+  </div>
+
+  <h4 id="primitive-1">1. Node.logicalParent</h4>
+  <p>
+    A new DOM property that allows nodes to specify a <em>logical parent</em> different from their physical DOM parent. This is the foundation for all portal behavior.
+  </p>
+  {% highlight "typescript" %}
+interface Node {
+  // The logical parent for context/event propagation (defaults to parentNode)
+  logicalParent: Node | null;
+
+  // Read-only: the injector resolved via logical ancestry
+  readonly logicalInjector: Injector | null;
+
+  // Walk the logical ancestor chain
+  logicalAncestors(): IterableIterator<Node>;
+
+  // Check if this node is a logical descendant of another
+  isLogicalDescendantOf(ancestor: Node): boolean;
+}
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+    <li><strong>Default behavior:</strong> When <code>logicalParent</code> is <code>null</code>, it defaults to <code>parentNode</code> (normal DOM behavior)</li>
+    <li><strong>Context resolution:</strong> <code>getContext()</code> walks <code>logicalParent</code> chain, not <code>parentNode</code></li>
+    <li><strong>Injector chain:</strong> <code>logicalInjector</code> resolves via logical ancestry</li>
+  </ul>
+
+  <h4 id="primitive-2" style="margin-top: 2rem;">2. Event Logical Propagation</h4>
+  <p>
+    Events need to bubble through the <em>logical</em> tree for handlers on logical ancestors to work. We propose extending <code>EventInit</code> and adding a new propagation path.
+  </p>
+  {% highlight "typescript" %}
+interface EventInit {
+  // New: should this event bubble through logical tree? (default: false)
+  bubblesLogical?: boolean;
+}
+
+interface Event {
+  // The logical propagation path (if bubblesLogical is true)
+  readonly logicalPath: EventTarget[];
+
+  // Stop propagation through both DOM and logical trees
+  stopLogicalPropagation(): void;
+}
+
+// Portaled content dispatches events with logical bubbling
+button.dispatchEvent(new MouseEvent('click', {
+  bubbles: true,
+  bubblesLogical: true  // Will also bubble through logicalParent chain
+}));
+  {% endhighlight %}
+
+  <div class="content-box" style="margin-top: 1rem;">
+    <h5 style="margin: 0 0 0.5rem 0; color: var(--color-primary);">Event Flow</h5>
+    <p style="font-size: 0.85rem; margin: 0; color: var(--color-text-muted);">
+      When <code>bubblesLogical: true</code>, the event first bubbles through the DOM tree normally, then continues up the <code>logicalParent</code> chain from the portal root to the logical ancestors. Handlers can use <code>event.logicalPath</code> to inspect the full path.
+    </p>
+  </div>
+
+  <h4 id="primitive-3" style="margin-top: 2rem;">3. PortalOutlet Element</h4>
+  <p>
+    A dedicated element for portal targets that integrates with the injector system and manages multiple incoming portals.
+  </p>
+  {% highlight "typescript" %}
+interface PortalOutlet extends HTMLElement {
+  // Currently attached portals (in attachment order)
+  readonly portals: ReadonlyArray<PortalDirective>;
+
+  // Callback when portals attach/detach
+  onportalchange: ((event: PortalChangeEvent) => void) | null;
+}
+
+// Registration
+customElements.define('portal-outlet', PortalOutlet);
+  {% endhighlight %}
+  {% highlight "html" %}
+<!-- Define portal outlets at strategic locations -->
+<body>
+  <div id="app">
+    <!-- App content with deeply nested modals/tooltips -->
+  </div>
+
+  <!-- Portal outlets outside stacking contexts -->
+  <portal-outlet id="modals"></portal-outlet>
+  <portal-outlet id="tooltips"></portal-outlet>
+  <portal-outlet id="notifications"></portal-outlet>
+</body>
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+    <li><strong>Ordering:</strong> Multiple portals to the same outlet append in attachment order (like Vue)</li>
+    <li><strong>Top Layer Integration:</strong> Can be combined with <code>popover</code> attribute for automatic top-layer rendering</li>
+    <li><strong>Named outlets:</strong> Target by ID, CSS selector, or direct reference</li>
+  </ul>
+
+  <h4 id="primitive-4" style="margin-top: 2rem;">4. Focus Scope</h4>
+  <p>
+    Focus management needs to respect logical boundaries for tab navigation and focus traps. We propose a <code>focusscope</code> attribute and related APIs.
+  </p>
+  {% highlight "typescript" %}
+interface FocusScopeOptions {
+  // Trap focus within this scope (for modals)
+  trap?: boolean;
+
+  // Return focus to trigger element on scope exit
+  returnFocus?: boolean;
+
+  // The element to return focus to (defaults to previously focused)
+  returnTarget?: Element;
+}
+
+interface Element {
+  // Create a focus scope rooted at this element
+  createFocusScope(options?: FocusScopeOptions): FocusScope;
+}
+
+interface FocusScope {
+  // The scope root element
+  readonly root: Element;
+
+  // Is focus currently within this scope?
+  readonly active: boolean;
+
+  // Release the focus scope
+  release(): void;
+}
+  {% endhighlight %}
+  {% highlight "html" %}
+<!-- Declarative focus scope via attribute -->
+<div class="modal" focusscope="trap returnfocus">
+  <input type="text" autofocus>
+  <button>Submit</button>
+  <button>Cancel</button>
+  <!-- Tab cycles within modal, ESC or close returns focus to trigger -->
+</div>
+  {% endhighlight %}
+
+  <h4 id="primitive-5" style="margin-top: 2rem;">5. The Portal Directive</h4>
+  <p>
+    The high-level API using <a href="/projects/webdirectives/">CustomTemplateDirective</a>. This is what developers typically interact with.
+  </p>
+  {% highlight "typescript" %}
+class PortalDirective extends CustomTemplateDirective {
+  static observedAttributes = ['target', 'disabled'];
+
+  // The target outlet (selector, element reference, or 'body')
+  target: string | Element = 'body';
+
+  // Disable the portal (content stays in place)
+  disabled: boolean = false;
+
+  // The rendered content
+  readonly content: DocumentFragment | null;
+
+  // Lifecycle
+  connectedCallback(): void {
+    // 1. Resolve target outlet
+    // 2. Instantiate template content
+    // 3. Set logicalParent on content root to this directive's parent
+    // 4. Append content to target
+    // 5. Set up event proxying
+  }
+
+  disconnectedCallback(): void {
+    // 1. Remove content from target
+    // 2. Clean up event listeners
+    // 3. Release focus scope if active
+  }
+}
+
+customElements.define('portal', PortalDirective, { extends: 'template' });
+  {% endhighlight %}
+
+  <p style="margin-top: 1.5rem;">Usage example:</p>
+  {{ formatSelector("portal-directive-usage") }}
+{% highlight "html" %}
+<!-- Usage: content renders to #modals but maintains logical context -->
+<my-widget>
+  <template is="portal" target="#modals">
+    <div class="widget-modal" focusscope="trap returnfocus">
+      <!-- Full access to my-widget's contexts and injectors -->
+      <h2 data-bind="widgetTitle"></h2>
+      <button on-click="closeModal">Close</button>
+    </div>
+  </template>
+</my-widget>
+{% endhighlight %}
+  {{ jsxContent("portal-directive-usage") }}
+{% highlight "tsx" %}
+// Usage: content renders to #modals but maintains logical context
+function MyWidget() {
+  const { widgetTitle, closeModal } = useWidgetContext();
+
+  return (
+    <Portal target="#modals">
+      <div className="widget-modal" focusScope={{ trap: true, returnFocus: true }}>
+        {/* Full access to my-widget's contexts */}
+        <h2>{widgetTitle}</h2>
+        <button onClick={closeModal}>Close</button>
+      </div>
+    </Portal>
+  );
+}
+{% endhighlight %}
+  {{ templateContent("portal-directive-usage") }}
+{% highlight "typescript" %}
+// Usage: content renders to #modals but maintains logical context
+html`
+  <my-widget>
+    <Portal target="#modals">
+      <div class="widget-modal" focusscope="trap returnfocus">
+        <!-- Full access to my-widget's contexts and injectors -->
+        <h2>${widgetTitle}</h2>
+        <button @click=${closeModal}>Close</button>
+      </div>
+    </Portal>
+  </my-widget>
+`
+{% endhighlight %}
+  {{ endFormat() }}
+</section>
+
+<section id="integration" class="section-card">
+  <h3 id="integration-with-native-apis">Integration with Native APIs (HTML)</h3>
+  <p>
+    In declarative HTML, Web Portals can combine with native APIs when you need content in a <strong>specific container</strong> that also uses popover/dialog for visual behavior.
+  </p>
+
+  <div class="comparison-block" style="background: rgba(99, 102, 241, 0.1); padding: 1rem; border-radius: 8px; border-left: 4px solid var(--color-primary); margin: 1rem 0 1.5rem 0;">
+    <p style="margin: 0; font-size: 0.9rem;">
+      <strong>Note:</strong> In frameworks like React/Vue/Solid, you typically <strong>don't need portals</strong> when using native APIs. Framework context follows the component tree (not DOM), so a <code>popover</code> element can stay in place and still access parent context. These integration patterns are primarily relevant for declarative HTML.
+    </p>
+  </div>
+
+  <h4>Portal + Popover: Container Organization</h4>
+  <p style="font-size: 0.9rem; color: var(--color-text-muted); margin-bottom: 1rem;">
+    Render all popovers to a central container for styling/management, while using native popover for top layer and light dismiss.
+  </p>
+{% highlight "html" %}
+<my-menu-trigger>
+  <template is="portal" target="#popovers">
+    <div popover id="my-menu" anchor="menu-trigger">
+      <!-- In top layer + light dismiss from popover -->
+      <!-- Context from my-menu-trigger via Web Contexts -->
+      <menu-item data-bind="items[0]"></menu-item>
+      <menu-item data-bind="items[1]"></menu-item>
+    </div>
+  </template>
+  <button popovertarget="my-menu" id="menu-trigger">Open Menu</button>
+</my-menu-trigger>
+{% endhighlight %}
+
+  <h4 style="margin-top: 1.5rem;">Portal + Dialog: Modal Container</h4>
+  <p style="font-size: 0.9rem; color: var(--color-text-muted); margin-bottom: 1rem;">
+    Centralize dialogs for consistent styling while using native modal behavior.
+  </p>
+{% highlight "html" %}
+<my-form>
+  <template is="portal" target="#dialogs">
+    <dialog id="confirm-dialog">
+      <!-- Native modal behavior, focus trap, ESC to close -->
+      <!-- Context from my-form via Web Contexts -->
+      <p>Confirm submission of <span data-bind="formTitle"></span>?</p>
+      <button on-click="submitForm">Confirm</button>
+      <button onclick="this.closest('dialog').close()">Cancel</button>
+    </dialog>
+  </template>
+  <button onclick="document.getElementById('confirm-dialog').showModal()">Submit</button>
+</my-form>
+{% endhighlight %}
+
+  <h4 style="margin-top: 1.5rem;">Portal + Anchor Positioning: Tooltip Container</h4>
+  <p style="font-size: 0.9rem; color: var(--color-text-muted); margin-bottom: 1rem;">
+    Tooltips in a central container, positioned via CSS anchor back to their triggers.
+  </p>
+{% highlight "html" %}
+<style>
+  .tooltip-content {
+    position: fixed;
+    position-anchor: --tooltip-anchor;
+    top: anchor(bottom);
+    left: anchor(center);
+  }
+</style>
+
+<data-cell>
+  <span anchor-name="--tooltip-anchor" data-bind="value"></span>
+  <template is="portal" target="#tooltips">
+    <div class="tooltip-content" popover="hint">
+      <!-- Positioned via anchor, in top layer via popover -->
+      <!-- Context from data-cell via Web Contexts -->
+      <span data-bind="tooltip"></span>
+    </div>
+  </template>
+</data-cell>
+{% endhighlight %}
+
+  <div class="comparison-block" style="background: rgba(34, 197, 94, 0.1); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #22c55e; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #16a34a; font-size: 1rem;">The Complete Picture</h4>
+    <table style="width: 100%; font-size: 0.9rem; margin-top: 0.75rem;">
+      <tr>
+        <td style="padding: 0.25rem 0;"><strong>Visual escaping:</strong></td>
+        <td style="padding: 0.25rem 0;">Popover API / Top Layer / position: fixed</td>
+      </tr>
+      <tr>
+        <td style="padding: 0.25rem 0;"><strong>Positioning:</strong></td>
+        <td style="padding: 0.25rem 0;">CSS Anchor Positioning</td>
+      </tr>
+      <tr>
+        <td style="padding: 0.25rem 0;"><strong>Modal behavior:</strong></td>
+        <td style="padding: 0.25rem 0;">&lt;dialog&gt; element</td>
+      </tr>
+      <tr>
+        <td style="padding: 0.25rem 0;"><strong>Context preservation:</strong></td>
+        <td style="padding: 0.25rem 0;"><strong>Web Portals</strong> (this proposal)</td>
+      </tr>
+    </table>
+  </div>
+</section>
+
+<section id="advanced" class="section-card">
+  <h3 id="advanced-patterns">Advanced Patterns</h3>
+
+  <h4>Nested Portals</h4>
+  <p>
+    Portals can be nested, with each level maintaining its logical parent chain:
+  </p>
+  {{ formatSelector("nested-portals") }}
+{% highlight "html" %}
+<app-root>
+  <template is="portal" target="#modals">
+    <div class="modal">
+      <!-- Logical parent: app-root -->
+      <template is="portal" target="#tooltips">
+        <div class="tooltip">
+          <!-- Logical parent chain: modal → app-root -->
+          <!-- Can access contexts from both! -->
+        </div>
+      </template>
+    </div>
+  </template>
+</app-root>
+{% endhighlight %}
+  {{ jsxContent("nested-portals") }}
+{% highlight "tsx" %}
+function AppRoot() {
+  return (
+    <Portal target="#modals">
+      <div className="modal">
+        {/* Logical parent: AppRoot */}
+        <Portal target="#tooltips">
+          <div className="tooltip">
+            {/* Logical parent chain: modal → AppRoot */}
+            {/* Can access contexts from both! */}
+          </div>
+        </Portal>
+      </div>
+    </Portal>
+  );
+}
+{% endhighlight %}
+  {{ templateContent("nested-portals") }}
+{% highlight "typescript" %}
+html`
+  <app-root>
+    <Portal target="#modals">
+      <div class="modal">
+        <!-- Logical parent: app-root -->
+        <Portal target="#tooltips">
+          <div class="tooltip">
+            <!-- Logical parent chain: modal → app-root -->
+            <!-- Can access contexts from both! -->
+          </div>
+        </Portal>
+      </div>
+    </Portal>
+  </app-root>
+`
+{% endhighlight %}
+  {{ endFormat() }}
+
+  <h4 style="margin-top: 1.5rem;">Conditional Portaling (Disabled State)</h4>
+  <p>
+    The <code>disabled</code> attribute renders content in-place instead of portaling:
+  </p>
+  {{ formatSelector("conditional-portal") }}
+{% highlight "html" %}
+<!-- Mobile: render inline. Desktop: portal to sidebar -->
+<template is="portal" target="#sidebar" disabled="{{ isMobile }}">
+  <nav class="table-of-contents">
+    <!-- Same content, different render location based on viewport -->
+  </nav>
+</template>
+{% endhighlight %}
+  {{ jsxContent("conditional-portal") }}
+{% highlight "tsx" %}
+function TableOfContents() {
+  const isMobile = useMediaQuery('(max-width: 768px)');
+
+  // Mobile: render inline. Desktop: portal to sidebar
+  return (
+    <Portal target="#sidebar" disabled={isMobile}>
+      <nav className="table-of-contents">
+        {/* Same content, different render location based on viewport */}
+      </nav>
+    </Portal>
+  );
+}
+{% endhighlight %}
+  {{ templateContent("conditional-portal") }}
+{% highlight "typescript" %}
+// Mobile: render inline. Desktop: portal to sidebar
+html`
+  <Portal target="#sidebar" ?disabled=${isMobile}>
+    <nav class="table-of-contents">
+      <!-- Same content, different render location based on viewport -->
+    </nav>
+  </Portal>
+`
+{% endhighlight %}
+  {{ endFormat() }}
+
+  <h4 style="margin-top: 1.5rem;">Multiple Portals to Same Outlet</h4>
+  <p>
+    Like Vue's Teleport, multiple portals to the same outlet append in order:
+  </p>
+  {{ formatSelector("multiple-portals") }}
+{% highlight "html" %}
+<notification-manager>
+  <!-- Each notification portals to the same outlet -->
+  <template is="for-each" items="notifications">
+    <template is="portal" target="#notification-area">
+      <div class="notification" data-bind="message"></div>
+    </template>
+  </template>
+</notification-manager>
+
+<!-- Notifications stack in order of creation -->
+<portal-outlet id="notification-area" class="notification-stack"></portal-outlet>
+{% endhighlight %}
+  {{ jsxContent("multiple-portals") }}
+{% highlight "tsx" %}
+function NotificationManager() {
+  const { notifications } = useNotifications();
+
+  return (
+    <>
+      {/* Each notification portals to the same outlet */}
+      {notifications.map((notification) => (
+        <Portal key={notification.id} target="#notification-area">
+          <div className="notification">{notification.message}</div>
+        </Portal>
+      ))}
+    </>
+  );
+}
+
+// Notifications stack in order of creation
+<portal-outlet id="notification-area" className="notification-stack" />
+{% endhighlight %}
+  {{ templateContent("multiple-portals") }}
+{% highlight "typescript" %}
+html`
+  <notification-manager>
+    <!-- Each notification portals to the same outlet -->
+    <For each=${notifications}>
+      ${(notification) => html`
+        <Portal target="#notification-area">
+          <div class="notification">${notification.message}</div>
+        </Portal>
+      `}
+    </For>
+  </notification-manager>
+`
+
+// Notifications stack in order of creation
+html`<portal-outlet id="notification-area" class="notification-stack"></portal-outlet>`
+{% endhighlight %}
+  {{ endFormat() }}
+
+  <h4 style="margin-top: 1.5rem;">Event Handling Across Portal Boundary</h4>
+  {{ formatSelector("event-handling") }}
+{% highlight "html" %}
+<form-container on-submit="handleSubmit">
+  <template is="portal" target="#modals">
+    <div class="modal">
+      <!-- This submit bubbles logically to form-container -->
+      <button type="submit">Submit</button>
+
+      <!-- Click-outside detection respects logical boundary -->
+      <div class="backdrop" on-click.outside="closeModal"></div>
+    </div>
+  </template>
+</form-container>
+{% endhighlight %}
+  {{ jsxContent("event-handling") }}
+{% highlight "tsx" %}
+function FormContainer() {
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    // Handle form submission
+  };
+
+  const closeModal = () => {
+    // Close the modal
+  };
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <Portal target="#modals">
+        <div className="modal">
+          {/* This submit bubbles logically to FormContainer */}
+          <button type="submit">Submit</button>
+
+          {/* Click-outside detection respects logical boundary */}
+          <div className="backdrop" onClick={closeModal} />
+        </div>
+      </Portal>
+    </form>
+  );
+}
+{% endhighlight %}
+  {{ templateContent("event-handling") }}
+{% highlight "typescript" %}
+html`
+  <form-container @submit=${handleSubmit}>
+    <Portal target="#modals">
+      <div class="modal">
+        <!-- This submit bubbles logically to form-container -->
+        <button type="submit">Submit</button>
+
+        <!-- Click-outside detection respects logical boundary -->
+        <div class="backdrop" @click.outside=${closeModal}></div>
+      </div>
+    </Portal>
+  </form-container>
+`
+{% endhighlight %}
+  {{ endFormat() }}
+</section>
+
+<section id="native-alternatives" class="section-card">
+  <h3 id="native-alternatives">Native Alternatives</h3>
+  <p>
+    The web platform has evolved to address some portal use cases natively:
+  </p>
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 600px;">
+      <thead>
+        <tr>
+          <th>API</th>
+          <th>Use Case</th>
+          <th>Limitations</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Popover API</strong></td>
+          <td>Tooltips, menus, non-modal dialogs</td>
+          <td>No context preservation; requires manual state sync</td>
+        </tr>
+        <tr>
+          <td><strong>&lt;dialog&gt;</strong></td>
+          <td>Modal dialogs</td>
+          <td>Limited to dialog pattern; no arbitrary content relocation</td>
+        </tr>
+        <tr>
+          <td><strong>CSS Anchor Positioning</strong></td>
+          <td>Positioning floating elements relative to anchors</td>
+          <td>Solves positioning, not context/event propagation</td>
+        </tr>
+        <tr>
+          <td><strong>Top Layer</strong></td>
+          <td>Rendering above all z-indexes</td>
+          <td>Browser-controlled; not arbitrary target locations</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="margin-top: 1rem; font-size: 0.9rem; color: var(--color-text-muted);">
+    These APIs solve the <em>visual</em> problem (escaping stacking contexts) but don't address the <em>logical</em> problem (maintaining context and event relationships). Web Portals complements these APIs by providing the missing logical layer.
+  </p>
+</section>
+
+<section id="status" class="section-card">
+  <h3>Status</h3>
+  <p>
+    Web Portals is in <strong>draft specification</strong> phase. The primitives above represent the proposed API surface.
+  </p>
+  <h4 style="margin-top: 1rem;">Dependencies</h4>
+  <ul style="font-size: 0.9rem;">
+    <li><a href="/projects/webinjectors/">Web Injectors</a> — Provides the injector hierarchy that serves as the logical tree backbone</li>
+    <li><a href="/projects/webcontexts/">Web Contexts</a> — Context resolution via logical ancestry</li>
+    <li><a href="/projects/webdirectives/">Web Directives</a> — The <code>CustomTemplateDirective</code> base for the portal directive</li>
+  </ul>
+  <h4 style="margin-top: 1rem;">Open Questions</h4>
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <li>Should <code>logicalParent</code> be a writable property or set via a method?</li>
+    <li>How should <code>bubblesLogical</code> interact with Shadow DOM event retargeting?</li>
+    <li>Should focus scopes be integrated into the portal directive or remain separate?</li>
+    <li>What's the behavior when a portal target doesn't exist yet (deferred resolution like Vue 3.5)?</li>
+  </ul>
+</section>
+
+<details class="section-card" style="margin-top: 2rem;">
+  <summary style="cursor: pointer; font-size: 1.25rem; font-weight: 600; padding: 1rem; background: rgba(99, 102, 241, 0.05); border-radius: 8px; user-select: none; list-style: none;">
+    <span style="display: inline-block; transition: transform 0.2s;">&#9654;</span> Research &amp; Analysis
+  </summary>
+  <div style="padding: 1rem 0;">
+
+<section id="research-summary" class="section-card">
+  <div class="comparison-block" style="background: rgba(99, 102, 241, 0.1); padding: 1.5rem; border-radius: 8px; border: 1px solid rgba(99, 102, 241, 0.2); margin: 1rem 0;">
+    <h4 style="margin-top: 0; color: var(--color-primary);">Summary of Research</h4>
+    <p>
+      Every major framework has implemented portals to solve the same fundamental problem: rendering content at a different DOM location while preserving the logical component tree's context and event relationships. The implementations are remarkably consistent in their approach, suggesting a well-understood pattern that could benefit from standardization.
+    </p>
+    <p style="margin-bottom: 0;">
+      <strong>Key Insight:</strong> Framework portals operate at the virtual/component tree level, not the DOM level. Native HTML has no equivalent concept of a "logical tree" separate from the DOM tree. Web Portals proposes using the injector hierarchy (from <a href="/projects/webinjectors/">Web Injectors</a>) as this logical backbone.
+    </p>
+  </div>
+</section>
+
+<section id="polyfillability" class="section-card">
+  <h3 id="polyfillability-analysis">Polyfillability Analysis</h3>
+  <p>A critical comparison of what can and cannot be polyfilled:</p>
+
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 700px;">
+      <thead>
+        <tr>
+          <th>Feature</th>
+          <th>Polyfillable?</th>
+          <th>Limitations</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Top Layer</strong></td>
+          <td style="color: #dc2626; font-weight: 600;">No</td>
+          <td>Browser-controlled layer above all z-indexes. Cannot be faked—z-index doesn't escape stacking contexts.</td>
+        </tr>
+        <tr>
+          <td><strong>Popover API</strong></td>
+          <td style="color: #d97706; font-weight: 600;">Partial</td>
+          <td>Show/hide behavior polyfillable. Light-dismiss polyfillable. <strong>Top layer: impossible.</strong></td>
+        </tr>
+        <tr>
+          <td><strong>CSS Anchor Positioning</strong></td>
+          <td style="color: #d97706; font-weight: 600;">Heavy</td>
+          <td>
+            <a href="https://github.com/oddbird/css-anchor-positioning">OddBird polyfill</a> exists but:
+            <ul style="margin: 0.5rem 0 0 0; padding-left: 1rem; font-size: 0.85rem;">
+              <li>Doesn't work with dynamic content (React, etc.)</li>
+              <li>position-area wrapping breaks CSS selectors</li>
+              <li>No shadow DOM across roots</li>
+              <li>No @import stylesheets</li>
+              <li>~85% of polyfill is CSS parsing overhead</li>
+            </ul>
+          </td>
+        </tr>
+        <tr>
+          <td><strong>DOM Relocation + Context</strong></td>
+          <td style="color: #16a34a; font-weight: 600;">Yes</td>
+          <td>Standard DOM operations. Context preservation via Web Injectors/Contexts is fully polyfillable.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="comparison-block" style="background: rgba(99, 102, 241, 0.05); padding: 1.25rem; border-radius: 8px; border-left: 4px solid var(--color-primary); margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: var(--color-primary); font-size: 1rem;">The Irony</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      The "modern" approach (top layer + anchor positioning) that <em>eliminates</em> the need for DOM relocation <strong>cannot be fully polyfilled</strong>. The "old" approach (relocating DOM nodes) that framework portals use <strong>is fully polyfillable</strong>. Web Portals embraces DOM relocation as the reliable, cross-browser foundation, with native API integration as progressive enhancement.
+    </p>
+  </div>
+
+  <h4 style="margin-top: 1.5rem;">Browser Support Timeline</h4>
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <li><strong>Popover API:</strong> Baseline 2024 (Chrome 114, Firefox 125, Safari 17)</li>
+    <li><strong>CSS Anchor Positioning:</strong> Chrome 125+, Firefox 145 (behind flag), Safari: no support</li>
+    <li><strong>Web Portals:</strong> Works in all browsers via polyfill (DOM operations are universal)</li>
+  </ul>
+</section>
+
+<section id="framework-comparison" class="section-card">
+  <h3 id="framework-implementations">Framework Implementations</h3>
+  <p>Analysis of portal implementations across major frameworks:</p>
+
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 800px;">
+      <thead>
+        <tr>
+          <th>Framework</th>
+          <th>API</th>
+          <th>Context Preserved</th>
+          <th>Event Bubbling</th>
+          <th>Target Specification</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>React</strong></td>
+          <td><code>createPortal(children, container)</code></td>
+          <td>Yes (React tree)</td>
+          <td>Through React tree, not DOM</td>
+          <td>DOM node reference</td>
+        </tr>
+        <tr>
+          <td><strong>Vue 3</strong></td>
+          <td><code>&lt;Teleport to="selector"&gt;</code></td>
+          <td>Yes (Vue tree)</td>
+          <td>Through Vue tree</td>
+          <td>CSS selector or DOM node</td>
+        </tr>
+        <tr>
+          <td><strong>Angular</strong></td>
+          <td>CDK Portal + PortalOutlet</td>
+          <td>Yes (DI hierarchy)</td>
+          <td>Through Angular tree</td>
+          <td>PortalOutlet directive</td>
+        </tr>
+        <tr>
+          <td><strong>SolidJS</strong></td>
+          <td><code>&lt;Portal mount={node}&gt;</code></td>
+          <td>Yes (Solid tree)</td>
+          <td>Through component hierarchy</td>
+          <td>DOM node (default: body)</td>
+        </tr>
+        <tr>
+          <td><strong>Svelte</strong></td>
+          <td>svelte-portal, svelte-teleport</td>
+          <td>Varies by library</td>
+          <td>Varies by library</td>
+          <td>CSS selector or DOM node</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="react-analysis" class="section-card">
+  <h4>React: createPortal</h4>
+  <p>
+    React's <code>createPortal</code> renders children into a DOM node outside the parent component's DOM hierarchy, while maintaining the React component tree relationship.
+  </p>
+  {% highlight "jsx" %}
+import { createPortal } from 'react-dom';
+
+function Modal({ children }) {
+  return createPortal(
+    <div className="modal">{children}</div>,
+    document.getElementById('modal-root')
+  );
+}
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <li><strong>Context:</strong> Full access to React Context from logical ancestors</li>
+    <li><strong>Events:</strong> Bubble through React tree, not DOM tree (potential source of confusion)</li>
+    <li><strong>Pitfall:</strong> Click-outside handlers may fire unexpectedly since events follow React tree</li>
+  </ul>
+</section>
+
+<section id="vue-analysis" class="section-card">
+  <h4>Vue 3: Teleport</h4>
+  <p>
+    Vue 3 introduced <code>&lt;Teleport&gt;</code> as a built-in component (evolved from the portal-vue library). It supports deferred target resolution (Vue 3.5+) and multiple teleports to the same target.
+  </p>
+  {% highlight "html" %}
+<template>
+  <button @click="showModal = true">Open Modal</button>
+  <Teleport to="body">
+    <div v-if="showModal" class="modal">
+      <!-- Full access to component's data and methods -->
+      <p>{{ message }}</p>
+      <button @click="showModal = false">Close</button>
+    </div>
+  </Teleport>
+</template>
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <li><strong>Logical vs Physical:</strong> "Only alters the rendered DOM structure - does not affect the logical hierarchy"</li>
+    <li><strong>Deferred Targets:</strong> Vue 3.5+ allows targeting elements rendered later in the component tree</li>
+    <li><strong>Multiple Teleports:</strong> Content appends in order to shared targets</li>
+  </ul>
+</section>
+
+<section id="angular-analysis" class="section-card">
+  <h4>Angular: CDK Portal</h4>
+  <p>
+    Angular's Component Dev Kit (CDK) provides a lower-level Portal abstraction, typically used with the Overlay service for modals, tooltips, and menus.
+  </p>
+  {% highlight "typescript" %}
+import { Portal, PortalModule } from '@angular/cdk/portal';
+
+// In template
+<ng-template cdkPortal>
+  <div class="tooltip-content">{{ tooltipText }}</div>
+</ng-template>
+
+// Attach to overlay
+const overlayRef = this.overlay.create();
+overlayRef.attach(this.portal());
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <li><strong>Dependency Injection:</strong> Portaled content maintains access to the Angular DI hierarchy</li>
+    <li><strong>Overlay Integration:</strong> Works with positioning, scroll strategies, and backdrop handling</li>
+    <li><strong>Modern Signals:</strong> Angular v19+ uses signal-based APIs (<code>viewChild.required</code>)</li>
+  </ul>
+</section>
+
+<section id="solid-analysis" class="section-card">
+  <h4>SolidJS: Portal</h4>
+  <p>
+    Solid's <code>&lt;Portal&gt;</code> component renders to a specified mount point while preserving the reactive context and event propagation.
+  </p>
+  {% highlight "jsx" %}
+import { Portal } from 'solid-js/web';
+
+function Modal(props) {
+  return (
+    <Portal mount={document.getElementById('modal-root')}>
+      <div class="modal">
+        {/* Full reactivity and context access */}
+        {props.children}
+      </div>
+    </Portal>
+  );
+}
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <li><strong>Event Propagation:</strong> "Events still propagate through the component hierarchy"</li>
+    <li><strong>SSR Note:</strong> Portal only runs on client with hydration disabled</li>
+    <li><strong>Simplicity:</strong> Noted as "just working" compared to React's more complex setup</li>
+  </ul>
+</section>
+
+<section id="native-apis" class="section-card">
+  <h3 id="native-web-apis">Native Web Platform APIs</h3>
+  <p>Recent web platform additions that address related (but distinct) problems:</p>
+
+  <h4>Popover API &amp; Top Layer</h4>
+  <p>
+    The Popover API (baseline 2024) provides native support for tooltips, menus, and non-modal overlays with automatic top-layer rendering.
+  </p>
+  {% highlight "html" %}
+<button popovertarget="my-popover">Toggle Popover</button>
+<div id="my-popover" popover>
+  Popover content - automatically in top layer
+</div>
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <li><strong>Top Layer:</strong> Renders above all z-indexes without manual z-index management</li>
+    <li><strong>Light Dismiss:</strong> Built-in click-outside and ESC key handling</li>
+    <li><strong>Limitation:</strong> No context preservation; the popover is still a regular DOM descendant</li>
+  </ul>
+
+  <h4>CSS Anchor Positioning</h4>
+  <p>
+    Anchor positioning (Chrome 125+, Interop 2025) allows elements to position relative to "anchor" elements, even across stacking contexts.
+  </p>
+  {% highlight "css" %}
+.tooltip {
+  position: fixed;
+  position-anchor: --trigger;
+  top: anchor(bottom);
+  left: anchor(center);
+}
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <li><strong>Top Layer Compatible:</strong> Works with popover and dialog elements</li>
+    <li><strong>Scroll Tethering:</strong> Anchored elements scroll with their anchors</li>
+    <li><strong>Limitation:</strong> Solves positioning, not context or event propagation</li>
+  </ul>
+</section>
+
+<section id="wicg-portals" class="section-card">
+  <h3 id="wicg-portals-note">Note: WICG Portals (Different Concept)</h3>
+  <div class="content-box" style="background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3);">
+    <p style="margin: 0; font-size: 0.9rem;">
+      <strong>Important:</strong> The <a href="https://wicg.github.io/portals/" target="_blank" rel="noopener">WICG Portals proposal</a> addresses a completely different problem: seamless navigation transitions between pages. It introduces a <code>&lt;portal&gt;</code> element for embedding and activating other pages (similar to an iframe that can be "promoted" to the top-level document). This is unrelated to the React-style portals that Web Portals aims to standardize.
+    </p>
+  </div>
+</section>
+
+<section id="gap-analysis" class="section-card">
+  <h3 id="gap-analysis">Gap Analysis</h3>
+  <p>What frameworks provide that native HTML lacks:</p>
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 600px;">
+      <thead>
+        <tr>
+          <th>Capability</th>
+          <th>Framework Portals</th>
+          <th>Native HTML</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Render to arbitrary DOM location</td>
+          <td>Yes</td>
+          <td>Manual (appendChild)</td>
+        </tr>
+        <tr>
+          <td>Preserve context from logical ancestors</td>
+          <td>Yes (virtual tree)</td>
+          <td>No - contexts follow DOM</td>
+        </tr>
+        <tr>
+          <td>Event bubbling through logical tree</td>
+          <td>Yes</td>
+          <td>No - events follow DOM</td>
+        </tr>
+        <tr>
+          <td>Escape stacking contexts</td>
+          <td>Yes</td>
+          <td>Yes (top layer, position: fixed)</td>
+        </tr>
+        <tr>
+          <td>Automatic lifecycle management</td>
+          <td>Yes</td>
+          <td>No - manual cleanup required</td>
+        </tr>
+        <tr>
+          <td>Declarative API</td>
+          <td>Yes</td>
+          <td>No</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p style="margin-top: 1rem;">
+    <strong>Conclusion:</strong> The core gap is the concept of a "logical tree" that's independent of the DOM tree. Web Portals proposes using the injector hierarchy (from Web Injectors) as this logical backbone, enabling context queries, event proxying, and lifecycle management to follow the logical structure rather than the physical DOM.
+  </p>
+</section>
+
+  </div>
+</details>

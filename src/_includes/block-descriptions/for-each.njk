@@ -1,6 +1,11 @@
-<h2>Protocol: For Each</h2><p>Iterates over a collection (Array, Observable, or Promise) and stamps a template for each item.</p><h3>Virtual Implementation</h3><p>Uses Custom Comments (e.g. <code>&lt;!-- control:for-each --&gt;</code>) to mark the list boundaries. This behaves like a Repeater without a wrapper element.</p><h3>Usage Example</h3><pre><code class="language-html">&lt;!-- control:for-each 
-  items="users" 
-  key="id" 
+<h2>Protocol: For Each</h2>
+<p>Iterates over a collection (Array, Observable, or Promise) and stamps a template for each item.</p>
+<h3>Virtual Implementation</h3>
+<p>Uses Custom Comments (e.g. <code>&lt;!-- control:for-each --&gt;</code>) to mark the list boundaries. This behaves like a Repeater without a wrapper element.</p>
+<h3>Usage Example</h3>
+<pre><code class="language-html">&lt;!-- control:for-each
+  items="users"
+  key="id"
 --&gt;
   &lt;template&gt;
     &lt;div class="user-row"&gt;

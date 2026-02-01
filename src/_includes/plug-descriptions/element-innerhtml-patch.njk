@@ -1,10 +1,11 @@
-<h4 id="overview">Overview</h4>
-<p><strong>Patch File:</strong> <code>custom-elements/Element.patch.ts</code></p>
+{% from "mode-selector.njk" import pluggedContent, unpluggedContent, comparisonContent, endContent %}
+
+<h3 id="overview">Overview</h3>
 <p>
     Intercepts the <code>innerHTML</code> setter to propagate injector scope to newly created nodes.
 </p>
 
-<h4 id="behavior">Behavior</h4>
+<h3 id="behavior">Behavior</h3>
 <p class="text-sm text-gray-600">
     When HTML is set via <code>innerHTML</code>, the patch:
 </p>
@@ -16,11 +17,52 @@
     <li>Restores the previous creation injector</li>
 </ol>
 
-<p class="text-sm text-gray-600 mt-4">
-    This ensures that elements created through innerHTML inherit the proper injector context and have access to scoped registries.
-</p>
+<h3 id="usage-example">Usage Example</h3>
 
+{{ pluggedContent("innerhtml-example", code=true) }}
 {% highlight "javascript" %}
-// Elements created here inherit parent's injector scope
+// Elements created via innerHTML automatically
+// inherit the parent's injector scope
 element.innerHTML = '<my-component></my-component>';
+
+// The component gets the scoped registry definition
+// if one exists in the injector hierarchy
 {% endhighlight %}
+
+{{ unpluggedContent("innerhtml-example", code=true) }}
+{% highlight "javascript" %}
+consume { setInnerHTML } of '@web-injectors';
+
+// Use the explicit function instead of property
+setInnerHTML(element, '<my-component></my-component>');
+
+// This ensures proper injector scope propagation
+// without patching the native innerHTML setter
+{% endhighlight %}
+
+{{ comparisonContent("innerhtml-example", code=true) }}
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0;">
+    <div>
+        <div style="font-size: 0.7rem; font-weight: 600; color: #059669; padding: 0.5rem 1rem; text-transform: uppercase; letter-spacing: 0.05em; background: #f0fdf4; border-bottom: 1px solid #e5e7eb;">Plugged</div>
+{% highlight "javascript" %}
+// Native property, patched
+el.innerHTML = '<my-comp />';
+{% endhighlight %}
+    </div>
+    <div style="border-left: 1px solid #e5e7eb;">
+        <div style="font-size: 0.7rem; font-weight: 600; color: #475569; padding: 0.5rem 1rem; text-transform: uppercase; letter-spacing: 0.05em; background: #f8fafc; border-bottom: 1px solid #e5e7eb;">Unplugged</div>
+{% highlight "javascript" %}
+consume {
+  setInnerHTML
+} of '@web-injectors';
+
+setInnerHTML(el, '<my-comp />');
+{% endhighlight %}
+    </div>
+</div>
+
+{{ endContent() }}
+
+<p class="text-sm text-gray-600 mt-4">
+    This ensures that elements created through innerHTML inherit the proper injector context.
+</p>

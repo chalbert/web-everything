@@ -1,45 +1,145 @@
-<h4 id="overview">Overview</h4>
-<p><strong>Patch File:</strong> <code>custom-elements/Node.patch.ts</code></p>
+{% from "mode-selector.njk" import pluggedContent, unpluggedContent, comparisonContent, endContent %}
+
+<h3 id="overview">Overview</h3>
 <p>
     Adds injector hierarchy navigation methods to the <code>Node</code> prototype, enabling hierarchical dependency resolution throughout the DOM tree.
 </p>
 
-<h4 id="added-methods">Added Methods</h4>
+<h3 id="api-reference">API Reference</h3>
+
+{{ pluggedContent("injector-api") }}
 <dl class="ml-4 text-sm">
-    <dt class="font-bold text-gray-800 mt-3"><code>getClosestInjector(): HTMLInjector | null</code></dt>
-    <dd class="text-gray-600 ml-4">Returns the closest injector in the DOM hierarchy, walking up from this node through parents, shadow roots, and template boundaries.</dd>
+    <dt class="font-bold text-gray-800 mt-3"><code>node.getClosestInjector()</code></dt>
+    <dd class="text-gray-600 ml-4">Returns the closest injector in the DOM hierarchy.</dd>
 
-    <dt class="font-bold text-gray-800 mt-3"><code>getOwnInjector(): HTMLInjector | null</code></dt>
-    <dd class="text-gray-600 ml-4">Returns the injector owned by this specific node, or null if the node doesn't have its own injector.</dd>
+    <dt class="font-bold text-gray-800 mt-3"><code>node.getOwnInjector()</code></dt>
+    <dd class="text-gray-600 ml-4">Returns the injector owned by this specific node.</dd>
 
-    <dt class="font-bold text-gray-800 mt-3"><code>hasOwnInjector(): boolean</code></dt>
-    <dd class="text-gray-600 ml-4">Returns true if this node has its own injector. Convenience method equivalent to Boolean(node.getOwnInjector()).</dd>
+    <dt class="font-bold text-gray-800 mt-3"><code>node.hasOwnInjector()</code></dt>
+    <dd class="text-gray-600 ml-4">Returns true if this node has its own injector.</dd>
 
-    <dt class="font-bold text-gray-800 mt-3"><code>injectors(): Generator&lt;HTMLInjector&gt;</code></dt>
-    <dd class="text-gray-600 ml-4">Returns a generator that yields all injectors in the hierarchy, starting from the closest. Each iteration yields the next ancestor injector.</dd>
+    <dt class="font-bold text-gray-800 mt-3"><code>node.injectors()</code></dt>
+    <dd class="text-gray-600 ml-4">Generator yielding all injectors in the hierarchy.</dd>
 
-    <dt class="font-bold text-gray-800 mt-3"><code>createElement(tagName: string, options?: ElementCreationOptions): HTMLElement</code></dt>
-    <dd class="text-gray-600 ml-4">Creates an element using the context-aware custom element registry. Searches through the injector hierarchy for custom element definitions.</dd>
+    <dt class="font-bold text-gray-800 mt-3"><code>node.createElement(tagName)</code></dt>
+    <dd class="text-gray-600 ml-4">Creates an element using the context-aware registry.</dd>
 </dl>
 
-<h4 id="usage-example">Usage Example</h4>
+{{ unpluggedContent("injector-api") }}
+<dl class="ml-4 text-sm">
+    <dt class="font-bold text-gray-800 mt-3"><code>getClosestInjector(node)</code></dt>
+    <dd class="text-gray-600 ml-4">Returns the closest injector in the DOM hierarchy.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>getOwnInjector(node)</code></dt>
+    <dd class="text-gray-600 ml-4">Returns the injector owned by this specific node.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>hasOwnInjector(node)</code></dt>
+    <dd class="text-gray-600 ml-4">Returns true if this node has its own injector.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>injectors(node)</code></dt>
+    <dd class="text-gray-600 ml-4">Generator yielding all injectors in the hierarchy.</dd>
+
+    <dt class="font-bold text-gray-800 mt-3"><code>createElement(node, tagName)</code></dt>
+    <dd class="text-gray-600 ml-4">Creates an element using the context-aware registry.</dd>
+</dl>
+
+{{ comparisonContent("injector-api") }}
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+    <div>
+        <div style="font-size: 0.7rem; font-weight: 600; color: #059669; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em;">Plugged</div>
+        <code class="text-sm" style="display: block; background: #ecfdf5; padding: 0.5rem; border-radius: 0.25rem; margin-bottom: 0.5rem;">node.getClosestInjector()</code>
+        <code class="text-sm" style="display: block; background: #ecfdf5; padding: 0.5rem; border-radius: 0.25rem; margin-bottom: 0.5rem;">node.hasOwnInjector()</code>
+        <code class="text-sm" style="display: block; background: #ecfdf5; padding: 0.5rem; border-radius: 0.25rem;">node.createElement(tag)</code>
+    </div>
+    <div>
+        <div style="font-size: 0.7rem; font-weight: 600; color: #475569; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em;">Unplugged</div>
+        <code class="text-sm" style="display: block; background: #f1f5f9; padding: 0.5rem; border-radius: 0.25rem; margin-bottom: 0.5rem;">getClosestInjector(node)</code>
+        <code class="text-sm" style="display: block; background: #f1f5f9; padding: 0.5rem; border-radius: 0.25rem; margin-bottom: 0.5rem;">hasOwnInjector(node)</code>
+        <code class="text-sm" style="display: block; background: #f1f5f9; padding: 0.5rem; border-radius: 0.25rem;">createElement(node, tag)</code>
+    </div>
+</div>
+
+{{ endContent() }}
+
+<h3 id="usage-example">Usage Example</h3>
+
+{{ pluggedContent("injector-example", code=true) }}
 {% highlight "javascript" %}
 // Get the closest injector
 const injector = element.getClosestInjector();
 
-// Check if an element has its own injector
+// Check if element has its own injector
 if (element.hasOwnInjector()) {
-  console.log('Element defines its own dependency scope');
+    console.log('Element defines its own scope');
 }
 
-// Create a custom element from the injector's registry
+// Create element from injector's registry
 const customEl = element.createElement('my-component');
 
-// Iterate through all injectors in the hierarchy
-for (const injector of element.injectors()) {
-  console.log('Found injector:', injector);
+// Iterate through all injectors
+for (const inj of element.injectors()) {
+    console.log('Found injector:', inj);
 }
 {% endhighlight %}
+
+{{ unpluggedContent("injector-example", code=true) }}
+{% highlight "javascript" %}
+consume {
+  getClosestInjector,
+  hasOwnInjector,
+  createElement,
+  injectors
+} of '@web-injectors';
+
+// Get the closest injector
+const injector = getClosestInjector(element);
+
+// Check if element has its own injector
+if (hasOwnInjector(element)) {
+    console.log('Element defines its own scope');
+}
+
+// Create element from injector's registry
+const customEl = createElement(element, 'my-component');
+
+// Iterate through all injectors
+for (const inj of injectors(element)) {
+    console.log('Found injector:', inj);
+}
+{% endhighlight %}
+
+{{ comparisonContent("injector-example", code=true) }}
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0;">
+    <div>
+        <div style="font-size: 0.7rem; font-weight: 600; color: #059669; padding: 0.5rem 1rem; text-transform: uppercase; letter-spacing: 0.05em; background: #f0fdf4; border-bottom: 1px solid #e5e7eb;">Plugged</div>
+{% highlight "javascript" %}
+// Native-like API
+const inj = el.getClosestInjector();
+if (el.hasOwnInjector()) {
+  // ...
+}
+el.createElement('my-comp');
+{% endhighlight %}
+    </div>
+    <div style="border-left: 1px solid #e5e7eb;">
+        <div style="font-size: 0.7rem; font-weight: 600; color: #475569; padding: 0.5rem 1rem; text-transform: uppercase; letter-spacing: 0.05em; background: #f8fafc; border-bottom: 1px solid #e5e7eb;">Unplugged</div>
+{% highlight "javascript" %}
+consume {
+  getClosestInjector,
+  hasOwnInjector,
+  createElement
+} of '@web-injectors';
+
+const inj = getClosestInjector(el);
+if (hasOwnInjector(el)) {
+  // ...
+}
+createElement(el, 'my-comp');
+{% endhighlight %}
+    </div>
+</div>
+
+{{ endContent() }}
 
 <p class="text-sm text-gray-600 mt-4">
     See <a href="/projects/webinjectors/">Web Injectors</a> for complete DOM API documentation.

@@ -1,0 +1,15 @@
+<svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="40" height="40" rx="12" fill="url(#favicon_gradient)"/>
+  <!-- The W (Top) -->
+  <path d="M11.7 10.2 L16.2 22.2 L20.2 12.2 L24.2 22.2 L28.7 10.2" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- The E (Reflecting) -->
+  <path d="M16.2 30.2 V24.2 H24.2 V30.2 M20.2 24.2 V28.7" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.6"/>
+
+  <defs>
+    <linearGradient id="favicon_gradient" x1="0" y1="0" x2="40" y2="40" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#4f46e5"/>
+      <stop offset="1" stop-color="#9333ea"/>
+    </linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,220 @@
+<h2>JSX Adapter</h2>
+<p>
+    The JSX Adapter enables authoring Web Everything components using JSX/TSX syntax while compiling to the same primitives as HTML.
+    It provides full type safety and IDE support while maintaining interconvertibility with other formats.
+</p>
+
+<section class="section-card">
+    <h3 id="design-principles">Design Principles</h3>
+    <ul>
+        <li><strong>Semantic Equivalence:</strong> Every JSX construct has a direct HTML equivalent and vice versa.</li>
+        <li><strong>No Runtime Magic:</strong> JSX compiles to standard Web Everything primitives—no framework-specific runtime.</li>
+        <li><strong>Type Safety:</strong> Full TypeScript support with typed props, events, and slots.</li>
+        <li><strong>AST Reversibility:</strong> The transformation is bidirectional—JSX can be converted back to HTML losslessly.</li>
+    </ul>
+</section>
+
+<section class="section-card">
+    <h3 id="component-mapping">Component Definition</h3>
+    <p>JSX provides the syntax for defining component templates within class-based Custom Elements:</p>
+
+    {% highlight "tsx" %}
+// Class-based Custom Element with JSX template
+class UserCard extends HTMLElement {
+    static observedAttributes = ['name', 'avatar'];
+
+    connectedCallback() {
+        this.attachShadow({ mode: 'open' });
+        this.render();
+    }
+
+    attributeChangedCallback() {
+        this.render();
+    }
+
+    render() {
+        const name = this.getAttribute('name');
+        const avatar = this.getAttribute('avatar');
+
+        // JSX syntax for the template
+        this.shadowRoot.replaceChildren(
+            <div class="user-card">
+                <img src={avatar} alt={name} />
+                <span>{name}</span>
+            </div>
+        );
+    }
+}
+
+customElements.define('user-card', UserCard);
+    {% endhighlight %}
+
+    <p style="margin-top: 1rem; font-size: 0.9rem; color: var(--color-text-muted);">
+        <strong>Note:</strong> For functional component syntax, see the <a href="/adapters/functional-component-adapter/">Functional Component Adapter</a>—a separate adapter that compiles functions to class-based elements.
+    </p>
+</section>
+
+<section class="section-card">
+    <h3 id="directive-syntax">Directive Syntax</h3>
+    <p>Web Directives are expressed as JSX components:</p>
+
+    <h4 id="for-each-directive">For Each</h4>
+    {% highlight "tsx" %}
+// JSX
+<For each={items} key="id">
+    {(item) => <ListItem data={item} />}
+</For>
+
+// Equivalent HTML
+<template is="for-each" items="items" key="id">
+    <list-item data-bind="item"></list-item>
+</template>
+    {% endhighlight %}
+
+    <h4 id="conditional-directive">Conditionals</h4>
+    {% highlight "tsx" %}
+// JSX
+<Show when={isVisible}>
+    <Modal title="Hello" />
+</Show>
+
+// Equivalent HTML
+<template is="if" condition="isVisible">
+    <modal-dialog title="Hello"></modal-dialog>
+</template>
+    {% endhighlight %}
+
+    <h4 id="resource-loader-directive">Resource Loader</h4>
+    {% highlight "tsx" %}
+// JSX - Multiple templates via props
+<Resource
+    source={userQuery}
+    loading={<Skeleton />}
+    error={(err) => <ErrorCard message={err.message} />}
+    empty={<EmptyState />}
+>
+    {(data) => <UserProfile user={data} />}
+</Resource>
+
+// Equivalent HTML (comment directive)
+<!-- resource:loader source="userQuery" -->
+    <template slot="loading"><skeleton-card></skeleton-card></template>
+    <template slot="error"><error-card data-bind="error.message"></error-card></template>
+    <template slot="empty"><empty-state></empty-state></template>
+    <template slot="success"><user-profile data-bind="data"></user-profile></template>
+<!-- /resource:loader -->
+    {% endhighlight %}
+</section>
+
+<section class="section-card">
+    <h3 id="behaviors">Behaviors</h3>
+    <p>Web Behaviors are applied as attributes with type-safe props:</p>
+
+    {% highlight "tsx" %}
+// JSX - Behaviors as typed attributes
+<button
+    history-link="/dashboard"
+    click-outside={handleClose}
+    trusted-html="sanitize"
+>
+    Navigate
+</button>
+
+// TypeScript definitions provide autocomplete
+interface BehaviorAttributes {
+    'history-link'?: string;
+    'click-outside'?: () => void;
+    'trusted-html'?: string;
+    'trusted-html-strict'?: boolean;
+}
+    {% endhighlight %}
+</section>
+
+<section class="section-card">
+    <h3 id="slots-projection">Slots &amp; Content Projection</h3>
+    <p>Named slots work naturally with JSX children:</p>
+
+    {% highlight "tsx" %}
+// JSX
+<Card>
+    <CardHeader>Title</CardHeader>
+    <CardBody>Content here</CardBody>
+    <CardFooter>
+        <Button>Action</Button>
+    </CardFooter>
+</Card>
+
+// Equivalent HTML
+<card-element>
+    <span slot="header">Title</span>
+    <div slot="body">Content here</div>
+    <div slot="footer">
+        <button>Action</button>
+    </div>
+</card-element>
+    {% endhighlight %}
+</section>
+
+<section class="section-card">
+    <h3 id="events">Event Handling</h3>
+    <p>Events map to Web Everything's <code>on:*</code> behavior pattern:</p>
+
+    {% highlight "tsx" %}
+// JSX
+<button
+    on:click={handleClick}
+    on:keydown.enter={handleSubmit}
+    on:focus.once={handleFirstFocus}
+>
+    Submit
+</button>
+
+// Equivalent HTML
+<button
+    on:click="handleClick"
+    on:keydown.enter="handleSubmit"
+    on:focus.once="handleFirstFocus"
+>
+    Submit
+</button>
+    {% endhighlight %}
+</section>
+
+<section class="section-card">
+    <h3 id="ast-transformation">AST Transformation</h3>
+    <p>The JSX adapter provides bidirectional transformation:</p>
+
+    {% highlight "typescript" %}
+import { jsxToHtml, htmlToJsx } from '@web-adapters/jsx';
+
+// Convert JSX AST to HTML
+const htmlAst = jsxToHtml(jsxAst, {
+    preserveComments: true,
+    formatOutput: 'pretty'
+});
+
+// Convert HTML AST to JSX
+const jsxAst = htmlToJsx(htmlAst, {
+    componentCase: 'PascalCase',
+    typeDefinitions: true
+});
+    {% endhighlight %}
+
+    <p>This enables:</p>
+    <ul style="margin-bottom: 0;">
+        <li>Migrating existing HTML components to JSX</li>
+        <li>Exporting JSX components as HTML for SSR</li>
+        <li>IDE refactoring across format boundaries</li>
+        <li>Publishing component libraries in multiple formats</li>
+    </ul>
+</section>
+
+<section class="section-card">
+    <h3 id="related">Related</h3>
+    <ul style="margin-bottom: 0;">
+        <li><a href="/adapters/html-adapter/">HTML Adapter</a> — The canonical format</li>
+        <li><a href="/adapters/template-string-adapter/">Template String Adapter</a> — Tagged template literal alternative</li>
+        <li><a href="/projects/webdirectives/">Web Directives</a> — Structural directives documentation</li>
+        <li><a href="/projects/webbehaviors/">Web Behaviors</a> — Custom attribute behaviors</li>
+    </ul>
+</section>

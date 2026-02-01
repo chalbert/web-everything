@@ -2,7 +2,17 @@
 <p>This module defines a standard interface for registering and handling keyboard shortcuts that works seamlessly with
   Shadow DOM and respects user platform conventions.</p>
 <h3>Core Interfaces</h3>
-<pre><code class="language-typescript">interface ShortcutRegistry {  register(context: string, shortcut: string, callback: (e: KeyboardEvent) => void): Subscription;  unregister(subscription: Subscription): void;  resolve(event: KeyboardEvent): ShortcutMatch | null;}</code></pre>
+<pre><code class="language-typescript">interface ShortcutRegistry {
+    register(
+        context: string,
+        shortcut: string,
+        callback: (e: KeyboardEvent) => void
+    ): Subscription;
+
+    unregister(subscription: Subscription): void;
+
+    resolve(event: KeyboardEvent): ShortcutMatch | null;
+}</code></pre>
 <h3>HTML Attributes</h3>
 <ul>
   <li>

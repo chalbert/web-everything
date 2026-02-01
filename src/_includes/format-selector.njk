@@ -1,0 +1,34 @@
+{# Format selector macros for HTML/JSX/Template String documentation #}
+
+{% macro formatSelector(id) %}
+<div class="format-selector-container" data-format-selector="{{ id }}" style="border: 1px solid #e5e7eb; border-radius: 0.5rem; overflow: hidden; margin: 1rem 0;">
+    <div style="display: flex; justify-content: flex-end; padding: 0.5rem 0.75rem; background: #f9fafb; border-bottom: 1px solid #e5e7eb;">
+        <div class="format-tabs" style="display: flex; gap: 0; border: 1px solid #d1d5db; border-radius: 0.25rem; overflow: hidden;">
+            <button class="format-tab active" data-format="html" style="padding: 0.25rem 0.75rem; font-size: 0.75rem; font-weight: 500; background: #1e40af; color: white; border: none; cursor: pointer;">
+                HTML
+            </button>
+            <button class="format-tab" data-format="jsx" style="padding: 0.25rem 0.75rem; font-size: 0.75rem; font-weight: 500; background: white; color: #6b7280; border: none; border-left: 1px solid #d1d5db; cursor: pointer;">
+                JSX
+            </button>
+            <button class="format-tab" data-format="template" style="padding: 0.25rem 0.75rem; font-size: 0.75rem; font-weight: 500; background: white; color: #6b7280; border: none; border-left: 1px solid #d1d5db; cursor: pointer;">
+                Template
+            </button>
+        </div>
+    </div>
+    <div class="format-content" data-format-content="{{ id }}" data-format="html" style="display: block;">
+{% endmacro %}
+
+{% macro jsxContent(id) %}
+    </div>
+    <div class="format-content" data-format-content="{{ id }}" data-format="jsx" style="display: none;">
+{% endmacro %}
+
+{% macro templateContent(id) %}
+    </div>
+    <div class="format-content" data-format-content="{{ id }}" data-format="template" style="display: none;">
+{% endmacro %}
+
+{% macro endFormat() %}
+    </div>
+</div>
+{% endmacro %}

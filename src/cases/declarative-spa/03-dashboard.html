@@ -1,0 +1,324 @@
+<!-- Declarative SPA: Data Dashboard -->
+<!-- Demonstrates computed values, data visualization, and reactive filtering -->
+
+<article class="dashboard">
+  <script type="context" context="dashboard-state">
+    {
+      "timeRange": "7d",
+      "metrics": {
+        "pageViews": 15420,
+        "uniqueVisitors": 3891,
+        "avgSessionTime": 245,
+        "bounceRate": 42.3
+      },
+      "chartData": [
+        { "date": "2026-01-25", "views": 2100, "visitors": 523 },
+        { "date": "2026-01-26", "views": 2350, "visitors": 612 },
+        { "date": "2026-01-27", "views": 1980, "visitors": 501 },
+        { "date": "2026-01-28", "views": 2450, "visitors": 628 },
+        { "date": "2026-01-29", "views": 2210, "visitors": 548 },
+        { "date": "2026-01-30", "views": 2180, "visitors": 539 },
+        { "date": "2026-01-31", "views": 2150, "visitors": 540 }
+      ],
+      "topPages": [
+        { "path": "/projects/webinjectors/", "views": 3420 },
+        { "path": "/projects/webcontexts/", "views": 2891 },
+        { "path": "/demos/declarative-spa/", "views": 2150 },
+        { "path": "/mission/", "views": 1820 },
+        { "path": "/", "views": 1650 }
+      ]
+    }
+  </script>
+
+  <header class="dashboard-header">
+    <div>
+      <h1>Analytics Dashboard</h1>
+      <p>Real-time metrics • Pure declarative HTML</p>
+    </div>
+    
+    <select 
+      bind-value="dashboard-state/timeRange"
+      on:change="dashboard-state/updateTimeRange"
+      class="time-selector"
+    >
+      <option value="24h">Last 24 Hours</option>
+      <option value="7d" selected>Last 7 Days</option>
+      <option value="30d">Last 30 Days</option>
+      <option value="90d">Last 90 Days</option>
+    </select>
+  </header>
+
+  <!-- Metric Cards -->
+  <section class="metrics-grid">
+    <div class="metric-card">
+      <div class="metric-icon" style="background: #667eea;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+      </div>
+      <div class="metric-content">
+        <div class="metric-label">Page Views</div>
+        <div class="metric-value" bind-text="dashboard-state/metrics.pageViews | number"></div>
+        <div class="metric-change positive">+12.5%</div>
+      </div>
+    </div>
+
+    <div class="metric-card">
+      <div class="metric-icon" style="background: #48bb78;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+          <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+      </div>
+      <div class="metric-content">
+        <div class="metric-label">Unique Visitors</div>
+        <div class="metric-value" bind-text="dashboard-state/metrics.uniqueVisitors | number"></div>
+        <div class="metric-change positive">+8.2%</div>
+      </div>
+    </div>
+
+    <div class="metric-card">
+      <div class="metric-icon" style="background: #ed8936;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <polyline points="12 6 12 12 16 14"/>
+        </svg>
+      </div>
+      <div class="metric-content">
+        <div class="metric-label">Avg. Session</div>
+        <div class="metric-value" bind-text="dashboard-state/metrics.avgSessionTime | duration"></div>
+        <div class="metric-change negative">-3.1%</div>
+      </div>
+    </div>
+
+    <div class="metric-card">
+      <div class="metric-icon" style="background: #f56565;">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+        </svg>
+      </div>
+      <div class="metric-content">
+        <div class="metric-label">Bounce Rate</div>
+        <div class="metric-value" bind-text="dashboard-state/metrics.bounceRate + '%'"></div>
+        <div class="metric-change positive">-5.7%</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Chart Visualization -->
+  <section class="chart-section">
+    <h2>Traffic Overview</h2>
+    <div class="chart-container">
+      <svg viewBox="0 0 700 300" class="line-chart">
+        <!-- Grid lines -->
+        <g class="grid">
+          <line x1="50" y1="250" x2="650" y2="250" stroke="#e0e0e0" stroke-width="1"/>
+          <line x1="50" y1="190" x2="650" y2="190" stroke="#e0e0e0" stroke-width="1"/>
+          <line x1="50" y1="130" x2="650" y2="130" stroke="#e0e0e0" stroke-width="1"/>
+          <line x1="50" y1="70" x2="650" y2="70" stroke="#e0e0e0" stroke-width="1"/>
+          <line x1="50" y1="10" x2="650" y2="10" stroke="#e0e0e0" stroke-width="1"/>
+        </g>
+        
+        <!-- Data points would be generated via template -->
+        <template for-each="dashboard-state/chartData" as="point" with-index="i">
+          <circle 
+            bind-attr:cx="50 + (i * 100)"
+            bind-attr:cy="250 - (point/views / 30)"
+            r="4"
+            fill="#667eea"
+          />
+        </template>
+      </svg>
+    </div>
+  </section>
+
+  <!-- Top Pages Table -->
+  <section class="table-section">
+    <h2>Top Pages</h2>
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Page</th>
+          <th>Views</th>
+          <th>Share</th>
+        </tr>
+      </thead>
+      <tbody>
+        <template for-each="dashboard-state/topPages" as="page">
+          <tr>
+            <td>
+              <code bind-text="page/path"></code>
+            </td>
+            <td bind-text="page/views | number"></td>
+            <td>
+              <div class="progress-cell">
+                <div 
+                  class="progress-bar-inline"
+                  bind-style:width="(page/views / dashboard-state/metrics.pageViews * 100) + '%'"
+                ></div>
+                <span bind-text="(page/views / dashboard-state/metrics.pageViews * 100) | fixed:1"></span>%
+              </div>
+            </td>
+          </tr>
+        </template>
+      </tbody>
+    </table>
+  </section>
+</article>
+
+<style>
+  .dashboard {
+    max-width: 1200px;
+    margin: 2rem auto;
+    padding: 2rem;
+  }
+
+  .dashboard-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 2rem;
+  }
+
+  .dashboard-header h1 {
+    margin: 0 0 0.5rem;
+  }
+
+  .dashboard-header p {
+    margin: 0;
+    color: #666;
+    font-size: 0.875rem;
+  }
+
+  .time-selector {
+    padding: 0.5rem 1rem;
+    border: 2px solid #e0e0e0;
+    border-radius: 4px;
+    font-size: 0.875rem;
+    cursor: pointer;
+  }
+
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+  }
+
+  .metric-card {
+    background: white;
+    border-radius: 8px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    display: flex;
+    gap: 1rem;
+  }
+
+  .metric-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    flex-shrink: 0;
+  }
+
+  .metric-content {
+    flex: 1;
+  }
+
+  .metric-label {
+    font-size: 0.875rem;
+    color: #666;
+    margin-bottom: 0.5rem;
+  }
+
+  .metric-value {
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: #333;
+    margin-bottom: 0.25rem;
+  }
+
+  .metric-change {
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+
+  .metric-change.positive {
+    color: #48bb78;
+  }
+
+  .metric-change.negative {
+    color: #f56565;
+  }
+
+  .chart-section,
+  .table-section {
+    background: white;
+    border-radius: 8px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    margin-bottom: 2rem;
+  }
+
+  .chart-section h2,
+  .table-section h2 {
+    margin: 0 0 1.5rem;
+    font-size: 1.25rem;
+  }
+
+  .chart-container {
+    width: 100%;
+    height: 300px;
+  }
+
+  .line-chart {
+    width: 100%;
+    height: 100%;
+  }
+
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .data-table th {
+    text-align: left;
+    padding: 0.75rem;
+    border-bottom: 2px solid #e0e0e0;
+    font-weight: 600;
+    color: #666;
+    font-size: 0.875rem;
+  }
+
+  .data-table td {
+    padding: 1rem 0.75rem;
+    border-bottom: 1px solid #e0e0e0;
+  }
+
+  .data-table code {
+    background: #f7fafc;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.875rem;
+  }
+
+  .progress-cell {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+  }
+
+  .progress-bar-inline {
+    height: 8px;
+    background: #667eea;
+    border-radius: 4px;
+    min-width: 4px;
+  }
+</style>

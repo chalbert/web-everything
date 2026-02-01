@@ -1,0 +1,247 @@
+<!-- Declarative SPA: Todo Application -->
+<!-- Zero JavaScript bootstrap, no custom elements, pure declarative HTML -->
+
+<article class="todo-app">
+  <!-- Context Definition: Application State -->
+  <script type="context" context="app-state">
+    {
+      "todos": [
+        { "id": 1, "text": "Learn Web Contexts", "completed": false },
+        { "id": 2, "text": "Build declarative app", "completed": false }
+      ],
+      "filter": "all",
+      "newTodoText": ""
+    }
+  </script>
+
+  <header>
+    <h1>Declarative Todo</h1>
+    <p>Zero JS bootstrap • Pure HTML • Web Everything Standards</p>
+  </header>
+
+  <!-- Add Todo Form -->
+  <form on:submit="app-state/addTodo" class="add-todo">
+    <input 
+      type="text" 
+      bind-value="app-state/newTodoText"
+      placeholder="What needs to be done?"
+      aria-label="New todo"
+    />
+    <button type="submit">Add</button>
+  </form>
+
+  <!-- Filter Controls -->
+  <nav class="filters" role="tablist">
+    <button 
+      type="button"
+      on:click="app-state/setFilter"
+      arg-filter="all"
+      bind-class:active="app-state/filter == 'all'"
+      role="tab"
+    >
+      All
+    </button>
+    <button 
+      type="button"
+      on:click="app-state/setFilter"
+      arg-filter="active"
+      bind-class:active="app-state/filter == 'active'"
+      role="tab"
+    >
+      Active
+    </button>
+    <button 
+      type="button"
+      on:click="app-state/setFilter"
+      arg-filter="completed"
+      bind-class:active="app-state/filter == 'completed'"
+      role="tab"
+    >
+      Completed
+    </button>
+  </nav>
+
+  <!-- Todo List -->
+  <ul class="todo-list" role="list">
+    <!-- This would be rendered server-side initially, then updated via template directives -->
+    <template for-each="app-state/filteredTodos" as="todo">
+      <li 
+        class="todo-item"
+        bind-class:completed="todo/completed"
+        role="listitem"
+      >
+        <input 
+          type="checkbox"
+          bind-checked="todo/completed"
+          on:change="app-state/toggleTodo"
+          arg-id="{{todo/id}}"
+          aria-label="Mark as complete"
+        />
+        <span bind-text="todo/text" class="todo-text"></span>
+        <button 
+          type="button"
+          on:click="app-state/removeTodo"
+          arg-id="{{todo/id}}"
+          aria-label="Delete todo"
+          class="delete-btn"
+        >
+          ×
+        </button>
+      </li>
+    </template>
+  </ul>
+
+  <!-- Stats Footer -->
+  <footer class="stats">
+    <span>
+      <strong bind-text="app-state/activeCount"></strong>
+      <span bind-text="app-state/activeCount == 1 ? 'item' : 'items'"></span>
+      left
+    </span>
+    <button 
+      type="button"
+      on:click="app-state/clearCompleted"
+      bind-disabled="app-state/completedCount == 0"
+    >
+      Clear completed (<span bind-text="app-state/completedCount"></span>)
+    </button>
+  </footer>
+</article>
+
+<style>
+  .todo-app {
+    max-width: 600px;
+    margin: 2rem auto;
+    padding: 2rem;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  }
+
+  header {
+    text-align: center;
+    margin-bottom: 2rem;
+  }
+
+  header h1 {
+    margin: 0 0 0.5rem;
+    font-size: 2.5rem;
+    color: #333;
+  }
+
+  header p {
+    margin: 0;
+    color: #666;
+    font-size: 0.875rem;
+  }
+
+  .add-todo {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .add-todo input {
+    flex: 1;
+    padding: 0.75rem;
+    border: 2px solid #e0e0e0;
+    border-radius: 4px;
+    font-size: 1rem;
+  }
+
+  .add-todo button {
+    padding: 0.75rem 1.5rem;
+    background: #667eea;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .filters {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #e0e0e0;
+  }
+
+  .filters button {
+    padding: 0.5rem 1rem;
+    background: transparent;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .filters button.active {
+    background: #667eea;
+    color: white;
+    border-color: #667eea;
+  }
+
+  .todo-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 1.5rem;
+  }
+
+  .todo-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    border-bottom: 1px solid #e0e0e0;
+  }
+
+  .todo-item.completed .todo-text {
+    text-decoration: line-through;
+    opacity: 0.5;
+  }
+
+  .todo-text {
+    flex: 1;
+  }
+
+  .delete-btn {
+    padding: 0.25rem 0.5rem;
+    background: transparent;
+    border: none;
+    color: #999;
+    font-size: 1.5rem;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .todo-item:hover .delete-btn {
+    opacity: 1;
+  }
+
+  .delete-btn:hover {
+    color: #f56565;
+  }
+
+  .stats {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.875rem;
+    color: #666;
+  }
+
+  .stats button {
+    padding: 0.5rem 1rem;
+    background: transparent;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .stats button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+</style>

@@ -1,11 +1,12 @@
-<h4 id="overview">Overview</h4>
-<p><strong>Dependency:</strong> <code>CustomRegistry</code></p>
+{% from "mode-selector.njk" import pluggedContent, unpluggedContent, comparisonContent, endContent %}
+
+<h3 id="overview">Overview</h3>
 <p>
     A specialized abstract registry for storing constructors that are bound to DOM nodes.
     It handles the complexity of "Upgrading" and "Downgrading" nodes when definitions are added or removed.
 </p>
 
-<h4 id="interface">Interface</h4>
+<h3 id="interface">Interface</h3>
 {% highlight "typescript" %}
 interface HTMLRegistry<Definition, DefType> extends CustomRegistry<
     Definition,
@@ -22,6 +23,60 @@ interface HTMLRegistry<Definition, DefType> extends CustomRegistry<
 }
 {% endhighlight %}
 
+<h3 id="usage-example">Usage Example</h3>
+
+{{ pluggedContent("html-registry-example", code=true) }}
+{% highlight "javascript" %}
+// Access the registry
+const registry = injector.get('customElements');
+
+// Manually upgrade a node
+registry.upgrade(element);
+
+// Get the name for a constructor
+const tagName = registry.getLocalNameOf(MyComponent);
+{% endhighlight %}
+
+{{ unpluggedContent("html-registry-example", code=true) }}
+{% highlight "javascript" %}
+consume { getClosestInjector } of '@web-injectors';
+
+// Access the registry
+const injector = getClosestInjector(element);
+const registry = injector.get('customElements');
+
+// Manually upgrade a node
+registry.upgrade(element);
+
+// Get the name for a constructor
+const tagName = registry.getLocalNameOf(MyComponent);
+{% endhighlight %}
+
+{{ comparisonContent("html-registry-example", code=true) }}
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0;">
+    <div>
+        <div style="font-size: 0.7rem; font-weight: 600; color: #059669; padding: 0.5rem 1rem; text-transform: uppercase; letter-spacing: 0.05em; background: #f0fdf4; border-bottom: 1px solid #e5e7eb;">Plugged</div>
+{% highlight "javascript" %}
+const reg = injector.get('customElements');
+reg.upgrade(element);
+{% endhighlight %}
+    </div>
+    <div style="border-left: 1px solid #e5e7eb;">
+        <div style="font-size: 0.7rem; font-weight: 600; color: #475569; padding: 0.5rem 1rem; text-transform: uppercase; letter-spacing: 0.05em; background: #f8fafc; border-bottom: 1px solid #e5e7eb;">Unplugged</div>
+{% highlight "javascript" %}
+consume {
+  getClosestInjector
+} of '@web-injectors';
+
+const inj = getClosestInjector(el);
+const reg = inj.get('customElements');
+reg.upgrade(element);
+{% endhighlight %}
+    </div>
+</div>
+
+{{ endContent() }}
+
 <p class="text-sm text-gray-600 mt-4">
-    HTMLRegistry extends CustomRegistry to add DOM-specific lifecycle management. Concrete registries like CustomElementRegistry and CustomAttributesRegistry extend this base.
+    HTMLRegistry extends CustomRegistry to add DOM-specific lifecycle management.
 </p>

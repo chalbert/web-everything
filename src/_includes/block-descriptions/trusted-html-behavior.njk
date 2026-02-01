@@ -1,0 +1,61 @@
+<h2>Protocol: Trusted HTML Behavior</h2>
+<p>
+    An attribute-based behavior that enforces <a href="https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API">Trusted Types</a> policies on an element's <code>innerHTML</code> mutations.
+</p>
+
+<h3>When to Use</h3>
+<p>
+    Use this behavior when you need to mark <strong>specific elements</strong> as requiring trusted content, rather than wrapping entire content zones. Ideal for:
+</p>
+<ul>
+    <li>Individual elements receiving user-generated content</li>
+    <li>Third-party widget containers</li>
+    <li>Dynamic content slots in otherwise static templates</li>
+</ul>
+
+<h3>Usage Example</h3>
+<pre><code class="language-html">&lt;!-- Attribute-based enforcement --&gt;
+&lt;div trusted-html="sanitize-user-content"&gt;&lt;/div&gt;
+
+&lt;!-- With fallback content --&gt;
+&lt;article trusted-html="blog-post-policy"&gt;
+    &lt;p&gt;Loading...&lt;/p&gt;
+&lt;/article&gt;</code></pre>
+
+<h3>Key Concepts</h3>
+<ul>
+    <li>
+        <strong>Policy Resolution:</strong>
+        The policy name resolves through the <code>HTMLInjector</code> hierarchy, allowing scoped overrides.
+    </li>
+    <li>
+        <strong>Mutation Interception:</strong>
+        Intercepts <code>innerHTML</code> setter calls on the element, routing strings through the policy's <code>createHTML</code> before assignment.
+    </li>
+    <li>
+        <strong>Strict Mode:</strong>
+        When <code>trusted-html-strict</code> is present, raw string assignments throw rather than auto-sanitize.
+    </li>
+</ul>
+
+<h3>Strict Mode Example</h3>
+<pre><code class="language-html">&lt;!-- Throws if innerHTML receives a raw string --&gt;
+&lt;div trusted-html="user-content" trusted-html-strict&gt;&lt;/div&gt;</code></pre>
+
+<pre><code class="language-typescript">// This throws in strict mode
+element.innerHTML = userInput; // Error: raw string not allowed
+
+// This works
+element.innerHTML = trustedTypes
+    .getPolicy('user-content')
+    .createHTML(userInput);</code></pre>
+
+<h3>Integration with innerHTML Patch</h3>
+<p>
+    Works alongside the existing <code>Element.innerHTML</code> patch. The behavior registers itself with the element's closest <code>HTMLInjector</code>, ensuring policy enforcement respects the scoped registry hierarchy.
+</p>
+
+<h3>Related</h3>
+<p>
+    For zone-based enforcement using virtual elements, see <a href="/blocks/trusted-html/">Trusted HTML Directive</a>.
+</p>

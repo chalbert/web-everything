@@ -1,16 +1,40 @@
 [
   {
-    "id": "syntax",
-    "title": "Syntax Adapters",
-    "description": "Developer-facing layers that provide convenient syntax (Sugar) compiling to standard protocols.",
+    "id": "rendering",
+    "title": "Rendering Adapters",
+    "description": "Format-agnostic authoring layers that compile to Web Everything primitives. All three formats are interconvertible via AST transformers.",
     "items": [
       {
-        "name": "JSX Adapter",
-        "desc": "Converts JSX syntax into standard <code>template</code> and <code>slot</code> structures."
+        "id": "html-adapter",
+        "name": "HTML Adapter",
+        "status": "implemented",
+        "summary": "The canonical format. Standard HTML with Web Everything enhancements (custom elements, behaviors, directives).",
+        "isCanonical": true
       },
       {
+        "id": "jsx-adapter",
+        "name": "JSX Adapter",
+        "status": "draft",
+        "summary": "Converts JSX/TSX syntax into standard templates, slots, and directive structures with full type safety."
+      },
+      {
+        "id": "template-string-adapter",
+        "name": "Template String Adapter",
+        "status": "draft",
+        "summary": "Tagged template literals (<code>html\\`...\\`</code>) that compile to the same primitives as HTML and JSX."
+      }
+    ]
+  },
+  {
+    "id": "syntax",
+    "title": "Syntax Adapters",
+    "description": "Developer-facing layers that provide convenient syntax (sugar) compiling to standard protocols.",
+    "items": [
+      {
+        "id": "functional-component-adapter",
         "name": "Functional Component Adapter",
-        "desc": "Allows writing functional-style components that map to class-based Web Components."
+        "status": "concept",
+        "summary": "Allows writing functional-style components that map to class-based Web Components."
       }
     ]
   },
@@ -20,12 +44,16 @@
     "description": "Implementation layers that bridge third-party ecosystem libraries to Web Blocks protocols.",
     "items": [
       {
+        "id": "floating-ui-adapter",
         "name": "Floating UI Adapter",
-        "desc": "Implements the <strong>Positioning Protocol</strong> using the Floating UI library."
+        "status": "concept",
+        "summary": "Implements the <strong>Positioning Protocol</strong> using the Floating UI library."
       },
       {
+        "id": "mousetrap-adapter",
         "name": "Mousetrap Adapter",
-        "desc": "Connects the Mousetrap library to the <strong>Keyboard Shortcuts Module</strong>."
+        "status": "concept",
+        "summary": "Connects the Mousetrap library to the <strong>Keyboard Shortcuts Module</strong>."
       }
     ]
   }

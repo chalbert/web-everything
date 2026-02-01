@@ -11,34 +11,29 @@ eleventyComputed:
 
 {% from "project-status.njk" import projectStatus %}
 
-<div class="container block-detail-page">
-    <div class="block-header">
-        <a href="/projects/webplugs/" class="back-link">&larr; Back to Web Plugs</a>
-        <h1 class="block-title">{{ plug.name }}</h1>
-        <div class="flex items-center gap-3 mt-4 mb-4">
-            <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {% if plug.type == 'Global' %}bg-blue-100 text-blue-800 border border-blue-200{% else %}bg-amber-100 text-amber-800 border border-amber-200{% endif %}">
-                {{ plug.type }}
-            </span>
-            <div style="max-width: 300px;">
+<div class="plug-detail-header">
+    <div class="plug-detail-header-inner">
+        <nav class="plug-breadcrumb">
+            <a href="/projects/webplugs/" class="plug-crumb">Web Plugs</a>
+            {% if plug.projects.length > 0 %}
+            <svg class="plug-crumb-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            <a href="/projects/webplugs/#{{ plug.projects[0] }}" class="plug-crumb">{{ plug.projects[0] | replace("web", "Web ") | title }} Plugs</a>
+            {% endif %}
+            <svg class="plug-crumb-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            <span class="plug-crumb plug-crumb-current">{{ plug.name }}</span>
+        </nav>
+        <div class="plug-title-row">
+            <h1 class="plug-title">
+                {{ plug.name }}<sup class="plug-type-sup {% if plug.type == 'Global' %}plug-type-global{% else %}plug-type-patch{% endif %}">{{ plug.type }}</sup>
+            </h1>
+            <div class="plug-status">
                 {{ projectStatus(plug.status) }}
             </div>
         </div>
-        <p class="lead">{{ plug.summary }}</p>
-        
-        {% if plug.projects.length > 0 %}
-        <div class="mt-4">
-            <div class="text-sm text-gray-600 mb-2">Part of:</div>
-            <div class="flex flex-wrap gap-2">
-                {% for project in plug.projects %}
-                <a href="/projects/{{ project }}/" class="px-3 py-1.5 rounded text-sm bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200">
-                    {{ project | replace("web", "Web ") | title }}
-                </a>
-                {% endfor %}
-            </div>
-        </div>
-        {% endif %}
     </div>
+</div>
 
+<div class="container block-detail-page">
     <div class="block-body content">
         <div class="section-card">
             {% include "plug-descriptions/" + plug.id + ".njk" %}
