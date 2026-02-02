@@ -18,13 +18,13 @@ describe('pathInsertionMethods - Extended Coverage', () => {
     injectorRoot = new InjectorRoot();
     elementRegistry = new CustomElementRegistry();
     injectorRoot.attach(document);
-    (window as any).customProviders = injectorRoot;
+    (window as any).injectors = injectorRoot;
   });
 
   afterEach(() => {
     injectorRoot.detach(document);
     removeNodeInjectorsPatches();
-    delete (window as any).customProviders;
+    delete (window as any).injectors;
   });
 
   describe('upgradeDeep with various node types', () => {

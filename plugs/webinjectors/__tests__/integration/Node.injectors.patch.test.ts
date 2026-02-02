@@ -93,15 +93,15 @@ describe('Node.injectors.patch integration', () => {
       const element = document.createElement('div');
       document.body.appendChild(element);
       
-      // Mock customProviders
-      (window as any).customProviders = injectorRoot;
+      // Mock injectors
+      (window as any).injectors = injectorRoot;
       
       const injector = injectorRoot.ensureInjector(element);
       const retrieved = (element as any).getOwnInjector();
       
       expect(retrieved).toBeTruthy();
       
-      delete (window as any).customProviders;
+      delete (window as any).injectors;
       document.body.removeChild(element);
       injectorRoot.detach(document);
     });
@@ -125,14 +125,14 @@ describe('Node.injectors.patch integration', () => {
       const element = document.createElement('div');
       document.body.appendChild(element);
       
-      (window as any).customProviders = injectorRoot;
+      (window as any).injectors = injectorRoot;
       
       injectorRoot.ensureInjector(element);
       const hasInjector = (element as any).hasOwnInjector();
       
       expect(hasInjector).toBe(true);
       
-      delete (window as any).customProviders;
+      delete (window as any).injectors;
       document.body.removeChild(element);
       injectorRoot.detach(document);
     });
@@ -153,14 +153,14 @@ describe('Node.injectors.patch integration', () => {
       parentElement.appendChild(childElement);
       document.body.appendChild(parentElement);
       
-      (window as any).customProviders = injectorRoot;
+      (window as any).injectors = injectorRoot;
       
       const parentInjector = injectorRoot.ensureInjector(parentElement);
       const foundInjector = (childElement as any).getClosestInjector();
       
       expect(foundInjector).toBe(parentInjector);
       
-      delete (window as any).customProviders;
+      delete (window as any).injectors;
       document.body.removeChild(parentElement);
       injectorRoot.detach(document);
     });
@@ -176,14 +176,14 @@ describe('Node.injectors.patch integration', () => {
       parent.appendChild(child);
       document.body.appendChild(grandparent);
       
-      (window as any).customProviders = injectorRoot;
+      (window as any).injectors = injectorRoot;
       
       const grandparentInjector = injectorRoot.ensureInjector(grandparent);
       const foundInjector = (child as any).getClosestInjector();
       
       expect(foundInjector).toBe(grandparentInjector);
       
-      delete (window as any).customProviders;
+      delete (window as any).injectors;
       document.body.removeChild(grandparent);
       injectorRoot.detach(document);
     });
@@ -192,14 +192,14 @@ describe('Node.injectors.patch integration', () => {
       const injectorRoot = new InjectorRoot();
       injectorRoot.attach(document);
       
-      (window as any).customProviders = injectorRoot;
+      (window as any).injectors = injectorRoot;
       
       const rootInjector = injectorRoot.getInjectorOf(document);
       const foundInjector = (document.body as any).getClosestInjector();
       
       expect(foundInjector).toBeTruthy();
       
-      delete (window as any).customProviders;
+      delete (window as any).injectors;
       injectorRoot.detach(document);
     });
 
@@ -227,7 +227,7 @@ describe('Node.injectors.patch integration', () => {
       parent.appendChild(child);
       document.body.appendChild(parent);
       
-      (window as any).customProviders = injectorRoot;
+      (window as any).injectors = injectorRoot;
       
       const parentInjector = injectorRoot.ensureInjector(parent);
       const rootInjector = injectorRoot.getInjectorOf(document);
@@ -237,7 +237,7 @@ describe('Node.injectors.patch integration', () => {
       expect(injectors.length).toBeGreaterThan(0);
       expect(injectors[0]).toBe(parentInjector);
       
-      delete (window as any).customProviders;
+      delete (window as any).injectors;
       document.body.removeChild(parent);
       injectorRoot.detach(document);
     });
@@ -249,14 +249,14 @@ describe('Node.injectors.patch integration', () => {
       const element = document.createElement('div');
       document.body.appendChild(element);
       
-      (window as any).customProviders = injectorRoot;
+      (window as any).injectors = injectorRoot;
       
       const injectors = Array.from((element as any).injectors());
       const lastInjector = injectors[injectors.length - 1];
       
       expect(lastInjector?.parentInjector).toBeNull();
       
-      delete (window as any).customProviders;
+      delete (window as any).injectors;
       document.body.removeChild(element);
       injectorRoot.detach(document);
     });

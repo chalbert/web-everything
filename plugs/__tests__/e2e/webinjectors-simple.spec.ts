@@ -16,7 +16,7 @@ test.describe('webinjectors - Basic Dependency Injection', () => {
     const result = await page.evaluate(() => {
       const injectorRoot = new window.InjectorRoot();
       injectorRoot.attach(document);
-      (window as any).customProviders = injectorRoot;
+      (window as any).injectors = injectorRoot;
       
       return {
         hasRoot: injectorRoot !== null,
@@ -32,7 +32,7 @@ test.describe('webinjectors - Basic Dependency Injection', () => {
     const result = await page.evaluate(() => {
       const injectorRoot = new window.InjectorRoot();
       injectorRoot.attach(document);
-      (window as any).customProviders = injectorRoot;
+      (window as any).injectors = injectorRoot;
       
       const element = document.createElement('div');
       document.body.appendChild(element);
@@ -56,7 +56,7 @@ test.describe('webinjectors - Basic Dependency Injection', () => {
     const result = await page.evaluate(() => {
       const injectorRoot = new window.InjectorRoot();
       injectorRoot.attach(document);
-      (window as any).customProviders = injectorRoot;
+      (window as any).injectors = injectorRoot;
       
       const parent = document.createElement('div');
       document.body.appendChild(parent);

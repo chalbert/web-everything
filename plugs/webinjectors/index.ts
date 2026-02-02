@@ -18,8 +18,8 @@ export { applyNodeInjectorsPatches, removeNodeInjectorsPatches, isNodeInjectorsP
  * 
  * This mutates:
  * - Node.prototype: Adds injectors(), getClosestInjector(), getOwnInjector(), hasOwnInjector()
- * - Window/Document: Adds customProviders property
- * - ShadowRoot.prototype: Adds customProviders property
+ * - Window/Document: Adds injectors property
+ * - ShadowRoot.prototype: Adds injectors property
  * 
  * WARNING: Global mutation - use with caution.
  */
@@ -31,7 +31,7 @@ export function applyPatches(): void {
 
   applyNodeInjectorsPatches();
   
-  // TODO: Apply customProviders property patches to Window/Document/ShadowRoot
+  // TODO: Apply injectors property patches to Window/Document/ShadowRoot
   // This will require creating InjectorRoot instances and attaching them
   
   console.log('webinjectors patches applied');
@@ -51,7 +51,7 @@ export function removePatches(): void {
 
   removeNodeInjectorsPatches();
   
-  // TODO: Remove customProviders properties
+  // TODO: Remove injectors properties
   
   console.log('webinjectors patches removed');
 }

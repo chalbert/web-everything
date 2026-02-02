@@ -246,7 +246,7 @@ describe('InjectorRoot', () => {
 
   describe('localName', () => {
     it('should have correct localName', () => {
-      expect(injectorRoot.localName).toBe('customProviders');
+      expect(injectorRoot.localName).toBe('injectors');
     });
   });
 });

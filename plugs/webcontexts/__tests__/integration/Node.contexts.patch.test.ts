@@ -27,7 +27,7 @@ describe('Node.contexts.patch integration', () => {
     elementRegistry = new CustomElementRegistry();
     
     injectorRoot.attach(document);
-    (window as any).customProviders = injectorRoot;
+    (window as any).injectors = injectorRoot;
   });
 
   afterEach(() => {
@@ -35,7 +35,7 @@ describe('Node.contexts.patch integration', () => {
     injectorRoot.detach(document);
     removeNodeContextsPatch();
     removeNodeInjectorsPatches();
-    delete (window as any).customProviders;
+    delete (window as any).injectors;
   });
 
   describe('patch application', () => {

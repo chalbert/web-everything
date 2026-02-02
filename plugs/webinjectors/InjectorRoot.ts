@@ -198,7 +198,7 @@ export default class InjectorRoot {
    */
   static creationInjector: HTMLInjector | null = null;
 
-  localName = 'customProviders';
+  localName = 'injectors';
 
   #observers: Map<Node, MutationObserver> = new Map();
 

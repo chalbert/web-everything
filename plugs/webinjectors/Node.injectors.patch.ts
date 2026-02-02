@@ -86,7 +86,7 @@ export function applyNodeInjectorsPatches(): void {
         if (this instanceof HTMLElement) {
           const root = this.getRootNode();
           const target = root === document ? window : (root as ShadowRoot);
-          const registry = (target as any).customProviders;
+          const registry = (target as any).injectors;
           if (registry) {
             const elementInjector = registry.getInjectorOf(this);
             return elementInjector;
@@ -113,7 +113,7 @@ export function applyNodeInjectorsPatches(): void {
             ? (rootNode as any).ownerTemplate?.getRootNode()
             : rootNode;
         const target = root === document ? window : (root as ShadowRoot);
-        const registry = (target as any)?.customProviders;
+        const registry = (target as any)?.injectors;
 
         if (registry) {
           if (root === this) {

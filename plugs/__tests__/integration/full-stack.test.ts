@@ -67,7 +67,7 @@ describe('Full Stack Integration', () => {
       document.body.appendChild(root);
 
       // Make injectorRoot available
-      (window as any).customProviders = injectorRoot;
+      (window as any).injectors = injectorRoot;
 
       // Setup injector hierarchy
       injectorRoot.ensureInjector(root);
@@ -91,7 +91,7 @@ describe('Full Stack Integration', () => {
       expect(logService.log('test')).toBe('[LOG] test');
 
       // Cleanup
-      delete (window as any).customProviders;
+      delete (window as any).injectors;
       document.body.removeChild(root);
     });
 
@@ -108,7 +108,7 @@ describe('Full Stack Integration', () => {
       root.appendChild(child);
       document.body.appendChild(root);
 
-      (window as any).customProviders = injectorRoot;
+      (window as any).injectors = injectorRoot;
 
       // Root injector with counter at 10
       injectorRoot.ensureInjector(root);
@@ -131,7 +131,7 @@ describe('Full Stack Integration', () => {
       expect(rootCounter.count).toBe(10);
 
       // Cleanup
-      delete (window as any).customProviders;
+      delete (window as any).injectors;
       document.body.removeChild(root);
     });
   });
@@ -197,7 +197,7 @@ describe('Full Stack Integration', () => {
       const container = document.createElement('div');
       document.body.appendChild(container);
 
-      (window as any).customProviders = injectorRoot;
+      (window as any).injectors = injectorRoot;
       injectorRoot.ensureInjector(container);
       const injector = injectorRoot.getInjectorOf(container)!;
       
@@ -216,7 +216,7 @@ describe('Full Stack Integration', () => {
       expect(element.textContent).toBe('Hello from service');
 
       // Cleanup
-      delete (window as any).customProviders;
+      delete (window as any).injectors;
       document.body.removeChild(container);
     });
   });
@@ -310,7 +310,7 @@ describe('Full Stack Integration', () => {
       document.body.appendChild(root);
 
       // Setup injector hierarchy
-      (window as any).customProviders = injectorRoot;
+      (window as any).injectors = injectorRoot;
       
       // Create injectors in order, ensuring proper parent-child relationships
       injectorRoot.ensureInjector(root);
@@ -347,7 +347,7 @@ describe('Full Stack Integration', () => {
       }
 
       // Cleanup
-      delete (window as any).customProviders;
+      delete (window as any).injectors;
       document.body.removeChild(root);
     });
 
@@ -355,7 +355,7 @@ describe('Full Stack Integration', () => {
       const container = document.createElement('div');
       document.body.appendChild(container);
 
-      (window as any).customProviders = injectorRoot;
+      (window as any).injectors = injectorRoot;
       
       // Create an injector for the container
       injectorRoot.ensureInjector(container);
@@ -380,7 +380,7 @@ describe('Full Stack Integration', () => {
       expect(elementInjector.get('theme')).toBe('dark');
 
       // Cleanup
-      delete (window as any).customProviders;
+      delete (window as any).injectors;
       document.body.removeChild(container);
     });
   });
@@ -418,7 +418,7 @@ describe('Full Stack Integration', () => {
       const container = document.createElement('div');
       document.body.appendChild(container);
 
-      (window as any).customProviders = injectorRoot;
+      (window as any).injectors = injectorRoot;
       
       injectorRoot.ensureInjector(container);
       const injector = injectorRoot.getInjectorOf(container)!;
@@ -434,7 +434,7 @@ describe('Full Stack Integration', () => {
       expect(injector.get('service99')).toEqual({ id: 99 });
 
       // Cleanup
-      delete (window as any).customProviders;
+      delete (window as any).injectors;
       document.body.removeChild(container);
     });
 
@@ -442,7 +442,7 @@ describe('Full Stack Integration', () => {
       // Create element without attaching to document
       const detached = document.createElement('div');
       
-      (window as any).customProviders = injectorRoot;
+      (window as any).injectors = injectorRoot;
       
       // Create injector on detached element
       injectorRoot.ensureInjector(detached);
@@ -461,7 +461,7 @@ describe('Full Stack Integration', () => {
       expect(injector.get('value')).toBe('test');
 
       // Cleanup
-      delete (window as any).customProviders;
+      delete (window as any).injectors;
     });
   });
 });

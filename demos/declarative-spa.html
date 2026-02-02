@@ -146,8 +146,13 @@
       <div class="source-viewer-header">
         <div class="source-viewer-title">Source Code</div>
         <div class="source-viewer-toggle">
-          <button id="view-source-btn" class="active">Original</button>
+          <button id="view-source-btn" class="active">HTML</button>
+          <button id="view-js-btn">JS</button>
           <button id="view-dom-btn">Live DOM</button>
+        </div>
+        <div class="source-viewer-mode">
+          <button id="mode-plugged-btn" class="active">Plugged</button>
+          <button id="mode-unplugged-btn">Unplugged</button>
         </div>
       </div>
       <div class="source-viewer-content">
@@ -156,31 +161,14 @@
     </aside>
   </div>
   
-  <!-- Context Definitions -->
+  <!-- Bootstrap: applies patches and exposes globals (not shown in code viewer) -->
+  <script type="module" src="/plugs/bootstrap.ts"></script>
+
+  <!-- Demo Code -->
   <script type="module">
-    import CustomContext from '/plugs/webcontexts/CustomContext.ts';
-    import CustomContextRegistry from '/plugs/webcontexts/CustomContextRegistry.ts';
-    import { applyNodeContextsPatch } from '/plugs/webcontexts/Node.contexts.patch.ts';
-    import InjectorRoot from '/plugs/webinjectors/InjectorRoot.ts';
-    import { applyNodeInjectorsPatches } from '/plugs/webinjectors/Node.injectors.patch.ts';
-    import CustomStore from '/plugs/webstates/CustomStore.ts';
-    import CustomStoreRegistry from '/plugs/webstates/CustomStoreRegistry.ts';
-    import CustomAttribute from '/plugs/webbehaviors/CustomAttribute.ts';
-    import CustomAttributeRegistry from '/plugs/webbehaviors/CustomAttributeRegistry.ts';
-    
-    // Apply patches
-    applyNodeInjectorsPatches();
-    applyNodeContextsPatch();
-    
-    // Setup injector system
-    const injectorRoot = new InjectorRoot();
-    injectorRoot.attach(document);
-    window.customProviders = injectorRoot;
-    
-    // Create registries
-    const contextRegistry = new CustomContextRegistry();
-    const storeRegistry = new CustomStoreRegistry();
-    const attributeRegistry = new CustomAttributeRegistry();
+    // Destructure globals (plugged mode)
+    // Bootstrap provides: injectors, attributes, stores, contexts
+    const { CustomStore, CustomAttribute } = window;
     
     // Counter Store
     class CounterStore extends CustomStore {
@@ -302,9 +290,9 @@
     }
     
     // Register stores
-    storeRegistry.define('counter', CounterStore);
-    storeRegistry.define('todo', TodoStore);
-    storeRegistry.define('form', FormStore);
+    stores.define('counter', CounterStore);
+    stores.define('todo', TodoStore);
+    stores.define('form', FormStore);
     
     // Create store instances
     const counterStore = new CounterStore();
@@ -522,51 +510,123 @@
     }
     
     // Register attributes
-    attributeRegistry.define('bind-text', BindTextAttribute);
-    attributeRegistry.define('bind-value', BindValueAttribute);
-    attributeRegistry.define('on:click', OnClickAttribute);
-    attributeRegistry.define('on:submit', OnSubmitAttribute);
+    attributes.define('bind-text', BindTextAttribute);
+    attributes.define('bind-value', BindValueAttribute);
+    attributes.define('on:click', OnClickAttribute);
+    attributes.define('on:submit', OnSubmitAttribute);
     
     // Upgrade document
-    attributeRegistry.upgrade(document.body);
+    attributes.upgrade(document.body);
     
     // Source code viewer functionality
-    let currentView = 'source';
+    let currentView = 'html';
+    let currentMode = 'plugged';
     const sourceDisplay = document.getElementById('source-display');
     const viewSourceBtn = document.getElementById('view-source-btn');
+    const viewJsBtn = document.getElementById('view-js-btn');
     const viewDomBtn = document.getElementById('view-dom-btn');
-    
-    // Fetch original source
+    const modePluggedBtn = document.getElementById('mode-plugged-btn');
+    const modeUnpluggedBtn = document.getElementById('mode-unplugged-btn');
+
+    // Generate unplugged version with imports
+    function generateUnpluggedScript(pluggedScript) {
+      const imports = `import {
+  InjectorRoot,
+  CustomStore,
+  CustomStoreRegistry,
+  CustomAttribute,
+  CustomAttributeRegistry,
+  applyWebInjectorsPatches,
+} from '@webeverything/plugs';
+
+// Apply patches
+applyWebInjectorsPatches();
+
+// Setup injector system
+const injectorRoot = new InjectorRoot();
+injectorRoot.attach(document);
+window.injectors = injectorRoot;
+
+// Create registries
+const attributes = new CustomAttributeRegistry();
+const stores = new CustomStoreRegistry();
+
+`;
+      // Remove plugged mode comments and window destructure
+      return imports + pluggedScript
+        .replace(/^\s*\/\/ Destructure globals.*\n/m, '')
+        .replace(/^\s*\/\/ Bootstrap provides.*\n/m, '')
+        .replace(/^\s*const\s*\{[\s\S]*?\}\s*=\s*window;\s*\n?/m, '');
+    }
+
+    // Generate unplugged HTML with script import
+    function generateUnpluggedHtml(pluggedHtml) {
+      // For unplugged mode, show that you'd import the script
+      const closeTag = '<' + '/script>';
+      const lines = [
+        '<!-- Unplugged mode: import patches explicitly -->',
+        '<script type="module">',
+        "  import '@webeverything/plugs/patches';",
+        closeTag,
+        '',
+        pluggedHtml
+      ];
+      return lines.join('\n');
+    }
+
+    // Fetch original source and extract the app-main content and script
     fetch(window.location.href)
       .then(res => res.text())
       .then(sourceCode => {
-        window.originalSource = sourceCode;
+        // Parse the HTML and extract just the .app-main content
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(sourceCode, 'text/html');
+        const appMain = doc.querySelector('.app-main');
+        window.originalHtml = appMain ? appMain.outerHTML : sourceCode;
+
+        // Extract the inline script module content (skip external scripts with src)
+        const scriptModule = doc.querySelector('script[type="module"]:not([src])');
+        window.originalScript = scriptModule ? scriptModule.textContent.trim() : '';
+
         displaySource();
       });
-    
+
     function displaySource() {
-      if (currentView === 'source') {
-        sourceDisplay.textContent = window.originalSource || 'Loading...';
+      if (currentView === 'html') {
+        const html = window.originalHtml || 'Loading...';
+        sourceDisplay.textContent = currentMode === 'plugged' ? html : generateUnpluggedHtml(html);
+      } else if (currentView === 'js') {
+        const js = window.originalScript || 'Loading...';
+        sourceDisplay.textContent = currentMode === 'plugged' ? js : generateUnpluggedScript(js);
       } else {
         // Show live DOM of the app-main section
         const appMain = document.querySelector('.app-main');
         sourceDisplay.textContent = appMain ? appMain.outerHTML : document.body.innerHTML;
       }
     }
-    
-    viewSourceBtn.addEventListener('click', () => {
-      currentView = 'source';
-      viewSourceBtn.classList.add('active');
-      viewDomBtn.classList.remove('active');
-      displaySource();
-    });
-    
-    viewDomBtn.addEventListener('click', () => {
-      currentView = 'dom';
-      viewDomBtn.classList.add('active');
+
+    function setActiveView(view, activeBtn) {
+      currentView = view;
       viewSourceBtn.classList.remove('active');
+      viewJsBtn.classList.remove('active');
+      viewDomBtn.classList.remove('active');
+      activeBtn.classList.add('active');
       displaySource();
-    });
+    }
+
+    function setActiveMode(mode, activeBtn) {
+      currentMode = mode;
+      modePluggedBtn.classList.remove('active');
+      modeUnpluggedBtn.classList.remove('active');
+      activeBtn.classList.add('active');
+      displaySource();
+    }
+
+    viewSourceBtn.addEventListener('click', () => setActiveView('html', viewSourceBtn));
+    viewJsBtn.addEventListener('click', () => setActiveView('js', viewJsBtn));
+    viewDomBtn.addEventListener('click', () => setActiveView('dom', viewDomBtn));
+    modePluggedBtn.addEventListener('click', () => setActiveMode('plugged', modePluggedBtn));
+    modeUnpluggedBtn.addEventListener('click', () => setActiveMode('unplugged', modeUnpluggedBtn));
     
     // Update live DOM view when changes occur (debounced)
     let updateTimeout;

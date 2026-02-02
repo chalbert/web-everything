@@ -357,7 +357,7 @@ select {
   padding: 1rem 1.5rem;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 1rem;
 }
 
 .source-viewer-title {
@@ -389,6 +389,34 @@ select {
 .source-viewer-toggle button.active {
   background: rgba(255,255,255,0.3);
   border-color: rgba(255,255,255,0.4);
+}
+
+.source-viewer-mode {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+.source-viewer-mode button {
+  background: transparent;
+  color: rgba(255,255,255,0.7);
+  border: 1px solid rgba(255,255,255,0.2);
+  padding: 0.4rem 0.75rem;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.source-viewer-mode button:hover {
+  color: white;
+  border-color: rgba(255,255,255,0.4);
+}
+
+.source-viewer-mode button.active {
+  background: #10b981;
+  color: white;
+  border-color: #10b981;
 }
 
 .source-viewer-content {
