@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Web Injectors E2E Test Page</title>
+</head>
+<body>
+  <div id="root"></div>
+  
+  <script type="module">
+    import InjectorRoot from '../plugs/webinjectors/InjectorRoot.ts';
+    import HTMLInjector from '../plugs/webinjectors/HTMLInjector.ts';
+    import { applyNodeInjectorsPatches } from '../plugs/webinjectors/Node.injectors.patch.ts';
+    
+    // Apply patches
+    applyNodeInjectorsPatches();
+    
+    // Make available globally
+    window.InjectorRoot = InjectorRoot;
+    window.HTMLInjector = HTMLInjector;
+    window.testReady = true;
+  </script>
+</body>
+</html>

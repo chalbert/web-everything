@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Web Contexts E2E Test Page</title>
+</head>
+<body>
+  <div id="root"></div>
+  
+  <script type="module">
+    import CustomContext from '../plugs/webcontexts/CustomContext.ts';
+    import CustomContextRegistry from '../plugs/webcontexts/CustomContextRegistry.ts';
+    import { applyNodeContextsPatch } from '../plugs/webcontexts/Node.contexts.patch.ts';
+    import InjectorRoot from '../plugs/webinjectors/InjectorRoot.ts';
+    import { applyNodeInjectorsPatches } from '../plugs/webinjectors/Node.injectors.patch.ts';
+    
+    // Apply patches
+    applyNodeInjectorsPatches();
+    applyNodeContextsPatch();
+    
+    // Create injector root and attach to document
+    const injectorRoot = new InjectorRoot();
+    injectorRoot.attach(document);
+    
+    // Set as global for patches to find
+    window.customProviders = injectorRoot;
+    
+    // Make available globally
+    window.CustomContext = CustomContext;
+    window.CustomContextRegistry = CustomContextRegistry;
+    window.InjectorRoot = InjectorRoot;
+    window.injectorRoot = injectorRoot;
+    window.testReady = true;
+  </script>
+</body>
+</html>
+

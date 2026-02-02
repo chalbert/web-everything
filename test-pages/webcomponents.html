@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Web Components E2E Test Page</title>
+</head>
+<body>
+  <div id="root"></div>
+  
+  <script type="module">
+    // Import all plugs
+    import { cloneHandlerRegistry } from '../plugs/core/CloneHandlerRegistry.ts';
+    import * as cloneUtils from '../plugs/core/cloneUtils.ts';
+    import CustomElement from '../plugs/webcomponents/CustomElement.ts';
+    import { registerCloneHandlers } from '../plugs/webcomponents/cloneHandlers.ts';
+    import { applyCloneNodePatch } from '../plugs/webcomponents/Node.cloneNode.patch.ts';
+    
+    // Apply patches
+    applyCloneNodePatch();
+    registerCloneHandlers();
+    
+    // Define test element
+    class TestElement extends HTMLElement {
+      constructor() {
+        super();
+        // Get options if available
+        if (this._elementOptions) {
+          this.options = this._elementOptions;
+        }
+      }
+      
+      static create(options) {
+        const el = document.createElement('test-element');
+        if (options) {
+          el._elementOptions = options;
+          el.options = options;
+        }
+        return el;
+      }
+      
+      connectedCallback() {
+        this.textContent = 'Test: ' + (this.options?.label || 'default');
+      }
+    }
+    
+    // Register custom element
+    customElements.define('test-element', TestElement);
+    
+    // Make available globally for tests
+    window.TestElement = TestElement;
+    window.CustomElement = CustomElement;
+    window.testReady = true;
+  </script>
+</body>
+</html>

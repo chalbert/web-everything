@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Web States E2E Test Page</title>
+</head>
+<body>
+  <div id="root"></div>
+  
+  <script type="module">
+    import CustomStore from '../plugs/webstates/CustomStore.ts';
+    import CustomStoreRegistry from '../plugs/webstates/CustomStoreRegistry.ts';
+    
+    // Make available globally
+    window.CustomStore = CustomStore;
+    window.CustomStoreRegistry = CustomStoreRegistry;
+    window.testReady = true;
+  </script>
+</body>
+</html>

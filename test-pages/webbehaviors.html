@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Web Behaviors E2E Test Page</title>
+</head>
+<body>
+  <div id="root"></div>
+  
+  <script type="module">
+    import CustomAttribute from '../plugs/webbehaviors/CustomAttribute.ts';
+    import CustomAttributeRegistry from '../plugs/webbehaviors/CustomAttributeRegistry.ts';
+    
+    // Make available globally
+    window.CustomAttribute = CustomAttribute;
+    window.CustomAttributeRegistry = CustomAttributeRegistry;
+    window.testReady = true;
+  </script>
+</body>
+</html>

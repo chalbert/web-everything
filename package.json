@@ -6,6 +6,7 @@
     "start": "eleventy --serve --watch",
     "build": "eleventy",
     "clean": "rm -rf _site",
+    "dev": "vite --port 5173",
     "test": "vitest",
     "test:unit": "vitest run",
     "test:integration": "playwright test",
@@ -18,6 +19,7 @@
     "@playwright/test": "^1.40.0",
     "@vitest/coverage-v8": "^1.0.0",
     "happy-dom": "^12.10.0",
+    "vite": "^5.0.0",
     "vitest": "^1.0.0"
   },
   "keywords": [

@@ -10,3 +10,8 @@ export type {
   BaseDefinition,
   ConstructorDefinition 
 } from './HTMLRegistry';
+
+// Clone handler system
+export { CloneHandlerRegistry, cloneHandlerRegistry } from './CloneHandlerRegistry';
+export type { CloneHandler, CloneContext } from './CloneHandlerRegistry';
+export * as cloneUtils from './cloneUtils';
