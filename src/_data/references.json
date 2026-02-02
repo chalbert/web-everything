@@ -103,5 +103,62 @@
         "context": "Our Static Site Generator of choice."
       }
     ]
+  },
+  {
+    "category": "Framework Comparison & Patterns",
+    "description": "Resources for comparing frameworks, understanding patterns, and exploring real-world implementations. Research for a potential 'Web Recipes' project.",
+    "links": [
+      {
+        "title": "Patterns.dev",
+        "url": "https://www.patterns.dev/",
+        "context": "Excellent resource on design, rendering, and performance patterns. React-focused but high quality explanations with code examples."
+      },
+      {
+        "title": "Component Party",
+        "url": "https://component-party.dev/",
+        "context": "Side-by-side syntax comparison across 15+ frameworks. Covers reactivity, state, templating, lifecycle. Simple but useful for quick comparisons."
+      },
+      {
+        "title": "RealWorld (Conduit)",
+        "url": "https://codebase.show/projects/realworld",
+        "context": "Medium.com clone with 100+ implementations. Real app with auth, CRUD, routing. Good but requires commitment to compare repos individually."
+      },
+      {
+        "title": "js-framework-benchmark",
+        "url": "https://krausest.github.io/js-framework-benchmark/",
+        "context": "Micro-benchmarks for 100+ frameworks. Useful for raw performance metrics but synthetic (forbids virtualization, lazy loading)."
+      },
+      {
+        "title": "web.dev/patterns",
+        "url": "https://web.dev/patterns",
+        "context": "Google's pattern library: Animation, Clipboard, Components, Layout. Vanilla JS/CSS focused, accessibility-conscious, but not framework-comparative."
+      },
+      {
+        "title": "TodoMVC",
+        "url": "https://todomvc.com/",
+        "context": "The original framework comparison. Too simple for real architectural decisions but useful for basic syntax overview."
+      }
+    ]
+  },
+  {
+    "category": "Web Recipes (Proposed)",
+    "description": "Gap analysis for a potential new project: complex, isolated use cases showing multiple strategies per framework with pros/cons. Unlike existing resources, would focus on architectural trade-offs for real-world patterns.",
+    "links": [
+      {
+        "title": "Gap: Complex Use Cases",
+        "url": "#",
+        "context": "TodoMVC is too simple. RealWorld is one app. Need isolated, complex patterns (infinite scroll, optimistic updates, real-time sync, etc.)."
+      },
+      {
+        "title": "Gap: Multiple Strategies",
+        "url": "#",
+        "context": "Existing resources show one implementation per framework. Real projects need to understand trade-offs between different approaches."
+      },
+      {
+        "title": "Gap: Architectural Decisions",
+        "url": "#",
+        "context": "Component Party shows syntax, not architecture. Patterns.dev explains patterns but is React-only. Need cross-framework architectural comparison."
+      }
+    ]
   }
 ]

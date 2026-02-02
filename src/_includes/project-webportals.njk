@@ -485,7 +485,7 @@ function MyWidget() {
 
   return (
     <Portal target="#modals">
-      <div className="widget-modal" focusScope={{ trap: true, returnFocus: true }}>
+      <div className="widget-modal" focusScope={%raw%}{{ trap: true, returnFocus: true }}{%endraw%}>
         {/* Full access to my-widget's contexts */}
         <h2>{widgetTitle}</h2>
         <button onClick={closeModal}>Close</button>

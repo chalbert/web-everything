@@ -29,24 +29,36 @@ eleventyComputed:
 
 <div class="container block-detail-page">
     <div class="block-body content">
-        {% if demo.projects %}
-        <div class="section-card" style="margin-bottom: 2rem;">
-            <h3 style="font-size: 0.875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted); margin-bottom: 0.75rem;">
-                Standards Used
-            </h3>
-            <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
-                {% for projectId in demo.projects %}
-                {% set project = projects | selectattr('id', 'equalto', projectId) | first %}
-                {% if project %}
-                <a href="/projects/{{ project.id }}/" class="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 transition-colors" style="text-decoration: none;">
-                    {{ project.name }}
+        {% if demo.liveUrl %}
+        <div class="section-card" style="padding: 2rem; margin-bottom: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+            <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 2rem;">
+                <div style="flex: 1;">
+                    {% if demo.projects %}
+                    <div style="margin-top: 1rem;">
+                        <div style="font-size: 0.875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.8; margin-bottom: 0.75rem;">
+                            Standards Used
+                        </div>
+                        <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                            {% for projectId in demo.projects %}
+                            {% set project = projects | selectattr('id', 'equalto', projectId) | first %}
+                            {% if project %}
+                            <a href="/projects/{{ project.id }}/" class="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-white/20 hover:bg-white/30 transition-colors backdrop-blur-sm" style="text-decoration: none; color: white; border: 1px solid rgba(255,255,255,0.3);">
+                                {{ project.name }}
+                            </a>
+                            {% else %}
+                            <span class="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-white/20" style="color: white; border: 1px solid rgba(255,255,255,0.3);">
+                                {{ projectId }}
+                            </span>
+                            {% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+                <a href="{{ demo.liveUrl }}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.875rem 1.75rem; background: white; color: #667eea; border-radius: 0.5rem; font-weight: 600; text-decoration: none; transition: transform 0.2s; flex-shrink: 0; align-self: flex-start;">
+                    Open Demo
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                 </a>
-                {% else %}
-                <span class="inline-flex items-center px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-50 text-gray-700 border border-gray-200">
-                    {{ projectId }}
-                </span>
-                {% endif %}
-                {% endfor %}
             </div>
         </div>
         {% endif %}
@@ -55,21 +67,6 @@ eleventyComputed:
             <h2>Overview</h2>
             {{ demo.description | safe }}
         </div>
-
-        {% if demo.liveUrl %}
-        <div class="section-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
-            <div style="display: flex; align-items: center; justify-content: space-between;">
-                <div>
-                    <h3 style="color: white; margin-bottom: 0.5rem;">Live Demo</h3>
-                    <p style="margin: 0; opacity: 0.9;">Experience this demo in action</p>
-                </div>
-                <a href="{{ demo.liveUrl }}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1.5rem; background: white; color: #667eea; border-radius: 0.5rem; font-weight: 600; text-decoration: none; transition: transform 0.2s;">
-                    Open Demo
-                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                </a>
-            </div>
-        </div>
-        {% endif %}
 
         {% if demo.codeUrl %}
         <div class="section-card">

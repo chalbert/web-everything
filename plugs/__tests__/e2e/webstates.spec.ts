@@ -49,10 +49,6 @@ test.describe('webstates - State Management', () => {
       window.CounterStore = CounterStore;
     });
   });
-      
-      window.CounterStore = CounterStore;
-    });
-  });
 
   test('should create store and get initial state', async ({ page }) => {
     const result = await page.evaluate(() => {
@@ -258,7 +254,7 @@ test.describe('webstates - Integration with DOM', () => {
       store.subscribe((state) => {
         renderCount++;
         app.innerHTML = state.todos
-          .map(todo => \`<div data-id="\${todo.id}">\${todo.text}</div>\`)
+          .map(todo => '<div data-id="' + todo.id + '">' + todo.text + '</div>')
           .join('');
       });
       
@@ -299,7 +295,7 @@ test.describe('webstates - Integration with DOM', () => {
       
       // Rapid updates
       for (let i = 0; i < 100; i++) {
-        store.addTodo(\`Todo \${i}\`);
+        store.addTodo('Todo ' + i);
       }
       
       const endTime = performance.now();

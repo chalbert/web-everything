@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Declarative SPA Demo - Web Everything</title>
+  <link rel="stylesheet" href="declarative-spa.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/demos/declarative-spa/" class="demo-header-back">
+      ← Back to Documentation
+    </a>
+  </div>
+
+  <div class="app-container">
+    <div class="app-main">
+      <header>
+        <h1>Declarative SPA Demo</h1>
+        
+        <nav>
+          <button data-view="counter" data-active="true" on:click="navigate">Counter</button>
+          <button data-view="todos" data-active="false" on:click="navigate">Todo List</button>
+          <button data-view="form" data-active="false" on:click="navigate">Form</button>
+        </nav>
+      </header>
+      
+      <main>
+      <!-- Counter View -->
+      <section class="view" data-view="counter" data-active="true">
+        <div class="counter">
+          <h2>Counter Demo</h2>
+          <div class="counter-value" bind-text="count">0</div>
+          <div class="counter-controls">
+            <button on:click="decrement">Decrement</button>
+            <button class="secondary" on:click="reset">Reset</button>
+            <button on:click="increment">Increment</button>
+          </div>
+        </div>
+      </section>
+      
+      <!-- Todo List View -->
+      <section class="view" data-view="todos" data-active="false">
+        <div class="todo-section">
+          <h2>Todo List</h2>
+          
+          <form class="todo-form" on:submit="addTodo">
+            <input 
+              type="text" 
+              placeholder="Add a new todo..." 
+              bind-value="newTodoText"
+              required
+            />
+            <button type="submit">Add</button>
+          </form>
+          
+          <ul class="todo-list" data-list="todos">
+            <!-- Todos will be rendered here dynamically -->
+          </ul>
+          
+          <div class="todo-stats">
+            <div class="stat">
+              <div class="stat-value" bind-text="totalTodos">0</div>
+              <div class="stat-label">Total</div>
+            </div>
+            <div class="stat">
+              <div class="stat-value" bind-text="activeTodos">0</div>
+              <div class="stat-label">Active</div>
+            </div>
+            <div class="stat">
+              <div class="stat-value" bind-text="completedTodos">0</div>
+              <div class="stat-label">Completed</div>
+            </div>
+          </div>
+        </div>
+      </section>
+      
+      <!-- Form View -->
+      <section class="view" data-view="form" data-active="false">
+        <div class="form-section">
+          <h2>User Form</h2>
+          
+          <form>
+            <div class="form-group">
+              <label for="name">Name</label>
+              <input 
+                type="text" 
+                id="name" 
+                bind-value="formData.name"
+                placeholder="Enter your name"
+              />
+            </div>
+            
+            <div class="form-group">
+              <label for="email">Email</label>
+              <input 
+                type="email" 
+                id="email" 
+                bind-value="formData.email"
+                placeholder="Enter your email"
+              />
+            </div>
+            
+            <div class="form-group">
+              <label for="role">Role</label>
+              <select id="role" bind-value="formData.role">
+                <option value="">Select a role</option>
+                <option value="developer">Developer</option>
+                <option value="designer">Designer</option>
+                <option value="manager">Manager</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+          </form>
+          
+          <div class="form-preview">
+            <div class="preview-title">Form Preview</div>
+            <div class="preview-item">
+              <span class="preview-label">Name:</span>
+              <span class="preview-value" bind-text="formData.name">-</span>
+            </div>
+            <div class="preview-item">
+              <span class="preview-label">Email:</span>
+              <span class="preview-value" bind-text="formData.email">-</span>
+            </div>
+            <div class="preview-item">
+              <span class="preview-label">Role:</span>
+              <span class="preview-value" bind-text="formData.role">-</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+    </div>
+
+    <!-- Source Code Viewer -->
+    <aside class="source-viewer">
+      <div class="source-viewer-header">
+        <div class="source-viewer-title">Source Code</div>
+        <div class="source-viewer-toggle">
+          <button id="view-source-btn" class="active">Original</button>
+          <button id="view-dom-btn">Live DOM</button>
+        </div>
+      </div>
+      <div class="source-viewer-content">
+        <pre id="source-display"></pre>
+      </div>
+    </aside>
+  </div>
+  
+  <!-- Context Definitions -->
+  <script type="module">
+    import CustomContext from '../plugs/webcontexts/CustomContext.ts';
+    import CustomContextRegistry from '../plugs/webcontexts/CustomContextRegistry.ts';
+    import { applyNodeContextsPatch } from '../plugs/webcontexts/Node.contexts.patch.ts';
+    import InjectorRoot from '../plugs/webinjectors/InjectorRoot.ts';
+    import { applyNodeInjectorsPatches } from '../plugs/webinjectors/Node.injectors.patch.ts';
+    import CustomStore from '../plugs/webstates/CustomStore.ts';
+    import CustomStoreRegistry from '../plugs/webstates/CustomStoreRegistry.ts';
+    import CustomAttribute from '../plugs/webbehaviors/CustomAttribute.ts';
+    import CustomAttributeRegistry from '../plugs/webbehaviors/CustomAttributeRegistry.ts';
+    
+    // Apply patches
+    applyNodeInjectorsPatches();
+    applyNodeContextsPatch();
+    
+    // Setup injector system
+    const injectorRoot = new InjectorRoot();
+    injectorRoot.attach(document);
+    window.customProviders = injectorRoot;
+    
+    // Create registries
+    const contextRegistry = new CustomContextRegistry();
+    const storeRegistry = new CustomStoreRegistry();
+    const attributeRegistry = new CustomAttributeRegistry();
+    
+    // Counter Store
+    class CounterStore extends CustomStore {
+      constructor(options = {}) {
+        super(options);
+        this._state = { count: 0 };
+        this._listeners = [];
+      }
+      
+      subscribe(callback) {
+        this._listeners.push(callback);
+        return () => {
+          this._listeners = this._listeners.filter(l => l !== callback);
+        };
+      }
+      
+      getItem(key) {
+        return this._state[key];
+      }
+      
+      setItem(key, value) {
+        this._state[key] = value;
+        this._listeners.forEach(callback => callback(this._state));
+      }
+      
+      get state() {
+        return this._state;
+      }
+    }
+    
+    // Todo Store
+    class TodoStore extends CustomStore {
+      constructor(options = {}) {
+        super(options);
+        this._state = {
+          todos: [],
+          newTodoText: '',
+          totalTodos: 0,
+          activeTodos: 0,
+          completedTodos: 0
+        };
+        this._listeners = [];
+      }
+      
+      subscribe(callback) {
+        this._listeners.push(callback);
+        return () => {
+          this._listeners = this._listeners.filter(l => l !== callback);
+        };
+      }
+      
+      getItem(key) {
+        return this._state[key];
+      }
+      
+      setItem(key, value) {
+        this._state[key] = value;
+        this._updateStats();
+        this._listeners.forEach(callback => callback(this._state));
+      }
+      
+      _updateStats() {
+        const todos = this._state.todos || [];
+        this._state.totalTodos = todos.length;
+        this._state.activeTodos = todos.filter(t => !t.completed).length;
+        this._state.completedTodos = todos.filter(t => t.completed).length;
+      }
+      
+      get state() {
+        return this._state;
+      }
+    }
+    
+    // Form Store
+    class FormStore extends CustomStore {
+      constructor(options = {}) {
+        super(options);
+        this._state = {
+          formData: {
+            name: '',
+            email: '',
+            role: ''
+          }
+        };
+        this._listeners = [];
+      }
+      
+      subscribe(callback) {
+        this._listeners.push(callback);
+        return () => {
+          this._listeners = this._listeners.filter(l => l !== callback);
+        };
+      }
+      
+      getItem(key) {
+        if (key.includes('.')) {
+          const parts = key.split('.');
+          return this._state[parts[0]]?.[parts[1]];
+        }
+        return this._state[key];
+      }
+      
+      setItem(key, value) {
+        if (key.includes('.')) {
+          const parts = key.split('.');
+          if (!this._state[parts[0]]) {
+            this._state[parts[0]] = {};
+          }
+          this._state[parts[0]][parts[1]] = value;
+        } else {
+          this._state[key] = value;
+        }
+        this._listeners.forEach(callback => callback(this._state));
+      }
+      
+      get state() {
+        return this._state;
+      }
+    }
+    
+    // Register stores
+    storeRegistry.define('counter', CounterStore);
+    storeRegistry.define('todo', TodoStore);
+    storeRegistry.define('form', FormStore);
+    
+    // Create store instances
+    const counterStore = new CounterStore();
+    const todoStore = new TodoStore();
+    const formStore = new FormStore();
+    
+    // Bind-Text Attribute
+    class BindTextAttribute extends CustomAttribute {
+      connectedCallback() {
+        const path = this.value;
+        if (!path) return;
+        
+        // Determine which store to use
+        let store;
+        if (path.startsWith('formData.')) {
+          store = formStore;
+        } else if (['newTodoText', 'totalTodos', 'activeTodos', 'completedTodos'].includes(path)) {
+          store = todoStore;
+        } else {
+          store = counterStore;
+        }
+        
+        // Initial update
+        this._updateText(store, path);
+        
+        // Subscribe to changes
+        this._unsubscribe = store.subscribe(() => {
+          this._updateText(store, path);
+        });
+      }
+      
+      _updateText(store, path) {
+        const value = store.getItem(path);
+        if (this.target) {
+          this.target.textContent = value ?? '';
+        }
+      }
+      
+      disconnectedCallback() {
+        if (this._unsubscribe) {
+          this._unsubscribe();
+        }
+      }
+    }
+    
+    // Bind-Value Attribute
+    class BindValueAttribute extends CustomAttribute {
+      connectedCallback() {
+        const path = this.value;
+        if (!path) return;
+        
+        // Determine which store to use
+        let store;
+        if (path.startsWith('formData.')) {
+          store = formStore;
+        } else if (path === 'newTodoText') {
+          store = todoStore;
+        } else {
+          store = counterStore;
+        }
+        
+        // Initial update
+        const value = store.getItem(path);
+        if (this.target && value !== undefined) {
+          this.target.value = value;
+        }
+        
+        // Listen to input changes
+        this._handleInput = (e) => {
+          store.setItem(path, e.target.value);
+        };
+        this.target?.addEventListener('input', this._handleInput);
+        
+        // Subscribe to store changes
+        this._unsubscribe = store.subscribe(() => {
+          const newValue = store.getItem(path);
+          if (this.target && this.target.value !== newValue) {
+            this.target.value = newValue ?? '';
+          }
+        });
+      }
+      
+      disconnectedCallback() {
+        this.target?.removeEventListener('input', this._handleInput);
+        if (this._unsubscribe) {
+          this._unsubscribe();
+        }
+      }
+    }
+    
+    // On:Click Attribute
+    class OnClickAttribute extends CustomAttribute {
+      connectedCallback() {
+        const action = this.value;
+        
+        this._handleClick = (e) => {
+          e.preventDefault();
+          
+          switch (action) {
+            case 'increment':
+              counterStore.setItem('count', counterStore.getItem('count') + 1);
+              break;
+            case 'decrement':
+              counterStore.setItem('count', counterStore.getItem('count') - 1);
+              break;
+            case 'reset':
+              counterStore.setItem('count', 0);
+              break;
+            case 'navigate':
+              const viewName = e.target.getAttribute('data-view');
+              if (viewName) {
+                // Update nav buttons
+                document.querySelectorAll('nav button').forEach(btn => {
+                  btn.setAttribute('data-active', 'false');
+                });
+                e.target.setAttribute('data-active', 'true');
+                
+                // Update views
+                document.querySelectorAll('.view').forEach(view => {
+                  view.setAttribute('data-active', 'false');
+                });
+                document.querySelector(`.view[data-view="${viewName}"]`)?.setAttribute('data-active', 'true');
+              }
+              break;
+          }
+        };
+        
+        this.target?.addEventListener('click', this._handleClick);
+      }
+      
+      disconnectedCallback() {
+        this.target?.removeEventListener('click', this._handleClick);
+      }
+    }
+    
+    // On:Submit Attribute
+    class OnSubmitAttribute extends CustomAttribute {
+      connectedCallback() {
+        const action = this.value;
+        
+        this._handleSubmit = (e) => {
+          e.preventDefault();
+          
+          if (action === 'addTodo') {
+            const text = todoStore.getItem('newTodoText');
+            if (text.trim()) {
+              const todos = todoStore.getItem('todos') || [];
+              const newTodo = {
+                id: Date.now(),
+                text: text.trim(),
+                completed: false
+              };
+              todoStore.setItem('todos', [...todos, newTodo]);
+              todoStore.setItem('newTodoText', '');
+              
+              // Render todos
+              this._renderTodos();
+            }
+          }
+        };
+        
+        this.target?.addEventListener('submit', this._handleSubmit);
+        
+        // Subscribe to todo changes for rendering
+        this._unsubscribe = todoStore.subscribe(() => {
+          this._renderTodos();
+        });
+      }
+      
+      _renderTodos() {
+        const list = document.querySelector('[data-list="todos"]');
+        if (!list) return;
+        
+        const todos = todoStore.getItem('todos') || [];
+        list.innerHTML = '';
+        
+        todos.forEach(todo => {
+          const li = document.createElement('li');
+          li.className = 'todo-item';
+          li.setAttribute('data-completed', todo.completed);
+          
+          li.innerHTML = `
+            <input type="checkbox" class="todo-checkbox" ${todo.completed ? 'checked' : ''} data-todo-id="${todo.id}">
+            <span class="todo-text">${todo.text}</span>
+            <button class="todo-delete" data-todo-id="${todo.id}">Delete</button>
+          `;
+          
+          // Add event listeners
+          const checkbox = li.querySelector('.todo-checkbox');
+          checkbox.addEventListener('change', (e) => {
+            const todos = todoStore.getItem('todos');
+            const updated = todos.map(t => 
+              t.id === todo.id ? { ...t, completed: e.target.checked } : t
+            );
+            todoStore.setItem('todos', updated);
+          });
+          
+          const deleteBtn = li.querySelector('.todo-delete');
+          deleteBtn.addEventListener('click', () => {
+            const todos = todoStore.getItem('todos');
+            const filtered = todos.filter(t => t.id !== todo.id);
+            todoStore.setItem('todos', filtered);
+          });
+          
+          list.appendChild(li);
+        });
+      }
+      
+      disconnectedCallback() {
+        this.target?.removeEventListener('submit', this._handleSubmit);
+        if (this._unsubscribe) {
+          this._unsubscribe();
+        }
+      }
+    }
+    
+    // Register attributes
+    attributeRegistry.define('bind-text', BindTextAttribute);
+    attributeRegistry.define('bind-value', BindValueAttribute);
+    attributeRegistry.define('on:click', OnClickAttribute);
+    attributeRegistry.define('on:submit', OnSubmitAttribute);
+    
+    // Upgrade document
+    attributeRegistry.upgrade(document.body);
+    
+    // Source code viewer functionality
+    let currentView = 'source';
+    const sourceDisplay = document.getElementById('source-display');
+    const viewSourceBtn = document.getElementById('view-source-btn');
+    const viewDomBtn = document.getElementById('view-dom-btn');
+    
+    // Fetch original source
+    fetch(window.location.href)
+      .then(res => res.text())
+      .then(sourceCode => {
+        window.originalSource = sourceCode;
+        displaySource();
+      });
+    
+    function displaySource() {
+      if (currentView === 'source') {
+        sourceDisplay.textContent = window.originalSource || 'Loading...';
+      } else {
+        // Show live DOM of the app-main section
+        const appMain = document.querySelector('.app-main');
+        sourceDisplay.textContent = appMain ? appMain.outerHTML : document.body.innerHTML;
+      }
+    }
+    
+    viewSourceBtn.addEventListener('click', () => {
+      currentView = 'source';
+      viewSourceBtn.classList.add('active');
+      viewDomBtn.classList.remove('active');
+      displaySource();
+    });
+    
+    viewDomBtn.addEventListener('click', () => {
+      currentView = 'dom';
+      viewDomBtn.classList.add('active');
+      viewSourceBtn.classList.remove('active');
+      displaySource();
+    });
+    
+    // Update live DOM view when changes occur (debounced)
+    let updateTimeout;
+    const observer = new MutationObserver(() => {
+      if (currentView === 'dom') {
+        clearTimeout(updateTimeout);
+        updateTimeout = setTimeout(displaySource, 100);
+      }
+    });
+    
+    observer.observe(document.querySelector('.app-main') || document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      characterData: true
+    });
+    
+    // Signal ready
+    window.demoReady = true;
+  </script>
+</body>
+</html>

@@ -92,7 +92,7 @@ test.describe('Full Stack E2E - Complete Application', () => {
               connectedCallback() {
                 // Consume theme context
                 const theme = this.consumeContext?.('theme');
-                this.className = theme ? \`theme-\${theme.theme}\` : '';
+                this.className = theme ? 'theme-' + theme.theme : '';
                 
                 // Consume store from injector
                 this.store = this.consume?.('appStore');
@@ -113,7 +113,7 @@ test.describe('Full Stack E2E - Complete Application', () => {
               
               render() {
                 if (this.store) {
-                  this.textContent = `Count: ${'${this.store.getItem(\'count\')}'}`;
+                  this.textContent = 'Count: ' + this.store.getItem('count');
                 }
               }
             }
