@@ -6,6 +6,7 @@
 
 import HTMLRegistry from '../core/HTMLRegistry';
 import type { BaseDefinition } from '../core/HTMLRegistry';
+import type { RootNode } from '../core/types';
 import CustomContext, { type ImplementedContext } from './CustomContext';
 
 export interface CustomContextRegistryOptions {
@@ -22,8 +23,6 @@ export interface ContextDefinition<ContextValue> extends BaseDefinition {
   contextConsumedCallback?(callback: (...args: unknown[]) => ContextValue): void;
   observedContexts?: Set<string>;
 }
-
-type RootNode = Document | DocumentFragment | ShadowRoot | HTMLElement;
 
 /**
  * CustomContextRegistry manages context type registration and instance tracking
@@ -80,23 +79,6 @@ export default class CustomContextRegistry extends HTMLRegistry<
   }
 
   /**
-   * Upgrade a root node by adding contexts and observing changes
-   */
-  upgrade(root: RootNode): void {
-    this.#addContextsOnTree(root);
-    this.#disconnect(root);
-    this.#observe(root);
-  }
-
-  /**
-   * Downgrade a root node by removing contexts and disconnecting observer
-   */
-  downgrade(root: RootNode): void {
-    this.#removeContextsFromTree(root);
-    this.#disconnect(root);
-  }
-
-  /**
    * Get a specific context instance by name from an element
    */
   getContextByName(node: Element, name: string): CustomContext<any> | null {
@@ -136,10 +118,10 @@ export default class CustomContextRegistry extends HTMLRegistry<
    */
   #addContext(element: HTMLElement, contextScript: HTMLScriptElement): void {
     const name = contextScript.getAttribute('context') as string;
-    const contextDefinition = this.get(name);
-    
-    if (contextDefinition) {
-      const Context = contextDefinition.constructor;
+    const definition = this.getDefinition(name);
+
+    if (definition) {
+      const Context = definition.constructor;
       const contextInstance = new Context();
       contextInstance.attach(element);
 
@@ -149,7 +131,7 @@ export default class CustomContextRegistry extends HTMLRegistry<
 
       this.#registrations.get(element)?.set(Context, contextInstance);
 
-      contextDefinition.attachedCallback?.();
+      definition.attachedCallback?.();
 
       if (element.isConnected) {
         contextInstance.connectedCallback?.();

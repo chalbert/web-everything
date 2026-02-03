@@ -1,10 +1,16 @@
 /**
  * webinjectors - Hierarchical Dependency Injection for the DOM
- * 
+ *
  * Provides plugged/unplugged access to the Web Injectors system.
- * 
+ *
  * @module webinjectors
  */
+
+import {
+  applyNodeInjectorsPatches as _applyNodeInjectorsPatches,
+  removeNodeInjectorsPatches as _removeNodeInjectorsPatches,
+  isNodeInjectorsPatched as _isNodeInjectorsPatched,
+} from './Node.injectors.patch';
 
 export { default as InjectorRoot, type InjectorRootOptions, type ProviderDefinition, type ProviderTypeMap, type AnyProviderType } from './InjectorRoot';
 export { default as HTMLInjector, type HTMLInjectorTarget, type HTMLProviderType } from './HTMLInjector';
@@ -15,12 +21,12 @@ export { applyNodeInjectorsPatches, removeNodeInjectorsPatches, isNodeInjectorsP
 
 /**
  * Apply webinjectors patches to native DOM APIs.
- * 
+ *
  * This mutates:
  * - Node.prototype: Adds injectors(), getClosestInjector(), getOwnInjector(), hasOwnInjector()
  * - Window/Document: Adds injectors property
  * - ShadowRoot.prototype: Adds injectors property
- * 
+ *
  * WARNING: Global mutation - use with caution.
  */
 export function applyPatches(): void {
@@ -29,17 +35,17 @@ export function applyPatches(): void {
     return;
   }
 
-  applyNodeInjectorsPatches();
-  
+  _applyNodeInjectorsPatches();
+
   // TODO: Apply injectors property patches to Window/Document/ShadowRoot
   // This will require creating InjectorRoot instances and attaching them
-  
+
   console.log('webinjectors patches applied');
 }
 
 /**
  * Remove webinjectors patches from native DOM APIs.
- * 
+ *
  * Attempts to restore original behavior. May not be fully reversible
  * if other code has captured references to patched methods.
  */
@@ -49,10 +55,10 @@ export function removePatches(): void {
     return;
   }
 
-  removeNodeInjectorsPatches();
-  
+  _removeNodeInjectorsPatches();
+
   // TODO: Remove injectors properties
-  
+
   console.log('webinjectors patches removed');
 }
 
@@ -60,5 +66,5 @@ export function removePatches(): void {
  * Check if webinjectors patches are currently applied.
  */
 export function isPatched(): boolean {
-  return isNodeInjectorsPatched();
+  return _isNodeInjectorsPatched();
 }

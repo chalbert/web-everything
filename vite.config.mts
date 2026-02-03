@@ -15,6 +15,16 @@ function webEverythingPatches(): Plugin {
           return html;
         }
 
+        // Skip injection for unplugged demos - they handle their own imports
+        if (ctx.filename?.includes('-unplugged')) {
+          return html;
+        }
+
+        // Skip if the demo already has bootstrap.ts included
+        if (html.includes('/plugs/bootstrap.ts')) {
+          return html;
+        }
+
         // Inject the bootstrap script as the first script in the body
         const patchScript = `<script type="module" src="/plugs/bootstrap.ts"></script>`;
 
@@ -59,16 +69,18 @@ export default defineConfig({
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
-      // Proxy demos directory and subdirectory indexes
+      // Proxy demos directory and detail pages to 11ty (not individual .html demo files)
+      // Demo HTML files are served directly by Vite for HMR and bootstrap injection
       '^/demos/?$': {
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
-      '^/demos/[^/]+/?$': {
+      '^/demos/index\\.html$': {
         target: 'http://localhost:8080',
         changeOrigin: true,
       },
-      '^/demos/index\\.html$': {
+      // Proxy demo detail pages (e.g., /demos/declarative-spa/) to 11ty
+      '^/demos/[\\w-]+/$': {
         target: 'http://localhost:8080',
         changeOrigin: true,
       },

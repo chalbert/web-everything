@@ -183,10 +183,7 @@ export function applyNodeInjectorsPatches(): void {
 }
 
 /**
- * R// Restore original createElement
-    Document.prototype.createElement = originalCreateElement;
-
-    emove injector patches from Node.prototype.
+ * Remove injector patches from Node.prototype.
  */
 export function removeNodeInjectorsPatches(): void {
   if (OriginalNode) {
@@ -194,6 +191,9 @@ export function removeNodeInjectorsPatches(): void {
       ...baseDescriptor,
       value: OriginalNode,
     });
+
+    // Restore original createElement
+    Document.prototype.createElement = originalCreateElement;
 
     delete (OriginalNode.prototype as any).getOwnInjector;
     delete (OriginalNode.prototype as any).hasOwnInjector;

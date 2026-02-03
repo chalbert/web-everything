@@ -4,11 +4,35 @@
 // For "plugged mode" with patches and globals, use bootstrap.ts instead.
 //
 // Usage:
-//   import { CustomStore, CustomAttribute } from '@webeverything/plugs';
+//   import { register, upgrade, CustomAttribute } from '@webeverything/plugs';
+//
+//   const attributes = new CustomAttributeRegistry();
+//   attributes.define('tooltip', TooltipAttribute);
+//   register(attributes);
+//   upgrade(document);
+
+// Unplugged API - functional interface for registering and upgrading plugs
+export {
+  register,
+  unregister,
+  upgrade,
+  downgrade,
+  attach,
+  detach,
+  getPlug,
+  hasPlug,
+  getPlugs,
+  getPlugNames,
+  getRoots,
+  isUpgraded,
+  reset,
+} from './unplugged';
 
 // Core exports
 export { CustomRegistry } from './core';
 export { HTMLRegistry } from './core';
+export type { Plug } from './core';
+export { isPlug } from './core';
 
 // Web Registries
 export { CustomElementRegistry } from './webregistries';

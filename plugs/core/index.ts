@@ -3,8 +3,11 @@
 export { default as CustomRegistry } from './CustomRegistry';
 export { default as HTMLRegistry } from './HTMLRegistry';
 export type { Registry } from './Registry';
-export type { 
-  CustomRegistryOptions 
+export type { Plug } from './Plug';
+export { isPlug } from './Plug';
+export type { RootNode } from './types';
+export type {
+  CustomRegistryOptions
 } from './CustomRegistry';
 export type { 
   BaseDefinition,

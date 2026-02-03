@@ -4,6 +4,12 @@
  * @source Migrated from plateau/src/plugs/custom-contexts/
  */
 
+import {
+  applyNodeContextsPatch as _applyNodeContextsPatch,
+  removeNodeContextsPatch as _removeNodeContextsPatch,
+  isContextsPatchApplied as _isContextsPatchApplied,
+} from './Node.contexts.patch';
+
 export { default as CustomContext } from './CustomContext';
 export { default as CustomContextRegistry } from './CustomContextRegistry';
 export type { ImplementedContext, Consumable } from './CustomContext';
@@ -19,22 +25,19 @@ export {
  * Apply all webcontexts patches
  */
 export function applyPatches(): void {
-  const { applyNodeContextsPatch } = require('./Node.contexts.patch');
-  applyNodeContextsPatch();
+  _applyNodeContextsPatch();
 }
 
 /**
  * Remove all webcontexts patches
  */
 export function removePatches(): void {
-  const { removeNodeContextsPatch } = require('./Node.contexts.patch');
-  removeNodeContextsPatch();
+  _removeNodeContextsPatch();
 }
 
 /**
  * Check if all webcontexts patches are applied
  */
 export function isPatched(): boolean {
-  const { isContextsPatchApplied } = require('./Node.contexts.patch');
-  return isContextsPatchApplied();
+  return _isContextsPatchApplied();
 }

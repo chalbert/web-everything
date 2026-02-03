@@ -16,6 +16,7 @@
 import HTMLRegistry, { BaseDefinition, ConstructorDefinition } from './HTMLRegistry';
 import HTMLInjector, { HTMLInjectorTarget } from './HTMLInjector';
 import CustomRegistry from '../core/CustomRegistry';
+import type { RootNode } from '../core/types';
 
 /**
  * TODO: These will be imported from webcontexts and other projects when migrated.
@@ -56,25 +57,50 @@ export default class InjectorRoot {
    * Get the InjectorRoot managing a node's subtree.
    */
   static getInjectorRootOf(node: Node): InjectorRoot | undefined {
-    const rootNode = node.getRootNode();
+    const rootNode = node.getRootNode() as RootNode;
     return this.#injectorRoots.get(rootNode);
   }
 
   /**
+   * Get injector chain for a node, working in both plugged and unplugged modes.
+   * In plugged mode, uses the patched node.injectors() API.
+   * In unplugged mode, walks the DOM tree using internal InjectorRoot state.
+   */
+  static *getInjectorChain(node: Node): Generator<HTMLInjector> {
+    // Plugged mode: use patched API if available
+    if ('injectors' in node && typeof (node as any).injectors === 'function') {
+      yield* (node as any).injectors();
+      return;
+    }
+
+    // Unplugged mode: walk DOM tree manually using internal state
+    let current: Node | null = node;
+    const visited = new Set<HTMLInjector>();
+
+    while (current) {
+      const injectorRoot = InjectorRoot.getInjectorRootOf(current);
+      if (injectorRoot) {
+        const injector = injectorRoot.getInjectorOf(current as HTMLInjectorTarget);
+        if (injector && !visited.has(injector)) {
+          visited.add(injector);
+          yield injector;
+        }
+      }
+      current = current.parentNode;
+    }
+  }
+
+  /**
    * Get a provider from a node's injector chain.
-   * 
+   *
    * Walks up the injector hierarchy until a matching provider is found.
    */
   static getProviderOf<ProviderName extends keyof ProviderTypeMap>(
     node: Node | Comment,
     providerName: ProviderName
   ): ProviderTypeMap[ProviderName] | undefined {
-    const injectors = (node as any).injectors?.();
-    if (!injectors) return undefined;
-
-    let currentInjector: HTMLInjector;
-    while ((currentInjector = injectors.next().value)) {
-      const provider = currentInjector.get(providerName) as ProviderTypeMap[ProviderName];
+    for (const injector of InjectorRoot.getInjectorChain(node)) {
+      const provider = injector.get(providerName) as ProviderTypeMap[ProviderName];
       if (provider) {
         return provider;
       }
@@ -84,19 +110,15 @@ export default class InjectorRoot {
 
   /**
    * Get all providers available to a node.
-   * 
+   *
    * Collects unique providers from the entire injector chain,
    * with closer injectors taking precedence.
    */
   static getProvidersOf(node: Node): Map<string, HTMLRegistry<any, any>> {
-    const injectors = (node as any).injectors?.();
     const providers = new Map<string, HTMLRegistry<any, any>>();
 
-    if (!injectors) return providers;
-
-    let currentInjector: HTMLInjector;
-    while ((currentInjector = injectors.next().value)) {
-      const entries = currentInjector.entries();
+    for (const injector of InjectorRoot.getInjectorChain(node)) {
+      const entries = injector.entries();
       Array.from(entries).forEach(([providerName, provider]) => {
         if (typeof providerName === 'string' && !providers.has(providerName)) {
           providers.set(providerName, provider as HTMLRegistry<any, any>);
@@ -115,12 +137,8 @@ export default class InjectorRoot {
     providerName: string,
     constructor: ConstructorDefinition<any>['constructor']
   ): BaseDefinition | undefined {
-    const injectors = (node as any).injectors?.();
-    if (!injectors) return undefined;
-
-    let currentInjector: HTMLInjector;
-    while ((currentInjector = injectors.next()?.value)) {
-      const provider = currentInjector.get(providerName);
+    for (const injector of InjectorRoot.getInjectorChain(node)) {
+      const provider = injector.get(providerName);
       if (provider instanceof HTMLRegistry) {
         const localElementName = provider.getLocalNameOf(constructor);
         if (localElementName) {
@@ -152,12 +170,8 @@ export default class InjectorRoot {
     providerName: string,
     localName: string
   ): any {
-    const injectors = (node as any).injectors?.();
-    if (!injectors) return undefined;
-
-    let currentInjector: HTMLInjector;
-    while ((currentInjector = injectors.next()?.value)) {
-      const provider = currentInjector.get(providerName);
+    for (const injector of InjectorRoot.getInjectorChain(node)) {
+      const provider = injector.get(providerName);
       if (provider instanceof HTMLRegistry) {
         const result = provider.get(localName);
         if (typeof result !== 'undefined') return result;
@@ -174,12 +188,8 @@ export default class InjectorRoot {
     providerName: string,
     constructor: ConstructorDefinition<any>['constructor']
   ): string | undefined {
-    const injectors = (node as any).injectors?.();
-    if (!injectors) return undefined;
-
-    let currentInjector: HTMLInjector;
-    while ((currentInjector = injectors.next()?.value)) {
-      const provider = currentInjector.get(providerName);
+    for (const injector of InjectorRoot.getInjectorChain(node)) {
+      const provider = injector.get(providerName);
       if (provider instanceof HTMLRegistry) {
         const localElementName = provider.getLocalNameOf(constructor);
         if (localElementName) {
