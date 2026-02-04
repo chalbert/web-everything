@@ -40,6 +40,13 @@ export { default as CustomAttribute } from './CustomAttribute';
 export { default as CustomAttributeRegistry } from './CustomAttributeRegistry';
 export { default as UndeterminedAttribute } from './UndeterminedAttribute';
 
+// Attribute parsers
+export {
+  CustomAttributeParser,
+  CustomAttributeParserRegistry,
+  type ParsedAttributeValue,
+} from './parsers';
+
 export type {
   CustomAttributeOptions,
   ImplementedAttribute,

@@ -428,7 +428,7 @@ describe('Node.contexts.patch integration', () => {
   });
 
   describe('queryContext method', () => {
-    it('should query context with path expression', () => {
+    it('should query context with expression', () => {
       class QueryableContext extends CustomContext<{ data: { value: number } }> {}
 
       contextRegistry.define('queryable', QueryableContext);

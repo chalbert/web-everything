@@ -36,6 +36,8 @@
 export { default as CustomTextNode } from './CustomTextNode';
 export { default as CustomTextNodeRegistry } from './CustomTextNodeRegistry';
 export { default as UndeterminedTextNode } from './UndeterminedTextNode';
+export { default as CustomExpressionParser } from './CustomExpressionParser';
+export { default as CustomExpressionParserRegistry } from './CustomExpressionParserRegistry';
 export { registerCloneHandlers, unregisterCloneHandlers } from './cloneHandlers';
 
 export type {
@@ -46,6 +48,20 @@ export type {
 export type {
   TextNodeDefinition,
 } from './CustomTextNodeRegistry';
+
+export type {
+  ParsedExpression,
+  ParseResult,
+  ParseContext,
+  Query,
+  ContextQuery,
+  MagicQuery,
+  ResolvedValues,
+} from './CustomExpressionParser';
+
+export type {
+  RegistryParseResult,
+} from './CustomExpressionParserRegistry';
 
 /**
  * Apply webexpressions patches (registers clone handlers).

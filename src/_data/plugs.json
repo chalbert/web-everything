@@ -226,19 +226,19 @@
     "projects": ["webexpressions"]
   },
   {
-    "id": "custompathexpressionparserregistry",
-    "name": "CustomPathExpressionParserRegistry",
+    "id": "customexpressionparserregistry",
+    "name": "CustomExpressionParserRegistry",
     "status": "implemented",
     "type": "Global",
-    "summary": "Registry for path expression parsers, standardizing how strings are parsed into executable paths.",
+    "summary": "Registry for expression parsers, standardizing how strings are parsed into executable expressions.",
     "projects": ["webexpressions"]
   },
   {
-    "id": "custompathexpressionparser",
-    "name": "CustomPathExpressionParser",
+    "id": "customexpressionparser",
+    "name": "CustomExpressionParser",
     "status": "implemented",
     "type": "Global",
-    "summary": "Standardizes how strings are parsed into executable paths for use in data bindings and expressions.",
+    "summary": "Standardizes how strings are parsed into executable expressions for use in data bindings.",
     "projects": ["webexpressions"]
   },
   {

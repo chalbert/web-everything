@@ -9,6 +9,7 @@ export default defineConfig({
       reporter: ['text', 'json', 'html'],
       include: [
         'plugs/**/*.ts',
+        'blocks/**/*.ts',
       ],
       exclude: [
         'node_modules/**',
@@ -18,7 +19,9 @@ export default defineConfig({
         '**/*.test.ts',
         '**/*.spec.ts',
         'plugs/**/__tests__/**',
+        'blocks/**/__tests__/**',
         'plugs/**/index.ts', // Export files don't need coverage
+        'blocks/**/index.ts', // Export files don't need coverage
         'plugs/core/utils/pathInsertionMethods.ts', // Infrastructure code not yet used by patches
         '.eleventy.js',
         'playwright.config.ts',
@@ -31,7 +34,10 @@ export default defineConfig({
         statements: 80,
       },
     },
-    include: ['plugs/**/__tests__/**/*.test.ts'],
+    include: [
+      'plugs/**/__tests__/**/*.test.ts',
+      'blocks/**/__tests__/**/*.test.ts',
+    ],
   },
   resolve: {
     alias: {
@@ -40,6 +46,7 @@ export default defineConfig({
       '@webinjectors': '/plugs/webinjectors',
       '@webcomponents': '/plugs/webcomponents',
       '@webcontexts': '/plugs/webcontexts',
+      '@webbehaviors': '/plugs/webbehaviors',
     },
   },
 });

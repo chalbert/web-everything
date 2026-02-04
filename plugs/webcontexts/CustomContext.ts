@@ -27,9 +27,9 @@ export class Consumable<T> {
 }
 
 /**
- * Path expression parser interface (placeholder for future implementation)
+ * Expression parser interface (placeholder for future implementation)
  */
-export interface CustomPathExpressionParser {
+export interface CustomExpressionParser {
   parse(expression: any): {
     vertices: any[];
     resolve(state: any): any;
@@ -52,11 +52,11 @@ export interface ConstructorDefinition<T> {
 
 /**
  * CustomContext provides hierarchical state management with dependency injection
- * 
+ *
  * Contexts can:
  * - Attach to DOM nodes via injector system
  * - Provide values to child nodes
- * - Support path-based queries
+ * - Support expression-based queries
  * - Integrate with store implementations
  * - Track and notify consumers on changes
  */
@@ -71,7 +71,7 @@ export default abstract class CustomContext<
   #queries = new Set<WeakRef<Consumable<any>>>();
   #value?: ContextValue;
   #store?: any; // CustomStore type - to be imported when webstates is available
-  #pathExpressionParser: CustomPathExpressionParser | null = null;
+  #expressionParser: CustomExpressionParser | null = null;
 
   abstract initialValue?: ContextValue;
 
@@ -103,7 +103,7 @@ export default abstract class CustomContext<
       const query = ref.deref();
       if (query) {
         if (query.expression) {
-          const graph = this.#pathExpressionParser?.parse(query.expression);
+          const graph = this.#expressionParser?.parse(query.expression);
           query.provide(graph?.resolve(newValue));
         } else {
           query.provide(newValue);
@@ -166,7 +166,7 @@ export default abstract class CustomContext<
       const query = ref.deref();
       if (query) {
         if (query.expression) {
-          const graph = this.#pathExpressionParser?.parse(query.expression);
+          const graph = this.#expressionParser?.parse(query.expression);
           // Only notify if the changed key is the first vertex in the query
           if (graph?.vertices[0] === key) {
             query.provide(graph?.resolve(state));
@@ -218,7 +218,7 @@ export default abstract class CustomContext<
   }
 
   /**
-   * Query the context with a path expression
+   * Query the context with an expression
    */
   query<QueryValue>(expression: any): Consumable<QueryValue> {
     const query = new Consumable<QueryValue>(expression);
@@ -232,8 +232,8 @@ export default abstract class CustomContext<
   claim(query: Consumable<any>): void {
     const state = this.#store ? this.#store.state : this.#value;
 
-    if (query.expression && this.#pathExpressionParser) {
-      const graph = this.#pathExpressionParser.parse(query.expression);
+    if (query.expression && this.#expressionParser) {
+      const graph = this.#expressionParser.parse(query.expression);
       const newValue = graph?.resolve(state);
       if (query.value !== newValue) {
         query.provide(newValue);
@@ -297,8 +297,8 @@ export default abstract class CustomContext<
       const injector = injectorRoot.ensureInjector(target);
       const localName = this.#getLocalNameOf(target, futureInjectorRoot);
 
-      const parser = injector.consume('customPathExpressionParsers', target as HTMLElement);
-      this.#pathExpressionParser = parser?.value;
+      const parser = injector.consume('customExpressionParsers', target as HTMLElement);
+      this.#expressionParser = parser?.value;
 
       if (!localName) {
         throw Error('Undefined context on target');

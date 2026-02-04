@@ -38,10 +38,10 @@
             for further processing by the binding system.
         </p>
 
-        <h4 class="font-semibold text-gray-800 mb-2">3. Path Expression Parsing</h4>
+        <h4 class="font-semibold text-gray-800 mb-2">3. Expression Parsing</h4>
         <p class="text-gray-600 text-sm">
-            Once an expression is extracted, its content (e.g., <code>user.profile.name</code>) needs to be parsed into an executable path.
-            <code>CustomPathExpressionParser</code> handles this, supporting keypaths, method calls, and computed properties.
+            Once an expression is extracted, its content (e.g., <code>user.profile.name</code>) needs to be parsed into an executable expression.
+            <code>CustomExpressionParser</code> handles this, supporting keypaths, method calls, and computed properties.
         </p>
     </div>
 </section>
@@ -373,7 +373,7 @@ customTextNodeParsers.define('mustache', new DoubleCurlyParser()); // {{ '{{' }}
    ├── Looks up "mustache" → InterpolationNode class
    └── Upgrades UndeterminedTextNode → InterpolationNode
 
-3. Path Expression Parser
+3. Expression Parser
    ├── Parses "user.name" → { type: 'keypath', parts: ['user', 'name'] }
    └── Returns executable graph for binding system
 
@@ -435,11 +435,11 @@ customTextNodeParsers.define('polymer', new DoubleSquareBracketParser());</code>
 // Register the implementation
 customTextNodes.define('interpolation', InterpolationNode);</code></pre>
 
-    <h4 class="font-semibold text-gray-800 mt-6 mb-2">Defining a Path Expression Parser</h4>
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">Defining an Expression Parser</h4>
     <p class="text-gray-600 text-sm mb-3">
         Parse expression strings into executable structures:
     </p>
-<pre><code class="language-typescript">class KeypathParser extends CustomPathExpressionParser {
+<pre><code class="language-typescript">class KeypathParser extends CustomExpressionParser {
     parse(text: string) {
         // Handle simple keypaths: "user.profile.name"
         const parts = text.split('.');
@@ -456,7 +456,7 @@ customTextNodes.define('interpolation', InterpolationNode);</code></pre>
     }
 }
 
-customPathExpressionParsers.define('keypath', new KeypathParser());</code></pre>
+customExpressionParsers.define('keypath', new KeypathParser());</code></pre>
 
     <h4 class="font-semibold text-gray-800 mt-6 mb-2">HTML Template Example</h4>
     <p class="text-gray-600 text-sm mb-3">
@@ -507,11 +507,230 @@ customPathExpressionParsers.define('keypath', new KeypathParser());</code></pre>
     textChangedCallback?(oldValue: string, newValue: string): void;
 }</code></pre>
 
-    <h4 class="font-semibold text-gray-800 mt-6 mb-2">CustomPathExpressionParser</h4>
-<pre><code class="language-typescript">abstract class CustomPathExpressionParser {
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">CustomExpressionParser</h4>
+<pre><code class="language-typescript">abstract class CustomExpressionParser {
     // Parses a string into an executable graph
     abstract parse(text: string): Graph;
 }</code></pre>
+</section>
+
+<section id="expression-parser-protocol" class="section-card">
+    <h3 id="parser-protocol">Expression Parser Protocol (Draft)</h3>
+    <p class="text-gray-600 text-sm mb-4">
+        This protocol defines how expression parsers return structured results that abstract evaluation and declare dependencies.
+        It enables consumers to resolve only what's needed without walking ASTs.
+    </p>
+
+    <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-6">
+        <div class="flex items-start gap-2">
+            <span class="text-amber-600 font-semibold text-sm">⚠️ Draft</span>
+            <p class="text-amber-800 text-sm m-0">This protocol is under development. Implementation details may change.</p>
+        </div>
+    </div>
+
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">Design Goals</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Abstraction</strong> — Parsers abstract expression evaluation; consumers don't walk ASTs</li>
+        <li><strong>Unified Query Model</strong> — Two query types: context (injector) and magic (runtime)</li>
+        <li><strong>Single Responsibility</strong> — Parser handles parsing + query analysis + evaluation</li>
+        <li><strong>Consumer Simplicity</strong> — Consumer resolves queries and calls evaluate</li>
+    </ul>
+
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">ParsedExpression Interface</h4>
+    <p class="text-gray-600 text-sm mb-3">
+        Every parsed expression implements this interface, declaring its dependencies as queries:
+    </p>
+<pre><code class="language-typescript">interface ParsedExpression {
+    /** Type discriminator */
+    type: string;
+
+    /** Original expression string */
+    raw: string;
+
+    /** Queries this expression needs */
+    queries: Query[];
+
+    /** Evaluate with resolved values */
+    evaluate(resolved: ResolvedValues): unknown;
+}
+
+/** Context query - resolved from injector chain */
+interface ContextQuery {
+    type: 'context';
+    context: string;
+    path?: string;
+}
+
+/** Magic query - runtime values provided by consumer */
+interface MagicQuery {
+    type: 'magic';
+    name: string;  // 'event', 'element', 'target'
+}
+
+type Query = ContextQuery | MagicQuery;</code></pre>
+
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">Query Types</h4>
+    <p class="text-gray-600 text-sm mb-3">
+        Two query types: <strong>context</strong> (from injector chain) and <strong>magic</strong> (runtime values from consumer):
+    </p>
+    <div class="comparison-table-wrapper mt-4 mb-4">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Syntax</th>
+                    <th>Query</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>$event</code></td>
+                    <td><code>{ type: 'magic', name: 'event' }</code></td>
+                    <td>Runtime value (DOM event)</td>
+                </tr>
+                <tr>
+                    <td><code>$element</code></td>
+                    <td><code>{ type: 'magic', name: 'element' }</code></td>
+                    <td>Runtime value (target element)</td>
+                </tr>
+                <tr>
+                    <td><code>@item.name</code></td>
+                    <td><code>{ type: 'context', context: 'item', path: 'name' }</code></td>
+                    <td>Named context</td>
+                </tr>
+                <tr>
+                    <td><code>handleClick</code></td>
+                    <td><code>{ type: 'context', context: 'handlers', path: 'handleClick' }</code></td>
+                    <td>Handler function</td>
+                </tr>
+                <tr>
+                    <td><code>uppercase</code> (in pipe)</td>
+                    <td><code>{ type: 'context', context: 'filters', path: 'uppercase' }</code></td>
+                    <td>Filter function</td>
+                </tr>
+                <tr>
+                    <td><code>count</code></td>
+                    <td><code>{ type: 'context', context: 'state', path: 'count' }</code></td>
+                    <td>State value (default context)</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">Resolved Values</h4>
+    <p class="text-gray-600 text-sm mb-3">
+        Consumer resolves queries and passes them to <code>evaluate()</code>:
+    </p>
+<pre><code class="language-typescript">interface ResolvedValues {
+    /** Resolved contexts (from injector chain) */
+    contexts: Record&lt;string, unknown&gt;;
+
+    /** Magic values (from consumer runtime) */
+    magic: Record&lt;string, unknown&gt;;
+}</code></pre>
+
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">Expression Types</h4>
+    <div class="comparison-table-wrapper mt-4 mb-4">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Type</th>
+                    <th>Syntax</th>
+                    <th>Queries</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Value</strong></td>
+                    <td><code>$event.target.value</code></td>
+                    <td><code>[{ type: 'magic', name: 'event' }]</code></td>
+                </tr>
+                <tr>
+                    <td><strong>Value</strong></td>
+                    <td><code>@item.name</code></td>
+                    <td><code>[{ type: 'context', context: 'item', path: 'name' }]</code></td>
+                </tr>
+                <tr>
+                    <td><strong>Value</strong></td>
+                    <td><code>count</code></td>
+                    <td><code>[{ type: 'context', context: 'state', path: 'count' }]</code></td>
+                </tr>
+                <tr>
+                    <td><strong>Call</strong></td>
+                    <td><code>save($event)</code></td>
+                    <td><code>[{ type: 'context', context: 'handlers', path: 'save' }, { type: 'magic', name: 'event' }]</code></td>
+                </tr>
+                <tr>
+                    <td><strong>Pipe</strong></td>
+                    <td><code>name | uppercase</code></td>
+                    <td><code>[{ type: 'context', context: 'state', path: 'name' }, { type: 'context', context: 'filters', path: 'uppercase' }]</code></td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">Registry Protocol</h4>
+    <p class="text-gray-600 text-sm mb-3">
+        The registry's <code>parse()</code> method returns aggregated results:
+    </p>
+<pre><code class="language-typescript">interface RegistryParseResult {
+    /** The compiled expression (or null if parsing failed) */
+    expression: ParsedExpression | null;
+
+    /** Aggregated queries from the expression tree */
+    queries: Query[];
+
+    /** Any remaining unparsed text */
+    remaining: string;
+
+    /** Whether parsing was successful */
+    success: boolean;
+}</code></pre>
+
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">Consumer Usage</h4>
+    <p class="text-gray-600 text-sm mb-3">
+        Consumers follow a simple pattern: parse, resolve queries, evaluate:
+    </p>
+<pre><code class="language-typescript">// 1. Parse expression
+const result = registry.parse('save($event, @item.id)');
+if (!result.success) return;
+
+// 2. Resolve queries
+const resolved: ResolvedValues = {
+    contexts: {},
+    magic: { event: domEvent, element: targetElement },
+};
+
+for (const query of result.queries) {
+    if (query.type === 'context') {
+        resolved.contexts[query.context] = injector.get(`customContexts:${query.context}`);
+    }
+    // Magic values are provided by consumer (already set above)
+}
+
+// 3. Evaluate
+const returnValue = result.expression.evaluate(resolved);</code></pre>
+    <p class="text-gray-600 text-sm mt-3">
+        Context queries come from the injector chain; magic values are runtime values the consumer already has.
+    </p>
+
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">Benefits</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>No AST walking in consumers</strong> — Expression handles its own evaluation</li>
+        <li><strong>Clear separation</strong> — Context queries (injector) vs magic values (runtime)</li>
+        <li><strong>Explicit queries</strong> — Easy to see what an expression needs</li>
+        <li><strong>Lazy resolution</strong> — Only resolve contexts that are actually queried</li>
+        <li><strong>Testable</strong> — Can test expressions with mock contexts/magic</li>
+        <li><strong>No conflicts</strong> — Magic values can't conflict with user-defined contexts</li>
+    </ul>
+
+    <h4 class="font-semibold text-gray-800 mt-6 mb-2">Open Questions</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li>Should <code>evaluate()</code> be on the expression or separate?</li>
+        <li>How to handle async evaluation (e.g., async handlers)?</li>
+        <li>Should queries include full paths or just context roots?</li>
+        <li>Error handling strategy for missing contexts or magic values?</li>
+    </ul>
 </section>
 
 <section id="comparison" class="section-card">

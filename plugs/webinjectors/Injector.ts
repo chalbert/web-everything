@@ -1,14 +1,14 @@
 /**
  * Injector - Abstract base class for dependency injection
- * 
+ *
  * Source: plateau/src/plugs/custom-injectors/Injector.ts
- * 
+ *
  * Manages hierarchical dependency injection with support for:
  * - Provider registration and resolution
- * - Consumable queries with path expressions
+ * - Consumable queries with expressions
  * - Parent-child injector relationships
  * - Dynamic provider claiming/unclaiming
- * 
+ *
  * @module webinjectors
  */
 

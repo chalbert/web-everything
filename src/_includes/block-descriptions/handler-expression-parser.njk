@@ -1,0 +1,48 @@
+<h2>Parser: Handler Expression Parser</h2>
+<p>Parser for function-call style event handler expressions. Extends <code>CustomAttributeParser</code> for registry integration with <code>CustomAttributeParserRegistry</code>.</p>
+
+<h3>Syntax</h3>
+<ul>
+  <li><code>save($event)</code> - Handler with magic variable</li>
+  <li><code>delete($event, @item.id)</code> - Handler with context access</li>
+  <li><code>update(value, @form.field)</code> - Handler with state and context</li>
+</ul>
+
+<h3>Magic Variables</h3>
+<p>Prefixed with <code>$</code> to distinguish from user-defined state:</p>
+<ul>
+  <li><code>$event</code> - The native DOM Event object passed to the handler</li>
+  <li><code>$element</code> - The element the event handler is attached to</li>
+  <li><code>$target</code> - The event.target (the element that triggered the event)</li>
+</ul>
+
+<h3>Named Contexts</h3>
+<p>Prefixed with <code>@</code> to access scoped data from parent elements:</p>
+<ul>
+  <li><code>@item</code> - ForEach loop context (e.g., <code>@item.id</code>, <code>@item.name</code>)</li>
+  <li><code>@theme</code> - Theme context from a provider</li>
+  <li><code>@state</code> - Explicit access to the default state context</li>
+  <li><code>@t</code> - Translations context</li>
+</ul>
+
+<h3>Default State</h3>
+<p>Bare identifiers resolve to the default state context. Most expressions reference state, so bare identifiers reduce verbosity. <code>@state.count</code> and <code>count</code> are equivalent.</p>
+
+<h3>Exports</h3>
+<ul>
+  <li><code>HandlerExpressionParser</code></li>
+  <li><code>HandlerExpressionParseError</code></li>
+  <li><code>HandlerExpressionShadowError</code></li>
+  <li><code>createHandlerExpressionParser</code></li>
+</ul>
+
+<h3>Usage Example</h3>
+<pre><code class="language-javascript">import { createHandlerExpressionParser } from '@webeverything/blocks/parsers';
+
+// Create and register the parser
+const parser = createHandlerExpressionParser();
+registry.define('handler', parser);
+
+// Parse an expression
+const result = parser.tryParse('save($event, @item.id)');
+</code></pre>

@@ -27,9 +27,9 @@
         <h1>Declarative SPA Demo</h1>
         
         <nav>
-          <button data-view="counter" data-active="true" on:click="navigate">Counter</button>
-          <button data-view="todos" data-active="false" on:click="navigate">Todo List</button>
-          <button data-view="form" data-active="false" on:click="navigate">Form</button>
+          <button data-view="counter" data-active="true" on:click="navigate($event)">Counter</button>
+          <button data-view="todos" data-active="false" on:click="navigate($event)">Todo List</button>
+          <button data-view="form" data-active="false" on:click="navigate($event)">Form</button>
         </nav>
       </header>
       
@@ -40,9 +40,9 @@
           <h2>Counter Demo</h2>
           <div class="counter-value" bind-text="count">0</div>
           <div class="counter-controls">
-            <button on:click="decrement">Decrement</button>
-            <button class="secondary" on:click="reset">Reset</button>
-            <button on:click="increment">Increment</button>
+            <button on:click="decrement($event)">Decrement</button>
+            <button class="secondary" on:click="reset($event)">Reset</button>
+            <button on:click="increment($event)">Increment</button>
           </div>
         </div>
       </section>
@@ -52,7 +52,7 @@
         <div class="todo-section">
           <h2>Todo List</h2>
           
-          <form class="todo-form" on:submit="addTodo">
+          <form class="todo-form" on:submit="addTodo($event)">
             <input 
               type="text" 
               placeholder="Add a new todo..." 
@@ -166,354 +166,137 @@
 
   <!-- Demo JS Source (for code viewer - stored as text/plain so Vite doesn't transform it) -->
   <script type="text/plain" id="demo-js-source">
-// Destructure globals (plugged mode)
-// Bootstrap provides: injectors, attributes, stores, contexts
-const { CustomStore, CustomAttribute } = window;
+// Import blocks and globals
+import { createOnEventAttribute } from '/blocks/attributes/on-event/OnEventAttribute';
+import { CallParser } from '/blocks/parsers/call/CallParser';
+import { ValueParser } from '/blocks/parsers/value/ValueParser';
+import { PipeParser } from '/blocks/parsers/pipe/PipeParser';
+import { CustomExpressionParserRegistry } from '/plugs/webexpressions';
+const { CustomAttribute, injectors } = window;
+
+// === PARSER REGISTRY SETUP ===
+// Register composable parsers via CustomExpressionParserRegistry
+const parsers = new CustomExpressionParserRegistry();
+parsers.define('call', new CallParser());
+parsers.define('value', new ValueParser());
+parsers.define('pipe', new PipeParser());
+
+// Provide parsers via the injector system
+const documentInjector = injectors.getInjectorOf(document);
+documentInjector.set('customExpressionParsers', parsers);
+
+// === STORES ===
 
 // Counter Store
-class CounterStore extends CustomStore {
-  constructor(options = {}) {
-    super(options);
-    this._state = { count: 0 };
-    this._listeners = [];
-  }
-
-  subscribe(callback) {
-    this._listeners.push(callback);
-    return () => {
-      this._listeners = this._listeners.filter(l => l !== callback);
-    };
-  }
-
-  getItem(key) {
-    return this._state[key];
-  }
-
-  setItem(key, value) {
-    this._state[key] = value;
-    this._listeners.forEach(callback => callback(this._state));
-  }
-
-  get state() {
-    return this._state;
-  }
-}
+const counterStore = {
+  _state: { count: 0 },
+  _listeners: [],
+  subscribe(cb) { this._listeners.push(cb); return () => this._listeners = this._listeners.filter(l => l !== cb); },
+  getItem(key) { return this._state[key]; },
+  setItem(key, value) { this._state[key] = value; this._listeners.forEach(cb => cb(this._state)); }
+};
 
 // Todo Store
-class TodoStore extends CustomStore {
-  constructor(options = {}) {
-    super(options);
-    this._state = {
-      todos: [],
-      newTodoText: '',
-      totalTodos: 0,
-      activeTodos: 0,
-      completedTodos: 0
-    };
-    this._listeners = [];
-  }
-
-  subscribe(callback) {
-    this._listeners.push(callback);
-    return () => {
-      this._listeners = this._listeners.filter(l => l !== callback);
-    };
-  }
-
-  getItem(key) {
-    return this._state[key];
-  }
-
+const todoStore = {
+  _state: { todos: [], newTodoText: '', totalTodos: 0, activeTodos: 0, completedTodos: 0 },
+  _listeners: [],
+  subscribe(cb) { this._listeners.push(cb); return () => this._listeners = this._listeners.filter(l => l !== cb); },
+  getItem(key) { return this._state[key]; },
   setItem(key, value) {
     this._state[key] = value;
-    this._updateStats();
-    this._listeners.forEach(callback => callback(this._state));
-  }
-
-  _updateStats() {
     const todos = this._state.todos || [];
     this._state.totalTodos = todos.length;
     this._state.activeTodos = todos.filter(t => !t.completed).length;
     this._state.completedTodos = todos.filter(t => t.completed).length;
+    this._listeners.forEach(cb => cb(this._state));
   }
-
-  get state() {
-    return this._state;
-  }
-}
+};
 
 // Form Store
-class FormStore extends CustomStore {
-  constructor(options = {}) {
-    super(options);
-    this._state = {
-      formData: {
-        name: '',
-        email: '',
-        role: ''
-      }
-    };
-    this._listeners = [];
-  }
-
-  subscribe(callback) {
-    this._listeners.push(callback);
-    return () => {
-      this._listeners = this._listeners.filter(l => l !== callback);
-    };
-  }
-
+const formStore = {
+  _state: { formData: { name: '', email: '', role: '' } },
+  _listeners: [],
+  subscribe(cb) { this._listeners.push(cb); return () => this._listeners = this._listeners.filter(l => l !== cb); },
   getItem(key) {
-    if (key.includes('.')) {
-      const parts = key.split('.');
-      return this._state[parts[0]]?.[parts[1]];
-    }
+    if (key.includes('.')) { const [obj, prop] = key.split('.'); return this._state[obj]?.[prop]; }
     return this._state[key];
-  }
-
+  },
   setItem(key, value) {
-    if (key.includes('.')) {
-      const parts = key.split('.');
-      if (!this._state[parts[0]]) {
-        this._state[parts[0]] = {};
-      }
-      this._state[parts[0]][parts[1]] = value;
-    } else {
-      this._state[key] = value;
+    if (key.includes('.')) { const [obj, prop] = key.split('.'); this._state[obj] = this._state[obj] || {}; this._state[obj][prop] = value; }
+    else { this._state[key] = value; }
+    this._listeners.forEach(cb => cb(this._state));
+  }
+};
+
+// === EVENT HANDLERS (using blocks/on-event) ===
+
+const handlers = {
+  // Counter actions
+  increment: (e) => {
+    e.preventDefault();
+    counterStore.setItem('count', counterStore.getItem('count') + 1);
+  },
+  decrement: (e) => {
+    e.preventDefault();
+    counterStore.setItem('count', counterStore.getItem('count') - 1);
+  },
+  reset: (e) => {
+    e.preventDefault();
+    counterStore.setItem('count', 0);
+  },
+
+  // Navigation - uses $event to get the clicked button
+  navigate: (e) => {
+    e.preventDefault();
+    const viewName = e.target.getAttribute('data-view');
+    if (viewName) {
+      document.querySelectorAll('nav button').forEach(btn => btn.setAttribute('data-active', 'false'));
+      e.target.setAttribute('data-active', 'true');
+      document.querySelectorAll('.view').forEach(view => view.setAttribute('data-active', 'false'));
+      document.querySelector(`.view[data-view="${viewName}"]`)?.setAttribute('data-active', 'true');
     }
-    this._listeners.forEach(callback => callback(this._state));
-  }
+  },
 
-  get state() {
-    return this._state;
-  }
-}
-
-// Register stores
-stores.define('counter', CounterStore);
-stores.define('todo', TodoStore);
-stores.define('form', FormStore);
-
-// Create store instances
-const counterStore = new CounterStore();
-const todoStore = new TodoStore();
-const formStore = new FormStore();
-
-// Bind-Text Attribute
-class BindTextAttribute extends CustomAttribute {
-  connectedCallback() {
-    const path = this.value;
-    if (!path) return;
-
-    // Determine which store to use
-    let store;
-    if (path.startsWith('formData.')) {
-      store = formStore;
-    } else if (['newTodoText', 'totalTodos', 'activeTodos', 'completedTodos'].includes(path)) {
-      store = todoStore;
-    } else {
-      store = counterStore;
+  // Todo actions
+  addTodo: (e) => {
+    e.preventDefault();
+    const text = todoStore.getItem('newTodoText');
+    if (text?.trim()) {
+      const todos = todoStore.getItem('todos') || [];
+      todoStore.setItem('todos', [...todos, { id: Date.now(), text: text.trim(), completed: false }]);
+      todoStore.setItem('newTodoText', '');
+      renderTodos();
     }
+  },
 
-    // Initial update
-    this._updateText(store, path);
+  // Expression syntax passes the id directly: toggleTodo($event, 123)
+  toggleTodo: (e, id) => {
+    const todos = todoStore.getItem('todos');
+    const updated = todos.map(t => t.id === id ? { ...t, completed: e.target.checked } : t);
+    todoStore.setItem('todos', updated);
+  },
 
-    // Subscribe to changes
-    this._unsubscribe = store.subscribe(() => {
-      this._updateText(store, path);
-    });
+  deleteTodo: (e, id) => {
+    e.preventDefault();
+    const todos = todoStore.getItem('todos');
+    todoStore.setItem('todos', todos.filter(t => t.id !== id));
   }
+};
 
-  _updateText(store, path) {
-    const value = store.getItem(path);
-    if (this.target) {
-      this.target.textContent = value ?? '';
-    }
-  }
+// Provide handlers via the injector system (context-based approach)
+documentInjector.set('customContexts:handlers', handlers);
 
-  disconnectedCallback() {
-    if (this._unsubscribe) {
-      this._unsubscribe();
-    }
-  }
-}
+// Create on:* attributes using the block factory
+// All context (handlers, state) is resolved from the injector chain
+const OnEventAttribute = createOnEventAttribute();
 
-// Bind-Value Attribute
-class BindValueAttribute extends CustomAttribute {
-  connectedCallback() {
-    const path = this.value;
-    if (!path) return;
+// Register event attributes
+attributes.define('on:click', OnEventAttribute);
+attributes.define('on:submit', OnEventAttribute);
+attributes.define('on:change', OnEventAttribute);
 
-    // Determine which store to use
-    let store;
-    if (path.startsWith('formData.')) {
-      store = formStore;
-    } else if (path === 'newTodoText') {
-      store = todoStore;
-    } else {
-      store = counterStore;
-    }
-
-    // Initial update
-    const value = store.getItem(path);
-    if (this.target && value !== undefined) {
-      this.target.value = value;
-    }
-
-    // Listen to input changes
-    this._handleInput = (e) => {
-      store.setItem(path, e.target.value);
-    };
-    this.target?.addEventListener('input', this._handleInput);
-
-    // Subscribe to store changes
-    this._unsubscribe = store.subscribe(() => {
-      const newValue = store.getItem(path);
-      if (this.target && this.target.value !== newValue) {
-        this.target.value = newValue ?? '';
-      }
-    });
-  }
-
-  disconnectedCallback() {
-    this.target?.removeEventListener('input', this._handleInput);
-    if (this._unsubscribe) {
-      this._unsubscribe();
-    }
-  }
-}
-
-// On:Click Attribute
-class OnClickAttribute extends CustomAttribute {
-  connectedCallback() {
-    const action = this.value;
-
-    this._handleClick = (e) => {
-      e.preventDefault();
-
-      switch (action) {
-        case 'increment':
-          counterStore.setItem('count', counterStore.getItem('count') + 1);
-          break;
-        case 'decrement':
-          counterStore.setItem('count', counterStore.getItem('count') - 1);
-          break;
-        case 'reset':
-          counterStore.setItem('count', 0);
-          break;
-        case 'navigate':
-          const viewName = e.target.getAttribute('data-view');
-          if (viewName) {
-            // Update nav buttons
-            document.querySelectorAll('nav button').forEach(btn => {
-              btn.setAttribute('data-active', 'false');
-            });
-            e.target.setAttribute('data-active', 'true');
-
-            // Update views
-            document.querySelectorAll('.view').forEach(view => {
-              view.setAttribute('data-active', 'false');
-            });
-            document.querySelector(`.view[data-view="${viewName}"]`)?.setAttribute('data-active', 'true');
-          }
-          break;
-      }
-    };
-
-    this.target?.addEventListener('click', this._handleClick);
-  }
-
-  disconnectedCallback() {
-    this.target?.removeEventListener('click', this._handleClick);
-  }
-}
-
-// On:Submit Attribute
-class OnSubmitAttribute extends CustomAttribute {
-  connectedCallback() {
-    const action = this.value;
-
-    this._handleSubmit = (e) => {
-      e.preventDefault();
-
-      if (action === 'addTodo') {
-        const text = todoStore.getItem('newTodoText');
-        if (text.trim()) {
-          const todos = todoStore.getItem('todos') || [];
-          const newTodo = {
-            id: Date.now(),
-            text: text.trim(),
-            completed: false
-          };
-          todoStore.setItem('todos', [...todos, newTodo]);
-          todoStore.setItem('newTodoText', '');
-
-          // Render todos
-          this._renderTodos();
-        }
-      }
-    };
-
-    this.target?.addEventListener('submit', this._handleSubmit);
-
-    // Subscribe to todo changes for rendering
-    this._unsubscribe = todoStore.subscribe(() => {
-      this._renderTodos();
-    });
-  }
-
-  _renderTodos() {
-    const list = document.querySelector('[data-list="todos"]');
-    if (!list) return;
-
-    const todos = todoStore.getItem('todos') || [];
-    list.innerHTML = '';
-
-    todos.forEach(todo => {
-      const li = document.createElement('li');
-      li.className = 'todo-item';
-      li.setAttribute('data-completed', todo.completed);
-
-      li.innerHTML = `
-        <input type="checkbox" class="todo-checkbox" ${todo.completed ? 'checked' : ''} data-todo-id="${todo.id}">
-        <span class="todo-text">${todo.text}</span>
-        <button class="todo-delete" data-todo-id="${todo.id}">Delete</button>
-      `;
-
-      // Add event listeners
-      const checkbox = li.querySelector('.todo-checkbox');
-      checkbox.addEventListener('change', (e) => {
-        const todos = todoStore.getItem('todos');
-        const updated = todos.map(t =>
-          t.id === todo.id ? { ...t, completed: e.target.checked } : t
-        );
-        todoStore.setItem('todos', updated);
-      });
-
-      const deleteBtn = li.querySelector('.todo-delete');
-      deleteBtn.addEventListener('click', () => {
-        const todos = todoStore.getItem('todos');
-        const filtered = todos.filter(t => t.id !== todo.id);
-        todoStore.setItem('todos', filtered);
-      });
-
-      list.appendChild(li);
-    });
-  }
-
-  disconnectedCallback() {
-    this.target?.removeEventListener('submit', this._handleSubmit);
-    if (this._unsubscribe) {
-      this._unsubscribe();
-    }
-  }
-}
-
-// Register attributes
-attributes.define('bind-text', BindTextAttribute);
-attributes.define('bind-value', BindValueAttribute);
-attributes.define('on:click', OnClickAttribute);
-attributes.define('on:submit', OnSubmitAttribute);
+// Register binding attributes (bind-text, bind-value)
+// ... (simplified for display)
 
 // Upgrade document
 attributes.upgrade(document.body);
@@ -521,207 +304,227 @@ attributes.upgrade(document.body);
 
   <!-- Demo Code -->
   <script type="module">
+    // Import blocks
+    import { createOnEventAttribute } from '/blocks/attributes/on-event/OnEventAttribute';
+    import { CallParser } from '/blocks/parsers/call/CallParser';
+    import { ValueParser } from '/blocks/parsers/value/ValueParser';
+    import { PipeParser } from '/blocks/parsers/pipe/PipeParser';
+    import { CustomExpressionParserRegistry } from '/plugs/webexpressions';
+
     // Destructure globals (plugged mode)
-    // Bootstrap provides: injectors, attributes, stores, contexts
-    const { CustomStore, CustomAttribute } = window;
-    
-    // Counter Store
-    class CounterStore extends CustomStore {
-      constructor(options = {}) {
-        super(options);
-        this._state = { count: 0 };
-        this._listeners = [];
-      }
-      
-      subscribe(callback) {
-        this._listeners.push(callback);
-        return () => {
-          this._listeners = this._listeners.filter(l => l !== callback);
-        };
-      }
-      
-      getItem(key) {
-        return this._state[key];
-      }
-      
-      setItem(key, value) {
-        this._state[key] = value;
-        this._listeners.forEach(callback => callback(this._state));
-      }
-      
-      get state() {
-        return this._state;
-      }
-    }
-    
-    // Todo Store
-    class TodoStore extends CustomStore {
-      constructor(options = {}) {
-        super(options);
-        this._state = {
-          todos: [],
-          newTodoText: '',
-          totalTodos: 0,
-          activeTodos: 0,
-          completedTodos: 0
-        };
-        this._listeners = [];
-      }
-      
-      subscribe(callback) {
-        this._listeners.push(callback);
-        return () => {
-          this._listeners = this._listeners.filter(l => l !== callback);
-        };
-      }
-      
-      getItem(key) {
-        return this._state[key];
-      }
-      
-      setItem(key, value) {
-        this._state[key] = value;
-        this._updateStats();
-        this._listeners.forEach(callback => callback(this._state));
-      }
-      
-      _updateStats() {
-        const todos = this._state.todos || [];
-        this._state.totalTodos = todos.length;
-        this._state.activeTodos = todos.filter(t => !t.completed).length;
-        this._state.completedTodos = todos.filter(t => t.completed).length;
-      }
-      
-      get state() {
-        return this._state;
-      }
-    }
-    
-    // Form Store
-    class FormStore extends CustomStore {
-      constructor(options = {}) {
-        super(options);
-        this._state = {
-          formData: {
-            name: '',
-            email: '',
-            role: ''
+    const { CustomAttribute, injectors } = window;
+
+    // === PARSER REGISTRY SETUP ===
+    // Register composable parsers via CustomExpressionParserRegistry
+    const parsers = new CustomExpressionParserRegistry();
+    parsers.define('call', new CallParser());
+    parsers.define('value', new ValueParser());
+    parsers.define('pipe', new PipeParser());
+
+    // Provide parsers via the injector system
+    const documentInjector = injectors.getInjectorOf(document);
+    documentInjector.set('customExpressionParsers', parsers);
+
+    // === STORES ===
+
+    // Simple store implementation
+    function createStore(initialState) {
+      const store = {
+        _state: initialState,
+        _listeners: [],
+        subscribe(callback) {
+          store._listeners.push(callback);
+          return () => { store._listeners = store._listeners.filter(l => l !== callback); };
+        },
+        getItem(key) {
+          if (key.includes('.')) {
+            const [obj, prop] = key.split('.');
+            return store._state[obj]?.[prop];
           }
-        };
-        this._listeners = [];
-      }
-      
-      subscribe(callback) {
-        this._listeners.push(callback);
-        return () => {
-          this._listeners = this._listeners.filter(l => l !== callback);
-        };
-      }
-      
-      getItem(key) {
-        if (key.includes('.')) {
-          const parts = key.split('.');
-          return this._state[parts[0]]?.[parts[1]];
-        }
-        return this._state[key];
-      }
-      
-      setItem(key, value) {
-        if (key.includes('.')) {
-          const parts = key.split('.');
-          if (!this._state[parts[0]]) {
-            this._state[parts[0]] = {};
+          return store._state[key];
+        },
+        setItem(key, value) {
+          if (key.includes('.')) {
+            const [obj, prop] = key.split('.');
+            store._state[obj] = store._state[obj] || {};
+            store._state[obj][prop] = value;
+          } else {
+            store._state[key] = value;
           }
-          this._state[parts[0]][parts[1]] = value;
-        } else {
-          this._state[key] = value;
+          store._listeners.forEach(cb => cb(store._state));
         }
-        this._listeners.forEach(callback => callback(this._state));
-      }
-      
-      get state() {
-        return this._state;
-      }
+      };
+      return store;
     }
-    
-    // Register stores
-    stores.define('counter', CounterStore);
-    stores.define('todo', TodoStore);
-    stores.define('form', FormStore);
-    
-    // Create store instances
-    const counterStore = new CounterStore();
-    const todoStore = new TodoStore();
-    const formStore = new FormStore();
-    
+
+    // Create stores
+    const counterStore = createStore({ count: 0 });
+
+    const todoStore = createStore({
+      todos: [],
+      newTodoText: '',
+      totalTodos: 0,
+      activeTodos: 0,
+      completedTodos: 0
+    });
+    // Override setItem to update stats BEFORE notifying listeners
+    todoStore.setItem = (key, value) => {
+      if (key.includes('.')) {
+        const [obj, prop] = key.split('.');
+        todoStore._state[obj] = todoStore._state[obj] || {};
+        todoStore._state[obj][prop] = value;
+      } else {
+        todoStore._state[key] = value;
+      }
+      // Update stats before notifying
+      const todos = todoStore._state.todos || [];
+      todoStore._state.totalTodos = todos.length;
+      todoStore._state.activeTodos = todos.filter(t => !t.completed).length;
+      todoStore._state.completedTodos = todos.filter(t => t.completed).length;
+      // Now notify listeners
+      todoStore._listeners.forEach(cb => cb(todoStore._state));
+    };
+
+    const formStore = createStore({
+      formData: { name: '', email: '', role: '' }
+    });
+
+    // Helper to get store by path
+    function getStoreForPath(path) {
+      if (path.startsWith('formData.')) return formStore;
+      if (['newTodoText', 'totalTodos', 'activeTodos', 'completedTodos', 'todos'].includes(path)) return todoStore;
+      return counterStore;
+    }
+
+    // === TODO RENDERING ===
+
+    function renderTodos() {
+      const list = document.querySelector('[data-list="todos"]');
+      if (!list) return;
+
+      const todos = todoStore.getItem('todos') || [];
+      list.innerHTML = '';
+
+      todos.forEach(todo => {
+        const li = document.createElement('li');
+        li.className = 'todo-item';
+        li.setAttribute('data-completed', todo.completed);
+
+        li.innerHTML = `
+          <input type="checkbox" class="todo-checkbox" ${todo.completed ? 'checked' : ''}
+                 on:change="toggleTodo($event, ${todo.id})">
+          <span class="todo-text">${todo.text}</span>
+          <button class="todo-delete" on:click="deleteTodo($event, ${todo.id})">Delete</button>
+        `;
+
+        list.appendChild(li);
+      });
+
+      // Upgrade newly added elements
+      attributes.upgrade(list);
+    }
+
+    // Subscribe to todo changes
+    todoStore.subscribe(renderTodos);
+
+    // === EVENT HANDLERS (using blocks/on-event) ===
+
+    const handlers = {
+      // Counter actions
+      increment: (e) => {
+        e.preventDefault();
+        counterStore.setItem('count', counterStore.getItem('count') + 1);
+      },
+      decrement: (e) => {
+        e.preventDefault();
+        counterStore.setItem('count', counterStore.getItem('count') - 1);
+      },
+      reset: (e) => {
+        e.preventDefault();
+        counterStore.setItem('count', 0);
+      },
+
+      // Navigation
+      navigate: (e) => {
+        e.preventDefault();
+        const viewName = e.target.getAttribute('data-view');
+        if (viewName) {
+          document.querySelectorAll('nav button').forEach(btn => btn.setAttribute('data-active', 'false'));
+          e.target.setAttribute('data-active', 'true');
+          document.querySelectorAll('.view').forEach(view => view.setAttribute('data-active', 'false'));
+          document.querySelector(`.view[data-view="${viewName}"]`)?.setAttribute('data-active', 'true');
+        }
+      },
+
+      // Todo actions
+      addTodo: (e) => {
+        e.preventDefault();
+        const text = todoStore.getItem('newTodoText');
+        if (text?.trim()) {
+          const todos = todoStore.getItem('todos') || [];
+          todoStore.setItem('todos', [...todos, { id: Date.now(), text: text.trim(), completed: false }]);
+          todoStore.setItem('newTodoText', '');
+        }
+      },
+
+      toggleTodo: (e, id) => {
+        const todos = todoStore.getItem('todos');
+        const updated = todos.map(t => t.id === id ? { ...t, completed: e.target.checked } : t);
+        todoStore.setItem('todos', updated);
+      },
+
+      deleteTodo: (e, id) => {
+        e.preventDefault();
+        const todos = todoStore.getItem('todos');
+        todoStore.setItem('todos', todos.filter(t => t.id !== id));
+      }
+    };
+
+    // Provide handlers via the injector system (context-based approach)
+    documentInjector.set('customContexts:handlers', handlers);
+
+    // Create on:* attribute using the block factory
+    // All context (handlers, state) is resolved from the injector chain
+    const OnEventAttribute = createOnEventAttribute();
+
+    // === BINDING ATTRIBUTES ===
+
     // Bind-Text Attribute
     class BindTextAttribute extends CustomAttribute {
       connectedCallback() {
         const path = this.value;
         if (!path) return;
-        
-        // Determine which store to use
-        let store;
-        if (path.startsWith('formData.')) {
-          store = formStore;
-        } else if (['newTodoText', 'totalTodos', 'activeTodos', 'completedTodos'].includes(path)) {
-          store = todoStore;
-        } else {
-          store = counterStore;
-        }
-        
-        // Initial update
-        this._updateText(store, path);
-        
-        // Subscribe to changes
-        this._unsubscribe = store.subscribe(() => {
-          this._updateText(store, path);
-        });
+
+        const store = getStoreForPath(path);
+        this._updateText = () => {
+          if (this.target) this.target.textContent = store.getItem(path) ?? '';
+        };
+        this._updateText();
+        this._unsubscribe = store.subscribe(this._updateText);
       }
-      
-      _updateText(store, path) {
-        const value = store.getItem(path);
-        if (this.target) {
-          this.target.textContent = value ?? '';
-        }
-      }
-      
+
       disconnectedCallback() {
-        if (this._unsubscribe) {
-          this._unsubscribe();
-        }
+        this._unsubscribe?.();
       }
     }
-    
+
     // Bind-Value Attribute
     class BindValueAttribute extends CustomAttribute {
       connectedCallback() {
         const path = this.value;
         if (!path) return;
-        
-        // Determine which store to use
-        let store;
-        if (path.startsWith('formData.')) {
-          store = formStore;
-        } else if (path === 'newTodoText') {
-          store = todoStore;
-        } else {
-          store = counterStore;
-        }
-        
-        // Initial update
+
+        const store = getStoreForPath(path);
+
+        // Initial value
         const value = store.getItem(path);
-        if (this.target && value !== undefined) {
-          this.target.value = value;
-        }
-        
-        // Listen to input changes
-        this._handleInput = (e) => {
-          store.setItem(path, e.target.value);
-        };
+        if (this.target && value !== undefined) this.target.value = value;
+
+        // Handle input
+        this._handleInput = (e) => store.setItem(path, e.target.value);
         this.target?.addEventListener('input', this._handleInput);
-        
-        // Subscribe to store changes
+
+        // Sync from store
         this._unsubscribe = store.subscribe(() => {
           const newValue = store.getItem(path);
           if (this.target && this.target.value !== newValue) {
@@ -729,147 +532,21 @@ attributes.upgrade(document.body);
           }
         });
       }
-      
+
       disconnectedCallback() {
         this.target?.removeEventListener('input', this._handleInput);
-        if (this._unsubscribe) {
-          this._unsubscribe();
-        }
+        this._unsubscribe?.();
       }
     }
-    
-    // On:Click Attribute
-    class OnClickAttribute extends CustomAttribute {
-      connectedCallback() {
-        const action = this.value;
-        
-        this._handleClick = (e) => {
-          e.preventDefault();
-          
-          switch (action) {
-            case 'increment':
-              counterStore.setItem('count', counterStore.getItem('count') + 1);
-              break;
-            case 'decrement':
-              counterStore.setItem('count', counterStore.getItem('count') - 1);
-              break;
-            case 'reset':
-              counterStore.setItem('count', 0);
-              break;
-            case 'navigate':
-              const viewName = e.target.getAttribute('data-view');
-              if (viewName) {
-                // Update nav buttons
-                document.querySelectorAll('nav button').forEach(btn => {
-                  btn.setAttribute('data-active', 'false');
-                });
-                e.target.setAttribute('data-active', 'true');
-                
-                // Update views
-                document.querySelectorAll('.view').forEach(view => {
-                  view.setAttribute('data-active', 'false');
-                });
-                document.querySelector(`.view[data-view="${viewName}"]`)?.setAttribute('data-active', 'true');
-              }
-              break;
-          }
-        };
-        
-        this.target?.addEventListener('click', this._handleClick);
-      }
-      
-      disconnectedCallback() {
-        this.target?.removeEventListener('click', this._handleClick);
-      }
-    }
-    
-    // On:Submit Attribute
-    class OnSubmitAttribute extends CustomAttribute {
-      connectedCallback() {
-        const action = this.value;
-        
-        this._handleSubmit = (e) => {
-          e.preventDefault();
-          
-          if (action === 'addTodo') {
-            const text = todoStore.getItem('newTodoText');
-            if (text.trim()) {
-              const todos = todoStore.getItem('todos') || [];
-              const newTodo = {
-                id: Date.now(),
-                text: text.trim(),
-                completed: false
-              };
-              todoStore.setItem('todos', [...todos, newTodo]);
-              todoStore.setItem('newTodoText', '');
-              
-              // Render todos
-              this._renderTodos();
-            }
-          }
-        };
-        
-        this.target?.addEventListener('submit', this._handleSubmit);
-        
-        // Subscribe to todo changes for rendering
-        this._unsubscribe = todoStore.subscribe(() => {
-          this._renderTodos();
-        });
-      }
-      
-      _renderTodos() {
-        const list = document.querySelector('[data-list="todos"]');
-        if (!list) return;
-        
-        const todos = todoStore.getItem('todos') || [];
-        list.innerHTML = '';
-        
-        todos.forEach(todo => {
-          const li = document.createElement('li');
-          li.className = 'todo-item';
-          li.setAttribute('data-completed', todo.completed);
-          
-          li.innerHTML = `
-            <input type="checkbox" class="todo-checkbox" ${todo.completed ? 'checked' : ''} data-todo-id="${todo.id}">
-            <span class="todo-text">${todo.text}</span>
-            <button class="todo-delete" data-todo-id="${todo.id}">Delete</button>
-          `;
-          
-          // Add event listeners
-          const checkbox = li.querySelector('.todo-checkbox');
-          checkbox.addEventListener('change', (e) => {
-            const todos = todoStore.getItem('todos');
-            const updated = todos.map(t => 
-              t.id === todo.id ? { ...t, completed: e.target.checked } : t
-            );
-            todoStore.setItem('todos', updated);
-          });
-          
-          const deleteBtn = li.querySelector('.todo-delete');
-          deleteBtn.addEventListener('click', () => {
-            const todos = todoStore.getItem('todos');
-            const filtered = todos.filter(t => t.id !== todo.id);
-            todoStore.setItem('todos', filtered);
-          });
-          
-          list.appendChild(li);
-        });
-      }
-      
-      disconnectedCallback() {
-        this.target?.removeEventListener('submit', this._handleSubmit);
-        if (this._unsubscribe) {
-          this._unsubscribe();
-        }
-      }
-    }
-    
-    // Register attributes
+
+    // === REGISTER ATTRIBUTES ===
+
     attributes.define('bind-text', BindTextAttribute);
     attributes.define('bind-value', BindValueAttribute);
-    attributes.define('on:click', OnClickAttribute);
-    attributes.define('on:submit', OnSubmitAttribute);
-    
+    attributes.define('on:click', OnEventAttribute);
+    attributes.define('on:submit', OnEventAttribute);
+    attributes.define('on:change', OnEventAttribute);
+
     // Upgrade document
     attributes.upgrade(document.body);
     

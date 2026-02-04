@@ -143,7 +143,7 @@ export function applyNodeContextsPatch(): void {
     },
   });
 
-  // queryContext: Queries context with path expression
+  // queryContext: Queries context with expression
   Object.defineProperty(Node.prototype, 'queryContext', {
     ...baseDescriptor,
     value(this: Node, contextType: string, query: any): any {
@@ -219,7 +219,7 @@ declare global {
     hasOwnContext(contextType: string): boolean;
 
     /**
-     * Query a context with a path expression
+     * Query a context with an expression
      */
     queryContext(contextType: string, query: any): any;
   }

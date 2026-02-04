@@ -49,11 +49,93 @@
     "summary": "Structural directive for rendering lists of items based on an array."
   },
   {
+    "id": "handler-expression-parser",
+    "name": "Handler Expression Parser",
+    "status": "active",
+    "type": "Parser",
+    "summary": "Parser for function-call style event handler expressions. Extends CustomAttributeParser for registry integration.",
+    "exports": [
+      "HandlerExpressionParser",
+      "HandlerExpressionParseError",
+      "HandlerExpressionShadowError",
+      "createHandlerExpressionParser"
+    ],
+    "extendsClass": "CustomAttributeParser",
+    "registryName": "CustomAttributeParserRegistry",
+    "defaultParserName": "handler",
+    "designDecisions": {
+      "magicVariables": {
+        "prefix": "$",
+        "description": "Magic variables are prefixed with $ to distinguish them from user-defined state",
+        "variables": {
+          "$event": "The native DOM Event object passed to the handler",
+          "$element": "The element the event handler is attached to",
+          "$target": "The event.target - the element that triggered the event"
+        },
+        "rationale": "Using $ is common in Vue, Svelte, and other frameworks. It creates a clear visual distinction between framework-provided values and user data."
+      },
+      "namedContexts": {
+        "prefix": "@",
+        "description": "Named contexts are prefixed with @ to access scoped data from parent elements",
+        "examples": {
+          "@item": "ForEach loop context (e.g., @item.id, @item.name)",
+          "@theme": "Theme context from a provider",
+          "@state": "Explicit access to the default state context",
+          "@t": "Translations context"
+        },
+        "rationale": "The @ prefix is distinct from $ and provides clear scoping. Similar to Angular's template reference variables but for contexts."
+      },
+      "defaultState": {
+        "description": "Bare identifiers resolve to the default state context",
+        "examples": ["count", "user.name", "items[0]"],
+        "rationale": "Most expressions reference state, so bare identifiers reduce verbosity. @state.count and count are equivalent."
+      },
+      "contextShadowing": {
+        "modes": ["error", "warn", "allow"],
+        "default": "warn",
+        "description": "Controls behavior when a context name shadows another in nested scopes",
+        "rationale": "Shadowing can cause subtle bugs. Default to warning to alert developers while not breaking during development."
+      },
+      "forEachNaming": {
+        "syntax": "for-each=\"items as item\"",
+        "description": "The 'as' keyword names the loop context",
+        "rationale": "Matches PHP/Blade/many template languages. Intuitive for developers familiar with foreach loops."
+      }
+    }
+  },
+  {
     "id": "event-behaviors",
     "name": "Event Behaviors (on:*)",
-    "status": "draft",
+    "status": "active",
     "type": "Behavior Category",
-    "summary": "Declarative event-to-action mapping using namespaced attributes (e.g., on:click) and argument passing (arg-*)."
+    "summary": "Declarative event-to-action mapping using expression syntax with context resolution.",
+    "exports": [
+      "createOnEventAttribute",
+      "createEventAttributes",
+      "registerEventAttributes"
+    ],
+    "syntax": {
+      "description": "Expression syntax with inline arguments",
+      "examples": [
+        "on:click=\"save($event)\"",
+        "on:click=\"delete($event, @item.id)\"",
+        "on:change=\"update(value, @form.field)\""
+      ]
+    },
+    "configuration": {
+      "getHandlers": "Required. Function returning handler registry for an element",
+      "getContexts": "Optional. Function returning named contexts Map",
+      "getState": "Optional. Function returning default state object",
+      "parserName": "Optional. Name of parser in CustomAttributeParserRegistry (default: 'handler')"
+    },
+    "parserResolution": {
+      "description": "HandlerExpressionParser is resolved from CustomAttributeParserRegistry in the injector chain",
+      "registryProvider": "customAttributeParsers",
+      "defaultParserName": "handler",
+      "required": true,
+      "error": "MissingParserError thrown if no parser found in registry"
+    },
+    "designRationale": "Parser registry allows different DOM subtrees to use different parser configurations. Parsers extend CustomAttributeParser for consistency with the attribute parsing system."
   },
   {
     "id": "trusted-html",
