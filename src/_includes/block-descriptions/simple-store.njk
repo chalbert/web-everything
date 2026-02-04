@@ -1,0 +1,99 @@
+<h2>Store: SimpleStore</h2>
+<p>A concrete implementation of <code>CustomStore</code> providing ready-to-use state management with automatic listener management, dot-notation path support for nested state, and an optional hook for derived state calculations.</p>
+
+<h3>Features</h3>
+<ul>
+  <li><strong>Automatic subscription management</strong> - <code>subscribe()</code> returns an unsubscribe function</li>
+  <li><strong>Dot-notation paths</strong> - Access nested state with <code>'user.name'</code> syntax</li>
+  <li><strong>Derived state hook</strong> - Compute values before listeners are notified</li>
+  <li><strong>Auto-create intermediate objects</strong> - Setting <code>'a.b.c'</code> creates <code>a</code> and <code>b</code> if needed</li>
+</ul>
+
+<h3>Basic Usage</h3>
+<pre><code class="language-javascript">import { SimpleStore } from '/blocks/stores/simple';
+
+// Create a store with initial state
+const counter = new SimpleStore({ count: 0 });
+
+// Subscribe to changes
+const unsubscribe = counter.subscribe(state => {
+  console.log('Count:', state.count);
+});
+
+// Update state (notifies subscribers)
+counter.setItem('count', counter.getItem('count') + 1);
+
+// Unsubscribe when done
+unsubscribe();
+</code></pre>
+
+<h3>Nested State with Dot-Notation</h3>
+<pre><code class="language-javascript">const form = new SimpleStore({
+  user: { name: '', email: '' }
+});
+
+// Get nested values
+form.getItem('user.name');  // ''
+
+// Set nested values
+form.setItem('user.name', 'John');
+form.setItem('user.email', 'john@example.com');
+
+// State is now: { user: { name: 'John', email: 'john@example.com' } }
+</code></pre>
+
+<h3>Derived State with onBeforeNotify</h3>
+<pre><code class="language-javascript">const todoStore = new SimpleStore(
+  { todos: [], totalTodos: 0, activeTodos: 0, completedTodos: 0 },
+  // This hook runs BEFORE subscribers are notified
+  (state) => {
+    state.totalTodos = state.todos.length;
+    state.activeTodos = state.todos.filter(t => !t.completed).length;
+    state.completedTodos = state.todos.filter(t => t.completed).length;
+  }
+);
+
+// When todos change, stats are automatically updated
+todoStore.setItem('todos', [
+  { id: 1, completed: false },
+  { id: 2, completed: true }
+]);
+
+todoStore.getItem('totalTodos');     // 2
+todoStore.getItem('activeTodos');    // 1
+todoStore.getItem('completedTodos'); // 1
+</code></pre>
+
+<h3>API Reference</h3>
+<table>
+  <tr>
+    <th>Method</th>
+    <th>Description</th>
+  </tr>
+  <tr>
+    <td><code>constructor(initialState, onBeforeNotify?)</code></td>
+    <td>Create store with initial state and optional derived state hook</td>
+  </tr>
+  <tr>
+    <td><code>getItem(key)</code></td>
+    <td>Get value by key or dot-notation path</td>
+  </tr>
+  <tr>
+    <td><code>setItem(key, value)</code></td>
+    <td>Set value and notify subscribers</td>
+  </tr>
+  <tr>
+    <td><code>subscribe(listener)</code></td>
+    <td>Subscribe to changes, returns unsubscribe function</td>
+  </tr>
+  <tr>
+    <td><code>state</code></td>
+    <td>Direct access to current state object</td>
+  </tr>
+</table>
+
+<h3>Exports</h3>
+<ul>
+  <li><code>SimpleStore</code> - The store class</li>
+  <li><code>SimpleStoreOptions</code> - TypeScript interface for constructor options</li>
+</ul>

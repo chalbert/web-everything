@@ -29,6 +29,13 @@ import CustomStoreRegistry from './webstates/CustomStoreRegistry';
 import CustomAttribute from './webbehaviors/CustomAttribute';
 import CustomAttributeRegistry from './webbehaviors/CustomAttributeRegistry';
 
+// Import expression parsers and event attributes
+import { CustomExpressionParserRegistry } from './webexpressions';
+import { CallParser } from '../blocks/parsers/call/CallParser';
+import { ValueParser } from '../blocks/parsers/value/ValueParser';
+import { PipeParser } from '../blocks/parsers/pipe/PipeParser';
+import { registerEventAttributes } from '../blocks/attributes/on-event/OnEventAttribute';
+
 // Extend Window interface
 declare global {
   interface Window {
@@ -138,5 +145,19 @@ window.contexts = new CustomContextRegistry();
 window.stores = new CustomStoreRegistry();
 window.attributes = new CustomAttributeRegistry();
 
+// Setup expression parser registry with composable parsers
+const expressionParsers = new CustomExpressionParserRegistry();
+expressionParsers.define('call', new CallParser());
+expressionParsers.define('value', new ValueParser());
+expressionParsers.define('pipe', new PipeParser());
+
+// Provide parsers on document injector
+const documentInjector = injectorRoot.getInjectorOf(document);
+documentInjector?.set('customExpressionParsers', expressionParsers);
+
+// Register event attributes (on:click, on:submit, on:change, etc.)
+registerEventAttributes(window.attributes);
+
 console.log('[Web Everything] Bootstrap complete');
 console.log('[Web Everything] Globals available: injectors, contexts, stores, attributes');
+console.log('[Web Everything] Event attributes registered: on:click, on:submit, on:change, etc.');

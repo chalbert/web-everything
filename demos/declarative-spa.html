@@ -166,67 +166,30 @@
 
   <!-- Demo JS Source (for code viewer - stored as text/plain so Vite doesn't transform it) -->
   <script type="text/plain" id="demo-js-source">
-// Import blocks and globals
-import { createOnEventAttribute } from '/blocks/attributes/on-event/OnEventAttribute';
-import { CallParser } from '/blocks/parsers/call/CallParser';
-import { ValueParser } from '/blocks/parsers/value/ValueParser';
-import { PipeParser } from '/blocks/parsers/pipe/PipeParser';
-import { CustomExpressionParserRegistry } from '/plugs/webexpressions';
+// Bootstrap provides: injectors, attributes, CustomAttribute
+// Bootstrap also pre-registers: expression parsers, event attributes (on:click, on:submit, etc.)
+import { SimpleStore } from '/blocks/stores/simple';
 const { CustomAttribute, injectors } = window;
 
-// === PARSER REGISTRY SETUP ===
-// Register composable parsers via CustomExpressionParserRegistry
-const parsers = new CustomExpressionParserRegistry();
-parsers.define('call', new CallParser());
-parsers.define('value', new ValueParser());
-parsers.define('pipe', new PipeParser());
-
-// Provide parsers via the injector system
+// Get document injector for providing handlers
 const documentInjector = injectors.getInjectorOf(document);
-documentInjector.set('customExpressionParsers', parsers);
 
-// === STORES ===
+// === STORES (using SimpleStore) ===
 
-// Counter Store
-const counterStore = {
-  _state: { count: 0 },
-  _listeners: [],
-  subscribe(cb) { this._listeners.push(cb); return () => this._listeners = this._listeners.filter(l => l !== cb); },
-  getItem(key) { return this._state[key]; },
-  setItem(key, value) { this._state[key] = value; this._listeners.forEach(cb => cb(this._state)); }
-};
+const counterStore = new SimpleStore({ count: 0 });
 
-// Todo Store
-const todoStore = {
-  _state: { todos: [], newTodoText: '', totalTodos: 0, activeTodos: 0, completedTodos: 0 },
-  _listeners: [],
-  subscribe(cb) { this._listeners.push(cb); return () => this._listeners = this._listeners.filter(l => l !== cb); },
-  getItem(key) { return this._state[key]; },
-  setItem(key, value) {
-    this._state[key] = value;
-    const todos = this._state.todos || [];
-    this._state.totalTodos = todos.length;
-    this._state.activeTodos = todos.filter(t => !t.completed).length;
-    this._state.completedTodos = todos.filter(t => t.completed).length;
-    this._listeners.forEach(cb => cb(this._state));
+const todoStore = new SimpleStore(
+  { todos: [], newTodoText: '', totalTodos: 0, activeTodos: 0, completedTodos: 0 },
+  // onBeforeNotify: compute derived stats before notifying listeners
+  (state) => {
+    const todos = state.todos || [];
+    state.totalTodos = todos.length;
+    state.activeTodos = todos.filter(t => !t.completed).length;
+    state.completedTodos = todos.filter(t => t.completed).length;
   }
-};
+);
 
-// Form Store
-const formStore = {
-  _state: { formData: { name: '', email: '', role: '' } },
-  _listeners: [],
-  subscribe(cb) { this._listeners.push(cb); return () => this._listeners = this._listeners.filter(l => l !== cb); },
-  getItem(key) {
-    if (key.includes('.')) { const [obj, prop] = key.split('.'); return this._state[obj]?.[prop]; }
-    return this._state[key];
-  },
-  setItem(key, value) {
-    if (key.includes('.')) { const [obj, prop] = key.split('.'); this._state[obj] = this._state[obj] || {}; this._state[obj][prop] = value; }
-    else { this._state[key] = value; }
-    this._listeners.forEach(cb => cb(this._state));
-  }
-};
+const formStore = new SimpleStore({ formData: { name: '', email: '', role: '' } });
 
 // === EVENT HANDLERS (using blocks/on-event) ===
 
@@ -286,17 +249,10 @@ const handlers = {
 // Provide handlers via the injector system (context-based approach)
 documentInjector.set('customContexts:handlers', handlers);
 
-// Create on:* attributes using the block factory
-// All context (handlers, state) is resolved from the injector chain
-const OnEventAttribute = createOnEventAttribute();
-
-// Register event attributes
-attributes.define('on:click', OnEventAttribute);
-attributes.define('on:submit', OnEventAttribute);
-attributes.define('on:change', OnEventAttribute);
-
 // Register binding attributes (bind-text, bind-value)
-// ... (simplified for display)
+// Event attributes (on:click, on:submit, on:change) are pre-registered by bootstrap
+attributes.define('bind-text', BindTextAttribute);
+attributes.define('bind-value', BindValueAttribute);
 
 // Upgrade document
 attributes.upgrade(document.body);
@@ -304,90 +260,31 @@ attributes.upgrade(document.body);
 
   <!-- Demo Code -->
   <script type="module">
-    // Import blocks
-    import { createOnEventAttribute } from '/blocks/attributes/on-event/OnEventAttribute';
-    import { CallParser } from '/blocks/parsers/call/CallParser';
-    import { ValueParser } from '/blocks/parsers/value/ValueParser';
-    import { PipeParser } from '/blocks/parsers/pipe/PipeParser';
-    import { CustomExpressionParserRegistry } from '/plugs/webexpressions';
-
     // Destructure globals (plugged mode)
+    // Bootstrap provides: injectors, attributes, CustomAttribute
+    // Bootstrap also registers: expression parsers, event attributes (on:click, on:submit, etc.)
+    import { SimpleStore } from '/blocks/stores/simple';
     const { CustomAttribute, injectors } = window;
 
-    // === PARSER REGISTRY SETUP ===
-    // Register composable parsers via CustomExpressionParserRegistry
-    const parsers = new CustomExpressionParserRegistry();
-    parsers.define('call', new CallParser());
-    parsers.define('value', new ValueParser());
-    parsers.define('pipe', new PipeParser());
-
-    // Provide parsers via the injector system
+    // Get document injector for providing handlers
     const documentInjector = injectors.getInjectorOf(document);
-    documentInjector.set('customExpressionParsers', parsers);
 
-    // === STORES ===
+    // === STORES (using SimpleStore) ===
 
-    // Simple store implementation
-    function createStore(initialState) {
-      const store = {
-        _state: initialState,
-        _listeners: [],
-        subscribe(callback) {
-          store._listeners.push(callback);
-          return () => { store._listeners = store._listeners.filter(l => l !== callback); };
-        },
-        getItem(key) {
-          if (key.includes('.')) {
-            const [obj, prop] = key.split('.');
-            return store._state[obj]?.[prop];
-          }
-          return store._state[key];
-        },
-        setItem(key, value) {
-          if (key.includes('.')) {
-            const [obj, prop] = key.split('.');
-            store._state[obj] = store._state[obj] || {};
-            store._state[obj][prop] = value;
-          } else {
-            store._state[key] = value;
-          }
-          store._listeners.forEach(cb => cb(store._state));
-        }
-      };
-      return store;
-    }
+    const counterStore = new SimpleStore({ count: 0 });
 
-    // Create stores
-    const counterStore = createStore({ count: 0 });
-
-    const todoStore = createStore({
-      todos: [],
-      newTodoText: '',
-      totalTodos: 0,
-      activeTodos: 0,
-      completedTodos: 0
-    });
-    // Override setItem to update stats BEFORE notifying listeners
-    todoStore.setItem = (key, value) => {
-      if (key.includes('.')) {
-        const [obj, prop] = key.split('.');
-        todoStore._state[obj] = todoStore._state[obj] || {};
-        todoStore._state[obj][prop] = value;
-      } else {
-        todoStore._state[key] = value;
+    const todoStore = new SimpleStore(
+      { todos: [], newTodoText: '', totalTodos: 0, activeTodos: 0, completedTodos: 0 },
+      // onBeforeNotify: compute derived stats before notifying listeners
+      (state) => {
+        const todos = state.todos || [];
+        state.totalTodos = todos.length;
+        state.activeTodos = todos.filter(t => !t.completed).length;
+        state.completedTodos = todos.filter(t => t.completed).length;
       }
-      // Update stats before notifying
-      const todos = todoStore._state.todos || [];
-      todoStore._state.totalTodos = todos.length;
-      todoStore._state.activeTodos = todos.filter(t => !t.completed).length;
-      todoStore._state.completedTodos = todos.filter(t => t.completed).length;
-      // Now notify listeners
-      todoStore._listeners.forEach(cb => cb(todoStore._state));
-    };
+    );
 
-    const formStore = createStore({
-      formData: { name: '', email: '', role: '' }
-    });
+    const formStore = new SimpleStore({ formData: { name: '', email: '', role: '' } });
 
     // Helper to get store by path
     function getStoreForPath(path) {
@@ -483,11 +380,8 @@ attributes.upgrade(document.body);
     // Provide handlers via the injector system (context-based approach)
     documentInjector.set('customContexts:handlers', handlers);
 
-    // Create on:* attribute using the block factory
-    // All context (handlers, state) is resolved from the injector chain
-    const OnEventAttribute = createOnEventAttribute();
-
     // === BINDING ATTRIBUTES ===
+    // Note: Event attributes (on:click, on:submit, on:change) are registered by bootstrap
 
     // Bind-Text Attribute
     class BindTextAttribute extends CustomAttribute {
@@ -540,12 +434,10 @@ attributes.upgrade(document.body);
     }
 
     // === REGISTER ATTRIBUTES ===
+    // Event attributes (on:click, on:submit, on:change) are pre-registered by bootstrap
 
     attributes.define('bind-text', BindTextAttribute);
     attributes.define('bind-value', BindValueAttribute);
-    attributes.define('on:click', OnEventAttribute);
-    attributes.define('on:submit', OnEventAttribute);
-    attributes.define('on:change', OnEventAttribute);
 
     // Upgrade document
     attributes.upgrade(document.body);

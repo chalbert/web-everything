@@ -5,9 +5,34 @@
 </section>
 <section class="standards-section">
     <h3 id="proposed-standards">Proposed Standards</h3>
-    <div class="standards-grid">
+
+    <!-- Filters -->
+    <div class="blocks-filters" style="margin-bottom: 1.5rem; display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+        <div class="filter-search" style="flex: 1; min-width: 200px;">
+            <input
+                type="text"
+                id="blocks-search"
+                placeholder="Search blocks..."
+                style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid #e2e8f0; border-radius: 0.375rem; font-size: 0.875rem;"
+            >
+        </div>
+        <div class="filter-type" style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <button class="filter-btn active" data-type="all" style="padding: 0.375rem 0.75rem; border: 1px solid #e2e8f0; border-radius: 0.375rem; background: #f8fafc; font-size: 0.75rem; cursor: pointer;">All</button>
+            {% set types = [] %}
+            {% for block in blocks %}
+                {% if block.type not in types %}
+                    {% set types = (types.push(block.type), types) %}
+                {% endif %}
+            {% endfor %}
+            {% for type in types | sort %}
+            <button class="filter-btn" data-type="{{ type }}" style="padding: 0.375rem 0.75rem; border: 1px solid #e2e8f0; border-radius: 0.375rem; background: #f8fafc; font-size: 0.75rem; cursor: pointer;">{{ type }}</button>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="standards-grid" id="blocks-grid">
         {% for block in blocks %}
-        <a href="/blocks/{{ block.id }}/" class="standard-card">
+        <a href="/blocks/{{ block.id }}/" class="standard-card" data-type="{{ block.type }}" data-name="{{ block.name | lower }}" data-summary="{{ block.summary | lower }}">
             <div class="flex justify-between items-start mb-3" style="gap: 12px; display: flex; justify-content: space-between;">
                 <h4 id="block-name" class="text-lg font-bold m-0 text-gray-900">{{ block.name }}</h4>
                 <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800" style="white-space: nowrap;">
@@ -21,4 +46,70 @@
         </a>
         {% endfor %}
     </div>
+
+    <p id="no-results" style="display: none; text-align: center; color: #64748b; padding: 2rem;">No blocks match your filters.</p>
 </section>
+
+<style>
+.filter-btn.active {
+    background: #3b82f6 !important;
+    color: white !important;
+    border-color: #3b82f6 !important;
+}
+.filter-btn:hover:not(.active) {
+    background: #e2e8f0;
+}
+.standard-card.hidden {
+    display: none !important;
+}
+</style>
+
+<script>
+(function() {
+    const searchInput = document.getElementById('blocks-search');
+    const filterBtns = document.querySelectorAll('.filter-btn');
+    const cards = document.querySelectorAll('#blocks-grid .standard-card');
+    const noResults = document.getElementById('no-results');
+
+    let currentType = 'all';
+    let currentSearch = '';
+
+    function filterCards() {
+        let visibleCount = 0;
+
+        cards.forEach(card => {
+            const type = card.dataset.type;
+            const name = card.dataset.name;
+            const summary = card.dataset.summary;
+
+            const matchesType = currentType === 'all' || type === currentType;
+            const matchesSearch = !currentSearch ||
+                name.includes(currentSearch) ||
+                summary.includes(currentSearch);
+
+            if (matchesType && matchesSearch) {
+                card.classList.remove('hidden');
+                visibleCount++;
+            } else {
+                card.classList.add('hidden');
+            }
+        });
+
+        noResults.style.display = visibleCount === 0 ? 'block' : 'none';
+    }
+
+    searchInput.addEventListener('input', (e) => {
+        currentSearch = e.target.value.toLowerCase();
+        filterCards();
+    });
+
+    filterBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            filterBtns.forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentType = btn.dataset.type;
+            filterCards();
+        });
+    });
+})();
+</script>
