@@ -1,0 +1,267 @@
+<p>
+    Declarative DOM-to-JS bridge for provider-scoped broadcast events. Fills the platform gap between
+    targeted <a href="https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API">Invoker Commands</a>
+    (1-to-1, element ID) and global <code>CustomEvent</code> dispatch (string names, no scoping).
+    Part of the <a href="/projects/webevents/">Web Events</a> ecosystem.
+</p>
+
+<h3>The Gap</h3>
+
+<p>The Invoker Commands API (Baseline 2026) gives the platform a clean declarative model for <strong>targeted commands</strong>:</p>
+
+{% highlight "html" %}
+<!-- Targeted: one button, one target, scoped by design -->
+<button commandfor="panel-1" command="--view-show">Show</button>
+{% endhighlight %}
+
+<p>
+    But some commands are inherently <strong>broadcast</strong> &mdash; they have no single target.
+    "Close all modals", "pause all media", "enter maintenance mode". Today the only option is
+    <code>document.dispatchEvent(new CustomEvent('close-modals'))</code> &mdash; a globally-scoped string
+    with all the collision risks <a href="/projects/webevents/">Web Events</a> is designed to solve.
+</p>
+
+<p>The platform has no declarative broadcast primitive:</p>
+
+<table>
+    <thead>
+        <tr><th>Pattern</th><th>Declarative (HTML)</th><th>Programmatic (JS)</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Targeted command</strong></td>
+            <td><code>commandfor</code>/<code>command</code></td>
+            <td><code>new CommandEvent()</code></td>
+        </tr>
+        <tr>
+            <td><strong>Broadcast command</strong></td>
+            <td><strong>Nothing</strong></td>
+            <td><code>listenForScoped</code> on <code>document</code></td>
+        </tr>
+    </tbody>
+</table>
+
+<p>The <code>broadcast</code> attribute fills that HTML column.</p>
+
+<h3>Usage</h3>
+
+<h4>Basic: Button broadcasts a scoped event</h4>
+{% highlight "html" %}
+<!-- The broadcast attribute value is the provider key -->
+<button broadcast="customEvents:close-modals">Close All Modals</button>
+{% endhighlight %}
+
+<p>On click, the behavior:</p>
+<ol>
+    <li>Reads the provider key from the attribute value (<code>customEvents:close-modals</code>)</li>
+    <li>Resolves the event class from the host element's injector scope</li>
+    <li>Constructs an instance of the resolved class</li>
+    <li>Dispatches it on <code>document</code></li>
+</ol>
+
+<p>Listeners using <code>listenForScoped</code> (or the plugged <code>{ provider }</code> option) receive the event
+with full <code>instanceof</code> discrimination. Other teams dispatching unrelated events with the same string name
+are silently ignored.</p>
+
+<h4>With static detail</h4>
+{% highlight "html" %}
+<button broadcast="customEvents:theme-change"
+        broadcast-detail='{"theme": "dark"}'>
+    Dark Mode
+</button>
+{% endhighlight %}
+
+<h4>With a different trigger event</h4>
+{% highlight "html" %}
+<!-- Broadcasts on form submit instead of click -->
+<form broadcast="customEvents:search-submitted"
+      broadcast-on="submit">
+    <input type="search" name="q" />
+    <button type="submit">Search</button>
+</form>
+{% endhighlight %}
+
+<h4>With dynamic detail from a store</h4>
+{% highlight "html" %}
+<!-- Reads current detail from a named store -->
+<button broadcast="customEvents:filter-applied"
+        broadcast-from="filterStore">
+    Apply Filters
+</button>
+{% endhighlight %}
+
+<h3>Web Standards Alignment</h3>
+
+<table>
+    <thead>
+        <tr><th>Standard</th><th>Status</th><th>How We Relate</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API">Invoker Commands API</a></td>
+            <td>Baseline 2026</td>
+            <td>Complementary &mdash; they handle targeted commands, we handle broadcast</td>
+        </tr>
+        <tr>
+            <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/CommandEvent/CommandEvent">CommandEvent</a></td>
+            <td>Baseline 2025</td>
+            <td>Constructable but designed for 1-to-1 button triggers, not broadcast</td>
+        </tr>
+        <tr>
+            <td><a href="https://dom.spec.whatwg.org/#interface-customevent">CustomEvent</a></td>
+            <td>Standard</td>
+            <td>The underlying dispatch mechanism &mdash; we add provider-based discrimination on top</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>How It Works</h3>
+
+{% highlight "typescript" %}
+// What the broadcast behavior does internally:
+class BroadcastBehavior extends CustomAttribute {
+  connectedCallback() {
+    this.target!.addEventListener(this.#triggerEvent, this.#onTrigger);
+  }
+
+  disconnectedCallback() {
+    this.target!.removeEventListener(this.#triggerEvent, this.#onTrigger);
+  }
+
+  #onTrigger = (e: Event) => {
+    e.preventDefault();
+
+    // 1. Resolve event class from injector
+    const providerKey = this.value; // e.g., 'customEvents:close-modals'
+    const EventClass = InjectorRoot.getProviderOf(this.target!, providerKey);
+    if (!EventClass) return;
+
+    // 2. Build detail (static JSON, store reference, or void)
+    const detail = this.#resolveDetail();
+
+    // 3. Dispatch on document
+    document.dispatchEvent(new EventClass(detail));
+  };
+
+  get #triggerEvent(): string {
+    return this.target!.getAttribute('broadcast-on') ?? 'click';
+  }
+
+  #resolveDetail(): unknown {
+    const staticDetail = this.target!.getAttribute('broadcast-detail');
+    if (staticDetail) return JSON.parse(staticDetail);
+
+    const storeKey = this.target!.getAttribute('broadcast-from');
+    if (storeKey) {
+      const store = InjectorRoot.getProviderOf(this.target!, `customStores:${storeKey}`);
+      return store?.getState();
+    }
+
+    return undefined;
+  }
+}
+{% endhighlight %}
+
+<h3>Complete Example</h3>
+
+{% highlight "html" %}
+<!-- 1. Register the event class at document level -->
+<script type="module">
+import { CloseAllModalsCommand } from './commands/modals.js';
+
+const injector = InjectorRoot.getInjectorOf(document);
+injector.set('customEvents:close-modals', CloseAllModalsCommand);
+</script>
+
+<!-- 2. Declarative broadcast trigger -->
+<button broadcast="customEvents:close-modals">Close All Modals</button>
+
+<!-- 3. Listeners — each modal uses listenForScoped -->
+<dialog modal>...</dialog>
+<dialog modal>...</dialog>
+{% endhighlight %}
+
+{% highlight "typescript" %}
+// commands/modals.ts
+export class CloseAllModalsCommand extends CustomEvent<void> {
+  static readonly type = 'close-modals';
+  constructor() {
+    super(CloseAllModalsCommand.type, { bubbles: false });
+  }
+}
+
+// modal behavior — listens with provider discrimination
+class ModalBehavior extends CustomAttribute {
+  #unsub?: Unsubscribe;
+
+  connectedCallback() {
+    this.#unsub = listenForScoped(
+      document,
+      'close-modals',
+      'customEvents:close-modals',
+      () => this.#close(),
+    );
+  }
+
+  disconnectedCallback() {
+    this.#unsub?.();
+  }
+}
+{% endhighlight %}
+
+<h3>API Reference</h3>
+
+<table>
+    <thead>
+        <tr><th>Attribute</th><th>Type</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>broadcast</code></td>
+            <td><code>string</code> (required)</td>
+            <td>Provider key for the event class to dispatch (e.g., <code>customEvents:close-modals</code>)</td>
+        </tr>
+        <tr>
+            <td><code>broadcast-on</code></td>
+            <td><code>string</code></td>
+            <td>Trigger event name. Default: <code>click</code></td>
+        </tr>
+        <tr>
+            <td><code>broadcast-detail</code></td>
+            <td><code>string</code> (JSON)</td>
+            <td>Static detail payload, parsed as JSON</td>
+        </tr>
+        <tr>
+            <td><code>broadcast-from</code></td>
+            <td><code>string</code></td>
+            <td>Store name to read dynamic detail from (resolved via <code>customStores:</code> injector key)</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Event Taxonomy Fit</h3>
+
+<p>
+    The <a href="/projects/webevents/#event-taxonomy">Web Events taxonomy</a> identifies three communication patterns.
+    The <code>broadcast</code> attribute completes the declarative HTML story:
+</p>
+
+<table>
+    <thead>
+        <tr><th></th><th>Notification</th><th>Targeted Command</th><th>Broadcast Command</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>JS API</strong></td>
+            <td><code>listenForScoped</code></td>
+            <td><code>new CommandEvent()</code></td>
+            <td><code>listenForScoped</code> on <code>document</code></td>
+        </tr>
+        <tr>
+            <td><strong>HTML API</strong></td>
+            <td>Bubbles naturally</td>
+            <td><code>commandfor</code>/<code>command</code></td>
+            <td><code>broadcast</code> attribute</td>
+        </tr>
+    </tbody>
+</table>

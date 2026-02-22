@@ -35,6 +35,7 @@ import { CallParser } from '../blocks/parsers/call/CallParser';
 import { ValueParser } from '../blocks/parsers/value/ValueParser';
 import { PipeParser } from '../blocks/parsers/pipe/PipeParser';
 import { registerEventAttributes } from '../blocks/attributes/on-event/OnEventAttribute';
+import { registerRouter } from '../blocks/router/registerRouter';
 
 // Extend Window interface
 declare global {
@@ -158,6 +159,10 @@ documentInjector?.set('customExpressionParsers', expressionParsers);
 // Register event attributes (on:click, on:submit, on:change, etc.)
 registerEventAttributes(window.attributes);
 
+// Register router components and behaviors (route-view, route-outlet, route:link, route:prefetch)
+registerRouter(window.attributes);
+
 console.log('[Web Everything] Bootstrap complete');
 console.log('[Web Everything] Globals available: injectors, contexts, stores, attributes');
 console.log('[Web Everything] Event attributes registered: on:click, on:submit, on:change, etc.');
+console.log('[Web Everything] Router registered: route-view, route-outlet, route:link, route:prefetch');

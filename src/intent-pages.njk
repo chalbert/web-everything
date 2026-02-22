@@ -32,5 +32,116 @@ eleventyComputed:
         <div class="section-card">
             {{ intent.description | safe }}
         </div>
+
+        {% if intent.dimensions %}
+        <div class="section-card mt-8">
+            <h2>Dimensions</h2>
+            <p class="mb-6 text-slate-600">Configurable axes for this intent. Applications declare their chosen value per dimension.</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Dimension</th>
+                        <th>Values</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for key, dim in intent.dimensions %}
+                    <tr>
+                        <td><code>{{ key }}</code></td>
+                        <td>{% for val in dim.values %}<code>{{ val }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</td>
+                        <td>{{ dim.description }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        {% set implementingBlocks = blocks | blocksForIntent(intent.id) %}
+        {% if implementingBlocks.length %}
+        <div class="section-card mt-8">
+            <h2>Implementing Blocks</h2>
+            <p class="mb-6 text-slate-600">Technical implementations that fulfill this intent.</p>
+            <div class="standards-grid">
+                {% for block in implementingBlocks %}
+                <a href="/blocks/{{ block.id }}/" class="standard-card">
+                    <div class="flex justify-between items-start mb-3" style="gap: 12px; display: flex; justify-content: space-between;">
+                        <h4 class="text-lg font-bold m-0 text-gray-900">{{ block.name }}</h4>
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800" style="white-space: nowrap;">
+                            {{ block.type }}
+                        </span>
+                    </div>
+                    <p class="text-gray-600 text-sm leading-relaxed mb-4">{{ block.summary }}</p>
+                    <div style="margin-bottom: 1rem;">
+                        {{ projectStatus(block.status) }}
+                    </div>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if intent.designSystemResearch %}
+        <div class="section-card mt-8">
+            <h2>Design System Research</h2>
+            <p class="mb-6 text-slate-600">How established design systems approach this UX concern.</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>System</th>
+                        <th>Components</th>
+                        <th>Key Insight</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for system in intent.designSystemResearch %}
+                    <tr>
+                        <td>{% if system.reference %}<a href="{{ system.reference }}">{{ system.system }}</a>{% else %}{{ system.system }}{% endif %}</td>
+                        <td>{{ system.components | join(", ") if system.components.length else "—" }}</td>
+                        <td>{{ system.keyInsight }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
+        {% if intent.uxResearch %}
+        <div class="section-card mt-8">
+            <h2>UX Research</h2>
+            <p class="mb-6 text-slate-600">Evidence-based findings on user perception and behavior.</p>
+
+            {% for research in intent.uxResearch %}
+            <div class="mb-6">
+                <h3>{{ research.title }}
+                    {% if research.source %}<span class="text-sm font-normal text-slate-500"> — {{ research.source }}</span>{% endif %}
+                </h3>
+                {% if research.findings %}
+                <ul class="text-sm text-gray-600 list-disc pl-5">
+                    {% for finding in research.findings %}
+                    <li>{{ finding }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                {% if research.reference %}
+                <p class="text-xs text-slate-400 mt-1"><a href="{{ research.reference }}">Source</a></p>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if intent.researchGaps %}
+        <div class="section-card mt-8">
+            <h2>Research Gaps</h2>
+            <p class="mb-4 text-slate-600">Areas where the current spec needs evolution based on research findings.</p>
+            <ul class="list-disc pl-5 text-sm text-gray-600">
+                {% for gap in intent.researchGaps %}
+                <li class="mb-2">{{ gap }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
     </div>
 </div>

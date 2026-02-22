@@ -1,25 +1,451 @@
-<h2>Protocol: Resource Loader</h2>
+<h2>Resource Loader</h2>
 <p>
-    A comprehensive container for "Load in Place" scenarios (GET requests), implemented as a <strong>Virtual Element</strong>.
+    Technical implementation of the <a href="/intents/loader/">Loader Intent</a>. Provides composable traits that
+    any loading consumer — <a href="/blocks/router/">Router</a>, forms, data grids, infinite scroll — can use to
+    apply the correct loading UX based on the application's declared intent profile.
 </p>
+<p>
+    Implemented as a <strong>Virtual Element</strong> using comment-based markers, ensuring no extra
+    <code>&lt;div&gt;</code> wrappers pollute parent-child layout relationships (Grid/Flex).
+    Part of the <a href="/projects/webresources/">Web Resources</a> ecosystem.
+</p>
+
+<h3>Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API">Fetch API</a></td>
+        <td>Baseline</td>
+        <td>All loader operations use <code>fetch()</code> with <code>AbortSignal</code> for cooperative cancellation</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/AbortController">AbortController</a></td>
+        <td>Baseline</td>
+        <td>Loaders receive <code>signal</code> param; superseded navigations abort automatically; <code>AbortSignal.timeout()</code> for built-in timeout</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Cache">Cache API</a></td>
+        <td>Baseline</td>
+        <td><a href="/resources/cache/">Custom Cache</a> sub-standard provides cache policy; runtime can delegate to <code>CacheStorage</code></td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control">HTTP Cache-Control</a></td>
+        <td>Standard (RFC 9111)</td>
+        <td><code>withStaleWhileRevalidate</code> trait mirrors the <code>stale-while-revalidate</code> HTTP directive at the UI level</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-busy">aria-busy</a></td>
+        <td>Standard</td>
+        <td>All strategy traits set <code>aria-busy="true"</code> on the loading region during async operations</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/progress">&lt;progress&gt;</a></td>
+        <td>Standard</td>
+        <td><code>withDeterminate</code> trait renders native <code>&lt;progress&gt;</code> with <code>value</code>/<code>max</code> attributes</td>
+    </tr>
+</table>
+
+<h3>Framework Research</h3>
+<table>
+    <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
+    <tr>
+        <td><a href="https://tanstack.com/query">TanStack Query</a></td>
+        <td>staleTime/gcTime model, hierarchical query keys for cache invalidation, request deduplication, focus/reconnect revalidation</td>
+    </tr>
+    <tr>
+        <td><a href="https://swr.vercel.app/">SWR (Vercel)</a></td>
+        <td>Stale-while-revalidate pattern, auto-revalidation triggers (focus, reconnect, interval)</td>
+    </tr>
+    <tr>
+        <td><a href="https://www.apollographql.com/docs/react/">Apollo Client</a></td>
+        <td>Link chain middleware pattern (inspiration for <a href="/resources/middleware/">Custom Middleware</a>), fetchPolicy (cache-first, network-only)</td>
+    </tr>
+    <tr>
+        <td><a href="https://react.dev/reference/react/Suspense">React Suspense</a></td>
+        <td>Declarative loading boundaries with fallback content; similar concept to our virtual element approach</td>
+    </tr>
+    <tr>
+        <td><a href="https://remix.run/docs/en/main/route/loader">Remix</a></td>
+        <td>Route-level loader functions, <code>defer</code>/<code>Await</code> for streaming, <code>useNavigation</code> for loading state</td>
+    </tr>
+</table>
+
+<h3>How It Works</h3>
+<ol>
+    <li><strong>App declares intent</strong> — The application provides a <code>LoaderIntent</code> object via the injector system (<code>customContexts:loaderIntent</code>). This declares the preferred loading UX: strategy, scope, progress, context, and timing.</li>
+    <li><strong>Consumer resolves intent</strong> — A loading consumer (e.g., <code>&lt;route-view&gt;</code>) walks the injector chain to find the declared intent.</li>
+    <li><strong>Traits selected</strong> — Based on the intent's dimension values, the consumer composes the matching Resource Loader traits (e.g., <code>withSoftBlocking</code> + <code>withIndeterminate</code>).</li>
+    <li><strong>Traits apply behavior</strong> — During the async operation, selected traits apply DOM, ARIA, and CSS changes. On resolve, traits clean up and the consumer stamps its content normally.</li>
+</ol>
+
+<h3>Provisioning Chain</h3>
+<pre><code class="language-text">App declares LoaderIntent profile
+  → Injector provides customContexts:loaderIntent
+    → Consumer resolves intent from ancestor injector
+      → Consumer selects matching Resource Loader trait(s)
+        → Trait applies DOM/CSS/ARIA changes during async operation
+          → On resolve: trait cleans up, consumer renders result</code></pre>
+
+<h4>Full Setup Example (with Router)</h4>
+<pre><code class="language-javascript">// 1. App declares its loader intent profile
+const docInjector = injectors.getInjectorOf(document);
+
+docInjector.set('customContexts:loaderIntent', {
+  strategy: 'soft',           // keep content visible, disable interaction
+  scope: 'region',            // route-view is the loading region
+  progress: 'indeterminate',  // no measurable progress for route loads
+  context: 'transition',      // routes always have prior content (except initial)
+  timing: 'debounced'         // don't flash indicator for fast loads (400ms threshold)
+});
+
+// 2. Provide route loaders as usual
+docInjector.set('customContexts:routeLoader', {
+  async loadUser({ params, signal }) {
+    const res = await fetch(`/api/users/${params.id}`, { signal });
+    if (!res.ok) throw new Error('User not found');
+    return res.json();
+  }
+});</code></pre>
+<pre><code class="language-html">&lt;!-- 3. Router consumes both: routeLoader for data, loaderIntent for UX --&gt;
+&lt;route-view&gt;
+  &lt;template route="/users/:id" route:loader="loadUser"&gt;
+    &lt;h1&gt;{{ '@route.data.name' }}&lt;/h1&gt;
+  &lt;/template&gt;
+&lt;/route-view&gt;</code></pre>
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">
+    When <code>loadUser</code> runs, the router resolves <code>customContexts:loaderIntent</code> from the injector chain.
+    The <code>soft</code> strategy activates <code>withSoftBlocking</code>: the previous route content stays visible but
+    non-interactive (<code>aria-busy="true"</code>, reduced opacity, <code>pointer-events: none</code>).
+    Because <code>timing</code> is <code>debounced</code>, the loading indicator only appears if the loader takes longer than 400ms.
+</p>
+
+<h3>Trait-to-Behavior Mapping</h3>
+<p>Each trait maps to a specific <a href="/intents/loader/">Loader Intent</a> dimension value and applies concrete DOM/ARIA/CSS changes.</p>
+<table>
+    <thead>
+        <tr>
+            <th>Trait</th>
+            <th>Intent Dimension</th>
+            <th>DOM Behavior</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>withSoftBlocking</code></td>
+            <td><code>loader.strategy.soft</code></td>
+            <td>Sets <code>aria-busy="true"</code> on the target region. Applies <code>pointer-events: none</code> and reduced opacity. Content remains visible but non-interactive.</td>
+        </tr>
+        <tr>
+            <td><code>withHardBlocking</code></td>
+            <td><code>loader.strategy.hard</code></td>
+            <td>Injects overlay element over target region. Sets <code>aria-busy="true"</code>. Traps focus within the overlay. User must wait.</td>
+        </tr>
+        <tr>
+            <td><code>withReplacement</code></td>
+            <td><code>loader.strategy.replacement</code></td>
+            <td>Hides current content via the virtual comment boundary. Stamps loading template (skeleton or spinner) in its place. Swaps back on resolve.</td>
+        </tr>
+        <tr>
+            <td><code>withOptimistic</code></td>
+            <td><code>loader.strategy.optimistic</code></td>
+            <td>No visual loading state. Previous content stays fully interactive. On success, new content stamps normally. On error, reverts to previous state and surfaces the error.</td>
+        </tr>
+        <tr>
+            <td><code>withDeterminate</code></td>
+            <td><code>loader.progress.determinate</code></td>
+            <td>Renders native <code>&lt;progress&gt;</code> element with <code>value</code>/<code>max</code> attributes. Updates via the loader's progress callback.</td>
+        </tr>
+        <tr>
+            <td><code>withIndeterminate</code></td>
+            <td><code>loader.progress.indeterminate</code></td>
+            <td>Renders activity indication (spinner, pulse, or shimmer animation) without measurable progress.</td>
+        </tr>
+        <tr>
+            <td><code>withSkeleton</code></td>
+            <td><code>loader.context.initial</code></td>
+            <td>Stamps skeleton template matching the expected content structure. Used when no prior content exists (first load).</td>
+        </tr>
+        <tr>
+            <td><code>withStaleWhileRevalidate</code></td>
+            <td><code>loader.context.transition</code></td>
+            <td>Keeps previous content visible in a dimmed/stale state while new content loads. Prevents the "spinner replacing content" anti-pattern.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Strategy Comparison</h3>
+<table>
+    <thead>
+        <tr>
+            <th>Strategy</th>
+            <th>User Can Interact?</th>
+            <th>Content Visible?</th>
+            <th>Best For</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>optimistic</code></td>
+            <td>Yes</td>
+            <td>Yes (predicted)</td>
+            <td>Fast writes, background sync, real-time collaboration</td>
+        </tr>
+        <tr>
+            <td><code>soft</code></td>
+            <td>No</td>
+            <td>Yes (dimmed)</td>
+            <td>Route transitions, form submissions, data refresh</td>
+        </tr>
+        <tr>
+            <td><code>hard</code></td>
+            <td>No</td>
+            <td>Obscured</td>
+            <td>Payment processing, destructive actions, critical workflows</td>
+        </tr>
+        <tr>
+            <td><code>replacement</code></td>
+            <td>No</td>
+            <td>No (placeholder)</td>
+            <td>Initial page loads, heavy dashboards, skeleton screens</td>
+        </tr>
+    </tbody>
+</table>
+
 <h3>Registry-First Philosophy</h3>
 <p>
-    Loaders are best defined in a global <strong>CustomResourceRegistry</strong> rather than inline. This ensures consistent loading skeletons and error states across the application.
+    Loading templates (skeletons, error cards, empty states) are best defined in a global
+    <strong>CustomResourceRegistry</strong> rather than inline. This ensures consistent loading
+    visuals across the application.
 </p>
-<pre><code class="language-typescript">// Definition
+<pre><code class="language-typescript">// Register reusable loading templates
 customResources.define('user-profile', {
-    loader: 'skeleton-profile',
-    error: 'error-card'
+    loader: 'skeleton-profile',   // skeleton template name
+    error: 'error-card'           // error template name
 });</code></pre>
+
 <h3>Virtual Implementation</h3>
 <p>
-    Uses Custom Comments (e.g. <code>&lt;!-- resource:loader --&gt;</code>) to wrap content. This ensures no extra <code>&lt;div&gt;</code> wrappers are introduced, maintaining strict parent-child layout relationships (Grid/Flex) while swapping between states.
+    Uses Custom Comments (e.g. <code>&lt;!-- resource:loader --&gt;</code>) to wrap content.
+    This ensures no extra <code>&lt;div&gt;</code> wrappers are introduced, maintaining strict
+    parent-child layout relationships (Grid/Flex) while swapping between states.
 </p>
+
 <h3>State Machine</h3>
+<p>The full lifecycle for a loading operation. Traits react to state transitions and apply the appropriate DOM changes.</p>
+<table>
+    <thead>
+        <tr>
+            <th>State</th>
+            <th>Description</th>
+            <th>Trait Behavior</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>idle</code></td>
+            <td>No operation in progress. Default state.</td>
+            <td>No loading indicators. Content (if any) rendered normally.</td>
+        </tr>
+        <tr>
+            <td><code>pending</code></td>
+            <td>Operation started, timing threshold not yet reached.</td>
+            <td>If <code>timing: 'debounced'</code>, no visible change yet. If <code>timing: 'immediate'</code>, loading indicator activates.</td>
+        </tr>
+        <tr>
+            <td><code>loading</code></td>
+            <td>Timing threshold reached, actively loading.</td>
+            <td>Strategy trait activates: soft dims content, hard shows overlay, replacement swaps to skeleton.</td>
+        </tr>
+        <tr>
+            <td><code>success</code></td>
+            <td>Operation completed. Data available.</td>
+            <td>Trait cleans up (removes aria-busy, overlay, skeleton). Consumer stamps result content.</td>
+        </tr>
+        <tr>
+            <td><code>empty</code></td>
+            <td>Success but no data.</td>
+            <td>Trait cleans up. Consumer renders <code>empty</code> template if registered.</td>
+        </tr>
+        <tr>
+            <td><code>error</code></td>
+            <td>Operation failed.</td>
+            <td>Trait cleans up. Consumer renders <code>error</code> template. For optimistic strategy, reverts to previous state.</td>
+        </tr>
+        <tr>
+            <td><code>stale</code></td>
+            <td>Showing previous data while a refresh is in progress.</td>
+            <td><code>withStaleWhileRevalidate</code> dims content. Combines with <code>transition</code> context.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Non-Router Consumers</h3>
+<p>
+    Resource Loader is not router-specific. Any block that performs async work can consume the
+    <a href="/intents/loader/">Loader Intent</a> through the same trait system:
+</p>
 <ul>
-    <li><strong>Idle:</strong> Initial state before request limits.</li>
-    <li><strong>Pending:</strong> Active request. Renders <code>loading</code> template.</li>
-    <li><strong>Success:</strong> Data available. Renders <code>default</code> content.</li>
-    <li><strong>Empty:</strong> Success but no data. Renders <code>empty</code> template.</li>
-    <li><strong>Error:</strong> Failed. Renders <code>error</code> template.</li>
+    <li><strong>Forms</strong> — Submit button uses <code>withSoftBlocking</code> on the form region during submission</li>
+    <li><strong>Data grids</strong> — Uses <code>withStaleWhileRevalidate</code> when refreshing table data</li>
+    <li><strong>Infinite scroll</strong> — Uses <code>withIndeterminate</code> at the scroll boundary</li>
+    <li><strong>File uploads</strong> — Uses <code>withDeterminate</code> to show upload progress</li>
 </ul>
+
+<h3>Timing Integration</h3>
+<p>
+    The <code>timing</code> dimension controls when loading indicators appear. This prevents the
+    "flash of loading state" anti-pattern for fast operations.
+</p>
+<table>
+    <thead>
+        <tr>
+            <th>Timing</th>
+            <th>Default Delay</th>
+            <th>Behavior</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>immediate</code></td>
+            <td>0ms</td>
+            <td>Loading indicator appears as soon as the operation starts.</td>
+        </tr>
+        <tr>
+            <td><code>debounced</code></td>
+            <td>400ms</td>
+            <td>Loading indicator deferred. If the operation resolves before the threshold, no indicator is ever shown.</td>
+        </tr>
+        <tr>
+            <td><code>[custom]</code></td>
+            <td>User-defined</td>
+            <td>Custom timing keys (e.g., <code>slow: 1000</code>) registered in the Loader Intent configuration.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Infrastructure Integration</h3>
+<p>
+    Resource Loader is the <strong>UI consumption layer</strong> for the <a href="/projects/webresources/">Web Resources</a>
+    infrastructure standards. It doesn't own data fetching &mdash; it owns the loading UX.
+</p>
+<table>
+    <thead>
+        <tr><th>Sub-Standard</th><th>Role</th><th>How Resource Loader Uses It</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><a href="/resources/clients/">Custom Clients</a></td>
+            <td>Transport</td>
+            <td>Client executes the <code>ResourceOperation</code>; Resource Loader consumes the result and manages UI state</td>
+        </tr>
+        <tr>
+            <td><a href="/resources/middleware/">Custom Middleware</a></td>
+            <td>Interceptors</td>
+            <td>Middleware wraps client execution (auth headers, logging, retry). Transparent to Resource Loader.</td>
+        </tr>
+        <tr>
+            <td><a href="/resources/cache/">Custom Cache</a></td>
+            <td>Cache policy</td>
+            <td>Cache policy determines stale-while-revalidate timing. <code>withStaleWhileRevalidate</code> trait activates when cache returns stale data.</td>
+        </tr>
+        <tr>
+            <td><a href="/resources/tracer/">Custom Tracer</a></td>
+            <td>Observability</td>
+            <td>Tracer instruments the operation lifecycle. Injects W3C Trace Context headers. Transparent to Resource Loader.</td>
+        </tr>
+        <tr>
+            <td><a href="/resources/pagination/">Custom Pagination</a></td>
+            <td>Iteration</td>
+            <td>Pagination drives infinite scroll / paginated lists. Resource Loader manages the loading UX for each page fetch.</td>
+        </tr>
+        <tr>
+            <td><a href="/resources/resources/">Custom Resources</a></td>
+            <td>Registry</td>
+            <td>Registry maps entity names to configs (skeleton templates, error cards, cache strategy). Resource Loader resolves these for consistent loading visuals.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Events</h3>
+<p>
+    Resource Loader dispatches typed event classes registered via <a href="/projects/webevents/">Web Events</a> provider keys.
+    This enables <code>listenForScoped</code> discrimination when multiple loaders coexist (e.g., router loader + inline data grid loader firing <code>load-end</code> simultaneously).
+</p>
+<table>
+    <thead>
+        <tr><th>Event</th><th>Class</th><th>Provider Key</th><th>Detail</th><th>Cancelable</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>resource-load-start</code></td>
+            <td><code>ResourceLoadStartEvent</code></td>
+            <td><code>customEvents:resource-load-start</code></td>
+            <td><code>{ operation, timing }</code></td>
+            <td>No</td>
+        </tr>
+        <tr>
+            <td><code>resource-load-end</code></td>
+            <td><code>ResourceLoadEndEvent</code></td>
+            <td><code>customEvents:resource-load-end</code></td>
+            <td><code>{ operation, data, duration }</code></td>
+            <td>No</td>
+        </tr>
+        <tr>
+            <td><code>resource-load-error</code></td>
+            <td><code>ResourceLoadErrorEvent</code></td>
+            <td><code>customEvents:resource-load-error</code></td>
+            <td><code>{ operation, error, retryable }</code></td>
+            <td>No</td>
+        </tr>
+        <tr>
+            <td><code>resource-state-change</code></td>
+            <td><code>ResourceStateChangeEvent</code></td>
+            <td><code>customEvents:resource-state-change</code></td>
+            <td><code>{ oldState, newState }</code></td>
+            <td>No</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Interface</h3>
+<pre><code class="language-typescript">/**
+ * Loader Intent profile — declares how loading states affect the UI.
+ * Provided via customContexts:loaderIntent on the injector chain.
+ *
+ * Consumers (Router, forms, etc.) resolve this and select
+ * matching Resource Loader traits.
+ */
+interface LoaderIntent {
+    strategy: 'optimistic' | 'soft' | 'hard' | 'replacement';
+    scope: 'element' | 'region' | 'viewport';
+    progress: 'determinate' | 'indeterminate';
+    context: 'initial' | 'transition';
+    timing: 'immediate' | 'debounced' | string;
+    label?: string;
+}
+
+/** State machine for loading lifecycle */
+type LoaderState = 'idle' | 'pending' | 'loading' | 'success' | 'empty' | 'error' | 'stale';</code></pre>
+
+<h3>Exports</h3>
+<table>
+    <thead>
+        <tr><th>Export</th><th>Kind</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>ResourceLoaderDirective</code></td><td>Class</td><td>Main directive (CustomTemplateDirective)</td></tr>
+        <tr><td><code>withSoftBlocking</code></td><td>Trait</td><td>Input-blocking strategy</td></tr>
+        <tr><td><code>withHardBlocking</code></td><td>Trait</td><td>Visual-blocking strategy</td></tr>
+        <tr><td><code>withReplacement</code></td><td>Trait</td><td>Content-replacing strategy</td></tr>
+        <tr><td><code>withOptimistic</code></td><td>Trait</td><td>Non-blocking optimistic strategy</td></tr>
+        <tr><td><code>withDeterminate</code></td><td>Trait</td><td>Measurable progress indication</td></tr>
+        <tr><td><code>withIndeterminate</code></td><td>Trait</td><td>Activity indication (spinner, pulse)</td></tr>
+        <tr><td><code>withSkeleton</code></td><td>Trait</td><td>Placeholder content for initial loads</td></tr>
+        <tr><td><code>withStaleWhileRevalidate</code></td><td>Trait</td><td>Previous content dimmed during refresh</td></tr>
+        <tr><td><code>LoaderState</code></td><td>Type</td><td>Union type for state machine states</td></tr>
+        <tr><td><code>ResourceLoadStartEvent</code></td><td>Event Class</td><td>Typed event for load start</td></tr>
+        <tr><td><code>ResourceLoadEndEvent</code></td><td>Event Class</td><td>Typed event for load end</td></tr>
+        <tr><td><code>ResourceLoadErrorEvent</code></td><td>Event Class</td><td>Typed event for load error</td></tr>
+        <tr><td><code>ResourceStateChangeEvent</code></td><td>Event Class</td><td>Typed event for state transitions</td></tr>
+    </tbody>
+</table>

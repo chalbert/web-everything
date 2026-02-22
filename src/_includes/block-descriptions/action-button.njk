@@ -1,0 +1,216 @@
+<h2>Action Button</h2>
+<p>
+    Behavioral implementation of the <a href="/intents/action/">Action Intent</a>, handling visual priority rendering,
+    busy state layout (width locking, visibility), and platform-aware group ordering.
+    Works with <a href="/blocks/resource-action/">Resource Action</a> for mutation lifecycle integration.
+</p>
+<p>
+    Action Button is a <strong>behavior layer</strong>, not a visual component. It reads the Action Intent from the
+    injector chain and applies the appropriate busy state, icon rendering, and group ordering to the target element.
+    Styling is left to CSS &mdash; the block manages attributes and layout constraints.
+</p>
+
+<h3>Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API">Invoker Commands API</a></td>
+        <td>Baseline 2026</td>
+        <td>Action buttons can use <code>commandfor</code>/<code>command</code> for declarative mutation invocation</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-disabled">aria-disabled</a></td>
+        <td>Standard</td>
+        <td><code>withBusyDisabled</code> applies <code>aria-disabled</code> instead of HTML <code>disabled</code>, preserving tab order and screen reader announcements</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-live">aria-live</a></td>
+        <td>Standard</td>
+        <td>Busy state changes announced via <code>aria-live="polite"</code> on the button's label region</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/contain">CSS Containment</a></td>
+        <td>Baseline</td>
+        <td>Action groups use <code>contain: layout</code> to prevent busy-state width changes from triggering ancestor reflow</td>
+    </tr>
+</table>
+
+<h3>Framework Research</h3>
+<table>
+    <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
+    <tr>
+        <td><a href="https://mui.com/material-ui/react-button/">Material UI</a></td>
+        <td><code>loading</code> prop with spinner replacement; <code>startIcon</code>/<code>endIcon</code> positioning; size variants</td>
+    </tr>
+    <tr>
+        <td><a href="https://www.radix-ui.com/primitives/docs/components/button">Radix UI</a></td>
+        <td>Composable primitives via <code>asChild</code>; state exposed via <code>data-state</code> attributes for CSS</td>
+    </tr>
+    <tr>
+        <td><a href="https://react.fluentui.dev/?path=/docs/components-button--docs">Fluent UI</a></td>
+        <td><code>SplitButton</code>, <code>MenuButton</code>, <code>CompoundButton</code> variants for action groups</td>
+    </tr>
+    <tr>
+        <td><a href="https://headlessui.com/">Headless UI</a></td>
+        <td>Behavior without styling opinions; controlled state; closest to our intent-driven model</td>
+    </tr>
+</table>
+
+<h3>Busy State Management</h3>
+<p>
+    When a <a href="/blocks/resource-action/">Resource Action</a> enters <code>pending</code> state,
+    Action Button applies busy behavior to the trigger element. Two strategies are available:
+</p>
+<table>
+    <thead>
+        <tr><th>Trait</th><th>Behavior</th><th>CSS Output</th><th>Use Case</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>withBusyDisabled</code></td>
+            <td>Non-interactive: blocks clicks, shows indicator</td>
+            <td><code>aria-disabled="true"</code> + <code>pointer-events: none</code></td>
+            <td>Destructive actions (delete, submit payment)</td>
+        </tr>
+        <tr>
+            <td><code>withBusyInteractive</code></td>
+            <td>Reduced feedback: still clickable, visual indicator</td>
+            <td><code>opacity: 0.7</code> + spinner overlay</td>
+            <td>Non-critical actions (save draft, toggle favorite)</td>
+        </tr>
+    </tbody>
+</table>
+<p>
+    <strong>Why <code>aria-disabled</code> over <code>disabled</code>?</strong>
+    The HTML <code>disabled</code> attribute removes the element from the tab order and prevents screen readers
+    from interacting with it. <code>aria-disabled</code> keeps the element focusable and announced &mdash;
+    screen reader users can still discover the button and hear that it's currently busy.
+</p>
+
+<h3>Width Lock</h3>
+<p>
+    The <code>withWidthLock</code> trait prevents layout shift when the button label changes during busy state
+    (e.g., "Save" → "Saving..."). Before entering busy state:
+</p>
+<ol>
+    <li><strong>Capture</strong> the element's <code>getComputedStyle().width</code>.</li>
+    <li><strong>Apply</strong> <code>min-width: {captured}px</code> as an inline style.</li>
+    <li><strong>Remove</strong> the inline style when busy state exits.</li>
+</ol>
+<p>
+    This ensures the button never shrinks, preventing reflow of adjacent elements.
+    Combined with <code>contain: layout</code> on the parent group, busy state changes are layout-isolated.
+</p>
+
+<h3>Platform-Aware Ordering</h3>
+<p>
+    Confirmation dialogs and action groups have different button ordering conventions per platform.
+    <code>withPlatformOrdering</code> reorders child action elements based on OS detection.
+</p>
+<table>
+    <thead>
+        <tr><th>Platform</th><th>Primary Action Position</th><th>Example</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>macOS / iOS</strong></td>
+            <td>Last (rightmost)</td>
+            <td>[Cancel] [Delete]</td>
+        </tr>
+        <tr>
+            <td><strong>Windows / Linux</strong></td>
+            <td>First (leftmost)</td>
+            <td>[Delete] [Cancel]</td>
+        </tr>
+    </tbody>
+</table>
+<p>
+    Detection uses <code>navigator.platform</code> (or <code>navigator.userAgentData.platform</code> where available).
+    The ordering can be overridden via injector configuration for cross-platform consistency.
+</p>
+
+<h3>Icon Integration</h3>
+<p>
+    Action Button resolves icon rendering from the <a href="/intents/icon/">Icon Intent</a> provider in the injector chain.
+    The button declares <em>what</em> icon it needs (name, size); the Icon Intent decides <em>how</em> to render it
+    (SVG sprite, icon font, inline SVG).
+</p>
+{% highlight "html" %}
+<button action-intent="primary"
+        action-icon="save"
+        action-icon-position="start">
+    Save Changes
+</button>
+{% endhighlight %}
+
+<h3>Usage Examples</h3>
+
+<h4>Basic Action Button with Busy State</h4>
+{% highlight "html" %}
+<button resource-action="saveUser"
+        action-intent="primary"
+        action-busy="disabled">
+    Save
+</button>
+<!-- During mutation: aria-disabled="true", min-width locked, label → "Saving..." -->
+{% endhighlight %}
+
+<h4>Action Group with Platform Ordering</h4>
+{% highlight "html" %}
+<div action-group="confirm" action-ordering="platform">
+    <button action-intent="secondary" command="cancel">Cancel</button>
+    <button action-intent="destructive"
+            resource-action="deleteItem"
+            resource-action-confirm="Are you sure?"
+            action-busy="disabled">
+        Delete
+    </button>
+</div>
+<!-- macOS: [Cancel] [Delete]  |  Windows: [Delete] [Cancel] -->
+{% endhighlight %}
+
+<h4>Invoker Commands Integration</h4>
+{% highlight "html" %}
+<button commandfor="user-form"
+        command="--save"
+        action-intent="primary"
+        action-busy="disabled">
+    Save
+</button>
+<form id="user-form" resource-action="saveUser">
+    <!-- form fields -->
+</form>
+{% endhighlight %}
+
+<h3>Styling Hooks</h3>
+<p>
+    Action Button exposes state via attributes and CSS custom properties, enabling styling without
+    JavaScript coupling.
+</p>
+<table>
+    <thead>
+        <tr><th>Selector / Property</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>[aria-disabled="true"]</code></td><td>Button is in busy-disabled state</td></tr>
+        <tr><td><code>[data-action-busy]</code></td><td>Button is in any busy state (disabled or interactive)</td></tr>
+        <tr><td><code>[data-action-intent="primary|secondary|destructive"]</code></td><td>Visual priority tier</td></tr>
+        <tr><td><code>--action-min-width</code></td><td>Captured width during width lock (set by JS)</td></tr>
+        <tr><td><code>--action-opacity</code></td><td>Opacity during busy-interactive state (default: 0.7)</td></tr>
+    </tbody>
+</table>
+
+<h3>Exports</h3>
+<table>
+    <thead>
+        <tr><th>Export</th><th>Kind</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>ActionButtonBehavior</code></td><td>Class</td><td>Main behavior (CustomAttribute)</td></tr>
+        <tr><td><code>withBusyDisabled</code></td><td>Trait</td><td>Non-interactive busy state (aria-disabled)</td></tr>
+        <tr><td><code>withBusyInteractive</code></td><td>Trait</td><td>Reduced-feedback busy state (opacity)</td></tr>
+        <tr><td><code>withPlatformOrdering</code></td><td>Trait</td><td>OS-aware action group reordering</td></tr>
+        <tr><td><code>withWidthLock</code></td><td>Trait</td><td>Layout shift prevention during busy state</td></tr>
+        <tr><td><code>ActionButtonState</code></td><td>Type</td><td>State: idle | busy-disabled | busy-interactive</td></tr>
+    </tbody>
+</table>

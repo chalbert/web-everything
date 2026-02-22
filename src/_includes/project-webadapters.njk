@@ -159,3 +159,160 @@ class UserCard extends HTMLElement {
         {% endif %}
     {% endfor %}
 </section>
+
+<section id="framework-comparison" class="section-card">
+    <h3 id="framework-feature-comparison">Framework Feature Comparison</h3>
+    <p>
+        How does Web Everything compare to the feature sets of React, Angular, Vue, Svelte, Lit, Solid, and Qwik?
+        The table below maps 74 features across 14 categories to their Web Everything equivalents, identifying where adapters are needed and where features are missing.
+    </p>
+
+    <div style="display: flex; gap: 1.5rem; margin: 1.5rem 0; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem;">
+            <div style="width: 18px; height: 18px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.15); background: #d4edda;"></div> Covered
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem;">
+            <div style="width: 18px; height: 18px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.15); background: #d1ecf1;"></div> Concept / spec only
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem;">
+            <div style="width: 18px; height: 18px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.15); background: #fff3cd;"></div> Missing Adapter
+        </div>
+        <div style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem;">
+            <div style="width: 18px; height: 18px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.15); background: #f8d7da;"></div> Missing Feature
+        </div>
+    </div>
+
+    <h4 id="coverage-summary">Coverage Summary</h4>
+    <table style="font-size: 0.85rem;">
+        <tr>
+            <th>Category</th>
+            <th style="background:#28a745;color:#fff;">Covered</th>
+            <th style="background:#17a2b8;color:#fff;">Concept</th>
+            <th style="background:#ffc107;color:#000;">Adapter</th>
+            <th style="background:#dc3545;color:#fff;">Missing</th>
+        </tr>
+        <tr><td>Reactivity &amp; State</td><td>3</td><td>0</td><td>1</td><td>2</td></tr>
+        <tr><td>Templating &amp; Rendering</td><td>4</td><td>2</td><td>2</td><td>3</td></tr>
+        <tr><td>Component Model</td><td>5</td><td>0</td><td>1</td><td>0</td></tr>
+        <tr><td>Routing</td><td>8</td><td>0</td><td>1</td><td>1</td></tr>
+        <tr><td>Data Fetching &amp; Async</td><td>4</td><td>1</td><td>1</td><td>2</td></tr>
+        <tr><td>Forms &amp; Validation</td><td>0</td><td>2</td><td>0</td><td>2</td></tr>
+        <tr><td>Events &amp; Communication</td><td>3</td><td>1</td><td>1</td><td>0</td></tr>
+        <tr><td>Dependency Injection</td><td>3</td><td>0</td><td>0</td><td>1</td></tr>
+        <tr><td>Styling &amp; Responsiveness</td><td>1</td><td>2</td><td>0</td><td>1</td></tr>
+        <tr><td>Animations &amp; Transitions</td><td>1</td><td>1</td><td>0</td><td>2</td></tr>
+        <tr><td>Accessibility</td><td>3</td><td>1</td><td>0</td><td>0</td></tr>
+        <tr><td>Performance</td><td>3</td><td>0</td><td>0</td><td>3</td></tr>
+        <tr><td>Internationalization</td><td>0</td><td>0</td><td>0</td><td>2</td></tr>
+        <tr><td>DevTools &amp; DX</td><td>2</td><td>0</td><td>0</td><td>1</td></tr>
+        <tr style="font-weight: bold; background: #f1f3f5;">
+            <td>TOTAL (74 features)</td>
+            <td style="color:#28a745;">40 (54%)</td>
+            <td style="color:#17a2b8;">10 (14%)</td>
+            <td style="color:#856404;">7 (9%)</td>
+            <td style="color:#dc3545;">20 (27%)</td>
+        </tr>
+    </table>
+
+    <h4 id="strongest-areas">Strongest Areas (at or above parity)</h4>
+    <ul style="font-size: 0.9rem;">
+        <li><strong>Routing</strong> (8/10): Navigation API, URLPattern, guards, loaders, prefetch, transitions, scroll restoration, lazy loading</li>
+        <li><strong>Component Model</strong> (5/6): Class components, lifecycle, props, refs, web component interop, traits</li>
+        <li><strong>Dependency Injection</strong> (3/4): Hierarchical DI, singletons, scoped providers</li>
+        <li><strong>Accessibility</strong> (3/4): ARIA roles built into blocks, keyboard navigation, live regions</li>
+    </ul>
+
+    <h4 id="missing-adapters">Missing Adapters (7 &mdash; bridgeable with transforms)</h4>
+    <p style="font-size: 0.9rem; color: var(--color-text-muted); margin-bottom: 1rem;">
+        These features exist conceptually in Web Everything but need a syntax bridge or thin adapter layer:
+    </p>
+    <table style="font-size: 0.85rem;">
+        <tr><th>Adapter</th><th>Description</th><th>Priority</th></tr>
+        <tr>
+            <td><code>bind:attr</code></td>
+            <td>Two-way binding syntax adapter (like Vue v-model)</td>
+            <td style="color: #dc3545; font-weight: 600;">High</td>
+        </tr>
+        <tr>
+            <td>Function Components</td>
+            <td>Factory generating CustomElement subclasses from functions</td>
+            <td style="color: #dc3545; font-weight: 600;">High</td>
+        </tr>
+        <tr>
+            <td>Event Modifiers</td>
+            <td><code>.stop</code>, <code>.prevent</code>, <code>.once</code> suffixes on <code>on:*</code> attributes</td>
+            <td style="color: #dc3545; font-weight: 600;">High</td>
+        </tr>
+        <tr>
+            <td>Signals</td>
+            <td>Fine-grained reactivity over individual SimpleStore keys</td>
+            <td style="color: #e67e22; font-weight: 600;">Medium</td>
+        </tr>
+        <tr>
+            <td>Nested Routes</td>
+            <td>Composable <code>&lt;route-view&gt;</code> elements for nested routing</td>
+            <td style="color: #e67e22; font-weight: 600;">Medium</td>
+        </tr>
+        <tr>
+            <td>Suspense Boundaries</td>
+            <td>Resource Loader virtual element as component-style boundary</td>
+            <td style="color: #7f8c8d; font-weight: 600;">Low</td>
+        </tr>
+        <tr>
+            <td>Text Interpolation</td>
+            <td>CustomTextNode parser for <code>{{ "{{ expression }}" }}</code> syntax</td>
+            <td style="color: #7f8c8d; font-weight: 600;">Low</td>
+        </tr>
+    </table>
+
+    <h4 id="biggest-gaps">Biggest Gaps (require new primitives)</h4>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1rem; margin-top: 1rem;">
+        <div style="padding: 1rem; background: #fff5f5; border-radius: 8px; border: 1px solid #feb2b2;">
+            <h4 style="margin: 0 0 0.5rem 0; font-size: 0.9rem; color: #c53030;" class="no-toc">SSR / Hydration (4)</h4>
+            <ul style="font-size: 0.85rem; margin: 0; padding-left: 1.25rem; color: #742a2a;">
+                <li>Server-side rendering</li>
+                <li>Server Components</li>
+                <li>Streaming SSR</li>
+                <li>Hydration / Resumability</li>
+            </ul>
+        </div>
+        <div style="padding: 1rem; background: #fff5f5; border-radius: 8px; border: 1px solid #feb2b2;">
+            <h4 style="margin: 0 0 0.5rem 0; font-size: 0.9rem; color: #c53030;" class="no-toc">Forms (2)</h4>
+            <ul style="font-size: 0.85rem; margin: 0; padding-left: 1.25rem; color: #742a2a;">
+                <li>Form state management</li>
+                <li>Server actions</li>
+            </ul>
+        </div>
+        <div style="padding: 1rem; background: #fff5f5; border-radius: 8px; border: 1px solid #feb2b2;">
+            <h4 style="margin: 0 0 0.5rem 0; font-size: 0.9rem; color: #c53030;" class="no-toc">i18n (2)</h4>
+            <ul style="font-size: 0.85rem; margin: 0; padding-left: 1.25rem; color: #742a2a;">
+                <li>Localization</li>
+                <li>RTL support</li>
+            </ul>
+        </div>
+        <div style="padding: 1rem; background: #fff5f5; border-radius: 8px; border: 1px solid #feb2b2;">
+            <h4 style="margin: 0 0 0.5rem 0; font-size: 0.9rem; color: #c53030;" class="no-toc">Animations (2)</h4>
+            <ul style="font-size: 0.85rem; margin: 0; padding-left: 1.25rem; color: #742a2a;">
+                <li>Layout animations</li>
+                <li>Spring-based physics</li>
+            </ul>
+        </div>
+    </div>
+
+    <h4 id="unique-to-we">Unique to Web Everything</h4>
+    <ul style="font-size: 0.9rem;">
+        <li><strong>Invoker Commands API</strong> &mdash; <code>commandfor</code>/<code>command</code> throughout (no other framework has this)</li>
+        <li><strong>Intent Protocol</strong> &mdash; abstract UX contracts that decouple WHAT from HOW</li>
+        <li><strong>Provider-scoped typed events</strong> &mdash; <code>listenForScoped</code> discrimination via injector chain</li>
+        <li><strong>Comment-based virtual elements</strong> &mdash; preserves CSS Grid/Flex parent-child relationships</li>
+    </ul>
+
+    <div class="comparison-block" style="background: rgba(99, 102, 241, 0.05); padding: 1.25rem; border-radius: 8px; border-left: 4px solid var(--color-primary); margin: 1.5rem 0;">
+        <h4 id="full-report" style="margin-top: 0; color: var(--color-primary); font-size: 1rem;">Full Comparison Report</h4>
+        <p style="margin-bottom: 0; font-size: 0.95rem;">
+            The complete feature-by-feature breakdown with per-framework details is available in the
+            <a href="/reports/2026-02-22-framework-adapters.html">Framework Feature Comparison Report</a>.
+            It includes 74 features across 14 categories with color-coded tables showing framework-specific implementations mapped to Web Everything equivalents.
+        </p>
+    </div>
+</section>

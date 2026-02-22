@@ -1,0 +1,13 @@
+[
+  {
+    "id": "custom-events",
+    "title": "Custom Event Scoping & Registry",
+    "status": "open",
+    "summary": "Exploring the gap between Web Everything's scoping discipline (injectors, registries, dynamic block names) and the globally-scoped nature of DOM CustomEvent names.",
+    "dateOpened": "2026-02-22",
+    "tags": ["events", "scoping", "registry", "cross-team"],
+    "relatedBlocks": ["event-behaviors", "view", "tabs", "router"],
+    "relatedPlugs": ["webbehaviors", "webregistries"],
+    "relatedProject": "webevents"
+  }
+]

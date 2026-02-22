@@ -1,5 +1,16 @@
 [
   {
+    "category": "Web Everything Standards",
+    "description": "Internal standards and terminology for the Web Everything project.",
+    "links": [
+      {
+        "title": "Semantics & Glossary",
+        "url": "/semantics/",
+        "context": "Standardized terminology aligned with web platform standards. Reference this when designing new blocks."
+      }
+    ]
+  },
+  {
     "category": "Core & Architecture",
     "description": "Foundational patterns for Dependency Injection, Registries, and Element definition.",
     "links": [

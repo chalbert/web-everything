@@ -1,0 +1,213 @@
+{% from "project-status.njk" import projectStatus %}
+
+<section id="overview" class="section-card">
+    <h3 id="mission">Mission</h3>
+    <p>
+        <strong>Web Components</strong> extends the native Custom Elements API with patterns for scoped registries, dependency injection integration, and element lifecycle enhancements.
+        Rather than replacing the browser's component model, we build directly on top of it.
+    </p>
+    <p>
+        The project addresses three gaps in the standard Custom Elements API:
+    </p>
+    <ul>
+        <li><strong>Scoped Registries:</strong> Allow multiple versions of a component to coexist without name collisions (aligns with the <a href="https://github.com/WICG/webcomponents/blob/gh-pages/proposals/Scoped-Custom-Element-Registries.md">Scoped Custom Element Registries proposal</a>).</li>
+        <li><strong>Injector Integration:</strong> Custom elements resolve dependencies from the <a href="/projects/webinjectors/">Web Injectors</a> hierarchy instead of relying on global state or module scope.</li>
+        <li><strong>Transient Components:</strong> Custom elements that replace themselves with semantically correct native HTML — solving the "dynamic tag" problem without permanent wrapper nodes.</li>
+    </ul>
+</section>
+
+<section id="scoped-registries" class="section-card">
+    <h3 id="scoped-registries-heading">Scoped Registries</h3>
+    <p>
+        The standard <code>customElements.define()</code> is a global, one-time operation. Two libraries defining <code>&lt;my-button&gt;</code> will collide.
+        Scoped registries solve this by tying element definitions to a Shadow DOM scope.
+    </p>
+
+    {% highlight "typescript" %}
+// Each Shadow DOM root can have its own registry
+const registry = new CustomElementRegistry();
+registry.define('my-button', LibAButton);
+
+class AppShell extends HTMLElement {
+    constructor() {
+        super();
+        this.attachShadow({
+            mode: 'open',
+            registry // This shadow root uses LibA's button
+        });
+    }
+}
+    {% endhighlight %}
+
+    <div class="comparison-block" style="background: rgba(99, 102, 241, 0.05); padding: 1.25rem; border-radius: 8px; border-left: 4px solid var(--color-primary); margin: 1.5rem 0;">
+        <h4 id="scoped-status" style="margin-top: 0; color: var(--color-primary); font-size: 1rem;">Standards Status</h4>
+        <p style="margin-bottom: 0; font-size: 0.95rem;">
+            Scoped Custom Element Registries are a <strong>Stage 2 WICG proposal</strong> with Chrome implementation behind a flag.
+            Web Plugs provides a polyfill that follows the proposal's API shape. When the standard ships, the polyfill becomes a no-op.
+        </p>
+    </div>
+</section>
+
+<section id="injector-integration" class="section-card">
+    <h3 id="injector-integration-heading">Injector Integration</h3>
+    <p>
+        Custom elements typically rely on module scope, global variables, or manual event dispatching to access shared services.
+        With <a href="/projects/webinjectors/">Web Injectors</a>, components resolve dependencies from the DOM tree:
+    </p>
+
+    {% highlight "typescript" %}
+class UserCard extends HTMLElement {
+    connectedCallback() {
+        // Resolve services from ancestor injectors
+        const userService = InjectorRoot.getProviderOf(this, 'services:user');
+        const theme = InjectorRoot.getProviderOf(this, 'customContexts:theme');
+
+        this.innerHTML = `<h3 style="color: ${theme.primary}">${userService.name}</h3>`;
+    }
+}
+    {% endhighlight %}
+
+    <p>
+        This follows the same pattern as Angular's hierarchical DI and React's Context — but it works with <strong>any</strong> custom element, not just those from a specific framework.
+    </p>
+</section>
+
+<section id="transient-components" class="section-card">
+    <h3 id="transient-components-heading">Transient Components</h3>
+    <p>
+        A <strong>Transient Component</strong> is a custom element that replaces itself with a semantically correct native HTML element during initialization.
+        The transient element exists only long enough to determine <em>what</em> to render — then it disappears, leaving no wrapper node in the DOM.
+    </p>
+
+    <table>
+        <tr><th>Problem</th><th>Framework Solution</th><th>Web Everything Solution</th></tr>
+        <tr>
+            <td>Heading level depends on nesting</td>
+            <td>React: HeadingLevelContext + useContext</td>
+            <td><code>&lt;auto-heading&gt;</code> resolves level from InjectorRoot, replaces itself with <code>&lt;hN&gt;</code></td>
+        </tr>
+        <tr>
+            <td>Link vs button depends on href</td>
+            <td>Vue: <code>&lt;component :is="tag"&gt;</code></td>
+            <td><code>&lt;smart-link&gt;</code> replaces with <code>&lt;a&gt;</code> or <code>&lt;button&gt;</code></td>
+        </tr>
+        <tr>
+            <td>Dynamic element tag at runtime</td>
+            <td>Svelte: <code>&lt;svelte:element this={tag}&gt;</code></td>
+            <td>Any <code>TransientElement</code> subclass: resolves tag, transfers attributes &amp; children, self-replaces</td>
+        </tr>
+    </table>
+
+    <h4 id="self-replacement-lifecycle">Self-Replacement Lifecycle</h4>
+    <ol>
+        <li><strong>connectedCallback fires</strong> — custom element is in the DOM</li>
+        <li><strong>Determine replacement</strong> — read attributes, query injector chain, compute target tag</li>
+        <li><strong>Create &amp; populate</strong> — <code>document.createElement(tag)</code>, transfer attributes and children</li>
+        <li><strong>Schedule replacement</strong> — <code>queueMicrotask(() => this.replaceWith(el))</code></li>
+        <li><strong>Microtask runs</strong> — transient element is removed, native element takes its place. Zero visual flash.</li>
+    </ol>
+
+    {% highlight "typescript" %}
+class TransientElement extends HTMLElement {
+    connectedCallback() {
+        const tag = this.resolveTag();
+        const el = document.createElement(tag);
+
+        for (const { name, value } of this.attributes) {
+            if (!name.startsWith('data-transient-')) el.setAttribute(name, value);
+        }
+        el.append(...this.childNodes);
+
+        queueMicrotask(() => this.replaceWith(el));
+    }
+
+    resolveTag(): string {
+        throw new Error('resolveTag() must be implemented');
+    }
+}
+    {% endhighlight %}
+
+    <h4 id="use-cases">Concrete Use Cases</h4>
+    <table>
+        <tr><th>Element</th><th>Replaces With</th><th>Logic</th></tr>
+        <tr>
+            <td><code>&lt;auto-heading&gt;</code></td>
+            <td><code>&lt;h1&gt;</code>&ndash;<code>&lt;h6&gt;</code></td>
+            <td>Heading level from injector or DOM nesting depth</td>
+        </tr>
+        <tr>
+            <td><code>&lt;smart-link&gt;</code></td>
+            <td><code>&lt;a&gt;</code> or <code>&lt;button&gt;</code></td>
+            <td>Presence of <code>href</code> attribute</td>
+        </tr>
+        <tr>
+            <td><code>&lt;field-group&gt;</code></td>
+            <td><code>&lt;fieldset&gt;</code> + <code>&lt;legend&gt;</code> or <code>&lt;div&gt;</code></td>
+            <td>Presence of <code>legend</code> attribute</td>
+        </tr>
+        <tr>
+            <td><code>&lt;icon name="..."&gt;</code></td>
+            <td><code>&lt;svg&gt;</code></td>
+            <td>Resolves SVG from icon registry</td>
+        </tr>
+        <tr>
+            <td><code>&lt;for-each&gt;</code></td>
+            <td>Comment markers + repeated content</td>
+            <td>Ergonomic directive syntax</td>
+        </tr>
+    </table>
+
+    <p style="margin-top: 1rem;">
+        See the full specification on the <a href="/blocks/transient-component/">Transient Component</a> block page, including AutoHeading code examples, SSR strategies, and pitfalls.
+    </p>
+</section>
+
+<section id="safari" class="section-card">
+    <h3 id="safari-constraints">Safari &amp; Customized Built-ins</h3>
+    <p>
+        Safari refuses to implement the <code>is=""</code> attribute for customized built-in elements.
+        This is a hard constraint that shapes the project:
+    </p>
+    <ul>
+        <li><strong>Autonomous elements only.</strong> All Web Everything custom elements use autonomous registration (<code>class MyEl extends HTMLElement</code>), never <code>customElements.define('my-el', MyEl, { extends: 'div' })</code>.</li>
+        <li><strong>Transient Components</strong> are the portable alternative to <code>is=""</code> — an autonomous element that becomes a native element via self-replacement.</li>
+        <li><strong>Web Directives</strong> uses <code>&lt;template is="for-each"&gt;</code> with a polyfill from <a href="/projects/webplugs/">Web Plugs</a> for Safari.</li>
+    </ul>
+</section>
+
+<section id="standards" class="section-card">
+    <h3 id="web-standards">Web Standards Alignment</h3>
+    <table>
+        <tr><th>Standard</th><th>Status</th><th>How We Use It</th></tr>
+        <tr>
+            <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_Components/Using_custom_elements">Custom Elements v1</a></td>
+            <td>Baseline</td>
+            <td>Foundation for all components. Autonomous elements only (Safari constraint).</td>
+        </tr>
+        <tr>
+            <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_Components/Using_shadow_DOM">Shadow DOM</a></td>
+            <td>Baseline</td>
+            <td>Style encapsulation, slot-based content projection, scoped registry host.</td>
+        </tr>
+        <tr>
+            <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/template">HTML Templates</a></td>
+            <td>Baseline</td>
+            <td>Inert content instantiation. Structural directives use <code>&lt;template&gt;</code> as authoring format.</td>
+        </tr>
+        <tr>
+            <td><a href="https://github.com/nicolo-ribaudo/tc39-proposal-structs">Scoped Custom Element Registries</a></td>
+            <td>Stage 2 Proposal</td>
+            <td>Per-shadow-root element definitions. Polyfilled in Web Plugs.</td>
+        </tr>
+        <tr>
+            <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Element/replaceWith">Element.replaceWith()</a></td>
+            <td>Baseline</td>
+            <td>Core mechanism for transient component self-replacement.</td>
+        </tr>
+        <tr>
+            <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Window/queueMicrotask">queueMicrotask()</a></td>
+            <td>Baseline</td>
+            <td>Safe lifecycle deferral for transient element replacement.</td>
+        </tr>
+    </table>
+</section>

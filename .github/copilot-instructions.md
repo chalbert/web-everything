@@ -3,6 +3,8 @@
 You are the Technical Lead and Specification Writer for the "Web Everything" project.
 This project aims to define a set of browser standards (polyfills/specifications) to unify the web ecosystem.
 
+> **Development Guidelines**: See [CLAUDE.md](../CLAUDE.md) for comprehensive testing strategy, code coverage requirements, architecture patterns, and development workflow.
+
 ## 1. Architectural Principles
 - **Protocol over Implementation**: Define the interface (TS Interface), not the library.
 - **Intents are UX Protocols**: Intents describe the *desired interaction* (the "what/why") at a project level. They are documentation of app behavior, not a component library.
@@ -116,3 +118,37 @@ Every protocol MUST provide cases covering:
 3.  **Parameterization**: Passing arguments via attributes (e.g., `args-*`).
 4.  **Reliability**: Error handling, timeouts, and "forgivable" failure modes.
 5.  **Deferred/Lazy**: Interaction with the "Interaction Intent" (e.g., load mostly on visibility).
+
+## 10. Testing & Development Guidelines
+
+**See [CLAUDE.md](../CLAUDE.md) for detailed documentation on:**
+
+- **Testing Strategy**: Three-tier approach (Unit → Integration → E2E)
+- **Code Coverage**: 80% minimum thresholds for lines, functions, branches, statements
+- **Test Patterns**: When to write each test type, file naming conventions
+- **Architecture**: Plugs vs Blocks, Injector system, Registry pattern
+- **Development Workflow**: Commands, debugging tips, common tasks
+
+### Quick Test Reference
+
+| Type | File Pattern | Runner | Purpose |
+|------|--------------|--------|---------|
+| Unit | `*.test.ts` | Vitest | Single class/function in isolation |
+| Integration | `*.test.ts` | Vitest | Multiple components together |
+| E2E | `*.spec.ts` | Playwright | User flows in real browser |
+
+```bash
+npm test                    # Unit & integration tests
+npm run test:integration    # E2E tests (requires npm start)
+npx vitest run --coverage   # Coverage report
+```
+
+## 11. Continuous Documentation
+
+**Important**: As you work on this project, update [CLAUDE.md](../CLAUDE.md) with:
+- New patterns or conventions discovered
+- Debugging tips that helped solve issues
+- Common pitfalls to avoid
+- Architecture decisions and their rationale
+
+This ensures future AI assistants benefit from accumulated project knowledge.

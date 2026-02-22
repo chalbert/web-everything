@@ -8,6 +8,32 @@ title: Research & References
     <p>A curated collection of external standards, proposals, and ecosystem libraries that influence the architectural decisions of Web Everything.</p>
 </section>
 
+{% if researchTopics.length %}
+<section style="margin-bottom: 3rem;">
+    <h2 style="margin-bottom: 1rem;">Open Research Topics</h2>
+    <p style="margin-bottom: 1.5rem; color: var(--color-text-muted); font-size: 0.9em;">Active investigations into design problems and architectural decisions.</p>
+    <div class="project-grid">
+        {% for topic in researchTopics %}
+        <a href="/research/{{ topic.id }}/" class="project-card" style="text-decoration: none; color: inherit;">
+            <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
+                <h3 class="project-title" style="margin: 0;">{{ topic.title }}</h3>
+                <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if topic.status == 'open' %}#fef3c7{% elif topic.status == 'resolved' %}#dcfce7{% else %}#f1f5f9{% endif %}; color: {% if topic.status == 'open' %}#92400e{% elif topic.status == 'resolved' %}#166534{% else %}#64748b{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ topic.status | title }}</span>
+            </div>
+            <p style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ topic.summary }}</p>
+            {% if topic.tags %}
+            <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+                {% for tag in topic.tags %}
+                <span style="display: inline-block; padding: 0.1rem 0.5rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b); font-size: 0.75em;">{{ tag }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </a>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+<h2 style="margin-bottom: 1rem;">External References</h2>
 <div class="project-grid">
     {% for section in references %}
     <div class="project-card" style="display: block; height: auto;">

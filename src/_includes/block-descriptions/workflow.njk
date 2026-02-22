@@ -1,0 +1,530 @@
+<h2>Workflow</h2>
+<p>
+    Multi-step process orchestration without URL changes &mdash; wizard-like flows with per-step validation,
+    linear/branching progression, and state persistence. The non-route complement to
+    <a href="/blocks/router/">Router</a>'s URL-based step navigation.
+</p>
+<p>
+    Workflow reuses <a href="/blocks/view/">ViewEngine</a>'s exclusive group pattern for step visibility
+    and <code>&lt;fieldset&gt;</code> for semantic grouping. Steps are always in the DOM (like
+    <a href="/blocks/tabs/">Tabs</a> panels), preserving form state across forward/back navigation.
+</p>
+
+<h3>Architecture: Router vs Workflow</h3>
+<p>
+    <a href="/blocks/router/">Router</a> handles URL-based multi-step flows (checkout with bookmarkable steps,
+    onboarding wizards with shareable links). Workflow handles <strong>state-based</strong> flows where
+    URL changes are unnecessary or undesirable: modal wizards, in-page forms, short processes.
+</p>
+<table>
+    <thead>
+        <tr><th></th><th>Router (URL-based)</th><th>Workflow (State-based)</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Step identity</strong></td>
+            <td>URL path (<code>/checkout/payment</code>)</td>
+            <td>Attribute value (<code>workflow-step="payment"</code>)</td>
+        </tr>
+        <tr>
+            <td><strong>Browser back/forward</strong></td>
+            <td>Native (Navigation API)</td>
+            <td>Optional (History API pushState or none)</td>
+        </tr>
+        <tr>
+            <td><strong>Bookmarkable</strong></td>
+            <td>Yes</td>
+            <td>No (or via query params)</td>
+        </tr>
+        <tr>
+            <td><strong>Step content</strong></td>
+            <td>Stamped on demand from <code>&lt;template&gt;</code></td>
+            <td>Always in DOM, hidden when inactive</td>
+        </tr>
+        <tr>
+            <td><strong>State on refresh</strong></td>
+            <td>Preserved (URL encodes step)</td>
+            <td>Lost unless <code>withAutoSave</code> persists to storage</td>
+        </tr>
+        <tr>
+            <td><strong>Use case</strong></td>
+            <td>Multi-page checkout, onboarding</td>
+            <td>Modal wizards, in-page forms, settings flows</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Guides/Constraint_validation">Constraint Validation API</a></td>
+        <td>Baseline</td>
+        <td><code>withGateValidation</code> calls <code>checkValidity()</code> on the active step's <code>&lt;fieldset&gt;</code> before allowing advancement; hidden steps are automatically skipped</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/fieldset">&lt;fieldset&gt;</a></td>
+        <td>Standard</td>
+        <td>Each step wraps content in <code>&lt;fieldset&gt;</code>; inactive steps get <code>disabled</code> attribute to prevent interaction and exclude from validation</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current">aria-current</a></td>
+        <td>Standard</td>
+        <td>Step indicator uses <code>&lt;ol&gt;</code> with <code>aria-current="step"</code> on the active <code>&lt;li&gt;</code></td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API">Invoker Commands API</a></td>
+        <td>Baseline 2026</td>
+        <td>Next/Previous buttons use <code>commandfor</code> targeting the workflow element with <code>command="--workflow-next"</code> / <code>command="--workflow-prev"</code></td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Scroll_snap">CSS Scroll Snap</a></td>
+        <td>Baseline</td>
+        <td>Optional: <code>scroll-snap-type: x mandatory</code> for horizontal step transitions; <code>scrollsnapchange</code> event for JS hooks</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/dialog">&lt;dialog&gt;</a></td>
+        <td>Baseline</td>
+        <td>When workflow is inside a <code>&lt;dialog&gt;</code>, focus management delegates to the browser's native dialog focusing steps</td>
+    </tr>
+</table>
+
+<h3>Framework Research</h3>
+<table>
+    <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
+    <tr>
+        <td><a href="https://material.angular.dev/cdk/stepper/overview">Angular CDK Stepper</a></td>
+        <td><code>linear</code> mode, <code>stepControl</code> per-step validation, <code>editable</code>/<code>optional</code> step flags</td>
+    </tr>
+    <tr>
+        <td><a href="https://mui.com/material-ui/react-stepper/">MUI Stepper</a></td>
+        <td><code>activeStep</code> controlled index, <code>nonLinear</code> mode, horizontal/vertical orientation</td>
+    </tr>
+    <tr>
+        <td><a href="https://www.patternfly.org/components/wizard/design-guidelines/">PatternFly Wizard</a></td>
+        <td>Progressive wizard (dynamic steps), sidebar step rail, review step, cancel/back/next footer</td>
+    </tr>
+    <tr>
+        <td><a href="https://stepperize.vercel.app/">Stepperize</a></td>
+        <td>Headless step orchestration (~1kB), typed step definitions, framework-agnostic</td>
+    </tr>
+    <tr>
+        <td><a href="https://react-hook-form.com/advanced-usage">React Hook Form</a></td>
+        <td><code>trigger()</code> for per-step field validation without full form submission</td>
+    </tr>
+</table>
+
+<h3>Progression Modes</h3>
+<p>
+    The progression mode determines how users navigate between steps. Each mode is a trait
+    that composes independently with validation and persistence traits.
+</p>
+<table>
+    <thead>
+        <tr><th>Mode</th><th>Trait</th><th>Behavior</th><th>Use Case</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Linear</strong></td>
+            <td><code>withLinearProgression</code></td>
+            <td>Steps must be completed in order. Future steps are disabled. Back navigation allowed to completed steps.</td>
+            <td>Checkout, onboarding, account setup</td>
+        </tr>
+        <tr>
+            <td><strong>Non-linear</strong></td>
+            <td><code>withNonLinearProgression</code></td>
+            <td>Any step can be visited at any time. Step indicator is clickable. Validation on final submit or per-step.</td>
+            <td>Settings pages, profile editing, surveys</td>
+        </tr>
+        <tr>
+            <td><strong>Branching</strong></td>
+            <td><code>withBranchingLogic</code></td>
+            <td>Step sequence adapts based on user input. Steps can be added/removed dynamically (progressive wizard).</td>
+            <td>Insurance quotes, tax filing, diagnostic flows</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Step Lifecycle</h3>
+<table>
+    <thead>
+        <tr><th>State</th><th>Description</th><th>DOM State</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>pending</code></td>
+            <td>Step not yet reached (linear mode). Cannot be activated.</td>
+            <td><code>hidden</code>, <code>&lt;fieldset disabled&gt;</code></td>
+        </tr>
+        <tr>
+            <td><code>active</code></td>
+            <td>Currently visible step. User is interacting with it.</td>
+            <td>Visible, <code>&lt;fieldset&gt;</code> enabled, <code>aria-current="step"</code> on indicator</td>
+        </tr>
+        <tr>
+            <td><code>completed</code></td>
+            <td>Step passed validation and user advanced past it.</td>
+            <td><code>hidden</code>, <code>&lt;fieldset disabled&gt;</code>, indicator shows checkmark</td>
+        </tr>
+        <tr>
+            <td><code>error</code></td>
+            <td>Step has validation errors (returned to after failed advancement).</td>
+            <td>Visible, <code>&lt;fieldset&gt;</code> enabled, indicator shows error icon</td>
+        </tr>
+        <tr>
+            <td><code>skipped</code></td>
+            <td>Optional step that user chose to bypass.</td>
+            <td><code>hidden</code>, <code>&lt;fieldset disabled&gt;</code>, indicator shows skip marker</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Declarative Structure</h3>
+
+<h4>Basic Linear Workflow</h4>
+{% highlight "html" %}
+<form workflow progression="linear" validation="gate">
+    <!-- Step indicator (auto-generated or manual) -->
+    <workflow-indicator></workflow-indicator>
+
+    <!-- Steps as fieldsets in an exclusive group -->
+    <fieldset workflow-step="personal" name="steps">
+        <legend>Personal Information</legend>
+        <input name="firstName" required />
+        <input name="lastName" required />
+        <input name="email" type="email" required />
+    </fieldset>
+
+    <fieldset workflow-step="address" name="steps" hidden>
+        <legend>Address</legend>
+        <input name="street" required />
+        <input name="city" required />
+        <input name="zip" pattern="[0-9]{5}" required />
+    </fieldset>
+
+    <fieldset workflow-step="review" name="steps" hidden>
+        <legend>Review & Submit</legend>
+        <!-- Summary of collected data -->
+    </fieldset>
+
+    <!-- Navigation via Invoker Commands -->
+    <footer>
+        <button commandfor="workflow" command="--workflow-prev">Back</button>
+        <button commandfor="workflow" command="--workflow-next">Next</button>
+    </footer>
+</form>
+{% endhighlight %}
+
+<h4>Non-Linear Workflow (Settings)</h4>
+{% highlight "html" %}
+<div workflow progression="non-linear">
+    <workflow-indicator></workflow-indicator>
+
+    <fieldset workflow-step="profile" name="settings">
+        <legend>Profile</legend>
+        <!-- ... -->
+    </fieldset>
+
+    <fieldset workflow-step="notifications" name="settings" hidden>
+        <legend>Notifications</legend>
+        <!-- ... -->
+    </fieldset>
+
+    <fieldset workflow-step="privacy" name="settings" hidden>
+        <legend>Privacy</legend>
+        <!-- ... -->
+    </fieldset>
+</div>
+{% endhighlight %}
+
+<h4>Branching Workflow (Progressive)</h4>
+{% highlight "html" %}
+<form workflow progression="branching" validation="gate">
+    <workflow-indicator></workflow-indicator>
+
+    <fieldset workflow-step="type" name="steps">
+        <legend>Account Type</legend>
+        <label><input type="radio" name="type" value="personal" /> Personal</label>
+        <label><input type="radio" name="type" value="business" /> Business</label>
+    </fieldset>
+
+    <!-- Shown only if type=personal -->
+    <fieldset workflow-step="personal-details" name="steps" hidden
+              workflow-branch="type:personal">
+        <legend>Personal Details</legend>
+        <!-- ... -->
+    </fieldset>
+
+    <!-- Shown only if type=business -->
+    <fieldset workflow-step="business-details" name="steps" hidden
+              workflow-branch="type:business">
+        <legend>Business Details</legend>
+        <!-- ... -->
+    </fieldset>
+
+    <fieldset workflow-step="review" name="steps" hidden>
+        <legend>Review</legend>
+    </fieldset>
+</form>
+{% endhighlight %}
+
+<h4>Modal Wizard</h4>
+{% highlight "html" %}
+<dialog id="setup-wizard">
+    <form workflow progression="linear" validation="gate" method="dialog">
+        <workflow-indicator></workflow-indicator>
+
+        <fieldset workflow-step="welcome" name="wizard-steps">
+            <legend>Welcome</legend>
+            <p>Let's get you set up.</p>
+        </fieldset>
+
+        <fieldset workflow-step="preferences" name="wizard-steps" hidden>
+            <legend>Preferences</legend>
+            <!-- ... -->
+        </fieldset>
+
+        <footer>
+            <button commandfor="setup-wizard" command="--workflow-prev">Back</button>
+            <button commandfor="setup-wizard" command="--workflow-next">Next</button>
+        </footer>
+    </form>
+</dialog>
+{% endhighlight %}
+
+<h3>Step Indicator</h3>
+<p>
+    The <code>&lt;workflow-indicator&gt;</code> element renders a step rail with accessible markup.
+    It reads step definitions from its parent workflow and renders an ordered list.
+</p>
+{% highlight "html" %}
+<!-- Generated accessible markup -->
+<workflow-indicator>
+    <ol role="list">
+        <li aria-current="step" data-state="active">
+            <span class="step-number">1</span>
+            <span class="step-label">Personal Information</span>
+        </li>
+        <li data-state="pending">
+            <span class="step-number">2</span>
+            <span class="step-label">Address</span>
+        </li>
+        <li data-state="pending">
+            <span class="step-number">3</span>
+            <span class="step-label">Review</span>
+        </li>
+    </ol>
+</workflow-indicator>
+{% endhighlight %}
+
+<h3>Validation</h3>
+<p>
+    <code>withGateValidation</code> uses the native
+    <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Guides/Constraint_validation">Constraint Validation API</a>
+    to validate the active step before allowing advancement.
+</p>
+<ol>
+    <li><strong>User clicks Next</strong> &mdash; <code>--workflow-next</code> command fires.</li>
+    <li><strong>Gate check</strong> &mdash; <code>activeFieldset.checkValidity()</code> called. If valid, fires <code>workflow-step-before-change</code>.</li>
+    <li><strong>If invalid</strong> &mdash; <code>activeFieldset.reportValidity()</code> shows browser-native error bubbles. Fires <code>workflow-error</code> event with invalid fields.</li>
+    <li><strong>Custom validation</strong> &mdash; Listen for <code>workflow-step-before-change</code> (cancelable). Run async validation, call <code>event.preventDefault()</code> to block advancement.</li>
+</ol>
+
+{% highlight "typescript" %}
+// Custom async validation on step change
+workflowEl.addEventListener('workflow-step-before-change', async (e) => {
+  if (e.detail.from === 'email-step') {
+    const email = form.elements.email.value;
+    const exists = await checkEmailExists(email);
+    if (exists) {
+      form.elements.email.setCustomValidity('Email already registered');
+      form.elements.email.reportValidity();
+      e.preventDefault(); // Block step advancement
+    }
+  }
+});
+{% endhighlight %}
+
+<h3>State Persistence</h3>
+<p>
+    <code>withAutoSave</code> persists form data on each step change so users can resume after
+    interruptions. Respects the configured storage backend.
+</p>
+<table>
+    <thead>
+        <tr><th>Storage</th><th>Scope</th><th>Cleared On</th><th>Use Case</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>sessionStorage</code></td>
+            <td>Tab/session</td>
+            <td>Tab close</td>
+            <td>Checkout flows (single session)</td>
+        </tr>
+        <tr>
+            <td><code>localStorage</code></td>
+            <td>Browser</td>
+            <td>Manual clear</td>
+            <td>Onboarding, long forms (resumable)</td>
+        </tr>
+        <tr>
+            <td><code>none</code></td>
+            <td>In-memory only</td>
+            <td>Page refresh</td>
+            <td>Short modal wizards</td>
+        </tr>
+    </tbody>
+</table>
+
+{% highlight "html" %}
+<form workflow progression="linear" persistence="sessionStorage"
+      persistence-key="checkout-v1">
+    <!-- Data auto-saved to sessionStorage on step change -->
+    <!-- On mount, hydrates form from stored data and restores step position -->
+</form>
+{% endhighlight %}
+
+<h3>Invoker Commands</h3>
+<p>
+    Step navigation uses the <a href="https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API">Invoker Commands API</a>
+    for declarative, no-JS navigation buttons.
+</p>
+<table>
+    <thead>
+        <tr><th>Command</th><th>Behavior</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>--workflow-next</code></td>
+            <td>Advance to next step (after validation if gate mode). On last step, fires <code>workflow-complete</code>.</td>
+        </tr>
+        <tr>
+            <td><code>--workflow-prev</code></td>
+            <td>Return to previous step. Skips validation (data already validated on entry).</td>
+        </tr>
+        <tr>
+            <td><code>--workflow-goto</code></td>
+            <td>Jump to a specific step by ID (non-linear mode only). Requires <code>command</code> value format: <code>--workflow-goto:stepId</code>.</td>
+        </tr>
+        <tr>
+            <td><code>--workflow-reset</code></td>
+            <td>Reset to first step, clearing all step states. Optionally clears persisted data.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Events</h3>
+<p>
+    Workflow dispatches typed event classes registered via <a href="/projects/webevents/">Web Events</a> provider keys.
+    The <code>workflow-step-before-change</code> and <code>workflow-complete</code> events are cancelable for validation gating.
+</p>
+<table>
+    <thead>
+        <tr><th>Event</th><th>Class</th><th>Provider Key</th><th>Detail</th><th>Cancelable</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>workflow-step-before-change</code></td>
+            <td><code>WorkflowStepBeforeChangeEvent</code></td>
+            <td><code>customEvents:workflow-step-before-change</code></td>
+            <td><code>{ from, to, direction, trigger }</code></td>
+            <td>Yes</td>
+        </tr>
+        <tr>
+            <td><code>workflow-step-change</code></td>
+            <td><code>WorkflowStepChangeEvent</code></td>
+            <td><code>customEvents:workflow-step-change</code></td>
+            <td><code>{ from, to, direction, trigger }</code></td>
+            <td>No</td>
+        </tr>
+        <tr>
+            <td><code>workflow-complete</code></td>
+            <td><code>WorkflowCompleteEvent</code></td>
+            <td><code>customEvents:workflow-complete</code></td>
+            <td><code>{ data, steps }</code></td>
+            <td>Yes</td>
+        </tr>
+        <tr>
+            <td><code>workflow-error</code></td>
+            <td><code>WorkflowErrorEvent</code></td>
+            <td><code>customEvents:workflow-error</code></td>
+            <td><code>{ step, fields, errors }</code></td>
+            <td>No</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Interface</h3>
+<pre><code class="language-typescript">/** Step definition parsed from DOM */
+interface WorkflowStepDefinition {
+    id: string;                    // workflow-step attribute value
+    fieldset: HTMLFieldSetElement; // The step's fieldset element
+    label: string;                // From &lt;legend&gt; text
+    optional: boolean;            // workflow-optional attribute
+    branch?: string;              // workflow-branch condition
+    state: 'pending' | 'active' | 'completed' | 'error' | 'skipped';
+}
+
+/** Workflow configuration — from attributes or injector */
+interface WorkflowConfig {
+    progression: 'linear' | 'non-linear' | 'branching';
+    validation: 'gate' | 'on-submit' | 'none';
+    persistence: 'sessionStorage' | 'localStorage' | 'none';
+    persistenceKey?: string;      // Storage key prefix
+}
+
+/** Step change event detail */
+interface WorkflowStepChangeDetail {
+    from: string | null;          // Previous step ID (null on initial)
+    to: string;                   // Target step ID
+    direction: 'forward' | 'backward';
+    trigger: HTMLElement | null;  // Button that triggered the change
+}
+
+/** Workflow complete event detail */
+interface WorkflowCompleteDetail {
+    data: Record&lt;string, FormDataEntryValue&gt;; // All form data
+    steps: WorkflowStepDefinition[];           // Final step states
+}</code></pre>
+
+<h3>Styling Hooks</h3>
+<table>
+    <thead>
+        <tr><th>Selector / Property</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>[workflow-step][data-state="active"]</code></td><td>Currently visible step</td></tr>
+        <tr><td><code>[workflow-step][data-state="completed"]</code></td><td>Step passed validation</td></tr>
+        <tr><td><code>[workflow-step][data-state="error"]</code></td><td>Step has validation errors</td></tr>
+        <tr><td><code>[workflow-step][data-state="pending"]</code></td><td>Step not yet reached (linear)</td></tr>
+        <tr><td><code>workflow-indicator [aria-current="step"]</code></td><td>Active step in indicator rail</td></tr>
+        <tr><td><code>workflow-indicator [data-state="completed"]</code></td><td>Completed step in indicator</td></tr>
+        <tr><td><code>--workflow-step-count</code></td><td>Total step count (CSS custom property)</td></tr>
+        <tr><td><code>--workflow-current-step</code></td><td>Current step index, 1-based (CSS custom property)</td></tr>
+    </tbody>
+</table>
+
+<h3>Exports</h3>
+<table>
+    <thead>
+        <tr><th>Export</th><th>Kind</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>WorkflowElement</code></td><td>Class</td><td>Main workflow orchestrator (Custom Element)</td></tr>
+        <tr><td><code>WorkflowStepElement</code></td><td>Class</td><td>Step container (optional, wraps fieldset)</td></tr>
+        <tr><td><code>WorkflowIndicator</code></td><td>Class</td><td>Step progress indicator (Custom Element)</td></tr>
+        <tr><td><code>withLinearProgression</code></td><td>Trait</td><td>Enforces sequential step completion</td></tr>
+        <tr><td><code>withNonLinearProgression</code></td><td>Trait</td><td>Allows free step navigation</td></tr>
+        <tr><td><code>withBranchingLogic</code></td><td>Trait</td><td>Dynamic step list based on input</td></tr>
+        <tr><td><code>withGateValidation</code></td><td>Trait</td><td>Per-step Constraint Validation</td></tr>
+        <tr><td><code>withAutoSave</code></td><td>Trait</td><td>Persistence to sessionStorage/localStorage</td></tr>
+        <tr><td><code>withReviewStep</code></td><td>Trait</td><td>Auto-generated review summary</td></tr>
+        <tr><td><code>WorkflowStepBeforeChangeEvent</code></td><td>Event Class</td><td>Before step transition (cancelable)</td></tr>
+        <tr><td><code>WorkflowStepChangeEvent</code></td><td>Event Class</td><td>After step transition</td></tr>
+        <tr><td><code>WorkflowCompleteEvent</code></td><td>Event Class</td><td>Workflow completed (cancelable)</td></tr>
+        <tr><td><code>WorkflowErrorEvent</code></td><td>Event Class</td><td>Validation error on step</td></tr>
+        <tr><td><code>WorkflowConfig</code></td><td>Interface</td><td>Configuration type</td></tr>
+        <tr><td><code>WorkflowStepDefinition</code></td><td>Interface</td><td>Parsed step definition</td></tr>
+        <tr><td><code>registerWorkflow</code></td><td>Function</td><td>Registers elements with default names</td></tr>
+    </tbody>
+</table>

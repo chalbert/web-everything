@@ -1,0 +1,144 @@
+<h2>Tabs</h2>
+<p>Accessible tab interface built on <a href="/blocks/view/">View</a>. Uses <a href="/blocks/view/#view-behavior">ViewBehavior</a> for panel switching &mdash; all panels are always in the DOM, toggled by commands.</p>
+
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">
+  <strong>Terminology:</strong> See <a href="/semantics/">Semantics & Glossary</a> for terms like <a href="/semantics/#term-tablist-tab-tabpanel">tablist/tab/tabpanel</a>, <a href="/semantics/#term-trigger">trigger</a>, and <a href="/semantics/#term-name-exclusive-groups">name (exclusive groups)</a>.
+</p>
+
+<h3>Architecture</h3>
+<p>Tabs is a <strong>UI layer</strong> over <a href="/blocks/view/">View</a> primitives:</p>
+<ul>
+  <li><strong>Tabs</strong>: ARIA roles, keyboard navigation, active state styling, trigger-panel association</li>
+  <li><strong>ViewBehavior</strong>: Panel show/hide via Invoker Commands, exclusive groups via <code>name</code> attribute</li>
+  <li><strong>ViewEngine</strong>: Hidden modes, <code>beforetoggle</code>/<code>toggle</code> events, View Transitions</li>
+</ul>
+<p>Tabs panels are always present in the DOM (behavior pattern, not directive pattern). This means <code>hidden="until-found"</code> works &mdash; Ctrl+F can find content in inactive tabs. State is preserved naturally since elements are never destroyed.</p>
+
+<h3>Web Standards Alignment</h3>
+<p>Tabs builds on platform patterns:</p>
+<ul>
+  <li><strong>Invoker Commands</strong> (Baseline Jan 2026): Tab triggers use <code>commandfor</code>/<code>command</code></li>
+  <li><strong>Exclusive groups</strong>: Panels share a <code>name</code> attribute (like <code>&lt;details name&gt;</code>)</li>
+  <li><strong>WAI-ARIA Tabs</strong>: Full compliance with <a href="https://www.w3.org/WAI/ARIA/apg/patterns/tabs/">APG pattern</a></li>
+  <li><strong>Open UI</strong>: Following <a href="https://open-ui.org/components/tabs.research/">tabs research</a> for future alignment</li>
+</ul>
+
+<h3>Syntax Options</h3>
+
+<h4>Option A: Invoker Commands + name attribute (Recommended)</h4>
+<pre><code class="language-html">&lt;div tab-group&gt;
+  &lt;nav tab-list&gt;
+    &lt;!-- Uses Invoker Commands API for triggers --&gt;
+    &lt;button commandfor="counter-panel" command="--tab-show"&gt;Counter&lt;/button&gt;
+    &lt;button commandfor="todos-panel" command="--tab-show"&gt;Todo List&lt;/button&gt;
+    &lt;button commandfor="form-panel" command="--tab-show"&gt;Form&lt;/button&gt;
+  &lt;/nav&gt;
+
+  &lt;div tab-panels&gt;
+    &lt;!-- Same name = exclusive group (only one visible) --&gt;
+    &lt;section id="counter-panel" tab-panel name="demo-tabs"&gt;Counter...&lt;/section&gt;
+    &lt;section id="todos-panel" tab-panel name="demo-tabs" hidden&gt;Todos...&lt;/section&gt;
+    &lt;section id="form-panel" tab-panel name="demo-tabs" hidden&gt;Form...&lt;/section&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+<p><strong>Pros:</strong> Aligns with web standards, progressive enhancement, works today with polyfill</p>
+
+<h4>Option B: Shorthand (attribute-based linking)</h4>
+<pre><code class="language-html">&lt;div tab-group="demo"&gt;
+  &lt;nav tab-list&gt;
+    &lt;button tab-trigger="counter"&gt;Counter&lt;/button&gt;
+    &lt;button tab-trigger="todos"&gt;Todo List&lt;/button&gt;
+  &lt;/nav&gt;
+
+  &lt;div tab-panels&gt;
+    &lt;section tab-panel="counter"&gt;Counter content...&lt;/section&gt;
+    &lt;section tab-panel="todos"&gt;Todo content...&lt;/section&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+<p><strong>Pros:</strong> More concise, auto-generates IDs and commandfor/command</p>
+
+<h4>Option C: Custom Element</h4>
+<pre><code class="language-html">&lt;we-tabs&gt;
+  &lt;we-tab-trigger slot="triggers" panel="counter"&gt;Counter&lt;/we-tab-trigger&gt;
+  &lt;we-tab-trigger slot="triggers" panel="todos"&gt;Todo List&lt;/we-tab-trigger&gt;
+
+  &lt;we-tab-panel slot="panels" name="counter"&gt;Counter content...&lt;/we-tab-panel&gt;
+  &lt;we-tab-panel slot="panels" name="todos"&gt;Todo content...&lt;/we-tab-panel&gt;
+&lt;/we-tabs&gt;</code></pre>
+<p><strong>Pros:</strong> More encapsulated, clearer component boundary</p>
+
+<h3>ARIA Implementation</h3>
+<p>Follows <a href="https://www.w3.org/WAI/ARIA/apg/patterns/tabs/">WAI-ARIA Tabs Pattern</a>:</p>
+<table>
+  <tr><th>Element</th><th>Role</th><th>Attributes</th></tr>
+  <tr><td>tab-list</td><td>tablist</td><td>aria-orientation</td></tr>
+  <tr><td>tab-trigger</td><td>tab</td><td>aria-selected, aria-controls, tabindex</td></tr>
+  <tr><td>tab-panel</td><td>tabpanel</td><td>aria-labelledby, tabindex="0"</td></tr>
+</table>
+
+<h3>Keyboard Navigation</h3>
+<table>
+  <tr><th>Key</th><th>Horizontal</th><th>Vertical</th></tr>
+  <tr><td>Arrow Left/Up</td><td>Previous tab</td><td>Previous tab</td></tr>
+  <tr><td>Arrow Right/Down</td><td>Next tab</td><td>Next tab</td></tr>
+  <tr><td>Home</td><td colspan="2">First tab</td></tr>
+  <tr><td>End</td><td colspan="2">Last tab</td></tr>
+  <tr><td>Enter/Space</td><td colspan="2">Activate tab (manual mode only)</td></tr>
+</table>
+
+<h3>Configuration</h3>
+<pre><code class="language-html">&lt;!-- Activation mode: automatic (default) or manual --&gt;
+&lt;div tab-group activation="manual"&gt;...&lt;/div&gt;
+
+&lt;!-- Orientation: horizontal (default) or vertical --&gt;
+&lt;div tab-group orientation="vertical"&gt;...&lt;/div&gt;
+
+&lt;!-- Default active tab --&gt;
+&lt;div tab-group default="todos"&gt;...&lt;/div&gt;
+
+&lt;!-- Sync with URL hash --&gt;
+&lt;div tab-group sync="hash"&gt;...&lt;/div&gt;
+
+&lt;!-- Persist to storage --&gt;
+&lt;div tab-group sync="session"&gt;...&lt;/div&gt;
+&lt;div tab-group sync="local"&gt;...&lt;/div&gt;</code></pre>
+
+<h3>View Integration</h3>
+<p>Since Tabs uses ViewBehavior (panels always in DOM), state preservation is automatic. ViewEngine features that apply:</p>
+<pre><code class="language-html">&lt;!-- Transitions between panels --&gt;
+&lt;div tab-group view:transition&gt;...&lt;/div&gt;
+
+&lt;!-- Hidden mode: let Ctrl+F find content in inactive tabs --&gt;
+&lt;section tab-panel="faq" hidden-mode="until-found"&gt;...&lt;/section&gt;
+
+&lt;!-- Lazy load panel content (defer rendering until first activation) --&gt;
+&lt;section tab-panel="heavy" view:lazy&gt;...&lt;/section&gt;</code></pre>
+<p>Note: <code>view:keep-alive</code> is not needed for Tabs &mdash; panels are never destroyed, so state is always preserved. <code>keep-alive</code> is for directives (ViewIf, ViewSwitch) that stamp/destroy DOM.</p>
+
+<h3>Planned Traits</h3>
+<p>Composable behaviors to be added later:</p>
+<ul>
+  <li><strong>closeable-tabs</strong>: Add close buttons to tabs</li>
+  <li><strong>reorderable-tabs</strong>: Drag-and-drop tab reordering</li>
+  <li><strong>overflow-tabs</strong>: Scroll or dropdown when too many tabs</li>
+  <li><strong>addable-tabs</strong>: "+" button to create new tabs</li>
+</ul>
+
+<h3>Events</h3>
+<p>Tabs dispatches typed event classes registered via <a href="/projects/webevents/">Web Events</a> provider keys. Consumers can use <code>listenForScoped</code> or the plugged <code>{ provider }</code> option to discriminate between tab events from different tab groups.</p>
+<table>
+  <tr><th>Event</th><th>Class</th><th>Provider Key</th><th>Detail</th><th>Cancelable</th></tr>
+  <tr><td><code>tab-change</code></td><td><code>TabChangeEvent</code></td><td><code>customEvents:tab-change</code></td><td><code>{ from, to, trigger }</code></td><td>Yes</td></tr>
+  <tr><td><code>tab-close</code></td><td><code>TabCloseEvent</code></td><td><code>customEvents:tab-close</code></td><td><code>{ panel, trigger }</code></td><td>Yes</td></tr>
+</table>
+
+<h3>Styling Hooks</h3>
+<pre><code class="language-css">/* Active trigger */
+[tab-trigger][aria-selected="true"] { ... }
+
+/* Active panel */
+[tab-panel]:not([hidden]) { ... }
+
+/* Focus visible for keyboard users */
+[tab-trigger]:focus-visible { ... }
+</code></pre>

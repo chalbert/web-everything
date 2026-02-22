@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Router Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/declarative-spa-router.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">
+      &larr; Back to Home
+    </a>
+  </div>
+
+  <div class="app-container">
+    <div class="app-main">
+      <header>
+        <h1>Router Demo</h1>
+        <p class="subtitle">Declarative client-side routing with guards, loaders, and named outlets</p>
+
+        <nav>
+          <a route:link="/counter">Counter</a>
+          <a route:link="/todos">Todo List</a>
+          <a route:link="/users/1" route:prefetch="hover">User 1</a>
+          <a route:link="/users/2" route:prefetch="hover">User 2</a>
+          <a route:link="/posts">Posts</a>
+          <a route:link="/admin">Admin</a>
+        </nav>
+
+        <!-- Loader Intent Controls -->
+        <div class="loader-intent-panel">
+          <div class="intent-control">
+            <label>Loading Strategy</label>
+            <div class="strategy-picker" id="strategy-picker">
+              <button class="strategy-btn active" data-strategy="soft">Soft</button>
+              <button class="strategy-btn" data-strategy="hard">Hard</button>
+              <button class="strategy-btn" data-strategy="replacement">Replacement</button>
+              <button class="strategy-btn" data-strategy="optimistic">Optimistic</button>
+            </div>
+          </div>
+          <div class="intent-control">
+            <label>Timing</label>
+            <div class="timing-picker" id="timing-picker">
+              <button class="timing-btn active" data-timing="debounced">Debounced (400ms)</button>
+              <button class="timing-btn" data-timing="immediate">Immediate</button>
+            </div>
+          </div>
+          <div class="intent-status" id="intent-status">
+            Strategy: <code>soft</code> &middot; Timing: <code>debounced</code>
+          </div>
+        </div>
+      </header>
+
+      <div class="content-layout">
+        <route-view>
+          <!-- Counter route -->
+          <template route="/counter">
+            <section class="view">
+              <div class="counter">
+                <h2>Counter Demo</h2>
+                <div class="counter-value" id="counter-display">0</div>
+                <div class="counter-controls">
+                  <button id="decrement-btn">Decrement</button>
+                  <button class="secondary" id="reset-btn">Reset</button>
+                  <button id="increment-btn">Increment</button>
+                </div>
+              </div>
+            </section>
+          </template>
+
+          <!-- Todo list route -->
+          <template route="/todos">
+            <section class="view">
+              <h2>Todo List</h2>
+              <div class="todo-section">
+                <form class="todo-form" id="todo-form">
+                  <input type="text" placeholder="Add a new todo..." id="todo-input" required />
+                  <button type="submit">Add</button>
+                </form>
+                <ul class="todo-list" id="todo-list"></ul>
+                <div class="todo-stats">
+                  <span id="todo-count">0 items</span>
+                </div>
+              </div>
+            </section>
+          </template>
+
+          <!-- User profile route (with loader — uses picker strategy) -->
+          <template route="/users/:id" route:loader="loadUser">
+            <section class="view">
+              <h2>User Profile</h2>
+              <div class="user-card" id="user-card">
+                <!-- Content filled by loader data -->
+              </div>
+            </section>
+          </template>
+
+          <!-- User error boundary -->
+          <template route="/users/:id" route:error>
+            <section class="view">
+              <div class="error-card">
+                <h2>User Not Found</h2>
+                <p>The requested user could not be loaded.</p>
+                <a route:link="/counter">Go to Counter</a>
+              </div>
+            </section>
+          </template>
+
+          <!-- Posts route (with loader — per-route override: always replacement) -->
+          <template route="/posts" route:loader="loadPosts"
+                    route:loader-strategy="replacement">
+            <section class="view">
+              <h2>Posts</h2>
+              <p class="route-override-badge">Per-route override: <code>route:loader-strategy="replacement"</code></p>
+              <div id="posts-list">
+                <!-- Content filled by loader data -->
+              </div>
+            </section>
+          </template>
+
+          <!-- Admin route (guarded) -->
+          <template route="/admin" route:guard="requireAuth">
+            <section class="view">
+              <h2>Admin Panel</h2>
+              <p>Welcome, administrator!</p>
+              <div class="admin-content">
+                <div class="admin-stat">Users: 42</div>
+                <div class="admin-stat">Active: 38</div>
+              </div>
+            </section>
+          </template>
+
+          <!-- Login route (redirect target for guard) -->
+          <template route="/login">
+            <section class="view">
+              <div class="login-card">
+                <h2>Login Required</h2>
+                <p>You need to log in to access the admin panel.</p>
+                <button id="login-btn">Log In</button>
+                <p class="login-hint">(Click to toggle auth state)</p>
+              </div>
+            </section>
+          </template>
+
+          <!-- Home redirect (default route) -->
+          <template route="/">
+            <section class="view">
+              <h2>Welcome</h2>
+              <p>Choose a route from the navigation above.</p>
+              <div class="feature-list">
+                <div class="feature">
+                  <strong>/counter</strong> &mdash; Basic route
+                </div>
+                <div class="feature">
+                  <strong>/todos</strong> &mdash; Basic route
+                </div>
+                <div class="feature">
+                  <strong>/users/:id</strong> &mdash; Route with loader (uses picker strategy)
+                </div>
+                <div class="feature">
+                  <strong>/posts</strong> &mdash; Route with loader + <code>route:loader-strategy="replacement"</code> override
+                </div>
+                <div class="feature">
+                  <strong>/admin</strong> &mdash; Guarded route (requires auth)
+                </div>
+                <div class="feature">
+                  <strong>Loader Intent</strong> &mdash; Switch strategies with the picker above
+                </div>
+              </div>
+            </section>
+          </template>
+
+          <!-- Sidebar content for certain routes -->
+          <template route="/users/:id" route:outlet="sidebar">
+            <div class="sidebar-content">
+              <h3>User Actions</h3>
+              <ul>
+                <li><a route:link="/users/1">View User 1</a></li>
+                <li><a route:link="/users/2">View User 2</a></li>
+                <li><a route:link="/users/999">View User 999 (error)</a></li>
+              </ul>
+            </div>
+          </template>
+        </route-view>
+
+        <!-- Named outlet for sidebar (auxiliary view) -->
+        <aside class="sidebar">
+          <route-outlet name="sidebar"></route-outlet>
+        </aside>
+      </div>
+    </div>
+
+    <!-- Source Code Viewer -->
+    <aside class="source-viewer">
+      <div class="source-viewer-header">
+        <div class="source-viewer-title">Source Code</div>
+        <div class="source-viewer-toggle">
+          <button id="view-source-btn" class="active">HTML</button>
+          <button id="view-js-btn">JS</button>
+        </div>
+      </div>
+      <div class="source-viewer-content">
+        <pre id="source-display"></pre>
+      </div>
+    </aside>
+  </div>
+
+  <!-- SPA routing: normalize URL when loaded via .html file path -->
+  <script>
+    if (location.pathname.includes('declarative-spa-router')) {
+      history.replaceState(null, '', '/');
+    }
+  </script>
+
+  <!-- Bootstrap: applies patches and exposes globals -->
+  <script type="module" src="/plugs/bootstrap.ts"></script>
+
+  <!-- Demo JS Source (for code viewer) -->
+  <script type="text/plain" id="demo-js-source">
+// Bootstrap provides: injectors, attributes, and registers router
+// Router elements: route-view, route-outlet
+// Router behaviors: route:link, route:prefetch
+import { SimpleStore } from '/blocks/stores/simple';
+const { injectors } = window;
+const documentInjector = injectors.getInjectorOf(document);
+
+// === AUTH STATE ===
+let isLoggedIn = false;
+
+// === LOADER INTENT ===
+// Declare how route loading should affect the UI.
+// This is the Loader Intent protocol — a single declaration
+// that all consumers (router, forms, etc.) resolve and adapt to.
+const loaderIntent = {
+  strategy: 'soft',           // soft | hard | replacement | optimistic
+  scope: 'region',            // route-view is the loading region
+  progress: 'indeterminate',  // no measurable progress for route loads
+  context: 'transition',      // routes have prior content (except initial)
+  timing: 'debounced'         // don't flash indicator for fast loads
+};
+documentInjector.set('customContexts:loaderIntent', loaderIntent);
+
+// === GUARDS ===
+documentInjector.set('customContexts:routeGuard', {
+  requireAuth(to, from) {
+    if (!isLoggedIn) return '/login';
+    return true;
+  }
+});
+
+// === LOADERS ===
+const mockUsers = {
+  '1': { id: 1, name: 'Alice', email: 'alice@example.com', role: 'Developer' },
+  '2': { id: 2, name: 'Bob', email: 'bob@example.com', role: 'Designer' },
+};
+
+const mockPosts = [
+  { id: 1, title: 'Getting Started with Web Everything', author: 'Alice' },
+  { id: 2, title: 'Intent-Driven Loading States', author: 'Bob' },
+  { id: 3, title: 'Declarative Routing Patterns', author: 'Charlie' },
+];
+
+documentInjector.set('customContexts:routeLoader', {
+  async loadUser({ params, signal }) {
+    // Simulate network delay (800ms — long enough to see loading states)
+    await new Promise(r => setTimeout(r, 800));
+    if (signal.aborted) return;
+
+    const user = mockUsers[params.id];
+    if (!user) throw new Error(`User ${params.id} not found`);
+    return user;
+  },
+  async loadPosts({ signal }) {
+    // Longer delay to showcase replacement skeleton
+    await new Promise(r => setTimeout(r, 1500));
+    if (signal.aborted) return;
+    return mockPosts;
+  }
+});
+
+// === LOADER INTENT STRATEGY SIMULATION ===
+// In production, Resource Loader traits handle this automatically.
+// This demo simulates what each trait does to show the visual difference.
+const routeView = document.querySelector('route-view');
+let loadingTimer = null;
+let cleanupFn = null;
+
+function getEffectiveStrategy(route) {
+  // Per-route override takes precedence (from route:loader-strategy attribute)
+  const template = routeView.querySelector(
+    `template[route="${route?.pattern || ''}"][route\\:loader-strategy]`
+  );
+  if (template) return template.getAttribute('route:loader-strategy');
+  return loaderIntent.strategy;
+}
+
+function applyStrategy(strategy) {
+  switch (strategy) {
+    case 'soft':
+      routeView.setAttribute('aria-busy', 'true');
+      cleanupFn = () => routeView.removeAttribute('aria-busy');
+      break;
+
+    case 'hard': {
+      const overlay = document.createElement('div');
+      overlay.className = 'loader-overlay';
+      overlay.innerHTML = '<div class="loader-spinner"></div>';
+      overlay.setAttribute('aria-label', 'Loading...');
+      routeView.appendChild(overlay);
+      cleanupFn = () => overlay.remove();
+      break;
+    }
+
+    case 'replacement': {
+      // Hide existing content, show skeleton
+      const views = routeView.querySelectorAll(':scope > section.view');
+      views.forEach(v => v.style.display = 'none');
+      const skeleton = document.createElement('div');
+      skeleton.className = 'loader-skeleton';
+      skeleton.innerHTML = `
+        <div class="skeleton-line skeleton-title"></div>
+        <div class="skeleton-card">
+          <div class="skeleton-circle"></div>
+          <div class="skeleton-lines">
+            <div class="skeleton-line" style="width: 60%"></div>
+            <div class="skeleton-line" style="width: 40%"></div>
+            <div class="skeleton-line" style="width: 75%"></div>
+          </div>
+        </div>
+      `;
+      routeView.appendChild(skeleton);
+      cleanupFn = () => {
+        skeleton.remove();
+        views.forEach(v => v.style.display = '');
+      };
+      break;
+    }
+
+    case 'optimistic':
+      // No visual change — content stays fully interactive
+      cleanupFn = () => {};
+      break;
+  }
+}
+
+routeView.addEventListener('route-load-start', (e) => {
+  const strategy = getEffectiveStrategy(e.detail?.route);
+
+  if (loaderIntent.timing === 'debounced') {
+    loadingTimer = setTimeout(() => applyStrategy(strategy), 400);
+  } else {
+    applyStrategy(strategy);
+  }
+});
+
+routeView.addEventListener('route-load-end', () => {
+  clearTimeout(loadingTimer);
+  loadingTimer = null;
+  if (cleanupFn) { cleanupFn(); cleanupFn = null; }
+});
+
+routeView.addEventListener('route-error', () => {
+  clearTimeout(loadingTimer);
+  loadingTimer = null;
+  if (cleanupFn) { cleanupFn(); cleanupFn = null; }
+});
+
+// === ROUTE EVENTS ===
+routeView.addEventListener('route-change', (e) => {
+  console.log('[Router] Route changed:', e.detail.to.path);
+
+  // Wire up route-specific behavior after stamp
+  requestAnimationFrame(() => wireRouteHandlers());
+});
+
+routeView.addEventListener('route-load-end', (e) => {
+  // Fill user card with loader data
+  const card = document.getElementById('user-card');
+  if (card && e.detail.data && !Array.isArray(e.detail.data)) {
+    const user = e.detail.data;
+    card.innerHTML = `
+      <div class="user-avatar">${user.name[0]}</div>
+      <div class="user-info">
+        <h3>${user.name}</h3>
+        <p>${user.email}</p>
+        <span class="user-role">${user.role}</span>
+      </div>
+    `;
+  }
+
+  // Fill posts list
+  const postsList = document.getElementById('posts-list');
+  if (postsList && Array.isArray(e.detail.data)) {
+    postsList.innerHTML = e.detail.data.map(post => `
+      <div class="post-card">
+        <h3>${post.title}</h3>
+        <span class="post-author">by ${post.author}</span>
+      </div>
+    `).join('');
+  }
+});
+
+// === STRATEGY PICKER ===
+document.getElementById('strategy-picker')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-strategy]');
+  if (!btn) return;
+  document.querySelectorAll('.strategy-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loaderIntent.strategy = btn.dataset.strategy;
+  documentInjector.set('customContexts:loaderIntent', loaderIntent);
+  updateIntentStatus();
+});
+
+document.getElementById('timing-picker')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-timing]');
+  if (!btn) return;
+  document.querySelectorAll('.timing-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loaderIntent.timing = btn.dataset.timing;
+  documentInjector.set('customContexts:loaderIntent', loaderIntent);
+  updateIntentStatus();
+});
+
+function updateIntentStatus() {
+  const el = document.getElementById('intent-status');
+  if (el) el.innerHTML = `Strategy: <code>${loaderIntent.strategy}</code> · Timing: <code>${loaderIntent.timing}</code>`;
+}
+
+// === ROUTE-SPECIFIC HANDLERS ===
+// (Re-wired after each route stamp since content is recreated)
+let count = 0;
+const todos = [];
+
+function wireRouteHandlers() {
+  // Counter
+  document.getElementById('increment-btn')?.addEventListener('click', () => {
+    count++;
+    const display = document.getElementById('counter-display');
+    if (display) display.textContent = String(count);
+  });
+  document.getElementById('decrement-btn')?.addEventListener('click', () => {
+    count--;
+    const display = document.getElementById('counter-display');
+    if (display) display.textContent = String(count);
+  });
+  document.getElementById('reset-btn')?.addEventListener('click', () => {
+    count = 0;
+    const display = document.getElementById('counter-display');
+    if (display) display.textContent = '0';
+  });
+
+  // Todos
+  document.getElementById('todo-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = document.getElementById('todo-input');
+    if (input?.value) {
+      todos.push(input.value);
+      input.value = '';
+      renderTodos();
+    }
+  });
+
+  // Login
+  document.getElementById('login-btn')?.addEventListener('click', () => {
+    isLoggedIn = !isLoggedIn;
+    const btn = document.getElementById('login-btn');
+    if (btn) btn.textContent = isLoggedIn ? 'Log Out' : 'Log In';
+  });
+
+  renderTodos();
+}
+
+function renderTodos() {
+  const list = document.getElementById('todo-list');
+  const countEl = document.getElementById('todo-count');
+  if (!list) return;
+
+  list.innerHTML = todos.map((todo, i) =>
+    `<li class="todo-item">${todo}</li>`
+  ).join('');
+
+  if (countEl) countEl.textContent = `${todos.length} item${todos.length !== 1 ? 's' : ''}`;
+}
+
+// Activate route:link and route:prefetch behaviors on existing elements
+attributes.upgrade(document.body);
+
+window.demoReady = true;
+  </script>
+
+  <!-- Actual running code -->
+  <script type="module">
+// Bootstrap provides: injectors, attributes, and registers router
+import { SimpleStore } from '/blocks/stores/simple';
+const { injectors } = window;
+const documentInjector = injectors.getInjectorOf(document);
+
+// === AUTH STATE ===
+let isLoggedIn = false;
+
+// === LOADER INTENT ===
+const loaderIntent = {
+  strategy: 'soft',
+  scope: 'region',
+  progress: 'indeterminate',
+  context: 'transition',
+  timing: 'debounced'
+};
+documentInjector.set('customContexts:loaderIntent', loaderIntent);
+
+// === GUARDS ===
+documentInjector.set('customContexts:routeGuard', {
+  requireAuth(to, from) {
+    if (!isLoggedIn) return '/login';
+    return true;
+  }
+});
+
+// === LOADERS ===
+const mockUsers = {
+  '1': { id: 1, name: 'Alice', email: 'alice@example.com', role: 'Developer' },
+  '2': { id: 2, name: 'Bob', email: 'bob@example.com', role: 'Designer' },
+};
+
+const mockPosts = [
+  { id: 1, title: 'Getting Started with Web Everything', author: 'Alice' },
+  { id: 2, title: 'Intent-Driven Loading States', author: 'Bob' },
+  { id: 3, title: 'Declarative Routing Patterns', author: 'Charlie' },
+];
+
+documentInjector.set('customContexts:routeLoader', {
+  async loadUser({ params, signal }) {
+    await new Promise(r => setTimeout(r, 800));
+    if (signal.aborted) return;
+
+    const user = mockUsers[params.id];
+    if (!user) throw new Error(`User ${params.id} not found`);
+    return user;
+  },
+  async loadPosts({ signal }) {
+    await new Promise(r => setTimeout(r, 1500));
+    if (signal.aborted) return;
+    return mockPosts;
+  }
+});
+
+// === LOADER INTENT STRATEGY SIMULATION ===
+const routeView = document.querySelector('route-view');
+let loadingTimer = null;
+let cleanupFn = null;
+
+function getEffectiveStrategy(route) {
+  const template = routeView.querySelector(
+    `template[route="${route?.pattern || ''}"][route\\:loader-strategy]`
+  );
+  if (template) return template.getAttribute('route:loader-strategy');
+  return loaderIntent.strategy;
+}
+
+function applyStrategy(strategy) {
+  switch (strategy) {
+    case 'soft':
+      routeView.setAttribute('aria-busy', 'true');
+      cleanupFn = () => routeView.removeAttribute('aria-busy');
+      break;
+
+    case 'hard': {
+      const overlay = document.createElement('div');
+      overlay.className = 'loader-overlay';
+      overlay.innerHTML = '<div class="loader-spinner"></div>';
+      overlay.setAttribute('aria-label', 'Loading...');
+      routeView.appendChild(overlay);
+      cleanupFn = () => overlay.remove();
+      break;
+    }
+
+    case 'replacement': {
+      const views = routeView.querySelectorAll(':scope > section.view');
+      views.forEach(v => v.style.display = 'none');
+      const skeleton = document.createElement('div');
+      skeleton.className = 'loader-skeleton';
+      skeleton.innerHTML = `
+        <div class="skeleton-line skeleton-title"></div>
+        <div class="skeleton-card">
+          <div class="skeleton-circle"></div>
+          <div class="skeleton-lines">
+            <div class="skeleton-line" style="width: 60%"></div>
+            <div class="skeleton-line" style="width: 40%"></div>
+            <div class="skeleton-line" style="width: 75%"></div>
+          </div>
+        </div>
+      `;
+      routeView.appendChild(skeleton);
+      cleanupFn = () => {
+        skeleton.remove();
+        views.forEach(v => v.style.display = '');
+      };
+      break;
+    }
+
+    case 'optimistic':
+      cleanupFn = () => {};
+      break;
+  }
+}
+
+routeView.addEventListener('route-load-start', (e) => {
+  const strategy = getEffectiveStrategy(e.detail?.route);
+
+  if (loaderIntent.timing === 'debounced') {
+    loadingTimer = setTimeout(() => applyStrategy(strategy), 400);
+  } else {
+    applyStrategy(strategy);
+  }
+});
+
+routeView.addEventListener('route-load-end', () => {
+  clearTimeout(loadingTimer);
+  loadingTimer = null;
+  if (cleanupFn) { cleanupFn(); cleanupFn = null; }
+});
+
+routeView.addEventListener('route-error', () => {
+  clearTimeout(loadingTimer);
+  loadingTimer = null;
+  if (cleanupFn) { cleanupFn(); cleanupFn = null; }
+});
+
+// === ROUTE EVENTS ===
+routeView.addEventListener('route-change', (e) => {
+  console.log('[Router] Route changed:', e.detail.to.path);
+  requestAnimationFrame(() => wireRouteHandlers());
+});
+
+routeView.addEventListener('route-load-end', (e) => {
+  const card = document.getElementById('user-card');
+  if (card && e.detail.data && !Array.isArray(e.detail.data)) {
+    const user = e.detail.data;
+    card.innerHTML = `
+      <div class="user-avatar">${user.name[0]}</div>
+      <div class="user-info">
+        <h3>${user.name}</h3>
+        <p>${user.email}</p>
+        <span class="user-role">${user.role}</span>
+      </div>
+    `;
+  }
+
+  const postsList = document.getElementById('posts-list');
+  if (postsList && Array.isArray(e.detail.data)) {
+    postsList.innerHTML = e.detail.data.map(post => `
+      <div class="post-card">
+        <h3>${post.title}</h3>
+        <span class="post-author">by ${post.author}</span>
+      </div>
+    `).join('');
+  }
+});
+
+// === STRATEGY PICKER ===
+document.getElementById('strategy-picker')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-strategy]');
+  if (!btn) return;
+  document.querySelectorAll('.strategy-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loaderIntent.strategy = btn.dataset.strategy;
+  documentInjector.set('customContexts:loaderIntent', loaderIntent);
+  updateIntentStatus();
+});
+
+document.getElementById('timing-picker')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-timing]');
+  if (!btn) return;
+  document.querySelectorAll('.timing-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  loaderIntent.timing = btn.dataset.timing;
+  documentInjector.set('customContexts:loaderIntent', loaderIntent);
+  updateIntentStatus();
+});
+
+function updateIntentStatus() {
+  const el = document.getElementById('intent-status');
+  if (el) el.innerHTML = `Strategy: <code>${loaderIntent.strategy}</code> &middot; Timing: <code>${loaderIntent.timing}</code>`;
+}
+
+// === ROUTE-SPECIFIC HANDLERS ===
+let count = 0;
+const todos = [];
+
+function wireRouteHandlers() {
+  document.getElementById('increment-btn')?.addEventListener('click', () => {
+    count++;
+    const display = document.getElementById('counter-display');
+    if (display) display.textContent = String(count);
+  });
+  document.getElementById('decrement-btn')?.addEventListener('click', () => {
+    count--;
+    const display = document.getElementById('counter-display');
+    if (display) display.textContent = String(count);
+  });
+  document.getElementById('reset-btn')?.addEventListener('click', () => {
+    count = 0;
+    const display = document.getElementById('counter-display');
+    if (display) display.textContent = '0';
+  });
+
+  document.getElementById('todo-form')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const input = document.getElementById('todo-input');
+    if (input?.value) {
+      todos.push(input.value);
+      input.value = '';
+      renderTodos();
+    }
+  });
+
+  document.getElementById('login-btn')?.addEventListener('click', () => {
+    isLoggedIn = !isLoggedIn;
+    const btn = document.getElementById('login-btn');
+    if (btn) btn.textContent = isLoggedIn ? 'Log Out' : 'Log In';
+  });
+
+  renderTodos();
+}
+
+function renderTodos() {
+  const list = document.getElementById('todo-list');
+  const countEl = document.getElementById('todo-count');
+  if (!list) return;
+
+  list.innerHTML = todos.map((todo, i) =>
+    `<li class="todo-item">${todo}</li>`
+  ).join('');
+
+  if (countEl) countEl.textContent = `${todos.length} item${todos.length !== 1 ? 's' : ''}`;
+}
+
+// === SOURCE VIEWER ===
+const viewSourceBtn = document.getElementById('view-source-btn');
+const viewJsBtn = document.getElementById('view-js-btn');
+const sourceDisplay = document.getElementById('source-display');
+
+const htmlSource = document.querySelector('.app-main')?.innerHTML || '';
+const jsSource = document.getElementById('demo-js-source')?.textContent || '';
+
+function showSource(type) {
+  viewSourceBtn?.classList.toggle('active', type === 'html');
+  viewJsBtn?.classList.toggle('active', type === 'js');
+
+  if (sourceDisplay) {
+    sourceDisplay.textContent = type === 'html' ? htmlSource : jsSource;
+  }
+}
+
+viewSourceBtn?.addEventListener('click', () => showSource('html'));
+viewJsBtn?.addEventListener('click', () => showSource('js'));
+showSource('html');
+
+// Activate route:link and route:prefetch behaviors on existing elements
+attributes.upgrade(document.body);
+
+window.demoReady = true;
+  </script>
+</body>
+</html>

@@ -8,6 +8,11 @@ module.exports = function (eleventyConfig) {
     return plugs.filter(plug => plug.projects && plug.projects.includes(projectId));
   });
 
+  // Reverse lookup: find blocks that implement a given intent
+  eleventyConfig.addFilter("blocksForIntent", function(blocks, intentId) {
+    return blocks.filter(b => b.implementsIntent === intentId);
+  });
+
   // Flatten adapters from categories for pagination
   eleventyConfig.addCollection("flatAdapters", function(collectionApi) {
     const adapters = require("./src/_data/adapters.json");

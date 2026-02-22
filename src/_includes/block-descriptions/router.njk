@@ -1,0 +1,1168 @@
+<h2>Router</h2>
+<p>Declarative client-side routing built on the Navigation API, URLPattern, and <a href="/blocks/view/">ViewEngine</a>. Provides URL-to-view mapping, route parameters, guards, loaders, and prefetching.</p>
+
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">
+  <strong>Terminology:</strong> See <a href="/semantics/">Semantics & Glossary</a> for terms like <a href="/semantics/#term-route">route</a>, <a href="/semantics/#term-outlet">outlet</a>, <a href="/semantics/#term-guard">guard</a>, and <a href="/semantics/#term-loader">loader</a>.
+</p>
+
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">
+  <strong>Naming note:</strong> The custom element names (<code>&lt;route-view&gt;</code>, <code>&lt;route-outlet&gt;</code>) and attribute names (<code>route:link</code>, <code>route:prefetch</code>) shown below are <em>defaults</em>. Custom element tag names are set at <code>customElements.define()</code> time. Attribute names depend on registration in the <a href="/plugs/webbehaviors/">CustomAttributeRegistry</a>. The <code>route</code>, <code>route:guard</code>, <code>route:loader</code>, and <code>route:error</code> attributes on <code>&lt;template&gt;</code> elements are plain HTML attributes read by <code>&lt;route-view&gt;</code> &mdash; no registry entry needed.
+</p>
+
+<h3>Architecture</h3>
+<p>Router uses a <strong>hybrid pattern</strong>: components for structural boundaries, behaviors for enhancing existing elements, and plain HTML attributes for declarative metadata.</p>
+
+<table>
+  <tr><th>Piece</th><th>Pattern</th><th>Rationale</th></tr>
+  <tr>
+    <td><code>&lt;route-view&gt;</code></td>
+    <td>Component (Custom Element)</td>
+    <td>Orchestrator that owns child route definitions and renders matched content <strong>in-place</strong>. Child <code>&lt;template&gt;</code> elements are inert; matched content is stamped as children alongside them. The router renders where you define the routes.</td>
+  </tr>
+  <tr>
+    <td><code>&lt;route-outlet&gt;</code></td>
+    <td>Component (Custom Element)</td>
+    <td><strong>Named auxiliary views only.</strong> For cases where a route needs to render content to a different area (header, footer, sidebar) outside the <code>&lt;route-view&gt;</code>. Not needed for the primary rendering path.</td>
+  </tr>
+  <tr>
+    <td><code>&lt;template route="..."&gt;</code></td>
+    <td>Plain HTML</td>
+    <td>Declarative data read by <code>&lt;route-view&gt;</code>. Guard, loader, error, and outlet attributes are plain HTML &mdash; no classes or registry entries needed. The view component parses them via <code>querySelectorAll</code>.</td>
+  </tr>
+  <tr>
+    <td><code>route:link</code></td>
+    <td>Behavior (CustomAttribute)</td>
+    <td>Must preserve native <code>&lt;a&gt;</code> semantics and accessibility. A component would lose the anchor element.</td>
+  </tr>
+  <tr>
+    <td><code>route:prefetch</code></td>
+    <td>Behavior (CustomAttribute)</td>
+    <td>Metadata on links. Paired with <code>route:link</code>.</td>
+  </tr>
+</table>
+
+<p>Router is a <strong>navigation layer</strong> that uses <a href="/blocks/view/">ViewEngine</a> directly:</p>
+<ul>
+  <li><strong>Router</strong>: URL matching, navigation interception, guards, loaders, scroll restoration, in-place DOM stamping</li>
+  <li><strong>ViewEngine</strong>: Hidden modes (for keep-alive cached routes), toggle events, View Transitions</li>
+</ul>
+<p>Route content doesn't exist in the DOM until the URL matches. No placeholders, no ghost elements. <code>&lt;route-view&gt;</code> stamps matched content as its own children &mdash; the simplest model where the router renders where you define the routes.</p>
+
+<h3>Web Standards Alignment</h3>
+<p>Router builds on modern platform APIs:</p>
+
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API">Navigation API</a></td>
+    <td>Baseline 2024</td>
+    <td>Primary navigation mechanism with <code>navigate</code> event interception</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/URLPattern">URLPattern API</a></td>
+    <td>Baseline 2025</td>
+    <td>Route pattern matching with <code>:params</code> and <code>*</code> wildcards</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/View_Transitions_API">View Transitions API</a></td>
+    <td>Baseline 2024</td>
+    <td>Animated navigation via <code>transition</code> attribute on <code>&lt;route-view&gt;</code></td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Speculation_Rules_API">Speculation Rules API</a></td>
+    <td>Chrome 121+</td>
+    <td>Generate prefetch/prerender rules from route definitions</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/History_API">History API</a></td>
+    <td>Legacy Fallback</td>
+    <td>Used only when Navigation API unavailable (Safari &lt;17.2)</td>
+  </tr>
+</table>
+
+<h3>Framework Research</h3>
+<p>Design informed by established routing libraries:</p>
+
+<table>
+  <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
+  <tr>
+    <td><a href="https://reactrouter.com/">React Router</a></td>
+    <td>Loaders for data fetching, Outlet for nested routes, useParams pattern</td>
+  </tr>
+  <tr>
+    <td><a href="https://router.vuejs.org/">Vue Router</a></td>
+    <td>Navigation guards (beforeEach, beforeEnter), meta fields for route data</td>
+  </tr>
+  <tr>
+    <td><a href="https://angular.io/guide/router">Angular Router</a></td>
+    <td>Named outlets (<code>&lt;router-outlet&gt;</code> as component), CanActivate/CanDeactivate guards</td>
+  </tr>
+  <tr>
+    <td><a href="https://tanstack.com/router">TanStack Router</a></td>
+    <td>Type-safe params, search param handling, pending UI states</td>
+  </tr>
+</table>
+
+<h3>Context Providers</h3>
+<p>Router provides its data through the <code>customContexts</code> injector system. Route content receives context via the <code>@</code> prefix, just like any other context in the framework.</p>
+
+<table>
+  <tr><th>Context</th><th>Injector Key</th><th>Provided To</th><th>Contains</th></tr>
+  <tr>
+    <td><code>@route</code></td>
+    <td><code>customContexts:route</code></td>
+    <td>Stamped content inside <code>&lt;route-view&gt;</code> (or named <code>&lt;route-outlet&gt;</code>)</td>
+    <td><code>RouteContext</code> &mdash; see <a href="#interfaces">Interfaces</a></td>
+  </tr>
+  <tr>
+    <td><code>@routeGuard</code></td>
+    <td><code>customContexts:routeGuard</code></td>
+    <td><code>&lt;route-view&gt;</code> ancestor (user-provided)</td>
+    <td><code>Record&lt;string, RouteGuardFn&gt;</code></td>
+  </tr>
+  <tr>
+    <td><code>@routeLoader</code></td>
+    <td><code>customContexts:routeLoader</code></td>
+    <td><code>&lt;route-view&gt;</code> ancestor (user-provided)</td>
+    <td><code>Record&lt;string, RouteLoaderFn&gt;</code></td>
+  </tr>
+  <tr>
+    <td><code>@loaderIntent</code></td>
+    <td><code>customContexts:loaderIntent</code></td>
+    <td><code>&lt;route-view&gt;</code> ancestor (user-provided)</td>
+    <td><code>LoaderIntent</code> &mdash; see <a href="/intents/loader/">Loader Intent</a></td>
+  </tr>
+</table>
+
+<h4>Providing Guards and Loaders</h4>
+<p>Guard and loader functions are provided via context, following the same <code>customContexts</code> pattern used throughout the framework. The <code>route:guard</code> and <code>route:loader</code> attribute values on <code>&lt;template&gt;</code> elements are looked up by name from their respective contexts.</p>
+
+<pre><code class="language-javascript">// Provide guards and loaders via injector
+const docInjector = injectors.getInjectorOf(document);
+
+docInjector.set('customContexts:routeGuard', {
+  requireAuth(to, from) {
+    if (!auth.isLoggedIn) return '/login';
+    return true;
+  },
+  confirmUnsaved(to, from) {
+    if (editor.hasUnsavedChanges) return confirm('Discard changes?');
+    return true;
+  }
+});
+
+docInjector.set('customContexts:routeLoader', {
+  async loadUser({ params, signal }) {
+    const res = await fetch(`/api/users/${params.id}`, { signal });
+    if (!res.ok) throw new Error('User not found');
+    return res.json();
+  }
+});</code></pre>
+
+<h4>How @route Is Populated</h4>
+<p>When a route matches, <code>&lt;route-view&gt;</code> sets <code>customContexts:route</code> on its own injector before stamping template content in-place. This makes <code>@route</code> available to all descendant expressions. For named outlets, the context is set on the outlet's injector instead.</p>
+
+<pre><code class="language-javascript">// Internally, &lt;route-view&gt; does something like:
+const viewInjector = injectors.getInjectorOf(this);
+viewInjector.set('customContexts:route', {
+  params: { userId: '123', postId: '456' },
+  data: loaderResult,       // populated after loader resolves
+  error: null,              // populated if loader throws
+  path: '/users/123/posts/456',
+  query: new URLSearchParams('tab=comments'),
+  hash: 'top',
+  state: null
+});</code></pre>
+
+<h3>Navigation API Integration</h3>
+<p>Router wraps the Navigation API rather than duplicating it. The browser's <code>navigate</code> event is the single integration point. Router adds route matching, guard orchestration, loader execution, and DOM stamping on top of what the platform provides natively.</p>
+
+<h4>Why Functional Guards (No Abstract Class)</h4>
+<p>Guards are plain functions, not class instances. The Navigation API already provides the guard <em>mechanism</em> &mdash; <code>event.intercept()</code> to proceed, <code>event.preventDefault()</code> to cancel, <code>event.signal</code> to abort in-flight work. An abstract <code>RouteGuard</code> class would duplicate this platform-level control. Guard functions are decision points that slot into the navigation pipeline; the injector/context system handles their dependency injection via closures.</p>
+
+<h4>Navigation Pipeline</h4>
+<p>When <code>navigation.addEventListener('navigate', ...)</code> fires, <code>&lt;route-view&gt;</code> executes this sequence:</p>
+<ol>
+  <li><strong>Match route</strong> &mdash; URLPattern match against all child <code>&lt;template route="..."&gt;</code> definitions</li>
+  <li><strong>canDeactivate</strong> &mdash; Run current route's <code>route:guard:leave</code> function (looked up from <code>@routeGuard</code> context). If it returns <code>false</code>, call <code>event.preventDefault()</code>. If it returns a string, redirect.</li>
+  <li><strong>event.intercept()</strong> &mdash; Commit to the navigation. URL updates. Inside the async handler:</li>
+  <li><strong>canActivate</strong> &mdash; Run target route's <code>route:guard</code> function. If it fails, redirect away.</li>
+  <li><strong>Loader</strong> &mdash; Run <code>route:loader</code> function with <code>{ params, query, signal: event.signal }</code>. The <code>signal</code> aborts automatically if a new navigation supersedes this one.</li>
+  <li><strong>Stamp</strong> &mdash; Clone template, set <code>customContexts:route</code> on <code>&lt;route-view&gt;</code>'s injector, append content in-place. For named outlets (<code>route:outlet="name"</code>), stamp into the <code>&lt;route-outlet&gt;</code> instead. Use ViewEngine for transitions and keep-alive.</li>
+</ol>
+
+<pre><code class="language-typescript">// Simplified internal flow (inside RouteViewElement.connectedCallback)
+navigation.addEventListener('navigate', (event) => {
+  if (!event.canIntercept) return;
+
+  const matched = this.#matchRoute(event.destination.url);
+  if (!matched) return;
+
+  // canDeactivate runs before intercept (URL hasn't changed yet)
+  const leaveGuard = this.#resolveGuard(this.#currentRoute, 'leave');
+  if (leaveGuard) {
+    const result = leaveGuard(matched.target, this.#currentTarget);
+    if (result === false) { event.preventDefault(); return; }
+    if (typeof result === 'string') { event.preventDefault(); navigation.navigate(result); return; }
+  }
+
+  event.intercept({
+    scroll: this.#scrollMode,
+    handler: async () => {
+      // canActivate runs inside handler (URL has committed)
+      const enterGuard = this.#resolveGuard(matched, 'enter');
+      if (enterGuard) {
+        const result = await enterGuard(matched.target, this.#currentTarget);
+        if (result === false) { navigation.navigate(this.#currentRoute.path); return; }
+        if (typeof result === 'string') { navigation.navigate(result); return; }
+      }
+
+      // Loader with abort signal
+      const loader = this.#resolveLoader(matched);
+      let data, error;
+      if (loader) {
+        try { data = await loader({ params: matched.params, query: matched.query, signal: event.signal }); }
+        catch (e) { error = e; }
+      }
+      if (event.signal.aborted) return;
+
+      // Stamp route content in-place (or into named outlet)
+      this.#stampRoute(matched, data, error);
+    }
+  });
+});</code></pre>
+
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">
+  <strong>Timing note:</strong> For <code>push</code>/<code>replace</code> navigations, the URL updates immediately when <code>event.intercept()</code> is called, before the async handler resolves. If <code>canActivate</code> fails after intercept, Router must navigate away programmatically. For <code>traverse</code> (back/forward), the URL updates when the handler's promise settles.
+</p>
+
+<h3 id="interfaces">TypeScript Interfaces</h3>
+
+<h4>Context Types</h4>
+
+<pre><code class="language-typescript">/**
+ * Route context provided to matched route content.
+ * Available as @route in expressions.
+ * Injector key: customContexts:route
+ */
+interface RouteContext {
+  /** Matched URL pattern parameters (e.g., { id: "123" }) */
+  params: Record&lt;string, string&gt;;
+  /** Loader result data (undefined until loader resolves) */
+  data: unknown;
+  /** Loader error (null unless loader throws) */
+  error: Error | null;
+  /** Matched pathname */
+  path: string;
+  /** Parsed search parameters */
+  query: URLSearchParams;
+  /** URL hash without # */
+  hash: string;
+  /** Navigation state passed via navigate() options */
+  state: unknown;
+}
+
+/**
+ * Navigation target passed to guard and loader functions.
+ * Represents one side of a navigation (the "from" or "to").
+ */
+interface RouteNavigationTarget {
+  /** Full destination URL */
+  url: URL;
+  /** Matched pathname */
+  path: string;
+  /** Extracted URL pattern parameters */
+  params: Record&lt;string, string&gt;;
+  /** Parsed search parameters */
+  query: URLSearchParams;
+  /** URL hash without # */
+  hash: string;
+  /** Navigation type from Navigation API */
+  navigationType: 'push' | 'replace' | 'traverse' | 'reload';
+}</code></pre>
+
+<h4>Guard Types</h4>
+
+<pre><code class="language-typescript">/**
+ * Guard function result.
+ * - true: allow navigation
+ * - false: cancel navigation
+ * - string: redirect to this path
+ */
+type RouteGuardResult = boolean | string;
+
+/**
+ * Guard function signature. Provided via customContexts:routeGuard.
+ * Used for both canActivate (route:guard) and canDeactivate (route:guard:leave).
+ *
+ * @param to - The route being navigated to
+ * @param from - The route being navigated from (null on initial load)
+ * @returns Decision to allow, cancel, or redirect. May be async.
+ *
+ * @example
+ * ```typescript
+ * const requireAuth: RouteGuardFn = (to, from) => {
+ *   if (!auth.isLoggedIn) return '/login';
+ *   return true;
+ * };
+ * ```
+ */
+type RouteGuardFn = (
+  to: RouteNavigationTarget,
+  from: RouteNavigationTarget | null
+) => RouteGuardResult | Promise&lt;RouteGuardResult&gt;;</code></pre>
+
+<h4>Loader Types</h4>
+
+<pre><code class="language-typescript">/**
+ * Parameters passed to a loader function.
+ */
+interface RouteLoaderParams {
+  /** Matched URL pattern parameters */
+  params: Record&lt;string, string&gt;;
+  /** Parsed search parameters */
+  query: URLSearchParams;
+  /**
+   * AbortSignal from the Navigation API.
+   * Aborted automatically if a new navigation supersedes this one.
+   * Pass to fetch() and other abortable APIs.
+   */
+  signal: AbortSignal;
+}
+
+/**
+ * Loader function signature. Provided via customContexts:routeLoader.
+ * Called before route content is stamped. Result is available as @route.data.
+ * If the loader throws, the error is available as @route.error.
+ *
+ * @example
+ * ```typescript
+ * const loadUser: RouteLoaderFn = async ({ params, signal }) => {
+ *   const res = await fetch(`/api/users/${params.id}`, { signal });
+ *   if (!res.ok) throw new Error('User not found');
+ *   return res.json();
+ * };
+ * ```
+ */
+type RouteLoaderFn = (params: RouteLoaderParams) => Promise&lt;unknown&gt;;</code></pre>
+
+<h4>Route Definition</h4>
+
+<pre><code class="language-typescript">/**
+ * Parsed route definition. Built by &lt;route-view&gt; from its child
+ * &lt;template&gt; elements and their plain HTML attributes.
+ */
+interface RouteDefinition {
+  /** Compiled URLPattern from the route attribute value */
+  pattern: URLPattern;
+  /** Source &lt;template&gt; element */
+  template: HTMLTemplateElement;
+  /** canActivate guard name (from route:guard attr), resolved from @routeGuard context */
+  guard?: string;
+  /** canDeactivate guard name (from route:guard:leave attr), resolved from @routeGuard context */
+  guardLeave?: string;
+  /** Loader function name (from route:loader attr), resolved from @routeLoader context */
+  loader?: string;
+  /** Target outlet name (from route:outlet attr). undefined = primary outlet */
+  outlet?: string;
+  /** Whether this template is an error boundary (has route:error attr) */
+  isErrorBoundary: boolean;
+  /** Prefetch strategy for this route's loader */
+  prefetch: 'none' | 'hover' | 'visible' | 'eager';
+}
+
+/**
+ * A matched route at runtime: a definition plus the extracted
+ * parameters from the current URL.
+ */
+interface MatchedRoute {
+  definition: RouteDefinition;
+  params: Record&lt;string, string&gt;;
+  url: URL;
+}</code></pre>
+
+<h4>Components</h4>
+
+<pre><code class="language-typescript">/**
+ * Main router orchestrator. Custom element that owns child &lt;template&gt;
+ * route definitions, listens to Navigation API events, runs guards
+ * and loaders, and stamps matched content in-place as its own children.
+ * For named auxiliary views, stamps into &lt;route-outlet&gt; elements instead.
+ *
+ * Default tag name: route-view
+ * Registered via: customElements.define('route-view', RouteViewElement)
+ *
+ * Child &lt;template&gt; attributes (plain HTML, no registry needed):
+ *   route="pattern"        — URLPattern path
+ *   route:guard="name"     — canActivate guard (from @routeGuard context)
+ *   route:guard:leave="n"  — canDeactivate guard (from @routeGuard context)
+ *   route:loader="name"    — loader function (from @routeLoader context)
+ *   route:error            — marks template as error boundary
+ *   route:outlet="name"    — target outlet (default: primary)
+ *
+ * @example
+ * ```html
+ * &lt;route-view base="/app" scroll="auto"&gt;
+ *   &lt;template route="/home"&gt;
+ *     &lt;home-page&gt;&lt;/home-page&gt;
+ *   &lt;/template&gt;
+ *   &lt;template route="/users/:id" route:loader="loadUser"&gt;
+ *     &lt;user-profile&gt;&lt;/user-profile&gt;
+ *   &lt;/template&gt;
+ *   &lt;template route="*"&gt;
+ *     &lt;not-found-page&gt;&lt;/not-found-page&gt;
+ *   &lt;/template&gt;
+ * &lt;/route-view&gt;
+ * ```
+ */
+class RouteViewElement extends HTMLElement {
+  /** Observed attributes for configuration */
+  static observedAttributes: ['scroll', 'base', 'transition', 'keep-alive'];
+
+  /** Scroll restoration: 'auto' | 'manual' | 'none'. Default: 'auto'. */
+  scroll: string;
+  /** Base path prepended to all route patterns */
+  base: string;
+  /** Enable View Transitions API for route changes */
+  transition: boolean;
+  /** Cache deactivated route content instead of destroying. Uses ViewEngine hidden modes. */
+  keepAlive: boolean;
+
+  /** All parsed route definitions from child &lt;template&gt; elements */
+  readonly routes: ReadonlyArray&lt;RouteDefinition&gt;;
+
+  /** Currently matched and active route (null before first navigation) */
+  readonly currentRoute: MatchedRoute | null;
+
+  /**
+   * Navigate programmatically. Delegates to navigation.navigate().
+   * @returns NavigationResult with committed/finished promises
+   */
+  navigate(path: string, options?: {
+    replace?: boolean;
+    state?: unknown;
+  }): NavigationResult;
+
+  /** Navigate back. Delegates to navigation.back(). */
+  back(): void;
+
+  /** Navigate forward. Delegates to navigation.forward(). */
+  forward(): void;
+
+  /** @internal Parses child templates, sets up navigate listener */
+  connectedCallback(): void;
+  /** @internal Removes listener, cleans up outlets */
+  disconnectedCallback(): void;
+  /** @internal Re-parses when config attributes change */
+  attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null): void;
+}
+
+/**
+ * Named auxiliary outlet. Used only when a route needs to render content
+ * to a different area (sidebar, header, footer) outside the &lt;route-view&gt;.
+ * Not needed for primary rendering — &lt;route-view&gt; stamps content in-place.
+ *
+ * Default tag name: route-outlet
+ * Registered via: customElements.define('route-outlet', RouteOutletElement)
+ *
+ * @example
+ * ```html
+ * &lt;aside&gt;
+ *   &lt;route-outlet name="sidebar"&gt;&lt;/route-outlet&gt;
+ * &lt;/aside&gt;
+ * ```
+ *
+ * @example CSS targeting
+ * ```css
+ * route-outlet[name="sidebar"] {
+ *   grid-area: sidebar;
+ * }
+ * ```
+ */
+class RouteOutletElement extends HTMLElement {
+  static observedAttributes: ['name'];
+
+  /** Outlet name. Empty string for primary outlet. */
+  readonly name: string;
+
+  /** The currently stamped route content (null when empty) */
+  readonly activeContent: Element | null;
+
+  /** The currently active MatchedRoute (null when empty) */
+  readonly activeRoute: MatchedRoute | null;
+
+  /** @internal */
+  connectedCallback(): void;
+  /** @internal */
+  disconnectedCallback(): void;
+}</code></pre>
+
+<h4>Behaviors (CustomAttribute)</h4>
+
+<pre><code class="language-typescript">/**
+ * Navigation link behavior. Intercepts clicks to use Navigation API
+ * instead of full page navigation. Manages .active class on the host
+ * &lt;a&gt; element when its route matches the current URL.
+ *
+ * Default registration name: route:link
+ * Registered on: CustomAttributeRegistry
+ * Value: target path (e.g., "/users/123")
+ *
+ * @example
+ * ```html
+ * &lt;a route:link="/users/123" route:prefetch="hover"&gt;Profile&lt;/a&gt;
+ * ```
+ */
+class RouteLinkBehavior extends CustomAttribute {
+  /** Whether this link's route is currently active */
+  readonly isActive: boolean;
+
+  connectedCallback(): void;
+  disconnectedCallback(): void;
+}
+
+/**
+ * Prefetch behavior. Controls when a route's loader is prefetched.
+ * Paired with route:link on the same element.
+ *
+ * Default registration name: route:prefetch
+ * Registered on: CustomAttributeRegistry
+ * Value: 'none' | 'hover' | 'visible' | 'eager'
+ *
+ * 'hover':   prefetch on mouseenter / focus (IntersectionObserver not needed)
+ * 'visible': prefetch when link enters viewport (IntersectionObserver)
+ * 'eager':   prefetch immediately on connectedCallback
+ * 'none':    no prefetching (default)
+ */
+class RoutePrefetchBehavior extends CustomAttribute {
+  connectedCallback(): void;
+  disconnectedCallback(): void;
+}</code></pre>
+
+<h4>Navigation API Types (re-exported from lib.dom)</h4>
+
+<pre><code class="language-typescript">/**
+ * Result of programmatic navigation via RouteViewElement.navigate().
+ * Wraps the Navigation API's NavigationResult.
+ */
+interface NavigationResult {
+  /** Resolves when the URL has committed (updated in the address bar) */
+  committed: Promise&lt;NavigationHistoryEntry&gt;;
+  /** Resolves when the navigation handler has completed (loaders done, content stamped) */
+  finished: Promise&lt;NavigationHistoryEntry&gt;;
+}</code></pre>
+
+<h3>Core Patterns</h3>
+
+<h4>Pattern 1: Basic Routes (in-place rendering)</h4>
+<pre><code class="language-html">&lt;!-- Content is stamped in-place inside &lt;route-view&gt; --&gt;
+&lt;route-view&gt;
+  &lt;template route="/home"&gt;
+    &lt;home-page&gt;&lt;/home-page&gt;
+  &lt;/template&gt;
+  &lt;template route="/users/:id"&gt;
+    &lt;user-profile&gt;&lt;/user-profile&gt;
+  &lt;/template&gt;
+  &lt;template route="*"&gt;
+    &lt;not-found-page&gt;&lt;/not-found-page&gt;
+  &lt;/template&gt;
+  &lt;!-- Matched content appears here as children --&gt;
+&lt;/route-view&gt;</code></pre>
+
+<h4>Pattern 2: Navigation Links</h4>
+<pre><code class="language-html">&lt;nav&gt;
+  &lt;a route:link="/home"&gt;Home&lt;/a&gt;
+  &lt;a route:link="/users/123"&gt;Profile&lt;/a&gt;
+  &lt;a route:link="/settings" route:prefetch="hover"&gt;Settings&lt;/a&gt;
+&lt;/nav&gt;
+
+&lt;style&gt;
+  [route\:link].active { font-weight: bold; }
+&lt;/style&gt;</code></pre>
+
+<h4>Pattern 3: Route Parameters</h4>
+<pre><code class="language-html">&lt;!-- URLPattern syntax for params --&gt;
+&lt;template route="/users/:userId/posts/:postId"&gt;
+  &lt;!-- @route context set on &lt;route-view&gt;'s injector --&gt;
+  &lt;p&gt;User: {{ @route.params.userId }}&lt;/p&gt;
+  &lt;p&gt;Post: {{ @route.params.postId }}&lt;/p&gt;
+&lt;/template&gt;
+
+&lt;!-- Wildcard patterns --&gt;
+&lt;template route="/files/*"&gt;
+  &lt;file-browser path="{{ @route.pathname.groups[0] }}"&gt;&lt;/file-browser&gt;
+&lt;/template&gt;</code></pre>
+
+<h4>Pattern 4: Guards (Navigation Control)</h4>
+<pre><code class="language-html">&lt;route-view&gt;
+  &lt;!-- canActivate: "requireAuth" resolved from @routeGuard context --&gt;
+  &lt;template route="/admin" route:guard="requireAuth"&gt;
+    &lt;admin-panel&gt;&lt;/admin-panel&gt;
+  &lt;/template&gt;
+
+  &lt;!-- canDeactivate: "confirmUnsaved" resolved from @routeGuard context --&gt;
+  &lt;template route="/editor" route:guard:leave="confirmUnsaved"&gt;
+    &lt;document-editor&gt;&lt;/document-editor&gt;
+  &lt;/template&gt;
+&lt;/route-view&gt;</code></pre>
+
+<h4>Pattern 5: Loaders (Data Fetching)</h4>
+<pre><code class="language-html">&lt;route-view&gt;
+  &lt;!-- "loadUser" resolved from @routeLoader context --&gt;
+  &lt;template route="/users/:id" route:loader="loadUser"&gt;
+    &lt;user-profile user="{{ @route.data }}"&gt;&lt;/user-profile&gt;
+  &lt;/template&gt;
+
+  &lt;!-- Error boundary: stamped when loader throws --&gt;
+  &lt;template route="/users/:id" route:loader="loadUser" route:error&gt;
+    &lt;error-page message="{{ @route.error.message }}"&gt;&lt;/error-page&gt;
+  &lt;/template&gt;
+&lt;/route-view&gt;</code></pre>
+
+<h4>Pattern 6: Named Outlets (auxiliary views)</h4>
+<pre><code class="language-html">&lt;!-- Primary content renders in-place inside &lt;route-view&gt; --&gt;
+&lt;route-view&gt;
+  &lt;template route="/dashboard"&gt;
+    &lt;dashboard-page&gt;&lt;/dashboard-page&gt;
+  &lt;/template&gt;
+  &lt;!-- This route also renders sidebar content via named outlet --&gt;
+  &lt;template route="/dashboard" route:outlet="sidebar"&gt;
+    &lt;dashboard-nav&gt;&lt;/dashboard-nav&gt;
+  &lt;/template&gt;
+&lt;/route-view&gt;
+
+&lt;!-- Named outlet: renders outside the &lt;route-view&gt; --&gt;
+&lt;aside&gt;
+  &lt;route-outlet name="sidebar"&gt;&lt;/route-outlet&gt;
+&lt;/aside&gt;</code></pre>
+
+<h3>Configuration</h3>
+<pre><code class="language-html">&lt;!-- Scroll restoration --&gt;
+&lt;route-view scroll="auto"&gt;...&lt;/route-view&gt;
+&lt;route-view scroll="manual"&gt;...&lt;/route-view&gt;
+
+&lt;!-- Base path for all routes --&gt;
+&lt;route-view base="/app"&gt;...&lt;/route-view&gt;
+
+&lt;!-- View transitions on navigation --&gt;
+&lt;route-view transition&gt;...&lt;/route-view&gt;
+
+&lt;!-- Keep-alive: cache deactivated routes --&gt;
+&lt;route-view keep-alive&gt;...&lt;/route-view&gt;</code></pre>
+
+<h3>Prefetching</h3>
+<pre><code class="language-html">&lt;!-- Prefetch modes (on links) --&gt;
+&lt;a route:link="/about" route:prefetch="none"&gt;No prefetch&lt;/a&gt;
+&lt;a route:link="/about" route:prefetch="hover"&gt;Prefetch on hover&lt;/a&gt;
+&lt;a route:link="/about" route:prefetch="visible"&gt;Prefetch when visible&lt;/a&gt;
+&lt;a route:link="/about" route:prefetch="eager"&gt;Prefetch immediately&lt;/a&gt;
+
+&lt;!-- Generates Speculation Rules when API available --&gt;</code></pre>
+
+<h3>ViewEngine Integration</h3>
+<p><code>&lt;route-view&gt;</code> delegates show/hide mechanics to <a href="/blocks/view/">ViewEngine</a>. It handles its own structural stamping but uses the engine for:</p>
+<ul>
+  <li><strong>Keep-alive</strong>: Cached routes are hidden via ViewEngine hidden modes inside <code>&lt;route-view&gt;</code> (or named outlet) instead of destroyed</li>
+  <li><strong>Transitions</strong>: Route changes wrapped in <code>document.startViewTransition()</code></li>
+  <li><strong>Events</strong>: <code>beforetoggle</code>/<code>toggle</code> fired on <code>&lt;route-view&gt;</code> (or named outlet) during route changes</li>
+</ul>
+<pre><code class="language-html">&lt;!-- State preservation across routes --&gt;
+&lt;route-view keep-alive&gt;...&lt;/route-view&gt;
+
+&lt;!-- Animated route transitions --&gt;
+&lt;route-view transition&gt;...&lt;/route-view&gt;
+
+&lt;!-- Lazy load route content --&gt;
+&lt;route-view&gt;
+  &lt;template route="/heavy" lazy&gt;...&lt;/template&gt;
+&lt;/route-view&gt;</code></pre>
+
+<h3>Styling</h3>
+<p>Both <code>&lt;route-view&gt;</code> and <code>&lt;route-outlet&gt;</code> are real DOM elements &mdash; natural CSS targets:</p>
+<pre><code class="language-css">/* Primary view layout */
+route-view {
+  display: block;
+  min-height: 100dvh;
+  view-transition-name: main-content;
+}
+
+/* Loading state (while loader runs) */
+route-view[aria-busy="true"] {
+  opacity: 0.6;
+}
+
+/* Named outlets */
+route-outlet[name="sidebar"] {
+  display: block;
+  grid-area: sidebar;
+  width: 280px;
+}
+
+/* Active links */
+[route\:link].active {
+  font-weight: bold;
+  color: var(--color-accent);
+}</code></pre>
+
+<h3>Loader Intent Integration</h3>
+<p>
+    Router loading behavior is driven by the <a href="/intents/loader/">Loader Intent</a>. Instead of hardcoding
+    how loading states look, <code>&lt;route-view&gt;</code> resolves the app's declared intent profile and delegates
+    to <a href="/blocks/resource-loader/">Resource Loader</a> traits.
+</p>
+
+<h4>How It Works</h4>
+<ol>
+    <li><strong>App declares intent</strong> — Provide a <code>LoaderIntent</code> object via <code>customContexts:loaderIntent</code> on the injector chain.</li>
+    <li><strong>Router resolves</strong> — When a <code>route:loader</code> function runs, <code>&lt;route-view&gt;</code> walks the injector chain to find <code>@loaderIntent</code>.</li>
+    <li><strong>Trait selected</strong> — The intent's <code>strategy</code> dimension selects the matching Resource Loader trait (<code>withSoftBlocking</code>, <code>withHardBlocking</code>, etc.).</li>
+    <li><strong>Trait applies behavior</strong> — The selected trait manages DOM/ARIA/CSS changes during the loader's execution.</li>
+    <li><strong>Cleanup on resolve</strong> — When the loader resolves (or errors), the trait cleans up and the route stamps normally.</li>
+</ol>
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <strong>Fallback:</strong> If no <code>@loaderIntent</code> is provided, <code>&lt;route-view&gt;</code> falls back
+    to the default behavior: <code>aria-busy="true"</code> with CSS-only soft blocking. The intent system is opt-in.
+</p>
+
+<h4>App-Level Declaration</h4>
+<pre><code class="language-javascript">// Declare how route loading should look across the entire app
+const docInjector = injectors.getInjectorOf(document);
+
+docInjector.set('customContexts:loaderIntent', {
+  strategy: 'soft',           // keep content visible, disable interaction
+  scope: 'region',            // route-view is the loading region
+  progress: 'indeterminate',  // no measurable progress for route loads
+  context: 'transition',      // routes have prior content (except initial load)
+  timing: 'debounced'         // don't flash indicator for fast loads (400ms)
+});</code></pre>
+
+<h4>Per-Route Overrides</h4>
+<p>Individual routes can override specific intent dimensions via <code>route:loader-*</code> attributes. These are plain HTML attributes on <code>&lt;template&gt;</code> elements, following the same pattern as <code>route:guard</code> and <code>route:loader</code>.</p>
+
+<pre><code class="language-html">&lt;route-view&gt;
+  &lt;!-- Fast route: uses app-level intent (soft, debounced) --&gt;
+  &lt;template route="/dashboard" route:loader="loadDashboard"&gt;
+    ...
+  &lt;/template&gt;
+
+  &lt;!-- Heavy route: override strategy to show skeleton --&gt;
+  &lt;template route="/reports/:id" route:loader="loadReport"
+            route:loader-strategy="replacement"&gt;
+    &lt;!-- skeleton template used during load --&gt;
+    ...
+  &lt;/template&gt;
+
+  &lt;!-- First load: no prior content, show skeleton immediately --&gt;
+  &lt;template route="/users/:id" route:loader="loadUser"
+            route:loader-context="initial"
+            route:loader-timing="immediate"&gt;
+    ...
+  &lt;/template&gt;
+&lt;/route-view&gt;</code></pre>
+
+<h4>Strategy-to-Behavior Mapping</h4>
+<table>
+  <tr><th>Strategy</th><th>Router Behavior</th><th>Resource Loader Trait</th></tr>
+  <tr>
+    <td><code>soft</code></td>
+    <td><code>aria-busy="true"</code>, content visible but non-interactive (reduced opacity, <code>pointer-events: none</code>)</td>
+    <td><code>withSoftBlocking</code></td>
+  </tr>
+  <tr>
+    <td><code>hard</code></td>
+    <td>Overlay/backdrop injected over <code>&lt;route-view&gt;</code>, focus trapped</td>
+    <td><code>withHardBlocking</code></td>
+  </tr>
+  <tr>
+    <td><code>replacement</code></td>
+    <td>Current content swapped with skeleton/spinner placeholder</td>
+    <td><code>withReplacement</code> + <code>withSkeleton</code> or <code>withIndeterminate</code></td>
+  </tr>
+  <tr>
+    <td><code>optimistic</code></td>
+    <td>No visual loading state &mdash; previous view stays fully interactive until new content stamps</td>
+    <td><code>withOptimistic</code></td>
+  </tr>
+</table>
+
+<h4>Timing Behavior</h4>
+<table>
+  <tr><th>Timing</th><th>Behavior</th></tr>
+  <tr>
+    <td><code>immediate</code></td>
+    <td>Loading indicator appears as soon as the loader starts.</td>
+  </tr>
+  <tr>
+    <td><code>debounced</code></td>
+    <td>Loading indicator deferred by configured ms (default 400ms). If the loader resolves before the threshold, no indicator is ever shown &mdash; prevents flicker for fast operations.</td>
+  </tr>
+</table>
+
+<h4>Context Behavior</h4>
+<table>
+  <tr><th>Context</th><th>Behavior</th></tr>
+  <tr>
+    <td><code>initial</code></td>
+    <td>No prior content exists. Uses <code>withSkeleton</code> or <code>withIndeterminate</code> as placeholder.</td>
+  </tr>
+  <tr>
+    <td><code>transition</code></td>
+    <td>Prior content visible. Keeps it visible (dimmed/stale via <code>withStaleWhileRevalidate</code>). Avoids the "spinner replacing content" anti-pattern.</td>
+  </tr>
+</table>
+
+<h4>Navigation Pipeline (Updated)</h4>
+<p>The loading phase of the navigation pipeline (step 5) now integrates with the Loader Intent:</p>
+<pre><code class="language-typescript">// Inside event.intercept() handler, after canActivate passes:
+
+// 1. Resolve loader intent from injector chain
+const intent = InjectorRoot.getProviderOf(this, 'customContexts:loaderIntent');
+
+// 2. Apply per-route overrides from template attributes
+const routeIntent = {
+  ...intent,
+  ...matched.loaderOverrides  // from route:loader-strategy, route:loader-context, etc.
+};
+
+// 3. Activate loading trait based on strategy
+const cleanup = this.#activateLoadingState(routeIntent);
+
+// 4. Run loader
+let data, error;
+try {
+  data = await loader({ params, query, signal: event.signal });
+} catch (e) {
+  error = e;
+}
+
+// 5. Deactivate loading trait
+cleanup();
+
+// 6. Stamp route content
+if (!event.signal.aborted) {
+  this.#stampRoute(matched, data, error);
+}</code></pre>
+
+<h4>Styling per Strategy</h4>
+<p>CSS targets vary by strategy. The intent-driven approach means CSS is predictable:</p>
+<pre><code class="language-css">/* Soft strategy — default, CSS-only approach */
+route-view[aria-busy="true"] {
+  opacity: 0.6;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+/* Hard strategy — overlay injected by trait */
+route-view .loader-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.8);
+  display: grid;
+  place-items: center;
+}
+
+/* Replacement strategy — skeleton injected by trait */
+route-view .loader-skeleton {
+  animation: shimmer 1.5s infinite;
+}
+
+/* Optimistic strategy — no loading styles needed */</code></pre>
+
+<h3>Resource Pipeline Integration</h3>
+<p>
+    The Router is the primary consumer of the <a href="/projects/webresources/">Web Resources</a> ecosystem.
+    Route loaders, error handling, prefetching, and mutations all delegate to specialized resource blocks
+    rather than implementing these concerns inline.
+</p>
+
+<h4>Integration Map</h4>
+<table>
+    <thead>
+        <tr><th>Router Concern</th><th>Resource Block</th><th>Integration Point</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Route data loading</strong></td>
+            <td><a href="/blocks/resource-loader/">Resource Loader</a></td>
+            <td><code>route:loader</code> functions execute through Resource Loader's state machine (idle→pending→loading→success|error). Loader Intent selects the loading UX trait.</td>
+        </tr>
+        <tr>
+            <td><strong>Load failure recovery</strong></td>
+            <td><a href="/blocks/error-recovery/">Error Recovery</a></td>
+            <td>When a <code>route:loader</code> fails, Error Recovery classifies the error (4xx terminal, 5xx retryable, offline queued) and applies the retry strategy before falling back to <code>route:error</code> boundary.</td>
+        </tr>
+        <tr>
+            <td><strong>Link prefetching</strong></td>
+            <td><a href="/blocks/prefetch-behavior/">Prefetch Behavior</a></td>
+            <td><code>route:prefetch</code> eagerness levels delegate to Prefetch Behavior for condition checking (saveData, battery, connection) before triggering the loader.</td>
+        </tr>
+        <tr>
+            <td><strong>Route-scoped mutations</strong></td>
+            <td><a href="/blocks/resource-action/">Resource Action</a></td>
+            <td>Mutations within route content use Resource Action for busy state, double-submit prevention, and optimistic updates. On success, can invalidate route loader cache.</td>
+        </tr>
+        <tr>
+            <td><strong>Action triggers</strong></td>
+            <td><a href="/blocks/action-button/">Action Button</a></td>
+            <td>Buttons within route content use Action Button for busy state layout (width lock, aria-disabled) during Resource Action mutations.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h4>Error Recovery Integration</h4>
+<p>
+    The <code>route:error</code> template boundary is the <strong>last resort</strong>.
+    Before it activates, <a href="/blocks/error-recovery/">Error Recovery</a> intercepts loader failures
+    and applies the configured retry strategy.
+</p>
+<ol>
+    <li><strong>Loader throws</strong> &mdash; Error Recovery classifies the HTTP status.</li>
+    <li><strong>If retryable</strong> (5xx) &mdash; Automatic retry with backoff. Router stays in loading state. Fires <code>resource-retry</code> event.</li>
+    <li><strong>If rate-limited</strong> (429) &mdash; Respects <code>Retry-After</code> header, then retries.</li>
+    <li><strong>If offline</strong> &mdash; Queues the load. Shows fallback (stale data or skeleton). Replays when <code>online</code> event fires.</li>
+    <li><strong>If terminal</strong> (4xx) or <strong>retries exhausted</strong> &mdash; Stamps the <code>route:error</code> boundary template with <code>@route.error</code>.</li>
+</ol>
+
+{% highlight "html" %}
+<route-view>
+    <template route="/users/:id" route:loader="loadUser"
+              route:loader-strategy="soft">
+        <user-profile user="{{ @route.data }}"></user-profile>
+    </template>
+
+    <!-- Error boundary: shown only after Error Recovery exhausts retries -->
+    <template route="/users/:id" route:error>
+        <div class="error-card">
+            <p>{{ @route.error.message }}</p>
+            <button resource-action="retryLoad">Retry</button>
+        </div>
+    </template>
+</route-view>
+{% endhighlight %}
+
+{% highlight "typescript" %}
+// Error Recovery configuration for route loaders
+docInjector.set('customContexts:errorRecovery', {
+  strategy: {
+    algorithm: 'exponential',
+    maxRetries: 3,
+    baseDelay: 1000,
+    jitter: true
+  },
+  classifyStatus: (status) => {
+    if (status === 429) return 'rate-limited';
+    if (status >= 400 && status < 500) return 'terminal';
+    if (status >= 500) return 'retryable';
+    return 'terminal';
+  }
+});
+{% endhighlight %}
+
+<h4>Prefetch-to-Resource Pipeline</h4>
+<p>
+    When <code>route:prefetch</code> triggers on a link, the pipeline checks
+    <a href="/blocks/prefetch-behavior/">Prefetch Behavior</a> conditions before executing the loader.
+    This prevents wasted prefetches on constrained devices.
+</p>
+<ol>
+    <li><strong>Eagerness trigger</strong> &mdash; <code>route:prefetch="hover"</code> fires <code>pointerenter</code> (200ms debounce).</li>
+    <li><strong>Condition check</strong> &mdash; Prefetch Behavior checks <code>saveData</code>, battery, <code>effectiveType</code>. If suppressed, fires <code>prefetch-suppressed</code> and stops.</li>
+    <li><strong>Loader execution</strong> &mdash; Route's <code>route:loader</code> function is called with a prefetch signal. Result cached in Resource Loader.</li>
+    <li><strong>Navigation</strong> &mdash; When the user actually navigates, Resource Loader returns the cached result instantly &mdash; no loading state visible.</li>
+</ol>
+
+{% highlight "html" %}
+<nav>
+    <!-- Hover prefetch: checks saveData/battery before fetching -->
+    <a route:link="/users/123" route:prefetch="hover">Profile</a>
+
+    <!-- Viewport prefetch: triggers when link scrolls into view -->
+    <a route:link="/dashboard" route:prefetch="visible">Dashboard</a>
+
+    <!-- No prefetch: heavy route, only load on navigation -->
+    <a route:link="/reports" route:prefetch="none">Reports</a>
+</nav>
+{% endhighlight %}
+
+<h4>Route-Scoped Mutations</h4>
+<p>
+    Mutations within route content use <a href="/blocks/resource-action/">Resource Action</a>.
+    On mutation success, the action can invalidate the route loader's cached data,
+    triggering a refresh of the route content.
+</p>
+
+{% highlight "html" %}
+<route-view>
+    <template route="/users/:id" route:loader="loadUser">
+        <user-profile user="{{ @route.data }}">
+            <!-- Mutation within route content -->
+            <button resource-action="updateUser"
+                    resource-action-detail='{"id": "{{ @route.params.id }}"}'
+                    action-intent="primary"
+                    action-busy="disabled">
+                Save Changes
+            </button>
+        </user-profile>
+    </template>
+</route-view>
+{% endhighlight %}
+
+{% highlight "typescript" %}
+// Route loader
+docInjector.set('customContexts:routeLoader', {
+  async loadUser({ params, signal }) {
+    const res = await fetch(`/api/users/${params.id}`, { signal });
+    if (!res.ok) throw new Error('User not found');
+    return res.json();
+  }
+});
+
+// Route-scoped mutation — invalidates loader cache on success
+docInjector.set('customContexts:resourceAction', {
+  async updateUser({ params, formData, signal }) {
+    const res = await fetch(`/api/users/${params.id}`, {
+      method: 'PUT', body: formData, signal
+    });
+    if (!res.ok) throw new Error('Update failed');
+    // Returning data signals Resource Loader to invalidate cache
+    // and re-run the route loader
+    return res.json();
+  }
+});
+{% endhighlight %}
+
+<h4>Context Population Flow</h4>
+<p>
+    The resource pipeline populates route context in stages. Each block adds its data
+    to the injector chain, making it available to all descendant expressions.
+</p>
+<table>
+    <thead>
+        <tr><th>Stage</th><th>Context Key</th><th>Populated By</th><th>Contains</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>1. Route match</td>
+            <td><code>customContexts:route</code></td>
+            <td>RouteViewElement</td>
+            <td><code>params</code>, <code>path</code>, <code>query</code>, <code>hash</code></td>
+        </tr>
+        <tr>
+            <td>2. Loader resolve</td>
+            <td><code>customContexts:route.data</code></td>
+            <td>Resource Loader</td>
+            <td>Loader result (or cached prefetch)</td>
+        </tr>
+        <tr>
+            <td>3. Error (if any)</td>
+            <td><code>customContexts:route.error</code></td>
+            <td>Error Recovery</td>
+            <td>Error after retries exhausted (or terminal classification)</td>
+        </tr>
+        <tr>
+            <td>4. Mutation</td>
+            <td><code>customContexts:resourceAction</code></td>
+            <td>Resource Action</td>
+            <td>Mutation handlers scoped to route content</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Events</h3>
+<p>Router dispatches typed event classes registered via <a href="/projects/webevents/">Web Events</a> provider keys. This enables discrimination when multiple routers coexist or when combining router events with other blocks firing similar event names.</p>
+<table>
+  <tr><th>Event</th><th>Class</th><th>Provider Key</th><th>Target</th><th>Detail</th><th>Cancelable</th></tr>
+  <tr><td><code>route-change</code></td><td><code>RouteChangeEvent</code></td><td><code>customEvents:route-change</code></td><td><code>&lt;route-view&gt;</code></td><td><code>{ from, to, matched }</code></td><td>Yes</td></tr>
+  <tr><td><code>route-load-start</code></td><td><code>RouteLoadStartEvent</code></td><td><code>customEvents:route-load-start</code></td><td><code>&lt;route-view&gt;</code></td><td><code>{ route }</code></td><td>No</td></tr>
+  <tr><td><code>route-load-end</code></td><td><code>RouteLoadEndEvent</code></td><td><code>customEvents:route-load-end</code></td><td><code>&lt;route-view&gt;</code></td><td><code>{ route, data }</code></td><td>No</td></tr>
+  <tr><td><code>route-error</code></td><td><code>RouteErrorEvent</code></td><td><code>customEvents:route-error</code></td><td><code>&lt;route-view&gt;</code></td><td><code>{ route, error }</code></td><td>No</td></tr>
+  <tr><td><code>beforetoggle</code></td><td colspan="2"><em>Inherited from <a href="/blocks/view/#toggle-events">ViewEngine</a></em></td><td><code>&lt;route-view&gt;</code> / <code>&lt;route-outlet&gt;</code></td><td>ViewEngine shape</td><td>Yes</td></tr>
+  <tr><td><code>toggle</code></td><td colspan="2"><em>Inherited from <a href="/blocks/view/#toggle-events">ViewEngine</a></em></td><td><code>&lt;route-view&gt;</code> / <code>&lt;route-outlet&gt;</code></td><td>ViewEngine shape</td><td>No</td></tr>
+</table>
+
+<h3>Programmatic Navigation</h3>
+<pre><code class="language-javascript">// Get the &lt;route-view&gt; element (renders in-place)
+const router = document.querySelector('route-view');
+
+// Navigate programmatically (wraps navigation.navigate())
+const { committed, finished } = router.navigate('/users/123');
+await finished; // wait for loader + stamp
+
+router.navigate('/users/123', { replace: true });
+router.navigate('/checkout', { state: { fromCart: true } });
+
+// Back/forward (wraps navigation.back()/forward())
+router.back();
+router.forward();
+
+// Access current route
+const { params, path, query, hash } = router.currentRoute;</code></pre>
+
+<h3>URL Pattern Examples</h3>
+<table>
+  <tr><th>Pattern</th><th>Matches</th><th>Params</th></tr>
+  <tr><td><code>/users/:id</code></td><td>/users/123</td><td>{ id: "123" }</td></tr>
+  <tr><td><code>/posts/:year/:month?</code></td><td>/posts/2024, /posts/2024/01</td><td>{ year, month? }</td></tr>
+  <tr><td><code>/files/*</code></td><td>/files/a/b/c</td><td>Wildcard capture</td></tr>
+  <tr><td><code>/api/v:version/*</code></td><td>/api/v2/users</td><td>{ version: "2" }</td></tr>
+</table>
+
+<h3>Exports</h3>
+<table>
+  <tr><th>Export</th><th>Kind</th><th>Description</th></tr>
+  <tr><td><code>RouteViewElement</code></td><td>Class</td><td>Main orchestrator component. Renders matched content in-place. Extends <code>HTMLElement</code>.</td></tr>
+  <tr><td><code>RouteOutletElement</code></td><td>Class</td><td>Named auxiliary outlet component. Extends <code>HTMLElement</code>.</td></tr>
+  <tr><td><code>RouteLinkBehavior</code></td><td>Class</td><td>Navigation link behavior. Extends <code>CustomAttribute</code>.</td></tr>
+  <tr><td><code>RoutePrefetchBehavior</code></td><td>Class</td><td>Prefetch strategy behavior. Extends <code>CustomAttribute</code>.</td></tr>
+  <tr><td><code>registerRouter</code></td><td>Function</td><td>Registers components and behaviors with default names.</td></tr>
+  <tr><td><code>RouteContext</code></td><td>Interface</td><td>Shape of <code>@route</code> context.</td></tr>
+  <tr><td><code>RouteNavigationTarget</code></td><td>Interface</td><td>Navigation endpoint passed to guards.</td></tr>
+  <tr><td><code>RouteGuardFn</code></td><td>Type</td><td>Guard function signature.</td></tr>
+  <tr><td><code>RouteGuardResult</code></td><td>Type</td><td>Guard return type: <code>boolean | string</code>.</td></tr>
+  <tr><td><code>RouteLoaderFn</code></td><td>Type</td><td>Loader function signature.</td></tr>
+  <tr><td><code>RouteLoaderParams</code></td><td>Interface</td><td>Parameters passed to loaders.</td></tr>
+  <tr><td><code>RouteDefinition</code></td><td>Interface</td><td>Parsed route from template attributes.</td></tr>
+  <tr><td><code>MatchedRoute</code></td><td>Interface</td><td>Runtime matched route with params.</td></tr>
+  <tr><td><code>NavigationResult</code></td><td>Interface</td><td>Promise pair from programmatic navigation.</td></tr>
+</table>
+
+<h3>Registration</h3>
+<pre><code class="language-typescript">/**
+ * Registers all router components and behaviors with default names.
+ * Tag names and attribute names can be customized by registering manually.
+ *
+ * @example
+ * ```typescript
+ * import { registerRouter } from 'blocks/router';
+ *
+ * // Default names
+ * registerRouter(attributes);
+ * // Registers:
+ * //   customElements.define('route-view', RouteViewElement)
+ * //   customElements.define('route-outlet', RouteOutletElement)
+ * //   attributes.define('route:link', RouteLinkBehavior)
+ * //   attributes.define('route:prefetch', RoutePrefetchBehavior)
+ *
+ * // Or register individually with custom names
+ * customElements.define('app-view', RouteViewElement);
+ * customElements.define('app-outlet', RouteOutletElement);
+ * attributes.define('app:link', RouteLinkBehavior);
+ * ```
+ */
+function registerRouter(attributes: CustomAttributeRegistry): void;</code></pre>
+
+<h3>Template Attributes Reference</h3>
+<p>These are plain HTML attributes on <code>&lt;template&gt;</code> elements inside <code>&lt;route-view&gt;</code>. They are read directly by the config component &mdash; no registry entries or classes needed.</p>
+<table>
+  <tr><th>Attribute</th><th>Value</th><th>Description</th></tr>
+  <tr><td><code>route</code></td><td>URLPattern path</td><td>Route pattern to match (e.g., <code>/users/:id</code>)</td></tr>
+  <tr><td><code>route:guard</code></td><td>Guard name</td><td>canActivate guard, resolved from <code>@routeGuard</code> context</td></tr>
+  <tr><td><code>route:guard:leave</code></td><td>Guard name</td><td>canDeactivate guard, resolved from <code>@routeGuard</code> context</td></tr>
+  <tr><td><code>route:loader</code></td><td>Loader name</td><td>Loader function, resolved from <code>@routeLoader</code> context</td></tr>
+  <tr><td><code>route:error</code></td><td>(boolean)</td><td>Marks template as error boundary for its route</td></tr>
+  <tr><td><code>route:outlet</code></td><td>Outlet name</td><td>Target outlet (omit for primary)</td></tr>
+  <tr><td><code>route:loader-strategy</code></td><td><code>optimistic</code> | <code>soft</code> | <code>hard</code> | <code>replacement</code></td><td>Override <a href="/intents/loader/">Loader Intent</a> strategy for this route</td></tr>
+  <tr><td><code>route:loader-context</code></td><td><code>initial</code> | <code>transition</code></td><td>Override Loader Intent context for this route</td></tr>
+  <tr><td><code>route:loader-timing</code></td><td><code>immediate</code> | <code>debounced</code> | ms value</td><td>Override Loader Intent timing for this route</td></tr>
+  <tr><td><code>lazy</code></td><td>(boolean)</td><td>Lazy-load route content on first navigation</td></tr>
+</table>

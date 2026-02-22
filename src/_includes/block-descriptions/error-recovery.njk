@@ -1,0 +1,354 @@
+<h2>Error Recovery</h2>
+<p>
+    Technical implementation of the <a href="/intents/reliability/">Reliability Intent</a>, handling retry strategies
+    (exponential backoff, linear, immediate), HTTP status classification, circuit breaker patterns, and offline queuing.
+    The complement to <a href="/blocks/resource-loader/">Resource Loader</a>'s error state &mdash; Error Recovery decides
+    <strong>what happens next</strong> when a load fails.
+    Part of the <a href="/projects/webresources/">Web Resources</a> ecosystem.
+</p>
+
+<h3>Architecture: Error Recovery in the Resource Pipeline</h3>
+<p>
+    <a href="/blocks/resource-loader/">Resource Loader</a> transitions to the <code>error</code> state when a fetch fails.
+    Error Recovery intercepts this transition and applies recovery strategies before the error surfaces to the user.
+    It sits between the transport layer (<a href="/resources/clients/">Custom Clients</a>) and the UI layer (Resource Loader),
+    deciding whether to retry, queue, or surface the error.
+</p>
+<table>
+    <thead>
+        <tr><th></th><th>Resource Loader</th><th>Error Recovery</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Responsibility</strong></td>
+            <td>Display loading states and content</td>
+            <td>Decide recovery strategy on failure</td>
+        </tr>
+        <tr>
+            <td><strong>When active</strong></td>
+            <td>Always (idle → loading → success/error)</td>
+            <td>Only on failure (error state entry)</td>
+        </tr>
+        <tr>
+            <td><strong>UX output</strong></td>
+            <td>Skeleton, overlay, stale content</td>
+            <td>Retry button, fallback content, queued indicator</td>
+        </tr>
+        <tr>
+            <td><strong>Configured by</strong></td>
+            <td><a href="/intents/loader/">Loader Intent</a></td>
+            <td><a href="/intents/reliability/">Reliability Intent</a></td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Retry-After">Retry-After Header</a></td>
+        <td>Standard (RFC 9110)</td>
+        <td>When present on 429/503 responses, overrides configured backoff delay with server-specified wait time</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status">HTTP Status Codes</a></td>
+        <td>Standard (RFC 9110)</td>
+        <td>4xx → terminal (no retry), 5xx → retryable with backoff, 429 → rate-limited with Retry-After</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Navigator/onLine">navigator.onLine</a></td>
+        <td>Baseline</td>
+        <td>Detects offline state to queue operations; listens for <code>online</code> event to trigger queued retries</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Background_Synchronization_API">Background Sync API</a></td>
+        <td>Limited (Chrome)</td>
+        <td>Progressive enhancement: if SW registered, queued mutations use Background Sync; otherwise falls back to <code>online</code> event</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/AbortController">AbortController</a></td>
+        <td>Baseline</td>
+        <td>Each retry attempt gets a fresh signal; previous attempt aborted before retry dispatches</td>
+    </tr>
+</table>
+
+<h3>Framework Research</h3>
+<table>
+    <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
+    <tr>
+        <td><a href="https://tanstack.com/query">TanStack Query</a></td>
+        <td><code>retry</code> count, <code>retryDelay</code> function, <code>networkMode: 'online'</code> pauses queries when offline</td>
+    </tr>
+    <tr>
+        <td><a href="https://github.com/softonic/axios-retry">axios-retry</a></td>
+        <td><code>exponentialDelay</code>, <code>retryCondition</code> predicate, interceptor-based composition</td>
+    </tr>
+    <tr>
+        <td><a href="https://commerce.nearform.com/open-source/urql/docs/advanced/retry/">urql</a></td>
+        <td><code>retryExchange</code> with <code>initialDelayMs</code>, <code>maxDelayMs</code>, <code>randomDelay</code> (jitter)</td>
+    </tr>
+    <tr>
+        <td><a href="https://swr.vercel.app/docs/error-handling">SWR</a></td>
+        <td><code>onErrorRetry</code> callback, <code>errorRetryCount</code>, pauses retry when <code>navigator.onLine</code> is false</td>
+    </tr>
+    <tr>
+        <td><a href="https://www.apollographql.com/docs/react/api/link/apollo-link-retry/">Apollo RetryLink</a></td>
+        <td><code>delay.initial</code>/<code>delay.max</code>/<code>delay.jitter</code> to prevent thundering herd</td>
+    </tr>
+</table>
+
+<h3>HTTP Status Classification</h3>
+<p>
+    Error Recovery classifies HTTP responses into three categories that determine the recovery path.
+    The <code>Retry-After</code> header, when present, always overrides the configured backoff timing.
+</p>
+<table>
+    <thead>
+        <tr><th>Category</th><th>Status Codes</th><th>Recovery Behavior</th><th>Rationale</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Terminal</strong></td>
+            <td>400, 401, 403, 404, 405, 409, 422</td>
+            <td>No retry. Surface error immediately.</td>
+            <td>Client errors &mdash; retrying with the same request will produce the same result.</td>
+        </tr>
+        <tr>
+            <td><strong>Retryable</strong></td>
+            <td>500, 502, 503, 504</td>
+            <td>Automatic retry with configured backoff strategy.</td>
+            <td>Server errors &mdash; transient failures that may resolve on retry.</td>
+        </tr>
+        <tr>
+            <td><strong>Rate Limited</strong></td>
+            <td>429</td>
+            <td>Retry after <code>Retry-After</code> header delay (or fallback to exponential).</td>
+            <td>Server explicitly asks to slow down. Respecting the header is both polite and effective.</td>
+        </tr>
+        <tr>
+            <td><strong>Offline</strong></td>
+            <td><code>navigator.onLine === false</code></td>
+            <td>Queue operation. Retry when <code>online</code> event fires.</td>
+            <td>No network &mdash; retrying immediately is wasteful. Queue and wait for connectivity.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Retry Strategies</h3>
+<p>
+    Three backoff algorithms are available. The Reliability Intent selects <code>automatic</code> recovery;
+    Error Recovery decides the backoff curve based on the failure category.
+</p>
+<table>
+    <thead>
+        <tr><th>Strategy</th><th>Formula</th><th>Example (base = 1s)</th><th>Best For</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Immediate</strong></td>
+            <td><code>delay = 0</code></td>
+            <td>0ms, 0ms, 0ms</td>
+            <td>Idempotent reads where the failure is likely a one-off glitch</td>
+        </tr>
+        <tr>
+            <td><strong>Linear</strong></td>
+            <td><code>delay = base × attempt</code></td>
+            <td>1s, 2s, 3s</td>
+            <td>Moderate backoff when server is likely recovering</td>
+        </tr>
+        <tr>
+            <td><strong>Exponential</strong></td>
+            <td><code>delay = base × 2^(attempt-1) + jitter</code></td>
+            <td>1s, 2s, 4s (+ random 0-500ms)</td>
+            <td>Server overload scenarios; jitter prevents thundering herd</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Circuit Breaker</h3>
+<p>
+    After repeated failures to the same endpoint, Error Recovery can trip a circuit breaker to prevent
+    wasted requests. This protects both the server (reduces load during outage) and the user (fast failure
+    instead of waiting for timeout).
+</p>
+<table>
+    <thead>
+        <tr><th>State</th><th>Behavior</th><th>Transition</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>closed</code></td>
+            <td>Requests flow normally. Failure counter increments on error.</td>
+            <td>→ <code>open</code> when failure count ≥ threshold</td>
+        </tr>
+        <tr>
+            <td><code>open</code></td>
+            <td>Requests fail immediately without hitting the network. Fires <code>resource-circuit-open</code>.</td>
+            <td>→ <code>half-open</code> after cooldown period expires</td>
+        </tr>
+        <tr>
+            <td><code>half-open</code></td>
+            <td>A single probe request is allowed through.</td>
+            <td>→ <code>closed</code> on success; → <code>open</code> on failure</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Offline Queuing</h3>
+<p>
+    When <code>navigator.onLine</code> is <code>false</code>, Error Recovery queues failed operations
+    instead of retrying. When the <code>online</code> event fires on <code>window</code>, queued operations
+    are replayed in order.
+</p>
+<ol>
+    <li><strong>Detect</strong> &mdash; <code>navigator.onLine === false</code> or fetch throws <code>TypeError</code> (network error).</li>
+    <li><strong>Queue</strong> &mdash; Operation stored in memory (or IndexedDB for persistence). Fires <code>resource-offline-queued</code>.</li>
+    <li><strong>Wait</strong> &mdash; Listen for <code>window.addEventListener('online', replay)</code>.</li>
+    <li><strong>Replay</strong> &mdash; On connectivity restored, queued operations are replayed sequentially with fresh AbortSignals.</li>
+</ol>
+<p>
+    <strong>Progressive Enhancement:</strong> If a Service Worker is registered with the
+    <a href="https://developer.mozilla.org/en-US/docs/Web/API/Background_Synchronization_API">Background Sync API</a>,
+    Error Recovery delegates queued operations to the SW for more reliable replay (survives page close).
+</p>
+
+<h3>Usage Examples</h3>
+
+<h4>Automatic Retry with Exponential Backoff</h4>
+{% highlight "html" %}
+<resource-loader resource="users"
+    reliability-recovery="automatic"
+    reliability-strategy="exponential"
+    reliability-max-retries="3">
+    <!-- Content renders on success -->
+</resource-loader>
+{% endhighlight %}
+
+<h4>Manual Retry with Fallback</h4>
+{% highlight "html" %}
+<resource-loader resource="dashboard"
+    reliability-recovery="manual"
+    reliability-fallback="previous">
+    <!-- On error: shows stale data + "Retry" button -->
+</resource-loader>
+{% endhighlight %}
+
+<h4>Programmatic Configuration</h4>
+{% highlight "typescript" %}
+// Configure retry behavior via injector
+docInjector.set('customContexts:errorRecovery', {
+  strategy: 'exponential',
+  maxRetries: 3,
+  baseDelay: 1000,       // 1 second
+  maxDelay: 30000,       // 30 second cap
+  jitter: true,          // Random 0–500ms added
+  circuitBreaker: {
+    threshold: 5,        // Open after 5 consecutive failures
+    cooldown: 60000      // Try again after 60 seconds
+  },
+  respectRetryAfter: true,
+  classifyStatus: (status) => {
+    if (status === 429) return 'rate-limited';
+    if (status >= 400 && status < 500) return 'terminal';
+    if (status >= 500) return 'retryable';
+    return 'terminal';
+  }
+});
+{% endhighlight %}
+
+<h3>Events</h3>
+<p>
+    Error Recovery dispatches typed event classes registered via <a href="/projects/webevents/">Web Events</a> provider keys.
+    The <code>resource-retry</code> event is cancelable &mdash; canceling it aborts the entire retry sequence.
+</p>
+<table>
+    <thead>
+        <tr><th>Event</th><th>Class</th><th>Provider Key</th><th>Detail</th><th>Cancelable</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>resource-retry</code></td>
+            <td><code>ResourceRetryEvent</code></td>
+            <td><code>customEvents:resource-retry</code></td>
+            <td><code>{ attempt, maxAttempts, delay, error }</code></td>
+            <td>Yes</td>
+        </tr>
+        <tr>
+            <td><code>resource-retry-exhausted</code></td>
+            <td><code>ResourceRetryExhaustedEvent</code></td>
+            <td><code>customEvents:resource-retry-exhausted</code></td>
+            <td><code>{ attempts, lastError, strategy }</code></td>
+            <td>No</td>
+        </tr>
+        <tr>
+            <td><code>resource-offline-queued</code></td>
+            <td><code>ResourceOfflineQueuedEvent</code></td>
+            <td><code>customEvents:resource-offline-queued</code></td>
+            <td><code>{ operation, queueSize }</code></td>
+            <td>No</td>
+        </tr>
+        <tr>
+            <td><code>resource-circuit-open</code></td>
+            <td><code>ResourceCircuitOpenEvent</code></td>
+            <td><code>customEvents:resource-circuit-open</code></td>
+            <td><code>{ failures, threshold, cooldown }</code></td>
+            <td>No</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Interface</h3>
+<pre><code class="language-typescript">/** Retry strategy configuration */
+interface RetryStrategy {
+    algorithm: 'immediate' | 'linear' | 'exponential';
+    maxRetries: number;         // Default: 3
+    baseDelay: number;          // ms, default: 1000
+    maxDelay: number;           // ms cap, default: 30000
+    jitter: boolean;            // Add random delay to prevent thundering herd
+    respectRetryAfter: boolean; // Honor Retry-After header
+}
+
+/** Circuit breaker configuration */
+interface CircuitBreakerConfig {
+    threshold: number;   // Failures before opening (default: 5)
+    cooldown: number;    // ms before half-open probe (default: 60000)
+}
+
+/** Circuit breaker runtime state */
+type CircuitBreakerState = 'closed' | 'open' | 'half-open';
+
+/** HTTP status classification */
+type StatusClassification =
+    | 'terminal'       // 4xx — no retry
+    | 'retryable'      // 5xx — retry with backoff
+    | 'rate-limited';  // 429 — retry after server delay
+
+/** Error Recovery configuration — provided via
+ *  customContexts:errorRecovery on the injector chain. */
+interface ErrorRecoveryConfig {
+    strategy: RetryStrategy;
+    circuitBreaker?: CircuitBreakerConfig;
+    classifyStatus?: (status: number) =&gt; StatusClassification;
+    offlineQueue?: boolean;  // Enable offline queuing (default: true)
+}</code></pre>
+
+<h3>Exports</h3>
+<table>
+    <thead>
+        <tr><th>Export</th><th>Kind</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>ErrorRecoveryModule</code></td><td>Class</td><td>Main module, plugs into Resource Loader error handling</td></tr>
+        <tr><td><code>withAutomaticRetry</code></td><td>Trait</td><td>Silent retry with configurable backoff</td></tr>
+        <tr><td><code>withManualRetry</code></td><td>Trait</td><td>User-initiated retry affordance</td></tr>
+        <tr><td><code>withFallbackSkeleton</code></td><td>Trait</td><td>Structural placeholder on exhausted retries</td></tr>
+        <tr><td><code>withFallbackPrevious</code></td><td>Trait</td><td>Shows stale data marked as outdated</td></tr>
+        <tr><td><code>withCircuitBreaker</code></td><td>Trait</td><td>Stops retrying after consecutive failures</td></tr>
+        <tr><td><code>ResourceRetryEvent</code></td><td>Event Class</td><td>Typed event before each retry (cancelable)</td></tr>
+        <tr><td><code>ResourceRetryExhaustedEvent</code></td><td>Event Class</td><td>Typed event when all retries exhausted</td></tr>
+        <tr><td><code>ResourceOfflineQueuedEvent</code></td><td>Event Class</td><td>Typed event when operation queued offline</td></tr>
+        <tr><td><code>ResourceCircuitOpenEvent</code></td><td>Event Class</td><td>Typed event when circuit breaker trips</td></tr>
+        <tr><td><code>RetryStrategy</code></td><td>Interface</td><td>Retry algorithm configuration</td></tr>
+        <tr><td><code>CircuitBreakerState</code></td><td>Type</td><td>Circuit state: closed | open | half-open</td></tr>
+    </tbody>
+</table>

@@ -483,6 +483,8 @@ h1, h2, h3, h4, h5, h6 {
 .status-candidate .meter-fill { width: 80%; background: var(--color-primary); }
 .status-implemented .meter-fill { width: 100%; background: #a855f7; }
 .status-stable .meter-fill { width: 100%; background: #22c55e; }
+.status-active .meter-fill { width: 100%; background: #22c55e; }
+.status-open .meter-fill { width: 25%; background: #f59e0b; }
 
 /* Detail Page */
 .project-detail-header {
@@ -908,21 +910,17 @@ a.plug-crumb:hover {
     gap: var(--spacing-md);
 }
 
-/* Comparison Table */
-.comparison-table-wrapper {
-    overflow-x: auto;
-    margin-top: 1.5rem;
-    width: 100%;
-}
-
-.comparison-table {
+/* Tables */
+table {
     width: 100%;
     text-align: left;
     font-size: 0.875rem;
     border-collapse: collapse;
+    overflow-x: auto;
+    display: block;
 }
 
-.comparison-table td, .comparison-table th {
+table td, table th {
     padding: 0.75rem;
     border: 1px solid var(--color-border);
 }

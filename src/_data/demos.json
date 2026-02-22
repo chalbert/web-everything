@@ -12,5 +12,28 @@
       "webinjectors",
       "webstates"
     ]
+  },
+  {
+    "id": "declarative-spa-router",
+    "name": "Router Demo",
+    "summary": "Declarative client-side routing with guards, loaders, error boundaries, and named outlets — all driven by HTML templates inside a single <route-view> element.",
+    "description": "<h2>Concept</h2><p>This demo showcases a fully declarative client-side router built on the Navigation API and URLPattern. Routes are defined as <code>&lt;template route=\"/path\"&gt;</code> children of a <code>&lt;route-view&gt;</code> element, with matched content stamped in-place.</p><h3>Key Features</h3><ul><li><strong>Declarative Routes:</strong> Define routes as <code>&lt;template&gt;</code> elements with a <code>route</code> attribute — no JavaScript router configuration needed.</li><li><strong>Route Guards:</strong> Protect routes with <code>route:guard</code> attributes. Guards can allow, block, or redirect navigation.</li><li><strong>Route Loaders:</strong> Fetch async data before rendering via <code>route:loader</code>. Loader results populate the stamped content.</li><li><strong>Loader Intent:</strong> Declare loading strategy (soft, hard, replacement, optimistic) and timing (debounced, immediate) via <code>customContexts:loaderIntent</code>. Switch strategies live to see different loading behaviors. Per-route overrides via <code>route:loader-strategy</code> attribute.</li><li><strong>Error Boundaries:</strong> Define <code>route:error</code> templates to handle loader failures gracefully.</li><li><strong>Named Outlets:</strong> Render auxiliary content in <code>&lt;route-outlet&gt;</code> elements for sidebars, toolbars, etc.</li><li><strong>Navigation Links:</strong> <code>route:link</code> behavior on <code>&lt;a&gt;</code> elements intercepts clicks for SPA navigation with active class management.</li><li><strong>Prefetching:</strong> <code>route:prefetch=\"hover\"</code> warms the loader cache on hover for instant navigation.</li></ul><h3>Technical Approach</h3><p>The router uses the Navigation API (with History API fallback) for URL interception, URLPattern for route matching, and the Web Everything injector system for guard/loader resolution. Templates are stamped and unstamped as the user navigates, with route context available to event handlers via custom events. Loading states are driven by the Loader Intent protocol — a single declaration that controls how pending states affect the UI.</p>",
+    "status": "active",
+    "liveUrl": "http://localhost:3000/demos/declarative-spa-router.html",
+    "projects": [
+      "webinjectors",
+      "webbehaviors"
+    ]
+  },
+  {
+    "id": "view-tabs-demo",
+    "name": "View + Tabs Demo",
+    "summary": "ViewEngine for show/hide with multiple hidden modes, exclusive groups, and toggle events. TabGroupBehavior for accessible tabbed interfaces with ARIA roles and keyboard navigation.",
+    "description": "<h2>Concept</h2><p>This demo showcases the View and Tabs blocks — the foundation for all show/hide patterns in Web Everything.</p><h3>Key Features</h3><ul><li><strong>ViewEngine:</strong> Shared primitive for show/hide/toggle with 4 hidden modes (display, content-visibility, until-found, inert).</li><li><strong>Toggle Events:</strong> Popover API-compatible <code>beforetoggle</code> (cancelable) and <code>toggle</code> events.</li><li><strong>Exclusive Groups:</strong> Elements with the same <code>name</code> attribute — only one visible at a time, mirroring <code>&lt;details name&gt;</code>.</li><li><strong>Tabs:</strong> Accessible tabbed interface with ARIA roles (tablist/tab/tabpanel), keyboard navigation (arrow keys, Home/End), and automatic/manual activation modes.</li><li><strong>Configuration:</strong> Live switching between activation modes (automatic/manual) and orientations (horizontal/vertical).</li></ul><h3>Technical Approach</h3><p>Tabs is a thin ARIA + keyboard layer over ViewEngine. Panels are always in the DOM (behavior pattern), with visibility managed by the engine. State preservation is automatic since elements are never destroyed.</p>",
+    "status": "active",
+    "liveUrl": "http://localhost:3000/demos/view-tabs-demo.html",
+    "projects": [
+      "webbehaviors"
+    ]
   }
 ]

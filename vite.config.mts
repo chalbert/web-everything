@@ -50,8 +50,28 @@ function webEverythingPatches(): Plugin {
   };
 }
 
+/**
+ * Vite plugin that provides SPA fallback for the router demo.
+ * Routes like /counter, /todos, /users/1 etc. are served the router demo HTML.
+ */
+function routerDemoFallback(): Plugin {
+  return {
+    name: 'router-demo-fallback',
+    configureServer(server) {
+      // Must run before Vite's internal middleware
+      server.middlewares.use((req, _res, next) => {
+        const url = req.url?.split('?')[0] || '';
+        if (/^\/(counter|todos|users|admin|login)(\/|$)/.test(url)) {
+          req.url = '/demos/declarative-spa-router.html';
+        }
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [webEverythingPatches()],
+  plugins: [routerDemoFallback(), webEverythingPatches()],
   root: './',
   server: {
     port: 3000,
@@ -99,6 +119,9 @@ export default defineConfig({
   },
   esbuild: {
     target: 'esnext',
+    jsxFactory: 'jsx.createElement',
+    jsxFragment: 'jsx.Fragment',
+    jsxInject: `import jsx from '/blocks/renderers/jsx'`,
   },
   build: {
     outDir: '_site',

@@ -1,24 +1,237 @@
-<h2>Protocol: Resource Action</h2>
-<p>Manages the lifecycle of a mutation (POST/PUT/DELETE) triggered by user input.</p>
+<h2>Resource Action</h2>
+<p>
+    Manages the async mutation lifecycle (POST/PUT/DELETE) &mdash; busy state on triggers, double-submit prevention,
+    optimistic updates with automatic rollback on error. The complement to <a href="/blocks/resource-loader/">Resource Loader</a>
+    (which handles reads); Resource Action handles writes.
+    Part of the <a href="/projects/webresources/">Web Resources</a> ecosystem.
+</p>
+
+<h3>Architecture: Reads vs Writes</h3>
+<p>
+    Reads and writes have fundamentally different UX patterns. <a href="/blocks/resource-loader/">Resource Loader</a> shows
+    loading states <strong>in-place</strong> (skeletons, overlays, stale content). Resource Action shows busy states
+    <strong>on triggers</strong> (disabled buttons, spinners, width locking) and delivers feedback (toasts, revert).
+</p>
+<table>
+    <thead>
+        <tr><th></th><th>Resource Loader (Reads)</th><th>Resource Action (Writes)</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Trigger</strong></td>
+            <td>Navigation, mount, focus/reconnect</td>
+            <td>User click, form submit, command</td>
+        </tr>
+        <tr>
+            <td><strong>Loading UX</strong></td>
+            <td>In-place: skeleton, overlay, stale content</td>
+            <td>On trigger: busy button, disabled state</td>
+        </tr>
+        <tr>
+            <td><strong>Success UX</strong></td>
+            <td>Content replaces loading state</td>
+            <td>Toast notification, cache invalidation</td>
+        </tr>
+        <tr>
+            <td><strong>Error UX</strong></td>
+            <td>Error card replaces content</td>
+            <td>Toast/alert, optimistic revert</td>
+        </tr>
+        <tr>
+            <td><strong>Cancellation</strong></td>
+            <td>Navigation supersede (automatic)</td>
+            <td>User-initiated or timeout</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API">Fetch API</a></td>
+        <td>Baseline</td>
+        <td>Mutations delegate to <a href="/resources/clients/">Custom Clients</a> for transport; <code>AbortController</code> for cancellation</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API">Invoker Commands API</a></td>
+        <td>Baseline 2026</td>
+        <td>Action triggers can use <code>commandfor</code>/<code>command</code> for declarative mutation invocation</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-disabled">aria-disabled</a></td>
+        <td>Standard</td>
+        <td><code>withBusyTrigger</code> applies <code>aria-disabled</code> + <code>pointer-events:none</code> during pending state</td>
+    </tr>
+</table>
+
+<h3>Framework Research</h3>
+<table>
+    <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
+    <tr>
+        <td><a href="https://tanstack.com/query">TanStack Query</a></td>
+        <td><code>useMutation</code> lifecycle: <code>onMutate</code> (optimistic), <code>onError</code> (rollback), <code>invalidateQueries</code> (cache refresh)</td>
+    </tr>
+    <tr>
+        <td><a href="https://www.apollographql.com/docs/react/">Apollo Client</a></td>
+        <td><code>useMutation</code> with <code>optimisticResponse</code> and manual cache updates</td>
+    </tr>
+    <tr>
+        <td><a href="https://remix.run/docs/en/main/route/action">Remix</a></td>
+        <td><code>&lt;Form&gt;</code> component with progressive enhancement, server actions, <code>useNavigation</code> for pending state</td>
+    </tr>
+    <tr>
+        <td><a href="https://swr.vercel.app/docs/mutation">SWR</a></td>
+        <td><code>useSWRMutation</code> with manual <code>trigger()</code>, revalidation after mutation</td>
+    </tr>
+</table>
+
 <h3>Interaction Model</h3>
-<ul>
-  <li>
-    <strong>Trigger:</strong>
-    The actionable element (Button). Acquires
-    <code>busy</code>
-    state (See
-    <strong>Action Intent</strong>).</li>
-  <li>
-    <strong>Feedback:</strong>
-    Optimistic UI updates or Toast notifications (See
-    <strong>Message Intent</strong>).</li>
-  <li>
-    <strong>Locking:</strong>
-    Prevents double-submission by disabling triggers or debouncing.</li>
-</ul>
-<h3>Virtual Implementation</h3>
-<p>Attached via Virtual Element markers or Attribute Directives to existing controls. This allows any arbitrary element
-  to become a stateful action trigger without wrapping it in a web component container.</p>
-<h3>Error Handling</h3>
-<p>Errors are typically
-  <strong>Forgivable</strong>, handled via Toast/Alert interactions rather than layout replacement.</p>
+<ol>
+    <li><strong>Trigger</strong> &mdash; User clicks a button, submits a form, or invokes a command. The action element acquires <code>busy</code> state via <a href="/intents/action/">Action Intent</a>.</li>
+    <li><strong>Execute</strong> &mdash; The mutation is dispatched through <a href="/resources/clients/">Custom Client</a> (with <a href="/resources/middleware/">Middleware</a> for auth, logging, tracing).</li>
+    <li><strong>Feedback</strong> &mdash; On success: toast notification, cache invalidation, UI update. On error: toast/alert, optimistic revert if applicable.</li>
+    <li><strong>Unlock</strong> &mdash; Trigger element exits busy state. Double-submit prevention releases.</li>
+</ol>
+
+<h3>Lifecycle State Machine</h3>
+<table>
+    <thead>
+        <tr><th>State</th><th>Description</th><th>Trait Behavior</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>idle</code></td>
+            <td>No mutation in progress.</td>
+            <td>Trigger element interactive. No indicators.</td>
+        </tr>
+        <tr>
+            <td><code>pending</code></td>
+            <td>Mutation started, timing threshold not reached.</td>
+            <td><code>withBusyTrigger</code> locks width, applies <code>aria-disabled</code>. If optimistic: predicted result applied immediately.</td>
+        </tr>
+        <tr>
+            <td><code>success</code></td>
+            <td>Mutation completed.</td>
+            <td>Trigger restored. <code>withFeedbackOnComplete</code> fires toast. Cache invalidated.</td>
+        </tr>
+        <tr>
+            <td><code>error</code></td>
+            <td>Mutation failed.</td>
+            <td>Trigger restored. Error toast surfaced. If optimistic: <code>withOptimisticMutation</code> reverts to previous state.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Usage Examples</h3>
+
+<h4>Form Submission</h4>
+{% highlight "html" %}
+<form resource-action="saveUser" resource-action-on="submit">
+    <input name="name" />
+    <button type="submit">Save</button>
+</form>
+{% endhighlight %}
+
+<h4>Delete with Confirmation</h4>
+{% highlight "html" %}
+<button resource-action="deleteItem"
+        resource-action-detail='{"id": "123"}'
+        resource-action-confirm="Are you sure?">
+    Delete
+</button>
+{% endhighlight %}
+
+<h4>Optimistic Update</h4>
+{% highlight "typescript" %}
+// Register mutation handler with optimistic prediction
+docInjector.set('customContexts:resourceAction', {
+  async toggleFavorite({ params, signal }) {
+    return fetch(`/api/favorites/${params.id}`, {
+      method: 'POST', signal
+    });
+  }
+});
+
+// The optimistic trait applies the predicted result immediately
+// If the mutation fails, the trait auto-reverts
+{% endhighlight %}
+
+<h3>Events</h3>
+<p>
+    Resource Action dispatches typed event classes registered via <a href="/projects/webevents/">Web Events</a> provider keys.
+    Enables <code>listenForScoped</code> discrimination between concurrent mutations.
+</p>
+<table>
+    <thead>
+        <tr><th>Event</th><th>Class</th><th>Provider Key</th><th>Detail</th><th>Cancelable</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>resource-action-start</code></td>
+            <td><code>ResourceActionStartEvent</code></td>
+            <td><code>customEvents:resource-action-start</code></td>
+            <td><code>{ operation, trigger }</code></td>
+            <td>Yes</td>
+        </tr>
+        <tr>
+            <td><code>resource-action-end</code></td>
+            <td><code>ResourceActionEndEvent</code></td>
+            <td><code>customEvents:resource-action-end</code></td>
+            <td><code>{ operation, result }</code></td>
+            <td>No</td>
+        </tr>
+        <tr>
+            <td><code>resource-action-error</code></td>
+            <td><code>ResourceActionErrorEvent</code></td>
+            <td><code>customEvents:resource-action-error</code></td>
+            <td><code>{ operation, error }</code></td>
+            <td>No</td>
+        </tr>
+        <tr>
+            <td><code>resource-action-revert</code></td>
+            <td><code>ResourceActionRevertEvent</code></td>
+            <td><code>customEvents:resource-action-revert</code></td>
+            <td><code>{ operation, previousState }</code></td>
+            <td>No</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Interface</h3>
+<pre><code class="language-typescript">/**
+ * Resource Action configuration — provided via
+ * customContexts:resourceAction on the injector chain.
+ *
+ * Named mutation functions resolved by name from the
+ * resource-action attribute value.
+ */
+type ResourceActionHandler = (params: {
+    params: Record&lt;string, unknown&gt;;
+    signal: AbortSignal;
+    formData?: FormData;
+}) => Promise&lt;unknown&gt;;
+
+/** Optimistic prediction for immediate UI update */
+interface OptimisticPrediction&lt;T&gt; {
+    predict: (params: Record&lt;string, unknown&gt;) => T;
+    apply: (prediction: T) => void;
+    revert: (previous: T) => void;
+}</code></pre>
+
+<h3>Exports</h3>
+<table>
+    <thead>
+        <tr><th>Export</th><th>Kind</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>ResourceActionDirective</code></td><td>Class</td><td>Main directive (CustomTemplateDirective)</td></tr>
+        <tr><td><code>withBusyTrigger</code></td><td>Trait</td><td>Busy state on trigger element (width lock, aria-disabled)</td></tr>
+        <tr><td><code>withOptimisticMutation</code></td><td>Trait</td><td>Immediate predicted result, auto-revert on error</td></tr>
+        <tr><td><code>withFeedbackOnComplete</code></td><td>Trait</td><td>Toast/notification on success or error</td></tr>
+        <tr><td><code>ResourceActionStartEvent</code></td><td>Event Class</td><td>Typed event for action start (cancelable)</td></tr>
+        <tr><td><code>ResourceActionEndEvent</code></td><td>Event Class</td><td>Typed event for action success</td></tr>
+        <tr><td><code>ResourceActionErrorEvent</code></td><td>Event Class</td><td>Typed event for action error</td></tr>
+        <tr><td><code>ResourceActionRevertEvent</code></td><td>Event Class</td><td>Typed event for optimistic revert</td></tr>
+    </tbody>
+</table>

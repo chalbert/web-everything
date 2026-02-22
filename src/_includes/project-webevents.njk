@@ -1,0 +1,254 @@
+<section id="problem" class="section-card">
+    <h3 id="the-problem">The Problem</h3>
+    <p>
+        DOM events use globally-scoped string names. When nested components fire identically-named events (e.g., two blocks both dispatching <code>toggle</code>), ancestors listening for that name receive <strong>both</strong> &mdash; with no structural way to tell them apart. This is not hypothetical: it happens as soon as you compose blocks from different teams.
+    </p>
+    <p>
+        Convention-based naming (prefixing event names) helps but doesn't scale to cross-organization, multi-team architectures. The platform provides no event scoping mechanism &mdash; the WHATWG DOM spec explicitly states namespace support "is not planned."
+    </p>
+</section>
+
+<section id="solution" class="section-card">
+    <h3 id="the-solution">The Solution: Provider-Based Discrimination</h3>
+    <p>
+        Web Events introduces a single discrimination primitive: <strong><code>listenForScoped</code></strong>. When an event arrives, the injector system resolves the expected event class from <code>event.target</code>'s scope. If the event passes <code>instanceof</code> against that class, the handler fires. Otherwise, it's silently ignored.
+    </p>
+    <p>
+        This is the same provide/resolve pattern the injector system already uses for stores, contexts, and services &mdash; extended to events. The event class <strong>is</strong> the contract.
+    </p>
+
+    {% highlight "typescript" %}
+// ── Producer: define a typed event class ──
+export class TabChangeEvent extends CustomEvent<TabChangeDetail> {
+  static readonly type = 'tab-change';
+  constructor(detail: TabChangeDetail) {
+    super(TabChangeEvent.type, { bubbles: true, cancelable: true, detail });
+  }
+}
+
+// Register in the injector at the appropriate scope
+const injector = InjectorRoot.getInjectorOf(tabGroupElement);
+injector.set('customEvents:tab-change', TabChangeEvent);
+
+// ── Consumer: listen with provider-based discrimination ──
+const unsub = listenForScoped(
+  app,
+  'tab-change',
+  'customEvents:tab-change',
+  (event) => {
+    // Only fires for TabChangeEvent instances from a known provider scope
+    console.log(`Tab: ${event.detail.from} → ${event.detail.to}`);
+  },
+);
+    {% endhighlight %}
+</section>
+
+<section id="plugged" class="section-card">
+    <h3 id="plugged-mode">Plugged Mode</h3>
+    <p>
+        In plugged mode, <code>listenForScoped</code> becomes a <code>provider</code> option on standard <code>addEventListener</code>. No new API to learn &mdash; just an extra option on the method every web developer already knows.
+    </p>
+
+    {% highlight "typescript" %}
+// Plugged: standard addEventListener with provider discrimination
+dashboard.addEventListener('widget-action', (event) => {
+  console.log('Widget action:', event.detail);
+}, {
+  provider: 'customEvents:widget-action',
+});
+
+// Standard string-based listener still works — no breaking change
+app.addEventListener('click', (e) => {
+  console.log('Clicked:', e.target);
+});
+    {% endhighlight %}
+</section>
+
+<section id="how-it-works" class="section-card">
+    <h3 id="how-it-works-title">How It Works</h3>
+
+    <h4 id="discrimination-flow">Discrimination Flow</h4>
+    <ol>
+        <li>A listener registers with an event type string and a <strong>provider key</strong></li>
+        <li>When an event arrives, <code>event.target</code> identifies where in the DOM tree it originated</li>
+        <li>The injector chain is walked from <code>event.target</code> upward to find the provider for that key</li>
+        <li>The resolved class is used for an <code>instanceof</code> check against the incoming event</li>
+        <li>If it passes, the handler fires with full type safety. If not, the event is silently skipped.</li>
+    </ol>
+
+    <h4 id="what-this-solves">What This Solves</h4>
+    <table>
+        <thead>
+            <tr><th>Problem</th><th>How Web Events Solves It</th></tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Name collisions</td>
+                <td><code>instanceof</code> discriminates by class identity, not by string name</td>
+            </tr>
+            <tr>
+                <td>Bubbling collisions</td>
+                <td>Two <code>toggle</code> events from different blocks &mdash; each has a different class, so each listener only fires for "its" event</td>
+            </tr>
+            <tr>
+                <td>Detail shape drift</td>
+                <td>Typed event classes enforce the detail shape at construction time</td>
+            </tr>
+            <tr>
+                <td>Implementation swapping</td>
+                <td>Different scopes can provide different event classes for the same protocol &mdash; consumers don't change</td>
+            </tr>
+            <tr>
+                <td>Micro-frontend safety</td>
+                <td>Each MFE brings its own injector scope with its own event providers &mdash; no global coordination</td>
+            </tr>
+        </tbody>
+    </table>
+</section>
+
+<section id="event-taxonomy" class="section-card">
+    <h3 id="event-taxonomy-title">Event Taxonomy</h3>
+    <p>Web Events identifies three communication patterns that DOM events conflate:</p>
+
+    <table>
+        <thead>
+            <tr><th></th><th>Notification</th><th>Targeted Command</th><th>Broadcast Command</th></tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Intent</strong></td>
+                <td>"This happened"</td>
+                <td>"You, do this"</td>
+                <td>"Everyone, do this"</td>
+            </tr>
+            <tr>
+                <td><strong>Direction</strong></td>
+                <td>Bubbles up</td>
+                <td>Directed to single target</td>
+                <td>Dispatched globally</td>
+            </tr>
+            <tr>
+                <td><strong>Collision risk</strong></td>
+                <td>High</td>
+                <td>Low (Invoker Commands)</td>
+                <td>High</td>
+            </tr>
+            <tr>
+                <td><strong>JS API</strong></td>
+                <td><code>listenForScoped</code></td>
+                <td><code>new CommandEvent()</code></td>
+                <td><code>listenForScoped</code> on <code>document</code></td>
+            </tr>
+            <tr>
+                <td><strong>HTML API</strong></td>
+                <td>Bubbles naturally</td>
+                <td><code>commandfor</code>/<code>command</code></td>
+                <td><a href="/blocks/broadcast/"><code>broadcast</code> attribute</a></td>
+            </tr>
+        </tbody>
+    </table>
+</section>
+
+<section id="api" class="section-card">
+    <h3 id="api-reference">API Reference</h3>
+
+    <h4 id="typed-event-class">TypedEventClass</h4>
+    <p>Contract for typed, self-describing event classes:</p>
+    {% highlight "typescript" %}
+interface TypedEventClass<TDetail = unknown> {
+  readonly type: string;
+  new (detail: TDetail): TypedEvent<TDetail>;
+}
+    {% endhighlight %}
+
+    <h4 id="listen-for-scoped">listenForScoped (unplugged)</h4>
+    {% highlight "typescript" %}
+function listenForScoped<TDetail>(
+  target: EventTarget,
+  eventType: string,
+  providerKey: string,
+  handler: (event: TypedEvent<TDetail>) => void,
+  options?: AddEventListenerOptions,
+): Unsubscribe;
+    {% endhighlight %}
+
+    <h4 id="provider-option">provider option (plugged)</h4>
+    {% highlight "typescript" %}
+// Extends AddEventListenerOptions
+interface TypedEventListenerOptions extends AddEventListenerOptions {
+  provider?: string;
+}
+    {% endhighlight %}
+
+    <h4 id="listen-for">listenFor (lightweight alternative)</h4>
+    <p>Zero-infrastructure shortcut for when you have the class in hand and don't need injector resolution:</p>
+    {% highlight "typescript" %}
+function listenFor<TDetail>(
+  target: EventTarget,
+  EventClass: TypedEventClass<TDetail>,
+  handler: (event: TypedEvent<TDetail>) => void,
+  options?: AddEventListenerOptions,
+): Unsubscribe;
+    {% endhighlight %}
+</section>
+
+<section id="standards" class="section-card">
+    <h3 id="standards-alignment">Standards Alignment</h3>
+    <table>
+        <thead>
+            <tr><th>Standard</th><th>Status</th><th>How We Relate</th></tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><a href="https://dom.spec.whatwg.org/#interface-customevent">CustomEvent</a></td>
+                <td>Standard</td>
+                <td>Our typed event classes extend <code>CustomEvent</code></td>
+            </tr>
+            <tr>
+                <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API">Invoker Commands API</a></td>
+                <td>Baseline 2026</td>
+                <td>Handles targeted commands; we handle notifications + broadcasts</td>
+            </tr>
+            <tr>
+                <td><a href="https://github.com/webcomponents-cg/community-protocols/blob/main/proposals/context.md">Context Protocol</a></td>
+                <td>Community</td>
+                <td>Same "provide/resolve from DOM tree" pattern, applied to events</td>
+            </tr>
+            <tr>
+                <td><a href="https://github.com/whatwg/html/issues/10854">Scoped Custom Element Registries</a></td>
+                <td>Proposal</td>
+                <td>Establishes the precedent that scoping is needed &mdash; we extend it to events</td>
+            </tr>
+        </tbody>
+    </table>
+</section>
+
+<section id="broadcast" class="section-card">
+    <h3 id="broadcast-block">Broadcast: The Declarative Bridge</h3>
+    <p>
+        Invoker Commands give HTML a declarative model for targeted commands (<code>commandfor</code>/<code>command</code>).
+        But the platform has no declarative equivalent for broadcast commands. The
+        <a href="/blocks/broadcast/">Broadcast</a> block fills this gap with a single attribute:
+    </p>
+
+    {% highlight "html" %}
+<!-- Targeted: Invoker Commands (platform) -->
+<button commandfor="panel-1" command="--view-show">Show</button>
+
+<!-- Broadcast: Web Events (block) -->
+<button broadcast="customEvents:close-modals">Close All Modals</button>
+    {% endhighlight %}
+
+    <p>
+        On click, the <code>broadcast</code> behavior resolves the event class from the host element's injector scope,
+        constructs an instance, and dispatches on <code>document</code>. Listeners using <code>listenForScoped</code>
+        receive the event with full <code>instanceof</code> discrimination.
+    </p>
+</section>
+
+<section id="research" class="section-card">
+    <h3 id="research-link">Research</h3>
+    <p>
+        This project emerged from the <a href="/research/custom-events/">Custom Event Scoping &amp; Registry</a> research topic, which explores the full design space: Symbol-based events, protocol tags, scoped registries, and listener discrimination approaches. The research concluded that provider-based <code>instanceof</code> discrimination is the simplest primitive that covers all scenarios.
+    </p>
+</section>

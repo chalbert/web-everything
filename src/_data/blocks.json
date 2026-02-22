@@ -18,28 +18,336 @@
     "name": "Droplist",
     "status": "draft",
     "type": "Component",
-    "summary": "Accessible dropdown menu supporting keyboard navigation, typeahead, and ARIA roles."
+    "summary": "Accessible dropdown menu supporting keyboard navigation, typeahead, and ARIA roles.",
+    "implementsIntent": "anchor"
   },
   {
     "id": "validation",
     "name": "Validation",
     "status": "draft",
     "type": "Behavior",
-    "summary": "Standard behaviors for native-like form validation in custom elements."
+    "summary": "Standard behaviors for native-like form validation in custom elements.",
+    "implementsIntent": "validation"
   },
   {
     "id": "resource-loader",
     "name": "Resource Loader",
     "status": "draft",
     "type": "Directive",
-    "summary": "Structural directive using comment-based virtual elements to handle async state without polluting the DOM."
+    "summary": "Structural directive using comment-based virtual elements to handle async state without polluting the DOM.",
+    "implementsIntent": "loader",
+    "dependsOn": ["view"],
+    "exports": [
+      "ResourceLoaderDirective",
+      "withSoftBlocking",
+      "withHardBlocking",
+      "withReplacement",
+      "withOptimistic",
+      "withDeterminate",
+      "withIndeterminate",
+      "withSkeleton",
+      "withStaleWhileRevalidate",
+      "LoaderState",
+      "ResourceLoadStartEvent",
+      "ResourceLoadEndEvent",
+      "ResourceLoadErrorEvent",
+      "ResourceStateChangeEvent"
+    ],
+    "webStandards": {
+      "fetchAPI": {
+        "status": "Baseline",
+        "pattern": "fetch() with AbortController for cancellable requests",
+        "adoption": "All loader operations use AbortSignal for cancellation; superseded navigations abort automatically",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API"
+      },
+      "abortController": {
+        "status": "Baseline",
+        "pattern": "AbortController/AbortSignal for cooperative cancellation",
+        "adoption": "Loaders receive signal param; AbortSignal.timeout() for built-in timeout support",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/AbortController"
+      },
+      "cacheAPI": {
+        "status": "Baseline",
+        "pattern": "Cache/CacheStorage for request-level caching",
+        "adoption": "Custom Cache sub-standard provides cache policy; runtime can delegate to Cache API",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Cache"
+      },
+      "httpCacheControl": {
+        "status": "Standard (RFC 9111)",
+        "pattern": "stale-while-revalidate directive in HTTP headers",
+        "adoption": "withStaleWhileRevalidate trait mirrors this pattern at the UI level",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control"
+      },
+      "ariaBusy": {
+        "status": "Standard",
+        "pattern": "aria-busy for announcing loading state to assistive technology",
+        "adoption": "All strategy traits set aria-busy='true' on the loading region during async operations",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-busy"
+      },
+      "progressElement": {
+        "status": "Standard",
+        "pattern": "<progress> element for native determinate progress indication",
+        "adoption": "withDeterminate trait renders native <progress> with value/max attributes",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/progress"
+      }
+    },
+    "events": {
+      "resource-load-start": {
+        "description": "Fired when an async loading operation begins",
+        "taxonomy": "notification",
+        "detail": { "operation": "ResourceOperation", "timing": "string" },
+        "bubbles": true,
+        "cancelable": false,
+        "class": "ResourceLoadStartEvent",
+        "provider": "customEvents:resource-load-start"
+      },
+      "resource-load-end": {
+        "description": "Fired when an async loading operation completes successfully",
+        "taxonomy": "notification",
+        "detail": { "operation": "ResourceOperation", "data": "unknown", "duration": "number" },
+        "bubbles": true,
+        "cancelable": false,
+        "class": "ResourceLoadEndEvent",
+        "provider": "customEvents:resource-load-end"
+      },
+      "resource-load-error": {
+        "description": "Fired when an async loading operation fails",
+        "taxonomy": "notification",
+        "detail": { "operation": "ResourceOperation", "error": "Error", "retryable": "boolean" },
+        "bubbles": true,
+        "cancelable": false,
+        "class": "ResourceLoadErrorEvent",
+        "provider": "customEvents:resource-load-error"
+      },
+      "resource-state-change": {
+        "description": "Fired on any state machine transition (idle, pending, loading, success, empty, error, stale)",
+        "taxonomy": "notification",
+        "detail": { "oldState": "LoaderState", "newState": "LoaderState" },
+        "bubbles": true,
+        "cancelable": false,
+        "class": "ResourceStateChangeEvent",
+        "provider": "customEvents:resource-state-change"
+      },
+      "rationale": "Typed event classes registered via provider key. Enables listenForScoped discrimination when multiple loaders coexist (e.g., router loader + inline data grid loader firing load-end simultaneously)."
+    },
+    "designDecisions": {
+      "virtualElement": {
+        "description": "Uses comment-based markers instead of wrapper elements",
+        "rationale": "Preserves parent-child CSS layout (Grid/Flex). No extra <div> between parent and content."
+      },
+      "traitComposition": {
+        "description": "Loading behaviors are composed via mixin traits, not subclassing",
+        "rationale": "Strategy (soft/hard/replacement/optimistic) and progress (determinate/indeterminate) are orthogonal dimensions. Mixins compose better than a class hierarchy."
+      },
+      "intentDriven": {
+        "description": "Block does not decide loading UX — it reads LoaderIntent from the injector chain",
+        "rationale": "Decouples the loading consumer from the loading UX. Apps declare intent once; all consumers (router, forms, grids) adapt consistently."
+      },
+      "stateMachine": {
+        "states": ["idle", "pending", "loading", "success", "empty", "error", "stale"],
+        "description": "7-state machine governing the full async lifecycle",
+        "rationale": "pending vs loading distinction enables debounced timing (no flash for fast ops). empty is distinct from success for empty-state UX. stale enables stale-while-revalidate pattern."
+      },
+      "registryFirst": {
+        "description": "Loading templates (skeletons, error cards, empty states) are defined in CustomResourceRegistry, not inline",
+        "rationale": "Ensures consistent loading visuals across the application. Inline templates create visual inconsistency."
+      }
+    },
+    "frameworkComparison": {
+      "tanstackQuery": {
+        "patterns": ["staleTime/gcTime", "query keys", "request deduplication", "focus/reconnect revalidation"],
+        "notes": "Stale-while-revalidate model with hierarchical cache invalidation by key"
+      },
+      "swr": {
+        "patterns": ["useSWR hook", "stale-while-revalidate", "auto-revalidation on focus/reconnect"],
+        "notes": "Lightweight SWR pattern from Vercel; minimal API with built-in deduplication"
+      },
+      "apolloClient": {
+        "patterns": ["Apollo Link chain", "fetchPolicy (cache-first, network-only, etc.)", "optimistic responses"],
+        "notes": "Link middleware pattern is the inspiration for Custom Middleware sub-standard"
+      },
+      "reactSuspense": {
+        "patterns": ["Suspense boundaries", "fallback content", "streaming SSR"],
+        "notes": "Declarative loading boundaries; similar concept to our virtual element approach"
+      },
+      "remix": {
+        "patterns": ["loader functions", "useLoaderData", "defer/Await", "useNavigation"],
+        "notes": "Route-level data fetching with progressive enhancement; inspiration for Router integration"
+      }
+    },
+    "traits": [
+      {
+        "name": "withOptimistic",
+        "description": "Non-blocking — shows predicted outcome immediately, reverts on failure",
+        "intentDimension": "loader.strategy.optimistic"
+      },
+      {
+        "name": "withSoftBlocking",
+        "description": "Input-blocking — applies aria-disabled and pointer-events:none while content remains visible",
+        "intentDimension": "loader.strategy.soft"
+      },
+      {
+        "name": "withHardBlocking",
+        "description": "Visual-blocking — obscures or overlays content with a backdrop",
+        "intentDimension": "loader.strategy.hard"
+      },
+      {
+        "name": "withReplacement",
+        "description": "Content-blocking — replaces view with placeholder (skeleton, spinner)",
+        "intentDimension": "loader.strategy.replacement"
+      },
+      {
+        "name": "withDeterminate",
+        "description": "Renders measurable progress (0-100%) as a progress bar or percentage",
+        "intentDimension": "loader.progress.determinate"
+      },
+      {
+        "name": "withIndeterminate",
+        "description": "Renders activity indication (spinner, pulse, shimmer) without measurable progress",
+        "intentDimension": "loader.progress.indeterminate"
+      },
+      {
+        "name": "withSkeleton",
+        "description": "Placeholder content matching page structure for initial loads",
+        "intentDimension": "loader.context.initial"
+      },
+      {
+        "name": "withStaleWhileRevalidate",
+        "description": "Keeps previous content visible (dimmed/stale) while refreshing",
+        "intentDimension": "loader.context.transition"
+      }
+    ]
   },
   {
     "id": "resource-action",
     "name": "Resource Action",
     "status": "draft",
     "type": "Directive",
-    "summary": "Behavioral directive that attaches async lifecycle management to triggers via virtual markers."
+    "summary": "Manages async mutation lifecycle (POST/PUT/DELETE) — busy state on triggers, double-submit prevention, optimistic updates with automatic rollback on error.",
+    "implementsIntent": "action",
+    "dependsOn": ["resource-loader"],
+    "exports": [
+      "ResourceActionDirective",
+      "withBusyTrigger",
+      "withOptimisticMutation",
+      "withFeedbackOnComplete",
+      "ResourceActionStartEvent",
+      "ResourceActionEndEvent",
+      "ResourceActionErrorEvent",
+      "ResourceActionRevertEvent"
+    ],
+    "webStandards": {
+      "fetchAPI": {
+        "status": "Baseline",
+        "pattern": "fetch() for mutations (POST/PUT/DELETE)",
+        "adoption": "Action operations delegate to Custom Clients for transport; AbortController for cancellation",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API"
+      },
+      "invokerCommands": {
+        "status": "Baseline January 2026",
+        "pattern": "commandfor/command for declarative action triggers",
+        "adoption": "Action triggers can use Invoker Commands for mutation invocation",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+      },
+      "ariaDisabled": {
+        "status": "Standard",
+        "pattern": "aria-disabled for non-focusable disable pattern during pending state",
+        "adoption": "withBusyTrigger applies aria-disabled + pointer-events:none during mutation",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-disabled"
+      }
+    },
+    "events": {
+      "resource-action-start": {
+        "description": "Fired when a mutation begins",
+        "taxonomy": "notification",
+        "detail": { "operation": "ResourceOperation", "trigger": "HTMLElement" },
+        "bubbles": true,
+        "cancelable": true,
+        "class": "ResourceActionStartEvent",
+        "provider": "customEvents:resource-action-start"
+      },
+      "resource-action-end": {
+        "description": "Fired when a mutation completes successfully",
+        "taxonomy": "notification",
+        "detail": { "operation": "ResourceOperation", "result": "unknown" },
+        "bubbles": true,
+        "cancelable": false,
+        "class": "ResourceActionEndEvent",
+        "provider": "customEvents:resource-action-end"
+      },
+      "resource-action-error": {
+        "description": "Fired when a mutation fails",
+        "taxonomy": "notification",
+        "detail": { "operation": "ResourceOperation", "error": "Error" },
+        "bubbles": true,
+        "cancelable": false,
+        "class": "ResourceActionErrorEvent",
+        "provider": "customEvents:resource-action-error"
+      },
+      "resource-action-revert": {
+        "description": "Fired when an optimistic update is rolled back due to error",
+        "taxonomy": "notification",
+        "detail": { "operation": "ResourceOperation", "previousState": "unknown" },
+        "bubbles": true,
+        "cancelable": false,
+        "class": "ResourceActionRevertEvent",
+        "provider": "customEvents:resource-action-revert"
+      },
+      "rationale": "Typed event classes enable listenForScoped discrimination between multiple concurrent mutations (e.g., save + delete actions on the same form)."
+    },
+    "designDecisions": {
+      "mutationVsQuery": {
+        "description": "Resource Action handles mutations (writes); Resource Loader handles queries (reads)",
+        "rationale": "Reads and writes have fundamentally different UX patterns. Reads show loading states in-place; writes show busy states on triggers. Splitting them avoids feature bloat."
+      },
+      "doubleSubmitPrevention": {
+        "description": "Automatically prevents double submission by disabling triggers during pending state",
+        "rationale": "Every mutation UI needs double-submit prevention. Building it into the directive avoids repetitive boilerplate."
+      },
+      "optimisticRevert": {
+        "description": "Optimistic updates are automatically reverted on error",
+        "rationale": "Optimistic UI is the happy path; revert-on-error is the safety net. The directive manages both sides of the lifecycle."
+      },
+      "virtualElement": {
+        "description": "Uses comment-based markers like Resource Loader for layout preservation",
+        "rationale": "Same reasoning as Resource Loader — no wrapper divs that would break Grid/Flex parent-child relationships."
+      }
+    },
+    "frameworkComparison": {
+      "tanstackQuery": {
+        "patterns": ["useMutation", "onMutate (optimistic)", "onError (rollback)", "invalidateQueries"],
+        "notes": "Mutation lifecycle with optimistic update/rollback and automatic cache invalidation"
+      },
+      "apolloClient": {
+        "patterns": ["useMutation", "optimisticResponse", "update cache"],
+        "notes": "GraphQL mutations with optimistic cache updates"
+      },
+      "remix": {
+        "patterns": ["<Form> component", "action functions", "useActionData", "useNavigation"],
+        "notes": "Progressive enhancement forms with server actions"
+      },
+      "swr": {
+        "patterns": ["useSWRMutation", "trigger()", "revalidation on mutation"],
+        "notes": "Separated mutation from query with manual trigger"
+      }
+    },
+    "traits": [
+      {
+        "name": "withBusyTrigger",
+        "description": "Applies busy state to the triggering element during mutation (width locking, aria-disabled, indicator)",
+        "intentDimension": "action.busy"
+      },
+      {
+        "name": "withOptimisticMutation",
+        "description": "Applies predicted result immediately, reverts on error",
+        "intentDimension": "loader.strategy.optimistic"
+      },
+      {
+        "name": "withFeedbackOnComplete",
+        "description": "Dispatches toast/notification on success or error",
+        "intentDimension": null
+      }
+    ]
   },
   {
     "id": "for-each",
@@ -138,6 +446,63 @@
     "designRationale": "Parser registry allows different DOM subtrees to use different parser configurations. Parsers extend CustomAttributeParser for consistency with the attribute parsing system."
   },
   {
+    "id": "broadcast",
+    "name": "Broadcast",
+    "status": "concept",
+    "type": "Behavior",
+    "summary": "Declarative DOM-to-JS bridge for provider-scoped broadcast events. Fills the platform gap between targeted Invoker Commands and global event dispatch.",
+    "exports": [
+      "BroadcastBehavior"
+    ],
+    "extendsClass": "CustomAttribute",
+    "dependsOn": ["event-behaviors"],
+    "relatedProject": "webevents",
+    "attribute": "broadcast",
+    "webStandards": {
+      "invokerCommands": {
+        "status": "Baseline January 2026",
+        "pattern": "commandfor/command for targeted commands",
+        "gap": "No broadcast equivalent — commands are always 1-to-1 via element ID",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+      },
+      "commandEvent": {
+        "status": "Baseline December 2025",
+        "pattern": "CommandEvent is constructable but designed for declarative button triggers, not programmatic broadcast",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/CommandEvent/CommandEvent"
+      },
+      "customEvent": {
+        "status": "Standard",
+        "pattern": "CustomEvent + dispatchEvent is the current broadcast mechanism",
+        "gap": "Globally-scoped string names — no discrimination, no scoping",
+        "reference": "https://dom.spec.whatwg.org/#interface-customevent"
+      }
+    },
+    "designDecisions": {
+      "naming": {
+        "chosen": "broadcast",
+        "alternatives": ["event-dispatch", "dispatch", "emit"],
+        "rationale": "Broadcast clearly communicates 'everyone, do this' intent. Mirrors the event taxonomy from Web Events research. 'dispatch' is too generic (could mean targeted). 'emit' is framework jargon (Node.js EventEmitter, Vue $emit)."
+      },
+      "dispatchTarget": {
+        "description": "Always dispatches on document",
+        "rationale": "Broadcast commands are global by definition. Subtree-scoped broadcast is a separate unsolved problem (DOM events only bubble up, not down). Keep the block simple and single-purpose."
+      },
+      "triggerEvent": {
+        "default": "click",
+        "configurable": "broadcast-on attribute for other triggers (e.g., change, submit)",
+        "rationale": "Buttons are the primary broadcast trigger. Other elements may need different trigger events."
+      },
+      "providerResolution": {
+        "description": "Resolves event class from the injector scope of the host element, constructs an instance, dispatches on document",
+        "rationale": "The host element's scope determines which event class to use. This allows different parts of the app to broadcast different event classes for the same provider key."
+      },
+      "detailSource": {
+        "description": "Optional broadcast-detail attribute for static detail, or broadcast-from attribute referencing a store/context for dynamic detail",
+        "rationale": "Broadcast commands often carry payload (e.g., theme name, locale code). Static JSON covers simple cases; store reference covers reactive cases."
+      }
+    }
+  },
+  {
     "id": "trusted-html",
     "name": "Trusted HTML",
     "status": "draft",
@@ -152,6 +517,575 @@
     "type": "Behavior",
     "summary": "Attribute-based behavior that enforces Trusted Types policies on an element's innerHTML mutations.",
     "related": ["trusted-html"]
+  },
+  {
+    "id": "view",
+    "name": "View",
+    "status": "active",
+    "type": "Module",
+    "summary": "Foundation for all show/hide/render patterns. Provides a shared engine and specialized blocks (behaviors + directives) that higher-level components build on.",
+    "blocks": {
+      "ViewEngine": {
+        "type": "Utility",
+        "description": "Shared core: hidden modes, toggle events, transitions, exclusive groups. Not a block — imported by blocks that need it."
+      },
+      "ViewBehavior": {
+        "type": "Behavior",
+        "attribute": "view",
+        "description": "Imperative show/hide via Invoker Commands. Element always in DOM.",
+        "extendsClass": "CustomAttribute"
+      },
+      "ViewShowBehavior": {
+        "type": "Behavior",
+        "attribute": "view:show",
+        "description": "Expression-bound reactive visibility. Element always in DOM.",
+        "extendsClass": "CustomAttribute"
+      },
+      "ViewIfDirective": {
+        "type": "Directive",
+        "attributes": ["view:if", "view:else"],
+        "description": "Structural conditional rendering. Nothing in DOM when false.",
+        "extendsClass": "CustomTemplateDirective"
+      },
+      "ViewSwitchDirective": {
+        "type": "Directive",
+        "attributes": ["view:switch", "view:case", "view:default"],
+        "description": "Multi-branch structural rendering. One branch at a time.",
+        "extendsClass": "CustomTemplateDirective"
+      }
+    },
+    "exports": [
+      "ViewEngine",
+      "ViewEngineOptions",
+      "ViewBehavior",
+      "ViewShowBehavior",
+      "ViewIfDirective",
+      "ViewSwitchDirective"
+    ],
+    "webStandards": {
+      "invokerCommands": {
+        "status": "Baseline January 2026",
+        "pattern": "commandfor/command attributes for declarative triggers",
+        "adoption": "ViewBehavior handles command events (--view-show, --view-hide, --view-toggle)",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+      },
+      "exclusiveAccordion": {
+        "status": "Standard (Interop 2025)",
+        "pattern": "<details name=\"group\"> for mutually exclusive panels",
+        "adoption": "ViewEngine uses name attribute for exclusive view groups",
+        "reference": "https://developer.mozilla.org/en-US/blog/html-details-exclusive-accordions/"
+      },
+      "hiddenUntilFound": {
+        "status": "Standard (Interop 2025)",
+        "pattern": "hidden=\"until-found\" for searchable hidden content",
+        "adoption": "ViewEngine hidden mode option for searchable hidden content",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/hidden"
+      },
+      "popoverEvents": {
+        "status": "Baseline April 2025",
+        "pattern": "beforetoggle (cancelable) and toggle events with oldState/newState",
+        "adoption": "ViewEngine fires same events with same detail shape",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Popover_API"
+      },
+      "contentVisibility": {
+        "status": "Baseline Widely Available",
+        "pattern": "content-visibility: hidden for performance, auto for lazy rendering",
+        "adoption": "ViewEngine default hidden mode (performant, keeps a11y tree)",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/content-visibility"
+      },
+      "inertAttribute": {
+        "status": "Standard",
+        "pattern": "inert makes content non-interactive but visible",
+        "adoption": "ViewEngine hidden mode for preview/disabled states",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/inert"
+      },
+      "viewTransitionsAPI": {
+        "status": "Baseline 2024",
+        "pattern": "document.startViewTransition() for animated state changes",
+        "adoption": "ViewEngine wraps show/hide in view transitions when opted in",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/View_Transitions_API"
+      },
+      "domParts": {
+        "status": "Proposal (W3C Web Components)",
+        "pattern": "Low-level API for marking DOM positions for updates",
+        "adoption": "Directives use comment markers today, ready to adopt DOM Parts when available",
+        "reference": "https://github.com/WICG/webcomponents/blob/gh-pages/proposals/DOM-Parts.md"
+      }
+    },
+    "designDecisions": {
+      "nomenclature": {
+        "chosen": "view",
+        "alternatives": ["outlet", "conditional", "show", "display", "region"],
+        "rationale": "\"View\" is framework-agnostic, implies visual display, and pairs naturally with router terminology. Dropped 'Conditional' from name — View is the foundation, not one specific pattern."
+      },
+      "architecture": {
+        "description": "View separates HOW to hide/show (engine) from WHEN to hide/show (blocks)",
+        "engine": "ViewEngine handles hidden modes, toggle events, transitions, exclusive groups",
+        "blocks": "Each block solves a different DOM-presence scenario: always present (Behavior) vs stamped on demand (Directive)",
+        "rationale": "Higher-level components (Tabs, Router, Accordion) pick the block that fits their DOM model, or use the engine directly. No reimplementation of show/hide mechanics."
+      },
+      "blockSelection": {
+        "description": "The right block depends on what exists in the DOM when content is inactive",
+        "criteria": {
+          "domPresence": "Does the content always exist in HTML, or is it created on demand?",
+          "accessibility": "Should hidden content remain in a11y tree or be findable via Ctrl+F?",
+          "statePreservation": "Should component state survive hide/show cycles?",
+          "controlModel": "Imperative (commands) vs declarative (expressions)?"
+        },
+        "rationale": "Making the DOM-presence question explicit prevents misuse. view:show and view:if look similar but have fundamentally different DOM models."
+      },
+      "exclusiveGroups": {
+        "attribute": "name",
+        "description": "Views with same name attribute are mutually exclusive (only one visible)",
+        "rationale": "Mirrors <details name=\"...\"> pattern from HTML standard. Familiar, consistent with platform direction."
+      },
+      "triggers": {
+        "primary": "commandfor/command (Invoker Commands pattern)",
+        "fallback": "on:click handlers for older browsers",
+        "rationale": "Align with Invoker Commands API (Baseline Jan 2026). Custom commands use -- prefix per spec."
+      },
+      "hiddenModes": {
+        "description": "Multiple ways to hide content with different tradeoffs",
+        "modes": {
+          "content-visibility:hidden": "Default. Hidden, skipped for rendering, stays in a11y tree",
+          "display:none": "Fully hidden, no layout cost, no accessibility",
+          "hidden=until-found": "Hidden but browser-searchable (Ctrl+F finds it)",
+          "inert": "Visible but non-interactive"
+        },
+        "default": "content-visibility:hidden",
+        "rationale": "content-visibility provides best performance while maintaining accessibility tree presence. Directives don't use hidden modes by default (they remove DOM), only when using keep-alive."
+      },
+      "events": {
+        "pattern": "Match Popover API event shape",
+        "events": {
+          "beforetoggle": {
+            "description": "Cancelable, fired before visibility change",
+            "taxonomy": "notification",
+            "detail": { "oldState": "hidden|visible", "newState": "hidden|visible" },
+            "bubbles": true,
+            "cancelable": true,
+            "class": "ViewBeforeToggleEvent",
+            "provider": "customEvents:view-beforetoggle"
+          },
+          "toggle": {
+            "description": "Fired after visibility change",
+            "taxonomy": "notification",
+            "detail": { "oldState": "hidden|visible", "newState": "hidden|visible" },
+            "bubbles": true,
+            "cancelable": false,
+            "class": "ViewToggleEvent",
+            "provider": "customEvents:view-toggle"
+          }
+        },
+        "rationale": "Consistency with platform. Developers familiar with popover events. Typed event classes enable provider-based discrimination via Web Events — a parent can distinguish a View toggle from a Popover toggle using listenForScoped.",
+        "collisionRisk": "High — 'beforetoggle' and 'toggle' are shared with Popover API and <details>. Without scoped events, a parent listening for 'toggle' would receive events from both views and popovers."
+      },
+      "statePreservation": {
+        "attribute": "view:keep-alive",
+        "description": "Caches hidden content state instead of destroying it. Only relevant for directives (behaviors preserve state naturally).",
+        "options": ["max (LRU limit)", "include/exclude patterns"],
+        "rationale": "Inspired by Vue KeepAlive. When using keep-alive, directives delegate hide/show of cached content to ViewEngine."
+      },
+      "transitions": {
+        "integration": "View Transitions API",
+        "attribute": "view:transition",
+        "description": "Opt-in to native browser View Transitions when switching content",
+        "rationale": "View Transitions API is baseline in all browsers (2024). Native > library."
+      }
+    },
+    "frameworkComparison": {
+      "alpine": { "show": "x-show", "if": "x-if" },
+      "vue": { "show": "v-show", "if": "v-if", "keepAlive": "KeepAlive" },
+      "angular": { "if": "ngIf", "switch": "ngSwitch", "outlet": "router-outlet" },
+      "solid": { "if": "Show", "switch": "Switch/Match" },
+      "react": { "outlet": "Outlet", "lazy": "Suspense" }
+    }
+  },
+  {
+    "id": "tabs",
+    "name": "Tabs",
+    "status": "active",
+    "type": "Component",
+    "summary": "Accessible tab interface component built on View (ViewBehavior for panel switching), providing tab triggers, panels, and ARIA semantics.",
+    "exports": [
+      "TabsComponent",
+      "TabListAttribute",
+      "TabTriggerAttribute",
+      "TabPanelAttribute"
+    ],
+    "implementsIntent": "navigation",
+    "dependsOn": ["view"],
+    "webStandards": {
+      "invokerCommands": {
+        "usage": "Tab triggers use commandfor/command pattern",
+        "command": "--tab-show",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+      },
+      "exclusiveGroups": {
+        "usage": "Panels share name attribute for mutual exclusivity",
+        "reference": "https://developer.mozilla.org/en-US/blog/html-details-exclusive-accordions/"
+      },
+      "ariaTabsPattern": {
+        "usage": "Full WAI-ARIA Tabs Pattern compliance",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/tabs/"
+      },
+      "openUITabs": {
+        "status": "Following Open UI research for future native alignment",
+        "reference": "https://open-ui.org/components/tabs.research/"
+      }
+    },
+    "designDecisions": {
+      "architecture": {
+        "description": "Tabs is a thin UI layer over View. Uses ViewBehavior for panel switching (panels always in DOM) and ViewEngine for hidden modes and toggle events.",
+        "responsibilities": {
+          "tabs": "ARIA roles, keyboard navigation, active styling",
+          "viewBehavior": "Panel show/hide via commands and exclusive groups",
+          "viewEngine": "Hidden modes, toggle events, transitions"
+        },
+        "rationale": "Tabs panels are always present in DOM (behavior pattern), not stamped on demand (directive pattern). ViewBehavior is the right primitive."
+      },
+      "syntax": {
+        "options": [
+          {
+            "name": "Attribute-based (recommended)",
+            "example": "<div tab-list><button tab-trigger=\"panel1\">Tab 1</button></div><div tab-panels><section tab-panel=\"panel1\">Content</section></div>",
+            "rationale": "Works with any markup, progressive enhancement"
+          },
+          {
+            "name": "Custom element",
+            "example": "<we-tabs><we-tab-trigger slot=\"triggers\">Tab 1</we-tab-trigger><we-tab-panel slot=\"panels\">Content</we-tab-panel></we-tabs>",
+            "rationale": "More encapsulated, but less flexible"
+          }
+        ],
+        "chosen": "Attribute-based for core, custom element as optional wrapper"
+      },
+      "aria": {
+        "roles": {
+          "tablist": "Container for tab triggers",
+          "tab": "Individual tab trigger",
+          "tabpanel": "Content panel"
+        },
+        "attributes": ["aria-selected", "aria-controls", "aria-labelledby"],
+        "rationale": "WAI-ARIA Tabs Pattern compliance"
+      },
+      "keyboard": {
+        "horizontal": ["ArrowLeft/Right to navigate", "Home/End for first/last"],
+        "vertical": ["ArrowUp/Down when orientation=vertical"],
+        "activation": ["Enter/Space to activate (manual mode)", "Arrow keys activate (automatic mode)"],
+        "rationale": "WAI-ARIA keyboard interaction model"
+      },
+      "activationMode": {
+        "modes": ["automatic (default)", "manual"],
+        "automatic": "Tab activates on focus (arrow keys switch tabs)",
+        "manual": "Tab activates on Enter/Space (arrow keys only move focus)",
+        "rationale": "Automatic is more accessible, manual allows preview before commit"
+      },
+      "orientation": {
+        "options": ["horizontal (default)", "vertical"],
+        "description": "Affects keyboard navigation direction and ARIA orientation",
+        "rationale": "Vertical tabs are common for settings pages, mobile navigation"
+      },
+      "stateSync": {
+        "urlHash": "Optional sync with URL hash for bookmarkable tabs",
+        "storage": "Optional persistence to sessionStorage/localStorage",
+        "rationale": "Users expect tab state to persist on refresh or when sharing URLs"
+      },
+      "events": {
+        "tab-change": {
+          "description": "Fired when the active tab changes",
+          "taxonomy": "notification",
+          "detail": { "from": "string|null", "to": "string", "trigger": "HTMLElement" },
+          "bubbles": true,
+          "cancelable": true,
+          "class": "TabChangeEvent",
+          "provider": "customEvents:tab-change"
+        },
+        "tab-close": {
+          "description": "Fired when a closeable tab is dismissed",
+          "taxonomy": "notification",
+          "detail": { "panel": "string", "trigger": "HTMLElement" },
+          "bubbles": true,
+          "cancelable": true,
+          "class": "TabCloseEvent",
+          "provider": "customEvents:tab-close"
+        },
+        "rationale": "Typed event classes registered via provider key. Module-prefixed names ('tab-change') reduce accidental collision; provider-based instanceof discrimination provides structural guarantee via Web Events."
+      }
+    },
+    "traits": [
+      {
+        "name": "withCloseableTabs",
+        "description": "Adds close buttons to tabs for dismissible panels",
+        "intentDimension": null
+      },
+      {
+        "name": "withReorderableTabs",
+        "description": "Enables drag-to-reorder for tab triggers",
+        "intentDimension": null
+      },
+      {
+        "name": "withOverflowTabs",
+        "description": "Handles tab overflow via scrolling or dropdown menu when tabs exceed available width",
+        "intentDimension": null
+      },
+      {
+        "name": "withLazyTabs",
+        "description": "Renders panel content only on first activation for performance",
+        "intentDimension": null
+      }
+    ]
+  },
+  {
+    "id": "router",
+    "name": "Router",
+    "status": "active",
+    "type": "Component",
+    "summary": "Declarative client-side routing built on Navigation API, URLPattern, and ViewEngine.",
+    "exports": [
+      "RouteViewElement",
+      "RouteOutletElement",
+      "RouteLinkBehavior",
+      "RoutePrefetchBehavior",
+      "registerRouter",
+      "RouteContext",
+      "RouteNavigationTarget",
+      "RouteGuardFn",
+      "RouteGuardResult",
+      "RouteLoaderFn",
+      "RouteLoaderParams",
+      "RouteDefinition",
+      "MatchedRoute",
+      "NavigationResult"
+    ],
+    "sourcePath": "blocks/router/elements/RouteViewElement.ts",
+    "implementsIntent": "navigation",
+    "consumesIntent": ["loader"],
+    "dependsOn": ["view", "resource-loader", "error-recovery", "prefetch-behavior", "resource-action"],
+    "viewIntegration": {
+      "description": "<route-view> uses ViewEngine directly — it does its own structural DOM stamping in-place (or into named outlets) but delegates hide/show mechanics to ViewEngine.",
+      "uses": {
+        "ViewEngine": "Hidden modes for keep-alive cached routes inside <route-view> (or named outlets), toggle events (beforetoggle/toggle), View Transitions API integration",
+        "ViewBehavior": "Not used — router content doesn't exist until a route matches, no pre-existing elements to attach behavior to",
+        "ViewIfDirective": "Not used — router has its own URL-based matching, not expression-based conditionals",
+        "ViewSwitchDirective": "Not used — router manages its own outlet stamping"
+      },
+      "rationale": "Route content shouldn't exist in DOM until the URL matches. No placeholders, no ghost elements. <route-view> does structural work in-place; ViewEngine provides shared show/hide mechanics."
+    },
+    "webStandards": {
+      "navigationAPI": {
+        "status": "Baseline 2024",
+        "pattern": "Modern API replacing History API with events, traversal info, and interception",
+        "adoption": "Primary navigation mechanism, fallback to History API for Safari <17.2",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API"
+      },
+      "urlPatternAPI": {
+        "status": "Baseline 2025",
+        "pattern": "URLPattern for route pattern matching with named groups",
+        "adoption": "Use for all route pattern matching, enables :param and * wildcards",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/URLPattern"
+      },
+      "viewTransitionsAPI": {
+        "status": "Baseline 2024",
+        "pattern": "Document.startViewTransition() for animated route changes",
+        "adoption": "Opt-in via route:transition attribute for smooth navigation",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/View_Transitions_API"
+      },
+      "speculationRulesAPI": {
+        "status": "Chrome 121+, other browsers pending",
+        "pattern": "Declarative prefetch and prerender rules",
+        "adoption": "Generate speculation rules from route definitions for prefetching",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Speculation_Rules_API"
+      },
+      "historyAPI": {
+        "status": "Standard (Legacy)",
+        "pattern": "pushState/replaceState/popstate for URL manipulation",
+        "adoption": "Fallback only for browsers without Navigation API",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/History_API"
+      }
+    },
+    "designDecisions": {
+      "hybridArchitecture": {
+        "description": "Router uses a hybrid pattern: components for structural boundaries, behaviors for enhancing existing elements, plain HTML attributes for declarative metadata. Primary rendering is in-place inside <route-view>.",
+        "components": {
+          "RouteViewElement": "Custom element (<route-view>). Orchestrator that owns child templates, listens to Navigation API, and stamps matched content in-place as its own children. The router renders where you define the routes.",
+          "RouteOutletElement": "Custom element (<route-outlet>). Named auxiliary views only — for cases where a route renders content to a different area outside the <route-view>."
+        },
+        "behaviors": {
+          "RouteLinkBehavior": "CustomAttribute on <a> (route:link). Must preserve native anchor semantics.",
+          "RoutePrefetchBehavior": "CustomAttribute on <a> (route:prefetch). Metadata paired with route:link."
+        },
+        "plainAttributes": {
+          "description": "route, route:guard, route:guard:leave, route:loader, route:error, route:outlet on <template> elements are plain HTML attributes read by <route-view> via querySelectorAll. No classes or registry entries needed.",
+          "rationale": "Eliminates RouteAttribute, RouteGuardAttribute, RouteLoaderAttribute, RouteErrorAttribute classes. The config component owns template parsing."
+        },
+        "rationale": "In-place rendering is the simplest model — the router renders where you define the routes. Named outlets exist only for auxiliary views (sidebar, header, footer). Links must stay as <a> elements for accessibility."
+      },
+      "naming": {
+        "prefix": "route:",
+        "componentTags": ["route-view", "route-outlet"],
+        "behaviorAttributes": ["route:link", "route:prefetch"],
+        "templateAttributes": ["route", "route:guard", "route:guard:leave", "route:loader", "route:error", "route:outlet", "lazy"],
+        "rationale": "Noun-based prefix consistent with view: and on: conventions. Component tag names use route- prefix. Template attributes are plain HTML read by the view component — no registry needed."
+      },
+      "nomenclature": {
+        "route": "URL pattern to view mapping",
+        "outlet": "Named insertion point for routed content (from React Router/Angular)",
+        "link": "Navigation trigger element",
+        "guard": "Conditional navigation logic (canActivate, canDeactivate)",
+        "loader": "Data fetching before route activation",
+        "rationale": "Terms from React Router and Angular Router, widely understood"
+      },
+      "patternSyntax": {
+        "description": "Route patterns follow URLPattern API syntax",
+        "examples": [
+          "/users/:id - Named parameter",
+          "/files/* - Wildcard match",
+          "/blog/:year/:month? - Optional parameter",
+          "https://*.example.com/* - Full URL patterns"
+        ],
+        "rationale": "URLPattern is a web standard, no need for custom syntax"
+      },
+      "outlets": {
+        "element": "<route-outlet name=\"...\">",
+        "primary": "<route-view> renders matched content in-place — no separate outlet needed for the primary path",
+        "named": "Named outlets (<route-outlet name=\"...\">)  for auxiliary views only (sidebars, headers, footers)",
+        "rationale": "In-place rendering is the simplest model. Named outlets exist for the special case where a route needs to render content outside the <route-view>."
+      },
+      "links": {
+        "attribute": "route:link",
+        "activeClass": "Automatic .active class on matching routes",
+        "prefetch": "Optional hover/intersection prefetching",
+        "rationale": "Declarative links enable pre-rendering and active state styling"
+      },
+      "contextProviders": {
+        "route": {
+          "injectorKey": "customContexts:route",
+          "providedTo": "Stamped content inside <route-view> (or named <route-outlet>), set on the element's injector",
+          "shape": "RouteContext { params, data, error, path, query, hash, state }"
+        },
+        "routeGuard": {
+          "injectorKey": "customContexts:routeGuard",
+          "providedTo": "<route-view> ancestor (user-provided)",
+          "shape": "Record<string, RouteGuardFn>"
+        },
+        "routeLoader": {
+          "injectorKey": "customContexts:routeLoader",
+          "providedTo": "<route-view> ancestor (user-provided)",
+          "shape": "Record<string, RouteLoaderFn>"
+        },
+        "loaderIntent": {
+          "injectorKey": "customContexts:loaderIntent",
+          "providedTo": "<route-view> ancestor (user-provided)",
+          "shape": "LoaderIntent (from Loader Intent protocol)",
+          "consumed": true,
+          "description": "Declares how route loading states affect the UI. Router resolves this from the injector chain and selects matching Resource Loader traits. Falls back to soft blocking (aria-busy + CSS) when not provided."
+        },
+        "rationale": "All router data flows through customContexts, consistent with the framework's @ prefix convention. Guards and loaders are named functions resolved from their respective contexts, not magic globals. The loaderIntent context is consumed (not provided) by the router — it reads the app's declared loading UX profile."
+      },
+      "guards": {
+        "types": ["canActivate", "canDeactivate"],
+        "description": "Plain functions (RouteGuardFn), not class instances. Provided via customContexts:routeGuard, resolved by name from route:guard and route:guard:leave attribute values.",
+        "noAbstractClass": "The Navigation API's navigate event already provides the guard mechanism — event.intercept() to proceed, event.preventDefault() to cancel, event.signal to abort. An abstract RouteGuard class would duplicate platform-level control. Guard functions are stateless decision points; the injector/context system handles DI via closures.",
+        "navigationApiMapping": {
+          "event.preventDefault()": "Guard returns false (canDeactivate, before intercept)",
+          "event.intercept({ handler })": "Guard returns true, proceed with navigation pipeline",
+          "navigation.navigate(redirect)": "Guard returns a string (redirect URL)",
+          "event.signal": "Passed to loaders for automatic abort on navigation supersede"
+        },
+        "rationale": "Functional guards follow Angular v15+ direction (away from class-based CanActivate). Simpler, composable, testable. Navigation API is the single integration point — Router wraps it, not duplicates it."
+      },
+      "loaders": {
+        "attribute": "route:loader",
+        "description": "Named async functions provided via customContexts:routeLoader, resolved by name from route:loader attribute value",
+        "integration": "Router resolves customContexts:loaderIntent from the injector chain. The intent's strategy dimension selects which Resource Loader trait controls the loading UX (soft, hard, replacement, optimistic). Per-route overrides via route:loader-strategy, route:loader-context, route:loader-timing attributes.",
+        "rationale": "Inspired by React Router loaders, Remix, TanStack Router. Context-based resolution keeps loaders injectable and testable. The Loader Intent bridge means apps declare loading UX once; all consumers (router, forms, data grids) adapt consistently."
+      },
+      "errorHandling": {
+        "attribute": "route:error",
+        "description": "Error boundary for route loading failures",
+        "rationale": "Clean error UI without try-catch in user code"
+      },
+      "lazyLoading": {
+        "attribute": "route:lazy",
+        "description": "Code-split route components, load on navigation",
+        "rationale": "Performance optimization for large apps"
+      },
+      "scrollRestoration": {
+        "modes": ["auto", "manual", "none"],
+        "description": "Control scroll position on navigation",
+        "rationale": "Navigation API provides native scroll restoration"
+      },
+      "prefetching": {
+        "modes": ["none", "hover", "visible", "eager"],
+        "integration": "Speculation Rules API when available",
+        "rationale": "Predictive loading for instant navigation feel"
+      },
+      "events": {
+        "route-change": {
+          "description": "Fired when the active route changes",
+          "taxonomy": "notification",
+          "detail": { "from": "RouteNavigationTarget|null", "to": "RouteNavigationTarget", "matched": "MatchedRoute" },
+          "target": "<route-view>",
+          "bubbles": true,
+          "cancelable": true,
+          "class": "RouteChangeEvent",
+          "provider": "customEvents:route-change"
+        },
+        "route-load-start": {
+          "description": "Fired when a route loader begins fetching data",
+          "taxonomy": "notification",
+          "detail": { "route": "MatchedRoute" },
+          "target": "<route-view>",
+          "bubbles": true,
+          "cancelable": false,
+          "class": "RouteLoadStartEvent",
+          "provider": "customEvents:route-load-start"
+        },
+        "route-load-end": {
+          "description": "Fired when a route loader finishes fetching data",
+          "taxonomy": "notification",
+          "detail": { "route": "MatchedRoute", "data": "unknown" },
+          "target": "<route-view>",
+          "bubbles": true,
+          "cancelable": false,
+          "class": "RouteLoadEndEvent",
+          "provider": "customEvents:route-load-end"
+        },
+        "route-error": {
+          "description": "Fired when a route loader fails",
+          "taxonomy": "notification",
+          "detail": { "route": "MatchedRoute", "error": "Error" },
+          "target": "<route-view>",
+          "bubbles": true,
+          "cancelable": false,
+          "class": "RouteErrorEvent",
+          "provider": "customEvents:route-error"
+        },
+        "rationale": "Module-prefixed names ('route-change') reduce collision risk. Typed event classes with provider keys enable listenForScoped discrimination for apps embedding multiple routers or combining routers with other blocks that fire change/error events."
+      }
+    },
+    "frameworkComparison": {
+      "reactRouter": {
+        "patterns": ["BrowserRouter", "Routes", "Route", "Outlet", "Link", "useNavigate", "useParams", "loader"],
+        "notes": "Similar loader pattern, data-driven routing"
+      },
+      "vueRouter": {
+        "patterns": ["RouterView", "RouterLink", "useRoute", "beforeEach guards"],
+        "notes": "Navigation guards inspiration"
+      },
+      "angular": {
+        "patterns": ["RouterModule", "router-outlet", "routerLink", "CanActivate", "Resolve"],
+        "notes": "Named outlets, guards, resolvers"
+      },
+      "tanstackRouter": {
+        "patterns": ["file-based routing", "search params", "loaders"],
+        "notes": "Type-safe routing, search param handling"
+      },
+      "sveltekit": {
+        "patterns": ["file-based routing", "+page.js loaders", "+error.svelte"],
+        "notes": "File-based but concepts translate to declarative"
+      }
+    }
   },
   {
     "id": "simple-store",
@@ -179,5 +1113,732 @@
         "rationale": "Reduces boilerplate when setting deeply nested values"
       }
     }
+  },
+  {
+    "id": "prefetch-behavior",
+    "name": "Prefetch Behavior",
+    "status": "concept",
+    "type": "Behavior",
+    "summary": "Attribute-based behavior that implements the Prefetch Intent by detecting user conditions via browser APIs and triggering resource prefetching.",
+    "implementsIntent": "prefetch",
+    "dependsOn": ["resource-loader", "router"],
+    "traits": [
+      {
+        "name": "withViewportPrefetch",
+        "description": "Triggers prefetch when link enters the viewport via IntersectionObserver",
+        "intentDimension": "prefetch.eagerness.viewport"
+      },
+      {
+        "name": "withHoverPrefetch",
+        "description": "Triggers prefetch on pointer hover (>200ms debounce) or focus",
+        "intentDimension": "prefetch.eagerness.hover"
+      },
+      {
+        "name": "withInteractionPrefetch",
+        "description": "Triggers prefetch at pointer down (moment of intent)",
+        "intentDimension": "prefetch.eagerness.interaction"
+      }
+    ],
+    "webStandards": {
+      "speculationRules": {
+        "status": "Chrome 121+",
+        "pattern": "Declarative JSON for prefetch/prerender: <script type=\"speculationrules\">",
+        "adoption": "Aligns eagerness model (conservative/moderate/eager/immediate) with our intent levels; uses browser-native prefetch when available",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Speculation_Rules_API"
+      },
+      "intersectionObserver": {
+        "status": "Baseline",
+        "pattern": "Observes element visibility relative to viewport/ancestor",
+        "adoption": "withViewportPrefetch uses IntersectionObserver with configurable rootMargin to trigger prefetch before element is fully visible",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/IntersectionObserver"
+      },
+      "navigatorConnection": {
+        "status": "Limited (Chromium)",
+        "pattern": "NetworkInformation API: effectiveType, saveData, downlink",
+        "adoption": "Suppresses prefetch when saveData is true or effectiveType is 'slow-2g'/'2g'",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/NetworkInformation"
+      },
+      "batteryStatus": {
+        "status": "Limited (Chromium)",
+        "pattern": "Battery Status API: navigator.getBattery() for charging/level",
+        "adoption": "Suppresses viewport-level prefetch when battery < 20% and not charging",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Battery_Status_API"
+      },
+      "linkRelPrefetch": {
+        "status": "Baseline",
+        "pattern": "<link rel=\"prefetch\"> for resource hints",
+        "adoption": "When the prefetched resource is a navigation, injects <link rel=\"prefetch\"> into <head> for browser-native fetching",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Attributes/rel/prefetch"
+      }
+    },
+    "events": [
+      {
+        "name": "prefetch-triggered",
+        "class": "PrefetchTriggeredEvent",
+        "providerKey": "customEvents:prefetch-triggered",
+        "detail": "{ url, eagerness, trigger }",
+        "cancelable": true,
+        "description": "Fired when a prefetch is about to start. Cancel to suppress."
+      },
+      {
+        "name": "prefetch-suppressed",
+        "class": "PrefetchSuppressedEvent",
+        "providerKey": "customEvents:prefetch-suppressed",
+        "detail": "{ url, reason, condition }",
+        "cancelable": false,
+        "description": "Fired when a prefetch is suppressed due to user conditions (saveData, low battery, slow connection)."
+      },
+      {
+        "name": "prefetch-complete",
+        "class": "PrefetchCompleteEvent",
+        "providerKey": "customEvents:prefetch-complete",
+        "detail": "{ url, duration, fromCache }",
+        "cancelable": false,
+        "description": "Fired when prefetched data is stored and ready for instant navigation."
+      }
+    ],
+    "frameworkComparison": {
+      "remix": {
+        "patterns": ["<Link prefetch=\"intent|render|viewport\">", "prefetch on hover/focus"],
+        "notes": "Three eagerness levels on Link component; 'intent' = hover+focus, 'render' = immediate, 'viewport' = IntersectionObserver"
+      },
+      "nextjs": {
+        "patterns": ["<Link> automatic prefetch", "prefetch={false} opt-out"],
+        "notes": "Automatic viewport prefetch on all Links; uses IntersectionObserver internally"
+      },
+      "quicklink": {
+        "patterns": ["viewport detection", "requestIdleCallback", "connection-aware"],
+        "notes": "Library by Google: prefetches in-viewport links during idle time, respects saveData and effectiveType"
+      },
+      "instantPage": {
+        "patterns": ["mousedown/touchstart prefetch", "65ms hover threshold"],
+        "notes": "Library: prefetches on hover (65ms debounce) or touchstart; minimal overhead approach"
+      },
+      "speculationRulesAPI": {
+        "patterns": ["eagerness: conservative|moderate|eager|immediate", "document rules", "URL patterns"],
+        "notes": "Chrome's native declarative prefetch/prerender; our eagerness levels align with this model"
+      }
+    },
+    "designDecisions": {
+      "conditionDetection": {
+        "description": "Maps Prefetch Intent user conditions to browser APIs: limited-data → saveData, low-power → Battery API, slow-connection → effectiveType",
+        "rationale": "The intent declares abstract conditions. This block maps them to concrete browser APIs with graceful degradation when APIs are unavailable."
+      },
+      "eagernessToEvents": {
+        "description": "Maps eagerness levels to DOM events: viewport → IntersectionObserver, hover → pointerenter (>200ms), interaction → pointerdown",
+        "rationale": "Each eagerness level corresponds to a specific user gesture timing. The block translates the abstract intent into concrete event listeners."
+      },
+      "suppressionPriority": {
+        "description": "Conditions are checked in priority order: saveData > low battery > slow connection. Any match suppresses.",
+        "rationale": "User's explicit data-saving preference (saveData) should always win. Battery and connection are softer signals."
+      },
+      "speculationRulesAlignment": {
+        "description": "Eagerness levels map to Speculation Rules API terms: viewport=moderate, hover=conservative, interaction=conservative, immediate=eager",
+        "rationale": "Aligning with the emerging browser standard ensures forward-compatible semantics and potential delegation to native prefetch."
+      }
+    },
+    "exports": [
+      "PrefetchBehavior",
+      "withViewportPrefetch",
+      "withHoverPrefetch",
+      "withInteractionPrefetch",
+      "PrefetchTriggeredEvent",
+      "PrefetchSuppressedEvent",
+      "PrefetchCompleteEvent",
+      "PrefetchCondition",
+      "PrefetchEagerness"
+    ]
+  },
+  {
+    "id": "action-button",
+    "name": "Action Button",
+    "status": "concept",
+    "type": "Behavior",
+    "summary": "Behavioral implementation of the Action Intent, handling visual priority rendering, busy state layout (width locking, visibility), and platform-aware group ordering.",
+    "implementsIntent": "action",
+    "dependsOn": ["resource-action"],
+    "traits": [
+      {
+        "name": "withBusyDisabled",
+        "description": "Disables the action during pending state (aria-disabled + pointer-events:none)",
+        "intentDimension": "action.busy.disabled"
+      },
+      {
+        "name": "withBusyInteractive",
+        "description": "Keeps the action interactive during pending state (reduced opacity indicator)",
+        "intentDimension": "action.busy.interactive"
+      },
+      {
+        "name": "withPlatformOrdering",
+        "description": "Reorders action groups based on OS conventions (macOS: primary last, Windows: primary first)",
+        "intentDimension": "action.groupOrdering.platform"
+      },
+      {
+        "name": "withWidthLock",
+        "description": "Captures computed width before busy state, applies as inline min-width to prevent layout shift",
+        "intentDimension": "action.busy.widthLock"
+      }
+    ],
+    "webStandards": {
+      "invokerCommands": {
+        "status": "Baseline 2026",
+        "pattern": "commandfor/command attributes for declarative action invocation",
+        "adoption": "Action buttons can use commandfor to target Resource Action elements; command attribute specifies the mutation",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+      },
+      "ariaDisabled": {
+        "status": "Standard",
+        "pattern": "aria-disabled keeps element focusable but non-interactive",
+        "adoption": "withBusyDisabled applies aria-disabled instead of HTML disabled, preserving tab order and screen reader announcements",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-disabled"
+      },
+      "ariaLive": {
+        "status": "Standard",
+        "pattern": "aria-live regions for dynamic content announcements",
+        "adoption": "Busy state changes announced via aria-live='polite' on the button's label region",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-live"
+      },
+      "cssContainment": {
+        "status": "Baseline",
+        "pattern": "CSS contain: layout for isolation from reflow",
+        "adoption": "Action groups use contain: layout to prevent busy-state width changes from triggering ancestor reflow",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/contain"
+      }
+    },
+    "frameworkComparison": {
+      "materialUI": {
+        "patterns": ["Button loading prop", "LoadingButton variant", "startIcon/endIcon"],
+        "notes": "Loading state with spinner replacement; icon positioning; size variants"
+      },
+      "radixUI": {
+        "patterns": ["Primitive button", "asChild composition", "data-state attribute"],
+        "notes": "Composable primitives; state exposed via data attributes for CSS styling"
+      },
+      "fluentUI": {
+        "patterns": ["SplitButton", "MenuButton", "CompoundButton"],
+        "notes": "Action button variants; split button for primary + secondary actions"
+      },
+      "headlessUI": {
+        "patterns": ["Button component", "controlled state", "render props"],
+        "notes": "Headless approach: behavior without opinions on styling; closest to our intent model"
+      }
+    },
+    "designDecisions": {
+      "layoutShiftPrevention": {
+        "description": "lockWidth: captures computed width before entering busy state, applies it as inline min-width",
+        "rationale": "Prevents layout reflow when label text changes (e.g., 'Save' → 'Saving...'). The intent declares the UX need; this block implements the CSS technique."
+      },
+      "visibilityMapping": {
+        "description": "Maps intent busy state to CSS: disabled → aria-disabled + pointer-events:none, interactive → opacity:0.7",
+        "rationale": "Translates the abstract 'interaction' field from ActionBusy into concrete accessibility attributes and CSS."
+      },
+      "iconIntegration": {
+        "description": "Resolves icon name/size from Icon Intent, renders via icon provider",
+        "rationale": "Icons are a cross-cutting concern. The Action block delegates icon rendering to whatever icon system is provided via the Icon Intent."
+      },
+      "ariaOverDisabled": {
+        "description": "Uses aria-disabled instead of HTML disabled attribute during busy state",
+        "rationale": "HTML disabled removes the element from tab order and prevents screen reader interaction. aria-disabled keeps focus and announcements while preventing activation."
+      },
+      "platformOrdering": {
+        "description": "macOS convention: primary action last (right). Windows convention: primary action first (left). Detects via navigator.platform or user configuration.",
+        "rationale": "Users have muscle memory for platform conventions. Getting this wrong forces cognitive overhead on every confirmation dialog."
+      }
+    },
+    "exports": [
+      "ActionButtonBehavior",
+      "withBusyDisabled",
+      "withBusyInteractive",
+      "withPlatformOrdering",
+      "withWidthLock",
+      "ActionButtonState"
+    ]
+  },
+  {
+    "id": "breakpoint-observer",
+    "name": "Breakpoint Observer",
+    "status": "concept",
+    "type": "Module",
+    "summary": "Runtime implementation of the Breakpoint Intent, mapping semantic step names to concrete CSS media queries or container queries and exposing reactive state.",
+    "implementsIntent": "breakpoint",
+    "traits": [
+      {
+        "name": "withMobileFirst",
+        "description": "Accumulative min-width queries — start small, add complexity as space grows",
+        "intentDimension": "breakpoint.strategy.mobile-first"
+      },
+      {
+        "name": "withDesktopFirst",
+        "description": "Subtractive max-width queries — start large, remove features as space shrinks",
+        "intentDimension": "breakpoint.strategy.desktop-first"
+      },
+      {
+        "name": "withStrictRange",
+        "description": "Isolated range queries — each tier is an independent bucket with no accumulation",
+        "intentDimension": "breakpoint.strategy.strict-range"
+      },
+      {
+        "name": "withContainerQueries",
+        "description": "Component-scoped breakpoints using CSS container queries instead of viewport media queries",
+        "intentDimension": null
+      }
+    ],
+    "designDecisions": {
+      "unitMapping": {
+        "description": "Converts semantic steps to pixel/em/rem breakpoints based on application configuration",
+        "rationale": "The intent declares abstract steps ('compact', 'medium', 'expanded'). This block maps them to concrete values (e.g., compact: 0-599px, medium: 600-904px)."
+      },
+      "queryAPI": {
+        "description": "Exposes matches(query) method for components to test current breakpoint: matches({ up: 'medium' }), matches({ only: 'compact' })",
+        "rationale": "Components need to query the active breakpoint at runtime. This block provides the matchMedia/container query implementation."
+      },
+      "containerQuerySupport": {
+        "description": "Supports both viewport-level (media queries) and component-level (container queries) breakpoints",
+        "rationale": "Modern layouts use container queries for component-scoped responsiveness. The block detects and uses the appropriate API."
+      }
+    }
+  },
+  {
+    "id": "error-recovery",
+    "name": "Error Recovery",
+    "status": "concept",
+    "type": "Module",
+    "summary": "Technical implementation of the Reliability Intent, handling retry strategies (exponential backoff, linear, immediate), HTTP status classification, and offline queuing.",
+    "implementsIntent": "reliability",
+    "dependsOn": ["resource-loader"],
+    "traits": [
+      {
+        "name": "withAutomaticRetry",
+        "description": "Silent retry with configurable backoff (exponential, linear, immediate)",
+        "intentDimension": "reliability.recovery.automatic"
+      },
+      {
+        "name": "withManualRetry",
+        "description": "Presents a 'Retry' affordance — user decides when to try again",
+        "intentDimension": "reliability.recovery.manual"
+      },
+      {
+        "name": "withFallbackSkeleton",
+        "description": "Shows structural placeholder implying content may load later",
+        "intentDimension": "reliability.fallback.skeleton"
+      },
+      {
+        "name": "withFallbackPrevious",
+        "description": "Shows stale data from last successful load, marked as outdated",
+        "intentDimension": "reliability.fallback.previous"
+      },
+      {
+        "name": "withCircuitBreaker",
+        "description": "Stops retrying after consecutive failures, enters open state with half-open probe",
+        "intentDimension": "reliability.recovery.circuitBreaker"
+      }
+    ],
+    "webStandards": {
+      "retryAfter": {
+        "status": "Standard",
+        "pattern": "Server-specified retry timing via Retry-After header (seconds or HTTP-date)",
+        "adoption": "When present on 429/503 responses, overrides configured backoff delay with server-specified wait time",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Retry-After"
+      },
+      "httpStatusCodes": {
+        "status": "Standard",
+        "pattern": "Semantic classification: 4xx client errors, 5xx server errors (RFC 9110)",
+        "adoption": "4xx → terminal (no retry), 5xx → retryable with backoff, 429 → rate-limited with Retry-After",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status"
+      },
+      "navigatorOnLine": {
+        "status": "Baseline",
+        "pattern": "navigator.onLine boolean + online/offline events on window",
+        "adoption": "Detects offline state to queue operations; listens for online event to trigger queued retries",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Navigator/onLine"
+      },
+      "backgroundSync": {
+        "status": "Limited (Chrome)",
+        "pattern": "Service Worker Background Sync API — defers tasks until connectivity restored",
+        "adoption": "Progressive enhancement: if SW registered, queued mutations use Background Sync; otherwise falls back to online event polling",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Background_Synchronization_API"
+      },
+      "abortController": {
+        "status": "Baseline",
+        "pattern": "AbortController/AbortSignal for cancellation",
+        "adoption": "Each retry attempt gets a fresh signal; previous attempt aborted before retry dispatches",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/AbortController"
+      }
+    },
+    "events": [
+      {
+        "name": "resource-retry",
+        "class": "ResourceRetryEvent",
+        "providerKey": "customEvents:resource-retry",
+        "detail": "{ attempt, maxAttempts, delay, error }",
+        "cancelable": true,
+        "description": "Fired before each retry attempt. Cancel to abort the retry sequence."
+      },
+      {
+        "name": "resource-retry-exhausted",
+        "class": "ResourceRetryExhaustedEvent",
+        "providerKey": "customEvents:resource-retry-exhausted",
+        "detail": "{ attempts, lastError, strategy }",
+        "cancelable": false,
+        "description": "All retry attempts exhausted. Block transitions to fallback UX."
+      },
+      {
+        "name": "resource-offline-queued",
+        "class": "ResourceOfflineQueuedEvent",
+        "providerKey": "customEvents:resource-offline-queued",
+        "detail": "{ operation, queueSize }",
+        "cancelable": false,
+        "description": "Operation queued for retry when connectivity is restored."
+      },
+      {
+        "name": "resource-circuit-open",
+        "class": "ResourceCircuitOpenEvent",
+        "providerKey": "customEvents:resource-circuit-open",
+        "detail": "{ failures, threshold, cooldown }",
+        "cancelable": false,
+        "description": "Circuit breaker tripped open after consecutive failures."
+      }
+    ],
+    "frameworkComparison": {
+      "tanstackQuery": {
+        "patterns": ["retry count", "retryDelay function", "networkMode"],
+        "notes": "Configurable retry with custom delay functions; networkMode: 'online' pauses queries when offline"
+      },
+      "axiosRetry": {
+        "patterns": ["exponentialDelay", "retryCondition", "retries"],
+        "notes": "Interceptor-based retry with exponential backoff and configurable retry conditions"
+      },
+      "urql": {
+        "patterns": ["retryExchange", "initialDelayMs", "maxDelayMs", "randomDelay"],
+        "notes": "Exchange-based retry with jitter for distributed systems"
+      },
+      "swr": {
+        "patterns": ["onErrorRetry", "errorRetryCount", "errorRetryInterval"],
+        "notes": "Built-in error retry with exponential backoff; pauses when offline"
+      },
+      "apolloLink": {
+        "patterns": ["RetryLink", "delay.initial", "delay.max", "delay.jitter"],
+        "notes": "Link-based retry with configurable jitter to prevent thundering herd"
+      }
+    },
+    "designDecisions": {
+      "retryStrategies": {
+        "description": "Implements three retry algorithms: immediate (0ms delay), linear (constant interval, e.g., 1s), exponential (doubling delay with optional jitter, e.g., 1s, 2s, 4s)",
+        "rationale": "The intent declares 'automatic' recovery. This block decides the backoff algorithm based on failure type. Jitter prevents thundering herd when many clients retry simultaneously."
+      },
+      "httpStatusClassification": {
+        "description": "Maps HTTP status codes to recovery behavior: 4xx → terminal (no retry), 5xx → automatic retry with backoff, 429 → rate-limited retry respecting Retry-After header, offline → queue for background retry",
+        "rationale": "The intent declares abstract failure tolerance. This block provides the concrete mapping from HTTP semantics to recovery behavior."
+      },
+      "maxRetries": {
+        "description": "Configurable maximum retry count (default: 3) with circuit breaker pattern",
+        "rationale": "Prevents infinite retry loops. After max retries, the block transitions the UX to the intent's fallback content."
+      },
+      "circuitBreaker": {
+        "description": "Three-state circuit (closed → open → half-open): closed allows requests, open fails fast after threshold, half-open probes with single request",
+        "rationale": "Prevents wasted requests against a known-failing endpoint. Protects both the server (reduces load during outage) and the user (fast failure instead of timeout)."
+      },
+      "retryAfterRespect": {
+        "description": "Server-provided Retry-After header overrides configured backoff delay",
+        "rationale": "The server knows best when it will recover. Respecting Retry-After is both polite (reduces load) and effective (retries at the right time)."
+      }
+    },
+    "exports": [
+      "ErrorRecoveryModule",
+      "withAutomaticRetry",
+      "withManualRetry",
+      "withFallbackSkeleton",
+      "withFallbackPrevious",
+      "withCircuitBreaker",
+      "ResourceRetryEvent",
+      "ResourceRetryExhaustedEvent",
+      "ResourceOfflineQueuedEvent",
+      "ResourceCircuitOpenEvent",
+      "RetryStrategy",
+      "CircuitBreakerState"
+    ]
+  },
+  {
+    "id": "workflow",
+    "name": "Workflow",
+    "status": "concept",
+    "type": "Component",
+    "summary": "Multi-step process orchestration without URL changes — wizard-like flows with per-step validation, linear/branching progression, and state persistence. The non-route complement to Router's URL-based step navigation.",
+    "dependsOn": ["view", "tabs"],
+    "traits": [
+      {
+        "name": "withLinearProgression",
+        "description": "Steps must be completed in order; future steps are disabled until current passes validation",
+        "intentDimension": "workflow.progression.linear"
+      },
+      {
+        "name": "withNonLinearProgression",
+        "description": "Steps can be visited in any order; all validated on final submit",
+        "intentDimension": "workflow.progression.nonLinear"
+      },
+      {
+        "name": "withBranchingLogic",
+        "description": "Step sequence adapts dynamically based on user input (progressive wizard)",
+        "intentDimension": "workflow.progression.branching"
+      },
+      {
+        "name": "withGateValidation",
+        "description": "Validates current step fields via Constraint Validation API before allowing advancement",
+        "intentDimension": "workflow.validation.gate"
+      },
+      {
+        "name": "withAutoSave",
+        "description": "Persists step data to sessionStorage/localStorage on each step change",
+        "intentDimension": "workflow.persistence.autoSave"
+      },
+      {
+        "name": "withReviewStep",
+        "description": "Final step displays summary of all collected data for confirmation",
+        "intentDimension": "workflow.progression.review"
+      }
+    ],
+    "webStandards": {
+      "constraintValidation": {
+        "status": "Baseline",
+        "pattern": "checkValidity(), reportValidity(), setCustomValidity() for per-step field validation",
+        "adoption": "withGateValidation calls checkValidity() on the active step's fieldset before allowing advancement; hidden steps are automatically skipped by the browser",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Guides/Constraint_validation"
+      },
+      "fieldset": {
+        "status": "Standard",
+        "pattern": "<fieldset> + <legend> for semantic grouping; disabling a fieldset disables all children",
+        "adoption": "Each step is a <fieldset>; inactive steps get disabled attribute to prevent interaction and exclude from form validation",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/fieldset"
+      },
+      "ariaCurrent": {
+        "status": "Standard",
+        "pattern": "aria-current='step' marks the active step in a numbered indicator",
+        "adoption": "Step indicator (progress rail) uses <ol> with aria-current='step' on the active <li>",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current"
+      },
+      "invokerCommands": {
+        "status": "Baseline 2026",
+        "pattern": "commandfor/command for declarative step navigation",
+        "adoption": "Next/Previous buttons use commandfor targeting the workflow element with command='--workflow-next' and command='--workflow-prev'",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+      },
+      "cssScrollSnap": {
+        "status": "Baseline",
+        "pattern": "CSS Scroll Snap for step transitions; scrollsnapchange event for JS hooks",
+        "adoption": "Optional trait: withSnapTransitions uses scroll-snap-type: x mandatory for horizontal step animation",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Scroll_snap"
+      },
+      "dialog": {
+        "status": "Baseline",
+        "pattern": "<dialog> for modal wizard flows with native focus trapping",
+        "adoption": "When workflow is rendered inside a <dialog>, focus management delegates to the browser's dialog focusing steps",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/dialog"
+      }
+    },
+    "events": [
+      {
+        "name": "workflow-step-before-change",
+        "class": "WorkflowStepBeforeChangeEvent",
+        "providerKey": "customEvents:workflow-step-before-change",
+        "detail": "{ from, to, direction, trigger }",
+        "cancelable": true,
+        "description": "Fired before step transition. Cancel to prevent advancement (e.g., failed validation)."
+      },
+      {
+        "name": "workflow-step-change",
+        "class": "WorkflowStepChangeEvent",
+        "providerKey": "customEvents:workflow-step-change",
+        "detail": "{ from, to, direction, trigger }",
+        "cancelable": false,
+        "description": "Fired after step transition completes. Step content is now visible."
+      },
+      {
+        "name": "workflow-complete",
+        "class": "WorkflowCompleteEvent",
+        "providerKey": "customEvents:workflow-complete",
+        "detail": "{ data, steps }",
+        "cancelable": true,
+        "description": "Fired when user completes the final step. Cancel to prevent submission (e.g., final validation)."
+      },
+      {
+        "name": "workflow-error",
+        "class": "WorkflowErrorEvent",
+        "providerKey": "customEvents:workflow-error",
+        "detail": "{ step, fields, errors }",
+        "cancelable": false,
+        "description": "Fired when step validation fails. Provides the invalid fields and error messages."
+      }
+    ],
+    "frameworkComparison": {
+      "angularCdkStepper": {
+        "patterns": ["CdkStepper base class", "CdkStep with stepControl", "linear mode", "editable/optional steps"],
+        "notes": "Most complete headless stepper; linear mode with per-step FormGroup validation"
+      },
+      "muiStepper": {
+        "patterns": ["activeStep controlled index", "nonLinear prop", "horizontal/vertical orientation", "alternativeLabel"],
+        "notes": "Display-only component; state management and validation are external"
+      },
+      "patternflyWizard": {
+        "patterns": ["progressive wizard (dynamic steps)", "sidebar step rail", "review step", "cancel/back/next footer"],
+        "notes": "Most fully specified wizard pattern; progressive wizard adds steps based on user input"
+      },
+      "stepperize": {
+        "patterns": ["headless step orchestration", "typed step definitions", "scoped hooks"],
+        "notes": "Emerging standard for headless multi-step; ~1kB, framework-agnostic"
+      },
+      "reactHookForm": {
+        "patterns": ["trigger() per-step validation", "useForm per step or shared", "state accumulation"],
+        "notes": "Per-step trigger() enables field-level validation without full form submission"
+      }
+    },
+    "designDecisions": {
+      "nonRouteWorkflow": {
+        "description": "Steps are state-based, not URL-based. No URL changes during step navigation.",
+        "rationale": "Router already handles URL-based multi-step flows. Workflow covers the complementary case: modal wizards, in-page flows, and short processes where URL bookmarking is unnecessary."
+      },
+      "domPresence": {
+        "description": "All steps remain in DOM (behavior pattern). Inactive steps are hidden via View's exclusive group + disabled fieldset.",
+        "rationale": "State preservation across step navigation. Users expect form data to survive forward/back navigation. Consistent with Tabs pattern."
+      },
+      "fieldsetPerStep": {
+        "description": "Each step wraps its content in a <fieldset> element. Inactive steps have disabled attribute.",
+        "rationale": "Disabled fieldset prevents interaction with hidden step fields and automatically excludes them from form validation. Semantic grouping via <legend> for screen readers."
+      },
+      "exclusiveGroupVisibility": {
+        "description": "Steps use View's name-based exclusive group. Showing a step auto-hides siblings.",
+        "rationale": "Reuses ViewEngine's proven exclusive group mechanism. Same pattern as Tabs panels and HTML <details name='...'>."
+      },
+      "gateValidation": {
+        "description": "Per-step validation before advancement (gate model). Uses native Constraint Validation API.",
+        "rationale": "Prevents invalid data from accumulating. Immediate feedback is the consensus best practice for complex flows (NN/G, PatternFly, Angular CDK)."
+      },
+      "invokerNavigation": {
+        "description": "Next/Previous buttons use Invoker Commands: commandfor + command='--workflow-next'/'--workflow-prev'.",
+        "rationale": "Declarative navigation without JS event listeners. Consistent with platform direction (Invoker Commands Baseline 2026)."
+      },
+      "progressiveWizard": {
+        "description": "withBranchingLogic supports dynamic step lists that grow/shrink based on user input.",
+        "rationale": "Many real-world workflows have conditional steps (e.g., 'Do you have dependents?' → show dependent steps). PatternFly's progressive wizard pattern addresses this."
+      }
+    },
+    "exports": [
+      "WorkflowElement",
+      "WorkflowStepElement",
+      "WorkflowIndicator",
+      "withLinearProgression",
+      "withNonLinearProgression",
+      "withBranchingLogic",
+      "withGateValidation",
+      "withAutoSave",
+      "withReviewStep",
+      "WorkflowStepBeforeChangeEvent",
+      "WorkflowStepChangeEvent",
+      "WorkflowCompleteEvent",
+      "WorkflowErrorEvent",
+      "WorkflowConfig",
+      "WorkflowStepDefinition",
+      "registerWorkflow"
+    ]
+  },
+  {
+    "id": "transient-component",
+    "name": "Transient Component",
+    "status": "concept",
+    "type": "Module",
+    "summary": "Base class and utilities for custom elements that replace themselves with semantically correct native HTML during connectedCallback — enabling context-aware element selection without permanent wrapper nodes.",
+    "exports": [
+      "TransientElement",
+      "AutoHeading",
+      "SmartLink",
+      "withSelfReplacement",
+      "calculateHeadingLevel"
+    ],
+    "webStandards": {
+      "replaceWith": {
+        "status": "Baseline",
+        "pattern": "Element.replaceWith() replaces an element in its parent's child list with new nodes",
+        "adoption": "Core mechanism — transient element calls queueMicrotask(() => this.replaceWith(replacement)) from connectedCallback to safely self-replace after callback stack completes",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Element/replaceWith"
+      },
+      "customElements": {
+        "status": "Baseline",
+        "pattern": "Autonomous custom elements with connectedCallback lifecycle",
+        "adoption": "Transient elements are autonomous custom elements that run initialization logic in connectedCallback, then replace themselves with native elements",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Web_Components/Using_custom_elements"
+      },
+      "queueMicrotask": {
+        "status": "Baseline",
+        "pattern": "Schedules a microtask to run after current script completes but before rendering",
+        "adoption": "Defers replaceWith() out of connectedCallback stack to avoid re-entrancy with disconnectedCallback",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Window/queueMicrotask"
+      },
+      "headingElements": {
+        "status": "Standard",
+        "pattern": "<h1>–<h6> provide document heading hierarchy; WHATWG outline algorithm removed from spec",
+        "adoption": "AutoHeading replaces itself with the correct <hN> element based on nesting depth or injector-provided level",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/Heading_Elements"
+      },
+      "ariaHeadingRole": {
+        "status": "Standard",
+        "pattern": "role='heading' with aria-level for non-native heading semantics",
+        "adoption": "Fallback only — MDN recommends native <hN> elements over role='heading'. Self-replacement produces native elements.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Roles/heading_role"
+      }
+    },
+    "designDecisions": {
+      "microtaskDeferral": {
+        "description": "Self-replacement uses queueMicrotask() to defer replaceWith() outside the connectedCallback stack",
+        "rationale": "Calling replaceWith() synchronously inside connectedCallback triggers disconnectedCallback re-entrantly. The microtask runs after connectedCallback completes but before paint — zero visual flash, clean lifecycle."
+      },
+      "attributeTransfer": {
+        "description": "All attributes except internal ones (is, data-transient-*) are transferred to the replacement element",
+        "rationale": "Authors expect class, id, style, aria-* and custom attributes to carry over. The transient element is a stand-in, not a wrapper."
+      },
+      "childNodeTransfer": {
+        "description": "All child nodes are moved to the replacement element via append(...this.childNodes)",
+        "rationale": "Children belong to the semantic target, not the transient host. Moving (not cloning) preserves event listeners on children."
+      },
+      "eventListenerWarning": {
+        "description": "Event listeners attached to the transient element itself are lost on replacement. This is by design.",
+        "rationale": "Transient elements are meant to be replaced before user interaction. Listeners should be on children (which survive) or on the replacement (added post-replacement via event delegation)."
+      },
+      "noCustomizedBuiltins": {
+        "description": "Does NOT use customized built-in elements (is='' attribute / extends: 'h1')",
+        "rationale": "Safari refuses to implement customized built-ins and has stated it never will. The polyfill is unreliable. Autonomous custom elements that self-replace are the portable alternative."
+      },
+      "injectorHeadingLevel": {
+        "description": "AutoHeading resolves heading level from InjectorRoot ('headingLevel' provider) first, falls back to DOM traversal (counting sectioning ancestors)",
+        "rationale": "InjectorRoot mirrors React's HeadingLevelContext pattern — a section component increments the level in its injector scope. All descendants read the correct level without DOM traversal. Fallback to DOM traversal covers cases without explicit section contexts."
+      },
+      "ssrStrategy": {
+        "description": "SSR must compute the correct element server-side (e.g., Eleventy shortcode). Client-side transient element upgrades the fallback.",
+        "rationale": "Custom elements require JS to connectedCallback. Crawlers and screen readers see the pre-upgrade HTML. The server must emit the correct <hN> for accessibility and SEO. The client-side element is progressive enhancement."
+      }
+    },
+    "frameworkComparison": {
+      "react": {
+        "patterns": ["HeadingLevelContext + useContext", "React.createElement(Tag) dynamic element"],
+        "notes": "React's context-based heading level is the canonical reference; components render the correct JSX element directly"
+      },
+      "angular": {
+        "patterns": ["<ng-container> (no DOM output)", "structural directives (*ngIf on <ng-container>)"],
+        "notes": "ng-container removes itself at compile time — different mechanism but same goal (no wrapper node)"
+      },
+      "vue": {
+        "patterns": ["<component :is='tag'> for dynamic element", "<template> as no-output wrapper"],
+        "notes": "Dynamic component tag selection; template element renders no DOM"
+      },
+      "svelte": {
+        "patterns": ["<svelte:element this={tag}>", "compile-time element selection"],
+        "notes": "Dynamic element tag at compile time; no runtime wrapper node"
+      }
+    },
+    "traits": [
+      {
+        "name": "withSelfReplacement",
+        "description": "Base mixin that handles the microtask-deferred replaceWith() lifecycle, attribute transfer, and child node migration",
+        "intentDimension": null
+      }
+    ]
   }
 ]

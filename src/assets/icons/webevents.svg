@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- Event Gradient (Amber/Orange) -->
+    <linearGradient id="eventGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" /> <!-- Amber-400 -->
+      <stop offset="100%" stop-color="#d97706" /> <!-- Amber-600 -->
+    </linearGradient>
+
+    <!-- Provider Gradient (Emerald) -->
+    <linearGradient id="providerGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399" /> <!-- Emerald-400 -->
+      <stop offset="100%" stop-color="#059669" /> <!-- Emerald-600 -->
+    </linearGradient>
+
+    <filter id="floatShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background base -->
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc" />
+
+  <g filter="url(#floatShadow)">
+    <!-- Event burst: lightning bolt shape representing event dispatch -->
+    <path d="M 72 30 L 52 62 L 64 62 L 48 98 L 82 58 L 68 58 L 84 30 Z"
+          fill="url(#eventGrad)" />
+
+    <!-- Provider shield: small shield on the left representing instanceof validation -->
+    <path d="M 34 52 L 46 48 L 46 62 C 46 70 40 74 34 76 C 28 74 22 70 22 62 L 22 48 Z"
+          fill="url(#providerGrad)" opacity="0.9" />
+  </g>
+</svg>

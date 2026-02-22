@@ -1,0 +1,1496 @@
+<h2>The Problem</h2>
+
+<p>Web Everything enforces <strong>conflict-free cohabitation</strong> across modules developed by different teams. The injector system provides scoped dependency resolution, registries provide dynamic naming, and blocks are tree-shakeable imports. But one critical piece escapes this scoping discipline: <strong>DOM events</strong>.</p>
+
+<p>CustomEvent names are globally-scoped strings. Any module can dispatch any event name, and any ancestor can listen for it. This creates three distinct problems:</p>
+
+<ol>
+  <li><strong>Name collisions</strong> &mdash; Two blocks from different teams using the same event name (e.g., <code>change</code>, <code>toggle</code>) with different semantics or detail shapes</li>
+  <li><strong>Shared semantics</strong> &mdash; Multiple blocks legitimately needing the same event contract (e.g., <code>beforetoggle</code>/<code>toggle</code> is used by View, Popover API, and <code>&lt;details&gt;</code>) but with no way to formally declare adherence</li>
+  <li><strong>Detail shape drift</strong> &mdash; No runtime enforcement of <code>event.detail</code> structure, so consumers must trust that producers send the right shape</li>
+</ol>
+
+<p>Convention-based naming (prefixing, etc.) is a valid last resort, but it represents <strong>giving up on providing a unified approach</strong> through Web Everything. Before resorting to convention, we want to explore two more ambitious axes: <strong>Symbol-based events</strong> (via new standard + polyfill) and <strong>listener discrimination</strong> (letting listeners filter by something other than name).</p>
+
+
+<h2>Event Taxonomy</h2>
+
+<p>Before solving scoping, we need clearer language for <em>what events are</em>. Today, DOM events conflate three fundamentally different communication patterns:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th></th>
+      <th>Notification</th>
+      <th>Targeted Command</th>
+      <th>Broadcast Command</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Intent</strong></td>
+      <td>"This happened"</td>
+      <td>"You, do this"</td>
+      <td>"Everyone, do this"</td>
+    </tr>
+    <tr>
+      <td><strong>Direction</strong></td>
+      <td>Source &rarr; ancestors (bubbles up)</td>
+      <td>Trigger &rarr; single target (directed)</td>
+      <td>Source &rarr; descendants or all (trickles down / global)</td>
+    </tr>
+    <tr>
+      <td><strong>DOM examples</strong></td>
+      <td><code>click</code>, <code>change</code>, <code>toggle</code>, <code>input</code></td>
+      <td><code>CommandEvent</code> (Invoker Commands API)</td>
+      <td>None &mdash; no standard pattern exists</td>
+    </tr>
+    <tr>
+      <td><strong>In our codebase</strong></td>
+      <td><code>tab-change</code>, <code>route-change</code>, <code>toggle</code></td>
+      <td><code>--view-show</code>, <code>--view-hide</code>, <code>--view-toggle</code></td>
+      <td>(not yet implemented)</td>
+    </tr>
+    <tr>
+      <td><strong>Cancelable?</strong></td>
+      <td>Sometimes (to veto: <code>beforetoggle</code>)</td>
+      <td>Yes (target can refuse)</td>
+      <td>Possibly (any receiver could veto)</td>
+    </tr>
+    <tr>
+      <td><strong>Collision risk</strong></td>
+      <td><strong>High</strong> &mdash; many things "toggle"</td>
+      <td>Low &mdash; directed to specific element by ID</td>
+      <td><strong>High</strong> &mdash; "close" could mean many things</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>The Broadcast Command Gap</h3>
+
+<p>The Invoker Commands API solves <em>targeted</em> commands: a button's <code>commandfor</code> attribute points at a specific element by ID. But some commands are inherently <strong>broadcast</strong> &mdash; they have no single target:</p>
+
+<ul>
+  <li><strong>"Close all modals"</strong> &mdash; every open modal should close. No single <code>commandfor</code> target.</li>
+  <li><strong>"Pause all media"</strong> &mdash; every playing audio/video element should pause.</li>
+  <li><strong>"Enter maintenance mode"</strong> &mdash; every interactive component should disable.</li>
+  <li><strong>"Theme changed"</strong> / <strong>"Locale changed"</strong> &mdash; every affected component should re-render.</li>
+  <li><strong>"Network offline"</strong> &mdash; every component with pending requests should show fallback state.</li>
+</ul>
+
+<p>These are imperative ("do this") like commands, but they propagate like notifications. They're <strong>commands without a target</strong>. The DOM has no standard pattern for this &mdash; today people use <code>window.dispatchEvent(new CustomEvent('close-all-modals'))</code> or a pub/sub bus, both of which are globally-scoped strings with all the collision risks we're trying to solve.</p>
+
+<p>Broadcast commands face the <strong>same collision problem</strong> as notifications. If Team A broadcasts <code>'close'</code> meaning "close modals" and Team B broadcasts <code>'close'</code> meaning "close sidebar panels", every listener for <code>'close'</code> fires for both. This is arguably worse than notification collisions because commands have side effects.</p>
+
+<h3>Implications for Solutions</h3>
+
+<p>Any event scoping solution must handle all three patterns, not just notifications:</p>
+<ul>
+  <li><strong>Notifications</strong> &mdash; need listener discrimination (the core challenge below)</li>
+  <li><strong>Targeted commands</strong> &mdash; handled by Invoker Commands API + <code>--</code> prefix</li>
+  <li><strong>Broadcast commands</strong> &mdash; need both dispatch-side scoping (who broadcasts?) and listener-side discrimination (who responds?). This is the hardest case because there's no established DOM pattern to build on.</li>
+</ul>
+
+<h3>Terminology Questions</h3>
+
+<p>We need clear vocabulary for these categories. Some options:</p>
+<ul>
+  <li><strong>Notification / Command (targeted) / Command (broadcast)</strong> &mdash; precise but verbose</li>
+  <li><strong>Signal / Command / Broadcast</strong> &mdash; "signal" overloaded (TC39 Signals proposal)</li>
+  <li><strong>Emission / Invocation / Dispatch</strong> &mdash; precise, but unfamiliar</li>
+  <li><strong>Event / Action / Announcement</strong> &mdash; "action" already means something in our project</li>
+</ul>
+
+<p>Whatever terms we choose, blocks should explicitly declare which type each of their events is, so documentation and tooling can treat them differently.</p>
+
+
+<h2>Current State in Web Everything</h2>
+
+<h3>Event Inventory</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Module</th>
+      <th>Event</th>
+      <th>Detail Shape</th>
+      <th>Bubbles</th>
+      <th>Cancelable</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>ViewEngine</td>
+      <td><code>beforetoggle</code></td>
+      <td><code>{ oldState: 'hidden'|'visible', newState: 'hidden'|'visible' }</code></td>
+      <td>No</td>
+      <td>Yes</td>
+    </tr>
+    <tr>
+      <td>ViewEngine</td>
+      <td><code>toggle</code></td>
+      <td><code>{ oldState, newState }</code></td>
+      <td>No</td>
+      <td>No</td>
+    </tr>
+    <tr>
+      <td>TabGroupBehavior</td>
+      <td><code>tab-change</code></td>
+      <td><code>{ from: string|null, to: string, trigger: HTMLElement }</code></td>
+      <td>Yes</td>
+      <td>Yes</td>
+    </tr>
+    <tr>
+      <td>RouteViewElement</td>
+      <td><code>route-change</code></td>
+      <td><code>{ from, to, matched }</code></td>
+      <td>Yes</td>
+      <td>No</td>
+    </tr>
+    <tr>
+      <td>RouteViewElement</td>
+      <td><code>route-load-start</code></td>
+      <td><code>{ route }</code></td>
+      <td>Yes</td>
+      <td>No</td>
+    </tr>
+    <tr>
+      <td>RouteViewElement</td>
+      <td><code>route-load-end</code></td>
+      <td><code>{ route, data }</code></td>
+      <td>Yes</td>
+      <td>No</td>
+    </tr>
+    <tr>
+      <td>RouteViewElement</td>
+      <td><code>route-error</code></td>
+      <td><code>{ route, error }</code></td>
+      <td>Yes</td>
+      <td>No</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>What Works Today</h3>
+
+<ul>
+  <li><strong>Module-prefixed names</strong> &mdash; <code>tab-change</code>, <code>route-*</code> events are namespaced by convention</li>
+  <li><strong>Standard-aligned names</strong> &mdash; <code>beforetoggle</code>/<code>toggle</code> deliberately match the Popover API shape</li>
+  <li><strong>TypeScript interfaces</strong> &mdash; <code>ViewToggleEventDetail</code> and <code>TabChangeEventDetail</code> provide compile-time safety</li>
+</ul>
+
+<h3>What Doesn't Work</h3>
+
+<ul>
+  <li><strong>No runtime enforcement</strong> &mdash; A third-party block could dispatch <code>tab-change</code> with a completely different detail shape</li>
+  <li><strong>No discoverability</strong> &mdash; Consumers have no way to query "what events does this element emit?"</li>
+  <li><strong>No shared contract</strong> &mdash; View's <code>toggle</code> and Popover's <code>toggle</code> have the same shape by convention, not by contract</li>
+  <li><strong>Bubbling collisions</strong> &mdash; If two nested elements both fire <code>toggle</code>, ancestors must manually check <code>event.target</code></li>
+</ul>
+
+
+<h2>Web Standards Landscape</h2>
+
+<h3>What the Platform Provides</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Standard</th>
+      <th>Status</th>
+      <th>What It Offers</th>
+      <th>What It Lacks</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><a href="https://dom.spec.whatwg.org/#interface-customevent">CustomEvent</a></td>
+      <td>Standard</td>
+      <td>String-typed event names with untyped <code>detail</code></td>
+      <td>No scoping, namespacing, or schema</td>
+    </tr>
+    <tr>
+      <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/EventTarget">Constructible EventTarget</a></td>
+      <td>Standard</td>
+      <td>Isolated event bus instances (<code>new EventTarget()</code>)</td>
+      <td>No typing, validation, or discovery</td>
+    </tr>
+    <tr>
+      <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API">Invoker Commands API</a></td>
+      <td>Baseline 2026</td>
+      <td><code>--</code> prefix convention for custom commands</td>
+      <td>Only for command events, not general events</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/webcomponents/custom-elements-manifest">Custom Elements Manifest</a></td>
+      <td>Community Standard</td>
+      <td>Static <code>events[]</code> field on class declarations for documentation</td>
+      <td>Documentation-only, no runtime enforcement</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/WICG/observable">WICG Observable API</a></td>
+      <td>Chrome 135+</td>
+      <td><code>element.when('click')</code> for compositional event handling</td>
+      <td>Event consumption patterns, not registration or typing</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/webcomponents-cg/community-protocols/blob/main/proposals/context.md">Context Protocol</a></td>
+      <td>Community Protocol</td>
+      <td>Event-based inter-component coordination (<code>context-request</code>)</td>
+      <td>Specific to context provision, not general events</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Symbols: The Raw Constraint</h3>
+
+<p>The DOM spec requires <strong>DOMString</strong> for event types. Passing a Symbol to <code>addEventListener</code> or <code>new CustomEvent()</code> triggers Web IDL's <code>ToString()</code> coercion, which <strong>throws a TypeError</strong>. This is why every existing solution falls back to string conventions.</p>
+
+<table>
+  <thead>
+    <tr><th>Aspect</th><th>Strings</th><th>Symbols</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>DOM API compatibility</td><td>Yes</td><td><strong>No</strong> (TypeError)</td></tr>
+    <tr><td>JSON serialization</td><td>Yes</td><td>No</td></tr>
+    <tr><td>DevTools visibility</td><td>Full</td><td>Not inspectable as event types</td></tr>
+    <tr><td>Cross-realm (iframes)</td><td>Work</td><td><code>Symbol()</code> unique per realm; <code>Symbol.for()</code> shared cross-realm. Moot for DOM events &mdash; events don't cross iframe boundaries.</td></tr>
+    <tr><td>Name collision prevention</td><td>Requires conventions</td><td>Inherent uniqueness</td></tr>
+    <tr><td>Node.js EventEmitter</td><td>Yes</td><td>Yes (fully supported)</td></tr>
+  </tbody>
+</table>
+
+<p>But this project already patches browser APIs &mdash; that's what <strong>plugs</strong> are. Could a polyfill bridge the gap?</p>
+
+
+<h3>Symbol Events via Polyfill: Feasibility Study</h3>
+
+<p>A plug could patch <code>EventTarget.prototype.addEventListener</code> and <code>EventTarget.prototype.dispatchEvent</code> to accept Symbols, mapping them to unique strings under the hood:</p>
+
+<pre><code class="language-typescript">// Symbol → unique string mapping
+const symbolToString = new Map&lt;symbol, string&gt;();
+
+function resolveType(type: string | symbol): string {
+  if (typeof type === 'string') return type;
+  if (!symbolToString.has(type)) {
+    const desc = type.description ?? 'event';
+    const id = crypto.randomUUID().slice(0, 8);
+    symbolToString.set(type, `__sym:${desc}:${id}`);
+  }
+  return symbolToString.get(type)!;
+}
+
+// Patch addEventListener to accept Symbol types
+const origAddEventListener = EventTarget.prototype.addEventListener;
+EventTarget.prototype.addEventListener = function(type, listener, options) {
+  return origAddEventListener.call(this, resolveType(type), listener, options);
+};
+
+// Patch dispatchEvent to accept Symbol-typed events
+const origDispatchEvent = EventTarget.prototype.dispatchEvent;
+EventTarget.prototype.dispatchEvent = function(event) {
+  // Event already has a resolved string type from createEvent helper
+  return origDispatchEvent.call(this, event);
+};
+
+// Helper to create events with Symbol types
+function createEvent&lt;T&gt;(type: symbol, detail: T, init?: EventInit) {
+  return new CustomEvent(resolveType(type), { ...init, detail });
+}</code></pre>
+
+<pre><code class="language-typescript">// Usage — collision-free by construction
+export const TAB_CHANGE = Symbol('tab-change');
+export const ROUTE_CHANGE = Symbol('route-change');
+
+// Producer
+element.dispatchEvent(createEvent(TAB_CHANGE, { from: 'a', to: 'b' }));
+
+// Consumer — import the symbol to listen
+import { TAB_CHANGE } from 'blocks/tabs';
+element.addEventListener(TAB_CHANGE, (e) =&gt; { /* type-safe */ });</code></pre>
+
+<h4>Polyfill trade-offs</h4>
+
+<table>
+  <thead>
+    <tr><th>Aspect</th><th>Assessment</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Collision safety</strong></td>
+      <td>Inherent &mdash; two Symbols are never equal even with same description</td>
+    </tr>
+    <tr>
+      <td><strong>Type safety</strong></td>
+      <td>Full &mdash; Symbol + generics: <code>createEvent&lt;TabChangeDetail&gt;(TAB_CHANGE, detail)</code></td>
+    </tr>
+    <tr>
+      <td><strong>DevTools</strong></td>
+      <td>Degraded &mdash; Events Listeners panel shows <code>__sym:tab-change:a7f3b2</code> instead of human-readable name. Would need a DevTools extension to resolve back to Symbol descriptions.</td>
+    </tr>
+    <tr>
+      <td><strong>Cross-realm (iframes)</strong></td>
+      <td>Not a real concern &mdash; <code>Symbol('x')</code> in frame A &ne; <code>Symbol('x')</code> in frame B, but this doesn't matter because DOM events don't cross iframe boundaries. Each iframe has its own document tree; events dispatched inside stay inside. Iframe communication uses <code>postMessage</code> (serialized data), not DOM events.</td>
+    </tr>
+    <tr>
+      <td><strong>Declarative HTML</strong></td>
+      <td>Incompatible &mdash; can't write <code>on:click="Symbol(handleClick)"</code> in markup. See "When Strings Are Essential" below.</td>
+    </tr>
+    <tr>
+      <td><strong>Standardisation path</strong></td>
+      <td>The polyfill proves the concept. Could inform a proposal to extend <code>addEventListener</code> to accept Symbols natively &mdash; Node.js already does this. But browser adoption timeline would be years.</td>
+    </tr>
+    <tr>
+      <td><strong>Micro-frontend safety</strong></td>
+      <td>A late-loading micro-frontend with its own <code>Symbol('tab-change')</code> gets a <em>different</em> symbol automatically &mdash; no collision, no throw. This is a strength over string registries where a late registrant would clash.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h4>Open design questions for Symbol approach</h4>
+<ul>
+  <li>Should the resolved string be deterministic (from <code>Symbol.for()</code>) or random (from <code>Symbol()</code>)? Random provides stronger isolation.</li>
+  <li>How to handle <code>removeEventListener</code>? Must resolve the same string for the same Symbol &mdash; the <code>Map</code> handles this.</li>
+  <li>Can we provide a DevTools integration (via <code>__devtools_symbol_map__</code> global) so browser tooling can display meaningful names?</li>
+  <li>Does patching <code>EventTarget.prototype</code> conflict with other polyfills or libraries?</li>
+</ul>
+
+
+<h3>When String Events Are Essential</h3>
+
+<p>Not everything can move to Symbols. Some use cases fundamentally require string-based event names:</p>
+
+<ul>
+  <li><strong>Declarative HTML attributes</strong> &mdash; <code>on:click="save"</code>, <code>onclick="handler()"</code>, Alpine's <code>x-on:click</code>, HTMX's <code>hx-trigger</code>. Markup is strings. You can't write a Symbol in an HTML attribute.</li>
+  <li><strong>DevTools</strong> &mdash; The Event Listeners panel, <code>monitorEvents()</code>, and Performance timeline all display and filter by string names.</li>
+  <li><strong>Event delegation</strong> &mdash; Patterns where a single ancestor listener matches <code>event.type</code> against a string table: <code>switch(e.type) { case 'click': ... }</code></li>
+  <li><strong>SSR / Hydration</strong> &mdash; Server-rendered HTML includes event binding instructions as string attributes. Symbols only exist at runtime.</li>
+  <li><strong>Browser native events</strong> &mdash; The browser will always fire <code>click</code>, <code>change</code>, <code>toggle</code>, <code>beforetoggle</code> as strings. A Symbol approach can't replace these &mdash; only custom events.</li>
+  <li><strong>MutationObserver</strong> &mdash; Attribute observation and DOM inspection work with strings.</li>
+</ul>
+
+<p>This suggests a <strong>dual model</strong>: native/standard events remain strings; cross-team custom events could use Symbols where isolation matters. The polyfill bridges the gap.</p>
+
+
+<h3>Notable Standard Gaps</h3>
+
+<ul>
+  <li><strong>No <code>CustomEventRegistry</code></strong> exists anywhere in WHATWG, WICG, W3C, or TC39 &mdash; the concept has not been proposed</li>
+  <li><strong>No event namespace mechanism</strong> &mdash; the WHATWG DOM spec explicitly states namespace support "is not planned and will not be added"</li>
+  <li><strong><code>EventTarget.getEventListeners()</code></strong> (<a href="https://github.com/whatwg/dom/issues/412">WHATWG #412</a>) &mdash; proposed in 2017 for listener introspection, still open with no consensus</li>
+  <li><strong>Scoped Custom Element Registries</strong> (<a href="https://github.com/whatwg/html/issues/10854">WHATWG HTML #10854</a>) &mdash; for elements, not events, but establishes the pattern that scoping is needed</li>
+  <li><strong>No proposal for Symbol-typed events</strong> &mdash; despite Node.js supporting them since v6. This could be a Web Everything contribution to standards discussion.</li>
+</ul>
+
+
+<h2>Framework Research</h2>
+
+<h3>How Frameworks Handle Events</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Framework</th>
+      <th>Pattern</th>
+      <th>Key Insight</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><a href="https://lit.dev/docs/components/events/">Lit</a></td>
+      <td>Standard <code>dispatchEvent(new CustomEvent(...))</code>. <code>@fires</code> JSDoc for CEM. No built-in declaration system (<a href="https://github.com/lit/lit/issues/3277">#3277 open</a>).</td>
+      <td>Closest to platform. No framework abstraction over events.</td>
+    </tr>
+    <tr>
+      <td><a href="https://stenciljs.com/docs/events">Stencil</a></td>
+      <td><code>@Event() todoCompleted: EventEmitter&lt;Todo&gt;</code> decorator with typed generics.</td>
+      <td>Compile-time typing via decorators, but dispatches standard CustomEvents at runtime.</td>
+    </tr>
+    <tr>
+      <td><a href="https://angular.dev/guide/components/outputs">Angular</a></td>
+      <td><code>output&lt;number&gt;()</code> (v19+). <strong>Not DOM events</strong> &mdash; framework-level notification system.</td>
+      <td>Fully scoped by design. Events never touch the DOM. Alias support for collision avoidance.</td>
+    </tr>
+    <tr>
+      <td><a href="https://vuejs.org/guide/components/events.html">Vue</a></td>
+      <td><code>defineEmits&lt;{ change: [id: number] }&gt;()</code>. Runtime validation (object syntax) or compile-time typing (TS syntax).</td>
+      <td>Compile-time + optional runtime validation. Not DOM events.</td>
+    </tr>
+    <tr>
+      <td><a href="https://svelte.dev/docs/svelte/v5-migration-guide">Svelte 5</a></td>
+      <td>Deprecated <code>createEventDispatcher</code> in favor of callback props: <code>let { onchange } = $props()</code>.</td>
+      <td><strong>Eliminated the event abstraction entirely.</strong> Direct function callbacks provide inherent type safety and zero collision risk.</td>
+    </tr>
+    <tr>
+      <td><a href="https://docs.solidjs.com/concepts/components/event-handlers">Solid</a></td>
+      <td><code>onClick</code> (delegated) vs <code>on:myevent</code> (native). Extend <code>JSX.CustomEvents</code> for typing.</td>
+      <td>Visual distinction between delegated and native. Typing via namespace extension.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Industry Trend</h3>
+
+<p>A clear direction is emerging: <strong>frameworks are moving away from event abstractions</strong> toward typed function callbacks for component communication. DOM CustomEvents are increasingly reserved for cross-component or cross-library boundaries where framework abstractions can't reach.</p>
+
+<ul>
+  <li>Svelte 5 deprecated its event dispatcher</li>
+  <li>Angular replaced EventEmitter with lightweight <code>output()</code></li>
+  <li>Vue's emits are compile-time constructs, not DOM events</li>
+</ul>
+
+<p>Web Everything operates at the cross-library boundary by design (framework-agnostic blocks from different teams). This means we <strong>can't follow the framework trend</strong> of avoiding DOM events. We need DOM events to work correctly because that's our interop surface.</p>
+
+
+<h2>The Core Challenge: Bubbling Collisions</h2>
+
+<p>This is the <strong>most blocking element</strong>. All other problems (naming, typing, discoverability) are solvable with documentation and tooling. But bubbling collisions are a <em>runtime</em> problem that silently breaks applications.</p>
+
+<h3>The Scenario</h3>
+
+<p>When nested components emit identically-named events, listeners on ancestors fire for both. This is not hypothetical &mdash; it happens as soon as you compose blocks:</p>
+
+<pre><code class="language-html">&lt;!-- Outer component listens for "toggle" to track visibility --&gt;
+&lt;div id="app"&gt;
+  &lt;!-- A View-managed panel fires "toggle" --&gt;
+  &lt;section view&gt;
+    &lt;!-- A Popover inside fires "toggle" too --&gt;
+    &lt;div popover&gt;...&lt;/div&gt;
+  &lt;/section&gt;
+&lt;/div&gt;
+
+&lt;script&gt;
+  // This handler fires for BOTH toggle events!
+  app.addEventListener('toggle', (e) =&gt; {
+    // Is this the panel toggling or the popover toggling?
+    // e.type is 'toggle' in both cases.
+    // e.detail has the same shape in both cases.
+    // Only e.target differs.
+  });
+&lt;/script&gt;</code></pre>
+
+<h3>Today's Mitigations (All Inadequate)</h3>
+
+<table>
+  <thead>
+    <tr><th>Mitigation</th><th>Works?</th><th>Problem</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Check <code>event.target === event.currentTarget</code></td>
+      <td>Partially</td>
+      <td>Only works for direct children. Breaks with deeper nesting.</td>
+    </tr>
+    <tr>
+      <td>Check <code>event.eventPhase === Event.AT_TARGET</code></td>
+      <td>Partially</td>
+      <td>Same limitation. And consumers must remember to add the check.</td>
+    </tr>
+    <tr>
+      <td>Use <code>bubbles: false</code></td>
+      <td>Yes, but&hellip;</td>
+      <td>Prevents useful delegation patterns. Not always appropriate.</td>
+    </tr>
+    <tr>
+      <td>Module-prefixed names</td>
+      <td>Yes, but&hellip;</td>
+      <td>Convention-dependent. Doesn't solve same-name-different-source (View's <code>toggle</code> vs Popover's <code>toggle</code>).</td>
+    </tr>
+    <tr>
+      <td><code>instanceof</code> check</td>
+      <td>Yes, but&hellip;</td>
+      <td>Fails across realms (iframes). Requires importing the Event class. Consumers must remember.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>The Key Insight</h3>
+
+<p><strong>Two events with the same name being triggered is not a problem if only the correct listener answers.</strong></p>
+
+<p>The real issue isn't the event name &mdash; it's that <code>addEventListener</code> only discriminates by string name. If listeners could filter by something <em>other</em> than name (event class, source block, protocol tag), name collisions would become irrelevant.</p>
+
+<p>This reframes the problem: instead of preventing collisions at the <em>dispatch</em> side (naming), we can solve them at the <em>listener</em> side (discrimination).</p>
+
+
+<h2>Exploration Axis 1: Listener Discrimination</h2>
+
+<p>What if listeners could express <em>which</em> events they care about beyond just the name string?</p>
+
+
+<h3>Approach A: Listen by Event Class Reference</h3>
+
+<p>A utility or patched <code>addEventListener</code> that accepts an Event class instead of a string. Only events that are instances of that class trigger the handler.</p>
+
+<pre><code class="language-typescript">// blocks/tabs/events.ts
+export class TabChangeEvent extends CustomEvent&lt;TabChangeEventDetail&gt; {
+  static readonly type = 'tab-change';
+  constructor(detail: TabChangeEventDetail) {
+    super('tab-change', { bubbles: true, cancelable: true, detail });
+  }
+}
+
+// Consumer — import the class, not a string
+import { TabChangeEvent } from 'blocks/tabs';
+
+// Option 1: Utility function (no patching needed)
+listenFor(element, TabChangeEvent, (e) =&gt; {
+  // e is typed as TabChangeEvent
+  // Only fires for TabChangeEvent instances, not other 'tab-change' events
+});
+
+// Option 2: Patched addEventListener
+element.addEventListener(TabChangeEvent, (e) =&gt; {
+  // Same effect, more ergonomic
+});</code></pre>
+
+<p><strong>Implementation of <code>listenFor</code> is trivial:</strong></p>
+
+<pre><code class="language-typescript">function listenFor&lt;T extends Event&gt;(
+  target: EventTarget,
+  EventClass: { new(...args: any[]): T; readonly type: string },
+  handler: (event: T) =&gt; void,
+  options?: AddEventListenerOptions,
+): () =&gt; void {
+  const wrapper = (e: Event) =&gt; {
+    if (e instanceof EventClass) handler(e as T);
+  };
+  target.addEventListener(EventClass.type, wrapper, options);
+  return () =&gt; target.removeEventListener(EventClass.type, wrapper, options);
+}</code></pre>
+
+<table>
+  <thead>
+    <tr><th>Aspect</th><th>Assessment</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Collision safety</td><td>Full &mdash; <code>instanceof</code> is authoritative</td></tr>
+    <tr><td>Type safety</td><td>Full &mdash; handler receives typed event</td></tr>
+    <tr><td>No patching needed</td><td>Yes &mdash; <code>listenFor</code> is a pure utility</td></tr>
+    <tr><td>Cross-realm</td><td>Theoretical concern &mdash; <code>instanceof</code> fails across iframes, but DOM events don't cross iframe boundaries (separate document trees, no shared elements). In practice, iframe communication uses <code>postMessage</code> (serialized data, no event objects). Not a real limitation for DOM events.</td></tr>
+    <tr><td>DevTools</td><td>Normal &mdash; standard addEventListener under the hood</td></tr>
+    <tr><td>Third-party adoption</td><td>Requires importing Event classes. Third-party blocks must export them.</td></tr>
+  </tbody>
+</table>
+
+
+<h3>Approach B: Protocol-Tagged Events</h3>
+
+<p>Events carry a protocol identifier (a string or Symbol) that listeners can filter on. This uses data comparison rather than object identity.</p>
+
+<pre><code class="language-typescript">// A well-known Symbol for tagging events with protocol identity
+const EVENT_PROTOCOL = Symbol.for('we:event-protocol');
+
+// blocks/tabs/events.ts
+export class TabChangeEvent extends CustomEvent&lt;TabChangeEventDetail&gt; {
+  [EVENT_PROTOCOL] = 'we:tabs:change';
+
+  constructor(detail: TabChangeEventDetail) {
+    super('tab-change', { bubbles: true, cancelable: true, detail });
+  }
+}
+
+// Consumer — filter by protocol, not by class
+element.addEventListener('tab-change', (e) =&gt; {
+  if (e[EVENT_PROTOCOL] === 'we:tabs:change') {
+    // This is definitely from the Tabs block
+  }
+});
+
+// Or with a utility:
+listenForProtocol(element, 'we:tabs:change', (e) =&gt; { ... });</code></pre>
+
+<table>
+  <thead>
+    <tr><th>Aspect</th><th>Assessment</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Collision safety</td><td>Good &mdash; protocol strings are namespaced. Could also use Symbols for protocol IDs.</td></tr>
+    <tr><td>Cross-realm</td><td>Works in theory &mdash; <code>Symbol.for()</code> is shared across realms, protocol string is just data. But DOM events don't cross iframe boundaries anyway, so this advantage is moot for event discrimination.</td></tr>
+    <tr><td>Type safety</td><td>Partial &mdash; need to cast after filtering. Could use a typed map: <code>listenForProtocol&lt;TabChangeDetail&gt;(...)</code></td></tr>
+    <tr><td>Standards path</td><td>Could propose extending <code>addEventListener</code> options: <code>{ protocol: 'we:tabs:change' }</code></td></tr>
+    <tr><td>Discoverability</td><td>Events self-describe their source. Inspectable in DevTools via the property.</td></tr>
+    <tr><td>Overhead</td><td>Minimal &mdash; one property lookup per event dispatch</td></tr>
+  </tbody>
+</table>
+
+
+<h3>Approach C: Scoped Listener Registration</h3>
+
+<p>Instead of global <code>addEventListener</code>, listeners register through a scoped registry that knows which events belong to which blocks. The registry handles discrimination internally.</p>
+
+<pre><code class="language-typescript">// Each block registers its events in its own scope
+const tabEvents = new EventScope('tabs');
+tabEvents.define('change', { detail: TabChangeEventDetail, bubbles: true });
+
+// Producer dispatches through the scope
+tabEvents.dispatch(element, 'change', { from: 'a', to: 'b' });
+// Under the hood: dispatches CustomEvent('tabs::change', ...)
+// or adds a protocol tag, or uses a Symbol — the mechanism is hidden
+
+// Consumer listens through the scope — no collision possible
+tabEvents.on(element, 'change', (e) =&gt; {
+  // Only receives events dispatched through the 'tabs' scope
+});</code></pre>
+
+<p>This is similar to CSS's <code>@scope</code> concept &mdash; the scope boundary determines which events are visible.</p>
+
+<table>
+  <thead>
+    <tr><th>Aspect</th><th>Assessment</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Collision safety</td><td>Full &mdash; scopes are isolated by construction</td></tr>
+    <tr><td>Micro-frontend safe</td><td>Yes &mdash; each MFE gets its own scope. Late-loading MFEs can't collide.</td></tr>
+    <tr><td>Underlying mechanism</td><td>Flexible &mdash; could use prefixed strings, Symbols, or protocol tags internally</td></tr>
+    <tr><td>Global registry problem</td><td>Avoided &mdash; no single registry that all teams must coordinate through</td></tr>
+    <tr><td>Ergonomics</td><td>Less familiar than <code>addEventListener</code>. Requires importing the scope.</td></tr>
+    <tr><td>Interop with native events</td><td>Separate &mdash; native events (<code>click</code>, <code>input</code>) stay on standard <code>addEventListener</code></td></tr>
+  </tbody>
+</table>
+
+
+<h3>Approach D: Scoped Event Providers via Injectors</h3>
+
+<p>This approach builds on a key observation: with the protocol-based architecture of Web Everything, the <strong>exact implementation is not known in advance</strong> and can vary per component or view. A modal could use the default implementation provided everywhere, or a specific component could use a custom implementation while still adhering to the same protocol. In both cases, the same event name might be triggered (e.g., <code>form:validated</code>, <code>modal:closed</code>).</p>
+
+<p>The name itself cannot be relied upon &mdash; even if unlikely, unrelated components could trigger events with the same name. So we need to determine whether an event is "ours" &mdash; whether it came from a known, expected provider in the current scope.</p>
+
+<p><strong>The insight:</strong> A global registry is problematic because of name collisions. But a <strong>scoped registry</strong> works if it "provides" a specific event class for a specific use case. And while we can't use a global registry, events <em>do</em> carry their <code>target</code> &mdash; which can be used to resolve the <strong>current scoped event provider</strong> for that specific element via the injector system.</p>
+
+<pre><code class="language-typescript">// ── A block provides its event class through the injector ──
+// In a component's setup:
+const injector = InjectorRoot.getInjectorOf(this.element);
+injector.set('customEvents:modal-closed', ModalClosedEvent);
+
+// ── Another component deeper in the tree provides a different implementation ──
+const childInjector = InjectorRoot.getInjectorOf(this.childElement);
+childInjector.set('customEvents:modal-closed', CustomModalClosedEvent);
+
+// ── Consumer: use event.target to resolve the scoped provider ──
+element.addEventListener('modal-closed', (event) => {
+  // Ask the injector: "what event class is provided for 'modal-closed'
+  // in the DOM scope of this event's target?"
+  const ExpectedClass = InjectorRoot.getProviderOf(
+    event.target,
+    'customEvents:modal-closed'
+  );
+
+  if (ExpectedClass && event instanceof ExpectedClass) {
+    // This event came from a known provider in our scope.
+    // Safe to handle — it's the implementation we expect.
+    handleModalClosed(event);
+  }
+  // Otherwise: this is a 'modal-closed' event from an unknown source.
+  // Ignore it — it's not ours.
+});</code></pre>
+
+<p>This is the same DOM-tree scoping pattern that the injector system already uses for services, stores, and contexts &mdash; extended to events. The key components:</p>
+
+<ol>
+  <li><strong>Event classes are provided through injectors</strong> &mdash; each block registers its event class in its scope, just like it registers stores or contexts.</li>
+  <li><strong><code>event.target</code> is the resolution key</strong> &mdash; when an event arrives, its <code>target</code> tells us where in the DOM tree it originated. We walk the injector chain from that target to find the nearest provider for that event type.</li>
+  <li><strong>Different scopes can provide different implementations</strong> &mdash; a top-level provider might supply a standard <code>ModalClosedEvent</code>, while a specific subtree provides <code>CustomModalClosedEvent</code>. The consumer doesn't need to know which one &mdash; the injector resolves the right class for the scope.</li>
+  <li><strong><code>instanceof</code> validates the match</strong> &mdash; once we have the expected class from the injector, a standard <code>instanceof</code> check confirms the event came from a known provider.</li>
+</ol>
+
+<pre><code class="language-typescript">// ── listenForScoped utility ──
+function listenForScoped&lt;T extends Event&gt;(
+  target: EventTarget,
+  eventType: string,
+  providerKey: string,
+  handler: (event: T) =&gt; void,
+  options?: AddEventListenerOptions,
+): () =&gt; void {
+  const wrapper = (e: Event) =&gt; {
+    // Resolve the expected event class from the dispatch origin's scope
+    const ExpectedClass = InjectorRoot.getProviderOf(
+      e.target as Element,
+      providerKey,
+    );
+    if (ExpectedClass && e instanceof ExpectedClass) {
+      handler(e as T);
+    }
+  };
+  target.addEventListener(eventType, wrapper, options);
+  return () =&gt; target.removeEventListener(eventType, wrapper, options);
+}</code></pre>
+
+<pre><code class="language-typescript">// Usage — works even when different subtrees provide different event classes
+listenForScoped(
+  document.querySelector('#app'),
+  'modal-closed',
+  'customEvents:modal-closed',
+  (event) =&gt; {
+    // Only fires when a 'modal-closed' event comes from an element
+    // whose injector scope provides a matching event class.
+    console.log('Modal closed:', event.detail);
+  },
+);</code></pre>
+
+<h4>Why this works for protocol-based architecture</h4>
+
+<p>In Web Everything, the same <em>protocol</em> (e.g., "a modal that can close") can be implemented by different blocks. Each implementation might dispatch a <code>'modal-closed'</code> event, but with its own event class. The injector system already solves this for services &mdash; a consumer asks "give me the modal service" and gets whatever was provided in scope. Scoped event providers extend this to events: a consumer asks "what event class represents modal-closed in this scope?" and validates incoming events against it.</p>
+
+<p>This pattern is particularly powerful because:</p>
+<ul>
+  <li><strong>No global coordination needed</strong> &mdash; each scope declares its own event classes through the injector, just like it declares its own services.</li>
+  <li><strong>Late-loading is safe</strong> &mdash; a new micro-frontend brings its own injector scope with its own event providers. These don't conflict with existing scopes.</li>
+  <li><strong>Implementation swapping is transparent</strong> &mdash; if a subtree overrides the event provider (e.g., providing <code>CustomModalClosedEvent</code> instead of <code>ModalClosedEvent</code>), consumers using <code>listenForScoped</code> automatically validate against the right class.</li>
+  <li><strong>No cross-realm limitation in practice</strong> &mdash; while <code>instanceof</code> fails across JavaScript realms (iframes), this is not a real concern for DOM events. Iframe boundaries are document boundaries: events dispatched inside an iframe stay in that iframe's document tree and don't bubble out to the parent. There are no shared DOM elements across realms. Iframe communication uses <code>postMessage</code>, which serializes data &mdash; no event objects cross. Shadow DOM, module federation, and dynamic imports all run in the same realm. For DOM event discrimination, <code>instanceof</code> is fully reliable.</li>
+</ul>
+
+<table>
+  <thead>
+    <tr><th>Aspect</th><th>Assessment</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Collision safety</td><td>Full &mdash; injector scoping + <code>instanceof</code></td></tr>
+    <tr><td>Cross-realm</td><td>Not a concern &mdash; DOM events don't cross iframe boundaries. <code>instanceof</code> is reliable for all DOM event scenarios.</td></tr>
+    <tr><td>Zero patching</td><td>Yes &mdash; uses existing injector system</td></tr>
+    <tr><td>Type safety</td><td>Full &mdash; handler receives typed event from the provided class</td></tr>
+    <tr><td>Micro-frontend safe</td><td>Yes &mdash; each MFE brings its own injector scope</td></tr>
+    <tr><td>Protocol-based architecture</td><td><strong>Native fit</strong> &mdash; reuses the same provide/resolve pattern used for everything else</td></tr>
+    <tr><td>Implementation flexibility</td><td>Full &mdash; different subtrees can provide different event classes for the same protocol</td></tr>
+    <tr><td>DevTools</td><td>Normal &mdash; standard addEventListener under the hood</td></tr>
+  </tbody>
+</table>
+
+
+<h3>Comparison: Listener Discrimination Approaches</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th></th>
+      <th>Class Reference</th>
+      <th>Protocol Tag</th>
+      <th>Scoped Registry</th>
+      <th>Scoped Provider (Injector)</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>Cross-realm (iframes)</td><td colspan="4">Not applicable &mdash; DOM events don't cross iframe boundaries. All approaches work within a single realm, which is where DOM events operate.</td></tr>
+    <tr><td>Micro-frontend safe</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+    <tr><td>Zero patching</td><td>Yes</td><td>Yes</td><td>Yes</td><td>Yes</td></tr>
+    <tr><td>Type safety</td><td>Full</td><td>Partial</td><td>Full (if typed)</td><td>Full</td></tr>
+    <tr><td>Backward compatible</td><td>Yes</td><td>Yes</td><td>No (new API)</td><td>Yes (uses existing injectors)</td></tr>
+    <tr><td>DevTools friendly</td><td>Yes</td><td>Yes</td><td>Depends on impl</td><td>Yes</td></tr>
+    <tr><td>Protocol-based architecture</td><td>N/A</td><td>N/A</td><td>N/A</td><td><strong>Native fit</strong></td></tr>
+    <tr><td>Implementation swappable</td><td>No</td><td>No</td><td>No</td><td><strong>Yes</strong></td></tr>
+    <tr><td>Standards proposal path</td><td>Unlikely</td><td>Possible</td><td>Possible</td><td>Unlikely (framework-specific)</td></tr>
+  </tbody>
+</table>
+
+
+<h2>Exploration Axis 2: Symbol Events + Polyfill</h2>
+
+<p>See the <a href="#symbol-events-via-polyfill-feasibility-study">Symbol feasibility study above</a>. The key question is whether the benefits of inherent Symbol uniqueness justify the costs (DevTools degradation, cross-realm complexity, incompatibility with declarative HTML).</p>
+
+<p>The polyfill approach fits naturally into the plugs architecture. The "unplugged" mode would use string events with convention; the "plugged" mode would enable Symbol events with full collision safety.</p>
+
+<p>A <strong>combined approach</strong> is possible: use Symbols for the event identity (collision safety) and attach a protocol tag for discoverability and documentation. Since DOM events don't cross iframe boundaries, the cross-realm question is moot &mdash; both Symbols and <code>instanceof</code> work reliably within a single document.</p>
+
+
+<h2>Why a Global Registry Is Problematic</h2>
+
+<p>A single <code>CustomEventRegistry</code> (analogous to <code>window.customElements</code>) seems attractive but has structural problems for micro-frontends:</p>
+
+<ul>
+  <li><strong>First-come-first-served</strong> &mdash; If Team A registers <code>'change'</code> and Team B tries to register <code>'change'</code> later, who wins? A throw breaks the late loader. Silent overwrite breaks the early one.</li>
+  <li><strong>Load order dependency</strong> &mdash; Micro-frontends load in unpredictable order. A global registry creates implicit coupling between teams that have never coordinated.</li>
+  <li><strong>No isolation</strong> &mdash; Every registration is visible to every consumer. A team's internal events pollute the global namespace.</li>
+  <li><strong>Prefix registries?</strong> &mdash; Each registry could own a prefix (<code>tabRegistry.define('change')</code> &rarr; <code>'tabs:change'</code>). But without Symbols, a late-loading MFE could still claim the same prefix and throw. With Symbols, this problem disappears.</li>
+</ul>
+
+<p>If Symbols work (via polyfill), a global registry becomes unnecessary &mdash; Symbols are their own registry. If Symbols don't work, <strong>listener discrimination</strong> (protocol tags or scoped registries) provides isolation without a global coordination point.</p>
+
+
+<h2>Micro-Frontend Patterns</h2>
+
+<p>The micro-frontend world faces the same cross-team event problem at a larger scale.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Pattern</th>
+      <th>Description</th>
+      <th>Collision Strategy</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>window.dispatchEvent</code></td>
+      <td>Global event bus on window</td>
+      <td>Prefix conventions (<code>custom:</code>, project name)</td>
+    </tr>
+    <tr>
+      <td>Shared pub/sub bus</td>
+      <td>Library-managed subscribe/publish</td>
+      <td>Namespace in channel names</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/trutoo/event-bus">@trutoo/event-bus</a></td>
+      <td>Schema-validated event bus</td>
+      <td>JSON Schema validation + namespace:event naming. <strong>Identical schemas required for same channel.</strong></td>
+    </tr>
+    <tr>
+      <td>single-spa</td>
+      <td>MFE orchestrator</td>
+      <td>Recommends <code>custom:EVENT_NAME</code> prefix convention</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>All of these fall back to string conventions. None provide structural isolation. The @trutoo/event-bus approach is the most rigorous (schema validation at registration time), but it still depends on unique string names.</p>
+
+
+<h2>Recommendation</h2>
+
+<p>One API covers all DOM event discrimination: <strong><code>listenForScoped</code></strong>. It uses <code>instanceof</code> to discriminate events, with the expected event class resolved at runtime from the injector scope of <code>event.target</code>. This is the same provide/resolve pattern the injector system already uses for stores, contexts, and services &mdash; extended to events.</p>
+
+<p>The "build-time known class" case (what was previously <code>listenFor</code>) is simply <code>listenForScoped</code> where the event class happens to be registered at the document-level injector. No separate API needed &mdash; the registration cost is one <code>injector.set()</code> call, identical to what blocks already do for stores and contexts.</p>
+
+<p>Convention-based naming (module-prefixed event names) is a complementary baseline: it reduces accidental collisions for consumers using plain <code>addEventListener</code>. Protocol tags are an optional documentation/introspection layer. Symbols and EventScope are unnecessary &mdash; <code>instanceof</code> already solves the discrimination problem without their costs.</p>
+
+
+<h3>Shared Interfaces</h3>
+
+<p>Both <code>listenFor</code> and <code>listenForScoped</code> build on a common event class contract:</p>
+
+<pre><code class="language-typescript">/**
+ * Contract for a typed, self-describing custom event class.
+ *
+ * Every block event class implements this interface. The static `type`
+ * property provides the string event name for addEventListener;
+ * the class identity provides collision-safe discrimination via instanceof.
+ */
+interface TypedEventClass&lt;TDetail = unknown&gt; {
+  /** The DOM event name string (e.g., 'tab-change', 'modal-closed'). */
+  readonly type: string;
+
+  /** Construct a new instance with the given detail payload. */
+  new (detail: TDetail): TypedEvent&lt;TDetail&gt;;
+}
+
+/**
+ * A CustomEvent instance that carries typed detail and is identifiable
+ * by its class (instanceof) rather than by its string name alone.
+ */
+interface TypedEvent&lt;TDetail = unknown&gt; extends CustomEvent&lt;TDetail&gt; {
+  readonly detail: TDetail;
+}
+
+/**
+ * Return type for both listenFor and listenForScoped: a function that
+ * removes the event listener when called.
+ */
+type Unsubscribe = () =&gt; void;</code></pre>
+
+
+<h3><code>listenFor</code> &mdash; Lightweight Alternative</h3>
+
+<p>A zero-infrastructure shortcut for when you have the event class in hand (direct import) and don't need injector-based resolution. Useful in unit tests, standalone utilities, or code that should not depend on the injector system. Not a separate tier &mdash; it's the same <code>instanceof</code> primitive without the injector lookup.</p>
+
+<pre><code class="language-typescript">/**
+ * Listen for events of a specific class. Only events that pass an
+ * `instanceof` check against EventClass trigger the handler.
+ *
+ * @param target    - The element to listen on (can be an ancestor for delegation)
+ * @param EventClass - The event class to discriminate by
+ * @param handler   - Typed handler; receives the event as EventClass instance
+ * @param options   - Standard addEventListener options
+ * @returns Unsubscribe function that removes the listener
+ */
+function listenFor&lt;TDetail&gt;(
+  target: EventTarget,
+  EventClass: TypedEventClass&lt;TDetail&gt;,
+  handler: (event: TypedEvent&lt;TDetail&gt;) =&gt; void,
+  options?: AddEventListenerOptions,
+): Unsubscribe;</code></pre>
+
+<pre><code class="language-typescript">// ── Producer: define and export a typed event class ──
+export interface TabChangeDetail {
+  from: string | null;
+  to: string;
+  trigger: HTMLElement;
+}
+
+export class TabChangeEvent extends CustomEvent&lt;TabChangeDetail&gt; {
+  static readonly type = 'tab-change';
+
+  constructor(detail: TabChangeDetail) {
+    super(TabChangeEvent.type, { bubbles: true, cancelable: true, detail });
+  }
+}
+
+// Dispatch
+tabGroup.dispatchEvent(new TabChangeEvent({ from: 'a', to: 'b', trigger: btn }));
+
+// ── Consumer: import the class, get full type safety ──
+import { TabChangeEvent } from 'blocks/tabs';
+
+const unsub = listenFor(app, TabChangeEvent, (event) =&gt; {
+  // event.detail is typed as TabChangeDetail
+  // Only fires for TabChangeEvent instances — not for other 'tab-change' events
+  console.log(`Tab changed from ${event.detail.from} to ${event.detail.to}`);
+});
+
+// Clean up
+unsub();</code></pre>
+
+<h4>When to use</h4>
+
+<ul>
+  <li>You <code>npm install @acme/tabs</code> and use it directly &mdash; import its event class</li>
+  <li>You build components within the same project &mdash; import across modules</li>
+  <li>You coordinate with another team on a shared package &mdash; the event class is the shared contract</li>
+</ul>
+
+<h4>Example: Nested discrimination</h4>
+
+<p>Two blocks both fire events with the string name <code>toggle</code>. An ancestor listens for both without ambiguity:</p>
+
+<pre><code class="language-typescript">// blocks/view/events.ts
+export class ViewToggleEvent extends CustomEvent&lt;ViewToggleDetail&gt; {
+  static readonly type = 'toggle';
+  constructor(detail: ViewToggleDetail) {
+    super(ViewToggleEvent.type, { detail });
+  }
+}
+
+// blocks/dropdown/events.ts
+export class DropdownToggleEvent extends CustomEvent&lt;DropdownToggleDetail&gt; {
+  static readonly type = 'toggle';
+  constructor(detail: DropdownToggleDetail) {
+    super(DropdownToggleEvent.type, { bubbles: true, detail });
+  }
+}
+
+// ── Consumer: same string name, different classes, no ambiguity ──
+import { ViewToggleEvent } from 'blocks/view';
+import { DropdownToggleEvent } from 'blocks/dropdown';
+
+listenFor(app, ViewToggleEvent, (e) =&gt; {
+  console.log('Panel visibility:', e.detail.newState);
+});
+
+listenFor(app, DropdownToggleEvent, (e) =&gt; {
+  console.log('Dropdown open:', e.detail.open);
+});
+
+// A native Popover 'toggle' event fires neither handler — it's a plain ToggleEvent,
+// not an instance of ViewToggleEvent or DropdownToggleEvent.</code></pre>
+
+<h4>Example: Lifecycle cleanup in a CustomAttribute</h4>
+
+<pre><code class="language-typescript">import { TabChangeEvent } from 'blocks/tabs';
+
+class MyBehavior extends CustomAttribute {
+  #unsub?: Unsubscribe;
+
+  connectedCallback() {
+    // Listen on the closest ancestor — only TabChangeEvent instances fire
+    this.#unsub = listenFor(this.target, TabChangeEvent, (e) =&gt; {
+      this.#onTabChange(e.detail);
+    });
+  }
+
+  disconnectedCallback() {
+    this.#unsub?.();
+  }
+
+  #onTabChange(detail: TabChangeDetail) {
+    // Guaranteed typed detail — no runtime shape checking needed
+    console.log(`Switched to tab: ${detail.to}`);
+  }
+}</code></pre>
+
+<h4>Example: Broadcast commands</h4>
+
+<p><code>listenFor</code> also solves broadcast commands naturally. Dispatch on <code>document</code>, listen on <code>document</code>:</p>
+
+<pre><code class="language-typescript">// commands/modals.ts
+export class CloseAllModalsCommand extends CustomEvent&lt;void&gt; {
+  static readonly type = 'close-modals';
+  constructor() {
+    super(CloseAllModalsCommand.type, { bubbles: false });
+  }
+}
+
+// ── Any code can broadcast ──
+document.dispatchEvent(new CloseAllModalsCommand());
+
+// ── Every modal listens — only CloseAllModalsCommand instances trigger it ──
+class ModalBehavior extends CustomAttribute {
+  #unsub?: Unsubscribe;
+
+  connectedCallback() {
+    this.#unsub = listenFor(document, CloseAllModalsCommand, () =&gt; {
+      this.#close();
+    });
+  }
+
+  disconnectedCallback() {
+    this.#unsub?.();
+  }
+
+  #close() { /* hide the modal */ }
+}</code></pre>
+
+<p>Other teams dispatching unrelated <code>'close-modals'</code> events won't trigger the handler &mdash; only <code>CloseAllModalsCommand</code> instances pass the <code>instanceof</code> check.</p>
+
+
+<h3><code>listenForScoped</code> &mdash; The Primary API</h3>
+
+<p>The single event discrimination API for Web Everything. The injector resolves the expected event class from <code>event.target</code>'s scope at runtime, then validates via <code>instanceof</code>. Covers all scenarios: same-project events (register at document level), plugin architectures (register per scope), broadcast commands (dispatch on <code>document</code>), and implementation swapping (different scopes provide different classes).</p>
+
+<pre><code class="language-typescript">/**
+ * Listen for events whose class is resolved at runtime from the
+ * injector scope of the event's target element.
+ *
+ * When an event arrives, the injector is queried via event.target to
+ * find the expected event class for this provider key. If found and
+ * the event passes instanceof, the handler fires.
+ *
+ * @param target      - The element to listen on
+ * @param eventType   - The DOM event name string to listen for
+ * @param providerKey - The injector key that maps to the expected event class
+ * @param handler     - Handler that receives the validated event
+ * @param options     - Standard addEventListener options
+ * @returns Unsubscribe function that removes the listener
+ */
+function listenForScoped&lt;TDetail&gt;(
+  target: EventTarget,
+  eventType: string,
+  providerKey: string,
+  handler: (event: TypedEvent&lt;TDetail&gt;) =&gt; void,
+  options?: AddEventListenerOptions,
+): Unsubscribe;</code></pre>
+
+<pre><code class="language-typescript">// ── Provider A: standard modal implementation ──
+export class ModalClosedEvent extends CustomEvent&lt;{ reason: string }&gt; {
+  static readonly type = 'modal-closed';
+  constructor(detail: { reason: string }) {
+    super(ModalClosedEvent.type, { bubbles: true, detail });
+  }
+}
+
+// Registered in the injector at a scope boundary
+const injector = InjectorRoot.getInjectorOf(appRoot);
+injector.set('customEvents:modal-closed', ModalClosedEvent);
+
+// ── Provider B: custom modal in a different subtree ──
+export class FancyModalClosedEvent extends CustomEvent&lt;{ reason: string }&gt; {
+  static readonly type = 'modal-closed'; // Same DOM event name
+  constructor(detail: { reason: string }) {
+    super(FancyModalClosedEvent.type, { bubbles: true, detail });
+  }
+}
+
+// Different scope, different class for the same protocol
+const childInjector = InjectorRoot.getInjectorOf(widgetRoot);
+childInjector.set('customEvents:modal-closed', FancyModalClosedEvent);
+
+// ── Consumer: doesn't import any specific class ──
+const unsub = listenForScoped(
+  document.querySelector('#app'),
+  'modal-closed',
+  'customEvents:modal-closed',
+  (event) =&gt; {
+    // Fires for ModalClosedEvent from appRoot's scope
+    // Fires for FancyModalClosedEvent from widgetRoot's scope
+    // Ignores 'modal-closed' events from unknown sources
+    console.log('Modal closed:', event.detail.reason);
+  },
+);</code></pre>
+
+<h4>When to use</h4>
+
+<ul>
+  <li>A dashboard renders widgets it doesn't know about at build time &mdash; widgets are injected</li>
+  <li>A form handles validation events from field implementations that may vary per deployment</li>
+  <li>You build a framework layer where the concrete block is decided by the integrator, not by you</li>
+  <li>You want to swap implementations (e.g., <code>@acme/modal</code> &rarr; <code>@other/modal</code>) without changing consumer code</li>
+</ul>
+
+<h4>Example: Plugin dashboard with unknown widgets</h4>
+
+<pre><code class="language-typescript">// ── Widget protocol: any widget can fire 'widget-action' ──
+// Team A's widget
+export class ChartActionEvent extends CustomEvent&lt;{ action: string; data: unknown }&gt; {
+  static readonly type = 'widget-action';
+  constructor(detail: { action: string; data: unknown }) {
+    super(ChartActionEvent.type, { bubbles: true, detail });
+  }
+}
+
+// Team B's widget — different class, same event name
+export class TableActionEvent extends CustomEvent&lt;{ action: string; data: unknown }&gt; {
+  static readonly type = 'widget-action';
+  constructor(detail: { action: string; data: unknown }) {
+    super(TableActionEvent.type, { bubbles: true, detail });
+  }
+}
+
+// ── Each widget registers its event class in its own scope ──
+// When team A's chart widget mounts:
+const chartInjector = InjectorRoot.getInjectorOf(chartContainer);
+chartInjector.set('customEvents:widget-action', ChartActionEvent);
+
+// When team B's table widget mounts:
+const tableInjector = InjectorRoot.getInjectorOf(tableContainer);
+tableInjector.set('customEvents:widget-action', TableActionEvent);
+
+// ── Dashboard: listens for all widget actions without importing any widget class ──
+listenForScoped(
+  dashboard,
+  'widget-action',
+  'customEvents:widget-action',
+  (event) =&gt; {
+    // Fires for ChartActionEvent from the chart scope
+    // Fires for TableActionEvent from the table scope
+    // Ignores 'widget-action' from an unknown third-party script
+    console.log('Widget action:', event.detail.action, event.detail.data);
+  },
+);</code></pre>
+
+<h4>Example: Swappable form field validation</h4>
+
+<pre><code class="language-typescript">// ── Two validation implementations that adhere to the same protocol ──
+
+// Default: simple HTML5 validation
+class SimpleValidationEvent extends CustomEvent&lt;{ valid: boolean; message?: string }&gt; {
+  static readonly type = 'field-validated';
+  constructor(detail: { valid: boolean; message?: string }) {
+    super(SimpleValidationEvent.type, { bubbles: true, detail });
+  }
+}
+
+// Premium: schema-based validation with error codes
+class SchemaValidationEvent extends CustomEvent&lt;{ valid: boolean; message?: string }&gt; {
+  static readonly type = 'field-validated';
+  constructor(detail: { valid: boolean; message?: string }) {
+    super(SchemaValidationEvent.type, { bubbles: true, detail });
+  }
+}
+
+// ── Deployer chooses which implementation to provide ──
+const formInjector = InjectorRoot.getInjectorOf(formElement);
+formInjector.set('customEvents:field-validated', SchemaValidationEvent);
+// Swap to SimpleValidationEvent in a different deployment — no consumer changes.
+
+// ── Form handler: doesn't care which validation is used ──
+listenForScoped(
+  formElement,
+  'field-validated',
+  'customEvents:field-validated',
+  (event) =&gt; {
+    if (!event.detail.valid) {
+      showError(event.detail.message);
+    }
+  },
+);</code></pre>
+
+<h4>Example: Lifecycle in a framework layer</h4>
+
+<pre><code class="language-typescript">// A reusable container behavior that reacts to child events
+// without knowing the concrete child implementations.
+class ContainerBehavior extends CustomAttribute {
+  #unsubs: Unsubscribe[] = [];
+
+  connectedCallback() {
+    // Listen for any 'item-selected' event from a known provider
+    this.#unsubs.push(
+      listenForScoped(this.target, 'item-selected', 'customEvents:item-selected', (e) =&gt; {
+        this.#handleSelection(e.detail);
+      }),
+    );
+
+    // Listen for any 'item-removed' event from a known provider
+    this.#unsubs.push(
+      listenForScoped(this.target, 'item-removed', 'customEvents:item-removed', (e) =&gt; {
+        this.#handleRemoval(e.detail);
+      }),
+    );
+  }
+
+  disconnectedCallback() {
+    this.#unsubs.forEach(unsub =&gt; unsub());
+    this.#unsubs = [];
+  }
+
+  #handleSelection(detail: unknown) { /* ... */ }
+  #handleRemoval(detail: unknown) { /* ... */ }
+}</code></pre>
+
+
+<h3>Plugged Mode: Browser-Native Ergonomics</h3>
+
+<p>The examples above show <code>listenForScoped</code> as an <strong>unplugged</strong> utility &mdash; explicit import, standalone function. Web Everything's plugs architecture patches browser APIs to make features feel native. In plugged mode, event discrimination becomes a standard <code>addEventListener</code> option.</p>
+
+<h4>Plugged <code>listenForScoped</code>: <code>addEventListener</code> with <code>provider</code> option</h4>
+
+<p>The plug extends <code>AddEventListenerOptions</code> with a <code>provider</code> key. When present, the listener resolves the expected event class from <code>event.target</code>'s injector scope and validates via <code>instanceof</code> &mdash; all transparently.</p>
+
+<pre><code class="language-typescript">// ── The plug (applied by bootstrap.ts) ──
+const origAddEventListener = EventTarget.prototype.addEventListener;
+const origRemoveEventListener = EventTarget.prototype.removeEventListener;
+
+// WeakMap to track wrapper functions for removeEventListener
+const wrapperMap = new WeakMap&lt;Function, Map&lt;EventTarget, Function&gt;&gt;();
+
+// ── Extended options interface ──
+interface TypedEventListenerOptions extends AddEventListenerOptions {
+  /**
+   * Injector provider key. When set, the listener resolves the expected
+   * event class from event.target's injector scope and applies instanceof
+   * discrimination automatically.
+   */
+  provider?: string;
+}
+
+EventTarget.prototype.addEventListener = function(
+  type: string,
+  listener: EventListenerOrEventListenerObject | null,
+  options?: boolean | TypedEventListenerOptions,
+) {
+  // Check for provider in options
+  if (
+    typeof options === 'object' &&
+    options?.provider
+  ) {
+    const eventType = type;
+    const providerKey = options.provider;
+    const wrapper = (e: Event) =&gt; {
+      const ExpectedClass = InjectorRoot.getProviderOf(
+        e.target as Element,
+        providerKey,
+      );
+      if (ExpectedClass && e instanceof ExpectedClass) {
+        (listener as EventListener)(e);
+      }
+    };
+    if (!wrapperMap.has(listener as Function)) {
+      wrapperMap.set(listener as Function, new Map());
+    }
+    wrapperMap.get(listener as Function)!.set(this, wrapper);
+    return origAddEventListener.call(this, eventType, wrapper, options);
+  }
+
+  // Plain string — standard behavior
+  return origAddEventListener.call(this, type, listener, options);
+};</code></pre>
+
+<p>With this plug applied, event discrimination feels like a native browser feature:</p>
+
+<pre><code class="language-typescript">// ── Plugged mode: provider option on addEventListener ──
+
+// Standard addEventListener call — the provider option triggers
+// injector-based resolution at runtime
+dashboard.addEventListener('widget-action', (event) =&gt; {
+  // Only fires for events whose class matches the injector-provided
+  // class at event.target's scope
+  console.log('Widget action:', event.detail);
+}, {
+  provider: 'customEvents:widget-action',
+});
+
+// Form validation — swap implementations without changing this code
+form.addEventListener('field-validated', (event) =&gt; {
+  if (!event.detail.valid) {
+    showError(event.detail.message);
+  }
+}, {
+  provider: 'customEvents:field-validated',
+});
+
+// Standard string-based listener still works — no breaking change
+app.addEventListener('click', (e) =&gt; {
+  console.log('Clicked:', e.target);
+});</code></pre>
+
+<pre><code class="language-html">&lt;!-- Full plugged demo --&gt;
+&lt;script type="module"&gt;
+  // No imports needed for the listening side — just standard addEventListener
+  // with an extra option. The plug + injector handle the rest.
+
+  const dashboard = document.querySelector('#dashboard');
+
+  // Discriminated listener — feels native
+  dashboard.addEventListener('widget-action', (e) =&gt; {
+    console.log('Action from widget:', e.detail.action);
+  }, {
+    provider: 'customEvents:widget-action',
+  });
+
+  // Meanwhile, each widget registers its event class through the injector
+  // when it mounts — this is the provider side, unchanged from unplugged mode.
+&lt;/script&gt;</code></pre>
+
+<p>The key property: <strong>this is additive, not breaking</strong>. Passing no <code>provider</code> option works exactly as standard <code>addEventListener</code>. Adding the option enables discrimination transparently.</p>
+
+<h4>Plugged mode summary</h4>
+
+<table>
+  <thead>
+    <tr><th></th><th>Unplugged (utility)</th><th>Plugged (patched API)</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Discriminated listener</strong></td>
+      <td><code>listenForScoped(el, 'type', 'key', handler)</code></td>
+      <td><code>el.addEventListener('type', handler, { provider: 'key' })</code></td>
+    </tr>
+    <tr>
+      <td><strong>Plain string</strong></td>
+      <td><code>el.addEventListener('click', handler)</code></td>
+      <td><code>el.addEventListener('click', handler)</code></td>
+    </tr>
+    <tr>
+      <td><strong>Cleanup</strong></td>
+      <td><code>const unsub = listenForScoped(...); unsub()</code></td>
+      <td><code>el.removeEventListener('type', handler)</code></td>
+    </tr>
+    <tr>
+      <td><strong>Imports needed</strong></td>
+      <td><code>listenForScoped</code></td>
+      <td>Nothing (just the provider key string)</td>
+    </tr>
+    <tr>
+      <td><strong>Tree-shakeable</strong></td>
+      <td>Yes</td>
+      <td>No (global patch)</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The plugged version requires <strong>no new API to learn</strong> &mdash; it extends the existing <code>addEventListener</code> options object that every web developer already knows. The unplugged utility (<code>listenForScoped</code>) remains available for tree-shaking or environments where patching browser globals is undesirable. The lightweight alternative (<code>listenFor</code>) is available for code that should not depend on the injector system.</p>
+
+
+<h3>Convention (Complementary Baseline)</h3>
+
+<p>Module-prefixed naming reduces accidental collisions even for consumers using plain <code>addEventListener</code>. This is always applied as a baseline alongside <code>listenForScoped</code>:</p>
+
+<pre><code class="language-text">Standard-aligned events:   Use the standard name (beforetoggle, toggle)
+Module-scoped events:      module-eventname (tab-change, route-change)
+Custom commands:           --module-action (--view-show, --tab-activate)</code></pre>
+
+<p>Convention is belt-and-suspenders &mdash; it helps, but <code>instanceof</code> is the structural guarantee.</p>
+
+
+<h3>Documentation Layer (Always)</h3>
+
+<p>Regardless of which utility is used, blocks declare their events in the documentation layer (JSON + CEM):</p>
+
+<pre><code class="language-json">{
+  "events": {
+    "tab-change": {
+      "taxonomy": "notification",
+      "detail": { "from": "string|null", "to": "string", "trigger": "HTMLElement" },
+      "bubbles": true,
+      "cancelable": true,
+      "class": "TabChangeEvent",
+      "provider": "customEvents:tab-change"
+    }
+  }
+}</code></pre>
+
+<p>This enables tooling validation, documentation cross-references, and CEM generation. The <code>provider</code> field maps to the injector provider key used by <code>listenForScoped</code>.</p>
+
+
+<h2>Open Questions</h2>
+
+<ol>
+  <li><strong>What do we call the three event categories?</strong> Notification / Targeted Command / Broadcast Command is the concept, but all three terms are overloaded. Need clear, unambiguous terminology that works in documentation, code, and conversation.</li>
+
+  <li><strong>Should standard-aligned events (toggle, beforetoggle) use typed event classes?</strong> View's <code>toggle</code> deliberately matches the Popover API shape. Should View define a <code>ViewToggleEvent</code> class, or dispatch plain <code>CustomEvent</code> to stay aligned with the standard? If it uses a typed class, consumers using <code>listenForScoped</code> can distinguish View's toggle from Popover's &mdash; but should they?</li>
+
+  <li><strong>How does <code>composed: true</code> interact with discrimination?</strong> Events crossing shadow DOM boundaries remain in the same realm (no <code>instanceof</code> issue), but <code>event.target</code> may be retargeted. Does <code>listenForScoped</code> need to account for composed event retargeting when resolving the injector scope?</li>
+
+  <li><strong>How should <code>on:event</code> attributes integrate with <code>listenForScoped</code>?</strong> Declarative HTML attributes work with string names. Could a modifier like <code>on:tab-change.scoped="handler"</code> internally use <code>listenForScoped</code> with the element's injector scope? Or should declarative listeners always use plain <code>addEventListener</code>?</li>
+
+  <li><strong>Can we align with CEM?</strong> The Custom Elements Manifest <code>events[]</code> field could be extended with <code>taxonomy</code>, <code>class</code>, and <code>provider</code> properties. This would benefit the entire web components ecosystem.</li>
+
+  <li><strong>What should the provider key convention be?</strong> <code>'customEvents:modal-closed'</code> mirrors the existing <code>'customContexts:...'</code> pattern, but should the key be the event name, a protocol identifier, or something else? Should there be a <code>CustomEventProvider</code> registry parallel to <code>CustomStoreRegistry</code>?</li>
+</ol>
+
+
+<h2>Next Steps</h2>
+
+<ol>
+  <li><strong>Implement <code>listenForScoped</code></strong> &mdash; Build the primary utility function. Test with different implementations in different scopes to validate injector-based discrimination and implementation swapping.</li>
+  <li><strong>Convert existing events to typed classes</strong> &mdash; Replace inline <code>new CustomEvent()</code> calls in ViewEngine, TabGroupBehavior, and RouteViewElement with typed event classes that implement <code>TypedEventClass</code>. Register each in the injector at the appropriate scope.</li>
+  <li><strong>Implement the <code>provider</code> plug</strong> &mdash; Patch <code>addEventListener</code> to accept the <code>provider</code> option for plugged mode.</li>
+  <li><strong>Implement <code>listenFor</code></strong> &mdash; Build the lightweight alternative for use in unit tests and injector-free code.</li>
+  <li><strong>Document event taxonomy</strong> &mdash; Add <code>taxonomy</code>, <code>class</code>, and <code>provider</code> fields to block event declarations in <code>blocks.json</code>. Establish terminology.</li>
+  <li><strong>Test broadcast commands</strong> &mdash; Verify the <code>listenForScoped</code> + <code>document</code> pattern for broadcast commands (close all modals, pause all media).</li>
+</ol>
+
+
+<h2>Appendix: Naming Convention Prior Art</h2>
+
+<p>For reference &mdash; the existing convention-based approaches in the wild. These are the <strong>last resort</strong> if structural solutions (listener discrimination, Symbols) prove unworkable.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Pattern</th>
+      <th>Example</th>
+      <th>Used By</th>
+      <th>Trade-offs</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Library prefix</td>
+      <td><code>sl-change</code>, <code>sl-show</code></td>
+      <td><a href="https://www.abeautifulsite.net/posts/why-you-should-prefix-custom-events/">Shoelace / Web Awesome</a></td>
+      <td>Clear provenance. Verbose. Doesn't solve shared semantics.</td>
+    </tr>
+    <tr>
+      <td>Colon namespace</td>
+      <td><code>my-lib:change</code></td>
+      <td>Some community libs</td>
+      <td>Structured. Not standard. Colon already used by attributes (<code>on:click</code>).</td>
+    </tr>
+    <tr>
+      <td>No prefix</td>
+      <td><code>change</code>, <code>toggle</code></td>
+      <td>Native DOM, Lit examples</td>
+      <td>Ergonomic. Highest collision risk.</td>
+    </tr>
+    <tr>
+      <td>Double-dash prefix</td>
+      <td><code>--view-show</code></td>
+      <td>Invoker Commands API</td>
+      <td><strong>Strongest standard precedent.</strong> Browsers guarantee no built-in values start with <code>--</code>.</td>
+    </tr>
+    <tr>
+      <td>Custom Event subclass</td>
+      <td><code>class TabChangeEvent extends Event {}</code></td>
+      <td><a href="https://open-wc.org/guides/knowledge/events/">Open Web Components</a></td>
+      <td>Disambiguates via <code>instanceof</code>. Doesn't prevent name collisions.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Convention works for a single team or coordinated teams. It does not scale to the cross-organization, multi-team scenario that Web Everything targets. If we resort to convention, it should be <em>in addition to</em> structural safeguards, not instead of them.</p>
+
+
+<h2>References</h2>
+
+<ul>
+  <li><a href="https://dom.spec.whatwg.org/#interface-customevent">WHATWG DOM: CustomEvent Interface</a></li>
+  <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API">MDN: Invoker Commands API</a> &mdash; <code>--</code> prefix convention for custom commands</li>
+  <li><a href="https://open-ui.org/components/invokers.explainer/">Open UI: Invoker Commands Explainer</a></li>
+  <li><a href="https://github.com/webcomponents/custom-elements-manifest">Custom Elements Manifest</a> &mdash; static event documentation format</li>
+  <li><a href="https://www.abeautifulsite.net/posts/why-you-should-prefix-custom-events/">Why You Should Prefix Custom Events</a> (Cory LaViska / Shoelace)</li>
+  <li><a href="https://www.abeautifulsite.net/posts/custom-event-names-and-the-bubbling-problem/">Custom Event Names and the Bubbling Problem</a> (Cory LaViska)</li>
+  <li><a href="https://open-wc.org/guides/knowledge/events/">Open Web Components: Events Guide</a></li>
+  <li><a href="https://github.com/webcomponents-cg/community-protocols">Web Components Community Protocols</a></li>
+  <li><a href="https://github.com/whatwg/dom/issues/412">WHATWG DOM #412: EventTarget.getEventListeners()</a></li>
+  <li><a href="https://github.com/whatwg/html/issues/10854">WHATWG HTML #10854: Scoped Custom Element Registries</a></li>
+  <li><a href="https://github.com/WICG/observable">WICG Observable API</a></li>
+  <li><a href="https://github.com/trutoo/event-bus">@trutoo/event-bus</a> &mdash; schema-validated micro-frontend event bus</li>
+</ul>

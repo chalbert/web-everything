@@ -13,6 +13,9 @@
     "outDir": "./dist/plugs",
     "rootDir": "./plugs",
     "baseUrl": "./plugs",
+    "jsx": "react",
+    "jsxFactory": "jsx.createElement",
+    "jsxFragmentFactory": "jsx.Fragment",
     "paths": {
       "@core/*": ["core/*"],
       "@webregistries/*": ["webregistries/*"],
@@ -21,6 +24,6 @@
       "@webcontexts/*": ["webcontexts/*"]
     }
   },
-  "include": ["plugs/**/*"],
-  "exclude": ["plugs/**/__tests__/**/*", "plugs/**/*.test.ts", "plugs/**/*.spec.ts"]
+  "include": ["plugs/**/*", "blocks/**/*"],
+  "exclude": ["plugs/**/__tests__/**/*", "plugs/**/*.test.ts", "plugs/**/*.spec.ts", "blocks/**/__tests__/**/*", "blocks/**/*.test.ts"]
 }

@@ -10,8 +10,35 @@
                 This enables the "Write Once, Run Everywhere" promise for UI components: the same <code>&lt;List&gt;</code> component can verify as a dense, mouse-driven data grid on Desktop and a spacious, touch-driven collection on Mobile, purely by swapping the active Intent Provider.
             </p>
             <p>
-                Crucially, this system pairs with <strong><a href="/projects/webtraits/">Web Traits</a></strong> to ensure zero overhead. 
+                Crucially, this system pairs with <strong><a href="/projects/webtraits/">Web Traits</a></strong> to ensure zero overhead.
                 Since the component only declares <em>intent</em>, the actual code implementation (e.g., the complex physics engine for "Swipe to Archive") is only loaded if that specific intent is active, keeping bundles lean.
+            </p>
+
+            <h3 id="philosophy">Philosophy</h3>
+            <p>
+                Each intent documents the <strong>complete vocabulary</strong> of UX possibilities for a given concern — not a single prescribed solution.
+                For example, the Loader Intent doesn't say "use a spinner"; it catalogs every way loading states can affect the user experience
+                (blocking strategies, progress indication, timing, skeleton vs. spinner, initial load vs. transition)
+                so that an application can <strong>declare</strong> its chosen profile.
+            </p>
+            <p>
+                This research-backed vocabulary is informed by design system analysis (Material, Carbon, Fluent, Spectrum, Apple HIG) and
+                UX research (Nielsen Norman Group, perceived performance studies). Intents may recommend approaches based on evidence,
+                but they never enforce a single way. The application decides.
+            </p>
+
+            <h3 id="intents-vs-blocks">Intents vs. Blocks</h3>
+            <p>
+                Intents define <em>what</em> the user should experience (the UX contract).
+                <a href="/projects/webblocks/">Blocks</a> define <em>how</em> it's implemented (the technical contract).
+                A Loader Intent declares "use soft-blocking with debounced timing";
+                the implementing Block decides whether to use <code>aria-busy</code>, a <code>&lt;progress&gt;</code> element,
+                or a CSS shimmer animation to fulfill that intent.
+            </p>
+            <p>
+                This separation means an application can swap its entire loading UX — from spinners to skeletons —
+                by changing intent configuration, without modifying component source code or even recompiling.
+                The trait system loads only the rendering code needed for the active intent profile.
             </p>
         </section>
 

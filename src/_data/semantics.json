@@ -5,6 +5,11 @@
     "usage": "Standardized by Action Intent."
   },
   {
+    "term": "beforetoggle",
+    "definition": "A cancelable event fired before a visibility change. Call preventDefault() to cancel the transition.",
+    "usage": "Matches Popover API pattern. Fired by ViewEngine on all View blocks. Event detail contains <code>oldState</code> and <code>newState</code> ('hidden' or 'visible')."
+  },
+  {
     "term": "Anchor",
     "definition": "A positioning reference point that allows an element to place itself relative to another element (the anchor), handling collision and flipping.",
     "usage": "Standardized by Anchor Intent (CSS Anchor Positioning)."
@@ -35,6 +40,11 @@
     "usage": "Located in `src/cases/`."
   },
   {
+    "term": "commandfor/command",
+    "definition": "Declarative trigger pattern from Invoker Commands API. Button references target by ID (commandfor) and specifies action (command). Custom commands use -- prefix.",
+    "usage": "Standard pattern (Baseline Jan 2026). Example: <code>&lt;button commandfor=\"panel-1\" command=\"--view-show\"&gt;</code>"
+  },
+  {
     "term": "Component",
     "definition": "An encapsulated custom element with its own shadow DOM and lifestyle."
   },
@@ -42,6 +52,11 @@
     "term": "Composite Widget",
     "definition": "A UI component managing focus for its children (e.g., Listbox, Grid) via specific keyboard patterns like Roving Tabindex.",
     "usage": "Standardized by Composite Widget Protocol."
+  },
+  {
+    "term": "content-visibility",
+    "definition": "CSS property for lazy rendering. 'hidden' skips rendering but keeps element in accessibility tree. 'auto' renders only when near viewport.",
+    "usage": "Standard (Baseline). Preferred for <code>view:show</code> as it provides best performance while maintaining accessibility."
   },
   {
     "term": "Context",
@@ -84,9 +99,29 @@
     "usage": "A core principle of Reliability Intent."
   },
   {
+    "term": "hidden/visible",
+    "definition": "Binary visibility states used in toggle events. Preferred over 'open/closed' or 'active/inactive' for consistency with Popover API.",
+    "usage": "Standard event detail shape: <code>{ oldState: 'hidden', newState: 'visible' }</code>"
+  },
+  {
+    "term": "hidden=\"until-found\"",
+    "definition": "HTML attribute value that hides content but allows browser search (Ctrl+F) to find and reveal it.",
+    "usage": "Standard (Interop 2025). Excellent for accordions, FAQs, and searchable expandable content."
+  },
+  {
     "term": "Iconography",
     "definition": "Visual symbols standards including sizing scales, stroke weights, and positioning strategies to ensure optical balance.",
     "usage": "Standardized by Icon Intent."
+  },
+  {
+    "term": "if/else (view)",
+    "definition": "Conditional rendering that adds/removes content from DOM. Clean unmount with no state retention.",
+    "usage": "Implemented by ViewIfDirective. Use for expensive components, auth gates, or when cleanup is needed. Contrast with <code>view:show</code> (ViewShowBehavior) which toggles visibility only."
+  },
+  {
+    "term": "inert",
+    "definition": "HTML attribute that makes element and descendants non-interactive. Removed from tab order and accessibility tree for interaction.",
+    "usage": "Standard. Use for preview states, disabled sections, or content behind modals."
   },
   {
     "term": "Input",
@@ -97,6 +132,11 @@
     "term": "Interaction",
     "definition": "The handling of input modalities (pointer, touch, gamepad, keyboard) and the feedback loops required for each.",
     "usage": "Standardized by Interaction Intent."
+  },
+  {
+    "term": "keep-alive",
+    "definition": "Feature that preserves component state when hidden instead of destroying it. Supports max cache limit with LRU eviction.",
+    "usage": "Inspired by Vue KeepAlive. Essential for tabs where users expect form state to persist."
   },
   {
     "term": "Keyboard Shortcuts",
@@ -144,9 +184,19 @@
     "usage": "Standardized by Motion Intent."
   },
   {
+    "term": "name (exclusive groups)",
+    "definition": "Attribute that groups elements for mutual exclusivity. Only one element with the same name value can be active/visible at a time.",
+    "usage": "Standard pattern from HTML (radio buttons, <code>&lt;details name&gt;</code> accordion). Preferred over 'group' attribute."
+  },
+  {
     "term": "Navigation",
     "definition": "The structure of application flow (Hierarchical, Lateral, Linear) and the mechanism for transitioning between views.",
     "usage": "Standardized by Navigation Intent."
+  },
+  {
+    "term": "outlet",
+    "definition": "A named insertion point for routed or projected content. Enables router integration and parent-controlled content projection.",
+    "usage": "Term from React Router and Angular. Use <code>view:outlet=\"name\"</code> for named outlets."
   },
   {
     "term": "Polyfill",
@@ -194,6 +244,11 @@
     "usage": "Standardized by Selection Intent."
   },
   {
+    "term": "show/hide (view)",
+    "definition": "Toggle visibility without removing from DOM. Element remains in accessibility tree and preserves state.",
+    "usage": "Implemented by ViewShowBehavior (<code>view:show</code>) for expression-bound visibility, or ViewBehavior (<code>view</code> attr) for command-driven toggling. Use for frequent toggles where state preservation matters."
+  },
+  {
     "term": "State Management",
     "definition": "Standard primitives for observability, data binding, and reaction to data changes (Signals, Stores).",
     "usage": "Implemented by Web States."
@@ -204,9 +259,24 @@
     "usage": "Standardized by Surface Intent."
   },
   {
+    "term": "switch/case/default (view)",
+    "definition": "Multi-branch conditional rendering where one case is shown based on expression value. More declarative than multiple if statements.",
+    "usage": "Implemented by ViewSwitchDirective. Matches Angular ngSwitch, Solid Switch/Match. Use <code>view:switch</code> on parent, <code>view:case</code>/<code>view:default</code> on children."
+  },
+  {
+    "term": "tablist/tab/tabpanel",
+    "definition": "ARIA roles for accessible tab interfaces. Container has role=tablist, triggers have role=tab, content has role=tabpanel.",
+    "usage": "Required by WAI-ARIA Tabs Pattern. Must include aria-selected, aria-controls, aria-labelledby."
+  },
+  {
     "term": "Time & Date",
     "definition": "The unified handling of temporal selection and display across different input modalities (Calendar, Dial, Text).",
     "usage": "Standardized by Temporal Intent."
+  },
+  {
+    "term": "toggle (event)",
+    "definition": "Event fired after a visibility change completes. Non-cancelable notification of completed state transition.",
+    "usage": "Matches Popover API and <code>&lt;details&gt;</code> element pattern. Event detail contains <code>oldState</code> and <code>newState</code>."
   },
   {
     "term": "Token",
@@ -234,6 +304,11 @@
     "usage": "Standardized by Web Traits."
   },
   {
+    "term": "trigger",
+    "definition": "An element that initiates an action on another element. In tabs: tab-trigger. In dropdowns: dropdown-trigger.",
+    "usage": "Common term across UI libraries. With Invoker Commands, triggers use <code>commandfor</code> attribute."
+  },
+  {
     "term": "Typography",
     "definition": "The abstraction of visual text hierarchy (Headline, Body, Caption) from semantic HTML elements.",
     "usage": "Standardized by Typography Intent."
@@ -244,6 +319,16 @@
     "usage": "Standardized by Validation Intent."
   },
   {
+    "term": "view",
+    "definition": "A region of content whose visibility is managed. Framework-agnostic term covering show/hide, structural rendering, and command-driven toggling.",
+    "usage": "Foundation module providing ViewEngine (shared core), ViewBehavior (<code>view</code> attr), ViewShowBehavior (<code>view:show</code>), ViewIfDirective (<code>view:if</code>), ViewSwitchDirective (<code>view:switch</code>). Higher-level components (Tabs, Router) build on these."
+  },
+  {
+    "term": "ViewEngine",
+    "definition": "Shared utility providing hidden mode management, toggle events (beforetoggle/toggle), exclusive group coordination, and View Transitions integration.",
+    "usage": "Not a block itself. Imported by View blocks and higher-level components (Router uses it directly). Handles HOW to hide/show; blocks handle WHEN."
+  },
+  {
     "term": "Virtual Element",
     "definition": "An element implementation using markers (e.g., comments) to avoid introducing redundant container nodes in the DOM.",
     "usage": "Used elsewhere to preserve CSS Grid/Flex relationships."
@@ -252,5 +337,40 @@
     "term": "Web Case",
     "definition": "See 'Case'.",
     "usage": "See 'Case'."
+  },
+  {
+    "term": "route",
+    "definition": "A URL pattern to view mapping. Defines which content displays for a given URL path.",
+    "usage": "Standard term from all major routers. Pattern syntax follows URLPattern API: <code>/users/:id</code>, <code>/files/*</code>."
+  },
+  {
+    "term": "guard",
+    "definition": "Conditional navigation logic that can allow, prevent, or redirect navigation. Common types: canActivate, canDeactivate, canLoad.",
+    "usage": "Term from Angular Router. Used as <code>route:guard=\"requireAuth\"</code> for entry guards, <code>route:guard:leave=\"confirmUnsaved\"</code> for exit guards."
+  },
+  {
+    "term": "loader",
+    "definition": "Async function that fetches data before a route activates. Result available in route context.",
+    "usage": "Term from React Router 6+ and Remix. Used as <code>route:loader=\"loadUser\"</code>. Data accessible via <code>@route.data</code>."
+  },
+  {
+    "term": "Navigation API",
+    "definition": "Modern browser API (Baseline 2024) replacing History API. Provides navigation events, traversal info, and interception capabilities.",
+    "usage": "Primary navigation mechanism. Use <code>navigation.addEventListener('navigate', ...)</code> for route interception."
+  },
+  {
+    "term": "URLPattern",
+    "definition": "Web standard API (Baseline 2025) for matching URLs against patterns with named groups and wildcards.",
+    "usage": "Use for route pattern matching. Syntax: <code>/users/:id</code> for named params, <code>*</code> for wildcards, <code>:param?</code> for optional."
+  },
+  {
+    "term": "prefetch",
+    "definition": "Strategy for loading route resources before navigation. Can load on hover, when visible, or eagerly.",
+    "usage": "Use <code>route:prefetch=\"hover\"</code> on links. Integrates with Speculation Rules API when available."
+  },
+  {
+    "term": "scroll restoration",
+    "definition": "Browser or custom control over scroll position after navigation. Navigation API provides native support.",
+    "usage": "Configure via <code>route:config scroll=\"auto|manual|none\"</code>. 'auto' uses browser behavior, 'manual' for custom control."
   }
 ]

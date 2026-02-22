@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Declarative SPA Demo (JSX) - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/declarative-spa.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">
+      &larr; Back to Home
+    </a>
+  </div>
+
+  <div class="app-container">
+    <div class="app-main">
+      <header>
+        <h1>Declarative SPA Demo (JSX)</h1>
+        <nav>
+          <!-- Navigation buttons will be replaced by JSX -->
+        </nav>
+      </header>
+
+      <main>
+        <!-- Views will be rendered via JSX -->
+        <div class="loading-placeholder" style="text-align: center; padding: 2rem; color: #666;">
+          Loading JSX components...
+        </div>
+      </main>
+    </div>
+
+    <!-- Source Code Viewer -->
+    <aside class="source-viewer">
+      <div class="source-viewer-header">
+        <div class="source-viewer-title">Source Code</div>
+        <div class="source-viewer-toggle">
+          <button id="view-tsx-btn" class="active">TSX</button>
+          <button id="view-dom-btn">Live DOM</button>
+        </div>
+        <div class="source-viewer-mode">
+          <a href="declarative-spa.html" class="mode-link">HTML</a>
+          <span class="mode-link active">JSX</span>
+        </div>
+      </div>
+      <div class="source-viewer-content">
+        <pre id="source-display">Loading...</pre>
+      </div>
+    </aside>
+  </div>
+
+  <!-- Bootstrap: applies patches and exposes globals -->
+  <script type="module" src="/plugs/bootstrap.ts"></script>
+
+  <!-- JSX Demo Code -->
+  <script type="module" src="/demos/declarative-spa-jsx.tsx"></script>
+
+  <!-- Source Code Viewer -->
+  <script type="module">
+    let currentView = 'tsx';
+    const sourceDisplay = document.getElementById('source-display');
+    const viewTsxBtn = document.getElementById('view-tsx-btn');
+    const viewDomBtn = document.getElementById('view-dom-btn');
+
+    // Fetch TSX source
+    fetch('/demos/declarative-spa-jsx.tsx')
+      .then(res => res.text())
+      .then(source => {
+        window.tsxSource = source;
+        displaySource();
+      });
+
+    function displaySource() {
+      if (currentView === 'tsx') {
+        sourceDisplay.textContent = window.tsxSource || 'Loading...';
+      } else {
+        const appMain = document.querySelector('.app-main');
+        sourceDisplay.textContent = appMain ? appMain.outerHTML : document.body.innerHTML;
+      }
+    }
+
+    function setActiveView(view, activeBtn) {
+      currentView = view;
+      viewTsxBtn.classList.remove('active');
+      viewDomBtn.classList.remove('active');
+      activeBtn.classList.add('active');
+      displaySource();
+    }
+
+    viewTsxBtn.addEventListener('click', () => setActiveView('tsx', viewTsxBtn));
+    viewDomBtn.addEventListener('click', () => setActiveView('dom', viewDomBtn));
+
+    // Update live DOM view when changes occur
+    let updateTimeout;
+    const observer = new MutationObserver(() => {
+      if (currentView === 'dom') {
+        clearTimeout(updateTimeout);
+        updateTimeout = setTimeout(displaySource, 100);
+      }
+    });
+
+    // Wait for app to mount before observing
+    setTimeout(() => {
+      const appMain = document.querySelector('.app-main');
+      if (appMain) {
+        observer.observe(appMain, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          characterData: true
+        });
+      }
+    }, 100);
+  </script>
+</body>
+</html>

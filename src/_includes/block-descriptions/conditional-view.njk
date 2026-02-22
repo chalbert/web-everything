@@ -1,0 +1,177 @@
+<h2>Conditional View</h2>
+<p>Core primitive for conditionally displaying content based on expressions. Provides the foundation for tabs, routing, accordions, and any UI pattern that shows/hides content.</p>
+
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">
+  <strong>Terminology:</strong> See <a href="/semantics/">Semantics & Glossary</a> for terms like <a href="/semantics/#term-view">view</a>, <a href="/semantics/#term-hidden-visible">hidden/visible</a>, and <a href="/semantics/#term-commandfor-command">commandfor/command</a>.
+</p>
+
+<h3>Web Standards Alignment</h3>
+<p>This design aligns with current and emerging web standards:</p>
+
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API">Invoker Commands API</a></td>
+    <td>Baseline Jan 2026</td>
+    <td>Use <code>commandfor</code>/<code>command</code> for triggers</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/blog/html-details-exclusive-accordions/">Exclusive Accordion</a></td>
+    <td>Standard (Interop 2025)</td>
+    <td>Use <code>name</code> attribute for exclusive groups</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/hidden">hidden="until-found"</a></td>
+    <td>Standard (Interop 2025)</td>
+    <td>Support as a hidden mode option</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Popover_API">Popover API</a></td>
+    <td>Baseline Apr 2025</td>
+    <td>Use <code>beforetoggle</code>/<code>toggle</code> event pattern</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/content-visibility">content-visibility</a></td>
+    <td>Baseline Widely Available</td>
+    <td>Use for performant show/hide</td>
+  </tr>
+  <tr>
+    <td><a href="https://open-ui.org/components/tabs.research/">Open UI Tabs</a></td>
+    <td>Active Proposal</td>
+    <td>Follow research, prepare for future native tabs</td>
+  </tr>
+</table>
+
+<h3>Core Patterns</h3>
+
+<h4>Pattern 1: Invoker Commands Triggers (Standard)</h4>
+<pre><code class="language-html">&lt;!-- Using Invoker Commands API (Baseline Jan 2026) --&gt;
+&lt;button commandfor="panel-1" command="--view-show"&gt;Show Panel&lt;/button&gt;
+&lt;button commandfor="panel-1" command="--view-hide"&gt;Hide Panel&lt;/button&gt;
+&lt;button commandfor="panel-1" command="--view-toggle"&gt;Toggle Panel&lt;/button&gt;
+
+&lt;section id="panel-1" view&gt;Panel content&lt;/section&gt;</code></pre>
+
+<h4>Pattern 2: Exclusive Groups (name attribute)</h4>
+<pre><code class="language-html">&lt;!-- Same name = mutually exclusive (mirrors &lt;details name="..."&gt;) --&gt;
+&lt;button commandfor="home" command="--view-show"&gt;Home&lt;/button&gt;
+&lt;button commandfor="about" command="--view-show"&gt;About&lt;/button&gt;
+
+&lt;section id="home" view name="pages"&gt;Home content&lt;/section&gt;
+&lt;section id="about" view name="pages" hidden&gt;About content&lt;/section&gt;</code></pre>
+
+<h4>Pattern 3: Binary Conditional (show vs if)</h4>
+<pre><code class="language-html">&lt;!-- view:show - toggles visibility, keeps DOM/state --&gt;
+&lt;div view:show="isOpen"&gt;Dropdown content&lt;/div&gt;
+
+&lt;!-- view:if - adds/removes from DOM --&gt;
+&lt;template view:if="isLoggedIn"&gt;
+  &lt;user-dashboard&gt;&lt;/user-dashboard&gt;
+&lt;/template&gt;
+
+&lt;!-- view:else pairs with preceding view:if --&gt;
+&lt;template view:if="hasItems"&gt;
+  &lt;item-list&gt;&lt;/item-list&gt;
+&lt;/template&gt;
+&lt;template view:else&gt;
+  &lt;empty-state&gt;&lt;/empty-state&gt;
+&lt;/template&gt;</code></pre>
+
+<h4>Pattern 4: Switch/Case</h4>
+<pre><code class="language-html">&lt;div view:switch="currentTab"&gt;
+  &lt;section view:case="home"&gt;Home content&lt;/section&gt;
+  &lt;section view:case="settings"&gt;Settings content&lt;/section&gt;
+  &lt;section view:default&gt;Unknown tab&lt;/section&gt;
+&lt;/div&gt;</code></pre>
+
+<h3>Hidden Modes</h3>
+<p>Multiple ways to hide content, matching platform capabilities:</p>
+
+<table>
+  <tr><th>Mode</th><th>CSS/Attribute</th><th>Behavior</th><th>Use Case</th></tr>
+  <tr>
+    <td>display</td>
+    <td><code>display: none</code></td>
+    <td>Fully hidden, no layout, not accessible</td>
+    <td>Default, broad support</td>
+  </tr>
+  <tr>
+    <td>until-found</td>
+    <td><code>hidden="until-found"</code></td>
+    <td>Hidden but Ctrl+F can find it</td>
+    <td>Accordions, expandable sections</td>
+  </tr>
+  <tr>
+    <td>content-visibility</td>
+    <td><code>content-visibility: hidden</code></td>
+    <td>Skipped for render, stays in a11y tree</td>
+    <td>Performance, lazy rendering</td>
+  </tr>
+  <tr>
+    <td>inert</td>
+    <td><code>inert</code></td>
+    <td>Visible but non-interactive</td>
+    <td>Preview, disabled states</td>
+  </tr>
+</table>
+
+<pre><code class="language-html">&lt;!-- Specify hidden mode --&gt;
+&lt;section view hidden-mode="until-found"&gt;Searchable content&lt;/section&gt;
+&lt;section view hidden-mode="content-visibility"&gt;Performance optimized&lt;/section&gt;</code></pre>
+
+<h3>Events (Popover API Pattern)</h3>
+<pre><code class="language-javascript">// Same event shape as Popover API
+element.addEventListener('beforetoggle', (e) => {
+  console.log(e.oldState, e.newState); // 'hidden', 'visible'
+  e.preventDefault(); // Cancel the toggle
+});
+
+element.addEventListener('toggle', (e) => {
+  console.log('Now:', e.newState);
+});</code></pre>
+
+<h3>Features</h3>
+
+<h4>State Preservation (keep-alive)</h4>
+<pre><code class="language-html">&lt;!-- Preserve component state when hidden --&gt;
+&lt;div view:switch="activeTab" view:keep-alive&gt;
+  &lt;form-panel view:case="form"&gt;...&lt;/form-panel&gt;
+  &lt;preview-panel view:case="preview"&gt;...&lt;/preview-panel&gt;
+&lt;/div&gt;
+
+&lt;!-- With cache limit (LRU eviction) --&gt;
+&lt;div view:switch="route" view:keep-alive="5"&gt;...&lt;/div&gt;</code></pre>
+
+<h4>Transitions (View Transitions API)</h4>
+<pre><code class="language-html">&lt;!-- Opt-in to native View Transitions --&gt;
+&lt;div view:switch="page" view:transition&gt;
+  &lt;home-page view:case="home"&gt;&lt;/home-page&gt;
+  &lt;about-page view:case="about"&gt;&lt;/about-page&gt;
+&lt;/div&gt;</code></pre>
+
+<h4>Lazy Loading</h4>
+<pre><code class="language-html">&lt;!-- Don't render until visible (default) --&gt;
+&lt;section view:case="heavy" view:lazy&gt;...&lt;/section&gt;
+
+&lt;!-- Render eagerly even when hidden --&gt;
+&lt;section view:case="preload" view:lazy="eager"&gt;...&lt;/section&gt;</code></pre>
+
+<h3>Framework Comparison</h3>
+<table>
+  <tr><th>Feature</th><th>Web Everything</th><th>Alpine</th><th>Vue</th><th>Angular</th><th>Platform</th></tr>
+  <tr><td>Triggers</td><td>commandfor/command</td><td>@click</td><td>@click</td><td>(click)</td><td>Invoker Commands</td></tr>
+  <tr><td>Exclusive groups</td><td>name attr</td><td>-</td><td>-</td><td>-</td><td>&lt;details name&gt;</td></tr>
+  <tr><td>Show/hide (CSS)</td><td>view:show</td><td>x-show</td><td>v-show</td><td>-</td><td>content-visibility</td></tr>
+  <tr><td>Conditional (DOM)</td><td>view:if</td><td>x-if</td><td>v-if</td><td>*ngIf</td><td>-</td></tr>
+  <tr><td>Switch/case</td><td>view:switch/case</td><td>-</td><td>-</td><td>ngSwitch</td><td>-</td></tr>
+  <tr><td>Events</td><td>beforetoggle/toggle</td><td>-</td><td>-</td><td>-</td><td>Popover events</td></tr>
+</table>
+
+<h3>Implementation Notes</h3>
+<ul>
+  <li>Uses comment-based markers for template boundaries (like ForEach)</li>
+  <li>Listens for <code>command</code> events from Invoker Commands API</li>
+  <li>Falls back to click handlers for browsers without Invoker Commands</li>
+  <li>Uses <code>content-visibility: hidden</code> with <code>display: none</code> fallback</li>
+  <li>Fires standard <code>beforetoggle</code>/<code>toggle</code> events</li>
+</ul>

@@ -1,0 +1,344 @@
+<p>
+  A <strong>Transient Component</strong> is a custom element that replaces itself with a semantically correct native HTML element during initialization.
+  The transient element exists only long enough to determine <em>what</em> to render — then it disappears, leaving no wrapper node in the DOM.
+  See the <a href="/semantics/">Semantics</a> page for terminology.
+</p>
+
+<h3>Why Transient?</h3>
+
+<p>
+  Frameworks solve the "dynamic element tag" problem at compile time (JSX, templates) or via virtual DOM.
+  Web components don't have this luxury — a custom element is always present in the DOM tree.
+  A transient component bridges this gap: it's a custom element that <strong>self-destructs</strong> after choosing the right native element.
+</p>
+
+<table>
+  <tr><th>Problem</th><th>Framework Solution</th><th>Web Everything Solution</th></tr>
+  <tr>
+    <td>Heading level depends on nesting</td>
+    <td>React: HeadingLevelContext + useContext</td>
+    <td>AutoHeading: resolves level from InjectorRoot, replaces itself with &lt;hN&gt;</td>
+  </tr>
+  <tr>
+    <td>Link vs button depends on href</td>
+    <td>Vue: &lt;component :is="tag"&gt;</td>
+    <td>SmartLink: replaces with &lt;a&gt; or &lt;button&gt; based on attributes</td>
+  </tr>
+  <tr>
+    <td>Wrapper-free structural containers</td>
+    <td>Angular: &lt;ng-container&gt; (no DOM output)</td>
+    <td>Comment markers (virtual elements) for structural directives</td>
+  </tr>
+</table>
+
+<h3>Web Standards Alignment</h3>
+
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Element/replaceWith">Element.replaceWith()</a></td>
+    <td>Baseline</td>
+    <td>Core mechanism — transient element calls <code>this.replaceWith(replacement)</code> to swap itself out</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Window/queueMicrotask">queueMicrotask()</a></td>
+    <td>Baseline</td>
+    <td>Defers replacement outside <code>connectedCallback</code> stack to avoid lifecycle re-entrancy</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/Heading_Elements">Heading Elements (&lt;h1&gt;–&lt;h6&gt;)</a></td>
+    <td>Standard</td>
+    <td>AutoHeading produces native heading elements. WHATWG outline algorithm was <strong>removed</strong> from spec — explicit levels are required.</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Roles/heading_role">ARIA heading role</a></td>
+    <td>Standard</td>
+    <td>Fallback only. MDN recommends native &lt;hN&gt; over <code>role="heading"</code>. Self-replacement produces native elements.</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_Components/Using_custom_elements">Custom Elements v1</a></td>
+    <td>Baseline</td>
+    <td>Autonomous custom elements only. Customized built-ins (<code>is=""</code>) are <strong>not used</strong> — Safari refuses to implement them.</td>
+  </tr>
+</table>
+
+<h3>Framework Research</h3>
+
+<table>
+  <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
+  <tr>
+    <td><a href="https://react.dev/reference/react/createContext">React HeadingLevelContext</a></td>
+    <td>Context-based heading level propagation. Section components increment level for all descendants. Canonical reference for our InjectorRoot approach.</td>
+  </tr>
+  <tr>
+    <td><a href="https://angular.dev/api/core/ng-container">Angular &lt;ng-container&gt;</a></td>
+    <td>Compile-time removal of wrapper element. Structural directives operate without DOM output. Inspiration for "disappearing element" concept.</td>
+  </tr>
+  <tr>
+    <td><a href="https://vuejs.org/api/built-in-special-elements.html#component">Vue &lt;component :is&gt;</a></td>
+    <td>Dynamic element tag selection at runtime. The <code>:is</code> binding chooses which component or native element to render.</td>
+  </tr>
+  <tr>
+    <td><a href="https://svelte.dev/docs/svelte/svelte-element">Svelte &lt;svelte:element&gt;</a></td>
+    <td>Compile-time dynamic element. The <code>this</code> attribute determines the tag name at render time.</td>
+  </tr>
+</table>
+
+<h3>Self-Replacement Lifecycle</h3>
+
+<p>The replacement follows a safe, deterministic sequence:</p>
+
+<ol>
+  <li><strong>connectedCallback fires</strong> — the custom element is in the DOM, attributes and children are accessible</li>
+  <li><strong>Determine replacement</strong> — read attributes, query injector chain, compute the target element tag</li>
+  <li><strong>Create replacement element</strong> — <code>document.createElement(tag)</code></li>
+  <li><strong>Transfer attributes</strong> — copy all attributes (except internal ones) to the new element</li>
+  <li><strong>Transfer children</strong> — <code>replacement.append(...this.childNodes)</code> (move, not clone — preserves listeners on children)</li>
+  <li><strong>Schedule replacement</strong> — <code>queueMicrotask(() => this.replaceWith(replacement))</code></li>
+  <li><strong>Microtask runs</strong> — the transient element is removed, the native element takes its place. Zero visual flash.</li>
+</ol>
+
+<pre><code>// Simplified TransientElement base class
+class TransientElement extends HTMLElement {
+  connectedCallback() {
+    const tag = this.resolveTag();         // subclass decides
+    const el = document.createElement(tag);
+
+    // Transfer attributes
+    for (const { name, value } of this.attributes) {
+      if (!name.startsWith('data-transient-')) {
+        el.setAttribute(name, value);
+      }
+    }
+
+    // Transfer children (move, not clone)
+    el.append(...this.childNodes);
+
+    // Safe deferred replacement
+    queueMicrotask(() => this.replaceWith(el));
+  }
+
+  /** Subclasses override to determine the replacement tag */
+  resolveTag(): string {
+    throw new Error('resolveTag() must be implemented');
+  }
+}</code></pre>
+
+<h3>Use Case 1: Accessible Auto-Heading</h3>
+
+<p>
+  The <strong>&lt;auto-heading&gt;</strong> element replaces itself with the correct <code>&lt;h1&gt;</code>–<code>&lt;h6&gt;</code> based on document nesting.
+  This solves the reusable component problem: a card, sidebar, or article section can use <code>&lt;auto-heading&gt;</code> without hardcoding a heading level.
+</p>
+
+<h4>Level Resolution (priority order)</h4>
+
+<table>
+  <tr><th>Source</th><th>Mechanism</th><th>Example</th></tr>
+  <tr>
+    <td>1. Explicit attribute</td>
+    <td><code>level="3"</code> on the element</td>
+    <td><code>&lt;auto-heading level="3"&gt;Title&lt;/auto-heading&gt;</code></td>
+  </tr>
+  <tr>
+    <td>2. Injector provider</td>
+    <td>InjectorRoot resolves <code>'headingLevel'</code> from ancestor chain</td>
+    <td>A &lt;section&gt; wrapper provides level 2; nested sections increment</td>
+  </tr>
+  <tr>
+    <td>3. DOM traversal (fallback)</td>
+    <td>Count &lt;section&gt;, &lt;article&gt;, &lt;nav&gt;, &lt;aside&gt; ancestors</td>
+    <td>3 sectioning ancestors → <code>&lt;h4&gt;</code></td>
+  </tr>
+</table>
+
+<h4>Injector-Based Level (Recommended)</h4>
+
+<pre><code>// Section component increments heading level in its injector scope
+class SectionElement extends HTMLElement {
+  connectedCallback() {
+    const parentLevel = InjectorRoot.getProviderOf(this, 'headingLevel') ?? 0;
+    const injector = InjectorRoot.ensureInjector(this);
+    injector.set('headingLevel', parentLevel + 1);
+  }
+}
+
+// AutoHeading reads from injector chain
+class AutoHeading extends TransientElement {
+  resolveTag() {
+    // 1. Explicit attribute
+    const explicit = this.getAttribute('level');
+    if (explicit) return `h${Math.min(Number(explicit), 6)}`;
+
+    // 2. Injector provider
+    const injected = InjectorRoot.getProviderOf(this, 'headingLevel');
+    if (injected) return `h${Math.min(injected, 6)}`;
+
+    // 3. DOM traversal fallback
+    return `h${Math.min(this.#countSectioningAncestors() + 1, 6)}`;
+  }
+
+  #countSectioningAncestors(): number {
+    let count = 0;
+    let el = this.parentElement;
+    while (el) {
+      if (el.matches('section, article, nav, aside')) count++;
+      el = el.parentElement;
+    }
+    return count;
+  }
+}</code></pre>
+
+<h4>Usage</h4>
+
+<pre><code>&lt;!-- Author writes: --&gt;
+&lt;section&gt;
+  &lt;auto-heading&gt;Page Title&lt;/auto-heading&gt;        &lt;!-- becomes &lt;h1&gt; --&gt;
+  &lt;section&gt;
+    &lt;auto-heading&gt;Section Title&lt;/auto-heading&gt;    &lt;!-- becomes &lt;h2&gt; --&gt;
+    &lt;section&gt;
+      &lt;auto-heading&gt;Sub-section&lt;/auto-heading&gt;    &lt;!-- becomes &lt;h3&gt; --&gt;
+    &lt;/section&gt;
+  &lt;/section&gt;
+&lt;/section&gt;</code></pre>
+
+<h3>Use Case 2: Smart Link</h3>
+
+<p>
+  A <strong>&lt;smart-link&gt;</strong> replaces itself with <code>&lt;a&gt;</code> (when <code>href</code> is present) or <code>&lt;button&gt;</code> (when no href).
+  This avoids the ARIA anti-pattern of <code>&lt;div role="link"&gt;</code> and ensures correct semantics for both navigation and actions.
+</p>
+
+<pre><code>&lt;!-- Navigation → becomes &lt;a href="/about"&gt; --&gt;
+&lt;smart-link href="/about"&gt;About&lt;/smart-link&gt;
+
+&lt;!-- Action → becomes &lt;button type="button"&gt; --&gt;
+&lt;smart-link&gt;Delete Item&lt;/smart-link&gt;</code></pre>
+
+<h3>Use Case 3: Ergonomic Directive Syntax</h3>
+
+<p>
+  Custom elements like <code>&lt;for-each&gt;</code> provide friendlier authoring syntax than comment markers.
+  The element replaces itself with start/end comment markers, then the structural directive manages the comment-bounded region.
+</p>
+
+<pre><code>&lt;!-- Author writes: --&gt;
+&lt;for-each store="items" as="item"&gt;
+  &lt;li&gt;{{ item.name }}&lt;/li&gt;
+&lt;/for-each&gt;
+
+&lt;!-- After connectedCallback, DOM becomes: --&gt;
+&lt;!-- for-each:start store="items" as="item" --&gt;
+&lt;li&gt;Alpha&lt;/li&gt;
+&lt;li&gt;Beta&lt;/li&gt;
+&lt;!-- for-each:end --&gt;</code></pre>
+
+<p>
+  This combines <strong>author ergonomics</strong> (custom element syntax) with the <strong>proven comment-based implementation</strong> that preserves CSS Grid/Flex parent-child relationships.
+</p>
+
+<h3>Other Potential Uses</h3>
+
+<table>
+  <tr><th>Element</th><th>Replaces With</th><th>Logic</th></tr>
+  <tr>
+    <td><code>&lt;auto-heading&gt;</code></td>
+    <td><code>&lt;h1&gt;</code>–<code>&lt;h6&gt;</code></td>
+    <td>Heading level from injector or DOM nesting depth</td>
+  </tr>
+  <tr>
+    <td><code>&lt;smart-link&gt;</code></td>
+    <td><code>&lt;a&gt;</code> or <code>&lt;button&gt;</code></td>
+    <td>Presence of <code>href</code> attribute</td>
+  </tr>
+  <tr>
+    <td><code>&lt;field-group&gt;</code></td>
+    <td><code>&lt;fieldset&gt;</code> + <code>&lt;legend&gt;</code> or <code>&lt;div&gt;</code></td>
+    <td>Presence of <code>legend</code> attribute</td>
+  </tr>
+  <tr>
+    <td><code>&lt;icon name="..."&gt;</code></td>
+    <td><code>&lt;svg&gt;</code></td>
+    <td>Resolves SVG from icon registry/sprite sheet</td>
+  </tr>
+  <tr>
+    <td><code>&lt;trusted-html&gt;</code></td>
+    <td>Validated HTML fragment</td>
+    <td>Validates via Trusted Types policy, then inserts content</td>
+  </tr>
+  <tr>
+    <td><code>&lt;for-each&gt;</code></td>
+    <td>Comment markers + repeated content</td>
+    <td>Structural directive with author-friendly syntax</td>
+  </tr>
+</table>
+
+<h3>SSR Considerations</h3>
+
+<p>
+  Transient components are <strong>client-side progressive enhancement</strong>.
+  Custom elements require JavaScript to run <code>connectedCallback</code> — crawlers and screen readers see the pre-upgrade HTML.
+</p>
+
+<table>
+  <tr><th>Strategy</th><th>Approach</th></tr>
+  <tr>
+    <td>Server-computed</td>
+    <td>SSR layer (e.g., Eleventy shortcode) computes the correct native element at build time. Client-side transient element is not needed.</td>
+  </tr>
+  <tr>
+    <td>Annotated fallback</td>
+    <td>Server emits <code>&lt;auto-heading data-level="2"&gt;Title&lt;/auto-heading&gt;</code>. Client upgrades to <code>&lt;h2&gt;</code>. Pre-JS HTML has the annotation for styling.</td>
+  </tr>
+  <tr>
+    <td>Progressive enhancement</td>
+    <td>Server emits a generic element (<code>&lt;div role="heading" aria-level="2"&gt;</code>). Client replaces with native <code>&lt;h2&gt;</code>.</td>
+  </tr>
+</table>
+
+<h3>Pitfalls &amp; Constraints</h3>
+
+<ul>
+  <li><strong>Event listeners on the transient element are lost.</strong> Use listeners on children or the replacement. This is by design — transient elements are replaced before user interaction.</li>
+  <li><strong>CSS rules targeting the custom element tag</strong> (e.g., <code>auto-heading { color: red }</code>) will not match the replacement. Style the replacement tag instead.</li>
+  <li><strong>HTML parser restrictions:</strong> A custom element inside <code>&lt;table&gt;</code>, <code>&lt;select&gt;</code>, or other restricted-content elements will be moved by parser error recovery. Transient elements should not be placed in parser-restricted contexts.</li>
+  <li><strong>MutationObserver</strong> sees the replacement as a <code>childList</code> mutation: <code>removedNodes</code> contains the original, <code>addedNodes</code> contains the replacement. This is clean and expected.</li>
+</ul>
+
+<h3>API Draft</h3>
+
+<pre><code>/** Base class for transient custom elements */
+abstract class TransientElement extends HTMLElement {
+  /** Determine the replacement element tag name */
+  abstract resolveTag(): string;
+
+  /** Optional: configure which attributes to exclude from transfer */
+  get excludedAttributes(): string[] {
+    return [];
+  }
+}
+
+/** Accessible heading that resolves level from context */
+class AutoHeading extends TransientElement {
+  resolveTag(): string; // returns 'h1'–'h6'
+}
+
+/** Mixin for adding self-replacement to any custom element */
+function withSelfReplacement&lt;T extends CustomElementConstructor&gt;(
+  Base: T,
+  resolveTag: (el: InstanceType&lt;T&gt;) => string
+): T;
+
+/** Utility: calculate heading level from DOM nesting */
+function calculateHeadingLevel(element: Element): number;</code></pre>
+
+<h3>Exports</h3>
+
+<table>
+  <tr><th>Export</th><th>Type</th><th>Description</th></tr>
+  <tr><td><code>TransientElement</code></td><td>Class</td><td>Abstract base class with self-replacement lifecycle</td></tr>
+  <tr><td><code>AutoHeading</code></td><td>Class</td><td>Heading element that resolves level from injector/DOM</td></tr>
+  <tr><td><code>SmartLink</code></td><td>Class</td><td>Link/button that resolves tag from href presence</td></tr>
+  <tr><td><code>withSelfReplacement</code></td><td>Mixin</td><td>Adds self-replacement to any custom element class</td></tr>
+  <tr><td><code>calculateHeadingLevel</code></td><td>Function</td><td>Utility: counts sectioning ancestors to determine heading level</td></tr>
+</table>

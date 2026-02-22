@@ -35,6 +35,42 @@ eleventyComputed:
             {% include "block-descriptions/" + block.id + ".njk" %}
         </div>
 
+        {% if block.implementsIntent %}
+        <div class="section-card mt-8">
+            <h2>Implements Intent</h2>
+            {% for intent in intents %}
+                {% if intent.id == block.implementsIntent %}
+            <p class="mb-4">This block is a technical implementation of the <a href="/intents/{{ intent.id }}/">{{ intent.name }}</a> — {{ intent.summary | lower }}</p>
+                {% endif %}
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if block.traits %}
+        <div class="section-card mt-8">
+            <h2>Traits</h2>
+            <p class="mb-6 text-slate-600">Composable behaviors loaded on-demand based on the active intent profile. Only the traits matching the application's chosen configuration are bundled.</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Trait</th>
+                        <th>Intent Dimension</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for trait in block.traits %}
+                    <tr>
+                        <td><code>{{ trait.name }}</code></td>
+                        <td>{% if trait.intentDimension %}<code>{{ trait.intentDimension }}</code>{% else %}&mdash;{% endif %}</td>
+                        <td>{{ trait.description }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
         {% set blockCases = cases[block.id] %}
         {% if blockCases %}
         <div class="section-card mt-8">

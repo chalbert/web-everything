@@ -83,6 +83,16 @@
     "isSvg": true
   },
   {
+    "id": "webevents",
+    "name": "Web Events",
+    "description": "Scoped event discrimination for cross-team DOM events. Extends <code>addEventListener</code> with provider-based <code>instanceof</code> validation.",
+    "status": "concept",
+    "category": "standard",
+    "icon": "/assets/icons/webevents.svg",
+    "details": "Web Events solves the DOM event collision problem: when nested components fire identically-named events, listeners have no structural way to distinguish them. The project introduces <code>listenForScoped</code> &mdash; a single API that resolves the expected event class from the injector scope of <code>event.target</code> and validates via <code>instanceof</code>. In plugged mode, this becomes a <code>provider</code> option on standard <code>addEventListener</code>.",
+    "isSvg": true
+  },
+  {
     "id": "webblocks",
     "name": "Web Blocks",
     "description": "Standard protocols for interoperable modules (components, behaviors) ensuring consistent UX and accessibility across libraries.",

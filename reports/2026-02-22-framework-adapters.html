@@ -1,0 +1,1139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Framework Feature Comparison — Web Everything</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, -apple-system, sans-serif; color: #1a1a2e; background: #f8f9fa; padding: 2rem; line-height: 1.5; }
+    h1 { font-size: 1.6rem; margin-bottom: 0.5rem; }
+    h2 { font-size: 1.2rem; margin: 2rem 0 0.75rem; color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.25rem; }
+    p.subtitle { color: #666; margin-bottom: 1.5rem; }
+
+    .legend { display: flex; gap: 1.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    .legend-item { display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; }
+    .legend-swatch { width: 18px; height: 18px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.15); }
+
+    .covered { background: #d4edda; }       /* green — feature exists */
+    .adapter  { background: #fff3cd; }       /* yellow — missing adapter */
+    .missing  { background: #f8d7da; }       /* red — missing feature */
+    .concept  { background: #d1ecf1; }       /* blue — concept/draft spec only */
+    .na       { background: #e9ecef; }       /* grey — not applicable / framework doesn't have it */
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.78rem; margin-bottom: 1.5rem; }
+    th, td { padding: 6px 8px; border: 1px solid #dee2e6; text-align: left; vertical-align: top; }
+    th { background: #343a40; color: #fff; font-weight: 600; position: sticky; top: 0; z-index: 1; }
+    th.feature-col { width: 16%; }
+    th.fw-col { width: 12%; }
+    td.feature-name { font-weight: 600; background: #f1f3f5; }
+
+    .note { font-size: 0.72rem; color: #555; display: block; margin-top: 2px; }
+    .we-equiv { font-weight: 600; }
+
+    @media print { body { padding: 0.5rem; } th { position: static; } }
+  </style>
+</head>
+<body>
+
+<h1>Framework Feature Comparison — Web Everything</h1>
+<p class="subtitle">Generated 2026-02-22. Maps features from React, Angular, Vue, Svelte, Lit, Solid, and Qwik to Web Everything specs.</p>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-swatch covered"></div> Covered — active/draft block exists</div>
+  <div class="legend-item"><div class="legend-swatch concept"></div> Concept — spec exists, not implemented</div>
+  <div class="legend-item"><div class="legend-swatch adapter"></div> Missing Adapter — different syntax, could be bridged with a transform</div>
+  <div class="legend-item"><div class="legend-swatch missing"></div> Missing Feature — no current equivalent</div>
+  <div class="legend-item"><div class="legend-swatch na"></div> N/A — framework doesn't have it either</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>1. Reactivity &amp; State Management</h2>
+<!-- ═══════════════════════════════════════════════════ -->
+<table>
+  <tr>
+    <th class="feature-col">Feature</th>
+    <th class="fw-col">React</th>
+    <th class="fw-col">Angular</th>
+    <th class="fw-col">Vue</th>
+    <th class="fw-col">Svelte</th>
+    <th class="fw-col">Lit</th>
+    <th class="fw-col">Solid</th>
+    <th class="fw-col">Web Everything</th>
+  </tr>
+  <tr>
+    <td class="feature-name">Local reactive state</td>
+    <td>useState</td>
+    <td>signal()</td>
+    <td>ref(), reactive()</td>
+    <td>$state</td>
+    <td>@property</td>
+    <td>createSignal</td>
+    <td class="covered"><span class="we-equiv">SimpleStore</span><span class="note">Active. getItem/setItem with subscribe(). Dot-notation paths.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Computed / derived state</td>
+    <td>useMemo</td>
+    <td>computed()</td>
+    <td>computed()</td>
+    <td>$derived</td>
+    <td>willUpdate</td>
+    <td>createMemo</td>
+    <td class="covered"><span class="we-equiv">SimpleStore.onBeforeNotify</span><span class="note">Active. Hook for derived state before listener notification.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Signals (fine-grained)</td>
+    <td class="na">N/A (VDOM)</td>
+    <td>signal()</td>
+    <td class="na">Proxy-based</td>
+    <td>$state (compiler)</td>
+    <td class="na">@property</td>
+    <td>createSignal</td>
+    <td class="adapter"><span class="we-equiv">—</span><span class="note">CustomStore is coarse-grained (subscribe to whole store). Signal-style fine-grained reactivity needs an adapter wrapping individual keys as observables.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Global / shared store</td>
+    <td>Context + useReducer, Zustand, Redux</td>
+    <td>Services + signals</td>
+    <td>Pinia stores</td>
+    <td>Svelte stores</td>
+    <td>Context protocol</td>
+    <td>createStore (nested)</td>
+    <td class="covered"><span class="we-equiv">CustomStoreRegistry + InjectorRoot</span><span class="note">Active. Stores registered globally or scoped via injector hierarchy.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Context / provide-inject</td>
+    <td>createContext + useContext</td>
+    <td>DI (hierarchical)</td>
+    <td>provide / inject</td>
+    <td>getContext / setContext</td>
+    <td>@consume/@provide</td>
+    <td>createContext</td>
+    <td class="covered"><span class="we-equiv">CustomContext + InjectorRoot</span><span class="note">Active. Hierarchical injector with DOM-tree traversal. CustomContextRegistry for named contexts.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Effects / watchers</td>
+    <td>useEffect</td>
+    <td>effect()</td>
+    <td>watch, watchEffect</td>
+    <td>$effect</td>
+    <td>updated()</td>
+    <td>createEffect</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">No effect/watcher system. Store subscriptions are manual. Effect-on-state-change would need a new primitive.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Immutable state updates</td>
+    <td>Immer (optional)</td>
+    <td class="na">Mutable signals</td>
+    <td class="na">Mutable proxies</td>
+    <td class="na">Mutable $state</td>
+    <td class="na">N/A</td>
+    <td>produce() (store)</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">SimpleStore is mutable. No structural sharing or immutable update helpers.</span></td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>2. Templating &amp; Rendering</h2>
+<!-- ═══════════════════════════════════════════════════ -->
+<table>
+  <tr>
+    <th class="feature-col">Feature</th>
+    <th class="fw-col">React</th>
+    <th class="fw-col">Angular</th>
+    <th class="fw-col">Vue</th>
+    <th class="fw-col">Svelte</th>
+    <th class="fw-col">Lit</th>
+    <th class="fw-col">Solid</th>
+    <th class="fw-col">Web Everything</th>
+  </tr>
+  <tr>
+    <td class="feature-name">Template syntax</td>
+    <td>JSX</td>
+    <td>HTML templates</td>
+    <td>SFC templates</td>
+    <td>Svelte templates</td>
+    <td>Tagged template literals</td>
+    <td>JSX (compile-time)</td>
+    <td class="covered"><span class="we-equiv">Native HTML + attributes</span><span class="note">Declarative HTML with custom attributes (on:*, view:*, for-each). No virtual DOM.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Conditional rendering</td>
+    <td>Ternary / &&</td>
+    <td>@if / ngIf</td>
+    <td>v-if / v-show</td>
+    <td>{#if}</td>
+    <td>Ternary in html``</td>
+    <td>Show / Switch</td>
+    <td class="covered"><span class="we-equiv">view:if, view:show, view:switch</span><span class="note">Active. ViewIfDirective (structural), ViewShowBehavior (reactive), ViewSwitchDirective (multi-branch).</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">List rendering</td>
+    <td>.map()</td>
+    <td>@for / ngFor</td>
+    <td>v-for</td>
+    <td>{#each}</td>
+    <td>map() in html``</td>
+    <td>For / Index</td>
+    <td class="concept"><span class="we-equiv">ForEach directive</span><span class="note">Draft. Syntax: for-each="items as item". Comment-based structural rendering.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Slots / content projection</td>
+    <td>props.children</td>
+    <td>ng-content</td>
+    <td>&lt;slot&gt;</td>
+    <td>&lt;slot&gt;</td>
+    <td>&lt;slot&gt; (Shadow DOM)</td>
+    <td>props.children</td>
+    <td class="covered"><span class="we-equiv">Native &lt;slot&gt;</span><span class="note">Uses standard Shadow DOM slots and light DOM composition.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Portals / teleport</td>
+    <td>createPortal</td>
+    <td>CDK Overlay</td>
+    <td>Teleport</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td>Portal</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">No portal/teleport primitive. Overlays would need a new block or use Popover API.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Fragments (no wrapper)</td>
+    <td>&lt;&gt;...&lt;/&gt;</td>
+    <td>ng-container</td>
+    <td>&lt;template&gt;</td>
+    <td>Implicit</td>
+    <td>Implicit</td>
+    <td>&lt;&gt;...&lt;/&gt;</td>
+    <td class="covered"><span class="we-equiv">Comment markers (virtual elements)</span><span class="note">Structural directives use comment markers. No wrapper div. Preserves CSS parent-child.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Text interpolation</td>
+    <td>{expression}</td>
+    <td>{{ expression }}</td>
+    <td>{{ expression }}</td>
+    <td>{expression}</td>
+    <td>${expression}</td>
+    <td>{expression}</td>
+    <td class="concept"><span class="we-equiv">CustomTextNode</span><span class="note">Plug exists (CustomTextNodeRegistry). Parser infrastructure ready but no concrete expression parser for text interpolation yet.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Server-side rendering</td>
+    <td>renderToString, RSC</td>
+    <td>Angular Universal</td>
+    <td>Nuxt SSR</td>
+    <td>SvelteKit SSR</td>
+    <td>@lit-labs/ssr</td>
+    <td>renderToString</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">No SSR story. Custom elements require JS to upgrade. Declarative Shadow DOM (DSD) is partial.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Server Components</td>
+    <td>React Server Components</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A (Nuxt server components proposal)</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">No server component concept. Would require a build/runtime layer beyond browser primitives.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Streaming SSR</td>
+    <td>renderToPipeableStream</td>
+    <td>Angular SSR streaming</td>
+    <td>Nuxt streaming</td>
+    <td>SvelteKit streaming</td>
+    <td class="na">N/A</td>
+    <td>renderToStream</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">No streaming SSR. Requires server runtime.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Two-way binding</td>
+    <td class="na">Controlled inputs</td>
+    <td>[(ngModel)]</td>
+    <td>v-model</td>
+    <td>bind:value</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="adapter"><span class="we-equiv">—</span><span class="note">on:input + store.setItem is the manual pattern. A bind: adapter could provide v-model-like syntax.</span></td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>3. Component Model</h2>
+<!-- ═══════════════════════════════════════════════════ -->
+<table>
+  <tr>
+    <th class="feature-col">Feature</th>
+    <th class="fw-col">React</th>
+    <th class="fw-col">Angular</th>
+    <th class="fw-col">Vue</th>
+    <th class="fw-col">Svelte</th>
+    <th class="fw-col">Lit</th>
+    <th class="fw-col">Solid</th>
+    <th class="fw-col">Web Everything</th>
+  </tr>
+  <tr>
+    <td class="feature-name">Class-based components</td>
+    <td>Class components (legacy)</td>
+    <td>@Component class</td>
+    <td>Options API</td>
+    <td class="na">N/A</td>
+    <td>LitElement class</td>
+    <td class="na">N/A</td>
+    <td class="covered"><span class="we-equiv">CustomElement + CustomAttribute</span><span class="note">Active. Class-based with lifecycle (connectedCallback, etc.).</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Function-based components</td>
+    <td>Function components + hooks</td>
+    <td>Standalone components</td>
+    <td>Composition API (&lt;script setup&gt;)</td>
+    <td>Runes (Svelte 5)</td>
+    <td class="na">N/A</td>
+    <td>Function components</td>
+    <td class="adapter"><span class="we-equiv">—</span><span class="note">No function component model. An adapter could generate CustomElement subclasses from factory functions with hooks-like API.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Lifecycle hooks</td>
+    <td>useEffect, useLayoutEffect</td>
+    <td>ngOnInit, ngOnDestroy, etc.</td>
+    <td>onMounted, onUnmounted, etc.</td>
+    <td>onMount, onDestroy</td>
+    <td>connectedCallback, etc.</td>
+    <td>onMount, onCleanup</td>
+    <td class="covered"><span class="we-equiv">connectedCallback, disconnectedCallback, attributeChangedCallback</span><span class="note">Standard custom element lifecycle. CustomAttribute has same callbacks.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Props / inputs</td>
+    <td>props object</td>
+    <td>@Input()</td>
+    <td>defineProps()</td>
+    <td>$props</td>
+    <td>@property</td>
+    <td>props parameter</td>
+    <td class="covered"><span class="we-equiv">HTML attributes + observedAttributes</span><span class="note">Standard. Attributes observed via static observedAttributes + attributeChangedCallback.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Refs / element access</td>
+    <td>useRef</td>
+    <td>@ViewChild</td>
+    <td>ref()</td>
+    <td>bind:this</td>
+    <td>@query</td>
+    <td>ref()</td>
+    <td class="covered"><span class="we-equiv">this.querySelector / $element</span><span class="note">Direct DOM access. Handler expressions expose $element and $target magic variables.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Web Component interop</td>
+    <td>Partial (props as attrs)</td>
+    <td>CUSTOM_ELEMENTS_SCHEMA</td>
+    <td>Good (v-bind, events)</td>
+    <td>Good (on:event)</td>
+    <td>Native (IS web components)</td>
+    <td>Good</td>
+    <td class="covered"><span class="we-equiv">Native</span><span class="note">IS web components. CustomElement, CustomAttribute, CustomTemplateDirective are all native.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Higher-order components / mixins</td>
+    <td>HOCs, render props</td>
+    <td>Directives, pipes</td>
+    <td>Composables</td>
+    <td>Actions</td>
+    <td>Controllers, directives</td>
+    <td>Higher-order functions</td>
+    <td class="covered"><span class="we-equiv">Trait composition (mixins)</span><span class="note">Active. Blocks compose via traits (e.g., withOptimistic, withBusyDisabled). CustomAttribute as behavior mixin.</span></td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>4. Routing</h2>
+<!-- ═══════════════════════════════════════════════════ -->
+<table>
+  <tr>
+    <th class="feature-col">Feature</th>
+    <th class="fw-col">React</th>
+    <th class="fw-col">Angular</th>
+    <th class="fw-col">Vue</th>
+    <th class="fw-col">Svelte</th>
+    <th class="fw-col">Lit</th>
+    <th class="fw-col">Solid</th>
+    <th class="fw-col">Web Everything</th>
+  </tr>
+  <tr>
+    <td class="feature-name">Declarative routing</td>
+    <td>React Router &lt;Route&gt;</td>
+    <td>RouterModule.forRoot()</td>
+    <td>Vue Router routes[]</td>
+    <td>SvelteKit file-based</td>
+    <td class="na">Community libs</td>
+    <td>Solid Router</td>
+    <td class="covered"><span class="we-equiv">&lt;route-view&gt; + &lt;template route="..."&gt;</span><span class="note">Active. Declarative HTML templates with URLPattern matching.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Route params</td>
+    <td>useParams()</td>
+    <td>ActivatedRoute.params</td>
+    <td>useRoute().params</td>
+    <td>$page.params</td>
+    <td class="na">N/A</td>
+    <td>useParams()</td>
+    <td class="covered"><span class="we-equiv">RouteContext.params</span><span class="note">Active. URLPattern named groups available via customContexts:route.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Navigation guards</td>
+    <td>loader redirect</td>
+    <td>CanActivate / CanDeactivate</td>
+    <td>beforeEach / beforeRouteLeave</td>
+    <td>hooks in +page.ts</td>
+    <td class="na">N/A</td>
+    <td>beforeLoad</td>
+    <td class="covered"><span class="we-equiv">route:guard / route:guard:leave</span><span class="note">Active. Functional guards via customContexts:routeGuard.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Route loaders / resolvers</td>
+    <td>loader (v7)</td>
+    <td>Resolve</td>
+    <td class="na">N/A (navigation guards)</td>
+    <td>load() in +page.ts</td>
+    <td class="na">N/A</td>
+    <td>routeData</td>
+    <td class="covered"><span class="we-equiv">route:loader</span><span class="note">Active. Named async functions via customContexts:routeLoader.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Named outlets / layouts</td>
+    <td>Outlet, nested Route</td>
+    <td>router-outlet name=""</td>
+    <td>RouterView name=""</td>
+    <td>+layout.svelte</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="covered"><span class="we-equiv">&lt;route-outlet name="..."&gt;</span><span class="note">Active. Named outlets for auxiliary views.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Prefetching</td>
+    <td>prefetch (Remix)</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td>data-sveltekit-preload-data</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="covered"><span class="we-equiv">route:prefetch + Prefetch Behavior</span><span class="note">Concept. Eagerness levels (viewport/hover/interaction). Speculation Rules API integration.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">View Transitions</td>
+    <td>startTransition</td>
+    <td class="na">N/A (planned)</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td>useTransition</td>
+    <td class="covered"><span class="we-equiv">ViewEngine + View Transitions API</span><span class="note">Active. Native document.startViewTransition() integration.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Scroll restoration</td>
+    <td>ScrollRestoration</td>
+    <td>scrollPositionRestoration</td>
+    <td>scrollBehavior</td>
+    <td>$app/navigation</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="covered"><span class="we-equiv">Router scrollRestoration</span><span class="note">Active. auto/manual/none modes via Navigation API.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Lazy route loading</td>
+    <td>React.lazy + Suspense</td>
+    <td>loadChildren</td>
+    <td>() => import()</td>
+    <td>Automatic (file-based)</td>
+    <td class="na">N/A</td>
+    <td>lazy()</td>
+    <td class="covered"><span class="we-equiv">route:lazy attribute</span><span class="note">Active. Code-split route components loaded on navigation.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">File-based routing</td>
+    <td>Remix / Next.js</td>
+    <td class="na">N/A</td>
+    <td>Nuxt pages/</td>
+    <td>SvelteKit routes/</td>
+    <td class="na">N/A</td>
+    <td>SolidStart</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">No file-based routing. Would require a build-time convention layer.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Nested routes</td>
+    <td>Nested &lt;Route&gt;</td>
+    <td>children routes</td>
+    <td>Nested routes</td>
+    <td>Nested +layout</td>
+    <td class="na">N/A</td>
+    <td>Nested routes</td>
+    <td class="adapter"><span class="we-equiv">—</span><span class="note">Current router is flat. Nested &lt;route-view&gt; elements could compose for nested routing but this isn't formally specced.</span></td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>5. Data Fetching &amp; Async</h2>
+<!-- ═══════════════════════════════════════════════════ -->
+<table>
+  <tr>
+    <th class="feature-col">Feature</th>
+    <th class="fw-col">React</th>
+    <th class="fw-col">Angular</th>
+    <th class="fw-col">Vue</th>
+    <th class="fw-col">Svelte</th>
+    <th class="fw-col">Lit</th>
+    <th class="fw-col">Solid</th>
+    <th class="fw-col">Web Everything</th>
+  </tr>
+  <tr>
+    <td class="feature-name">Async data loading</td>
+    <td>Suspense + use()</td>
+    <td>HttpClient + RxJS</td>
+    <td>useFetch (Nuxt)</td>
+    <td>load functions</td>
+    <td>Task (lit-labs)</td>
+    <td>createResource</td>
+    <td class="covered"><span class="we-equiv">Resource Loader</span><span class="note">Draft. 7-state machine (idle→pending→loading→success|empty|error|stale). Virtual elements.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Mutations</td>
+    <td>useActionState, form actions</td>
+    <td>HttpClient.post()</td>
+    <td class="na">Manual</td>
+    <td>form actions</td>
+    <td class="na">N/A</td>
+    <td>createAction</td>
+    <td class="covered"><span class="we-equiv">Resource Action</span><span class="note">Draft. Mutation lifecycle, busy state, double-submit prevention, optimistic rollback.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Optimistic updates</td>
+    <td>useOptimistic</td>
+    <td class="na">Manual</td>
+    <td class="na">Manual</td>
+    <td class="na">Manual</td>
+    <td class="na">N/A</td>
+    <td class="na">Manual</td>
+    <td class="covered"><span class="we-equiv">withOptimisticMutation</span><span class="note">Draft. Automatic rollback on error via ResourceActionRevertEvent.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Stale-while-revalidate</td>
+    <td>SWR / TanStack</td>
+    <td class="na">Manual / RxJS</td>
+    <td>SWR (lib)</td>
+    <td class="na">Manual</td>
+    <td class="na">N/A</td>
+    <td class="na">Manual</td>
+    <td class="covered"><span class="we-equiv">withStaleWhileRevalidate</span><span class="note">Draft. Keeps previous content visible while refreshing.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Error boundaries</td>
+    <td>ErrorBoundary class</td>
+    <td class="na">N/A (try-catch)</td>
+    <td>onErrorCaptured</td>
+    <td class="na">+error.svelte</td>
+    <td class="na">N/A</td>
+    <td>ErrorBoundary</td>
+    <td class="covered"><span class="we-equiv">route:error + Error Recovery</span><span class="note">Active (route:error). Concept (Error Recovery with retry, circuit breaker, offline queue).</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Retry / backoff</td>
+    <td>TanStack retry</td>
+    <td>RxJS retryWhen</td>
+    <td class="na">Manual</td>
+    <td class="na">Manual</td>
+    <td class="na">N/A</td>
+    <td class="na">Manual</td>
+    <td class="concept"><span class="we-equiv">Error Recovery</span><span class="note">Concept. withAutomaticRetry (exponential/linear/immediate), withCircuitBreaker, offline queuing.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Request deduplication</td>
+    <td>TanStack Query</td>
+    <td>shareReplay (RxJS)</td>
+    <td>SWR</td>
+    <td class="na">Manual</td>
+    <td class="na">N/A</td>
+    <td class="na">Manual</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">No request deduplication. Would need to be part of Custom Clients sub-standard.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Cache invalidation</td>
+    <td>invalidateQueries (TanStack)</td>
+    <td class="na">Manual</td>
+    <td class="na">Manual</td>
+    <td>invalidate() (SvelteKit)</td>
+    <td class="na">N/A</td>
+    <td class="na">Manual</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">No cache key invalidation system. Cache sub-standard exists but no invalidation API yet.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Suspense boundaries</td>
+    <td>&lt;Suspense&gt;</td>
+    <td>@defer</td>
+    <td>&lt;Suspense&gt;</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td>&lt;Suspense&gt;</td>
+    <td class="adapter"><span class="we-equiv">Resource Loader (virtual element)</span><span class="note">Similar concept — loading boundary with fallback. Different syntax (comment-based vs JSX component).</span></td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>6. Forms &amp; Validation</h2>
+<!-- ═══════════════════════════════════════════════════ -->
+<table>
+  <tr>
+    <th class="feature-col">Feature</th>
+    <th class="fw-col">React</th>
+    <th class="fw-col">Angular</th>
+    <th class="fw-col">Vue</th>
+    <th class="fw-col">Svelte</th>
+    <th class="fw-col">Lit</th>
+    <th class="fw-col">Solid</th>
+    <th class="fw-col">Web Everything</th>
+  </tr>
+  <tr>
+    <td class="feature-name">Form validation</td>
+    <td>React Hook Form, Formik</td>
+    <td>Reactive Forms, Validators</td>
+    <td>VeeValidate, FormKit</td>
+    <td>Superforms</td>
+    <td class="na">Native</td>
+    <td>modular-forms</td>
+    <td class="concept"><span class="we-equiv">Validation block</span><span class="note">Draft spec. Execution timing (change/blur/submit), visibility rules, severity levels. Uses Constraint Validation API.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Multi-step forms / wizards</td>
+    <td>Manual / form libraries</td>
+    <td>CDK Stepper</td>
+    <td>Manual</td>
+    <td>Manual</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="concept"><span class="we-equiv">Workflow block</span><span class="note">Concept. Linear/non-linear/branching progression, gate validation, auto-save, review step.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Form state management</td>
+    <td>React Hook Form, useActionState</td>
+    <td>FormGroup / FormControl</td>
+    <td>VeeValidate</td>
+    <td>Superforms</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">No form state library. dirty/touched/pristine tracking, field arrays, async validation not covered.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Server actions / form actions</td>
+    <td>useActionState, Server Actions</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td>SvelteKit form actions</td>
+    <td class="na">N/A</td>
+    <td>Solid Start actions</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">No server action concept. Would need a server runtime layer.</span></td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>7. Events &amp; Communication</h2>
+<!-- ═══════════════════════════════════════════════════ -->
+<table>
+  <tr>
+    <th class="feature-col">Feature</th>
+    <th class="fw-col">React</th>
+    <th class="fw-col">Angular</th>
+    <th class="fw-col">Vue</th>
+    <th class="fw-col">Svelte</th>
+    <th class="fw-col">Lit</th>
+    <th class="fw-col">Solid</th>
+    <th class="fw-col">Web Everything</th>
+  </tr>
+  <tr>
+    <td class="feature-name">Event handling</td>
+    <td>onClick, onChange</td>
+    <td>(click), (change)</td>
+    <td>@click, @change</td>
+    <td>on:click</td>
+    <td>@click</td>
+    <td>onClick</td>
+    <td class="covered"><span class="we-equiv">on:click, on:change (Event Behaviors)</span><span class="note">Active. Expression-based handlers with context resolution ($event, @context).</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Event modifiers</td>
+    <td class="na">Manual</td>
+    <td class="na">Manual</td>
+    <td>.stop, .prevent, .once</td>
+    <td>|stopPropagation</td>
+    <td class="na">Manual</td>
+    <td class="na">Manual</td>
+    <td class="adapter"><span class="we-equiv">—</span><span class="note">No built-in modifiers. An adapter could add .stop, .prevent, .once suffixes to on:* attributes.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Custom events (typed)</td>
+    <td>Callback props</td>
+    <td>@Output EventEmitter</td>
+    <td>defineEmits</td>
+    <td>createEventDispatcher</td>
+    <td>new CustomEvent</td>
+    <td>Callback props</td>
+    <td class="covered"><span class="we-equiv">Typed event classes + provider keys</span><span class="note">Active. Typed CustomEvent subclasses (e.g., TabChangeEvent) registered via provider keys for listenForScoped discrimination.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Broadcast / pub-sub</td>
+    <td class="na">Event bus (manual)</td>
+    <td>Subject (RxJS)</td>
+    <td>mitt / tiny-emitter</td>
+    <td class="na">Manual</td>
+    <td class="na">N/A</td>
+    <td class="na">Manual</td>
+    <td class="concept"><span class="we-equiv">Broadcast block</span><span class="note">Concept. Provider-scoped event dispatch on document. Detail from static JSON or store reference.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Invoker Commands (declarative triggers)</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="covered"><span class="we-equiv">commandfor/command throughout</span><span class="note">Active. Used by View, Tabs, Router, Workflow, Action Button. Standard Baseline 2026.</span></td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>8. Dependency Injection</h2>
+<!-- ═══════════════════════════════════════════════════ -->
+<table>
+  <tr>
+    <th class="feature-col">Feature</th>
+    <th class="fw-col">React</th>
+    <th class="fw-col">Angular</th>
+    <th class="fw-col">Vue</th>
+    <th class="fw-col">Svelte</th>
+    <th class="fw-col">Lit</th>
+    <th class="fw-col">Solid</th>
+    <th class="fw-col">Web Everything</th>
+  </tr>
+  <tr>
+    <td class="feature-name">Hierarchical DI</td>
+    <td>Context (limited)</td>
+    <td>Full DI system</td>
+    <td>provide/inject</td>
+    <td>getContext/setContext</td>
+    <td>@provide/@consume</td>
+    <td>createContext</td>
+    <td class="covered"><span class="we-equiv">InjectorRoot + HTMLInjector</span><span class="note">Active. Per-node injectors with DOM-tree traversal. Hierarchical provider resolution.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Service singletons</td>
+    <td class="na">Module scope</td>
+    <td>providedIn: 'root'</td>
+    <td class="na">Module scope</td>
+    <td class="na">Module scope</td>
+    <td class="na">Module scope</td>
+    <td class="na">Module scope</td>
+    <td class="covered"><span class="we-equiv">Document-level injector</span><span class="note">Active. Set on document injector for app-wide singletons.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Scoped providers</td>
+    <td>Nested Context.Provider</td>
+    <td>Component-level providers</td>
+    <td>Component-level provide</td>
+    <td>Component setContext</td>
+    <td>Component @provide</td>
+    <td>Nested providers</td>
+    <td class="covered"><span class="we-equiv">Element-level injectors</span><span class="note">Active. Any element can have its own injector scope. Providers shadow ancestors.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Factory / lifetime management</td>
+    <td class="na">N/A</td>
+    <td>useFactory, multi providers</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">No factory providers or lifetime scopes (transient, scoped, singleton). Values are set directly.</span></td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>9. Styling &amp; Responsiveness</h2>
+<!-- ═══════════════════════════════════════════════════ -->
+<table>
+  <tr>
+    <th class="feature-col">Feature</th>
+    <th class="fw-col">React</th>
+    <th class="fw-col">Angular</th>
+    <th class="fw-col">Vue</th>
+    <th class="fw-col">Svelte</th>
+    <th class="fw-col">Lit</th>
+    <th class="fw-col">Solid</th>
+    <th class="fw-col">Web Everything</th>
+  </tr>
+  <tr>
+    <td class="feature-name">Scoped CSS</td>
+    <td>CSS Modules, styled-components</td>
+    <td>ViewEncapsulation</td>
+    <td>&lt;style scoped&gt;</td>
+    <td>Scoped by default</td>
+    <td>Shadow DOM encapsulation</td>
+    <td>CSS Modules</td>
+    <td class="covered"><span class="we-equiv">Shadow DOM</span><span class="note">Native. Custom elements can use Shadow DOM for style encapsulation.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Design tokens / theming</td>
+    <td>CSS variables, Theme UI</td>
+    <td>CSS variables</td>
+    <td>CSS variables</td>
+    <td>CSS variables</td>
+    <td>CSS custom properties</td>
+    <td>CSS variables</td>
+    <td class="concept"><span class="we-equiv">Surface + Density + Typography Intents</span><span class="note">Draft/concept. Abstract token layers (elevation, spacing, type scale) but no concrete token system.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Responsive breakpoints</td>
+    <td>CSS media queries</td>
+    <td>BreakpointObserver (CDK)</td>
+    <td>CSS media queries</td>
+    <td>CSS media queries</td>
+    <td>CSS media queries</td>
+    <td>CSS media queries</td>
+    <td class="concept"><span class="we-equiv">Breakpoint Observer</span><span class="note">Concept. Semantic steps (compact/medium/expanded), mobile-first/desktop-first/strict-range, container queries.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">CSS-in-JS</td>
+    <td>styled-components, Emotion</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td>css`` tagged literal</td>
+    <td>solid-styled</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">No CSS-in-JS. Uses standard CSS + Shadow DOM. Not a goal — relies on platform CSS.</span></td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>10. Animations &amp; Transitions</h2>
+<!-- ═══════════════════════════════════════════════════ -->
+<table>
+  <tr>
+    <th class="feature-col">Feature</th>
+    <th class="fw-col">React</th>
+    <th class="fw-col">Angular</th>
+    <th class="fw-col">Vue</th>
+    <th class="fw-col">Svelte</th>
+    <th class="fw-col">Lit</th>
+    <th class="fw-col">Solid</th>
+    <th class="fw-col">Web Everything</th>
+  </tr>
+  <tr>
+    <td class="feature-name">View transitions</td>
+    <td>startTransition (React)</td>
+    <td class="na">Planned</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td>useTransition</td>
+    <td class="covered"><span class="we-equiv">View Transitions API</span><span class="note">Active. ViewEngine wraps show/hide in document.startViewTransition().</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Enter/exit animations</td>
+    <td>Framer Motion, react-spring</td>
+    <td>@trigger, animate()</td>
+    <td>&lt;Transition&gt;</td>
+    <td>transition:, animate:</td>
+    <td>lit-transition</td>
+    <td>solid-transition-group</td>
+    <td class="concept"><span class="we-equiv">Motion Intent</span><span class="note">Concept. Declares physics (natural/immediate/reduced), respects prefers-reduced-motion. No implementation block yet.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Layout animations</td>
+    <td>layoutId (Framer Motion)</td>
+    <td>@trigger</td>
+    <td>&lt;TransitionGroup&gt;</td>
+    <td>animate: FLIP</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">No layout animation system. FLIP or Web Animations API integration not specified.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Spring-based physics</td>
+    <td>react-spring, Motion</td>
+    <td>angular-animations</td>
+    <td class="na">N/A</td>
+    <td>spring()</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">Motion Intent defines "natural" physics but no spring/physics implementation.</span></td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>11. Accessibility</h2>
+<!-- ═══════════════════════════════════════════════════ -->
+<table>
+  <tr>
+    <th class="feature-col">Feature</th>
+    <th class="fw-col">React</th>
+    <th class="fw-col">Angular</th>
+    <th class="fw-col">Vue</th>
+    <th class="fw-col">Svelte</th>
+    <th class="fw-col">Lit</th>
+    <th class="fw-col">Solid</th>
+    <th class="fw-col">Web Everything</th>
+  </tr>
+  <tr>
+    <td class="feature-name">ARIA roles on components</td>
+    <td>Manual / React Aria</td>
+    <td>CDK a11y</td>
+    <td>Manual</td>
+    <td>Manual</td>
+    <td>Manual (native)</td>
+    <td>Manual</td>
+    <td class="covered"><span class="we-equiv">Built into blocks</span><span class="note">Active. Tabs (tablist/tab/tabpanel), Workflow (aria-current="step"), Action Button (aria-disabled), Resource Loader (aria-busy).</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Focus management</td>
+    <td>React Aria FocusScope</td>
+    <td>CDK FocusTrap</td>
+    <td>Manual</td>
+    <td>Manual</td>
+    <td>Manual</td>
+    <td>Manual</td>
+    <td class="concept"><span class="we-equiv">Composite Widget + Modal Intent</span><span class="note">Concept. Roving tabindex pattern, focus trapping for dialogs.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Keyboard navigation</td>
+    <td>React Aria</td>
+    <td>CDK ListKeyManager</td>
+    <td>Manual</td>
+    <td>Manual</td>
+    <td>Manual</td>
+    <td>Manual</td>
+    <td class="covered"><span class="we-equiv">Keyboard Shortcuts + Tabs keyboard</span><span class="note">Draft. Tabs has full WAI-ARIA keyboard interaction. Keyboard Shortcuts block for cross-shadow-boundary handling.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Live region announcements</td>
+    <td>Manual / react-aria</td>
+    <td>CDK LiveAnnouncer</td>
+    <td>Manual</td>
+    <td>Manual</td>
+    <td>Manual</td>
+    <td>Manual</td>
+    <td class="covered"><span class="we-equiv">aria-busy + aria-live on blocks</span><span class="note">Active. Resource Loader uses aria-busy. Action Button uses aria-live="polite".</span></td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>12. Performance</h2>
+<!-- ═══════════════════════════════════════════════════ -->
+<table>
+  <tr>
+    <th class="feature-col">Feature</th>
+    <th class="fw-col">React</th>
+    <th class="fw-col">Angular</th>
+    <th class="fw-col">Vue</th>
+    <th class="fw-col">Svelte</th>
+    <th class="fw-col">Lit</th>
+    <th class="fw-col">Solid</th>
+    <th class="fw-col">Web Everything</th>
+  </tr>
+  <tr>
+    <td class="feature-name">Code splitting / lazy loading</td>
+    <td>React.lazy + Suspense</td>
+    <td>loadChildren</td>
+    <td>defineAsyncComponent</td>
+    <td>Automatic</td>
+    <td class="na">Manual</td>
+    <td>lazy()</td>
+    <td class="covered"><span class="we-equiv">route:lazy + native import()</span><span class="note">Active. Route-level code splitting. Also unplugged mode enables tree-shaking.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Virtual DOM / fine-grained</td>
+    <td>Virtual DOM + fiber</td>
+    <td>Incremental DOM → signals</td>
+    <td>Virtual DOM + patches</td>
+    <td>Compiler → fine-grained</td>
+    <td>Lit-html template diffing</td>
+    <td>Fine-grained reactivity</td>
+    <td class="covered"><span class="we-equiv">No VDOM — direct DOM</span><span class="note">Native. No virtual DOM. Direct DOM manipulation via attributes and custom elements. content-visibility for rendering perf.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Hydration</td>
+    <td>hydrateRoot</td>
+    <td>provideClientHydration</td>
+    <td>createSSRApp</td>
+    <td>SvelteKit hydration</td>
+    <td>@lit-labs/ssr hydration</td>
+    <td>hydrate()</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">No hydration. Custom elements upgrade in-place but there's no SSR+hydration pipeline.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Partial / selective hydration</td>
+    <td>Server Components</td>
+    <td>@defer</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">No partial hydration. Qwik's resumability is unique and cannot be replicated without a compiler.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Resumability</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">Qwik's unique feature. Requires compiler for lazy-loading event handlers. Cannot be replicated at runtime.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Keep-alive / caching</td>
+    <td class="na">Manual</td>
+    <td class="na">Manual</td>
+    <td>&lt;KeepAlive&gt;</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="na">N/A</td>
+    <td class="covered"><span class="we-equiv">view:keep-alive</span><span class="note">Active. LRU cache for ViewIfDirective. State preserved across hide/show cycles.</span></td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>13. Internationalization</h2>
+<!-- ═══════════════════════════════════════════════════ -->
+<table>
+  <tr>
+    <th class="feature-col">Feature</th>
+    <th class="fw-col">React</th>
+    <th class="fw-col">Angular</th>
+    <th class="fw-col">Vue</th>
+    <th class="fw-col">Svelte</th>
+    <th class="fw-col">Lit</th>
+    <th class="fw-col">Solid</th>
+    <th class="fw-col">Web Everything</th>
+  </tr>
+  <tr>
+    <td class="feature-name">i18n / localization</td>
+    <td>react-intl, i18next</td>
+    <td>Built-in @angular/localize</td>
+    <td>vue-i18n</td>
+    <td>svelte-i18n</td>
+    <td>@lit/localize</td>
+    <td>Manual</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">No i18n system. Named context @t exists in parser but no concrete localization block.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">RTL support</td>
+    <td>CSS dir/logical</td>
+    <td>Built-in</td>
+    <td>CSS dir/logical</td>
+    <td>CSS</td>
+    <td>CSS</td>
+    <td>CSS</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">No RTL utilities or direction-aware layout helpers.</span></td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>14. DevTools &amp; Developer Experience</h2>
+<!-- ═══════════════════════════════════════════════════ -->
+<table>
+  <tr>
+    <th class="feature-col">Feature</th>
+    <th class="fw-col">React</th>
+    <th class="fw-col">Angular</th>
+    <th class="fw-col">Vue</th>
+    <th class="fw-col">Svelte</th>
+    <th class="fw-col">Lit</th>
+    <th class="fw-col">Solid</th>
+    <th class="fw-col">Web Everything</th>
+  </tr>
+  <tr>
+    <td class="feature-name">TypeScript support</td>
+    <td>Good (JSX types)</td>
+    <td>First-class</td>
+    <td>Good (SFC types)</td>
+    <td>Good (runes typed)</td>
+    <td>Good (decorators)</td>
+    <td>Good (JSX types)</td>
+    <td class="covered"><span class="we-equiv">First-class TypeScript</span><span class="note">Active. Strict TypeScript throughout. Typed events, typed store generics.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">HMR / hot reload</td>
+    <td>Fast Refresh</td>
+    <td>ng serve</td>
+    <td>Vite HMR</td>
+    <td>SvelteKit HMR</td>
+    <td>Vite HMR</td>
+    <td>Vite HMR</td>
+    <td class="covered"><span class="we-equiv">Vite HMR</span><span class="note">Active. Vite dev server on port 3000 with HMR for demos.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Browser DevTools extension</td>
+    <td>React DevTools</td>
+    <td>Angular DevTools</td>
+    <td>Vue DevTools</td>
+    <td>Svelte DevTools</td>
+    <td class="na">N/A (browser tools)</td>
+    <td class="na">N/A</td>
+    <td class="missing"><span class="we-equiv">—</span><span class="note">No devtools extension. State inspector, injector tree, event timeline not available.</span></td>
+  </tr>
+  <tr>
+    <td class="feature-name">Testing utilities</td>
+    <td>Testing Library</td>
+    <td>TestBed</td>
+    <td>Vue Test Utils</td>
+    <td>@testing-library/svelte</td>
+    <td class="na">N/A</td>
+    <td>solid-testing-library</td>
+    <td class="covered"><span class="we-equiv">Vitest + Playwright</span><span class="note">Active. 3-tier testing (unit/integration/E2E). 80% coverage thresholds.</span></td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════ -->
+<h2>Summary Statistics</h2>
+<!-- ═══════════════════════════════════════════════════ -->
+<table>
+  <tr>
+    <th>Category</th>
+    <th style="background:#28a745;color:#fff;">Covered</th>
+    <th style="background:#17a2b8;color:#fff;">Concept</th>
+    <th style="background:#ffc107;color:#000;">Adapter</th>
+    <th style="background:#dc3545;color:#fff;">Missing</th>
+  </tr>
+  <tr><td>1. Reactivity &amp; State</td><td>3</td><td>0</td><td>1</td><td>2</td></tr>
+  <tr><td>2. Templating &amp; Rendering</td><td>4</td><td>2</td><td>2</td><td>3</td></tr>
+  <tr><td>3. Component Model</td><td>5</td><td>0</td><td>1</td><td>0</td></tr>
+  <tr><td>4. Routing</td><td>8</td><td>0</td><td>1</td><td>1</td></tr>
+  <tr><td>5. Data Fetching</td><td>4</td><td>1</td><td>1</td><td>2</td></tr>
+  <tr><td>6. Forms &amp; Validation</td><td>0</td><td>2</td><td>0</td><td>2</td></tr>
+  <tr><td>7. Events &amp; Communication</td><td>3</td><td>1</td><td>1</td><td>0</td></tr>
+  <tr><td>8. Dependency Injection</td><td>3</td><td>0</td><td>0</td><td>1</td></tr>
+  <tr><td>9. Styling &amp; Responsiveness</td><td>1</td><td>2</td><td>0</td><td>1</td></tr>
+  <tr><td>10. Animations &amp; Transitions</td><td>1</td><td>1</td><td>0</td><td>2</td></tr>
+  <tr><td>11. Accessibility</td><td>3</td><td>1</td><td>0</td><td>0</td></tr>
+  <tr><td>12. Performance</td><td>3</td><td>0</td><td>0</td><td>3</td></tr>
+  <tr><td>13. Internationalization</td><td>0</td><td>0</td><td>0</td><td>2</td></tr>
+  <tr><td>14. DevTools &amp; DX</td><td>2</td><td>0</td><td>0</td><td>1</td></tr>
+  <tr style="font-weight:bold;background:#f1f3f5;">
+    <td>TOTAL (74 features)</td>
+    <td style="color:#28a745;">40 (54%)</td>
+    <td style="color:#17a2b8;">10 (14%)</td>
+    <td style="color:#856404;">7 (9%)</td>
+    <td style="color:#dc3545;">20 (27%)</td>
+  </tr>
+</table>
+
+<h2>Key Takeaways</h2>
+<ul style="font-size:0.9rem; line-height:1.7; padding-left:1.5rem; margin-bottom:2rem;">
+  <li><strong>Strongest areas:</strong> Routing (8/10 covered), Component Model (5/6), DI (3/4), Accessibility (3/4). These are at or above framework parity.</li>
+  <li><strong>Missing Adapters (7):</strong> Signals, function components, two-way binding, event modifiers, nested routes, suspense boundaries, text interpolation — all achievable via syntax transforms or thin adapter layers without new core primitives.</li>
+  <li><strong>Biggest gaps:</strong> SSR/hydration (4 missing), forms (2 missing), i18n (2 missing), animations (2 missing). These require new feature work, not just adapters.</li>
+  <li><strong>Unique to Web Everything:</strong> Invoker Commands integration (no framework has this), Intent protocol (abstract UX contracts), provider-scoped typed events, comment-based virtual elements.</li>
+  <li><strong>Recommended adapter priorities:</strong> (1) Two-way binding (bind:attr), (2) Function component factory, (3) Event modifiers (.stop, .prevent, .once), (4) Signals adapter over SimpleStore keys.</li>
+  <li><strong>Recommended feature priorities:</strong> (1) Effect/watcher system, (2) Form state management, (3) i18n, (4) SSR pipeline, (5) Animation library.</li>
+</ul>
+
+</body>
+</html>

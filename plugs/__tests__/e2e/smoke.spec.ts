@@ -66,6 +66,7 @@ function createErrorCollector(): ErrorCollector {
 const pages = [
   { name: 'Declarative SPA (plugged)', url: '/demos/declarative-spa.html', waitFor: 'demoReady' },
   { name: 'Declarative SPA (unplugged)', url: '/demos/declarative-spa-unplugged.html', waitFor: 'demoReady' },
+  { name: 'Router Demo', url: '/demos/declarative-spa-router.html', waitFor: 'demoReady' },
 ];
 
 test.describe('Smoke Tests - All Pages Load', () => {

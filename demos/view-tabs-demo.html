@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>View + Tabs Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/view-tabs-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">
+      &larr; Back to Home
+    </a>
+  </div>
+
+  <div class="app-container">
+    <div class="app-main">
+      <header>
+        <h1>View + Tabs Demo</h1>
+        <p class="subtitle">ViewEngine for show/hide, Tabs for accessible tabbed interfaces</p>
+      </header>
+
+      <!-- ═══════════════════════════════════════════════ -->
+      <!-- Section 1: Tabs -->
+      <!-- ═══════════════════════════════════════════════ -->
+      <section class="demo-section">
+        <h2>Tabs</h2>
+        <p>Accessible tab interface built on ViewEngine. ARIA roles, keyboard navigation, exclusive panel groups.</p>
+
+        <!-- Tab Configuration -->
+        <div class="config-panel" id="tab-config">
+          <div class="config-row">
+            <label>Activation</label>
+            <div class="btn-group">
+              <button class="config-btn active" data-activation="automatic">Automatic</button>
+              <button class="config-btn" data-activation="manual">Manual</button>
+            </div>
+          </div>
+          <div class="config-row">
+            <label>Orientation</label>
+            <div class="btn-group">
+              <button class="config-btn active" data-orientation="horizontal">Horizontal</button>
+              <button class="config-btn" data-orientation="vertical">Vertical</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- The Tab Group -->
+        <div id="demo-tabs" tab-group activation="automatic" orientation="horizontal">
+          <nav tab-list>
+            <button tab-trigger="counter">Counter</button>
+            <button tab-trigger="todos">Todo List</button>
+            <button tab-trigger="form">Form</button>
+          </nav>
+
+          <div class="tab-panels-container">
+            <section tab-panel="counter">
+              <div class="panel-content">
+                <h3>Counter</h3>
+                <div class="counter-display">
+                  <span class="counter-value" id="counter-value">0</span>
+                </div>
+                <div class="counter-controls">
+                  <button id="decrement-btn">-</button>
+                  <button id="increment-btn">+</button>
+                  <button class="secondary" id="reset-btn">Reset</button>
+                </div>
+              </div>
+            </section>
+
+            <section tab-panel="todos">
+              <div class="panel-content">
+                <h3>Todo List</h3>
+                <div class="todo-input">
+                  <input type="text" id="todo-input" placeholder="Add a todo...">
+                  <button id="todo-add-btn">Add</button>
+                </div>
+                <ul class="todo-list" id="todo-list"></ul>
+                <p class="todo-status" id="todo-status">No todos yet</p>
+              </div>
+            </section>
+
+            <section tab-panel="form">
+              <div class="panel-content">
+                <h3>Contact Form</h3>
+                <form id="demo-form">
+                  <div class="form-field">
+                    <label for="name-input">Name</label>
+                    <input type="text" id="name-input" placeholder="Your name">
+                  </div>
+                  <div class="form-field">
+                    <label for="email-input">Email</label>
+                    <input type="email" id="email-input" placeholder="your@email.com">
+                  </div>
+                  <div class="form-field">
+                    <label for="message-input">Message</label>
+                    <textarea id="message-input" rows="3" placeholder="Your message"></textarea>
+                  </div>
+                  <button type="submit">Send</button>
+                </form>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div class="event-log" id="tab-event-log">
+          <strong>Events:</strong> <span id="tab-events">Waiting...</span>
+        </div>
+      </section>
+
+      <!-- ═══════════════════════════════════════════════ -->
+      <!-- Section 2: Standalone ViewEngine -->
+      <!-- ═══════════════════════════════════════════════ -->
+      <section class="demo-section">
+        <h2>Standalone ViewEngine</h2>
+        <p>Direct ViewEngine usage without Tabs. Commands show/hide/toggle a panel.</p>
+
+        <div class="view-demo">
+          <div class="view-controls">
+            <button id="view-show-btn">Show</button>
+            <button id="view-hide-btn">Hide</button>
+            <button id="view-toggle-btn">Toggle</button>
+          </div>
+
+          <div class="view-target" id="view-panel">
+            <h3>Panel Content</h3>
+            <p>This panel is controlled by ViewEngine. It can be shown, hidden, or toggled.</p>
+            <p>The default hidden mode is <code>content-visibility</code>, which keeps the element in the accessibility tree.</p>
+          </div>
+
+          <div class="view-status">
+            Status: <code id="view-status-text">visible</code>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════════════════════════════════════════ -->
+      <!-- Section 3: Exclusive Groups -->
+      <!-- ═══════════════════════════════════════════════ -->
+      <section class="demo-section">
+        <h2>Exclusive Groups</h2>
+        <p>Elements with the same <code>name</code> attribute form an exclusive group — only one is visible at a time.</p>
+
+        <div class="group-demo">
+          <div class="group-buttons">
+            <button class="group-btn active" data-show="group-panel-a">Panel A</button>
+            <button class="group-btn" data-show="group-panel-b">Panel B</button>
+            <button class="group-btn" data-show="group-panel-c">Panel C</button>
+          </div>
+
+          <div class="group-panels">
+            <div id="group-panel-a" name="demo-group" class="group-panel">
+              <h4>Panel A</h4>
+              <p>First panel in the exclusive group.</p>
+            </div>
+            <div id="group-panel-b" name="demo-group" class="group-panel" hidden>
+              <h4>Panel B</h4>
+              <p>Second panel. Showing this hides the others.</p>
+            </div>
+            <div id="group-panel-c" name="demo-group" class="group-panel" hidden>
+              <h4>Panel C</h4>
+              <p>Third panel. Exclusive groups work like <code>&lt;details name&gt;</code>.</p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ═══════════════════════════════════════════════ -->
+      <!-- Source Code Viewer -->
+      <!-- ═══════════════════════════════════════════════ -->
+      <section class="demo-section">
+        <h2>Source Code</h2>
+        <div class="source-viewer">
+          <pre><code id="source-code"></code></pre>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Displayable source -->
+  <script type="text/plain" id="demo-js-source">
+import { ViewEngine } from '/blocks/view/index.ts';
+import { TabGroupBehavior } from '/blocks/tabs/index.ts';
+
+// === TABS SETUP ===
+
+const tabGroup = document.getElementById('demo-tabs');
+const tabBehavior = new TabGroupBehavior({ name: 'tab-group' });
+tabBehavior.attach(tabGroup);
+tabBehavior.connectedCallback();
+
+// Tab event logging
+tabGroup.addEventListener('tab-change', (e) => {
+  const { from, to } = e.detail;
+  document.getElementById('tab-events').textContent =
+    `tab-change: ${from} → ${to}`;
+});
+
+// === TAB CONFIG ===
+
+document.getElementById('tab-config').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-activation], [data-orientation]');
+  if (!btn) return;
+
+  if (btn.dataset.activation) {
+    tabGroup.setAttribute('activation', btn.dataset.activation);
+    // Rebuild tabs with new config
+    tabBehavior.disconnectedCallback();
+    tabBehavior.connectedCallback();
+  }
+  if (btn.dataset.orientation) {
+    tabGroup.setAttribute('orientation', btn.dataset.orientation);
+    tabGroup.classList.toggle('vertical', btn.dataset.orientation === 'vertical');
+    tabBehavior.disconnectedCallback();
+    tabBehavior.connectedCallback();
+  }
+});
+
+// === COUNTER ===
+
+let count = 0;
+const counterValue = document.getElementById('counter-value');
+document.getElementById('increment-btn').onclick = () => {
+  counterValue.textContent = String(++count);
+};
+document.getElementById('decrement-btn').onclick = () => {
+  counterValue.textContent = String(--count);
+};
+document.getElementById('reset-btn').onclick = () => {
+  count = 0;
+  counterValue.textContent = '0';
+};
+
+// === TODO LIST ===
+
+const todos = [];
+const todoInput = document.getElementById('todo-input');
+const todoList = document.getElementById('todo-list');
+const todoStatus = document.getElementById('todo-status');
+
+function renderTodos() {
+  todoList.innerHTML = todos.map((t, i) => `
+    <li>
+      <span>${t}</span>
+      <button data-remove="${i}">×</button>
+    </li>
+  `).join('');
+  todoStatus.textContent = todos.length
+    ? `${todos.length} todo${todos.length > 1 ? 's' : ''}`
+    : 'No todos yet';
+}
+
+document.getElementById('todo-add-btn').onclick = () => {
+  const text = todoInput.value.trim();
+  if (text) {
+    todos.push(text);
+    todoInput.value = '';
+    renderTodos();
+  }
+};
+todoList.addEventListener('click', (e) => {
+  const idx = e.target.dataset?.remove;
+  if (idx !== undefined) {
+    todos.splice(Number(idx), 1);
+    renderTodos();
+  }
+});
+
+// === STANDALONE VIEW ===
+
+const viewEngine = new ViewEngine();
+const viewPanel = document.getElementById('view-panel');
+const viewStatusText = document.getElementById('view-status-text');
+
+function updateViewStatus() {
+  viewStatusText.textContent = viewEngine.isVisible(viewPanel) ? 'visible' : 'hidden';
+}
+
+document.getElementById('view-show-btn').onclick = () => {
+  viewEngine.show(viewPanel);
+  updateViewStatus();
+};
+document.getElementById('view-hide-btn').onclick = () => {
+  viewEngine.hide(viewPanel);
+  updateViewStatus();
+};
+document.getElementById('view-toggle-btn').onclick = () => {
+  viewEngine.toggle(viewPanel);
+  updateViewStatus();
+};
+
+// === EXCLUSIVE GROUPS ===
+
+const groupEngine = new ViewEngine({ hiddenMode: 'display' });
+
+document.querySelector('.group-buttons').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-show]');
+  if (!btn) return;
+
+  const panelId = btn.dataset.show;
+  const panel = document.getElementById(panelId);
+  if (panel) {
+    groupEngine.show(panel);
+  }
+
+  // Update active button state
+  document.querySelectorAll('.group-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+});
+  </script>
+
+  <!-- Running code -->
+  <script type="module">
+import ViewEngine from '/blocks/view/ViewEngine.ts';
+import TabGroupBehavior from '/blocks/tabs/TabGroupBehavior.ts';
+
+// === TABS SETUP ===
+
+const tabGroup = document.getElementById('demo-tabs');
+const tabBehavior = new TabGroupBehavior({ name: 'tab-group' });
+tabBehavior.attach(tabGroup);
+tabBehavior.isConnected = true;
+tabBehavior.connectedCallback();
+
+// Tab event logging
+tabGroup.addEventListener('tab-change', (e) => {
+  const { from, to } = e.detail;
+  document.getElementById('tab-events').textContent =
+    `tab-change: ${from} → ${to}`;
+});
+
+// === TAB CONFIG ===
+
+function updateConfigButtons(container, attr, value) {
+  container.querySelectorAll(`[data-${attr}]`).forEach(b => {
+    b.classList.toggle('active', b.dataset[attr] === value);
+  });
+}
+
+document.getElementById('tab-config').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-activation], [data-orientation]');
+  if (!btn) return;
+
+  if (btn.dataset.activation) {
+    tabGroup.setAttribute('activation', btn.dataset.activation);
+    tabBehavior.disconnectedCallback();
+    tabBehavior.connectedCallback();
+    updateConfigButtons(document.getElementById('tab-config'), 'activation', btn.dataset.activation);
+  }
+  if (btn.dataset.orientation) {
+    tabGroup.setAttribute('orientation', btn.dataset.orientation);
+    tabGroup.classList.toggle('vertical', btn.dataset.orientation === 'vertical');
+    tabBehavior.disconnectedCallback();
+    tabBehavior.connectedCallback();
+    updateConfigButtons(document.getElementById('tab-config'), 'orientation', btn.dataset.orientation);
+  }
+});
+
+// === COUNTER ===
+
+let count = 0;
+const counterValue = document.getElementById('counter-value');
+document.getElementById('increment-btn').onclick = () => {
+  counterValue.textContent = String(++count);
+};
+document.getElementById('decrement-btn').onclick = () => {
+  counterValue.textContent = String(--count);
+};
+document.getElementById('reset-btn').onclick = () => {
+  count = 0;
+  counterValue.textContent = '0';
+};
+
+// === TODO LIST ===
+
+const todos = [];
+const todoInput = document.getElementById('todo-input');
+const todoList = document.getElementById('todo-list');
+const todoStatus = document.getElementById('todo-status');
+
+function renderTodos() {
+  todoList.innerHTML = todos.map((t, i) => `
+    <li>
+      <span>${t}</span>
+      <button data-remove="${i}">×</button>
+    </li>
+  `).join('');
+  todoStatus.textContent = todos.length
+    ? `${todos.length} todo${todos.length > 1 ? 's' : ''}`
+    : 'No todos yet';
+}
+
+document.getElementById('todo-add-btn').onclick = () => {
+  const text = todoInput.value.trim();
+  if (text) {
+    todos.push(text);
+    todoInput.value = '';
+    renderTodos();
+  }
+};
+todoList.addEventListener('click', (e) => {
+  const idx = e.target.dataset?.remove;
+  if (idx !== undefined) {
+    todos.splice(Number(idx), 1);
+    renderTodos();
+  }
+});
+
+// === FORM ===
+
+document.getElementById('demo-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  alert('Form submitted!');
+});
+
+// === STANDALONE VIEW ===
+
+const viewEngine = new ViewEngine();
+const viewPanel = document.getElementById('view-panel');
+const viewStatusText = document.getElementById('view-status-text');
+
+function updateViewStatus() {
+  viewStatusText.textContent = viewEngine.isVisible(viewPanel) ? 'visible' : 'hidden';
+}
+
+document.getElementById('view-show-btn').onclick = () => {
+  viewEngine.show(viewPanel);
+  updateViewStatus();
+};
+document.getElementById('view-hide-btn').onclick = () => {
+  viewEngine.hide(viewPanel);
+  updateViewStatus();
+};
+document.getElementById('view-toggle-btn').onclick = () => {
+  viewEngine.toggle(viewPanel);
+  updateViewStatus();
+};
+
+// === EXCLUSIVE GROUPS ===
+
+const groupEngine = new ViewEngine({ hiddenMode: 'display' });
+
+document.querySelector('.group-buttons').addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-show]');
+  if (!btn) return;
+
+  const panelId = btn.dataset.show;
+  const panel = document.getElementById(panelId);
+  if (panel) {
+    groupEngine.show(panel);
+  }
+
+  // Update active button state
+  document.querySelectorAll('.group-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+});
+
+// === SOURCE VIEWER ===
+
+const source = document.getElementById('demo-js-source');
+if (source) {
+  const code = document.getElementById('source-code');
+  code.textContent = source.textContent.trim();
+}
+
+window.demoReady = true;
+  </script>
+</body>
+</html>

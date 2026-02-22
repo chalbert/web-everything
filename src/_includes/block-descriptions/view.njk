@@ -1,0 +1,562 @@
+<h2>View</h2>
+<p>Foundation for all show/hide/render patterns. Provides a shared engine and specialized blocks that higher-level components (Tabs, Router, Accordion) build on.</p>
+
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">
+  <strong>Terminology:</strong> See <a href="/semantics/">Semantics & Glossary</a> for terms like <a href="/semantics/#term-view">view</a>, <a href="/semantics/#term-hidden-visible">hidden/visible</a>, and <a href="/semantics/#term-commandfor-command">commandfor/command</a>.
+</p>
+
+<h3>Architecture</h3>
+<p>View separates two concerns:</p>
+<ul>
+  <li><strong>ViewEngine</strong> (shared core): How to hide/show &mdash; hidden modes, toggle events, transitions, exclusive groups</li>
+  <li><strong>Blocks</strong> (specialized): When/whether to hide/show &mdash; each block solves a different DOM-presence scenario</li>
+</ul>
+<p>Higher-level components don't reimplement show/hide mechanics. They pick the View block that fits their DOM model, or use the engine directly.</p>
+
+<h3>The Core Question: What Exists in the DOM?</h3>
+<p>The right block depends on what should be in the DOM when content is <strong>not active</strong>:</p>
+
+<table>
+  <tr>
+    <th>DOM When Inactive</th>
+    <th>Block</th>
+    <th>Type</th>
+    <th>When to Use</th>
+  </tr>
+  <tr>
+    <td>Full element + content, just hidden</td>
+    <td><a href="#view-behavior">ViewBehavior</a></td>
+    <td>Behavior</td>
+    <td>Tabs, accordion, disclosure, toggling existing content</td>
+  </tr>
+  <tr>
+    <td>Element exists, visibility bound to expression</td>
+    <td><a href="#view-show">ViewShowBehavior</a></td>
+    <td>Behavior</td>
+    <td>Reactive show/hide, dropdowns, conditional UI</td>
+  </tr>
+  <tr>
+    <td>Nothing &mdash; DOM stamped on condition, destroyed when false</td>
+    <td><a href="#view-if">ViewIfDirective</a></td>
+    <td>Directive</td>
+    <td>Login gates, feature flags, expensive components</td>
+  </tr>
+  <tr>
+    <td>Nothing &mdash; one branch stamped at a time from multiple options</td>
+    <td><a href="#view-switch">ViewSwitchDirective</a></td>
+    <td>Directive</td>
+    <td>Multi-step wizards, state-dependent UI, mode switching</td>
+  </tr>
+</table>
+
+<h4>Decision Guide</h4>
+<ol>
+  <li><strong>Does the content always exist in your HTML?</strong>
+    <ul>
+      <li>Yes &rarr; Is it toggled by commands/triggers or by an expression?
+        <ul>
+          <li>Commands (buttons, Invoker Commands) &rarr; <strong>ViewBehavior</strong></li>
+          <li>Expression/state &rarr; <strong>ViewShowBehavior</strong></li>
+        </ul>
+      </li>
+      <li>No, it should only exist when a condition is met &rarr;
+        <ul>
+          <li>Binary (true/false) &rarr; <strong>ViewIfDirective</strong></li>
+          <li>Multiple branches &rarr; <strong>ViewSwitchDirective</strong></li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+  <li><strong>Do you need accessibility for hidden content?</strong>
+    <ul>
+      <li><code>hidden="until-found"</code> (Ctrl+F finds it) &rarr; use a Behavior (content must be in DOM)</li>
+      <li><code>content-visibility: hidden</code> (stays in a11y tree) &rarr; use a Behavior</li>
+      <li>No trace when inactive &rarr; use a Directive</li>
+    </ul>
+  </li>
+  <li><strong>Should state survive hide/show cycles?</strong>
+    <ul>
+      <li>Behaviors preserve state naturally (element stays in DOM)</li>
+      <li>Directives destroy state by default, use <code>view:keep-alive</code> to cache</li>
+    </ul>
+  </li>
+</ol>
+
+<h3>Web Standards Alignment</h3>
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API">Invoker Commands API</a></td>
+    <td>Baseline Jan 2026</td>
+    <td>ViewBehavior handles <code>command</code> events (<code>--view-show</code>, <code>--view-hide</code>, <code>--view-toggle</code>)</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/blog/html-details-exclusive-accordions/">Exclusive Accordion</a></td>
+    <td>Standard (Interop 2025)</td>
+    <td>ViewEngine uses <code>name</code> attribute for mutual exclusivity</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/hidden">hidden="until-found"</a></td>
+    <td>Standard (Interop 2025)</td>
+    <td>ViewEngine hidden mode option for searchable hidden content</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Popover_API">Popover API</a></td>
+    <td>Baseline Apr 2025</td>
+    <td>ViewEngine fires <code>beforetoggle</code>/<code>toggle</code> events with same shape</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/content-visibility">content-visibility</a></td>
+    <td>Baseline Widely Available</td>
+    <td>ViewEngine default hidden mode (performant, keeps a11y tree)</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/View_Transitions_API">View Transitions API</a></td>
+    <td>Baseline 2024</td>
+    <td>ViewEngine wraps show/hide in <code>document.startViewTransition()</code> when opted in</td>
+  </tr>
+  <tr>
+    <td><a href="https://github.com/nicolo-ribaudo/tc39-proposal-structs">DOM Parts</a></td>
+    <td>Proposal (W3C)</td>
+    <td>Directives use comment markers today, ready to adopt DOM Parts when available</td>
+  </tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════ -->
+<hr>
+<h3>ViewEngine (Shared Core)</h3>
+<p>Not a block itself. The engine provides the mechanics that all View blocks and higher-level components share.</p>
+
+<h4>Hidden Modes</h4>
+<table>
+  <tr><th>Mode</th><th>CSS / Attribute</th><th>In DOM</th><th>Accessible</th><th>Searchable (Ctrl+F)</th><th>Use Case</th></tr>
+  <tr>
+    <td><code>display</code></td>
+    <td><code>display: none</code></td>
+    <td>Yes</td>
+    <td>No</td>
+    <td>No</td>
+    <td>Broad fallback</td>
+  </tr>
+  <tr>
+    <td><code>content-visibility</code> (default)</td>
+    <td><code>content-visibility: hidden</code></td>
+    <td>Yes</td>
+    <td>Yes</td>
+    <td>No</td>
+    <td>Performance with a11y</td>
+  </tr>
+  <tr>
+    <td><code>until-found</code></td>
+    <td><code>hidden="until-found"</code></td>
+    <td>Yes</td>
+    <td>No</td>
+    <td>Yes</td>
+    <td>Accordion, FAQ, searchable sections</td>
+  </tr>
+  <tr>
+    <td><code>inert</code></td>
+    <td><code>inert</code> attribute</td>
+    <td>Yes</td>
+    <td>No (non-interactive)</td>
+    <td>Yes</td>
+    <td>Preview, disabled states</td>
+  </tr>
+</table>
+<p>Directives (ViewIf, ViewSwitch) don't use hidden modes by default &mdash; they remove content from the DOM entirely. Hidden modes apply when using <code>keep-alive</code> to cache previously-stamped content.</p>
+
+<h4>Toggle Events (Popover API pattern)</h4>
+<p>ViewEngine fires <code>beforetoggle</code>/<code>toggle</code> events matching the Popover API shape. Since these names are shared with Popover and <code>&lt;details&gt;</code>, ViewEngine registers <strong>typed event classes</strong> via <a href="/projects/webevents/">Web Events</a> provider keys for discrimination:</p>
+
+<pre><code class="language-javascript">// Standard listener — works, but receives ALL toggle events (views, popovers, details)
+element.addEventListener('toggle', (e) => {
+  console.log('Now:', e.newState);
+});
+
+// Scoped listener — only fires for ViewEngine toggles
+listenForScoped(element, 'toggle', 'customEvents:view-toggle', (e) => {
+  console.log('View toggled:', e.newState);
+});
+
+// Plugged mode — same discrimination, standard API
+element.addEventListener('toggle', (e) => {
+  console.log('View toggled:', e.newState);
+}, { provider: 'customEvents:view-toggle' });</code></pre>
+
+<table>
+  <tr><th>Event</th><th>Class</th><th>Provider Key</th><th>Cancelable</th></tr>
+  <tr><td><code>beforetoggle</code></td><td><code>ViewBeforeToggleEvent</code></td><td><code>customEvents:view-beforetoggle</code></td><td>Yes</td></tr>
+  <tr><td><code>toggle</code></td><td><code>ViewToggleEvent</code></td><td><code>customEvents:view-toggle</code></td><td>No</td></tr>
+</table>
+<p>Detail shape: <code>{ oldState: 'hidden'|'visible', newState: 'hidden'|'visible' }</code></p>
+
+<h4>Exclusive Groups</h4>
+<pre><code class="language-html">&lt;!-- Elements with same name: only one visible at a time --&gt;
+&lt;!-- Mirrors &lt;details name="..."&gt; pattern from HTML standard --&gt;
+&lt;section view name="panels"&gt;Panel A&lt;/section&gt;
+&lt;section view name="panels" hidden&gt;Panel B&lt;/section&gt;</code></pre>
+
+<h4>Transitions (opt-in)</h4>
+<pre><code class="language-html">&lt;!-- Engine wraps toggle in document.startViewTransition() --&gt;
+&lt;section view view:transition&gt;...&lt;/section&gt;</code></pre>
+
+<h4>API Draft</h4>
+<pre><code class="language-typescript">/** Hidden mode determines HOW an element is hidden */
+type ViewHiddenMode = 'display' | 'content-visibility' | 'until-found' | 'inert';
+
+/** Matches Popover API state values */
+type ViewState = 'hidden' | 'visible';
+
+/** Configuration — instances hold defaults, methods accept overrides */
+interface ViewOptions {
+  hiddenMode?: ViewHiddenMode;  // default: 'content-visibility'
+  transition?: boolean;         // wrap in document.startViewTransition()
+}
+
+/**
+ * Shared view primitive. Instances hold configuration defaults.
+ * All state lives in the DOM — the primitive is stateless.
+ *
+ * @example
+ * // Router creates one with its preferred defaults
+ * const view = new ___(/* TBD *​/{ hiddenMode: 'content-visibility', transition: true });
+ * view.show(outletContent);
+ * view.hide(previousContent);
+ *
+ * @example
+ * // Static methods work without an instance (uses element attributes)
+ * ___(/* TBD *​/).show(element);
+ * ___(/* TBD *​/).isVisible(element);
+ */
+class ___(/* TBD */) {
+
+  constructor(options?: ViewOptions);
+
+  // ── Core operations ──────────────────────────────────
+  // All return boolean: true if toggle happened, false if cancelled via beforetoggle
+
+  /** Show element. Removes hidden state. Hides exclusive group siblings. */
+  show(element: Element, options?: ViewOptions): boolean;
+
+  /** Hide element. Applies hidden mode. */
+  hide(element: Element, options?: ViewOptions): boolean;
+
+  /** Toggle: show if hidden, hide if visible. */
+  toggle(element: Element, options?: ViewOptions): boolean;
+
+  // ── State queries ────────────────────────────────────
+
+  /** Is the element currently visible? (not hidden, not inert, not content-visibility:hidden) */
+  isVisible(element: Element): boolean;
+
+  /** Read hidden-mode from element attribute, fallback to instance default */
+  getHiddenMode(element: Element): ViewHiddenMode;
+
+  /** Read name attribute for exclusive group membership */
+  getGroupName(element: Element): string | undefined;
+
+  /** Find all elements in the same exclusive group (same name, same scope) */
+  getGroupMembers(element: Element): Element[];
+
+  // ── Events (fired automatically by show/hide/toggle) ─
+
+  /**
+   * Fires beforetoggle (cancelable) then toggle (non-cancelable)
+   * on the target element. Matches Popover API event shape:
+   *   { oldState: 'hidden'|'visible', newState: 'hidden'|'visible' }
+   */
+
+  // ── Exclusive groups ─────────────────────────────────
+
+  /**
+   * When showing an element with a name attribute,
+   * all other elements with the same name are automatically hidden.
+   * Scope: siblings within the same parent, or configurable via
+   * a scope selector.
+   */
+
+  // ── Transitions ──────────────────────────────────────
+
+  /**
+   * If transition: true (via options or view:transition attribute),
+   * show/hide is wrapped in document.startViewTransition().
+   * Nested transitions are queued, not nested (browser limitation).
+   */
+}</code></pre>
+
+<h4>How blocks use the API</h4>
+<pre><code class="language-typescript">// ViewBehavior — creates instance, delegates command handling
+class ViewBehavior extends CustomAttribute {
+  #view = new ___(/* TBD */)();
+
+  connectedCallback() {
+    this.target!.addEventListener('command', (e) => {
+      if (e.command === '--view-show')   this.#view.show(this.target!);
+      if (e.command === '--view-hide')   this.#view.hide(this.target!);
+      if (e.command === '--view-toggle') this.#view.toggle(this.target!);
+    });
+  }
+}
+
+// ViewShowBehavior — creates instance, watches expression
+class ViewShowBehavior extends CustomAttribute {
+  #view = new ___(/* TBD */)();
+
+  #onStateChange(value: unknown) {
+    if (value) this.#view.show(this.target!);
+    else       this.#view.hide(this.target!);
+  }
+}
+
+// Router — creates instance with defaults, manages own stamping
+class Router {
+  #view = new ___(/* TBD */)({ hiddenMode: 'content-visibility', transition: true });
+
+  #activateRoute(outlet: Element, content: DocumentFragment) {
+    outlet.appendChild(content);
+    this.#view.show(outlet);
+  }
+
+  #deactivateRoute(outlet: Element, keepAlive: boolean) {
+    if (keepAlive) this.#view.hide(outlet);
+    else           outlet.innerHTML = '';
+  }
+}</code></pre>
+
+<!-- ═══════════════════════════════════════════════ -->
+<hr>
+<h3 id="view-behavior">ViewBehavior</h3>
+<p><strong>Type:</strong> Behavior &nbsp;|&nbsp; <strong>Attribute:</strong> <code>view</code> &nbsp;|&nbsp; <strong>DOM:</strong> Element always present</p>
+
+<p>Marks an element as a view target that can be shown/hidden via Invoker Commands. The element is always in the DOM &mdash; ViewBehavior only toggles its visibility using the engine's hidden modes.</p>
+
+<h4>Usage</h4>
+<pre><code class="language-html">&lt;!-- Triggers using Invoker Commands API --&gt;
+&lt;button commandfor="panel-1" command="--view-show"&gt;Show&lt;/button&gt;
+&lt;button commandfor="panel-1" command="--view-hide"&gt;Hide&lt;/button&gt;
+&lt;button commandfor="panel-1" command="--view-toggle"&gt;Toggle&lt;/button&gt;
+
+&lt;!-- Target: always in DOM, visibility managed --&gt;
+&lt;section id="panel-1" view&gt;Panel content&lt;/section&gt;</code></pre>
+
+<h4>With exclusive groups</h4>
+<pre><code class="language-html">&lt;button commandfor="home" command="--view-show"&gt;Home&lt;/button&gt;
+&lt;button commandfor="about" command="--view-show"&gt;About&lt;/button&gt;
+
+&lt;section id="home" view name="pages"&gt;Home content&lt;/section&gt;
+&lt;section id="about" view name="pages" hidden&gt;About content&lt;/section&gt;</code></pre>
+
+<h4>With hidden mode</h4>
+<pre><code class="language-html">&lt;!-- Searchable when hidden (Ctrl+F reveals it) --&gt;
+&lt;section view hidden-mode="until-found"&gt;FAQ answer&lt;/section&gt;
+
+&lt;!-- Visible but non-interactive --&gt;
+&lt;section view hidden-mode="inert"&gt;Preview content&lt;/section&gt;</code></pre>
+
+<h4>Who uses this</h4>
+<ul>
+  <li><strong><a href="/blocks/tabs/">Tabs</a></strong> &mdash; panels are always in DOM, toggled by tab triggers via commands</li>
+  <li><strong>Accordion</strong> &mdash; sections always in DOM, <code>hidden="until-found"</code> for searchability</li>
+  <li><strong>Disclosure</strong> &mdash; single panel toggled by a button</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════ -->
+<hr>
+<h3 id="view-show">ViewShowBehavior</h3>
+<p><strong>Type:</strong> Behavior &nbsp;|&nbsp; <strong>Attribute:</strong> <code>view:show</code> &nbsp;|&nbsp; <strong>DOM:</strong> Element always present</p>
+
+<p>Binds an expression to an element's visibility. The element stays in the DOM; its visibility reacts to state changes. Unlike ViewBehavior (imperative, command-driven), ViewShowBehavior is declarative and expression-driven.</p>
+
+<h4>Usage</h4>
+<pre><code class="language-html">&lt;!-- Show when expression is truthy, hide when falsy --&gt;
+&lt;div view:show="isDropdownOpen"&gt;Dropdown menu&lt;/div&gt;
+
+&lt;!-- Works with dot-notation paths --&gt;
+&lt;div view:show="user.isAdmin"&gt;Admin tools&lt;/div&gt;
+
+&lt;!-- Negation --&gt;
+&lt;div view:show="!isLoading"&gt;Content ready&lt;/div&gt;</code></pre>
+
+<h4>Difference from ViewBehavior</h4>
+<table>
+  <tr><th></th><th>ViewBehavior</th><th>ViewShowBehavior</th></tr>
+  <tr><td>Trigger</td><td>Commands (buttons, API calls)</td><td>Expression evaluation (state changes)</td></tr>
+  <tr><td>Control</td><td>Imperative</td><td>Declarative / reactive</td></tr>
+  <tr><td>Typical use</td><td>User-triggered panels</td><td>State-driven UI regions</td></tr>
+</table>
+
+<h4>Who uses this</h4>
+<ul>
+  <li><strong>Dropdown menus</strong> &mdash; bound to open/close state</li>
+  <li><strong>Permission-gated UI</strong> &mdash; <code>view:show="user.canEdit"</code></li>
+  <li><strong>Loading overlays</strong> &mdash; <code>view:show="isLoading"</code></li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════ -->
+<hr>
+<h3 id="view-if">ViewIfDirective</h3>
+<p><strong>Type:</strong> Directive &nbsp;|&nbsp; <strong>Attributes:</strong> <code>view:if</code>, <code>view:else</code> &nbsp;|&nbsp; <strong>DOM:</strong> Nothing when false</p>
+
+<p>Structural conditional rendering. When the expression is falsy, the content does not exist in the DOM at all &mdash; no element, no placeholder, no accessibility trace. Content is stamped from a <code>&lt;template&gt;</code> when the condition becomes truthy and destroyed when it becomes falsy.</p>
+
+<h4>Usage</h4>
+<pre><code class="language-html">&lt;!-- Content created/destroyed based on condition --&gt;
+&lt;template view:if="isLoggedIn"&gt;
+  &lt;user-dashboard&gt;&lt;/user-dashboard&gt;
+&lt;/template&gt;
+
+&lt;!-- if/else pairing --&gt;
+&lt;template view:if="hasItems"&gt;
+  &lt;item-list&gt;&lt;/item-list&gt;
+&lt;/template&gt;
+&lt;template view:else&gt;
+  &lt;empty-state&gt;&lt;/empty-state&gt;
+&lt;/template&gt;</code></pre>
+
+<h4>Why not ViewShowBehavior?</h4>
+<p>Use ViewIfDirective when:</p>
+<ul>
+  <li>The content is expensive to keep in DOM (heavy components, many nodes)</li>
+  <li>You want clean mount/unmount lifecycle (event listeners, subscriptions)</li>
+  <li>The condition is rarely true and you don't want DOM overhead when false</li>
+  <li>There's no reason for the content to be discoverable when inactive</li>
+</ul>
+
+<h4>Tradeoffs</h4>
+<table>
+  <tr><th></th><th>ViewShowBehavior (<code>view:show</code>)</th><th>ViewIfDirective (<code>view:if</code>)</th></tr>
+  <tr><td>DOM when inactive</td><td>Element exists, hidden</td><td>Nothing (comment marker only)</td></tr>
+  <tr><td>State preservation</td><td>Automatic</td><td>Destroyed (unless <code>keep-alive</code>)</td></tr>
+  <tr><td>Toggle cost</td><td>Low (CSS change)</td><td>Higher (template stamp + teardown)</td></tr>
+  <tr><td>Idle DOM cost</td><td>Higher (nodes exist)</td><td>None</td></tr>
+  <tr><td>Accessibility when hidden</td><td>Configurable via hidden mode</td><td>None</td></tr>
+  <tr><td>Ctrl+F findable</td><td>Yes (with <code>until-found</code>)</td><td>No</td></tr>
+</table>
+
+<h4>Who uses this</h4>
+<ul>
+  <li><strong>Auth gates</strong> &mdash; don't render admin UI for non-admins</li>
+  <li><strong>Feature flags</strong> &mdash; features not in DOM when disabled</li>
+  <li><strong>One-time modals</strong> &mdash; created on demand, destroyed on close</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════ -->
+<hr>
+<h3 id="view-switch">ViewSwitchDirective</h3>
+<p><strong>Type:</strong> Directive &nbsp;|&nbsp; <strong>Attributes:</strong> <code>view:switch</code>, <code>view:case</code>, <code>view:default</code> &nbsp;|&nbsp; <strong>DOM:</strong> One branch at a time</p>
+
+<p>Multi-branch structural rendering. Evaluates an expression and stamps the matching case. Only the active branch exists in the DOM (unless using <code>keep-alive</code>).</p>
+
+<h4>Usage</h4>
+<pre><code class="language-html">&lt;div view:switch="currentStep"&gt;
+  &lt;template view:case="info"&gt;
+    &lt;info-form&gt;&lt;/info-form&gt;
+  &lt;/template&gt;
+  &lt;template view:case="payment"&gt;
+    &lt;payment-form&gt;&lt;/payment-form&gt;
+  &lt;/template&gt;
+  &lt;template view:case="confirm"&gt;
+    &lt;confirmation-page&gt;&lt;/confirmation-page&gt;
+  &lt;/template&gt;
+  &lt;template view:default&gt;
+    &lt;p&gt;Unknown step&lt;/p&gt;
+  &lt;/template&gt;
+&lt;/div&gt;</code></pre>
+
+<h4>With keep-alive</h4>
+<pre><code class="language-html">&lt;!-- Cache previously rendered branches (form state preserved) --&gt;
+&lt;div view:switch="currentStep" view:keep-alive&gt;
+  &lt;template view:case="info"&gt;...&lt;/template&gt;
+  &lt;template view:case="payment"&gt;...&lt;/template&gt;
+&lt;/div&gt;
+
+&lt;!-- With LRU cache limit --&gt;
+&lt;div view:switch="route" view:keep-alive="5"&gt;...&lt;/div&gt;</code></pre>
+<p>When using <code>keep-alive</code>, cached branches are hidden using the engine's hidden modes instead of being destroyed. This is the bridge between directive and behavior patterns &mdash; the directive handles structural stamping, but delegates hide/show of cached content to the engine.</p>
+
+<h4>Why not ViewBehavior with exclusive groups?</h4>
+<table>
+  <tr><th></th><th>ViewBehavior + <code>name</code></th><th>ViewSwitchDirective</th></tr>
+  <tr><td>Children in HTML</td><td>All declared statically</td><td>Templates, stamped on demand</td></tr>
+  <tr><td>Initial DOM cost</td><td>All branches rendered</td><td>Only active branch</td></tr>
+  <tr><td>State preservation</td><td>Automatic (always in DOM)</td><td>Only with <code>keep-alive</code></td></tr>
+  <tr><td>Dynamic branches</td><td>No</td><td>Yes (template-based)</td></tr>
+  <tr><td>Accessibility when hidden</td><td>Configurable</td><td>None (unless cached)</td></tr>
+  <tr><td>Best for</td><td>Tabs (few panels, always present)</td><td>Wizards, routed views, many branches</td></tr>
+</table>
+
+<h4>Who uses this</h4>
+<ul>
+  <li><strong>Multi-step wizards</strong> &mdash; one step at a time, keep-alive preserves form state</li>
+  <li><strong>Mode switching</strong> &mdash; edit vs preview vs code view</li>
+  <li><strong>State-dependent UI</strong> &mdash; idle / loading / success / error states</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════ -->
+<hr>
+<h3>How Higher-Level Components Use View</h3>
+<p>View provides the primitives. Components add domain-specific concerns:</p>
+
+<table>
+  <tr><th>Component</th><th>View Blocks Used</th><th>What the Component Adds</th></tr>
+  <tr>
+    <td><a href="/blocks/tabs/">Tabs</a></td>
+    <td>ViewBehavior (panels always in DOM)</td>
+    <td>ARIA roles, keyboard navigation, active styling</td>
+  </tr>
+  <tr>
+    <td><a href="/blocks/router/">Router</a></td>
+    <td>ViewEngine directly (structural stamping is router's own job)</td>
+    <td>URL matching, guards, loaders, scroll restoration</td>
+  </tr>
+  <tr>
+    <td>Accordion</td>
+    <td>ViewBehavior + <code>hidden="until-found"</code></td>
+    <td>Expand/collapse animation, ARIA expanded state</td>
+  </tr>
+  <tr>
+    <td>Wizard / Stepper</td>
+    <td>ViewSwitchDirective + <code>keep-alive</code></td>
+    <td>Step validation, progress indicator, linear flow control</td>
+  </tr>
+  <tr>
+    <td>Conditional UI</td>
+    <td>ViewShowBehavior or ViewIfDirective</td>
+    <td>Nothing &mdash; these are used directly</td>
+  </tr>
+</table>
+
+<h3>Framework Comparison</h3>
+<table>
+  <tr><th>Concern</th><th>Web Everything</th><th>Alpine</th><th>Vue</th><th>Angular</th><th>Solid</th></tr>
+  <tr><td>Show (CSS)</td><td><code>view:show</code></td><td><code>x-show</code></td><td><code>v-show</code></td><td>&mdash;</td><td><code>&lt;Show&gt;</code></td></tr>
+  <tr><td>If (DOM)</td><td><code>view:if</code></td><td><code>x-if</code></td><td><code>v-if</code></td><td><code>*ngIf</code></td><td><code>&lt;Show&gt;</code></td></tr>
+  <tr><td>Switch</td><td><code>view:switch/case</code></td><td>&mdash;</td><td>&mdash;</td><td><code>ngSwitch</code></td><td><code>&lt;Switch/Match&gt;</code></td></tr>
+  <tr><td>Imperative toggle</td><td><code>view</code> + commands</td><td><code>@click</code></td><td><code>@click</code></td><td><code>(click)</code></td><td>Signals</td></tr>
+  <tr><td>Exclusive groups</td><td><code>name</code> attribute</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td></tr>
+  <tr><td>Keep-alive</td><td><code>view:keep-alive</code></td><td>&mdash;</td><td><code>&lt;KeepAlive&gt;</code></td><td>&mdash;</td><td>&mdash;</td></tr>
+  <tr><td>Events</td><td><code>beforetoggle/toggle</code></td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td><td>&mdash;</td></tr>
+</table>
+
+<h3>Implementation Notes</h3>
+<ul>
+  <li>ViewEngine is a utility class, not a registered block &mdash; imported by blocks that need it</li>
+  <li>ViewBehavior extends <code>CustomAttribute</code> (from Web Behaviors)</li>
+  <li>ViewShowBehavior extends <code>CustomAttribute</code> (from Web Behaviors)</li>
+  <li>ViewIfDirective and ViewSwitchDirective extend <code>CustomTemplateDirective</code> (from Web Directives)</li>
+  <li>Directives use comment-based markers for template boundaries (like ForEach)</li>
+  <li>ViewBehavior listens for <code>command</code> events from Invoker Commands API</li>
+  <li>ViewBehavior falls back to click handlers for browsers without Invoker Commands</li>
+  <li>All blocks delegate hidden mode, events, transitions, and exclusive groups to ViewEngine</li>
+</ul>
+
+<h3>Exports</h3>
+<table>
+  <tr><th>Export</th><th>Description</th></tr>
+  <tr><td><code>ViewEngine</code></td><td>Shared core: hidden modes, toggle events, transitions, exclusive groups</td></tr>
+  <tr><td><code>ViewBehavior</code></td><td>Behavior: imperative show/hide via Invoker Commands</td></tr>
+  <tr><td><code>ViewShowBehavior</code></td><td>Behavior: expression-bound reactive visibility</td></tr>
+  <tr><td><code>ViewIfDirective</code></td><td>Directive: structural if/else conditional rendering</td></tr>
+  <tr><td><code>ViewSwitchDirective</code></td><td>Directive: structural multi-branch rendering</td></tr>
+  <tr><td><code>ViewEngineOptions</code></td><td>Configuration type for hidden mode, transition, group name</td></tr>
+</table>

@@ -148,6 +148,7 @@
         <div class="source-viewer-toggle">
           <button id="view-source-btn" class="active">HTML</button>
           <button id="view-js-btn">JS</button>
+          <button id="view-jsx-btn">JSX</button>
           <button id="view-dom-btn">Live DOM</button>
         </div>
         <div class="source-viewer-mode">
@@ -447,6 +448,7 @@ attributes.upgrade(document.body);
     const sourceDisplay = document.getElementById('source-display');
     const viewSourceBtn = document.getElementById('view-source-btn');
     const viewJsBtn = document.getElementById('view-js-btn');
+    const viewJsxBtn = document.getElementById('view-jsx-btn');
     const viewDomBtn = document.getElementById('view-dom-btn');
 
     // Get JS source from the text/plain script tag (not transformed by Vite)
@@ -466,11 +468,21 @@ attributes.upgrade(document.body);
         displaySource();
       });
 
+    // Fetch JSX source
+    fetch('/demos/declarative-spa-jsx.tsx')
+      .then(res => res.text())
+      .then(source => {
+        window.jsxSource = source;
+        if (currentView === 'jsx') displaySource();
+      });
+
     function displaySource() {
       if (currentView === 'html') {
         sourceDisplay.textContent = window.originalHtml || 'Loading...';
       } else if (currentView === 'js') {
         sourceDisplay.textContent = window.originalScript || 'Loading...';
+      } else if (currentView === 'jsx') {
+        sourceDisplay.textContent = window.jsxSource || 'Loading...';
       } else {
         // Show live DOM of the app-main section
         const appMain = document.querySelector('.app-main');
@@ -482,6 +494,7 @@ attributes.upgrade(document.body);
       currentView = view;
       viewSourceBtn.classList.remove('active');
       viewJsBtn.classList.remove('active');
+      viewJsxBtn.classList.remove('active');
       viewDomBtn.classList.remove('active');
       activeBtn.classList.add('active');
       displaySource();
@@ -489,6 +502,7 @@ attributes.upgrade(document.body);
 
     viewSourceBtn.addEventListener('click', () => setActiveView('html', viewSourceBtn));
     viewJsBtn.addEventListener('click', () => setActiveView('js', viewJsBtn));
+    viewJsxBtn.addEventListener('click', () => setActiveView('jsx', viewJsxBtn));
     viewDomBtn.addEventListener('click', () => setActiveView('dom', viewDomBtn));
     
     // Update live DOM view when changes occur (debounced)

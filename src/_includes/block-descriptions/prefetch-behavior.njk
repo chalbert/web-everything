@@ -1,0 +1,281 @@
+<h2>Prefetch Behavior</h2>
+<p>
+    Attribute-based behavior that implements the <a href="/intents/prefetch/">Prefetch Intent</a> by detecting user conditions
+    via browser APIs and triggering resource prefetching at the appropriate eagerness level.
+    Part of the <a href="/projects/webresources/">Web Resources</a> ecosystem.
+</p>
+<p>
+    Maps abstract intent conditions (<code>limited-data</code>, <code>low-power</code>, <code>slow-connection</code>)
+    to concrete browser APIs. Eagerness levels are translated to DOM events that trigger prefetching
+    at the optimal moment &mdash; trading off speculation cost against navigation speed.
+</p>
+
+<h3>Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Speculation_Rules_API">Speculation Rules API</a></td>
+        <td>Chrome 121+</td>
+        <td>Aligns eagerness model (conservative/moderate/eager/immediate) with our intent levels; delegates to native prefetch when available</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/IntersectionObserver">IntersectionObserver</a></td>
+        <td>Baseline</td>
+        <td><code>withViewportPrefetch</code> observes link visibility with configurable <code>rootMargin</code> to trigger before element is fully in view</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/NetworkInformation">NetworkInformation API</a></td>
+        <td>Limited (Chromium)</td>
+        <td>Suppresses prefetch when <code>saveData</code> is true or <code>effectiveType</code> is <code>'slow-2g'</code>/<code>'2g'</code></td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Battery_Status_API">Battery Status API</a></td>
+        <td>Limited (Chromium)</td>
+        <td>Suppresses viewport-level prefetch when battery &lt; 20% and not charging</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Attributes/rel/prefetch">&lt;link rel="prefetch"&gt;</a></td>
+        <td>Baseline</td>
+        <td>For navigation prefetches, injects <code>&lt;link rel="prefetch"&gt;</code> into <code>&lt;head&gt;</code> for browser-native fetching</td>
+    </tr>
+</table>
+
+<h3>Framework Research</h3>
+<table>
+    <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
+    <tr>
+        <td><a href="https://remix.run/docs/en/main/components/link">Remix</a></td>
+        <td><code>&lt;Link prefetch="intent|render|viewport"&gt;</code> &mdash; three eagerness levels; <code>intent</code> = hover+focus</td>
+    </tr>
+    <tr>
+        <td><a href="https://nextjs.org/docs/pages/api-reference/components/link">Next.js</a></td>
+        <td>Automatic viewport prefetch on all <code>&lt;Link&gt;</code> components; IntersectionObserver internally</td>
+    </tr>
+    <tr>
+        <td><a href="https://github.com/GoogleChromeLabs/quicklink">quicklink</a></td>
+        <td>Prefetches in-viewport links during <code>requestIdleCallback</code>; respects <code>saveData</code> and <code>effectiveType</code></td>
+    </tr>
+    <tr>
+        <td><a href="https://instant.page/">instant.page</a></td>
+        <td>Prefetches on hover (65ms debounce) or <code>touchstart</code>; minimal overhead approach</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Speculation_Rules_API">Speculation Rules API</a></td>
+        <td>Chrome's native declarative prefetch/prerender with <code>eagerness</code> levels and document rules</td>
+    </tr>
+</table>
+
+<h3>Eagerness-to-Events Mapping</h3>
+<p>
+    Each eagerness level maps to a specific DOM event or API that triggers prefetching at the optimal moment.
+    Higher eagerness means earlier speculation &mdash; more wasted fetches, but faster navigation.
+</p>
+<table>
+    <thead>
+        <tr><th>Eagerness</th><th>DOM Trigger</th><th>Timing</th><th>Speculation Rules Equivalent</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>viewport</strong></td>
+            <td><code>IntersectionObserver</code> (rootMargin: 200px)</td>
+            <td>~seconds before interaction</td>
+            <td><code>moderate</code></td>
+        </tr>
+        <tr>
+            <td><strong>hover</strong></td>
+            <td><code>pointerenter</code> (200ms debounce) + <code>focusin</code></td>
+            <td>~200–400ms before click</td>
+            <td><code>conservative</code></td>
+        </tr>
+        <tr>
+            <td><strong>interaction</strong></td>
+            <td><code>pointerdown</code> / <code>touchstart</code></td>
+            <td>~100ms before click</td>
+            <td><code>conservative</code></td>
+        </tr>
+        <tr>
+            <td><strong>immediate</strong></td>
+            <td>On mount (connectedCallback)</td>
+            <td>Immediately, no user gesture</td>
+            <td><code>eager</code></td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Condition Suppression</h3>
+<p>
+    Before triggering a prefetch, Prefetch Behavior checks user conditions in priority order.
+    If any condition matches, the prefetch is suppressed and a <code>prefetch-suppressed</code> event fires.
+    APIs that are unavailable are treated as "condition not met" (graceful degradation).
+</p>
+<table>
+    <thead>
+        <tr><th>Condition</th><th>Browser API</th><th>Suppression Rule</th><th>Availability</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Data Saver</strong></td>
+            <td><code>navigator.connection.saveData</code></td>
+            <td>Suppress all prefetches when <code>true</code></td>
+            <td>Chromium only</td>
+        </tr>
+        <tr>
+            <td><strong>Low Battery</strong></td>
+            <td><code>navigator.getBattery()</code></td>
+            <td>Suppress viewport prefetch when <code>level &lt; 0.2 &amp;&amp; !charging</code></td>
+            <td>Chromium only</td>
+        </tr>
+        <tr>
+            <td><strong>Slow Connection</strong></td>
+            <td><code>navigator.connection.effectiveType</code></td>
+            <td>Suppress viewport prefetch when <code>'slow-2g'</code> or <code>'2g'</code></td>
+            <td>Chromium only</td>
+        </tr>
+        <tr>
+            <td><strong>Reduced Motion</strong></td>
+            <td><code>prefers-reduced-data</code> media query</td>
+            <td>Suppress all prefetches (user-level preference)</td>
+            <td>Proposed</td>
+        </tr>
+    </tbody>
+</table>
+<p>
+    <strong>Priority order:</strong> Data Saver &gt; Low Battery &gt; Slow Connection &gt; Reduced Motion.
+    The user's explicit data-saving preference always wins.
+</p>
+
+<h3>Router Integration</h3>
+<p>
+    Prefetch Behavior integrates with the <a href="/blocks/router/">Router</a> to prefetch route data
+    before navigation. When a link with <code>prefetch</code> attribute is triggered, the behavior:
+</p>
+<ol>
+    <li><strong>Resolves</strong> the target URL to a route definition via the Router's route table.</li>
+    <li><strong>Checks</strong> suppression conditions (saveData, battery, connection).</li>
+    <li><strong>Prefetches</strong> via <a href="/blocks/resource-loader/">Resource Loader</a>'s cache &mdash; the data is stored so that subsequent navigation gets an instant cache hit.</li>
+    <li><strong>Optionally</strong> injects <code>&lt;link rel="prefetch"&gt;</code> for sub-resources (CSS, JS) that the route will need.</li>
+</ol>
+
+<h3>Usage Examples</h3>
+
+<h4>Viewport Prefetch on Links</h4>
+{% highlight "html" %}
+<a href="/products/123" prefetch="viewport">
+    Product Details
+</a>
+{% endhighlight %}
+
+<h4>Hover Prefetch with Router</h4>
+{% highlight "html" %}
+<nav>
+    <a href="/dashboard" prefetch="hover">Dashboard</a>
+    <a href="/settings" prefetch="hover">Settings</a>
+    <a href="/profile" prefetch="interaction">Profile</a>
+</nav>
+{% endhighlight %}
+
+<h4>Programmatic Configuration</h4>
+{% highlight "typescript" %}
+// Configure prefetch behavior via injector
+docInjector.set('customContexts:prefetchConfig', {
+  defaultEagerness: 'hover',
+  conditions: {
+    saveData: true,       // Respect saveData
+    lowBattery: true,     // Check battery level
+    slowConnection: true, // Check effectiveType
+    threshold: {
+      battery: 0.2,             // Suppress below 20%
+      connectionTypes: ['slow-2g', '2g']
+    }
+  },
+  rootMargin: '200px',  // IntersectionObserver margin
+  hoverDelay: 200,      // Hover debounce ms
+  maxConcurrent: 2      // Limit concurrent prefetches
+});
+{% endhighlight %}
+
+<h3>Events</h3>
+<p>
+    Prefetch Behavior dispatches typed event classes registered via <a href="/projects/webevents/">Web Events</a> provider keys.
+    The <code>prefetch-triggered</code> event is cancelable &mdash; canceling it suppresses the prefetch.
+</p>
+<table>
+    <thead>
+        <tr><th>Event</th><th>Class</th><th>Provider Key</th><th>Detail</th><th>Cancelable</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><code>prefetch-triggered</code></td>
+            <td><code>PrefetchTriggeredEvent</code></td>
+            <td><code>customEvents:prefetch-triggered</code></td>
+            <td><code>{ url, eagerness, trigger }</code></td>
+            <td>Yes</td>
+        </tr>
+        <tr>
+            <td><code>prefetch-suppressed</code></td>
+            <td><code>PrefetchSuppressedEvent</code></td>
+            <td><code>customEvents:prefetch-suppressed</code></td>
+            <td><code>{ url, reason, condition }</code></td>
+            <td>No</td>
+        </tr>
+        <tr>
+            <td><code>prefetch-complete</code></td>
+            <td><code>PrefetchCompleteEvent</code></td>
+            <td><code>customEvents:prefetch-complete</code></td>
+            <td><code>{ url, duration, fromCache }</code></td>
+            <td>No</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Interface</h3>
+<pre><code class="language-typescript">/** Prefetch eagerness levels */
+type PrefetchEagerness =
+    | 'viewport'     // IntersectionObserver
+    | 'hover'        // pointerenter + focusin
+    | 'interaction'  // pointerdown / touchstart
+    | 'immediate';   // On mount
+
+/** Suppression condition result */
+interface PrefetchCondition {
+    saveData: boolean;
+    lowBattery: boolean;
+    slowConnection: boolean;
+    reducedData: boolean;
+}
+
+/** Prefetch configuration — provided via
+ *  customContexts:prefetchConfig on the injector chain. */
+interface PrefetchConfig {
+    defaultEagerness: PrefetchEagerness;
+    conditions: {
+        saveData: boolean;
+        lowBattery: boolean;
+        slowConnection: boolean;
+        threshold?: {
+            battery: number;
+            connectionTypes: string[];
+        };
+    };
+    rootMargin?: string;       // IntersectionObserver margin
+    hoverDelay?: number;       // Debounce ms (default: 200)
+    maxConcurrent?: number;    // Limit parallel prefetches
+}</code></pre>
+
+<h3>Exports</h3>
+<table>
+    <thead>
+        <tr><th>Export</th><th>Kind</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>PrefetchBehavior</code></td><td>Class</td><td>Main behavior (CustomAttribute)</td></tr>
+        <tr><td><code>withViewportPrefetch</code></td><td>Trait</td><td>IntersectionObserver-based viewport detection</td></tr>
+        <tr><td><code>withHoverPrefetch</code></td><td>Trait</td><td>Pointer hover + focus detection (200ms debounce)</td></tr>
+        <tr><td><code>withInteractionPrefetch</code></td><td>Trait</td><td>Pointer down / touch start detection</td></tr>
+        <tr><td><code>PrefetchTriggeredEvent</code></td><td>Event Class</td><td>Typed event before prefetch (cancelable)</td></tr>
+        <tr><td><code>PrefetchSuppressedEvent</code></td><td>Event Class</td><td>Typed event when prefetch suppressed</td></tr>
+        <tr><td><code>PrefetchCompleteEvent</code></td><td>Event Class</td><td>Typed event on prefetch completion</td></tr>
+        <tr><td><code>PrefetchCondition</code></td><td>Interface</td><td>Suppression condition check result</td></tr>
+        <tr><td><code>PrefetchEagerness</code></td><td>Type</td><td>Eagerness level: viewport | hover | interaction | immediate</td></tr>
+    </tbody>
+</table>

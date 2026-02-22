@@ -1,0 +1,488 @@
+/* ═══════════════════════════════════════════════
+   View + Tabs Demo Styles
+   ═══════════════════════════════════════════════ */
+
+:root {
+  --color-bg: #f8f9fa;
+  --color-surface: #ffffff;
+  --color-border: #e1e5e9;
+  --color-text: #1a1a2e;
+  --color-text-muted: #6b7280;
+  --color-primary: #3b82f6;
+  --color-primary-hover: #2563eb;
+  --color-primary-light: #eff6ff;
+  --color-danger: #ef4444;
+  --color-success: #22c55e;
+  --radius: 8px;
+  --radius-sm: 4px;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: 1.6;
+}
+
+/* ── Header ─────────────────────────────────── */
+
+.demo-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.5rem;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  box-shadow: var(--shadow);
+}
+
+.demo-header-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.demo-header-brand svg {
+  width: 20px;
+  height: 20px;
+  color: var(--color-primary);
+}
+
+.demo-header-back {
+  color: var(--color-text-muted);
+  text-decoration: none;
+  font-size: 0.875rem;
+}
+.demo-header-back:hover { color: var(--color-primary); }
+
+/* ── Layout ─────────────────────────────────── */
+
+.app-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+header {
+  margin-bottom: 2rem;
+}
+
+header h1 {
+  font-size: 1.75rem;
+  margin-bottom: 0.25rem;
+}
+
+.subtitle {
+  color: var(--color-text-muted);
+  font-size: 0.95rem;
+}
+
+/* ── Demo Sections ──────────────────────────── */
+
+.demo-section {
+  margin-bottom: 2.5rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  box-shadow: var(--shadow);
+}
+
+.demo-section h2 {
+  font-size: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.demo-section > p {
+  color: var(--color-text-muted);
+  font-size: 0.9rem;
+  margin-bottom: 1.25rem;
+}
+
+/* ── Config Panel ───────────────────────────── */
+
+.config-panel {
+  display: flex;
+  gap: 1.5rem;
+  padding: 0.75rem 1rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.config-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.config-row label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.btn-group {
+  display: flex;
+  gap: 2px;
+}
+
+.config-btn {
+  padding: 0.3rem 0.75rem;
+  font-size: 0.8rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-surface);
+  cursor: pointer;
+  color: var(--color-text-muted);
+  transition: all 0.15s;
+}
+
+.config-btn:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.config-btn:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+
+.config-btn.active {
+  background: var(--color-primary);
+  color: white;
+  border-color: var(--color-primary);
+}
+
+/* ── Tabs ───────────────────────────────────── */
+
+[tab-list] {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--color-border);
+  margin-bottom: 0;
+}
+
+[tab-trigger] {
+  padding: 0.6rem 1.25rem;
+  border: none;
+  background: none;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+[tab-trigger]:hover {
+  color: var(--color-text);
+}
+
+[tab-trigger][aria-selected="true"] {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+
+[tab-trigger]:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Vertical tabs layout */
+[tab-group].vertical {
+  display: flex;
+  gap: 0;
+}
+
+.vertical [tab-list] {
+  flex-direction: column;
+  border-bottom: none;
+  border-right: 2px solid var(--color-border);
+  min-width: 140px;
+}
+
+.vertical [tab-trigger] {
+  text-align: left;
+  border-bottom: none;
+  border-right: 2px solid transparent;
+  margin-bottom: 0;
+  margin-right: -2px;
+}
+
+.vertical [tab-trigger][aria-selected="true"] {
+  border-right-color: var(--color-primary);
+  border-bottom-color: transparent;
+}
+
+.vertical .tab-panels-container {
+  flex: 1;
+}
+
+/* Tab panels */
+.tab-panels-container {
+  min-height: 200px;
+}
+
+[tab-panel] {
+  padding: 1.25rem 0;
+}
+
+/* Hidden panels via data-view-hidden attribute */
+[tab-panel][data-view-hidden] {
+  content-visibility: hidden;
+}
+
+.panel-content h3 {
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+}
+
+/* ── Counter ────────────────────────────────── */
+
+.counter-display {
+  text-align: center;
+  margin: 1rem 0;
+}
+
+.counter-value {
+  font-size: 3rem;
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+.counter-controls {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+/* ── Todo List ──────────────────────────────── */
+
+.todo-input {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.todo-input input {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+}
+
+.todo-list {
+  list-style: none;
+}
+
+.todo-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.todo-list li button {
+  padding: 0.15rem 0.5rem;
+  font-size: 0.8rem;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--color-danger);
+}
+
+.todo-status {
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+  margin-top: 0.5rem;
+}
+
+/* ── Form ───────────────────────────────────── */
+
+.form-field {
+  margin-bottom: 1rem;
+}
+
+.form-field label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+}
+
+.form-field input,
+.form-field textarea {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+
+.form-field textarea {
+  resize: vertical;
+}
+
+/* ── Buttons ────────────────────────────────── */
+
+button {
+  padding: 0.5rem 1rem;
+  border: none;
+  background: var(--color-primary);
+  color: white;
+  border-radius: var(--radius-sm);
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+button:hover { background: var(--color-primary-hover); }
+
+button.secondary {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+
+button.secondary:hover {
+  background: var(--color-border);
+}
+
+/* ── Event Log ──────────────────────────────── */
+
+.event-log {
+  margin-top: 1rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 0.8rem;
+  font-family: monospace;
+}
+
+/* ── Standalone View Demo ───────────────────── */
+
+.view-demo {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.view-controls {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.view-target {
+  padding: 1.25rem;
+  background: var(--color-primary-light);
+  border: 2px solid var(--color-primary);
+  border-radius: var(--radius);
+  transition: opacity 0.2s;
+}
+
+.view-target[data-view-hidden] {
+  content-visibility: hidden;
+}
+
+.view-target h3 {
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.view-target p {
+  font-size: 0.9rem;
+  margin-bottom: 0.5rem;
+}
+
+.view-status {
+  font-size: 0.85rem;
+  font-family: monospace;
+}
+
+/* ── Exclusive Groups Demo ──────────────────── */
+
+.group-demo {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.group-buttons {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.group-btn {
+  padding: 0.5rem 1rem;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid var(--color-border);
+}
+
+.group-btn.active {
+  background: var(--color-primary);
+  color: white;
+  border-color: var(--color-primary);
+}
+
+.group-panels {
+  position: relative;
+}
+
+.group-panel {
+  padding: 1.25rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+}
+
+.group-panel h4 {
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+/* ── Source Viewer ───────────────────────────── */
+
+.source-viewer {
+  max-height: 400px;
+  overflow: auto;
+  background: #1e1e2e;
+  border-radius: var(--radius);
+  padding: 1rem;
+}
+
+.source-viewer pre {
+  margin: 0;
+}
+
+.source-viewer code {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.8rem;
+  color: #cdd6f4;
+  white-space: pre;
+  line-height: 1.5;
+}
+
+/* ── Responsive ─────────────────────────────── */
+
+@media (max-width: 600px) {
+  .config-panel {
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+
+  .config-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
