@@ -1743,7 +1743,7 @@
   {
     "id": "transient-component",
     "name": "Transient Component",
-    "status": "concept",
+    "status": "active",
     "type": "Module",
     "summary": "Base class and utilities for custom elements that replace themselves with semantically correct native HTML during connectedCallback — enabling context-aware element selection without permanent wrapper nodes.",
     "exports": [

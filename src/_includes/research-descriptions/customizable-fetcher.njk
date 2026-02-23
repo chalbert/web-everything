@@ -1,0 +1,362 @@
+{% raw %}<h2>The Problem</h2>
+
+<p>The <a href="/blocks/resource-loader/">Resource Loader</a> needs a transport layer to execute requests. The natural default is the browser's native <code>fetch()</code> API. But projects must be able to replace it &mdash; with Axios, a GraphQL client, a WebSocket transport, or any custom implementation &mdash; without modifying Resource Loader itself. The same applies to caching: the default Cache API should be swappable with a custom implementation.</p>
+
+<p>This is not a new requirement. The <a href="/projects/webresources/">Web Resources</a> architecture already defines the separation: <strong>Transport</strong> (how to execute) vs <strong>Policy</strong> (auth, cache, retry, logging). This research documents how that separation should be made concrete through the injector system.</p>
+
+
+<h2>The Architecture Already Exists</h2>
+
+<p>Web Resources defines six sub-standards, three of which directly address this concern:</p>
+
+<table>
+  <thead>
+    <tr><th>Sub-Standard</th><th>Interface</th><th>What It Swaps</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong><a href="/resources/custom-clients/">Custom Clients</a></strong></td>
+      <td><code>CustomResourceClient</code></td>
+      <td>The transport layer. Default: native <code>fetch()</code>. Replaceable with Axios, GraphQL, WebSocket, mock client, etc.</td>
+    </tr>
+    <tr>
+      <td><strong><a href="/resources/custom-middleware/">Custom Middleware</a></strong></td>
+      <td><code>CustomMiddleware</code></td>
+      <td>Request/response interceptors. Auth headers, retry logic, logging, request transforms. Stackable via chain-of-responsibility.</td>
+    </tr>
+    <tr>
+      <td><strong><a href="/resources/custom-cache/">Custom Cache</a></strong></td>
+      <td><code>CustomCachePolicy</code></td>
+      <td>Cache strategy. Default: browser Cache API. Replaceable with in-memory LRU, IndexedDB, Redis proxy, etc.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The key insight from the Web Resources mission:</p>
+
+<blockquote>
+  <p>"Most libraries couple the <em>Transport</em> (HTTP vs GQL) with the <em>Policy</em> (Cache/Auth). Web Resources standardizes the Policy layer so it can be injected into any Transport."</p>
+</blockquote>
+
+
+<h2>Custom Clients: Transport Abstraction</h2>
+
+<h3>Interface</h3>
+
+<pre><code>interface CustomResourceClient {
+    execute(operation: ResourceOperation): Consumable&lt;ResourceResult&gt;;
+}
+
+interface ResourceOperation {
+    kind: 'query' | 'mutation' | 'subscription';
+    key: unknown[];           // Normalized resource identifier
+    context: Record&lt;string, unknown&gt;;  // Request-specific context
+}
+
+type Consumable&lt;T&gt; = Promise&lt;T&gt; | AsyncIterable&lt;T&gt; | Observable&lt;T&gt;;</code></pre>
+
+<p>The <code>Consumable</code> return type supports three consumption patterns:</p>
+
+<table>
+  <thead>
+    <tr><th>Pattern</th><th>Type</th><th>Use Case</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>One-shot</td>
+      <td><code>Promise&lt;ResourceResult&gt;</code></td>
+      <td>REST API call, GraphQL query</td>
+    </tr>
+    <tr>
+      <td>Streaming</td>
+      <td><code>AsyncIterable&lt;ResourceResult&gt;</code></td>
+      <td>Server-Sent Events, chunked responses</td>
+    </tr>
+    <tr>
+      <td>Reactive</td>
+      <td><code>Observable&lt;ResourceResult&gt;</code></td>
+      <td>WebSocket subscriptions, live queries</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Injection via Injector</h3>
+
+<pre><code>// App provides a custom client via injector
+const docInjector = injectorRoot.getInjectorOf(document);
+
+// Default: native fetch client
+docInjector.set('customContexts:resourceClient', new FetchClient());
+
+// Or: Axios adapter
+docInjector.set('customContexts:resourceClient', new AxiosClient(axiosInstance));
+
+// Or: GraphQL client
+docInjector.set('customContexts:resourceClient', new GraphQLClient(endpoint));
+
+// Or: Mock client for testing
+docInjector.set('customContexts:resourceClient', new MockClient(fixtures));</code></pre>
+
+<h3>Framework Comparison: Transport Abstraction</h3>
+
+<table>
+  <thead>
+    <tr><th>Library</th><th>Transport Pattern</th><th>Swappable?</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>TanStack Query</strong></td>
+      <td><code>queryFn</code> per query &mdash; user provides the fetch function</td>
+      <td>Yes (per query). No global transport abstraction.</td>
+    </tr>
+    <tr>
+      <td><strong>SWR</strong></td>
+      <td><code>fetcher</code> function per hook or via <code>SWRConfig</code></td>
+      <td>Yes (global or per request). No typed interface.</td>
+    </tr>
+    <tr>
+      <td><strong>Apollo Client</strong></td>
+      <td><code>ApolloLink</code> chain &mdash; transport is the terminating link</td>
+      <td>Yes. <code>HttpLink</code>, <code>WebSocketLink</code>, <code>BatchLink</code> are swappable.</td>
+    </tr>
+    <tr>
+      <td><strong>Axios</strong></td>
+      <td><code>adapter</code> config option</td>
+      <td>Yes. Can replace XMLHttpRequest with fetch, or with mock adapter for tests.</td>
+    </tr>
+    <tr>
+      <td><strong>Web Everything</strong></td>
+      <td><code>CustomResourceClient</code> via injector</td>
+      <td>Yes. Globally, per scope, or per component. Injector hierarchy enables scoped overrides.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Web Everything's advantage:</strong> The injector system provides <strong>hierarchical scoping</strong> that no other library offers. A data grid inside a dashboard can use a different transport client than the rest of the app, simply by providing a scoped <code>customContexts:resourceClient</code> on its injector.</p>
+
+
+<h2>Custom Middleware: Request Pipeline</h2>
+
+<h3>Interface</h3>
+
+<pre><code>type MiddlewareNext = (req: ResourceOperation) => Consumable&lt;ResourceResult&gt;;
+
+interface CustomMiddleware {
+    process(req: ResourceOperation, next: MiddlewareNext): Consumable&lt;ResourceResult&gt;;
+}</code></pre>
+
+<p>Middleware wraps the <code>next</code> handler, enabling both request preprocessing and response postprocessing:</p>
+
+<pre><code>// Auth middleware
+class AuthMiddleware implements CustomMiddleware {
+    process(req, next) {
+        req.context.headers = {
+            ...req.context.headers,
+            Authorization: `Bearer ${this.#getToken()}`
+        };
+        return next(req);
+    }
+}
+
+// Retry middleware
+class RetryMiddleware implements CustomMiddleware {
+    async process(req, next) {
+        for (let attempt = 0; attempt &lt; 3; attempt++) {
+            try {
+                return await next(req);
+            } catch (e) {
+                if (!isRetryable(e) || attempt === 2) throw e;
+                await delay(Math.pow(2, attempt) * 100);
+            }
+        }
+    }
+}</code></pre>
+
+<h3>Framework Comparison: Middleware</h3>
+
+<table>
+  <thead>
+    <tr><th>Library</th><th>Middleware Pattern</th><th>Transport-Agnostic?</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Axios</strong></td>
+      <td>Request/response interceptors (<code>axios.interceptors.request.use()</code>)</td>
+      <td>No &mdash; tied to Axios</td>
+    </tr>
+    <tr>
+      <td><strong>Apollo Client</strong></td>
+      <td><code>ApolloLink</code> chain of responsibility</td>
+      <td>No &mdash; GraphQL specific</td>
+    </tr>
+    <tr>
+      <td><strong>Ky / Got / Wretch</strong></td>
+      <td>Hook-based interceptors (beforeRequest, afterResponse)</td>
+      <td>No &mdash; tied to their HTTP client</td>
+    </tr>
+    <tr>
+      <td><strong>Web Everything</strong></td>
+      <td><code>CustomMiddleware</code> composable via injector</td>
+      <td><strong>Yes</strong> &mdash; middleware is independent of which <code>CustomResourceClient</code> is used</td>
+    </tr>
+  </tbody>
+</table>
+
+
+<h2>Custom Cache: Policy Abstraction</h2>
+
+<h3>Interface</h3>
+
+<pre><code>interface CustomCachePolicy {
+    mode: 'cache-first' | 'network-only' | 'stale-while-revalidate';
+    maxAge: number;                          // ms
+    staleWhileRevalidate: number;            // ms
+    key: (op: ResourceOperation) => string;  // Cache key derivation
+}</code></pre>
+
+<h3>Separation of Policy and Storage</h3>
+
+<p>The <code>CustomCachePolicy</code> defines <em>how long</em> data is fresh and <em>when</em> to revalidate. The <em>where</em> (storage backend) is a separate concern:</p>
+
+<table>
+  <thead>
+    <tr><th>Policy</th><th>Storage</th><th>Use Case</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>cache-first</code>, maxAge: 5min</td>
+      <td>Browser Cache API</td>
+      <td>Default for most REST queries</td>
+    </tr>
+    <tr>
+      <td><code>stale-while-revalidate</code>, maxAge: 30s</td>
+      <td>In-memory Map</td>
+      <td>Frequently changing data (dashboards)</td>
+    </tr>
+    <tr>
+      <td><code>network-only</code></td>
+      <td>None</td>
+      <td>Mutations, real-time data</td>
+    </tr>
+    <tr>
+      <td><code>cache-first</code>, maxAge: 24h</td>
+      <td>IndexedDB</td>
+      <td>Offline-capable apps</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Integration with Resource Loader</h3>
+
+<p>The Resource Loader's <code>withStaleWhileRevalidate</code> trait activates when the cache returns stale data &mdash; it keeps previous content visible in a dimmed state while fresh data loads. The trait responds to the cache policy; it doesn't implement caching itself.</p>
+
+
+<h2>The Injection Pattern</h2>
+
+<p>All three layers &mdash; client, middleware, and cache &mdash; are provided via the injector system:</p>
+
+<pre><code>// Application bootstrap
+const docInjector = injectorRoot.getInjectorOf(document);
+
+// Transport
+docInjector.set('customContexts:resourceClient', new FetchClient());
+
+// Middleware (composable stack)
+docInjector.set('customContexts:resourceMiddleware', [
+    new AuthMiddleware(tokenStore),
+    new RetryMiddleware({ maxRetries: 3 }),
+    new LoggingMiddleware(),
+]);
+
+// Cache policy
+docInjector.set('customContexts:resourceCachePolicy', {
+    mode: 'stale-while-revalidate',
+    maxAge: 30_000,
+    staleWhileRevalidate: 60_000,
+    key: (op) => JSON.stringify(op.key),
+});
+
+// Per-scope override: admin panel uses GraphQL
+const adminPanel = document.querySelector('#admin');
+const adminInjector = injectorRoot.getInjectorOf(adminPanel);
+adminInjector.set('customContexts:resourceClient', new GraphQLClient('/admin/graphql'));</code></pre>
+
+<p>Resource Loader resolves these from the injector chain at request time. If no custom client is provided, it falls back to native <code>fetch()</code>.</p>
+
+
+<h2>Adapter Examples</h2>
+
+<h3>Axios Adapter</h3>
+
+<pre><code>class AxiosClient implements CustomResourceClient {
+    #instance: AxiosInstance;
+
+    constructor(instance: AxiosInstance) {
+        this.#instance = instance;
+    }
+
+    async execute(operation: ResourceOperation): Promise&lt;ResourceResult&gt; {
+        const { data, status, headers } = await this.#instance.request({
+            url: operation.context.url as string,
+            method: operation.kind === 'mutation' ? 'POST' : 'GET',
+            data: operation.context.body,
+            signal: operation.context.signal as AbortSignal,
+        });
+        return { data, metadata: { status, headers } };
+    }
+}</code></pre>
+
+<h3>GraphQL Adapter</h3>
+
+<pre><code>class GraphQLClient implements CustomResourceClient {
+    #endpoint: string;
+
+    constructor(endpoint: string) {
+        this.#endpoint = endpoint;
+    }
+
+    async execute(operation: ResourceOperation): Promise&lt;ResourceResult&gt; {
+        const response = await fetch(this.#endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                query: operation.context.query,
+                variables: operation.context.variables,
+            }),
+            signal: operation.context.signal as AbortSignal,
+        });
+        const { data, errors } = await response.json();
+        if (errors?.length) throw new GraphQLError(errors);
+        return { data };
+    }
+}</code></pre>
+
+<h3>Mock Adapter (Testing)</h3>
+
+<pre><code>class MockClient implements CustomResourceClient {
+    #fixtures: Map&lt;string, unknown&gt;;
+
+    constructor(fixtures: Record&lt;string, unknown&gt;) {
+        this.#fixtures = new Map(Object.entries(fixtures));
+    }
+
+    async execute(operation: ResourceOperation): Promise&lt;ResourceResult&gt; {
+        const key = JSON.stringify(operation.key);
+        if (!this.#fixtures.has(key)) {
+            throw new Error(`No fixture for ${key}`);
+        }
+        return { data: this.#fixtures.get(key) };
+    }
+}</code></pre>
+
+
+<h2>Key Principles</h2>
+
+<ol>
+  <li><strong><code>fetch()</code> is the default, not the only option.</strong> If no <code>customContexts:resourceClient</code> is provided, Resource Loader uses native <code>fetch()</code>. This follows the progressive enhancement philosophy &mdash; zero configuration required.</li>
+  <li><strong>Transport and Policy are independent.</strong> The same <code>AuthMiddleware</code> works whether the client is Fetch, Axios, or GraphQL. Middleware processes <code>ResourceOperation</code> objects, not HTTP-specific types.</li>
+  <li><strong>Scoped overrides via injector hierarchy.</strong> A subsection of the app can use a different client, cache policy, or middleware stack without affecting the rest. This is unique to Web Everything's injector-based DI.</li>
+  <li><strong>Adapters are thin.</strong> Implementing <code>CustomResourceClient</code> requires one method: <code>execute(operation) → Consumable&lt;ResourceResult&gt;</code>. The adapter translates between Web Everything's operation model and the library's native API.</li>
+  <li><strong>Testing is a first-class use case.</strong> A <code>MockClient</code> injected at the document level replaces all network calls with fixture data. No network mocking libraries needed.</li>
+</ol>
+{% endraw %}

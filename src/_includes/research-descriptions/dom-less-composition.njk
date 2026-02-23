@@ -1,0 +1,376 @@
+{% raw %}<h2>The Problem</h2>
+
+<p>React can wrap components without adding DOM elements &mdash; <code>&lt;&gt;...&lt;/&gt;</code> (Fragments), <code>Context.Provider</code>, render props, and higher-order components all compose behavior without injecting wrapper nodes. In a custom-elements framework like Web Everything, every custom element is a real DOM node. This creates problems:</p>
+
+<ul>
+  <li><strong>CSS layout pollution</strong> &mdash; A wrapper <code>&lt;my-provider&gt;</code> between a Flex/Grid parent and its children breaks the parent&ndash;child layout relationship</li>
+  <li><strong>Semantic noise</strong> &mdash; Extra elements in the DOM that carry no semantic meaning</li>
+  <li><strong>Accessibility tree bloat</strong> &mdash; Screen readers may enumerate elements that add no value</li>
+  <li><strong>Selector complexity</strong> &mdash; CSS selectors must account for intermediate wrappers (<code>.parent > my-provider > .child</code>)</li>
+</ul>
+
+<p>This research catalogs every pattern and runtime solution available, evaluates what Web Everything already implements, and identifies the remaining gaps.</p>
+
+
+<h2>What Frameworks Do</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Framework</th>
+      <th>DOM-Less Patterns</th>
+      <th>Mechanism</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>React</strong></td>
+      <td>Fragment, Context.Provider, render props, HOCs, Portals, cloneElement</td>
+      <td>Virtual DOM &mdash; components are functions, not DOM nodes</td>
+    </tr>
+    <tr>
+      <td><strong>Vue</strong></td>
+      <td><code>&lt;template&gt;</code> wrapper, <code>&lt;Teleport&gt;</code>, <code>&lt;Transition&gt;</code>, <code>&lt;Suspense&gt;</code></td>
+      <td>Compiler removes <code>&lt;template&gt;</code>; virtual components use comment placeholders</td>
+    </tr>
+    <tr>
+      <td><strong>Angular</strong></td>
+      <td><code>&lt;ng-container&gt;</code>, <code>&lt;ng-template&gt;</code>, structural directives (<code>*ngIf</code>, <code>*ngFor</code>)</td>
+      <td>Compiler replaces with comment markers at build time</td>
+    </tr>
+    <tr>
+      <td><strong>Svelte</strong></td>
+      <td><code>{#if}</code>, <code>{#each}</code>, <code>{#await}</code>, <code>&lt;svelte:element&gt;</code></td>
+      <td>Compiler generates imperative DOM code &mdash; blocks become comment-delimited regions</td>
+    </tr>
+    <tr>
+      <td><strong>Solid</strong></td>
+      <td><code>&lt;Show&gt;</code>, <code>&lt;For&gt;</code>, <code>&lt;Switch&gt;/&lt;Match&gt;</code>, <code>&lt;Portal&gt;</code></td>
+      <td>Components use comment nodes as anchors; zero wrapper elements</td>
+    </tr>
+    <tr>
+      <td><strong>Lit</strong></td>
+      <td><code>nothing</code> sentinel, <code>repeat</code>/<code>when</code>/<code>choose</code>/<code>cache</code> directives</td>
+      <td>Comment-based template part system for tracking dynamic regions</td>
+    </tr>
+    <tr>
+      <td><strong>Stencil</strong></td>
+      <td><code>&lt;Host&gt;</code>, Fragment, functional components</td>
+      <td>Functional components inlined during virtual DOM rendering</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Key insight:</strong> Every framework solves this either through <em>compile-time erasure</em> (removing grouping elements at build time) or <em>comment-based markers</em> (invisible DOM nodes that delimit regions). Web Everything already uses both patterns.</p>
+
+
+<h2>Complete Pattern Catalog</h2>
+
+<h3>Category A: Compile-Time Erasure</h3>
+
+<table>
+  <thead>
+    <tr><th>Pattern</th><th>How It Works</th><th>Extra DOM Nodes</th><th>Relevance</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Vue <code>&lt;template&gt;</code> wrapper</td>
+      <td>Compiler removes the grouping element</td>
+      <td>Zero</td>
+      <td>Not directly applicable (no required build step)</td>
+    </tr>
+    <tr>
+      <td>Svelte blocks</td>
+      <td>Compiler generates imperative DOM code</td>
+      <td>Zero in production</td>
+      <td>Not directly applicable</td>
+    </tr>
+    <tr>
+      <td>Angular <code>&lt;ng-container&gt;</code></td>
+      <td>Compiler removes grouping element, leaves comments</td>
+      <td>Zero (comments in dev)</td>
+      <td>Already adopted as comment-based directives</td>
+    </tr>
+    <tr>
+      <td>Stencil functional components</td>
+      <td>Compiler inlines function output into vDOM</td>
+      <td>Zero</td>
+      <td>Adaptable via JSXRenderer</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Category B: Comment-Based Virtual Elements</h3>
+
+<table>
+  <thead>
+    <tr><th>Pattern</th><th>How It Works</th><th>Extra DOM Nodes</th><th>Status in WE</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Comment marker pairs</td>
+      <td><code>&lt;!-- start --&gt;</code> / <code>&lt;!-- end --&gt;</code> delimit dynamic regions</td>
+      <td>Two comments (layout-invisible)</td>
+      <td><strong>Primary pattern</strong> &mdash; used by ForEach, ViewIf, ViewSwitch, ResourceLoader</td>
+    </tr>
+    <tr>
+      <td>CustomComment lifecycle</td>
+      <td>Comments with connectedCallback/disconnectedCallback</td>
+      <td>One or two comments</td>
+      <td><strong>Already implemented</strong> via insertion patch</td>
+    </tr>
+    <tr>
+      <td>Transient-to-comments</td>
+      <td>Custom element replaces itself with start/end comment pair</td>
+      <td>Two comments</td>
+      <td><strong>Already documented</strong> for <code>&lt;for-each&gt;</code> ergonomic syntax</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Category C: Fragment-Based (One-Shot Insertion)</h3>
+
+<table>
+  <thead>
+    <tr><th>Pattern</th><th>How It Works</th><th>Extra DOM Nodes</th><th>Status in WE</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>DocumentFragment</td>
+      <td>Groups nodes; dissolves on insertion into DOM</td>
+      <td>Zero</td>
+      <td><strong>Already used</strong> in JSXRenderer and template stamping</td>
+    </tr>
+    <tr>
+      <td><code>&lt;template&gt;</code> element content</td>
+      <td>Inert content container; <code>.content</code> is a DocumentFragment</td>
+      <td>Template element present but inert</td>
+      <td><strong>Already central</strong> to directive system</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Category D: Self-Replacing / Transient Elements</h3>
+
+<table>
+  <thead>
+    <tr><th>Pattern</th><th>How It Works</th><th>Extra DOM Nodes</th><th>Status in WE</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>TransientElement</td>
+      <td>Custom element replaces itself with native element via <code>replaceWith()</code></td>
+      <td>Zero after replacement</td>
+      <td><strong>Already implemented</strong> &mdash; AutoHeading, planned for SmartLink</td>
+    </tr>
+    <tr>
+      <td>withSelfReplacement mixin</td>
+      <td>Adds self-replacement to any class via composition</td>
+      <td>Zero</td>
+      <td><strong>Documented</strong>, not yet implemented</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Category E: CSS Layout Transparency</h3>
+
+<table>
+  <thead>
+    <tr><th>Pattern</th><th>How It Works</th><th>Extra DOM Nodes</th><th>Trade-offs</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>display: contents</code></td>
+      <td>Element invisible to CSS layout; children act as direct children of grandparent</td>
+      <td>One (layout-transparent)</td>
+      <td>Accessibility mostly fixed (2023+). Element still in DOM for JS, events, injector chain. Not suitable for inherently semantic elements.</td>
+    </tr>
+    <tr>
+      <td>Adopted stylesheets</td>
+      <td>Share CSSStyleSheet objects without <code>&lt;style&gt;</code> elements</td>
+      <td>Zero</td>
+      <td>Only for programmatically created stylesheets</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Category F: Data Association Without DOM</h3>
+
+<table>
+  <thead>
+    <tr><th>Pattern</th><th>How It Works</th><th>Extra DOM Nodes</th><th>Status in WE</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>WeakMap-based associated data</td>
+      <td><code>WeakMap&lt;Node, T&gt;</code> &mdash; data keyed to nodes, auto-GC</td>
+      <td>Zero</td>
+      <td>Used internally by injector system</td>
+    </tr>
+    <tr>
+      <td>Symbol-tagged metadata</td>
+      <td><code>node[Symbol('meta')]</code> &mdash; invisible to serialization</td>
+      <td>Zero</td>
+      <td>Alternative to WeakMap</td>
+    </tr>
+    <tr>
+      <td>Proxy-based reactive wrappers</td>
+      <td>Proxy intercepts property access to trigger reactive updates</td>
+      <td>Zero</td>
+      <td>Potential for DOM-less reactive providers</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Category G: Behavioral Composition</h3>
+
+<table>
+  <thead>
+    <tr><th>Pattern</th><th>How It Works</th><th>Extra DOM Nodes</th><th>Status in WE</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>CustomAttribute (Behaviors)</td>
+      <td>JS objects attached to elements via attributes, with lifecycle callbacks</td>
+      <td>Zero</td>
+      <td><strong>Core pattern</strong> &mdash; already extensively used</td>
+    </tr>
+    <tr>
+      <td>Mixins / Decorators</td>
+      <td>Class-level composition adding cross-cutting concerns</td>
+      <td>Zero</td>
+      <td><strong>Already used</strong> (withSelfReplacement planned)</td>
+    </tr>
+    <tr>
+      <td>Render functions (JSX)</td>
+      <td>Direct DOM API via <code>createElement()</code> calls</td>
+      <td>Only explicit elements</td>
+      <td><strong>Already supported</strong> via JSXRenderer</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Category H: Teleportation / Portals</h3>
+
+<table>
+  <thead>
+    <tr><th>Pattern</th><th>How It Works</th><th>Extra DOM Nodes</th><th>Status in WE</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Portal (React/Vue)</td>
+      <td>Render children into a remote DOM target</td>
+      <td>Zero at source, content at target</td>
+      <td><strong>Documented</strong> as portal directive concept</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Category I: The <code>is</code> Attribute (Customized Built-in Elements)</h3>
+
+<table>
+  <thead>
+    <tr><th>Pattern</th><th>How It Works</th><th>Extra DOM Nodes</th><th>Status in WE</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>&lt;div is="my-element"&gt;</code></td>
+      <td>Native element upgraded to custom class &mdash; no wrapper</td>
+      <td>Zero (the native element IS the custom element)</td>
+      <td><strong>Already used</strong> for CustomTemplateDirective. Safari limitation acknowledged; polyfill planned.</td>
+    </tr>
+  </tbody>
+</table>
+
+
+<h2>The Primary Gap: DOM-Less Context Providers</h2>
+
+<p>Web Everything already covers most DOM-less composition patterns. The one significant gap is <strong>context/injector providers that do not affect CSS layout</strong>.</p>
+
+<p>The injector chain walks the DOM tree &mdash; providers must be DOM nodes. React's <code>&lt;Context.Provider&gt;</code> adds zero DOM because React has a virtual tree. In Web Everything, providing context requires a real element in the DOM hierarchy.</p>
+
+<h3>Proposed Solution: <code>display: contents</code> Custom Elements</h3>
+
+<p>A custom element with <code>display: contents</code> achieves both goals:</p>
+
+<ul>
+  <li><strong>Participates in injector chain</strong> &mdash; it is a real DOM node, so <code>InjectorRoot.getProviderOf()</code> walks through it</li>
+  <li><strong>Invisible to CSS layout</strong> &mdash; its children become direct flex/grid items of the grandparent</li>
+  <li><strong>Events still work</strong> &mdash; the element receives and dispatches events normally</li>
+  <li><strong>Selectors still work</strong> &mdash; <code>querySelector</code>, <code>closest()</code> can find it</li>
+</ul>
+
+<p>Example:</p>
+<pre><code>&lt;!-- This provider is layout-transparent --&gt;
+&lt;context-provider style="display:contents" heading-level="3"&gt;
+  &lt;auto-heading&gt;Title&lt;/auto-heading&gt;  &lt;!-- resolves to h3 --&gt;
+  &lt;p&gt;Content&lt;/p&gt;
+&lt;/context-provider&gt;</code></pre>
+
+<p><strong>Accessibility note:</strong> As of 2023&ndash;2024, <code>display: contents</code> accessibility bugs have been largely fixed in major browsers. The element remains in the accessibility tree. However, it should not be used on inherently semantic elements like <code>&lt;button&gt;</code>, <code>&lt;table&gt;</code>, or <code>&lt;details&gt;</code>.</p>
+
+
+<h2>Secondary Opportunity: Functional Components in JSXRenderer</h2>
+
+<p>The existing JSXRenderer supports string tags and class constructors. Extending it to support <strong>function components</strong> would enable Stencil/Haunted-style DOM-less composition:</p>
+
+<pre><code>// Function component &mdash; no custom element, no wrapper
+const List = ({ items }) =&gt; (
+  &lt;&gt;
+    {items.map(item =&gt; &lt;li&gt;{item}&lt;/li&gt;)}
+  &lt;/&gt;
+);
+
+// Usage &mdash; List adds zero DOM nodes
+const el = &lt;ul&gt;&lt;List items={['a', 'b', 'c']} /&gt;&lt;/ul&gt;;</code></pre>
+
+<p>When <code>type</code> is a function (not a class constructor), <code>createElement</code> calls it with props and inlines the returned DOM. Zero extra elements. Zero custom element registration.</p>
+
+
+<h2>What Web Everything Already Has</h2>
+
+<p>The framework already implements the strongest set of DOM-less composition mechanisms available to a custom-elements-based framework:</p>
+
+<ol>
+  <li><strong>Comment markers</strong> for structural directives (no layout impact)</li>
+  <li><strong>TransientElement</strong> for dynamic tag resolution (element vanishes after replacement)</li>
+  <li><strong>DocumentFragment</strong> for grouping during creation (dissolves on insertion)</li>
+  <li><strong>CustomAttribute</strong> for behavioral composition (zero DOM)</li>
+  <li><strong>Mixins</strong> for class-level composition (zero DOM)</li>
+  <li><strong>JSX Fragment</strong> via JSXRenderer (DocumentFragment-based)</li>
+  <li><strong>Customized built-in elements</strong> via <code>is</code> attribute (no wrapper)</li>
+</ol>
+
+
+<h2>Recommendations (Ranked)</h2>
+
+<h3>Tier 1: Already Validated &mdash; Continue Investing</h3>
+<ol>
+  <li><strong>Comment-based virtual elements</strong> &mdash; Primary pattern. Proven by Angular, Solid, Lit, and now Web Everything.</li>
+  <li><strong>TransientElement</strong> &mdash; Unique to WE. AutoHeading proves the pattern.</li>
+  <li><strong>DocumentFragment</strong> &mdash; Standard. Already used for JSX and template stamping.</li>
+</ol>
+
+<h3>Tier 2: High-Value Additions</h3>
+<ol start="4">
+  <li><strong><code>display: contents</code> provider elements</strong> &mdash; Solves the context provider layout problem. Enables React-like <code>Context.Provider</code> without virtual DOM.</li>
+  <li><strong>Functional components in JSXRenderer</strong> &mdash; Small change (detect function type in createElement), large impact for composition.</li>
+  <li><strong>Transient-to-comments bridge</strong> &mdash; Generalize TransientElement to replace itself with comment markers (not just native elements), unifying the transient and virtual element patterns.</li>
+</ol>
+
+<h3>Tier 3: Worth Considering</h3>
+<ol start="7">
+  <li><strong>Proxy-based reactive providers</strong> &mdash; For stores/contexts that do not need DOM presence.</li>
+  <li><strong>DOM Parts adoption path</strong> &mdash; When the W3C DOM Parts proposal matures, it would standardize comment-based markers. The framework is already positioned for this transition.</li>
+</ol>
+
+
+<h2>Open Questions</h2>
+
+<ol>
+  <li>Should <code>display: contents</code> be the default for injector-only elements, or should it be opt-in via an attribute?</li>
+  <li>Should functional components in JSXRenderer support hooks (useState, useEffect) like Haunted, or remain pure render functions?</li>
+  <li>When TransientElement replaces itself with comments (transient-to-comments bridge), how should the comment lifecycle callbacks wire up to the original element's logic?</li>
+  <li>Should the framework provide a <code>&lt;provider&gt;</code> custom element out of the box, or let users create their own <code>display: contents</code> elements?</li>
+</ol>
+{% endraw %}

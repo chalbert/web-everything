@@ -629,6 +629,88 @@ class DebugAttribute extends CustomAttribute {
 }
 ```
 
+## Plans & Research Workflow
+
+The project uses a lightweight plans-to-research pipeline. Users drop short plan files (questions, ideas, design explorations) into `plans/`. Each plan is then researched and converted into a permanent research topic page on the documentation site.
+
+### Directory Structure
+
+```
+plans/                          # Inbox — short markdown files with questions/ideas
+reports/                        # Session progress reports (not part of 11ty build)
+src/_data/researchTopics.json   # Registry of all research topics
+src/_includes/research-descriptions/{id}.njk  # Full research write-ups
+```
+
+### Workflow Steps
+
+1. **Check for plan files**: Look in `plans/` for `.md` files
+2. **Read each plan**: Understand the question or design exploration
+3. **Research the topic**: Use web search, codebase exploration, and framework analysis
+4. **Create research topic entry**: Add to `src/_data/researchTopics.json` with:
+   ```json
+   {
+     "id": "kebab-case-id",
+     "title": "Human-Readable Title",
+     "status": "open",
+     "summary": "One-paragraph description of the research question.",
+     "dateOpened": "YYYY-MM-DD",
+     "tags": ["relevant", "tags"],
+     "relatedBlocks": ["block-ids"],
+     "relatedPlugs": ["plug-ids"],
+     "relatedProject": "project-id"
+   }
+   ```
+5. **Create research description**: Write `src/_includes/research-descriptions/{id}.njk` with comprehensive analysis. Use `{% raw %}...{% endraw %}` wrapper. Include:
+   - The question being explored
+   - Recommendation or finding
+   - Historical context and framework comparison tables
+   - Web standards alignment (if applicable)
+   - Classification or architecture proposal
+   - Cross-references to related project pages and other research topics
+6. **Verify build**: Run `npx @11ty/eleventy` — page count should increase by 1 per new topic
+7. **Delete the plan file**: Remove the processed `.md` from `plans/`
+8. **Write a report for this plan**: Create `reports/YYYY-MM-DD-{topic}.md` — **one report per plan file** (not combined)
+
+### Research Description Conventions
+
+- Wrap entire file in `{% raw %}...{% endraw %}` (prevents Nunjucks from processing HTML)
+- Use `<h2>` for top-level sections (the page template provides the `<h1>`)
+- Use HTML tables for comparisons, framework surveys, and classification matrices
+- Cross-reference related project pages: `<a href="/projects/{id}/">Project Name</a>`
+- Cross-reference related research: `<a href="/research/{id}/">Research Title</a>`
+- Include code examples in `<pre><code>` blocks where applicable
+
+### Reports
+
+The `reports/` directory stores individual research reports and session progress reports. These are standalone markdown files not included in the 11ty build. **One report per plan file.**
+
+**Naming**: `reports/YYYY-MM-DD-{topic}.md`
+
+**Template**:
+```markdown
+# Research Report — Title
+
+**Plan file**: `plans/{filename}.md`
+**Research page**: `/research/{id}/`
+**Date**: YYYY-MM-DD
+
+---
+
+## Question
+What was being explored.
+
+## Recommendation
+The answer or proposed approach.
+
+## Key Findings
+Detailed findings with tables, comparisons, framework research.
+
+## Files Created/Modified
+| File | Action |
+|------|--------|
+```
+
 ## Keeping This Document Updated
 
 **This is a living document.** As you work on the project, update this file with:
@@ -666,3 +748,6 @@ This ensures future Claude sessions (and other AI assistants) benefit from accum
 - Website at `http://localhost:3000/blocks/` - Block documentation
 - `src/_data/semantics.json` - Standardized terminology (add new terms here)
 - `src/_data/references.json` - External references organized by category
+- `src/_data/researchTopics.json` - Research topic registry (add new topics here)
+- `plans/` - Inbox for plan files (questions/ideas to research)
+- `reports/` - Session progress reports (not part of site build)

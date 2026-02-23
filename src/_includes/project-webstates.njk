@@ -27,3 +27,79 @@
     <strong>Observation</strong>—the ability to subscribe to changes or react to updates—is a core feature of <em>Web States</em> (such as stores or signals). These objects are designed to be observed directly, regardless of how they are provided (e.g., via injection or direct reference). Context/injector systems simply provide access to these stateful objects; the observation mechanism is always a property of the state object itself.
   </p>
 </section>
+
+<section id="ssr" class="section-card">
+    <h3 id="ssr-contract">SSR Contract</h3>
+    <p>
+        This section defines the server-side rendering contract for <strong>Web States</strong>.
+        The server MUST serialize initial store state into the HTML so the client can hydrate stores
+        without redundant data fetches.
+    </p>
+
+    <h4 id="ssr-server-output">Server Output Requirements</h4>
+    <div class="comparison-table-wrapper mt-4">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Feature</th>
+                    <th>Server Output HTML</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Store state serialization</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;script type="application/json"
+  data-store="app-state"&gt;
+{"count":5,"user":{"name":"John"}}
+&lt;/script&gt;</code></pre>
+                    </td>
+                    <td>Server MUST emit initial state as a JSON script block. The <code>data-store</code> attribute identifies the store key.</td>
+                </tr>
+                <tr>
+                    <td><strong>Multiple stores</strong></td>
+                    <td>One <code>&lt;script type="application/json" data-store="..."&gt;</code> block per store</td>
+                    <td>Each store gets its own serialization block. Blocks MAY appear anywhere in the document.</td>
+                </tr>
+                <tr>
+                    <td><strong>State-driven content</strong></td>
+                    <td>Resolved values in HTML (e.g., <code>&lt;span&gt;5&lt;/span&gt;</code>)</td>
+                    <td>Server MUST render all store-derived content using the serialized state values.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>JSON parsing:</strong> Client reads <code>&lt;script type="application/json" data-store="..."&gt;</code> blocks and parses the JSON content.</li>
+        <li><strong>Store initialization:</strong> <code>CustomStore</code> / <code>SimpleStore</code> instances are initialized with the parsed state, skipping any initial data fetch.</li>
+        <li><strong>Subscription activation:</strong> Store subscriptions (<code>subscribe()</code>) begin after hydration. Initial render matches server output — no DOM mutations needed.</li>
+        <li><strong>Script block cleanup:</strong> Client MAY remove the JSON script blocks after hydration, or leave them as inert elements.</li>
+    </ul>
+
+    <h4 id="ssr-progressive-baseline">Progressive Enhancement Baseline</h4>
+    <p class="text-gray-600 text-sm">
+        With zero JavaScript, all content rendered from store state is visible as static text.
+        The JSON script blocks are invisible (<code>type="application/json"</code> is not executed by browsers).
+        No reactivity — content remains static at its server-rendered values.
+    </p>
+
+    <h4 id="ssr-client-only">Client-Only Features</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Reactivity:</strong> <code>subscribe()</code>, <code>setItem()</code>, signal subscriptions</li>
+        <li><strong>Store creation:</strong> <code>new SimpleStore()</code>, <code>new CustomStore()</code></li>
+        <li><strong>Schema validation:</strong> Runtime schema enforcement on store mutations</li>
+        <li><strong>Computed values:</strong> Derived state that depends on reactive updates</li>
+    </ul>
+
+    <div class="comparison-block" style="background: rgba(251, 191, 36, 0.1); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
+        <h4 id="ssr-implementor-note" style="margin-top: 0; color: #d97706; font-size: 1rem;">Implementor Note</h4>
+        <p style="margin-bottom: 0; font-size: 0.95rem;">
+            This contract defines compliance requirements. The build system or server framework
+            is responsible for serializing store state and rendering state-driven content.
+            Web States does not ship an SSR runtime — it ships this specification.
+        </p>
+    </div>
+</section>

@@ -1,0 +1,391 @@
+{% raw %}<h2>The Problem</h2>
+
+<p>The web platform provides substantial i18n primitives through the <code>Intl</code> API &mdash; number formatting, date formatting, plural rules, collation, segmentation, and more. But major frameworks ship significant i18n libraries on top of these standards because critical capabilities are missing. This research maps the gap between what web standards provide and what frameworks deliver, identifying what Web Everything should adopt.</p>
+
+
+<h2>What Web Standards Already Provide</h2>
+
+<table>
+  <thead>
+    <tr><th>API</th><th>Status</th><th>What It Does</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>Intl.NumberFormat</code></td><td>Baseline</td><td>Locale-aware number, currency, and unit formatting</td></tr>
+    <tr><td><code>Intl.DateTimeFormat</code></td><td>Baseline</td><td>Locale-aware date and time formatting</td></tr>
+    <tr><td><code>Intl.RelativeTimeFormat</code></td><td>Baseline</td><td>Relative time ("2 days ago")</td></tr>
+    <tr><td><code>Intl.PluralRules</code></td><td>Baseline</td><td>Plural category for a number (one, few, many, other)</td></tr>
+    <tr><td><code>Intl.ListFormat</code></td><td>Baseline</td><td>List formatting ("A, B, and C")</td></tr>
+    <tr><td><code>Intl.Segmenter</code></td><td>Baseline 2024</td><td>Text segmentation (graphemes, words, sentences)</td></tr>
+    <tr><td><code>Intl.DisplayNames</code></td><td>Baseline</td><td>Localized names for languages, regions, currencies</td></tr>
+    <tr><td><code>Intl.Locale</code></td><td>Baseline</td><td>Locale string parsing and negotiation</td></tr>
+    <tr><td><code>navigator.languages</code></td><td>Baseline</td><td>User's preferred languages</td></tr>
+    <tr><td>CSS Logical Properties</td><td>Baseline</td><td>Direction-agnostic layout (<code>margin-inline-start</code>)</td></tr>
+    <tr><td><code>dir</code> attribute</td><td>Baseline</td><td>Text direction (LTR/RTL)</td></tr>
+    <tr><td><code>:dir()</code> pseudo-class</td><td>Baseline 2023</td><td>Style based on text direction</td></tr>
+    <tr><td><code>translate</code> attribute</td><td>Baseline</td><td>Mark content for translation tools</td></tr>
+    <tr><td><code>lang</code> attribute</td><td>Baseline</td><td>Declare content language</td></tr>
+  </tbody>
+</table>
+
+<p><strong>The standards are strong for formatting individual values.</strong> The gaps are in <em>composing messages</em>, <em>managing translations</em>, and <em>reactive locale switching</em>.</p>
+
+
+<h2>Framework i18n Solutions</h2>
+
+<table>
+  <thead>
+    <tr><th>Framework</th><th>Primary Library</th><th>Key Features Beyond Standards</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>React</strong></td>
+      <td>react-intl (FormatJS), react-i18next, next-intl, LinguiJS</td>
+      <td>ICU MessageFormat, compile-time extraction, type-safe keys, lazy loading</td>
+    </tr>
+    <tr>
+      <td><strong>Vue</strong></td>
+      <td>vue-i18n, @nuxtjs/i18n</td>
+      <td>Reactive <code>$t()</code>, component-scoped translations, SFC <code>&lt;i18n&gt;</code> blocks</td>
+    </tr>
+    <tr>
+      <td><strong>Angular</strong></td>
+      <td>@angular/localize, Transloco, ngx-translate</td>
+      <td>Per-locale builds (AOT), XLIFF extraction, structural directive <code>*transloco</code></td>
+    </tr>
+    <tr>
+      <td><strong>Svelte</strong></td>
+      <td>svelte-i18n, Paraglide</td>
+      <td>Store-based reactivity, compile-time message functions (Paraglide)</td>
+    </tr>
+    <tr>
+      <td><strong>Solid</strong></td>
+      <td>@solid-primitives/i18n, Paraglide</td>
+      <td>Signal-based reactivity, tree-shakeable messages</td>
+    </tr>
+    <tr>
+      <td><strong>Lit</strong></td>
+      <td>@lit/localize</td>
+      <td>Dual-mode (runtime + transform), <code>msg()</code> tagged templates, XLIFF extraction</td>
+    </tr>
+  </tbody>
+</table>
+
+
+<h2>Gap Analysis: What Frameworks Provide That Standards Do Not</h2>
+
+<h3>Critical Gaps</h3>
+
+<table>
+  <thead>
+    <tr><th>Feature</th><th>Web Standard</th><th>Framework Solutions</th><th>Adoption Path for WE</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Message formatting with variables</strong></td>
+      <td><code>Intl.MessageFormat</code> (TC39 Stage 1)</td>
+      <td>ICU MessageFormat (FormatJS, vue-i18n, ember-intl), i18next interpolation, Fluent</td>
+      <td>Message formatter block using MF2 syntax; polyfill until standard ships</td>
+    </tr>
+    <tr>
+      <td><strong>Variable interpolation</strong></td>
+      <td>None</td>
+      <td>All frameworks &mdash; <code>{name}</code>, <code>{{name}}</code>, tagged templates</td>
+      <td>Built into message formatter</td>
+    </tr>
+    <tr>
+      <td><strong>Fallback locale chains</strong></td>
+      <td>None</td>
+      <td>All frameworks &mdash; <code>fr-CA</code> &rarr; <code>fr</code> &rarr; <code>en</code></td>
+      <td>Message resolver walks chain; configurable via injector</td>
+    </tr>
+    <tr>
+      <td><strong>Dynamic locale switching</strong></td>
+      <td>None (lang attribute has no reactive effect)</td>
+      <td>All runtime frameworks &mdash; reactive state triggers re-render</td>
+      <td>Locale store (<code>CustomStore</code>) + reactive <code>@t</code> context</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>High-Priority Gaps</h3>
+
+<table>
+  <thead>
+    <tr><th>Feature</th><th>Web Standard</th><th>Framework Solutions</th><th>Adoption Path for WE</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Locale detection &amp; negotiation</strong></td>
+      <td><code>navigator.languages</code> only</td>
+      <td>i18next (URL, cookie, header), next-intl (middleware), nuxt-i18n</td>
+      <td>Pluggable detection strategies via injector</td>
+    </tr>
+    <tr>
+      <td><strong>Lazy loading translations</strong></td>
+      <td><code>import()</code> for JS modules</td>
+      <td>i18next backends, vue-i18n async, svelte-i18n <code>register()</code></td>
+      <td>Translation loader interface via injector (like route loaders)</td>
+    </tr>
+    <tr>
+      <td><strong>RTL component adaptation</strong></td>
+      <td>CSS Logical Properties, <code>dir</code>, <code>:dir()</code></td>
+      <td>Material Design, Ant Design, Fluent UI RTL guides</td>
+      <td>Behavior block observing <code>dir</code> attribute for component-level adaptation</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Medium-Priority Gaps</h3>
+
+<table>
+  <thead>
+    <tr><th>Feature</th><th>Web Standard</th><th>Framework Solutions</th><th>Adoption Path for WE</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Type-safe translation keys</strong></td>
+      <td>None</td>
+      <td>Paraglide (generated functions), next-intl (generated types), typesafe-i18n</td>
+      <td>CLI tool generates TypeScript types from catalog</td>
+    </tr>
+    <tr>
+      <td><strong>Compile-time translation</strong></td>
+      <td>None</td>
+      <td>Paraglide, LinguiJS macro, @lit/localize transform</td>
+      <td>Unplugged mode: generated message functions (tree-shakeable)</td>
+    </tr>
+    <tr>
+      <td><strong>Namespace/scope management</strong></td>
+      <td>None</td>
+      <td>i18next namespaces, vue-i18n component scopes, Transloco scopes</td>
+      <td>Injector scoping (natural fit &mdash; each component scope provides its own translations)</td>
+    </tr>
+    <tr>
+      <td><strong>URL-based locale routing</strong></td>
+      <td><code>hreflang</code> link only</td>
+      <td>Next.js i18n routing, Nuxt i18n, SvelteKit</td>
+      <td>Integration with Router block (<code>&lt;route-view&gt;</code> locale parameter)</td>
+    </tr>
+    <tr>
+      <td><strong>Translation file management</strong></td>
+      <td>XLIFF (OASIS standard)</td>
+      <td>JSON, PO, XLIFF, ARB, Fluent (.ftl)</td>
+      <td>Build-time normalization; support multiple input formats</td>
+    </tr>
+    <tr>
+      <td><strong>Gender/grammatical agreement</strong></td>
+      <td>None</td>
+      <td>ICU <code>select</code>, MessageFormat 2.0 <code>match</code></td>
+      <td>Supported via MF2 syntax</td>
+    </tr>
+  </tbody>
+</table>
+
+
+<h2>Emerging Standards</h2>
+
+<h3>Unicode MessageFormat 2.0</h3>
+
+<p><strong>Status:</strong> Approved as part of Unicode Technical Standard #35 (CLDR) Part 9, published 2024.</p>
+
+<p>This is the most significant development for i18n. It provides a standard message formatting syntax to replace ICU MessageFormat 1.0:</p>
+
+<pre><code>// Variable interpolation
+{Hello {$name}!}
+
+// Plural selection
+.match {$count :integer}
+  1   {{You have one item}}
+  *   {{You have {$count} items}}
+
+// Date formatting
+{Your appointment is {$date :datetime dateStyle=long}}
+
+// Custom functions (extensible registry)
+{$amount :currency currency=USD}</code></pre>
+
+<p>Key improvements: consistent data model, better error handling (partial output on errors), extensible function registry, simpler nesting.</p>
+
+<h3>TC39 Intl.MessageFormat Proposal</h3>
+
+<p><strong>Status:</strong> Stage 1 (as of early 2025). Would bring MF2 to browsers natively:</p>
+
+<pre><code>const mf = new Intl.MessageFormat('{Hello {$name}!}', 'en');
+mf.format({ name: 'World' }); // "Hello World!"</code></pre>
+
+<p><strong>Timeline concern:</strong> Stage 1 proposals can take 3&ndash;7 years to ship in all browsers. A polyfill/library will be necessary for the foreseeable future.</p>
+
+<h3>Temporal API</h3>
+
+<p><strong>Status:</strong> TC39 Stage 3 (2025). Improves timezone-aware, calendar-system-aware date handling. Integrates with <code>Intl.DateTimeFormat</code>. Does not address translation itself.</p>
+
+
+<h2>Build-Time vs Runtime Translation</h2>
+
+<table>
+  <thead>
+    <tr><th>Approach</th><th>Libraries</th><th>Pros</th><th>Cons</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Compile-time (per-locale build)</strong></td>
+      <td>@angular/localize, @lit/localize transform</td>
+      <td>Zero runtime overhead, smallest bundle</td>
+      <td>No dynamic switching, CI build per locale</td>
+    </tr>
+    <tr>
+      <td><strong>Compile-time (tree-shakeable functions)</strong></td>
+      <td>Paraglide, LinguiJS macro</td>
+      <td>Tiny runtime (~0&ndash;2KB), type-safe, dead message elimination</td>
+      <td>Build tooling required</td>
+    </tr>
+    <tr>
+      <td><strong>Runtime (eager)</strong></td>
+      <td>vue-i18n, react-intl, ember-intl</td>
+      <td>Dynamic switching, simple setup</td>
+      <td>Larger bundle (8&ndash;16KB), runtime parsing cost</td>
+    </tr>
+    <tr>
+      <td><strong>Runtime (lazy)</strong></td>
+      <td>i18next, Transloco, svelte-i18n</td>
+      <td>Dynamic switching, code-split translations</td>
+      <td>Network waterfall, loading states needed</td>
+    </tr>
+    <tr>
+      <td><strong>Hybrid</strong></td>
+      <td>@lit/localize (both modes)</td>
+      <td>Choose per deployment</td>
+      <td>Two modes to maintain</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Mapping to Web Everything</h3>
+
+<p>The plugged/unplugged architecture maps naturally:</p>
+
+<ul>
+  <li><strong>Unplugged (compile-time)</strong>: Import message functions directly. Tree-shakeable. Type-safe. No runtime overhead. Locale switching via dynamic <code>import()</code>.</li>
+  <li><strong>Plugged (runtime)</strong>: Bootstrap registers a global translation context. <code>@t.key</code> resolves reactively. Dynamic locale switching via store.</li>
+</ul>
+
+<p>The message function signature is the common interface either way:</p>
+<pre><code>type MessageFn = (params?: Record&lt;string, unknown&gt;) =&gt; string;</code></pre>
+
+
+<h2>Web Component i18n Challenges</h2>
+
+<table>
+  <thead>
+    <tr><th>Challenge</th><th>Description</th><th>Lit's Solution</th><th>Web Everything Approach</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Shadow DOM text</strong></td>
+      <td>Internal strings inaccessible from outside</td>
+      <td><code>msg()</code> in render method</td>
+      <td><code>@t.key</code> in template expressions</td>
+    </tr>
+    <tr>
+      <td><strong>Slotted content</strong></td>
+      <td>Light DOM content needs translation too</td>
+      <td>Consumer translates their own slot content</td>
+      <td>Same &mdash; slot content is the consumer's responsibility</td>
+    </tr>
+    <tr>
+      <td><strong>Component library strings</strong></td>
+      <td>Labels like "Close", "Next" baked into components</td>
+      <td><code>msg()</code> with extraction</td>
+      <td>Provide translations via injector context; components read from <code>@t</code></td>
+    </tr>
+    <tr>
+      <td><strong>Locale propagation</strong></td>
+      <td>How does a component know the locale changed?</td>
+      <td><code>lit-localize-status</code> event + <code>@localized</code> decorator</td>
+      <td>Reactive store via injector. Store change triggers re-render.</td>
+    </tr>
+    <tr>
+      <td><strong>SSR with i18n</strong></td>
+      <td>Server must know locale before rendering</td>
+      <td>Lit SSR supports locale</td>
+      <td>Translation functions are sync; locale determined before render</td>
+    </tr>
+  </tbody>
+</table>
+
+
+<h2>Proposed Architecture for Web Everything</h2>
+
+<p>Given the existing primitives (injectors, contexts, stores, expression parsers), i18n maps cleanly:</p>
+
+<table>
+  <thead>
+    <tr><th>Concern</th><th>Maps To</th><th>Mechanism</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Locale state</td><td><code>CustomStore</code></td><td>Reactive, observable locale value</td></tr>
+    <tr><td>Translation provision</td><td>Injector context (<code>@t</code>)</td><td>Scoped per DOM subtree</td></tr>
+    <tr><td>Message formatting</td><td>Block (MessageFormatter)</td><td>MF2-based, provided via injector</td></tr>
+    <tr><td>Locale detection</td><td>Pluggable strategies</td><td>Like prefetch strategies in the router</td></tr>
+    <tr><td>Locale routing</td><td>Router block integration</td><td>URL parameter &rarr; locale store</td></tr>
+    <tr><td>RTL switching</td><td>Behavior block</td><td>Observes <code>dir</code> attribute</td></tr>
+    <tr><td>Lazy loading</td><td>Translation loader via injector</td><td>Like route loaders</td></tr>
+    <tr><td>Locale change notification</td><td>Store subscription</td><td>Like any other reactive state</td></tr>
+  </tbody>
+</table>
+
+<p>The <code>@t</code> context already referenced in <code>blocks.json</code> (handler expression parser's context access patterns) is the right surface API:</p>
+
+<pre><code>&lt;span&gt;@t.greeting&lt;/span&gt;
+&lt;span&gt;@t.itemCount({ count: $store.items.length })&lt;/span&gt;</code></pre>
+
+
+<h2>Key Design Decisions</h2>
+
+<ol>
+  <li><strong>Message syntax</strong>: MessageFormat 2.0 (recommended &mdash; forward-compatible with <code>Intl.MessageFormat</code>) vs ICU MessageFormat 1.0 (wider current tooling) vs custom (not recommended)</li>
+  <li><strong>Runtime vs compile-time</strong>: Offer both via plugged/unplugged? @lit/localize proves the dual-mode approach works.</li>
+  <li><strong>Translation file format</strong>: XLIFF for external exchange, JSON for development, compiled JS for runtime. Build tool converts between them.</li>
+  <li><strong>Scope of blocks</strong>:
+    <ul>
+      <li><code>LocaleStore</code> &mdash; state management for current locale</li>
+      <li><code>MessageFormatter</code> &mdash; message formatting engine (MF2)</li>
+      <li><code>TranslationLoader</code> &mdash; async loading of translation files</li>
+      <li><code>LocaleDetector</code> &mdash; detection strategies</li>
+      <li><code>LocaleProvider</code> &mdash; custom element or behavior that sets up the injector context</li>
+    </ul>
+  </li>
+  <li><strong>Integration with <code>@t</code></strong>: The handler expression parser already references <code>@t</code> as a translations context. This should be the primary consumer API.</li>
+</ol>
+
+
+<h2>References</h2>
+
+<h3>Web Standards</h3>
+<ul>
+  <li><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl">MDN: Intl API</a></li>
+  <li><a href="https://unicode.org/reports/tr35/tr35-messageFormat.html">Unicode MessageFormat 2.0</a> (UTS #35 Part 9)</li>
+  <li><a href="https://github.com/tc39/proposal-intl-messageformat">TC39 Intl.MessageFormat proposal</a></li>
+  <li><a href="https://github.com/tc39/proposal-temporal">TC39 Temporal proposal</a></li>
+  <li><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_logical_properties_and_values">CSS Logical Properties</a></li>
+</ul>
+
+<h3>Framework Libraries</h3>
+<ul>
+  <li><a href="https://formatjs.io/">FormatJS (react-intl)</a></li>
+  <li><a href="https://react.i18next.com/">react-i18next</a></li>
+  <li><a href="https://vue-i18n.intlify.dev/">vue-i18n</a></li>
+  <li><a href="https://angular.dev/guide/i18n">@angular/localize</a></li>
+  <li><a href="https://inlang.com/m/gerre34r/library-inlang-paraglideJs">Paraglide</a></li>
+  <li><a href="https://lingui.dev/">LinguiJS</a></li>
+  <li><a href="https://lit.dev/docs/localization/overview/">@lit/localize</a></li>
+</ul>
+
+<h3>Message Formats</h3>
+<ul>
+  <li><a href="https://unicode-org.github.io/icu/userguide/format_parse/messages/">ICU MessageFormat</a></li>
+  <li><a href="https://projectfluent.org/">Project Fluent (Mozilla)</a></li>
+  <li><a href="https://docs.oasis-open.org/xliff/xliff-core/v2.1/xliff-core-v2.1.html">XLIFF (OASIS)</a></li>
+  <li><a href="https://messageformat.github.io/messageformat/">messageformat (JS library for MF2)</a></li>
+</ul>
+{% endraw %}

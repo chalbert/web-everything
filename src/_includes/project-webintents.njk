@@ -116,3 +116,98 @@ class MyComponent extends HTMLElement {
 withMode(Component); // applies mode trait
             {% endhighlight %}
         </section>
+
+<section id="ssr" class="section-card">
+    <h3 id="ssr-contract">SSR Contract</h3>
+    <p>
+        This section defines the server-side rendering contract for <strong>Web Intents</strong>.
+        The server MUST read the intent configuration and apply the active profile's settings to the rendered output.
+        This ensures that density, motion, mode, and other UX preferences are reflected in the initial HTML
+        without waiting for client-side JavaScript.
+    </p>
+
+    <h4 id="ssr-server-output">Server Output Requirements</h4>
+    <div class="comparison-table-wrapper mt-4">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Feature</th>
+                    <th>Server Output HTML</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Intent configuration</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;html data-intent-density="compact"
+      data-intent-motion="immediate"
+      data-intent-mode="night"&gt;</code></pre>
+                    </td>
+                    <td>Server MUST read the intent configuration (e.g., <code>intents.json</code>) and emit the active profile as <code>data-intent-*</code> attributes on the root element or relevant scope.</td>
+                </tr>
+                <tr>
+                    <td><strong>Density-driven styles</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;div style="padding: 4px 8px;"&gt;
+  Compact item
+&lt;/div&gt;</code></pre>
+                    </td>
+                    <td>Server MUST apply the active density profile's spacing values to rendered components. Build-time intent resolution allows dead-code elimination of unused density implementations.</td>
+                </tr>
+                <tr>
+                    <td><strong>Motion preference</strong></td>
+                    <td><code>&lt;div class="transition-none"&gt;</code> or appropriate motion class</td>
+                    <td>Server MUST apply the motion intent to CSS classes or inline styles. The <code>immediate</code> profile suppresses transition/animation classes.</td>
+                </tr>
+                <tr>
+                    <td><strong>Context serialization</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;script type="application/json"
+  data-store="intents:active"&gt;
+{"density":"compact",
+ "motion":"immediate",
+ "mode":"night"}
+&lt;/script&gt;</code></pre>
+                    </td>
+                    <td>Server MUST serialize the active intent profile using the <a href="/projects/webstates/#ssr">Web States</a> JSON block format so the client can hydrate without re-reading configuration.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Intent verification:</strong> Client reads the serialized intent profile and verifies it matches the current configuration. If the server output is correct, no DOM mutations are needed.</li>
+        <li><strong>Dynamic override:</strong> For runtime intent changes (e.g., user toggling density), the client updates <code>data-intent-*</code> attributes and re-applies affected styles. This is a client-only operation.</li>
+        <li><strong>Trait loading:</strong> Intent-specific trait implementations (e.g., the physics engine for swipe gestures) are loaded only if the active intent requires them. See <a href="/projects/webcontexts/#ssr">Web Contexts SSR</a> for context resolution.</li>
+    </ul>
+
+    <h4 id="ssr-progressive-baseline">Progressive Enhancement Baseline</h4>
+    <p class="text-gray-600 text-sm">
+        With zero JavaScript: all intent-driven styles (density, motion, mode) are applied via HTML attributes and inline styles.
+        The <code>data-intent-*</code> attributes can be used as CSS selectors for theme-level styling
+        (e.g., <code>[data-intent-mode="night"] { ... }</code>).
+        Components render at the server-determined density and mode.
+        No dynamic intent switching — the profile is frozen at its server-rendered values.
+    </p>
+
+    <h4 id="ssr-client-only">Client-Only Features</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Dynamic intent switching:</strong> Changing density, motion, or mode at runtime</li>
+        <li><strong>Trait loading:</strong> Lazy-loading intent-specific implementations via <a href="/projects/webtraits/">Web Traits</a></li>
+        <li><strong>User preference detection:</strong> Reading <code>prefers-reduced-motion</code>, <code>prefers-color-scheme</code>, and other media queries to auto-configure intents</li>
+        <li><strong>Intent composition:</strong> Merging multiple intent profiles from different injector scopes</li>
+    </ul>
+
+    <div class="comparison-block" style="background: rgba(251, 191, 36, 0.1); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
+        <h4 id="ssr-implementor-note" style="margin-top: 0; color: #d97706; font-size: 1rem;">Implementor Note</h4>
+        <p style="margin-bottom: 0; font-size: 0.95rem;">
+            This contract defines compliance requirements. The build system or server framework
+            is responsible for reading intent configuration, applying the active profile to rendered output,
+            and serializing the profile for client hydration.
+            Web Intents does not ship an SSR runtime — it ships this specification.
+            See also: <a href="/projects/webcontexts/#ssr">Web Contexts SSR Contract</a> for context-based intent resolution.
+        </p>
+    </div>
+</section>

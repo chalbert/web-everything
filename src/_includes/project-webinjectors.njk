@@ -295,3 +295,79 @@ logger.info('Accessed from injector hierarchy');
     <li><strong>Generator-based:</strong> The <code>injectors()</code> API uses generators for efficient iteration without building arrays</li>
   </ul>
 </section>
+
+<section id="ssr" class="section-card">
+    <h3 id="ssr-contract">SSR Contract</h3>
+    <p>
+        This section defines the server-side rendering contract for <strong>Web Injectors</strong>.
+        Declarative injector markup MUST be preserved in server output. The server MUST use the injector hierarchy
+        to resolve dependencies needed for rendering.
+    </p>
+
+    <h4 id="ssr-server-output">Server Output Requirements</h4>
+    <div class="comparison-table-wrapper mt-4">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Feature</th>
+                    <th>Server Output HTML</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong><code>&lt;script type="injector"&gt;</code></strong></td>
+                    <td>Emit as-is in the HTML</td>
+                    <td>Server MUST preserve these blocks verbatim. They are declarative configuration, not executable code. Browsers ignore unknown script types.</td>
+                </tr>
+                <tr>
+                    <td><strong><code>injector=""</code> attribute</strong></td>
+                    <td>Emit on the appropriate elements</td>
+                    <td>Server MUST preserve the <code>injector</code> attribute that associates elements with their injector scope.</td>
+                </tr>
+                <tr>
+                    <td><strong><code>isolate</code> attribute</strong></td>
+                    <td>Emit as boolean attribute</td>
+                    <td>Server MUST preserve this attribute on isolated injector blocks.</td>
+                </tr>
+                <tr>
+                    <td><strong>Dependency resolution</strong></td>
+                    <td>Resolved values in rendered content</td>
+                    <td>Server MUST use the injector hierarchy to resolve values needed by templates, expressions, and components during rendering.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Injector tree reconstruction:</strong> Client parses <code>&lt;script type="injector"&gt;</code> blocks and reconstructs the injector hierarchy.</li>
+        <li><strong>Scope association:</strong> Elements with <code>injector=""</code> attributes are associated with their injector scopes.</li>
+        <li><strong>Isolation:</strong> Blocks with <code>isolate</code> attribute create fully isolated injector scopes with no parent inheritance.</li>
+        <li><strong>Dependency availability:</strong> After tree reconstruction, <code>getClosestInjector()</code> and <code>injectors()</code> return the same hierarchy the server used for rendering.</li>
+    </ul>
+
+    <h4 id="ssr-progressive-baseline">Progressive Enhancement Baseline</h4>
+    <p class="text-gray-600 text-sm">
+        With zero JavaScript, <code>&lt;script type="injector"&gt;</code> blocks are invisible (browsers ignore unknown script types).
+        The <code>injector=""</code> and <code>isolate</code> attributes are harmless unknown attributes. All content rendered using
+        injector-resolved values is visible as static HTML.
+    </p>
+
+    <h4 id="ssr-client-only">Client-Only Features</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Runtime DI:</strong> <code>getClosestInjector()</code>, <code>injectors()</code>, <code>getProviderOf()</code></li>
+        <li><strong>Dynamic providers:</strong> <code>injector.set()</code>, runtime dependency registration</li>
+        <li><strong>Imperative injector creation:</strong> <code>ensureInjector()</code>, programmatic scope management</li>
+        <li><strong><code>provide</code>/<code>consume</code> execution:</strong> TypeScript-level DI syntax</li>
+    </ul>
+
+    <div class="comparison-block" style="background: rgba(251, 191, 36, 0.1); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
+        <h4 id="ssr-implementor-note" style="margin-top: 0; color: #d97706; font-size: 1rem;">Implementor Note</h4>
+        <p style="margin-bottom: 0; font-size: 0.95rem;">
+            This contract defines compliance requirements. The build system or server framework
+            is responsible for parsing injector declarations and using the hierarchy for dependency resolution during rendering.
+            Web Injectors does not ship an SSR runtime — it ships this specification.
+        </p>
+    </div>
+</section>

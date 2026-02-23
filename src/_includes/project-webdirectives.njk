@@ -399,3 +399,104 @@ declare const customComments: CustomCommentRegistry;
         <li><strong>Familiar Patterns:</strong> Lifecycle callbacks mirror Custom Elements, reducing learning curve.</li>
     </ul>
 </section>
+
+<section id="ssr" class="section-card">
+    <h3 id="ssr-contract">SSR Contract</h3>
+    <p>
+        This section defines the server-side rendering contract for <strong>Web Directives</strong>.
+        The server MUST expand all structural directives into their final HTML form.
+        <code>&lt;template is="..."&gt;</code> elements and comment directive source markup MUST NOT appear in server output —
+        only the expanded content with optional comment boundary markers.
+    </p>
+
+    <h4 id="ssr-server-output">Server Output Requirements</h4>
+    <div class="comparison-table-wrapper mt-4">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Directive</th>
+                    <th>Server Output HTML</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>for-each</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;!-- control:for-each items="users" key="id" --&gt;
+&lt;div class="user-row" data-key="1"&gt;Alice&lt;/div&gt;
+&lt;div class="user-row" data-key="2"&gt;Bob&lt;/div&gt;
+&lt;!-- /control:for-each --&gt;</code></pre>
+                    </td>
+                    <td>All items expanded. Comment boundaries SHOULD be included for client diffing. Keyed items MUST include <code>data-key</code> attribute.</td>
+                </tr>
+                <tr>
+                    <td><strong>if</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;!-- control:if condition="isAdmin" --&gt;
+&lt;button class="admin-action"&gt;Delete&lt;/button&gt;
+&lt;!-- /control:if --&gt;</code></pre>
+                    </td>
+                    <td>Server MUST evaluate the condition. Only the matching branch is emitted. If false, emit empty markers only.</td>
+                </tr>
+                <tr>
+                    <td><strong>switch / case</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;!-- control:switch value="status" --&gt;
+&lt;span class="badge success"&gt;Active&lt;/span&gt;
+&lt;!-- /control:switch --&gt;</code></pre>
+                    </td>
+                    <td>Server MUST evaluate the active case and emit only that branch.</td>
+                </tr>
+                <tr>
+                    <td><strong>resource:loader</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;!-- resource:loader name="user-profile" --&gt;
+&lt;user-card&gt;...resolved data...&lt;/user-card&gt;
+&lt;!-- /resource:loader --&gt;</code></pre>
+                    </td>
+                    <td>Server MUST evaluate the data state and emit the corresponding template (success, empty, or error). For streaming SSR, loading template MAY be emitted first.</td>
+                </tr>
+                <tr>
+                    <td><strong>lazy</strong></td>
+                    <td><em>Not emitted</em></td>
+                    <td>Lazy directives are client-only. Server emits nothing (the content loads on demand).</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Comment boundaries:</strong> Client uses <code>&lt;!-- control:... --&gt;</code> and <code>&lt;!-- /control:... --&gt;</code> as delimiters to identify directive-managed DOM regions.</li>
+        <li><strong>Keyed diffing:</strong> For <code>for-each</code> directives, the client reads <code>data-key</code> attributes to perform efficient keyed reconciliation when data changes.</li>
+        <li><strong>Template absence:</strong> Client MUST NOT expect <code>&lt;template is="..."&gt;</code> elements in the DOM — these are authoring artifacts replaced by the server.</li>
+        <li><strong>Directive re-attachment:</strong> Client attaches directive logic (event listeners, mutation tracking) to the comment boundary markers and their enclosed content.</li>
+    </ul>
+
+    <h4 id="ssr-progressive-baseline">Progressive Enhancement Baseline</h4>
+    <p class="text-gray-600 text-sm">
+        With zero JavaScript, all structural content is fully rendered: lists are expanded, conditionals are evaluated,
+        resource loaders show resolved data. The page is complete and readable.
+        Comment markers are invisible to users. No interactivity — content is static.
+    </p>
+
+    <h4 id="ssr-client-only">Client-Only Features</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Dynamic re-evaluation:</strong> Updating <code>for-each</code> items, toggling <code>if</code> conditions, or switching <code>switch</code> values</li>
+        <li><strong>Template instantiation:</strong> <code>&lt;template is="..."&gt;</code> directive registration and runtime cloning</li>
+        <li><strong>Lazy directive:</strong> Deferred content loading triggered by viewport or interaction</li>
+        <li><strong>Comment parser registration:</strong> <code>customComments.define()</code> and custom parser plugins</li>
+        <li><strong>Directive lifecycle callbacks:</strong> <code>connectedCallback</code>, <code>disconnectedCallback</code>, <code>optionsChangedCallback</code></li>
+    </ul>
+
+    <div class="comparison-block" style="background: rgba(251, 191, 36, 0.1); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
+        <h4 id="ssr-implementor-note" style="margin-top: 0; color: #d97706; font-size: 1rem;">Implementor Note</h4>
+        <p style="margin-bottom: 0; font-size: 0.95rem;">
+            This contract defines compliance requirements. The build system or server framework
+            is responsible for expanding directives and emitting comment boundary markers.
+            Web Directives does not ship an SSR runtime — it ships this specification.
+            See also: <a href="/projects/webexpressions/#ssr">Web Expressions SSR</a> for expression resolution within directive content.
+        </p>
+    </div>
+</section>

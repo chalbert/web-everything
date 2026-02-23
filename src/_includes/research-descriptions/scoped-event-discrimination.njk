@@ -1,0 +1,300 @@
+{% raw %}<h2>The Question</h2>
+
+<p>When multiple <a href="/blocks/resource-loader/">Resource Loaders</a> coexist in the same injector scope &mdash; a route loader and an inline data grid loader, for example &mdash; both fire events with the same string name (<code>resource-load-end</code>). How does <code>listenForScoped</code> help consumers tell them apart? And how does tracing fit into this picture?</p>
+
+
+<h2>How listenForScoped Discriminates</h2>
+
+<p>The <code>listenForScoped</code> API resolves an <strong>event class</strong> from the injector chain and validates incoming events via <code>instanceof</code>. This is not name-based filtering &mdash; it's <strong>class identity discrimination</strong>.</p>
+
+<h3>The Three-Step Flow</h3>
+
+<ol>
+  <li><strong>Register</strong> &mdash; A listener calls <code>listenForScoped(target, 'resource-load-end', 'customEvents:resource-load-end', handler)</code></li>
+  <li><strong>Resolve</strong> &mdash; When an event arrives, <code>listenForScoped</code> uses the event's <code>target</code> to walk the injector chain and resolve the class registered at <code>customEvents:resource-load-end</code></li>
+  <li><strong>Discriminate</strong> &mdash; If the incoming event passes <code>instanceof</code> against the resolved class, the handler fires. Otherwise, it's silently ignored.</li>
+</ol>
+
+<h3>Same Scope, Same Provider Key &mdash; Same Class</h3>
+
+<p>Here's the subtle point the plan question raises: if two loaders share an injector scope, they both resolve to the <strong>same event class</strong> for <code>customEvents:resource-load-end</code>. This means <code>instanceof</code> passes for both. So how do you tell them apart?</p>
+
+<p>The answer is <strong>scope isolation</strong>, not class isolation. There are three patterns:</p>
+
+<table>
+  <thead>
+    <tr><th>Pattern</th><th>How It Works</th><th>When to Use</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>1. Different injector scopes</strong></td>
+      <td>Each loader is inside a different injector scope (e.g., <code>&lt;div injector&gt;</code>). Each scope can provide a different event class for the same provider key.</td>
+      <td>When loaders serve distinct architectural roles (route-level vs panel-level)</td>
+    </tr>
+    <tr>
+      <td><strong>2. Listen on the loader's DOM subtree</strong></td>
+      <td>Instead of listening on <code>document</code>, listen on the specific element that contains the loader. Events bubble, so a listener on the grid container only receives the grid loader's events.</td>
+      <td>When loaders are structurally nested (listen closer to the source)</td>
+    </tr>
+    <tr>
+      <td><strong>3. Event detail discrimination</strong></td>
+      <td>The event's <code>detail</code> carries an <code>operation</code> identifier (the resource key or request URL). The listener checks <code>event.detail.operation</code> to filter.</td>
+      <td>When two loaders share a scope and you need fine-grained filtering</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>What Scoped Events Actually Prevent</h3>
+
+<p>The primary value of scoped events for resource loaders is <strong>cross-concern collision</strong>, not same-concern disambiguation:</p>
+
+<table>
+  <thead>
+    <tr><th>Scenario</th><th>Without Scoped Events</th><th>With Scoped Events</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Tab component fires <code>toggle</code><br>View component fires <code>toggle</code></td>
+      <td>Listener receives both &mdash; can't tell which component fired</td>
+      <td><code>instanceof TabToggleEvent</code> vs <code>instanceof ViewToggleEvent</code> &mdash; distinct classes, clean discrimination</td>
+    </tr>
+    <tr>
+      <td>Resource loader fires <code>resource-load-end</code><br>A third-party widget fires <code>resource-load-end</code></td>
+      <td>Listener receives both &mdash; the widget's event has a different <code>detail</code> shape</td>
+      <td><code>instanceof ResourceLoadEndEvent</code> rejects the widget's event automatically</td>
+    </tr>
+    <tr>
+      <td>Two resource loaders fire <code>resource-load-end</code> (same scope)</td>
+      <td>Both are <code>ResourceLoadEndEvent</code> &mdash; listener receives both</td>
+      <td>Same &mdash; <code>instanceof</code> passes for both. Use DOM proximity or <code>detail.operation</code> to filter.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Key insight:</strong> Scoped events solve the <em>type collision</em> problem (different things with the same name). For <em>instance disambiguation</em> (same type of thing happening in two places), use DOM tree proximity or event detail filtering.</p>
+
+
+<h2>Resource Loader Event Lifecycle</h2>
+
+<p>The Resource Loader dispatches four typed events at state transitions:</p>
+
+<table>
+  <thead>
+    <tr><th>Event Name</th><th>Class</th><th>Provider Key</th><th>Detail</th><th>When</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>resource-load-start</code></td>
+      <td><code>ResourceLoadStartEvent</code></td>
+      <td><code>customEvents:resource-load-start</code></td>
+      <td><code>{ operation, timing }</code></td>
+      <td>Async operation begins</td>
+    </tr>
+    <tr>
+      <td><code>resource-load-end</code></td>
+      <td><code>ResourceLoadEndEvent</code></td>
+      <td><code>customEvents:resource-load-end</code></td>
+      <td><code>{ operation, data, duration }</code></td>
+      <td>Operation completes successfully</td>
+    </tr>
+    <tr>
+      <td><code>resource-load-error</code></td>
+      <td><code>ResourceLoadErrorEvent</code></td>
+      <td><code>customEvents:resource-load-error</code></td>
+      <td><code>{ operation, error, retryable }</code></td>
+      <td>Operation fails</td>
+    </tr>
+    <tr>
+      <td><code>resource-state-change</code></td>
+      <td><code>ResourceStateChangeEvent</code></td>
+      <td><code>customEvents:resource-state-change</code></td>
+      <td><code>{ oldState, newState }</code></td>
+      <td>Any state transition</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The <code>operation</code> field in the event detail is what enables instance-level filtering: it carries the resource key (e.g., <code>['users', 123]</code>) that uniquely identifies which data request completed.</p>
+
+
+<h2>The Tracing Relationship</h2>
+
+<p>Tracing and event discrimination are <strong>orthogonal</strong> but complementary. They answer different questions:</p>
+
+<table>
+  <thead>
+    <tr><th></th><th>Scoped Events</th><th>Tracing</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Question answered</strong></td>
+      <td>"<em>What</em> happened and <em>who</em> cares?"</td>
+      <td>"<em>How</em> did it happen and <em>what touched it</em>?"</td>
+    </tr>
+    <tr>
+      <td><strong>Audience</strong></td>
+      <td>UI components reacting to data changes</td>
+      <td>DevTools, observability backends, debugging</td>
+    </tr>
+    <tr>
+      <td><strong>Mechanism</strong></td>
+      <td>DOM event bubbling + <code>instanceof</code> discrimination</td>
+      <td>W3C Trace Context headers + span creation</td>
+    </tr>
+    <tr>
+      <td><strong>Scope</strong></td>
+      <td>Client-side DOM tree</td>
+      <td>Client &harr; server (distributed)</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Three Dimensions of "Knowing What Happened"</h3>
+
+<p>The plan raises an important observation about three kinds of provenance knowledge:</p>
+
+<table>
+  <thead>
+    <tr><th>Dimension</th><th>Question</th><th>Mechanism in WE</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>1. What triggered the call?</strong></td>
+      <td>Which user action or code path initiated the resource request?</td>
+      <td><strong>Trace spans.</strong> A span wraps the initiating action (click handler, route navigation, form submit). The resource request is a child span of the trigger span, establishing causality.</td>
+    </tr>
+    <tr>
+      <td><strong>2. What modified the call?</strong></td>
+      <td>Which middleware intercepted, transformed, or retried the request?</td>
+      <td><strong>Trace spans + attributes.</strong> Each <a href="/resources/custom-middleware/">Custom Middleware</a> can create a child span with attributes recording its transformations (e.g., <code>middleware.auth.token_injected: true</code>, <code>middleware.retry.attempt: 2</code>).</td>
+    </tr>
+    <tr>
+      <td><strong>3. How is the trace correlated?</strong></td>
+      <td>How do client and server connect their traces?</td>
+      <td><strong>W3C Trace Context headers.</strong> The <a href="/resources/custom-tracer/">Custom Tracer</a> injects <code>traceparent</code> and <code>tracestate</code> into outgoing requests. The server propagates them. A unique trace ID links client-side spans with server-side processing.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>How Tracing and Events Connect</h3>
+
+<p>The connection point is the <code>resource-load-end</code> event detail. It carries a <code>duration</code> value and the <code>operation</code> key. A tracer span wrapping the same operation has the same key and timing. This enables correlation:</p>
+
+<pre><code>// Listener receives the event
+listenForScoped(app, 'resource-load-end', 'customEvents:resource-load-end', (event) => {
+  // event.detail.operation = ['users', 123]
+  // event.detail.duration = 247 (ms)
+
+  // The tracer recorded a span for the same operation:
+  // span.name = 'resource:users:123'
+  // span.duration = 247ms
+  // span.attributes = { 'http.status': 200, 'cache.hit': false }
+  // span.parentId = 'nav:route-change:abc'  (← what triggered it)
+});
+</code></pre>
+
+<p>Events tell the UI "data arrived." Traces tell the developer "here's the full journey of that request."</p>
+
+
+<h2>Discrimination Between Different Kinds of Loaders</h2>
+
+<p>The plan notes that scoped events "bring into focus the need to differentiate between loaders and even calls." This maps to two concrete scenarios:</p>
+
+<h3>Scenario 1: Route Loader vs Inline Loader</h3>
+
+<table>
+  <thead>
+    <tr><th>Loader</th><th>Scope</th><th>Discrimination Strategy</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Route loader (fires on navigation)</td>
+      <td>App-level injector</td>
+      <td>Listen on <code>&lt;route-view&gt;</code> element. Only route loader events bubble through it.</td>
+    </tr>
+    <tr>
+      <td>Data grid loader (fires on scroll/filter)</td>
+      <td>Panel-level injector</td>
+      <td>Listen on the grid container. Only grid loader events bubble through it.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>DOM proximity solves this naturally &mdash; listen close to the source.</p>
+
+<h3>Scenario 2: Resource Loader vs Resource Action</h3>
+
+<table>
+  <thead>
+    <tr><th></th><th>Resource Loader (reads)</th><th>Resource Action (writes)</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Events</strong></td>
+      <td><code>resource-load-start/end/error</code></td>
+      <td><code>resource-action-start/end/error/revert</code></td>
+    </tr>
+    <tr>
+      <td><strong>Event classes</strong></td>
+      <td><code>ResourceLoadEndEvent</code></td>
+      <td><code>ResourceActionEndEvent</code></td>
+    </tr>
+    <tr>
+      <td><strong>Discrimination</strong></td>
+      <td colspan="2">Different event names <em>and</em> different classes. <code>instanceof</code> naturally separates them even if both fire in the same scope.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Reads and writes are already distinguished by their event class hierarchy. No additional discrimination needed.</p>
+
+
+<h2>Open Questions</h2>
+
+<ol>
+  <li><strong>Should loaders emit a unique instance ID?</strong> The <code>operation</code> key identifies the <em>type</em> of request (e.g., <code>['users', 123]</code>), but not a specific invocation. For retry discrimination, a unique <code>requestId</code> in the event detail would correlate an event to a specific trace span.</li>
+  <li><strong>Should trace spans be accessible from event details?</strong> Including a <code>traceId</code> or <code>spanId</code> in the event detail would let listeners directly query the trace backend for the full journey of a specific request.</li>
+  <li><strong>Should scoped events support "sub-scoping" by operation key?</strong> A pattern like <code>listenForScoped(target, 'resource-load-end', 'customEvents:resource-load-end', handler, { operation: ['users'] })</code> would add operation-level filtering to the existing class-level discrimination.</li>
+</ol>
+
+
+<h2>Summary</h2>
+
+<table>
+  <thead>
+    <tr><th>Problem</th><th>Mechanism</th><th>Layer</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Different things with the same event name</td>
+      <td>Scoped events (<code>instanceof</code> discrimination)</td>
+      <td>Web Events</td>
+    </tr>
+    <tr>
+      <td>Same thing in two places</td>
+      <td>DOM proximity (listen on the container) or <code>detail.operation</code> filtering</td>
+      <td>Application code</td>
+    </tr>
+    <tr>
+      <td>Reads vs writes</td>
+      <td>Different event classes (<code>ResourceLoadEndEvent</code> vs <code>ResourceActionEndEvent</code>)</td>
+      <td>Web Resources</td>
+    </tr>
+    <tr>
+      <td>What triggered the request</td>
+      <td>Parent trace span</td>
+      <td>Web Traces</td>
+    </tr>
+    <tr>
+      <td>What modified the request</td>
+      <td>Middleware trace spans with attributes</td>
+      <td>Web Traces + Web Resources</td>
+    </tr>
+    <tr>
+      <td>Client &harr; server correlation</td>
+      <td>W3C Trace Context headers (<code>traceparent</code>, <code>tracestate</code>)</td>
+      <td>Web Traces</td>
+    </tr>
+  </tbody>
+</table>
+{% endraw %}

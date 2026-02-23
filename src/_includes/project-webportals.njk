@@ -1227,3 +1227,95 @@ function Modal(props) {
 
   </div>
 </details>
+
+<section id="ssr" class="section-card">
+    <h3 id="ssr-contract">SSR Contract</h3>
+    <p>
+        This section defines the server-side rendering contract for <strong>Web Portals</strong>.
+        Portals relocate content from a <em>logical</em> position (where the component authors it) to a <em>physical</em> position
+        (where it renders in the DOM). The server MUST emit portal content at its logical position; the client relocates it during hydration.
+    </p>
+
+    <h4 id="ssr-server-output">Server Output Requirements</h4>
+    <div class="comparison-table-wrapper mt-4">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Feature</th>
+                    <th>Server Output HTML</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Portal content (logical position)</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;div class="card"&gt;
+  &lt;!-- portal:modal-root --&gt;
+  &lt;div class="modal" data-portal="modal-root"&gt;
+    &lt;h2&gt;Confirm Delete&lt;/h2&gt;
+    &lt;p&gt;Are you sure?&lt;/p&gt;
+  &lt;/div&gt;
+  &lt;!-- /portal:modal-root --&gt;
+&lt;/div&gt;</code></pre>
+                    </td>
+                    <td>Server MUST render portal content at its <strong>logical position</strong> in the component tree, wrapped in comment boundary markers. The <code>data-portal</code> attribute identifies the target container.</td>
+                </tr>
+                <tr>
+                    <td><strong>Portal target container</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;div id="modal-root"
+  data-portal-target&gt;
+&lt;/div&gt;</code></pre>
+                    </td>
+                    <td>Server MUST emit the portal target container as an empty element. The client moves content into it during hydration.</td>
+                </tr>
+                <tr>
+                    <td><strong>Multiple portals to same target</strong></td>
+                    <td>Each portal at its own logical position with unique comment markers</td>
+                    <td>Multiple components MAY portal to the same target. Order is determined by DOM source order of the logical positions.</td>
+                </tr>
+                <tr>
+                    <td><strong>Injector context</strong></td>
+                    <td>Resolved from logical position</td>
+                    <td>Server MUST resolve injector values from the portal's <strong>logical</strong> ancestors, not the target container's ancestors. See <a href="/projects/webinjectors/#ssr">Web Injectors SSR</a>.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Content relocation:</strong> Client finds <code>&lt;!-- portal:... --&gt;</code> boundary markers, extracts the content, and moves it into the matching <code>data-portal-target</code> container.</li>
+        <li><strong>Context preservation:</strong> The portal maintains a reference to its logical parent for injector resolution, event proxying, and lifecycle management — even after physical relocation.</li>
+        <li><strong>Marker cleanup:</strong> Client MAY remove the comment boundary markers after relocation, or leave them for potential re-rendering.</li>
+        <li><strong>Event proxying:</strong> Events dispatched on portaled content bubble through the <em>logical</em> tree (via the injector hierarchy), not the physical DOM tree.</li>
+    </ul>
+
+    <h4 id="ssr-progressive-baseline">Progressive Enhancement Baseline</h4>
+    <p class="text-gray-600 text-sm">
+        With zero JavaScript: portal content is visible at its logical position in the document flow.
+        This means a modal's content appears inline where the component authored it, not in a separate overlay.
+        The content is fully readable and accessible — it simply isn't relocated to its intended visual position.
+        The empty target container is invisible (no content to display).
+    </p>
+
+    <h4 id="ssr-client-only">Client-Only Features</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Content relocation:</strong> Moving portal content from logical to physical DOM position</li>
+        <li><strong>Event proxying:</strong> Bubbling events through the logical tree</li>
+        <li><strong>Context bridging:</strong> Maintaining injector access across DOM boundaries</li>
+        <li><strong>Lifecycle management:</strong> Automatic cleanup when the portal source unmounts</li>
+        <li><strong>Dynamic portal creation:</strong> Programmatic portal instantiation at runtime</li>
+    </ul>
+
+    <div class="comparison-block" style="background: rgba(251, 191, 36, 0.1); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
+        <h4 id="ssr-implementor-note" style="margin-top: 0; color: #d97706; font-size: 1rem;">Implementor Note</h4>
+        <p style="margin-bottom: 0; font-size: 0.95rem;">
+            This contract defines compliance requirements. The build system or server framework
+            is responsible for rendering portal content at the logical position with boundary markers
+            and emitting empty target containers.
+            Web Portals does not ship an SSR runtime — it ships this specification.
+        </p>
+    </div>
+</section>

@@ -175,6 +175,106 @@ class TransientElement extends HTMLElement {
     </ul>
 </section>
 
+<section id="ssr" class="section-card">
+    <h3 id="ssr-contract">SSR Contract</h3>
+    <p>
+        This section defines the server-side rendering contract for <strong>Web Components</strong>.
+        Custom elements have three distinct SSR strategies depending on their type: standard components with Shadow DOM,
+        light DOM components, and transient components that self-replace.
+    </p>
+
+    <h4 id="ssr-server-output">Server Output Requirements</h4>
+    <div class="comparison-table-wrapper mt-4">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Component Type</th>
+                    <th>Server Output HTML</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Shadow DOM component</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;my-card&gt;
+  &lt;template shadowrootmode="open"&gt;
+    &lt;style&gt;...&lt;/style&gt;
+    &lt;h2&gt;Title&lt;/h2&gt;
+    &lt;slot&gt;&lt;/slot&gt;
+  &lt;/template&gt;
+  Slotted content here
+&lt;/my-card&gt;</code></pre>
+                    </td>
+                    <td>Server MUST emit Declarative Shadow DOM (<code>&lt;template shadowrootmode="open"&gt;</code>). Browser attaches shadow root during HTML parsing — no JS needed for initial render.</td>
+                </tr>
+                <tr>
+                    <td><strong>Light DOM component</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;user-card&gt;
+  &lt;h3&gt;John Doe&lt;/h3&gt;
+  &lt;p&gt;john@example.com&lt;/p&gt;
+&lt;/user-card&gt;</code></pre>
+                    </td>
+                    <td>Server emits the custom element tag with its rendered children. Content is visible before upgrade.</td>
+                </tr>
+                <tr>
+                    <td><strong>Transient component</strong><br><span class="text-xs text-gray-500">(server-computed)</span></td>
+                    <td><code>&lt;h2&gt;Section Title&lt;/h2&gt;</code></td>
+                    <td>Server computes the replacement directly. No custom element tag in output. This is the <strong>recommended</strong> strategy.</td>
+                </tr>
+                <tr>
+                    <td><strong>Transient component</strong><br><span class="text-xs text-gray-500">(annotated fallback)</span></td>
+                    <td><code>&lt;auto-heading data-level="2"&gt;Title&lt;/auto-heading&gt;</code></td>
+                    <td>Server emits the custom element with a data annotation. Client upgrades to <code>&lt;h2&gt;</code>. Use when server cannot compute the replacement.</td>
+                </tr>
+                <tr>
+                    <td><strong>Scoped registries</strong></td>
+                    <td>Correct tag names per scope in output</td>
+                    <td>Server MUST resolve scoped registry lookups and use the correct element names for each shadow root's scope.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>DSD parsing:</strong> Declarative Shadow DOM is automatically parsed by the browser — the shadow root exists before any JS runs. Client calls <code>customElements.define()</code> to upgrade the element and attach behavior.</li>
+        <li><strong>No re-render on upgrade:</strong> If the server output matches the component's expected render, <code>connectedCallback</code> SHOULD detect the existing DSD content and skip re-rendering.</li>
+        <li><strong>Transient no-op:</strong> If the server emitted the native element directly (server-computed strategy), transient component hydration is a no-op — the element is already correct.</li>
+        <li><strong>Attribute transfer:</strong> For annotated transient components, the client reads <code>data-level</code> (or equivalent) and replaces the custom element with the native element, transferring all attributes except <code>data-transient-*</code>.</li>
+    </ul>
+
+    <h4 id="ssr-progressive-baseline">Progressive Enhancement Baseline</h4>
+    <p class="text-gray-600 text-sm">
+        With zero JavaScript: DSD components render their shadow DOM content (styles and markup visible).
+        Light DOM components display their children as normal HTML.
+        Server-computed transient elements are native HTML — fully accessible.
+        Annotated transient fallbacks show pre-upgrade HTML with ARIA annotations
+        (e.g., <code>&lt;auto-heading role="heading" aria-level="2"&gt;</code>) for screen reader support.
+    </p>
+
+    <h4 id="ssr-client-only">Client-Only Features</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Element lifecycle:</strong> <code>connectedCallback</code>, <code>disconnectedCallback</code>, <code>attributeChangedCallback</code></li>
+        <li><strong>Property setting:</strong> JavaScript properties, method calls, imperative APIs</li>
+        <li><strong>Scoped registry polyfill:</strong> Runtime polyfill for scoped <code>customElements.define()</code></li>
+        <li><strong>Injector resolution:</strong> <code>InjectorRoot.getProviderOf()</code> for dependency injection</li>
+        <li><strong>Dynamic element creation:</strong> <code>document.createElement()</code> with custom elements</li>
+    </ul>
+
+    <div class="comparison-block" style="background: rgba(251, 191, 36, 0.1); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
+        <h4 id="ssr-implementor-note" style="margin-top: 0; color: #d97706; font-size: 1rem;">Implementor Note</h4>
+        <p style="margin-bottom: 0; font-size: 0.95rem;">
+            This contract defines compliance requirements. The build system or server framework
+            is responsible for emitting Declarative Shadow DOM, computing transient replacements,
+            and resolving scoped registry lookups.
+            Web Components does not ship an SSR runtime — it ships this specification.
+            See also: the <a href="/blocks/transient-component/">Transient Component</a> block page for detailed SSR strategies.
+        </p>
+    </div>
+</section>
+
 <section id="standards" class="section-card">
     <h3 id="web-standards">Web Standards Alignment</h3>
     <table>

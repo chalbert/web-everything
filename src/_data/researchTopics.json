@@ -9,5 +9,71 @@
     "relatedBlocks": ["event-behaviors", "view", "tabs", "router"],
     "relatedPlugs": ["webbehaviors", "webregistries"],
     "relatedProject": "webevents"
+  },
+  {
+    "id": "dom-less-composition",
+    "title": "DOM-Less Composition Patterns",
+    "status": "open",
+    "summary": "Researching every programming pattern and runtime solution that enables React-like component wrapping without adding DOM elements — from comment-based markers to display:contents, transient elements, and functional components.",
+    "dateOpened": "2026-02-23",
+    "tags": ["composition", "dom", "fragments", "transient", "layout"],
+    "relatedBlocks": ["transient-component", "view", "renderer"],
+    "relatedPlugs": ["webinjectors", "webcomponents", "webdirectives"],
+    "relatedProject": "webcomponents"
+  },
+  {
+    "id": "internationalization",
+    "title": "Internationalization & Translation",
+    "status": "open",
+    "summary": "Surveying what major frameworks provide for i18n and translation that is not yet part of web standards — from message formatting and locale negotiation to compile-time translations and type-safe keys.",
+    "dateOpened": "2026-02-23",
+    "tags": ["i18n", "translation", "locale", "messageformat", "rtl"],
+    "relatedBlocks": ["expression-parser", "router"],
+    "relatedPlugs": ["webinjectors", "webstates", "webcontexts"],
+    "relatedProject": "webadapters"
+  },
+  {
+    "id": "virtual-elements",
+    "title": "Virtual Elements: Directives or Components?",
+    "status": "open",
+    "summary": "Analyzing whether virtual elements (comment-based DOM-less markers) belong in Web Directives or Web Components, how they relate to transient elements, and when JSX makes transient syntax redundant.",
+    "dateOpened": "2026-02-23",
+    "tags": ["virtual-elements", "comments", "directives", "transient", "jsx", "dom-parts"],
+    "relatedBlocks": ["transient-component", "for-each", "resource-loader", "view"],
+    "relatedPlugs": ["webdirectives", "webcomponents"],
+    "relatedProject": "webdirectives"
+  },
+  {
+    "id": "configurable-loading-threshold",
+    "title": "Configurable Loading Threshold via Intents",
+    "status": "open",
+    "summary": "Researching how the 400ms debounce loading threshold should be configurable through the Intent system, backed by UX perception research and framework precedent.",
+    "dateOpened": "2026-02-23",
+    "tags": ["loading", "debounce", "timing", "intents", "ux-research", "skeleton"],
+    "relatedBlocks": ["resource-loader", "router"],
+    "relatedPlugs": ["webinjectors", "webcontexts"],
+    "relatedProject": "webintents"
+  },
+  {
+    "id": "scoped-event-discrimination",
+    "title": "Scoped Event Discrimination for Resource Loaders",
+    "status": "open",
+    "summary": "Analyzing how listenForScoped discriminates between concurrent resource loaders in the same scope, the relationship between loader events and tracing, and how trace context flows through resource requests.",
+    "dateOpened": "2026-02-23",
+    "tags": ["events", "scoping", "resource-loader", "tracing", "instanceof", "discrimination"],
+    "relatedBlocks": ["resource-loader", "resource-action", "broadcast", "router"],
+    "relatedPlugs": ["webevents", "webresources"],
+    "relatedProject": "webevents"
+  },
+  {
+    "id": "customizable-fetcher",
+    "title": "Customizable Fetcher & Cache for Resource Loader",
+    "status": "open",
+    "summary": "Documenting how the resource-loader's transport (fetch by default) and cache should be injectable via the injector system, enabling projects to swap in axios, GraphQL clients, or custom cache implementations.",
+    "dateOpened": "2026-02-23",
+    "tags": ["fetch", "transport", "cache", "middleware", "adapter", "injector"],
+    "relatedBlocks": ["resource-loader", "resource-action"],
+    "relatedPlugs": ["webresources", "webinjectors"],
+    "relatedProject": "webresources"
   }
 ]

@@ -191,6 +191,80 @@ if (stateContext) {
   </p>
 </section>
 
+<section id="ssr" class="section-card">
+    <h3 id="ssr-contract">SSR Contract</h3>
+    <p>
+        This section defines the server-side rendering contract for <strong>Web Contexts</strong>.
+        The server MUST resolve context queries at render time and respect the same hierarchical resolution order as the client.
+    </p>
+
+    <h4 id="ssr-server-output">Server Output Requirements</h4>
+    <div class="comparison-table-wrapper mt-4">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Feature</th>
+                    <th>Server Output HTML</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Context-driven content</strong></td>
+                    <td>Resolved values in the HTML</td>
+                    <td>Server MUST evaluate context queries (e.g., <code>@theme.primary</code>) and emit resolved values. No raw context references in output.</td>
+                </tr>
+                <tr>
+                    <td><strong>Context hierarchy</strong></td>
+                    <td>Server respects closest-provider-wins</td>
+                    <td>If a nested element overrides a context, the server MUST use the override for that subtree. Resolution order matches client behavior.</td>
+                </tr>
+                <tr>
+                    <td><strong>Context state serialization</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;script type="context" context="theme"&gt;
+{"primary":"#6366f1","mode":"dark"}
+&lt;/script&gt;</code></pre>
+                    </td>
+                    <td>Server SHOULD serialize context state using the same <code>&lt;script type="context"&gt;</code> pattern already used in declarative HTML. See <a href="/projects/webstates/#ssr">Web States SSR</a> for the JSON serialization format.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Context reconstruction:</strong> Client parses <code>&lt;script type="context"&gt;</code> blocks and reconstructs the context hierarchy from the DOM structure.</li>
+        <li><strong>Claim/query rebinding:</strong> Template bindings that reference contexts (e.g., <code>bind-text="user.name"</code>) are rebound to live context instances.</li>
+        <li><strong>Hierarchy matching:</strong> The client context hierarchy MUST match the server's. If they diverge, reactive updates may produce different values than the initial render.</li>
+    </ul>
+
+    <h4 id="ssr-progressive-baseline">Progressive Enhancement Baseline</h4>
+    <p class="text-gray-600 text-sm">
+        With zero JavaScript, all context-driven content is fully resolved and visible.
+        <code>&lt;script type="context"&gt;</code> blocks are ignored by browsers (unknown script type).
+        Content is static — no reactive context updates.
+    </p>
+
+    <h4 id="ssr-client-only">Client-Only Features</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Context lifecycle:</strong> <code>createContext()</code>, <code>ensureContext()</code>, <code>queryContext()</code></li>
+        <li><strong>Reactive updates:</strong> Context value changes and claim/query notification</li>
+        <li><strong>Negotiation protocol:</strong> Provider decline/defer logic for advanced scenarios</li>
+        <li><strong>Dynamic context attachment:</strong> Runtime <code>attach()</code> / <code>detach()</code></li>
+    </ul>
+
+    <div class="comparison-block" style="background: rgba(251, 191, 36, 0.1); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
+        <h4 id="ssr-implementor-note" style="margin-top: 0; color: #d97706; font-size: 1rem;">Implementor Note</h4>
+        <p style="margin-bottom: 0; font-size: 0.95rem;">
+            This contract defines compliance requirements. The build system or server framework
+            is responsible for resolving context queries and serializing context state.
+            Web Contexts does not ship an SSR runtime — it ships this specification.
+            See also: <a href="/projects/webstates/#ssr">Web States SSR</a> for state serialization format.
+        </p>
+    </div>
+</section>
+
 <details class="section-card" style="margin-top: 2rem;">
   <summary style="cursor: pointer; font-size: 1.25rem; font-weight: 600; padding: 1rem; background: rgba(99, 102, 241, 0.05); border-radius: 8px; user-select: none; list-style: none;">
     <span style="display: inline-block; transition: transform 0.2s;">▶</span> Research & Analysis

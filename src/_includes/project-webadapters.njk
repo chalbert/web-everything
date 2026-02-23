@@ -316,3 +316,23 @@ class UserCard extends HTMLElement {
         </p>
     </div>
 </section>
+
+<section id="ssr" class="section-card">
+    <h3 id="ssr-contract">SSR: Delegation to Target Primitives</h3>
+    <p>
+        <strong>Web Adapters</strong> do not define their own SSR contract. Adapters compile down to underlying Web Everything primitives
+        (expressions, directives, components, behaviors), and each of those primitives defines its own SSR specification.
+    </p>
+    <p>
+        An adapter's SSR compliance is determined by the contracts of the primitives it targets:
+    </p>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>JSX adapter:</strong> Compiles to <a href="/projects/webexpressions/#ssr">Web Expressions</a> and <a href="/projects/webcomponents/#ssr">Web Components</a>. Server output MUST conform to those contracts.</li>
+        <li><strong>Template-string adapter:</strong> Compiles to <a href="/projects/webexpressions/#ssr">Web Expressions</a> and <a href="/projects/webdirectives/#ssr">Web Directives</a>. Server output MUST conform to those contracts.</li>
+        <li><strong>HTML-first adapter:</strong> The HTML is the server output — progressive enhancement by design.</li>
+    </ul>
+    <p class="text-gray-600 text-sm" style="margin-top: 1rem;">
+        Adapter authors MUST ensure that their compilation output produces HTML conforming to the target primitives' SSR contracts.
+        No additional server-side logic is needed beyond what the target primitives specify.
+    </p>
+</section>

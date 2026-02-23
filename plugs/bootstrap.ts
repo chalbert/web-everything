@@ -36,6 +36,7 @@ import { ValueParser } from '../blocks/parsers/value/ValueParser';
 import { PipeParser } from '../blocks/parsers/pipe/PipeParser';
 import { registerEventAttributes } from '../blocks/attributes/on-event/OnEventAttribute';
 import { registerRouter } from '../blocks/router/registerRouter';
+import { registerTransient } from '../blocks/transient/registerTransient';
 
 // Extend Window interface
 declare global {
@@ -162,7 +163,11 @@ registerEventAttributes(window.attributes);
 // Register router components and behaviors (route-view, route-outlet, route:link, route:prefetch)
 registerRouter(window.attributes);
 
+// Register transient components (auto-heading)
+registerTransient();
+
 console.log('[Web Everything] Bootstrap complete');
 console.log('[Web Everything] Globals available: injectors, contexts, stores, attributes');
 console.log('[Web Everything] Event attributes registered: on:click, on:submit, on:change, etc.');
 console.log('[Web Everything] Router registered: route-view, route-outlet, route:link, route:prefetch');
+console.log('[Web Everything] Transient components registered: auto-heading');

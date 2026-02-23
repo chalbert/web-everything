@@ -290,7 +290,8 @@
 
     <h4 class="font-semibold text-gray-800 mt-6 mb-2">Strategy 3: Server-Side Rendering</h4>
     <p class="text-gray-600 text-sm mb-3">
-        Render values on the server, hydrate for reactivity on the client. Several hydration approaches are possible:
+        Render values on the server, hydrate for reactivity on the client. Several hydration approaches are possible
+        (see the full <a href="#ssr-contract">SSR Contract</a> below):
     </p>
     <div class="comparison-table-wrapper mt-4">
         <table class="comparison-table">
@@ -777,6 +778,90 @@ const returnValue = result.expression.evaluate(resolved);</code></pre>
                 </tr>
             </tbody>
         </table>
+    </div>
+</section>
+
+<section id="ssr" class="section-card">
+    <h3 id="ssr-contract">SSR Contract</h3>
+    <p>
+        This section defines the server-side rendering contract for <strong>Web Expressions</strong>.
+        A compliant SSR implementation MUST resolve expressions at render time and emit hydration markers
+        so the client can rebind reactive updates without re-rendering.
+    </p>
+
+    <h4 id="ssr-server-output">Server Output Requirements</h4>
+    <p class="text-gray-600 text-sm mb-3">
+        The server MUST resolve all expression values and emit the result as plain text.
+        To enable client-side hydration, the server SHOULD also emit hydration markers using one of the following strategies:
+    </p>
+    <div class="comparison-table-wrapper mt-4">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Feature</th>
+                    <th>Server Output HTML</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Text interpolation</strong><br><span class="text-xs text-gray-500">{{ '{{' }}user.name{{ '}}' }}</span></td>
+                    <td><code>&lt;!--expr:user.name--&gt;John&lt;!--/expr--&gt;</code></td>
+                    <td>Comment markers (recommended). Invisible, no wrapper element needed.</td>
+                </tr>
+                <tr>
+                    <td><strong>Text interpolation</strong><br><span class="text-xs text-gray-500">(data-attribute variant)</span></td>
+                    <td><code>&lt;span data-expr="user.name"&gt;John&lt;/span&gt;</code></td>
+                    <td>Requires wrapper element. Clean markup.</td>
+                </tr>
+                <tr>
+                    <td><strong>Text interpolation</strong><br><span class="text-xs text-gray-500">(JSON map variant)</span></td>
+                    <td><code>&lt;span id="e1"&gt;John&lt;/span&gt;</code> + JSON block</td>
+                    <td>Cleanest markup. Requires <code>&lt;script type="application/json" data-hydration-map&gt;</code>.</td>
+                </tr>
+                <tr>
+                    <td><strong>Attribute expressions</strong><br><span class="text-xs text-gray-500">title="{{ '{{' }}user.name{{ '}}' }}"</span></td>
+                    <td><code>&lt;span title="John" data-bind-title="user.name"&gt;</code></td>
+                    <td>Server MUST emit the resolved attribute value. The <code>data-bind-*</code> attribute MUST remain for client rebinding.</td>
+                </tr>
+                <tr>
+                    <td><strong>Conditional expressions</strong></td>
+                    <td>Server evaluates and emits the matching branch only</td>
+                    <td>See <a href="/projects/webdirectives/#ssr">Web Directives SSR</a> for structural conditionals.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Marker scanning:</strong> Client scans the DOM for hydration markers (comment nodes matching <code>&lt;!--expr:...--&gt;</code>, <code>data-expr</code> attributes, or JSON hydration maps) and associates them with reactive bindings.</li>
+        <li><strong>Parser registration:</strong> Expression parsers (<code>CustomTextNodeParser</code>, <code>CustomExpressionParser</code>) MUST be registered before hydration begins.</li>
+        <li><strong>No re-render:</strong> If the server output matches the current data, the client MUST NOT re-render — it only attaches listeners for future updates.</li>
+        <li><strong>Cloak removal:</strong> If the server used the CSS cloak strategy as a fallback, the client removes <code>[cloak]</code> attributes after upgrade (same as client-only flow).</li>
+    </ul>
+
+    <h4 id="ssr-progressive-baseline">Progressive Enhancement Baseline</h4>
+    <p class="text-gray-600 text-sm">
+        With zero JavaScript, all expression values are visible as plain text — fully resolved by the server.
+        Content is readable and accessible. Expressions are inert strings; no reactivity, no dynamic updates.
+    </p>
+
+    <h4 id="ssr-client-only">Client-Only Features</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Parser registration:</strong> <code>customTextNodeParsers.define()</code>, <code>customExpressionParsers.define()</code></li>
+        <li><strong>Dynamic expression changes:</strong> Programmatic updates to expression values or re-parsing</li>
+        <li><strong>Custom parser plugins:</strong> Adding new delimiter syntaxes or expression types at runtime</li>
+        <li><strong>Expression upgrade triggers:</strong> <code>innerHTML</code>, <code>cloneNode</code>, and other DOM mutation-based upgrades</li>
+    </ul>
+
+    <div class="comparison-block" style="background: rgba(251, 191, 36, 0.1); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
+        <h4 id="ssr-implementor-note" style="margin-top: 0; color: #d97706; font-size: 1rem;">Implementor Note</h4>
+        <p style="margin-bottom: 0; font-size: 0.95rem;">
+            This contract defines compliance requirements. The build system or server framework
+            (Eleventy, Astro, Next.js, etc.) is responsible for resolving expressions and emitting the specified hydration markers.
+            Web Expressions does not ship an SSR runtime — it ships this specification.
+        </p>
     </div>
 </section>
 

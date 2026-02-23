@@ -246,6 +246,87 @@ function listenFor<TDetail>(
     </p>
 </section>
 
+<section id="ssr" class="section-card">
+    <h3 id="ssr-contract">SSR Contract</h3>
+    <p>
+        This section defines the server-side rendering contract for <strong>Web Events</strong>.
+        Event classes and dispatch logic are entirely client-side. The server's role is limited to
+        preserving event-related attributes in the HTML output and ensuring the
+        <a href="/projects/webbehaviors/#ssr">Web Behaviors</a> attribute passthrough contract is met.
+    </p>
+
+    <h4 id="ssr-server-output">Server Output Requirements</h4>
+    <div class="comparison-table-wrapper mt-4">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Feature</th>
+                    <th>Server Output HTML</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Event attributes</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;button on:click="save($event)"&gt;
+  Save
+&lt;/button&gt;</code></pre>
+                    </td>
+                    <td>Server MUST emit <code>on:*</code> attributes exactly as authored. This is a subset of the <a href="/projects/webbehaviors/#ssr">Web Behaviors</a> attribute passthrough contract.</td>
+                </tr>
+                <tr>
+                    <td><strong>Broadcast attributes</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;button broadcast="customEvents:close-modals"&gt;
+  Close All Modals
+&lt;/button&gt;</code></pre>
+                    </td>
+                    <td>Server MUST emit <code>broadcast</code> attributes as-is. The value is an injector key referencing a scoped event class.</td>
+                </tr>
+                <tr>
+                    <td><strong>Event class registration</strong></td>
+                    <td>No server output</td>
+                    <td>Event classes (<code>customEvents:*</code> injector keys) are registered on the client. No serialization needed.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Attribute binding:</strong> <code>on:*</code> and <code>broadcast</code> attributes are processed by the <a href="/projects/webbehaviors/">Web Behaviors</a> system during DOM walk. Event listeners are attached at that point.</li>
+        <li><strong>Event class resolution:</strong> The <code>broadcast</code> behavior resolves event classes from the injector scope at dispatch time, not at hydration time. No upfront resolution needed.</li>
+        <li><strong>Listener registration:</strong> <code>listenForScoped()</code> calls register listeners that receive events with full <code>instanceof</code> discrimination. These are client-only registrations.</li>
+    </ul>
+
+    <h4 id="ssr-progressive-baseline">Progressive Enhancement Baseline</h4>
+    <p class="text-gray-600 text-sm">
+        With zero JavaScript: <code>on:*</code> attributes are unknown to the browser and ignored.
+        <code>broadcast</code> is an unknown attribute and ignored.
+        Buttons and interactive elements retain their native behavior (form submission, navigation).
+        No events are dispatched, but the page remains functional for its static content.
+    </p>
+
+    <h4 id="ssr-client-only">Client-Only Features</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Event dispatching:</strong> All <code>dispatchEvent()</code>, <code>broadcast</code>, and custom event construction</li>
+        <li><strong>Scoped listeners:</strong> <code>listenForScoped()</code> with <code>instanceof</code> discrimination</li>
+        <li><strong>Event class instantiation:</strong> <code>new CustomEvent()</code>, provider-based class resolution</li>
+        <li><strong>Invoker Commands integration:</strong> <code>commandfor</code>/<code>command</code> attribute handling (platform feature)</li>
+    </ul>
+
+    <div class="comparison-block" style="background: rgba(251, 191, 36, 0.1); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
+        <h4 id="ssr-implementor-note" style="margin-top: 0; color: #d97706; font-size: 1rem;">Implementor Note</h4>
+        <p style="margin-bottom: 0; font-size: 0.95rem;">
+            This contract defines compliance requirements. The build system or server framework
+            is responsible for preserving event attribute markup in the HTML output.
+            Web Events does not ship an SSR runtime — it ships this specification.
+            See also: <a href="/projects/webbehaviors/#ssr">Web Behaviors SSR Contract</a> for the full attribute passthrough specification.
+        </p>
+    </div>
+</section>
+
 <section id="research" class="section-card">
     <h3 id="research-link">Research</h3>
     <p>

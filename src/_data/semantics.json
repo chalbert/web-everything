@@ -372,5 +372,30 @@
     "term": "scroll restoration",
     "definition": "Browser or custom control over scroll position after navigation. Navigation API provides native support.",
     "usage": "Configure via <code>route:config scroll=\"auto|manual|none\"</code>. 'auto' uses browser behavior, 'manual' for custom control."
+  },
+  {
+    "term": "SSR Contract",
+    "definition": "The specification of what server output MUST look like for a given Web Everything primitive, and what the client expects during hydration.",
+    "usage": "Each project defines its SSR Contract in a dedicated section on its project page."
+  },
+  {
+    "term": "Hydration",
+    "definition": "The process by which client-side JavaScript attaches interactivity to server-rendered HTML without re-rendering the DOM.",
+    "usage": "Described in each project's SSR Contract section."
+  },
+  {
+    "term": "Progressive Enhancement Baseline",
+    "definition": "The minimum functionality available when JavaScript is disabled or not yet loaded. Server-rendered content should be usable at this baseline.",
+    "usage": "Defined per project in SSR Contracts."
+  },
+  {
+    "term": "Hydration Marker",
+    "definition": "A DOM annotation (comment node, data attribute, or JSON script block) that enables the client to associate server-rendered content with its reactive bindings.",
+    "usage": "Used by Web Expressions SSR for expression rebinding. Formats: comment markers, <code>data-expr</code> attributes, JSON hydration maps."
+  },
+  {
+    "term": "Declarative Shadow DOM",
+    "definition": "The <code>&lt;template shadowrootmode&gt;</code> pattern that allows shadow DOM content to be included in server-rendered HTML and parsed by the browser without JavaScript.",
+    "usage": "Used by Web Components SSR Contract for custom elements with shadow DOM."
   }
 ]

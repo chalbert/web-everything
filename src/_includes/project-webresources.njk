@@ -22,6 +22,114 @@
     </div>
 </section>
 
+<section id="ssr" class="section-card">
+    <h3 id="ssr-contract">SSR Contract</h3>
+    <p>
+        This section defines the server-side rendering contract for <strong>Web Resources</strong>.
+        The server MUST execute data requests at render time and embed the results directly in the HTML.
+        Clients receive pre-fetched data and skip redundant network requests during hydration.
+    </p>
+
+    <h4 id="ssr-server-output">Server Output Requirements</h4>
+    <div class="comparison-table-wrapper mt-4">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Feature</th>
+                    <th>Server Output HTML</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Fetched data embedding</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;script type="application/json"
+  data-store="resource:users"&gt;
+[{"id":1,"name":"Alice"},
+ {"id":2,"name":"Bob"}]
+&lt;/script&gt;</code></pre>
+                    </td>
+                    <td>Server MUST execute the resource request and serialize the response using the <a href="/projects/webstates/#ssr">Web States</a> JSON block format. The <code>data-store</code> key uses a <code>resource:</code> prefix to distinguish resource data from application state.</td>
+                </tr>
+                <tr>
+                    <td><strong>Resource state templates</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;!-- Server renders the success
+     template with fetched data --&gt;
+&lt;ul class="user-list"&gt;
+  &lt;li&gt;Alice&lt;/li&gt;
+  &lt;li&gt;Bob&lt;/li&gt;
+&lt;/ul&gt;</code></pre>
+                    </td>
+                    <td>Server MUST render the appropriate state template (success, error, or empty) based on the fetch result. See <a href="/projects/webdirectives/#ssr">Web Directives SSR</a> for <code>resource:loader</code> directive expansion.</td>
+                </tr>
+                <tr>
+                    <td><strong>Prefetch hints</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;link rel="prefetch"
+  href="/api/users?page=2"&gt;</code></pre>
+                    </td>
+                    <td>Server MAY emit <code>&lt;link rel="prefetch"&gt;</code> hints for resources the client is likely to need next (e.g., next page of paginated data).</td>
+                </tr>
+                <tr>
+                    <td><strong>Error state</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;div class="error-state"&gt;
+  Failed to load users.
+&lt;/div&gt;</code></pre>
+                    </td>
+                    <td>If the server request fails, the server MUST render the error template rather than leaving the resource in a loading state.</td>
+                </tr>
+                <tr>
+                    <td><strong>Loading state</strong></td>
+                    <td>MUST NOT appear in server output</td>
+                    <td>Server output is final — loading/pending states are client-only concepts. The server either succeeds, errors, or returns empty.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Data recovery:</strong> Client reads <code>&lt;script type="application/json" data-store="resource:..."&gt;</code> blocks and initializes resource stores with the pre-fetched data, following the <a href="/projects/webstates/#ssr">Web States</a> hydration contract.</li>
+        <li><strong>Skip initial fetch:</strong> If a resource store is hydrated with data, the client MUST skip the initial network request. Subsequent refreshes or invalidations trigger normal fetching.</li>
+        <li><strong>Template matching:</strong> The server-rendered template (success/error/empty) should match what the client would render for the same data. No DOM mutations are needed on initial hydration.</li>
+        <li><strong>Middleware activation:</strong> Client-side middleware (auth headers, retry logic, caching policies) activates for all subsequent requests after hydration.</li>
+    </ul>
+
+    <h4 id="ssr-progressive-baseline">Progressive Enhancement Baseline</h4>
+    <p class="text-gray-600 text-sm">
+        With zero JavaScript: all resource data is visible as server-rendered content.
+        Lists, tables, and detail views display the fetched data as static HTML.
+        The JSON script blocks are invisible (<code>type="application/json"</code> is not executed).
+        Prefetch hints are honored by the browser's native prefetch mechanism.
+        No data refreshing, pagination, or dynamic filtering — content is frozen at its server-rendered state.
+    </p>
+
+    <h4 id="ssr-client-only">Client-Only Features</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Data fetching:</strong> All runtime <code>fetch()</code> calls, polling, WebSocket connections</li>
+        <li><strong>Middleware pipeline:</strong> Auth injection, retry logic, request/response transforms</li>
+        <li><strong>Cache management:</strong> Stale-while-revalidate, TTL expiry, cache invalidation</li>
+        <li><strong>Loading states:</strong> Spinner display, skeleton screens, progress indicators</li>
+        <li><strong>Pagination &amp; filtering:</strong> Dynamic data refetching based on user interaction</li>
+        <li><strong>Error recovery:</strong> Retry buttons, fallback UI, error boundary integration</li>
+    </ul>
+
+    <div class="comparison-block" style="background: rgba(251, 191, 36, 0.1); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
+        <h4 id="ssr-implementor-note" style="margin-top: 0; color: #d97706; font-size: 1rem;">Implementor Note</h4>
+        <p style="margin-bottom: 0; font-size: 0.95rem;">
+            This contract defines compliance requirements. The build system or server framework
+            is responsible for executing resource requests, serializing responses, and rendering
+            the appropriate state template.
+            Web Resources does not ship an SSR runtime — it ships this specification.
+            See also: <a href="/projects/webstates/#ssr">Web States SSR Contract</a> for data serialization format,
+            <a href="/projects/webdirectives/#ssr">Web Directives SSR Contract</a> for <code>resource:loader</code> expansion.
+        </p>
+    </div>
+</section>
+
 <details class="section-card" style="margin-top: 2rem;">
    <summary style="cursor: pointer; font-size: 1.25rem; font-weight: 600; padding: 1rem; background: rgba(99, 102, 241, 0.05); border-radius: 8px; user-select: none; list-style: none;">
       <span style="display: inline-block; transition: transform 0.2s;">▶</span> Research & Analysis

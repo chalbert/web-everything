@@ -1,0 +1,291 @@
+{% raw %}<h2>The Question</h2>
+
+<p>Virtual elements &mdash; comment-based DOM-less markers that delimit dynamic regions &mdash; are a foundational pattern in Web Everything. But which project <em>owns</em> them? Are they part of <strong>Web Directives</strong> (structural control flow) or <strong>Web Components</strong> (custom element patterns)?</p>
+
+<p>This research also examines the relationship between virtual elements and <strong>transient elements</strong>, and clarifies when JSX rendering makes the transient pattern unnecessary.</p>
+
+
+<h2>Recommendation: Web Directives</h2>
+
+<p>Virtual elements belong in <strong>Web Directives</strong>. The reasoning is straightforward:</p>
+
+<table>
+  <thead>
+    <tr><th>Criterion</th><th>Virtual Elements</th><th>Transient Elements</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>DOM artifact</strong></td>
+      <td>Comment nodes (<code>&lt;!-- ... --&gt;</code>)</td>
+      <td>Native HTML element (after replacement)</td>
+    </tr>
+    <tr>
+      <td><strong>Primary purpose</strong></td>
+      <td>Structural control flow (loops, conditionals, async boundaries)</td>
+      <td>Dynamic tag resolution (heading levels, link vs button)</td>
+    </tr>
+    <tr>
+      <td><strong>Registration</strong></td>
+      <td><code>CustomCommentRegistry</code> or <code>customElements</code> (for <code>&lt;template is=""&gt;</code>)</td>
+      <td><code>customElements</code></td>
+    </tr>
+    <tr>
+      <td><strong>Lifecycle</strong></td>
+      <td>connectedCallback &rarr; template stamping &rarr; comment boundaries persist</td>
+      <td>connectedCallback &rarr; determine tag &rarr; <code>replaceWith()</code> &rarr; element vanishes</td>
+    </tr>
+    <tr>
+      <td><strong>CSS layout impact</strong></td>
+      <td>Zero (comments are invisible to layout)</td>
+      <td>Zero (after replacement)</td>
+    </tr>
+    <tr>
+      <td><strong>Inspectable</strong></td>
+      <td>Comment nodes visible in DevTools</td>
+      <td>Native element visible in DevTools</td>
+    </tr>
+    <tr>
+      <td><strong>Extends</strong></td>
+      <td><code>Comment</code> (via CustomComment plug)</td>
+      <td><code>HTMLElement</code> (via TransientElement base class)</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Virtual elements are <strong>comment-based structural markers</strong>. They control <em>what</em> appears in the DOM, not <em>which tag</em> it uses. This is the defining characteristic of a directive, not a component.</p>
+
+
+<h2>Historical Context</h2>
+
+<p>The comment-based virtual element pattern has a well-established lineage across frameworks:</p>
+
+<table>
+  <thead>
+    <tr><th>Framework</th><th>Year</th><th>Pattern</th><th>Mechanism</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Knockout.js</strong></td>
+      <td>2011</td>
+      <td><code>&lt;!-- ko if: condition --&gt;</code></td>
+      <td>First framework to use comment nodes as binding containers. Exposed <code>ko.virtualElements</code> API for custom bindings.</td>
+    </tr>
+    <tr>
+      <td><strong>Angular</strong></td>
+      <td>2016</td>
+      <td><code>&lt;ng-container&gt;</code>, <code>*ngIf</code></td>
+      <td>Structural directives insert comment anchors (<code>&lt;!--ngIf--&gt;</code>). Angular 17+ replaces with compiler-built-in <code>@if</code>/<code>@for</code> that eliminate comment nodes entirely.</td>
+    </tr>
+    <tr>
+      <td><strong>Vue</strong></td>
+      <td>2020</td>
+      <td><code>&lt;template v-if&gt;</code></td>
+      <td>Compiler removes the <code>&lt;template&gt;</code> wrapper, inserts <code>createCommentVNode()</code> as positional anchors. Comments visible in DOM as <code>&lt;!----&gt;</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>Solid</strong></td>
+      <td>2021</td>
+      <td><code>&lt;Show&gt;</code>, <code>&lt;For&gt;</code></td>
+      <td>Components use comment nodes as anchors. Zero wrapper elements.</td>
+    </tr>
+    <tr>
+      <td><strong>Lit</strong></td>
+      <td>2021</td>
+      <td><code>ChildPart</code></td>
+      <td>Comment sentinels (<code>&lt;!--?lit$...--&gt;</code>) bracket dynamic regions. The <code>Part</code> system holds references to start/end comment nodes.</td>
+    </tr>
+    <tr>
+      <td><strong>Web Everything</strong></td>
+      <td>2026</td>
+      <td><code>CustomComment</code></td>
+      <td>Comments with lifecycle callbacks. Registered via <code>CustomCommentRegistry</code>. Configurable parsing via <code>CustomCommentParserRegistry</code>.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Key trend:</strong> Angular 17's migration from structural directives to compiler-built-in <code>@if</code>/<code>@for</code> shows that the pattern is evolving toward <em>compiler erasure</em> &mdash; removing even the comment anchors from the DOM. Web Everything's two-layer architecture (authoring templates + runtime comments) is positioned for a similar evolution if a build step is present.</p>
+
+
+<h2>W3C DOM Parts: The Standardization Path</h2>
+
+<p>The <a href="https://github.com/nicolo-ribaudo/tc39-proposal-structs">W3C DOM Parts proposal</a> aims to standardize what frameworks currently do with comment-based markers:</p>
+
+<table>
+  <thead>
+    <tr><th>DOM Part Type</th><th>Purpose</th><th>Web Everything Equivalent</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>NodePart</code></td>
+      <td>Wraps a single node</td>
+      <td>Expression binding target</td>
+    </tr>
+    <tr>
+      <td><code>AttributePart</code></td>
+      <td>Wraps a single attribute</td>
+      <td><code>CustomAttribute</code> binding</td>
+    </tr>
+    <tr>
+      <td><code>ChildNodePart</code></td>
+      <td>Wraps a range of siblings between boundary markers</td>
+      <td><strong>Comment marker pairs</strong> (virtual elements)</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Status (2025):</strong> Chrome filed an Intent to Prototype (January 2025). Firefox and Safari have given no signal. A W3C breakout session in March 2025 aimed to reach consensus on a concrete MVP. The proposal remains early-stage.</p>
+
+<p><strong>Impact:</strong> When DOM Parts ships, <code>ChildNodePart</code> would replace the custom comment marker system with a browser-native primitive. Web Everything's <code>CustomComment</code> is already architecturally aligned &mdash; the comment markers serve the same role as <code>ChildNodePart</code> boundaries. Migrating would be a runtime swap, not an API change.</p>
+
+
+<h2>The Transient Element Relationship</h2>
+
+<p>Transient elements and virtual elements solve related but distinct problems:</p>
+
+<table>
+  <thead>
+    <tr><th>Problem</th><th>Virtual Element Solution</th><th>Transient Element Solution</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Rendering a list without a wrapper</td>
+      <td><code>&lt;!-- for-each --&gt;...&lt;!-- /for-each --&gt;</code></td>
+      <td>N/A &mdash; transient elements don't handle lists</td>
+    </tr>
+    <tr>
+      <td>Conditional rendering</td>
+      <td><code>&lt;!-- if --&gt;...&lt;!-- /if --&gt;</code></td>
+      <td>N/A &mdash; transient elements always render something</td>
+    </tr>
+    <tr>
+      <td>Dynamic heading level</td>
+      <td>N/A &mdash; directives don't resolve tags</td>
+      <td><code>&lt;auto-heading&gt;</code> resolves to <code>&lt;h1&gt;</code>&ndash;<code>&lt;h6&gt;</code></td>
+    </tr>
+    <tr>
+      <td>Link vs button</td>
+      <td>N/A</td>
+      <td><code>&lt;smart-link&gt;</code> resolves to <code>&lt;a&gt;</code> or <code>&lt;button&gt;</code></td>
+    </tr>
+    <tr>
+      <td>Ergonomic directive syntax</td>
+      <td>Natively uses comment boundaries</td>
+      <td><code>&lt;for-each&gt;</code> replaces itself with comment boundaries</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>The last row is where they overlap. A <code>&lt;for-each&gt;</code> custom element is a transient element that replaces itself with comment boundaries &mdash; it's an ergonomic authoring shortcut for what is fundamentally a directive. This is the <strong>transient-to-comments bridge</strong> identified in the <a href="/research/dom-less-composition/">DOM-Less Composition</a> research.</p>
+
+
+<h2>JSX Makes Transient Syntax Redundant</h2>
+
+<p>A critical insight: transient elements exist primarily as an <strong>HTML authoring convenience</strong>. When using JSX, the same ergonomics are available natively:</p>
+
+<table>
+  <thead>
+    <tr><th>Pattern</th><th>HTML Authoring</th><th>JSX Equivalent</th><th>Transient Needed?</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Dynamic heading</td>
+      <td><code>&lt;auto-heading&gt;Title&lt;/auto-heading&gt;</code></td>
+      <td><code>&lt;AutoHeading&gt;Title&lt;/AutoHeading&gt;</code> (function component returns <code>&lt;hN&gt;</code>)</td>
+      <td>No &mdash; JSX function components produce native elements directly</td>
+    </tr>
+    <tr>
+      <td>Conditional list</td>
+      <td><code>&lt;for-each store="items"&gt;...&lt;/for-each&gt;</code></td>
+      <td><code>{items.map(item =&gt; &lt;li&gt;{item}&lt;/li&gt;)}</code></td>
+      <td>No &mdash; JSX maps directly</td>
+    </tr>
+    <tr>
+      <td>Link vs button</td>
+      <td><code>&lt;smart-link href="..."&gt;...&lt;/smart-link&gt;</code></td>
+      <td><code>&lt;SmartLink href="..."&gt;...&lt;/SmartLink&gt;</code></td>
+      <td>No &mdash; same function resolves tag</td>
+    </tr>
+    <tr>
+      <td>Fragment</td>
+      <td>No native equivalent</td>
+      <td><code>&lt;&gt;...&lt;/&gt;</code></td>
+      <td>No &mdash; JSX fragments dissolve on insertion</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>In JSX, a function component like <code>AutoHeading</code> returns a native element directly &mdash; there is no intermediate custom element that needs to self-replace. The <code>TransientElement</code> base class and its <code>queueMicrotask(() =&gt; this.replaceWith(el))</code> lifecycle are irrelevant.</p>
+
+<p><strong>This means:</strong> Transient elements are an <strong>HTML-first authoring pattern</strong>. They belong in Web Components because they are custom elements. Virtual elements are a <strong>runtime structural pattern</strong>. They belong in Web Directives because they are control flow primitives.</p>
+
+
+<h2>Classification</h2>
+
+<table>
+  <thead>
+    <tr><th>Pattern</th><th>Project</th><th>Rationale</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Comment marker pairs</strong><br>(<code>&lt;!-- start --&gt;</code> / <code>&lt;!-- end --&gt;</code>)</td>
+      <td>Web Directives</td>
+      <td>Core runtime mechanism for structural control flow. Used by ForEach, ViewIf, ViewSwitch, ResourceLoader.</td>
+    </tr>
+    <tr>
+      <td><strong>CustomComment</strong><br>(lifecycle-enabled comments)</td>
+      <td>Web Directives (plug)</td>
+      <td>Extends <code>Comment</code> with lifecycle callbacks. The primitive that powers directive boundaries.</td>
+    </tr>
+    <tr>
+      <td><strong>CustomCommentRegistry</strong></td>
+      <td>Web Directives (plug)</td>
+      <td>Registry for comment-based directives. Analogous to <code>customElements</code> for comments.</td>
+    </tr>
+    <tr>
+      <td><strong>CustomCommentParserRegistry</strong></td>
+      <td>Web Directives (plug)</td>
+      <td>Configurable parsing rules for comment directive syntax.</td>
+    </tr>
+    <tr>
+      <td><strong>TransientElement</strong><br>(self-replacing custom element)</td>
+      <td>Web Components</td>
+      <td>Extends <code>HTMLElement</code>. Is a custom element with self-replacement lifecycle. Produces native elements.</td>
+    </tr>
+    <tr>
+      <td><strong>Transient-to-comments bridge</strong><br>(<code>&lt;for-each&gt;</code> replacing itself with comments)</td>
+      <td>Cross-referenced in both</td>
+      <td>Authoring syntax is a custom element (Components); runtime result is comment boundaries (Directives). Documented in Web Components with explicit cross-reference to Web Directives.</td>
+    </tr>
+  </tbody>
+</table>
+
+
+<h2>Cross-Reference Requirements</h2>
+
+<p>Given the overlap, clear cross-referencing is needed:</p>
+
+<ol>
+  <li><strong>Web Directives project page</strong> should reference the <a href="/blocks/transient-component/">Transient Component</a> block as an ergonomic authoring shortcut for directives. Note: the transient-to-comments bridge means some custom elements dissolve into directive-managed comment boundaries.</li>
+  <li><strong>Web Components project page</strong> (Transient Components section) should note that transient elements serving as directive syntax shortcuts produce virtual elements managed by <a href="/projects/webdirectives/">Web Directives</a>.</li>
+  <li><strong>Transient Component block page</strong> should document the three replacement targets: native element (AutoHeading), comment boundaries (ForEach), and the JSX bypass.</li>
+  <li><strong>JSX Renderer / Adapter documentation</strong> should note that transient elements are unnecessary when using JSX, since function components provide the same ergonomics without self-replacement.</li>
+</ol>
+
+
+<h2>Summary</h2>
+
+<table>
+  <thead>
+    <tr><th></th><th>Virtual Elements</th><th>Transient Elements</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Project</strong></td><td>Web Directives</td><td>Web Components</td></tr>
+    <tr><td><strong>DOM base</strong></td><td>Comment</td><td>HTMLElement</td></tr>
+    <tr><td><strong>Runtime artifact</strong></td><td>Comment boundaries</td><td>Native HTML element</td></tr>
+    <tr><td><strong>Solves</strong></td><td>Structural control flow without wrappers</td><td>Dynamic tag resolution without wrappers</td></tr>
+    <tr><td><strong>Bridge</strong></td><td colspan="2">Transient elements can self-replace into comment boundaries, unifying both patterns</td></tr>
+    <tr><td><strong>JSX bypass</strong></td><td>N/A &mdash; JSX still needs runtime boundaries for lists/conditionals</td><td>JSX function components make transient elements redundant</td></tr>
+    <tr><td><strong>Standards path</strong></td><td>W3C DOM Parts (<code>ChildNodePart</code>)</td><td>None needed &mdash; uses standard <code>customElements</code></td></tr>
+  </tbody>
+</table>
+{% endraw %}

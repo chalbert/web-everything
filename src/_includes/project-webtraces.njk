@@ -75,3 +75,18 @@ effect(operation, { input, output, attributes });
 
   </div>
 </details>
+
+<section id="ssr" class="section-card">
+    <h3 id="ssr-contract">SSR: Trace Context Propagation</h3>
+    <p>
+        <strong>Web Traces</strong> is primarily a client-side observability system. However, the server plays a role in
+        propagating trace context so that client-side spans can be correlated with server-side traces.
+    </p>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Header propagation:</strong> Server MUST propagate <code>traceparent</code> and <code>tracestate</code> headers per the <a href="https://www.w3.org/TR/trace-context/">W3C Trace Context</a> specification.</li>
+        <li><strong>Trace ID embedding:</strong> Server MAY embed the trace ID in a <code>&lt;meta&gt;</code> tag so client-side traces can reference the server trace:
+<pre style="margin: 0.5rem 0; font-size: 0.8em;"><code>&lt;meta name="trace-id" content="00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"&gt;</code></pre>
+        </li>
+        <li><strong>Client-only:</strong> All span creation, context propagation, sampling, attribute attachment, and exporter configuration are client-side operations. No server rendering contract is needed for trace instrumentation.</li>
+    </ul>
+</section>

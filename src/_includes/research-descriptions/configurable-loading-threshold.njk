@@ -1,0 +1,430 @@
+{% raw %}<h2>The Problem</h2>
+
+<p>Web Everything uses a <strong>400ms debounce threshold</strong> for loading indicators: if an async operation completes within 400ms, no loading state is ever shown to the user. This prevents the "flash of spinner" anti-pattern. But the 400ms value is currently a convention, not a configurable parameter. It should be configurable through the <a href="/projects/webintents/">Intent system</a>.</p>
+
+
+<h2>Perception Research: Why 300&ndash;400ms?</h2>
+
+<p>The threshold sits precisely in the gap between two well-established perception boundaries:</p>
+
+<table>
+  <thead>
+    <tr><th>Threshold</th><th>Perception</th><th>UX Guidance</th><th>Source</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>100ms</strong></td>
+      <td>Instantaneous</td>
+      <td>No feedback needed. User perceives direct manipulation.</td>
+      <td>Nielsen Norman Group (1993, updated 2014)</td>
+    </tr>
+    <tr>
+      <td><strong>300&ndash;400ms</strong></td>
+      <td>Noticeable delay</td>
+      <td>User notices the wait but maintains focus. Showing a spinner here causes more anxiety than it relieves. The debounce threshold.</td>
+      <td>Multiple sources converge (see below)</td>
+    </tr>
+    <tr>
+      <td><strong>1,000ms</strong></td>
+      <td>Flow disruption</td>
+      <td>User's train of thought is interrupted. A loading indicator becomes necessary.</td>
+      <td>Nielsen Norman Group</td>
+    </tr>
+    <tr>
+      <td><strong>10,000ms</strong></td>
+      <td>Attention lost</td>
+      <td>User wants to do other things. Determinate progress bar required. Cancel option expected.</td>
+      <td>Nielsen Norman Group</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Convergent Evidence for 300&ndash;400ms</h3>
+
+<table>
+  <thead>
+    <tr><th>Source</th><th>Value</th><th>Context</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>React (internal)</td>
+      <td>300ms</td>
+      <td><code>FALLBACK_THROTTLE_MS</code> &mdash; Suspense waits 300ms before committing fallback to DOM. Not user-configurable.</td>
+    </tr>
+    <tr>
+      <td>spin-delay (community)</td>
+      <td>500ms delay / 200ms minimum</td>
+      <td>Most popular React loading delay library. Default 500ms suppression threshold, 200ms minimum display once shown.</td>
+    </tr>
+    <tr>
+      <td>Vaadin</td>
+      <td>300ms</td>
+      <td>Default <code>firstDelay</code> for loading indicator. Configurable per component.</td>
+    </tr>
+    <tr>
+      <td>Productboard</td>
+      <td>300ms</td>
+      <td>Empirically tuned spinner threshold with 300ms minimum display to prevent flickering.</td>
+    </tr>
+    <tr>
+      <td>Laravel Livewire</td>
+      <td>200ms</td>
+      <td><code>wire:loading.delay</code> modifier. Shorter because Livewire operates over server roundtrips.</td>
+    </tr>
+    <tr>
+      <td>Skeleton screen research</td>
+      <td>300ms</td>
+      <td>"Very short loading periods (below 300ms) won't benefit from skeleton screens" &mdash; industry consensus from multiple UX studies.</td>
+    </tr>
+    <tr>
+      <td>Web Everything</td>
+      <td>400ms</td>
+      <td>Current convention. Slightly conservative, appropriate for the framework's emphasis on progressive enhancement.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Conclusion:</strong> 300&ndash;400ms is not arbitrary. It's the range where human perception transitions from "that was fast" to "something is happening." Below this range, any indicator creates more visual noise than value. Above it, the absence of feedback feels broken.</p>
+
+
+<h2>What Frameworks Provide</h2>
+
+<h3>Angular: The Gold Standard</h3>
+
+<p>Angular's <code>@defer</code> block (Angular 17+) provides the most explicit configurable loading timing of any major framework:</p>
+
+<pre><code>@defer {
+  &lt;large-component /&gt;
+} @loading (after 100ms; minimum 1s) {
+  &lt;img alt="loading..." src="loading.gif" /&gt;
+} @placeholder (minimum 500ms) {
+  &lt;p&gt;Placeholder content&lt;/p&gt;
+}</code></pre>
+
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Purpose</th><th>Default</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>after</code></td>
+      <td>How long after loading starts before showing the indicator</td>
+      <td>None (immediate)</td>
+    </tr>
+    <tr>
+      <td><code>minimum</code></td>
+      <td>Minimum display duration once the indicator is shown (prevents flicker)</td>
+      <td>None</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>This is the two-parameter model: <strong>delay before showing</strong> + <strong>minimum display duration</strong>. Both are essential.</p>
+
+<h3>Other Frameworks</h3>
+
+<table>
+  <thead>
+    <tr><th>Framework</th><th>Configurable Delay?</th><th>Configurable Minimum?</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>React Suspense</strong></td>
+      <td>No (300ms internal, not exposed)</td>
+      <td>No</td>
+      <td>Community workaround: <code>spin-delay</code> library. Long-standing GitHub issue #17351 requesting <code>fallbackMinDurationMs</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>Angular @defer</strong></td>
+      <td>Yes (<code>after</code>)</td>
+      <td>Yes (<code>minimum</code>)</td>
+      <td>Best-in-class. Per-usage configuration.</td>
+    </tr>
+    <tr>
+      <td><strong>Svelte {#await}</strong></td>
+      <td>No</td>
+      <td>No</td>
+      <td>Pending block shows immediately. Manual timeout workaround.</td>
+    </tr>
+    <tr>
+      <td><strong>Remix / React Router</strong></td>
+      <td>No</td>
+      <td>No</td>
+      <td><code>useNavigation().state</code> exposes state only. No timing API.</td>
+    </tr>
+    <tr>
+      <td><strong>Vaadin</strong></td>
+      <td>Yes</td>
+      <td>No</td>
+      <td><code>firstDelay</code>, <code>secondDelay</code>, <code>thirdDelay</code> for staged indicators.</td>
+    </tr>
+  </tbody>
+</table>
+
+
+<h2>Current State in Web Everything</h2>
+
+<p>The Loader Intent already defines the architectural surface for timing configuration:</p>
+
+<pre><code>// From intents.json — timing dimension
+"timing": {
+  "values": ["immediate", "debounced"],
+  "contract": {
+    "immediate": "Loading indicator appears as soon as operation starts (0ms delay).",
+    "debounced": "Defaults to 400ms (Configurable). Prevents flicker for fast operations."
+  }
+}</code></pre>
+
+<p>And the <code>LoaderConfig</code> example already shows how custom timing values are provided:</p>
+
+<pre><code>const LoaderConfig = {
+    timings: {
+        debounced: 400,   // Default threshold
+        complex: 800      // Longer threshold for known-slow operations
+    },
+    defaults: {
+        region: { strategy: 'soft', timing: 'debounced', context: 'transition' }
+    }
+};</code></pre>
+
+<p>The architecture is in place. What's missing is formalization of the <strong>two-parameter model</strong> and the <strong>configuration flow</strong>.</p>
+
+
+<h2>Proposed Configuration Model</h2>
+
+<h3>Two Parameters: Delay + Minimum</h3>
+
+<p>Following Angular's lead, each timing profile should define two values:</p>
+
+<table>
+  <thead>
+    <tr><th>Parameter</th><th>Name in WE</th><th>Default</th><th>Purpose</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Delay</strong></td>
+      <td><code>delay</code></td>
+      <td>400ms</td>
+      <td>How long after the async operation starts before the loading indicator appears. If the operation completes within this window, no indicator is ever shown.</td>
+    </tr>
+    <tr>
+      <td><strong>Minimum</strong></td>
+      <td><code>minimum</code></td>
+      <td>500ms</td>
+      <td>Once the indicator is shown, it stays visible for at least this duration &mdash; even if the operation completes sooner. Prevents a brief flash of loading state.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>TypeScript Interface</h3>
+
+<pre><code>interface TimingProfile {
+  /** Milliseconds before showing the loading indicator (default: 400) */
+  delay: number;
+  /** Minimum display duration once shown (default: 500) */
+  minimum: number;
+}
+
+interface LoaderConfig {
+  timings: Record&lt;string, TimingProfile&gt;;
+  defaults: Record&lt;LoaderScope, Partial&lt;LoaderIntent&gt;&gt;;
+}
+
+// Example configuration
+const config: LoaderConfig = {
+  timings: {
+    immediate: { delay: 0, minimum: 0 },
+    debounced: { delay: 400, minimum: 500 },
+    patient:   { delay: 800, minimum: 1000 },
+  },
+  defaults: {
+    element: { strategy: 'soft', timing: 'debounced' },
+    region:  { strategy: 'soft', timing: 'debounced' },
+    viewport: { strategy: 'hard', timing: 'debounced' },
+  },
+};</code></pre>
+
+<h3>Configuration Flow</h3>
+
+<ol>
+  <li><strong>App-level default</strong> &mdash; Provide <code>LoaderConfig</code> via the injector system. All components inherit the app's timing preferences.</li>
+  <li><strong>Per-route override</strong> &mdash; Routes can override timing via attributes: <code>route:loader-timing="patient"</code></li>
+  <li><strong>Per-component override</strong> &mdash; Any component can provide a scoped <code>LoaderConfig</code> to its subtree via injector hierarchy.</li>
+  <li><strong>User preference</strong> &mdash; <code>prefers-reduced-motion</code> can map to <code>immediate</code> timing (show indicator immediately, no animations). The Motion Intent already handles this.</li>
+</ol>
+
+
+<h2>Integration with Existing Blocks</h2>
+
+<h3>Resource Loader</h3>
+
+<p>The <a href="/blocks/resource-loader/">Resource Loader</a> block already implements a state machine with <code>pending</code> &rarr; <code>loading</code> transition. The timing profile governs when the transition from <code>pending</code> (no indicator) to <code>loading</code> (indicator visible) occurs:</p>
+
+<table>
+  <thead>
+    <tr><th>State</th><th>With <code>immediate</code></th><th>With <code>debounced</code> (400ms)</th><th>With <code>patient</code> (800ms)</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Operation starts</strong></td>
+      <td>&rarr; <code>loading</code> immediately</td>
+      <td>&rarr; <code>pending</code> (timer starts)</td>
+      <td>&rarr; <code>pending</code> (timer starts)</td>
+    </tr>
+    <tr>
+      <td><strong>200ms elapsed</strong></td>
+      <td>Indicator visible for 200ms</td>
+      <td>Still <code>pending</code> (no indicator)</td>
+      <td>Still <code>pending</code> (no indicator)</td>
+    </tr>
+    <tr>
+      <td><strong>400ms elapsed</strong></td>
+      <td>Indicator visible for 400ms</td>
+      <td>&rarr; <code>loading</code> (indicator appears)</td>
+      <td>Still <code>pending</code> (no indicator)</td>
+    </tr>
+    <tr>
+      <td><strong>Completes at 350ms</strong></td>
+      <td>&rarr; <code>success</code> (indicator was visible 350ms)</td>
+      <td>&rarr; <code>success</code> (no indicator was ever shown)</td>
+      <td>&rarr; <code>success</code> (no indicator was ever shown)</td>
+    </tr>
+    <tr>
+      <td><strong>Completes at 500ms</strong></td>
+      <td>&rarr; <code>success</code></td>
+      <td>&rarr; <code>success</code> (indicator shown 100ms &rarr; held to <code>minimum</code> 500ms)</td>
+      <td>&rarr; <code>success</code> (no indicator was ever shown)</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Router</h3>
+
+<p>The <a href="/blocks/router/">Router</a> consumes <code>LoaderIntent</code> from the injector chain. Per-route attributes map directly to timing profiles:</p>
+
+<pre><code>&lt;!-- Fast route: uses app-level debounced default --&gt;
+&lt;template route="/dashboard" route:loader="loadDashboard"&gt;
+  ...
+&lt;/template&gt;
+
+&lt;!-- Slow report: patient timing, replacement strategy --&gt;
+&lt;template route="/reports/:id"
+          route:loader="loadReport"
+          route:loader-timing="patient"
+          route:loader-strategy="replacement"&gt;
+  ...
+&lt;/template&gt;
+
+&lt;!-- First load: no prior content, immediate indicator --&gt;
+&lt;template route="/users/:id"
+          route:loader="loadUser"
+          route:loader-timing="immediate"&gt;
+  ...
+&lt;/template&gt;</code></pre>
+
+
+<h2>Design System Timing Conventions</h2>
+
+<p>Major design systems have their own loading timing guidance:</p>
+
+<table>
+  <thead>
+    <tr><th>Design System</th><th>Guidance</th><th>Timing Default</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Material Design 3</strong></td>
+      <td>Use indeterminate progress for unknown duration. Switch to determinate when progress becomes measurable.</td>
+      <td>No specific delay; immediate by convention</td>
+    </tr>
+    <tr>
+      <td><strong>Carbon (IBM)</strong></td>
+      <td>Four-state inline loading. Skeleton screens for initial page loads.</td>
+      <td>No documented delay threshold</td>
+    </tr>
+    <tr>
+      <td><strong>Spectrum (Adobe)</strong></td>
+      <td>Size scales for indicators. Labels in sentence case with trailing ellipsis.</td>
+      <td>No documented delay threshold</td>
+    </tr>
+    <tr>
+      <td><strong>Fluent 2 (Microsoft)</strong></td>
+      <td>&ldquo;-ing&rdquo; verbs for labels (&le;3 words). Never rewind a progress bar.</td>
+      <td>No documented delay threshold</td>
+    </tr>
+    <tr>
+      <td><strong>Apple HIG</strong></td>
+      <td>Activity indicators only when content is loading. Never display inaccurate progress.</td>
+      <td>No documented delay threshold</td>
+    </tr>
+    <tr>
+      <td><strong>GOV.UK</strong></td>
+      <td>No dedicated loading indicators. Progressive enhancement philosophy.</td>
+      <td>N/A &mdash; content is server-rendered</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Observation:</strong> No major design system specifies a debounce delay. This is treated as an implementation detail, not a design token. Web Everything's approach of making it configurable via Intents &mdash; alongside density, motion, and mode &mdash; is novel and fills a genuine gap.</p>
+
+
+<h2>Recommended Defaults</h2>
+
+<table>
+  <thead>
+    <tr><th>Profile Name</th><th>Delay</th><th>Minimum</th><th>Use Case</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>immediate</code></td>
+      <td>0ms</td>
+      <td>0ms</td>
+      <td>First page load (no prior content). User expects to wait. Indicator from the start.</td>
+    </tr>
+    <tr>
+      <td><code>debounced</code></td>
+      <td>400ms</td>
+      <td>500ms</td>
+      <td>Default for navigation and data fetching. Suppresses indicator for fast loads.</td>
+    </tr>
+    <tr>
+      <td><code>patient</code></td>
+      <td>800ms</td>
+      <td>1000ms</td>
+      <td>Known-slow operations (report generation, file upload). User is primed to wait longer.</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>These defaults can be overridden at any level of the injector hierarchy. The <code>prefers-reduced-motion</code> media query, when detected, can map <code>debounced</code> to <code>immediate</code> to reduce the perception of unresponsiveness for users with motion sensitivity.</p>
+
+
+<h2>Key Design Decisions</h2>
+
+<ol>
+  <li><strong>Two parameters, not one.</strong> Both <code>delay</code> and <code>minimum</code> are needed. Delay prevents premature indicators; minimum prevents flickering. Angular proved this works.</li>
+  <li><strong>Named profiles, not raw numbers.</strong> Developers write <code>timing: 'debounced'</code>, not <code>timing: 400</code>. Profiles are defined in <code>LoaderConfig</code> and can be overridden globally. This is consistent with how density uses named profiles (<code>comfortable</code>, <code>compact</code>).</li>
+  <li><strong>Injector-scoped.</strong> A <code>&lt;dashboard-panel&gt;</code> can provide a <code>patient</code> timing profile to its subtree without affecting the rest of the app. This follows the same scoping pattern as all Web Everything contexts.</li>
+  <li><strong>Custom profiles allowed.</strong> Apps can define custom timing profiles beyond the three built-in ones (e.g., <code>aggressive: { delay: 150, minimum: 200 }</code> for latency-sensitive UIs).</li>
+  <li><strong>Intent-driven, not block-driven.</strong> The timing lives in the <code>LoaderIntent</code>, not hardcoded in <code>ResourceLoader</code> or <code>Router</code>. Changing the app's timing preferences requires zero code changes in components &mdash; only an intent configuration update.</li>
+</ol>
+
+
+<h2>References</h2>
+
+<h3>UX Research</h3>
+<ul>
+  <li><a href="https://www.nngroup.com/articles/response-times-3-important-limits/">Response Time Limits &mdash; Nielsen Norman Group</a></li>
+  <li><a href="https://www.nngroup.com/articles/progress-indicators/">Progress Indicators Make a Slow System Less Insufferable &mdash; NN/G</a></li>
+  <li><a href="https://www.lukew.com/ff/entry.asp?1797=">Mobile Design Details: Avoid The Spinner &mdash; Luke Wroblewski</a></li>
+  <li><a href="https://timkadlec.com/remembers/2020-11-02-skeleton-screens/">Effective Skeleton Screens &mdash; Tim Kadlec</a></li>
+</ul>
+
+<h3>Framework Implementations</h3>
+<ul>
+  <li><a href="https://angular.dev/guide/templates/defer">Angular @defer block documentation</a></li>
+  <li><a href="https://github.com/facebook/react/issues/31819">React FALLBACK_THROTTLE_MS discussion</a></li>
+  <li><a href="https://github.com/smeijer/spin-delay">spin-delay &mdash; Configurable loading delay for React</a></li>
+  <li><a href="https://vaadin.com/docs/latest/flow/advanced/loading-indicator">Vaadin Loading Indicator Configuration</a></li>
+</ul>
+{% endraw %}

@@ -238,3 +238,93 @@ interface Window {
                 <li><strong>Composition:</strong> An element can have multiple behaviors simultaneously: <br><code>&lt;input validate-email track-change auto-save&gt;</code>.</li>
             </ul>
         </section>
+
+<section id="ssr" class="section-card">
+    <h3 id="ssr-contract">SSR Contract</h3>
+    <p>
+        This section defines the server-side rendering contract for <strong>Web Behaviors</strong>.
+        Custom attributes are the primary mechanism — the server MUST emit them exactly as authored.
+        Behavior classes are instantiated entirely on the client; the server's only job is to preserve the attribute markup.
+    </p>
+
+    <h4 id="ssr-server-output">Server Output Requirements</h4>
+    <div class="comparison-table-wrapper mt-4">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Feature</th>
+                    <th>Server Output HTML</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Custom attributes</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;input validate-email
+  auto-save="/api/draft"
+  bind-value="form.email"&gt;</code></pre>
+                    </td>
+                    <td>Server MUST emit all custom attributes exactly as authored. Attribute names and values are preserved verbatim — no transformation or stripping.</td>
+                </tr>
+                <tr>
+                    <td><strong>Event attributes</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;button on:click="save($event)"&gt;
+  Save
+&lt;/button&gt;</code></pre>
+                    </td>
+                    <td>Server MUST emit <code>on:*</code> attributes as-is. The colon in the attribute name is valid HTML and preserved by all parsers.</td>
+                </tr>
+                <tr>
+                    <td><strong>Multiple behaviors</strong></td>
+                    <td><code>&lt;input validate-email track-change auto-save&gt;</code></td>
+                    <td>An element MAY have any number of custom attributes. Order does not matter — behaviors attach independently.</td>
+                </tr>
+                <tr>
+                    <td><strong>Behavior with native fallback</strong></td>
+                    <td>
+<pre style="margin: 0; font-size: 0.8em;"><code>&lt;a href="/page" history-link&gt;
+  Navigate
+&lt;/a&gt;</code></pre>
+                    </td>
+                    <td>Server SHOULD use native elements with custom attributes so the element works without JS. The <code>&lt;a&gt;</code> navigates normally; <code>history-link</code> enhances it with History API navigation on the client.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>DOM walk:</strong> Client walks the DOM tree and matches custom attributes against the <code>CustomAttributeRegistry</code>. For each recognized attribute, the corresponding <code>CustomAttribute</code> class is instantiated.</li>
+        <li><strong>Lifecycle:</strong> <code>connectedCallback()</code> fires when the behavior attaches. The attribute instance receives the host element and the attribute value.</li>
+        <li><strong>No DOM mutations:</strong> Behaviors observe and enhance — they do not modify the server-rendered DOM structure. The element's content and attributes remain as emitted.</li>
+        <li><strong>Lazy attachment:</strong> Behaviors MAY use <code>MutationObserver</code> or deferred registration to attach to elements added after initial hydration.</li>
+    </ul>
+
+    <h4 id="ssr-progressive-baseline">Progressive Enhancement Baseline</h4>
+    <p class="text-gray-600 text-sm">
+        With zero JavaScript: all custom attributes are ignored by the browser (unknown attributes are harmless per the HTML spec).
+        Native element behavior is fully preserved — links navigate, forms submit, inputs accept text.
+        The <code>on:*</code> event attributes have no effect without JS, matching the behavior of inline event handlers when scripting is disabled.
+    </p>
+
+    <h4 id="ssr-client-only">Client-Only Features</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Behavior instantiation:</strong> <code>CustomAttribute</code> class creation, <code>connectedCallback</code>, <code>disconnectedCallback</code></li>
+        <li><strong>Event binding:</strong> All <code>on:*</code> attribute event listeners</li>
+        <li><strong>Validation:</strong> <code>validate-*</code> attribute runtime checks</li>
+        <li><strong>Registry:</strong> <code>CustomAttributeRegistry</code> registration and lookup</li>
+        <li><strong>Dynamic attributes:</strong> Adding or removing custom attributes at runtime</li>
+    </ul>
+
+    <div class="comparison-block" style="background: rgba(251, 191, 36, 0.1); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
+        <h4 id="ssr-implementor-note" style="margin-top: 0; color: #d97706; font-size: 1rem;">Implementor Note</h4>
+        <p style="margin-bottom: 0; font-size: 0.95rem;">
+            This contract defines compliance requirements. The build system or server framework
+            is responsible for preserving custom attribute markup in the HTML output.
+            Web Behaviors does not ship an SSR runtime — it ships this specification.
+            See also: <a href="/projects/webevents/#ssr">Web Events SSR Contract</a> for event-specific attribute handling.
+        </p>
+    </div>
+</section>

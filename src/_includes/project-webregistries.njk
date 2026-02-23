@@ -104,3 +104,71 @@ adminIcons.define('menu', '<svg viewBox="0 0 24 24">...<!-- Admin Menu --></svg>
 <ui-icon name="menu" admin></ui-icon>   <!-- Renders admin menu (via scoped registry) -->
             {% endhighlight %}
         </section>
+
+<section id="ssr" class="section-card">
+    <h3 id="ssr-contract">SSR Contract</h3>
+    <p>
+        This section defines the server-side rendering contract for <strong>Web Registries</strong>.
+        The server MUST resolve all registry lookups at render time and emit the resolved content in the HTML.
+    </p>
+
+    <h4 id="ssr-server-output">Server Output Requirements</h4>
+    <div class="comparison-table-wrapper mt-4">
+        <table class="comparison-table">
+            <thead>
+                <tr>
+                    <th>Feature</th>
+                    <th>Server Output HTML</th>
+                    <th>Notes</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Icon registry</strong></td>
+                    <td>Inline SVG or resolved icon markup</td>
+                    <td>Server MUST resolve <code>registry.get('menu')</code> and emit the SVG directly. No runtime lookup needed.</td>
+                </tr>
+                <tr>
+                    <td><strong>Formatter registry</strong></td>
+                    <td>Formatted text output</td>
+                    <td>Server MUST apply registered formatters and emit the formatted result.</td>
+                </tr>
+                <tr>
+                    <td><strong>Scoped registry lookups</strong></td>
+                    <td>Scope-appropriate resolved values</td>
+                    <td>Server MUST respect registry inheritance chains. A scoped override (e.g., admin icons) MUST apply to its subtree.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <h4 id="ssr-hydration-expectations">Client Hydration Expectations</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Registry recreation:</strong> Client creates registry instances and populates them with definitions.</li>
+        <li><strong>No DOM mutation needed:</strong> If the server resolved all lookups correctly, the client registry produces the same values — no visual changes on hydration.</li>
+        <li><strong>Scope matching:</strong> Client-side scoped registries MUST match the server's inheritance chains to ensure consistency.</li>
+    </ul>
+
+    <h4 id="ssr-progressive-baseline">Progressive Enhancement Baseline</h4>
+    <p class="text-gray-600 text-sm">
+        With zero JavaScript, all registry-resolved content (icons, formatted text, etc.) is fully visible as static HTML.
+        Icons are inline SVGs. Formatted values are plain text.
+    </p>
+
+    <h4 id="ssr-client-only">Client-Only Features</h4>
+    <ul class="list-disc ml-6 text-gray-600 text-sm">
+        <li><strong>Registry API:</strong> <code>define()</code>, <code>get()</code>, <code>has()</code></li>
+        <li><strong>Dynamic registration:</strong> Adding or overriding definitions at runtime</li>
+        <li><strong>Scoped overrides:</strong> Creating child registries with <code>{ extends: [parent] }</code></li>
+        <li><strong>Lazy loading:</strong> Registering definitions on demand</li>
+    </ul>
+
+    <div class="comparison-block" style="background: rgba(251, 191, 36, 0.1); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 1.5rem 0;">
+        <h4 id="ssr-implementor-note" style="margin-top: 0; color: #d97706; font-size: 1rem;">Implementor Note</h4>
+        <p style="margin-bottom: 0; font-size: 0.95rem;">
+            This contract defines compliance requirements. The build system or server framework
+            is responsible for resolving registry lookups and emitting the resolved content.
+            Web Registries does not ship an SSR runtime — it ships this specification.
+        </p>
+    </div>
+</section>
