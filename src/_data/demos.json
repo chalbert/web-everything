@@ -35,5 +35,48 @@
     "projects": [
       "webbehaviors"
     ]
+  },
+  {
+    "id": "text-interpolation",
+    "name": "Text Interpolation Demo",
+    "summary": "Text node expression pipeline with {{mustache}} and [[polymer]] syntax, named contexts, pipes, nested paths, and template instantiation — all rendered without FOUC.",
+    "description": "<h2>Concept</h2><p>This demo showcases the complete text node expression pipeline: text node parsers detect <code>{{ }}</code> and <code>[[ ]]</code> syntax, expression parsers evaluate content, and InterpolationTextNode renders resolved values into the DOM.</p><h3>Key Features</h3><ul><li><strong>Basic Interpolation:</strong> <code>{{name}}</code> renders state values from injector-provided contexts.</li><li><strong>Nested Paths:</strong> <code>{{user.profile.name}}</code> with dot-notation resolution.</li><li><strong>Named Contexts:</strong> <code>{{@theme.primary}}</code> resolves values from named injector contexts.</li><li><strong>Pipe Expressions:</strong> <code>{{name | uppercase}}</code> applies filter functions via the pipe parser.</li><li><strong>Multiple Expressions:</strong> Several expressions in the same text node.</li><li><strong>Polymer Syntax:</strong> <code>[[count]]</code> using double-square-bracket parser.</li><li><strong>Mixed Syntax:</strong> Both <code>{{ }}</code> and <code>[[ ]]</code> on the same page.</li><li><strong>Template Instantiation:</strong> Expressions inside <code>&lt;template&gt;</code> elements, cloned at runtime to avoid FOUC.</li></ul><h3>Technical Approach</h3><p>The pipeline flows: Text → CustomTextNodeParser → UndeterminedTextNode → CustomTextNodeRegistry upgrade → InterpolationTextNode → CustomExpressionParserRegistry → Resolved Value. Parsers are registered via bootstrap ('mustache' for <code>{{ }}</code>, 'polymer' for <code>[[ ]]</code>).</p>",
+    "status": "active",
+    "liveUrl": "http://localhost:3000/demos/text-interpolation-demo.html",
+    "projects": [
+      "webexpressions"
+    ]
+  },
+  {
+    "id": "navigation-demo",
+    "name": "Navigation Demo",
+    "description": "Accessible sidebar navigation with collapsible sections, keyboard navigation, and router integration.",
+    "path": "/demos/navigation-demo.html",
+    "status": "active",
+    "project": "navigation"
+  },
+  {
+    "id": "injector-runtime",
+    "name": "Injector Runtime API",
+    "summary": "InjectableModule provides app-level services with lazy loading via register(), InjectorRoot bridges module→DOM, await consume() resolves like import through DI, dispose clears providers.",
+    "description": "<h2>Concept</h2><p>This demo validates the Injector Runtime API by exercising the full lifecycle: module-level provider registration (eager and lazy), cross-scope bridging to the DOM, async consumption via <code>await consume()</code>, and clean disposal.</p><h3>Key Features</h3><ul><li><strong>InjectableModule:</strong> Factory pattern for module-level dependency injection via <code>new InjectableModule(name, import.meta, setup)</code>.</li><li><strong>Cross-Scope Bridging:</strong> <code>InjectorRoot.attach(document, module.injector)</code> wires ModuleInjector as parent of HTMLInjector.</li><li><strong>Lazy Loading:</strong> <code>register(key, loader)</code> declares providers that are loaded on first <code>consume()</code>.</li><li><strong>Async Consumption:</strong> <code>await consume(key, querier)</code> works like <code>import()</code> but resolved through DI — returns the value directly.</li><li><strong>Provider Lifecycle:</strong> <code>dispose()</code> clears all providers, registrations, and in-flight loads.</li></ul>",
+    "status": "active",
+    "liveUrl": "http://localhost:3000/demos/injector-runtime-demo.html",
+    "projects": [
+      "webinjectors"
+    ]
+  },
+  {
+    "id": "for-each-demo",
+    "name": "For-Each Demo",
+    "summary": "Structural directive that stamps a <template> for each item in a collection, using comment markers and injector-based context for {{@item.name}} interpolation.",
+    "description": "<h2>Concept</h2><p>This demo showcases the for-each directive — a structural directive that iterates over collections and stamps template content for each item. Each stamped item receives its own injector context, so standard text interpolation with <code>{{@alias.path}}</code> works automatically.</p><h3>Key Features</h3><ul><li><strong>Comment Markers:</strong> Uses comment nodes (no wrapper element) to preserve CSS Grid/Flex parent-child relationships.</li><li><strong>\"items as item\" Syntax:</strong> PHP/Blade-style alias for the loop context.</li><li><strong>Injector Context:</strong> Each stamped item gets <code>customContexts:{alias}</code> on its root element's injector.</li><li><strong>Text Interpolation:</strong> Standard <code>{{@member.name}}</code> resolves through the injector chain.</li><li><strong>Multiple Elements Per Item:</strong> Templates can stamp &lt;dt&gt;/&lt;dd&gt; pairs for definition lists.</li></ul>",
+    "status": "active",
+    "liveUrl": "http://localhost:3000/demos/for-each-demo.html",
+    "projects": [
+      "webbehaviors",
+      "webinjectors",
+      "webexpressions"
+    ]
   }
 ]

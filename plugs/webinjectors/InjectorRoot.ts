@@ -16,6 +16,7 @@
 import HTMLRegistry, { BaseDefinition, ConstructorDefinition } from './HTMLRegistry';
 import HTMLInjector, { HTMLInjectorTarget } from './HTMLInjector';
 import CustomRegistry from '../core/CustomRegistry';
+import type ModuleInjector from './ModuleInjector';
 import type { RootNode } from '../core/types';
 
 /**
@@ -25,7 +26,12 @@ import type { RootNode } from '../core/types';
 type CustomContext<T = any> = any;
 type CustomContextRegistry = any;
 type CustomCommentParserRegistry = any;
-type CustomElementRegistry = any;
+type CustomExpressionParserRegistry = any;
+type CustomTextNodeParserRegistry = any;
+type CustomTextNodeRegistry = any;
+type CustomAttributeRegistry = any;
+type CustomStoreRegistry = any;
+type CustomElementsRegistry = any;
 
 export interface InjectorRootOptions {
   extends?: InjectorRoot[];
@@ -35,11 +41,20 @@ export interface ProviderDefinition extends ConstructorDefinition<any> {}
 
 /**
  * Type map for all provider types in the system.
+ *
+ * Maps provider names to their registry types. Covers all registry types
+ * from the injector spec (Section 4 — Provider Type Map).
  */
 export type ProviderTypeMap = {
   [index: string]: CustomRegistry<any>;
   customContextTypes: CustomContextRegistry;
   customCommentParsers: CustomCommentParserRegistry;
+  customExpressionParsers: CustomExpressionParserRegistry;
+  customTextNodeParsers: CustomTextNodeParserRegistry;
+  customTextNodes: CustomTextNodeRegistry;
+  customAttributes: CustomAttributeRegistry;
+  customStores: CustomStoreRegistry;
+  customElements: CustomElementsRegistry;
 } & Record<`customContexts:${string}`, CustomContext<any>>;
 
 export type AnyProviderType = CustomRegistry<any> | CustomContext<any>;
@@ -295,9 +310,20 @@ export default class InjectorRoot {
 
   /**
    * Attach this InjectorRoot to a root node.
+   *
+   * @param root - The root node (document or shadow root) to attach to
+   * @param moduleInjector - Optional ModuleInjector to bridge module-scope
+   *   providers into the DOM tree. When provided, the root HTMLInjector's
+   *   parent is set to the ModuleInjector, allowing DOM elements to
+   *   consume module-level providers via chain traversal.
    */
-  attach(root: RootNode): void {
+  attach(root: RootNode, moduleInjector?: ModuleInjector): void {
     const rootInjector = new HTMLInjector(root);
+
+    if (moduleInjector) {
+      rootInjector.parentInjector = moduleInjector as any;
+    }
+
     this.#injectors.set(root, rootInjector);
 
     InjectorRoot.#injectorRoots.set(root, this);

@@ -47,10 +47,9 @@ export default class HTMLInjector extends Injector<HTMLProviderType, Node, HTMLI
     // TODO: Uncomment when CustomContext is migrated from webcontexts
     // if (provider instanceof CustomContext && !provider.isAttached && this.target.isConnected) {
     //   provider.attach(this.target);
-    //   this.claim(provider);
     // }
 
-    return this.providers.set(name, provider), this;
+    return super.set(name, provider);
   }
 
   /**

@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Text Interpolation Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/text-interpolation-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">
+      &larr; Back to Home
+    </a>
+  </div>
+
+  <div class="demo-container">
+    <h1>Text Interpolation Demo</h1>
+    <p>Demonstrates the expression text node pipeline: text node parsers detect syntax, expression parsers evaluate content.</p>
+
+    <!-- 1. Basic interpolation -->
+    <div class="demo-section" id="section-basic">
+      <h2>1. Basic Interpolation</h2>
+      <p class="section-desc">Simple state value rendered with <code>{{name}}</code></p>
+      <div class="result-label">Result</div>
+      <div class="result" data-test="basic">
+        <template id="tpl-basic"><span>Hello, {{name}}!</span></template>
+      </div>
+    </div>
+
+    <!-- 2. Nested paths -->
+    <div class="demo-section" id="section-nested">
+      <h2>2. Nested Paths</h2>
+      <p class="section-desc">Dot-path resolution with <code>{{user.profile.name}}</code></p>
+      <div class="result-label">Result</div>
+      <div class="result" data-test="nested">
+        <template id="tpl-nested"><span>User: {{user.profile.name}} ({{user.profile.role}})</span></template>
+      </div>
+    </div>
+
+    <!-- 3. Named contexts -->
+    <div class="demo-section" id="section-context">
+      <h2>3. Named Contexts</h2>
+      <p class="section-desc">Injector-provided context with <code>{{@theme.primary}}</code></p>
+      <div class="result-label">Result</div>
+      <div class="result" data-test="context">
+        <template id="tpl-context"><span>Primary color: {{@theme.primary}}</span></template>
+      </div>
+    </div>
+
+    <!-- 4. Pipes -->
+    <div class="demo-section" id="section-pipe">
+      <h2>4. Pipe Expressions</h2>
+      <p class="section-desc">Filter expression with <code>{{name | uppercase}}</code></p>
+      <div class="result-label">Result</div>
+      <div class="result" data-test="pipe">
+        <template id="tpl-pipe"><span>Shouting: {{name | uppercase}}</span></template>
+      </div>
+    </div>
+
+    <!-- 5. Multiple expressions -->
+    <div class="demo-section" id="section-multiple">
+      <h2>5. Multiple Expressions</h2>
+      <p class="section-desc">Two expressions in one text node: <code>{{first}} {{last}}</code></p>
+      <div class="result-label">Result</div>
+      <div class="result" data-test="multiple">
+        <template id="tpl-multiple"><span>Full name: {{first}} {{last}}</span></template>
+      </div>
+    </div>
+
+    <!-- 6. Polymer syntax -->
+    <div class="demo-section" id="section-polymer">
+      <h2>6. Polymer Syntax</h2>
+      <p class="section-desc">Double square bracket parser: <code>[[count]]</code></p>
+      <div class="result-label">Result</div>
+      <div class="result" data-test="polymer">
+        <template id="tpl-polymer"><span>Count: [[count]]</span></template>
+      </div>
+    </div>
+
+    <!-- 7. Mixed syntax -->
+    <div class="demo-section" id="section-mixed">
+      <h2>7. Mixed Syntax</h2>
+      <p class="section-desc">Both <code>{{ }}</code> and <code>[[ ]]</code> on same page</p>
+      <div class="result-label">Result</div>
+      <div class="result" data-test="mixed">
+        <template id="tpl-mixed"><span>Mustache: {{name}} / Polymer: [[count]]</span></template>
+      </div>
+    </div>
+
+    <!-- 8. Template instantiation -->
+    <div class="demo-section" id="section-template">
+      <h2>8. Template Instantiation</h2>
+      <p class="section-desc">Expressions inside <code>&lt;template&gt;</code> cloned at runtime (no FOUC)</p>
+      <div class="result-label">Result</div>
+      <div class="result" data-test="template">
+        <template id="tpl-template">
+          <div>
+            <strong>{{name}}</strong> &mdash; {{user.profile.role}}
+            <br>
+            Items: [[count]]
+          </div>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    // Bootstrap Web Everything (applies patches, registers parsers, etc.)
+    import '../plugs/bootstrap.ts';
+
+    const { injectors } = window;
+    const documentInjector = injectors.getInjectorOf(document);
+
+    // Provide state context with demo data
+    documentInjector.set('customContexts:state', {
+      name: 'World',
+      first: 'Jane',
+      last: 'Doe',
+      count: 42,
+      user: {
+        profile: {
+          name: 'Jane Doe',
+          role: 'Platform Engineer',
+        },
+      },
+    });
+
+    // Provide named contexts
+    documentInjector.set('customContexts:theme', {
+      primary: '#6366f1',
+      secondary: '#a78bfa',
+    });
+
+    // Provide filters context
+    documentInjector.set('customContexts:filters', {
+      uppercase: (value) => String(value).toUpperCase(),
+      lowercase: (value) => String(value).toLowerCase(),
+    });
+
+    // Clone each template into its result container
+    // This triggers expression parsing + text node upgrade
+    const templates = document.querySelectorAll('template[id^="tpl-"]');
+    for (const template of templates) {
+      const clone = template.content.cloneNode(true);
+
+      // Upgrade text nodes in the clone
+      window.customTextNodes.upgrade(clone);
+
+      // Insert into the result container (parent of the template)
+      template.parentElement.appendChild(clone);
+    }
+
+    // Signal demo ready for Playwright tests
+    window.demoReady = true;
+    console.log('[Demo] Text Interpolation demo ready');
+  </script>
+</body>
+</html>

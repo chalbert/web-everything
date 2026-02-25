@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Navigation Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/navigation-demo.css">
+</head>
+<body>
+  <div class="demo-layout">
+    <nav aria-label="Main" nav:list class="sidebar" data-test="nav">
+      <ul>
+        <li><a route:link="/" data-test="link-home">Dashboard</a></li>
+      </ul>
+
+      <button nav:section="#catalog-items" class="section-trigger" data-test="section-catalog">
+        Catalog
+      </button>
+      <ul id="catalog-items" data-test="section-catalog-items">
+        <li><a route:link="/apps" data-test="link-apps">Applications</a></li>
+        <li><a route:link="/libraries" data-test="link-libraries">Libraries</a></li>
+        <li><a route:link="/components" data-test="link-components">Components</a></li>
+      </ul>
+
+      <button nav:section="#admin-items" class="section-trigger" data-test="section-admin">
+        Administration
+      </button>
+      <ul id="admin-items" hidden data-test="section-admin-items">
+        <li><a route:link="/users" data-test="link-users">Users</a></li>
+        <li><a route:link="/settings" data-test="link-settings">Settings</a></li>
+      </ul>
+    </nav>
+
+    <main class="content">
+      <route-view data-test="route-view">
+        <template route="/">
+          <h1>Dashboard</h1>
+          <p data-test="page-content">Welcome to the navigation demo. Use the sidebar to navigate.</p>
+        </template>
+        <template route="/apps">
+          <h1>Applications</h1>
+          <p data-test="page-content">Application catalog page.</p>
+        </template>
+        <template route="/libraries">
+          <h1>Libraries</h1>
+          <p data-test="page-content">Library catalog page.</p>
+        </template>
+        <template route="/components">
+          <h1>Components</h1>
+          <p data-test="page-content">Component catalog page.</p>
+        </template>
+        <template route="/users">
+          <h1>Users</h1>
+          <p data-test="page-content">User management page.</p>
+        </template>
+        <template route="/settings">
+          <h1>Settings</h1>
+          <p data-test="page-content">Settings page.</p>
+        </template>
+      </route-view>
+    </main>
+  </div>
+
+  <!-- SPA routing: normalize URL when loaded via .html file path -->
+  <script>
+    if (location.pathname.includes('navigation-demo')) {
+      history.replaceState(null, '', '/');
+    }
+  </script>
+
+  <!-- Bootstrap: applies patches and exposes globals -->
+  <script type="module" src="/plugs/bootstrap.ts"></script>
+
+  <script type="module">
+    // Wait for DOM ready then upgrade
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+
+    function init() {
+      // Upgrade attributes on body to activate nav:list, nav:section, route:link
+      window.attributes.upgrade(document.body);
+
+      // Upgrade text nodes if any expressions exist
+      if (window.customTextNodes) {
+        window.customTextNodes.upgrade(document.body);
+      }
+
+      window.demoReady = true;
+    }
+  </script>
+</body>
+</html>

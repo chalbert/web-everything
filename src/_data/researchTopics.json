@@ -75,5 +75,60 @@
     "relatedBlocks": ["resource-loader", "resource-action"],
     "relatedPlugs": ["webresources", "webinjectors"],
     "relatedProject": "webresources"
+  },
+  {
+    "id": "ui-configuration",
+    "title": "UI Configuration & Visual Variation",
+    "status": "open",
+    "summary": "Exploring how an HTML-first, standards-based component library can handle visual variations of the same core component — injecting icons, badges, popovers, or different visual treatments — without rebuilding accessibility logic. Catalogs strategies from React composition to web component slots and headless UI patterns.",
+    "dateOpened": "2026-02-23",
+    "tags": ["configuration", "composition", "slots", "css-parts", "design-tokens", "headless", "customization"],
+    "relatedBlocks": ["nav-list", "tabs", "view", "renderer"],
+    "relatedPlugs": ["webbehaviors", "webinjectors", "webcontexts"],
+    "relatedProject": "webblocks"
+  },
+  {
+    "id": "injector-syntax-proposals",
+    "title": "Provide/Consume/Injector Syntax Proposals",
+    "status": "open",
+    "summary": "Cataloging the four layers of provide/consume/injector syntax explored in the plateau project — from runtime API (Consumable, consume(), Node context methods) through HTML declarative forms (script type=expression/context), decorators (@provide, @context), and language-level DSL (injector blocks, provide/consume/map statements). Evaluates what should carry forward to Web Everything and what was exploratory.",
+    "dateOpened": "2026-02-24",
+    "tags": ["injector", "provide", "consume", "syntax", "dsl", "consumable", "decorators", "context"],
+    "relatedBlocks": [],
+    "relatedPlugs": ["webinjectors", "webcontexts", "webstates"],
+    "relatedProject": "webinjectors"
+  },
+  {
+    "id": "injector-migration-gaps",
+    "title": "Web Injectors: Plateau Migration Gaps",
+    "status": "open",
+    "summary": "Tracking features present in the plateau injector system that are missing or incomplete in Web Everything's webinjectors — Consumable class, Node context methods, scoped createElement, cloneNode preservation, CustomContext auto-attachment, ModuleInjector, provider replacement, and Window/ShadowRoot entry points.",
+    "dateOpened": "2026-02-24",
+    "tags": ["injector", "migration", "consumable", "context", "createElement", "cloneNode", "gap-analysis"],
+    "relatedBlocks": [],
+    "relatedPlugs": ["webinjectors", "webcontexts", "webstates"],
+    "relatedProject": "webinjectors"
+  },
+  {
+    "id": "injector-syntax-spec",
+    "title": "Injector Syntax: Draft Specification",
+    "status": "open",
+    "summary": "Formal draft specification for the injector syntax system — provide, consume, and injector block declarations. Defines three conformance tiers (Runtime API, TypeScript API, DSL), maps every DSL construct to an unplugged runtime equivalent, addresses both module-scope and DOM-scope injection, and documents tooling requirements for esbuild, TypeScript, Chrome DevTools, and transpiler plugins.",
+    "dateOpened": "2026-02-24",
+    "tags": ["injector", "syntax", "spec", "provide", "consume", "dsl", "tooling", "module-injector", "consumable"],
+    "relatedBlocks": [],
+    "relatedPlugs": ["webinjectors", "webcontexts", "webstates"],
+    "relatedProject": "webinjectors"
+  },
+  {
+    "id": "plateau-outstanding-todos",
+    "title": "Plateau Migration: Outstanding TODOs Across All Modules",
+    "status": "open",
+    "summary": "Comprehensive catalog of all TODO, stub, and placeholder code remaining from the plateau migration across every module — webregistries, webinjectors, webcontexts, webcomponents, and core utilities. Tracks what's genuinely incomplete vs outdated comments, and identifies the highest-impact items for completion.",
+    "dateOpened": "2026-02-24",
+    "tags": ["migration", "todo", "stubs", "plateau", "gap-analysis", "registries", "patching"],
+    "relatedBlocks": [],
+    "relatedPlugs": ["webregistries", "webinjectors", "webcontexts", "webcomponents"],
+    "relatedProject": "webinjectors"
   }
 ]

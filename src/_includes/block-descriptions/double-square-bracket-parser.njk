@@ -1,0 +1,19 @@
+<h3 id="overview">Overview</h3>
+<p>Text node parser for Polymer-style <code>[[expression]]</code> syntax. Extends <code>CustomTextNodeParser</code> with double square bracket delimiters.</p>
+
+<h3 id="usage">Usage</h3>
+{% highlight "typescript" %}
+import { DoubleSquareBracketParser } from '@we/blocks/parsers/text-node/double-square';
+
+const parser = new DoubleSquareBracketParser();
+const nodes = parser.parse('Count: [[count]]');
+// [Text("Count: "), UndeterminedTextNode("count"), Text("")]
+{% endhighlight %}
+
+<h3 id="registration">Bootstrap Registration</h3>
+<p>Registered as <code>'polymer'</code> in the global <code>customTextNodeParsers</code> registry by <code>bootstrap.ts</code>.</p>
+
+<h3 id="exports">Exports</h3>
+<ul>
+    <li><code>DoubleSquareBracketParser</code> — The parser class</li>
+</ul>

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>For-Each Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/for-each-demo.css">
+</head>
+<body>
+  <div class="demo-container">
+    <h1>For-Each Directive Demo</h1>
+    <p class="demo-subtitle">
+      Structural directive that stamps a &lt;template&gt; for each item in a collection,
+      using comment markers and injector-based context.
+    </p>
+
+    <!-- Stats bar shows item counts -->
+    <div class="stats" data-test="stats">
+      <div>
+        <div class="stat-value" data-test="user-count">0</div>
+        <div class="stat-label">Team Members</div>
+      </div>
+      <div>
+        <div class="stat-value" data-test="task-count">0</div>
+        <div class="stat-label">Tasks</div>
+      </div>
+    </div>
+
+    <!-- Demo 1: User Cards (basic for-each with "as" alias) -->
+    <div class="demo-section" data-test="user-section">
+      <h2 class="section-title">Team Members</h2>
+      <div class="user-grid" data-test="user-grid">
+        <template for-each="@team.members as member" data-test="user-template">
+          <div class="user-card" data-test="user-card">
+            <div class="name" data-test="user-name">{{@member.name}}</div>
+            <div class="email" data-test="user-email">{{@member.email}}</div>
+            <span class="role" data-test="user-role">{{@member.role}}</span>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Demo 2: Task List (for-each with priority-based styling) -->
+    <div class="demo-section" data-test="task-section">
+      <h2 class="section-title">Project Tasks</h2>
+      <div class="task-list" data-test="task-list">
+        <template for-each="@project.tasks as task" data-test="task-template">
+          <div class="task-row" data-test="task-row">
+            <span class="task-title" data-test="task-title">{{@task.title}}</span>
+            <span class="task-assignee" data-test="task-assignee">{{@task.assignee}}</span>
+            <span class="task-priority" data-test="task-priority">{{@task.priority}}</span>
+          </div>
+        </template>
+      </div>
+    </div>
+
+    <!-- Demo 3: Definition List (multiple elements per item, implicit "item") -->
+    <div class="demo-section" data-test="spec-section">
+      <h2 class="section-title">Project Specs</h2>
+      <div class="specs-list" data-test="spec-list">
+        <template for-each="@specs" data-test="spec-template">
+          <dt class="spec-label" data-test="spec-label">{{@item.label}}</dt>
+          <dd class="spec-value" data-test="spec-value">{{@item.value}}</dd>
+        </template>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bootstrap: applies patches and exposes globals -->
+  <script type="module" src="/plugs/bootstrap.ts"></script>
+
+  <script type="module">
+    import InjectorRoot from '/plugs/webinjectors/InjectorRoot.ts';
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+
+    function init() {
+      // --- Provide demo data via injectors ---
+
+      const injRoot = InjectorRoot.getInjectorRootOf(document);
+      if (!injRoot) return;
+
+      // Team data (for Demo 1)
+      const userGrid = document.querySelector('[data-test="user-grid"]');
+      if (userGrid) {
+        const injector = injRoot.ensureInjector(userGrid);
+        injector.set('customContexts:team', {
+          members: [
+            { name: 'Alice Chen', email: 'alice@example.com', role: 'Lead Engineer' },
+            { name: 'Bob Martinez', email: 'bob@example.com', role: 'Designer' },
+            { name: 'Carol Park', email: 'carol@example.com', role: 'Backend Dev' },
+            { name: 'Dan Wilson', email: 'dan@example.com', role: 'QA Engineer' },
+          ],
+        });
+      }
+
+      // Task data (for Demo 2)
+      const taskList = document.querySelector('[data-test="task-list"]');
+      if (taskList) {
+        const injector = injRoot.ensureInjector(taskList);
+        injector.set('customContexts:project', {
+          tasks: [
+            { title: 'Implement for-each directive', assignee: 'Alice', priority: 'high' },
+            { title: 'Write unit tests', assignee: 'Carol', priority: 'high' },
+            { title: 'Create demo page', assignee: 'Bob', priority: 'medium' },
+            { title: 'Update documentation', assignee: 'Dan', priority: 'low' },
+            { title: 'Add reactive updates (Phase 2)', assignee: 'Alice', priority: 'low' },
+          ],
+        });
+      }
+
+      // Spec data (for Demo 3 — implicit "item" context)
+      const specList = document.querySelector('[data-test="spec-list"]');
+      if (specList) {
+        const injector = injRoot.ensureInjector(specList);
+        injector.set('customContexts:specs', [
+          { label: 'Pattern', value: 'CustomAttribute on <template>' },
+          { label: 'Markers', value: 'Comment nodes (no wrapper DOM)' },
+          { label: 'Context', value: 'Injector-based per stamped item' },
+          { label: 'Syntax', value: 'for-each="expression as alias"' },
+          { label: 'Phase', value: '1 — One-time rendering on connect' },
+        ]);
+      }
+
+      // Upgrade attributes to activate for-each
+      window.attributes.upgrade(document.body);
+
+      // Upgrade text nodes to activate {{@member.name}} interpolation
+      if (window.customTextNodes) {
+        window.customTextNodes.upgrade(document.body);
+      }
+
+      // Update stats
+      const userCount = document.querySelector('[data-test="user-count"]');
+      const taskCount = document.querySelector('[data-test="task-count"]');
+      if (userCount) userCount.textContent = String(document.querySelectorAll('[data-test="user-card"]').length);
+      if (taskCount) taskCount.textContent = String(document.querySelectorAll('[data-test="task-row"]').length);
+
+      // Apply priority-based styling to task rows
+      document.querySelectorAll('[data-test="task-row"]').forEach(row => {
+        const prioritySpan = row.querySelector('[data-test="task-priority"]');
+        if (prioritySpan) {
+          const priority = prioritySpan.textContent?.trim().toLowerCase();
+          if (priority) {
+            row.setAttribute('data-priority', priority);
+            prioritySpan.classList.add(priority);
+          }
+        }
+      });
+
+      window.demoReady = true;
+    }
+  </script>
+</body>
+</html>

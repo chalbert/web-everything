@@ -105,16 +105,23 @@ export default class CustomTextNodeRegistry extends HTMLRegistry<TextNodeDefinit
           const TextNodeType = customTextNodeRegistry?.get(textNode.parserName);
           if (TextNodeType) {
             const textNodeInstance = new TextNodeType({ children: textNode.textContent || '' });
-            textNodeInstance.connectedCallback?.();
             return textNodeInstance;
           }
         }
         return textNode;
       });
 
-      // Replace original text node with determined node(s)
+      // Replace original text node with determined node(s), then call
+      // connectedCallback AFTER DOM insertion so nodes can resolve
+      // injector-provided dependencies from the DOM tree
       if (determinedTextNodes.length > 1 || determinedTextNodes[0] !== element) {
         element.replaceWith(...determinedTextNodes);
+
+        for (const node of determinedTextNodes) {
+          if (node instanceof CustomTextNode) {
+            node.connectedCallback?.();
+          }
+        }
       }
     } else {
       // Not connected - just replace
@@ -174,8 +181,17 @@ export default class CustomTextNodeRegistry extends HTMLRegistry<TextNodeDefinit
 
     return parsers.reduce<Text[]>((result, parser) => {
       const nodes: Text[] = [];
-      
+
       result.forEach((currentText) => {
+        // Skip nodes already claimed by a previous parser
+        if (
+          currentText instanceof CustomTextNode &&
+          currentText.determined === false
+        ) {
+          nodes.push(currentText);
+          return;
+        }
+
         if (currentText.textContent) {
           const parsedTextNodes = parser.parse(currentText.textContent);
           if (parsedTextNodes && parsedTextNodes.length > 0) {
@@ -187,7 +203,7 @@ export default class CustomTextNodeRegistry extends HTMLRegistry<TextNodeDefinit
           nodes.push(currentText);
         }
       });
-      
+
       return nodes;
     }, [text]);
   }

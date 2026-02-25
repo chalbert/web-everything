@@ -32,26 +32,36 @@
   {
     "id": "resource-loader",
     "name": "Resource Loader",
-    "status": "draft",
-    "type": "Directive",
-    "summary": "Structural directive using comment-based virtual elements to handle async state without polluting the DOM.",
+    "status": "active",
+    "type": "Module",
+    "summary": "Trait-based async state management orchestrator handling loading lifecycle with timing, abort, and composable UI traits.",
     "implementsIntent": "loader",
-    "dependsOn": ["view"],
+    "sourcePath": "blocks/resource-loader/ResourceLoader.ts",
+    "dependsOn": [],
     "exports": [
-      "ResourceLoaderDirective",
+      "ResourceLoader",
+      "LoadResult",
       "withSoftBlocking",
-      "withHardBlocking",
+      "SoftBlockingOptions",
       "withReplacement",
-      "withOptimistic",
-      "withDeterminate",
+      "ReplacementOptions",
       "withIndeterminate",
-      "withSkeleton",
-      "withStaleWhileRevalidate",
+      "IndeterminateOptions",
+      "LoaderIntent",
       "LoaderState",
-      "ResourceLoadStartEvent",
-      "ResourceLoadEndEvent",
-      "ResourceLoadErrorEvent",
-      "ResourceStateChangeEvent"
+      "BlockingStrategy",
+      "LoaderScope",
+      "LoaderProgress",
+      "LoaderContext",
+      "TraitHandle",
+      "TraitFactory",
+      "ResourceLoaderOptions",
+      "ResourceLoadStartDetail",
+      "ResourceLoadEndDetail",
+      "ResourceLoadErrorDetail",
+      "ResourceStateChangeDetail",
+      "DEFAULT_INTENT",
+      "DEFAULT_TIMINGS"
     ],
     "webStandards": {
       "fetchAPI": {
@@ -352,9 +362,31 @@
   {
     "id": "for-each",
     "name": "For Each",
-    "status": "draft",
+    "status": "active",
     "type": "Directive",
-    "summary": "Structural directive for rendering lists of items based on an array."
+    "summary": "Structural directive for rendering lists of items based on an array.",
+    "exports": ["ForEachBehavior", "registerForEach"],
+    "extendsClass": "CustomAttribute",
+    "sourcePath": "blocks/for-each/ForEachBehavior.ts",
+    "dependsOn": ["handler-expression-parser"],
+    "designDecisions": {
+      "templateAttribute": {
+        "description": "Implemented as a CustomAttribute on <template> rather than CustomTemplateDirective",
+        "rationale": "Avoids Safari's restriction on the 'is' attribute for built-in element extensions. CustomAttribute registration via the attribute registry is more portable."
+      },
+      "commentMarkers": {
+        "description": "Uses comment nodes to mark list boundaries instead of a wrapper element",
+        "rationale": "Preserves parent-child DOM relationships for CSS Grid/Flex. Comment markers are invisible to layout."
+      },
+      "contextInjection": {
+        "description": "Each stamped item's root element gets an injector with customContexts:{alias} set",
+        "rationale": "Standard injector chain resolution means {{@item.name}} works without special handling. Same pattern used by the router for route context."
+      },
+      "phaseOneLimitation": {
+        "description": "Phase 1 renders once on connect; no reactive array watching",
+        "rationale": "Covers the most common use case (render route-loaded data). Reactive updates will be added in Phase 2 with store subscription integration."
+      }
+    }
   },
   {
     "id": "handler-expression-parser",
@@ -1840,5 +1872,120 @@
         "intentDimension": null
       }
     ]
+  },
+  {
+    "id": "double-curly-bracket-parser",
+    "name": "DoubleCurlyBracketParser",
+    "status": "active",
+    "type": "Parser",
+    "summary": "Text node parser for Mustache-style {{expression}} syntax. Detects {{ and }} delimiters in text content.",
+    "exports": ["DoubleCurlyBracketParser"],
+    "extendsClass": "CustomTextNodeParser",
+    "sourcePath": "blocks/parsers/text-node/double-curly/DoubleCurlyBracketParser.ts",
+    "dependsOn": []
+  },
+  {
+    "id": "double-square-bracket-parser",
+    "name": "DoubleSquareBracketParser",
+    "status": "active",
+    "type": "Parser",
+    "summary": "Text node parser for Polymer-style [[expression]] syntax. Detects [[ and ]] delimiters in text content.",
+    "exports": ["DoubleSquareBracketParser"],
+    "extendsClass": "CustomTextNodeParser",
+    "sourcePath": "blocks/parsers/text-node/double-square/DoubleSquareBracketParser.ts",
+    "dependsOn": []
+  },
+  {
+    "id": "interpolation-text-node",
+    "name": "InterpolationTextNode",
+    "status": "active",
+    "type": "Behavior",
+    "summary": "Reactive text node that evaluates expressions and renders their values. Connects text node parsing to the expression parser pipeline.",
+    "exports": ["InterpolationTextNode", "InterpolationTextNodeOptions"],
+    "extendsClass": "CustomTextNode",
+    "sourcePath": "blocks/text-nodes/interpolation/InterpolationTextNode.ts",
+    "dependsOn": ["double-curly-bracket-parser"]
+  },
+  {
+    "id": "nav-list",
+    "name": "Navigation",
+    "status": "active",
+    "type": "Module",
+    "summary": "Accessible navigation menus using the W3C APG Disclosure Navigation pattern. Provides keyboard navigation, collapsible sections, and router integration with aria-current tracking.",
+    "blocks": {
+      "NavListBehavior": {
+        "type": "Behavior",
+        "attribute": "nav:list",
+        "description": "Keyboard navigation (roving tabindex) and active state tracking for navigation landmarks.",
+        "extendsClass": "CustomAttribute"
+      },
+      "NavSectionBehavior": {
+        "type": "Behavior",
+        "attribute": "nav:section",
+        "description": "Disclosure toggle for collapsible navigation sections with aria-expanded management.",
+        "extendsClass": "CustomAttribute"
+      }
+    },
+    "exports": ["NavListBehavior", "NavSectionBehavior", "registerNavigation"],
+    "implementsIntent": "navigation",
+    "dependsOn": ["view", "router"],
+    "sourcePath": "blocks/navigation/",
+    "webStandards": {
+      "disclosureNavigation": {
+        "status": "W3C APG Pattern",
+        "pattern": "Disclosure Navigation Menu pattern for site navigation",
+        "adoption": "NavSectionBehavior implements disclosure with aria-expanded and aria-controls",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/examples/disclosure-navigation/"
+      },
+      "ariaCurrent": {
+        "status": "WAI-ARIA 1.1",
+        "pattern": "aria-current='page' to indicate the current page within navigation",
+        "adoption": "RouteLinkBehavior sets aria-current='page' on active links, NavListBehavior tracks it for roving tabindex",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current"
+      },
+      "navigationLandmark": {
+        "status": "Standard",
+        "pattern": "nav element with aria-label when multiple nav landmarks exist",
+        "adoption": "nav:list attaches to nav elements, documentation recommends aria-label",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/nav"
+      },
+      "rovingTabindex": {
+        "status": "W3C APG Practice",
+        "pattern": "Focus management using tabindex 0/-1 for keyboard-navigable widgets",
+        "adoption": "NavListBehavior manages roving tabindex across navigation items",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/#kbd_roving_tabindex"
+      },
+      "prefersReducedMotion": {
+        "status": "Baseline",
+        "pattern": "prefers-reduced-motion media query",
+        "adoption": "Demo CSS disables expand/collapse animations when reduced motion preferred",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/@media/prefers-reduced-motion"
+      }
+    },
+    "designDecisions": {
+      "pattern": {
+        "chosen": "Disclosure Navigation",
+        "alternatives": ["ARIA menu role", "Treeview"],
+        "rationale": "W3C APG recommends Disclosure Navigation for site navigation. ARIA menu role is for application menus, treeview is too heavy for typical sidebar nav."
+      },
+      "ariaCurrentVsActiveClass": {
+        "description": "Use aria-current='page' alongside .active CSS class",
+        "rationale": "Screen readers announce 'current page' with aria-current. CSS class alone is invisible to assistive technology."
+      },
+      "rovingTabindexOverActivedescendant": {
+        "description": "Use roving tabindex instead of aria-activedescendant",
+        "rationale": "Better VoiceOver support. Same pattern used by TabGroupBehavior."
+      },
+      "verticalDefault": {
+        "description": "Default orientation is vertical (unlike tabs which default to horizontal)",
+        "rationale": "Navigation menus are predominantly vertical (sidebars)."
+      }
+    },
+    "frameworkComparison": {
+      "react": { "patterns": ["React Router NavLink (automatic aria-current)", "Radix UI NavigationMenu"], "notes": "NavLink only handles aria-current. Radix handles keyboard navigation too." },
+      "vue": { "patterns": ["Vue Router router-link active-class"], "notes": "Does not set aria-current by default." },
+      "github": { "patterns": ["Primer NavList"], "notes": "Semantic HTML with minimal ARIA. Closest to our approach." },
+      "adobe": { "patterns": ["Spectrum SideNav"], "notes": "Arrow key navigation within sections." }
+    }
   }
 ]

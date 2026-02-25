@@ -1,0 +1,609 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+  The plateau project explored provide/consume/injector syntax at multiple abstraction layers — from runtime APIs through HTML declarative forms, decorators, and full language-level DSL proposals.
+  What syntax should carry forward to Web Everything, and what was purely exploratory?
+</p>
+
+<h2>Syntax Layers Overview</h2>
+<table>
+  <tr><th>Layer</th><th>Where Found</th><th>Status in Plateau</th><th>Carry Forward?</th></tr>
+  <tr>
+    <td>1. Runtime API</td>
+    <td>Injector.ts, Consumable.ts, Node.patch.ts</td>
+    <td>Implemented</td>
+    <td>Yes — core plumbing</td>
+  </tr>
+  <tr>
+    <td>2. HTML Declarative</td>
+    <td>concepts/expressions.md, blocks/script-types/</td>
+    <td>Partially explored</td>
+    <td>Evaluate — some patterns valuable</td>
+  </tr>
+  <tr>
+    <td>3. Decorators</td>
+    <td>blocks/decorators/provide.ts, context.ts</td>
+    <td>Implemented (legacy decorators)</td>
+    <td>Evaluate — TC39 decorators now stage 3</td>
+  </tr>
+  <tr>
+    <td>4. Language-level DSL</td>
+    <td>proposals/js/consumable-proposal.md, main.tsx, injector.d.ts</td>
+    <td>Proposals only, never compiled</td>
+    <td>Document as aspirational — requires tooling</td>
+  </tr>
+</table>
+
+<h2>Layer 1: Runtime API</h2>
+<p>These are the programmatic primitives that make injection usable. They exist in plateau's implementation and are partially ported to Web Everything.</p>
+
+<h3>1.1 Consumable Class</h3>
+<p>A multi-resolving, Promise-compatible, AsyncIterator-compatible object. The core async primitive for reactive consumption.</p>
+<pre><code>// Construction
+const consumable = new Consumable('path.expression');
+
+// Provide a value (can be called multiple times)
+consumable.provide(value);
+
+// Reject
+consumable.reject(error);
+
+// Promise-compatible (thenable)
+const { value } = await consumable;
+
+// AsyncIterator — reactive watching
+for await (const result of consumable) {
+  console.log(result.value);
+}
+</code></pre>
+<p><strong>Status in Web Everything:</strong> Stub only (7-line placeholder in Injector.ts). Blocks all reactive consumption patterns.</p>
+
+<h3>1.2 injector.consume() Query Syntax</h3>
+<p>The consume method accepts a query string with optional path expression after a <code>/</code> separator.</p>
+<pre><code>// Basic — get a whole provider
+injector.consume('customContexts:nav', querier);
+
+// With path expression — query into a provider
+injector.consume('customContexts:data/foo.bar[0]', querier);
+
+// Format: "providerName" or "providerName/path.to.value"
+</code></pre>
+<p>If the resolved provider implements <code>query(expression)</code> (the <code>Queryable</code> interface), the path expression is delegated to it. Otherwise the whole provider is returned.</p>
+
+<h3>1.3 Consume Overload Variants (Explored, Not Finalized)</h3>
+<p>Several signatures were explored in plateau's Injector.ts comments for batch consumption:</p>
+<pre><code>// Array form — consumable resolves when any update
+const consumable = injector.consume([
+  'customContexts:redux',
+  'customContexts:nav',
+  'customContexts:data',
+]);
+const [redux, nav, data] = await consumable;
+
+// Object form — named destructuring
+const consumable = injector.consume({
+  redux: 'customContexts:redux',
+  nav: 'customContexts:nav',
+  data: 'customContexts:data',
+});
+const { redux, nav, data } = await consumable;
+</code></pre>
+<p><strong>Status:</strong> Comments only. Neither form was implemented. Worth evaluating whether batch consumption is needed or whether individual consumes suffice.</p>
+
+<h3>1.4 Node Context Convenience Methods</h3>
+<p>Plateau patches these onto <code>Node.prototype</code> for ergonomic context access:</p>
+<table>
+  <tr><th>Method</th><th>Signature</th><th>Behavior</th></tr>
+  <tr>
+    <td><code>getContext</code></td>
+    <td><code>(type: string): CustomContext | undefined</code></td>
+    <td>Walk injector chain for <code>customContexts:{type}</code></td>
+  </tr>
+  <tr>
+    <td><code>getOwnContext</code></td>
+    <td><code>(type: string): CustomContext | null</code></td>
+    <td>Check only this element's injector</td>
+  </tr>
+  <tr>
+    <td><code>createContext</code></td>
+    <td><code>(type: string): CustomContext | undefined</code></td>
+    <td>Construct from <code>customContextType</code> registry via chain</td>
+  </tr>
+  <tr>
+    <td><code>ensureContext</code></td>
+    <td><code>(type: string): CustomContext</code></td>
+    <td>Get own or create + attach</td>
+  </tr>
+  <tr>
+    <td><code>hasContext</code></td>
+    <td><code>(type: string): boolean</code></td>
+    <td>Boolean check up the chain</td>
+  </tr>
+  <tr>
+    <td><code>hasOwnContext</code></td>
+    <td><code>(type: string): boolean</code></td>
+    <td>Boolean check on this element only</td>
+  </tr>
+  <tr>
+    <td><code>queryContext</code></td>
+    <td><code>(type: string, query: string): Consumable</code></td>
+    <td>Consume with path expression</td>
+  </tr>
+  <tr>
+    <td><code>createElement</code></td>
+    <td><code>(tagName: string, options?): Element</code></td>
+    <td>Resolve custom elements from <code>customElements</code> registries in injector chain</td>
+  </tr>
+</table>
+<p><strong>Status in Web Everything:</strong> None of these are patched. Only injector traversal methods exist (<code>getClosestInjector</code>, <code>injectors</code>, <code>getOwnInjector</code>, <code>hasOwnInjector</code>).</p>
+
+<h3>1.5 Also Explored on Node (Commented Out in Plateau)</h3>
+<pre><code>// Batch multi-context query
+node.queryContextList([
+  { type: 'redux', query: 'foo' },
+  { type: 'nav', query: 'bar' },
+]);
+
+// Collect all matching contexts up the full chain
+node.queryContextAll('data', 'foo.bar');
+
+// Shorthand consume by provider + constructor
+node.consume('customElements', ButtonConstructor);
+</code></pre>
+<p>These were commented out and never finalized. Likely over-engineering for initial needs.</p>
+
+<h2>Layer 2: HTML Declarative Syntax</h2>
+
+<h3>2.1 Script Type: Injector</h3>
+<p>The most developed HTML declarative form. An injector is defined as a <code>&lt;script type="injector"&gt;</code> block with a unique <code>id</code>, then associated with elements via the <code>injector</code> attribute.</p>
+<pre><code>&lt;!-- Define an injector with a unique id --&gt;
+&lt;script type="injector" id="theme-injector"&gt;
+    provide { theme } from './theme-dark.js';
+&lt;/script&gt;
+
+&lt;!-- Associate a node with the injector by id --&gt;
+&lt;my-widget injector="theme-injector"&gt;&lt;/my-widget&gt;
+</code></pre>
+
+<h4>The <code>injector</code> Meta Reference</h4>
+<p>Inside a <code>&lt;script type="injector"&gt;</code>, the bare <code>injector</code> keyword (not <code>import.injector</code>) refers to the current injector context in the <code>from</code> clause:</p>
+<pre><code>&lt;script type="injector" id="custom-elements-injector"&gt;
+    provide * of 'customElements' from injector;
+&lt;/script&gt;
+</code></pre>
+
+<h4>The <code>isolate</code> Attribute</h4>
+<p>By default, an injector context extends its parent injector. To prevent inheritance and create a fully isolated injector, add the boolean <code>isolate</code> attribute:</p>
+<pre><code>&lt;script type="injector" id="isolated-injector" isolate&gt;
+    provide { theme } from './theme-contrast.js';
+&lt;/script&gt;
+</code></pre>
+<p>When <code>isolate</code> is present, the injector does <strong>not</strong> inherit from any parent context. This is analogous to <code>hidden</code>, <code>inert</code>, and other boolean HTML attributes.</p>
+<p><strong>Status:</strong> Explored in plateau project documentation. Could be implemented via <code>customScriptTypes</code> registry as an extensibility point.</p>
+
+<h3>2.2 Script Type: Expression</h3>
+<pre><code>&lt;script type="expression"&gt;
+  consume number from 'state';
+  const result = number + 1;
+  provide default result;
+&lt;/script&gt;</code></pre>
+<p>Proposed to be converted at runtime into a <code>ConsumableModule</code> with observed values. The <code>consume</code>/<code>provide</code> keywords inside would be parsed and transformed.</p>
+
+<h3>2.3 Script Type: Context</h3>
+<pre><code>&lt;script type="context" name="bindings"&gt;
+  consume { toTitleDate, date } from 'component';
+  provide const title = toTitleDate(data);
+  provide const datetime = date;
+&lt;/script&gt;</code></pre>
+<p>Creates a named context accessible via the injector chain. Consumed by elements using <code>@bindings.title</code> syntax.</p>
+
+<h3>2.4 Script Type: Bindings</h3>
+<pre><code>&lt;script type="bindings"&gt;
+  consume { toTitleDate, date } from 'component';
+  export const title = toTitleDate(data);
+  export const datetime = date;
+&lt;/script&gt;
+&lt;time&gt;&lt;/time&gt;  &lt;!-- bindings apply to next sibling --&gt;</code></pre>
+
+<h3>2.5 Binding Consumption Syntax</h3>
+<pre><code>&lt;!-- All bindings from a context --&gt;
+&lt;time v-bind="@bindings"&gt;&lt;/time&gt;
+
+&lt;!-- Specific bindings --&gt;
+&lt;time v-bind="title=@bindings.title; dateTime=@bindings.dateTime"&gt;&lt;/time&gt;
+
+&lt;!-- By ID selector --&gt;
+&lt;time v-bind="#my-bindings"&gt;&lt;/time&gt;
+</code></pre>
+<p><strong>Status:</strong> Conceptual only. The <code>@</code> prefix for context references and <code>#</code> for selector-based references were explored but not standardized.</p>
+
+<h2>Layer 3: Decorators</h2>
+<p>Plateau implemented these using legacy TypeScript decorators:</p>
+<pre><code>// Attach a context to the element when the attribute connects
+@provide('myContextType')
+class MyAttribute extends CustomAttribute {}
+
+// Provide state backed by a store + storage
+@provideState({ defaultState: { count: 0 }, storage: new ElementStorage() })
+class CounterAttribute extends CustomAttribute {}
+
+// Field-level context binding
+class MyElement extends CustomElement {
+  @context()
+  state = { count: 0 };
+}
+</code></pre>
+<p><strong>Consideration:</strong> TC39 decorators are now stage 3. If Web Everything adopts decorators, they should use the standard syntax. However, decorators add a framework-specific feel that may conflict with the "native browser APIs" philosophy.</p>
+
+<h2>Key Concept: Registries vs Domains</h2>
+<p>The plateau DSL made a fundamental architectural distinction between two kinds of namespaces. Understanding this distinction is essential to the provide/consume syntax.</p>
+
+<table>
+  <tr><th>Concept</th><th>Prefix</th><th>Purpose</th><th>Examples</th></tr>
+  <tr>
+    <td><strong>Registry</strong></td>
+    <td><code>custom*:</code> or bare name</td>
+    <td>Concrete typed namespace for a specific kind of provider</td>
+    <td><code>customElements</code>, <code>customContexts:nav</code>, <code>customContextTypes</code></td>
+  </tr>
+  <tr>
+    <td><strong>Domain</strong></td>
+    <td><code>@</code></td>
+    <td>Abstract contract — the consumer declares what capability it needs, not where it comes from</td>
+    <td><code>@date/core</code>, <code>@ui/icons</code>, <code>@auth/session</code></td>
+  </tr>
+</table>
+
+<p>Registries are about <strong>what kind of provider</strong> (elements, contexts, stores). Domains are about <strong>what capability</strong> (date math, icons, auth). An injector can provide to both.</p>
+
+<p>The domain convention prevents naming collisions — <code>@auth/session</code> and <code>@analytics/session</code> can coexist — and decouples the interface from the implementation. <strong>The domain IS the contract.</strong></p>
+
+<p>This distinction affects the provide/consume prepositions:</p>
+<table>
+  <tr><th>Preposition</th><th>Target</th><th>Semantics</th><th>Example</th></tr>
+  <tr>
+    <td><code>as</code></td>
+    <td>Registry</td>
+    <td>Replace</td>
+    <td><code>provide { Button } as 'customElements'</code></td>
+  </tr>
+  <tr>
+    <td><code>in</code></td>
+    <td>Registry</td>
+    <td>Extend/merge</td>
+    <td><code>provide { Button } in 'customElements'</code></td>
+  </tr>
+  <tr>
+    <td><code>to</code></td>
+    <td>Domain</td>
+    <td>Target abstract domain</td>
+    <td><code>provide * to '@date/core' from DateFnsAdapter</code></td>
+  </tr>
+  <tr>
+    <td><code>of</code></td>
+    <td>Domain</td>
+    <td>Consume from domain</td>
+    <td><code>consume { format } of '@date/fmt'</code></td>
+  </tr>
+  <tr>
+    <td><code>from</code></td>
+    <td>Registry or source</td>
+    <td>Consume from registry / specify source</td>
+    <td><code>consume nav from 'customContexts:nav'</code></td>
+  </tr>
+</table>
+
+<h2>Layer 4: Language-Level DSL</h2>
+<p>These are the most ambitious proposals — new JavaScript syntax constructs that would require esbuild plugins or TypeScript transformers to compile.</p>
+
+<h3>4.1 Injector Block Declaration</h3>
+<pre><code>// Exportable injector (like a class or variable)
+export injector definitions {
+  const Resource = 100;
+  provide { Resource };
+}
+
+// Anonymous
+injector {
+  provide * from import.injector;
+}
+
+// Named (aids debugging)
+injector PageName {
+  provide { 'react', 'react-dom', '@company/core' } from import.injector;
+  provide { 'customContexts:*', 'customElements' } from import.injector;
+}
+
+// Inheritance
+injector TestPage extends PageName {
+  provide { 'react', 'react-dom' } from MockInjector;
+}
+</code></pre>
+
+<h3>4.2 Provide Statement</h3>
+<table>
+  <tr><th>Syntax</th><th>Semantics</th></tr>
+  <tr>
+    <td><code>provide { Button1 } as 'customElements'</code></td>
+    <td>Create/replace registry with entries</td>
+  </tr>
+  <tr>
+    <td><code>provide { Button1 } in 'customElements'</code></td>
+    <td>Extend existing registry (<code>in</code> = merge)</td>
+  </tr>
+  <tr>
+    <td><code>provide * to '@date/core' from DateFnsAdapter</code></td>
+    <td>Provide all exports to an abstract domain</td>
+  </tr>
+  <tr>
+    <td><code>provide * to 'customElements' from './my-injector'</code></td>
+    <td>Provide all entries of a type to a registry</td>
+  </tr>
+  <tr>
+    <td><code>provide * from import.injector</code></td>
+    <td>Re-provide all registries from parent</td>
+  </tr>
+  <tr>
+    <td><code>provide MyRegistry as 'someRegistry'</code></td>
+    <td>Provide a registry instance by name</td>
+  </tr>
+  <tr>
+    <td><code>provide * from 'https://lib.company.com/shared'</code></td>
+    <td>Provide all exports from URL</td>
+  </tr>
+</table>
+<p>Key design decisions: <code>as</code> = replace, <code>in</code> = extend/merge, <code>to</code> = target domain. See <a href="#key-concept-registries-vs-domains">Registries vs Domains</a> for the full preposition table.</p>
+
+<h4>Fallback Providers</h4>
+<p>Injectors can provide fallback implementations that are only used if the dependency hasn't been provided by an ancestor. The syntax evolved during plateau development:</p>
+<pre><code>// Original syntax (used a dedicated keyword)
+provide fallback { Logger } from './console-logger';
+
+// Revised syntax (comma-separated source list, parent takes priority)
+provide { Logger } from import.injector, './console-logger';
+</code></pre>
+<p>The revised form eliminates the <code>fallback</code> keyword. The comma-separated <code>from</code> clause acts as a resolution chain — <code>import.injector</code> is tried first, and <code>'./console-logger'</code> is the fallback.</p>
+
+<h3>4.3 Consume Statement</h3>
+<p>The consume statement uses two prepositions: <code>of</code> for abstract domains and <code>from</code> for concrete registries.</p>
+
+<h4>Consuming from Domains (<code>of</code>)</h4>
+<pre><code>// Destructured from an abstract domain
+consume { Resource } of '@definitions';
+
+// Multiple from a domain
+consume { addMonths, startOfMonth, getDaysInMonth } of '@date/core';
+consume { format }                                  of '@date/fmt';
+consume { ChevronLeft, ChevronRight }               of '@ui/icons';
+</code></pre>
+<p>The <code>of</code> preposition suggests membership in an abstract set — the consumer declares what capability it needs without knowing the implementation.</p>
+
+<h4>Consuming from Registries (<code>from</code>)</h4>
+<pre><code>// Destructured from a specific context
+consume { nav } from 'customContexts:a';
+
+// Shorthand for single value
+consume nav from 'customContexts:nav';
+
+// From a dependency (shorthand for customDependencies)
+consume { get } from 'web-everything';
+
+// With path expression
+consume { 'foo.bar[0]' as item } from 'customContexts:data';
+
+// Multiple contexts at once
+consume { redux, nav, data } from 'customContexts';
+</code></pre>
+
+<h3>4.4 Map Statement — Removed</h3>
+<p>The original proposal included a <code>map</code> statement for module remapping (e.g., <code>map 'react' from './lib/react'</code>). After analysis, this was <strong>removed</strong> because:</p>
+<ul>
+  <li><strong><code>provide</code> already covers all <code>map</code> use cases</strong> — the <code>as</code> (replace) and <code>from</code> (source) modifiers express every pattern <code>map</code> was used for.</li>
+  <li><strong>URL resolution is a separate concern</strong> — the browser's native <code>&lt;script type="importmap"&gt;</code> handles bare specifier mapping at the loader level, which is orthogonal to runtime injection.</li>
+  <li><strong>Two keywords for overlapping semantics increases cognitive load</strong> without adding expressiveness.</li>
+</ul>
+<table>
+  <tr><th>#</th><th>Original Map Example</th><th>Provide Equivalent</th></tr>
+  <tr>
+    <td>1</td>
+    <td><code>map 'react' from './lib/react'</code></td>
+    <td><code>provide './lib/react' as 'react'</code></td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td><code>map { 'react', 'react-dom' } from import.injector</code></td>
+    <td><code>provide { 'react', 'react-dom' } from import.injector</code></td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td><code>map * from import.injector</code></td>
+    <td><code>provide * from import.injector</code></td>
+  </tr>
+  <tr>
+    <td>4</td>
+    <td><code>map 'react' from module { ... }</code></td>
+    <td><code>provide module { ... } as 'react'</code></td>
+  </tr>
+</table>
+<p>See <a href="/reports/2026-02-24-map-statement-analysis/">Map Statement Analysis</a> for the full rationale.</p>
+
+<h3>4.5 import.injector</h3>
+<p>A proposed special reference (like <code>import.meta</code>) that refers to the current module's injector context. Used as a source in <code>provide</code> statements and in the fallback resolution chain.</p>
+
+<h3>4.6 provide class Syntax</h3>
+<pre><code>// Shorthand: auto-registers by camelCase name into the relevant registry
+provide class Button1 extends CustomElement {
+  // ...
+}
+</code></pre>
+<p>Explored briefly. Would infer the registry from the base class.</p>
+
+<h2>Layer 5: TypeScript Type Proposals (Tangential)</h2>
+<p>These are TypeScript language proposals that support injection patterns but are independent concerns:</p>
+<table>
+  <tr><th>Proposal</th><th>Syntax</th><th>Injection Relevance</th></tr>
+  <tr>
+    <td>with-statement</td>
+    <td><code>with a as B { }</code></td>
+    <td>Type-narrow injected globals within a scope</td>
+  </tr>
+  <tr>
+    <td>definitely/maybe</td>
+    <td><code>with a as definitely A { }</code></td>
+    <td>Incremental type narrowing for multi-provider contexts</td>
+  </tr>
+  <tr>
+    <td>import type casting</td>
+    <td><code>import a from 'test' with a as B</code></td>
+    <td>Type-cast injected module imports</td>
+  </tr>
+  <tr>
+    <td>negated types</td>
+    <td><code>A ~ B</code></td>
+    <td>Express "anything except" in provider type maps</td>
+  </tr>
+</table>
+<p>These are TypeScript team-level proposals (some referencing existing TS issues). Not actionable for Web Everything directly but document the type-safety aspirations of the injection system.</p>
+
+<h2>Case Study: The "Hollow" Calendar Widget</h2>
+<p>The most compelling demonstration of domain-based injection from the plateau project. A "hollow" widget delegates all complexity to injected domains, containing zero implementation logic itself.</p>
+
+<h3>The Consumer (Widget)</h3>
+<pre><code>// components/calendar.ts
+// Declare dependencies on abstract domains
+consume { addMonths, startOfMonth, getDaysInMonth } of '@date/core';
+consume { format }                                  of '@date/fmt';
+consume { useFloating, offset, flip }               of '@ui/floating';
+consume { ChevronLeft, ChevronRight }               of '@ui/icons';
+
+export class HollowCalendar extends HTMLElement {
+  connectedCallback() {
+    // Use the injected 'format' — doesn't know if it's Intl, date-fns, or moment
+    const title = format(new Date(), 'MMMM yyyy');
+
+    // Use the injected icons — doesn't know if SVGs, FontAwesome, or Images
+    this.innerHTML = `
+      &lt;header&gt;
+        &lt;button&gt;${ChevronLeft}&lt;/button&gt;
+        &lt;span&gt;${title}&lt;/span&gt;
+        &lt;button&gt;${ChevronRight}&lt;/button&gt;
+      &lt;/header&gt;
+      &lt;div class="grid"&gt;&lt;!-- Days rendered using injected math --&gt;&lt;/div&gt;
+    `;
+  }
+}
+</code></pre>
+
+<h3>The Wiring (Application Root)</h3>
+<pre><code>// app.ts
+import { DateFnsAdapter } from "./adapters/date-fns";
+import { FloatingUIDOM } from "./adapters/floating-ui";
+import { FontAwesomeIcons } from "./theme/fa-icons";
+
+export injector AppEnvironment {
+  // Bind specific libraries to the abstract domains
+  provide * to '@date/core'     from DateFnsAdapter;
+  provide * to '@date/fmt'      from DateFnsAdapter;
+  provide * to '@ui/floating'   from FloatingUIDOM;
+  provide * to '@ui/icons'      from FontAwesomeIcons;
+}
+</code></pre>
+<p>The widget never imports a concrete library. The application root decides which implementations to inject. Swapping <code>date-fns</code> for <code>dayjs</code> or <code>Temporal</code> is a one-line change at the composition root.</p>
+
+<h2>Evaluation: What Should Carry Forward</h2>
+
+<h3>Definite — Runtime Primitives</h3>
+<table>
+  <tr><th>Feature</th><th>Priority</th><th>Rationale</th></tr>
+  <tr>
+    <td>Consumable class</td>
+    <td>High</td>
+    <td>Core async primitive; everything reactive depends on it</td>
+  </tr>
+  <tr>
+    <td>consume() query syntax</td>
+    <td>High</td>
+    <td>Already partially ported; path expressions needed for context queries</td>
+  </tr>
+  <tr>
+    <td>Node context methods</td>
+    <td>High</td>
+    <td>Primary developer API; without these, injection is only usable internally</td>
+  </tr>
+  <tr>
+    <td>Scoped createElement</td>
+    <td>Medium</td>
+    <td>Needed for injector-scoped custom element resolution</td>
+  </tr>
+</table>
+
+<h3>Evaluate — Design Concepts</h3>
+<table>
+  <tr><th>Feature</th><th>Priority</th><th>Notes</th></tr>
+  <tr>
+    <td>Domain concept (<code>@domain</code>)</td>
+    <td>High</td>
+    <td>Central organizing idea of the DSL. Could be a naming convention on existing <code>set</code>/<code>get</code>, a first-class runtime concept, or deferred until build tooling exists. See <a href="#key-concept-registries-vs-domains">Registries vs Domains</a>.</td>
+  </tr>
+  <tr>
+    <td><code>&lt;script type="injector"&gt;</code></td>
+    <td>Medium</td>
+    <td>Most immediately actionable HTML feature. Could be implemented via <code>customScriptTypes</code> registry.</td>
+  </tr>
+  <tr>
+    <td>Fallback provider resolution chain</td>
+    <td>Medium</td>
+    <td>The comma-separated <code>from</code> clause pattern. Useful for libraries that need to be self-sufficient while remaining extensible.</td>
+  </tr>
+</table>
+
+<h3>Evaluate — May Not Be Needed</h3>
+<table>
+  <tr><th>Feature</th><th>Concern</th></tr>
+  <tr>
+    <td>Batch consume (array/object forms)</td>
+    <td>Individual consumes may suffice; adds API surface complexity</td>
+  </tr>
+  <tr>
+    <td>queryContextList / queryContextAll</td>
+    <td>Commented out in plateau; likely over-engineering</td>
+  </tr>
+  <tr>
+    <td>Decorators (@provide, @context)</td>
+    <td>Adds framework feel; TC39 decorators still settling; could be blocks instead</td>
+  </tr>
+  <tr>
+    <td>HTML script types (expression, context, bindings)</td>
+    <td>Interesting but overlaps with text node interpolation and attribute parsers already in Web Everything</td>
+  </tr>
+</table>
+
+<h3>Aspirational — Requires Tooling</h3>
+<table>
+  <tr><th>Feature</th><th>Dependency</th></tr>
+  <tr>
+    <td>injector blocks with <code>export</code></td>
+    <td>esbuild plugin or TS transformer</td>
+  </tr>
+  <tr>
+    <td>provide/consume/of/to statements</td>
+    <td>Same — new syntax requires compilation</td>
+  </tr>
+  <tr>
+    <td>import.injector</td>
+    <td>Same — extends import.meta pattern</td>
+  </tr>
+  <tr>
+    <td>TypeScript type proposals</td>
+    <td>TypeScript language team adoption</td>
+  </tr>
+</table>
+<p>The language-level DSL is the most compelling long-term vision but cannot be adopted without build tooling. The key design ideas to preserve from this layer are: the <code>as</code>/<code>in</code>/<code>to</code> preposition semantics, the <code>of</code>/<code>from</code> consumption distinction, the <code>import.injector</code> concept, and the domain-based architecture demonstrated by the Hollow Calendar case study. The <code>map</code> statement was removed after analysis showed it overlaps entirely with <code>provide</code>.</p>
+
+<h2>Cross-References</h2>
+<ul>
+  <li><a href="/research/injector-migration-gaps/">Web Injectors: Plateau Migration Gaps</a> — tracks the runtime implementation gaps</li>
+  <li><a href="/plugs/injectorroot/">InjectorRoot</a> — current Web Everything implementation</li>
+  <li><a href="/plugs/htmlinjector/">HTMLInjector</a> — HTML-specific injector</li>
+</ul>
+{% endraw %}

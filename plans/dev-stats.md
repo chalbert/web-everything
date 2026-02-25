@@ -1,0 +1,1 @@
+The platform should collect dev actions to know what to prioritize. For example number of installs, build, tests, etc. Anonymized.

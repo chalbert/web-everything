@@ -1,0 +1,618 @@
+{% raw %}<h2>The Problem</h2>
+
+<p>Designers produce visual variations of the same core component. A navigation might need icons, notification badges, status indicators, or popovers alongside its links. Some variations are structural (an accordion nav warrants a new block), but many are visual additions to a component whose <strong>accessibility logic is already correct</strong> &mdash; roving tabindex, ARIA attributes, keyboard navigation, focus management.</p>
+
+<p>React solves this elegantly because components are functions &mdash; you can pass a custom <code>LinkComponent</code>, wrap with a HOC, merge props, split into abstract pieces, or configure via Context so the same component behaves differently in two apps. All of this is natural in a virtual DOM where composition is just function calls.</p>
+
+<p>The question: <strong>what strategies achieve this level of customization in an HTML-first, standards-based framework like Web Everything?</strong></p>
+
+
+<h2>What Frameworks Do</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Framework</th>
+      <th>Configuration Surface</th>
+      <th>Content Injection</th>
+      <th>Behavioral Composition</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>React</strong></td>
+      <td>Props, Context</td>
+      <td>children, render props, compound components (Radix, Headless UI)</td>
+      <td>Hooks, HOCs</td>
+    </tr>
+    <tr>
+      <td><strong>Vue</strong></td>
+      <td>Props, provide/inject</td>
+      <td>Scoped slots, renderless components</td>
+      <td>Composables (Composition API)</td>
+    </tr>
+    <tr>
+      <td><strong>Angular</strong></td>
+      <td>Inputs, DI</td>
+      <td><code>ng-content</code> with <code>select</code>, <code>ng-template</code></td>
+      <td>Directives, services</td>
+    </tr>
+    <tr>
+      <td><strong>Svelte 5</strong></td>
+      <td>Props, context</td>
+      <td>Snippets (replacing slots)</td>
+      <td>Actions, stores</td>
+    </tr>
+    <tr>
+      <td><strong>Lit</strong></td>
+      <td>Reactive properties, attributes</td>
+      <td>Native <code>&lt;slot&gt;</code></td>
+      <td>Decorators, controllers</td>
+    </tr>
+    <tr>
+      <td><strong>Stimulus</strong></td>
+      <td><code>data-*-value</code> attributes</td>
+      <td>Consumer-owned HTML (headless)</td>
+      <td>Multiple controllers on one element</td>
+    </tr>
+    <tr>
+      <td><strong>Shoelace / Web Awesome</strong></td>
+      <td>Attributes, CSS custom properties</td>
+      <td>Named slots, <code>::part()</code></td>
+      <td>Standard custom element lifecycle</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Key insight:</strong> Every framework provides three orthogonal mechanisms: <em>how to configure</em> (props/attributes/context), <em>how to inject content</em> (slots/children/projections), and <em>how to compose behavior</em> (hooks/directives/controllers). The question is which web standards map to each.</p>
+
+
+<h2>Strategy Catalog</h2>
+
+<h3>Strategy A: Behavioral Composition via CustomAttribute</h3>
+
+<table>
+  <thead>
+    <tr><th>Aspect</th><th>Details</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Mechanism</strong></td>
+      <td>Multiple independent behaviors attach to the same element via HTML attributes</td>
+    </tr>
+    <tr>
+      <td><strong>WE Status</strong></td>
+      <td><strong>Already implemented</strong> &mdash; core pattern</td>
+    </tr>
+    <tr>
+      <td><strong>Analogy</strong></td>
+      <td>React hooks on a component, Angular directives, Stimulus controllers</td>
+    </tr>
+    <tr>
+      <td><strong>What it solves</strong></td>
+      <td>Adding behaviors (tooltips, keyboard shortcuts, drag handles) to any element without touching it</td>
+    </tr>
+    <tr>
+      <td><strong>Limitation</strong></td>
+      <td>Does not inject content &mdash; only adds behavior to existing markup</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Example:</p>
+<pre><code>&lt;button on:click="save()" tooltip:show="Save changes" shortcut:key="ctrl+s"&gt;
+  Save
+&lt;/button&gt;</code></pre>
+
+<p>Three independent behaviors, zero coupling between them. Each manages its own lifecycle and cleanup. This is WE's version of hooks &mdash; except it works on <strong>any element</strong>, not just components you authored.</p>
+
+
+<h3>Strategy B: Consumer-Owned Markup (Headless Behaviors)</h3>
+
+<table>
+  <thead>
+    <tr><th>Aspect</th><th>Details</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Mechanism</strong></td>
+      <td>Behaviors discover items via selectors, manage state and ARIA regardless of internal markup</td>
+    </tr>
+    <tr>
+      <td><strong>WE Status</strong></td>
+      <td><strong>Already implemented</strong> &mdash; NavListBehavior, TabGroupBehavior</td>
+    </tr>
+    <tr>
+      <td><strong>Analogy</strong></td>
+      <td>Radix Primitives, Downshift props getters, React Aria hooks</td>
+    </tr>
+    <tr>
+      <td><strong>What it solves</strong></td>
+      <td>Consumer controls <em>all</em> markup &mdash; icons, badges, popovers, any HTML &mdash; while behavior manages accessibility</td>
+    </tr>
+    <tr>
+      <td><strong>Limitation</strong></td>
+      <td>Consumer must follow discovery conventions (e.g., links must be <code>&lt;a href&gt;</code> or <code>a[route\:link]</code>)</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Example &mdash; rich navigation with icons and badges:</p>
+<pre><code>&lt;nav aria-label="Main" nav:list&gt;
+  &lt;ul&gt;
+    &lt;li&gt;
+      &lt;a route:link="/"&gt;
+        &lt;svg class="nav-icon"&gt;&lt;!-- dashboard icon --&gt;&lt;/svg&gt;
+        Dashboard
+        &lt;span class="badge"&gt;3&lt;/span&gt;
+      &lt;/a&gt;
+    &lt;/li&gt;
+    &lt;li&gt;
+      &lt;a route:link="/settings"&gt;
+        &lt;svg class="nav-icon"&gt;&lt;!-- gear icon --&gt;&lt;/svg&gt;
+        Settings
+      &lt;/a&gt;
+    &lt;/li&gt;
+  &lt;/ul&gt;
+&lt;/nav&gt;</code></pre>
+
+<p><code>NavListBehavior</code> discovers <code>a[href]</code> elements and manages roving tabindex on them. It does not care what's <em>inside</em> the <code>&lt;a&gt;</code> &mdash; icons, badges, status dots, or plain text all work. <strong>This is WE's strongest differentiator.</strong> React headless libraries use hooks + props getters; WE uses behavior attributes &mdash; same separation, but declarative and HTML-first.</p>
+
+
+<h3>Strategy C: Attribute-Based Configuration</h3>
+
+<table>
+  <thead>
+    <tr><th>Aspect</th><th>Details</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Mechanism</strong></td>
+      <td>HTML attributes control behavior variants; also serve as CSS selectors</td>
+    </tr>
+    <tr>
+      <td><strong>WE Status</strong></td>
+      <td><strong>Already implemented</strong> &mdash; dominant configuration pattern</td>
+    </tr>
+    <tr>
+      <td><strong>Analogy</strong></td>
+      <td>Lit reactive properties, Shoelace attribute API</td>
+    </tr>
+    <tr>
+      <td><strong>What it solves</strong></td>
+      <td>Variant selection visible in HTML, dual-purpose as CSS selectors</td>
+    </tr>
+    <tr>
+      <td><strong>Limitation</strong></td>
+      <td>Limited to string values; complex configuration needs parsing or injectors</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Example:</p>
+<pre><code>&lt;nav nav:list orientation="horizontal" density="compact"&gt;</code></pre>
+
+<p>CSS targets these directly:</p>
+<pre><code>nav[orientation="horizontal"] { flex-direction: row; }
+nav[density="compact"] a { padding: 0.25rem 0.75rem; font-size: 0.85rem; }</code></pre>
+
+
+<h3>Strategy D: CSS Custom Properties as Design Tokens</h3>
+
+<table>
+  <thead>
+    <tr><th>Aspect</th><th>Details</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Mechanism</strong></td>
+      <td>CSS custom properties define component styling hooks; cascade through the DOM</td>
+    </tr>
+    <tr>
+      <td><strong>Web Standard</strong></td>
+      <td><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/Using_CSS_custom_properties">CSS Custom Properties</a> (Baseline), <a href="https://www.designtokens.org/tr/drafts/format/">W3C Design Tokens Format 2025.10</a></td>
+    </tr>
+    <tr>
+      <td><strong>What it solves</strong></td>
+      <td>Theming, visual variation without structural changes; pierces Shadow DOM</td>
+    </tr>
+    <tr>
+      <td><strong>Limitation</strong></td>
+      <td>Only controls CSS values; cannot inject structure or behavior</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Three-tier token architecture:</p>
+<pre><code>/* Tier 1: Global primitives */
+:root { --color-indigo-600: #4f46e5; }
+
+/* Tier 2: Semantic mappings */
+:root { --color-interactive: var(--color-indigo-600); }
+
+/* Tier 3: Component-specific */
+nav[nav\:list] {
+  --nav-active-color: var(--color-interactive);
+  --nav-active-bg: color-mix(in srgb, var(--nav-active-color), transparent 90%);
+  --nav-icon-size: 1.25rem;
+  --nav-badge-bg: var(--color-danger, #ef4444);
+}
+
+/* Compact variant overrides tokens */
+nav[density="compact"] {
+  --nav-icon-size: 1rem;
+  --nav-item-padding: 0.25rem 0.75rem;
+}</code></pre>
+
+
+<h3>Strategy E: Injector-Based Context Configuration</h3>
+
+<table>
+  <thead>
+    <tr><th>Aspect</th><th>Details</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Mechanism</strong></td>
+      <td>Ancestor elements provide configuration through the injector chain; descendants look it up</td>
+    </tr>
+    <tr>
+      <td><strong>WE Status</strong></td>
+      <td><strong>Already implemented</strong> &mdash; InjectorRoot, CustomContext</td>
+    </tr>
+    <tr>
+      <td><strong>Analogy</strong></td>
+      <td>React Context, Vue provide/inject, Angular DI</td>
+    </tr>
+    <tr>
+      <td><strong>What it solves</strong></td>
+      <td>Same component behaves differently in different apps or subtrees; no prop drilling</td>
+    </tr>
+    <tr>
+      <td><strong>Limitation</strong></td>
+      <td>Requires a DOM node in the ancestor chain to host the injector</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Example &mdash; different nav configuration per application:</p>
+<pre><code>&lt;!-- App A provides minimal nav config --&gt;
+&lt;div data-inject="navConfig: { icons: false, badges: false }"&gt;
+  &lt;nav nav:list&gt;...&lt;/nav&gt;
+&lt;/div&gt;
+
+&lt;!-- App B provides rich nav config --&gt;
+&lt;div data-inject="navConfig: { icons: true, badges: true }"&gt;
+  &lt;nav nav:list&gt;...&lt;/nav&gt;
+&lt;/div&gt;</code></pre>
+
+<p>The same <code>nav:list</code> behavior resolves configuration from its injector chain. Different ancestor providers produce different behavior &mdash; no component API changes needed.</p>
+
+
+<h3>Strategy F: Named Slots (Shadow DOM)</h3>
+
+<table>
+  <thead>
+    <tr><th>Aspect</th><th>Details</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Mechanism</strong></td>
+      <td>Shadow DOM <code>&lt;slot name="..."&gt;</code> defines injection points; consumer projects content into named positions</td>
+    </tr>
+    <tr>
+      <td><strong>Web Standard</strong></td>
+      <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_templates_and_slots">HTML Slot</a> (Baseline), <a href="https://developer.mozilla.org/en-US/docs/Web/CSS/::slotted">::slotted()</a>, <a href="https://developer.mozilla.org/en-US/docs/Web/CSS/::part">::part()</a></td>
+    </tr>
+    <tr>
+      <td><strong>What it solves</strong></td>
+      <td>Structured content injection at specific positions (icon, label, badge, suffix) with fallback content</td>
+    </tr>
+    <tr>
+      <td><strong>Limitation</strong></td>
+      <td>Requires Shadow DOM; <code>::slotted()</code> only matches top-level projected nodes; styling boundary</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Example &mdash; a nav-item Custom Element with named slots:</p>
+<pre><code>&lt;!-- Shadow DOM template --&gt;
+&lt;a part="link"&gt;
+  &lt;slot name="icon"&gt;&lt;/slot&gt;
+  &lt;slot&gt;&lt;!-- default: label text --&gt;&lt;/slot&gt;
+  &lt;slot name="badge"&gt;&lt;/slot&gt;
+&lt;/a&gt;
+
+&lt;!-- Consumer usage --&gt;
+&lt;nav-item href="/inbox"&gt;
+  &lt;svg slot="icon"&gt;...&lt;/svg&gt;
+  Inbox
+  &lt;span slot="badge"&gt;12&lt;/span&gt;
+&lt;/nav-item&gt;</code></pre>
+
+<p><strong>Tension with WE:</strong> WE currently uses light DOM behaviors (CustomAttribute), not Shadow DOM components. The light DOM approach keeps things simple, styleable, and progressive-enhancement-friendly. Slots require Shadow DOM.</p>
+
+<p><strong>Selective Shadow DOM approach:</strong> Use Shadow DOM only for components that genuinely need structured content projection. The nav <em>item</em> could be a Custom Element with Shadow DOM, while <code>NavListBehavior</code> stays as a light DOM behavior on the parent <code>&lt;nav&gt;</code>. The behavior discovers <code>&lt;nav-item&gt;</code> elements just as it discovers <code>&lt;a&gt;</code> elements today.</p>
+
+
+<h3>Strategy G: CSS <code>::part()</code> for Styling Hooks</h3>
+
+<table>
+  <thead>
+    <tr><th>Aspect</th><th>Details</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Mechanism</strong></td>
+      <td>Components expose internal elements via <code>part</code> attribute; consumers style with <code>::part(name)</code></td>
+    </tr>
+    <tr>
+      <td><strong>Web Standard</strong></td>
+      <td><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/::part">::part()</a> (Baseline)</td>
+    </tr>
+    <tr>
+      <td><strong>What it solves</strong></td>
+      <td>Visual variation of Shadow DOM components without structural changes</td>
+    </tr>
+    <tr>
+      <td><strong>Limitation</strong></td>
+      <td>Only visible to direct parent (no deep ancestor); requires Shadow DOM</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Example:</p>
+<pre><code>/* Consumer styles a nav-item's internal parts */
+nav-item::part(link) { text-decoration: none; }
+nav-item::part(icon) { color: var(--nav-icon-color); }
+nav-item::part(badge) { background: var(--nav-badge-bg); border-radius: 9999px; }</code></pre>
+
+
+<h3>Strategy H: Custom States via <code>CustomStateSet</code></h3>
+
+<table>
+  <thead>
+    <tr><th>Aspect</th><th>Details</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Mechanism</strong></td>
+      <td>Custom elements expose boolean states via <code>ElementInternals.states</code>; CSS targets with <code>:state(name)</code></td>
+    </tr>
+    <tr>
+      <td><strong>Web Standard</strong></td>
+      <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/CustomStateSet">CustomStateSet</a> (Chrome 125+, Safari 17.4+)</td>
+    </tr>
+    <tr>
+      <td><strong>What it solves</strong></td>
+      <td>CSS can target dynamic component states without data attributes or class names</td>
+    </tr>
+    <tr>
+      <td><strong>Limitation</strong></td>
+      <td>Custom Elements only (not CustomAttribute); Firefox support still maturing</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Example:</p>
+<pre><code>// Inside a Custom Element
+this.#internals.states.add('has-badge');
+this.#internals.states.add('expanded');
+
+/* CSS targeting custom states */
+nav-item:state(has-badge)::part(badge) { display: inline-flex; }
+nav-section:state(expanded) { --chevron-rotation: 180deg; }</code></pre>
+
+
+<h3>Strategy I: Emerging Platform APIs</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>API</th>
+      <th>Status</th>
+      <th>Relevance</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Popover_API">Popover API</a></td>
+      <td>Baseline (Jan 2025)</td>
+      <td>Declarative popovers on nav items without custom JS; <code>popover="hint"</code> for tooltips</td>
+    </tr>
+    <tr>
+      <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API">Invoker Commands API</a></td>
+      <td>Chrome 135+, Firefox 144+</td>
+      <td><code>commandfor</code>/<code>command</code> attributes replace JS toggle logic for dialogs and popovers</td>
+    </tr>
+    <tr>
+      <td><a href="https://developer.chrome.com/docs/css-ui/anchor-positioning-api">CSS Anchor Positioning</a></td>
+      <td>Chrome/Safari 26; Interop 2025</td>
+      <td>Position popovers and tooltips relative to nav items without JS</td>
+    </tr>
+    <tr>
+      <td><a href="https://open-ui.org/components/customizableselect/">Customizable Select</a></td>
+      <td>Chrome (appearance: base-select)</td>
+      <td>Model for how built-in controls become customizable &mdash; informing WE's approach</td>
+    </tr>
+    <tr>
+      <td><a href="https://web.dev/articles/declarative-shadow-dom">Declarative Shadow DOM</a></td>
+      <td>Baseline</td>
+      <td>Server-render Shadow DOM components; slot content pre-filled without JS</td>
+    </tr>
+    <tr>
+      <td><a href="https://css.oddbird.net/layers/">CSS @layer</a></td>
+      <td>Baseline</td>
+      <td>Deterministic cascade ordering: <code>@layer tokens, base, components, overrides</code></td>
+    </tr>
+  </tbody>
+</table>
+
+
+<h2>The WE Configuration Stack</h2>
+
+<p>Rather than picking one strategy, these compose into layers that play to WE's existing strengths:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Layer</th>
+      <th>Mechanism</th>
+      <th>What It Configures</th>
+      <th>WE Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Behavior</strong></td>
+      <td>CustomAttribute composition (Strategy A)</td>
+      <td>What the component <em>does</em></td>
+      <td>Core pattern</td>
+    </tr>
+    <tr>
+      <td><strong>Structure</strong></td>
+      <td>Consumer-owned markup / headless behaviors (Strategy B)</td>
+      <td>What the component <em>contains</em></td>
+      <td>Already implemented</td>
+    </tr>
+    <tr>
+      <td><strong>Variant</strong></td>
+      <td>HTML attributes as selectors (Strategy C)</td>
+      <td>Which variant is <em>active</em></td>
+      <td>Already implemented</td>
+    </tr>
+    <tr>
+      <td><strong>Appearance</strong></td>
+      <td>CSS custom properties + @layer (Strategy D)</td>
+      <td>How the component <em>looks</em></td>
+      <td>Available, not yet standardized</td>
+    </tr>
+    <tr>
+      <td><strong>Context</strong></td>
+      <td>Injector-provided configuration (Strategy E)</td>
+      <td>How the component <em>varies by app</em></td>
+      <td>Already implemented</td>
+    </tr>
+    <tr>
+      <td><strong>Projection</strong></td>
+      <td>Named slots / selective Shadow DOM (Strategy F)</td>
+      <td>Where custom content <em>goes</em></td>
+      <td>Not yet adopted</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Key finding:</strong> WE behaviors are <em>already headless by nature</em>. They attach to arbitrary elements and manage state/accessibility without dictating structure. This means the consumer always controls the markup &mdash; icons, badges, popovers, or any other content can be added directly in the HTML. The behavior layer neither adds nor constrains visual content.</p>
+
+
+<h2>The Primary Gap: Structured Content Projection</h2>
+
+<p>The configuration stack above handles most customization scenarios. The one significant gap is <strong>structured content injection into specific positions</strong> &mdash; a defined API for "put your icon here, your badge there."</p>
+
+<p>Currently, WE solves this implicitly: the consumer writes the markup, and the behavior discovers items regardless of their internal structure. This works well but lacks the <em>explicit contract</em> of named slots. Consumers must read documentation to know where to put things.</p>
+
+<h3>Three Approaches to Fill the Gap</h3>
+
+<table>
+  <thead>
+    <tr>
+      <th>Approach</th>
+      <th>Mechanism</th>
+      <th>Trade-offs</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Convention-based discovery</strong></td>
+      <td>Behaviors look for elements with specific attributes or roles within their scope (e.g., <code>[slot="icon"]</code>, <code>[data-nav-badge]</code>)</td>
+      <td>Simplest; most HTML-native; no Shadow DOM needed; but no enforced contract</td>
+    </tr>
+    <tr>
+      <td><strong>Selective Shadow DOM</strong></td>
+      <td>Use Shadow DOM (with <code>&lt;slot&gt;</code>) only for components that need structured projection; behaviors stay in light DOM</td>
+      <td>Cleaner API; true encapsulation; but introduces Shadow DOM styling boundary</td>
+    </tr>
+    <tr>
+      <td><strong>Template stamping</strong></td>
+      <td>Consumer provides <code>&lt;template&gt;</code> elements for each section; behavior stamps them into position</td>
+      <td>Flexible; no Shadow DOM; but more verbose for simple cases</td>
+    </tr>
+  </tbody>
+</table>
+
+
+<h2>Headless UI: WE's Natural Position</h2>
+
+<p>The headless component movement (Radix, Ark UI, Downshift, React Aria) emerged because React's component model couples behavior and rendering. These libraries extract behavior into hooks or state machines, returning props for the consumer to spread onto their own elements.</p>
+
+<p>WE does not have this coupling problem. Behaviors (CustomAttribute) never owned the rendering in the first place. The HTML <em>is</em> the rendering layer, and behaviors are pure orchestrators. This means:</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Headless Pattern</th>
+      <th>React Approach</th>
+      <th>WE Equivalent</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Props getters</td>
+      <td><code>getItemProps()</code> spreads ARIA + handlers</td>
+      <td>Behavior auto-sets ARIA + tabindex on discovered elements</td>
+    </tr>
+    <tr>
+      <td>Compound components</td>
+      <td><code>Menu.Root</code> / <code>Menu.Item</code> share Context</td>
+      <td>Parent behavior discovers child elements; injector shares state</td>
+    </tr>
+    <tr>
+      <td>State machines (Zag.js)</td>
+      <td>Machine drives behavior; view is adapter</td>
+      <td>Behavior drives state; HTML is the "adapter"</td>
+    </tr>
+    <tr>
+      <td>Unstyled primitives</td>
+      <td>Component renders unstyled; consumer adds classes</td>
+      <td>No component rendering &mdash; consumer writes <em>all</em> HTML</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>WE is more headless than headless libraries.</strong> Headless UI libraries still render DOM (a <code>&lt;div role="menu"&gt;</code>, etc). WE behaviors render nothing &mdash; they enhance whatever DOM the consumer provides.</p>
+
+
+<h2>Recommendations (Ranked)</h2>
+
+<h3>Tier 1: Already Validated &mdash; Formalize and Document</h3>
+<ol>
+  <li><strong>Consumer-owned markup (headless behaviors)</strong> as the primary configuration story. Document the "discovery contract" for each behavior &mdash; what elements it looks for, what attributes it manages.</li>
+  <li><strong>Attribute-based variants</strong> with CSS selector conventions. Establish a standard set of configuration attributes: <code>orientation</code>, <code>density</code>, <code>variant</code>, <code>size</code>.</li>
+  <li><strong>Injector-based context</strong> for app-level configuration. Document how to provide and consume configuration through the injector chain.</li>
+</ol>
+
+<h3>Tier 2: High-Value Additions</h3>
+<ol start="4">
+  <li><strong>CSS custom property conventions</strong> &mdash; Define a three-tier token architecture (primitives, semantic, component-specific) and a naming convention. Publish token documentation per block.</li>
+  <li><strong>Convention-based content discovery</strong> &mdash; Behaviors look for <code>[slot="icon"]</code>, <code>[slot="badge"]</code> etc. in light DOM. No Shadow DOM needed, but provides a documented injection contract.</li>
+  <li><strong>Popover API + Invoker Commands integration</strong> &mdash; Many "injected content" scenarios (tooltips, menus, context panels) are now solved natively. Build behaviors that leverage <code>popover</code>, <code>commandfor</code>, and CSS Anchor Positioning.</li>
+</ol>
+
+<h3>Tier 3: Worth Exploring</h3>
+<ol start="7">
+  <li><strong>Selective Shadow DOM</strong> for high-projection components &mdash; If certain blocks (droplist, data table cells) need true slot-based projection, adopt Shadow DOM for those while keeping behaviors in light DOM.</li>
+  <li><strong>CustomStateSet for behavior-driven states</strong> &mdash; When WE behaviors are attached to Custom Elements, they could set custom states via <code>ElementInternals</code>, enabling <code>:state(expanded)</code> CSS selectors.</li>
+  <li><strong>Declarative Shadow DOM for SSR</strong> &mdash; When SSR support becomes a priority, Declarative Shadow DOM allows server-rendered components with pre-filled slots.</li>
+</ol>
+
+
+<h2>Open Questions</h2>
+
+<ol>
+  <li><strong>Should WE define a "slot" convention in light DOM?</strong> Using <code>[slot="icon"]</code> attributes without Shadow DOM gives a familiar API but conflates with the native <code>slot</code> attribute. Should WE use <code>[data-slot="icon"]</code> or a custom attribute name instead?</li>
+  <li><strong>Should token naming be standardized per block?</strong> If each block publishes its CSS custom properties (e.g., <code>--nav-*</code>, <code>--tab-*</code>), should there be a formal registry or just documentation?</li>
+  <li><strong>When should a block "upgrade" to Shadow DOM?</strong> What criteria determine when light DOM headless behaviors hit their limit and a Shadow DOM component is warranted?</li>
+  <li><strong>How should behaviors compose with Custom Elements?</strong> Today behaviors target any element. If some elements become Custom Elements (with Shadow DOM), how do behaviors discover and manage items inside the Shadow DOM? Should <code>nav:list</code> walk into shadow roots?</li>
+  <li><strong>Should WE adopt Zag-style state machines?</strong> Encoding behavior as framework-agnostic state machines would make blocks portable beyond WE. Is this worth the complexity for an HTML-first library?</li>
+</ol>
+{% endraw %}

@@ -1,0 +1,1676 @@
+{% raw %}
+<h2>1. Introduction</h2>
+<p>
+  This document is a <strong>draft specification</strong> for the Web Everything injector syntax system.
+  It formalizes the <code>provide</code>, <code>consume</code>, and <code>injector</code> block constructs
+  explored in the <a href="/research/injector-syntax-proposals/">Provide/Consume/Injector Syntax Proposals</a>
+  research, resolves open design questions, and defines normative desugaring from DSL to runtime API.
+</p>
+
+<h3>1.1 Conformance Tiers</h3>
+<p>Every construct in this spec exists at three tiers. Only Tier 1 is normative; Tiers 2 and 3 are sugar that compiles down to Tier 1.</p>
+<table>
+  <tr><th>Tier</th><th>Name</th><th>Requires</th><th>Status</th></tr>
+  <tr>
+    <td>1</td>
+    <td><strong>Runtime API</strong></td>
+    <td>Nothing — pure JS/TS</td>
+    <td>Normative. Partially implemented.</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td><strong>TypeScript API</strong></td>
+    <td>Standard TypeScript compiler</td>
+    <td>Typed wrappers over Tier 1. Designed but not yet implemented.</td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td><strong>DSL Syntax</strong></td>
+    <td>Custom parser + transformer (esbuild plugin, Babel, or SWC)</td>
+    <td>Aspirational. No tooling exists yet.</td>
+  </tr>
+</table>
+<p>
+  <strong>Design principle:</strong> The DSL is syntactic sugar, not a separate system.
+  If the transformer is unavailable, developers use the Runtime API directly with identical semantics.
+  Every DSL construct has a normative desugaring to Tier 1.
+</p>
+
+<h3>1.2 Scope</h3>
+<p>This spec covers:</p>
+<ul>
+  <li><strong>Provide</strong> — registering providers on an injector</li>
+  <li><strong>Consume</strong> — requesting providers from the injector chain</li>
+  <li><strong>Injector blocks</strong> — declaring named injector scopes</li>
+  <li><strong>import.injector</strong> — compile-time module scope reference</li>
+  <li><strong>DOM integration</strong> — element-tree injection (plugged and unplugged)</li>
+  <li><strong>Module integration</strong> — ES Module scope injection</li>
+  <li><strong>Type system</strong> — TypeScript integration for typed providers</li>
+  <li><strong>Tooling requirements</strong> — what each build tool needs</li>
+</ul>
+
+<hr>
+
+<h2>2. Syntax At a Glance</h2>
+<p>
+  The injector system has two independent dimensions:
+</p>
+<ul>
+  <li><strong>DSL vs Compiled</strong> — the DSL is syntactic sugar; a transpiler compiles it to standard Tier 1 runtime API calls.</li>
+  <li><strong>Plugged vs Unplugged</strong> — how you access injectors from the DOM. Orthogonal to the DSL.</li>
+</ul>
+
+<style>
+  .syntax-compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--color-border, #e2e8f0);
+    border-radius: var(--radius-md, 8px);
+    overflow: hidden;
+    margin: 1.5rem 0;
+  }
+  .syntax-compare > div {
+    background: var(--color-surface, #fff);
+    padding: 0.75rem;
+  }
+  .syntax-compare .col-header {
+    font-weight: 600;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-text-muted, #64748b);
+    padding-bottom: 0.4rem;
+    border-bottom: 2px solid var(--color-primary, #6366f1);
+    margin-bottom: 0.6rem;
+  }
+  .syntax-compare pre {
+    margin: 0;
+    font-size: 0.78rem;
+    line-height: 1.45;
+    background: #1e293b;
+    color: #e2e8f0;
+    padding: 0.6rem;
+    border-radius: 6px;
+    white-space: pre-wrap;
+  }
+  .syntax-compare code {
+    font-size: 0.78rem;
+    background: none;
+    padding: 0;
+    color: inherit;
+  }
+</style>
+
+<h3>2.1 DSL vs Runtime API</h3>
+<p>
+  The DSL is syntactic sugar over the Tier 1 runtime API.
+  The right column shows what a developer would write without the DSL —
+  readable, idiomatic code using <code>Injector</code>, <code>Consumable</code>,
+  and <code>InjectableModule</code> directly.
+</p>
+
+<h4>Provide a Value</h4>
+<div class="syntax-compare">
+  <div>
+    <div class="col-header">DSL</div>
+<pre><code>provide MyStore
+  as 'customContexts:state';
+</code></pre>
+  </div>
+  <div>
+    <div class="col-header">Runtime API</div>
+<pre><code>injector.set(
+  'customContexts:state',
+  MyStore
+);
+</code></pre>
+  </div>
+</div>
+
+<h4>Extend a Registry</h4>
+<div class="syntax-compare">
+  <div>
+    <div class="col-header">DSL</div>
+<pre><code>provide { 'my-btn': Button }
+  in 'customElements';
+</code></pre>
+  </div>
+  <div>
+    <div class="col-header">Runtime API</div>
+<pre><code>const elements =
+  injector.get('customElements')
+  ?? new CustomElementRegistry();
+
+elements.define('my-btn', Button);
+injector.set('customElements',
+  elements);
+</code></pre>
+  </div>
+</div>
+
+<h4>Re-provide from Parent</h4>
+<div class="syntax-compare">
+  <div>
+    <div class="col-header">DSL</div>
+<pre><code>// All providers
+provide * from import.injector;
+
+// Selected providers
+provide { 'customElements' }
+  from import.injector;
+</code></pre>
+  </div>
+  <div>
+    <div class="col-header">Runtime API</div>
+<pre><code>// All providers
+for (const [key, value]
+  of parent.entries()) {
+  injector.set(key, value);
+}
+
+// Selected providers
+const elements =
+  parent.get('customElements');
+if (elements) {
+  injector.set('customElements',
+    elements);
+}
+</code></pre>
+  </div>
+</div>
+
+<h4>Consume a Provider</h4>
+<div class="syntax-compare">
+  <div>
+    <div class="col-header">DSL</div>
+<pre><code>consume nav
+  from 'customContexts:nav';
+
+// nav is Consumable — not awaited
+const { value } = await nav;
+</code></pre>
+  </div>
+  <div>
+    <div class="col-header">Runtime API</div>
+<pre><code>const nav = injector.consume(
+  'customContexts:nav', this
+);
+// Returns Consumable&lt;T&gt;
+const { value } = await nav;
+</code></pre>
+  </div>
+</div>
+
+<h4>Reactive Consumption</h4>
+<div class="syntax-compare">
+  <div>
+    <div class="col-header">DSL</div>
+<pre><code>consume state
+  from 'customContexts:state';
+
+for await (const { value }
+  of state) {
+  this.render(value);
+}
+</code></pre>
+  </div>
+  <div>
+    <div class="col-header">Runtime API</div>
+<pre><code>const state = injector.consume(
+  'customContexts:state', this
+);
+
+for await (const { value }
+  of state) {
+  this.render(value);
+}
+</code></pre>
+  </div>
+</div>
+
+<h4>Destructured Consume</h4>
+<div class="syntax-compare">
+  <div>
+    <div class="col-header">DSL</div>
+<pre><code>consume { nav, redux }
+  from 'customContexts';
+</code></pre>
+  </div>
+  <div>
+    <div class="col-header">Runtime API</div>
+<pre><code>const nav = injector.consume(
+  'customContexts:nav', this
+);
+const redux = injector.consume(
+  'customContexts:redux', this
+);
+</code></pre>
+  </div>
+</div>
+
+<h4>Injector Block</h4>
+<div class="syntax-compare">
+  <div>
+    <div class="col-header">DSL</div>
+<pre><code>injector AppScope {
+  provide AppStore
+    as 'customContexts:state';
+  provide Router
+    as 'customContexts:route';
+}
+
+injector TestScope
+  extends AppScope {
+  provide MockStore
+    as 'customContexts:state';
+}
+</code></pre>
+  </div>
+  <div>
+    <div class="col-header">Runtime API</div>
+<pre><code>const AppScope =
+  new Injector('AppScope');
+AppScope.set('customContexts:state',
+  AppStore);
+AppScope.set('customContexts:route',
+  Router);
+
+const TestScope =
+  new Injector('TestScope');
+TestScope.parentInjector = AppScope;
+TestScope.set('customContexts:state',
+  MockStore);
+</code></pre>
+  </div>
+</div>
+
+<h4>Module Integration</h4>
+<div class="syntax-compare">
+  <div>
+    <div class="col-header">DSL</div>
+<pre><code>provide Logger
+  as 'customContexts:logger';
+consume config
+  from 'customContexts:config';
+</code></pre>
+  </div>
+  <div>
+    <div class="col-header">Runtime API</div>
+<pre><code>const mod = new InjectableModule(
+  'my-mod', import.meta, (m) =&gt; {
+    m.provide(
+      'customContexts:logger',
+      new Logger()
+    );
+    const config = m.consume(
+      'customContexts:config',
+      import.meta
+    );
+  }
+);
+mod.bootstrap();
+</code></pre>
+  </div>
+</div>
+
+<h3>2.2 Plugged vs Unplugged DOM Access</h3>
+<p>
+  The compiled output above uses an abstract <code>injector</code> reference.
+  In DOM contexts, how you <em>obtain</em> that injector depends on plugged vs unplugged mode.
+  This is orthogonal to whether you write DSL or standard JS.
+</p>
+
+<h4>Obtaining an Injector</h4>
+<div class="syntax-compare">
+  <div>
+    <div class="col-header">Plugged</div>
+<pre><code>// Node.prototype patches
+const inj =
+  element.getClosestInjector();
+</code></pre>
+  </div>
+  <div>
+    <div class="col-header">Unplugged</div>
+<pre><code>// InjectorRoot static methods
+const inj = root
+  .ensureInjector(element);
+</code></pre>
+  </div>
+</div>
+
+<h4>Traversing the Chain</h4>
+<div class="syntax-compare">
+  <div>
+    <div class="col-header">Plugged</div>
+<pre><code>element.getOwnInjector();
+element.hasOwnInjector();
+element.getClosestInjector();
+
+for (const inj
+  of element.injectors()) {
+  console.log(inj.providers);
+}
+</code></pre>
+  </div>
+  <div>
+    <div class="col-header">Unplugged</div>
+<pre><code>InjectorRoot.getProviderOf(
+  element, 'customContexts:nav');
+InjectorRoot.getProvidersOf(element);
+
+for (const inj of InjectorRoot
+  .getInjectorChain(element)) {
+  console.log(inj.providers);
+}
+</code></pre>
+  </div>
+</div>
+
+<h4>Context Convenience Methods</h4>
+<div class="syntax-compare">
+  <div>
+    <div class="col-header">Plugged</div>
+<pre><code>element.getContext('nav');
+element.getOwnContext('nav');
+element.hasContext('nav');
+element.ensureContext('nav');
+element.createContext('nav');
+element.queryContext(
+  'nav', 'path.to.value');
+element.createElement('my-button');
+</code></pre>
+  </div>
+  <div>
+    <div class="col-header">Unplugged</div>
+<pre><code>InjectorRoot.getProviderOf(
+  element, 'customContexts:nav');
+
+// No convenience wrappers —
+// use InjectorRoot statics
+// or walk the chain manually.
+
+InjectorRoot.getValueInProviderOf(
+  element,
+  'customElements',
+  'my-button');
+</code></pre>
+  </div>
+</div>
+
+<hr>
+
+<h2>3. Core Concepts</h2>
+
+<h3>3.1 Injector</h3>
+<p>
+  A scope container that holds <em>providers</em> and forms a parent-child hierarchy.
+  Injectors can target DOM elements (<code>HTMLInjector</code>) or ES Modules (<code>ModuleInjector</code>).
+  Lookup traverses the parent chain until a provider is found or the root is reached.
+</p>
+
+<h3>3.2 Provider</h3>
+<p>
+  A named value or registry stored on an injector, keyed by a string.
+  Providers may be plain objects, registry instances (e.g., <code>CustomElementRegistry</code>),
+  or context instances (e.g., <code>CustomContext</code>).
+</p>
+
+<h3>3.3 Consumer</h3>
+<p>
+  Code that requests a provider by key. The injector system tracks consumers
+  via <code>WeakRef</code> to avoid memory leaks and support dynamic provider swapping.
+</p>
+
+<h3>3.4 Consumable</h3>
+<p>
+  A multi-resolving async primitive returned by <code>consume()</code>.
+  Consumable is simultaneously:
+</p>
+<ul>
+  <li><strong>Promise-compatible</strong> — supports <code>await consumable</code> for one-shot resolution</li>
+  <li><strong>AsyncIterator-compatible</strong> — supports <code>for await (const { value } of consumable)</code> for reactive watching</li>
+  <li><strong>Multi-resolving</strong> — <code>provide(value)</code> can be called multiple times, each time resolving the current pending promise and creating a new one</li>
+</ul>
+<pre><code>// One-shot
+const { value } = await consumable;
+
+// Reactive
+for await (const { value } of consumable) {
+  update(value);
+}
+
+// Rejection (provider removed)
+consumable.reject(new Error('Provider disposed'));
+</code></pre>
+
+<h3>3.5 Injector Chain</h3>
+<p>
+  The ordered sequence of injectors from a consumer's location up to the root.
+  For DOM injectors, this follows the ancestor element chain.
+  For module injectors, this follows the module's declared parent.
+</p>
+
+<h3>3.6 Scope Types</h3>
+<table>
+  <tr><th>Scope</th><th>Injector Type</th><th>Target</th><th>Querier Validation</th></tr>
+  <tr>
+    <td>DOM scope</td>
+    <td><code>HTMLInjector</code></td>
+    <td><code>HTMLElement | RootNode | Comment</code></td>
+    <td><code>target.contains(querier)</code> — DOM subtree containment</td>
+  </tr>
+  <tr>
+    <td>Module scope</td>
+    <td><code>ModuleInjector</code></td>
+    <td><code>ImportMeta</code></td>
+    <td>Always valid — modules don't have containment hierarchy</td>
+  </tr>
+</table>
+
+<h3>3.7 Provider Lifecycle</h3>
+<pre><code>Created        → injector.set(key, provider)
+  ↓
+Claimed        → claim(provider) notifies existing consumers
+  ↓
+Updated        → consumable.provide(newValue) — triggers await/for-await
+  ↓
+Disposed       → consumable.reject(error) — exits for-await loops
+                  injector.delete(key) + unclaim(provider)
+</code></pre>
+
+<hr>
+
+<h2>4. Provider Type Map</h2>
+<p>
+  The Provider Type Map is a normative registry of known provider key patterns and their corresponding
+  registry constructors. This table is used by:
+</p>
+<ul>
+  <li>The runtime API for type inference</li>
+  <li>The TypeScript <code>ProviderTypeMap</code> interface for typed lookups</li>
+  <li>Future transformers for registry instantiation in DSL desugaring</li>
+</ul>
+<table>
+  <tr><th>Key Pattern</th><th>Registry Constructor</th><th>Status</th><th>Notes</th></tr>
+  <tr>
+    <td><code>customElements</code></td>
+    <td><code>CustomElementRegistry</code></td>
+    <td>Implemented</td>
+    <td>Scoped custom element definitions</td>
+  </tr>
+  <tr>
+    <td><code>customContextTypes</code></td>
+    <td><code>CustomContextRegistry</code></td>
+    <td>Implemented</td>
+    <td>Context type constructors</td>
+  </tr>
+  <tr>
+    <td><code>customAttributes</code></td>
+    <td><code>CustomAttributeRegistry</code></td>
+    <td>Implemented</td>
+    <td>Custom attribute behaviors</td>
+  </tr>
+  <tr>
+    <td><code>customExpressionParsers</code></td>
+    <td><code>CustomExpressionParserRegistry</code></td>
+    <td>Implemented</td>
+    <td>Expression parser pipeline</td>
+  </tr>
+  <tr>
+    <td><code>customTextNodeParsers</code></td>
+    <td><code>CustomTextNodeParserRegistry</code></td>
+    <td>Implemented</td>
+    <td>Text node type detection</td>
+  </tr>
+  <tr>
+    <td><code>customTextNodes</code></td>
+    <td><code>CustomTextNodeRegistry</code></td>
+    <td>Implemented</td>
+    <td>Text node implementations</td>
+  </tr>
+  <tr>
+    <td><code>customStores</code></td>
+    <td><code>CustomStoreRegistry</code></td>
+    <td>Concept</td>
+    <td>State management stores</td>
+  </tr>
+  <tr>
+    <td><code>customContexts:<em>name</em></code></td>
+    <td>Direct provider (no registry)</td>
+    <td>Implemented</td>
+    <td>Set directly on injector by key</td>
+  </tr>
+</table>
+<p>
+  Keys not matching a known pattern are treated as <strong>direct providers</strong> —
+  the value is stored and retrieved as-is, with no registry intermediary.
+</p>
+
+<hr>
+
+<h2>5. Provide Semantics</h2>
+
+<h3>5.0 Provide is a Declaration, Not a Load</h3>
+<p>
+  <strong>Critical design principle:</strong> A <code>provide</code> statement does <strong>not</strong> import or execute a module.
+  It registers a mapping from a provider key to a module location (or value), similar to how
+  <code>&lt;script type="importmap"&gt;</code> declares where bare specifiers resolve without loading them.
+</p>
+<table>
+  <tr><th>Construct</th><th>What It Does</th><th>When Loading Happens</th></tr>
+  <tr>
+    <td><code>import x from './mod'</code></td>
+    <td>Loads, links, and executes the module</td>
+    <td>Before the importing module's body runs</td>
+  </tr>
+  <tr>
+    <td><code>&lt;script type="importmap"&gt;</code></td>
+    <td>Declares where bare specifiers resolve</td>
+    <td>Never — only resolves when an <code>import</code> references the specifier</td>
+  </tr>
+  <tr>
+    <td><code>provide X as 'key'</code></td>
+    <td>Declares that <code>'key'</code> resolves to <code>X</code> within this injector scope</td>
+    <td>Never — only loads when a <code>consume</code> references the key</td>
+  </tr>
+</table>
+<p>
+  This means an injector block can declare a complete map of every possible provider and their locations
+  without incurring any loading cost. Only when a module issues a <code>consume</code> does the system
+  resolve and load the actual dependency tree.
+</p>
+<p>
+  <strong>Bundler optimization:</strong> Because both <code>provide</code> and <code>consume</code> are declarative
+  (like <code>import</code> statements), a bundler can statically analyze the full dependency graph at build time.
+  It can determine which providers are actually consumed, inline or chunk them, and eliminate the async
+  resolution overhead entirely — producing the same kind of optimized output that bundlers produce for
+  static <code>import</code> statements today.
+</p>
+
+<p>
+  Three prepositions control the provide semantics:
+</p>
+<table>
+  <tr><th>Preposition</th><th>Semantics</th><th>Registry Behavior</th></tr>
+  <tr>
+    <td><code>as</code></td>
+    <td><strong>Replace</strong> — creates or replaces the provider at this key</td>
+    <td>A new registry is created with the provided entries</td>
+  </tr>
+  <tr>
+    <td><code>in</code></td>
+    <td><strong>Extend</strong> — merges entries into the existing provider</td>
+    <td>Get existing registry (or create new), then define entries into it</td>
+  </tr>
+  <tr>
+    <td><code>from</code></td>
+    <td><strong>Source</strong> — specifies where the provider comes from</td>
+    <td>Used with <code>as</code>/<code>in</code> or alone for re-providing</td>
+  </tr>
+</table>
+
+<h3>5.1 Replace (<code>as</code>)</h3>
+<p>Creates or replaces the provider at the specified key.</p>
+<table>
+  <tr><th>Tier</th><th>Syntax</th></tr>
+  <tr>
+    <td>DSL</td>
+    <td><pre><code>provide MyStore as 'customContexts:state';</code></pre></td>
+  </tr>
+  <tr>
+    <td>Runtime</td>
+    <td><pre><code>injector.set('customContexts:state', MyStore);</code></pre></td>
+  </tr>
+</table>
+
+<p>With registry entries (names must be explicit):</p>
+<table>
+  <tr><th>Tier</th><th>Syntax</th></tr>
+  <tr>
+    <td>DSL</td>
+    <td><pre><code>provide { 'my-button': Button, 'my-input': Input } as 'customElements';</code></pre></td>
+  </tr>
+  <tr>
+    <td>Runtime</td>
+    <td><pre><code>const registry = new CustomElementRegistry();
+registry.define('my-button', Button);
+registry.define('my-input', Input);
+injector.set('customElements', registry);</code></pre></td>
+  </tr>
+</table>
+
+<h3>5.2 Extend (<code>in</code>)</h3>
+<p>Merges entries into an existing registry, or creates one if none exists.</p>
+<table>
+  <tr><th>Tier</th><th>Syntax</th></tr>
+  <tr>
+    <td>DSL</td>
+    <td><pre><code>provide { 'my-button': Button } in 'customElements';</code></pre></td>
+  </tr>
+  <tr>
+    <td>Runtime</td>
+    <td><pre><code>const registry = injector.get('customElements') ?? new CustomElementRegistry();
+registry.define('my-button', Button);
+injector.set('customElements', registry);</code></pre></td>
+  </tr>
+</table>
+<p>
+  <strong>Design note:</strong> The <code>in</code> desugaring uses get-or-create + define.
+  No new runtime API method is needed — the existing <code>get()</code>, <code>set()</code>,
+  and registry <code>define()</code> methods suffice.
+</p>
+
+<h3>5.3 Re-provide from Source (<code>from</code>)</h3>
+<p>Copies providers from another injector into the current scope.</p>
+<table>
+  <tr><th>Tier</th><th>Syntax</th></tr>
+  <tr>
+    <td>DSL</td>
+    <td><pre><code>// All providers
+provide * from import.injector;
+
+// Selected providers
+provide { 'customElements', 'customAttributes' } from import.injector;</code></pre></td>
+  </tr>
+  <tr>
+    <td>Runtime</td>
+    <td><pre><code>// All providers
+for (const [key, provider] of parentInjector.entries()) {
+  injector.set(key, provider);
+}
+
+// Selected providers
+for (const key of ['customElements', 'customAttributes']) {
+  const provider = parentInjector.get(key);
+  if (provider) injector.set(key, provider);
+}</code></pre></td>
+  </tr>
+</table>
+
+<h3>5.4 Provide from URL (Deferred)</h3>
+<pre><code>provide * from 'https://lib.company.com/shared';</code></pre>
+<p>
+  <strong>Status:</strong> Deferred to Phase 2.
+  Requires dynamic <code>import()</code> combined with injector binding.
+  The semantics of what is "provided" from a URL (module exports? a manifest?) need further design.
+</p>
+
+<h3>5.5 Naming Rules</h3>
+<ul>
+  <li>Provider key names are always quoted strings: <code>'customElements'</code>, <code>'customContexts:nav'</code></li>
+  <li>Registry entry names must be explicit in Phase 1: <code>'my-button': Button</code></li>
+  <li>Convention-based name inference (PascalCase to kebab-case) is planned for Phase 2 via <code>provide class</code> — single-word names that produce no hyphen are a compile-time error (see Open Question #4)</li>
+</ul>
+
+<hr>
+
+<h2>6. Consume Semantics</h2>
+<p>
+  The <code>consume</code> statement requests a provider from the injector chain.
+  How it resolves depends on where it appears:
+</p>
+<table>
+  <tr><th>Context</th><th>Resolution</th><th>Access</th></tr>
+  <tr>
+    <td><strong>Inside an <code>injector</code> block (DSL)</strong></td>
+    <td>Async resolution happens <em>before</em> the block body runs — the transformer builds the dependency graph from all <code>provide</code>/<code>consume</code> declarations and prefetches in parallel</td>
+    <td><strong>Synchronous</strong> — consumed values are available immediately, like <code>import</code> bindings</td>
+  </tr>
+  <tr>
+    <td><strong>Imperative code (Runtime API)</strong></td>
+    <td>Dynamic — the system cannot know the dependency tree ahead of time</td>
+    <td><strong>Asynchronous</strong> — returns a <code>Consumable&lt;T&gt;</code> that resolves when the provider is available</td>
+  </tr>
+</table>
+<p>
+  The DSL <code>consume</code> gives the same guarantee as <code>import</code>: everything is resolved before your code runs.
+  The Runtime API <code>consume()</code> gives you the <code>Consumable</code> async primitive because it cannot make that guarantee.
+</p>
+
+<h3>6.1 Basic Consume</h3>
+<table>
+  <tr><th>Tier</th><th>Syntax</th></tr>
+  <tr>
+    <td>DSL</td>
+    <td><pre><code>consume nav from 'customContexts:nav';</code></pre></td>
+  </tr>
+  <tr>
+    <td>Runtime</td>
+    <td><pre><code>const nav = injector.consume('customContexts:nav', this);
+// nav: Consumable&lt;NavigationContext&gt;</code></pre></td>
+  </tr>
+</table>
+
+<h3>6.2 Destructured Consume</h3>
+<table>
+  <tr><th>Tier</th><th>Syntax</th></tr>
+  <tr>
+    <td>DSL</td>
+    <td><pre><code>consume { nav, redux } from 'customContexts';</code></pre></td>
+  </tr>
+  <tr>
+    <td>Runtime</td>
+    <td><pre><code>const nav = injector.consume('customContexts:nav', this);
+const redux = injector.consume('customContexts:redux', this);</code></pre></td>
+  </tr>
+</table>
+<p>
+  Each destructured name becomes a separate consume call.
+  The key is constructed by appending <code>:<em>name</em></code> to the source string.
+</p>
+
+<h3>6.3 Path Expression Consume</h3>
+<table>
+  <tr><th>Tier</th><th>Syntax</th></tr>
+  <tr>
+    <td>DSL</td>
+    <td><pre><code>consume { 'foo.bar[0]' as item } from 'customContexts:data';</code></pre></td>
+  </tr>
+  <tr>
+    <td>Runtime</td>
+    <td><pre><code>const item = injector.consume('customContexts:data/foo.bar[0]', this);</code></pre></td>
+  </tr>
+</table>
+<p>
+  The path expression is appended after a <code>/</code> separator.
+  If the resolved provider implements the <code>Queryable</code> interface
+  (<code>query(expression): Consumable</code>), the path expression is delegated to it.
+  Otherwise the whole provider is returned.
+</p>
+
+<h3>6.4 Resolution Model: DSL vs Runtime</h3>
+
+<h4>DSL: Synchronous Access (Inside Injector Blocks)</h4>
+<p>
+  When <code>consume</code> appears inside an <code>injector</code> block, the transformer can see all
+  <code>provide</code> and <code>consume</code> statements statically. It builds the full dependency graph,
+  prefetches all consumed modules in parallel, and makes consumed values available synchronously
+  when the block body executes — exactly like ES module <code>import</code> bindings.
+</p>
+<pre><code>// DSL — consumed values are synchronous
+injector AppScope {
+  provide DateFnsAdapter as '@date/core';
+  consume { format } from '@date/core';
+
+  // 'format' is available here synchronously,
+  // just like an import binding.
+  const title = format(new Date(), 'MMMM yyyy');
+}</code></pre>
+<p>
+  The async resolution phase (fetching modules, resolving the tree) happens <em>before</em> the block body runs.
+  This is not fundamentally different from how <code>import</code> works — there is an async loading/linking phase,
+  then synchronous access. A bundler can statically analyze this and eliminate the async phase entirely.
+</p>
+
+<h4>Runtime API: Asynchronous Access (Imperative Code)</h4>
+<p>
+  In imperative code, <code>consume()</code> returns a <code>Consumable&lt;T&gt;</code> — not a resolved value — for three reasons:
+</p>
+<ol>
+  <li><strong>No static analysis:</strong> The runtime cannot see the full dependency tree ahead of time, so it cannot prefetch and pre-resolve.</li>
+  <li><strong>Reactive consumption:</strong> The <code>for await...of</code> protocol enables watching for provider changes over time. An awaited value would be a snapshot, losing reactivity.</li>
+  <li><strong>Deferred resolution:</strong> A provider may not exist yet when <code>consume()</code> is called. The Consumable resolves when a matching provider is registered via the claim/unclaim system.</li>
+</ol>
+<pre><code>// Runtime API — consumed values are async
+class MyElement extends HTMLElement {
+  #nav = injector.consume('customContexts:nav', this);
+
+  async connectedCallback() {
+    // One-shot
+    const { value: nav } = await this.#nav;
+
+    // Or reactive
+    for await (const { value: nav } of this.#nav) {
+      this.render(nav);
+    }
+  }
+}</code></pre>
+
+<h4>Summary</h4>
+<table>
+  <tr><th></th><th>DSL (<code>consume</code> in injector block)</th><th>Runtime API (<code>injector.consume()</code>)</th></tr>
+  <tr>
+    <td><strong>Resolution</strong></td>
+    <td>Static — transformer builds dependency graph</td>
+    <td>Dynamic — resolved at call time</td>
+  </tr>
+  <tr>
+    <td><strong>Loading phase</strong></td>
+    <td>Async, before block body runs (like <code>import</code>)</td>
+    <td>Async, returns <code>Consumable</code></td>
+  </tr>
+  <tr>
+    <td><strong>Access</strong></td>
+    <td>Synchronous</td>
+    <td>Asynchronous (<code>await</code> or <code>for await</code>)</td>
+  </tr>
+  <tr>
+    <td><strong>Bundler optimization</strong></td>
+    <td>Full — can inline, chunk, tree-shake</td>
+    <td>Limited — dynamic calls are opaque to bundlers</td>
+  </tr>
+</table>
+
+<hr>
+
+<h2>7. Injector Block Declaration</h2>
+<p>
+  The <code>injector</code> block declares a named injector scope containing
+  <code>provide</code> and <code>consume</code> statements.
+</p>
+
+<h3>7.1 Named Block</h3>
+<table>
+  <tr><th>Tier</th><th>Syntax</th></tr>
+  <tr>
+    <td>DSL</td>
+    <td><pre><code>injector AppScope {
+  provide * from import.injector;
+  provide { 'my-button': Button } as 'customElements';
+  provide AppStore as 'customContexts:state';
+}</code></pre></td>
+  </tr>
+  <tr>
+    <td>Runtime</td>
+    <td><pre><code>const AppScope = new Injector('AppScope');
+for (const [k, v] of parentInjector.entries()) AppScope.set(k, v);
+const reg = new CustomElementRegistry();
+reg.define('my-button', Button);
+AppScope.set('customElements', reg);
+AppScope.set('customContexts:state', AppStore);</code></pre></td>
+  </tr>
+</table>
+
+<h3>7.2 Inheritance (<code>extends</code>)</h3>
+<table>
+  <tr><th>Tier</th><th>Syntax</th></tr>
+  <tr>
+    <td>DSL</td>
+    <td><pre><code>injector TestScope extends AppScope {
+  provide { 'my-button': MockButton } as 'customElements';
+}</code></pre></td>
+  </tr>
+  <tr>
+    <td>Runtime</td>
+    <td><pre><code>const TestScope = new Injector('TestScope');
+TestScope.parentInjector = AppScope;
+const reg = new CustomElementRegistry();
+reg.define('my-button', MockButton);
+TestScope.set('customElements', reg);</code></pre></td>
+  </tr>
+</table>
+<p>
+  <strong>Important:</strong> <code>extends</code> establishes a parent-chain relationship,
+  not a copy of providers. <code>TestScope</code> inherits from <code>AppScope</code> via lookup —
+  any provider not overridden in <code>TestScope</code> is resolved from <code>AppScope</code>.
+</p>
+
+<h3>7.3 Isolation (<code>isolate</code>)</h3>
+<table>
+  <tr><th>Tier</th><th>Syntax</th></tr>
+  <tr>
+    <td>DSL</td>
+    <td><pre><code>injector Sandbox isolate {
+  provide SandboxStore as 'customContexts:state';
+  // No parent — all providers must be explicit
+}</code></pre></td>
+  </tr>
+  <tr>
+    <td>Runtime</td>
+    <td><pre><code>const Sandbox = new Injector('Sandbox');
+// parentInjector remains null
+Sandbox.set('customContexts:state', SandboxStore);</code></pre></td>
+  </tr>
+</table>
+<p><code>extends</code> and <code>isolate</code> are mutually exclusive.</p>
+
+<h3>7.4 Anonymous Block</h3>
+<pre><code>// DSL
+injector {
+  provide * from import.injector;
+}
+
+// Runtime — no name needed
+const scope = new Injector();
+for (const [k, v] of parentInjector.entries()) scope.set(k, v);</code></pre>
+
+<h3>7.5 Consume Inside Injector Blocks</h3>
+<p>
+  When <code>consume</code> appears inside an <code>injector</code> block, it has different semantics
+  than in imperative code. The injector block is fully declarative — the transformer can see every
+  <code>provide</code> and <code>consume</code> statement statically, build the complete dependency graph,
+  and resolve all dependencies <em>before</em> the block body executes.
+</p>
+<pre><code>// DSL — consume inside an injector block
+injector AppScope {
+  provide DateFnsAdapter as '@date/core';
+  provide FloatingUIDOM   as '@ui/floating';
+
+  // These are resolved before the block body runs
+  consume { format }       from '@date/core';
+  consume { useFloating }  from '@ui/floating';
+
+  // Consumed values are synchronous — like import bindings
+  provide AppCalendar as 'customElements:hollow-calendar';
+}</code></pre>
+<p>The transformer desugars this to:</p>
+<pre><code>// Compiled output — async resolution wrapped around synchronous body
+const AppScope = await (async () => {
+  const scope = new Injector('AppScope');
+  scope.set('@date/core', DateFnsAdapter);
+  scope.set('@ui/floating', FloatingUIDOM);
+
+  // Resolve consumed dependencies
+  const { format } = await scope.get('@date/core');
+  const { useFloating } = await scope.get('@ui/floating');
+
+  scope.set('customElements:hollow-calendar', AppCalendar);
+  return scope;
+})();</code></pre>
+<p>
+  <strong>Key insight:</strong> The async resolution phase is invisible to the developer.
+  Inside the block, consumed values appear synchronous — exactly like <code>import</code> bindings
+  appear synchronous even though module loading is async.
+  A bundler can analyze the provide/consume declarations at build time and eliminate the
+  async resolution entirely, inlining or chunking the resolved modules.
+</p>
+<p>
+  <strong>Contrast with Runtime API:</strong> In imperative code, <code>injector.consume()</code> returns
+  a <code>Consumable</code> because the system cannot statically analyze which providers will be
+  available. The developer must handle async resolution explicitly via <code>await</code> or <code>for await</code>.
+</p>
+
+<hr>
+
+<h2>8. import.injector</h2>
+
+<h3>8.1 Concept</h3>
+<p>
+  <code>import.injector</code> is a proposed special reference (analogous to <code>import.meta</code>)
+  that refers to the current module's injector context.
+  It is used as a source in <code>provide ... from</code> statements.
+</p>
+<pre><code>// Inside an injector block
+injector AppScope {
+  provide * from import.injector;            // re-provide all from module's parent
+  provide { 'customElements' } from import.injector; // re-provide specific registries
+}</code></pre>
+
+<h3>8.2 The ES Module Singleton Problem</h3>
+<p>
+  <strong>Challenge:</strong> ES Modules are evaluated once and cached.
+  <code>import.meta</code> is per-module, but the module instance is shared across all importers.
+  There is no native mechanism for <code>import.injector</code> to resolve differently depending on
+  which injector scope loaded the module.
+</p>
+<p>
+  This means <code>import.injector</code> <strong>cannot work as a native runtime construct</strong>.
+  It is fundamentally a compile-time concept.
+</p>
+
+<h3>8.3 Compile-Time Solution</h3>
+<p>A transformer replaces <code>import.injector</code> with a scope-resolution function call:</p>
+<pre><code>// Source (DSL)
+provide * from import.injector;
+
+// Compiled output
+provide * from __resolveInjector(import.meta);
+// __resolveInjector uses a WeakMap&lt;ImportMeta, Injector&gt; to look up
+// the injector that was active when this module was loaded.</code></pre>
+<p>
+  The injector binding happens at module initialization time.
+  The build tool inserts a registration call at the top of the compiled module:
+</p>
+<pre><code>// Inserted by transformer
+__registerModuleInjector(import.meta, __currentInjector);</code></pre>
+
+<h3>8.4 Runtime Fallback (Factory Pattern)</h3>
+<p>
+  Without a transformer, modules participate in injection via the
+  <code>InjectableModule</code> pattern — a factory function that receives the injector as a parameter:
+</p>
+<pre><code>// Module exports a factory
+export function setup(injector) {
+  const parsers = injector.get('customExpressionParsers');
+  injector.set('customContexts:state', new AppStore());
+}
+
+// Consumer calls the factory with the appropriate scope
+import { setup } from './my-module.js';
+const myInjector = new ModuleInjector(import.meta);
+setup(myInjector);</code></pre>
+<p>This is the approach used by the plateau project's <code>InjectableModule</code> class and is the recommended Tier 1 pattern.</p>
+
+<hr>
+
+<h2>9. DOM Integration</h2>
+
+<h3>9.1 Plugged Mode (Node.prototype patches)</h3>
+<p>In plugged mode, <code>applyWebInjectorsPatches()</code> adds methods to <code>Node.prototype</code>:</p>
+
+<h4>Injector Traversal</h4>
+<table>
+  <tr><th>Method</th><th>Signature</th><th>Behavior</th></tr>
+  <tr>
+    <td><code>getOwnInjector()</code></td>
+    <td><code>(): HTMLInjector | undefined</code></td>
+    <td>Get injector directly attached to this node</td>
+  </tr>
+  <tr>
+    <td><code>hasOwnInjector()</code></td>
+    <td><code>(): boolean</code></td>
+    <td>Check if this node has a direct injector</td>
+  </tr>
+  <tr>
+    <td><code>getClosestInjector()</code></td>
+    <td><code>(): HTMLInjector | null</code></td>
+    <td>Walk up to find nearest injector (own, parent chain, root, creation)</td>
+  </tr>
+  <tr>
+    <td><code>injectors()</code></td>
+    <td><code>(): Generator&lt;HTMLInjector&gt;</code></td>
+    <td>Yield all injectors up the chain</td>
+  </tr>
+</table>
+
+<h4>Context Methods (from plateau, not yet ported)</h4>
+<table>
+  <tr><th>Method</th><th>Signature</th><th>Behavior</th><th>Status</th></tr>
+  <tr>
+    <td><code>getContext()</code></td>
+    <td><code>(type: string): CustomContext | undefined</code></td>
+    <td>Walk injector chain for <code>customContexts:{type}</code></td>
+    <td>Not ported</td>
+  </tr>
+  <tr>
+    <td><code>getOwnContext()</code></td>
+    <td><code>(type: string): CustomContext | null</code></td>
+    <td>Check only this element's injector</td>
+    <td>Not ported</td>
+  </tr>
+  <tr>
+    <td><code>createContext()</code></td>
+    <td><code>(type: string): CustomContext | undefined</code></td>
+    <td>Construct from <code>customContextTypes</code> registry via chain</td>
+    <td>Not ported</td>
+  </tr>
+  <tr>
+    <td><code>ensureContext()</code></td>
+    <td><code>(type: string): CustomContext</code></td>
+    <td>Get own or create + attach</td>
+    <td>Not ported</td>
+  </tr>
+  <tr>
+    <td><code>hasContext()</code></td>
+    <td><code>(type: string): boolean</code></td>
+    <td>Boolean check up the chain</td>
+    <td>Not ported</td>
+  </tr>
+  <tr>
+    <td><code>queryContext()</code></td>
+    <td><code>(type: string, query: string): Consumable</code></td>
+    <td>Consume with path expression</td>
+    <td>Not ported</td>
+  </tr>
+  <tr>
+    <td><code>createElement()</code></td>
+    <td><code>(tagName: string, options?): Element</code></td>
+    <td>Resolve from <code>customElements</code> registries in injector chain</td>
+    <td>Not ported</td>
+  </tr>
+</table>
+
+<h3>9.2 Unplugged Mode (Static methods)</h3>
+<p>All DOM injection operations are available without patches via <code>InjectorRoot</code> static methods:</p>
+<pre><code>// Get a specific provider
+const provider = InjectorRoot.getProviderOf(element, 'customContexts:nav');
+
+// Get all providers available to an element
+const providers = InjectorRoot.getProvidersOf(element);
+
+// Walk the full injector chain (generator)
+for (const injector of InjectorRoot.getInjectorChain(element)) {
+  const value = injector.get('customContexts:state');
+  if (value) break;
+}
+
+// Lookup by registry entry
+const ButtonDef = InjectorRoot.getDefinitionInProviderOf(element, 'customElements', Button);
+const localName = InjectorRoot.getLocalNameInProviderOf(element, 'customElements', Button);
+const ButtonCls = InjectorRoot.getValueInProviderOf(element, 'customElements', 'my-button');
+
+// Manual injector management
+const root = new InjectorRoot();
+root.attach(document);
+const injector = root.ensureInjector(element);
+injector.set('customContexts:state', myStore);</code></pre>
+
+<h3>9.3 HTML Declarative Forms (Deferred to Phase 2)</h3>
+<p>These forms require the <code>customScriptTypes</code> registry which is not yet built:</p>
+<pre><code>&lt;!-- Script type: injector --&gt;
+&lt;script type="injector" name="AppScope"&gt;
+  provide AppStore as 'customContexts:state';
+  provide Router as 'customContexts:route';
+&lt;/script&gt;
+
+&lt;!-- Attribute-based injection --&gt;
+&lt;div injector="AppScope"&gt;
+  &lt;!-- elements here consume from AppScope --&gt;
+&lt;/div&gt;
+
+&lt;!-- Isolated scope --&gt;
+&lt;div injector="Sandbox" isolate&gt;
+  &lt;!-- no parent chain --&gt;
+&lt;/div&gt;</code></pre>
+
+<h3>9.4 Creation Injector Context</h3>
+<p>
+  When elements are created programmatically (e.g., <code>document.createElement()</code>),
+  they are not yet attached to the DOM tree and cannot walk the ancestor chain.
+  The system handles this via <code>InjectorRoot.creationInjector</code> — a static property
+  set before element creation to capture the intended injector scope:
+</p>
+<pre><code>// Internal mechanism (handled automatically in plugged mode)
+InjectorRoot.creationInjector = parentInjector;
+const element = document.createElement('my-element');
+// element's constructor can access InjectorRoot.creationInjector
+InjectorRoot.creationInjector = null;</code></pre>
+
+<hr>
+
+<h2>10. Module Integration</h2>
+
+<h3>10.1 ModuleInjector</h3>
+<p>A specialized injector for ES Module scopes. Targets <code>ImportMeta</code> instead of DOM elements.</p>
+<pre><code>import { ModuleInjector } from 'web-everything/unplugged';
+
+const moduleInjector = new ModuleInjector(import.meta);
+moduleInjector.set('customContexts:config', appConfig);
+moduleInjector.set('customElements', myRegistry);</code></pre>
+
+<h3>10.2 InjectableModule</h3>
+<p>
+  A convenience facade that wraps <code>ModuleInjector</code> with a name, setup callback, and exports tracking.
+  This is the recommended Tier 1 pattern for module-level injection.
+</p>
+<pre><code>import { InjectableModule } from 'web-everything/unplugged';
+
+const module = new InjectableModule('my-module', import.meta, (mod) => {
+  // Setup: provide into this module's injector
+  mod.provide('customContexts:logger', new Logger());
+
+  // Setup: consume from parent injector
+  const config = mod.consume('customContexts:config', import.meta);
+});
+
+// Bootstrap triggers the setup function
+module.bootstrap();</code></pre>
+
+<h3>10.3 Cross-Scope Bridging</h3>
+<p>
+  Module injectors and DOM injectors can be connected in a parent-child hierarchy.
+  This allows module-level providers to flow into the DOM tree:
+</p>
+<pre><code>// Module-level injector (provides app-wide dependencies)
+const appModule = new ModuleInjector(import.meta);
+appModule.set('customContexts:config', appConfig);
+
+// DOM-level injector root (document inherits from module)
+const root = new InjectorRoot();
+root.attach(document);
+const docInjector = root.ensureInjector(document);
+docInjector.parentInjector = appModule;
+
+// Now any element in the document can consume 'customContexts:config'
+// because the chain traverses: element → ... → document → appModule</code></pre>
+
+<p>
+  <strong>Type compatibility note:</strong> <code>HTMLInjector</code> expects querier type <code>Node</code>,
+  while <code>ModuleInjector</code> expects querier type <code>ImportMeta</code>.
+  When crossing scope boundaries, the <code>isQuerierValid</code> check on the
+  <code>ModuleInjector</code> returns <code>true</code> unconditionally, so DOM nodes
+  can traverse through it. This is by design — module providers are globally available
+  within their scope.
+</p>
+
+<h3>10.4 The Module-Element Relationship</h3>
+<p>
+  A custom element class is defined in a module but lives in a DOM tree.
+  These are separate scopes with different injector chains:
+</p>
+<pre><code>// Module scope: resolved at class definition time
+// (via import.injector or InjectableModule)
+consume { format } from import.injector;
+
+class MyElement extends HTMLElement {
+  // DOM scope: resolved at connection time
+  // (via element's ancestor chain)
+  connectedCallback() {
+    const nav = InjectorRoot.getProviderOf(this, 'customContexts:nav');
+
+    // Module-scope values are captured in closure
+    this.textContent = format(nav.currentRoute);
+  }
+}</code></pre>
+
+<hr>
+
+<h2>11. Type System</h2>
+
+<h3>11.1 ProviderTypeMap (Tier 2 — works with standard TypeScript)</h3>
+<p>
+  The <code>ProviderTypeMap</code> interface maps provider keys to their value types.
+  Applications extend it via module augmentation:
+</p>
+<pre><code>// types/providers.d.ts
+declare module 'web-everything' {
+  interface ProviderTypeMap {
+    'customElements': CustomElementRegistry;
+    'customContextTypes': CustomContextRegistry;
+    'customAttributes': CustomAttributeRegistry;
+    'customContexts:nav': NavigationContext;
+    'customContexts:state': AppStore;
+    'customContexts:route': RouteContext;
+  }
+}</code></pre>
+<p>This enables typed <code>get()</code>, <code>set()</code>, and <code>consume()</code> calls:</p>
+<pre><code>// TypeScript infers the return type from the key
+const nav = injector.get('customContexts:nav');
+// nav: NavigationContext | undefined
+
+const consumable = injector.consume('customContexts:state', this);
+// consumable: Consumable&lt;AppStore&gt;
+
+injector.set('customContexts:nav', new NavigationContext());
+// Type-checks: value must be NavigationContext</code></pre>
+
+<h3>11.2 Typed Consume</h3>
+<p>When the ProviderTypeMap doesn't cover a key, explicit typing is available:</p>
+<pre><code>const consumable = injector.consume&lt;MyService&gt;('custom:my-service', this);
+// consumable: Consumable&lt;MyService&gt;</code></pre>
+
+<h3>11.3 Aspirational: <code>declare injector</code> (Deferred)</h3>
+<p>
+  A TypeScript language extension for declaring typed injector scopes.
+  This would require TypeScript team adoption and is not actionable today.
+</p>
+<pre><code>// Aspirational — requires TS language extension
+declare injector AppScope {
+  provides: {
+    'customContexts:redux': ReduxStore;
+    'customElements': CustomElementRegistry;
+  }
+  consumes: {
+    'customContexts:config': AppConfig;
+  }
+}</code></pre>
+
+<hr>
+
+<h2>12. Tooling Requirements</h2>
+
+<h3>12.1 Tooling Matrix</h3>
+<table>
+  <tr><th>Tool</th><th>Capability</th><th>Limitation</th><th>Required Work</th><th>Phase</th></tr>
+  <tr>
+    <td><strong>esbuild</strong></td>
+    <td><code>onLoad</code> plugin: transform source text before parsing</td>
+    <td>Go-based parser cannot be extended; no AST plugin hooks</td>
+    <td>Pre-transform plugin that rewrites DSL to standard JS before esbuild sees it</td>
+    <td>Phase 2</td>
+  </tr>
+  <tr>
+    <td><strong>TypeScript</strong></td>
+    <td>Custom transformers on valid TS AST; language service plugins for IDE support</td>
+    <td>Parser rejects unknown keywords (<code>provide</code>, <code>consume</code>, <code>injector</code>)</td>
+    <td>Pre-transform step + optional language service plugin for IDE completions</td>
+    <td>Phase 2</td>
+  </tr>
+  <tr>
+    <td><strong>Vite</strong></td>
+    <td><code>transform</code> hook in plugin pipeline; runs before esbuild</td>
+    <td>Cannot modify esbuild's parser</td>
+    <td>Vite plugin with <code>transform()</code> that rewrites DSL files (e.g., <code>.injector.ts</code>)</td>
+    <td>Phase 2</td>
+  </tr>
+  <tr>
+    <td><strong>Babel</strong></td>
+    <td>Parser extensible via plugins; full AST access; source map generation</td>
+    <td>Parser extension is undocumented/unsupported API</td>
+    <td>Custom parser plugin + transform visitor</td>
+    <td>Phase 2</td>
+  </tr>
+  <tr>
+    <td><strong>SWC</strong></td>
+    <td>Wasm plugin system; faster than Babel</td>
+    <td>Parser extensions require Rust modifications</td>
+    <td>Rust/Wasm plugin for parsing and transformation</td>
+    <td>Phase 2+</td>
+  </tr>
+  <tr>
+    <td><strong>Chrome DevTools</strong></td>
+    <td>Source maps for debugging transformed code; extension API for custom panels</td>
+    <td>Cannot show injector state natively</td>
+    <td>DevTools extension: injector tree panel, provider inspector, consumer tracking</td>
+    <td>Phase 2+</td>
+  </tr>
+</table>
+
+<h3>12.2 No-Tool Path (Phase 1)</h3>
+<p>
+  The Runtime API (Tier 1) requires <strong>no build tooling</strong>.
+  All injector operations use standard JavaScript:
+</p>
+<pre><code>import { InjectorRoot, HTMLInjector } from 'web-everything/unplugged';
+
+const root = new InjectorRoot();
+root.attach(document);
+
+const injector = root.ensureInjector(document.body);
+injector.set('customContexts:state', new AppStore());
+
+// Consume
+const consumable = injector.consume('customContexts:state', myElement);
+const { value } = await consumable;</code></pre>
+
+<h3>12.3 Light-Tool Path (Phase 2)</h3>
+<p>
+  A Vite/esbuild plugin that detects files with injector DSL
+  (by file extension <code>.injector.ts</code> or a pragma comment)
+  and transforms them to standard TypeScript before the compiler processes them.
+</p>
+<pre><code>// vite.config.mts
+import { injectorTransform } from 'web-everything/tools';
+
+export default {
+  plugins: [
+    injectorTransform(),  // transforms .injector.ts files
+  ],
+};</code></pre>
+<p>The plugin would:</p>
+<ol>
+  <li>Parse the DSL syntax with a JavaScript-based parser</li>
+  <li>Transform to Tier 1 runtime API calls</li>
+  <li>Generate source maps for debugging</li>
+  <li>Return standard TypeScript that esbuild/tsc can process</li>
+</ol>
+
+<h3>12.4 Full-Tool Path (Phase 2+)</h3>
+<p>
+  Full Babel or SWC integration with parser extensions for native
+  <code>provide</code>/<code>consume</code>/<code>injector</code> keyword support.
+  This is the long-term vision but has the highest implementation cost.
+</p>
+
+<h3>12.5 Chrome DevTools Extension</h3>
+<p>A Chrome DevTools extension would provide:</p>
+<ul>
+  <li><strong>Injector Tree panel:</strong> Visualize the injector hierarchy for the inspected element</li>
+  <li><strong>Provider inspector:</strong> List all providers on each injector in the chain</li>
+  <li><strong>Consumer tracking:</strong> Show which elements are consuming which providers</li>
+  <li><strong>Consumable state:</strong> Show pending/resolved/rejected status</li>
+</ul>
+<p>
+  The extension would read injector state from the page via <code>InjectorRoot</code>'s
+  static methods, which are accessible from the DevTools console context.
+  This is Phase 2+ and non-blocking.
+</p>
+
+<hr>
+
+<h2>13. Open Questions</h2>
+
+<table>
+  <tr><th>#</th><th>Question</th><th>Impact</th><th>Current Position</th></tr>
+  <tr>
+    <td>1</td>
+    <td><strong>Nested provide batch syntax</strong><br><code>provide { { 'B1' } from 'customElements', 'customAttrs' } from import.injector</code></td>
+    <td>Syntax complexity</td>
+    <td>Deferred — individual statements suffice for Phase 1</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td><strong>Fallback resolution chain</strong><br><code>provide { Logger } from A, B;</code> — what if A lacks the provider?</td>
+    <td>Design clarity</td>
+    <td>First match wins. If A has it, use A. Otherwise try B. Open for discussion.</td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td><strong>Provider disposal</strong><br>When an injector is removed from DOM, what happens to active Consumables?</td>
+    <td>Correctness</td>
+    <td>Consumable.reject() should be called, causing for-await loops to exit. Needs formalization.</td>
+  </tr>
+  <tr>
+    <td>4</td>
+    <td><strong><code>provide class</code> shorthand</strong><br><code>provide class MyButton extends CustomElement { }</code></td>
+    <td>Naming convention</td>
+    <td>Phase 2 — use PascalCase-to-kebab-case algorithm (split on case boundaries, lowercase, join with hyphens). Single-word class names that produce a tag without a hyphen are a <strong>compile-time error</strong> with a suggested fix. This is safe because <code>provide class</code> is declarative (like <code>import</code>) and processed by the transformer, not at runtime.</td>
+  </tr>
+  <tr>
+    <td>5</td>
+    <td><strong>Domain providers (<code>@domain/path</code>)</strong><br>Should <code>@</code>-prefixed keys have special runtime behavior?</td>
+    <td>API surface</td>
+    <td>Naming convention only in Phase 1. No special runtime handling.</td>
+  </tr>
+  <tr>
+    <td>6</td>
+    <td><strong>Decorator integration</strong><br><code>@provide('customContexts:state')</code> on class fields</td>
+    <td>DX ergonomics</td>
+    <td>Deferred — TC39 decorators still stage 3. Could complement DSL later.</td>
+  </tr>
+  <tr>
+    <td>7</td>
+    <td><strong>Cross-scope type compatibility</strong><br>ModuleInjector querier is <code>ImportMeta</code>, HTMLInjector querier is <code>Node</code></td>
+    <td>Type safety</td>
+    <td>ModuleInjector.isQuerierValid returns true unconditionally. Works but loses type safety at boundary.</td>
+  </tr>
+</table>
+
+<hr>
+
+<h2>14. Phase Summary</h2>
+
+<h3>Phase 1 — Runtime API (no tooling required)</h3>
+<table>
+  <tr><th>Feature</th><th>Priority</th><th>Effort</th><th>Status</th></tr>
+  <tr>
+    <td>Consumable class (port from plateau)</td>
+    <td>Critical</td>
+    <td>Low (95-line class)</td>
+    <td>Stub only in Web Everything</td>
+  </tr>
+  <tr>
+    <td>ModuleInjector (port from plateau)</td>
+    <td>High</td>
+    <td>Low (15-line class)</td>
+    <td>Not started</td>
+  </tr>
+  <tr>
+    <td>InjectableModule facade</td>
+    <td>High</td>
+    <td>Low (52-line class)</td>
+    <td>Not started</td>
+  </tr>
+  <tr>
+    <td>Node context methods (port from plateau)</td>
+    <td>High</td>
+    <td>Medium</td>
+    <td>Not ported</td>
+  </tr>
+  <tr>
+    <td>Cross-scope bridging (Module → DOM)</td>
+    <td>Medium</td>
+    <td>Low</td>
+    <td>Not started</td>
+  </tr>
+  <tr>
+    <td>Provider lifecycle (dispose/reject)</td>
+    <td>Medium</td>
+    <td>Low</td>
+    <td>Not formalized</td>
+  </tr>
+  <tr>
+    <td>ProviderTypeMap interface</td>
+    <td>Medium</td>
+    <td>Low</td>
+    <td>Partially exists in InjectorRoot.ts</td>
+  </tr>
+  <tr>
+    <td>This spec document</td>
+    <td>High</td>
+    <td>Done</td>
+    <td>This page</td>
+  </tr>
+</table>
+
+<h3>Phase 2 — DSL + Tooling</h3>
+<table>
+  <tr><th>Feature</th><th>Dependency</th></tr>
+  <tr>
+    <td><code>injector { }</code> block syntax</td>
+    <td>Vite/esbuild pre-transform plugin</td>
+  </tr>
+  <tr>
+    <td><code>provide</code>/<code>consume</code> statement keywords</td>
+    <td>Same pre-transform plugin</td>
+  </tr>
+  <tr>
+    <td><code>import.injector</code> compile-time replacement</td>
+    <td>Same pre-transform plugin + runtime WeakMap registry</td>
+  </tr>
+  <tr>
+    <td><code>&lt;script type="injector"&gt;</code> HTML form</td>
+    <td>customScriptTypes registry</td>
+  </tr>
+  <tr>
+    <td>Chrome DevTools extension</td>
+    <td>Chrome Extension API</td>
+  </tr>
+  <tr>
+    <td>TypeScript language service plugin</td>
+    <td>TS Language Service Plugin API</td>
+  </tr>
+  <tr>
+    <td>Nested provide batch syntax</td>
+    <td>Design finalization</td>
+  </tr>
+  <tr>
+    <td>Decorator integration</td>
+    <td>TC39 decorators finalization</td>
+  </tr>
+</table>
+
+<hr>
+
+<h2>Appendix A: Full Desugaring Table</h2>
+<table>
+  <tr><th>DSL Syntax</th><th>Runtime API Equivalent</th></tr>
+  <tr>
+    <td><code>injector Name { ... }</code></td>
+    <td><code>const Name = new Injector('Name');</code></td>
+  </tr>
+  <tr>
+    <td><code>injector Name extends Parent { ... }</code></td>
+    <td><code>const Name = new Injector('Name'); Name.parentInjector = Parent;</code></td>
+  </tr>
+  <tr>
+    <td><code>injector Name isolate { ... }</code></td>
+    <td><code>const Name = new Injector('Name'); /* no parent */</code></td>
+  </tr>
+  <tr>
+    <td><code>provide X as 'key';</code></td>
+    <td><code>injector.set('key', X);</code></td>
+  </tr>
+  <tr>
+    <td><code>provide { 'a': A, 'b': B } as 'reg';</code></td>
+    <td><code>const r = new Registry(); r.define('a', A); r.define('b', B); injector.set('reg', r);</code></td>
+  </tr>
+  <tr>
+    <td><code>provide { 'a': A } in 'reg';</code></td>
+    <td><code>const r = injector.get('reg') ?? new Registry(); r.define('a', A); injector.set('reg', r);</code></td>
+  </tr>
+  <tr>
+    <td><code>provide * from parent;</code></td>
+    <td><code>for (const [k, v] of parent.entries()) injector.set(k, v);</code></td>
+  </tr>
+  <tr>
+    <td><code>provide { 'key1', 'key2' } from parent;</code></td>
+    <td><code>['key1','key2'].forEach(k => { const v = parent.get(k); if (v) injector.set(k, v); });</code></td>
+  </tr>
+  <tr>
+    <td><code>consume x from 'key';</code></td>
+    <td><code>const x = injector.consume('key', this);</code></td>
+  </tr>
+  <tr>
+    <td><code>consume { a, b } from 'ns';</code></td>
+    <td><code>const a = injector.consume('ns:a', this); const b = injector.consume('ns:b', this);</code></td>
+  </tr>
+  <tr>
+    <td><code>consume { 'path.expr' as x } from 'key';</code></td>
+    <td><code>const x = injector.consume('key/path.expr', this);</code></td>
+  </tr>
+  <tr>
+    <td><code>import.injector</code></td>
+    <td><code>__resolveInjector(import.meta)</code> (compile-time) or factory parameter (runtime)</td>
+  </tr>
+</table>
+
+<hr>
+
+<h2>Appendix B: Framework Comparison</h2>
+<table>
+  <tr><th>Framework</th><th>DI Mechanism</th><th>Scope Model</th><th>Compile-Time?</th><th>Web Everything Parallel</th></tr>
+  <tr>
+    <td><strong>Angular</strong></td>
+    <td><code>@Injectable()</code> + <code>providers[]</code> in modules/components</td>
+    <td>Hierarchical (module → component tree)</td>
+    <td>Yes — Angular compiler transforms decorators</td>
+    <td>Closest analog. Injector hierarchy + provide/consume is similar to Angular's DI.</td>
+  </tr>
+  <tr>
+    <td><strong>React</strong></td>
+    <td><code>createContext()</code> + <code>&lt;Context.Provider&gt;</code></td>
+    <td>Component tree (ancestor chain)</td>
+    <td>No — runtime only</td>
+    <td>Context.Provider ≈ <code>injector.set('customContexts:X', value)</code></td>
+  </tr>
+  <tr>
+    <td><strong>Vue</strong></td>
+    <td><code>provide()</code> / <code>inject()</code> in Composition API</td>
+    <td>Component tree (ancestor chain)</td>
+    <td>No — runtime only</td>
+    <td>Closest naming match. Vue's provide/inject mirrors the provide/consume pattern.</td>
+  </tr>
+  <tr>
+    <td><strong>Solid</strong></td>
+    <td>Context via <code>createContext()</code> + <code>&lt;Context.Provider&gt;</code></td>
+    <td>Component tree</td>
+    <td>Partial — compiler optimizes reactivity</td>
+    <td>Consumable's reactive watching parallels Solid's signal-based reactivity.</td>
+  </tr>
+  <tr>
+    <td><strong>Lit</strong></td>
+    <td><a href="https://lit.dev/docs/data/context/">@lit/context</a> using TC39 Context Protocol</td>
+    <td>DOM tree (custom events)</td>
+    <td>No — runtime only</td>
+    <td>Most aligned with web standards. Uses <code>context-request</code> events on DOM tree.</td>
+  </tr>
+</table>
+<p>
+  <strong>Key differentiator:</strong> Web Everything's injector system is <em>registry-aware</em> —
+  it doesn't just pass values through a tree, it manages named registries
+  (<code>customElements</code>, <code>customAttributes</code>, etc.) with scoped definition/override semantics.
+  No other framework combines hierarchical DI with registry management.
+</p>
+
+<hr>
+
+<h2>Cross-References</h2>
+<ul>
+  <li><a href="/research/injector-syntax-proposals/">Provide/Consume/Injector Syntax Proposals</a> — historical catalog from the plateau project</li>
+  <li><a href="/research/injector-migration-gaps/">Web Injectors: Plateau Migration Gaps</a> — tracks runtime implementation gaps</li>
+  <li><a href="/plugs/injectorroot/">InjectorRoot</a> — current Web Everything implementation</li>
+  <li><a href="/plugs/htmlinjector/">HTMLInjector</a> — HTML-specific injector</li>
+</ul>
+{% endraw %}

@@ -84,12 +84,9 @@ export function applyNodeInjectorsPatches(): void {
       ...baseDescriptor,
       value(this: Node) {
         if (this instanceof HTMLElement) {
-          const root = this.getRootNode();
-          const target = root === document ? window : (root as ShadowRoot);
-          const registry = (target as any).injectors;
+          const registry = InjectorRoot.getInjectorRootOf(this);
           if (registry) {
-            const elementInjector = registry.getInjectorOf(this);
-            return elementInjector;
+            return registry.getInjectorOf(this);
           }
         }
 
@@ -107,16 +104,16 @@ export function applyNodeInjectorsPatches(): void {
     getClosestInjector: {
       ...baseDescriptor,
       value(this: Node) {
-        const rootNode = this.getRootNode();
-        const root =
-          rootNode instanceof DocumentFragment
-            ? (rootNode as any).ownerTemplate?.getRootNode()
-            : rootNode;
-        const target = root === document ? window : (root as ShadowRoot);
-        const registry = (target as any)?.injectors;
+        // Find effective root, following ownerTemplate for DocumentFragments
+        let effectiveRoot: Node = this.getRootNode();
+        if (effectiveRoot instanceof DocumentFragment && (effectiveRoot as any).ownerTemplate) {
+          effectiveRoot = (effectiveRoot as any).ownerTemplate.getRootNode() || effectiveRoot;
+        }
+
+        const registry = InjectorRoot.getInjectorRootOf(effectiveRoot as any);
 
         if (registry) {
-          if (root === this) {
+          if (effectiveRoot === this) {
             return registry.getInjectorOf(this as RootNode);
           }
 

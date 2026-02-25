@@ -35,6 +35,8 @@
 
 export { default as CustomTextNode } from './CustomTextNode';
 export { default as CustomTextNodeRegistry } from './CustomTextNodeRegistry';
+export { default as CustomTextNodeParser } from './CustomTextNodeParser';
+export { default as CustomTextNodeParserRegistry } from './CustomTextNodeParserRegistry';
 export { default as UndeterminedTextNode } from './UndeterminedTextNode';
 export { default as CustomExpressionParser } from './CustomExpressionParser';
 export { default as CustomExpressionParserRegistry } from './CustomExpressionParserRegistry';

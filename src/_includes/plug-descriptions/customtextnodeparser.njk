@@ -1,0 +1,39 @@
+<h3 id="overview">Overview</h3>
+<p>Abstract base class for text node parsers that detect expression syntax in text content and split it into static segments and <code>UndeterminedTextNode</code> instances.</p>
+
+<p>Text node parsers define delimiter pairs (e.g., <code>{{ '{{' }}</code> / <code>{{ '}}' }}</code>) and provide a <code>parse()</code> method that splits text around these delimiters. The resulting <code>UndeterminedTextNode</code> instances are later upgraded by the <code>CustomTextNodeRegistry</code> to specific implementations.</p>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+abstract class CustomTextNodeParser {
+    abstract openingIdentifier: string;
+    abstract closingIdentifier: string;
+    localName: string | null;
+    parse(text: string): Text[];
+}
+{% endhighlight %}
+
+<h3 id="usage-example">Usage Example</h3>
+{% highlight "typescript" %}
+// Create a parser for Mustache-style syntax
+class DoubleCurlyParser extends CustomTextNodeParser {
+    openingIdentifier = '{{ '{{' }}';
+    closingIdentifier = '{{ '}}' }}';
+}
+
+const parser = new DoubleCurlyParser();
+parser.localName = 'mustache';
+
+// Parse text with expressions
+const nodes = parser.parse('Hello {{ '{{' }}name{{ '}}' }}!');
+// Result: [Text("Hello "), UndeterminedTextNode("name"), Text("!")]
+{% endhighlight %}
+
+<h3 id="api">API Reference</h3>
+<table>
+    <tr><th>Member</th><th>Type</th><th>Description</th></tr>
+    <tr><td><code>openingIdentifier</code></td><td><code>string</code></td><td>Opening delimiter (e.g., <code>{{ '{{' }}</code>)</td></tr>
+    <tr><td><code>closingIdentifier</code></td><td><code>string</code></td><td>Closing delimiter (e.g., <code>{{ '}}' }}</code>)</td></tr>
+    <tr><td><code>localName</code></td><td><code>string | null</code></td><td>Registered name, set by the registry</td></tr>
+    <tr><td><code>parse(text)</code></td><td><code>Text[]</code></td><td>Splits text into Text and UndeterminedTextNode instances</td></tr>
+</table>

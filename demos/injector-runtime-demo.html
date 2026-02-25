@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Injector Runtime API Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/injector-runtime-demo.css">
+</head>
+<body>
+  <header class="demo-header">
+    <h1>Injector Runtime API</h1>
+    <a href="/">← Back to Home</a>
+  </header>
+
+  <div class="demo-container">
+    <!-- Section 1: Module provider -->
+    <div class="section" data-test="providers-section">
+      <h2>Module Providers</h2>
+      <div class="status-row">
+        <span class="status">
+          <span class="status-dot active" data-test="module-status"></span>
+          <span data-test="module-status-text">Module active</span>
+        </span>
+        <button class="danger" data-test="dispose-btn" id="dispose-btn">Dispose Module</button>
+      </div>
+      <ul class="provider-list" data-test="provider-list">
+        <li>
+          <span class="provider-key">customContexts:config</span>
+          <span class="provider-value" data-test="config-value">—</span>
+        </li>
+        <li>
+          <span class="provider-key">customContexts:counter</span>
+          <span class="provider-value" data-test="counter-provider-value">—</span>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Section 2: Reactive counter (subscribe) -->
+    <div class="section" data-test="counter-section">
+      <h2>Reactive Counter (subscribe)</h2>
+      <div class="counter-display">
+        <span class="counter-value" data-test="counter-value">0</span>
+      </div>
+      <div class="counter-controls">
+        <button data-test="decrement-btn" id="decrement-btn">−</button>
+        <button class="primary" data-test="increment-btn" id="increment-btn">+</button>
+        <button data-test="reset-btn" id="reset-btn">Reset</button>
+      </div>
+    </div>
+
+    <!-- Section 3: Event log -->
+    <div class="section" data-test="log-section">
+      <h2>Event Log</h2>
+      <div class="event-log" data-test="event-log" id="event-log"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { InjectorRoot, InjectableModule, Injector } from '/plugs/webinjectors/index.ts';
+    import CustomContext from '/plugs/webcontexts/CustomContext.ts';
+
+    // ─── 1. Create module with eager + lazy providers ───
+    const appModule = new InjectableModule('app', import.meta, (m) => {
+      // Eager provider: available immediately
+      m.provide('customContexts:config', { theme: 'dark', version: '1.0.0' });
+
+      // Lazy provider: loaded on first consume()
+      m.injector.register('customContexts:counter', async () => {
+        // Simulate async module load
+        return { count: 0 };
+      });
+    });
+
+    appModule.bootstrap();
+
+    // ─── 2. Bridge module → DOM ───
+    const injectorRoot = new InjectorRoot();
+    injectorRoot.attach(document, appModule.injector);
+
+    // ─── DOM references ───
+    const counterValueEl = document.querySelector('[data-test="counter-value"]');
+    const configValueEl = document.querySelector('[data-test="config-value"]');
+    const counterProviderEl = document.querySelector('[data-test="counter-provider-value"]');
+    const eventLog = document.getElementById('event-log');
+    const statusDot = document.querySelector('[data-test="module-status"]');
+    const statusText = document.querySelector('[data-test="module-status-text"]');
+
+    function log(message, type = '') {
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.innerHTML = message.replace(
+        /`([^`]+)`/g,
+        (_, v) => `<span class="${type || 'value'}">${v}</span>`
+      );
+      eventLog.appendChild(entry);
+      eventLog.scrollTop = eventLog.scrollHeight;
+    }
+
+    // ─── 3. Consume providers (await — like import) ───
+    const rootInjector = injectorRoot.getInjectorOf(document);
+
+    // Eager: resolves immediately
+    const config = await rootInjector.consume('customContexts:config', document.body);
+    configValueEl.textContent = JSON.stringify(config);
+    log('Consumed `config` → ' + JSON.stringify(config), 'info');
+
+    // Lazy: triggers the registered loader, then resolves
+    const counterState = await rootInjector.consume('customContexts:counter', document.body);
+    counterProviderEl.textContent = JSON.stringify(counterState);
+    counterValueEl.textContent = counterState.count;
+    log('Consumed `counter` (lazy-loaded) → ' + JSON.stringify(counterState), 'info');
+
+    // ─── 4. Counter reactivity via direct state + DOM update ───
+    let disposed = false;
+    let count = counterState.count;
+
+    function updateCounter(newCount) {
+      count = newCount;
+      const value = { count };
+      // Update the provider in the injector
+      rootInjector.set('customContexts:counter', value);
+      // Update DOM
+      counterValueEl.textContent = count;
+      counterProviderEl.textContent = JSON.stringify(value);
+      log('Counter updated: `' + JSON.stringify(value) + '`');
+    }
+
+    document.getElementById('increment-btn').addEventListener('click', () => {
+      if (disposed) return;
+      updateCounter(count + 1);
+    });
+
+    document.getElementById('decrement-btn').addEventListener('click', () => {
+      if (disposed) return;
+      updateCounter(count - 1);
+    });
+
+    document.getElementById('reset-btn').addEventListener('click', () => {
+      if (disposed) return;
+      updateCounter(0);
+    });
+
+    // ─── 5. Dispose button ───
+    document.getElementById('dispose-btn').addEventListener('click', () => {
+      if (disposed) return;
+      disposed = true;
+
+      log('Calling `appModule.injector.dispose()`...', 'error');
+      appModule.injector.dispose();
+
+      statusDot.classList.remove('active');
+      statusDot.classList.add('disposed');
+      statusText.textContent = 'Module disposed';
+
+      document.getElementById('dispose-btn').disabled = true;
+      log('Module disposed — providers cleared', 'error');
+    });
+
+    // Signal ready for E2E tests
+    window.demoReady = true;
+  </script>
+</body>
+</html>

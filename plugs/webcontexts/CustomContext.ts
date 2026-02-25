@@ -11,19 +11,19 @@ import type { HTMLInjectorTarget, HTMLProviderType } from '../webinjectors/HTMLI
 import type Injector from '../webinjectors/Injector';
 
 /**
- * Consumable represents a query result that can be provided with values
+ * A subscription to context value changes.
  */
-export class Consumable<T> {
-  value?: T;
-  expression?: any;
+export interface ContextSubscription<T = any> {
+  expression: string | null;
+  callback: (value: T) => void;
+}
 
-  constructor(expression?: any) {
-    this.expression = expression;
-  }
-
-  provide(value: T) {
-    this.value = value;
-  }
+/**
+ * Return type of subscribe() — provides current value and cleanup.
+ */
+export interface ContextSubscriptionHandle<T = any> {
+  value: T;
+  unsubscribe: () => void;
 }
 
 /**
@@ -68,7 +68,7 @@ export default abstract class CustomContext<
   static observedEvents: string[] = [];
 
   #target: HTMLInjectorTarget | undefined;
-  #queries = new Set<WeakRef<Consumable<any>>>();
+  #subscriptions = new Set<ContextSubscription>();
   #value?: ContextValue;
   #store?: any; // CustomStore type - to be imported when webstates is available
   #expressionParser: CustomExpressionParser | null = null;
@@ -98,18 +98,13 @@ export default abstract class CustomContext<
       this.#store.state = newValue;
     }
 
-    // Notify all queries of the new value
-    this.#queries.forEach((ref) => {
-      const query = ref.deref();
-      if (query) {
-        if (query.expression) {
-          const graph = this.#expressionParser?.parse(query.expression);
-          query.provide(graph?.resolve(newValue));
-        } else {
-          query.provide(newValue);
-        }
+    // Notify all subscriptions of the new value
+    this.#subscriptions.forEach((sub) => {
+      if (sub.expression) {
+        const graph = this.#expressionParser?.parse(sub.expression);
+        sub.callback(graph?.resolve(newValue));
       } else {
-        this.#queries.delete(ref);
+        sub.callback(newValue);
       }
     });
   }
@@ -161,22 +156,17 @@ export default abstract class CustomContext<
 
     const state = this.#store ? this.#store.state : this.#value;
 
-    // Notify queries that may be affected by this key change
-    this.#queries.forEach((ref) => {
-      const query = ref.deref();
-      if (query) {
-        if (query.expression) {
-          const graph = this.#expressionParser?.parse(query.expression);
-          // Only notify if the changed key is the first vertex in the query
-          if (graph?.vertices[0] === key) {
-            query.provide(graph?.resolve(state));
-          }
-        } else {
-          // If listening to the base, notify of every update
-          query.provide(state);
+    // Notify subscriptions that may be affected by this key change
+    this.#subscriptions.forEach((sub) => {
+      if (sub.expression) {
+        const graph = this.#expressionParser?.parse(sub.expression);
+        // Only notify if the changed key is the first vertex in the expression
+        if (graph?.vertices[0] === key) {
+          sub.callback(graph?.resolve(state));
         }
       } else {
-        this.#queries.delete(ref);
+        // If listening to the base, notify of every update
+        sub.callback(state);
       }
     });
   }
@@ -218,43 +208,38 @@ export default abstract class CustomContext<
   }
 
   /**
-   * Query the context with an expression
+   * Subscribe to context value changes.
+   *
+   * Returns the current value immediately and calls the callback
+   * whenever the value (or the expression result) changes.
+   *
+   * @param expression - Expression to evaluate against the context state, or null for the full state
+   * @param callback - Called with the new value on each change
+   * @returns Handle with current value and unsubscribe function
    */
-  query<QueryValue>(expression: any): Consumable<QueryValue> {
-    const query = new Consumable<QueryValue>(expression);
-    this.claim(query);
-    return query;
-  }
+  subscribe<QueryValue>(
+    expression: string | null,
+    callback: (value: QueryValue) => void,
+  ): ContextSubscriptionHandle<QueryValue> {
+    const sub: ContextSubscription = { expression, callback };
+    this.#subscriptions.add(sub);
 
-  /**
-   * Register a query to receive updates
-   */
-  claim(query: Consumable<any>): void {
     const state = this.#store ? this.#store.state : this.#value;
+    let initialValue: any;
 
-    if (query.expression && this.#expressionParser) {
-      const graph = this.#expressionParser.parse(query.expression);
-      const newValue = graph?.resolve(state);
-      if (query.value !== newValue) {
-        query.provide(newValue);
-      }
+    if (expression && this.#expressionParser) {
+      const graph = this.#expressionParser.parse(expression);
+      initialValue = graph?.resolve(state);
     } else {
-      // Without parser or without expression, provide full state
-      query.provide(state);
+      initialValue = state;
     }
 
-    this.#queries.add(new WeakRef(query));
-  }
-
-  /**
-   * Unregister a query from receiving updates
-   */
-  unclaim(query: Consumable<any>): void {
-    const which = Array.from(this.#queries.values()).find((item) => item.deref() === query);
-
-    if (which) {
-      this.#queries.delete(which);
-    }
+    return {
+      value: initialValue,
+      unsubscribe: () => {
+        this.#subscriptions.delete(sub);
+      },
+    };
   }
 
   // Lifecycle callbacks (to be implemented by subclasses)
@@ -297,8 +282,12 @@ export default abstract class CustomContext<
       const injector = injectorRoot.ensureInjector(target);
       const localName = this.#getLocalNameOf(target, futureInjectorRoot);
 
-      const parser = injector.consume('customExpressionParsers', target as HTMLElement);
-      this.#expressionParser = parser?.value;
+      try {
+        this.#expressionParser = await injector.consume('customExpressionParsers', target as HTMLElement);
+      } catch {
+        // Expression parser is optional — not all injector chains provide one
+        this.#expressionParser = null;
+      }
 
       if (!localName) {
         throw Error('Undefined context on target');

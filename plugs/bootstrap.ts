@@ -30,13 +30,18 @@ import CustomAttribute from './webbehaviors/CustomAttribute';
 import CustomAttributeRegistry from './webbehaviors/CustomAttributeRegistry';
 
 // Import expression parsers and event attributes
-import { CustomExpressionParserRegistry } from './webexpressions';
+import { CustomExpressionParserRegistry, CustomTextNodeParserRegistry, CustomTextNodeRegistry } from './webexpressions';
 import { CallParser } from '../blocks/parsers/call/CallParser';
 import { ValueParser } from '../blocks/parsers/value/ValueParser';
 import { PipeParser } from '../blocks/parsers/pipe/PipeParser';
+import { DoubleCurlyBracketParser } from '../blocks/parsers/text-node/double-curly/DoubleCurlyBracketParser';
+import { DoubleSquareBracketParser } from '../blocks/parsers/text-node/double-square/DoubleSquareBracketParser';
+import { InterpolationTextNode } from '../blocks/text-nodes/interpolation/InterpolationTextNode';
 import { registerEventAttributes } from '../blocks/attributes/on-event/OnEventAttribute';
 import { registerRouter } from '../blocks/router/registerRouter';
 import { registerTransient } from '../blocks/transient/registerTransient';
+import { registerNavigation } from '../blocks/navigation/registerNavigation';
+import { registerForEach } from '../blocks/for-each/registerForEach';
 
 // Extend Window interface
 declare global {
@@ -68,6 +73,9 @@ declare global {
     CustomAttribute: typeof CustomAttribute;
     CustomAttributeRegistry: typeof CustomAttributeRegistry;
     attributes: CustomAttributeRegistry;
+    // Web Expressions
+    customTextNodeParsers: CustomTextNodeParserRegistry;
+    customTextNodes: CustomTextNodeRegistry;
   }
 }
 
@@ -148,14 +156,36 @@ window.stores = new CustomStoreRegistry();
 window.attributes = new CustomAttributeRegistry();
 
 // Setup expression parser registry with composable parsers
+// Order matters: value before call so text interpolation ({{name}}) resolves
+// state references rather than handler calls. CallParser still matches
+// explicit call syntax like save($event).
 const expressionParsers = new CustomExpressionParserRegistry();
-expressionParsers.define('call', new CallParser());
 expressionParsers.define('value', new ValueParser());
 expressionParsers.define('pipe', new PipeParser());
+expressionParsers.define('call', new CallParser());
 
 // Provide parsers on document injector
 const documentInjector = injectorRoot.getInjectorOf(document);
 documentInjector?.set('customExpressionParsers', expressionParsers);
+
+// Setup text node parser registry (detects expression syntax in text)
+const textNodeParsers = new CustomTextNodeParserRegistry();
+textNodeParsers.define('mustache', new DoubleCurlyBracketParser());
+textNodeParsers.define('polymer', new DoubleSquareBracketParser());
+
+// Expose globally (CustomTextNodeRegistry reads from window.customTextNodeParsers)
+window.customTextNodeParsers = textNodeParsers;
+documentInjector?.set('customTextNodeParsers', textNodeParsers);
+
+// Setup custom text node registry (upgrades undetermined nodes to implementations)
+// Register InterpolationTextNode under each parser name so the registry can match
+// parserName ('mustache' or 'polymer') → text node implementation
+const textNodes = new CustomTextNodeRegistry();
+textNodes.define('mustache', InterpolationTextNode);
+textNodes.define('polymer', InterpolationTextNode);
+
+window.customTextNodes = textNodes;
+documentInjector?.set('customTextNodes', textNodes);
 
 // Register event attributes (on:click, on:submit, on:change, etc.)
 registerEventAttributes(window.attributes);
@@ -166,8 +196,17 @@ registerRouter(window.attributes);
 // Register transient components (auto-heading)
 registerTransient();
 
+// Register navigation behaviors (nav:list, nav:section)
+registerNavigation(window.attributes);
+
+// Register for-each directive
+registerForEach(window.attributes);
+
 console.log('[Web Everything] Bootstrap complete');
-console.log('[Web Everything] Globals available: injectors, contexts, stores, attributes');
+console.log('[Web Everything] Globals available: injectors, contexts, stores, attributes, customTextNodeParsers, customTextNodes');
 console.log('[Web Everything] Event attributes registered: on:click, on:submit, on:change, etc.');
+console.log('[Web Everything] Text node parsers registered: mustache ({{ }}), polymer ([[ ]])');
 console.log('[Web Everything] Router registered: route-view, route-outlet, route:link, route:prefetch');
 console.log('[Web Everything] Transient components registered: auto-heading');
+console.log('[Web Everything] Navigation registered: nav:list, nav:section');
+console.log('[Web Everything] Directives registered: for-each');

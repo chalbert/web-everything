@@ -1,0 +1,19 @@
+<h3 id="overview">Overview</h3>
+<p>Text node parser for Mustache-style <code>{{ '{{' }}expression{{ '}}' }}</code> syntax. Extends <code>CustomTextNodeParser</code> with double curly brace delimiters.</p>
+
+<h3 id="usage">Usage</h3>
+{% highlight "typescript" %}
+import { DoubleCurlyBracketParser } from '@we/blocks/parsers/text-node/double-curly';
+
+const parser = new DoubleCurlyBracketParser();
+const nodes = parser.parse('Hello {{ '{{' }}name{{ '}}' }}!');
+// [Text("Hello "), UndeterminedTextNode("name"), Text("!")]
+{% endhighlight %}
+
+<h3 id="registration">Bootstrap Registration</h3>
+<p>Registered as <code>'mustache'</code> in the global <code>customTextNodeParsers</code> registry by <code>bootstrap.ts</code>.</p>
+
+<h3 id="exports">Exports</h3>
+<ul>
+    <li><code>DoubleCurlyBracketParser</code> — The parser class</li>
+</ul>

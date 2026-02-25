@@ -1,0 +1,270 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+  The plateau migration was declared complete at Phase 10 (500/506 tests passing, 87.9% coverage).
+  However, many TODO comments, stubs, and placeholder types remain in the codebase.
+  Which are genuinely incomplete, which are outdated, and what is the highest-impact work remaining?
+</p>
+
+<h2>Summary</h2>
+<table>
+  <tr><th>Module</th><th>Outstanding TODOs</th><th>Severity</th></tr>
+  <tr>
+    <td>webregistries</td>
+    <td>7</td>
+    <td>Medium — plugged mode patching is stubbed</td>
+  </tr>
+  <tr>
+    <td>webinjectors</td>
+    <td>9</td>
+    <td>High — covered separately in <a href="/research/injector-migration-gaps/">Injector Migration Gaps</a></td>
+  </tr>
+  <tr>
+    <td>core/utils</td>
+    <td>3</td>
+    <td>Low-Medium — outdated phase references</td>
+  </tr>
+  <tr>
+    <td>webcomponents</td>
+    <td>1</td>
+    <td>Low</td>
+  </tr>
+  <tr>
+    <td>webcontexts</td>
+    <td>0</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td>webbehaviors</td>
+    <td>0</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td>webdirectives</td>
+    <td>0</td>
+    <td>—</td>
+  </tr>
+  <tr>
+    <td>webexpressions</td>
+    <td>0</td>
+    <td>—</td>
+  </tr>
+</table>
+<p><strong>Total: 20 TODOs</strong> across 4 modules. 9 are already tracked in <a href="/research/injector-migration-gaps/">Injector Migration Gaps</a>. This page covers the remaining 11.</p>
+
+<h2>webregistries — Module Patching &amp; CustomElementRegistry</h2>
+<p>The webregistries module has a complete <code>CustomElementRegistry</code> implementation (121 lines, 20 tests) but its plugged-mode interface and several methods are stubbed.</p>
+
+<h3>Plugged-Mode Patching (3 TODOs)</h3>
+<table>
+  <tr><th>File</th><th>Line</th><th>TODO</th><th>Impact</th></tr>
+  <tr>
+    <td><code>webregistries/index.ts</code></td>
+    <td>24</td>
+    <td><code>applyPatches()</code> — should replace <code>window.CustomElementRegistry</code> and <code>window.customElements</code></td>
+    <td><strong>Medium</strong> — plugged mode cannot override the global registry</td>
+  </tr>
+  <tr>
+    <td><code>webregistries/index.ts</code></td>
+    <td>48</td>
+    <td><code>removePatches()</code> — logs a warning, does nothing</td>
+    <td><strong>Medium</strong> — cleanup/teardown not functional</td>
+  </tr>
+  <tr>
+    <td><code>webregistries/index.ts</code></td>
+    <td>63</td>
+    <td><code>isPatched()</code> — always returns <code>false</code></td>
+    <td><strong>Low</strong> — detection only</td>
+  </tr>
+</table>
+<p>These three form a set. They should be implemented together when plugged-mode registry replacement is needed.</p>
+
+<h3>CustomElementRegistry Methods (4 TODOs)</h3>
+<table>
+  <tr><th>File</th><th>Line</th><th>TODO</th><th>Impact</th></tr>
+  <tr>
+    <td><code>CustomElementRegistry.ts</code></td>
+    <td>107</td>
+    <td><code>whenDefined()</code> — always rejects with an error</td>
+    <td><strong>Medium</strong> — blocks dynamic element registration patterns (e.g., lazy-loading components, waiting for a custom element to be defined before rendering)</td>
+  </tr>
+  <tr>
+    <td><code>CustomElementRegistry.ts</code></td>
+    <td>49</td>
+    <td>No duplicate name/constructor validation on <code>define()</code></td>
+    <td><strong>Low</strong> — works without it, but won't catch errors early</td>
+  </tr>
+  <tr>
+    <td><code>CustomElementRegistry.ts</code></td>
+    <td>75</td>
+    <td><code>getStandInElement()</code> not implemented — uses basic stand-in class</td>
+    <td><strong>Low</strong> — stand-in elements work, just not optimal</td>
+  </tr>
+  <tr>
+    <td><code>CustomElementRegistry.ts</code></td>
+    <td>94</td>
+    <td><code>downgrade()</code> is a no-op</td>
+    <td><strong>Low</strong> — no known use case yet</td>
+  </tr>
+</table>
+
+<h2>core/utils — Outdated Phase References</h2>
+<p>These TODOs reference "Phase 6+" but all 10 phases are already complete. The commented-out code may need to be re-evaluated — either the integration was done differently elsewhere, or these are genuinely incomplete despite the phase being marked done.</p>
+
+<table>
+  <tr><th>File</th><th>Line</th><th>TODO</th><th>Status</th></tr>
+  <tr>
+    <td><code>pathInsertionMethods.ts</code></td>
+    <td>45</td>
+    <td>CustomTextNode upgrade — requires <code>CustomTextNodeRegistry</code> from injector chain. Currently returns <code>null</code> (no-op).</td>
+    <td><strong>Investigate</strong> — Phase 8 (webexpressions) is complete. The <code>CustomTextNodeRegistry</code> exists. This stub may need wiring, or text node upgrades may be handled via a different path (e code>MutationObserver</code> in <code>InjectorRoot</code>).</td>
+  </tr>
+  <tr>
+    <td><code>pathInsertionMethods.ts</code></td>
+    <td>62</td>
+    <td>CustomComment upgrade — requires <code>CustomComment</code>. Currently returns <code>null</code> (no-op).</td>
+    <td><strong>Investigate</strong> — similar situation. Comment handling may be done elsewhere.</td>
+  </tr>
+  <tr>
+    <td><code>pathInsertionMethods.ts</code></td>
+    <td>101</td>
+    <td>Attribute upgrade — requires <code>CustomAttribute</code>. Commented out.</td>
+    <td><strong>Likely outdated</strong> — Phase 7 (webbehaviors) is complete. <code>CustomAttribute</code> exists and attribute handling is done via <code>CustomAttributeRegistry</code> + <code>MutationObserver</code>.</td>
+  </tr>
+</table>
+<p>These stubs live in the DOM insertion path (<code>appendChild</code>, <code>insertBefore</code>, etc.). When a node is inserted into the DOM, <code>pathInsertionMethods</code> walks the subtree and upgrades undetermined elements. The question is whether text node, comment, and attribute upgrades also need to happen at insertion time, or whether they're already handled by the <code>MutationObserver</code> in <code>InjectorRoot</code>.</p>
+
+<h2>webcomponents — Reversibility</h2>
+<table>
+  <tr><th>File</th><th>Line</th><th>TODO</th><th>Impact</th></tr>
+  <tr>
+    <td><code>Element.insertion.patch.ts</code></td>
+    <td>171</td>
+    <td>Add reversibility to <code>pathInsertionMethods</code> utility</td>
+    <td><strong>Low</strong> — affects cleanup when elements are removed. May matter for memory-sensitive apps or SSR.</td>
+  </tr>
+</table>
+
+<h2>webinjectors — Covered Separately</h2>
+<p>The 9 TODOs in webinjectors are tracked in detail on the <a href="/research/injector-migration-gaps/">Web Injectors: Plateau Migration Gaps</a> page. The high-impact items are:</p>
+<ol>
+  <li><strong>Consumable class</strong> — 7-line stub, blocks all reactive patterns</li>
+  <li><strong>Node context methods</strong> — 7 methods not patched</li>
+  <li><strong>Provider replacement</strong> — skipped, correctness issue</li>
+  <li><strong>Window/ShadowRoot patching</strong> — multi-root support</li>
+</ol>
+
+<h2>Priority Matrix</h2>
+<p>Combining this page with the <a href="/research/injector-migration-gaps/">Injector Migration Gaps</a>, here is the full priority view:</p>
+
+<table>
+  <tr><th>Priority</th><th>Item</th><th>Module</th><th>Rationale</th></tr>
+  <tr>
+    <td><strong>High</strong></td>
+    <td>Consumable class</td>
+    <td>webinjectors</td>
+    <td>Blocks all reactive consumption patterns</td>
+  </tr>
+  <tr>
+    <td><strong>High</strong></td>
+    <td>Node context methods</td>
+    <td>webinjectors</td>
+    <td>Primary developer-facing API</td>
+  </tr>
+  <tr>
+    <td><strong>Medium</strong></td>
+    <td>Provider replacement</td>
+    <td>webinjectors</td>
+    <td>Correctness — stale refs on swap</td>
+  </tr>
+  <tr>
+    <td><strong>Medium</strong></td>
+    <td><code>whenDefined()</code></td>
+    <td>webregistries</td>
+    <td>Blocks lazy/dynamic element patterns</td>
+  </tr>
+  <tr>
+    <td><strong>Medium</strong></td>
+    <td>Plugged-mode patching (3 stubs)</td>
+    <td>webregistries</td>
+    <td>Plugged mode cannot override global registry</td>
+  </tr>
+  <tr>
+    <td><strong>Medium</strong></td>
+    <td>Window/ShadowRoot entry points</td>
+    <td>webinjectors</td>
+    <td>Multi-root support</td>
+  </tr>
+  <tr>
+    <td><strong>Medium</strong></td>
+    <td>Scoped createElement</td>
+    <td>webinjectors</td>
+    <td>Injector-scoped element resolution</td>
+  </tr>
+  <tr>
+    <td><strong>Medium</strong></td>
+    <td>cloneNode preservation</td>
+    <td>webinjectors</td>
+    <td>Template cloning loses custom identities</td>
+  </tr>
+  <tr>
+    <td><strong>Low-Med</strong></td>
+    <td>pathInsertionMethods stubs (3)</td>
+    <td>core/utils</td>
+    <td>May be outdated — investigate if handled by MutationObserver</td>
+  </tr>
+  <tr>
+    <td><strong>Low</strong></td>
+    <td>CustomContext auto-attach</td>
+    <td>webinjectors</td>
+    <td>Ergonomic, not blocking</td>
+  </tr>
+  <tr>
+    <td><strong>Low</strong></td>
+    <td>Duplicate validation on define()</td>
+    <td>webregistries</td>
+    <td>Error detection only</td>
+  </tr>
+  <tr>
+    <td><strong>Low</strong></td>
+    <td>downgrade() no-op</td>
+    <td>webregistries</td>
+    <td>No known use case</td>
+  </tr>
+  <tr>
+    <td><strong>Low</strong></td>
+    <td>getStandInElement()</td>
+    <td>webregistries</td>
+    <td>Works, just not optimal</td>
+  </tr>
+  <tr>
+    <td><strong>Low</strong></td>
+    <td>Insertion reversibility</td>
+    <td>webcomponents</td>
+    <td>Cleanup on removal</td>
+  </tr>
+  <tr>
+    <td><strong>Low</strong></td>
+    <td>ModuleInjector</td>
+    <td>webinjectors</td>
+    <td>Deferred until build tooling</td>
+  </tr>
+</table>
+
+<h2>Modules With Zero Outstanding TODOs</h2>
+<p>These modules are fully migrated with no remaining stubs, placeholders, or TODOs:</p>
+<ul>
+  <li><strong>webcontexts</strong> — CustomContext, context patches</li>
+  <li><strong>webbehaviors</strong> — CustomAttribute, CustomAttributeRegistry</li>
+  <li><strong>webdirectives</strong> — CustomTemplateDirective</li>
+  <li><strong>webexpressions</strong> — CustomTextNode, CustomTextNodeRegistry</li>
+</ul>
+
+<h2>Cross-References</h2>
+<ul>
+  <li><a href="/research/injector-migration-gaps/">Web Injectors: Plateau Migration Gaps</a> — detailed webinjectors gap analysis</li>
+  <li><a href="/research/injector-syntax-proposals/">Provide/Consume/Injector Syntax Proposals</a> — DSL syntax catalog</li>
+  <li><a href="/plugs/injectorroot/">InjectorRoot</a> — current injector implementation</li>
+  <li><a href="/plugs/customelementregistry/">CustomElementRegistry</a> — current registry implementation</li>
+</ul>
+{% endraw %}

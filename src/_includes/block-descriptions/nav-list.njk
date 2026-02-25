@@ -1,0 +1,177 @@
+<h2>Navigation</h2>
+<p>Accessible navigation menus implementing the <a href="https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/examples/disclosure-navigation/">W3C APG Disclosure Navigation</a> pattern. Provides keyboard navigation via roving tabindex, collapsible sections with <code>aria-expanded</code>, and router integration with <code>aria-current="page"</code> tracking.</p>
+
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">
+  <strong>Terminology:</strong> See <a href="/semantics/">Semantics & Glossary</a> for terms like <a href="/semantics/#term-disclosure">disclosure</a>, <a href="/semantics/#term-navigation-landmark">navigation landmark</a>, and <a href="/semantics/#term-aria-current">aria-current</a>.
+</p>
+
+<h3>Web Standards Alignment</h3>
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr>
+    <td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/examples/disclosure-navigation/">Disclosure Navigation</a></td>
+    <td>W3C APG Pattern</td>
+    <td>NavSectionBehavior implements disclosure with <code>aria-expanded</code> and <code>aria-controls</code></td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current">aria-current</a></td>
+    <td>WAI-ARIA 1.1</td>
+    <td>RouteLinkBehavior sets <code>aria-current="page"</code> on active links; NavListBehavior tracks it for roving tabindex</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/nav">Navigation Landmark</a></td>
+    <td>Standard</td>
+    <td><code>nav:list</code> attaches to <code>&lt;nav&gt;</code> elements; use <code>aria-label</code> when multiple nav landmarks exist</td>
+  </tr>
+  <tr>
+    <td><a href="https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/#kbd_roving_tabindex">Roving Tabindex</a></td>
+    <td>W3C APG Practice</td>
+    <td>NavListBehavior manages <code>tabindex="0"</code> on focused item, <code>tabindex="-1"</code> on others</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/@media/prefers-reduced-motion">prefers-reduced-motion</a></td>
+    <td>Baseline</td>
+    <td>Demo CSS disables expand/collapse animations when reduced motion is preferred</td>
+  </tr>
+</table>
+
+<h3>Framework Research</h3>
+<table>
+  <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
+  <tr>
+    <td><a href="https://reactrouter.com/en/main/components/nav-link">React Router NavLink</a></td>
+    <td>Automatic <code>aria-current="page"</code> on active links</td>
+  </tr>
+  <tr>
+    <td><a href="https://router.vuejs.org/guide/advanced/active-links.html">Vue Router router-link</a></td>
+    <td>Active class management (we add <code>aria-current</code> which Vue does not set by default)</td>
+  </tr>
+  <tr>
+    <td><a href="https://primer.style/components/nav-list">GitHub Primer NavList</a></td>
+    <td>Semantic HTML with minimal ARIA; collapsible sub-navigation sections</td>
+  </tr>
+  <tr>
+    <td><a href="https://spectrum.adobe.com/page/side-nav/">Adobe Spectrum SideNav</a></td>
+    <td>Arrow key navigation within sections; multi-level hierarchy</td>
+  </tr>
+</table>
+
+<h3>Architecture</h3>
+<p>Navigation is a <strong>Module</strong> composed of two behaviors and enhanced router integration:</p>
+<ul>
+  <li><strong>NavListBehavior</strong> (<code>nav:list</code>): Attaches to a <code>&lt;nav&gt;</code> element. Manages roving tabindex across all navigation links, tracks <code>aria-current="page"</code> for active state, and handles arrow key navigation.</li>
+  <li><strong>NavSectionBehavior</strong> (<code>nav:section</code>): Attaches to a collapsible section container. Implements the disclosure pattern with a toggle button that controls <code>aria-expanded</code> and shows/hides the section's link list.</li>
+  <li><strong>RouteLinkBehavior</strong> (from Router): Enhanced with <code>aria-current="page"</code> support. When a route matches, the corresponding link receives both the <code>.active</code> CSS class and the <code>aria-current="page"</code> attribute.</li>
+</ul>
+<p>NavListBehavior observes the DOM for <code>aria-current</code> changes (via MutationObserver or router events) and updates the roving tabindex accordingly &mdash; the currently active page link receives <code>tabindex="0"</code>.</p>
+
+<h3>HTML Usage</h3>
+<pre><code class="language-html">&lt;nav nav:list aria-label="Main navigation"&gt;
+  &lt;!-- Top-level links --&gt;
+  &lt;a href="/" route:link&gt;Home&lt;/a&gt;
+  &lt;a href="/about" route:link&gt;About&lt;/a&gt;
+
+  &lt;!-- Collapsible section --&gt;
+  &lt;div nav:section&gt;
+    &lt;button aria-expanded="true" aria-controls="docs-links"&gt;
+      Documentation
+    &lt;/button&gt;
+    &lt;ul id="docs-links"&gt;
+      &lt;li&gt;&lt;a href="/docs/getting-started" route:link&gt;Getting Started&lt;/a&gt;&lt;/li&gt;
+      &lt;li&gt;&lt;a href="/docs/api" route:link&gt;API Reference&lt;/a&gt;&lt;/li&gt;
+      &lt;li&gt;&lt;a href="/docs/examples" route:link&gt;Examples&lt;/a&gt;&lt;/li&gt;
+    &lt;/ul&gt;
+  &lt;/div&gt;
+
+  &lt;!-- Another collapsible section (initially collapsed) --&gt;
+  &lt;div nav:section&gt;
+    &lt;button aria-expanded="false" aria-controls="guides-links"&gt;
+      Guides
+    &lt;/button&gt;
+    &lt;ul id="guides-links" hidden&gt;
+      &lt;li&gt;&lt;a href="/guides/routing" route:link&gt;Routing&lt;/a&gt;&lt;/li&gt;
+      &lt;li&gt;&lt;a href="/guides/state" route:link&gt;State Management&lt;/a&gt;&lt;/li&gt;
+    &lt;/ul&gt;
+  &lt;/div&gt;
+&lt;/nav&gt;</code></pre>
+
+<h3>ARIA Implementation</h3>
+<p>Follows the <a href="https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/examples/disclosure-navigation/">W3C APG Disclosure Navigation</a> pattern:</p>
+<table>
+  <tr><th>Attribute</th><th>Element</th><th>Managed By</th><th>Purpose</th></tr>
+  <tr><td><code>aria-label</code></td><td><code>&lt;nav&gt;</code></td><td>Author</td><td>Identifies the navigation landmark when multiple exist on the page</td></tr>
+  <tr><td><code>aria-current="page"</code></td><td><code>&lt;a&gt;</code></td><td>RouteLinkBehavior</td><td>Identifies the link matching the current URL; announced by screen readers as "current page"</td></tr>
+  <tr><td><code>aria-expanded</code></td><td><code>&lt;button&gt;</code></td><td>NavSectionBehavior</td><td>Communicates whether the section is expanded or collapsed</td></tr>
+  <tr><td><code>aria-controls</code></td><td><code>&lt;button&gt;</code></td><td>NavSectionBehavior</td><td>Associates the toggle button with the controlled section content</td></tr>
+  <tr><td><code>tabindex="0"</code></td><td>Active link</td><td>NavListBehavior</td><td>Makes the currently focused/active navigation item tabbable</td></tr>
+  <tr><td><code>tabindex="-1"</code></td><td>Other links</td><td>NavListBehavior</td><td>Removes other links from tab order; reachable only via arrow keys</td></tr>
+</table>
+
+<h3>Keyboard Interaction</h3>
+<table>
+  <tr><th>Key</th><th>Context</th><th>Action</th></tr>
+  <tr><td>Arrow Down</td><td>Navigation list</td><td>Move focus to next link</td></tr>
+  <tr><td>Arrow Up</td><td>Navigation list</td><td>Move focus to previous link</td></tr>
+  <tr><td>Home</td><td>Navigation list</td><td>Move focus to first link</td></tr>
+  <tr><td>End</td><td>Navigation list</td><td>Move focus to last link</td></tr>
+  <tr><td>Enter</td><td>Link</td><td>Navigate to the link target</td></tr>
+  <tr><td>Enter / Space</td><td>Section toggle button</td><td>Toggle the section expanded/collapsed state</td></tr>
+  <tr><td>Escape</td><td>Expanded section</td><td>Collapse the section and return focus to the toggle button</td></tr>
+</table>
+
+<h3>Configuration</h3>
+<pre><code class="language-html">&lt;!-- Orientation: vertical (default) or horizontal --&gt;
+&lt;nav nav:list orientation="vertical"&gt;...&lt;/nav&gt;
+&lt;nav nav:list orientation="horizontal"&gt;...&lt;/nav&gt;
+
+&lt;!-- Auto-expand section containing the current page link --&gt;
+&lt;div nav:section auto-expand&gt;...&lt;/div&gt;
+
+&lt;!-- Collapse other sections when one is expanded (accordion mode) --&gt;
+&lt;nav nav:list exclusive-sections&gt;...&lt;/nav&gt;</code></pre>
+
+<h3>Router Integration</h3>
+<p>When used with the <a href="/blocks/router/">Router</a>, navigation links use <code>route:link</code> to get automatic active state management:</p>
+<ul>
+  <li><code>route:link</code> intercepts clicks for SPA navigation</li>
+  <li>On route change, the matching link receives <code>aria-current="page"</code> and <code>.active</code> class</li>
+  <li>NavListBehavior observes these changes and updates roving tabindex to match</li>
+  <li>Sections containing the active link can auto-expand via the <code>auto-expand</code> attribute</li>
+</ul>
+
+<h3>Styling Hooks</h3>
+<pre><code class="language-css">/* Active link (current page) */
+[nav\:list] a[aria-current="page"] {
+  font-weight: bold;
+  border-left: 3px solid var(--color-primary);
+}
+
+/* Focused link (keyboard navigation) */
+[nav\:list] a:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
+}
+
+/* Expanded section toggle */
+[nav\:section] button[aria-expanded="true"] {
+  color: var(--color-primary);
+}
+
+/* Collapsed section content */
+[nav\:section] [hidden] {
+  display: none;
+}
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  [nav\:section] ul {
+    transition: none;
+  }
+}</code></pre>
+
+<h3>Exports</h3>
+<ul>
+  <li><code>NavListBehavior</code> &mdash; Keyboard navigation and active state tracking behavior (<code>nav:list</code>)</li>
+  <li><code>NavSectionBehavior</code> &mdash; Disclosure toggle behavior for collapsible sections (<code>nav:section</code>)</li>
+  <li><code>registerNavigation</code> &mdash; Registers both behaviors with the attribute registry</li>
+</ul>

@@ -15,6 +15,11 @@
     "usage": "Standardized by Anchor Intent (CSS Anchor Positioning)."
   },
   {
+    "term": "aria-current",
+    "definition": "ARIA attribute indicating the current item within a set. For navigation, aria-current='page' identifies the current page link.",
+    "usage": "Set by RouteLinkBehavior on the link matching the current URL. Screen readers announce it as 'current page'."
+  },
+  {
     "term": "Behavior",
     "definition": "A reusable functionality pattern attached to a component via composition rather than inheritance.",
     "usage": "Implemented via Web Behaviors."
@@ -77,6 +82,11 @@
     "term": "Directionality",
     "definition": "The handling of text direction (LTR vs RTL) and its impact on layout, icons, and interaction logic.",
     "usage": "Core consideration for internationalization."
+  },
+  {
+    "term": "disclosure",
+    "definition": "A design pattern where a button controls the visibility of a content section. The button uses aria-expanded to communicate state.",
+    "usage": "Implemented by NavSectionBehavior for collapsible navigation sections. Follows the W3C APG Disclosure Navigation pattern."
   },
   {
     "term": "Elevation",
@@ -192,6 +202,11 @@
     "term": "Navigation",
     "definition": "The structure of application flow (Hierarchical, Lateral, Linear) and the mechanism for transitioning between views.",
     "usage": "Standardized by Navigation Intent."
+  },
+  {
+    "term": "navigation landmark",
+    "definition": "A nav element that identifies a section containing navigation links. Use aria-label when multiple landmarks exist on the same page.",
+    "usage": "NavListBehavior attaches to nav elements. The HTML nav element creates an implicit navigation ARIA landmark."
   },
   {
     "term": "outlet",

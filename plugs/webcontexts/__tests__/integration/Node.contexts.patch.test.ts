@@ -428,26 +428,41 @@ describe('Node.contexts.patch integration', () => {
   });
 
   describe('queryContext method', () => {
-    it('should query context with expression', () => {
+    it('should query context with expression via subscribe', () => {
       class QueryableContext extends CustomContext<{ data: { value: number } }> {}
 
       contextRegistry.define('queryable', QueryableContext);
 
       const container = document.createElement('div');
       document.body.appendChild(container);
-      
+
       injectorRoot.ensureInjector(container);
       const injector = injectorRoot.getInjectorOf(container)!;
       injector.set('customContextTypes', contextRegistry);
 
       const context = new QueryableContext();
+      context.value = { data: { value: 42 } };
       injector.set('customContexts:queryable', context);
 
-      // queryContext should use consume API
-      const result = (container as any).queryContext('queryable', 'data/value');
-      
-      // Result depends on consume implementation
+      // queryContext returns { value, unsubscribe } from subscribe()
+      const result = (container as any).queryContext('queryable', null);
+
       expect(result).toBeDefined();
+      expect(result.value).toEqual({ data: { value: 42 } });
+      expect(typeof result.unsubscribe).toBe('function');
+
+      document.body.removeChild(container);
+    });
+
+    it('should return undefined for non-existent context', () => {
+      const container = document.createElement('div');
+      document.body.appendChild(container);
+
+      injectorRoot.ensureInjector(container);
+
+      const result = (container as any).queryContext('nonexistent', null);
+
+      expect(result).toBeUndefined();
 
       document.body.removeChild(container);
     });

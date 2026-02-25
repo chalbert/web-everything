@@ -1,4 +1,5 @@
 import { defineConfig, Plugin } from 'vite';
+import { devPanel } from './tools/dev-panel/vite-plugin';
 
 /**
  * Vite plugin that automatically injects Web Everything patches into demo HTML files.
@@ -71,7 +72,7 @@ function routerDemoFallback(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [routerDemoFallback(), webEverythingPatches()],
+  plugins: [devPanel(), routerDemoFallback(), webEverythingPatches()],
   root: './',
   server: {
     port: 3000,

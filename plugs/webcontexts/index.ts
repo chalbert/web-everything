@@ -12,7 +12,7 @@ import {
 
 export { default as CustomContext } from './CustomContext';
 export { default as CustomContextRegistry } from './CustomContextRegistry';
-export type { ImplementedContext, Consumable } from './CustomContext';
+export type { ImplementedContext, ContextSubscription, ContextSubscriptionHandle } from './CustomContext';
 export type { ContextDefinition } from './CustomContextRegistry';
 
 export {

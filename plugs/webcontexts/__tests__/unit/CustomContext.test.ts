@@ -3,8 +3,8 @@
  * @description Unit tests for CustomContext base class
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import CustomContext, { Consumable, type ImplementedContext } from '../../CustomContext';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import CustomContext, { type ImplementedContext } from '../../CustomContext';
 
 // Mock context implementation
 interface TestState {
@@ -92,74 +92,73 @@ describe('CustomContext', () => {
     });
   });
 
-  describe('query management', () => {
-    it('should create query and claim it', () => {
+  describe('subscribe', () => {
+    it('should return current value immediately', () => {
       context.value = { count: 5, name: 'test' };
-      const query = context.query('path');
-      expect(query).toBeInstanceOf(Consumable);
-      // The query() method claims immediately, so value should be provided
-      // Without path parser, full state is provided
-      expect(query.value).toEqual({ count: 5, name: 'test' });
+      const handle = context.subscribe(null, () => {});
+      expect(handle.value).toEqual({ count: 5, name: 'test' });
     });
 
-    it('should claim and provide value to query', () => {
-      context.value = { count: 10, name: 'initial' };
-      const consumable = new Consumable<TestState>();
-      
-      context.claim(consumable);
-      
-      expect(consumable.value).toEqual({ count: 10, name: 'initial' });
-    });
+    it('should notify callback when value changes', () => {
+      context.value = { count: 5, name: 'initial' };
+      const callback = vi.fn();
+      context.subscribe(null, callback);
 
-    it('should unclaim query', () => {
-      const consumable = new Consumable<TestState>();
-      context.claim(consumable);
-      
-      context.unclaim(consumable);
-      
-      // After unclaim, changing value shouldn't notify the query
-      const oldValue = consumable.value;
-      context.value = { count: 999, name: 'changed' };
-      expect(consumable.value).toEqual(oldValue);
-    });
-
-    it('should notify queries when value changes', () => {
-      const consumable = new Consumable<TestState>();
-      context.claim(consumable);
-      
       const newValue = { count: 20, name: 'updated' };
       context.value = newValue;
-      
-      expect(consumable.value).toEqual(newValue);
+
+      expect(callback).toHaveBeenCalledWith(newValue);
     });
 
-    it('should notify queries when key changes', () => {
+    it('should notify callback when key changes via set()', () => {
       context.value = { count: 5, name: 'initial' };
-      const consumable = new Consumable<TestState>();
-      context.claim(consumable);
-      
+      const callback = vi.fn();
+      context.subscribe(null, callback);
+
       context.set('count', 15);
-      
-      expect(consumable.value).toEqual({ count: 15, name: 'initial' });
+
+      expect(callback).toHaveBeenCalledWith({ count: 15, name: 'initial' });
     });
 
-    it('should clean up garbage collected queries', () => {
-      context.value = { count: 1, name: 'test' };
-      
-      // Create a query that will be garbage collected
-      let consumable: Consumable<TestState> | null = new Consumable<TestState>();
-      context.claim(consumable);
-      
-      // Simulate garbage collection
-      const weakRef = new WeakRef(consumable);
-      consumable = null;
-      
-      // Force garbage collection simulation by removing references
-      // In real tests, this would need actual GC, but we can at least verify the logic
-      context.value = { count: 2, name: 'test2' };
-      
-      // The test validates the cleanup logic exists
-      expect(true).toBe(true);
+    it('should stop notifying after unsubscribe', () => {
+      context.value = { count: 5, name: 'initial' };
+      const callback = vi.fn();
+      const handle = context.subscribe(null, callback);
+
+      handle.unsubscribe();
+
+      context.value = { count: 999, name: 'changed' };
+      expect(callback).not.toHaveBeenCalled();
+    });
+
+    it('should support multiple subscriptions', () => {
+      context.value = { count: 0, name: 'test' };
+      const cb1 = vi.fn();
+      const cb2 = vi.fn();
+
+      context.subscribe(null, cb1);
+      context.subscribe(null, cb2);
+
+      context.value = { count: 1, name: 'updated' };
+
+      expect(cb1).toHaveBeenCalledOnce();
+      expect(cb2).toHaveBeenCalledOnce();
+    });
+
+    it('should unsubscribe independently', () => {
+      context.value = { count: 0, name: 'test' };
+      const cb1 = vi.fn();
+      const cb2 = vi.fn();
+
+      const h1 = context.subscribe(null, cb1);
+      context.subscribe(null, cb2);
+
+      h1.unsubscribe();
+
+      context.value = { count: 1, name: 'updated' };
+
+      expect(cb1).not.toHaveBeenCalled();
+      expect(cb2).toHaveBeenCalledOnce();
     });
   });
 
@@ -173,28 +172,10 @@ describe('CustomContext', () => {
     });
 
     it('should detach from target', () => {
-      // Simulate attachment (full attachment requires injector system)
       (context as any).isAttached = true;
-      (context as any)['#target'] = document.body;
-      
       context.detach();
-      
       expect(context.isAttached).toBe(false);
       expect(context.target).toBeUndefined();
-    });
-  });
-
-  describe('Consumable', () => {
-    it('should create consumable with expression', () => {
-      const consumable = new Consumable('some.path');
-      expect(consumable.expression).toBe('some.path');
-      expect(consumable.value).toBeUndefined();
-    });
-
-    it('should provide value to consumable', () => {
-      const consumable = new Consumable<number>();
-      consumable.provide(42);
-      expect(consumable.value).toBe(42);
     });
   });
 

@@ -1,6 +1,6 @@
 /**
  * Unit tests for HTMLInjector
- * 
+ *
  * @module webinjectors
  */
 
@@ -11,11 +11,11 @@ import HTMLRegistry from '../../HTMLRegistry';
 // Mock HTMLRegistry for testing
 class TestHTMLRegistry extends HTMLRegistry<any, any> {
   localName = 'testRegistry';
-  
+
   upgrade(node: Node): void {
     // Mock implementation
   }
-  
+
   downgrade(node: Node): void {
     // Mock implementation
   }
@@ -46,7 +46,7 @@ describe('HTMLInjector', () => {
       const childElement = document.createElement('span');
       element.appendChild(childElement);
       const childInjector = new HTMLInjector(childElement, parentInjector);
-      
+
       expect(childInjector.parentInjector).toBe(parentInjector);
     });
   });
@@ -55,13 +55,8 @@ describe('HTMLInjector', () => {
     it('should set provider', () => {
       const registry = new TestHTMLRegistry();
       injector.set('testRegistry', registry);
-      
-      expect(injector.get('testRegistry')).toBe(registry);
-    });
 
-    // TODO: Test CustomContext attachment when webcontexts is migrated
-    it.skip('should attach CustomContext if target is connected', () => {
-      // Will be enabled when CustomContext is available
+      expect(injector.get('testRegistry')).toBe(registry);
     });
   });
 
@@ -69,13 +64,13 @@ describe('HTMLInjector', () => {
     it('should validate based on DOM containment', () => {
       const childElement = document.createElement('span');
       element.appendChild(childElement);
-      
+
       expect(injector.isQuerierValid(childElement)).toBe(true);
     });
 
     it('should return false for non-contained nodes', () => {
       const outsideElement = document.createElement('div');
-      
+
       expect(injector.isQuerierValid(outsideElement)).toBe(false);
     });
 
@@ -90,31 +85,31 @@ describe('HTMLInjector', () => {
       const childElement = document.createElement('span');
       parentElement.appendChild(childElement);
       document.body.appendChild(parentElement);
-      
+
       const parentInjector = new HTMLInjector(parentElement);
       const childInjector = new HTMLInjector(childElement, parentInjector);
-      
+
       expect(childInjector.parentInjector).toBe(parentInjector);
       expect(parentInjector.childInjectors.has(childInjector)).toBe(true);
     });
   });
 
   describe('provider resolution', () => {
-    it('should resolve providers from parent chain', () => {
+    it('should resolve providers from parent chain', async () => {
       const parentElement = document.createElement('div');
       const childElement = document.createElement('span');
       parentElement.appendChild(childElement);
       document.body.appendChild(parentElement);
-      
+
       const parentInjector = new HTMLInjector(parentElement);
       const childInjector = new HTMLInjector(childElement, parentInjector);
-      
+
       const registry = new TestHTMLRegistry();
       parentInjector.set('testRegistry', registry);
-      
+
       // Child can access parent's provider via consume
-      const consumable = childInjector.consume('testRegistry', childElement);
-      expect(consumable).toBeTruthy();
+      const result = await childInjector.consume('testRegistry', childElement);
+      expect(result).toBe(registry);
     });
   });
 });

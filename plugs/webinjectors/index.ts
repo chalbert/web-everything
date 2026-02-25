@@ -14,7 +14,9 @@ import {
 
 export { default as InjectorRoot, type InjectorRootOptions, type ProviderDefinition, type ProviderTypeMap, type AnyProviderType } from './InjectorRoot';
 export { default as HTMLInjector, type HTMLInjectorTarget, type HTMLProviderType } from './HTMLInjector';
-export { default as Injector, type Queryable } from './Injector';
+export { default as Injector } from './Injector';
+export { default as ModuleInjector } from './ModuleInjector';
+export { default as InjectableModule } from './InjectableModule';
 export { default as HTMLRegistry, type BaseDefinition, type ConstructorDefinition } from './HTMLRegistry';
 export { type Registry } from './Registry';
 export { applyNodeInjectorsPatches, removeNodeInjectorsPatches, isNodeInjectorsPatched } from './Node.injectors.patch';

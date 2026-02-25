@@ -1,0 +1,57 @@
+<h2>NavSectionBehavior</h2>
+<p>Disclosure toggle behavior for collapsible navigation sections, implementing the <a href="https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/examples/disclosure-navigation/">W3C APG Disclosure Navigation</a> pattern. Manages <code>aria-expanded</code> state on the toggle button and controls visibility of the associated link list.</p>
+
+<p>This behavior is part of the <a href="/blocks/nav-list/">Navigation</a> module. For the full navigation system including keyboard navigation and router integration, see the <a href="/blocks/nav-list/">Navigation</a> page.</p>
+
+<h3>HTML Usage</h3>
+<pre><code class="language-html">&lt;div nav:section&gt;
+  &lt;button aria-expanded="true" aria-controls="section-links"&gt;
+    Section Title
+  &lt;/button&gt;
+  &lt;ul id="section-links"&gt;
+    &lt;li&gt;&lt;a href="/page-1" route:link&gt;Page 1&lt;/a&gt;&lt;/li&gt;
+    &lt;li&gt;&lt;a href="/page-2" route:link&gt;Page 2&lt;/a&gt;&lt;/li&gt;
+    &lt;li&gt;&lt;a href="/page-3" route:link&gt;Page 3&lt;/a&gt;&lt;/li&gt;
+  &lt;/ul&gt;
+&lt;/div&gt;
+
+&lt;!-- Initially collapsed --&gt;
+&lt;div nav:section&gt;
+  &lt;button aria-expanded="false" aria-controls="more-links"&gt;
+    More Pages
+  &lt;/button&gt;
+  &lt;ul id="more-links" hidden&gt;
+    &lt;li&gt;&lt;a href="/page-4" route:link&gt;Page 4&lt;/a&gt;&lt;/li&gt;
+    &lt;li&gt;&lt;a href="/page-5" route:link&gt;Page 5&lt;/a&gt;&lt;/li&gt;
+  &lt;/ul&gt;
+&lt;/div&gt;</code></pre>
+
+<h3>ARIA Attributes Managed</h3>
+<table>
+  <tr><th>Attribute</th><th>Element</th><th>Description</th></tr>
+  <tr><td><code>aria-expanded</code></td><td>Toggle button</td><td>Set to <code>"true"</code> when the section is expanded, <code>"false"</code> when collapsed. Toggled on activation.</td></tr>
+  <tr><td><code>aria-controls</code></td><td>Toggle button</td><td>References the <code>id</code> of the controlled content element. Set by the author in markup.</td></tr>
+  <tr><td><code>hidden</code></td><td>Content list</td><td>Applied when collapsed, removed when expanded. Uses the native <code>hidden</code> attribute.</td></tr>
+</table>
+
+<h3>Public API</h3>
+<table>
+  <tr><th>Method</th><th>Description</th></tr>
+  <tr><td><code>toggle()</code></td><td>Toggles the section between expanded and collapsed states.</td></tr>
+  <tr><td><code>expand()</code></td><td>Expands the section, setting <code>aria-expanded="true"</code> and removing <code>hidden</code> from the content.</td></tr>
+  <tr><td><code>collapse()</code></td><td>Collapses the section, setting <code>aria-expanded="false"</code> and adding <code>hidden</code> to the content.</td></tr>
+  <tr><td><code>isExpanded</code></td><td>Read-only boolean property. Returns <code>true</code> if the section is currently expanded.</td></tr>
+</table>
+
+<h3>Keyboard Interaction</h3>
+<table>
+  <tr><th>Key</th><th>Context</th><th>Action</th></tr>
+  <tr><td>Enter</td><td>Toggle button</td><td>Toggles the section expanded/collapsed state</td></tr>
+  <tr><td>Space</td><td>Toggle button</td><td>Toggles the section expanded/collapsed state</td></tr>
+</table>
+<p>Note: <code>Enter</code> and <code>Space</code> are handled natively by the browser on <code>&lt;button&gt;</code> elements. NavSectionBehavior listens for the <code>click</code> event (which fires on both mouse click and keyboard activation) to toggle state.</p>
+
+<h3>Configuration</h3>
+<pre><code class="language-html">&lt;!-- Auto-expand when a child link has aria-current="page" --&gt;
+&lt;div nav:section auto-expand&gt;...&lt;/div&gt;</code></pre>
+<p>When <code>auto-expand</code> is set, NavSectionBehavior checks on <code>connectedCallback</code> and on route changes whether any descendant link has <code>aria-current="page"</code>. If so, the section is automatically expanded.</p>

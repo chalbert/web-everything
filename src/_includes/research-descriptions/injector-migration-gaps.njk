@@ -1,0 +1,165 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+  The plateau project's injector system has features that are missing or incomplete in Web Everything's webinjectors module.
+  This page catalogs each gap with its plateau implementation, current Web Everything status, and priority for migration.
+</p>
+
+<h2>Gap Summary</h2>
+<table>
+  <tr><th>#</th><th>Feature</th><th>Plateau Status</th><th>Web Everything Status</th><th>Priority</th></tr>
+  <tr>
+    <td>1</td>
+    <td>Consumable class</td>
+    <td>Full implementation (95 lines)</td>
+    <td>7-line stub, provide() is no-op</td>
+    <td>High</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td>Node context methods</td>
+    <td>7 methods on Node.prototype</td>
+    <td>Not present</td>
+    <td>High</td>
+  </tr>
+  <tr>
+    <td>3</td>
+    <td>Scoped createElement</td>
+    <td>Resolves custom elements via injector chain</td>
+    <td>Tracks creationInjector only</td>
+    <td>Medium</td>
+  </tr>
+  <tr>
+    <td>4</td>
+    <td>cloneNode preservation</td>
+    <td>Preserves custom element/comment/text node identities</td>
+    <td>Not present</td>
+    <td>Medium</td>
+  </tr>
+  <tr>
+    <td>5</td>
+    <td>CustomContext auto-attach</td>
+    <td>HTMLInjector.set() auto-calls context.attach()</td>
+    <td>Commented out with TODO</td>
+    <td>Medium (blocked by webcontexts migration)</td>
+  </tr>
+  <tr>
+    <td>6</td>
+    <td>Provider replacement</td>
+    <td>Full claim/unclaim cycle on swap</td>
+    <td>TODO — currently skipped</td>
+    <td>Medium</td>
+  </tr>
+  <tr>
+    <td>7</td>
+    <td>Window/ShadowRoot entry points</td>
+    <td>window.customProviders, shadowRoot.customProviders</td>
+    <td>TODO — InjectorRoot attaches to document directly</td>
+    <td>Low-Medium</td>
+  </tr>
+  <tr>
+    <td>8</td>
+    <td>ModuleInjector / InjectableModule</td>
+    <td>ImportMeta-based DI for modules</td>
+    <td>Not present</td>
+    <td>Low</td>
+  </tr>
+</table>
+
+<h2>Gap Details</h2>
+
+<h3>1. Consumable Class</h3>
+<p><strong>What plateau has:</strong> A multi-resolving, Promise-compatible (<code>.then()</code>), AsyncIterator-compatible (<code>Symbol.asyncIterator</code>) object. Stored via WeakMap to avoid memory leaks. Can <code>provide()</code> multiple times, creating new promises each time.</p>
+<p><strong>What Web Everything has:</strong> A minimal stub class at the bottom of <code>Injector.ts</code> (lines 297-303). The <code>provide()</code> method is empty with a TODO comment.</p>
+<p><strong>Impact:</strong> Blocks all reactive consumption. Without a real Consumable, <code>consume()</code> returns objects that can't notify consumers of updates. The <code>for await...of</code> pattern for watching context changes is impossible.</p>
+<p><strong>Migration note:</strong> The plateau Consumable is self-contained (95 lines, no external deps beyond WeakMap). Can be ported nearly as-is. Consider whether it belongs in webinjectors or webstates.</p>
+
+<h3>2. Node Context Convenience Methods</h3>
+<p><strong>What plateau has:</strong> Seven methods patched onto <code>Node.prototype</code>:</p>
+<pre><code>node.getContext('user')          // walk chain for customContexts:user
+node.getOwnContext('user')       // check only this element
+node.createContext('user')       // construct from customContextType registry
+node.ensureContext('user')       // get own or create + attach
+node.hasContext('user')          // boolean
+node.hasOwnContext('user')       // boolean
+node.queryContext('user', 'name') // consume with path expression</code></pre>
+<p><strong>What Web Everything has:</strong> Only injector traversal methods (<code>getClosestInjector</code>, <code>injectors</code>, <code>getOwnInjector</code>, <code>hasOwnInjector</code>).</p>
+<p><strong>Impact:</strong> Without these, developers must manually walk the injector chain and understand the <code>customContexts:</code> prefix convention. These methods are the primary consumer-facing API.</p>
+<p><strong>Depends on:</strong> Consumable class (#1), webcontexts migration (#5).</p>
+
+<h3>3. Scoped createElement</h3>
+<p><strong>What plateau has:</strong> <code>Node.prototype.createElement</code> walks the injector chain, checking <code>customElements</code> registries at each level for tag names containing <code>-</code>. Falls back to <code>document.createElement</code>.</p>
+<pre><code>// plateau: resolves Button from nearest customElements registry
+const button = someElement.createElement('my-button');</code></pre>
+<p><strong>What Web Everything has:</strong> <code>Document.prototype.createElement</code> is patched only to track <code>InjectorRoot.creationInjector</code> during construction. No scoped custom element resolution.</p>
+<p><strong>Impact:</strong> Custom elements registered in a scoped injector (not the global <code>customElements</code>) cannot be created via <code>createElement</code>. Only matters when using injector-scoped element registries rather than the global <code>customElements.define()</code>.</p>
+
+<h3>4. cloneNode Preservation</h3>
+<p><strong>What plateau has:</strong> Overridden <code>cloneNode</code> that walks both original and clone trees in parallel, restoring:</p>
+<ul>
+  <li>Custom element constructors + options (re-constructs with original constructor)</li>
+  <li>CustomComment constructors + options</li>
+  <li>CustomTextNode constructors + parser names</li>
+  <li>Undetermined element prototypes</li>
+</ul>
+<p><strong>What Web Everything has:</strong> No <code>cloneNode</code> override.</p>
+<p><strong>Impact:</strong> Cloning a subtree containing custom elements, comments, or text nodes (e.g., in ForEach template cloning) loses their custom identities — they revert to plain HTMLElement/Comment/Text.</p>
+
+<h3>5. CustomContext Auto-Attachment</h3>
+<p><strong>What plateau has:</strong> <code>HTMLInjector.set()</code> checks if the provider is a <code>CustomContext</code> instance and auto-calls <code>context.attach(target)</code> when the target is connected.</p>
+<p><strong>What Web Everything has:</strong> Commented out at HTMLInjector.ts lines 47-51 with <code>// TODO: Enable when webcontexts is migrated</code>.</p>
+<p><strong>Impact:</strong> Contexts must be manually attached after being set on an injector. Minor ergonomic issue.</p>
+
+<h3>6. Provider Replacement</h3>
+<p><strong>What plateau has:</strong> When a provider is replaced via <code>injector.set()</code>, the old provider's consumers are unclaimed and the new provider claims them. Consumables are re-resolved against the new provider.</p>
+<p><strong>What Web Everything has:</strong> TODO at InjectorRoot.ts line 264 — provider replacement is currently skipped.</p>
+<p><strong>Impact:</strong> Dynamic provider swapping (e.g., hot module replacement, A/B testing, privilege changes) won't update existing consumers. They'll hold stale references.</p>
+
+<h3>7. Window/ShadowRoot as Injector Entry Points</h3>
+<p><strong>What plateau has:</strong> <code>window.customProviders</code> and <code>shadowRoot.customProviders</code> as InjectorRoot instances. The <code>getClosestInjector</code> resolution uses <code>target = root === document ? window : root</code>.</p>
+<p><strong>What Web Everything has:</strong> TODO at index.ts line 40. InjectorRoot attaches directly to <code>document</code>.</p>
+<p><strong>Impact:</strong> Multi-root scenarios (multiple shadow DOMs each with their own injector trees) may not work correctly. The document-level attachment works for single-root apps.</p>
+
+<h3>8. ModuleInjector / InjectableModule</h3>
+<p><strong>What plateau has:</strong></p>
+<ul>
+  <li><code>ModuleInjector</code> — extends <code>Injector&lt;CustomDependenciesRegistry, ImportMeta, ImportMeta&gt;</code></li>
+  <li><code>InjectableModule</code> — facade with <code>provide()</code>, <code>consume()</code>, <code>get()</code>, <code>set()</code>, <code>bootstrap()</code></li>
+</ul>
+<p><strong>What Web Everything has:</strong> No module-level injector concept.</p>
+<p><strong>Impact:</strong> Module-level DI (swapping imports per injector scope) is not possible. This is primarily needed for the language-level DSL (Layer 4 of the syntax proposals). Low priority until build tooling exists.</p>
+
+<h2>What's Already Well-Ported</h2>
+<ul>
+  <li>Injector abstract base with generic type params and provider Map</li>
+  <li>HTMLInjector with DOM containment validation</li>
+  <li>InjectorRoot: attach/detach, upgrade/downgrade, MutationObserver</li>
+  <li>HTMLRegistry with bidirectional constructor-name mapping</li>
+  <li><code>getClosestInjector</code> with CustomComment sibling traversal and ClosingComment awareness</li>
+  <li><code>injectors()</code> generator yielding ancestor chain</li>
+  <li><code>creationInjector</code> tracking during element construction</li>
+  <li>Consumer tracking with WeakRef for GC</li>
+  <li>Claim/unclaim mechanism for reactive provider updates</li>
+  <li>Plugged vs unplugged dual-mode support</li>
+</ul>
+
+<h2>Suggested Migration Order</h2>
+<ol>
+  <li><strong>Consumable</strong> — self-contained, unblocks everything reactive</li>
+  <li><strong>Provider replacement</strong> — correctness fix, small scope</li>
+  <li><strong>Node context methods</strong> — depends on webcontexts but can be stubbed</li>
+  <li><strong>Scoped createElement</strong> — needed for injector-scoped elements</li>
+  <li><strong>cloneNode</strong> — needed when ForEach or templates clone subtrees</li>
+  <li><strong>CustomContext auto-attach</strong> — awaits webcontexts migration</li>
+  <li><strong>Window/ShadowRoot entry points</strong> — needed for multi-root</li>
+  <li><strong>ModuleInjector</strong> — deferred until build tooling exists</li>
+</ol>
+
+<h2>Cross-References</h2>
+<ul>
+  <li><a href="/research/injector-syntax-proposals/">Provide/Consume/Injector Syntax Proposals</a> — the syntax layer analysis</li>
+  <li><a href="/plugs/injectorroot/">InjectorRoot</a> — current implementation</li>
+  <li><a href="/plugs/htmlinjector/">HTMLInjector</a> — HTML-specific injector</li>
+  <li><a href="/plugs/node-injector-patch/">Node Injector Patch</a> — current Node.prototype patches</li>
+</ul>
+{% endraw %}

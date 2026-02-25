@@ -1,0 +1,50 @@
+<h3 id="overview">Overview</h3>
+<p>Reactive text node that evaluates expressions and renders their values as text content. Connects the text node parsing pipeline to the expression parser system.</p>
+
+<h3 id="pipeline">Pipeline</h3>
+<p>When connected to the DOM, the <code>InterpolationTextNode</code>:</p>
+<ol>
+    <li>Extracts the expression from its text content (set by the text node parser)</li>
+    <li>Parses it via the <code>CustomExpressionParserRegistry</code> (from injector chain)</li>
+    <li>Resolves context queries from the injector chain</li>
+    <li>Evaluates the expression and sets its text content to the result</li>
+</ol>
+
+<h3 id="supported-expressions">Supported Expressions</h3>
+<table>
+    <tr><th>Expression</th><th>Example</th><th>Description</th></tr>
+    <tr><td>State value</td><td><code>{{ '{{' }}name{{ '}}' }}</code></td><td>Resolves from <code>customContexts:state</code></td></tr>
+    <tr><td>Nested path</td><td><code>{{ '{{' }}user.profile.name{{ '}}' }}</code></td><td>Dot-path resolution</td></tr>
+    <tr><td>Named context</td><td><code>{{ '{{' }}@theme.primary{{ '}}' }}</code></td><td>Resolves from <code>customContexts:theme</code></td></tr>
+    <tr><td>Pipe</td><td><code>{{ '{{' }}name | uppercase{{ '}}' }}</code></td><td>Filter through <code>customContexts:filters</code></td></tr>
+    <tr><td>Literal</td><td><code>{{ '{{' }}42{{ '}}' }}</code></td><td>Literal values render as-is</td></tr>
+</table>
+
+<h3 id="usage">Usage</h3>
+{% highlight "html" %}
+<!-- Expressions in templates (recommended — no FOUC) -->
+<template id="greeting">
+    <p>Hello, {{ '{{' }}name{{ '}}' }}!</p>
+</template>
+
+<script type="module">
+    import '../plugs/bootstrap.ts';
+
+    // Provide state data
+    const injector = injectors.getInjectorOf(document);
+    injector.set('customContexts:state', { name: 'World' });
+
+    // Clone and upgrade
+    const tpl = document.getElementById('greeting');
+    const clone = tpl.content.cloneNode(true);
+    customTextNodes.upgrade(clone);
+    document.body.appendChild(clone);
+    // Renders: "Hello, World!"
+</script>
+{% endhighlight %}
+
+<h3 id="exports">Exports</h3>
+<ul>
+    <li><code>InterpolationTextNode</code> — The text node class</li>
+    <li><code>InterpolationTextNodeOptions</code> — Options type</li>
+</ul>

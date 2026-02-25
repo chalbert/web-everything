@@ -97,8 +97,10 @@ export default class RouteLinkBehavior extends CustomAttribute {
 
     if (currentPath === linkPath) {
       anchor.classList.add('active');
+      anchor.setAttribute('aria-current', 'page');
     } else {
       anchor.classList.remove('active');
+      anchor.removeAttribute('aria-current');
     }
   }
 }

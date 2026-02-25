@@ -28,6 +28,9 @@
             <a href="https://github.com/chalbert/webeverything" class="header-icon" aria-label="GitHub">
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
             </a>
+            <button id="claude-panel-toggle" class="header-icon" aria-label="Spec Explorer" title="Spec Explorer">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path><circle cx="12" cy="10" r="1" fill="currentColor" stroke="none"></circle><circle cx="8" cy="10" r="1" fill="currentColor" stroke="none"></circle><circle cx="16" cy="10" r="1" fill="currentColor" stroke="none"></circle></svg>
+            </button>
         </div>
     </header>
 
@@ -42,5 +45,182 @@
     <script src="/assets/js/mode-selector.js"></script>
     <script src="/assets/js/format-selector.js"></script>
     </footer>
+
+    <!-- Spec Explorer side panel (dev only — loads from Vite dev server) -->
+    <div id="claude-panel" class="claude-panel" aria-hidden="true">
+        <iframe id="claude-panel-frame" class="claude-panel-frame"></iframe>
+    </div>
+
+    <script>
+    (function() {
+        var toggle = document.getElementById('claude-panel-toggle');
+        var panel = document.getElementById('claude-panel');
+        var frame = document.getElementById('claude-panel-frame');
+        var loaded = false;
+        var pendingSelection = null;
+
+        function open() {
+            if (!loaded) {
+                frame.src = '/demos/dev-panel.html';
+                loaded = true;
+            }
+            panel.classList.add('open');
+            panel.setAttribute('aria-hidden', 'false');
+            document.body.classList.add('panel-open');
+            toggle.classList.add('active');
+            sessionStorage.setItem('claude-panel-open', '1');
+
+            // Send pending selection once iframe is ready
+            if (pendingSelection) {
+                sendSelectionWhenReady(pendingSelection);
+            }
+        }
+
+        function close() {
+            panel.classList.remove('open');
+            panel.setAttribute('aria-hidden', 'true');
+            document.body.classList.remove('panel-open');
+            toggle.classList.remove('active');
+            sessionStorage.removeItem('claude-panel-open');
+        }
+
+        // Restore panel state from previous page
+        if (sessionStorage.getItem('claude-panel-open')) {
+            open();
+        }
+
+        // ── Selection capture ──────────────────────────────
+        // Capture the text selection from the parent page BEFORE
+        // the click clears it, then forward it to the iframe.
+
+        function getSelectionContext() {
+            var sel = window.getSelection();
+            var text = sel ? sel.toString().trim() : '';
+            if (!text) return null;
+
+            // Find nearest heading for section context
+            var node = sel.anchorNode;
+            var heading = '';
+            while (node && node !== document.body) {
+                if (node.nodeType === 1) {
+                    var prev = node.previousElementSibling;
+                    while (prev) {
+                        if (/^H[1-6]$/.test(prev.tagName)) {
+                            heading = prev.textContent.trim();
+                            break;
+                        }
+                        prev = prev.previousElementSibling;
+                    }
+                    if (heading) break;
+                    // Also check if current node IS a heading parent
+                    var h = node.closest && node.closest('section, article, div');
+                    if (h) {
+                        var hEl = h.querySelector('h1, h2, h3, h4, h5, h6');
+                        if (hEl) {
+                            heading = hEl.textContent.trim();
+                            break;
+                        }
+                    }
+                }
+                node = node.parentNode;
+            }
+
+            // Map URL path to source file for Claude Code
+            var path = window.location.pathname.replace(/\/$/, '');
+            var parts = path.split('/').filter(Boolean);
+            var sourceFile = null;
+            if (parts[0] === 'blocks' && parts[1]) {
+                sourceFile = 'src/_includes/block-descriptions/' + parts[1] + '.njk';
+            } else if (parts[0] === 'plugs' && parts[1]) {
+                sourceFile = 'src/_includes/plug-descriptions/' + parts[1] + '.njk';
+            } else if (parts[0] === 'research' && parts[1]) {
+                sourceFile = 'src/_includes/research-descriptions/' + parts[1] + '.njk';
+            } else if (parts[0] === 'demos' && parts[1]) {
+                sourceFile = 'demos/' + parts[1] + '.html';
+            } else if (parts[0] === 'projects' && parts[1]) {
+                sourceFile = 'src/_includes/project-descriptions/' + parts[1] + '.njk';
+            }
+
+            return {
+                text: text,
+                page: window.location.pathname,
+                title: document.title,
+                heading: heading,
+                sourceFile: sourceFile
+            };
+        }
+
+        // Capture selection on mousedown (before click clears it)
+        var capturedSelection = null;
+        toggle.addEventListener('mousedown', function() {
+            capturedSelection = getSelectionContext();
+        });
+
+        function sendSelectionWhenReady(ctx) {
+            // If iframe not loaded yet, wait for it
+            if (!frame.contentWindow) {
+                pendingSelection = ctx;
+                return;
+            }
+            frame.contentWindow.postMessage({
+                type: 'selection-context',
+                context: ctx
+            }, '*');
+            pendingSelection = null;
+        }
+
+        toggle.addEventListener('click', function() {
+            if (panel.classList.contains('open')) {
+                close();
+            } else {
+                // Send selection if we captured one
+                if (capturedSelection) {
+                    pendingSelection = capturedSelection;
+                    capturedSelection = null;
+                }
+                open();
+            }
+        });
+
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && panel.classList.contains('open')) close();
+        });
+
+        // When iframe signals it's ready, send any pending selection
+        window.addEventListener('message', function(e) {
+            if (e.data && e.data.type === 'dev-panel-ready' && pendingSelection) {
+                sendSelectionWhenReady(pendingSelection);
+            }
+        });
+
+        // ── Browser selection bridge ──────────────────────────
+        // On mouseup, if there's a text selection:
+        //   1. Write to .browser-selection.json (for Claude Code in VSCode)
+        //   2. Send to dev panel iframe if open (for Spec Explorer chat)
+        var selectionTimer = null;
+        document.addEventListener('mouseup', function() {
+            clearTimeout(selectionTimer);
+            selectionTimer = setTimeout(function() {
+                var ctx = getSelectionContext();
+                if (ctx) {
+                    // File bridge for Claude Code
+                    fetch('/__dev-panel/selection', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(ctx)
+                    }).catch(function() {});
+
+                    // Forward to open dev panel iframe
+                    if (panel.classList.contains('open') && frame.contentWindow) {
+                        frame.contentWindow.postMessage({
+                            type: 'selection-context',
+                            context: ctx
+                        }, '*');
+                    }
+                }
+            }, 150);
+        });
+    })();
+    </script>
 </body>
 </html>

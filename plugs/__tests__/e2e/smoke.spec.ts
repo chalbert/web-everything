@@ -67,6 +67,10 @@ const pages = [
   { name: 'Declarative SPA (plugged)', url: '/demos/declarative-spa.html', waitFor: 'demoReady' },
   { name: 'Declarative SPA (unplugged)', url: '/demos/declarative-spa-unplugged.html', waitFor: 'demoReady' },
   { name: 'Router Demo', url: '/demos/declarative-spa-router.html', waitFor: 'demoReady' },
+  { name: 'Text Interpolation', url: '/demos/text-interpolation-demo.html', waitFor: 'demoReady' },
+  { name: 'Navigation Demo', url: '/demos/navigation-demo.html', waitFor: 'demoReady' },
+  { name: 'For-Each Demo', url: '/demos/for-each-demo.html', waitFor: 'demoReady' },
+  { name: 'Dev Panel', url: '/demos/dev-panel.html' },
 ];
 
 test.describe('Smoke Tests - All Pages Load', () => {

@@ -119,6 +119,20 @@ describe('RouteLinkBehavior', () => {
 
       expect(behavior.isActive).toBe(false);
     });
+
+    it('should set aria-current="page" when active', () => {
+      const { anchor, behavior } = createLink('/');
+      behavior.connectedCallback?.();
+
+      expect(anchor.getAttribute('aria-current')).toBe('page');
+    });
+
+    it('should not have aria-current when not active', () => {
+      const { anchor, behavior } = createLink('/some-other-path');
+      behavior.connectedCallback?.();
+
+      expect(anchor.hasAttribute('aria-current')).toBe(false);
+    });
   });
 
   describe('disconnectedCallback', () => {

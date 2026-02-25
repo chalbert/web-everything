@@ -1,0 +1,3 @@
+I'd like to review the website and make sure our stance towards plug/future standard is clear.
+
+Although we do not want to depend on any adoption, and while we want to stay humble and not affirming ourselves the future standard of the web, we should make it clear that the goal about providing plugs is to imagine how how feature would fit if normalize in the hope that they do fix with the web standards and a far-reaching ambition to push some of the idea toward standization. It's a fine line to walk, but I think we should try to represent that. Would certainly affect the Web Plugs page and mission page, maybe others.

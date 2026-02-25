@@ -143,13 +143,13 @@ export function applyNodeContextsPatch(): void {
     },
   });
 
-  // queryContext: Queries context with expression
+  // queryContext: Queries context with expression via subscribe
   Object.defineProperty(Node.prototype, 'queryContext', {
     ...baseDescriptor,
-    value(this: Node, contextType: string, query: any): any {
-      const currentInjector = this.getClosestInjector();
-      const consumable = currentInjector.consume(`customContexts:${contextType}/${query}`, this);
-      return consumable;
+    value(this: Node, contextType: string, expression: any): any {
+      const context = this.getContext(contextType);
+      if (!context) return undefined;
+      return context.subscribe(expression, () => {});
     },
   });
 
@@ -219,8 +219,9 @@ declare global {
     hasOwnContext(contextType: string): boolean;
 
     /**
-     * Query a context with an expression
+     * Query a context with an expression.
+     * Returns { value, unsubscribe } or undefined if context not found.
      */
-    queryContext(contextType: string, query: any): any;
+    queryContext(contextType: string, expression: any): any;
   }
 }
