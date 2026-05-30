@@ -222,10 +222,22 @@
     function setStreaming(active) {
       isStreaming = active;
       promptInput.disabled = active;
-      promptInput.classList.toggle('disabled', active);
-      sendIcon.style.display = active ? 'none' : '';
-      stopIcon.style.display = active ? '' : 'none';
-      sendBtn.classList.toggle('stop', active);
+
+      if (active) {
+        promptInput.classList.add('disabled');
+        sendIcon.style.visibility = 'hidden';
+        sendIcon.style.position = 'absolute';
+        stopIcon.style.visibility = 'visible';
+        stopIcon.style.position = 'static';
+        sendBtn.classList.add('stop');
+      } else {
+        promptInput.classList.remove('disabled');
+        sendIcon.style.visibility = 'visible';
+        sendIcon.style.position = 'static';
+        stopIcon.style.visibility = 'hidden';
+        stopIcon.style.position = 'absolute';
+        sendBtn.classList.remove('stop');
+      }
     }
 
     // ── Auto-resize textarea ──────────────────────────────

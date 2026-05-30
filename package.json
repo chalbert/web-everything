@@ -15,7 +15,9 @@
     "test:unit": "vitest run",
     "test:integration": "playwright test",
     "test:coverage": "vitest run --coverage",
-    "build:plugs": "tsc -p tsconfig.plugs.json"
+    "build:plugs": "tsc -p tsconfig.plugs.json",
+    "gen:inventory": "node scripts/gen-inventory.mjs",
+    "check:standards": "node scripts/check-standards.mjs"
   },
   "devDependencies": {
     "@11ty/eleventy": "^2.0.1",

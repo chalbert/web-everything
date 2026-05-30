@@ -1,0 +1,84 @@
+{% from "mode-selector.njk" import pluggedContent, unpluggedContent, comparisonContent, endContent %}
+
+<h3 id="overview">Overview</h3>
+<p>
+    Exposes <code>window.customPositioning</code> for registering named <strong>positioning providers</strong>.
+    A provider is any engine that can place a floating element relative to an anchor — the native-first
+    default, the <a href="/adapters/floating-ui-adapter/">Floating UI adapter</a>, or a custom one. Components
+    resolve the application's provider through the injector chain and delegate, so a page ships <strong>one</strong>
+    positioning engine that every component shares rather than bundling one per library.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Anchor_positioning">CSS Anchor Positioning</a></td>
+        <td>Baseline 2026</td>
+        <td>The default provider drives <code>anchor-name</code>/<code>position-anchor</code>/<code>position-area</code>/<code>position-try</code> with near-zero JS.</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Popover_API">Popover API</a></td>
+        <td>Baseline 2024</td>
+        <td>Top-layer escape composes via <a href="/projects/webportals/">Web Portals</a>; positioning stays orthogonal to layering.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+interface CustomPositioningRegistry extends CustomRegistry<CustomPositioner> {
+    readonly localName = 'customPositioning';
+
+    // Register a named provider (e.g. 'default', 'floating-ui', 'css-anchor')
+    define(name: string, provider: CustomPositioner): void;
+
+    // The provider an element should use, resolved via the injector chain
+    resolve(forElement: Element): CustomPositioner;
+}
+{% endhighlight %}
+
+<h3 id="usage-example">Usage Example</h3>
+
+{{ pluggedContent("positioning-example", code=true) }}
+{% highlight "javascript" %}
+// The application registers ONE provider and selects it for the tree.
+import { FloatingUIAdapter } from '@web-adapters/floating-ui';
+customPositioning.define('floating-ui', new FloatingUIAdapter());
+
+// A vendor component delegates — it never bundles its own engine.
+const provider = customPositioning.resolve(floatingEl);
+const cleanup = provider.position(anchorEl, floatingEl, {
+    placement: 'bottom-start',
+    collision: ['flip', 'shift'],
+    tracking: 'follow',
+});
+{% endhighlight %}
+
+{{ unpluggedContent("positioning-example", code=true) }}
+{% highlight "javascript" %}
+consume { customPositioning } of '@web-positioning';
+
+customPositioning.define('floating-ui', new FloatingUIAdapter());
+
+const provider = customPositioning.resolve(floatingEl);
+const cleanup = provider.position(anchorEl, floatingEl, {
+    placement: 'bottom-start',
+    collision: ['flip', 'shift'],
+    tracking: 'follow',
+});
+{% endhighlight %}
+
+{{ endContent() }}
+
+<h3 id="design-decisions">Design Decisions</h3>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+    <li><strong>Registry, not a hard dependency.</strong> Positioning is a swappable service so ten vendor components can converge on one engine. Swapping engines is a one-line registration change with zero component edits.</li>
+    <li><strong>Native-first default.</strong> The bundled provider leans on CSS Anchor Positioning; libraries are opt-in enhancements through adapters, not the baseline.</li>
+    <li><strong>Compose, don't reimplement.</strong> Top-layer escape defers to <a href="/projects/webportals/">Web Portals</a> and elevation to the Surface Intent. This plug owns <em>placement</em>, not <em>layering</em>.</li>
+</ul>
+
+<p class="text-sm text-gray-600 mt-4">
+    Implements the <a href="/intents/">Anchor Intent</a>. Providers satisfy the
+    <a href="/plugs/custompositioner/"><code>CustomPositioner</code></a> contract.
+    See <a href="/projects/webpositioning/">Web Positioning</a> for the full feature surface.
+</p>

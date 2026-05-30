@@ -1,0 +1,82 @@
+<h3 id="overview">Overview</h3>
+<p>
+    <code>CustomPositioner</code> is the single contract every positioning provider implements. Its one method,
+    <code>position()</code>, places a floating element relative to an anchor and returns a <em>cleanup</em>
+    function that tears down any listeners (used by <code>tracking: 'follow'</code>). The native-first default
+    provider and every library adapter (<a href="/adapters/floating-ui-adapter/">Floating UI</a>, …) satisfy
+    this same interface, which is what lets <a href="/plugs/custompositioningregistry/">the registry</a> treat
+    them interchangeably.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Anchor_positioning">CSS Anchor Positioning</a></td>
+        <td>Baseline 2026</td>
+        <td>Placement / collision options map to <code>position-area</code> and <code>position-try</code> in the native default provider.</td>
+    </tr>
+    <tr>
+        <td><a href="https://floating-ui.com/">Floating UI</a></td>
+        <td>Library</td>
+        <td>Option names (placement, offset, flip, shift, autoUpdate) mirror Floating UI so adapters map 1:1.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+type Placement =
+    | 'top' | 'top-start' | 'top-end'
+    | 'right' | 'right-start' | 'right-end'
+    | 'bottom' | 'bottom-start' | 'bottom-end'
+    | 'left' | 'left-start' | 'left-end'
+    | 'auto';
+
+type CollisionStrategy = 'flip' | 'shift' | 'hide' | 'none';
+
+interface PositionOptions {
+    placement: Placement;
+    collision?: CollisionStrategy[];   // ordered fallback pipeline
+    strategy?: 'inline' | 'escape';    // 'escape' composes Web Portals (top layer)
+    offset?: number;                   // gap from the anchor edge (px)
+    tracking?: 'static' | 'follow';    // recompute on scroll / resize
+    arrow?: boolean;
+}
+
+type Cleanup = () => void;
+
+interface CustomPositioner {
+    // Place `anchored` relative to `anchor`; returns a teardown for `tracking: 'follow'`.
+    position(anchor: Element, anchored: HTMLElement, options: PositionOptions): Cleanup;
+}
+{% endhighlight %}
+
+<h3 id="implementing">Implementing a Provider</h3>
+{% highlight "typescript" %}
+// A library adapter is a thin class that fulfils the one contract.
+class FloatingUIAdapter implements CustomPositioner {
+    position(anchor, anchored, options) {
+        const update = () => computePosition(anchor, anchored, {
+            placement: options.placement,
+            middleware: toMiddleware(options),  // flip(), shift(), offset()…
+        }).then(({ x, y }) => Object.assign(anchored.style, {
+            left: `${x}px`, top: `${y}px`,
+        }));
+        return options.tracking === 'follow'
+            ? autoUpdate(anchor, anchored, update)  // returns its own cleanup
+            : (update(), () => {});
+    }
+}
+{% endhighlight %}
+
+<h3 id="design-decisions">Design Decisions</h3>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+    <li><strong>One method, one cleanup.</strong> A minimal surface keeps adapters trivial and makes the native default as cheap as a stylesheet write.</li>
+    <li><strong>Option vocabulary mirrors the platform.</strong> Reusing CSS Anchor Positioning and Floating UI terms (placement, flip, shift, offset) means no translation layer to learn.</li>
+    <li><strong>Layering is out of scope.</strong> <code>strategy: 'escape'</code> hands off to <a href="/projects/webportals/">Web Portals</a> rather than re-implementing the top layer.</li>
+</ul>
+
+<p class="text-sm text-gray-600 mt-4">
+    Registered through <a href="/plugs/custompositioningregistry/"><code>CustomPositioningRegistry</code></a>.
+    Fulfils the <a href="/intents/">Anchor Intent</a>. See <a href="/projects/webpositioning/">Web Positioning</a>.
+</p>

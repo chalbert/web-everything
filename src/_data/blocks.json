@@ -22,12 +22,175 @@
     "implementsIntent": "anchor"
   },
   {
-    "id": "validation",
-    "name": "Validation",
+    "id": "type-ahead",
+    "name": "Type-Ahead",
     "status": "draft",
     "type": "Behavior",
-    "summary": "Standard behaviors for native-like form validation in custom elements.",
-    "implementsIntent": "validation"
+    "summary": "Keyboard type-ahead navigation for listboxes, menus, selects, and trees: buffer typed characters, move focus to the matching item, then reset after an idle timeout. Moves focus — never filters.",
+    "implementsIntent": "type-ahead",
+    "sourcePath": "blocks/type-ahead/TypeAheadBehavior.ts",
+    "dependsOn": [],
+    "exports": [
+      "TypeAheadBehavior",
+      "TypeAheadOptions",
+      "TypeAheadMatching",
+      "TypeAheadIntent",
+      "TypeAheadMatchDetail"
+    ],
+    "webStandards": {
+      "ariaApgKeyboard": {
+        "status": "WAI-ARIA Authoring Practices",
+        "pattern": "Type-ahead / first-character navigation across the Listbox, Menu, Combobox, and Tree patterns",
+        "adoption": "Buffer printable keys, move focus (or aria-activedescendant) to the matching item; reset after idle timeout",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/"
+      },
+      "htmlSelectTypeAhead": {
+        "status": "Baseline",
+        "pattern": "Native <select> first-character / prefix navigation",
+        "adoption": "Mirror the platform default a custom listbox/menu would otherwise lose",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/select"
+      },
+      "keyboardEventKey": {
+        "status": "Baseline",
+        "pattern": "KeyboardEvent.key for printable-character detection",
+        "adoption": "Match single-character, non-modifier keys; ignore Arrow/Enter/Tab and modifier chords",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key"
+      }
+    },
+    "events": {
+      "typeahead-match": {
+        "description": "Fired when the buffer matches an item and focus moves to it",
+        "taxonomy": "notification",
+        "detail": { "query": "string", "matched": "HTMLElement" },
+        "bubbles": true,
+        "cancelable": false
+      },
+      "typeahead-nomatch": {
+        "description": "Fired when the buffer matches no item (focus is unchanged)",
+        "taxonomy": "notification",
+        "detail": { "query": "string" },
+        "bubbles": true,
+        "cancelable": false
+      },
+      "typeahead-reset": {
+        "description": "Fired when the character buffer is cleared after the idle timeout",
+        "taxonomy": "notification",
+        "detail": { "query": "string" },
+        "bubbles": true,
+        "cancelable": false
+      }
+    },
+    "designDecisions": {
+      "moveFocusNotFilter": {
+        "description": "Type-ahead moves focus to an existing item; it never removes or hides items.",
+        "rationale": "Distinguishes the pattern from combobox autocomplete/filtering (aria-autocomplete='list'); preserves the full item set and mirrors the native <select> behavior."
+      },
+      "resetTimeout": {
+        "description": "The accumulated character buffer clears after an idle timeout, defaulting to 500ms.",
+        "rationale": "Matches the WAI-ARIA APG recommendation and native <select> convention; configurable via type-ahead-reset."
+      },
+      "behaviorComposition": {
+        "description": "Implemented as a CustomAttribute behavior attached to an existing container, composing with Composite Widget rather than absorbing it.",
+        "rationale": "Roving-tabindex / aria-activedescendant focus management is orthogonal — type-ahead only decides WHICH item should receive focus and delegates the actual focus move when a composite-widget container is present."
+      }
+    },
+    "traits": [
+      {
+        "name": "withPrefixMatching",
+        "description": "Accumulate typed characters into a prefix buffer and match item labels by prefix",
+        "intentDimension": "type-ahead.matching.prefix"
+      },
+      {
+        "name": "withSameLetterCycling",
+        "description": "A repeated single key cycles focus through items starting with that character",
+        "intentDimension": "type-ahead.matching.cycle"
+      },
+      {
+        "name": "withWrapAround",
+        "description": "Wrap focus to the start of the collection when matching passes the last item",
+        "intentDimension": "type-ahead.wrap.wrap"
+      },
+      {
+        "name": "withTimeoutReset",
+        "description": "Clear the character buffer after an idle timeout (default 500ms)",
+        "intentDimension": "type-ahead.reset.debounced"
+      }
+    ]
+  },
+  {
+    "id": "validation",
+    "name": "Validation",
+    "status": "concept",
+    "type": "Protocol",
+    "summary": "Conformance reference for form validation interop. Defines observable states/events/contexts per level (control/group/form/nested); three conformance tiers; optional feature bundles; DI-replaceable concerns. Implementations from different creators become swappable (L1) and combinable (L2).",
+    "implementsIntent": "validation",
+    "webStandards": [
+      {
+        "standard": "Constraint Validation API",
+        "role": "Native validity reporting. ElementInternals.setValidity() is the conformance seam: carries merged validity + anchor element for native focus. Validation composes it at L0/L1.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Guides/Constraint_validation"
+      },
+      {
+        "standard": "ARIA Form Semantics",
+        "role": "aria-invalid (error level only), aria-describedby/aria-errormessage (message anchoring), aria-live (error summary region), role=alert (error summary role).",
+        "reference": "https://www.w3.org/WAI/tutorials/forms/validation/"
+      },
+      {
+        "standard": ":user-invalid / :user-valid Pseudo-classes",
+        "role": "Native styling of invalid state only after user touch/submit. Baseline Oct 2023. Maps to visibility: touched | submitted intent.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/:user-invalid"
+      }
+    ],
+    "traits": [
+      {
+        "name": "withValidity",
+        "description": "Adds merged-validity tracking (idle/pending/valid/invalid) from independent sources with version tokens. Swappable rule engine concern (native/schema/async/manual)."
+      },
+      {
+        "name": "withInteractionState",
+        "description": "Tracks dirty (vs baseline), touched, focused, submitted states. Observable for display gating per visibility intent."
+      },
+      {
+        "name": "withDirtyCheck",
+        "description": "Compares current value to baseline. Swappable strategy: strict ===, deep equal, normalized, custom comparator."
+      },
+      {
+        "name": "withChangeDetection",
+        "description": "Detects value changes and increments version token. Swappable: event listeners, signal subscriptions, polling. The event-driven vs state-derived choice collapses here."
+      },
+      {
+        "name": "withAsyncOrchestration",
+        "description": "Debounce, AbortController, version tagging, stale-result dropping. Enables pending aggregation and submit-await."
+      },
+      {
+        "name": "withErrorSummary",
+        "description": "Form-level aggregate list (GOV.UK pattern): DOM-ordered, linked to fields, focused on submit-blocked, verbatim parity with inline messages."
+      },
+      {
+        "name": "withDisplayDecision",
+        "description": "Applies visibility intent gate (immediate/dirty/touched/submitted) and reward-early/punish-late policy to show/hide messages per severity."
+      }
+    ],
+    "events": [
+      "value-input",
+      "value-commit",
+      "focus",
+      "blur",
+      "validate-start",
+      "validate-end",
+      "validity-changed",
+      "became-valid",
+      "became-invalid",
+      "message-enter",
+      "message-exit",
+      "message-pulse",
+      "commit-state-changed",
+      "baseline-change",
+      "submit-attempt",
+      "submit-blocked",
+      "submit-allowed",
+      "focus-moved-to-summary"
+    ]
   },
   {
     "id": "resource-loader",

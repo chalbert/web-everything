@@ -1,0 +1,49 @@
+# Conventions — Naming, Glossary, Code Style
+
+> Tier-1 reference. Read when naming anything, writing code, or adding glossary terms.
+> Canonical naming authority for **both** Web Everything and Frontier UI.
+
+## Naming Conventions
+
+### Attributes
+- **Component properties**: single-word or concatenated lowercase (`multiple`, `autofocus`).
+- **Behavior attributes**: colon-namespaced (`layout:grid`) when a Web Behavior attaches functionality.
+- **Event behaviors**: `namespace:event` (e.g. `on:click`) to bind interactions to abstract Actions.
+  - The attribute **value** is the **Action ID** (`save`, `next`).
+  - Pass static data with `arg-[name]` attributes (e.g. `arg-id="123"`).
+- ❌ Avoid hyphenated attributes (`allow-multiple`) except when mirroring `aria-*` / `data-*`.
+
+### Code identifiers
+- **Classes**: PascalCase — `SimpleStore`, `CallParser`.
+- **Functions/variables**: camelCase — `createStore`, `parsedResult`.
+- **File names**: kebab-case — `simple-store.njk`, `on-event`.
+- **Constants**: SCREAMING_CASE — `DEFAULT_OPTIONS`.
+
+### Domain-specific patterns (machine-checked by `check:standards`)
+- **Traits**: `with[Capability]` — `withSortable`, `withDraggable`. ❌ Never `use[Capability]` (reserved for React Hooks).
+- **Registries**: `Custom[Name]Registry` — `CustomStoreRegistry`.
+- **Implementations**: interfaces `Implemented[Name]` (`ImplementedStore`); definitions `[Name]Definition` (`StoreDefinition`).
+- **Injectors**: domains start with `@` (`@web-intents`, `@date/core`). Use the provider syntax from the Web Injectors spec for defaults/fallbacks.
+
+## Glossary Philosophy (`src/_data/semantics.json`)
+- **Term first**: identify the abstract concept (`Action`, `Layout`), not the project artifact (`Action Intent`).
+- Each entry: **Term** (general web/UI concept), **Definition** (universal explanation), **Usage** (the Web Everything implementation, e.g. "standardized by Web Intents").
+- Any new term introduced by a block/plug/intent **must** be added to `semantics.json`. `check:standards` flags terms used in descriptions but missing here.
+
+## TypeScript
+- Strict mode. Export types alongside implementations.
+- `#privateFields` for truly private members. Prefer interfaces over type aliases for object shapes.
+- Each module has an `index.ts` re-exporting its public API.
+
+## JSDoc
+Add JSDoc to all public APIs (`@param`, `@returns`, `@example`). Keep examples concise.
+
+## Icons (SVG)
+Canonical template: `src/assets/icons/_template.svg`.
+- **Canvas**: `viewBox="0 0 128 128"`. **Background**: rounded rect `rx="30"` at `x=14 y=14 w=100 h=100`, fill Slate-50 `#f8fafc`. Center content in the ~84×84 safe area.
+- **Depth**: `filter="url(#floatShadow)"` on the main `<g>`. **Strokes**: min `stroke-width="6"`. Prefer primitive shapes.
+- **Semantic color map** (gradients, top-left → bottom-right):
+  - Red `@web-intents` Action/Behavior (`#ef4444`→`#b91c1c`)
+  - Indigo `@web-states` Data/Store (`#818cf8`→`#4f46e5`)
+  - Purple `@web-injectors` Structure/Wiring (`#c084fc`→`#9333ea`)
+  - Sky `@web-plugs` Utilities/Polyfills (`#38bdf8`→`#0284c7`)

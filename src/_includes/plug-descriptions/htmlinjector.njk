@@ -14,18 +14,24 @@
 
 <h3 id="interface">Interface</h3>
 {% highlight "typescript" %}
-class HTMLInjector {
+class HTMLInjector extends Injector {
     // Parent injector in the hierarchy
     readonly parentInjector: HTMLInjector | null;
 
-    // Get a registry or value by name
-    get(name: string): any;
+    // Get a provider by name (synchronous, loaded providers only)
+    get(name: string): any | undefined;
 
-    // Register a value or registry
-    register(name: string, value: any): void;
+    // Set a provider eagerly
+    set(name: string, provider: any): this;
 
-    // Query for a consumable value
-    consume(path: string, consumer: Node): Consumable;
+    // Register a lazy-loaded provider (loader called on first consume)
+    register(name: string, loader: () => Promise<any>): this;
+
+    // Consume a provider — resolves through the injector hierarchy
+    consume(name: string, consumer: Node): Promise<any>;
+
+    // Check if a consumer node is within this injector's scope
+    isQuerierValid(querier: Node): boolean;
 }
 {% endhighlight %}
 

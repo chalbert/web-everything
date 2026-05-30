@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- Gradients: Emerald for the floating surface, Slate for the anchor -->
+    <linearGradient id="posFloatGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <linearGradient id="posAnchorGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#94a3b8" />
+      <stop offset="100%" stop-color="#475569" />
+    </linearGradient>
+    <filter id="posFloatShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.22"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc" />
+
+  <!-- Anchor element (the reference) -->
+  <rect x="34" y="74" width="34" height="26" rx="6" fill="url(#posAnchorGrad)" />
+
+  <!-- Tether: connector from anchor edge to the floating surface -->
+  <line x1="60" y1="74" x2="78" y2="50" stroke="#059669" stroke-width="4" stroke-linecap="round" stroke-dasharray="2 7" />
+
+  <!-- Floating surface (the anchored element), offset to top-end -->
+  <g filter="url(#posFloatShadow)">
+    <rect x="62" y="30" width="40" height="30" rx="8" fill="url(#posFloatGrad)" stroke="#059669" stroke-width="4" />
+    <!-- caret pointing back toward the anchor -->
+    <path d="M70 60 L78 60 L66 70 Z" fill="url(#posFloatGrad)" stroke="#059669" stroke-width="3" stroke-linejoin="round" />
+    <!-- content lines -->
+    <rect x="69" y="39" width="26" height="4" rx="2" fill="#fff" fill-opacity="0.9" />
+    <rect x="69" y="48" width="18" height="4" rx="2" fill="#fff" fill-opacity="0.7" />
+  </g>
+</svg>

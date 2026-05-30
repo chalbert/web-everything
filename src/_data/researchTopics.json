@@ -130,5 +130,27 @@
     "relatedBlocks": [],
     "relatedPlugs": ["webregistries", "webinjectors", "webcontexts", "webcomponents"],
     "relatedProject": "webinjectors"
+  },
+  {
+    "id": "validation-meta-intent-composition",
+    "title": "Validation as Composition of Meta-Intents",
+    "status": "open",
+    "summary": "Discovering that validation's core concerns (async lifecycle, severity vocabulary, error handling) are universal patterns already in the repo (Loader, Feedback, Message, Reliability). Validation composes these shared metas rather than redefining them—a pattern applicable to any standard with optional features.",
+    "dateOpened": "2026-05-30",
+    "tags": ["validation", "composition", "meta-intents", "interop", "design-pattern"],
+    "relatedBlocks": ["validation"],
+    "relatedPlugs": [],
+    "relatedProject": "webintents"
+  },
+  {
+    "id": "volar-typescript7-compatibility",
+    "title": "Volar & TypeScript 7 (Corsa/tsgo) Compatibility",
+    "status": "open",
+    "summary": "Researching how Volar.js and Vue language tools will interact with TypeScript 7's native Go rewrite (Project Corsa / tsgo). Covers the Corsa IPC-based API surface, the loss of TSServer plugin support, the viability of writing Volar language plugins in Go or native code, performance profiles and bottlenecks of Volar-based language servers, and potential IPC/WASM/FFI communication patterns between native analysis engines and Volar's Node.js-based framework.",
+    "dateOpened": "2026-02-26",
+    "tags": ["volar", "typescript", "tsgo", "corsa", "language-server", "ipc", "wasm", "performance", "go", "tooling"],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webtooling"
   }
 ]

@@ -2,7 +2,7 @@
   {
     "id": "customregistry",
     "name": "CustomRegistry",
-    "status": "implemented",
+    "status": "active",
     "type": "Global",
     "summary": "Abstract base class for all scoped registries, standardizing API for storing and retrieving definitions with inheritance support.",
     "projects": ["webregistries"]
@@ -10,7 +10,7 @@
   {
     "id": "htmlregistry",
     "name": "HTMLRegistry",
-    "status": "implemented",
+    "status": "active",
     "type": "Global",
     "summary": "Specialized abstract registry for storing constructors bound to DOM nodes, handling node upgrade and downgrade lifecycles.",
     "projects": ["webregistries"]
@@ -18,7 +18,7 @@
   {
     "id": "customelementregistry-patch",
     "name": "CustomElementRegistry",
-    "status": "implemented",
+    "status": "active",
     "type": "Patch",
     "summary": "Replaces native window.customElements with an extended version supporting scoped registries and inheritance.",
     "projects": ["webregistries"],
@@ -27,7 +27,7 @@
   {
     "id": "injectorroot",
     "name": "InjectorRoot",
-    "status": "implemented",
+    "status": "active",
     "type": "Global",
     "summary": "Root container for dependency injection, handling the map of all active injectors in the DOM tree.",
     "projects": ["webinjectors"]
@@ -35,24 +35,40 @@
   {
     "id": "htmlinjector",
     "name": "HTMLInjector",
-    "status": "implemented",
+    "status": "active",
     "type": "Global",
     "summary": "Injector instance bound to a specific DOM node, providing hierarchical dependency resolution.",
     "projects": ["webinjectors"]
   },
   {
+    "id": "moduleinjector",
+    "name": "ModuleInjector",
+    "status": "active",
+    "type": "Global",
+    "summary": "Module-scoped injector for ES Module dependency injection, where any consumer can access providers since module scope is not spatially constrained.",
+    "projects": ["webinjectors"]
+  },
+  {
+    "id": "injectablemodule",
+    "name": "InjectableModule",
+    "status": "active",
+    "type": "Global",
+    "summary": "Ergonomic facade wrapping a ModuleInjector with provide/consume/register methods and a bootstrap lifecycle for module-scoped dependency injection.",
+    "projects": ["webinjectors"]
+  },
+  {
     "id": "node-injector-patch",
     "name": "Node",
-    "status": "implemented",
+    "status": "active",
     "type": "Patch",
-    "summary": "Adds injector hierarchy methods to Node prototype: getClosestInjector(), getOwnInjector(), hasOwnInjector(), injectors(), createElement().",
+    "summary": "Adds injector hierarchy methods to Node prototype: getClosestInjector(), getOwnInjector(), hasOwnInjector(), injectors().",
     "projects": ["webinjectors"],
     "patchFile": "custom-elements/Node.patch.ts"
   },
   {
     "id": "element-innerhtml-patch",
     "name": "Element.innerHTML",
-    "status": "implemented",
+    "status": "active",
     "type": "Patch",
     "summary": "Intercepts innerHTML setter to propagate injector scope to newly created nodes.",
     "projects": ["webinjectors"],
@@ -61,7 +77,7 @@
   {
     "id": "customcontextregistry",
     "name": "CustomContextRegistry",
-    "status": "implemented",
+    "status": "active",
     "type": "Global",
     "summary": "Exposes window.customContextTypes for registering context definitions that provide hierarchical data flow.",
     "projects": ["webcontexts"]
@@ -69,7 +85,7 @@
   {
     "id": "customcontext",
     "name": "CustomContext",
-    "status": "implemented",
+    "status": "active",
     "type": "Global",
     "summary": "Base class for defining context providers with lifecycle callbacks and consumption tracking.",
     "projects": ["webcontexts"]
@@ -77,7 +93,7 @@
   {
     "id": "node-context-patch",
     "name": "Node",
-    "status": "implemented",
+    "status": "active",
     "type": "Patch",
     "summary": "Adds context methods to Node prototype: createContext(), getContext(), ensureContext(), getOwnContext(), hasContext(), hasOwnContext(), queryContext().",
     "projects": ["webcontexts"],
@@ -86,7 +102,7 @@
   {
     "id": "customelement",
     "name": "CustomElement",
-    "status": "implemented",
+    "status": "active",
     "type": "Global",
     "summary": "Base class for custom elements with enhanced lifecycle and options support.",
     "projects": ["webcomponents"]
@@ -94,7 +110,7 @@
   {
     "id": "node-clonenode-patch",
     "name": "Node.cloneNode",
-    "status": "implemented",
+    "status": "active",
     "type": "Patch",
     "summary": "Patches cloneNode to preserve Custom Elements, Custom Comments, and Custom Text Nodes with their prototypes and options.",
     "projects": ["webcomponents"],
@@ -103,7 +119,7 @@
   {
     "id": "element-insertion-patch",
     "name": "Element",
-    "status": "implemented",
+    "status": "active",
     "type": "Patch",
     "summary": "Patches DOM insertion methods (append, prepend, after, before, replaceChildren, replaceWith) for lazy element upgrade.",
     "projects": ["webcomponents"],
@@ -112,7 +128,7 @@
   {
     "id": "htmlelement-patch",
     "name": "HTMLElement Constructors",
-    "status": "implemented",
+    "status": "active",
     "type": "Patch",
     "summary": "Wraps native HTMLElement constructors to enable the dynamic registry system.",
     "projects": ["webcomponents"],
@@ -121,7 +137,7 @@
   {
     "id": "document-createelement-patch",
     "name": "Document.createElement",
-    "status": "implemented",
+    "status": "active",
     "type": "Patch",
     "summary": "Patches createElement to apply correct prototypes from the patched constructors.",
     "projects": ["webcomponents"],
@@ -130,7 +146,7 @@
   {
     "id": "documentfragment-patch",
     "name": "DocumentFragment.ownerTemplate",
-    "status": "implemented",
+    "status": "active",
     "type": "Patch",
     "summary": "Adds ownerTemplate property to DocumentFragment for template ownership tracking.",
     "projects": ["webcomponents"],
@@ -139,7 +155,7 @@
   {
     "id": "htmltemplateelement-patch",
     "name": "HTMLTemplateElement.content",
-    "status": "implemented",
+    "status": "active",
     "type": "Patch",
     "summary": "Patches the content getter to support enhanced template functionality.",
     "projects": ["webcomponents"],
@@ -148,7 +164,7 @@
   {
     "id": "customattributesregistry",
     "name": "CustomAttributesRegistry",
-    "status": "implemented",
+    "status": "active",
     "type": "Global",
     "summary": "Exposes window.customAttributes, monitoring DOM for attribute changes and facilitating upgrade of attributes into behaviors.",
     "projects": ["webbehaviors"]
@@ -156,7 +172,7 @@
   {
     "id": "customattribute",
     "name": "CustomAttribute",
-    "status": "implemented",
+    "status": "active",
     "type": "Global",
     "summary": "Base class for creating behaviors, similar to HTMLElement, with lifecycle callbacks for attribute-based components.",
     "projects": ["webbehaviors"]
@@ -164,7 +180,7 @@
   {
     "id": "customattributeparserregistry",
     "name": "CustomAttributeParserRegistry",
-    "status": "implemented",
+    "status": "active",
     "type": "Global",
     "summary": "Allows defining parsing logic for attribute values, enabling custom syntax and transformations.",
     "projects": ["webexpressions"]
@@ -172,7 +188,7 @@
   {
     "id": "customcommentregistry",
     "name": "CustomCommentRegistry",
-    "status": "implemented",
+    "status": "active",
     "type": "Global",
     "summary": "Enables attaching behavior to comment nodes, useful for structural directives like virtual elements.",
     "projects": ["webdirectives"]
@@ -180,7 +196,7 @@
   {
     "id": "customcomment",
     "name": "CustomComment",
-    "status": "implemented",
+    "status": "active",
     "type": "Global",
     "summary": "Base class for enhanced comments with lifecycle callbacks for comment-based directives.",
     "projects": ["webdirectives"]
@@ -188,7 +204,7 @@
   {
     "id": "customcommentparserregistry",
     "name": "CustomCommentParserRegistry",
-    "status": "implemented",
+    "status": "active",
     "type": "Global",
     "summary": "Parses comment content to identify and upgrade custom comments into active directives.",
     "projects": ["webdirectives"]
@@ -204,7 +220,7 @@
   {
     "id": "customtextnoderegistry",
     "name": "CustomTextNodeRegistry",
-    "status": "implemented",
+    "status": "active",
     "type": "Global",
     "summary": "Allows defining parsers for text content, enabling custom template syntax like Mustache-style interpolation.",
     "projects": ["webexpressions"]
@@ -212,7 +228,7 @@
   {
     "id": "customtextnode",
     "name": "CustomTextNode",
-    "status": "implemented",
+    "status": "active",
     "type": "Global",
     "summary": "Base class for enhanced text nodes with reactive binding capabilities.",
     "projects": ["webexpressions"]
@@ -220,7 +236,7 @@
   {
     "id": "customtextnodeparserregistry",
     "name": "CustomTextNodeParserRegistry",
-    "status": "implemented",
+    "status": "active",
     "type": "Global",
     "summary": "Manages parsers that can interpret text node content and transform it into reactive components.",
     "projects": ["webexpressions"]
@@ -228,7 +244,7 @@
   {
     "id": "customtextnodeparser",
     "name": "CustomTextNodeParser",
-    "status": "implemented",
+    "status": "active",
     "type": "Global",
     "summary": "Abstract base class for text node parsers that detect expression syntax and split text into static and expression segments.",
     "projects": ["webexpressions"]
@@ -236,7 +252,7 @@
   {
     "id": "customexpressionparserregistry",
     "name": "CustomExpressionParserRegistry",
-    "status": "implemented",
+    "status": "active",
     "type": "Global",
     "summary": "Registry for expression parsers, standardizing how strings are parsed into executable expressions.",
     "projects": ["webexpressions"]
@@ -244,7 +260,7 @@
   {
     "id": "customexpressionparser",
     "name": "CustomExpressionParser",
-    "status": "implemented",
+    "status": "active",
     "type": "Global",
     "summary": "Standardizes how strings are parsed into executable expressions for use in data bindings.",
     "projects": ["webexpressions"]
@@ -272,5 +288,21 @@
     "type": "Global",
     "summary": "Registry for state management stores, enabling reactive data flow patterns.",
     "projects": ["webstates"]
+  },
+  {
+    "id": "custompositioningregistry",
+    "name": "CustomPositioningRegistry",
+    "status": "concept",
+    "type": "Global",
+    "summary": "Exposes window.customPositioning for registering named positioning providers (native CSS Anchor, Floating UI, …) so any component delegates anchoring to one shared engine resolved through the injector chain.",
+    "projects": ["webpositioning"]
+  },
+  {
+    "id": "custompositioner",
+    "name": "CustomPositioner",
+    "status": "concept",
+    "type": "Global",
+    "summary": "Base contract a positioning provider implements — position(anchor, anchored, options) returning a cleanup. Satisfied alike by the native-first default and by every library adapter.",
+    "projects": ["webpositioning"]
   }
 ]

@@ -60,6 +60,21 @@
         "title": "Framer Motion",
         "url": "https://www.framer.com/motion/",
         "context": "Inspiration for declarative animation bindings."
+      },
+      {
+        "title": "CSS Anchor Positioning",
+        "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Anchor_positioning",
+        "context": "Native placement + collision fallback (Baseline 2026). Default engine for the Anchor Intent / Web Positioning."
+      },
+      {
+        "title": "Floating UI",
+        "url": "https://floating-ui.com/",
+        "context": "Reference positioning engine (placement, flip/shift/offset middleware, autoUpdate). Bridged via the Floating UI Adapter."
+      },
+      {
+        "title": "Popover API",
+        "url": "https://developer.mozilla.org/en-US/docs/Web/API/Popover_API",
+        "context": "Top-layer rendering and light dismiss (Baseline 2024). Composes with anchoring; layering is orthogonal to positioning."
       }
     ]
   },

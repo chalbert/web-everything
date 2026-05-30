@@ -11,8 +11,38 @@
   },
   {
     "term": "Anchor",
-    "definition": "A positioning reference point that allows an element to place itself relative to another element (the anchor), handling collision and flipping.",
-    "usage": "Standardized by Anchor Intent (CSS Anchor Positioning)."
+    "definition": "The reference element a floating element positions itself relative to. Also called the anchor element.",
+    "usage": "Standardized by Anchor Intent (CSS Anchor Positioning <code>anchor-name</code>/<code>position-anchor</code>). The Anchored Element tethers to it."
+  },
+  {
+    "term": "Anchored Element",
+    "definition": "The floating element (tooltip, popover, menu) positioned relative to an anchor element. Maps to CSS Anchor Positioning's 'anchored element'.",
+    "usage": "Standardized by Anchor Intent; positioned by a Positioning Provider via the Web Positioning plug."
+  },
+  {
+    "term": "Placement",
+    "definition": "The preferred side and alignment of an anchored element relative to its anchor, on a 12-way grid (side × start/center/end) plus an automatic option.",
+    "usage": "The <code>placement</code> dimension of the Anchor Intent. Mirrors CSS <code>position-area</code> and Floating UI placement."
+  },
+  {
+    "term": "Collision",
+    "definition": "Detection of viewport or clipping-ancestor overflow, and the fallback response that keeps an anchored element visible.",
+    "usage": "The <code>collision</code> dimension of the Anchor Intent: an ordered pipeline of <code>flip</code>/<code>shift</code>/<code>hide</code>/<code>none</code>."
+  },
+  {
+    "term": "Flip",
+    "definition": "A collision strategy that moves the anchored element to the opposite side of the anchor when the preferred placement overflows.",
+    "usage": "A value of the Anchor Intent <code>collision</code> pipeline. Maps to CSS <code>position-try</code> and Floating UI <code>flip()</code>."
+  },
+  {
+    "term": "Tether",
+    "definition": "The live binding that keeps an anchored element positioned relative to its anchor as the page scrolls, resizes, or mutates.",
+    "usage": "Established by a Positioning Provider when <code>tracking: 'follow'</code>; returns a cleanup that detaches the tether."
+  },
+  {
+    "term": "Positioning Provider",
+    "definition": "A registered engine that computes placement for anchored elements, satisfying the CustomPositioner contract (native CSS Anchor, Floating UI adapter, etc.).",
+    "usage": "Registered in CustomPositioningRegistry and resolved through the injector chain. See Web Positioning."
   },
   {
     "term": "aria-current",
@@ -135,8 +165,8 @@
   },
   {
     "term": "Input",
-    "definition": "Standardization of data entry interfaces, including affordances, privacy masking, virtual keyboard types, and validation feedback.",
-    "usage": "Standardized by Input Intent."
+    "definition": "Standardization of data entry interfaces, including affordances, privacy masking, virtual keyboard types, and visual status rendering. Status renders the DisplayDecision from Validation Intent (see OP-21).",
+    "usage": "Standardized by Input Intent. The <code>status</code> dimension visually presents validity state from Validation Intent; there is one source of truth for field state."
   },
   {
     "term": "Interaction",
@@ -221,7 +251,7 @@
   {
     "term": "Positioning",
     "definition": "Declarative strategies for placing elements relative to the viewport or other elements.",
-    "usage": "Standardized by Layout and Anchor logic."
+    "usage": "Standardized by Layout (regions) and the Anchor Intent (tethered surfaces). Element-relative anchoring is delegated to a Positioning Provider via the Web Positioning plug."
   },
   {
     "term": "Prefetching",
@@ -324,6 +354,11 @@
     "usage": "Common term across UI libraries. With Invoker Commands, triggers use <code>commandfor</code> attribute."
   },
   {
+    "term": "Type-Ahead",
+    "definition": "A keyboard navigation pattern where typed characters accumulate into a buffer that moves focus to the first item whose label matches; the buffer resets after an idle timeout. Distinct from filtering — items are never removed.",
+    "usage": "Standardized by Type-Ahead Intent and the Type-Ahead block. Consumed by Droplist and composes with Composite Widget."
+  },
+  {
     "term": "Typography",
     "definition": "The abstraction of visual text hierarchy (Headline, Body, Caption) from semantic HTML elements.",
     "usage": "Standardized by Typography Intent."
@@ -412,5 +447,55 @@
     "term": "Declarative Shadow DOM",
     "definition": "The <code>&lt;template shadowrootmode&gt;</code> pattern that allows shadow DOM content to be included in server-rendered HTML and parsed by the browser without JavaScript.",
     "usage": "Used by Web Components SSR Contract for custom elements with shadow DOM."
+  },
+  {
+    "term": "Conformance Level",
+    "definition": "The tier at which a validation implementation conforms to the Validation Intent contract. Level 0: Intent-aware. Level 1: observable states and events (swappable). Level 2: canonical shapes and DI concerns (combinable).",
+    "usage": "Standardized by Validation Intent. Conformance is defined against observable contract, never computation strategy."
+  },
+  {
+    "term": "Validity State",
+    "definition": "The four parallel regions of a validation control's state: Validity (merged + version token), Interaction (dirty/touched/focused/submitted), Commit (committed/rejected/held), Display (silent/showing-{severity}).",
+    "usage": "Defined in Validation Intent per-level vocabulary. Each region is independently observable and transitions emit events."
+  },
+  {
+    "term": "Validity Pending",
+    "definition": "An async validation state carrying a version/generation token. The token is the input's snapshot version at dispatch time; results from old versions are discarded (stale-resolve prevention).",
+    "usage": "Composes Loader Intent's pending lifecycle. Cross-cutting requirement for all async validation systems (RHF #1688, Final Form #420)."
+  },
+  {
+    "term": "Commit Policy",
+    "definition": "The validation-level dimension that defines data persistence rules: error rejects (blocks submission), warning/info commit, caution holds until user confirms.",
+    "usage": "Standardized by Validation Intent <code>level</code> dimension. Separates severity/tone from data-gating behavior."
+  },
+  {
+    "term": "Error Summary",
+    "definition": "A form-level aggregate list of all validation errors, displayed at the top (GOV.UK pattern). Ordered by DOM, linked to fields, focused on submit-blocked, with verbatim parity to inline messages.",
+    "usage": "Optional feature <code>validation.feature.error-summary</code> at Conformance Level 1+. Combines with inline messages for dual-model a11y and discoverability."
+  },
+  {
+    "term": "Reward Early Punish Late",
+    "definition": "A display policy: until a field errors, show validation lazily (on blur). Once errored, flip to eager (on change) for immediate feedback. Revert to lazy on fix. A dynamic behavior (not a flat execution value) driven by interaction state.",
+    "usage": "Emerges naturally from Validation Intent's DisplayDecision gating by visibility intent. Research: Konjević, Smashing Magazine. Prevents annoying re-validation while encouraging rapid correction."
+  },
+  {
+    "term": "Dirty Check",
+    "definition": "The concern that determines whether current field value differs from its baseline (pristine state). Algorithms: strict ===, deep equal, normalized (trim/case), custom comparators.",
+    "usage": "A decomposed DI concern (<code>customValidation:dirty-check</code>). Swappable per control or app-wide. Required for interaction state tracking."
+  },
+  {
+    "term": "Change Detection",
+    "definition": "The concern that detects when a field value has changed: event listeners, signal subscriptions, polling, MutationObserver. Triggers value-input events.",
+    "usage": "A decomposed DI concern (<code>customValidation:change-detection</code>). The event-driven vs state-derived architectural choice collapses into this concern + inter-element-comms; the other 6 concerns are architecture-agnostic."
+  },
+  {
+    "term": "Severity Level",
+    "definition": "The unified semantic axis shared by Validation (<code>level</code>), Feedback (<code>severity</code>), and Message (<code>tone</code>): error (failure), caution (critical advisory), warning (advisory), info (informational), success (confirmation).",
+    "usage": "Defined across intents. Allows validation messages, toasts, and alerts to speak the same language. Replaces the triplicated vocabulary (feedback.severity / message.tone / validation.level)."
+  },
+  {
+    "term": "Dependency Graph",
+    "definition": "A <code>dependsOn</code> relation at group scope: field B depends on field A. When A changes, B is revalidated reactively. Enables cross-field and conditional validation without imperative handlers.",
+    "usage": "Optional feature <code>validation.feature.cross-field</code>. Required for password-confirm, date ranges, required-if patterns. Fixes RHF #trigger and Angular updateValueAndValidity revalidation complexity."
   }
 ]

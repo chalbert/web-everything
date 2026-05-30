@@ -43,11 +43,11 @@
 
 ## Repository inventory
 <!-- AUTO-GENERATED:inventory — run `npm run gen:inventory`; do not edit by hand -->
-- **Plugs** 35 — 31 active · 2 concept · 2 experimental
-- **Blocks** 26 — 13 active · 7 concept · 6 draft
-- **Intents** 21 — 8 concept · 13 draft
-- **Glossary terms** 83 · **Research topics** 13 (13 open)
-- **Projects** 21: webadapters, webanalytics, webbehaviors, webblocks, webcases, webcomponents, webcontexts, webdirectives, webdocs, webevents, webexpressions, webinjectors, webintents, webmanifests, webplugs, webportals, webregistries, webresources, webstates, webtraces, webtraits
+- **Plugs** 37 — 31 active · 4 concept · 2 experimental
+- **Blocks** 27 — 13 active · 8 concept · 6 draft
+- **Intents** 22 — 7 concept · 15 draft
+- **Glossary terms** 100 · **Research topics** 14 (14 open)
+- **Projects** 22: webadapters, webanalytics, webbehaviors, webblocks, webcases, webcomponents, webcontexts, webdirectives, webdocs, webevents, webexpressions, webinjectors, webintents, webmanifests, webplugs, webportals, webpositioning, webregistries, webresources, webstates, webtraces, webtraits
 <!-- /AUTO-GENERATED:inventory -->
 
 ## Commands

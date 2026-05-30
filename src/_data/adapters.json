@@ -47,7 +47,7 @@
         "id": "floating-ui-adapter",
         "name": "Floating UI Adapter",
         "status": "concept",
-        "summary": "Implements the <strong>Positioning Protocol</strong> using the Floating UI library."
+        "summary": "Bridges the <strong>Floating UI</strong> library to the <strong>Positioning plug</strong> as a provider for the <strong>Anchor Intent</strong>."
       },
       {
         "id": "mousetrap-adapter",

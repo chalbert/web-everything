@@ -1,18 +1,66 @@
 <h2>Protocol: Validation</h2>
-<p>A set of standard behaviors to bring native form validation experience to Custom Elements.</p>
+<p>An interop contract for form validation: observable states and events across control/group/form/nested levels. Enables swappable and combinable validation implementations from different creators.</p>
+
+<h3>Conformance Model</h3>
+<p>Three tiers of conformance, each building on the previous:</p>
+<ul>
+  <li><strong>Level 0 — Intent-aware:</strong> Honours UX intents (context/level/execution/visibility). Renders messages and timing correctly. No state/event contract required.</li>
+  <li><strong>Level 1 — State &amp; event conformant:</strong> Observable states (merged validity, interaction, commit, display) via native/attributed surfaces + stable-id events. Makes implementations <strong>swappable</strong> — drop one control in for another, form behaves identically.</li>
+  <li><strong>Level 2 — Shape &amp; concern conformant:</strong> Canonical hand-off shapes (ValueSnapshot, SourceResult, MergedValidity, InteractionState, DisplayDecision) normative. DI-replaceable concerns (dirty-check, change-detection, validity-computation, async-orchestration, etc.). Makes <strong>concerns combinable</strong> across creators.</li>
+</ul>
+
 <h3>Key Concepts</h3>
 <ul>
-  <li>
-    <strong>Constraint Integration:</strong>
-    Maps internal logic to
-    <code>ElementInternals.setValidity()</code>.</li>
-  <li>
-    <strong>State Reflection:</strong>
-    Automatically reflects validation state to attributes like
-    <code>aria-invalid</code>
-    and CSS pseudo-classes
-    <code>:invalid</code>.</li>
-  <li>
-    <strong>Message Standardization:</strong>
-    Unified error message distribution system.</li>
+  <li><strong>Version Token (async):</strong> Each async validation carries a generation token. Results from old input versions are dropped (prevents stale-resolve clobbering — RHF #1688, Final Form #420).</li>
+  <li><strong>Merged Validity:</strong> Validity is computed from independent sources (native/schema/async/manual) with a declared precedence order. One source never overwrites another (prevents "server error wiped on blur" — Formik #706, RHF #9982).</li>
+  <li><strong>Commit Policy:</strong> Severity level defines data persistence: error rejects (blocks submission), warning/info commit, caution holds until user confirms.</li>
+  <li><strong>Reward Early Punish Late:</strong> Display gates by interaction state. Until errored: validate lazily (on blur). Once errored: flip to eager (on change). On fix: revert to lazy. A dynamic policy, not a static execution value.</li>
+  <li><strong>Error Summary (GOV.UK):</strong> Form-level aggregate, ordered by DOM, linked to fields, focused on submit-blocked, with verbatim parity to inline messages. Dual model: summary + inline messages.</li>
+  <li><strong>Meta-Intent Composition:</strong> Validation is not standalone. It composes Loader (async lifecycle + version tokens + aggregation), unified severity vocabulary (with Feedback/Message intents), and Reliability (mechanism failure vs input invalidity split).</li>
 </ul>
+
+<h3>Per-Level Vocabulary</h3>
+<ul>
+  <li><strong>Control:</strong> Four parallel state regions: Validity (merged from sources, with version token), Interaction (dirty/touched/focused/submitted), Commit (committed/rejected/held), Display (silent/showing-{severity}). Comprehensive event set for state transitions.</li>
+  <li><strong>Group:</strong> Aggregate validity rollup, completion tracking, anchor-to-first-error member, reactive dependency graph (dependsOn) for cross-field validation.</li>
+  <li><strong>Form:</strong> Submission lifecycle (idle → validating → blocked/submitting → submitted/failed). Error summary (GOV.UK pattern). Server reconciliation (manual source injection by path). Root/global error distinction.</li>
+  <li><strong>Nested-Form:</strong> Bubbling policy (participating/isolated), field arrays with key-based identity, wizard step gating, back-nav value retention.</li>
+</ul>
+
+<h3>Decomposed Concerns (DI-Replaceable)</h3>
+<p>Validation decomposes into 8 swappable concerns, resolvable via <code>customValidation:&lt;concern&gt;</code>:</p>
+<ul>
+  <li><code>change-detection</code>: Detects value changes (event, signal, polling).</li>
+  <li><code>dirty-check</code>: Compares current to baseline (strict, deep, normalized, custom).</li>
+  <li><code>inter-element-comms</code>: Control↔group↔form messages (DOM events, bus, signals).</li>
+  <li><code>validity-computation</code>: Rule engine (native CVAPI, Standard Schema, custom).</li>
+  <li><code>async-orchestration</code>: Debounce, cancellation, version tagging, aggregation.</li>
+  <li><code>message-resolution</code>: Validity code → string (native localized, i18n, schema message).</li>
+  <li><code>display-placement</code>: Message rendering (inline, summary, toast).</li>
+  <li><code>focus-management</code>: Focus on error (summary, first field, none).</li>
+</ul>
+
+<h3>Optional Features (Trait-like Bundles)</h3>
+<ul>
+  <li><code>async</code>: Pending + version token + debounce + aggregation.</li>
+  <li><code>cross-field</code>: dependsOn graph, reactive revalidation.</li>
+  <li><code>conditional</code>: Dynamic required-if, discriminated union schemas.</li>
+  <li><code>field-array</code>: Repeated sections, key-based identity, row add/remove/reorder.</li>
+  <li><code>wizard</code>: Step gating, per-step validation, forward/back nav.</li>
+  <li><code>error-summary</code>: Form-level summary (GOV.UK dual model).</li>
+  <li><code>severity</code>: warning/caution/info beyond binary error (Level 1+).</li>
+  <li><code>schema</code>: Standard Schema adapter (vendor-neutral rule input).</li>
+  <li><code>server-reconciliation</code>: Manual source + server error merging.</li>
+</ul>
+
+<h3>Interface with Platform</h3>
+<ul>
+  <li><code>ElementInternals.setValidity()</code>: Native conformance seam. Carries merged validity flag + anchor element for focus. Validation composes it.</li>
+  <li><code>aria-invalid</code>, <code>aria-describedby</code>, <code>aria-live</code>: a11y contracts. Only error level sets <code>aria-invalid</code>; warning/caution/info are advisory-only.</li>
+  <li><code>:user-invalid/:user-valid</code>: Native styling gate (touched/submitted). Maps to visibility intent.</li>
+</ul>
+
+<h3>Integration Path</h3>
+<p>Implementations are L0-conformant by default (honouring intents). To reach L1 (swappable), surface observable states via documented attributes (<code>data-pending</code>, <code>data-dirty</code>, <code>data-severity</code>, etc.) and emit stable-id events with detail shapes. To reach L2 (combinable), normalize hand-off shapes and register decomposed concerns via DI.</p>
+
+<p><strong>Research:</strong> Assessment report at <a href="/reports/2026-05-30-form-validation-standard-assessment/">2026-05-30 Form Validation Standard Assessment</a>. Spec versioning + adherence detection at <a href="/reports/2026-05-30-validation-spec-versioning-adherence/">2026-05-30 Validation Spec Versioning</a>.</p>

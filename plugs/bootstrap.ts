@@ -42,6 +42,7 @@ import { registerRouter } from '../blocks/router/registerRouter';
 import { registerTransient } from '../blocks/transient/registerTransient';
 import { registerNavigation } from '../blocks/navigation/registerNavigation';
 import { registerForEach } from '../blocks/for-each/registerForEach';
+import { registerTypeAhead } from '../blocks/type-ahead/registerTypeAhead';
 
 // Extend Window interface
 declare global {
@@ -201,6 +202,9 @@ registerNavigation(window.attributes);
 
 // Register for-each directive
 registerForEach(window.attributes);
+
+// Register type-ahead behavior (type-ahead)
+registerTypeAhead(window.attributes);
 
 console.log('[Web Everything] Bootstrap complete');
 console.log('[Web Everything] Globals available: injectors, contexts, stores, attributes, customTextNodeParsers, customTextNodes');

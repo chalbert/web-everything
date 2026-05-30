@@ -1,0 +1,122 @@
+<h2>The Discovery</h2>
+
+<p>While designing the Validation Intent, a pattern emerged: <strong>validation's core concerns are not validation-specific</strong>. They already exist in Web Everything's shared intents. Rather than redefine them, Validation should <strong>compose</strong> them.</p>
+
+<p>This applies beyond validation. Any standard with optional features and cross-cutting concerns can use the same composition pattern.</p>
+
+<h2>Three Shared Meta-Intents</h2>
+
+<h3>1. Loader Intent — Async Lifecycle</h3>
+
+<p><strong>Today:</strong> Loader covers pending state (idle/pending/success/error/stale), debounce timing, strategy (optimistic/soft/hard/replacement), scope (element/region/viewport).</p>
+
+<p><strong>Validation's need:</strong> Async validators need a <strong>version/generation token</strong> to prevent stale-resolve races (RHF #1688, Final Form #420). Results from old input versions should be dropped.</p>
+
+<p><strong>Enhancement:</strong> Add to Loader:</p>
+<ul>
+  <li><code>pending {version}</code> state carrying the input snapshot version at dispatch time.</li>
+  <li><strong>Hierarchy aggregation:</strong> pending if any descendant pending; allows submit gates + pending awaits.</li>
+</ul>
+
+<p><strong>Result:</strong> Validation composes Loader's async lifecycle. The version token is Loader's problem, not Validation's.</p>
+
+<h3>2. Unified Severity/Tone Vocabulary</h3>
+
+<p><strong>Today:</strong> Three silos:</p>
+<ul>
+  <li><code>feedback.severity</code> = [info, success, warning, error]</li>
+  <li><code>message.tone</code> = [neutral, positive, caution, negative]</li>
+  <li><code>validation.level</code> = [error, warning, caution, info]</li>
+</ul>
+
+<p><strong>Problem:</strong> Triplication. A form error, a toast, and an alert each speak a different language for the same semantic concept (e.g., "something went wrong").</p>
+
+<p><strong>Solution:</strong> One unified vocabulary: error (failure) / caution (critical advisory) / warning (advisory) / info (information) / success (confirmation).</p>
+
+<p><strong>Validation's twist:</strong> <code>level</code> = severity + <strong>commit policy overlay</strong>: error rejects (blocks submission), warning/info commit, caution holds until user confirms.</p>
+
+<p><strong>Result:</strong> Feedback, Message, and Validation all reference the same semantic axis. A messaging system can render any severity consistently.</p>
+
+<h3>3. Reliability Intent — Mechanism Failure vs Input Invalidity</h3>
+
+<p><strong>Today:</strong> Reliability defines error recovery (tolerance: forgivable/degraded/terminal; recovery: automatic/manual/none; fallback: skeleton/empty/previous).</p>
+
+<p><strong>Category error:</strong> Validation and Reliability both define "errors," but they're different families:</p>
+<ul>
+  <li><strong>Input-invalidity</strong> (Validation): "The user's email is malformed" or "These passwords don't match." Expected outcome. User must fix it.</li>
+  <li><strong>Mechanism failure</strong> (Reliability): "The uniqueness check timed out" or "The server is unreachable." Unexpected system problem.</li>
+</ul>
+
+<p><strong>Solution:</strong> Validation <strong>owns input-invalidity</strong>. Validation composes Reliability <strong>only for mechanism failure</strong> (e.g., async validator crashed).</p>
+
+<p><strong>Result:</strong> Two distinct error families. A form field can be "invalid input" (validation error) or "check failed—server down" (reliability error from async validator). Prevents conflation.</p>
+
+<h2>Why This Pattern Matters</h2>
+
+<h3>Avoids Duplication</h3>
+
+<p>If each standard redefines pending, severity, and error-handling, the repo accrues N copies of N concerns. Updates must happen in parallel. Bugs are replicated.</p>
+
+<p>By composing shared metas:</p>
+<ul>
+  <li>Fix the version-token bug in Loader once → all async systems (validation, action, API errors) benefit.</li>
+  <li>Change severity vocabulary once → consistent tone everywhere.</li>
+  <li>Refine error-handling policies once → better recovery across the app.</li>
+</ul>
+
+<h3>Strengthens Shared Metas</h3>
+
+<p>Validation's requirements force Loader to mature. Validation needs version tokens and aggregation. Adding those makes Loader better for all consumers (router transitions, resource loading, action pending states).</p>
+
+<p>The shared metas become more robust by serving multiple standards.</p>
+
+<h3>Generalizes to Other Standards</h3>
+
+<p>Any future standard with async operations can reuse Loader's async lifecycle. Any standard with user messaging can reuse the unified severity vocabulary. Any error scenario can reuse Reliability's recovery patterns.</p>
+
+<p>This is the Web Everything composition vision: <strong>standards are not monoliths, they are compositions of orthogonal concerns</strong>.</p>
+
+<h2>Implementation Path</h2>
+
+<h3>Phase 1 (Complete)</h3>
+
+<ul>
+  <li>✅ Enhance Loader with version token + aggregation.</li>
+  <li>✅ Unify severity vocabulary across Feedback, Message, Validation.</li>
+  <li>✅ Clarify Reliability as mechanism-failure scope.</li>
+  <li>✅ Update Validation Intent to document composition.</li>
+</ul>
+
+<h3>Phase 2 (Adapters & Tooling)</h3>
+
+<ul>
+  <li>Build L1-conformant implementations (React Hook Form, Angular, Solid adapters) demonstrating state/event contract.</li>
+  <li>Build L2-conformant implementations (schema + custom concerns via DI) demonstrating swappability.</li>
+  <li>Implement spec versioning + adherence detection (`check:validation-adherence`, runtime guards).</li>
+</ul>
+
+<h3>Phase 3 (Generalization)</h3>
+
+<ul>
+  <li>Document the composition pattern as a living research topic.</li>
+  <li>Apply the pattern to other standards requiring optional features + cross-cutting concerns.</li>
+  <li>Build tooling to detect duplication across intents (e.g., "multiple severity vocabularies detected").</li>
+</ul>
+
+<h2>Open Questions</h2>
+
+<ul>
+  <li><strong>Scope of meta-intent family:</strong> Should we explicitly catalog all meta-intents (Loader, Messaging, Reliability, …), or let them emerge organically as standards mature?</li>
+  <li><strong>Naming &amp; discovery:</strong> How should standards declare their composition (e.g., "Validation composes Loader")? Should the site have a composition graph?</li>
+  <li><strong>Version constraints:</strong> If Validation requires Loader 2.1+ for version tokens, how do we express that in capability manifests?</li>
+  <li><strong>Conflict resolution:</strong> What if two standards propose conflicting enhancements to a shared meta? (Unlikely but worth preempting.)</li>
+</ul>
+
+<h2>Key Takeaways</h2>
+
+<ol>
+  <li><strong>Validation composes three shared metas,</strong> not monolithic.</li>
+  <li><strong>The pattern generalizes:</strong> any standard can reuse Loader's async lifecycle, Messaging's severity vocabulary, or Reliability's recovery strategies.</li>
+  <li><strong>Shared metas become stronger</strong> by serving multiple standards. Validation's requirements forced Loader to mature (version tokens + aggregation).</li>
+  <li><strong>This is the Web Everything vision:</strong> standards are not independent silos. They are orchestrations of orthogonal concerns, enabling composition and reuse across the ecosystem.</li>
+</ol>

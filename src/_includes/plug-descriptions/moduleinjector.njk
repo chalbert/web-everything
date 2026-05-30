@@ -1,0 +1,52 @@
+{% raw %}
+<h3 id="overview">Overview</h3>
+<p>
+    <strong>ModuleInjector</strong> extends the base <code>Injector</code> for ES Module scope. Unlike <a href="/plugs/htmlinjector/">HTMLInjector</a> which validates consumers via DOM containment, ModuleInjector allows any consumer to access its providers because module scope is not spatially constrained.
+</p>
+
+<h3 id="key-differences">Key Differences from HTMLInjector</h3>
+<table>
+    <tr><th>Aspect</th><th>HTMLInjector</th><th>ModuleInjector</th></tr>
+    <tr>
+        <td>Target</td>
+        <td>DOM node (<code>HTMLElement | Document</code>)</td>
+        <td>ES Module (<code>import.meta</code>)</td>
+    </tr>
+    <tr>
+        <td>Consumer validation</td>
+        <td>DOM containment check</td>
+        <td>Always valid (module scope is global)</td>
+    </tr>
+    <tr>
+        <td>Hierarchy</td>
+        <td>DOM tree parent-child</td>
+        <td>Explicit parent chain</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+<pre><code class="language-typescript">class ModuleInjector extends Injector {
+    constructor(
+        target: ImportMeta,
+        parentInjector?: Injector | null
+    );
+
+    // Always returns true — module scope is not spatially constrained
+    isQuerierValid(querier: ImportMeta): boolean;
+}
+</code></pre>
+
+<h3 id="usage-example">Usage Example</h3>
+<pre><code class="language-typescript">import { ModuleInjector } from '@web-everything/webinjectors';
+
+const injector = new ModuleInjector(import.meta);
+injector.set('customContexts:config', { apiUrl: '/api' });
+
+// Any consumer can access — no DOM containment required
+const config = await injector.consume('customContexts:config', import.meta);
+</code></pre>
+
+<p class="text-sm text-gray-600 mt-4">
+    See <a href="/plugs/injectablemodule/">InjectableModule</a> for an ergonomic facade over ModuleInjector, and <a href="/projects/webinjectors/">Web Injectors</a> for the full dependency injection system.
+</p>
+{% endraw %}

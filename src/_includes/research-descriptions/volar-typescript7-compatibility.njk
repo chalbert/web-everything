@@ -1,0 +1,418 @@
+{% raw %}<h2>The Questions</h2>
+
+<ol>
+  <li>How will Volar interact with TypeScript 7.0 (the Go rewrite)? Will Volar still work?</li>
+  <li>What is the "Corsa API" that TypeScript 7 exposes? Is it IPC-based? Can external tools like Volar use it?</li>
+  <li>Could a Volar language plugin be written in Go for performance?</li>
+  <li>Are there examples of language servers that use native code (Go, Rust, C++) while integrating with Volar's framework?</li>
+  <li>What is the performance profile of Volar-based language servers? What are the known bottlenecks?</li>
+  <li>Could a Go-based analysis engine communicate with a Volar plugin via IPC/WASM/FFI?</li>
+</ol>
+
+
+<h2>1. Volar + TypeScript 7 Compatibility</h2>
+
+<h3>Current Status: Blocked on Upstream</h3>
+
+<p>Volar <strong>does not currently work with TypeScript 7 (tsgo)</strong>. The fundamental issue is that Volar relies on <strong>monkey-patching the TypeScript language service</strong> &mdash; a technique that is impossible with a statically compiled Go binary.</p>
+
+<p>The blocking dependency is tracked in two places:</p>
+
+<table>
+  <thead>
+    <tr><th>Issue</th><th>Repository</th><th>Status</th><th>What It Tracks</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><a href="https://github.com/vuejs/language-tools/issues/5381">#5381</a></td>
+      <td>vuejs/language-tools</td>
+      <td>Open</td>
+      <td>Feature request for tsgo support in Volar. Labeled <code>upstream: typescript</code> and <code>upstream: volar</code>.</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/vuejs/language-tools/discussions/5269">#5269</a></td>
+      <td>vuejs/language-tools</td>
+      <td>Open discussion</td>
+      <td>Community discussion on whether TypeScript's Go rewrite will break vue-tsc.</td>
+    </tr>
+    <tr>
+      <td><a href="https://github.com/microsoft/typescript-go/discussions/455">#455</a></td>
+      <td>microsoft/typescript-go</td>
+      <td>Open discussion</td>
+      <td>The API story for the new codebase &mdash; how external tools will integrate.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Why It's Broken</h3>
+
+<p>Volar currently integrates with TypeScript via <strong>TSServer plugins</strong>. These are JavaScript modules that run inside the same Node.js process as the TypeScript language service. Volar monkey-patches the TS language service to intercept operations on <code>.vue</code> files, transform them into virtual TypeScript code, and delegate back to TS for type checking.</p>
+
+<p>TypeScript 7 (Corsa) replaces the JavaScript-based TSServer with a <strong>Go binary that speaks LSP natively</strong>. There is no JavaScript plugin host, no monkey-patching surface, and no in-process extension mechanism. As one contributor noted on issue #5381: "We are basically stuck waiting until JS plugin interop is available, which is how Volar currently runs with the tsserver."</p>
+
+<h3>Interim Workarounds</h3>
+
+<table>
+  <thead>
+    <tr><th>Approach</th><th>Description</th><th>Trade-offs</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Side-by-side installation</strong></td>
+      <td>Install both <code>typescript</code> (6.x) and <code>@typescript/native-preview</code>. Use tsgo for type-checking, keep TS 6.x for Volar/tooling.</td>
+      <td>Official recommendation from the TypeScript team. Two TS versions in the project.</td>
+    </tr>
+    <tr>
+      <td><strong>Unofficial Vue extension</strong></td>
+      <td><a href="https://github.com/hlpmenu/vue-vscode-unofficial">hlmpn/vue-vscode-unofficial</a> runs a standalone tsserver instance with the <code>@vue/typescript</code> plugin loaded, alongside tsgo.</td>
+      <td>Less efficient than Volar (runs its own TS language server). Explicitly states "use Volar unless you are using the ts preview extension."</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Volar Team Response</h3>
+
+<p>Johnson Chu (Volar's creator) has <strong>labeled issue #5381</strong> with upstream tags but has not provided a detailed technical roadmap for tsgo integration. The issue remains open and dependent on upstream TypeScript Go development. No official timeline has been communicated.</p>
+
+
+<h2>2. The Corsa API</h2>
+
+<h3>Architecture: IPC-Based, Not In-Process</h3>
+
+<p>TypeScript 7's API is fundamentally different from the JavaScript-based "Strada" API (TypeScript 1.x&ndash;6.x). The new <strong>"Corsa" API</strong> uses <strong>inter-process communication (IPC)</strong> as its primary integration mechanism.</p>
+
+<table>
+  <thead>
+    <tr><th>Aspect</th><th>Strada (TS 1&ndash;6)</th><th>Corsa (TS 7)</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Runtime</strong></td>
+      <td>JavaScript (Node.js)</td>
+      <td>Go (native binary)</td>
+    </tr>
+    <tr>
+      <td><strong>Integration model</strong></td>
+      <td>In-process JavaScript API (<code>ts.createProgram()</code>, <code>ts.createLanguageService()</code>)</td>
+      <td>Out-of-process IPC over STDIO pipes</td>
+    </tr>
+    <tr>
+      <td><strong>Plugin model</strong></td>
+      <td>TSServer plugins (JS modules in same process)</td>
+      <td>No plugin host. LSP-based language service.</td>
+    </tr>
+    <tr>
+      <td><strong>API surface</strong></td>
+      <td>Full compiler API (~thousands of exports)</td>
+      <td>Curated subset targeting critical use cases (linting, transforms, resolution, language service embedding)</td>
+    </tr>
+    <tr>
+      <td><strong>Packages</strong></td>
+      <td><code>typescript</code></td>
+      <td><code>@typescript/ast</code> (AST node types), <code>@typescript/api</code> (Node.js IPC client)</td>
+    </tr>
+    <tr>
+      <td><strong>Sync bridge</strong></td>
+      <td>Not needed (same process)</td>
+      <td><code>@typescript/libsyncrpc</code> (Rust-based NAPI module for synchronous IPC)</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Key Technical Details</h3>
+
+<ul>
+  <li><strong>libsyncrpc</strong> is a Rust-based NAPI module (<a href="https://github.com/microsoft/libsyncrpc">github.com/microsoft/libsyncrpc</a>) that provides synchronous blocking during IPC calls from JavaScript to the Go server. It uses a MessagePack-based binary protocol with three elements: message type, name, and payload.</li>
+  <li>The IPC API prototype was scaffolded in <a href="https://github.com/microsoft/typescript-go/pull/711">PR #711</a>. The Go server runs as a child process spawned by the <code>@typescript/api</code> client, communicating over STDIO.</li>
+  <li>Objects (symbols, types, projects) are referenced by <strong>opaque IDs</strong> with a client-side registry for garbage collection.</li>
+  <li>The API supports <strong>batching</strong> to reduce round-trip overhead for bulk operations.</li>
+</ul>
+
+<h3>Can Volar Use the Corsa API?</h3>
+
+<p><strong>Not yet, and the path is unclear.</strong> The Corsa API is still a work in progress with no stable tooling integration. The TypeScript team has stated that "any tools like linters, formatters, or IDE extensions that rely on the Strada API will not work with Corsa." The curated API surface may eventually include language service embedding as a critical use case, but no concrete timeline exists for the features Volar needs (virtual file mapping, type information for non-TS files).</p>
+
+
+<h2>3. Writing Volar Plugins in Go</h2>
+
+<h3>Short Answer: Not Feasible Today</h3>
+
+<p>Volar is a <strong>Node.js/TypeScript framework</strong>. Its entire stack runs in a single Node.js process:</p>
+
+<table>
+  <thead>
+    <tr><th>Layer</th><th>Package</th><th>Language</th><th>Purpose</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Foundation</td>
+      <td><code>@volar/language-core</code></td>
+      <td>TypeScript</td>
+      <td>Virtual code generation, source mapping</td>
+    </tr>
+    <tr>
+      <td>Services</td>
+      <td><code>@volar/language-service</code></td>
+      <td>TypeScript</td>
+      <td>IntelliSense features (completions, diagnostics, hover)</td>
+    </tr>
+    <tr>
+      <td>Server</td>
+      <td><code>@volar/language-server</code></td>
+      <td>TypeScript</td>
+      <td>LSP server over JSON-RPC (IPC or sockets)</td>
+    </tr>
+    <tr>
+      <td>TS integration</td>
+      <td><code>volar-service-typescript</code></td>
+      <td>TypeScript</td>
+      <td>TypeScript language service plugin for Volar</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>Volar language plugins must implement TypeScript interfaces (<code>LanguagePlugin</code>, <code>VirtualCode</code>, etc.) and run in the same Node.js process. There is <strong>no plugin boundary</strong> that would allow a Go module to participate directly.</p>
+
+<h3>What Would Need to Change</h3>
+
+<p>For a Go-based Volar plugin to be viable, one of these would need to happen:</p>
+
+<ol>
+  <li><strong>Volar exposes an IPC-based plugin protocol</strong> &mdash; allowing out-of-process language plugins that communicate via messages rather than shared memory. This does not exist today.</li>
+  <li><strong>The Go code compiles to WASM</strong> and is loaded as a Node.js native module. This is technically possible (see Section 6) but adds complexity.</li>
+  <li><strong>The Go code compiles to a native Node.js addon</strong> via N-API, similar to how libsyncrpc works. This requires a C ABI bridge.</li>
+  <li><strong>Volar itself is rewritten</strong> (or forked) in Go. One community member in Discussion #5269 suggested "vue language tools could be ported to Go (or Rust, lol)" &mdash; but this is speculative and would be a massive undertaking.</li>
+</ol>
+
+
+<h2>4. Native Code in Language Servers: Precedents</h2>
+
+<p>Several language servers and IDE tools successfully integrate native code with higher-level frameworks:</p>
+
+<table>
+  <thead>
+    <tr><th>Tool</th><th>Native Language</th><th>Integration Pattern</th><th>Performance Gain</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>rust-analyzer</strong></td>
+      <td>Rust</td>
+      <td>Standalone Rust LSP server. No JS framework involved &mdash; entirely native.</td>
+      <td>Incremental analysis, responsive even on large codebases</td>
+    </tr>
+    <tr>
+      <td><strong>Biome</strong></td>
+      <td>Rust</td>
+      <td>Rust binary serves as both CLI tool and LSP server. No Node.js in the loop.</td>
+      <td>20x faster than ESLint + Prettier</td>
+    </tr>
+    <tr>
+      <td><strong>Oxlint</strong></td>
+      <td>Rust</td>
+      <td>Rust-based JS/TS linter. Standalone binary.</td>
+      <td>50&ndash;100x faster than ESLint</td>
+    </tr>
+    <tr>
+      <td><strong>Oso (Polar)</strong></td>
+      <td>Rust &rarr; WASM</td>
+      <td>Rust language server compiled to WASM, loaded in a VS Code extension's TypeScript host. TypeScript manages LSP connection, delegates logic to WASM module.</td>
+      <td>Native-speed policy evaluation within the VS Code extension runtime</td>
+    </tr>
+    <tr>
+      <td><strong>TypeScript 7 (tsgo)</strong></td>
+      <td>Go</td>
+      <td>Go binary communicates with Node.js clients via <code>libsyncrpc</code> (Rust-based NAPI module for sync IPC).</td>
+      <td>7&ndash;10x faster type checking</td>
+    </tr>
+    <tr>
+      <td><strong>VS Code WASM extensions</strong></td>
+      <td>Various &rarr; WASM</td>
+      <td>VS Code supports loading WASM modules in extensions (official blog posts from May/June 2024). TypeScript manages the extension lifecycle; WASM handles the heavy computation.</td>
+      <td>Varies by use case</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>Key observation:</strong> None of these examples integrate native code <em>into</em> Volar's framework. They either replace the entire language server with a native implementation or use WASM within a VS Code extension's TypeScript shell. The Oso pattern (Rust &rarr; WASM inside a TypeScript host) is the closest analogy to what a hypothetical "Go analysis engine inside a Volar plugin" would look like.</p>
+
+
+<h2>5. Volar Performance Profile</h2>
+
+<h3>Architecture Overhead</h3>
+
+<p>Volar's performance is bounded by the TypeScript language service it wraps. The Volar team has stated that "the performance of Volar can only be infinitely close to, but not faster than the vanilla TS language server."</p>
+
+<h3>Known Bottlenecks</h3>
+
+<table>
+  <thead>
+    <tr><th>Bottleneck</th><th>Cause</th><th>Severity</th><th>Mitigation</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Dual TS instances</strong></td>
+      <td>Volar v1 required both a Vue Language Server and a TypeScript language server, doubling memory usage.</td>
+      <td>Critical on large projects</td>
+      <td>Volar v1 "Takeover mode" (disable built-in TS). Volar v2 "Hybrid mode" resolves this by default.</td>
+    </tr>
+    <tr>
+      <td><strong>Virtual code generation</strong></td>
+      <td>Every <code>.vue</code> SFC is transformed into virtual TypeScript, which creates additional AST instances in memory.</td>
+      <td>Proportional to project size</td>
+      <td>Volar.js optimized core to minimize overhead. Incremental updates reduce re-generation.</td>
+    </tr>
+    <tr>
+      <td><strong>TS AST memory</strong></td>
+      <td>Each file generates expensive TS AST instances. Projects with thousands of <code>.d.ts</code> files in dependencies spike memory.</td>
+      <td>High on large monorepos</td>
+      <td>Restrict <code>tsconfig</code> includes. Use project references.</td>
+    </tr>
+    <tr>
+      <td><strong>Diagnostics latency</strong></td>
+      <td>Users reported 10&ndash;20 second delays for linting/highlighting after edits in Volar 1.6.x&ndash;1.7.x.</td>
+      <td>Regression (fixed in later versions)</td>
+      <td>Downgrade to 1.2.x/1.4.x was the interim fix. Later versions addressed the regression.</td>
+    </tr>
+    <tr>
+      <td><strong>Monorepo scale</strong></td>
+      <td>Multiple tsconfig projects in a monorepo each spin up separate TS language service instances.</td>
+      <td>Linear with project count</td>
+      <td>Volar supports scoping to a single package. Use workspace settings.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>What TypeScript 7 Could Fix</h3>
+
+<p>If Volar could eventually use tsgo's language service, the 7&ndash;10x type-checking speedup would directly benefit Vue developers. The key metric from the TypeScript team: type-check times drop from ~72 seconds to ~6&ndash;7 seconds on large JSX codebases. Similar gains would apply to Vue SFC type checking &mdash; <em>if</em> the integration path exists.</p>
+
+
+<h2>6. Go-Based Analysis Engine + Volar via IPC/WASM/FFI</h2>
+
+<h3>Three Integration Patterns</h3>
+
+<table>
+  <thead>
+    <tr><th>Pattern</th><th>Mechanism</th><th>Latency</th><th>Complexity</th><th>Precedent</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>IPC (subprocess)</strong></td>
+      <td>Go binary communicates with Volar's Node.js process via STDIO pipes or Unix sockets, using JSON-RPC or MessagePack.</td>
+      <td>Microseconds per message (within same machine)</td>
+      <td>Moderate &mdash; requires defining a protocol, managing process lifecycle, handling serialization.</td>
+      <td>TypeScript 7's own architecture (<code>@typescript/api</code> + <code>libsyncrpc</code>). Also: LSP itself is an IPC protocol.</td>
+    </tr>
+    <tr>
+      <td><strong>WASM (in-process)</strong></td>
+      <td>Go code compiled to WASM via <code>GOOS=js GOARCH=wasm</code> or <code>GOOS=wasip1</code>. Loaded in Node.js via <code>wazero</code>, <code>wasmtime</code>, or Node's built-in WASM support.</td>
+      <td>Near-native for compute. ~3x overhead vs native Go. Boundary crossing (JS &harr; WASM) adds latency for chatty APIs.</td>
+      <td>High &mdash; Go WASM binaries are large (5&ndash;20 MB). Requires <code>wasm_exec.js</code> glue. Complex type marshaling.</td>
+      <td>Oso's Polar language server (Rust &rarr; WASM in VS Code). Go 1.24's <code>go:wasmexport</code> directive.</td>
+    </tr>
+    <tr>
+      <td><strong>FFI (native addon)</strong></td>
+      <td>Go code compiled to a C shared library (<code>-buildmode=c-shared</code>). Loaded in Node.js via N-API (using <code>ffi-napi</code> or a custom NAPI-RS bridge).</td>
+      <td>Lowest &mdash; function call overhead only. No serialization for primitive types.</td>
+      <td>Very high &mdash; requires C ABI bridge, CGo overhead, manual memory management, platform-specific builds.</td>
+      <td><code>libsyncrpc</code> itself uses Rust + NAPI-RS for the FFI bridge.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Recommended Approach: IPC</h3>
+
+<p>For a hypothetical Go-based analysis engine communicating with a Volar plugin:</p>
+
+<ol>
+  <li><strong>IPC is the pragmatic choice.</strong> It follows the same pattern TypeScript 7 itself uses. The protocol is language-agnostic, the Go binary runs natively (no WASM overhead), and process isolation prevents crashes from affecting the editor.</li>
+  <li><strong>WASM is viable but heavy.</strong> Go's WASM output is significantly larger than Rust's, and the boundary-crossing overhead penalizes the frequent, small calls typical of language service operations (completions, hover, diagnostics).</li>
+  <li><strong>FFI is overkill</strong> for language tooling. The complexity of maintaining C ABI compatibility across platforms outweighs the latency benefits for operations that are already measured in milliseconds.</li>
+</ol>
+
+<h3>Architecture Sketch: IPC Pattern</h3>
+
+<pre><code>┌─────────────────────────────────────────────────┐
+│  VS Code / Editor                                │
+│  ┌───────────────────────────────────────────┐   │
+│  │  Volar Language Server (Node.js)          │   │
+│  │  ┌─────────────────────────────────────┐  │   │
+│  │  │  Custom Language Plugin (TS)        │  │   │
+│  │  │  - Implements LanguagePlugin iface  │  │   │
+│  │  │  - Manages Go subprocess lifecycle  │  │   │
+│  │  │  - Translates Volar requests to     │  │   │
+│  │  │    IPC protocol messages            │  │   │
+│  │  └──────────────┬──────────────────────┘  │   │
+│  └─────────────────┼────────────────────────-┘   │
+│                    │ STDIO / Unix Socket          │
+│                    │ (JSON-RPC or MessagePack)    │
+│  ┌─────────────────┼────────────────────────-┐   │
+│  │  Go Analysis Engine (native binary)       │   │
+│  │  - Custom file format parsing             │   │
+│  │  - Type analysis / inference              │   │
+│  │  - Diagnostics generation                 │   │
+│  └───────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────┘</code></pre>
+
+
+<h2>Timeline Outlook</h2>
+
+<table>
+  <thead>
+    <tr><th>Milestone</th><th>Estimated Timeline</th><th>Impact on Volar</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>TypeScript 7.0 stable release</td>
+      <td>January 2026 (done)</td>
+      <td>Compiler and type-checker available. Language service via LSP. No plugin host.</td>
+    </tr>
+    <tr>
+      <td>Corsa API stabilization</td>
+      <td>H1 2026 (speculative)</td>
+      <td><code>@typescript/api</code> and <code>@typescript/ast</code> packages mature. External tools can query type information via IPC.</td>
+    </tr>
+    <tr>
+      <td>Language service embedding API</td>
+      <td>H2 2026 (speculative)</td>
+      <td>The curated API surface includes features needed by Volar: virtual file mapping, custom file extensions, type information for non-TS files.</td>
+    </tr>
+    <tr>
+      <td>Volar + tsgo integration</td>
+      <td>2026&ndash;2027 (speculative)</td>
+      <td>Depends entirely on the Corsa API providing sufficient hooks for embedded language scenarios. May require architectural changes to Volar itself.</td>
+    </tr>
+  </tbody>
+</table>
+
+
+<h2>Key Takeaways</h2>
+
+<ol>
+  <li><strong>Volar is currently incompatible with TypeScript 7.</strong> The monkey-patching approach cannot work with a Go binary. This is a known, tracked issue awaiting upstream resolution.</li>
+  <li><strong>The Corsa API is IPC-based.</strong> TypeScript 7 exposes a curated API via STDIO pipes, using <code>libsyncrpc</code> (a Rust-based NAPI module) for synchronous calls from Node.js. This is intentionally language-agnostic.</li>
+  <li><strong>Volar plugins cannot be written in Go today.</strong> Volar is a purely Node.js/TypeScript framework with no out-of-process plugin boundary. Native code would need to be wrapped via WASM or FFI, or communicate via IPC with a Volar plugin acting as a bridge.</li>
+  <li><strong>The Oso pattern (Rust &rarr; WASM in a TS host) is the closest precedent</strong> for native code integration within a VS Code extension. TypeScript 7's own IPC architecture is the closest precedent for subprocess-based integration.</li>
+  <li><strong>Volar's main bottleneck is the TypeScript language service itself.</strong> TypeScript 7's 7&ndash;10x speedup would directly benefit Volar users &mdash; once integration is possible.</li>
+  <li><strong>IPC is the recommended pattern</strong> for connecting a Go-based analysis engine to a Volar plugin. It follows TypeScript 7's own architecture, avoids WASM binary size issues, and provides process isolation.</li>
+</ol>
+
+
+<h2>Sources</h2>
+
+<ul>
+  <li><a href="https://github.com/vuejs/language-tools/issues/5381">vuejs/language-tools #5381 &mdash; TypeScript Native / TypeScript 7 Support</a></li>
+  <li><a href="https://github.com/vuejs/language-tools/discussions/5269">vuejs/language-tools #5269 &mdash; TypeScript rewrite in Go impact on vue-tsc</a></li>
+  <li><a href="https://github.com/microsoft/typescript-go/discussions/455">microsoft/typescript-go #455 &mdash; API story for the new codebase</a></li>
+  <li><a href="https://github.com/microsoft/typescript-go/discussions/481">microsoft/typescript-go #481 &mdash; Public-facing Go API for embedding</a></li>
+  <li><a href="https://github.com/microsoft/typescript-go/pull/711">microsoft/typescript-go PR #711 &mdash; Scaffold IPC-based API</a></li>
+  <li><a href="https://github.com/microsoft/libsyncrpc">microsoft/libsyncrpc &mdash; Synchronous RPC for Node.js</a></li>
+  <li><a href="https://devblogs.microsoft.com/typescript/progress-on-typescript-7-december-2025/">TypeScript Blog &mdash; Progress on TypeScript 7 (December 2025)</a></li>
+  <li><a href="https://devblogs.microsoft.com/typescript/announcing-typescript-native-previews/">TypeScript Blog &mdash; Announcing TypeScript Native Previews</a></li>
+  <li><a href="https://github.com/hlpmenu/vue-vscode-unofficial">hlmpn/vue-vscode-unofficial &mdash; Unofficial tsgo-compatible Vue extension</a></li>
+  <li><a href="https://volarjs.dev/guides/first-server/">Volar.js &mdash; Your First Language Server</a></li>
+  <li><a href="https://blog.vuejs.org/posts/volar-a-new-beginning">Vue Blog &mdash; Volar: A New Beginning</a></li>
+  <li><a href="https://www.osohq.com/post/building-vs-code-extension-with-rust-wasm-typescript">Oso &mdash; Building a VS Code Extension with Rust, WASM, and TypeScript</a></li>
+  <li><a href="https://github.com/vuejs/language-tools/issues/3226">vuejs/language-tools #3226 &mdash; Volar 1.6/1.7 very slow for large projects</a></li>
+</ul>
+{% endraw %}

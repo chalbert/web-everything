@@ -387,6 +387,39 @@ body {
   align-self: flex-end;
   transition: background 0.15s, opacity 0.15s;
   flex-shrink: 0;
+  position: relative;
+}
+
+.input-area button svg {
+  display: flex;
+  width: 18px;
+  height: 18px;
+}
+
+#send-icon {
+  visibility: visible;
+  position: static;
+}
+
+#stop-icon {
+  visibility: hidden;
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.input-area button.stop #send-icon {
+  visibility: hidden;
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.input-area button.stop #stop-icon {
+  visibility: visible;
+  position: static;
+  width: 18px;
+  height: 18px;
 }
 
 .input-area button:hover {

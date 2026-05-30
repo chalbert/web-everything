@@ -1,0 +1,125 @@
+<section class="intro-section mb-12">
+  <h3 id="mission">Mission</h3>
+  <p>
+    <strong>Web Positioning</strong> standardizes <strong>anchoring</strong> — placing a floating element
+    (tooltip, popover, menu) relative to another element and keeping it tethered there as the page
+    scrolls and resizes. It defines the contract (via the <a href="/intents/">Anchor Intent</a>), a
+    shared <a href="/plugs/custompositioningregistry/">positioning provider</a> that components delegate
+    to, and <a href="/projects/webadapters/">adapters</a> that let an existing engine (Floating UI) or
+    the native platform fulfil that contract.
+  </p>
+  <p>
+    It is <strong>native-first</strong>: the default provider leans on
+    <a href="https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Anchor_positioning">CSS Anchor Positioning</a>
+    (Baseline 2026) and the <a href="https://developer.mozilla.org/en-US/docs/Web/API/Popover_API">Popover API</a>.
+    Third-party libraries are opt-in enhancements through adapters — not the baseline dependency.
+  </p>
+
+  <div class="comparison-block" style="background: rgba(5, 150, 105, 0.08); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #059669; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #047857; font-size: 1rem;">The problem it solves</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      You import ten components from different vendors — a date picker, a combobox, a tooltip, a menu —
+      and <strong>every one of them ships its own positioning engine</strong>. Web Positioning lets the
+      application register <strong>one</strong> provider that all of them resolve and delegate to, so the
+      bundle carries a single engine instead of ten copies of the same collision math.
+    </p>
+  </div>
+</section>
+
+<section id="features" class="section-card">
+  <h3 id="feature-surface">Feature Surface</h3>
+  <p>
+    What a positioning standard covers, and how each capability is fulfilled. <strong>Built-in</strong> = the
+    bundled native-first provider; <strong>Adapter</strong> = delegated to a plugged-in library (Floating UI);
+    <strong>Compose</strong> = deferred to an existing Web Everything standard rather than reimplemented.
+  </p>
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 720px;">
+      <thead>
+        <tr><th>Feature</th><th>Source (spec / lib)</th><th>What it does</th><th>Built-in</th><th>Adapter</th></tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="5" style="font-weight:600; background:rgba(5,150,105,0.06);">Core placement</td></tr>
+        <tr><td><strong>Placement</strong> (12-way)</td><td>CSS <code>position-area</code> · FU <code>placement</code></td><td>Where the anchored element sits relative to the anchor</td><td>✅</td><td>✅</td></tr>
+        <tr><td><strong>Offset</strong></td><td>FU <code>offset()</code> · CSS margin</td><td>Gap between anchor and anchored element</td><td>✅</td><td>✅</td></tr>
+        <tr><td><strong>Anchor ↔ anchored binding</strong></td><td>CSS <code>anchor-name</code>/<code>position-anchor</code></td><td>Resolve which element tracks which</td><td>✅</td><td>✅</td></tr>
+        <tr><td><strong>Strategy</strong> (absolute/fixed)</td><td>FU <code>strategy</code></td><td>CSS positioning context</td><td>✅</td><td>✅</td></tr>
+        <tr><td colspan="5" style="font-weight:600; background:rgba(5,150,105,0.06);">Collision / fallback</td></tr>
+        <tr><td><strong>Flip</strong></td><td>CSS <code>position-try</code> · FU <code>flip()</code></td><td>Flip to the opposite side on overflow</td><td>✅ basic</td><td>✅ robust</td></tr>
+        <tr><td><strong>Shift</strong></td><td>FU <code>shift()</code></td><td>Slide along axis to stay in view</td><td>✅ basic</td><td>✅</td></tr>
+        <tr><td><strong>Hide</strong></td><td>CSS <code>position-visibility</code> · FU <code>hide()</code></td><td>Hide when the anchor is clipped/off-screen</td><td>✅ basic</td><td>✅</td></tr>
+        <tr><td><strong>AutoPlacement</strong></td><td>FU <code>autoPlacement()</code></td><td>Pick the side with the most space</td><td>➖</td><td>✅</td></tr>
+        <tr><td><strong>Size</strong></td><td>CSS <code>anchor-size()</code> · FU <code>size()</code></td><td>Constrain to available space</td><td>➖</td><td>✅</td></tr>
+        <tr><td colspan="5" style="font-weight:600; background:rgba(5,150,105,0.06);">Tracking &amp; extras</td></tr>
+        <tr><td><strong>Tracking</strong> (static/follow)</td><td>FU <code>autoUpdate()</code></td><td>Recompute on scroll / resize / mutation</td><td>✅ scroll+resize</td><td>✅ full</td></tr>
+        <tr><td><strong>Inline reference</strong></td><td>FU <code>inline()</code></td><td>Anchor to wrapped inline text ranges</td><td>➖</td><td>✅</td></tr>
+        <tr><td><strong>RTL awareness</strong></td><td>both</td><td>Mirror start/end in RTL</td><td>✅</td><td>✅</td></tr>
+        <tr><td><strong>Arrow</strong></td><td>FU <code>arrow()</code></td><td>Position a caret toward the anchor</td><td>✅ basic</td><td>✅</td></tr>
+        <tr><td colspan="5" style="font-weight:600; background:rgba(99,102,241,0.06);">Layering / escape — composed, not reimplemented</td></tr>
+        <tr><td><strong>Top-layer rendering</strong></td><td>Popover API · Web Portals</td><td>Escape overflow/clip, render above</td><td colspan="2">🔗 <a href="/projects/webportals/">Web Portals</a></td></tr>
+        <tr><td><strong>Elevation / z-index</strong></td><td>Surface Intent</td><td>Stacking depth</td><td colspan="2">🔗 <a href="/intents/">Surface Intent</a></td></tr>
+        <tr><td><strong>Light dismiss / focus</strong></td><td>Popover · Modal</td><td>Click-outside, Esc, focus trap</td><td colspan="2">🔗 View / Modal blocks</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="how" class="section-card">
+  <h3 id="how-it-works">How It Works</h3>
+  <p>
+    A component never bundles a positioning engine. It declares its <a href="/intents/">Anchor Intent</a>,
+    resolves the application's provider through the injector chain, and delegates the math:
+  </p>
+  {% highlight "typescript" %}
+// 1. The application registers ONE provider (native-first by default).
+import { FloatingUIAdapter } from '@web-adapters/floating-ui';
+customPositioning.define('floating-ui', new FloatingUIAdapter());
+
+injector Application {
+  // every descendant component resolves this provider
+  provide { positioning: 'floating-ui' } to '@web-positioning';
+}
+
+// 2. Any vendor component delegates — it does not know which engine runs.
+const provider = InjectorRoot.getProviderOf(el, 'customPositioning');
+const cleanup = provider.position(anchorEl, floatingEl, {
+  placement: 'bottom-start',
+  collision: ['flip', 'shift'],
+  tracking: 'follow',          // recompute on scroll/resize
+});
+// cleanup() detaches listeners when the floating element closes
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+    <li><strong>One contract:</strong> the <a href="/plugs/custompositioner/"><code>CustomPositioner</code></a> interface — <code>position(anchor, anchored, options): Cleanup</code> — is satisfied by the native default and by every adapter alike.</li>
+    <li><strong>One registry:</strong> <a href="/plugs/custompositioningregistry/"><code>CustomPositioningRegistry</code></a> (<code>window.customPositioning</code>) holds the named providers.</li>
+    <li><strong>Injector resolution:</strong> components get the app-configured provider, so swapping engines is a one-line change with zero component edits.</li>
+  </ul>
+</section>
+
+<section id="composition" class="section-card">
+  <h3 id="composition">Composition With Other Standards</h3>
+  <p>
+    Web Positioning owns <em>where</em> a floating element sits, not <em>how it escapes the DOM</em> or
+    <em>how high it stacks</em> — those compose with neighbouring standards, mirroring how CSS separates
+    positioning from layering:
+  </p>
+  <ul style="font-size: 0.9rem;">
+    <li><strong><a href="/projects/webportals/">Web Portals</a></strong> — the <code>escape</code> strategy lifts a floating element to the top layer / out of clipping ancestors.</li>
+    <li><strong>Surface Intent</strong> — elevation and z-stacking of the floating surface.</li>
+    <li><strong>Modal / View blocks</strong> — light dismiss, focus trapping, open/close lifecycle.</li>
+  </ul>
+</section>
+
+<section id="status" class="section-card">
+  <h3 id="status">Status</h3>
+  <p>
+    Web Positioning is in <strong>concept</strong> phase. The contract and provider registry are specified;
+    the native-first default provider and the Floating UI adapter are the first planned implementations.
+  </p>
+  <h4 style="margin-top: 1rem;">Open Questions</h4>
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <li>How deep should the <code>escape</code> strategy delegate to Web Portals vs. drive the native Popover top layer directly?</li>
+    <li>Arrow placement math — built-in basic vs. always defer to an adapter?</li>
+    <li>RTL and safe-area (notch / virtual keyboard) handling in the native default provider.</li>
+  </ul>
+</section>

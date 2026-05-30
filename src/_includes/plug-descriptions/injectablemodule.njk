@@ -1,0 +1,58 @@
+{% raw %}
+<h3 id="overview">Overview</h3>
+<p>
+    <strong>InjectableModule</strong> is an ergonomic facade wrapping a <a href="/plugs/moduleinjector/">ModuleInjector</a>. It provides a simple <code>provide</code>/<code>consume</code>/<code>register</code> API with a <code>bootstrap()</code> lifecycle for module-scoped dependency injection.
+</p>
+
+<h3 id="interface">Interface</h3>
+<pre><code class="language-typescript">class InjectableModule {
+    readonly name: string;
+    readonly injector: ModuleInjector;
+
+    constructor(name: string, importMeta: ImportMeta, setup: (module: InjectableModule) => void);
+
+    // Set a provider eagerly
+    provide(name: string, value: any): void;
+
+    // Consume a provider (lazy-loads if registered but not yet loaded)
+    consume(name: string, consumer: ImportMeta): Promise&lt;any&gt;;
+
+    // Register a lazy-loaded provider
+    register(name: string, loader: () => Promise&lt;any&gt;): void;
+
+    // Get a provider synchronously
+    get(name: string): any | undefined;
+
+    // Set a provider directly
+    set(name: string, value: any): void;
+
+    // Execute the setup function
+    bootstrap(): void;
+}
+</code></pre>
+
+<h3 id="usage-example">Usage Example</h3>
+<pre><code class="language-typescript">import { InjectableModule } from '@web-everything/webinjectors';
+
+const appModule = new InjectableModule('app', import.meta, (m) => {
+    // Provide values eagerly
+    m.provide('customContexts:config', { apiUrl: '/api', debug: true });
+
+    // Register lazy-loaded providers
+    m.register('customContexts:logger', async () => {
+        const { Logger } = await import('./logger');
+        return new Logger();
+    });
+});
+
+// Initialize
+appModule.bootstrap();
+
+// Later, consume from another module
+const config = await appModule.injector.consume('customContexts:config', import.meta);
+</code></pre>
+
+<p class="text-sm text-gray-600 mt-4">
+    See <a href="/plugs/moduleinjector/">ModuleInjector</a> for the underlying injector, and <a href="/projects/webinjectors/">Web Injectors</a> for the full dependency injection system.
+</p>
+{% endraw %}

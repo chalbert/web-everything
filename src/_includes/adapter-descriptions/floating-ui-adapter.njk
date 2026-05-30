@@ -1,6 +1,11 @@
 <h2>Floating UI Adapter</h2>
 <p>
-    The Floating UI Adapter implements the Web Everything <strong>Positioning Protocol</strong> using the <a href="https://floating-ui.com/">Floating UI</a> library.
+    The Floating UI Adapter bridges the <a href="https://floating-ui.com/">Floating UI</a> library to
+    Web Everything as a <a href="/plugs/custompositioner/">positioning provider</a>, fulfilling the
+    <a href="/intents/">Anchor Intent</a>. Register it once and any component delegating to
+    <a href="/plugs/custompositioningregistry/"><code>CustomPositioningRegistry</code></a> uses Floating UI
+    for placement, collision, and tracking — including the advanced middleware (autoPlacement, size, inline)
+    beyond what the native-first default provides.
 </p>
 
 <section class="section-card">
@@ -13,26 +18,50 @@
 <section class="section-card">
     <h3 id="concept">Concept</h3>
     <p>
-        Floating UI provides robust positioning for tooltips, popovers, dropdowns, and other floating elements. This adapter bridges it to Web Everything's positioning protocol:
+        Floating UI provides robust positioning for tooltips, popovers, dropdowns, and other floating
+        elements. The adapter is a thin class implementing the one-method <code>CustomPositioner</code>
+        contract, so it slots into the registry alongside the native default and any other provider:
     </p>
 
     {% highlight "typescript" %}
-import { FloatingUIAdapter } from '@web-adapters/floating-ui';
+import { computePosition, autoUpdate, offset, flip, shift } from '@floating-ui/dom';
 
-// Register the adapter
-positioningRegistry.define('floating-ui', FloatingUIAdapter);
+class FloatingUIAdapter implements CustomPositioner {
+    position(anchor, anchored, options) {
+        const middleware = [
+            options.offset != null && offset(options.offset),
+            options.collision?.includes('flip') && flip(),
+            options.collision?.includes('shift') && shift(),
+        ].filter(Boolean);
 
-// Use in components
-<dropdown-menu positioning="floating-ui">
-    <button slot="trigger">Open Menu</button>
-    <menu-items slot="content">...</menu-items>
-</dropdown-menu>
+        const update = () =>
+            computePosition(anchor, anchored, { placement: options.placement, middleware })
+                .then(({ x, y }) => Object.assign(anchored.style, { left: `${x}px`, top: `${y}px` }));
+
+        // tracking: 'follow' → autoUpdate returns its own cleanup
+        return options.tracking === 'follow'
+            ? autoUpdate(anchor, anchored, update)
+            : (update(), () => {});
+    }
+}
+
+// Register the adapter as the application's provider
+customPositioning.define('floating-ui', new FloatingUIAdapter());
     {% endhighlight %}
+
+    <p>
+        Components never reference Floating UI directly — they resolve <code>customPositioning</code> and call
+        <code>position()</code>. Swapping to the native <code>'css-anchor'</code> provider (or another library)
+        is a one-line registration change with no component edits.
+    </p>
 </section>
 
 <section class="section-card">
     <h3 id="related">Related</h3>
     <ul style="margin-bottom: 0;">
+        <li><a href="/projects/webpositioning/">Web Positioning</a> — the domain &amp; feature surface</li>
+        <li><a href="/intents/">Anchor Intent</a> — the contract this adapter fulfills</li>
+        <li><a href="/plugs/custompositioningregistry/">CustomPositioningRegistry</a> · <a href="/plugs/custompositioner/">CustomPositioner</a></li>
         <li><a href="/blocks/droplist/">Droplist Block</a></li>
     </ul>
 </section>

@@ -20,9 +20,6 @@
 
     <dt class="font-bold text-gray-800 mt-3"><code>node.injectors()</code></dt>
     <dd class="text-gray-600 ml-4">Generator yielding all injectors in the hierarchy.</dd>
-
-    <dt class="font-bold text-gray-800 mt-3"><code>node.createElement(tagName)</code></dt>
-    <dd class="text-gray-600 ml-4">Creates an element using the context-aware registry.</dd>
 </dl>
 
 {{ unpluggedContent("injector-api") }}
@@ -38,9 +35,6 @@
 
     <dt class="font-bold text-gray-800 mt-3"><code>injectors(node)</code></dt>
     <dd class="text-gray-600 ml-4">Generator yielding all injectors in the hierarchy.</dd>
-
-    <dt class="font-bold text-gray-800 mt-3"><code>createElement(node, tagName)</code></dt>
-    <dd class="text-gray-600 ml-4">Creates an element using the context-aware registry.</dd>
 </dl>
 
 {{ comparisonContent("injector-api") }}
@@ -49,13 +43,13 @@
         <div style="font-size: 0.7rem; font-weight: 600; color: #059669; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em;">Plugged</div>
         <code class="text-sm" style="display: block; background: #ecfdf5; padding: 0.5rem; border-radius: 0.25rem; margin-bottom: 0.5rem;">node.getClosestInjector()</code>
         <code class="text-sm" style="display: block; background: #ecfdf5; padding: 0.5rem; border-radius: 0.25rem; margin-bottom: 0.5rem;">node.hasOwnInjector()</code>
-        <code class="text-sm" style="display: block; background: #ecfdf5; padding: 0.5rem; border-radius: 0.25rem;">node.createElement(tag)</code>
+        <code class="text-sm" style="display: block; background: #ecfdf5; padding: 0.5rem; border-radius: 0.25rem;">node.injectors()</code>
     </div>
     <div>
         <div style="font-size: 0.7rem; font-weight: 600; color: #475569; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em;">Unplugged</div>
         <code class="text-sm" style="display: block; background: #f1f5f9; padding: 0.5rem; border-radius: 0.25rem; margin-bottom: 0.5rem;">getClosestInjector(node)</code>
         <code class="text-sm" style="display: block; background: #f1f5f9; padding: 0.5rem; border-radius: 0.25rem; margin-bottom: 0.5rem;">hasOwnInjector(node)</code>
-        <code class="text-sm" style="display: block; background: #f1f5f9; padding: 0.5rem; border-radius: 0.25rem;">createElement(node, tag)</code>
+        <code class="text-sm" style="display: block; background: #f1f5f9; padding: 0.5rem; border-radius: 0.25rem;">injectors(node)</code>
     </div>
 </div>
 
@@ -73,9 +67,6 @@ if (element.hasOwnInjector()) {
     console.log('Element defines its own scope');
 }
 
-// Create element from injector's registry
-const customEl = element.createElement('my-component');
-
 // Iterate through all injectors
 for (const inj of element.injectors()) {
     console.log('Found injector:', inj);
@@ -87,7 +78,6 @@ for (const inj of element.injectors()) {
 consume {
   getClosestInjector,
   hasOwnInjector,
-  createElement,
   injectors
 } of '@web-injectors';
 
@@ -98,9 +88,6 @@ const injector = getClosestInjector(element);
 if (hasOwnInjector(element)) {
     console.log('Element defines its own scope');
 }
-
-// Create element from injector's registry
-const customEl = createElement(element, 'my-component');
 
 // Iterate through all injectors
 for (const inj of injectors(element)) {
@@ -118,7 +105,9 @@ const inj = el.getClosestInjector();
 if (el.hasOwnInjector()) {
   // ...
 }
-el.createElement('my-comp');
+for (const i of el.injectors()) {
+  // ...
+}
 {% endhighlight %}
     </div>
     <div style="border-left: 1px solid #e5e7eb;">
@@ -127,14 +116,13 @@ el.createElement('my-comp');
 consume {
   getClosestInjector,
   hasOwnInjector,
-  createElement
+  injectors
 } of '@web-injectors';
 
 const inj = getClosestInjector(el);
 if (hasOwnInjector(el)) {
   // ...
 }
-createElement(el, 'my-comp');
 {% endhighlight %}
     </div>
 </div>
