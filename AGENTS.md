@@ -24,6 +24,7 @@
 ## Definition of Done (run before finishing)
 - Changed an API? Update its `.njk` description **and** its `src/_data/*.json` entry.
 - Introduced a term? Add it to `semantics.json`.
+- Wrote a `reports/*.md` report? It's **outside the 11ty build** — expose it: promote it to a `/research/` topic, or mirror it with a **backlog pointer item** (`relatedReport`, no body). `check:standards` fails on a hidden report (see [backlog-workflow.md](docs/agent/backlog-workflow.md) → "Three homes — nothing stays hidden").
 - Added/removed a block, plug, or intent? Run `npm run gen:inventory` (refreshes the generated summary below — never edit it by hand).
 - Run `npm run check:standards` — it must pass (it also fails if the inventory is stale).
 - Run affected tests (`npx vitest run <path>`); for broad changes, `npm test`.

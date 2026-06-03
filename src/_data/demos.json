@@ -1,5 +1,16 @@
 [
   {
+    "id": "jsx-adapter-demo",
+    "name": "JSX Adapter Playground",
+    "summary": "Mirror-dialect sandbox: authored JSX rendered live to DOM through the realigned JSX renderer, shown beside its produced HTML. The iteration surface for the HTML↔JSX feature mapping before the source-toggle lands on block pages.",
+    "description": "<h2>Concept</h2><p>Each card authors a tree in the <strong>JSX mirror dialect</strong> — a faithful, reversible spelling of the canonical HTML adapter (<code>class</code> not <code>className</code>, <code>for</code> not <code>htmlFor</code>, <code>on:*</code> string behaviors, <code>bind-*</code> bindings, <code>&lt;template is=\"…\"&gt;</code> directives) — renders it live through the realigned JSX renderer, and shows the produced HTML beside it.</p><h3>Why a sandbox</h3><p>This is the development surface for the HTML↔JSX feature mapping: improve the example pairs and the renderer here, in isolation, before bringing the source-toggle onto real block pages. It exercises the realigned <code>JSXRenderer</code> end-to-end in a browser (customized built-ins via <code>is</code>, namespaced behavior attributes, <code>class</code>/<code>for</code> first-class).</p><h3>Scope</h3><p>The sandbox focuses on <em>structural</em> JSX→DOM/HTML equivalence. Behavior activation (events firing beyond the demo's own listener, <code>bind-*</code> updating, <code>is=\"for-each\"</code> iterating) belongs to the rendering-strategy axis, which is parked.</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/jsx-adapter-demo.html",
+    "projects": [
+      "webadapters"
+    ]
+  },
+  {
     "id": "declarative-spa",
     "name": "Declarative Single-Page Application",
     "summary": "A fully interactive SPA using only declarative HTML with zero JavaScript bootstrap or custom elements. Demonstrates maximum interactivity through pure markup and Web Everything standards.",

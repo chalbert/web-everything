@@ -12,6 +12,16 @@ src/backlog-pages.njk      # paginates the array → one /backlog/{id}/ detail p
 reports/                   # deep thinking — a backlog item links OUT to a report; the report is not the tracker
 ```
 
+## Three homes — nothing stays hidden
+
+Every doc has exactly one home, and **nothing sits in the repo unreachable from the website**:
+
+- **Research** (analysis, options, citations) → a report in `reports/`. Reports are **not** in the 11ty build, so a report is exposed only when it is either **promoted to a `/research/` topic** (`researchTopics.json` + `research-descriptions/{id}.njk`, where `id` = the report's de-dated slug) **or mirrored by a backlog pointer item** (`relatedReport`, no body — renders the report at `/backlog/{id}/`). A report that is neither is a **hidden doc**.
+- **Spec** (the standard itself) → the website: `src/_data/*.json` + `src/_includes/*-descriptions/*.njk` (blocks, plugs, intents, adapters, projects, protocols, semantics). Exposed by construction.
+- **Everything else** — ideas, issues, decisions, reviews, "do this later" → a **backlog item** at `/backlog/`.
+
+The test for any new markdown: *is it research (→ report + a `/research/` topic or backlog mirror), spec (→ website), or a backlog item?* If it fits none, it doesn't belong in the repo. **`npm run check:standards` fails if any `reports/*.md` is hidden** — i.e. has neither a matching research topic nor a backlog reference.
+
 ## Where an open question goes
 
 | Source of the question | What to do |

@@ -174,6 +174,16 @@ describe('JSXRenderer', () => {
       expect(tpl.getAttribute('items')).toBe('@links');
       expect(tpl.getAttribute('key')).toBe('id');
     });
+
+    it('should place <template> children into its content fragment, not light DOM', () => {
+      const tpl = jsx.createElement(
+        'template',
+        { is: 'for-each' },
+        jsx.createElement('div', { class: 'row' }, 'x')
+      ) as HTMLTemplateElement;
+      expect(tpl.childNodes.length).toBe(0);
+      expect(tpl.content.querySelector('div.row')?.textContent).toBe('x');
+    });
   });
 
   describe('Fragment', () => {

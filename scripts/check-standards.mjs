@@ -8,7 +8,7 @@
  *
  * Run: `npm run check:standards`  (exits 1 on any error; warnings don't fail)
  */
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
@@ -187,6 +187,27 @@ for (const item of backlog) {
     err(`Backlog item "${item.id}" crossRef must have both "url" and "label"`);
   if (item.status === 'resolved' && !item.graduatedTo && item.type !== 'issue' && item.type !== 'review')
     warn(`Backlog item "${item.id}" is resolved but has no graduatedTo — record what it became`);
+}
+
+// ── 6e. No hidden reports — every report must be exposed somewhere ────────────
+// "Three homes": research → a /research/ topic, spec → the website, everything else → a
+// backlog item. reports/ is NOT in the 11ty build, so a report is only reachable when it is
+// either backed by a research topic (id = its de-dated slug) or referenced by a backlog item
+// (relatedReport). A report that is neither is invisible on the website — fail.
+const REPORTS = join(ROOT, 'reports');
+const reportFiles = existsSync(REPORTS) ? readdirSync(REPORTS).filter((f) => f.endsWith('.md')) : [];
+const researchIds = new Set(research.map((r) => r.id).filter(Boolean));
+const backlogReportRefs = new Set(
+  backlog.map((b) => b.relatedReport).filter(Boolean).map((p) => p.replace(/^reports\//, '')),
+);
+const deDate = (f) => f.replace(/^\d{4}-\d{2}-\d{2}-/, '').replace(/\.md$/, '');
+for (const f of reportFiles) {
+  const slug = deDate(f);
+  if (!researchIds.has(slug) && !backlogReportRefs.has(f))
+    err(
+      `Report "reports/${f}" is hidden — no /research/ topic (id "${slug}") and no /backlog/ item ` +
+      `references it (relatedReport). Promote it to a research topic or add a backlog item.`,
+    );
 }
 
 // ── 7. AGENTS.md inventory must be in sync (generated, not hand-edited) ────────

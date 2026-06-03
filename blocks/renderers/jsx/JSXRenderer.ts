@@ -247,11 +247,15 @@ class JSXRenderer {
    * Append children to a parent element
    */
   #appendChildren(parent: Element | DocumentFragment, children: (Node | string)[]): void {
+    // A <template>'s children belong in its inert .content fragment — mirroring how the HTML
+    // parser fills template content — not its light DOM, so directives and clones can read them.
+    const target: Element | DocumentFragment =
+      parent instanceof HTMLTemplateElement ? parent.content : parent;
     for (const child of children) {
       if (typeof child === 'string') {
-        parent.appendChild(document.createTextNode(child));
+        target.appendChild(document.createTextNode(child));
       } else {
-        parent.appendChild(child);
+        target.appendChild(child);
       }
     }
   }
