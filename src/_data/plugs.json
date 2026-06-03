@@ -304,5 +304,37 @@
     "type": "Global",
     "summary": "Base contract a positioning provider implements — position(anchor, anchored, options) returning a cleanup. Satisfied alike by the native-first default and by every library adapter.",
     "projects": ["webpositioning"]
+  },
+  {
+    "id": "customrecoveryhandlerregistry",
+    "name": "CustomRecoveryHandlerRegistry",
+    "status": "concept",
+    "type": "Global",
+    "summary": "Exposes window.customRecovery for registering named recovery handlers tried in priority order — the first handler whose tryRecover() returns a non-null result owns the recovery. Any system (Resource Loader, form submission, background task) resolves the registry and delegates failure handling without knowing which handlers are registered.",
+    "projects": ["webreliability"]
+  },
+  {
+    "id": "customrecoveryhandler",
+    "name": "CustomRecoveryHandler",
+    "status": "concept",
+    "type": "Global",
+    "summary": "Base contract a recovery handler implements — tryRecover(error, context) returning a RecoveryResult or null. Returning null passes control to the next handler in registration order. Implementations include HTTP retry handlers, circuit breakers, offline queues, and custom domain handlers.",
+    "projects": ["webreliability"]
+  },
+  {
+    "id": "customtranslationproviderregistry",
+    "name": "CustomTranslationProviderRegistry",
+    "status": "concept",
+    "type": "Global",
+    "summary": "Exposes window.customTranslations for registering named translation providers tried in priority order — the first provider whose resolve(key, locale) returns a non-null MessageFn owns the message. Any consumer resolves the registry through the injector chain and reads messages via the @t context without knowing which provider answered or which library backs it.",
+    "projects": ["webintl"]
+  },
+  {
+    "id": "customtranslationprovider",
+    "name": "CustomTranslationProvider",
+    "status": "concept",
+    "type": "Global",
+    "summary": "Base contract a translation provider implements — resolve(key, locale) returning a MessageFn or null. Returning null declines the key and passes control down the locale fallback chain and the next registered provider. Implementations include a native Intl MF2 formatter, lazy-namespace catalogs, and library adapters (FormatJS, i18next, Lingui, Paraglide).",
+    "projects": ["webintl"]
   }
 ]

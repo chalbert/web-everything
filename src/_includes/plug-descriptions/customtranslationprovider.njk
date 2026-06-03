@@ -1,0 +1,71 @@
+<h3 id="overview">Overview</h3>
+<p>
+    <code>CustomTranslationProvider</code> is the single contract every translation provider implements.
+    Its one method, <code>resolve()</code>, receives a message key and the active locale, and returns
+    either a <code>MessageFn</code> — a function that formats the message with the given parameters — or
+    <code>null</code> to decline and let resolution continue down the locale fallback chain and on to the
+    next registered provider. A native <code>Intl</code> MessageFormat 2.0 formatter, lazy-namespace
+    catalogs, and library adapters (FormatJS, i18next, Lingui, Paraglide) all satisfy this same
+    interface, which is what lets <a href="/plugs/customtranslationproviderregistry/">the registry</a>
+    treat them interchangeably.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl"><code>Intl.*</code></a></td>
+        <td>Baseline</td>
+        <td>The default provider formats numbers, dates, plurals, and lists embedded in a message with native <code>Intl</code> rather than re-implementing CLDR.</td>
+    </tr>
+    <tr>
+        <td><a href="https://unicode.org/reports/tr35/tr35-messageFormat.html">Unicode MessageFormat 2.0</a></td>
+        <td>Unicode standard (2024)</td>
+        <td>The default message syntax compiled into a <code>MessageFn</code>; forward-compatible with the TC39 <code>Intl.MessageFormat</code> proposal.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+/** The common message shape — runtime (MF2) and compile-time messages alike. */
+type MessageFn = (params?: Record<string, unknown>) => string;
+
+/** The one contract every translation provider implements. */
+abstract class CustomTranslationProvider {
+    // Return a MessageFn to own the key for that locale, or null to decline.
+    abstract resolve(key: string, locale: string): MessageFn | null;
+}
+{% endhighlight %}
+
+<h3 id="implementing">Implementing a Provider</h3>
+{% highlight "typescript" %}
+// Example: an MF2 provider backed by a lazily-loaded catalog per locale.
+class Mf2Provider extends CustomTranslationProvider {
+    private catalogs = new Map<string, Record<string, string>>();
+
+    constructor(private formatter: MessageFormatter) {}
+
+    resolve(key: string, locale: string): MessageFn | null {
+        const source = this.catalogs.get(locale)?.[key];
+        if (source === undefined) return null;          // Decline — walk the fallback chain.
+        return this.formatter.compile(source, locale);  // Compile MF2 → MessageFn.
+    }
+}
+
+// Register at bootstrap.
+customTranslations.define('app', new Mf2Provider(mf2Formatter));
+{% endhighlight %}
+
+<h3 id="design-decisions">Design Decisions</h3>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+    <li><strong>Null means decline.</strong> A provider returning <code>null</code> declines a key without side effects; resolution continues down the fallback chain. No separate <code>has()</code> predicate needed — <code>resolve()</code> is atomic.</li>
+    <li><strong>Returns a function, not a string.</strong> <code>resolve()</code> yields a <code>MessageFn</code> so the same resolved message can be re-formatted with different parameters, and so compile-time message functions slot in with no shape change.</li>
+    <li><strong>Native-first formatting.</strong> The default provider composes native <code>Intl</code> output. Providers add catalog lookup and message composition — they do not re-implement value formatting.</li>
+</ul>
+
+<p class="text-sm text-gray-600 mt-4">
+    Registered through <a href="/plugs/customtranslationproviderregistry/"><code>CustomTranslationProviderRegistry</code></a>.
+    Fulfils the <a href="/intents/locale/">Locale Intent</a>.
+    See <a href="/projects/webintl/">Web Intl</a> and the
+    <a href="/projects/webintl/#protocol-localization">Localization Protocol</a>.
+</p>

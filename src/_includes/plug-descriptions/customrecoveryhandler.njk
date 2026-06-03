@@ -1,0 +1,93 @@
+<h3 id="overview">Overview</h3>
+<p>
+    <code>CustomRecoveryHandler</code> is the single contract every recovery handler implements. Its one
+    method, <code>tryRecover()</code>, receives the error and context, and returns either a
+    <code>RecoveryResult</code> describing what the system should do next, or <code>null</code> to decline
+    and let the next registered handler try. HTTP retry, circuit-breaker, offline-queue, and any
+    custom domain handler all satisfy this same interface, which is what lets
+    <a href="/plugs/customrecoveryhandlerregistry/">the registry</a> treat them interchangeably.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/AbortController">AbortController</a></td>
+        <td>Baseline</td>
+        <td><code>RecoveryContext</code> carries an <code>AbortSignal</code>. Handlers may abort the previous attempt's signal before dispatching a retry with a fresh one.</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Navigator/onLine">navigator.onLine</a></td>
+        <td>Baseline</td>
+        <td>Offline-queue handlers use <code>navigator.onLine</code> and the <code>online</code> window event to gate and replay queued operations.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+/** Outcome the handler instructs the system to apply. */
+type RecoveryOutcome =
+    | 'retry'     // Re-execute the operation (after optional delay).
+    | 'queued'    // Operation stored; will replay when conditions allow.
+    | 'fallback'  // Surface fallback content; no retry.
+    | 'abort';    // Propagate the error immediately.
+
+/** Returned by a handler that accepts the error. */
+interface RecoveryResult {
+    outcome: RecoveryOutcome;
+    delay?: number;       // ms to wait before retry (outcome: 'retry' only).
+    signal?: AbortSignal; // Fresh signal for the retry attempt.
+}
+
+/** Passed to every handler. */
+interface RecoveryContext {
+    error: Error;
+    attempt: number;       // 1-based retry count for this operation.
+    signal: AbortSignal;   // Signal of the most recent attempt.
+    operation?: string;    // Opaque identifier for the failing operation.
+}
+
+/** The one contract every recovery handler implements. */
+abstract class CustomRecoveryHandler {
+    // Return a RecoveryResult to own the recovery, or null to decline.
+    abstract tryRecover(
+        error: Error,
+        context: RecoveryContext,
+    ): Promise<RecoveryResult | null>;
+}
+{% endhighlight %}
+
+<h3 id="implementing">Implementing a Handler</h3>
+{% highlight "typescript" %}
+// Example: a handler that retries HTTP 5xx errors with exponential backoff.
+class HttpRetryHandler extends CustomRecoveryHandler {
+    constructor(private maxRetries = 3) {}
+
+    async tryRecover(error: Error, context: RecoveryContext) {
+        const status = (error as any).status;
+        // Decline errors that are not retryable HTTP failures.
+        if (!status || status < 500 || context.attempt > this.maxRetries) {
+            return null;
+        }
+        const delay = Math.min(1000 * 2 ** (context.attempt - 1), 30_000);
+        return { outcome: 'retry', delay, signal: new AbortController().signal };
+    }
+}
+
+// Register at bootstrap.
+customRecovery.define('http-retry', new HttpRetryHandler(3));
+{% endhighlight %}
+
+<h3 id="design-decisions">Design Decisions</h3>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+    <li><strong>Null means pass-through.</strong> A handler returning <code>null</code> declines without observable side effects. No separate <code>canHandle()</code> predicate needed — <code>tryRecover()</code> is atomic.</li>
+    <li><strong>Result describes intent, not execution.</strong> <code>RecoveryResult.outcome</code> tells the consumer what to do next; the consumer drives the retry loop. Handlers are pure decision functions — they do not re-execute operations themselves.</li>
+    <li><strong>Context is minimal.</strong> Only what any handler universally needs: the raw error, attempt count, and an abort signal. Domain-specific metadata (HTTP status, endpoint URL) is read from the error object by the handler, not promoted to the context.</li>
+</ul>
+
+<p class="text-sm text-gray-600 mt-4">
+    Registered through <a href="/plugs/customrecoveryhandlerregistry/"><code>CustomRecoveryHandlerRegistry</code></a>.
+    Fulfils the <a href="/intents/reliability/">Reliability Intent</a>.
+    See <a href="/projects/webreliability/">Web Reliability</a> and the
+    <a href="/projects/webreliability/#protocol-error-recovery">Error Recovery Protocol</a>.
+</p>

@@ -6,4 +6,5 @@ const local = process.env.ELEVENTY_RUN_MODE !== "build";
 
 module.exports = {
   frontierUrl: local ? "http://localhost:3001" : "https://frontierui.dev",
+  plateauUrl: "https://github.com/chalbert/plateau",
 };

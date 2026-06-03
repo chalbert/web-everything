@@ -109,6 +109,79 @@ layer owning async + cross-field + conditional logic.
 - **A11y → WCAG:** `aria-invalid` + `aria-describedby` (3.3.1, A); suggest the fix (3.3.3, AA); confirm
   high-stakes submits (3.3.4, AA); dynamic errors need a live region present on load.
 
+### Axis D — Async Resolution Strategy: Cancellation vs. Versioning
+
+**Problem:** Async validators race. If a validator runs for input V1, then user types V2 before V1 completes, the V1 result (stale) can overwrite V2's (correct) result. Both React Hook Form ([RHF #1688](https://github.com/react-hook-form/react-hook-form/issues/1688)) and Final Form ([#420](https://github.com/final-form/react-final-form/issues/420)) track this as a recurring critical bug.
+
+**Solution:** Choose a strategy for detecting and rejecting stale results. Two equally valid approaches exist; the choice is a conformance concern, not a UX concern. Web Everything supports both via the `CustomValidatorResolutionRegistry` plug.
+
+#### Strategy 1: Cancellation (native-first, recommended default)
+
+| Aspect | Detail |
+|--------|--------|
+| **Mechanism** | When input changes, cancel in-flight validators via `AbortController`. Stopped validators never produce results. |
+| **Signature** | `validator(value, signal)` — validator accepts an `AbortSignal` and checks `signal.aborted` or passes it to fetch/async operations. |
+| **Pros** | Matches user intent ("they changed their mind"). Resource-efficient (stops wasted API calls). Web standard (`AbortController`). Simple semantics: latest input always wins. |
+| **Cons** | Requires validators to accept a `signal` parameter. Legacy validators (pre-AbortController era) need refactoring. |
+| **Best for** | New code, async-capable validators, internal implementations. Aligns with platform (fetch, AbortController). |
+| **Example** | `const result = await fetch('/validate', { signal }); // abort stops the request` |
+
+#### Strategy 2: Versioning (pragmatic integration)
+
+| Aspect | Detail |
+|--------|--------|
+| **Mechanism** | Tag each validation run with a generation/version token. When a validator completes, check: is this version still current? If old, drop result. If current, apply it. |
+| **Signature** | `validator(value)` — no signature change. Registry handles version tracking. |
+| **Pros** | Works with existing validators without refactoring. No signature change needed. Integrates third-party libraries easily (Zod, Yup, custom validators). |
+| **Cons** | Less efficient (validators complete unnecessary work). Requires explicit version checking in result handler. Mental model: old results are dropped, not prevented. |
+| **Best for** | Legacy code, third-party validators, framework constraints (e.g., Formik/Final Form validators that predate AbortController). Teams integrating multiple libraries. |
+| **Example** | `const result = checkServer(value); if (result.version !== currentVersion) return; // drop stale` |
+
+#### Decision Framework
+
+Choose **cancellation** if:
+- You're starting a new validation system from scratch.
+- Your validators use async/await with fetch or other AbortController-aware APIs.
+- You want to minimize resource waste and follow web platform conventions.
+
+Choose **versioning** if:
+- You're integrating with legacy form libraries (Formik, Final Form) that don't support AbortController.
+- You have third-party validators you can't modify.
+- Your validators do expensive work that's already started (e.g., database query) — you'd rather finish and discard than interrupt.
+- Your team's existing code patterns use mutable version counters or timestamp-based invalidation.
+
+#### Registry Pattern in Web Everything
+
+Both strategies are registered via `CustomValidatorResolutionRegistry` (a plug):
+
+```typescript
+// Define the provider interface
+interface CustomValidatorResolution {
+  startValidation(fieldId, input): ValidationHandle;
+  shouldApplyResult(handle, result): boolean; // true if result should be applied
+  onInputChange(fieldId, newInput): void; // clean up old work
+}
+
+// Register strategies (e.g., in app bootstrap)
+window.customValidatorResolution.register('cancellation', new CancellationResolver());
+window.customValidatorResolution.register('versioning', new VersioningResolver());
+
+// App selects which strategy via injector
+const resolver = injector.get('customValidation:async-resolution');
+// Or at form level:
+const formValidator = createFormValidator({
+  asyncStrategy: injector.resolve('customValidatorResolution').getProvider('cancellation')
+});
+```
+
+**Teams can:**
+- Set a **default strategy globally** (app bootstrap).
+- **Override per-form** (e.g., legacy form uses versioning, new form uses cancellation).
+- **Chain strategies** (verify cancellation, fall back to versioning).
+- **Implement a custom strategy** for non-standard scenarios (rate limiting, batch validation, etc.).
+
+**Recommendation for WE standards:** Cancellation is the native-aligned default. Versioning is a first-class alternative, not a workaround — teams choosing it have legitimate constraints.
+
 ---
 
 ## 3. Exhaustive UX Pattern Catalog (~70 deduplicated)

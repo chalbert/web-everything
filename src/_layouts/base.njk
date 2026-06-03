@@ -18,12 +18,33 @@
             <p class="site-tagline" style="margin: 0; padding-left: 1rem; border-left: 1px solid var(--color-border, #e2e8f0); line-height: 1.2; position: relative; top: 2px;">Defining the missing standards for the modern web.</p>
         </div>
         <div class="header-controls">
-            <nav style="display: flex; gap: 1rem; margin-right: 1.5rem; align-items: center; position: relative; top: 2px;">
-                <a href="/mission/" style="color: inherit; text-decoration: none; font-size: 0.9em; font-weight: 500; opacity: 0.8;">Mission</a>
-                <a href="/demos/" style="color: inherit; text-decoration: none; font-size: 0.9em; font-weight: 500; opacity: 0.8;">Demos</a>
-                <a href="/author/" style="color: inherit; text-decoration: none; font-size: 0.9em; font-weight: 500; opacity: 0.8;">Author</a>
-                <a href="/research/" style="color: inherit; text-decoration: none; font-size: 0.9em; font-weight: 500; opacity: 0.8;">Research</a>
-                <a href="/semantics/" style="color: inherit; text-decoration: none; font-size: 0.9em; font-weight: 500; opacity: 0.8;">Semantics</a>
+            <nav class="site-nav" style="display: flex; gap: 0.75rem; margin-right: 1.5rem; align-items: center; position: relative; top: 2px;">
+                <!-- Catalogs: browse the standards -->
+                <div class="nav-group">
+                    <span class="nav-group-label">Standards</span>
+                    <div class="nav-group-links">
+                        <a href="/intents/" class="nav-link">Intents</a>
+                        <a href="/protocols/" class="nav-link">Protocols</a>
+                        <a href="/semantics/" class="nav-link">Semantics</a>
+                    </div>
+                </div>
+                <!-- Evidence: explore the standards in action -->
+                <div class="nav-group">
+                    <span class="nav-group-label">Explore</span>
+                    <div class="nav-group-links">
+                        <a href="/demos/" class="nav-link">Demos</a>
+                        <a href="/research/" class="nav-link">Research</a>
+                        <a href="/backlog/" class="nav-link">Backlog</a>
+                    </div>
+                </div>
+                <!-- About the project -->
+                <div class="nav-group">
+                    <span class="nav-group-label">About</span>
+                    <div class="nav-group-links">
+                        <a href="/mission/" class="nav-link">Mission</a>
+                        <a href="/author/" class="nav-link">Author</a>
+                    </div>
+                </div>
             </nav>
             <a href="https://github.com/chalbert/webeverything" class="header-icon" aria-label="GitHub">
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path></svg>
@@ -48,6 +69,7 @@
 
     <!-- Spec Explorer side panel (dev only — loads from Vite dev server) -->
     <div id="claude-panel" class="claude-panel" aria-hidden="true">
+        <div id="claude-panel-resizer" class="claude-panel-resizer" role="separator" aria-orientation="vertical" aria-label="Resize Spec Explorer"></div>
         <iframe id="claude-panel-frame" class="claude-panel-frame"></iframe>
     </div>
 
@@ -56,12 +78,87 @@
         var toggle = document.getElementById('claude-panel-toggle');
         var panel = document.getElementById('claude-panel');
         var frame = document.getElementById('claude-panel-frame');
+        var resizer = document.getElementById('claude-panel-resizer');
         var loaded = false;
         var pendingSelection = null;
 
+        // ── Panel width (drag-resizable, persisted) ───────────
+        var PANEL_WIDTH_KEY = 'claude-panel-width';
+        var MIN_PANEL_WIDTH = 320;
+        function maxPanelWidth() {
+            // Leave at least 360px for page content.
+            return Math.max(MIN_PANEL_WIDTH, window.innerWidth - 360);
+        }
+        function clampPanelWidth(w) {
+            return Math.min(Math.max(w, MIN_PANEL_WIDTH), maxPanelWidth());
+        }
+        function setPanelWidth(w, persist) {
+            w = clampPanelWidth(w);
+            document.documentElement.style.setProperty('--panel-width', w + 'px');
+            if (persist) {
+                try { localStorage.setItem(PANEL_WIDTH_KEY, String(w)); } catch (e) {}
+            }
+            return w;
+        }
+        // Restore saved width before the panel can paint at the default.
+        var savedWidth = null;
+        try { savedWidth = parseInt(localStorage.getItem(PANEL_WIDTH_KEY), 10); } catch (e) {}
+        if (savedWidth && !isNaN(savedWidth)) setPanelWidth(savedWidth, false);
+
+        // Drag to resize from the left edge.
+        if (resizer) {
+            var startX = 0, startW = 0;
+            function onMove(e) {
+                // Panel grows as the pointer moves left (toward smaller clientX).
+                setPanelWidth(startW + (startX - e.clientX), true);
+            }
+            function onUp() {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('mouseup', onUp);
+                document.body.classList.remove('panel-resizing');
+                resizer.classList.remove('dragging');
+            }
+            resizer.addEventListener('mousedown', function(e) {
+                e.preventDefault();
+                startX = e.clientX;
+                startW = panel.getBoundingClientRect().width;
+                document.body.classList.add('panel-resizing');
+                resizer.classList.add('dragging');
+                document.addEventListener('mousemove', onMove);
+                document.addEventListener('mouseup', onUp);
+            });
+        }
+        // Keep within bounds if the window shrinks.
+        window.addEventListener('resize', function() {
+            if (savedWidth || document.documentElement.style.getPropertyValue('--panel-width')) {
+                setPanelWidth(panel.getBoundingClientRect().width, false);
+            }
+        });
+
+        // ── Header height → CSS var ───────────────────────────
+        // The site header wraps/grows as nav changes, so the panel can't
+        // assume a fixed offset. Measure it and expose --header-height so the
+        // panel's `top`/`height` track the real header and its own header bar
+        // never hides behind the sticky site header.
+        var header = document.querySelector('.site-header');
+        function syncHeaderHeight() {
+            if (!header) return;
+            document.documentElement.style.setProperty(
+                '--header-height', header.offsetHeight + 'px'
+            );
+        }
+        syncHeaderHeight();
+        window.addEventListener('resize', syncHeaderHeight);
+        if (window.ResizeObserver && header) {
+            new ResizeObserver(syncHeaderHeight).observe(header);
+        }
+
         function open() {
             if (!loaded) {
-                frame.src = '/demos/dev-panel.html';
+                // Pass the host page's path so the panel scopes its session +
+                // transcript per page (navigate between specs → each spec keeps
+                // its own agent conversation).
+                frame.src = '/demos/dev-panel.html#page=' + encodeURIComponent(location.pathname);
                 loaded = true;
             }
             panel.classList.add('open');

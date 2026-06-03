@@ -279,21 +279,33 @@ export function matchAllRoutes(
   routes: RouteDefinition[],
 ): MatchedRoute[] {
   const matches: MatchedRoute[] = [];
+  let primaryFound = false;
 
   for (const definition of routes) {
     if (definition.isErrorBoundary) continue;
 
     const result = definition.pattern.exec({ pathname: url.pathname });
-    if (result) {
-      const groups = result.pathname.groups as Record<string, string>;
-      const params: Record<string, string> = {};
-      for (const [key, value] of Object.entries(groups)) {
-        if (value !== undefined) {
-          params[key] = value;
-        }
-      }
-      matches.push({ definition, params, url });
+    if (!result) continue;
+
+    // Only the FIRST in-place (non-outlet) match is the primary — same rule as
+    // matchRoute. Later in-place matches (e.g. the catch-all "/*") must NOT also
+    // be returned, or every page would additionally stamp the 404 template and
+    // pile up. Outlet templates are always collected (they target named outlets,
+    // not the primary view).
+    const isOutlet = definition.outlet !== undefined;
+    if (!isOutlet) {
+      if (primaryFound) continue;
+      primaryFound = true;
     }
+
+    const groups = result.pathname.groups as Record<string, string>;
+    const params: Record<string, string> = {};
+    for (const [key, value] of Object.entries(groups)) {
+      if (value !== undefined) {
+        params[key] = value;
+      }
+    }
+    matches.push({ definition, params, url });
   }
 
   return matches;

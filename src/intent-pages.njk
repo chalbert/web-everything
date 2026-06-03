@@ -58,11 +58,16 @@ eleventyComputed:
         </div>
         {% endif %}
 
-        {% set implementingBlocks = blocks | blocksForIntent(intent.id) %}
+        {% set implementingBlocks = [] %}
+        {% for b in blocks %}
+            {% if b.implementsIntent == intent.id or (b.composesIntents and intent.id in b.composesIntents) %}
+                {% set _ = implementingBlocks.push(b) %}
+            {% endif %}
+        {% endfor %}
         {% if implementingBlocks.length %}
         <div class="section-card mt-8">
-            <h2>Implementing Blocks</h2>
-            <p class="mb-6 text-slate-600">Technical implementations that fulfill this intent.</p>
+            <h2>Implementing &amp; Composing Blocks</h2>
+            <p class="mb-6 text-slate-600">Blocks that fulfill this intent directly, or compose it as part of a larger component.</p>
             <div class="standards-grid">
                 {% for block in implementingBlocks %}
                 <a href="/blocks/{{ block.id }}/" class="standard-card">

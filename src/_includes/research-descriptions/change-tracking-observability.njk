@@ -1,0 +1,154 @@
+<h3>The Question</h3>
+<p>
+    Change tracking lives today in exactly one place in this repo — the dirty/pristine model inside the
+    <a href="/intents/validation/">Validation Intent</a>, with two DI concerns already named in the
+    glossary (<code>customValidation:dirty-check</code> and <code>customValidation:change-detection</code>).
+    This research takes the position that change tracking is <strong>not a form concern but a facet of
+    observability in general</strong>: the problem of <em>detecting, representing, and attributing a
+    mutation to state over time</em>. That problem recurs at every layer — form fields, stores and signals,
+    documents, collections, the DOM, network sync — and the field has solved it many incompatible ways.
+</p>
+<p>
+    The goal is <strong>not to mandate one strategy</strong> but to (1) catalog them, (2) name the axes
+    that distinguish them, and (3) design a layer that lets one app <strong>configure a preferred strategy
+    and interoperate between several at once</strong> — generalizing the existing
+    <code>customValidation:change-detection</code> concern under the repo's native-first + registry/adapter
+    pattern. Full findings, citations, and confidence tags are in the companion report
+    (<code>reports/2026-05-31-change-tracking-observability.md</code>), grounded in an adversarially-verified
+    deep-research pass (25 claims, 25 confirmed 3-0).
+</p>
+
+<h3>Change Tracking IS Observability</h3>
+<p>
+    This standard sits in the same constellation as <a href="/projects/webstates/">Web States</a>
+    (observable stores and signals), <a href="/projects/webtraces/">Web Traces</a> (execution lineage),
+    <a href="/projects/webevents/">Web Events</a> (scoped typed dispatch), and
+    <a href="/projects/webanalytics/">Web Analytics</a> (user behavior). Each of those already observes
+    <em>some</em> change in its own private way. The gap is a <strong>unified change model</strong> (what
+    changed: path, old/new, op), an <strong>attribution model</strong> (who/what caused it), and a
+    <strong>cross-layer story</strong> for how one mutation propagates from a store into validation, traces,
+    analytics, and events.
+</p>
+
+<h3>Taxonomy — the classification axes</h3>
+<p>Every strategy below is classified on eight axes; the first four are the ones a canonical change record is derived from.</p>
+<table>
+    <thead><tr><th>Axis</th><th>Values</th></tr></thead>
+    <tbody>
+        <tr><td><strong>Granularity</strong></td><td>whole-object · property/key · nested-path · collection-delta · field-within-value</td></tr>
+        <tr><td><strong>Eagerness / timing</strong></td><td>sync-on-mutation · microtask-batched · scheduled (frame) · lazy/pull-on-read · polled</td></tr>
+        <tr><td><strong>Representation</strong></td><td>flag · old/new pair · path+op · merge-doc · event/command · CRDT op · structural patch</td></tr>
+        <tr><td><strong>Attribution</strong></td><td>none · binary (user/program) · typed-source · full provenance (actor + cause + trace link)</td></tr>
+        <tr><td><strong>Reversibility</strong></td><td>none · inverse-patch · event-sourced replay · CRDT-convergent</td></tr>
+        <tr><td><strong>Transport</strong></td><td>in-memory · serializable · network-merge-safe · log-shippable</td></tr>
+        <tr><td><strong>Soundness / coverage</strong></td><td>complete · partial · sampled</td></tr>
+        <tr><td><strong>Cost</strong></td><td>interception overhead · snapshot memory · diff CPU · subscription bookkeeping</td></tr>
+    </tbody>
+</table>
+
+<h3>Strategy Catalog</h3>
+<p>
+    Confidence: ✅ adversarially verified from a primary source · 📄 sourced but unaudited · 🔶 catalogued
+    from general knowledge, pending verification.
+</p>
+<table>
+    <thead>
+        <tr><th>Strategy</th><th>Granularity</th><th>Eagerness</th><th>Representation</th><th>Reversibility</th><th>Transport</th><th>Soundness</th><th>Conf.</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>Signals / observers (TC39, SolidJS)</td><td>per-signal/prop</td><td>lazy-pull + sync</td><td>old/new (no path)</td><td>none</td><td>in-memory</td><td>complete (sync scope)</td><td>✅</td></tr>
+        <tr><td>Proxy interception (Vue 3, MobX, Valtio)</td><td>property/path</td><td>sync</td><td>event/old-new</td><td>none</td><td>in-memory</td><td>complete</td><td>✅ / 📄</td></tr>
+        <tr><td>Accessor tracking (Vue 2 defineProperty)</td><td>property</td><td>sync</td><td>old/new</td><td>none</td><td>in-memory</td><td>partial</td><td>📄</td></tr>
+        <tr><td>Dirty-checking (Angular 1 digest)</td><td>expr/object</td><td>scheduled (digest)</td><td>flag / old/new</td><td>none</td><td>in-memory</td><td>sampled</td><td>🔶</td></tr>
+        <tr><td>Snapshot + structural diff</td><td>nested-path</td><td>sampled</td><td>structural patch</td><td>derivable</td><td>serializable</td><td>sampled</td><td>🔶</td></tr>
+        <tr><td>JSON Patch (RFC 6902)</td><td>nested-path</td><td>format</td><td>path+op</td><td>none natively</td><td>serializable</td><td>exact</td><td>✅</td></tr>
+        <tr><td>JSON Merge Patch (RFC 7386)</td><td>object-member</td><td>format</td><td>merge-doc</td><td>none</td><td>serializable</td><td>no arrays / null-literal</td><td>✅</td></tr>
+        <tr><td>Immer / Mutative patches</td><td>nested-path</td><td>sync (on produce)</td><td>structural patch</td><td>inverse-patch</td><td>serializable</td><td>complete</td><td>✅</td></tr>
+        <tr><td>CRDT (Yjs, Automerge)</td><td>collection-delta/field</td><td>sync/async</td><td>CRDT op</td><td>convergent</td><td>network-merge-safe</td><td>complete</td><td>✅</td></tr>
+        <tr><td>Operational Transformation</td><td>op</td><td>sync (server-ord.)</td><td>op</td><td>transform</td><td>network</td><td>intent-preserving</td><td>🔶</td></tr>
+        <tr><td>Event sourcing</td><td>event/command</td><td>append</td><td>event/command</td><td>replay</td><td>log-shippable</td><td>complete</td><td>🔶</td></tr>
+        <tr><td>MutationObserver (DOM)</td><td>node/subtree</td><td>microtask-batched</td><td>record list</td><td>none</td><td>in-memory</td><td>complete (DOM)</td><td>📄</td></tr>
+        <tr><td>Object.observe (removed)</td><td>object/property</td><td>—</td><td>record list</td><td>none</td><td>—</td><td>withdrawn</td><td>📄</td></tr>
+        <tr><td>Polling / equality checks</td><td>value</td><td>polled</td><td>flag / old/new</td><td>none</td><td>in-memory</td><td>sampled</td><td>🔶</td></tr>
+    </tbody>
+</table>
+
+<h4>Verified highlights</h4>
+<ul>
+    <li><strong>Signals</strong> use automatic, dynamic, read-time dependency tracking; computed signals are lazy/pull and memoized; propagation is synchronous and glitch-free via topological sort; tracking is synchronous-only, so reads inside <code>setTimeout</code> are not tracked (the key soundness limit). [TC39 Signals; SolidJS]</li>
+    <li><strong>Vue 3</strong> combines Proxy interception for objects with getter/setter accessors for refs (a Proxy cannot wrap a primitive), tracking at property-level granularity. [Vue]</li>
+    <li><strong>JSON Patch (RFC 6902)</strong> is the proven serializable path+op spine: six ops (add/remove/replace/move/copy/test), each one <code>op</code> + one <code>path</code>, applied in order — but ops are <em>not self-inverting</em>, so reversibility requires carrying the old value. [RFC 6902; immutable-json-patch]</li>
+    <li><strong>Immer / Mutative</strong> emit inverse patches alongside forward patches, giving structural-sharing reversibility for undo/replay (paths are arrays, JSON-Patch-shaped but not strictly RFC 6902). [Immer; Mutative]</li>
+    <li><strong>CRDTs</strong> guarantee Strong Eventual Consistency in two styles — state-based (join-semilattice + least-upper-bound merge) and op-based (commutative concurrent ops under causal delivery) — the formal basis for concurrent multi-source merge normalization. [Shapiro et al. 2011]</li>
+</ul>
+
+<h3>Canonical Change Record <em>(provisional)</em></h3>
+<p>
+    🔶 The heterogeneous outputs share a recoverable core. A normalization target lets every strategy map
+    into one shape so downstream consumers are strategy-agnostic. <strong>Deliberately under-specified for
+    now; to be revised as the contract meets real adapters.</strong>
+</p>
+<pre><code>interface ChangeRecord {
+  path: JsonPointer;     // RFC 6901 — the RFC 6902 spine
+  op: 'add' | 'remove' | 'replace' | 'move' | 'copy';
+  oldValue?: unknown;    // REQUIRED for self-contained reversibility (RFC ops don't carry it)
+  newValue?: unknown;
+  source: ChangeSource;  // attribution
+  timestamp: number;
+  version?: string | number;  // optimistic-concurrency / causal token
+}</code></pre>
+<p>
+    The record is a <em>lossy lingua franca for observation</em>, not a replacement for any strategy's
+    native form: Merge-Patch is too coarse to be the spine (no arrays), and CRDT ops need an adapter rather
+    than a lossless mapping (their convergence lives in causal metadata, not the record).
+</p>
+
+<h3>Attribution Model <em>(provisional)</em></h3>
+<p>
+    🔶 Attribution — who/what caused a change — is the biggest gap today: no strategy carries it natively
+    (CRDT/OT carry only a replica/site id). Proposed: a typed <code>ChangeSource</code> channel —
+    <code>user</code> · <code>program</code> · <code>server-sync</code> · <code>replay</code>/<code>undo</code>
+    · <code>external</code> — generalizing validation's <code>value-input</code> (user) vs
+    <code>baseline-change</code> (program/server) distinction. The source rides on the record so a
+    mutation's origin survives into revalidation, a trace span, and an analytics event. It may carry a
+    W3C Trace Context <code>traceparent</code> so "what caused this mutation" resolves to the initiating
+    span; the CloudEvents envelope is prior art for the attributed-change shape.
+</p>
+
+<h3>Interop &amp; Configuration Sketch <em>(provisional — flagged for revision)</em></h3>
+<p>🔶 The exact mechanism is intentionally not pinned down in this research stage. The shape that fits this repo:</p>
+<ul>
+    <li><strong>CustomChangeStrategy</strong> — the one contract every strategy satisfies, producing change records from a tracked target. Native store/signal subscriptions are the zero-config default (native-first).</li>
+    <li><strong>CustomChangeStrategyRegistry</strong> — registry + provider; per-scope selection through the injector chain lets two strategies coexist in one app (a form subtree on snapshot-diff, a collaborative doc subtree on a CRDT). Generalizes <code>customValidation:change-detection</code>.</li>
+    <li><strong>Bridging</strong> — because every strategy emits the same record, one strategy's output can feed another (signals graph → JSON-Patch stream → CRDT document). The lossy mappings mean bridges are adapters, not identities.</li>
+    <li><strong>Ordering / merge</strong> — when concurrent sources mutate the same state, defer to the strongest participating model (CRDT convergence rules, or an explicit version/causal token).</li>
+</ul>
+
+<h3>Placement Analysis</h3>
+<p>
+    <strong>Recommendation: a Protocol owned by <a href="/projects/webstates/">Web States</a>, plus a thin
+    Change Tracking Intent — with escalation to a net-new Project held in reserve.</strong>
+</p>
+<ul>
+    <li><strong>Protocol under Web States (favored)</strong> — change tracking is fundamentally observing state mutation; Web States owns the emit point (store/signal subscriptions) and its mission already reads "observability and state management." It owns zero protocols today; this is a natural first.</li>
+    <li><strong>Thin Change Tracking Intent</strong> — only if a genuine app-wide UX-preference axis exists (preferred strategy / granularity / eagerness / attribution / reversibility) distinct from the technical contract. Decide in Stage 2.</li>
+    <li><strong>Escalate to a new Project</strong> ("Web Observability" / "Web Changes") only if the catalog's breadth proves decisive — MutationObserver (DOM), CRDT/OT (network sync), and trace/analytics linkage suggest a cross-cutting substrate that could attract its own plugs/blocks/registries (the Error-Recovery → Web Reliability precedent). Real, but not yet decisive.</li>
+</ul>
+
+<h3>Cross-References</h3>
+<ul>
+    <li><a href="/projects/webstates/">Web States</a> — primary integration; subscriptions are the native default strategy's emit source.</li>
+    <li><a href="/intents/validation/">Validation Intent</a> — generalizes <code>customValidation:dirty-check</code> and <code>customValidation:change-detection</code>; cross-reference, do not duplicate.</li>
+    <li><a href="/projects/webtraces/">Web Traces</a> — <code>source.traceparent</code> span linkage.</li>
+    <li><a href="/projects/webevents/">Web Events</a> — <code>change-detected</code> as a scoped typed event.</li>
+    <li><a href="/projects/webanalytics/">Web Analytics</a> — user-attributed changes feed Track/Identify (downstream consumer only).</li>
+</ul>
+
+<h3>Open Questions</h3>
+<ul>
+    <li>Is <code>oldValue</code> always carried on the record? Is <code>version</code> a Lamport clock, a vector clock, or an opaque token? Where exactly is the CRDT-op adapter boundary?</li>
+    <li>What is the <code>ChangeSource</code> channel set, and should the standard adopt CloudEvents envelope fields? Is trace linkage mandatory or optional?</li>
+    <li>Sync vs microtask-batched vs scheduled delivery of records — does the protocol take a position or make it configurable?</li>
+    <li>Do any production systems implement a canonical-change-record normalization bridging signals → JSON Patch → CRDT? (The interop core remains synthesis, not a verified fact.)</li>
+    <li>Operational Transformation vs op-based CRDTs for concurrent-edit ordering — transport and memory tradeoffs in practice.</li>
+</ul>

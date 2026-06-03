@@ -1,9 +1,135 @@
-<h2>Protocol: Droplist</h2>
-<p>Defines the interaction model for dropdown menus, including keyboard navigation, ARIA roles, and typeahead support.</p>
-<h3>Features</h3>
+<h2>Droplist — the composition manifest</h2>
+<p>A <strong>droplist</strong> is not one widget but a <strong>composition</strong> of general paradigms, almost none of which are droplist-specific. The droplist standard does not re-specify positioning, focus, selection, async, or truncation — it <strong>composes</strong> the intents that own them, and only declares which of their dimension values each concrete member selects. The same paradigms are reused by menus, comboboxes, trees, grids, and date pickers.</p>
+
+<h3>Family vs. members</h3>
+<p>The word "dropdown" is overloaded. Throughout this standard we use these terms precisely:</p>
+<table>
+  <thead>
+    <tr><th>Term</th><th>Meaning</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Droplist</strong></td><td>The <strong>abstract family</strong> — the substrate that every list-based selection surface conforms to. Not itself a shippable widget; this page documents it.</td></tr>
+    <tr><td><strong>Dropdown</strong></td><td>One <strong>concrete member</strong> — single-select, button-triggered, non-filtering. See <a href="/blocks/dropdown/">/blocks/dropdown/</a>.</td></tr>
+    <tr><td><strong>Multi-dropdown</strong></td><td>Concrete member — <code>multiple</code> selection. See <a href="/backlog/multi-select-dropdown-block/">backlog</a>.</td></tr>
+    <tr><td><strong>Autocomplete</strong></td><td>Concrete member — editable input, filterable. See <a href="/backlog/autocomplete-block/">backlog</a>.</td></tr>
+    <tr><td><strong>Tree-select</strong></td><td>Concrete member — hierarchical selection. See <a href="/backlog/tree-select-block/">backlog</a>.</td></tr>
+    <tr><td><strong>Menu button</strong></td><td>Concrete member — independent activation (no persisted value). ARIA role <code>menu</code>, not <code>listbox</code>.</td></tr>
+    <tr><td><strong>Native</strong></td><td>The browser-owned <code>&lt;select&gt;</code> / <code>&lt;optgroup&gt;</code> baseline. Zero composed traits — climb off it only when a requirement rules it out.</td></tr>
+  </tbody>
+</table>
+
+<h3>Two channels: ambient intent vs. trait selection</h3>
+<p>"Intent" used to do two jobs in this family. The standard now keeps them on separate channels — and structural dimensions never travel on the intent one.</p>
+<table>
+  <thead>
+    <tr><th>Channel</th><th>Owner</th><th>Carries</th><th>Mechanism</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Ambient intent</strong></td><td>Designer / product</td><td><em>Behavioral</em> preference (focus strategy, collision handling, truncation) — ambient, partial, overridable.</td><td>DI: <code>customContexts:droplistIntent</code>, set on an ancestor injector.</td></tr>
+    <tr><td><strong>Trait selection</strong></td><td>Component author / developer</td><td><em>Structural</em> construction (<code>model</code>, <code>editable</code>, which traits compose) — local, total.</td><td>Attributes on the substrate (<code>selection="model=single"</code>) or <code>with*</code> composition.</td></tr>
+  </tbody>
+</table>
+<p>Per-dimension resolution: <code>explicit (local) ⊕ ambient intent (behavioral only) ⊕ trait default</code>. Structural dimensions stop at <code>explicit ⊕ default</code> — the ambient channel has no say. One app-level line can still make "every droplist here uses virtual focus and truncates" true, but it can never make a dropdown single or multiple. That stays where the widget is built.</p>
+
+<h4>Ambient intent in practice</h4>
+<pre><code class="language-typescript">// App root — a designer/product policy, NOT structure:
+injector.set('customContexts:droplistIntent', {
+  focusStrategy: 'virtual',     // prefer virtual focus everywhere
+  collision: ['flip', 'shift'],
+  truncate: true,
+});</code></pre>
+<p>A trait with no explicit option for a <em>behavioral</em> dimension reads this. A trait with no explicit option for a <em>structural</em> dimension falls through to its default — never to the ambient channel.</p>
+
+<h3>How a trait reaches the page</h3>
+<p>A <strong>trait</strong> is the unit of composed behavior — a <code>with[Capability]</code> factory that applies DOM/ARIA/CSS/keyboard wiring and returns a handle that can undo it (the resource-loader contract, reused). The app author never writes that call directly. A trait surfaces in HTML as one of three things:</p>
+<table>
+  <thead>
+    <tr><th>Face</th><th>What it is</th><th>When the trait takes this face</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Component</strong></td><td>A custom element that owns a subtree.</td><td>The trait needs to own structure/children — the popup surface, the option template.</td></tr>
+    <tr><td><strong>Behavior</strong></td><td>A custom attribute stacked on semantic HTML.</td><td>The trait enhances an element that already exists; multiple stack on one node.</td></tr>
+    <tr><td><strong>Provider</strong></td><td>A value/service set on the injector chain, consumed down-tree.</td><td>The trait is config or a shared service that many nodes read (intent profile, positioning strategy, the announcer).</td></tr>
+  </tbody>
+</table>
+<p>Most droplist traits are <strong>behaviors</strong>; two own structure as <strong>components</strong>; three are best delivered as <strong>providers</strong>. See the trait surface map below for which is which.</p>
+
+<h3>Three altitudes: how to read any variant</h3>
+<p>The same droplist composition can be expressed at three levels of the same trait language. Concrete blocks (Dropdown, Autocomplete, Multi-dropdown, …) document themselves at all three; reading them in this order builds the mental model.</p>
+<ol>
+  <li><strong>HTML, explicit behaviors (the substrate).</strong> Each custom attribute is one trait; the attribute <em>value</em> is the trait selection. Reads as DOM + ARIA + behavior attributes only — no framework, no element wrapping.</li>
+  <li><strong>Component (a named preset of traits).</strong> A custom element such as <code>&lt;drop-list&gt;</code> that desugars to the substrate above in its <code>connectedCallback</code>. The element and its attributes <em>are</em> the trait selection.</li>
+  <li><strong>TypeScript, explicit composition (the purest trait language).</strong> A list of <code>with*</code> factories — structurally identical to <code>loader.load(promise, [traitA, traitB])</code>. Returns a handle whose <code>cleanup()</code> reverts every trait in reverse.</li>
+</ol>
+
+<h3>Composed intents</h3>
+<table>
+  <thead>
+    <tr><th>Intent</th><th>What it contributes to a droplist</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><a href="/intents/anchor/">Anchor</a></td><td>The tethered surface: placement (<code>bottom-start</code>), collision flip/shift, edge-aware sizing, and <strong>dismissal &amp; focus return</strong> (Esc / outside-click, focus back to the trigger).</td></tr>
+    <tr><td><a href="/intents/focus-delegation/">Focus Delegation</a></td><td>One tab stop; arrows move within. <code>roving</code> focus for menus, <code>virtual</code> focus (<code>aria-activedescendant</code> + scroll-into-view) for comboboxes.</td></tr>
+    <tr><td><a href="/intents/selection/">Selection</a></td><td>Single vs. multiple, and when the choice commits. Drives <code>aria-selected</code>/<code>aria-checked</code>, the highlight-vs-commit model, and <strong>option grouping</strong> (<code>optgroup</code> / <code>role=group</code>).</td></tr>
+    <tr><td><a href="/intents/type-ahead/">Type-Ahead</a></td><td>Typing characters to seek a matching option. Mutually exclusive with <strong>filter</strong>; both consume printable keys.</td></tr>
+    <tr><td><a href="/intents/input/">Input</a></td><td>The combobox text field: the <code>clear</code> affordance (accessible "Clear", focus-return, decoupled from Esc) and disabled/readonly states.</td></tr>
+    <tr><td><a href="/intents/live-region-status/">Live Region Status</a></td><td>Politely announces "{n} results available", "No results found", and loading — for filterable variants.</td></tr>
+    <tr><td><a href="/intents/windowed-collection/">Windowed Collection</a></td><td>Virtualizes very long option lists while preserving <code>aria-setsize</code>/<code>aria-posinset</code> and focus. Optional.</td></tr>
+    <tr><td><a href="/intents/loader/">Loader</a></td><td><code>filtering</code> / <code>loadingMore</code> states for async (server-filtered or paginated) options. Optional.</td></tr>
+    <tr><td><a href="/intents/typography/">Typography</a></td><td><code>truncation</code> of long option/value labels with full-text recovery and Label-in-Name preserved.</td></tr>
+  </tbody>
+</table>
+
+<h3>Trait surface map</h3>
+<p>Every intent contributes exactly one trait, which surfaces in HTML as one of the three faces:</p>
+<table>
+  <thead>
+    <tr><th>Intent</th><th>Trait</th><th>HTML surface</th><th>Markup</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><a href="/intents/anchor/">Anchor</a></td><td><code>withAnchoredSurface</code></td><td><strong>behavior</strong> (binding) + <strong>provider</strong> (positioning strategy)</td><td><code>anchor="…"</code> / <code>anchored="bottom-start;flip"</code></td><td>proposed</td></tr>
+    <tr><td><a href="/intents/focus-delegation/">Focus Delegation</a></td><td><code>withFocusDelegation</code></td><td><strong>behavior</strong></td><td><code>focus-delegation="strategy=virtual"</code></td><td>real (split)</td></tr>
+    <tr><td><a href="/intents/selection/">Selection</a></td><td><code>withSelection</code></td><td><strong>behavior</strong></td><td><code>selection="model=single"</code></td><td>real (split)</td></tr>
+    <tr><td><a href="/intents/type-ahead/">Type-Ahead</a></td><td><code>withTypeAhead</code></td><td><strong>behavior</strong></td><td><code>type-ahead</code></td><td>real</td></tr>
+    <tr><td><a href="/intents/input/">Input</a></td><td><code>withClearable</code></td><td><strong>behavior</strong></td><td><code>clearable</code></td><td>proposed</td></tr>
+    <tr><td><a href="/intents/live-region-status/">Live Region Status</a></td><td><code>withLiveStatus</code></td><td><strong>provider</strong> (one announcer per app) + behavior trigger</td><td><code>live-status</code> + <code>customContexts:announcer</code></td><td>proposed</td></tr>
+    <tr><td><a href="/intents/windowed-collection/">Windowed Collection</a></td><td><code>withWindowing</code></td><td><strong>behavior</strong> on the listbox</td><td><code>windowed</code></td><td>proposed</td></tr>
+    <tr><td><a href="/intents/loader/">Loader</a></td><td><code>withAsyncOptions</code></td><td><strong>provider</strong> (<code>loaderIntent</code>) + behavior</td><td><code>filter="async"</code> + <code>customContexts:loaderIntent</code></td><td>provider real</td></tr>
+    <tr><td><a href="/intents/typography/">Typography</a></td><td><code>withTruncation</code></td><td><strong>behavior</strong> (or CSS layer) on options</td><td><code>truncate</code></td><td>proposed</td></tr>
+  </tbody>
+</table>
+
+<h3>The substrate</h3>
+<p>Pulling it together, the <strong>droplist substrate</strong> is precisely:</p>
+<ol>
+  <li>A <strong>semantic skeleton</strong> — a trigger (button <em>or</em> combobox input) + a <code>role=listbox</code>/<code>menu</code> surface + an option collection.</li>
+  <li>A <strong>stack of behaviors</strong> on that skeleton, each the behavior-face of one intent's trait.</li>
+  <li>An <strong>intent profile</strong> injected above it, that the behaviors read to resolve <em>behavioral</em> dimension values (structural dimensions never come from this channel).</li>
+  <li>Optionally, <strong>service providers</strong> (positioning strategy, announcer, loader intent) consumed via DI.</li>
+</ol>
+
+<h4>Concrete members as presets</h4>
+<p>Each concrete member is a different point in the substrate's dimension space — a preset of trait selections, not a distinct code path.</p>
+<table>
+  <thead>
+    <tr><th>Member</th><th>Focus</th><th>Selection</th><th>Filtering</th><th>ARIA shape</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><a href="/blocks/dropdown/">Dropdown</a></td><td><code>virtual</code></td><td><code>model=single</code>, follows focus</td><td>—</td><td><code>button[aria-haspopup=listbox]</code> → <code>listbox</code> / <code>option</code></td></tr>
+    <tr><td><a href="/backlog/multi-select-dropdown-block/">Multi-dropdown</a></td><td><code>virtual</code></td><td><code>model=multiple</code>, <code>selectionFollowsFocus=false</code></td><td>optional</td><td><code>listbox[aria-multiselectable]</code></td></tr>
+    <tr><td><a href="/backlog/autocomplete-block/">Autocomplete</a></td><td><code>virtual</code> + <code>controller=input</code></td><td><code>model=single</code>/<code>multiple</code></td><td>client or async (replaces type-ahead)</td><td><code>combobox</code> + <code>listbox</code> + <code>live-status</code></td></tr>
+    <tr><td><a href="/backlog/tree-select-block/">Tree-select</a></td><td>TBD</td><td>TBD (hierarchical)</td><td>TBD</td><td><code>tree[aria-multiselectable]</code></td></tr>
+    <tr><td>Menu button</td><td><code>roving</code></td><td><code>independent</code> (no persisted value)</td><td>—</td><td><code>button[aria-haspopup=menu]</code> → <code>menu</code> / <code>menuitem</code></td></tr>
+    <tr><td>Native baseline</td><td><code>native</code></td><td><code>model=single</code>/<code>multiple</code></td><td>—</td><td><code>&lt;select&gt;</code> / <code>&lt;optgroup&gt;</code></td></tr>
+  </tbody>
+</table>
+
+<h3>Keyboard contract (family-level summary)</h3>
 <ul>
-  <li>Keyboard navigation (Arrow keys, Home/End)</li>
-  <li>Type-ahead (delegated to the <a href="/blocks/type-ahead/">Type-Ahead</a> block, not inlined)</li>
-  <li>ARIA roles and properties</li>
+  <li><kbd>Tab</kbd> moves between widgets; arrows move within. <kbd>Home</kbd>/<kbd>End</kbd> jump; <kbd>PageUp</kbd>/<kbd>PageDown</kbd> page through long lists.</li>
+  <li>Type-ahead seeks by typed prefix (Type-Ahead intent). In editable variants, type-ahead is replaced by filter.</li>
+  <li><kbd>Esc</kbd> closes the surface and returns focus to the trigger; in editable comboboxes a second <kbd>Esc</kbd> (popup already closed) may clear the input.</li>
+  <li><kbd>Enter</kbd>/<kbd>Space</kbd> commit; <kbd>Tab</kbd> commits and advances. In select-only comboboxes, arrow navigation alone does not change the value.</li>
 </ul>
-<p style="font-size: 0.9rem; color: var(--color-text-muted);">Type-ahead &mdash; typing characters to jump to a matching option &mdash; is provided by the standalone <a href="/blocks/type-ahead/">Type-Ahead</a> behavior so the same pattern is shared with listboxes, menus, and trees.</p>
+
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">Grounded in the dropdown UX research (<code>reports/2026-06-01-dropdown-ux-behaviors.md</code>) and the trait-language design (<code>reports/2026-06-02-droplist-trait-language.md</code>, <code>reports/2026-06-02-dropdown-trait-composition.md</code>, <code>reports/2026-06-02-intent-vs-trait-change-plan.md</code>). The reports remain as the historical research trail; this page is the canonical standard.</p>

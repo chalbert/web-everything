@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="intlGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#4f46e5" />
+    </linearGradient>
+    <filter id="intlFloatShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#eef2ff" />
+
+  <g filter="url(#intlFloatShadow)">
+      <!-- Globe outline -->
+      <circle cx="64" cy="64" r="30" stroke="url(#intlGrad)" stroke-width="8" fill="none" />
+      <!-- Equator -->
+      <line x1="34" y1="64" x2="94" y2="64" stroke="url(#intlGrad)" stroke-width="6" stroke-linecap="round" />
+      <!-- Meridian: vertical ellipse implying longitude -->
+      <ellipse cx="64" cy="64" rx="13" ry="30" stroke="url(#intlGrad)" stroke-width="6" fill="none" />
+      <!-- Upper latitude line -->
+      <line x1="42" y1="46" x2="86" y2="46" stroke="#4338ca" stroke-width="5" stroke-linecap="round" />
+      <!-- Lower latitude line -->
+      <line x1="42" y1="82" x2="86" y2="82" stroke="#4338ca" stroke-width="5" stroke-linecap="round" />
+  </g>
+</svg>

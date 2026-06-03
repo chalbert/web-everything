@@ -7,7 +7,11 @@
     "dimensions": {
       "physics": {
         "description": "The animation model governing transitions and micro-interactions",
-        "values": ["natural", "immediate", "reduced"]
+        "values": [
+          "natural",
+          "immediate",
+          "reduced"
+        ]
       }
     },
     "description": "<h3>Physics Contract</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>natural</code>: Mass-based physics (springs), context-aware transitions.</li><li><code>immediate</code>: <strong>&lt; 16ms</strong> latency. Disables decorative motion for high-performance workflows.</li><li><code>reduced</code>: Semantic motion only (e.g. layout shifts), disabling parallax/scaling. Respects <code>prefers-reduced-motion</code>.</li></ul>"
@@ -20,7 +24,11 @@
     "dimensions": {
       "level": {
         "description": "The spatial density profile controlling touch targets, spacing, and information quantity",
-        "values": ["comfortable", "compact", "wafer"]
+        "values": [
+          "comfortable",
+          "compact",
+          "wafer"
+        ]
       }
     },
     "description": "<h3>Spatial Contract</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>comfortable</code>: <strong>44px+</strong> touch targets. Whitespace is used for grouping (Consumer standard).</li><li><code>compact</code>: <strong>32px</strong> targets. High information density, border-based grouping (Enterprise standard).</li><li><code>wafer</code>: <strong>24px</strong> targets. Maximum data visibility for complex tooling/IDE interfaces.</li></ul>"
@@ -29,14 +37,281 @@
     "id": "interaction",
     "name": "Interaction Intent",
     "status": "concept",
-    "summary": "Protocol defining the input modality and focus management behavior.",
+    "summary": "Protocol defining the input modality (pointer, touch, spatial) that shapes interaction patterns.",
     "dimensions": {
       "modality": {
         "description": "The primary input method determining interaction patterns",
-        "values": ["pointer", "touch", "gamepad"]
+        "values": [
+          "pointer",
+          "touch",
+          "gamepad"
+        ]
       }
     },
-    "description": "<h3>Input Contract</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>pointer</code>: Fine-grained control. Hover menus enabled, scrollbars visible.</li><li><code>touch</code>: Coarse control. <strong>Swipe actions</strong> replace hover menus. Hit testing padding applied.</li><li><code>gamepad</code>: Spatial Navigation (D-Pad). Focus is trapped within active regions (Sunsetting <code>tab-index</code> logic).</li></ul>"
+    "description": "<h3>Input Contract</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>pointer</code>: Fine-grained control. Hover menus enabled, scrollbars visible.</li><li><code>touch</code>: Coarse control. <strong>Swipe actions</strong> replace hover menus. Hit testing padding applied.</li><li><code>gamepad</code>: Spatial Navigation (D-Pad). Focus is trapped within active regions (Sunsetting <code>tab-index</code> logic).</li></ul><p class=\"text-sm text-gray-600 mb-2\">This intent owns the input <em>modality</em> only. The composite-widget focus contract — roving tabindex vs. virtual focus, arrows-within / Tab-between, and selection-follows-focus — is owned by the <a href=\"/intents/focus-delegation/\">Focus Delegation Intent</a>.</p>"
+  },
+  {
+    "id": "focus-delegation",
+    "name": "Focus Delegation Intent",
+    "status": "draft",
+    "summary": "Protocol for composite-widget focus — roving tabindex vs. virtual focus (active descendant), arrow-key navigation within a widget, and whether selection follows focus.",
+    "dimensions": {
+      "strategy": {
+        "description": "How the active item is tracked as focus moves through the widget",
+        "values": [
+          "roving",
+          "virtual",
+          "native"
+        ]
+      },
+      "orientation": {
+        "description": "The axis the arrow keys traverse",
+        "values": [
+          "vertical",
+          "horizontal",
+          "both"
+        ]
+      },
+      "selectionFollowsFocus": {
+        "description": "Whether moving focus to an item also activates or selects it",
+        "values": [
+          "follows",
+          "independent"
+        ]
+      }
+    },
+    "description": "<h3>Tab vs. Arrows</h3><p class=\"text-sm text-gray-600 mb-2\">A composite widget exposes <strong>one</strong> tab stop: <kbd>Tab</kbd> / <kbd>Shift+Tab</kbd> move <em>between</em> widgets, while the arrow keys move <em>within</em> — options, rows, and cells are reached by arrows, never by Tab.</p><h3>Strategy</h3><p class=\"text-sm text-gray-600 mb-2\">How the active item is tracked as focus moves.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>roving</code>: Real DOM focus moves between items — the active item has <code>tabindex=\"0\"</code>, all others <code>-1</code>. Use when the items themselves are the interactive targets (menus, toolbars, radio groups, tabs).</li><li><code>virtual</code>: DOM focus stays on a controller element (a text input or the listbox) while the visually active item is tracked via <code>aria-activedescendant</code>. Required when typing must continue uninterrupted (comboboxes). The active item <strong>must be scrolled into view</strong> on each move — browsers do not auto-scroll <code>aria-activedescendant</code> targets the way they do real focus.</li><li><code>native</code>: Browser-managed focus with no JavaScript — a radio group or a native <code>&lt;select&gt;</code>. The native-first baseline; reach for <code>roving</code>/<code>virtual</code> only when a custom widget rules native out.</li></ul><h3>Orientation</h3><p class=\"text-sm text-gray-600 mb-2\"><code>vertical</code> binds <kbd>Up</kbd>/<kbd>Down</kbd>, <code>horizontal</code> binds <kbd>Left</kbd>/<kbd>Right</kbd>, and <code>both</code> enables two-dimensional movement (menubars, grids). <kbd>Home</kbd>/<kbd>End</kbd> jump to the first/last item regardless of orientation. Movement <strong>clamps</strong> at the ends by default; a widget may opt into <strong>wrapping</strong> (last &rarr; first).</p><h3>Selection follows focus</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>follows</code>: Moving focus immediately activates/selects the item — single-select listboxes and auto-activated tabs. Fast, but unsafe when activation is expensive or destructive.</li><li><code>independent</code>: Focus moves without committing; selection happens on an explicit key (<kbd>Space</kbd>/<kbd>Enter</kbd>). Correct for multi-select, menus, and comboboxes.</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">This intent owns only <em>focus movement</em>. It composes with the <a href=\"/intents/selection/\">Selection Intent</a> (what gets chosen and when it commits), the <a href=\"/intents/type-ahead/\">Type-Ahead Intent</a> (seeking an item by typing within the same focus model), the <a href=\"/intents/anchor/\">Anchor Intent</a> (a menu or listbox surface adopts a focus strategy when it opens), and the <a href=\"/intents/interaction/\">Interaction Intent</a> (input modality — pointer, touch, or spatial navigation).</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type FocusStrategy = 'roving' | 'virtual' | 'native';\ntype Orientation = 'vertical' | 'horizontal' | 'both';\n\ninterface FocusDelegationIntent {\n    // How the active item is tracked\n    strategy: FocusStrategy;\n    // Axis the arrow keys traverse\n    orientation: Orientation;\n    // Does moving focus also select?\n    selectionFollowsFocus: boolean;\n    // Wrap around at the ends, or clamp (default)\n    wrap?: boolean;\n}</code></pre>",
+    "designSystemResearch": [
+      {
+        "system": "WAI-ARIA APG",
+        "components": [
+          "Roving tabindex",
+          "aria-activedescendant",
+          "Developing a Keyboard Interface",
+          "Managing focus"
+        ],
+        "keyInsight": "Defines the two focus-management techniques (roving tabindex and aria-activedescendant) and the arrows-within / Tab-between rule. We adopt both verbatim as the strategy axis and the core invariant.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/"
+      },
+      {
+        "system": "Radix UI",
+        "components": [
+          "RovingFocusGroup",
+          "orientation",
+          "loop",
+          "dir"
+        ],
+        "keyInsight": "Headless roving-focus primitive; its orientation and loop options map directly to our orientation dimension and wrap option, validating focus delegation as a standalone, composable concern.",
+        "reference": "https://www.radix-ui.com/primitives"
+      },
+      {
+        "system": "React Aria",
+        "components": [
+          "useSelectableCollection",
+          "selectionBehavior",
+          "shouldFocusWrap",
+          "FocusScope"
+        ],
+        "keyInsight": "Implements both strategies behind one hook and exposes selection-follows-focus via selectionBehavior. Confirms decoupling focus movement from selection commitment.",
+        "reference": "https://react-spectrum.adobe.com/react-aria/"
+      },
+      {
+        "system": "Material Design 3",
+        "components": [
+          "Menus",
+          "Tabs",
+          "Lists"
+        ],
+        "keyInsight": "Single-tab-stop composite widgets with arrow navigation; tabs auto-activate (selection follows focus) while menus do not — informs the selectionFollowsFocus split.",
+        "reference": "https://m3.material.io/"
+      }
+    ],
+    "uxResearch": [
+      {
+        "title": "Cross-cutting paradigms in the dropdown family",
+        "source": "Web Everything dropdown UX research (2026-06-01)",
+        "findings": [
+          "Focus delegation is the keystone paradigm a dropdown composes — reused by listbox, menu, tree, grid, toolbar, and tabs.",
+          "Virtual focus requires manually scrolling the aria-activedescendant target into view; browsers do not do it automatically.",
+          "Select-only comboboxes keep DOM focus on the control and never let arrow navigation alone change the value (selection independent of focus)."
+        ],
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/combobox/examples/combobox-select-only/"
+      }
+    ],
+    "researchGaps": [
+      "Spatial / D-pad navigation overlaps the Interaction Intent's gamepad modality (focus trapping within active regions) — decide whether spatial navigation is a strategy here or stays owned by Interaction.",
+      "Reconcile selectionFollowsFocus with the Selection Intent's immediacy axis (live vs. buffered) — related but distinct commitment moments.",
+      "Two-dimensional grid mechanics (row/column wrap, cell vs. widget focus, ragged rows) need a deeper contract than the orientation:both value currently implies."
+    ],
+    "events": [
+      "focusmove",
+      "activechange"
+    ]
+  },
+  {
+    "id": "live-region-status",
+    "name": "Live Region Status Intent",
+    "status": "draft",
+    "summary": "Protocol for announcing transient status to assistive technology via a live region — urgency, the semantic container (status, alert, log), and what is announced (loading, result counts, no-results, errors).",
+    "dimensions": {
+      "urgency": {
+        "description": "How forcefully an update interrupts the user (maps to aria-live)",
+        "values": [
+          "polite",
+          "assertive"
+        ]
+      },
+      "role": {
+        "description": "The semantic live-region container",
+        "values": [
+          "status",
+          "alert",
+          "log"
+        ]
+      },
+      "relevance": {
+        "description": "Whether the whole message or only new additions are announced",
+        "values": [
+          "atomic",
+          "additions"
+        ]
+      }
+    },
+    "description": "<h3>Urgency</h3><p class=\"text-sm text-gray-600 mb-2\">How forcefully an update interrupts, mapping to <code>aria-live</code>.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>polite</code>: Announced when the user is idle, without interrupting (advisory status — loading, result counts). The safe default.</li><li><code>assertive</code>: Announced immediately, interrupting the current utterance. Reserve for time-critical messages (a submitted form's error); overuse is hostile.</li></ul><h3>Role</h3><p class=\"text-sm text-gray-600 mb-2\">The semantic container. <strong>The region must already exist (empty) in the DOM when the page loads</strong> so assistive tech registers it; populate its text on events rather than inserting the node on demand.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>status</code>: <code>role=\"status\"</code> — implicit <code>aria-live=\"polite\"</code> + <code>aria-atomic=\"true\"</code>. Advisory status.</li><li><code>alert</code>: <code>role=\"alert\"</code> — implicit <code>aria-live=\"assertive\"</code>. Errors and urgent conditions.</li><li><code>log</code>: <code>role=\"log\"</code> — sequential additions where order matters (chat, console).</li></ul><h3>Relevance</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>atomic</code>: The entire region is re-announced on change (<code>aria-atomic=\"true\"</code>) — for a single replaced message like \"3 results available\".</li><li><code>additions</code>: Only newly added content is announced (<code>aria-relevant=\"additions\"</code>) — for append-only logs.</li></ul><h3>What to Announce</h3><p class=\"text-sm text-gray-600 mb-2\">Surface state in <em>text</em>, never a spinner or colour alone:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li>Loading/searching: \"Loading…\" / \"Searching…\" (compose the <a href=\"/intents/loader/\">Loader Intent</a> for label conventions).</li><li>Result counts: \"{n} results available\", and \"{label} {i} of {n}\" as focus moves through options.</li><li>Empty: an explicit \"No results found\".</li><li>Errors: the validation message text (compose the <a href=\"/intents/validation/\">Validation Intent</a>).</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">This intent owns only the <em>announcement channel</em>. The content it announces is owned by neighbouring intents: <a href=\"/intents/loader/\">Loader</a> (pending text), <a href=\"/intents/validation/\">Validation</a> (errors), and <a href=\"/intents/selection/\">Selection</a> / combobox (counts). Do not move focus to the live region.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Urgency = 'polite' | 'assertive';\ntype LiveRole = 'status' | 'alert' | 'log';\ntype Relevance = 'atomic' | 'additions';\n\ninterface LiveRegionStatusIntent {\n    // aria-live level\n    urgency: Urgency;\n    // Semantic container (sets the default urgency)\n    role: LiveRole;\n    // Whole message vs. only additions\n    relevance?: Relevance;\n}</code></pre>",
+    "events": [
+      "announce",
+      "clear"
+    ],
+    "designSystemResearch": [
+      {
+        "system": "WAI-ARIA / MDN",
+        "components": [
+          "aria-live",
+          "role=status",
+          "role=alert",
+          "role=log",
+          "aria-atomic",
+          "aria-relevant"
+        ],
+        "keyInsight": "role=status implies polite + atomic; role=alert implies assertive. The region must pre-exist empty for AT to register it. We adopt the role→urgency default mapping as the contract.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Roles/status_role"
+      },
+      {
+        "system": "Orange Digital Accessibility",
+        "components": [
+          "Autocomplete announcements"
+        ],
+        "keyInsight": "The live region must exist on load; announce '{n} results available' politely. Assertive floods the user during rapid typing.",
+        "reference": "https://a11y-guidelines.orange.com/en/articles/autocomplete-component/"
+      },
+      {
+        "system": "React Aria",
+        "components": [
+          "LiveAnnouncer",
+          "useComboBox announcements"
+        ],
+        "keyInsight": "A centralized localized announcer for focus/filter/selection reuses one managed region across messages, rather than scattering aria-live nodes.",
+        "reference": "https://react-spectrum.adobe.com/react-aria/"
+      }
+    ],
+    "uxResearch": [
+      {
+        "title": "Announcing async combobox states",
+        "source": "Web Everything dropdown UX research (2026-06-01)",
+        "findings": [
+          "No-results and result counts must be announced as text, not just shown visually.",
+          "Loading vs. empty need distinct, localizable strings.",
+          "Keep aria-expanded honest while a loading or empty popup is shown."
+        ],
+        "reference": "https://mui.com/material-ui/api/autocomplete/"
+      }
+    ],
+    "researchGaps": [
+      "Announcement debounce/coalescing — rapid typing can flood even a polite region; define a recommended settle interval and whether successive messages coalesce.",
+      "Reconcile with the Feedback and Message intents (toasts/alerts) which also convey severity — is live-region delivery a shared transport those compose, or a distinct channel?"
+    ]
+  },
+  {
+    "id": "windowed-collection",
+    "name": "Windowed Collection Intent",
+    "status": "draft",
+    "summary": "Protocol for rendering only the visible window of a large collection (virtualization) while preserving set-size and position semantics and keeping keyboard focus valid.",
+    "dimensions": {
+      "rendering": {
+        "description": "Whether all items are in the DOM or only a visible window",
+        "values": [
+          "full",
+          "windowed"
+        ]
+      },
+      "itemSize": {
+        "description": "Whether row sizes are known ahead of time",
+        "values": [
+          "fixed",
+          "variable"
+        ]
+      },
+      "dataSource": {
+        "description": "Whether the full item count is known or fetched progressively",
+        "values": [
+          "bounded",
+          "infinite"
+        ]
+      }
+    },
+    "description": "<h3>Rendering</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>full</code>: All items live in the DOM. Correct for short lists — simplest and most accessible.</li><li><code>windowed</code>: Only the visible window (plus a small overscan) is rendered; rows recycle as the user scrolls. Reach for it only when the item count is large enough to hurt layout/memory — not by default.</li></ul><h3>Set-Size Semantics</h3><p class=\"text-sm text-gray-600 mb-2\">Because a windowed list's DOM no longer reflects the true collection, every rendered item <strong>must</strong> carry <code>aria-setsize</code> (the full count) and <code>aria-posinset</code> (its absolute index + 1, <em>not</em> its DOM position) so assistive tech announces \"item 42 of 5000\". Never derive position from DOM order.</p><h3>Focus Persistence</h3><p class=\"text-sm text-gray-600 mb-2\">The currently focused or active item <strong>must not be unmounted</strong> when scrolled out of the window, or DOM focus and <code>aria-activedescendant</code> references break. This composes the <a href=\"/intents/focus-delegation/\">Focus Delegation Intent</a>: under <code>virtual</code> focus the active item must also be scrolled back into view on keyboard navigation.</p><h3>Item Size</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>fixed</code>: Uniform row height — scroll offsets are pure arithmetic; cheapest and most stable.</li><li><code>variable</code>: Measured/estimated heights — requires a measurement cache and can cause scroll-anchor shifts.</li></ul><h3>Data Source</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>bounded</code>: The full count is known; the window maps into a complete dataset.</li><li><code>infinite</code>: Items are fetched progressively (infinite scroll / load-more). Composes the <a href=\"/intents/loader/\">Loader Intent</a> <code>loadingMore</code> state — render an announced progress row at the list end rather than a blocking overlay.</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">This intent owns only <em>which items are realised in the DOM</em>. Selection, focus movement, and async fetching are delegated to the <a href=\"/intents/selection/\">Selection</a>, <a href=\"/intents/focus-delegation/\">Focus Delegation</a>, and <a href=\"/intents/loader/\">Loader</a> intents respectively.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Rendering = 'full' | 'windowed';\ntype ItemSize = 'fixed' | 'variable';\ntype DataSource = 'bounded' | 'infinite';\n\ninterface WindowedCollectionIntent {\n    // All items vs. visible window\n    rendering: Rendering;\n    // Known vs. measured row heights\n    itemSize?: ItemSize;\n    // Known count vs. progressive fetch\n    dataSource?: DataSource;\n    // Extra rows rendered beyond the viewport\n    overscan?: number;\n}</code></pre>",
+    "events": [
+      "rangechange",
+      "loadmore"
+    ],
+    "designSystemResearch": [
+      {
+        "system": "WAI-ARIA APG",
+        "components": [
+          "aria-setsize",
+          "aria-posinset",
+          "Scrollable Listbox example"
+        ],
+        "keyInsight": "setsize/posinset let assistive tech report position and total when not all items are in the DOM — the core accessibility contract for virtualization.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/listbox/examples/listbox-scrollable/"
+      },
+      {
+        "system": "React Aria",
+        "components": [
+          "Virtualizer",
+          "persisted focused row",
+          "aria-rowindex"
+        ],
+        "keyInsight": "Persists the focused element in the DOM even when scrolled out of view and supplies positional ARIA so screen-reader context is not lost.",
+        "reference": "https://react-spectrum.adobe.com/react-aria/"
+      },
+      {
+        "system": "TanStack Virtual / react-window",
+        "components": [
+          "fixed / variable size",
+          "overscan",
+          "measureElement"
+        ],
+        "keyInsight": "Headless windowing engines; fixed vs. variable sizing and overscan are the primary tuning axes, which we expose as dimensions rather than reimplement.",
+        "reference": "https://tanstack.com/virtual/latest"
+      }
+    ],
+    "uxResearch": [
+      {
+        "title": "Virtualization accessibility caveats",
+        "source": "Web Everything dropdown UX research (2026-06-01)",
+        "findings": [
+          "Set aria-setsize/aria-posinset on every rendered option using the absolute index, not DOM order.",
+          "Never unmount the focused/active option while it is scrolled out of the window.",
+          "Infinite scroll should expose a load-more progress row with an aria-label."
+        ],
+        "reference": "https://github.com/bvaughn/react-window/issues/808"
+      }
+    ],
+    "researchGaps": [
+      "Threshold guidance — at what item count does windowing pay off versus its accessibility and scroll-anchor cost? Provide a heuristic rather than 'always virtualize'.",
+      "Find-in-page (Ctrl+F) and full-text search break when matching items are not realised in the DOM — define a fallback (render-on-search or a search index)."
+    ]
   },
   {
     "id": "prefetch",
@@ -46,11 +321,19 @@
     "dimensions": {
       "eagerness": {
         "description": "How proactively the application anticipates the user's next action",
-        "values": ["viewport", "hover", "interaction"]
+        "values": [
+          "viewport",
+          "hover",
+          "interaction"
+        ]
       },
       "suppressWhen": {
         "description": "Conditions that suppress prefetching to respect the user's environment",
-        "values": ["limited-data", "low-power", "slow-connection"]
+        "values": [
+          "limited-data",
+          "low-power",
+          "slow-connection"
+        ]
       }
     },
     "description": "<h3>Eagerness</h3><p class=\"text-sm text-gray-600 mb-2\">How proactively the application anticipates the user's next action. Higher eagerness improves perceived speed but consumes more resources.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>viewport</code>: Prefetch when the link becomes visible to the user (Lazy).</li><li><code>hover</code>: Prefetch when the user shows interest (hovering or focusing) (Moderate).</li><li><code>interaction</code>: Prefetch at the moment the user begins to act (pointer down) (Eager).</li></ul><h3>User Conditions</h3><p class=\"text-sm text-gray-600 mb-2\">Conditions under which prefetching should be suppressed to respect the user's environment. The implementing block decides which APIs to use for detection.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>limited-data</code>: User has indicated a preference to conserve data (e.g., metered connection).</li><li><code>low-power</code>: Device is in a low-battery or power-saving state.</li><li><code>slow-connection</code>: Network quality is too poor for speculative loading to be beneficial.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type PrefetchEagerness = 'viewport' | 'hover' | 'interaction';\ntype PrefetchConstraint = 'limited-data' | 'low-power' | 'slow-connection';\n\ninterface PrefetchIntent {\n    // How proactively to prefetch\n    eagerness: PrefetchEagerness;\n    // Conditions that suppress prefetching\n    suppressWhen: PrefetchConstraint[];\n}</code></pre>"
@@ -63,61 +346,98 @@
     "dimensions": {
       "strategy": {
         "description": "How the UI is blocked during a pending state",
-        "values": ["optimistic", "soft", "hard", "replacement"]
+        "values": [
+          "optimistic",
+          "soft",
+          "hard",
+          "replacement"
+        ]
       },
       "scope": {
         "description": "What part of the UI is affected by the pending state",
-        "values": ["element", "region", "viewport"]
+        "values": [
+          "element",
+          "region",
+          "viewport"
+        ]
       },
       "progress": {
         "description": "Whether the user can see measurable progress",
-        "values": ["determinate", "indeterminate"]
+        "values": [
+          "determinate",
+          "indeterminate"
+        ]
       },
       "context": {
         "description": "Whether prior content exists when loading begins",
-        "values": ["initial", "transition"]
+        "values": [
+          "initial",
+          "transition"
+        ]
       },
       "timing": {
         "description": "When the loading indicator appears",
-        "values": ["immediate", "debounced"]
+        "values": [
+          "immediate",
+          "debounced"
+        ]
       }
     },
-    "description": "<h3>Blocking Strategy</h3><p class=\"text-sm text-gray-600 mb-2\">How the UI responds to a pending state. Each strategy represents a different trade-off between user freedom and data integrity.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>optimistic</code>: <strong>Non-blocking</strong>. UI remains fully interactive (background sync). The predicted outcome is shown immediately; reverted on failure.</li><li><code>soft</code>: <strong>Input-blocking</strong>. Applies <code>aria-disabled</code> and <code>pointer-events: none</code>. Content remains visible but non-interactive.</li><li><code>hard</code>: <strong>Visual-blocking</strong>. Content is obscured or overlaid (Backdrop). User must wait.</li><li><code>replacement</code>: <strong>Content-blocking</strong>. Placeholder content (Skeleton, Spinner) temporarily replaces the view.</li></ul><h3>Scope Definition</h3><p class=\"text-sm text-gray-600 mb-2\">What part of the UI is affected by the pending state.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>element</code>: Constrained to the triggering target (e.g., Button spinner).</li><li><code>region</code>: Constrained to the containing landmark (e.g., <code>aria-busy</code> on the Form).</li><li><code>viewport</code>: Global interruption (Glass pane).</li></ul><h3>Progress Indication</h3><p class=\"text-sm text-gray-600 mb-2\">Whether the user can see measurable progress or only that activity is happening.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>determinate</code>: Progress can be measured (0–100%). Rendered as a progress bar or percentage. Research suggests this is preferred for operations exceeding 10 seconds.</li><li><code>indeterminate</code>: Progress is happening but completion is unknown. Rendered as a spinner, pulse, or shimmer animation.</li></ul><h3>Loading Context</h3><p class=\"text-sm text-gray-600 mb-2\">Whether prior content exists. This changes user expectations for how the pending state should look.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>initial</code>: No prior content is available. The user expects a placeholder (skeleton, spinner, empty state).</li><li><code>transition</code>: Prior content is already visible. The user expects the existing content to remain visible (dimmed, stale) while new content loads. Replacing visible content with a loading indicator is perceived as regression.</li></ul><h3>Timing Contract</h3><p class=\"text-sm text-gray-600 mb-2\">Maps semantic timing profiles to configurable durations (ms). Applications can override defaults or register new profiles.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>immediate</code>: Defaults to 0ms (Configurable).</li><li><code>debounced</code>: Defaults to 400ms (Configurable). Prevents flicker for fast operations.</li><li><code>[custom]</code>: User-defined keys (e.g., <code>slow: 1000ms</code>).</li></ul><h3>Lifecycle States</h3><p class=\"text-sm text-gray-600 mb-2\">The full state machine for a loading operation. Components can react to any state transition.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>idle</code>: No operation in progress. Default state.</li><li><code>pending</code>: Operation started, no result yet. Loading indicator is active. <strong>Carries a version/generation token</strong> — an immutable snapshot of the input/request state at dispatch time. On resolution, if the current input version has changed, the result is dropped (stale-resolve prevention, cross-cutting req #1).</li><li><code>success</code>: Operation completed successfully. Indicator may briefly show confirmation before returning to idle.</li><li><code>error</code>: Operation failed. Error state may persist until dismissed or retried.</li><li><code>stale</code>: Showing previous data while a refresh is in progress. Combines with <code>transition</code> context.</li></ul><h3>Hierarchy Aggregation</h3><p class=\"text-sm text-gray-600 mb-2\"><strong>Validation and form hierarchies compose the loader lifecycle:</strong> a parent's pending state rolls up from its children — <code>pending</code> if any descendant is pending; otherwise <code>success</code>/<code>error</code>/<code>idle</code> per precedence. This aggregation surfaces the full async tree's readiness, enabling submission gates and progress indication. Validation composes this as its async-orchestration meta-intent (cross-cutting req #3: \"pending aggregation + submit awaits in-flight async\").</p><h3>Label Conventions</h3><p class=\"text-sm text-gray-600 mb-2\">Recommended conventions for loading indicator labels, drawn from design system research (Fluent, Spectrum).</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Casing</strong>: Sentence case (\"Loading data...\" not \"LOADING DATA\").</li><li><strong>Suffix</strong>: Trailing ellipsis to convey ongoing activity.</li><li><strong>Form</strong>: Gerund / \"-ing\" verbs (\"Loading\", \"Saving\", \"Submitting\").</li><li><strong>Length</strong>: Three words or fewer for conciseness.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type BlockingStrategy = 'optimistic' | 'soft' | 'hard' | 'replacement';\ntype LoaderScope = 'element' | 'region' | 'viewport';\ntype LoaderProgress = 'determinate' | 'indeterminate';\ntype LoaderContext = 'initial' | 'transition';\ntype LoaderState = 'idle' | 'pending' | 'success' | 'error' | 'stale';\n\ninterface LoaderIntent {\n    // How the UI is blocked\n    strategy: BlockingStrategy;\n    // What part of the UI is affected\n    scope: LoaderScope;\n    // Whether progress is measurable\n    progress: LoaderProgress;\n    // Whether prior content exists\n    context: LoaderContext;\n    // When the loader appears (referencing Config.timings)\n    timing: 'immediate' | 'debounced' | string;\n    // Accessibility label\n    label?: string;\n    // Motion bindings per lifecycle state\n    animations?: Partial&lt;Record&lt;LoaderState, string&gt;&gt;;\n}</code></pre><h3>Provisioning Example</h3><pre><code class=\"language-typescript\">const LoaderConfig = {\n    timings: {\n        debounced: 400,\n        complex: 800\n    },\n    defaults: {\n        region: { strategy: 'soft', timing: 'debounced', context: 'transition' }\n    }\n};\n\ninjector Application {\n    provide { Loader } to '@web-intents' from './components/GlobalLoader';\n    provide { LoaderConfig } to '@web-intents/loader';\n}</code></pre><h3>Consumer Integration</h3><p class=\"text-sm text-gray-600 mb-2\">Blocks that consume the Loader Intent resolve it from the injector chain via <code>customContexts:loaderIntent</code> and select the matching <a href=\"/blocks/resource-loader/\">Resource Loader</a> trait for their loading behavior.</p><pre><code class=\"language-typescript\">// Consumer (e.g., Router) resolves the intent\nconst intent = InjectorRoot.getProviderOf(element, 'customContexts:loaderIntent');\n\n// Select trait based on declared strategy\nswitch (intent?.strategy) {\n    case 'replacement':\n        // Swap content with skeleton/spinner\n        return withReplacement(withSkeleton(BaseElement));\n    case 'hard':\n        // Overlay with backdrop, trap focus\n        return withHardBlocking(BaseElement);\n    case 'optimistic':\n        // No visual change, revert on error\n        return withOptimistic(BaseElement);\n    default:\n        // Soft: aria-busy + pointer-events:none\n        return withSoftBlocking(BaseElement);\n}</code></pre><p class=\"text-sm text-gray-600 mb-2\">Current consumers: <a href=\"/blocks/router/\">Router</a> (route transitions). The same pattern applies to forms, data grids, and any block with async operations.</p>",
+    "description": "<h3>Blocking Strategy</h3><p class=\"text-sm text-gray-600 mb-2\">How the UI responds to a pending state. Each strategy represents a different trade-off between user freedom and data integrity.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>optimistic</code>: <strong>Non-blocking</strong>. UI remains fully interactive (background sync). The predicted outcome is shown immediately; reverted on failure.</li><li><code>soft</code>: <strong>Input-blocking</strong>. Applies <code>aria-disabled</code> and <code>pointer-events: none</code>. Content remains visible but non-interactive.</li><li><code>hard</code>: <strong>Visual-blocking</strong>. Content is obscured or overlaid (Backdrop). User must wait.</li><li><code>replacement</code>: <strong>Content-blocking</strong>. Placeholder content (Skeleton, Spinner) temporarily replaces the view.</li></ul><h3>Scope Definition</h3><p class=\"text-sm text-gray-600 mb-2\">What part of the UI is affected by the pending state.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>element</code>: Constrained to the triggering target (e.g., Button spinner).</li><li><code>region</code>: Constrained to the containing landmark (e.g., <code>aria-busy</code> on the Form).</li><li><code>viewport</code>: Global interruption (Glass pane).</li></ul><h3>Progress Indication</h3><p class=\"text-sm text-gray-600 mb-2\">Whether the user can see measurable progress or only that activity is happening.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>determinate</code>: Progress can be measured (0\u2013100%). Rendered as a progress bar or percentage. Research suggests this is preferred for operations exceeding 10 seconds.</li><li><code>indeterminate</code>: Progress is happening but completion is unknown. Rendered as a spinner, pulse, or shimmer animation.</li></ul><h3>Loading Context</h3><p class=\"text-sm text-gray-600 mb-2\">Whether prior content exists. This changes user expectations for how the pending state should look.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>initial</code>: No prior content is available. The user expects a placeholder (skeleton, spinner, empty state).</li><li><code>transition</code>: Prior content is already visible. The user expects the existing content to remain visible (dimmed, stale) while new content loads. Replacing visible content with a loading indicator is perceived as regression.</li></ul><h3>Timing Contract</h3><p class=\"text-sm text-gray-600 mb-2\">Maps semantic timing profiles to configurable durations (ms). Applications can override defaults or register new profiles.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>immediate</code>: Defaults to 0ms (Configurable).</li><li><code>debounced</code>: Defaults to 400ms (Configurable). Prevents flicker for fast operations.</li><li><code>[custom]</code>: User-defined keys (e.g., <code>slow: 1000ms</code>).</li></ul><h3>Lifecycle States</h3><p class=\"text-sm text-gray-600 mb-2\">The full state machine for a loading operation. Components can react to any state transition.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>idle</code>: No operation in progress. Default state.</li><li><code>pending</code>: Operation started, no result yet. Loading indicator is active. <strong>Carries a version/generation token</strong> \u2014 an immutable snapshot of the input/request state at dispatch time. On resolution, if the current input version has changed, the result is dropped (stale-resolve prevention, cross-cutting req #1).</li><li><code>success</code>: Operation completed successfully. Indicator may briefly show confirmation before returning to idle.</li><li><code>error</code>: Operation failed. Error state may persist until dismissed or retried.</li><li><code>stale</code>: Showing previous data while a refresh is in progress. Combines with <code>transition</code> context.</li><li><code>filtering</code>: Re-querying an already-open collection on new filter text (combobox / search-as-you-type). A pending sub-state that keeps prior results visible; debounce the query (see <code>timing</code>) and drop stale resolutions via the version token.</li><li><code>loadingMore</code>: Fetching the next page of an infinite / paginated collection. Surfaces as an announced progress row at the list end, never a blocking overlay — composes the <a href=\"/intents/windowed-collection/\">Windowed Collection Intent</a>.</li></ul><h3>Hierarchy Aggregation</h3><p class=\"text-sm text-gray-600 mb-2\"><strong>Validation and form hierarchies compose the loader lifecycle:</strong> a parent's pending state rolls up from its children \u2014 <code>pending</code> if any descendant is pending; otherwise <code>success</code>/<code>error</code>/<code>idle</code> per precedence. This aggregation surfaces the full async tree's readiness, enabling submission gates and progress indication. Validation composes this as its async-orchestration meta-intent (cross-cutting req #3: \"pending aggregation + submit awaits in-flight async\").</p><h3>Label Conventions</h3><p class=\"text-sm text-gray-600 mb-2\">Recommended conventions for loading indicator labels, drawn from design system research (Fluent, Spectrum).</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Casing</strong>: Sentence case (\"Loading data...\" not \"LOADING DATA\").</li><li><strong>Suffix</strong>: Trailing ellipsis to convey ongoing activity.</li><li><strong>Form</strong>: Gerund / \"-ing\" verbs (\"Loading\", \"Saving\", \"Submitting\").</li><li><strong>Length</strong>: Three words or fewer for conciseness.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type BlockingStrategy = 'optimistic' | 'soft' | 'hard' | 'replacement';\ntype LoaderScope = 'element' | 'region' | 'viewport';\ntype LoaderProgress = 'determinate' | 'indeterminate';\ntype LoaderContext = 'initial' | 'transition';\ntype LoaderState = 'idle' | 'pending' | 'success' | 'error' | 'stale' | 'filtering' | 'loadingMore';\n\ninterface LoaderIntent {\n    // How the UI is blocked\n    strategy: BlockingStrategy;\n    // What part of the UI is affected\n    scope: LoaderScope;\n    // Whether progress is measurable\n    progress: LoaderProgress;\n    // Whether prior content exists\n    context: LoaderContext;\n    // When the loader appears (referencing Config.timings)\n    timing: 'immediate' | 'debounced' | string;\n    // Accessibility label\n    label?: string;\n    // Motion bindings per lifecycle state\n    animations?: Partial&lt;Record&lt;LoaderState, string&gt;&gt;;\n}</code></pre><h3>Provisioning Example</h3><pre><code class=\"language-typescript\">const LoaderConfig = {\n    timings: {\n        debounced: 400,\n        complex: 800\n    },\n    defaults: {\n        region: { strategy: 'soft', timing: 'debounced', context: 'transition' }\n    }\n};\n\ninjector Application {\n    provide { Loader } to '@web-intents' from './components/GlobalLoader';\n    provide { LoaderConfig } to '@web-intents/loader';\n}</code></pre><h3>Consumer Integration</h3><p class=\"text-sm text-gray-600 mb-2\">Blocks that consume the Loader Intent resolve it from the injector chain via <code>customContexts:loaderIntent</code> and select the matching <a href=\"/blocks/resource-loader/\">Resource Loader</a> trait for their loading behavior.</p><pre><code class=\"language-typescript\">// Consumer (e.g., Router) resolves the intent\nconst intent = InjectorRoot.getProviderOf(element, 'customContexts:loaderIntent');\n\n// Select trait based on declared strategy\nswitch (intent?.strategy) {\n    case 'replacement':\n        // Swap content with skeleton/spinner\n        return withReplacement(withSkeleton(BaseElement));\n    case 'hard':\n        // Overlay with backdrop, trap focus\n        return withHardBlocking(BaseElement);\n    case 'optimistic':\n        // No visual change, revert on error\n        return withOptimistic(BaseElement);\n    default:\n        // Soft: aria-busy + pointer-events:none\n        return withSoftBlocking(BaseElement);\n}</code></pre><p class=\"text-sm text-gray-600 mb-2\">Current consumers: <a href=\"/blocks/router/\">Router</a> (route transitions). The same pattern applies to forms, data grids, and any block with async operations.</p>",
     "events": [
       "idle",
       "pending",
       "success",
       "error",
-      "stale"
+      "stale",
+      "filtering",
+      "loadingMore"
     ],
     "designSystemResearch": [
       {
         "system": "Material Design 3",
-        "components": ["Linear progress indicator", "Circular progress indicator"],
+        "components": [
+          "Linear progress indicator",
+          "Circular progress indicator"
+        ],
         "keyInsight": "Both support determinate and indeterminate. Naming uses 'progress indicators' (not 'spinner' or 'loader').",
         "reference": "https://m3.material.io/components/progress-indicators/overview"
       },
       {
         "system": "Carbon (IBM)",
-        "components": ["Loading (full-page)", "Inline Loading (four-state: inactive → active → success → error)", "Skeleton states"],
+        "components": [
+          "Loading (full-page)",
+          "Inline Loading (four-state: inactive \u2192 active \u2192 success \u2192 error)",
+          "Skeleton states"
+        ],
         "keyInsight": "Four-state Inline Loading is the most complete lifecycle model. Progressive loading pattern: skeleton first, then primary content, then secondary. Never skeleton toasts, modals, or overflow menus.",
         "reference": "https://carbondesignsystem.com/patterns/loading-pattern/"
       },
       {
         "system": "Spectrum (Adobe)",
-        "components": ["ProgressBar (linear)", "ProgressCircle (circular)"],
+        "components": [
+          "ProgressBar (linear)",
+          "ProgressCircle (circular)"
+        ],
         "keyInsight": "Size scale (S/M/L/XL). Width constraints (48px min, 768px max for bars). Labels: sentence case with trailing ellipsis. RTL reverses bar fill; circles always spin clockwise.",
         "reference": "https://spectrum.adobe.com/page/progress-bar/"
       },
       {
         "system": "Fluent 2 (Microsoft)",
-        "components": ["Spinner", "ProgressBar", "Skeleton"],
-        "keyInsight": "Labels: short -ing verbs, ≤3 words, trailing ellipsis. Never rewind a progress bar. Switch from indeterminate to determinate once enough data is available.",
+        "components": [
+          "Spinner",
+          "ProgressBar",
+          "Skeleton"
+        ],
+        "keyInsight": "Labels: short -ing verbs, \u22643 words, trailing ellipsis. Never rewind a progress bar. Switch from indeterminate to determinate once enough data is available.",
         "reference": "https://fluent2.microsoft.design/"
       },
       {
         "system": "Apple HIG",
-        "components": ["Activity Indicator (indeterminate)", "Progress Bar (determinate)"],
+        "components": [
+          "Activity Indicator (indeterminate)",
+          "Progress Bar (determinate)"
+        ],
         "keyInsight": "Never display inaccurate progress. Always allow cancellation for long operations. Activity indicators are non-interactive and must disappear on completion.",
         "reference": "https://developer.apple.com/design/human-interface-guidelines/progress-indicators"
       },
@@ -133,9 +453,9 @@
         "title": "Timing Thresholds",
         "source": "Nielsen Norman Group",
         "findings": [
-          "< 1 second: Show nothing — any indicator would flash annoyingly",
-          "1–10 seconds: Spinner or skeleton screen (skeleton for known layouts, spinner for unknown)",
-          "> 10 seconds: Determinate progress bar — users need to see how much is left; spinners lose credibility"
+          "< 1 second: Show nothing \u2014 any indicator would flash annoyingly",
+          "1\u201310 seconds: Spinner or skeleton screen (skeleton for known layouts, spinner for unknown)",
+          "> 10 seconds: Determinate progress bar \u2014 users need to see how much is left; spinners lose credibility"
         ],
         "reference": "https://www.nngroup.com/articles/skeleton-screens/"
       },
@@ -143,9 +463,9 @@
         "title": "Skeleton Screen Types",
         "source": "Nielsen Norman Group",
         "findings": [
-          "Animated shimmer: Best — wave/pulse animation conveys activity and outperforms static",
-          "Static placeholder: Good — gray blocks matching layout structure",
-          "Frame-only: Harmful — showing only chrome (header/footer) without content placeholders makes users assume the page is broken"
+          "Animated shimmer: Best \u2014 wave/pulse animation conveys activity and outperforms static",
+          "Static placeholder: Good \u2014 gray blocks matching layout structure",
+          "Frame-only: Harmful \u2014 showing only chrome (header/footer) without content placeholders makes users assume the page is broken"
         ]
       },
       {
@@ -153,8 +473,8 @@
         "source": "Multiple (Facebook, Maister)",
         "findings": [
           "Skeleton screens led to ~300ms faster perceived load vs. spinners (Facebook study)",
-          "Uncertain waits feel longer than known waits — favor determinate indicators",
-          "Unexplained waits feel longer — provide labels and context",
+          "Uncertain waits feel longer than known waits \u2014 favor determinate indicators",
+          "Unexplained waits feel longer \u2014 provide labels and context",
           "Showing page structure (skeletons) reduces anxiety and cognitive load when content appears",
           "People overestimate passive waits by 36% (Maister's psychology of waiting)"
         ]
@@ -170,7 +490,7 @@
       }
     ],
     "researchGaps": [
-      "Skeleton exclusion rules not defined — Carbon research shows the 'replacement' strategy should never apply to toasts, modals, overflow menus, or loaders themselves. Consider an excludeFrom convention."
+      "Skeleton exclusion rules not defined \u2014 Carbon research shows the 'replacement' strategy should never apply to toasts, modals, overflow menus, or loaders themselves. Consider an excludeFrom convention."
     ]
   },
   {
@@ -181,22 +501,48 @@
     "dimensions": {
       "context": {
         "description": "Where validation messages are displayed / which element commits the state",
-        "values": ["control", "group", "form", "root"]
+        "values": [
+          "control",
+          "group",
+          "form",
+          "root"
+        ]
       },
       "level": {
-        "description": "Severity + commit policy. Part of unified vocabulary (error/warning/info/success) plus validation-specific caution. error→rejected/blocks-submit, warning/info→committed, caution→held-until-confirm.",
-        "values": ["error", "warning", "caution", "info"]
+        "description": "Severity + commit policy. Part of unified vocabulary (error/warning/info/success) plus validation-specific caution. error\u2192rejected/blocks-submit, warning/info\u2192committed, caution\u2192held-until-confirm.",
+        "values": [
+          "error",
+          "warning",
+          "caution",
+          "info"
+        ]
       },
       "execution": {
         "description": "When validity is computed: on user input (change), blur, or form submission only",
-        "values": ["change", "blur", "submit"]
+        "values": [
+          "change",
+          "blur",
+          "submit"
+        ]
       },
       "visibility": {
         "description": "When messages are displayed to user: immediate, when field dirty, after touch, or after submission attempt",
-        "values": ["immediate", "dirty", "touched", "submitted"]
+        "values": [
+          "immediate",
+          "dirty",
+          "touched",
+          "submitted"
+        ]
+      },
+      "commitment": {
+        "description": "When invalid values enter form state: immediately on input (full), or buffered locally until blur/submit (deferred)",
+        "values": [
+          "full",
+          "deferred"
+        ]
       }
     },
-    "description": "<h3>Meta-Intent Composition</h3><p class=\"text-sm text-gray-600 mb-2\"><strong>Validation composes three shared meta-intents and is not a monolithic standard:</strong></p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Loader Intent (async lifecycle):</strong> Async validators emit <code>pending {version}</code>. The version token prevents stale-resolve races: results from superseded input versions are dropped. Pending aggregates up form hierarchy to gate submission.</li><li><strong>Unified severity/tone vocabulary:</strong> <code>level</code> shares the semantic axis (error/warning/info/success + caution) with Feedback (<code>severity</code>) and Message (<code>tone</code>). A single severity vocabulary across all messaging enables consistent tone.</li><li><strong>Reliability Intent (mechanism failure):</strong> Validation owns input-invalidity (expected outcome: user must fix). Reliability owns mechanism failure (async validator crash, server unreachable). The split prevents conflating input errors with operation failures.</li></ul><h3>Message Context (Dimension: context)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>control</code>: Inline message anchored to a single input field.</li><li><code>group</code>: Message anchored to a fieldset, composite control, or field array. Error attaches to first errored member by path.</li><li><code>form</code>: Aggregate error summary at top of form, ordered by DOM. Links jump to first errored control. Focus moved to summary on submit-blocked.</li><li><code>root</code>: Global message (system-wide validation, not field-bound). Never sets <code>aria-invalid</code> on individual fields.</li></ul><h3>Severity & Commit Policy (Dimension: level)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>error</code>: Substantive. <strong>Commit state: Rejected.</strong> Blocks form submission. Sets <code>aria-invalid=true</code>. Only <code>error</code>-level blocks.</li><li><code>warning</code>: Advisory. <strong>Commit state: Committed.</strong> Submission allowed. No <code>aria-invalid</code> (beyond-native).</li><li><code>caution</code>: Critical advisory. <strong>Commit state: Held.</strong> Submission paused until user confirms override (e.g., \"Continue anyway?\").</li><li><code>info</code>: Educational / helper text. <strong>Commit state: Committed.</strong> No visual emphasis. Complements the primary message.</li><li><code>[custom]</code>: App-defined levels (e.g., <code>audit</code>). App specifies commit behavior.</li></ul><h3>Per-Level Vocabulary: Control</h3><p class=\"text-sm text-gray-600 mb-2\"><strong>Observable states</strong> (four parallel regions):</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Validity:</strong> <code>unknown</code> | <code>pending {version}</code> | <code>invalid {severity, messages}</code> | <code>valid</code>. Reduced from independent sources (native/schema/async/manual) via declared precedence. Version token prevents stale-resolve.</li><li><strong>Interaction:</strong> <code>pristine</code>↔<code>dirty</code> (vs baseline), <code>untouched</code>↔<code>touched</code>, <code>blurred</code>↔<code>focused</code>, <code>pre-submit</code>↔<code>submit-attempted</code>.</li><li><strong>Commit:</strong> <code>committed</code> (warning/info) | <code>rejected</code> (error) | <code>held</code> (caution awaits confirm).</li><li><strong>Display:</strong> <code>silent</code> | <code>showing-error</code> | <code>showing-warning</code> | <code>showing-info</code> | <code>showing-pending</code>. Gated by <code>visibility</code> intent; subject to reward-early/punish-late policy.</li></ul><p class=\"text-sm text-gray-600 mb-2\"><strong>Observable events</strong> (stable-id scheme: <code>validation.control.*</code>):</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>value-input</code> (↑version): User entered / programmatic value change.</li><li><code>value-commit</code>: Value ready for persistence.</li><li><code>focus</code> | <code>blur</code>: Interaction state change.</li><li><code>validate-start {source, version}</code>: Validation run initiated (may be deferred/debounced).</li><li><code>validate-end {source, version, result}</code>: Validation completed. Stale results (old version) are dropped here.</li><li><code>validity-changed {merged}</code>: Merged validity state transitioned.</li><li><code>became-valid</code> | <code>became-invalid</code>: Crossing validity boundary.</li><li><code>message-enter</code> | <code>message-exit</code> | <code>message-pulse</code>: Message lifecycle (appears, resolves, re-triggers).</li><li><code>commit-state-changed</code>: Commit state transitioned (committed→rejected, etc.).</li><li><code>baseline-change</code>: Baseline updated (async defaults, reinitialize, reset-post-submit). Owns dirty/touched lifecycle.</li></ul><h3>Per-Level Vocabulary: Group</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Validity aggregation:</strong> <code>pending</code> if any member pending; <code>invalid</code> if any invalid; else <code>valid</code>. Max severity wins.</li><li><strong>Completion:</strong> <code>empty</code> | <code>partial</code> | <code>complete</code> (vs <code>visited</code> rollup).</li><li><strong>Anchor target:</strong> First errored member by DOM order (e.g., in composite date, target day/month/year sub-field).</li><li><strong>States:</strong> <code>dependsOn</code> reactive graph. Changing a dependency revalidates dependents (fixes requiredIf-latching).</li><li><strong>Events:</strong> <code>member-validity-change</code>, <code>group-became-invalid</code>, <code>dependents-revalidated</code>, message <code>enter</code>/<code>exit</code>.</li></ul><h3>Per-Level Vocabulary: Form</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Submission lifecycle:</strong> <code>idle</code> → <code>validating</code> (run all, await pending) → <code>blocked</code> (invalid; show summary, move focus) OR <code>submitting</code> (valid; in flight) → <code>submitted</code> | <code>submit-failed</code> (server errors injected).</li><li><strong>Rollup:</strong> Aggregate validity, dirty, visited, pending. <code>submittable</code> = not invalid AND not pending.</li><li><strong>Error summary (GOV.UK dual model):</strong> Summary ordered by DOM, <code>role=alert</code>, focus moved on blocked, entries link to first errored field/member, verbatim parity with inline messages.</li><li><strong>Server reconciliation:</strong> Server errors injected as <code>manual</code> validity source by path. Merge precedence ensures they are not wiped on blur.</li><li><strong>Events:</strong> <code>submit-attempt</code>, <code>submit-blocked {invalid-list}</code>, <code>submit-allowed</code>, <code>submit-start</code>, <code>submit-end {success|error}</code>, summary <code>enter</code>/<code>exit</code>, <code>focus-moved-to-summary</code>.</li></ul><h3>Per-Level Vocabulary: Nested-Form</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Bubbling policy:</strong> <code>participating</code> (child invalidity blocks parent submit) vs <code>isolated</code> (child validated independently).</li><li><strong>Field arrays:</strong> Errors track rows by stable key (not index). Reorder preserves error association. Array node has separate validity from items.</li><li><strong>Wizard steps:</strong> Per-step gate. <code>gated</code> state blocks advance; <code>step-advance-allowed</code> event fires when active step valid.</li><li><strong>Back-nav value retention:</strong> Stepping back preserves values + baseline (no unregister-on-leave).</li><li><strong>Events:</strong> <code>child-validity-change</code>, <code>step-gate-blocked</code>, <code>step-advance-allowed</code>, row <code>add</code>/<code>remove</code>/<code>reorder</code>.</li></ul><h3>Conformance Tiers</h3><p class=\"text-sm text-gray-600 mb-2\">Implementations conform at one of three tiers. Each builds on the previous:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Level 0 — Intent-aware:</strong> Honours the UX intents (context/level/execution/visibility). Renders messages, timing, placement correctly. No state/event contract. (&quot;Does the right UX.&quot;)</li><li><strong>Level 1 — State &amp; event conformant:</strong> Presents observable states (merged validity via <code>aria-invalid</code>/<code>:user-invalid</code>/<code>validity</code> and documented attributes for beyond-native states: <code>data-pending</code>, <code>data-dirty</code>, <code>data-severity</code>, etc.) and emits stable-id events (<code>validation.control.*</code>) with documented <code>detail</code> shapes. Makes implementations <strong>swappable</strong> — swap one control for another, form behaves identically.</li><li><strong>Level 2 — Shape &amp; concern conformant:</strong> Canonical hand-off shapes (<code>ValueSnapshot</code>, <code>SourceResult</code>, <code>MergedValidity</code>, <code>InteractionState</code>, <code>DisplayDecision</code>) are normative. Decomposed concerns (<code>validation.concern.*</code>) are individually replaceable via DI. Makes concerns <strong>combinable</strong> across creators.</li></ul><h3>Features &amp; Capability Model</h3><p class=\"text-sm text-gray-600 mb-2\">Features are optional, trait-like capability bundles. Partial compliance is first-class if gaps are detectable and reported. All implementations declare a <strong>capability manifest:</strong> <code>{ specVersion, conformanceLevel, features: [...], concerns: {...} }</code>.</p><p class=\"text-sm text-gray-600 mb-2\"><strong>Core (mandatory for any conformance):</strong> control validity (error level only), interaction state, display decision, native-constraint source.</p><p class=\"text-sm text-gray-600 mb-2\"><strong>Optional features</strong> (<code>validation.feature.*</code>):</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>async</code>: Pending lifecycle, version tokens, debounce, cancellation, aggregation.</li><li><code>cross-field</code>: <code>dependsOn</code> graph, group-scoped rules, reactive revalidation.</li><li><code>conditional</code>: Dynamic required-if, conditional schema (discriminated union).</li><li><code>field-array</code>: Repeated sections, key-based identity, per-row validation, add/remove/reorder.</li><li><code>wizard</code>: Step gating, per-step validation, forward/back navigation.</li><li><code>error-summary</code>: Form-level summary, focus-on-blocked, GOV.UK dual model (inline + summary parity).</li><li><code>severity</code>: warning/caution/info beyond binary error (Level 1+).</li><li><code>schema</code>: Standard Schema adapter input (vendor-neutral rule definition).</li><li><code>server-reconciliation</code>: Manual validity source injection, server error merging.</li></ul><p class=\"text-sm text-gray-600 mb-2\"><strong>Out-of-capability usage detection:</strong> Build-time check (sibling to <code>check:standards</code>) diffs declared manifest vs atoms used. Runtime dev-mode guard warns/throws if undeclared feature atom is used. (See side-project brief: <code>reports/2026-05-30-validation-spec-versioning-adherence.md</code>.)</p><h3>Decomposed Concerns (DI Registry)</h3><p class=\"text-sm text-gray-600 mb-2\">Each concern is a swappable provider registered via <code>customValidation:&lt;concern&gt;</code>:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>change-detection</code>: When a value \"changed\" (event listener, signal subscription, polling).</li><li><code>dirty-check</code>: Is current ≠ pristine (strict ===, deep equal, normalized, custom).</li><li><code>inter-element-comms</code>: Control↔group↔form messages (DOM events, injector bus, signals).</li><li><code>validity-computation</code>: Rule engine (native Constraint Validation, Standard Schema adapter, custom).</li><li><code>async-orchestration</code>: Pending, debounce, cancellation, aggregation, version tokens.</li><li><code>message-resolution</code>: Validity code → display string (native localized, i18n, schema issue.message).</li><li><code>display-placement</code>: Message rendering (inline, group summary, error summary, toast).</li><li><code>focus-management</code>: Focus on error (focus-summary-on-submit, focus-first-field, none).</li></ul><h3>Stable-Id Scheme</h3><p class=\"text-sm text-gray-600 mb-2\">Atoms are addressed by stable dot-paths rooted in <code>validation.</code> domain (not intent id), so re-categorization never breaks refs:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>validation.control.validity.pending</code>, <code>validation.control.validity.invalid</code>, etc. (states)</li><li><code>validation.control.value-input</code>, <code>validation.control.became-valid</code>, etc. (events)</li><li><code>validation.group.*</code>, <code>validation.form.*</code>, <code>validation.nested.*</code> (per-level)</li><li><code>validation.source.native</code>, <code>validation.source.schema</code>, <code>validation.source.async</code>, <code>validation.source.manual</code> (sources)</li><li><code>validation.concern.dirty-check</code>, etc. (DI providers)</li><li><code>validation.feature.async</code>, <code>validation.feature.cross-field</code>, etc. (capabilities)</li></ul><h3>Interface Protocol (Provisional)</h3><pre><code class=\"language-typescript\">type ValidationLevel = 'error' | 'warning' | 'caution' | 'info' | string;\n\ninterface SourceResult {\n    source: 'native' | 'schema' | 'async' | 'manual' | string;\n    state: 'idle' | 'valid' | 'invalid' | 'pending';\n    version?: number; // for pending/async\n    messages?: Array&lt;{ code: string; level: ValidationLevel; path?: string }&gt;;\n}\n\ninterface MergedValidity {\n    state: 'unknown' | 'pending' | 'valid' | 'invalid';\n    blocking: boolean; // any source at level:error\n    severity: ValidationLevel;\n    messages: Array&lt;{ code: string; level: ValidationLevel; path?: string }&gt;;\n}\n\ninterface InteractionState {\n    dirty: boolean; // vs baseline\n    touched: boolean;\n    focused: boolean;\n    submitted: boolean;\n}\n\ninterface DisplayDecision {\n    show: boolean; // gated by visibility intent\n    message: string | null;\n    severity: ValidationLevel;\n    context: 'control' | 'group' | 'form' | 'root';\n}</code></pre>",
+    "description": "<h3>Meta-Intent Composition</h3>\n<p class=\"text-sm text-gray-600 mb-2\"><strong>Validation is not standalone \u2014 it composes three shared meta-intents:</strong></p>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><strong>Loader Intent (async lifecycle):</strong> Async validators emit pending states. Pending aggregates up the form hierarchy to gate submission.</li>\n  <li><strong>Unified severity vocabulary:</strong> <code>level</code> shares the semantic axis (error/warning/info/success + caution) with Feedback (<code>severity</code>) and Message (<code>tone</code>). One severity vocabulary across all messaging ensures consistent tone.</li>\n  <li><strong>Reliability Intent (mechanism failure):</strong> Validation owns input invalidity (user must fix the data). Reliability owns mechanism failure (validator crashed, server unreachable). The split prevents conflating input errors with operation failures.</li>\n</ul>\n\n<h3>Message Context (Dimension: context)</h3>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><code>control</code>: Inline message anchored to a single input field.</li>\n  <li><code>group</code>: Message anchored to a fieldset, composite control, or field array. Error attaches to first errored member by DOM order.</li>\n  <li><code>form</code>: Aggregate error summary at top of form, ordered by DOM. Links jump to errored fields. Focus moves to summary on submit-blocked.</li>\n  <li><code>root</code>: Global message (system-wide validation, not field-bound). Never sets <code>aria-invalid</code> on individual fields.</li>\n</ul>\n\n<h3>Severity & Commit Policy (Dimension: level)</h3>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><code>error</code>: Substantive. <strong>Blocks form submission.</strong> Sets <code>aria-invalid=true</code>. Only error-level can block.</li>\n  <li><code>warning</code>: Advisory. <strong>Submission allowed.</strong> No <code>aria-invalid</code> (user-advisory only).</li>\n  <li><code>caution</code>: Critical advisory. <strong>Submission paused</strong> until user confirms override (e.g., \"Continue anyway?\").</li>\n  <li><code>info</code>: Educational / helper text. <strong>Submission allowed.</strong> Complements the primary message.</li>\n  <li><code>[custom]</code>: App-defined levels (e.g., <code>audit</code>). App specifies commit behavior.</li>\n</ul>\n\n<h3>Interaction States (Observable at every level)</h3>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><strong>Dirty vs Pristine:</strong> Did the value change from baseline?</li>\n  <li><strong>Touched vs Untouched:</strong> Has the user focused the control?</li>\n  <li><strong>Submitted:</strong> Has the form submission attempt started?</li>\n  <li><strong>Pending:</strong> Is an async validator in flight?</li>\n</ul>\n\n<h3>Message Display Gating (Dimension: visibility)</h3>\n<p class=\"text-sm text-gray-600 mb-2\">When are validation messages shown to the user?</p>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><code>immediate</code>: Show messages as soon as validity changes (eager).</li>\n  <li><code>dirty</code>: Show only after the value has changed from baseline.</li>\n  <li><code>touched</code>: Show only after the user has focused the control.</li>\n  <li><code>submitted</code>: Show only after a form submission attempt.</li>\n</ul>\n<p class=\"text-sm text-gray-600 mt-2\"><strong>Dynamic policy:</strong> Once a field errors, validation may flip to eager (on-change) until fixed, then revert to lazy (on-blur). This \"reward early, punish late\" pattern prevents annoying re-validation while encouraging rapid correction.</p>\n\n<h3>Data Commitment (Dimension: commitment)</h3>\n<p class=\"text-sm text-gray-600 mb-2\">When do invalid values enter form state? (UX consequence for autosave, downstream safety, user input preservation)</p>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><code>full</code>: Values written to form state on every input, valid or invalid. Autosave gates on validation result. User input always persists (even broken dates). Downstream code must handle invalid states defensively.</li>\n  <li><code>deferred</code>: Invalid values buffered locally; only committed to form state on blur, submit, or explicit event. Autosave works safely (only valid data reaches it). Trade-off: user loses buffered input on page refresh before commit.</li>\n</ul>\n<p class=\"text-sm text-gray-600 mt-2\"><strong>Granular per-field/per-event/per-severity:</strong> Commitment is not form-wide. A form can have email deferring on input but committing on blur; errors prevent commit while warnings commit; custom strategies gate commit on severity or field-specific rules. Registry-based (see <a href=\"/specs/validation/\">Validation Block</a>) — <code>full</code> and <code>deferred</code> are built-in; teams register custom strategies (optimistic, staged, severity-gated, reconcile) via <code>CustomCommitmentPolicyRegistry</code>.</p>\n\n<h3>Per-Level Contract</h3>\n\n<h4>Control (Single Field)</h4>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><strong>Observable:</strong> Is it valid? Is it pending? Is it dirty/touched? What message (if any) should show?</li>\n  <li><strong>Events:</strong> User changed value, user blurred, validation started/ended, became valid/invalid, message appeared/disappeared.</li>\n  <li><strong>A11y:</strong> <code>aria-invalid</code> (error only), <code>aria-describedby</code> (message anchor), <code>:user-invalid/:user-valid</code> (visibility gate).</li>\n</ul>\n\n<h4>Group (Fieldset or Composite Control)</h4>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><strong>Observable:</strong> Is the group valid (all members valid)? If invalid, which member errored first?</li>\n  <li><strong>Dependency:</strong> If one field depends on another (requiredIf), changing the dependency revalidates dependents.</li>\n  <li><strong>Completion:</strong> How many members are complete vs. empty (useful for multi-step forms).</li>\n</ul>\n\n<h4>Form (Full Document)</h4>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><strong>Submission lifecycle:</strong> idle \u2192 validating (await pending) \u2192 blocked (show errors) OR submitting (valid) \u2192 submitted/failed.</li>\n  <li><strong>Error summary:</strong> DOM-ordered list of all errors. Links anchor to errored controls. Focus moves to summary on submit-blocked (GOV.UK pattern).</li>\n  <li><strong>Rollup:</strong> Is the form submittable (not invalid AND not pending)?</li>\n  <li><strong>Server errors:</strong> Errors from the server (authentication fail, business rule violation) are injected by field path. They do not wipe on user edit.</li>\n</ul>\n\n<h4>Nested Form (Multi-Step, Field Arrays, Wizard)</h4>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><strong>Bubbling:</strong> Does child invalidity block parent submission? (participating) Or do children validate in isolation? (isolated)</li>\n  <li><strong>Field arrays:</strong> Errors track rows by stable key (not index). Reorder preserves error association.</li>\n  <li><strong>Wizard steps:</strong> Current step must be valid to advance. Previous steps remain valid (back-nav preserves values and baseline).</li>\n</ul>\n\n<h3>Optional Features (Capability Bundles)</h3>\n<p class=\"text-sm text-gray-600 mb-2\">Not all validation systems support all features. Apps declare which features they use:</p>\n<ul class=\"text-sm text-gray-600 list-disc pl-5\">\n  <li><code>async</code>: Async validators (server-side checks, network calls).</li>\n  <li><code>cross-field</code>: One field's validity depends on another field's value (e.g., password confirmation).</li>\n  <li><code>conditional</code>: Fields appear/disappear based on values. Validation rules change dynamically.</li>\n  <li><code>field-array</code>: Repeating sections (e.g., multiple addresses). Add/remove/reorder rows.</li>\n  <li><code>wizard</code>: Multi-step form with per-step validation gates.</li>\n  <li><code>error-summary</code>: Form-level error summary with focus-on-submit-blocked (GOV.UK pattern).</li>\n  <li><code>severity</code>: Warning/caution/info beyond binary error/valid.</li>\n  <li><code>schema</code>: Vendor-neutral schema input (Standard Schema, Zod, Valibot, etc.).</li>\n  <li><code>server-reconciliation</code>: Server errors merged with client errors by field path.</li>\n</ul>\n\n<h3>Web Standards Alignment</h3>\n<table class=\"text-sm border-collapse border border-gray-300 mt-2\">\n  <tr class=\"bg-gray-100\">\n    <th class=\"border border-gray-300 px-2 py-1\">Standard</th>\n    <th class=\"border border-gray-300 px-2 py-1\">How We Use It</th>\n  </tr>\n  <tr>\n    <td class=\"border border-gray-300 px-2 py-1\"><a href=\"https://developer.mozilla.org/en-US/docs/Web/HTML/Guides/Constraint_validation\">Constraint Validation API</a></td>\n    <td class=\"border border-gray-300 px-2 py-1\">Native validity gating and <code>aria-invalid</code> anchoring via <code>ElementInternals.setValidity()</code>.</td>\n  </tr>\n  <tr>\n    <td class=\"border border-gray-300 px-2 py-1\"><a href=\"https://www.w3.org/WAI/tutorials/forms/validation/\">ARIA Form Validation</a></td>\n    <td class=\"border border-gray-300 px-2 py-1\"><code>aria-invalid</code> (error level only), <code>aria-describedby/aria-errormessage</code> (message anchoring), <code>aria-live</code> (error summary updates), <code>role=alert</code> (error summary role).</td>\n  </tr>\n  <tr>\n    <td class=\"border border-gray-300 px-2 py-1\"><a href=\"https://developer.mozilla.org/en-US/docs/Web/CSS/:user-invalid\">:user-invalid / :user-valid</a></td>\n    <td class=\"border border-gray-300 px-2 py-1\">Native display gate. Styles apply only after user touch/submit. Maps to <code>visibility</code> dimension. Baseline Oct 2023.</td>\n  </tr>\n</table>\n",
     "events": [
       "value-input",
       "value-commit",
@@ -220,31 +566,50 @@
     "designSystemResearch": [
       {
         "system": "GOV.UK",
-        "components": ["Error summary", "Inline error messages", "Form validation pattern"],
+        "components": [
+          "Error summary",
+          "Inline error messages",
+          "Form validation pattern"
+        ],
         "keyInsight": "Dual model: submit-only timing (discourages live/blur), error summary at top with focus-to-summary + anchor links, inline messages with verbatim parity. Gold standard for placement + a11y.",
         "reference": "https://design-system.service.gov.uk/patterns/validation/"
       },
       {
         "system": "Ant Design",
-        "components": ["Form.Item", "validateStatus", "validateTrigger"],
-        "keyInsight": "Comprehensive enum: validateStatus ∈ {success, warning, error, validating}. validateTrigger per-field override (change/blur/submit). validateFirst (short-circuit).",
+        "components": [
+          "Form.Item",
+          "validateStatus",
+          "validateTrigger"
+        ],
+        "keyInsight": "Comprehensive enum: validateStatus \u2208 {success, warning, error, validating}. validateTrigger per-field override (change/blur/submit). validateFirst (short-circuit).",
         "reference": "https://ant.design/components/form/"
       },
       {
         "system": "IBM Carbon",
-        "components": ["Form", "TextInput (invalid state)", "Inline loading"],
-        "keyInsight": "On-blur default + helper-text→error-message swap. Progress-indicator step error state. Four-state Inline Loading (inactive→active→success→error).",
+        "components": [
+          "Form",
+          "TextInput (invalid state)",
+          "Inline loading"
+        ],
+        "keyInsight": "On-blur default + helper-text\u2192error-message swap. Progress-indicator step error state. Four-state Inline Loading (inactive\u2192active\u2192success\u2192error).",
         "reference": "https://carbondesignsystem.com/patterns/forms/"
       },
       {
         "system": "Material Design 3",
-        "components": ["TextField (error state)", "Form validation"],
+        "components": [
+          "TextField (error state)",
+          "Form validation"
+        ],
         "keyInsight": "Error replaces helper text. Warm error hue. Native setValidity() support via custom elements.",
         "reference": "https://m3.material.io/components/text-fields/overview"
       },
       {
         "system": "Web Platform (HTML5 + ARIA)",
-        "components": ["Constraint Validation API", "ElementInternals.setValidity()", ":invalid/:user-invalid"],
+        "components": [
+          "Constraint Validation API",
+          "ElementInternals.setValidity()",
+          ":invalid/:user-invalid"
+        ],
         "keyInsight": "Native binary validity (only error level). setValidity() carries an anchor element for focus. :user-invalid gates display to touched|submitted. Beyond-native: pending, severity, cross-field.",
         "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Guides/Constraint_validation"
       }
@@ -252,7 +617,7 @@
     "uxResearch": [
       {
         "title": "Reward early, punish late",
-        "source": "Smashing Magazine / Konjević",
+        "source": "Smashing Magazine / Konjevi\u0107",
         "findings": [
           "Once a field errors, switch from lazy to eager validation (on change instead of blur).",
           "On fix, clear the error message immediately.",
@@ -308,23 +673,45 @@
     "dimensions": {
       "placement": {
         "description": "Visual position of the modal surface",
-        "values": ["center", "top", "bottom", "start", "end", "fill"]
+        "values": [
+          "center",
+          "top",
+          "bottom",
+          "start",
+          "end",
+          "fill"
+        ]
       },
       "mode": {
         "description": "Whether the modal blocks background interaction",
-        "values": ["modal", "modeless"]
+        "values": [
+          "modal",
+          "modeless"
+        ]
       },
       "backdrop": {
         "description": "Visual treatment behind the modal",
-        "values": ["dimmed", "transparent", "blur"]
+        "values": [
+          "dimmed",
+          "transparent",
+          "blur"
+        ]
       },
       "dismissal": {
         "description": "How the modal can be closed",
-        "values": ["light", "explicit", "none", "gesture"]
+        "values": [
+          "light",
+          "explicit",
+          "none",
+          "gesture"
+        ]
       },
       "scrolling": {
         "description": "How content scrolling is handled",
-        "values": ["contained", "viewport"]
+        "values": [
+          "contained",
+          "viewport"
+        ]
       }
     },
     "description": "<h3>Placement & Docking</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>center</code>: Standard dialog.</li><li><code>top/bottom</code>: Sheet/Drawer behavior (Mobile standard).</li><li><code>start/end</code>: Sidebar/Panel behavior.</li><li><code>fill</code>: Full-screen override.</li></ul><h3>Focus Management</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>trap</code>: Keeps focus within modal (Accessibility Requirement).</li><li><code>restore</code>: Returns focus to trigger when closed.</li><li><code>initial</code>: Default focus element (e.g., First input vs Close button).</li></ul><h3>Lifecycle Events</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>enter</code>: Modal opens and becomes active.</li><li><code>exit</code>: Modal closes.</li><li><code>recede</code>: Modal moves to background (when a new stacked modal opens).</li><li><code>advance</code>: Modal moves to foreground (when the top stacked modal closes).</li></ul><h3>Design System Alignment</h3><div class=\"comparison-table-wrapper\"><table class=\"comparison-table\"><thead><tr><th>System</th><th>Component</th><th>Placement</th><th>Backdrop</th><th>Dismissal</th></tr></thead><tbody><tr><td>Material 3</td><td>Basic Dialog</td><td><code>center</code></td><td><code>dimmed</code></td><td><code>light</code></td></tr><tr><td>Material 3</td><td>Full-screen</td><td><code>fill</code></td><td><code>transparent</code></td><td><code>explicit</code></td></tr><tr><td>Carbon</td><td>Modal</td><td><code>top</code></td><td><code>dimmed</code></td><td><code>explicit</code></td></tr><tr><td>Apple HIG</td><td>Sheet</td><td><code>bottom</code></td><td><code>dimmed</code></td><td><code>light</code></td></tr><tr><td>Radix UI</td><td>Dialog</td><td><code>center</code></td><td><code>dimmed</code></td><td><code>light</code></td></tr></tbody></table></div><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Dismissal = 'light' | 'explicit' | 'none';\ntype Placement = 'center' | 'top' | 'bottom' | 'start' | 'end' | 'fill';\ntype Backdrop = 'dimmed' | 'transparent' | 'blur';\n\ninterface FocusStrategy {\n    trap: boolean;\n    restore: boolean;\n    initial?: string; // Selector\n}\n\ninterface ModalIntent {\n    // Role (ARIA)\n    role: 'dialog' | 'alertdialog';\n    // Visual placement\n    placement: Placement;\n    // Interaction Mode (Blocks background?)\n    mode: 'modal' | 'modeless';\n    // Mobile Snap Points (Sheet)\n    detents?: { initial: 'medium' | 'large' | 'full'; stops: string[] };\n    // Backdrop visual\n    backdrop: Backdrop;\n    // How the modal can be closed\n    dismissal: Dismissal | 'gesture';\n    // Focus Management\n    focus: FocusStrategy;\n    // Allow other modals on top?\n    stackable: boolean;\n    // Scroll strategy\n    scrolling: 'contained' | 'viewport';\n    // Responsive sizing map\n    size: 'auto' | 'fullscreen' | Record&lt;string, string&gt;;\n    // Motion bindings\n    animations?: Partial<Record<'enter' | 'exit' | 'recede' | 'advance', string>>;\n}</code></pre>",
@@ -343,22 +730,38 @@
     "dimensions": {
       "level": {
         "description": "The semantic weight determining visual prominence",
-        "values": ["primary", "secondary", "tertiary", "destructive"]
+        "values": [
+          "primary",
+          "secondary",
+          "tertiary",
+          "destructive"
+        ]
       },
       "busy": {
         "description": "What the user experiences when the action is pending",
-        "values": ["disabled", "interactive"]
+        "values": [
+          "disabled",
+          "interactive"
+        ]
       },
       "groupOrdering": {
         "description": "How actions are ordered in a group",
-        "values": ["dom", "reverse", "platform"]
+        "values": [
+          "dom",
+          "reverse",
+          "platform"
+        ]
       },
       "groupSizing": {
         "description": "How actions are sized in a group",
-        "values": ["auto", "stretch", "uniform"]
+        "values": [
+          "auto",
+          "stretch",
+          "uniform"
+        ]
       }
     },
-    "description": "<h3>Action Levels</h3><p class=\"text-sm text-gray-600 mb-2\">The semantic weight of an action, determining its visual prominence. Every design system converges on this hierarchy.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>primary</code>: Principal call to action. Highest visual weight (Material FAB, Fluent Solid).</li><li><code>secondary</code>: Alternative actions. Moderate visual weight (Outlined, Tonal).</li><li><code>tertiary</code>: Supplemental actions. Minimal visual weight (Text, Ghost).</li><li><code>destructive</code>: Negative actions. Implies danger semantics (typically red).</li></ul><h3>Grouping & Alignment</h3><p class=\"text-sm text-gray-600 mb-2\">Spatial relationships for collections of actions (Dialog footers, Toolbars, Form actions).</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>ordering</code>: <strong>Platform-aware</strong> (macOS: Primary Last, Windows: Primary First) vs <strong>DOM order</strong> (as authored).</li><li><code>sizing</code>: <strong>Stretch</strong> (full-width, common on mobile) vs <strong>Auto</strong> (content-sized, common on desktop).</li><li><code>placement</code>: <strong>End</strong> (Dialogs), <strong>Start</strong> (Forms), <strong>Split</strong> (primary and secondary at opposite ends).</li></ul><h3>Busy State</h3><p class=\"text-sm text-gray-600 mb-2\">What the user experiences when an action is pending. The implementing block handles the CSS and layout details.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>interaction</code>: Whether the action is <strong>disabled</strong> or remains <strong>interactive</strong> during the pending state.</li><li><code>indicator</code>: Whether a loading indicator appears, and its position relative to the label (<code>start</code>, <code>end</code>, <code>center</code>, <code>overlay</code>).</li><li><code>label</code>: Whether the label changes (e.g., \"Save\" → \"Saving...\"), hides, or remains as-is.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type ActionLevel = 'primary' | 'secondary' | 'tertiary' | 'destructive' | string;\ntype IndicatorPosition = 'start' | 'end' | 'center' | 'overlay';\n\ninterface ActionBusy {\n    // Is the action disabled while busy?\n    interaction: 'disabled' | 'interactive';\n    // Where to show a loading indicator (if any)\n    indicator?: IndicatorPosition;\n    // Temporary label during pending state\n    label?: string;\n}\n\ninterface ActionGroupIntent {\n    alignment: 'start' | 'end' | 'center' | 'justify' | 'split';\n    ordering: 'dom' | 'reverse' | 'platform';\n    sizing: 'auto' | 'stretch' | 'uniform';\n}\n\ninterface ActionIntent {\n    // The semantic weight\n    level: ActionLevel;\n    // What the user experiences when the action is pending\n    busy?: ActionBusy;\n    // Icon configuration (references Icon Intent)\n    icon?: { position?: 'start' | 'end' };\n    // Grouping Context (for Collections)\n    group?: ActionGroupIntent;\n}</code></pre>",
+    "description": "<h3>Action Levels</h3><p class=\"text-sm text-gray-600 mb-2\">The semantic weight of an action, determining its visual prominence. Every design system converges on this hierarchy.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>primary</code>: Principal call to action. Highest visual weight (Material FAB, Fluent Solid).</li><li><code>secondary</code>: Alternative actions. Moderate visual weight (Outlined, Tonal).</li><li><code>tertiary</code>: Supplemental actions. Minimal visual weight (Text, Ghost).</li><li><code>destructive</code>: Negative actions. Implies danger semantics (typically red).</li></ul><h3>Grouping & Alignment</h3><p class=\"text-sm text-gray-600 mb-2\">Spatial relationships for collections of actions (Dialog footers, Toolbars, Form actions).</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>ordering</code>: <strong>Platform-aware</strong> (macOS: Primary Last, Windows: Primary First) vs <strong>DOM order</strong> (as authored).</li><li><code>sizing</code>: <strong>Stretch</strong> (full-width, common on mobile) vs <strong>Auto</strong> (content-sized, common on desktop).</li><li><code>placement</code>: <strong>End</strong> (Dialogs), <strong>Start</strong> (Forms), <strong>Split</strong> (primary and secondary at opposite ends).</li></ul><h3>Busy State</h3><p class=\"text-sm text-gray-600 mb-2\">What the user experiences when an action is pending. The implementing block handles the CSS and layout details.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>interaction</code>: Whether the action is <strong>disabled</strong> or remains <strong>interactive</strong> during the pending state.</li><li><code>indicator</code>: Whether a loading indicator appears, and its position relative to the label (<code>start</code>, <code>end</code>, <code>center</code>, <code>overlay</code>).</li><li><code>label</code>: Whether the label changes (e.g., \"Save\" \u2192 \"Saving...\"), hides, or remains as-is.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type ActionLevel = 'primary' | 'secondary' | 'tertiary' | 'destructive' | string;\ntype IndicatorPosition = 'start' | 'end' | 'center' | 'overlay';\n\ninterface ActionBusy {\n    // Is the action disabled while busy?\n    interaction: 'disabled' | 'interactive';\n    // Where to show a loading indicator (if any)\n    indicator?: IndicatorPosition;\n    // Temporary label during pending state\n    label?: string;\n}\n\ninterface ActionGroupIntent {\n    alignment: 'start' | 'end' | 'center' | 'justify' | 'split';\n    ordering: 'dom' | 'reverse' | 'platform';\n    sizing: 'auto' | 'stretch' | 'uniform';\n}\n\ninterface ActionIntent {\n    // The semantic weight\n    level: ActionLevel;\n    // What the user experiences when the action is pending\n    busy?: ActionBusy;\n    // Icon configuration (references Icon Intent)\n    icon?: { position?: 'start' | 'end' };\n    // Grouping Context (for Collections)\n    group?: ActionGroupIntent;\n}</code></pre>",
     "events": []
   },
   {
@@ -369,15 +772,27 @@
     "dimensions": {
       "size": {
         "description": "The visual size of the icon",
-        "values": ["sm", "md", "lg", "xl"]
+        "values": [
+          "sm",
+          "md",
+          "lg",
+          "xl"
+        ]
       },
       "weight": {
         "description": "Stroke weight for variable icons",
-        "values": ["light", "regular", "bold"]
+        "values": [
+          "light",
+          "regular",
+          "bold"
+        ]
       },
       "style": {
         "description": "Render style of the icon",
-        "values": ["outlined", "filled"]
+        "values": [
+          "outlined",
+          "filled"
+        ]
       }
     },
     "description": "<h3>Sizing Scale</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>sm</code>: Small (e.g., 16px). For inline text or tight density.</li><li><code>md</code>: Medium (e.g., 20px). Standard usage.</li><li><code>lg</code>: Large (e.g., 24px). Feature icons or comfortable buttons.</li><li><code>xl</code>: Extra Large (e.g., 32px+). Hero or empty states.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type IconSize = 'sm' | 'md' | 'lg' | 'xl' | string;\n\ninterface IconIntent {\n    // The visual size identifier\n    size: IconSize;\n    // Name of the icon asset/glyph\n    name: string;\n    // Stroke weight (if variable)\n    weight?: 'light' | 'regular' | 'bold';\n    // Render style\n    style?: 'outlined' | 'filled';\n}</code></pre>"
@@ -390,14 +805,22 @@
     "dimensions": {
       "strategy": {
         "description": "How layout rules accumulate as the viewport changes",
-        "values": ["mobile-first", "desktop-first", "strict-range"]
+        "values": [
+          "mobile-first",
+          "desktop-first",
+          "strict-range"
+        ]
       },
       "steps": {
         "description": "Named tiers describing the user's display context",
-        "values": ["compact", "medium", "expanded"]
+        "values": [
+          "compact",
+          "medium",
+          "expanded"
+        ]
       }
     },
-    "description": "<h3>Adaptation Strategy</h3><p class=\"text-sm text-gray-600 mb-2\">How layout rules accumulate or subtract as the viewport changes. This determines the mental model for authoring responsive layouts.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>mobile-first</code>: Start small, add complexity as space grows. Standard approach (Tailwind, Bootstrap).</li><li><code>desktop-first</code>: Start large, remove features as space shrinks. Legacy approach.</li><li><code>strict-range</code>: Each size tier is an isolated bucket — no accumulation. Used by Material Design 3.</li></ul><h3>Semantic Steps</h3><p class=\"text-sm text-gray-600 mb-2\">Named tiers that describe the user's display context, independent of specific pixel values. The implementing block maps these to concrete media/container queries.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>compact</code>: Phones in portrait. Single-column layouts, stacked navigation.</li><li><code>medium</code>: Tablets or phones in landscape. Two-column layouts, rail navigation.</li><li><code>expanded</code>: Desktops or large tablets. Multi-column layouts, persistent navigation.</li><li><code>[custom]</code>: Application-defined tiers (e.g., <code>ultrawide</code> for multi-pane dashboards).</li></ul><h3>Logical Groups</h3><p class=\"text-sm text-gray-600 mb-2\">Aliases that combine steps for convenience. Allows components to query \"am I in a small context?\" without knowing specific tier names.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>small</code>: Groups <code>compact</code> (equivalent to \"mobile\").</li><li><code>large</code>: Groups <code>expanded</code> and above (equivalent to \"desktop\").</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type AdaptationStrategy = 'mobile-first' | 'desktop-first' | 'strict-range';\n\ninterface BreakpointIntent {\n    // How layout rules accumulate\n    strategy: AdaptationStrategy;\n    // Ordered list of semantic step names (smallest to largest)\n    steps: string[];\n    // Logical groups that alias one or more steps\n    aliases?: Record&lt;string, string[]&gt;;\n}</code></pre>",
+    "description": "<h3>Adaptation Strategy</h3><p class=\"text-sm text-gray-600 mb-2\">How layout rules accumulate or subtract as the viewport changes. This determines the mental model for authoring responsive layouts.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>mobile-first</code>: Start small, add complexity as space grows. Standard approach (Tailwind, Bootstrap).</li><li><code>desktop-first</code>: Start large, remove features as space shrinks. Legacy approach.</li><li><code>strict-range</code>: Each size tier is an isolated bucket \u2014 no accumulation. Used by Material Design 3.</li></ul><h3>Semantic Steps</h3><p class=\"text-sm text-gray-600 mb-2\">Named tiers that describe the user's display context, independent of specific pixel values. The implementing block maps these to concrete media/container queries.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>compact</code>: Phones in portrait. Single-column layouts, stacked navigation.</li><li><code>medium</code>: Tablets or phones in landscape. Two-column layouts, rail navigation.</li><li><code>expanded</code>: Desktops or large tablets. Multi-column layouts, persistent navigation.</li><li><code>[custom]</code>: Application-defined tiers (e.g., <code>ultrawide</code> for multi-pane dashboards).</li></ul><h3>Logical Groups</h3><p class=\"text-sm text-gray-600 mb-2\">Aliases that combine steps for convenience. Allows components to query \"am I in a small context?\" without knowing specific tier names.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>small</code>: Groups <code>compact</code> (equivalent to \"mobile\").</li><li><code>large</code>: Groups <code>expanded</code> and above (equivalent to \"desktop\").</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type AdaptationStrategy = 'mobile-first' | 'desktop-first' | 'strict-range';\n\ninterface BreakpointIntent {\n    // How layout rules accumulate\n    strategy: AdaptationStrategy;\n    // Ordered list of semantic step names (smallest to largest)\n    steps: string[];\n    // Logical groups that alias one or more steps\n    aliases?: Record&lt;string, string[]&gt;;\n}</code></pre>",
     "events": [
       "change"
     ]
@@ -410,14 +833,34 @@
     "dimensions": {
       "role": {
         "description": "The semantic purpose of the text",
-        "values": ["display", "heading", "body", "label", "code"]
+        "values": [
+          "display",
+          "heading",
+          "body",
+          "label",
+          "code"
+        ]
       },
       "scale": {
         "description": "Relative size/emphasis within the role",
-        "values": ["xs", "sm", "md", "lg", "xl"]
+        "values": [
+          "xs",
+          "sm",
+          "md",
+          "lg",
+          "xl"
+        ]
+      },
+      "truncation": {
+        "description": "How text that overflows its box is cut, and how the full value is recovered",
+        "values": [
+          "clip",
+          "ellipsis",
+          "fade"
+        ]
       }
     },
-    "description": "<h3>Role Definition</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>display</code>: Expressive/Decorative (Hero, Splash). Low density.</li><li><code>heading</code>: Structural hierarchy (H1-H6 markers).</li><li><code>body</code>: focused on Readability (Long-form content).</li><li><code>label</code>: focused on Legibility (UI Components, Buttons).</li><li><code>code</code>: Monospace technical data.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type TypographyRole = 'display' | 'heading' | 'body' | 'label' | 'code';\n// T-shirt scale relative to the Role base size\ntype TypographyScale = 'xs' | 'sm' | 'md' | 'lg' | 'xl';\n\ninterface ToneFeatures {\n    // Force monospace numbers (Data Grids)\n    tabular?: boolean;\n    // Overflow behavior\n    truncation?: 'clip' | 'ellipsis' | 'fade';\n    // Disable definition-based optical sizing\n    opticalSizing?: 'auto' | 'none';\n}\n\ninterface TypographyIntent {\n    // The semantic purpose\n    role: TypographyRole;\n    // Relative size/emphasis within that role\n    scale?: TypographyScale;\n    // Rendering constraints\n    features?: ToneFeatures;\n}</code></pre>"
+    "description": "<h3>Role Definition</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>display</code>: Expressive/Decorative (Hero, Splash). Low density.</li><li><code>heading</code>: Structural hierarchy (H1-H6 markers).</li><li><code>body</code>: focused on Readability (Long-form content).</li><li><code>label</code>: focused on Legibility (UI Components, Buttons).</li><li><code>code</code>: Monospace technical data.</li></ul><h3>Truncation</h3><p class=\"text-sm text-gray-600 mb-2\">How overflowing text is cut. Always truncate <em>visually</em> (CSS) while keeping the full string as the element's text content — never hard-slice the string mid-grapheme, and keep at least ~4 meaningful characters.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>clip</code>: Hard cut at the box edge, no indicator. Use only where the cut is obvious from context.</li><li><code>ellipsis</code>: <code>text-overflow: ellipsis</code> — the conventional single-line cut with a trailing &hellip;.</li><li><code>fade</code>: A gradient mask fades the trailing edge; avoids the visual weight of an ellipsis.</li></ul><p class=\"text-sm text-gray-600 mb-2\"><strong>Recovery &amp; accessibility:</strong> whenever text is truncated, provide a way to read the full value — a <code>title</code> / tooltip for short labels, an expand affordance for longer ones. Front-load the distinguishing words so they survive the cut. Because the full text remains the accessible name, an interactive truncated label still satisfies <a href=\"https://www.w3.org/WAI/WCAG21/Understanding/label-in-name.html\">WCAG 2.5.3 Label in Name</a> — do not replace it with an unrelated <code>aria-label</code>. This axis is the home for the <em>Accessible truncation</em> paradigm reused by table cells, tabs, breadcrumbs, chips, and dropdown option labels.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type TypographyRole = 'display' | 'heading' | 'body' | 'label' | 'code';\n// T-shirt scale relative to the Role base size\ntype TypographyScale = 'xs' | 'sm' | 'md' | 'lg' | 'xl';\n\ninterface ToneFeatures {\n    // Force monospace numbers (Data Grids)\n    tabular?: boolean;\n    // Overflow behavior\n    truncation?: 'clip' | 'ellipsis' | 'fade';\n    // Disable definition-based optical sizing\n    opticalSizing?: 'auto' | 'none';\n}\n\ninterface TypographyIntent {\n    // The semantic purpose\n    role: TypographyRole;\n    // Relative size/emphasis within that role\n    scale?: TypographyScale;\n    // Rendering constraints\n    features?: ToneFeatures;\n}</code></pre>"
   },
   {
     "id": "surface",
@@ -427,11 +870,19 @@
     "dimensions": {
       "texture": {
         "description": "Physical material of the surface",
-        "values": ["solid", "glass", "transparent"]
+        "values": [
+          "solid",
+          "glass",
+          "transparent"
+        ]
       },
       "interaction": {
         "description": "Visual response to user interaction",
-        "values": ["static", "lift", "scale"]
+        "values": [
+          "static",
+          "lift",
+          "scale"
+        ]
       }
     },
     "description": "<h3>Elevation Semantics (Z-Axis)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>0</code>: Base. Application background.</li><li><code>1-2</code>: Grouping content. (Cards, Lists).</li><li><code>3-5</code>: Floating content. (Sticky Headers, Modals, Tooltips).</li></ul><h3>Material Texture</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>solid</code>: Opaque. Standard for Material Design 3 (Surface Tones).</li><li><code>glass</code>: Blurred background. Standard for macOS/iOS (Vibrancy) and Windows (Mica/Acrylic).</li><li><code>transparent</code>: Layout-only containment.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type SurfaceMaterial = 'solid' | 'glass' | 'transparent';\ntype SurfaceInteraction = 'static' | 'lift' | 'scale';\n\ninterface SurfaceIntent {\n    // Z-axis position relative to parent (0-5)\n    elevation: number;\n    \n    // Physical texture of the surface\n    texture: SurfaceMaterial;\n    \n    // Visual variation (Default vs High Contrast)\n    variant: 'default' | 'alt';\n    \n    // Interaction physics\n    interaction: SurfaceInteraction;\n}</code></pre>"
@@ -444,15 +895,31 @@
     "dimensions": {
       "placement": {
         "description": "Positioning strategy for the notification",
-        "values": ["top-start", "top-end", "bottom-start", "bottom-end", "top-center", "bottom-center"]
+        "values": [
+          "top-start",
+          "top-end",
+          "bottom-start",
+          "bottom-end",
+          "top-center",
+          "bottom-center"
+        ]
       },
       "severity": {
         "description": "Semantic weight of the message. Part of unified severity vocabulary: info (informational), success (confirmation), warning (advisory), error (failure).",
-        "values": ["info", "success", "warning", "error"]
+        "values": [
+          "info",
+          "success",
+          "warning",
+          "error"
+        ]
       },
       "duration": {
         "description": "How long the notification persists",
-        "values": ["short", "long", "indefinite"]
+        "values": [
+          "short",
+          "long",
+          "indefinite"
+        ]
       }
     },
     "description": "<h3>Placement Logic</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>top-end</code>: Standard for Desktop notifications (Toasts).</li><li><code>bottom-start</code>: Standard for Material Design (Snackbars). Avoids FAB interaction.</li><li><code>top-center</code>: Mobile alerts.</li></ul><h3>Severity Semantics</h3><p class=\"text-sm text-gray-600 mb-2\"><code>severity</code> is part of a <strong>unified severity/tone vocabulary</strong> shared across Feedback (transient), Message (structural), and Validation (input states). All three use the same semantic set:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>info</code>: Informational. Neutral tone. No action required.</li><li><code>success</code>: Confirmation. Positive outcome achieved.</li><li><code>warning</code>: Advisory. Issue detected but not blocking. User may act.</li><li><code>error</code>: Failure. Problem occurred. User action required.</li></ul><h3>Timing & Duration</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>short</code>: ~4000ms. For simple confirmations (\"Saved\").</li><li><code>long</code>: ~10000ms. If text > 60 chars.</li><li><code>indefinite</code>: Remains until dismissed. Required if an Action is present (Accessibility).</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type FeedbackPlacement = 'top-start' | 'top-end' | 'bottom-start' | 'bottom-end' | 'top-center' | 'bottom-center';\ntype FeedbackSeverity = 'info' | 'success' | 'warning' | 'error';\n\ninterface FeedbackAction {\n    label: string;\n    intent: string;\n}\n\ninterface FeedbackIntent {\n    // Positioning strategy\n    placement: FeedbackPlacement;\n    // Semantic weight (shared severity vocabulary)\n    severity: FeedbackSeverity;\n    // Persistence\n    duration: 'short' | 'long' | 'indefinite';\n    // Queue Management (1 = Single/Replace, >1 = Stack)\n    stackLimit: number;\n    // Optional interactive element (e.g. \"Undo\")\n    action?: FeedbackAction;\n}</code></pre>"
@@ -465,18 +932,35 @@
     "dimensions": {
       "model": {
         "description": "How many items can be selected",
-        "values": ["single", "multiple"]
+        "values": [
+          "single",
+          "multiple"
+        ]
       },
       "immediacy": {
         "description": "When the selection state is committed",
-        "values": ["live", "buffered"]
+        "values": [
+          "live",
+          "buffered"
+        ]
       },
       "variant": {
         "description": "Visual metaphor for the selection",
-        "values": ["boolean", "item", "range"]
+        "values": [
+          "boolean",
+          "item",
+          "range"
+        ]
+      },
+      "grouping": {
+        "description": "Whether options are flat or organized into labeled groups",
+        "values": [
+          "flat",
+          "grouped"
+        ]
       }
     },
-    "description": "<h3>Choice Models</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>single</code>: Mutually exclusive. Renders as <strong>Radio</strong> (Forms), <strong>Switch</strong> (Settings), or <strong>Select</strong> (Compact).</li><li><code>multiple</code>: Accumulative. Renders as <strong>Checkbox</strong> (List) or <strong>Filter Chips</strong> (Toolbar).</li></ul><h3>Immediacy Profile</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>live</code>: State changes immediately (Settings toggle).</li><li><code>buffered</code>: State changes on submission (Form field).</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type SelectionModel = 'single' | 'multiple';\ntype SelectionVariant = 'boolean' | 'item' | 'range';\n\ninterface SelectionIntent {\n    // How many can be selected\n    model: SelectionModel;\n    // When the state is committed\n    immediacy: 'live' | 'buffered';\n    // Visual metaphor\n    variant: SelectionVariant;\n    // Constraints\n    constraints?: { min?: number; max?: number };\n}</code></pre>"
+    "description": "<h3>Choice Models</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>single</code>: Mutually exclusive. Renders as <strong>Radio</strong> (Forms), <strong>Switch</strong> (Settings), or <strong>Select</strong> (Compact).</li><li><code>multiple</code>: Accumulative. Renders as <strong>Checkbox</strong> (List) or <strong>Filter Chips</strong> (Toolbar).</li></ul><h3>Immediacy Profile</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>live</code>: State changes immediately (Settings toggle).</li><li><code>buffered</code>: State changes on submission (Form field).</li></ul><h3>Grouping</h3><p class=\"text-sm text-gray-600 mb-2\">Options may be <code>flat</code> or organized into labeled <code>grouped</code> sets — the <strong>Grouping</strong> paradigm, reused by menus, command palettes, and faceted lists.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li>Native: <code>&lt;optgroup label=\"…\"&gt;</code> — the <code>label</code> is required and is what assistive tech announces as group membership; groups do not nest.</li><li>Custom (ARIA): wrap each group's options in <code>role=\"group\"</code> with <code>aria-labelledby</code> pointing at a <em>visible</em> heading; group headings are not focusable options.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type SelectionModel = 'single' | 'multiple';\ntype SelectionVariant = 'boolean' | 'item' | 'range';\n\ninterface SelectionIntent {\n    // How many can be selected\n    model: SelectionModel;\n    // When the state is committed\n    immediacy: 'live' | 'buffered';\n    // Visual metaphor\n    variant: SelectionVariant;\n    // Constraints\n    constraints?: { min?: number; max?: number };\n}</code></pre>"
   },
   {
     "id": "input",
@@ -486,31 +970,88 @@
     "dimensions": {
       "variant": {
         "description": "Visual style of the input",
-        "values": ["outlined", "filled", "borderless"]
+        "values": [
+          "outlined",
+          "filled",
+          "borderless"
+        ]
       },
       "affordances": {
         "description": "Interaction helpers shown with the input",
-        "values": ["clear", "reveal", "copy"]
+        "values": [
+          "clear",
+          "reveal",
+          "copy"
+        ]
       },
       "status": {
         "description": "Interaction state of the input",
-        "values": ["enabled", "disabled", "readonly"]
+        "values": [
+          "enabled",
+          "disabled",
+          "readonly"
+        ]
       }
     },
-    "description": "<h3>Visual Variants</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>outlined</code>: High contrast (Material default). Defined boundary.</li><li><code>filled</code>: High emphasis background (Fluent/Material).</li><li><code>borderless</code>: Minimalist (iOS List style).</li></ul><h3>Affordances</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>clear</code>: 'X' button to reset value.</li><li><code>reveal</code>: Eye icon for passwords.</li><li><code>copy</code>: Clipboard action.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type InputVariant = 'outlined' | 'filled' | 'borderless';\ntype InputAffordance = 'clear' | 'reveal' | 'copy';\n\ninterface InputIntent {\n    // Visual style\n    variant: InputVariant;\n    // Privacy masking (dots)\n    masking: boolean;\n    // Interaction helpers\n    affordances: InputAffordance[];\n    // State\n    status: 'enabled' | 'disabled' | 'readonly';\n}</code></pre>"
+    "description": "<h3>Visual Variants</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>outlined</code>: High contrast (Material default). Defined boundary.</li><li><code>filled</code>: High emphasis background (Fluent/Material).</li><li><code>borderless</code>: Minimalist (iOS List style).</li></ul><h3>Affordances</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>clear</code>: 'X' button to reset the value — the <strong>Clearable value</strong> paradigm. Shown only when a value is present; carries an explicit accessible name (\"Clear\"); is keyboard-reachable; and returns focus to the input after clearing. Keep it decoupled from <kbd>Esc</kbd> — in a combobox <kbd>Esc</kbd> closes the popup, while clearing is a separate, opt-in action — so users don't lose data accidentally. Reused by search fields, comboboxes, tag inputs, and filters.</li><li><code>reveal</code>: Eye icon for passwords.</li><li><code>copy</code>: Clipboard action.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type InputVariant = 'outlined' | 'filled' | 'borderless';\ntype InputAffordance = 'clear' | 'reveal' | 'copy';\n\ninterface InputIntent {\n    // Visual style\n    variant: InputVariant;\n    // Privacy masking (dots)\n    masking: boolean;\n    // Interaction helpers\n    affordances: InputAffordance[];\n    // State\n    status: 'enabled' | 'disabled' | 'readonly';\n}</code></pre>"
   },
   {
     "id": "navigation",
     "name": "Navigation Intent",
-    "status": "concept",
-    "summary": "Protocol defining application structure (Hierarchical, Lateral, Linear) and view transition logic.",
+    "status": "draft",
+    "summary": "UX vocabulary for in-app navigation: information-architecture structure (hierarchical/lateral/linear) plus the orthogonal behaviors a view change carries — history contribution, scroll landing, transition direction, leave-guarding, and URL persistence. Composes prefetch (eagerness), motion (animation feel), and focus-delegation (focus reset).",
     "dimensions": {
       "structure": {
-        "description": "The navigation model governing view transitions and history",
-        "values": ["hierarchical", "lateral", "linear"]
+        "description": "The information-architecture model: how views are organized and how users traverse between them",
+        "values": [
+          "hierarchical",
+          "lateral",
+          "linear"
+        ]
+      },
+      "history": {
+        "description": "What this navigation contributes to the session history — i.e. what the browser Back button does afterward",
+        "values": [
+          "push",
+          "replace",
+          "none"
+        ]
+      },
+      "scroll": {
+        "description": "Where the viewport lands after the view swaps",
+        "values": [
+          "auto",
+          "top",
+          "preserve",
+          "manual"
+        ]
+      },
+      "transition": {
+        "description": "The directionality of the view transition (forward vs back). Animation feel — easing, reduced-motion — defers to the Motion intent",
+        "values": [
+          "directional",
+          "fade",
+          "none"
+        ]
+      },
+      "guard": {
+        "description": "Whether leaving the current view can be interrupted (e.g. unsaved changes)",
+        "values": [
+          "free",
+          "confirm",
+          "blocked"
+        ]
+      },
+      "persistence": {
+        "description": "Whether this navigation state is reflected in a deep-linkable, shareable URL or held ephemerally",
+        "values": [
+          "url",
+          "memory",
+          "session"
+        ]
       }
     },
-    "description": "<h3>Structure Model</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>hierarchical</code>: Parent/Child stack. Managing history and back-navigation.</li><li><code>lateral</code>: Peer switching (Tabs, Bottom Nav). No history stack.</li><li><code>linear</code>: Sequential steps (Wizard). Locked progression.</li></ul>"
+    "description": "<p class=\"text-sm text-gray-600\">The Navigation Intent is the UX vocabulary for moving between views. <code>structure</code> declares the information-architecture shape; the remaining dimensions declare the orthogonal behaviors a single view change carries. Any structure can pair with any behavior — a <code>lateral</code> tab set may still want a deep-linkable URL, a <code>linear</code> wizard may guard against leaving mid-step.</p><h3>Structure Model</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>hierarchical</code>: Parent/child stack — manages history and back-navigation (Router). Active item marked <code>aria-current=\"page\"</code>.</li><li><code>lateral</code>: Peer switching (Tabs, Bottom Nav). Active item marked <code>aria-current=\"page\"</code>.</li><li><code>linear</code>: Sequential steps (Wizard). Locked progression; current step marked <code>aria-current=\"step\"</code>.</li></ul><p class=\"text-sm text-gray-600\">The correct <code>aria-current</code> token is <em>derived from</em> <code>structure</code> (page for hierarchical/lateral, step for linear) — it is part of the structure contract, not a separate choice.</p><h3>History Contribution</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>push</code>: New history entry — Back returns to the prior view.</li><li><code>replace</code>: Overwrite the current entry — Back skips this view (typical for wizard steps).</li><li><code>none</code>: Transient change that never enters the back stack.</li></ul><h3>Scroll Landing</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>auto</code>: Platform default — restore on back/forward, honor a URL fragment, else top.</li><li><code>top</code>: Always reset to the top on a forward navigation.</li><li><code>preserve</code>: Keep the current scroll position (correct for in-place tab/filter swaps).</li><li><code>manual</code>: The view drives scroll itself.</li></ul><h3>Transition Direction</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>directional</code>: Forward navigations animate forward, Back animates back (derived from history-traversal direction — browser-initiated Back carries no transition type).</li><li><code>fade</code>: Non-directional crossfade.</li><li><code>none</code>: No transition.</li></ul><p class=\"text-sm text-gray-600\">Direction is owned here; the <em>feel</em> of the animation (natural/immediate/reduced, honoring <code>prefers-reduced-motion</code>) is owned by the <a href=\"/intents/motion/\">Motion intent</a>.</p><h3>Leave Guard</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>free</code>: Navigation always proceeds.</li><li><code>confirm</code>: Intercept and prompt (\"unsaved changes — leave?\"); the user may proceed. The prompt UI composes with the <a href=\"/intents/modal/\">Modal intent</a>.</li><li><code>blocked</code>: Navigation is prevented until a condition clears.</li></ul><h3>URL Persistence</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>url</code>: State lives in the path/search — bookmarkable, shareable, survives refresh.</li><li><code>session</code>: State rides session history — survives traversal but not a fresh share.</li><li><code>memory</code>: In-memory only — lost on refresh or share.</li></ul><h3>Composition</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Prefetch:</strong> speculative loading of the next view is the <a href=\"/intents/prefetch/\">Prefetch intent</a>'s <code>eagerness</code> axis — Navigation composes it, does not own it.</li><li><strong>Focus reset:</strong> where focus goes after a view swap is a referenced contract (WAI-ARIA APG: move to the new view's main heading; platform <code>focusReset</code>) — the closed value set lives with <a href=\"/intents/focus-delegation/\">Focus Delegation</a>, not duplicated here.</li><li><strong>Loader:</strong> pending-state UX during a navigation defers to the <a href=\"/intents/loader/\">Loader intent</a>.</li></ul>"
   },
   {
     "id": "anchor",
@@ -520,61 +1061,124 @@
     "dimensions": {
       "type": {
         "description": "The role of the anchored surface",
-        "values": ["tooltip", "popover", "menu"]
+        "values": [
+          "tooltip",
+          "popover",
+          "menu"
+        ]
       },
       "placement": {
         "description": "Preferred position of the anchored element relative to its anchor (12-way grid + auto)",
-        "values": ["top", "top-start", "top-end", "right", "right-start", "right-end", "bottom", "bottom-start", "bottom-end", "left", "left-start", "left-end", "auto"]
+        "values": [
+          "top",
+          "top-start",
+          "top-end",
+          "right",
+          "right-start",
+          "right-end",
+          "bottom",
+          "bottom-start",
+          "bottom-end",
+          "left",
+          "left-start",
+          "left-end",
+          "auto"
+        ]
       },
       "collision": {
         "description": "Ordered fallback pipeline applied when the preferred placement overflows the viewport or a clipping ancestor",
-        "values": ["flip", "shift", "hide", "none"]
+        "values": [
+          "flip",
+          "shift",
+          "hide",
+          "none"
+        ]
       },
       "strategy": {
         "description": "How the anchored element stacks. inline stays in normal flow; escape lifts it to the top layer (composes Web Portals)",
-        "values": ["inline", "escape"]
+        "values": [
+          "inline",
+          "escape"
+        ]
       },
       "tracking": {
         "description": "Whether the position is recomputed as layout changes",
-        "values": ["static", "follow"]
+        "values": [
+          "static",
+          "follow"
+        ]
+      },
+      "dismissal": {
+        "description": "How the surface is closed and where focus returns",
+        "values": [
+          "light",
+          "explicit",
+          "modal"
+        ]
       }
     },
-    "description": "<h3>Tether Contract</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>tooltip</code>: Informational. Hover/Focus trigger. Non-interactive.</li><li><code>popover</code>: Interactive content. Click trigger. Traps focus if modal.</li><li><code>menu</code>: Action list. Click/Context trigger. Keyboard navigable.</li></ul><h3>Placement</h3><p class=\"text-sm text-gray-600 mb-2\">The preferred side and alignment of the <strong>anchored element</strong> relative to its <strong>anchor element</strong>, using the platform 12-way grid (side &times; <code>start</code>/center/<code>end</code>). <code>auto</code> defers the choice to the provider (most-available-space).</p><h3>Collision</h3><p class=\"text-sm text-gray-600 mb-2\">An ordered fallback pipeline applied when the preferred placement would overflow.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>flip</code>: Move to the opposite side (CSS <code>position-try</code> / Floating UI <code>flip</code>).</li><li><code>shift</code>: Slide along the axis to stay in view (<code>shift</code>).</li><li><code>hide</code>: Hide the anchored element when the anchor is clipped or scrolled off-screen (CSS <code>position-visibility</code>).</li><li><code>none</code>: No fallback; honor the requested placement verbatim.</li></ul><h3>Strategy</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>inline</code>: The anchored element stays in normal flow / stacking context (CSS <code>anchor()</code>, absolute).</li><li><code>escape</code>: The anchored element lifts to the top layer to escape clipping ancestors &mdash; composed via <a href=\"/projects/webportals/\">Web Portals</a> (DOM/context escape) and the Surface Intent (elevation), not re-implemented here.</li></ul><h3>Delegation</h3><p class=\"text-sm text-gray-600 mb-2\">This intent declares the <em>what</em>; the <em>how</em> (position math, collision, tracking) is delegated to a registered <a href=\"/plugs/custompositioner/\">positioning provider</a> resolved through <a href=\"/plugs/custompositioningregistry/\">CustomPositioningRegistry</a> &mdash; native-first (CSS Anchor Positioning) by default, or a library adapter (Floating UI). See <a href=\"/projects/webpositioning/\">Web Positioning</a>.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type SurfaceRole = 'tooltip' | 'popover' | 'menu';\ntype Placement = 'top' | 'top-start' | 'top-end'\n  | 'right' | 'right-start' | 'right-end'\n  | 'bottom' | 'bottom-start' | 'bottom-end'\n  | 'left' | 'left-start' | 'left-end' | 'auto';\ntype CollisionStrategy = 'flip' | 'shift' | 'hide' | 'none';\ntype AnchorStrategy = 'inline' | 'escape';   // 'escape' composes Web Portals (top layer)\n\ninterface AnchorIntent {\n    // The role of the anchored surface\n    role: SurfaceRole;\n    // Preferred position relative to the anchor\n    placement: Placement;\n    // Ordered fallback pipeline on overflow\n    collision: CollisionStrategy[];\n    // Normal flow vs. top-layer escape\n    strategy: AnchorStrategy;\n    // Gap from the anchor edge (px)\n    offset?: number;\n    // Recompute on scroll / resize\n    tracking?: 'static' | 'follow';\n    // Render a pointer toward the anchor\n    arrow?: boolean;\n}</code></pre>",
+    "description": "<h3>Tether Contract</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>tooltip</code>: Informational. Hover/Focus trigger. Non-interactive.</li><li><code>popover</code>: Interactive content. Click trigger. Traps focus if modal.</li><li><code>menu</code>: Action list. Click/Context trigger. Keyboard navigable.</li></ul><h3>Placement</h3><p class=\"text-sm text-gray-600 mb-2\">The preferred side and alignment of the <strong>anchored element</strong> relative to its <strong>anchor element</strong>, using the platform 12-way grid (side &times; <code>start</code>/center/<code>end</code>). <code>auto</code> defers the choice to the provider (most-available-space).</p><h3>Collision</h3><p class=\"text-sm text-gray-600 mb-2\">An ordered fallback pipeline applied when the preferred placement would overflow.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>flip</code>: Move to the opposite side (CSS <code>position-try</code> / Floating UI <code>flip</code>).</li><li><code>shift</code>: Slide along the axis to stay in view (<code>shift</code>).</li><li><code>hide</code>: Hide the anchored element when the anchor is clipped or scrolled off-screen (CSS <code>position-visibility</code>).</li><li><code>none</code>: No fallback; honor the requested placement verbatim.</li></ul><h3>Strategy</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>inline</code>: The anchored element stays in normal flow / stacking context (CSS <code>anchor()</code>, absolute).</li><li><code>escape</code>: The anchored element lifts to the top layer to escape clipping ancestors &mdash; composed via <a href=\"/projects/webportals/\">Web Portals</a> (DOM/context escape) and the Surface Intent (elevation), not re-implemented here.</li></ul><h3>Dismissal &amp; Focus Return</h3><p class=\"text-sm text-gray-600 mb-2\">How the surface closes, and the invariant that <strong>focus returns to the trigger</strong> on close so keyboard users keep their place.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>light</code>: <kbd>Esc</kbd> and outside-click both dismiss (Popover API light-dismiss). For an interactive surface, the first <kbd>Esc</kbd> closes the surface before any inner clear/reset semantics fire.</li><li><code>explicit</code>: Closes only via an in-surface control or re-trigger; outside-click does not dismiss. For surfaces whose content must not vanish on an accidental click.</li><li><code>modal</code>: Focus is trapped inside the surface; <kbd>Esc</kbd> dismisses and focus returns to the trigger. Pairs with a backdrop.</li></ul><p class=\"text-sm text-gray-600 mb-2\">The in-widget arrow-key model for a <code>menu</code> surface is owned by the <a href=\"/intents/focus-delegation/\">Focus Delegation Intent</a>; this axis governs only how the surface itself is dismissed.</p><h3>Delegation</h3><p class=\"text-sm text-gray-600 mb-2\">This intent declares the <em>what</em>; the <em>how</em> (position math, collision, tracking) is delegated to a registered <a href=\"/plugs/custompositioner/\">positioning provider</a> resolved through <a href=\"/plugs/custompositioningregistry/\">CustomPositioningRegistry</a> &mdash; native-first (CSS Anchor Positioning) by default, or a library adapter (Floating UI). See <a href=\"/projects/webpositioning/\">Web Positioning</a>.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type SurfaceRole = 'tooltip' | 'popover' | 'menu';\ntype Placement = 'top' | 'top-start' | 'top-end'\n  | 'right' | 'right-start' | 'right-end'\n  | 'bottom' | 'bottom-start' | 'bottom-end'\n  | 'left' | 'left-start' | 'left-end' | 'auto';\ntype CollisionStrategy = 'flip' | 'shift' | 'hide' | 'none';\ntype AnchorStrategy = 'inline' | 'escape';   // 'escape' composes Web Portals (top layer)\n\ninterface AnchorIntent {\n    // The role of the anchored surface\n    role: SurfaceRole;\n    // Preferred position relative to the anchor\n    placement: Placement;\n    // Ordered fallback pipeline on overflow\n    collision: CollisionStrategy[];\n    // Normal flow vs. top-layer escape\n    strategy: AnchorStrategy;\n    // Gap from the anchor edge (px)\n    offset?: number;\n    // Recompute on scroll / resize\n    tracking?: 'static' | 'follow';\n    // Render a pointer toward the anchor\n    arrow?: boolean;\n}</code></pre>",
     "designSystemResearch": [
       {
         "system": "CSS Anchor Positioning",
-        "components": ["anchor-name", "position-anchor", "anchor()", "position-area", "position-try / @position-try", "position-visibility"],
+        "components": [
+          "anchor-name",
+          "position-anchor",
+          "anchor()",
+          "position-area",
+          "position-try / @position-try",
+          "position-visibility"
+        ],
         "keyInsight": "Native, Baseline 2026. Unifies placement + collision fallback in CSS while leaving layering (top layer) to the Popover API. We adopt this separation: the Anchor Intent owns placement, Web Portals owns escape.",
         "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Anchor_positioning"
       },
       {
         "system": "Popover API",
-        "components": ["popover", "popovertarget", "top layer", "light dismiss"],
-        "keyInsight": "Handles top-layer stacking and light dismiss, but NOT positioning — it delegates placement to CSS Anchor Positioning via the implicit anchor. Confirms positioning and layering are orthogonal concerns.",
+        "components": [
+          "popover",
+          "popovertarget",
+          "top layer",
+          "light dismiss"
+        ],
+        "keyInsight": "Handles top-layer stacking and light dismiss, but NOT positioning \u2014 it delegates placement to CSS Anchor Positioning via the implicit anchor. Confirms positioning and layering are orthogonal concerns.",
         "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Popover_API"
       },
       {
         "system": "Floating UI",
-        "components": ["placement (12-way)", "middleware: offset/flip/shift/size/arrow/hide/autoPlacement", "autoUpdate", "strategy"],
+        "components": [
+          "placement (12-way)",
+          "middleware: offset/flip/shift/size/arrow/hide/autoPlacement",
+          "autoUpdate",
+          "strategy"
+        ],
         "keyInsight": "Combines anchoring + collision + escape in one JS engine. Our dimension and option vocabulary mirrors it 1:1 so the adapter maps directly; Tier-3 middleware (autoPlacement, size, inline) stay adapter-only.",
         "reference": "https://floating-ui.com/docs/middleware"
       },
       {
         "system": "Radix UI",
-        "components": ["Popper primitive", "side / align", "avoidCollisions", "collisionPadding", "sticky"],
+        "components": [
+          "Popper primitive",
+          "side / align",
+          "avoidCollisions",
+          "collisionPadding",
+          "sticky"
+        ],
         "keyInsight": "Headless side/align maps to our placement; avoidCollisions/collisionPadding map to the collision pipeline. Validates exposing collision as a first-class, configurable axis.",
         "reference": "https://www.radix-ui.com/primitives/docs/utilities/popper"
       },
       {
         "system": "Material Design 3",
-        "components": ["Menus", "Tooltips (plain / rich)"],
+        "components": [
+          "Menus",
+          "Tooltips (plain / rich)"
+        ],
         "keyInsight": "Menus reposition to remain on-screen and align to the anchor edge; rich tooltips persist and are interactive. Informs the tooltip/popover/menu role split.",
         "reference": "https://m3.material.io/components/menus/overview"
       }
     ],
     "researchGaps": [
-      "Escape delegation depth — should strategy:'escape' drive the native Popover top layer directly, or always route through Web Portals for context preservation? Define the handoff.",
-      "Arrow placement math — ship a basic built-in arrow in the native provider, or always defer to an adapter (Floating UI arrow())?",
+      "Escape delegation depth \u2014 should strategy:'escape' drive the native Popover top layer directly, or always route through Web Portals for context preservation? Define the handoff. (Note: the dismissal axis now owns Esc/outside-click close + focus-return; this gap is specifically about top-layer escape.)",
+      "Arrow placement math \u2014 ship a basic built-in arrow in the native provider, or always defer to an adapter (Floating UI arrow())?",
       "RTL and safe-area handling (notch, virtual keyboard) in the native-first default provider."
     ]
   },
@@ -586,11 +1190,19 @@
     "dimensions": {
       "presentation": {
         "description": "The visual paradigm for date/time selection",
-        "values": ["media", "linear", "input"]
+        "values": [
+          "media",
+          "linear",
+          "input"
+        ]
       },
       "granularity": {
         "description": "The selection scope",
-        "values": ["point", "range", "multi"]
+        "values": [
+          "point",
+          "range",
+          "multi"
+        ]
       }
     },
     "description": "<h3>Presentation Paradigms</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>media</code>: Spatial surfaces. Wall calendars (Grid) or Analog Clocks.</li><li><code>linear</code>: Sequential lists. Scrolling Wheels (iOS) or Listboxes.</li><li><code>input</code>: Text-based. Masked inputs or simple native fallbacks.</li></ul><h3>Granularity</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>point</code>: Single instance (Date/Time).</li><li><code>range</code>: Span between two points.</li><li><code>multi</code>: Disconnected sets of points.</li></ul>"
@@ -603,7 +1215,11 @@
     "dimensions": {
       "behavior": {
         "description": "How regions interact with the main content area",
-        "values": ["push", "overlay", "rail"]
+        "values": [
+          "push",
+          "overlay",
+          "rail"
+        ]
       }
     },
     "description": "<h3>Region Behavior</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>push</code>: Region consumes space, shifting the main content (Desktop).</li><li><code>overlay</code>: Region floats above content with a backdrop (Mobile).</li><li><code>rail</code>: Region collapses to a thin strip (Icons) rather than disappearing.</li></ul><h3>Anatomy</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>shell</code>: The global viewport container.</li><li><code>pane</code>: A resizable subdivision of the shell.</li><li><code>dock</code>: A sticky region (Header/Footer).</li></ul>"
@@ -616,11 +1232,21 @@
     "dimensions": {
       "attention": {
         "description": "Priority level determining how the message interrupts the user",
-        "values": ["ambient", "routine", "urgent", "critical"]
+        "values": [
+          "ambient",
+          "routine",
+          "urgent",
+          "critical"
+        ]
       },
       "tone": {
-        "description": "Semantic meaning conveyed by the message. Part of unified severity vocabulary: neutral↔info, positive↔success, caution↔warning, negative↔error.",
-        "values": ["neutral", "positive", "caution", "negative"]
+        "description": "Semantic meaning conveyed by the message. Part of unified severity vocabulary: neutral\u2194info, positive\u2194success, caution\u2194warning, negative\u2194error.",
+        "values": [
+          "neutral",
+          "positive",
+          "caution",
+          "negative"
+        ]
       }
     },
     "description": "<h3>Attention Hierarchy</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>ambient</code>: Low priority. Status bars or helper text.</li><li><code>routine</code>: Standard priority. Toasts or inline notes.</li><li><code>urgent</code>: High priority. Banners or System Alerts.</li><li><code>critical</code>: Blocking priority. Dialogs or Screen Takeovers.</li></ul><h3>Tone Semantics</h3><p class=\"text-sm text-gray-600 mb-2\"><code>tone</code> is part of a <strong>unified severity/tone vocabulary</strong> shared across Message (structural), Feedback (transient), and Validation (input states). The semantic mapping aligns all three:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>neutral</code> / info: Informational. No action required.</li><li><code>positive</code> / success: Confirmation. Positive outcome achieved.</li><li><code>caution</code> / warning: Advisory. Issue detected but not blocking. User may act.</li><li><code>negative</code> / error: Failure. Problem occurred. User action required.</li></ul>"
@@ -633,15 +1259,27 @@
     "dimensions": {
       "tolerance": {
         "description": "How severely the user is affected by failure",
-        "values": ["forgivable", "degraded", "terminal"]
+        "values": [
+          "forgivable",
+          "degraded",
+          "terminal"
+        ]
       },
       "recovery": {
         "description": "What the user experiences during system recovery",
-        "values": ["automatic", "manual", "none"]
+        "values": [
+          "automatic",
+          "manual",
+          "none"
+        ]
       },
       "fallback": {
         "description": "What replaces the failed content",
-        "values": ["skeleton", "empty", "previous"]
+        "values": [
+          "skeleton",
+          "empty",
+          "previous"
+        ]
       }
     },
     "description": "<h3>Scope: Mechanism Failure (not Input Invalidity)</h3><p class=\"text-sm text-gray-600 mb-2\"><strong>Reliability is strictly for operation/system failure,</strong> not validation errors:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Input-invalidity</strong> (Validation domain): \"The user's email is malformed\" or \"These passwords don't match\". This is an expected outcome; the field is wrong, and the user must fix it. Validation owns this.</li><li><strong>Mechanism failure</strong> (Reliability domain): \"The uniqueness check timed out\" or \"The server is unreachable\" or \"The async validator crashed\". This is an unexpected system problem. Reliability owns this.</li></ul><p class=\"text-sm text-gray-600 mb-2\">A validation scenario that includes async (e.g., checking if an email is already registered) may emit a Reliability error if the check itself fails (server down), but a Validation error if the email is taken. The distinction prevents conflating the two error families.</p><h3>Failure Tolerance</h3><p class=\"text-sm text-gray-600 mb-2\">How severely the user is affected when an operation fails. This determines the visual response and the user's ability to continue.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>forgivable</code>: Operation failed but the user can continue. Communicated silently (logged) or with minimal disruption (toast). App state remains valid.</li><li><code>degraded</code>: Partial failure. The UI renders with missing data or fallback content. The user can still interact but the experience is incomplete.</li><li><code>terminal</code>: Broken state. The component cannot render meaningfully. Requires replacement with an error boundary or a full-page error state.</li></ul><h3>Recovery Experience</h3><p class=\"text-sm text-gray-600 mb-2\">What the user experiences while the system attempts to recover from a failure. The implementing block decides the technical retry strategy (timing, backoff algorithm).</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>automatic</code>: The system retries silently. The user sees a loading state but takes no action.</li><li><code>manual</code>: The user is presented with a \"Retry\" affordance and decides when to try again.</li><li><code>none</code>: No recovery is attempted. The failure state is final.</li></ul><h3>Fallback Content</h3><p class=\"text-sm text-gray-600 mb-2\">What the user sees in place of the failed content.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>skeleton</code>: Structural placeholder, implying the content may load later.</li><li><code>empty</code>: Explicit empty state with messaging (e.g., \"No data available\").</li><li><code>previous</code>: Stale data from the last successful load, marked as outdated.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type FailureTolerance = 'forgivable' | 'degraded' | 'terminal';\ntype RecoveryExperience = 'automatic' | 'manual' | 'none';\ntype FallbackContent = 'skeleton' | 'empty' | 'previous';\n\ninterface ReliabilityIntent {\n    // How severely the user is affected\n    tolerance: FailureTolerance;\n    // What the user experiences during recovery\n    recovery: RecoveryExperience;\n    // What replaces the failed content\n    fallback?: FallbackContent;\n}</code></pre>"
@@ -654,18 +1292,278 @@
     "dimensions": {
       "matching": {
         "description": "How typed characters map to items",
-        "values": ["prefix", "cycle", "prefix-then-cycle"]
+        "values": [
+          "prefix",
+          "cycle",
+          "prefix-then-cycle"
+        ]
       },
       "reset": {
         "description": "When the accumulated character buffer clears",
-        "values": ["debounced", "custom"]
+        "values": [
+          "debounced",
+          "custom"
+        ]
       },
       "wrap": {
         "description": "Focus behavior at the ends of the collection",
-        "values": ["wrap", "clamp"]
+        "values": [
+          "wrap",
+          "clamp"
+        ]
       }
     },
-    "description": "<h3>Matching Strategy</h3><p class=\"text-sm text-gray-600 mb-2\">How typed characters are mapped to an item. Type-ahead <strong>moves focus</strong> to an existing item — it never removes or hides items (that is filtering, see <code>aria-autocomplete=\"list\"</code> on a combobox).</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>prefix</code>: Characters accumulate into a buffer; focus moves to the first item whose label starts with the buffer.</li><li><code>cycle</code>: A repeated single character cycles focus through items whose label starts with that character.</li><li><code>prefix-then-cycle</code>: <strong>Recommended default</strong>. Matches WAI-ARIA APG and native <code>&lt;select&gt;</code> — characters typed in rapid succession accumulate into a prefix, while a lone repeated key cycles among same-initial items.</li></ul><h3>Reset Timing</h3><p class=\"text-sm text-gray-600 mb-2\">When the character buffer is discarded so the next keystroke starts a fresh search.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>debounced</code>: Buffer clears after an idle timeout (defaults to <strong>500ms</strong>, the APG / native <code>&lt;select&gt;</code> convention).</li><li><code>custom</code>: Application-defined timeout via <code>resetMs</code>.</li></ul><h3>Wrap Behavior</h3><p class=\"text-sm text-gray-600 mb-2\">What happens when matching passes the last item.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>wrap</code>: Search wraps around to the start of the collection (default).</li><li><code>clamp</code>: Search stops at the ends without wrapping.</li></ul><h3>Label Source</h3><p class=\"text-sm text-gray-600 mb-2\">The text each item is matched against. Defaults, in order: <code>aria-label</code>, the element referenced by <code>aria-labelledby</code>, then <code>textContent</code>. Applications may override via a <code>label</code> resolver.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type TypeAheadMatching = 'prefix' | 'cycle' | 'prefix-then-cycle';\n\ninterface TypeAheadIntent {\n    // How typed characters map to items\n    matching: TypeAheadMatching;\n    // Idle ms before the buffer resets (default 500)\n    resetMs: number;\n    // Wrap focus past the ends of the collection (default true)\n    wrap: boolean;\n    // Override how an item's searchable label is derived\n    label?: (item: Element) =&gt; string;\n}</code></pre>",
-    "events": ["typeahead-match", "typeahead-nomatch", "typeahead-reset"]
+    "description": "<h3>Matching Strategy</h3><p class=\"text-sm text-gray-600 mb-2\">How typed characters are mapped to an item. Type-ahead <strong>moves focus</strong> to an existing item \u2014 it never removes or hides items (that is filtering, see <code>aria-autocomplete=\"list\"</code> on a combobox).</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>prefix</code>: Characters accumulate into a buffer; focus moves to the first item whose label starts with the buffer.</li><li><code>cycle</code>: A repeated single character cycles focus through items whose label starts with that character.</li><li><code>prefix-then-cycle</code>: <strong>Recommended default</strong>. Matches WAI-ARIA APG and native <code>&lt;select&gt;</code> \u2014 characters typed in rapid succession accumulate into a prefix, while a lone repeated key cycles among same-initial items.</li></ul><h3>Reset Timing</h3><p class=\"text-sm text-gray-600 mb-2\">When the character buffer is discarded so the next keystroke starts a fresh search.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>debounced</code>: Buffer clears after an idle timeout (defaults to <strong>500ms</strong>, the APG / native <code>&lt;select&gt;</code> convention).</li><li><code>custom</code>: Application-defined timeout via <code>resetMs</code>.</li></ul><h3>Wrap Behavior</h3><p class=\"text-sm text-gray-600 mb-2\">What happens when matching passes the last item.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>wrap</code>: Search wraps around to the start of the collection (default).</li><li><code>clamp</code>: Search stops at the ends without wrapping.</li></ul><h3>Label Source</h3><p class=\"text-sm text-gray-600 mb-2\">The text each item is matched against. Defaults, in order: <code>aria-label</code>, the element referenced by <code>aria-labelledby</code>, then <code>textContent</code>. Applications may override via a <code>label</code> resolver.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type TypeAheadMatching = 'prefix' | 'cycle' | 'prefix-then-cycle';\n\ninterface TypeAheadIntent {\n    // How typed characters map to items\n    matching: TypeAheadMatching;\n    // Idle ms before the buffer resets (default 500)\n    resetMs: number;\n    // Wrap focus past the ends of the collection (default true)\n    wrap: boolean;\n    // Override how an item's searchable label is derived\n    label?: (item: Element) =&gt; string;\n}</code></pre>",
+    "events": [
+      "typeahead-match",
+      "typeahead-nomatch",
+      "typeahead-reset"
+    ]
+  },
+  {
+    "id": "locale",
+    "name": "Locale Intent",
+    "status": "concept",
+    "summary": "Protocol defining the application's active locale, writing direction, and locale-bound format preferences. The app-wide preference axis the Localization Protocol consumes; retroactively fills the RTL/format gaps implied by temporal, typography, and anchor.",
+    "dimensions": {
+      "locale": {
+        "description": "The active locale as a BCP-47 language tag (open-valued — not a fixed enum)",
+        "values": [
+          "en",
+          "en-US",
+          "fr-CA",
+          "ar",
+          "ja",
+          "…BCP-47"
+        ]
+      },
+      "direction": {
+        "description": "The writing direction the layout flows in",
+        "values": [
+          "ltr",
+          "rtl",
+          "auto"
+        ]
+      },
+      "numbering": {
+        "description": "Optional override for the numbering system (defaults to the locale's CLDR default)",
+        "values": [
+          "latn",
+          "arab",
+          "deva",
+          "…Unicode bn"
+        ]
+      },
+      "calendar": {
+        "description": "Optional override for the calendar system (defaults to the locale's CLDR default)",
+        "values": [
+          "gregory",
+          "islamic",
+          "buddhist",
+          "japanese",
+          "…Unicode ca"
+        ]
+      }
+    },
+    "description": "<h3>Active Locale</h3><p class=\"text-sm text-gray-600 mb-2\">The current locale as a <a href=\"https://www.rfc-editor.org/info/bcp47\">BCP-47</a> language tag. This is an <strong>open axis</strong> — the standard fixes the <em>shape</em> (a valid tag) and the negotiation rules, not a closed list of locales. Components read the active locale to format values (via <code>Intl</code>) and resolve messages (via the <a href=\"/projects/webintl/#protocol-localization\">Localization Protocol</a>).</p><h3>Writing Direction</h3><p class=\"text-sm text-gray-600 mb-2\">The direction the layout flows in. Drives the <code>dir</code> attribute, the <code>:dir()</code> pseudo-class, and CSS logical properties so components adapt without bidirectional CSS forks.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>ltr</code>: Left-to-right (Latin, Cyrillic, CJK).</li><li><code>rtl</code>: Right-to-left (Arabic, Hebrew). Inline start/end flip; physical left/right do not.</li><li><code>auto</code>: Direction inferred per the Unicode bidi algorithm from the content's first strong character (matches <code>dir=\"auto\"</code>).</li></ul><h3>Format Preferences</h3><p class=\"text-sm text-gray-600 mb-2\">Optional overrides for locale-bound formatting, defaulting to the locale's CLDR defaults. These complement the <a href=\"/intents/temporal/\">Temporal</a> and <a href=\"/intents/typography/\">Typography</a> intents, which previously had no locale axis to defer to.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>numbering</code>: Unicode numbering system (a <code>nu</code> subtag value) — e.g. <code>latn</code>, <code>arab</code>, <code>deva</code>.</li><li><code>calendar</code>: Unicode calendar system (a <code>ca</code> subtag value) — e.g. <code>gregory</code>, <code>islamic</code>, <code>japanese</code>.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Direction = 'ltr' | 'rtl' | 'auto';\n\ninterface LocaleIntent {\n    // Active BCP-47 language tag (open-valued)\n    locale: string;\n    // Writing direction the layout flows in\n    direction: Direction;\n    // Optional Unicode numbering system (nu subtag)\n    numbering?: string;\n    // Optional Unicode calendar system (ca subtag)\n    calendar?: string;\n}</code></pre>"
+  },
+  {
+    "id": "translation",
+    "name": "Translation Intent",
+    "status": "concept",
+    "summary": "Protocol defining how a locale change is delivered to the UI from a UX standpoint — instant (all catalogs preloaded, synchronous switch), async (lazy-load the target catalog behind a loading state), or reload (full per-locale document load). Orthogonal to the Locale Intent: locale declares which locale; translation declares how switching to it feels.",
+    "dimensions": {
+      "switching": {
+        "description": "How a locale change manifests in the UI, trading bundle/payload size against switch latency and client-state preservation",
+        "values": [
+          "instant",
+          "async",
+          "reload"
+        ]
+      }
+    },
+    "description": "<h3>Switching Strategy</h3><p class=\"text-sm text-gray-600 mb-2\">How changing the active locale is <em>delivered</em> to the user. This is a UX and runtime-cost decision, independent of <em>which</em> locale is active (that is the <a href=\"/intents/locale/\">Locale Intent</a>). The implementing block decides the mechanism; this axis declares the experience the application wants.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>instant</code>: All candidate catalogs are <strong>preloaded</strong> (bundled or prefetched) before the switch. Changing locale is synchronous — no network round-trip, no loading state, no navigation; client state is preserved. Best for a small number of locales or compact catalogs. <strong>Cost:</strong> upfront payload grows with every supported locale.</li><li><code>async</code>: The target locale's catalog is <strong>lazy-loaded on demand</strong> when the user switches. A loading state bridges the fetch and the UI updates in place when it resolves; client state is preserved. Smallest initial payload. <strong>Cost:</strong> a network round-trip on first switch to a locale — design the loading affordance via the <a href=\"/intents/loader/\">Loader Intent</a>.</li><li><code>reload</code>: The switch is delivered by a <strong>full document load</strong> — navigating to a per-locale URL (<code>/fr/…</code>) or a per-locale build (SSR / static). There is no in-place reactive update; the new locale arrives with a fresh document. Best for SEO/SSR and compile-time per-locale builds. <strong>Cost:</strong> a full navigation that discards transient client state.</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">Each strategy leans on a neighbouring standard rather than re-solving it:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>instant</code> → preload the candidate catalogs ahead of need; eagerness composes with the <a href=\"/intents/prefetch/\">Prefetch Intent</a>.</li><li><code>async</code> → the catalog fetch surfaces a pending state via the <a href=\"/intents/loader/\">Loader Intent</a>.</li><li><code>reload</code> → the per-locale document is delivered by URL-based locale routing (Router).</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type TranslationSwitching = 'instant' | 'async' | 'reload';\n\ninterface TranslationIntent {\n    // How a locale change is delivered to the UI\n    switching: TranslationSwitching;\n}</code></pre>"
+  },
+  {
+    "id": "collection-operations",
+    "name": "Collection Operations Intent",
+    "status": "concept",
+    "summary": "UX-only protocol for the four data operations on a collection — filter, sort, group, page — composed as a configurable pipeline (default filter → sort → group → page). Sort's vocabulary mirrors the platform verbatim: direction follows aria-sort (ascending/descending), text comparison follows Intl.Collator (sensitivity/numeric/caseFirst/ignorePunctuation); group aggregates follow SQL naming. Models the front-end only — comparator implementation and client/server execution are technical concerns handled outside the intent. INITIAL vocabulary, pending owner review.",
+    "dimensions": {
+      "pipelineOrder": {
+        "description": "Which data operations run and in what order. Configurable; default filter → sort → group → page (sort the filtered set, group the sorted set, page the grouped set). Each stage is optional and independent.",
+        "values": [
+          "filter",
+          "sort",
+          "group",
+          "page"
+        ]
+      },
+      "sortDirection": {
+        "description": "Sort direction for a key — named to match the native aria-sort attribute the active header projects. An empty sort projects aria-sort=\"none\".",
+        "values": [
+          "ascending",
+          "descending"
+        ]
+      },
+      "sortKeys": {
+        "description": "Whether sort keys may be stacked — ties on the first key break on the next (shift-click multi-column sort).",
+        "values": [
+          "single",
+          "multiple"
+        ]
+      },
+      "textSensitivity": {
+        "description": "Which character differences affect text order. Adopts the Intl.Collator sensitivity option verbatim.",
+        "values": [
+          "base",
+          "accent",
+          "case",
+          "variant"
+        ]
+      },
+      "numericOrdering": {
+        "description": "Natural numeric order so embedded numbers compare by value (img2 before img10). Adopts the Intl.Collator numeric option.",
+        "values": [
+          "true",
+          "false"
+        ]
+      },
+      "caseFirst": {
+        "description": "Which case sorts first. Adopts the Intl.Collator caseFirst option.",
+        "values": [
+          "upper",
+          "lower",
+          "false"
+        ]
+      },
+      "ignorePunctuation": {
+        "description": "Whether punctuation is ignored when comparing. Adopts the Intl.Collator ignorePunctuation option.",
+        "values": [
+          "true",
+          "false"
+        ]
+      },
+      "emptyPlacement": {
+        "description": "Where empty / missing values land in the order. Mirrors SQL NULLS FIRST / NULLS LAST — the web platform has no native term.",
+        "values": [
+          "first",
+          "last"
+        ]
+      },
+      "filterMatch": {
+        "description": "How active filter predicates combine — AND or OR. The predicates themselves are call-site data, not part of the intent.",
+        "values": [
+          "all",
+          "any"
+        ]
+      },
+      "groupSummary": {
+        "description": "The aggregate shown per group, named after the SQL aggregate functions (the nearest cross-platform standard).",
+        "values": [
+          "count",
+          "sum",
+          "average",
+          "minimum",
+          "maximum"
+        ]
+      },
+      "pageMode": {
+        "description": "The navigation model — does advancing replace the slice or grow the list. paged = discrete numbered / prev-next page links that replace the visible slice (the only model that supports jump-to-page and a known total); append = each new slice accumulates onto a growing list. Orthogonal to the advance trigger below: 'infinite scroll' is not a third mode, it is append + advance:auto.",
+        "values": [
+          "paged",
+          "append"
+        ]
+      },
+      "advance": {
+        "description": "How the next slice is requested — orthogonal to pageMode. manual = an explicit user action (clicking a page link or a Load-more button); auto = the next slice fetches automatically at the scroll boundary, via the native IntersectionObserver sentinel. Default manual: auto-advance is the opt-in that turns append into infinite scroll, and it carries the documented infinite-scroll harms (unreachable footer, no stopping point), so it is never the default. paged + auto is undefined (you do not auto-replace on scroll).",
+        "values": [
+          "manual",
+          "auto"
+        ]
+      },
+      "urlSync": {
+        "description": "Whether the active page is reflected in a shareable, back-button-restorable URL (e.g. ?page=n). Native-first: the History API (pushState/popstate/scrollRestoration) is the baseline; the Navigation API is a progressive enhancement; for server-rendered paged links, cross-document View Transitions animate page-to-page with zero JS. Load-bearing: append modes (especially advance:auto) are only advisable when this is on, else the footer and back button break.",
+        "values": [
+          "none",
+          "query-param"
+        ]
+      },
+      "rangeLabel": {
+        "description": "Whether to surface the slice as a 'showing 21–40 of 500' range label. Requires a known total, so it composes only over an offset/page resource protocol — a cursor protocol has no total and forces it off.",
+        "values": [
+          "none",
+          "range"
+        ]
+      }
+    },
+    "description": "<h3>The Pipeline</h3><p class=\"text-sm text-gray-600 mb-2\">Four data operations compose as an ordered pipeline over a collection. Each stage is optional and independent; the order is <strong>configurable</strong>, defaulting to <code>filter → sort → group → page</code> (you sort the filtered set, group the sorted set, page the grouped set). This intent is <strong>UX-only</strong> — it expresses <em>what the user wants</em>, never how it is computed. The vocabulary below is an <strong>initial pass</strong> pending review; where the platform already has a word for a concept, this intent borrows it verbatim rather than inventing one.</p><h3>Sort — direction &amp; comparison</h3><p class=\"text-sm text-gray-600 mb-2\">Direction names match the native <a href=\"https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-sort\"><code>aria-sort</code></a> attribute the active header projects (an empty sort is <code>aria-sort=\"none\"</code>). The text-comparison preferences adopt the <a href=\"https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator\"><code>Intl.Collator</code></a> option vocabulary verbatim.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>sortDirection</code> — <code>ascending</code> | <code>descending</code> (aria-sort).</li><li><code>sortKeys</code> — <code>single</code> | <code>multiple</code>: may sort keys be stacked.</li><li><code>textSensitivity</code> — <code>base</code> | <code>accent</code> | <code>case</code> | <code>variant</code> (Intl.Collator <code>sensitivity</code>).</li><li><code>numericOrdering</code> — natural numeric order so <code>img2</code> precedes <code>img10</code> (Intl.Collator <code>numeric</code>).</li><li><code>caseFirst</code> — <code>upper</code> | <code>lower</code> | <code>false</code> (Intl.Collator <code>caseFirst</code>).</li><li><code>ignorePunctuation</code> (Intl.Collator <code>ignorePunctuation</code>).</li><li><code>emptyPlacement</code> — <code>first</code> | <code>last</code>: where empty / missing values land (mirrors SQL <code>NULLS FIRST</code>/<code>NULLS LAST</code>; the web has no native term).</li></ul><h3>Filter, Group &amp; Page</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>filterMatch</code> — <code>all</code> | <code>any</code>: combine active predicates with AND or OR; the predicates are call-site data.</li><li><code>groupSummary</code> — <code>count</code> | <code>sum</code> | <code>average</code> | <code>minimum</code> | <code>maximum</code>: named after the SQL aggregate functions.</li><li><code>pageMode</code> — <code>paged</code> | <code>append</code>: navigation model. <code>paged</code> replaces the slice (numbered / prev-next, the only model with jump-to-page and a known total); <code>append</code> grows the list.</li><li><code>advance</code> — <code>manual</code> | <code>auto</code>: trigger, orthogonal to pageMode. <code>manual</code> (default) is a click; <code>auto</code> fetches at the scroll boundary via IntersectionObserver. <strong>Infinite scroll = <code>append</code> + <code>auto</code></strong> — a derived opt-in, not a third mode; rendering delegates to Windowed Collection, lifecycle to Loader. <code>paged</code> + <code>auto</code> is undefined.</li><li><code>urlSync</code> — <code>none</code> | <code>query-param</code>: whether the active page is a shareable, back-button-restorable URL. <code>append</code> modes are only advisable with <code>query-param</code> on.</li><li><code>rangeLabel</code> — <code>none</code> | <code>range</code>: show ‘showing 21–40 of 500’. Needs a known total → composes only over an offset/page protocol.</li></ul><h3>Page — native primitives, SEO &amp; a11y</h3><p class=\"text-sm text-gray-600 mb-2\">The pagination dimensions stay <strong>UX-only</strong>; the offset/page-vs-cursor <em>protocol</em> lives in the <a href=\"/resources/pagination/\">Custom Pagination</a> resource, not here. A cross-layer constraint binds them: jump-to-page and <code>rangeLabel</code> require a total, so they pair only with an offset/page protocol — a cursor protocol forces <code>append</code> or prev-next. <strong>URL state</strong> aligns to native primitives: the <a href=\"https://developer.mozilla.org/en-US/docs/Web/API/History/pushState\">History API</a> (<code>pushState</code>/<code>popstate</code>/<code>scrollRestoration</code>) as baseline, the <a href=\"https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API\">Navigation API</a> as enhancement, and CSS <a href=\"https://developer.chrome.com/docs/web-platform/view-transitions/cross-document\"><code>@view-transition</code></a> for zero-JS server-rendered transitions. <strong>SEO</strong>: the indexable default is server-rendered, self-canonical <code>?page=n</code> links — Googlebot does not fire the user-action JS behind <code>append</code>/<code>advance:auto</code>, and <code>rel=next/prev</code> is deprecated (Google, 2019), so never emit it as primary machinery. <strong>A11y</strong>: paged controls live in a <code>&lt;nav aria-label=\"pagination\"&gt;</code> landmark with <code>aria-current=\"page\"</code> on the active link (WAI-ARIA APG); focus &amp; announcement after a page change are <a href=\"/backlog/pagination-focus-announcement/\">still open</a>. See the <a href=\"/research/collection-operations/\">collection-operations research</a> and the 2026-06-03 pagination research report for the full pattern decision framework.</p><h3>UX-only — where the technical choices live</h3><p class=\"text-sm text-gray-600 mb-2\">Deliberately <strong>not</strong> in this intent: the comparator <em>implementation</em> (default <code>Array.prototype.sort</code> vs <code>Intl.Collator</code> vs a numeric comparator vs decorate-sort-undecorate), and <em>where</em> the work runs. This standard models the <strong>front-end</strong> only; delegating to a backend <code>ORDER BY</code> / sort query is app-owned and out of scope. Those technical strategies, with their trade-offs, are catalogued in the <a href=\"/research/collection-operations/\">collection-operations research</a> and Plateau's Technical Configurator (Sorting Strategy domain).</p><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">This intent owns only the data operations; neighbours own the rest:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><a href=\"/intents/windowed-collection/\">Windowed Collection</a> — renders the visible window; this selects/orders the set. Compose, never merge.</li><li><a href=\"/intents/locale/\">Locale</a> — supplies the default collation locale, so a French app sorts French by default.</li><li><a href=\"/intents/loader/\">Loader</a> — <code>append</code> paging surfaces its <code>loadingMore</code> state (and at the <code>advance:auto</code> scroll sentinel).</li><li><a href=\"/intents/selection/\">Selection</a> — co-resident on the same grids; an orthogonal axis.</li><li><a href=\"/intents/action/\">Action</a> — its <code>groupOrdering</code> is prior art for a declarative ordering dimension.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type SortDirection = 'ascending' | 'descending';            // aria-sort\ntype Sensitivity = 'base' | 'accent' | 'case' | 'variant';  // Intl.Collator\ntype CaseFirst = 'upper' | 'lower' | 'false';               // Intl.Collator\ntype EmptyPlacement = 'first' | 'last';                     // SQL NULLS FIRST/LAST\ntype Operation = 'filter' | 'sort' | 'group' | 'page';\n\ninterface SortKey {\n    field: string;\n    direction: SortDirection;\n    // Comparison preferences mirror Intl.Collator option names verbatim\n    sensitivity?: Sensitivity;\n    numeric?: boolean;            // natural numeric order: img2 before img10\n    caseFirst?: CaseFirst;\n    ignorePunctuation?: boolean;\n    emptyPlacement?: EmptyPlacement;\n}\n\ninterface CollectionOperationsIntent {\n    // Stages applied in order; configurable, default below\n    order: Operation[];           // default ['filter','sort','group','page']\n    sort?: { by: SortKey[]; keys: 'single' | 'multiple' };\n    filter?: { match: 'all' | 'any' };\n    group?: { summary: Array&lt;'count' | 'sum' | 'average' | 'minimum' | 'maximum'&gt; };\n    page?: { mode: 'paged' | 'append'; size?: number;\n             advance?: 'manual' | 'auto';        // default manual; append+auto = infinite scroll\n             urlSync?: 'none' | 'query-param';   // History API ?page=n\n             rangeLabel?: 'none' | 'range' };     // 'showing 21-40 of 500' — offset/page only\n}</code></pre>",
+    "events": [
+      "sortchange",
+      "filterchange",
+      "groupchange",
+      "pagechange"
+    ],
+    "designSystemResearch": [
+      {
+        "system": "WAI-ARIA",
+        "components": [
+          "aria-sort",
+          "ascending / descending / none / other"
+        ],
+        "keyInsight": "aria-sort standardizes the sort STATE vocabulary on a column header (one header at a time); this intent's sortDirection projects onto it directly.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-sort"
+      },
+      {
+        "system": "ECMA-402 Intl.Collator",
+        "components": [
+          "sensitivity",
+          "numeric",
+          "caseFirst",
+          "ignorePunctuation"
+        ],
+        "keyInsight": "The standard locale-aware comparison engine; this intent adopts its option names verbatim so the UX preference is expressed in the platform's own vocabulary rather than a bespoke one.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator"
+      },
+      {
+        "system": "TanStack Table",
+        "components": [
+          "row-model pipeline",
+          "filter → sort → group → paginate"
+        ],
+        "keyInsight": "Models the four operations as ordered, optional, composable row-model transformers — the architectural precedent for a configurable pipeline of independent stages.",
+        "reference": "https://tanstack.com/table/latest/docs/guide/row-models"
+      },
+      {
+        "system": "History API / Navigation API / View Transitions",
+        "components": [
+          "pushState",
+          "popstate",
+          "scrollRestoration",
+          "@view-transition"
+        ],
+        "keyInsight": "The page dimension's urlSync aligns to native URL-state primitives rather than a router library: History API (Baseline 2020) is the baseline for ?page=n + back/forward + scroll restoration, the Navigation API (Baseline 2026) is the SPA-grade enhancement, and cross-document View Transitions animate server-rendered paged navigation with zero JS.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API"
+      },
+      {
+        "system": "Google Search Central + WAI-ARIA APG",
+        "components": [
+          "self-canonical ?page=n",
+          "nav landmark",
+          "aria-current=page"
+        ],
+        "keyInsight": "SEO and a11y constrain paged pagination's defaults: each page needs a unique self-canonical URL of server-rendered links (Googlebot does not fire load-more JS; rel=next/prev deprecated 2019), and controls belong in a labeled nav landmark with aria-current='page'.",
+        "reference": "https://developers.google.com/search/docs/specialty/ecommerce/pagination-and-incremental-page-loading"
+      }
+    ],
+    "researchGaps": [
+      "Pagination focus & announcement — what receives focus and what is announced after a page change is unspecified (the verified a11y part is only the nav landmark + aria-current). Tracked at /backlog/pagination-focus-announcement/.",
+      "Pagination range labels & page-size selectors — 'showing 21–40 of 500' and page-size options have no verified best-practice (sizes, defaults, persistence). Tracked at /backlog/pagination-range-labels-page-size/.",
+      "Per-dimension UX vocabulary completeness — this is an initial pass. Validate the value lists against a real grid/list corpus and provide a custom escape hatch for non-standard preferences (open-system stance), since the bar is 'describe any UX preference'.",
+      "Pipeline-order validity — order is configurable; are some orders (e.g. page-before-filter) nonsensical and rejected, or is it free-form?",
+      "Server boundary residual — execution is front-end only; should the standard still recommend a canonical sort/filter serialization so apps converge, even though it does not own the wire format?",
+      "Shared comparison primitive — does sort order + dirty-check equality + locale collation share one primitive (Web Intl)? Tracked in the technical layer / the Configurator's Sorting Strategy domain, not in this UX intent.",
+      "Provisional surface details — the event names (sortchange/filterchange/groupchange/pagechange) are placeholders with no native precedent, and the boolean-valued dimensions (numericOrdering, ignorePunctuation) render as true/false to mirror Intl.Collator. Confirm or rename during owner review."
+    ]
   }
 ]

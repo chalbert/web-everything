@@ -1,0 +1,353 @@
+<section class="intro-section mb-12">
+  <h3 id="mission">Mission</h3>
+  <p>
+    <strong>Web Validation</strong> standardizes <strong>input invalidity</strong> — how form
+    controls, groups, forms, and nested wizards report and react to user data that fails its
+    rules. It defines the contract (via the <a href="/intents/validation/">Validation Intent</a>)
+    and the <a href="#protocol-validation">Validation Protocol</a> that conformant
+    implementations satisfy so independent vendors are <strong>swappable</strong> and
+    <strong>combinable</strong>.
+  </p>
+  <p>
+    Validation is delivered through pluggable registries — <a href="/plugs/customvalidatorresolutionregistry/"><code>CustomValidatorResolutionRegistry</code></a>
+    (async strategies), <a href="/plugs/customcommitmentpolicyregistry/"><code>CustomCommitmentPolicyRegistry</code></a>
+    (when invalid values enter form state) — so apps configure strategies once and every
+    control delegates through the injector chain.
+  </p>
+
+  <div class="comparison-block" style="background: rgba(99, 102, 241, 0.08); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #6366f1; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #4338ca; font-size: 1rem;">Validation vs. Reliability</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      <strong>Validation</strong> handles <em>input invalidity</em> — the user provided incorrect
+      data (email already taken, password too short, field missing).
+      <strong><a href="/projects/webreliability/">Reliability</a></strong> handles <em>system
+      failures</em> — the mechanism itself broke (uniqueness check timed out, server unreachable,
+      async validator crashed). Never conflate the two.
+    </p>
+  </div>
+</section>
+
+<section id="protocol-validation" class="section-card">
+  <h3 id="validation-protocol">Validation Protocol</h3>
+  <p>
+    Interop contract for form validation: observable states and events across
+    control/group/form/nested levels. Enables swappable and combinable validation
+    implementations from different creators. This section specifies the normative
+    implementation contract, decomposed concerns (DI-replaceable), and conformance tiers.
+  </p>
+
+  <h4 id="conformance-model">Conformance Model</h4>
+  <p>Three tiers of conformance, each building on the previous. Implementations declare which tier they meet.</p>
+  <ul>
+    <li><strong>Level 0 — Intent-aware:</strong> Honours UX intents (context/level/execution/visibility). Renders messages and timing correctly. No state/event contract required. (&quot;Does the right UX.&quot;)</li>
+    <li><strong>Level 1 — State &amp; event conformant:</strong> Observable states (merged validity, interaction, commit, display) via native/attributed surfaces + stable-id events with documented <code>detail</code> shapes. Makes implementations <strong>swappable</strong> — swap one control for another, form behaves identically. Emits events like <code>validation.control.became-valid</code>.</li>
+    <li><strong>Level 2 — Shape &amp; concern conformant:</strong> Canonical hand-off shapes (<code>ValueSnapshot</code>, <code>SourceResult</code>, <code>MergedValidity</code>, <code>InteractionState</code>, <code>DisplayDecision</code>) normative. Decomposed concerns (dirty-check, change-detection, validity-computation, async-resolution, etc.) individually replaceable via DI. Makes <strong>concerns combinable</strong> across creators.</li>
+  </ul>
+
+  <h4 id="key-concepts">Key Concepts</h4>
+  <ul>
+    <li><strong>Merged Validity:</strong> Validity is computed from independent sources (native/schema/async/manual) with a declared precedence order. One source never overwrites another—prevents "server error wiped on blur" bugs (Formik #706, RHF #9982).</li>
+    <li><strong>Commit Policy:</strong> Severity level determines data persistence: error rejects (blocks submission), warning/info commit, caution holds until user confirms.</li>
+    <li><strong>Reward Early Punish Late:</strong> Display gates by interaction state. Until errored: validate lazily (on blur). Once errored: flip to eager (on change) until fixed, then revert to lazy. A dynamic policy, not a static execution value.</li>
+    <li><strong>Error Summary (GOV.UK dual model):</strong> Form-level aggregate ordered by DOM, linked to fields, focused on submit-blocked, with verbatim parity to inline messages.</li>
+    <li><strong>Async Resolution Strategy:</strong> Prevents stale-resolve races (RHF #1688, Final Form #420). Registered via <code>CustomValidatorResolutionRegistry</code> with pluggable strategies (see below).</li>
+  </ul>
+
+  <h4 id="async-resolution-strategies">Async Resolution Strategies</h4>
+  <p><strong>Problem:</strong> Async validators race. If validation runs for input V1, then V2 arrives before V1 completes, the V1 result (stale) can overwrite V2's result (correct). Both React Hook Form and Final Form track this as a recurring bug.</p>
+  <p><strong>Solution:</strong> Register an async resolution strategy via <code>CustomValidatorResolutionRegistry</code>. Two provider patterns are supported:</p>
+
+  <h5>1. Cancellation Strategy (native-first default)</h5>
+  <ul>
+    <li><strong>Mechanism:</strong> When input changes, cancel in-flight validators via <code>AbortController</code>. Stopped validators never produce results.</li>
+    <li><strong>Pros:</strong> Matches user intent ("they changed their mind"). Resource-efficient (stops wasted API calls). Web standard (AbortController). Simple mental model.</li>
+    <li><strong>Cons:</strong> Requires validators to accept <code>signal</code> parameter.</li>
+    <li><strong>Best for:</strong> New code, async-capable validators, internal implementations.</li>
+  </ul>
+
+  <h5>2. Versioning Strategy (pragmatic integration)</h5>
+  <ul>
+    <li><strong>Mechanism:</strong> Tag each validation run with a generation token. When a validator completes, check: is this version still current? If old, drop the result. If current, apply it.</li>
+    <li><strong>Pros:</strong> Works with existing validators (no refactoring needed). No signature change required. Integrates third-party libraries easily.</li>
+    <li><strong>Cons:</strong> Less efficient (completes unnecessary work). Requires explicit version checking in result handler.</li>
+    <li><strong>Best for:</strong> Legacy code, third-party validators, framework constraints (e.g., Formik validators that predate signal support).</li>
+  </ul>
+
+  <h5>Registry Usage</h5>
+  {% highlight "typescript" %}
+// Define the strategy interface (plug)
+interface CustomValidatorResolution {
+  startValidation(fieldId, input): ValidationHandle;
+  shouldApplyResult(handle, result): boolean; // true if result should be applied
+  onInputChange(fieldId, newInput): void;     // clean up old work
+}
+
+// Register a strategy (e.g., in app bootstrap)
+customValidatorResolution.register('cancellation', new CancellationResolver());
+customValidatorResolution.register('versioning', new VersioningResolver());
+
+// App selects which strategy via DI
+const formValidator = createFormValidator({
+  asyncStrategy: injector.get('customValidatorResolution')
+    .getProvider('cancellation') // or 'versioning'
+});
+
+// Any validator transparently uses the chosen strategy
+const validator = async (value, signal) => {
+  const result = await checkServer(value, { signal });
+  return result; // strategy handles version/cancellation logic
+};
+  {% endhighlight %}
+  <p><strong>Recommendation:</strong> Cancellation is the native-aligned default. Use versioning if your validators can't accept <code>signal</code> or you're integrating third-party libraries. See <a href="/reports/2026-05-30-form-validation-standard-assessment/">Form Validation Standard Assessment</a> for detailed comparison and decision framework.</p>
+
+  <h4 id="commitment-strategy-registry">Commitment Strategy Registry</h4>
+  <p><strong>Registry:</strong> <code>CustomCommitmentPolicyRegistry</code></p>
+  <p class="text-sm">When invalid values enter form state is a per-field, per-event, per-validity decision. Apps register commitment strategies via the registry. Implementations must satisfy the <code>CommitmentPolicy</code> contract.</p>
+
+  <h5>CommitmentPolicy Interface</h5>
+  {% highlight "typescript" %}
+interface CommitContext {
+  fieldId: string;
+  event: 'input' | 'blur' | 'submit' | 'explicit';
+  value: unknown;
+  validity: MergedValidity;  // includes severity
+  interaction: InteractionState;
+  submitted: boolean;
+  validationPending: boolean;
+}
+
+interface CommitmentPolicy {
+  // Per-field, per-event, per-validity decision
+  shouldCommit(fieldId: string, value: unknown, context: CommitContext): boolean;
+
+  // Increment generation when value input arrives
+  onValueInput(fieldId: string, newValue: unknown): number;
+
+  // Staleness observables
+  getValidationSync(fieldId: string): 'current' | 'stale';
+  getValidationGeneration(fieldId: string): number;
+  getValidationTimestamp(fieldId: string): string;
+
+  dispose(fieldId: string): void;
+}
+  {% endhighlight %}
+
+  <h5>Registry Usage</h5>
+  {% highlight "typescript" %}
+// Register strategies (app bootstrap)
+customCommitmentRegistry.register('full', fullCommitmentProvider);
+customCommitmentRegistry.register('deferred', deferredCommitmentProvider);
+
+// Resolve and use
+const policy = injector.get('customCommitment:policy')
+  ?? customCommitmentRegistry.getProvider('full');
+
+if (policy.shouldCommit(fieldId, value, context)) {
+  formValues[fieldId] = value;
+}
+  {% endhighlight %}
+
+  <h5>Built-in Strategies</h5>
+  <p class="text-sm">Conformant implementations should provide at minimum:</p>
+  <ul class="text-sm">
+    <li><code>full</code>: Values committed to form state on every input event.</li>
+    <li><code>deferred</code>: Values buffered locally; committed only on blur, submit, or explicit event.</li>
+  </ul>
+
+  <h5>Granular Control</h5>
+  <p class="text-sm">Strategies decide per-field, per-event, per-validity. Examples of custom strategies (implemented by adapters/frameworks, not normative):</p>
+  <ul class="text-sm">
+    <li><strong>Severity-gated:</strong> Commit based on validation level (error blocks, warning commits).</li>
+    <li><strong>Field-specific:</strong> Different policies per field (email defers, name full).</li>
+    <li><strong>Optimistic:</strong> Write to form + autosave to server; rollback on validation error.</li>
+    <li><strong>Staged:</strong> Required fields full, optional fields deferred.</li>
+  </ul>
+
+  <h4 id="per-level-vocabulary">Per-Level Vocabulary</h4>
+
+  <h5>Control (Single Field)</h5>
+  <p><strong>Observable states (four parallel regions):</strong></p>
+  <ul>
+    <li><strong>Validity:</strong> <code>unknown</code> | <code>pending</code> | <code>invalid {severity, messages}</code> | <code>valid</code>. Reduced from independent sources (native/schema/async/manual) via declared precedence.</li>
+    <li><strong>Interaction:</strong> <code>pristine</code>↔<code>dirty</code> (vs baseline), <code>untouched</code>↔<code>touched</code>, <code>pre-submit</code>↔<code>submit-attempted</code>, <code>focused</code>↔<code>blurred</code>.</li>
+    <li><strong>Commit:</strong> <code>committed</code> (warning/info) | <code>rejected</code> (error) | <code>held</code> (caution awaits confirm).</li>
+    <li><strong>Display:</strong> <code>silent</code> | <code>showing-error</code> | <code>showing-warning</code> | <code>showing-info</code> | <code>showing-pending</code>. Gated by <code>visibility</code> intent.</li>
+  </ul>
+  <p><strong>Observable attributes (beyond-native):</strong></p>
+  <ul>
+    <li><code>data-validity</code>: <code>unknown | pending | valid | invalid</code></li>
+    <li><code>data-dirty</code>: <code>true | false</code></li>
+    <li><code>data-touched</code>: <code>true | false</code></li>
+    <li><code>data-committed</code>: <code>committed | rejected | held</code></li>
+    <li><code>data-severity</code>: <code>error | warning | caution | info</code></li>
+  </ul>
+  <p><strong>Observable events (stable-id scheme: <code>validation.control.*</code>):</strong></p>
+  <ul>
+    <li><code>validation.control.value-input</code>: User entered / programmatic value change.</li>
+    <li><code>validation.control.value-commit</code>: Value ready for persistence (e.g., on blur).</li>
+    <li><code>validation.control.focus</code> | <code>validation.control.blur</code>: Interaction state change.</li>
+    <li><code>validation.control.validate-start {source, version}</code>: Validation run initiated.</li>
+    <li><code>validation.control.validate-end {source, version, result}</code>: Validation completed. Stale results (old version) are dropped here.</li>
+    <li><code>validation.control.validity-changed {merged}</code>: Merged validity state transitioned.</li>
+    <li><code>validation.control.became-valid</code> | <code>validation.control.became-invalid</code>: Crossing validity boundary.</li>
+    <li><code>validation.control.message-enter</code> | <code>validation.control.message-exit</code> | <code>validation.control.message-pulse</code>: Message lifecycle.</li>
+    <li><code>validation.control.commit-state-changed</code>: Commit state transitioned.</li>
+    <li><code>validation.control.baseline-change</code>: Baseline updated (async defaults, reinitialize, reset-post-submit). Owns dirty/touched lifecycle.</li>
+  </ul>
+
+  <h5>Staleness Observables (Commitment Sync)</h5>
+  <p class="text-sm">For <code>commitment: deferred</code>, clients need to know if displayed validation is in sync with the current buffered value.</p>
+  <ul>
+    <li><code>data-validation-sync="current"</code> — validation result matches buffered value; currently accurate.</li>
+    <li><code>data-validation-sync="stale"</code> — value changed but validation not yet run; displayed errors may not reflect current input.</li>
+    <li><code>data-validation-generation</code> — opaque version token (integer). Increments on value input. Used internally for stale-result detection and available for debugging/logging.</li>
+    <li><code>data-validation-timestamp</code> — ISO 8601 timestamp of last validation completion. Consumers can infer: how old is this validation result?</li>
+  </ul>
+  <p class="text-sm">For <code>commitment: full</code>, <code>data-validation-sync</code> is always <code>"current"</code> (validation runs immediately after input).</p>
+
+  <h5>Group (Fieldset or Composite Control)</h5>
+  <ul>
+    <li><strong>Validity aggregation:</strong> <code>pending</code> if any member pending; <code>invalid</code> if any invalid; else <code>valid</code>. Max severity wins.</li>
+    <li><strong>Completion:</strong> <code>empty</code> | <code>partial</code> | <code>complete</code> (vs <code>visited</code> rollup).</li>
+    <li><strong>Anchor target:</strong> First errored member by DOM order (e.g., in composite date, target day/month/year sub-field).</li>
+    <li><strong>Dependency:</strong> <code>dependsOn</code> reactive graph. Changing a dependency revalidates dependents (fixes <code>requiredIf</code>-latching bugs).</li>
+    <li><strong>Events:</strong> <code>validation.group.member-validity-change</code>, <code>validation.group.became-invalid</code>, <code>validation.group.dependents-revalidated</code>, message <code>enter</code>/<code>exit</code>.</li>
+  </ul>
+
+  <h5>Form (Full Document)</h5>
+  <ul>
+    <li><strong>Submission lifecycle:</strong> <code>idle</code> → <code>validating</code> (run all, await pending) → <code>blocked</code> (invalid; show summary, move focus) OR <code>submitting</code> (valid; in flight) → <code>submitted</code> | <code>submit-failed</code> (server errors injected).</li>
+    <li><strong>Rollup:</strong> Aggregate validity, dirty, visited, pending. <code>submittable</code> = not invalid AND not pending.</li>
+    <li><strong>Error summary (GOV.UK):</strong> DOM-ordered list, <code>role=alert</code>, focus moved on blocked, entries link to errored fields, verbatim parity with inline messages.</li>
+    <li><strong>Server reconciliation:</strong> Server errors injected as <code>manual</code> validity source by path. Merge precedence ensures they are not wiped on blur.</li>
+    <li><strong>Events:</strong> <code>validation.form.submit-attempt</code>, <code>validation.form.submit-blocked {invalid-list}</code>, <code>validation.form.submit-allowed</code>, <code>validation.form.submit-start</code>, <code>validation.form.submit-end {success|error}</code>, summary <code>enter</code>/<code>exit</code>, <code>validation.form.focus-moved-to-summary</code>.</li>
+  </ul>
+
+  <h5>Nested-Form (Multi-Step, Field Arrays, Wizard)</h5>
+  <ul>
+    <li><strong>Bubbling policy:</strong> <code>participating</code> (child invalidity blocks parent submit) vs <code>isolated</code> (child validated independently).</li>
+    <li><strong>Field arrays:</strong> Errors track rows by stable key (not index). Reorder preserves error association. Array node has separate validity from items.</li>
+    <li><strong>Wizard steps:</strong> Per-step gate. <code>gated</code> state blocks advance; <code>validation.nested.step-advance-allowed</code> event fires when active step valid.</li>
+    <li><strong>Back-nav value retention:</strong> Stepping back preserves values + baseline (no unregister-on-leave).</li>
+    <li><strong>Events:</strong> <code>validation.nested.child-validity-change</code>, <code>validation.nested.step-gate-blocked</code>, <code>validation.nested.step-advance-allowed</code>, row <code>add</code>/<code>remove</code>/<code>reorder</code>.</li>
+  </ul>
+
+  <h4 id="decomposed-concerns">Decomposed Concerns (DI-Replaceable via <code>customValidation:&lt;concern&gt;</code>)</h4>
+  <p>Each concern is a swappable provider registered and resolved via the injector:</p>
+  <ul>
+    <li><code>change-detection</code>: Detects when a value changed (event listeners, signal subscriptions, polling). The event-driven vs state-derived choice lives here.</li>
+    <li><code>dirty-check</code>: Compares current to baseline (strict ===, deep equal, normalized, custom comparator).</li>
+    <li><code>inter-element-comms</code>: Control↔group↔form messages (DOM events, injector bus, signals, custom).</li>
+    <li><code>validity-computation</code>: Rule engine (native Constraint Validation, Standard Schema adapter, custom).</li>
+    <li><code>async-resolution</code>: Provided via <code>CustomValidatorResolutionRegistry</code>. Pluggable strategies: cancellation (AbortController) or versioning (generation tokens). Owns pending aggregation and submit-await.</li>
+    <li><code>commitment-policy</code>: Provided via <code>CustomCommitmentPolicyRegistry</code>. Pluggable strategies: full (write on input), deferred (buffer until blur/submit), or custom (severity-gated, field-specific, optimistic, etc.). Decides when invalid values enter form state.</li>
+    <li><code>message-resolution</code>: Validity code → display string (native localized, i18n library, schema issue.message).</li>
+    <li><code>display-placement</code>: Message rendering (inline, group summary, error summary, toast).</li>
+    <li><code>focus-management</code>: Focus on error (focus-summary-on-submit, focus-first-field, none).</li>
+  </ul>
+
+  <h4 id="optional-features">Optional Features (Capability Bundles)</h4>
+  <ul>
+    <li><code>async</code>: Pending lifecycle, version tokens or cancellation, debounce, aggregation.</li>
+    <li><code>cross-field</code>: <code>dependsOn</code> graph, group-scoped rules, reactive revalidation.</li>
+    <li><code>conditional</code>: Dynamic required-if, conditional schema (discriminated union).</li>
+    <li><code>field-array</code>: Repeated sections, key-based identity, per-row validation, add/remove/reorder.</li>
+    <li><code>wizard</code>: Step gating, per-step validation, forward/back navigation.</li>
+    <li><code>error-summary</code>: Form-level summary, focus-on-blocked, GOV.UK dual model (inline + summary parity).</li>
+    <li><code>severity</code>: warning/caution/info beyond binary error (Level 1+).</li>
+    <li><code>schema</code>: Standard Schema adapter input (vendor-neutral rule definition).</li>
+    <li><code>server-reconciliation</code>: Manual validity source injection, server error merging.</li>
+    <li><code>commitment-policy</code>: Granular control over when invalid values enter form state (full/deferred/custom strategies).</li>
+  </ul>
+
+  <h4 id="stable-id-scheme">Stable-ID Scheme (Normative Addressing)</h4>
+  <p>Atoms are addressed by stable dot-paths rooted in <code>validation.</code> domain (not intent id), so re-categorization never breaks refs:</p>
+  <ul>
+    <li><code>validation.control.validity.pending</code>, <code>validation.control.validity.invalid</code>, etc. (states)</li>
+    <li><code>validation.control.value-input</code>, <code>validation.control.became-valid</code>, etc. (events)</li>
+    <li><code>validation.group.*</code>, <code>validation.form.*</code>, <code>validation.nested.*</code> (per-level)</li>
+    <li><code>validation.source.native</code>, <code>validation.source.schema</code>, <code>validation.source.async</code>, <code>validation.source.manual</code> (sources)</li>
+    <li><code>validation.concern.dirty-check</code>, <code>validation.concern.async-resolution</code>, etc. (DI providers)</li>
+    <li><code>validation.feature.async</code>, <code>validation.feature.cross-field</code>, etc. (capabilities)</li>
+  </ul>
+
+  <h4 id="interface-protocol">Interface Protocol (Canonical Hand-Off Shapes)</h4>
+  <p>Level 2 conformance requires these shapes. Level 0–1 may defer to observable attributes/events.</p>
+  {% highlight "typescript" %}
+type ValidationLevel = 'error' | 'warning' | 'caution' | 'info' | string;
+
+interface ValueSnapshot {
+  current: unknown;
+  baseline: unknown;
+}
+
+interface SourceResult {
+  source: 'native' | 'schema' | 'async' | 'manual' | string;
+  state: 'idle' | 'valid' | 'invalid' | 'pending';
+  version?: number;            // for pending/async; allows stale-result detection
+  messages?: Array<{ code: string; level: ValidationLevel; path?: string }>;
+}
+
+interface MergedValidity {
+  state: 'unknown' | 'pending' | 'valid' | 'invalid';
+  blocking: boolean;           // any source at level:error
+  severity: ValidationLevel;
+  messages: Array<{ code: string; level: ValidationLevel; path?: string }>;
+}
+
+interface InteractionState {
+  dirty: boolean;              // vs baseline
+  touched: boolean;
+  focused: boolean;
+  submitted: boolean;
+}
+
+interface DisplayDecision {
+  show: boolean;               // gated by visibility intent
+  message: string | null;
+  severity: ValidationLevel;
+  context: 'control' | 'group' | 'form' | 'root';
+}
+  {% endhighlight %}
+
+  <h4 id="capability-manifest">Capability Manifest &amp; Adherence Detection</h4>
+  <p>Implementations declare a capability manifest (build-time or runtime):</p>
+  {% highlight "typescript" %}
+interface ValidationCapabilityManifest {
+  specVersion: string;                       // e.g., '1.0.0'
+  conformanceLevel: 0 | 1 | 2;
+  features: string[];                        // subset of validation.feature.*
+  concerns: Record<string, string>;          // concern → provider class/name
+}
+  {% endhighlight %}
+  <p><strong>Out-of-capability detection:</strong> A sibling check to <code>check:standards</code> diffs declared manifest vs atoms actually used. Runtime dev-mode guard warns/throws if undeclared feature or concern is used. (See <a href="/reports/2026-05-30-validation-spec-versioning-adherence/">Validation Spec Versioning &amp; Adherence</a>.)</p>
+
+  <h4 id="integration-path">Integration Path</h4>
+  <p><strong>Level 0:</strong> Honour the UX intents. No state/event contract required.</p>
+  <p><strong>Level 1:</strong> Surface observable states via documented attributes (<code>data-pending</code>, <code>data-dirty</code>, <code>data-severity</code>, etc.) and emit stable-id events with documented <code>detail</code> shapes. Implementations become <strong>swappable</strong>.</p>
+  <p><strong>Level 2:</strong> Normalize hand-off shapes (<code>ValueSnapshot</code>, <code>SourceResult</code>, <code>MergedValidity</code>, <code>InteractionState</code>, <code>DisplayDecision</code>) and register decomposed concerns via DI. Concerns become <strong>combinable</strong> across creators.</p>
+</section>
+
+<section id="composition" class="section-card">
+  <h3 id="composition">Composition With Other Standards</h3>
+  <ul style="font-size: 0.9rem;">
+    <li><strong><a href="/intents/loader/">Loader Intent</a>:</strong> Async validators emit pending states. Pending aggregates form hierarchy to gate submission.</li>
+    <li><strong>Feedback + Message Intents:</strong> Share unified severity vocabulary (error/warning/info/success + caution).</li>
+    <li><strong><a href="/projects/webreliability/">Web Reliability</a>:</strong> Validation owns input invalidity. Reliability owns mechanism failure (async validator crash, server unreachable).</li>
+  </ul>
+</section>
+
+<section id="status" class="section-card">
+  <h3 id="status">Status</h3>
+  <p>
+    Web Validation is in <strong>concept</strong> phase. The contract is specified via the
+    <a href="#protocol-validation">Validation Protocol</a> above; concrete implementations
+    (Frontier UI form controls, async resolvers, commitment policies) are the first planned deliverables.
+  </p>
+</section>
+
+<section id="research" class="section-card">
+  <h3 id="research">Research &amp; References</h3>
+  <p><strong>Assessment:</strong> <a href="/reports/2026-05-30-form-validation-standard-assessment/">2026-05-30 Form Validation Standard Assessment</a> — UX catalog, philosophy axes (architecture, rule definition, timing), framework research, async strategy comparison.</p>
+  <p><strong>Spec versioning &amp; adherence:</strong> <a href="/reports/2026-05-30-validation-spec-versioning-adherence/">2026-05-30 Validation Spec Versioning &amp; Adherence</a> — Decision register, feature bundles, out-of-capability detection.</p>
+</section>

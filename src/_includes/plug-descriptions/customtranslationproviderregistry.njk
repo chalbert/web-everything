@@ -1,0 +1,90 @@
+{% from "mode-selector.njk" import pluggedContent, unpluggedContent, comparisonContent, endContent %}
+
+<h3 id="overview">Overview</h3>
+<p>
+    Exposes <code>window.customTranslations</code> for registering named <strong>translation
+    providers</strong>. A provider is any source that can resolve a message key for a locale — a bundled
+    MessageFormat 2.0 catalog, a lazily-loaded namespace, or a library adapter (FormatJS, i18next,
+    Lingui, Paraglide). Providers are tried in registration order; the first whose
+    <code>resolve()</code> returns a non-null <code>MessageFn</code> owns the message. Any consumer
+    resolves the registry through the injector chain and reads messages via the <code>@t</code> context,
+    so translation lookup is never hardwired into components.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Navigator/languages"><code>navigator.languages</code></a></td>
+        <td>Baseline</td>
+        <td>The default signal for negotiating the locale fallback chain the registry walks when no explicit preference is set.</td>
+    </tr>
+    <tr>
+        <td><a href="https://github.com/tc39/proposal-intl-messageformat"><code>Intl.MessageFormat</code></a></td>
+        <td>TC39 Stage 1</td>
+        <td>The forward-compatible target for providers; the registry contract is unchanged when the polyfilled MF2 provider becomes a native call.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+interface CustomTranslationProviderRegistry extends CustomRegistry<CustomTranslationProvider> {
+    readonly localName = 'customTranslations';
+
+    // Register a named provider (e.g. 'app', 'vendor', 'lazy-checkout').
+    // Registration order is priority order — first registered is tried first.
+    define(name: string, provider: CustomTranslationProvider): void;
+
+    // Ordered iterator — consumers try providers in definition order.
+    values(): IterableIterator<CustomTranslationProvider>;
+}
+{% endhighlight %}
+
+<h3 id="usage-example">Usage Example</h3>
+
+{{ pluggedContent("translations-registry-example", code=true) }}
+{% highlight "javascript" %}
+// Register providers at bootstrap in priority order.
+import { Mf2Provider } from '@web-intl/messageformat';
+import { I18nextProvider } from '@web-intl/i18next';
+
+customTranslations.define('app', new Mf2Provider({ load: (l) => import(`./locales/${l}.json`) }));
+customTranslations.define('vendor', new I18nextProvider(i18nextInstance)); // adapter, equal participant
+
+// Any consumer delegates — never knows which provider resolved the key.
+for (const tag of negotiate(locale)) {          // ['fr-CA', 'fr', 'en']
+    for (const provider of customTranslations.values()) {
+        const message = provider.resolve(key, tag);
+        if (message) return message(params);
+    }
+}
+{% endhighlight %}
+
+{{ unpluggedContent("translations-registry-example", code=true) }}
+{% highlight "javascript" %}
+consume { customTranslations } of '@web-intl';
+
+customTranslations.define('app', new Mf2Provider({ load: (l) => import(`./locales/${l}.json`) }));
+
+for (const provider of customTranslations.values()) {
+    const message = provider.resolve(key, locale);
+    if (message) return message(params);
+}
+{% endhighlight %}
+
+{{ endContent() }}
+
+<h3 id="design-decisions">Design Decisions</h3>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+    <li><strong>Registry, not a chain object.</strong> <code>CustomRegistry.values()</code> already provides ordered iteration. Registration order is the priority — explicit and reviewable. Mirrors <code>CustomRecoveryHandlerRegistry</code> and <code>CustomPositioningRegistry</code>.</li>
+    <li><strong>First-that-resolves pattern.</strong> Providers return <code>null</code> to decline without side effects; resolution continues down the fallback chain and on to the next provider. Consistent with <code>CustomRecoveryHandler</code> (<code>tryRecover</code>) and route matching (<code>matchRoute</code>).</li>
+    <li><strong>No built-in catalog.</strong> The registry ships no messages. Applications register the providers (bundled MF2, lazy namespaces, library adapters) they actually need — keeping the standard lean and library-agnostic.</li>
+    <li><strong>Library-agnostic.</strong> Native <code>Intl</code> MF2 and every third-party engine register behind the same contract, so message catalogs from different vendors interoperate in one app.</li>
+</ul>
+
+<p class="text-sm text-gray-600 mt-4">
+    Providers satisfy the
+    <a href="/plugs/customtranslationprovider/"><code>CustomTranslationProvider</code></a> contract.
+    See <a href="/projects/webintl/">Web Intl</a> for the full feature surface and
+    <a href="/projects/webintl/#protocol-localization">Localization Protocol</a> for the conformance reference.
+</p>

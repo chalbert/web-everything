@@ -1,0 +1,183 @@
+{% from "component-source-toggle.njk" import sourceToggle, classSource, endSource %}
+
+<h2>The <code>&lt;component&gt;</code> Element</h2>
+<p>
+    <strong>Component</strong> defines a brand-new custom element <em>entirely from HTML</em> — its
+    tag name, template, and shadow options live in markup, with no authored
+    <code>class extends HTMLElement</code>. It is the fourth gap Web Components fills, alongside
+    <a href="/projects/webcomponents/#scoped-registries">scoped registries</a>,
+    <a href="/projects/webcomponents/#injector-integration">injector integration</a>, and
+    <a href="/blocks/transient-component/">transient components</a>.
+</p>
+<p>
+    The intended implementation is <strong>not</strong> a browser-side interpreter but a
+    deterministic, build-time, AST-based transform — the
+    <a href="/adapters/declarative-component/">Declarative Component adapter</a> — that lowers each
+    definition to the equivalent class element. Toggle any example below between the declarative
+    source you write and the class the adapter emits:
+</p>
+
+{{ sourceToggle("user-card") }}
+{% highlight "html" %}
+<component name="user-card" shadow="open">
+  <template>
+    <style>:host { display: block } h3 { margin: 0 }</style>
+    <h3><slot name="title">Untitled</slot></h3>
+    <slot></slot>
+  </template>
+</component>
+
+<!-- used anywhere after the definition -->
+<user-card><span slot="title">Ada Lovelace</span><p>First programmer.</p></user-card>
+{% endhighlight %}
+{{ classSource("user-card") }}
+{% highlight "typescript" %}
+const TEMPLATE = document.createElement('template');
+TEMPLATE.innerHTML =
+  `<style>:host { display: block } h3 { margin: 0 }</style>` +
+  `<h3><slot name="title">Untitled</slot></h3><slot></slot>`;
+
+class UserCard extends HTMLElement {
+  connectedCallback() {
+    const root = this.shadowRoot ?? this.attachShadow({ mode: 'open' });
+    if (!root.childNodes.length) root.append(TEMPLATE.content.cloneNode(true));
+  }
+}
+customElements.define('user-card', UserCard);
+{% endhighlight %}
+{{ endSource() }}
+
+<section class="section-card">
+    <h3 id="status">Status</h3>
+    <p class="text-sm text-gray-600">
+        <strong>Concept.</strong> The standard ships with its design forks held
+        <strong>open for progressive resolution</strong> — see
+        <a href="/backlog/">Open Points (DC-1…DC-8)</a> and the grounding report
+        <code>reports/2026-06-03-declarative-component-element.md</code>.
+        This page documents <em>contracts</em>; the concrete transform/runtime is the
+        reference implementation's job (Frontier UI).
+    </p>
+</section>
+
+<section class="section-card">
+    <h3 id="authoring">Authoring contract</h3>
+    <ul>
+        <li><code>name</code> — <strong>required</strong>. The custom element tag to register (must contain a hyphen).</li>
+        <li><code>shadow="open|closed|none"</code> — shadow mode; <code>none</code> renders into light DOM. Maps onto <a href="#standards">Declarative Shadow DOM</a> / <code>attachShadow</code>. Defaults to <code>open</code>. <em>(DC-2)</em></li>
+        <li>An optional child <code>&lt;template&gt;</code> — the render source. Cloned into the shadow (or light) tree on first connect. May contain <code>&lt;style&gt;</code> and <code>&lt;slot&gt;</code>. If omitted, an empty <code>&lt;template&gt;</code> is implied — <code>&lt;component name="x-foo"&gt;&lt;/component&gt;</code> is shorthand for <code>&lt;component name="x-foo"&gt;&lt;template&gt;&lt;/template&gt;&lt;/component&gt;</code>. <em>(DC-9)</em></li>
+        <li>The <code>&lt;component&gt;</code> element <strong>registers its definition then removes itself</strong> — no wrapper node remains. <em>(DC-3)</em></li>
+    </ul>
+</section>
+
+<section class="section-card">
+    <h3 id="standards">Web Standards Alignment</h3>
+    <table>
+        <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+        <tr>
+            <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_Components/Using_custom_elements">Custom Elements v1</a></td>
+            <td>Baseline</td>
+            <td>Definition lowers to an autonomous element + <code>customElements.define()</code>. Autonomous only (Safari refuses customized built-ins).</td>
+        </tr>
+        <tr>
+            <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/template#shadowrootmode">Declarative Shadow DOM</a></td>
+            <td>Baseline 2024</td>
+            <td><code>shadow="open|closed"</code> maps onto <code>attachShadow</code> / DSD; the <code>&lt;template&gt;</code> becomes shadow content.</td>
+        </tr>
+        <tr>
+            <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/slot">Slots</a></td>
+            <td>Baseline</td>
+            <td>Content projection is native — use <code>&lt;slot&gt;</code> directly; no custom projection layer.</td>
+        </tr>
+        <tr>
+            <td><a href="https://github.com/WICG/webcomponents/blob/gh-pages/proposals/Scoped-Custom-Element-Registries.md">Scoped Registries</a></td>
+            <td>Stage 2 Proposal</td>
+            <td>Tier-2 <code>scope</code> attribute composes with the project's Scoped Registries section; global by default.</td>
+        </tr>
+        <tr>
+            <td><a href="https://github.com/WICG/webcomponents/issues/1009">Declarative Custom Elements</a></td>
+            <td>Stalled strawman</td>
+            <td>Prior art (<code>&lt;definition&gt;</code>). We choose <code>&lt;component&gt;</code> and ship the static tier now, composing unshipped binding primitives later.</td>
+        </tr>
+    </table>
+</section>
+
+<section class="section-card">
+    <h3 id="frameworks">Framework Research</h3>
+    <table>
+        <tr><th>Framework</th><th>Key Patterns</th><th>Relationship</th></tr>
+        <tr><td><a href="https://vuejs.org/api/built-in-special-elements.html#component">Vue</a></td><td><code>&lt;component :is&gt;</code></td><td>The <em>instantiate-here</em> pattern our <em>define-here</em> element must not be confused with (DC-1).</td></tr>
+        <tr><td><a href="https://svelte.dev/docs/special-elements#svelte-element">Svelte</a></td><td><code>&lt;svelte:element&gt;</code>, compile-time lowering</td><td>Compiles components to classes at build time — the same model as our AST adapter.</td></tr>
+        <tr><td><a href="https://lit.dev/">Lit</a></td><td><code>@customElement</code>, static <code>html``</code></td><td>The class shape our transform emits resembles a Lit element.</td></tr>
+        <tr><td><a href="https://github.com/justinfagnani/stampino-element">Stampino</a></td><td>declarative <code>&lt;template&gt;</code> components</td><td>Userland proof HTML-defined components are viable today.</td></tr>
+    </table>
+</section>
+
+<section class="section-card">
+    <h3 id="features">Feature Inventory</h3>
+    <table>
+        <tr><th>Feature</th><th>Disposition</th><th>Tier</th></tr>
+        <tr><td>Register element by <code>name</code> from markup</td><td>built-in</td><td>1</td></tr>
+        <tr><td>Shadow template (<code>shadow="open|closed"</code>, DSD-aligned)</td><td>built-in</td><td>1</td></tr>
+        <tr><td>Light-DOM template (<code>shadow="none"</code>)</td><td>built-in</td><td>1</td></tr>
+        <tr><td>Slots / content projection</td><td>compose (native <code>&lt;slot&gt;</code>)</td><td>1</td></tr>
+        <tr><td>Build-time AST transform → class</td><td>adapter</td><td>1</td></tr>
+        <tr><td>Observed attributes → reflect to template</td><td>built-in</td><td>2</td></tr>
+        <tr><td>Reactive bindings in template</td><td>compose (<a href="/blocks/for-each/">for-each</a> / Web Expressions)</td><td>2</td></tr>
+        <tr><td>Scoped registration (<code>scope</code>)</td><td>compose (Scoped Registries)</td><td>2</td></tr>
+        <tr><td>Script enhancement hook (<code>behavior</code>/<code>extends</code>)</td><td>built-in hook</td><td>2</td></tr>
+        <tr><td>Live in-browser transform in the toggle</td><td>defer</td><td>2</td></tr>
+        <tr><td>Inherit / extend another <code>&lt;component&gt;</code></td><td>compose</td><td>3</td></tr>
+    </table>
+    <p class="text-sm text-gray-600">
+        Tier 1 ships the static, DSD-aligned definition. Tiers 2–3 <strong>compose</strong> with
+        other Web Everything standards as they mature — they are not reimplemented here.
+    </p>
+</section>
+
+<section class="section-card">
+    <h3 id="light-dom">Light-DOM components (<code>shadow="none"</code>)</h3>
+    <p>When a component needs no style encapsulation, skip the shadow root entirely:</p>
+    {{ sourceToggle("byline") }}
+{% highlight "html" %}
+<component name="x-byline" shadow="none">
+  <template>
+    <small><slot></slot></small>
+  </template>
+</component>
+{% endhighlight %}
+    {{ classSource("byline") }}
+{% highlight "typescript" %}
+const TEMPLATE = document.createElement('template');
+TEMPLATE.innerHTML = `<small><slot></slot></small>`;
+
+class XByline extends HTMLElement {
+  connectedCallback() {
+    if (!this.querySelector('small')) this.append(TEMPLATE.content.cloneNode(true));
+  }
+}
+customElements.define('x-byline', XByline);
+{% endhighlight %}
+    {{ endSource() }}
+</section>
+
+<section class="section-card">
+    <h3 id="composition">Composition</h3>
+    <ul>
+        <li><a href="/blocks/transient-component/">Transient Component</a> — <code>&lt;component&gt;</code> reuses the self-removal lifecycle; transient elements <em>resolve</em> to native HTML, this <em>defines</em> a reusable element.</li>
+        <li><a href="/blocks/for-each/">For Each</a> &amp; Web Expressions — supply tier-2 reactive bindings and <code>if</code>/<code>each</code> inside the template (DC-4).</li>
+        <li><a href="/projects/webinjectors/">Web Injectors</a> — a defined element resolves services/contexts from the DOM tree, like any custom element.</li>
+        <li><a href="/projects/webcomponents/#ssr-contract">SSR contract</a> — a build emits the element's Declarative Shadow DOM; the definition itself is build-time.</li>
+    </ul>
+</section>
+
+<section class="section-card">
+    <h3 id="open-questions">Open questions (progressive resolution)</h3>
+    <p>
+        None of the design forks are resolved by fiat. Each is tracked as a
+        <code>decision</code> thread in the <a href="/backlog/">backlog</a> (DC-1…DC-9) and in the
+        grounding report's Open Points Register, carrying a <em>current recommendation</em> only —
+        tag name vs Vue ambiguity (DC-1), <code>shadow</code> spelling (DC-2), registration timing
+        (DC-3), reactive depth (DC-4), the scripting hook (DC-5), adapter placement (DC-6), toggle
+        interactivity (DC-7), Protocol extraction (DC-8), and implicit empty template (DC-9).
+    </p>
+</section>

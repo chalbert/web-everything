@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   parseRouteDefinitions,
   matchRoute,
+  matchAllRoutes,
   findErrorBoundary,
   buildNavigationTarget,
   buildRouteContext,
@@ -245,6 +246,70 @@ describe('matchRoute', () => {
     const result = matchRoute(url, defs);
 
     expect(result!.url).toBe(url);
+  });
+});
+
+describe('matchAllRoutes', () => {
+  let container: HTMLElement;
+
+  beforeEach(() => {
+    container = document.createElement('div');
+  });
+
+  it('returns only the first in-place match (not later catch-all)', () => {
+    // Regression: a catch-all "/*" must NOT be returned alongside a specific
+    // in-place match, or every page would also stamp the 404 template.
+    container.innerHTML = `
+      <template route="/settings"><h2>Settings</h2></template>
+      <template route="/*"><h2>Page Not Found</h2></template>
+    `;
+    const defs = parseRouteDefinitions(container);
+
+    const matches = matchAllRoutes(new URL('http://localhost/settings'), defs);
+
+    expect(matches).toHaveLength(1);
+    expect(matches[0].definition.path).toBe('/settings');
+  });
+
+  it('returns the catch-all alone when nothing else matches', () => {
+    container.innerHTML = `
+      <template route="/settings"><h2>Settings</h2></template>
+      <template route="/*"><h2>Page Not Found</h2></template>
+    `;
+    const defs = parseRouteDefinitions(container);
+
+    const matches = matchAllRoutes(new URL('http://localhost/nope'), defs);
+
+    expect(matches).toHaveLength(1);
+    expect(matches[0].definition.path).toBe('/*');
+  });
+
+  it('includes outlet-targeted templates alongside the primary', () => {
+    container.innerHTML = `
+      <template route="/dash"><h2>Dash</h2></template>
+      <template route="/dash" route:outlet="aside"><aside>Aside</aside></template>
+      <template route="/*"><h2>Page Not Found</h2></template>
+    `;
+    const defs = parseRouteDefinitions(container);
+
+    const matches = matchAllRoutes(new URL('http://localhost/dash'), defs);
+
+    expect(matches).toHaveLength(2);
+    expect(matches[0].definition.outlet).toBeUndefined();
+    expect(matches[1].definition.outlet).toBe('aside');
+  });
+
+  it('skips error boundary templates', () => {
+    container.innerHTML = `
+      <template route="/x"><h2>X</h2></template>
+      <template route="/x" route:error><h2>Err</h2></template>
+    `;
+    const defs = parseRouteDefinitions(container);
+
+    const matches = matchAllRoutes(new URL('http://localhost/x'), defs);
+
+    expect(matches).toHaveLength(1);
+    expect(matches[0].definition.isErrorBoundary).toBe(false);
   });
 });
 

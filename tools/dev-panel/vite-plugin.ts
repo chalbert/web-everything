@@ -12,8 +12,8 @@
  *   GET  /__dev-panel/selection  → reads current browser selection
  */
 
-import { readdirSync, writeFileSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { readdirSync, writeFileSync, readFileSync, existsSync, accessSync, constants } from 'fs';
+import { join, delimiter } from 'path';
 import { homedir } from 'os';
 import { spawn, type ChildProcess } from 'child_process';
 import type { Plugin, ViteDevServer } from 'vite';
@@ -21,26 +21,82 @@ import type { IncomingMessage, ServerResponse } from 'http';
 
 // ── Binary Discovery ───────────────────────────────────────────
 
+/** True if `path` exists and is executable. */
+function isExecutable(path: string): boolean {
+  try {
+    accessSync(path, constants.X_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Compare two version strings numerically (semver-naive, segment-wise). */
+function compareVersions(a: string, b: string): number {
+  const pa = a.split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = b.split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+/** Look up `claude` on the PATH. */
+function findOnPath(): string | null {
+  const dirs = (process.env.PATH ?? '').split(delimiter).filter(Boolean);
+  for (const dir of dirs) {
+    const candidate = join(dir, 'claude');
+    if (isExecutable(candidate)) return candidate;
+  }
+  return null;
+}
+
 /**
- * Discovers the Claude Code binary on macOS.
- * Searches the managed install directory for the latest version.
+ * Discovers the Claude Code binary, in priority order:
+ *   1. Explicit override — DEV_PANEL_CLAUDE / CLAUDE_BIN env var.
+ *   2. `claude` on the PATH (global install, symlink).
+ *   3. macOS managed install — newest version, handling both the
+ *      bare-binary and `.app` bundle layouts.
+ * Every candidate is validated as an executable file before use, so a
+ * stale/missing path never gets reported as available.
  */
 function findClaudeBinary(): string | null {
+  // 1. Explicit override
+  const override = process.env.DEV_PANEL_CLAUDE || process.env.CLAUDE_BIN;
+  if (override && isExecutable(override)) return override;
+
+  // 2. PATH lookup
+  const onPath = findOnPath();
+  if (onPath) return onPath;
+
+  // 3. macOS managed install
   const searchPaths = [
-    // macOS: Claude Desktop managed install
     join(homedir(), 'Library/Application Support/Claude/claude-code'),
-    // macOS: VM variant
     join(homedir(), 'Library/Application Support/Claude/claude-code-vm'),
   ];
 
   for (const baseDir of searchPaths) {
+    let versions: string[];
     try {
-      const versions = readdirSync(baseDir).sort();
-      if (versions.length > 0) {
-        return join(baseDir, versions[versions.length - 1], 'claude');
-      }
+      versions = readdirSync(baseDir)
+        .filter((name) => existsSync(join(baseDir, name)) && !name.startsWith('.'))
+        .sort(compareVersions)
+        .reverse();
     } catch {
-      // Directory doesn't exist, try next
+      continue; // Directory doesn't exist, try next
+    }
+
+    for (const version of versions) {
+      const versionDir = join(baseDir, version);
+      // Newer managed installs ship a `.app` bundle; older ones a bare binary.
+      const candidates = [
+        join(versionDir, 'claude.app', 'Contents', 'MacOS', 'claude'),
+        join(versionDir, 'claude'),
+      ];
+      for (const candidate of candidates) {
+        if (isExecutable(candidate)) return candidate;
+      }
     }
   }
 
@@ -188,12 +244,14 @@ export function devPanel(): Plugin {
       ) => {
         const url = req.url?.split('?')[0] ?? '';
 
-        // Health check
+        // Health check — re-validate so we never report a path that
+        // has since moved/disappeared (e.g. a Claude Code self-update).
         if (url === '/__dev-panel/health' && req.method === 'GET') {
+          const available = !!claudeBinary && isExecutable(claudeBinary);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({
-            available: !!claudeBinary,
-            binary: claudeBinary,
+            available,
+            binary: available ? claudeBinary : null,
           }));
           return;
         }
@@ -223,10 +281,10 @@ export function devPanel(): Plugin {
 
         // Query endpoint
         if (url === '/__dev-panel/query' && req.method === 'POST') {
-          if (!claudeBinary) {
+          if (!claudeBinary || !isExecutable(claudeBinary)) {
             res.writeHead(503, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
-              error: 'Claude binary not found. Install Claude Code or set the path manually.',
+              error: 'Claude binary not found. Install Claude Code, or set DEV_PANEL_CLAUDE to its path.',
             }));
             return;
           }

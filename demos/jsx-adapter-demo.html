@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JSX Adapter Playground - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/jsx-adapter-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>JSX Adapter Playground</h1>
+      <p>
+        Each card authors a tree in the <strong>JSX mirror dialect</strong>, renders it live through the
+        realigned JSX renderer, and shows the <strong>produced HTML</strong> beside it. This is the
+        iteration surface for the
+        <a href="http://localhost:8080/adapters/jsx-adapter/">HTML&#8596;JSX feature mapping</a> — improve
+        the examples and the renderer here before bringing the source-toggle onto block pages.
+      </p>
+      <p class="play-caveat">
+        Behavior activation (events firing, <code>bind-*</code> updating, <code>is="for-each"</code>
+        iterating) depends on the bootstrap + the rendering-strategy axis, which is parked. This sandbox
+        focuses on <em>structural</em> JSX&#8594;DOM/HTML equivalence.
+      </p>
+    </header>
+
+    <div id="examples">Loading examples&hellip;</div>
+  </main>
+
+  <!-- Bootstrap: applies patches and exposes globals (CustomAttribute, injectors, attributes). -->
+  <script type="module" src="/plugs/bootstrap.ts"></script>
+
+  <!-- Playground: renders the mirror-dialect examples. JSX is auto-injected by vite.config.mts. -->
+  <script type="module" src="/demos/jsx-adapter-demo.tsx"></script>
+</body>
+</html>

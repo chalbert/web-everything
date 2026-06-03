@@ -31,10 +31,11 @@ src/_includes/research-descriptions/{id}.njk     # full research write-ups
 
 ## Report template
 ```markdown
-# Research Report — Title
+# Descriptive Title
+**Date**: YYYY-MM-DD
+**Point**: one-line summary of what this report is / concludes.
 **Plan file**: `plans/{filename}.md`
 **Research page**: `/research/{id}/`
-**Date**: YYYY-MM-DD
 ---
 ## Question
 ## Recommendation
@@ -42,3 +43,5 @@ src/_includes/research-descriptions/{id}.njk     # full research write-ups
 ## Files Created/Modified
 | File | Action |
 ```
+
+**Lead with a clear `# Title` and a one-line `**Point:**`** (or `**Goal:**`/`**Summary:**`), followed by a `---` rule. A report can be surfaced on the site as a *pointer* backlog item that **mirrors** it: the backlog loads the report's H1 as the item title, the `**Point:**` line as its summary, and the content after the `---` as the detail page (see [backlog-workflow.md](backlog-workflow.md)). A vague title or missing point makes a poor backlog entry. (`reports/` itself is not in the 11ty build; the mirror is how a report shows on the site.)

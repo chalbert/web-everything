@@ -81,7 +81,7 @@
   },
   {
     "term": "Component",
-    "definition": "An encapsulated custom element with its own shadow DOM and lifestyle."
+    "definition": "An encapsulated custom element with its own shadow DOM and lifecycle."
   },
   {
     "term": "Composite Widget",
@@ -281,7 +281,17 @@
   {
     "term": "Roving Tabindex",
     "definition": "A focus management pattern where `tabindex=\"0\"` moves to the currently active item, while others are set to `-1`.",
-    "usage": "Used in Composite Widgets."
+    "usage": "Used in Composite Widgets. One of the two strategies of the Focus Delegation Intent (the other being Virtual Focus)."
+  },
+  {
+    "term": "Virtual Focus",
+    "definition": "A focus management pattern where DOM focus stays on a controller element (e.g. a text input or listbox) while the visually active item is tracked via `aria-activedescendant`. Unlike real focus, the active item must be scrolled into view manually — browsers do not auto-scroll `aria-activedescendant` targets.",
+    "usage": "The `virtual` strategy of the Focus Delegation Intent; required for comboboxes where typing must continue uninterrupted. Complements Roving Tabindex."
+  },
+  {
+    "term": "Selection Follows Focus",
+    "definition": "A pattern where moving focus to an item also activates or selects it (single-select listboxes, auto-activated tabs), as opposed to focus moving independently of selection (multi-select, menus, comboboxes), where selection commits on an explicit key.",
+    "usage": "The `selectionFollowsFocus` dimension of the Focus Delegation Intent; composes with the Selection Intent's commitment model."
   },
   {
     "term": "Selection",
@@ -497,5 +507,195 @@
     "term": "Dependency Graph",
     "definition": "A <code>dependsOn</code> relation at group scope: field B depends on field A. When A changes, B is revalidated reactively. Enables cross-field and conditional validation without imperative handlers.",
     "usage": "Optional feature <code>validation.feature.cross-field</code>. Required for password-confirm, date ranges, required-if patterns. Fixes RHF #trigger and Angular updateValueAndValidity revalidation complexity."
+  },
+  {
+    "term": "Recovery Handler",
+    "definition": "A service registered in <code>CustomRecoveryHandlerRegistry</code> that decides whether and how to recover from a mechanism failure. Implements <code>tryRecover(error, context)</code> returning a <code>RecoveryResult</code> or <code>null</code> to decline. Handlers are tried in registration order; the first non-null result wins.",
+    "usage": "Web Reliability. Distinct from validation error handling — recovery handlers respond to system/operation failures (timeouts, server errors), not input invalidity."
+  },
+  {
+    "term": "Recovery Outcome",
+    "definition": "The instruction a recovery handler returns to the consumer: <code>retry</code> (re-execute after optional delay), <code>queued</code> (stored for later replay), <code>fallback</code> (surface fallback content), or <code>abort</code> (propagate error immediately).",
+    "usage": "Web Reliability — <code>RecoveryResult.outcome</code>. Maps to Reliability Intent dimensions: retry → recovery.automatic/manual; fallback → fallback.skeleton/empty/previous; abort → tolerance.terminal."
+  },
+  {
+    "term": "Mechanism Failure",
+    "definition": "An unexpected system or operation error — network unreachable, server crash, database timeout, computation failure. Distinguished from input invalidity (Validation domain): the user's data was correct; the mechanism broke.",
+    "usage": "Web Reliability, Reliability Intent. Determines which domain owns the error: mechanism failures → Reliability; input errors → Validation."
+  },
+  {
+    "term": "Change Tracking",
+    "definition": "The observability concern of detecting, representing, and attributing mutations to state over time. A facet of observability in general — not limited to form dirty-state — that recurs across stores, signals, documents, collections, the DOM, and network sync, and that the field solves with plural strategies (snapshot diff, Proxy, signals, patches, CRDTs, event sourcing).",
+    "usage": "The framing term for the Change Tracking standard (research topic <code>change-tracking-observability</code>). Generalizes the validation <code>customValidation:dirty-check</code> and <code>customValidation:change-detection</code> concerns. Goal: configurable preferred strategy + interop between multiple strategies in one app."
+  },
+  {
+    "term": "Change Record",
+    "definition": "The normalized representation of a single mutation that every change-tracking strategy maps into: <code>path</code> (RFC 6901 pointer), <code>op</code> (RFC 6902 vocabulary), optional <code>oldValue</code>/<code>newValue</code>, <code>source</code> (attribution), <code>timestamp</code>, and optional <code>version</code> causal token. A lossy lingua franca for observation — not a replacement for any strategy's native form.",
+    "usage": "Provisional interop target (research topic <code>change-tracking-observability</code>); shape to be finalized in the Change Tracking protocol. <code>oldValue</code> is carried because RFC 6902 ops are not self-inverting."
+  },
+  {
+    "term": "Change Source",
+    "definition": "The origin of a mutation carried on a Change Record so cross-layer consumers can discriminate cause: <code>user</code> input, <code>program</code> mutation, <code>server-sync</code>, <code>replay</code>/<code>undo</code>, or <code>external</code>. May carry a W3C Trace Context <code>traceparent</code> linking the change to the initiating span.",
+    "usage": "The attribution axis of Change Tracking. Generalizes validation's <code>value-input</code> (user) vs <code>baseline-change</code> (program/server) distinction; mirrors the CloudEvents <code>source</code> envelope field."
+  },
+  {
+    "term": "Change Strategy",
+    "definition": "A registered mechanism that turns a tracked target into a stream of Change Records, satisfying the <code>CustomChangeStrategy</code> contract (<code>track</code>, optional <code>diff</code>, optional <code>applyInverse</code>). Capability is feature-detected by which optional methods are present. Examples: native-signals, snapshot-diff, proxy, patch, crdt, event-sourced.",
+    "usage": "Change Tracking Protocol (Web States). The native store/signal subscription strategy is the zero-config default; library strategies are opt-in adapters behind the same contract."
+  },
+  {
+    "term": "Change Strategy Registry",
+    "definition": "The <code>CustomChangeStrategyRegistry</code> resolved through the injector chain that selects the active Change Strategy per scope, so different subtrees of one app can track changes with different strategies simultaneously (e.g. a form on snapshot-diff, a collaborative document on a CRDT).",
+    "usage": "Change Tracking Protocol (Web States). Generalizes the validation <code>customValidation:change-detection</code> concern from one form to all observable state. Nearest-scope strategy wins."
+  },
+  {
+    "term": "Change Adapter",
+    "definition": "A thin bridge that maps a third-party change source (Immer/Mutative patches, Yjs/Automerge ops, a JSON Patch stream) into the canonical Change Record contract, or between two strategies' formats. Because mappings are lossy, bridges are adapters rather than identities.",
+    "usage": "Change Tracking Protocol (Web States). Enables a signals graph → JSON-Patch stream → CRDT document pipeline with the Change Record as the hand-off."
+  },
+  {
+    "term": "Baseline",
+    "definition": "The pristine reference snapshot a diff or dirty strategy compares the current value against to derive change. Re-captured on a <code>baseline-set</code> event (initial load, save, server sync). For SSR, the serialized initial store state is the post-hydration baseline.",
+    "usage": "Change Tracking Protocol (Web States); reconciles with the Validation Intent's existing baseline notion behind <code>customValidation:dirty-check</code>."
+  },
+  {
+    "term": "Structural Diff",
+    "definition": "Change detection by comparing two immutable snapshots (baseline vs current) and deriving the set of Change Records between them. Sampled coverage — intermediate states between snapshots are invisible — but library-agnostic and trivially correct; the natural fallback when no interception is available.",
+    "usage": "A Change Strategy supplying the optional <code>diff(baseline, current)</code> method. Contrast with interception strategies (Proxy, signals) that capture every write as it happens."
+  },
+  {
+    "term": "Change Patch",
+    "definition": "A serializable, optionally invertible set of Change Records aligned to JSON Patch (RFC 6902). Forward patches apply a change; inverse patches (carrying <code>oldValue</code>, since RFC 6902 ops are not self-inverting) revert it, enabling undo/replay. Immer and Mutative emit forward + inverse patch pairs.",
+    "usage": "The transport-friendly representation produced by patch and snapshot Change Strategies. The <code>change-reverted</code> event applies an inverse Change Patch."
+  },
+  {
+    "term": "Localization",
+    "definition": "Turning a single UI into many locales: composing messages from static text plus formatted values, resolving keys against catalogs, walking locale fallback chains, and adapting writing direction. Distinct from native value formatting, which the platform already provides via <code>Intl</code>.",
+    "usage": "The domain of Web Intl, specified by the Localization Protocol and declared by the Locale Intent."
+  },
+  {
+    "term": "Locale Negotiation",
+    "definition": "Expanding a requested locale into an ordered fallback chain of available locales (e.g. <code>fr-CA</code> → <code>fr</code> → <code>en</code>), so a missing translation degrades gracefully to a more general locale rather than failing.",
+    "usage": "Performed by the <code>LocaleNegotiation</code> interface; the Localization Protocol walks the resulting chain when resolving a key."
+  },
+  {
+    "term": "Fallback Chain",
+    "definition": "The ordered list of locales tried in turn when resolving a message key, produced by Locale Negotiation. Resolution stops at the first locale for which a Translation Provider returns a message.",
+    "usage": "Walked by the Localization Protocol's resolution pattern; the outermost fallback is typically the application's default locale."
+  },
+  {
+    "term": "Message Catalog",
+    "definition": "A keyed set of message sources for one locale (and optionally one namespace). The data a Translation Provider reads to resolve a key into a Message Function.",
+    "usage": "Loaded eagerly or lazily by a Translation Provider. Authored as JSON / PO / XLIFF / ARB / Fluent and normalized at build time."
+  },
+  {
+    "term": "MessageFormat 2.0",
+    "definition": "The Unicode message-formatting syntax (UTS #35 Part 9, published 2024) for composing messages with variable interpolation and plural/gender selection. Forward-compatible with the TC39 <code>Intl.MessageFormat</code> proposal.",
+    "usage": "The default message syntax of the Localization Protocol; compiled by a MessageFormatter into a Message Function. Abbreviated MF2."
+  },
+  {
+    "term": "Message Function",
+    "definition": "A resolved message represented as <code>(params?) =&gt; string</code> — a function that formats a message with the given parameters using native <code>Intl</code>. The common shape for runtime (MF2) and compile-time (tree-shaken) messages alike.",
+    "usage": "Returned by <code>CustomTranslationProvider.resolve()</code>; typed as <code>MessageFn</code>."
+  },
+  {
+    "term": "Translation Provider",
+    "definition": "A registered source that resolves a message key for a locale to a Message Function, or declines with <code>null</code>. A native <code>Intl</code> MF2 formatter, lazy-namespace catalog, or library adapter (FormatJS, i18next, Lingui, Paraglide).",
+    "usage": "Satisfies the CustomTranslationProvider contract; registered in CustomTranslationProviderRegistry and resolved through the injector chain. First provider that resolves a key owns the message."
+  },
+  {
+    "term": "Bidi",
+    "definition": "Bidirectional text handling — laying out content that mixes left-to-right and right-to-left scripts per the Unicode bidirectional algorithm. The reason layout flows by inline start/end rather than physical left/right.",
+    "usage": "Driven by the Locale Intent <code>direction</code> dimension via the <code>dir</code> attribute, <code>:dir()</code>, and CSS logical properties. <code>direction: auto</code> defers to the bidi algorithm."
+  },
+  {
+    "term": "Locale Switching",
+    "definition": "Changing the application's active locale at runtime, and the delivery strategy governing how the change reaches the UI: synchronously from preloaded catalogs (<code>instant</code>), via an on-demand catalog fetch behind a loading state (<code>async</code>), or through a full per-locale document load (<code>reload</code>).",
+    "usage": "The <code>switching</code> dimension of the Translation Intent. Orthogonal to which locale is active (the Locale Intent). <code>async</code> composes with the Loader Intent; <code>reload</code> with URL-based locale routing."
+  },
+  {
+    "term": "Live Region",
+    "definition": "A DOM region whose updates are announced to assistive technology without moving focus, via `aria-live` (`polite`/`assertive`) or an implicit role (`status`, `alert`, `log`). The region must already exist (empty) when the page loads so the AT registers it; text is then written into it on events.",
+    "usage": "Standardized by the Live Region Status Intent. Announces loading, result counts, no-results, and errors. Distinct from the Message/Feedback intents, which own notification content and priority."
+  },
+  {
+    "term": "Windowing",
+    "definition": "Rendering only the visible window of a large collection (plus a small overscan) and recycling rows as the user scrolls, rather than placing every item in the DOM. Also called virtualization. Distinct from the Virtual Element (comment-marker) concept.",
+    "usage": "The `windowed` rendering mode of the Windowed Collection Intent. Requires Set Size / Position in Set to preserve accessibility, and must not unmount the focused item."
+  },
+  {
+    "term": "Set Size / Position in Set",
+    "definition": "The `aria-setsize` (total item count) and `aria-posinset` (1-based absolute index) attributes that let assistive technology announce an item's position in a collection — e.g. 'item 42 of 5000' — even when not all items are present in the DOM.",
+    "usage": "Required on every rendered item under Windowing; the index is the item's absolute position in the full collection, never its DOM order."
+  },
+  {
+    "term": "Truncation",
+    "definition": "Visually cutting text that overflows its box (`clip`, `ellipsis`, or `fade`) while keeping the full string as the element's text content. Must not slice mid-grapheme, and must provide a recovery path (tooltip/title or expand) to read the full value.",
+    "usage": "The `truncation` dimension of the Typography Intent. Preserves WCAG 2.5.3 Label in Name because the accessible name stays the full text; front-load distinguishing words so they survive the cut."
+  },
+  {
+    "term": "Clearable Value",
+    "definition": "An 'X' affordance that resets a field's value. Shown only when a value is present, carries the accessible name 'Clear', is keyboard-reachable, and returns focus to the field after clearing. Decoupled from Escape so clearing is a deliberate action, not an accidental side-effect of dismissing a popup.",
+    "usage": "The `clear` affordance of the Input Intent. Reused by search fields, comboboxes, tag inputs, and filters."
+  },
+  {
+    "term": "Option Group",
+    "definition": "A labeled subset of options within a selection control. Native: `<optgroup label>` (label required, no nesting). Custom: `role=\"group\"` + `aria-labelledby` referencing a visible heading; the heading is not a focusable option.",
+    "usage": "The `grouping` dimension of the Selection Intent. Mirrors how menus, command palettes, and faceted lists organize choices."
+  },
+  {
+    "term": "Declarative Custom Element",
+    "definition": "A custom element whose definition — tag name, template, and shadow options — is expressed entirely in HTML markup, requiring no authored JavaScript class.",
+    "usage": "The output of the <code>&lt;component&gt;</code> element in Web Components. Distinct from Declarative Shadow DOM, which declares an instance's shadow content but not a reusable element definition."
+  },
+  {
+    "term": "Component Definition",
+    "definition": "The <code>&lt;component name&gt;</code> declaration block — a name, a <code>&lt;template&gt;</code>, and shadow/registration options — that registers a Declarative Custom Element.",
+    "usage": "Authored once per element type. The deterministic build-time AST transform lowers each Component Definition to a class plus customElements.define()."
+  },
+  {
+    "term": "Definition Element",
+    "definition": "The <code>&lt;component&gt;</code> element itself: a transient authoring element that reads a Component Definition, registers the custom element, then removes itself from the DOM leaving no wrapper node.",
+    "usage": "Web Components. Shares the self-removal lifecycle of a Transient Component, but its purpose is registration rather than rendering."
+  },
+  {
+    "term": "Trait Selection",
+    "definition": "The act of choosing which traits to compose and what dimension values they take when constructing a component. Local, total, and developer-owned — expressed as attributes on the substrate (e.g. <code>selection=\"model=single\"</code>) or as a list of <code>with*</code> factories in TypeScript. Distinct from Ambient Intent, which is the designer-owned behavioral-preference channel propagated via DI.",
+    "usage": "The structural-construction channel of the Droplist family. Structural dimensions (<code>model</code>, <code>editable</code>) never travel via Ambient Intent — they are always stated locally. Behavioral dimensions (<code>focusStrategy</code>, <code>collision</code>) may fall back to Ambient Intent when not stated."
+  },
+  {
+    "term": "Ambient Intent",
+    "definition": "A designer- or product-owned <em>behavioral</em> preference (focus strategy, collision handling, truncation) propagated down a DOM subtree via DI. Partial, overridable, and never structural — Ambient Intent cannot set <code>model</code> or <code>editable</code>; those are Trait Selection.",
+    "usage": "The behavioral-preference channel in the Droplist family and other composable systems. Set via <code>injector.set('customContexts:droplistIntent', { focusStrategy: 'virtual', … })</code>; resolved per-dimension as <code>explicit ⊕ ambient ⊕ default</code>. The Loader Intent's <code>loaderIntent</code> provider is the original precedent."
+  },
+  {
+    "term": "Droplist",
+    "definition": "The abstract family — the substrate that every list-based selection surface (Dropdown, Multi-dropdown, Autocomplete, Tree-select, Menu button, native <code>&lt;select&gt;</code>) conforms to. Not itself a shippable widget.",
+    "usage": "Standardized by the Droplist block. Documents the trait surface map, the two-channel resolution rule, and the preset table that each concrete member resolves into."
+  },
+  {
+    "term": "Dropdown",
+    "definition": "One concrete member of the Droplist family — single-select, button-triggered, non-filtering. Structural identity: <code>selection=\"model=single\"</code> with type-ahead.",
+    "usage": "Standardized by the Dropdown block. A form-associated custom element so <code>&lt;form&gt;</code>/<code>FormData</code>/reset/validity work like the native <code>&lt;select&gt;</code> baseline."
+  },
+  {
+    "term": "history disposition",
+    "definition": "What a navigation contributes to session history: <code>push</code> (new entry), <code>replace</code> (overwrite current), or <code>none</code> (no entry). Determines what the browser Back button does after the navigation.",
+    "usage": "The <code>history</code> dimension of the Navigation Intent. Maps to the Navigation API <code>navigate(url, { history })</code> option."
+  },
+  {
+    "term": "deep link",
+    "definition": "A URL that encodes enough application state (path + search params) to reconstruct a specific view directly — bookmarkable, shareable, and surviving a page refresh.",
+    "usage": "The <code>url</code> value of the Navigation Intent's <code>persistence</code> dimension. Contrast <code>memory</code> (ephemeral, in-memory state) and <code>session</code> (carried in History <code>state</code>, survives traversal but not a fresh share)."
+  },
+  {
+    "term": "view transition",
+    "definition": "An animated transition played as one view replaces another during navigation, driven by the View Transitions API. Its <em>direction</em> (forward vs back) is a navigation concern; its <em>feel</em> (easing, reduced-motion) is a motion concern.",
+    "usage": "The <code>transition</code> dimension of the Navigation Intent owns direction (<code>directional|fade|none</code>); the Motion intent's <code>physics</code> owns feel. Browser-initiated Back navigations carry no transition type, so direction is derived from history-traversal direction."
+  },
+  {
+    "term": "leave guard",
+    "definition": "Logic that can interrupt a navigation away from the current view — proceeding freely, prompting for confirmation (e.g. unsaved changes), or blocking until a condition clears.",
+    "usage": "The <code>guard</code> dimension of the Navigation Intent (<code>free|confirm|blocked</code>). Grounded in the Navigation API <code>navigate</code> event (<code>preventDefault</code>/<code>intercept</code>) and <code>beforeunload</code>. Distinct from a route entry <code>guard</code> (canActivate); a leave guard is canDeactivate. The Router exposes it as <code>route:guard:leave</code>."
   }
 ]

@@ -1,0 +1,81 @@
+<h2>Declarative Component Adapter</h2>
+<p>
+    The Declarative Component Adapter is the intended implementation of the
+    <a href="/blocks/component/">Component block</a> — the <code>&lt;component&gt;</code> element. It is a
+    <strong>deterministic, build-time, AST-based transform</strong> that lowers each declarative
+    definition into an equivalent class-based custom element plus
+    <code>customElements.define()</code>. It is not a browser-side interpreter; nothing in the tier-1
+    output depends on a runtime beyond baseline DOM APIs.
+</p>
+
+<section class="section-card">
+    <h3 id="status">Status</h3>
+    <p class="text-sm text-gray-600">
+        <strong>Concept Phase.</strong> Sibling to the
+        <a href="/adapters/functional-component-adapter/">Functional Component Adapter</a> (functional → class) and
+        in the lineage of the canonical <a href="/adapters/html-adapter/">HTML Adapter</a>'s
+        AST-transformation work. Whether it stays standalone or folds into the HTML Adapter is an
+        open point (<strong>DC-6</strong>, see the
+        <a href="/blocks/component/#open-questions">Component block</a>).
+    </p>
+</section>
+
+<section class="section-card">
+    <h3 id="concept">Concept</h3>
+    <p>The transform takes declarative markup in:</p>
+    {% highlight "html" %}
+<component name="user-card" shadow="open">
+  <template>
+    <style>:host { display: block }</style>
+    <h3><slot name="title">Untitled</slot></h3>
+    <slot></slot>
+  </template>
+</component>
+    {% endhighlight %}
+    <p>…and deterministically emits the class form out:</p>
+    {% highlight "typescript" %}
+const TEMPLATE = document.createElement('template');
+TEMPLATE.innerHTML =
+  `<style>:host { display: block }</style>` +
+  `<h3><slot name="title">Untitled</slot></h3><slot></slot>`;
+
+class UserCard extends HTMLElement {
+  connectedCallback() {
+    const root = this.shadowRoot ?? this.attachShadow({ mode: 'open' });
+    if (!root.childNodes.length) root.append(TEMPLATE.content.cloneNode(true));
+  }
+}
+customElements.define('user-card', UserCard);
+    {% endhighlight %}
+    <p>
+        The class name is derived from <code>name</code> (kebab → PascalCase); <code>shadow</code>
+        selects the <code>attachShadow</code> mode (or light DOM for <code>none</code>); the
+        <code>&lt;template&gt;</code> becomes the cloned render source. This is the same lowering
+        Svelte's compiler and Lit-style tooling already perform.
+    </p>
+</section>
+
+<section class="section-card">
+    <h3 id="guarantees">Determinism guarantees</h3>
+    <ul>
+        <li><strong>Byte-identical output</strong> for identical input — stable member ordering, no timestamps or content hashes — so generated files diff cleanly and cache well.</li>
+        <li><strong>AST-based, not string-rewriting</strong> — the definition is parsed to an AST and emitted from the AST; source is never regex-patched.</li>
+        <li><strong>Zero residual runtime (tier 1)</strong> — output uses only baseline <code>attachShadow</code>, <code>&lt;template&gt;.content.cloneNode</code>, and <code>customElements.define()</code>.</li>
+        <li><strong>Idempotent registration</strong> — the emitted <code>connectedCallback</code> no-ops if the tree is already populated (SSR / Declarative Shadow DOM hydration safe).</li>
+    </ul>
+    <p class="text-sm text-gray-600">
+        The deterministic, AST-based emitter could be built on the workspace's existing
+        esbuild / TypeScript tooling. Concrete code lives in the reference implementation
+        (Frontier UI), not in this canonical repo.
+    </p>
+</section>
+
+<section class="section-card">
+    <h3 id="related">Related</h3>
+    <ul style="margin-bottom: 0;">
+        <li><a href="/blocks/component/">Component block</a> — the standard this adapter implements</li>
+        <li><a href="/projects/webcomponents/">Web Components</a> — the owning project</li>
+        <li><a href="/adapters/html-adapter/">HTML Adapter</a> — canonical format; AST-transformation lineage</li>
+        <li><a href="/adapters/functional-component-adapter/">Functional Component Adapter</a> — sibling syntax adapter (functional → class)</li>
+    </ul>
+</section>

@@ -1,0 +1,83 @@
+---
+pagination:
+    data: backlog
+    size: 1
+    alias: item
+permalink: "backlog/{{ item.id }}/"
+layout: base.njk
+eleventyComputed:
+    title: "Backlog - {{ item.title }}"
+---
+
+{% macro typeBadge(type) %}
+<span style="padding: 0.15rem 0.6rem; border-radius: 9999px; font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
+  background: {% if type == 'idea' %}#ede9fe{% elif type == 'issue' %}#fee2e2{% elif type == 'review' %}#cffafe{% elif type == 'decision' %}#e0e7ff{% else %}#f1f5f9{% endif %};
+  color: {% if type == 'idea' %}#5b21b6{% elif type == 'issue' %}#991b1b{% elif type == 'review' %}#155e75{% elif type == 'decision' %}#3730a3{% else %}#64748b{% endif %};">{{ type }}</span>
+{% endmacro %}
+
+{% macro statusBadge(status) %}
+<span style="padding: 0.15rem 0.6rem; border-radius: 9999px; font-size: 0.8em; font-weight: 600; white-space: nowrap;
+  background: {% if status == 'open' %}#fef3c7{% elif status == 'active' %}#dbeafe{% elif status == 'resolved' %}#dcfce7{% else %}#f1f5f9{% endif %};
+  color: {% if status == 'open' %}#92400e{% elif status == 'active' %}#1e40af{% elif status == 'resolved' %}#166534{% else %}#64748b{% endif %};">{{ status | title }}</span>
+{% endmacro %}
+
+<div class="plug-detail-header">
+    <div class="plug-detail-header-inner">
+        <nav class="plug-breadcrumb">
+            <a href="/backlog/" class="plug-crumb">Backlog</a>
+            <svg class="plug-crumb-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            <span class="plug-crumb plug-crumb-current">{{ item.title }}</span>
+        </nav>
+        <div class="plug-title-row">
+            <h1 class="plug-title">{{ item.title }}</h1>
+            <div class="plug-status" style="display: flex; gap: 0.5rem; align-items: center;">
+                {{ typeBadge(item.type) }}
+                {{ statusBadge(item.status) }}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="container block-detail-page">
+    <div class="block-body content">
+        <div class="section-card">
+            {% if item.details %}
+            <div class="content" style="line-height: 1.7;">{{ item.details | safe }}</div>
+            {% else %}
+            <p class="mb-4 text-slate-600" style="font-size: 1.1em; line-height: 1.6;">{{ item.summary }}</p>
+            {% endif %}
+
+            {% if item.tags %}
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 1.25rem 0 1rem;">
+                {% for tag in item.tags %}
+                <span style="display: inline-block; padding: 0.15rem 0.6rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b); font-size: 0.8em;">{{ tag }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <p style="font-size: 0.85em; color: var(--color-text-muted, #94a3b8);">Opened: {{ item.dateOpened }}</p>
+        </div>
+
+        {% if item.crossRef or item.relatedProject or item.relatedReport or item.graduatedTo %}
+        <div class="section-card mt-8">
+            <h2>References</h2>
+            <ul style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.6rem;">
+                {% if item.crossRef %}
+                <li><a href="{{ item.crossRef.url }}" style="color: var(--color-primary); font-weight: 600; text-decoration: none;">&rarr; {{ item.crossRef.label }}</a></li>
+                {% endif %}
+                {% if item.relatedProject %}
+                {% for project in projects %}{% if project.id == item.relatedProject %}
+                <li><a href="/projects/{{ project.id }}/" style="color: var(--color-primary); font-weight: 600; text-decoration: none;">&rarr; Project: {{ project.name }}</a></li>
+                {% endif %}{% endfor %}
+                {% endif %}
+                {% if item.relatedReport %}
+                <li style="color: var(--color-text-muted);">Deep dive{% if item.reportDate %} <span style="color: var(--color-text); font-weight: 600;">({{ item.reportDate }})</span>{% endif %} — in repo, not on site: <span style="font-family: var(--font-mono, monospace);">{{ item.relatedReport }}</span></li>
+                {% endif %}
+                {% if item.graduatedTo %}
+                <li style="color: #166534; font-weight: 600;">Graduated into: {{ item.graduatedTo }}</li>
+                {% endif %}
+            </ul>
+        </div>
+        {% endif %}
+    </div>
+</div>

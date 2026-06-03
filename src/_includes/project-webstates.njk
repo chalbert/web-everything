@@ -103,3 +103,150 @@
         </p>
     </div>
 </section>
+
+<section id="protocol-change-tracking" class="section-card">
+  <h3 id="change-tracking-protocol">Change Tracking Protocol</h3>
+  <div class="comparison-block" style="background: rgba(251, 191, 36, 0.1); padding: 1rem 1.25rem; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 0 0 1.5rem 0;">
+    <p style="margin: 0; font-size: 0.95rem;">
+      <strong>Status: concept.</strong> The change-record shape, the strategy interface, and especially
+      the interop layer below are <strong>provisional</strong> and will be revised as the standard
+      advances. Grounded in the research topic
+      <a href="/research/change-tracking-observability/">Change Tracking as Observability</a>.
+    </p>
+  </div>
+  <p>
+    Conformance reference for <strong>observing state mutation</strong> as a normalized
+    <strong>Change Record</strong>. Change tracking is treated here as a facet of <em>observability in
+    general</em> — the problem of detecting, representing, and attributing a mutation to state over time —
+    not as a form concern. The protocol defines a single <code>CustomChangeStrategy</code> contract that
+    every detection mechanism satisfies, a registry that selects a strategy <strong>per scope</strong>, and
+    the observable change events a conformant store/signal must emit. It <strong>never mandates one
+    strategy</strong>: snapshot-diff, Proxy interception, signals, Immer-style patches, JSON Patch, and
+    CRDTs are all conformant, configurable, and interoperable.
+  </p>
+
+  <h4 id="ct-canonical-record">The Change Record</h4>
+  <p>
+    Heterogeneous strategy outputs (flags, old/new pairs, path+op patches, merge docs, CRDT ops) normalize
+    into one shape so downstream consumers — validation, traces, analytics, undo — stay strategy-agnostic.
+    It is a <em>lossy lingua franca for observation</em>, not a replacement for any strategy's native form.
+  </p>
+  {% highlight "typescript" %}
+// RFC 6901 JSON Pointer; RFC 6902 op vocabulary (minus `test`).
+interface ChangeRecord {
+    path: string;          // JSON Pointer to the mutated location
+    op: 'add' | 'remove' | 'replace' | 'move' | 'copy';
+    oldValue?: unknown;    // REQUIRED for self-contained reversal — RFC 6902 ops are not self-inverting
+    newValue?: unknown;
+    source: ChangeSource;  // attribution — who/what caused the change
+    timestamp: number;
+    version?: string | number;  // optional causal / optimistic-concurrency token
+}
+
+// Attribution channel. Generalizes validation's value-input (user) vs baseline-change (program/server).
+interface ChangeSource {
+    channel: 'user' | 'program' | 'server-sync' | 'replay' | 'external';
+    traceparent?: string;  // optional W3C Trace Context link to the initiating span
+}
+  {% endhighlight %}
+  <p>
+    Why <code>oldValue</code> is carried: RFC 6902 <code>remove</code>/<code>replace</code> operations do
+    not store the prior value, so reversal otherwise requires the original document. Carrying it makes a
+    record independently invertible. <code>version</code> is left opaque (Lamport clock, vector clock, or
+    document version) so distributed strategies can supply their own causal token.
+  </p>
+
+  <h4 id="ct-strategy-contract">The Strategy Contract</h4>
+  <p>
+    Every detection mechanism is a <code>CustomChangeStrategy</code> that turns a tracked target into a
+    stream of Change Records. The native default — store/signal subscriptions firing on mutation — is the
+    zero-config baseline (native-first); libraries (Immer, Yjs, a diff engine) are opt-in adapters behind
+    the same contract.
+  </p>
+  {% highlight "typescript" %}
+interface CustomChangeStrategy {
+    readonly key: string;                       // e.g. 'native-signals', 'snapshot-diff', 'crdt'
+    track(target: object, emit: (record: ChangeRecord) => void): Disposable;
+    diff?(baseline: unknown, current: unknown): ChangeRecord[];   // for snapshot strategies
+    applyInverse?(target: object, records: ChangeRecord[]): void; // for reversible strategies
+}
+  {% endhighlight %}
+  <p>
+    Capability is expressed by which optional methods a strategy implements: a snapshot strategy supplies
+    <code>diff</code>; a reversible one supplies <code>applyInverse</code>; a purely observational one
+    (signals) supplies only <code>track</code>. Consumers feature-detect rather than assume.
+  </p>
+
+  <h4 id="ct-registry">Per-Scope Selection</h4>
+  <p>
+    Strategies register in a <code>CustomChangeStrategyRegistry</code> resolved through the injector chain,
+    so the active strategy is a <strong>scope decision</strong>: a form subtree can track on
+    <code>snapshot-diff</code> while a collaborative-document subtree tracks on a <code>crdt</code> — in the
+    same app, simultaneously. This generalizes the validation <code>customValidation:change-detection</code>
+    concern from one form to all observable state.
+  </p>
+  {% highlight "typescript" %}
+// A conformant store delegates strategy selection; it never hard-codes detection.
+function observe(target: object, onChange: (r: ChangeRecord) => void): Disposable {
+    const registry = /* resolve customChangeStrategy from injector chain */;
+    const strategy = registry.active();   // nearest-scope strategy wins
+    return strategy.track(target, onChange);
+}
+  {% endhighlight %}
+
+  <h4 id="ct-interop">Interop &amp; Bridging <em>(provisional)</em></h4>
+  <p>
+    Because every registered strategy emits the same Change Record, one strategy's output can feed another
+    — a signals reactivity graph → a JSON-Patch stream → a CRDT document — with the record as the hand-off.
+    The mappings are <strong>lossy</strong> (Merge Patch cannot express arrays; CRDT convergence lives in
+    causal metadata, not the record), so bridges are <strong>adapters</strong>, not identities. When
+    multiple concurrent sources mutate the same state, ordering defers to the strongest participating model:
+    CRDT convergence rules (least-upper-bound for state-based; commutativity under causal delivery for
+    op-based) or an explicit <code>version</code> token. The exact bridging mechanism is intentionally
+    under-specified at <code>concept</code> status.
+  </p>
+
+  <h4 id="ct-observable-events">Observable Change Events</h4>
+  <p>A conformant store/signal emits these events; they reconcile with the
+    <a href="/intents/validation/">Validation Intent</a>'s existing vocabulary so a form is just one consumer.</p>
+  <table>
+    <thead>
+      <tr><th>Event</th><th>Condition</th><th>Validation Intent equivalent</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>baseline-set</code></td><td>A new pristine reference is captured (initial load, save, server sync)</td><td><code>baseline-change</code></td></tr>
+      <tr><td><code>change-detected</code></td><td>A strategy produced a Change Record; state differs from baseline</td><td><code>value-input</code></td></tr>
+      <tr><td><code>change-committed</code></td><td>The change is durably accepted into state (post-validation, post-merge)</td><td><code>value-commit</code></td></tr>
+      <tr><td><code>change-reverted</code></td><td>An inverse patch / undo / failed-merge rolled the change back</td><td>—</td></tr>
+    </tbody>
+  </table>
+
+  <h4 id="ct-standards-alignment">Web Standards Alignment</h4>
+  <table>
+    <thead>
+      <tr><th>Standard</th><th>Role in the protocol</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>RFC 6901</strong> (JSON Pointer)</td><td>The <code>path</code> addressing scheme</td></tr>
+      <tr><td><strong>RFC 6902</strong> (JSON Patch)</td><td>The <code>op</code> vocabulary and the serializable path+op spine</td></tr>
+      <tr><td><strong>RFC 7386</strong> (JSON Merge Patch)</td><td>A coarse projection of a record set; object-member granularity only</td></tr>
+      <tr><td><strong>TC39 Signals</strong></td><td>The native default strategy; informs sync/glitch-free propagation and the framework-scheduled delivery stance</td></tr>
+      <tr><td><strong>W3C Trace Context</strong></td><td><code>ChangeSource.traceparent</code> links a change to its initiating span (<a href="/projects/webtraces/">Web Traces</a>)</td></tr>
+      <tr><td><strong>CRDTs</strong> (Shapiro et al.)</td><td>The convergence rules for concurrent multi-source merge normalization</td></tr>
+    </tbody>
+  </table>
+
+  <h4 id="ct-design-decisions">Design Decisions</h4>
+  <table>
+    <thead>
+      <tr><th>Decision</th><th>Rationale</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>One record, many strategies</strong></td><td>Normalizing to a single shape is what makes strategies swappable and bridgeable; the alternative (consumers learn each strategy's format) defeats interop.</td></tr>
+      <tr><td><strong>Native-first default</strong></td><td>Store/signal subscriptions already fire on mutation — the zero-config baseline. Libraries are opt-in adapters, never required.</td></tr>
+      <tr><td><strong>Per-scope, not global</strong></td><td>Real apps mix concerns (a form and a collaborative doc want different strategies). Scope-resolved selection lets them coexist; a global choice would force a lowest common denominator.</td></tr>
+      <tr><td><strong>Attribution on the record</strong></td><td>"Who caused this" is the gap no existing strategy fills natively. Carrying <code>source</code> lets one mutation's origin survive into validation, traces, and analytics.</td></tr>
+      <tr><td><strong>Contracts, not implementations</strong></td><td>The protocol ships interfaces and a registry pattern. <code>CustomChangeStrategy</code> / <code>CustomChangeStrategyRegistry</code> would be materialized as plugs, and concrete strategies as adapters, when the standard advances past <code>concept</code>.</td></tr>
+    </tbody>
+  </table>
+</section>

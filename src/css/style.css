@@ -162,6 +162,54 @@ main.project-page-container {
     gap: 1rem;
 }
 
+/* Grouped nav: light rounded containers with a small group header on top */
+.nav-group {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.2rem;
+    padding: 0.25rem 0.7rem;
+    border: 1px solid var(--color-border, #e2e8f0);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.015);
+}
+
+.nav-group-label {
+    font-size: 0.6em;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    font-weight: 600;
+    opacity: 0.45;
+    padding-bottom: 0.15rem;
+    border-bottom: 1px solid var(--color-border, #e2e8f0);
+    align-self: stretch;
+}
+
+/* Row of links sitting under each group label */
+.nav-group .nav-link {
+    display: inline-flex;
+}
+
+.nav-group-links {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.nav-link {
+    color: inherit;
+    text-decoration: none;
+    font-size: 0.9em;
+    font-weight: 500;
+    opacity: 0.8;
+    transition: opacity 0.2s ease, color 0.2s ease;
+}
+
+.nav-link:hover {
+    opacity: 1;
+    color: var(--color-primary);
+}
+
 .header-icon {
     color: var(--color-text-muted);
     transition: color 0.2s ease;
@@ -189,10 +237,10 @@ button.header-icon.active {
 
 .claude-panel {
     position: fixed;
-    top: 57px;  /* Below sticky header */
+    top: var(--header-height, 57px);  /* Below sticky header — height measured at runtime */
     right: 0;
-    width: 420px;
-    height: calc(100vh - 57px);
+    width: var(--panel-width, 420px);  /* Drag-resizable; persisted in localStorage */
+    height: calc(100vh - var(--header-height, 57px));
     background: #1a1a2e;
     border-left: 1px solid #2a3a5c;
     z-index: 99;  /* Below header (z-index: 100) so toggle stays clickable */
@@ -200,6 +248,39 @@ button.header-icon.active {
     transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     display: flex;
     flex-direction: column;
+}
+
+/* Resize handle — thin grab strip on the panel's left edge */
+.claude-panel-resizer {
+    position: absolute;
+    top: 0;
+    left: -3px;
+    width: 8px;
+    height: 100%;
+    cursor: ew-resize;
+    z-index: 1;
+    background: transparent;
+    transition: background 0.15s;
+}
+
+.claude-panel-resizer:hover,
+.claude-panel-resizer.dragging {
+    background: rgba(100, 255, 218, 0.25);
+}
+
+/* Suppress transitions/iframe pointer events while dragging for smoothness */
+body.panel-resizing .claude-panel,
+body.panel-resizing main {
+    transition: none;
+}
+
+body.panel-resizing .claude-panel-frame {
+    pointer-events: none;
+}
+
+body.panel-resizing {
+    cursor: ew-resize;
+    user-select: none;
 }
 
 .claude-panel.open {
@@ -245,14 +326,46 @@ button.header-icon.active {
     background: #1a1a2e;
 }
 
-/* Push page content left when panel is open */
-body.panel-open main,
+/* Make room for the panel when it's open.
+   `main` is centered (margin: 0 auto), so a plain margin-right fights the auto
+   margins and makes the content jump (right on wide screens, left on medium).
+   Instead keep it centered and translate it left ONLY by the amount the panel
+   actually overlaps the content: zero shift when there's enough right-side
+   whitespace (wide screens), clamped to the left margin so it never clips off
+   the left edge. The footer is full-bleed, so margin-right is correct there.
+
+   We also shrink `max-width` so it never exceeds the leftover space — without
+   this, on medium viewports the right portion of `main` sits under the panel.
+   The clamp's lower bound switches to `-panel-width / 2` in that case so the
+   (now narrower) content can shift far enough to clear the panel. */
+body.panel-open main {
+    max-width: min(1200px, calc(100vw - var(--panel-width, 420px)));
+    transform: translateX(clamp(
+        min(calc((1200px - 100vw) / 2), calc(var(--panel-width, 420px) / -2)),
+        calc((100vw - 1200px) / 2 - var(--panel-width, 420px)),
+        0px
+    ));
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+body.panel-open main.project-page-container {
+    max-width: min(1400px, calc(100vw - var(--panel-width, 420px)));
+    transform: translateX(clamp(
+        min(calc((1400px - 100vw) / 2), calc(var(--panel-width, 420px) / -2)),
+        calc((100vw - 1400px) / 2 - var(--panel-width, 420px)),
+        0px
+    ));
+}
+
+body:not(.panel-open) main {
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 body.panel-open .site-footer {
-    margin-right: 420px;
+    margin-right: var(--panel-width, 420px);
     transition: margin-right 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-body:not(.panel-open) main,
 body:not(.panel-open) .site-footer {
     transition: margin-right 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -331,6 +444,21 @@ h1, h2, h3, h4, h5, h6 {
 
 .status-link-wrapper:hover {
     background-color: rgba(0,0,0,0.03);
+}
+
+/* Backlog cards: full-card link overlay + clamped teaser. Meta links sit above
+   the overlay so they stay independently clickable; the summary clamps so a long
+   description doesn't bloat the grid (full text lives on /backlog/{id}/). */
+.backlog-meta {
+    position: relative;
+    z-index: 2;
+}
+
+.backlog-summary {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
 }
 
 .project-card:hover {
@@ -1037,4 +1165,171 @@ table td, table th {
 
 .semantic-item:last-child {
     border-bottom: none;
+}
+
+/* Home Display Tool — discreet view toggle + filter for the project tiles */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* Description row: subtitle on the left, display tool aligned to its right */
+.section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+}
+
+.section-head .section-desc {
+    margin-bottom: 0;
+}
+
+/* Controls are tinted to recede into the warm page background, not sit on white */
+.home-display-toolbar {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+}
+
+.home-search {
+    display: flex;
+    align-items: center;
+}
+
+.home-search-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.4rem 0.45rem;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    color: rgba(0, 0, 0, 0.5);
+    cursor: pointer;
+    transition: color 0.15s, background-color 0.15s;
+}
+
+.home-search-btn:hover,
+.home-search.is-open .home-search-btn {
+    color: rgba(0, 0, 0, 0.8);
+}
+
+.home-filter {
+    width: 0;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    font-size: 0.9rem;
+    color: var(--color-text-main);
+    background: transparent;
+    opacity: 0;
+    transition: width 0.2s ease, padding 0.2s ease, opacity 0.15s ease;
+}
+
+.home-search.is-open .home-filter {
+    width: 180px;
+    padding: 0.35rem 0.6rem;
+    background: rgba(255, 255, 255, 0.45);
+    border-color: rgba(0, 0, 0, 0.12);
+    opacity: 1;
+}
+
+.home-filter:focus {
+    outline: none;
+    border-color: rgba(0, 0, 0, 0.3);
+    background: rgba(255, 255, 255, 0.7);
+}
+
+.home-filter::placeholder {
+    color: rgba(0, 0, 0, 0.45);
+}
+
+.view-toggle {
+    display: inline-flex;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.view-toggle-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.4rem 0.5rem;
+    background: transparent;
+    border: none;
+    color: rgba(0, 0, 0, 0.5);
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s;
+}
+
+.view-toggle-btn + .view-toggle-btn {
+    border-left: 1px solid rgba(0, 0, 0, 0.12);
+}
+
+.view-toggle-btn:hover {
+    color: rgba(0, 0, 0, 0.8);
+    background: rgba(0, 0, 0, 0.05);
+}
+
+.view-toggle-btn.is-active {
+    color: rgba(0, 0, 0, 0.85);
+    background: rgba(0, 0, 0, 0.1);
+}
+
+.project-card.is-filtered-out {
+    display: none;
+}
+
+/* Compact list view — smaller tiles, denser grid, for quick browsing */
+.home-list-view .project-grid {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: var(--spacing-xs);
+}
+
+.home-list-view .project-card {
+    padding: 0.75rem var(--spacing-sm);
+}
+
+.home-list-view .project-card:hover {
+    transform: none;
+}
+
+.home-list-view .project-header {
+    gap: 0.75rem;
+    margin-bottom: 0;
+}
+
+.home-list-view .project-icon {
+    width: 36px;
+    height: 36px;
+    font-size: 1.25rem;
+    border-radius: var(--radius-sm, 6px);
+}
+
+.home-list-view .project-icon img {
+    width: 24px;
+    height: 24px;
+}
+
+.home-list-view .project-title {
+    font-size: 1.05rem;
+}
+
+/* Drop the prose + status meter so each tile is a compact, scannable row */
+.home-list-view .project-card p,
+.home-list-view .project-card .status-meter,
+.home-list-view .project-card .status-badge,
+.home-list-view .project-card .status-link-wrapper,
+.home-list-view .project-card .backlog-meta {
+    display: none;
 }

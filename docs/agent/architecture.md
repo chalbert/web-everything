@@ -4,7 +4,7 @@
 
 ## Architectural Principles
 - **Protocol over Implementation**: define the interface (TS Interface), not the library.
-- **Intents are UX protocols**: describe the desired interaction (the "what/why") at project level. Documentation of app behavior, *not* a component library.
+- **Intents are UX protocols**: describe the desired interaction (the "what/why") at project level. Documentation of app behavior, *not* a component library. Include only: dimensions, states, events, per-level contracts. Exclude: conformance tiers, DI concerns, type shapes, registries — move those to the block.
 - **Behaviors are implementations**: custom attributes (`layout:grid`) attach functionality. Not Intents.
 - **Design System superset**: Intents must be abstract enough to configure any major design system (Material, Carbon, Fluent…). A design system is just a config of Web Intents + CSS.
 - **Native alignment**: align with existing Web APIs (`Storage`, `EventTarget`, `CustomElementRegistry`) over framework patterns.
@@ -17,6 +17,7 @@
 |-------|---------|----------|---------------|----------|
 | **plugs** | Core primitives, patches, registries | `plugs/` | Yes (via bootstrap) | CustomStore, CustomAttribute, InjectorRoot |
 | **blocks** | Reusable implementations | `blocks/` | No (import directly) | SimpleStore, OnEventAttribute, CallParser |
+| **protocols** | Conformance contracts owned by a Project (interfaces, registry shapes, observable states/events) | `src/_data/protocols.json` + body in `project-*.njk` | No (no runnable code) | Validation, Error Recovery, Anchor Positioning |
 
 - **Plugged mode**: bootstrap applies patches, exposes globals on `window`.
 - **Unplugged mode**: direct imports, no patches, tree-shakeable.

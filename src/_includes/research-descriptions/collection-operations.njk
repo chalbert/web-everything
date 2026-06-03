@@ -1,0 +1,227 @@
+<h3>The Question</h3>
+<p>
+    Four operations recur on every data collection — <strong>filter, sort, page, group</strong> — and in this
+    repo <em>nothing owns them</em>. <a href="/intents/type-ahead/">Type-Ahead</a> moves focus to a match but
+    never reorders or removes rows. <a href="/intents/windowed-collection/">Windowed Collection</a> decides
+    <em>which items are realised in the DOM</em>, explicitly <em>not</em> which items are in the set or in what
+    order. <a href="/intents/loader/">Loader</a> fetches asynchronously. None of them <em>transform the dataset</em>.
+    This is <a href="/backlog/gap-10-collection-ops-intent/">gap&nbsp;#10</a>, and its open call is narrow:
+    <strong>confirm the intent shape and the dimensions to standardize.</strong>
+</p>
+<p>
+    The gap's triage note reads "no single native API — more of a vocabulary standardization play." This
+    research <strong>sharpens that</strong>: it is true there is no native <em>operation</em> API, but the
+    native platform <em>does</em> standardize the <em>semantics and primitives</em> of sorting
+    (<code>aria-sort</code>, <code>Intl.Collator</code>, stable <code>Array.prototype.sort</code>). The play is
+    to ground the intent in those, not to invent vocabulary from scratch.
+</p>
+
+<h3>Recommendation</h3>
+<p>
+    <strong>One <em>Collection Operations Intent</em> whose dimensions are the four pipeline stages
+    (<code>filter</code> · <code>sort</code> · <code>group</code> · <code>page</code>), with a
+    <em>configurable</em> pipeline order (default <code>filter → sort → group → paginate</code>), and
+    <code>sort</code> given a structured sub-shape rather than a flat value list.</strong>
+    The four operations always travel together and compose as an ordered transform pipeline — the model proven
+    by every headless table library — so one intent with four dimensions fits this repo's multi-axis convention
+    (<a href="/intents/selection/">Selection</a>, <a href="/intents/focus-delegation/">Focus Delegation</a>)
+    better than four sibling intents. Sort is the one operation with genuine internal depth (multi-key,
+    comparison preference, collation, stability, empty-value placement), so it is the dimension that earns a sub-object.
+</p>
+<p>
+    <strong>Decided (2026-06-03):</strong> (1) <em>one intent</em>, not sort-as-its-own — revisit only if sort's
+    depth proves unmanageable. (2) Every dimension must be able to <strong>describe any UX preference</strong>,
+    so nothing is hard-coded — the pipeline order included. (3) The intent is <strong>UX-only</strong>: it
+    carries no implementation references (no comparator functions, no client/server execution flag, no
+    registries). The <em>technical</em> sorting choices are materialised separately — see
+    <a href="#technical-choices">Where the technical choices live</a> below.
+</p>
+
+<h3>Native Grounding — what the platform already standardizes</h3>
+<p>
+    Confidence: ✅ verified from a primary source (MDN / W3C) · 🔶 proposal / not yet a standard.
+    <em>(This is the gap's <code>Native anchor</code> triage field, in its native-first sense — the platform
+    primitives the standard grounds in. Unrelated to the positioning <a href="/intents/anchor/">Anchor
+    Intent</a>.)</em>
+</p>
+<table>
+    <thead><tr><th>Operation</th><th>Native primitive</th><th>What it standardizes</th><th>Conf.</th></tr></thead>
+    <tbody>
+        <tr>
+            <td>sort — state</td>
+            <td><code>aria-sort</code></td>
+            <td>The <em>sort state</em> vocabulary: <code>ascending</code> · <code>descending</code> · <code>none</code> · <code>other</code>, set on exactly one header at a time. <code>none</code> = sortable-but-unsorted; <code>other</code> = a non-asc/desc algorithm.</td>
+            <td>✅</td>
+        </tr>
+        <tr>
+            <td>sort — comparison</td>
+            <td><code>Intl.Collator</code></td>
+            <td>Locale-aware string comparison: <code>sensitivity</code> (base/accent/case/variant), <code>numeric</code> ("1"&lt;"2"&lt;"10"), <code>caseFirst</code> (upper/lower), <code>ignorePunctuation</code>, <code>usage</code> (sort/search). The standard collation strategy — widely supported since 2017.</td>
+            <td>✅</td>
+        </tr>
+        <tr>
+            <td>sort — primitive</td>
+            <td><code>Array.prototype.sort(cmp)</code></td>
+            <td>The comparator primitive; <strong>guaranteed stable</strong> since ES2019. <code>toSorted()</code> (ES2023) is the non-mutating form.</td>
+            <td>✅</td>
+        </tr>
+        <tr>
+            <td>sort — DOM affordance</td>
+            <td>Open UI <code>&lt;th sortable&gt;</code> (issue #800)</td>
+            <td>Proposed declarative sortable header with CSS markers (◇ unsorted / ▲ asc / ▼ desc). Discussion since Aug 2023 — <em>not</em> shipped. W3C APG's "Sortable Table" pattern is the accessible-today recipe: <code>aria-sort</code> + a <code>&lt;button&gt;</code>-wrapped header.</td>
+            <td>🔶</td>
+        </tr>
+        <tr>
+            <td>filter / page / group</td>
+            <td><em>(none)</em></td>
+            <td>No native operation API and no semantics primitive comparable to <code>aria-sort</code>. These are genuinely pure vocabulary plays.</td>
+            <td>✅</td>
+        </tr>
+    </tbody>
+</table>
+<p>
+    <strong>Takeaway:</strong> sort is <em>not</em> ungrounded — its state model and comparison engine are both
+    native standards the intent should adopt verbatim rather than redesign. Filter / page / group are the parts
+    that are pure vocabulary. This asymmetry is itself an argument for sort having a richer sub-shape than its
+    three siblings.
+</p>
+
+<h3>Framework Precedent — the row-model pipeline</h3>
+<p>
+    Headless table libraries have independently converged on the same architecture, which is the strongest
+    available evidence for the intent's shape.
+</p>
+<table>
+    <thead><tr><th>Library</th><th>Model</th><th>Conf.</th></tr></thead>
+    <tbody>
+        <tr><td>TanStack Table</td><td>Each operation is an <em>optional row-model transformer</em>: <code>core → filtered → sorted → grouped → expanded → paginated</code>. Each stage takes the previous row model and produces the next. Sorting supports multi-column + built-in/custom sort fns; grouping moves matching rows into <code>subRows</code> with aggregation fns (sum/count/mean); filtering has column + global + faceting.</td><td>✅</td></tr>
+        <tr><td>AG Grid / MUI DataGrid</td><td>Same separable model: independent sort / filter / pagination / grouping modules, client- or server-side, multi-sort by shift-click.</td><td>📄</td></tr>
+    </tbody>
+</table>
+<p>
+    Two facts fall out that the intent should standardize:
+</p>
+<ul>
+    <li><strong>The operations are an ordered pipeline, not a flat config.</strong> Canonical order is
+    <code>filter → sort → group → paginate</code> (you sort the filtered set, group the sorted set, paginate
+    the grouped set). Stating the order <em>is</em> part of the standard.</li>
+    <li><strong>Each stage is independent and optional.</strong> An app can sort without paging, page without
+    grouping, etc. This maps cleanly onto four optional intent dimensions.</li>
+    <li><strong>Client vs. server is a technical axis, not a UX one.</strong> Each operation can run in-memory
+    or be delegated to a backend query — but that is an implementation choice, so it lives <em>outside</em> the
+    UX intent (see <a href="#technical-choices">Where the technical choices live</a>). This standard models the
+    <strong>front-end</strong> only.</li>
+</ul>
+
+<h3>Proposed Intent Shape <em>(provisional)</em></h3>
+<p>
+    <strong>UX preferences only</strong> — no implementation references (no comparator functions, no
+    client/server flag, no registries). Every dimension is optional and independently configurable, and the
+    pipeline <code>order</code> is itself data, so the intent can describe <em>any</em> UX preference. Sort
+    carries a sub-object because it is the deep one; comparison is expressed as a <em>preference</em>
+    (locale-aware? case-sensitive? numeric?), never as a function.
+</p>
+<pre><code class="language-typescript">type SortDir = 'asc' | 'desc';
+type EmptyPlacement = 'first' | 'last';
+type Operation = 'filter' | 'sort' | 'group' | 'page';
+
+// How values should compare — a UX preference, not an implementation.
+interface SortPreference {
+  field: string;
+  direction: SortDir;
+  collation?: 'locale-aware' | 'codepoint';   // dictionary order vs raw code-point order
+  caseSensitive?: boolean;
+  numeric?: boolean;                           // natural order: "img2" before "img10"
+  emptyValues?: EmptyPlacement;                // where blanks / missing values land
+}
+
+interface CollectionOperationsIntent {
+  // The pipeline order is configurable, not fixed.
+  order?: Operation[];                         // default ['filter','sort','group','page']
+  sort?: {
+    by: SortPreference[];                      // ordered; [0] is primary. Empty = unsorted.
+    multiKey?: boolean;                        // may the user stack sort keys (shift-click)?
+  };
+  filter?: { matching?: 'all' | 'any' };       // UX combinator; the predicates are call-site data
+  group?: { summarize?: ('total' | 'count' | 'average' | 'min' | 'max')[] };
+  page?: { size?: number; mode?: 'paged' | 'append';   // append + advance:auto = infinite scroll
+           advance?: 'manual' | 'auto' };              // default manual
+}</code></pre>
+<p>
+    <code>aria-sort</code> is the <em>rendered projection</em> of <code>sort.by[0]</code> onto the active
+    header (<code>asc→ascending</code>, <code>desc→descending</code>, no key →<code>none</code>) — the intent
+    owns the UX model, the block owns the attribute.
+</p>
+
+<h3 id="technical-choices">Where the technical choices live</h3>
+<p>
+    Because the intent is UX-only, the <em>technical</em> sorting decisions deliberately sit outside it:
+</p>
+<ul>
+    <li><strong>Comparison implementation</strong> (default <code>Array.prototype.sort</code> vs
+    <code>Intl.Collator</code> vs a numeric comparator vs a decorate-sort-undecorate pass for expensive keys) —
+    a technical strategy, not a UX preference. These are catalogued, with their advantages and disadvantages, in
+    the Plateau <strong>Technical Configurator</strong>'s new <em>Sorting Strategy</em> domain
+    (<code>/technical-configurator</code> → "Sorting Strategy"), the same decision tool that already covers
+    Change Tracking and File Upload.</li>
+    <li><strong>Where the sort runs</strong> — this standard models the <strong>front-end</strong> only.
+    Delegating a sort/filter to a backend (an <code>ORDER BY</code> / sort query-param vocabulary) is an
+    app-owned wire concern, documented as out of scope here. <em>(Decision recorded; see Open Questions for the
+    one residual: whether to <em>recommend</em> a canonical serialization.)</em></li>
+    <li><strong>Shared comparator primitive</strong> — "how two values compare" recurs in dirty-check equality
+    (<a href="/research/change-tracking-observability/">Change Tracking</a>) and locale collation
+    (<a href="/projects/webintl/">Web Intl</a>). Whether one shared primitive serves all three is a
+    technical-layer question, tracked there — not in this UX intent.</li>
+</ul>
+
+<h3>The Two-Channel Resolution Rule applied</h3>
+<p>
+    Per the droplist <a href="/blocks/droplist/">composition model</a>, every dimension resolves through one of
+    two channels — ambient Intent (DI, with call-site override) for <em>behavioral</em> dims, local Trait
+    Selection (explicit) for <em>structural</em> ones. Collection Operations splits cleanly:
+</p>
+<table>
+    <thead><tr><th>Dimension</th><th>Channel</th><th>Why</th></tr></thead>
+    <tbody>
+        <tr><td>Default collation / locale <em>preference</em></td><td><strong>Ambient Intent (DI)</strong></td><td>App-wide UX preference; should match <a href="/intents/locale/">Locale Intent</a> so a French app sorts French by default. Behavioral. (The comparator <em>implementation</em> is technical — out of the intent.)</td></tr>
+        <tr><td>Default page size, page affordance</td><td><strong>Ambient Intent (DI)</strong></td><td>A design-system default a call site may override.</td></tr>
+        <tr><td>Which columns are sortable/filterable</td><td><strong>Trait Selection</strong></td><td>Structural — a property of the component instance, never injected.</td></tr>
+        <tr><td>Multi-sort on/off, grouping on/off</td><td><strong>Trait Selection</strong></td><td>Which capability mixins compose (<code>withMultiSort</code>, <code>withGrouping</code>). Structural.</td></tr>
+    </tbody>
+</table>
+
+<h3>Cross-cutting paradigms harvested</h3>
+<p>Per repo practice, the reusable paradigms surfaced here — candidates beyond the immediate intent:</p>
+<ul>
+    <li><strong>Row-model pipeline</strong> — an ordered, optional-stage transform over a collection. Reusable wherever a dataset is progressively narrowed (search results, query builders). Could itself be a named composable pattern.</li>
+    <li><strong>Comparator / collation strategy</strong> — "how do two values compare" is the same pluggable concern that <a href="/research/change-tracking-observability/">Change Tracking</a> names as <code>custom comparators</code> for dirty-check, and that <a href="/projects/webintl/">Web Intl</a> owns via <code>Intl.Collator</code>. One shared comparison primitive could serve both — sort order and equality are the same primitive viewed two ways. <em>(Technical-layer concern — explored in the Technical Configurator's Sorting Strategy domain, not embedded in the UX intent.)</em></li>
+    <li><strong>Slice selection vs. slice rendering</strong> — pagination <em>selects</em> a slice of the set; <a href="/intents/windowed-collection/">windowing</a> <em>renders</em> a slice of the DOM. Distinct but adjacent; an infinite/cursor-paged source composes <code>windowed-collection</code>'s <code>infinite</code> dataSource and the <a href="/intents/loader/">Loader</a> <code>loadingMore</code> state.</li>
+</ul>
+
+<h3>Placement &amp; Cross-References</h3>
+<ul>
+    <li><a href="/backlog/gap-10-collection-ops-intent/">Gap&nbsp;#10</a> — the decision this research feeds; its open call ("confirm intent shape and dimensions") is answered provisionally above.</li>
+    <li><a href="/intents/windowed-collection/">Windowed Collection</a> — adjacent and complementary: it renders the window, this selects/orders the set. Compose, don't merge.</li>
+    <li><a href="/intents/type-ahead/">Type-Ahead</a> — explicitly <em>not</em> this: focus movement, not data transform. The gap exists precisely because type-ahead was mistaken for "search/filter."</li>
+    <li><a href="/intents/locale/">Locale</a> / <a href="/projects/webintl/">Web Intl</a> — owns <code>Intl.Collator</code>; the ambient collation default should derive from the active locale.</li>
+    <li><a href="/intents/action/">Action Intent</a> — its <code>groupOrdering</code> (dom/reverse/platform) is prior art for a declarative ordering dimension; reuse its vocabulary where it fits.</li>
+    <li><a href="/intents/selection/">Selection</a> — co-resident on the same grids/lists; multi-select + multi-sort are independent structural traits on one block.</li>
+</ul>
+
+<h3 id="open-questions">Open Questions</h3>
+<p><em>Resolved 2026-06-03:</em> one intent (not sort-as-its-own); everything configurable (order included); intent is UX-only; front-end only. What remains:</p>
+<ul>
+    <li><strong>Per-dimension UX vocabulary — the real authoring work.</strong> The value lists above (collation, case, numeric, empty-value placement, page affordance, group summaries) are provisional. Because the bar is "describe <em>any</em> UX preference," the open task is enumerating the complete vocabulary each dimension must express — and proving it has no gaps against real grids.</li>
+    <li><strong>Pipeline-order constraints.</strong> Order is configurable (default <code>filter → sort → group → paginate</code>). Are some orders nonsensical (paginate-before-filter) and should the standard reject them, or is it free-form?</li>
+    <li><strong>Residual on the server boundary.</strong> Decided: front-end only, wire format app-owned. The one residual: should the standard still <em>recommend</em> a canonical sort/filter serialization so apps converge, even though it does not own it?</li>
+    <li><strong>Shared comparison primitive (technical layer).</strong> Is "how two values compare" one cross-cutting primitive (sort order + dirty-check equality + locale collation), and if so does it live in <a href="/projects/webintl/">Web Intl</a> or per-concern? Tracked in the technical layer / the Configurator's Sorting Strategy domain — explicitly <em>not</em> in this UX intent.</li>
+</ul>
+
+<h3>Sources</h3>
+<ul>
+    <li><a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-sort">MDN — aria-sort</a> (ascending/descending/none/other; one header at a time)</li>
+    <li><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator/Collator">MDN — Intl.Collator</a> (sensitivity, numeric, caseFirst, ignorePunctuation, usage)</li>
+    <li><a href="https://tanstack.com/table/latest/docs/guide/row-models">TanStack Table — Row Models</a> (composable filter→sort→group→paginate pipeline)</li>
+    <li><a href="https://www.w3.org/WAI/ARIA/apg/patterns/table/examples/sortable-table/">W3C APG — Sortable Table pattern</a></li>
+    <li><a href="https://github.com/openui/open-ui/issues/800">Open UI — Native ability to sort a &lt;table&gt; (#800)</a></li>
+</ul>

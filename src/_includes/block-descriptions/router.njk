@@ -888,7 +888,7 @@ route-view .loader-skeleton {
         </tr>
         <tr>
             <td><strong>Load failure recovery</strong></td>
-            <td><a href="/blocks/error-recovery/">Error Recovery</a></td>
+            <td><a href="/projects/webreliability/#protocol-error-recovery">Error Recovery</a></td>
             <td>When a <code>route:loader</code> fails, Error Recovery classifies the error (4xx terminal, 5xx retryable, offline queued) and applies the retry strategy before falling back to <code>route:error</code> boundary.</td>
         </tr>
         <tr>
@@ -912,7 +912,7 @@ route-view .loader-skeleton {
 <h4>Error Recovery Integration</h4>
 <p>
     The <code>route:error</code> template boundary is the <strong>last resort</strong>.
-    Before it activates, <a href="/blocks/error-recovery/">Error Recovery</a> intercepts loader failures
+    Before it activates, <a href="/projects/webreliability/#protocol-error-recovery">Error Recovery</a> intercepts loader failures
     and applies the configured retry strategy.
 </p>
 <ol>

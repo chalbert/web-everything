@@ -4,6 +4,13 @@
  * Provides a custom JSX factory that creates real DOM elements.
  * Works with CustomElement, standard HTML tags, and DocumentFragment.
  *
+ * JSX here is the **HTML mirror dialect** (see /adapters/jsx-adapter/ and
+ * reports/2026-06-03-jsx-adapter-feature-mapping.md): authors write `class` and
+ * `for` (not className/htmlFor), `on:click="handler($event)"` string behaviors
+ * (or `onclick={fn}` function props), `bind-*` bindings, and customized built-in
+ * directives via `is` — e.g. `<template is="for-each">`. className/htmlFor remain
+ * tolerated aliases so existing React-style sources keep working.
+ *
  * ## Setup (tsconfig.json)
  * ```json
  * {
@@ -121,9 +128,15 @@ class JSXRenderer {
     type: JSXElementType,
     props: JSXProps | null
   ): HTMLElement {
-    // String tag name - create standard HTML element
+    // String tag name - create standard HTML element.
+    // A string `is` prop creates a *customized built-in* (e.g. <template is="for-each">,
+    // <button is="...">) — the `is` option, not just the attribute, is what triggers the
+    // upgrade. The attribute itself is still reflected by #applyProps below.
     if (typeof type === 'string') {
-      return document.createElement(type);
+      const is = props && typeof props.is === 'string' ? props.is : undefined;
+      return is
+        ? (document.createElement(type, { is }) as HTMLElement)
+        : document.createElement(type);
     }
 
     // Class constructor - instantiate custom element
@@ -180,8 +193,9 @@ class JSXRenderer {
         continue;
       }
 
-      // Data attributes and custom attributes with hyphens
-      if (key.includes('-') || key.startsWith('data')) {
+      // Data attributes, hyphenated, and namespaced (on:click, bind:value) custom
+      // attributes — the mirror-dialect behavior/binding surface. Always plain attributes.
+      if (key.includes('-') || key.includes(':') || key.startsWith('data')) {
         element.setAttribute(key, String(value));
         continue;
       }

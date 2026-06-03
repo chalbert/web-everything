@@ -1,0 +1,21 @@
+---
+type: decision
+status: open
+dateOpened: "2026-05-31"
+tags: [gap-analysis, intent, disclosure]
+---
+
+# Decide on Disclosure / Expansion intent (gap #12)
+
+Accordion / collapse / expand. Native: `<details>`, `beforetoggle`/`toggle`, `hidden=until-found`. Small, well-scoped intent.
+
+## Triage context
+
+- **Kind**: Intent
+- **Native anchor**: `<details>`, `beforetoggle`/`toggle`, `hidden=until-found`
+- **Native-first**: ◆ medium · **Gap**: ▽ low · **Effort**: ▽ low
+- **Rank**: 12
+
+## Open call
+
+Confirm intent dimensions (open/closed default, multi-vs-single, animated reveal).

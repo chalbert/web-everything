@@ -1,0 +1,95 @@
+---
+layout: base.njk
+title: Backlog
+---
+
+{% from "display-toolbar.njk" import displayToolbar %}
+
+{% macro typeBadge(type) %}
+<span style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.7em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
+  background: {% if type == 'idea' %}#ede9fe{% elif type == 'issue' %}#fee2e2{% elif type == 'review' %}#cffafe{% elif type == 'decision' %}#e0e7ff{% else %}#f1f5f9{% endif %};
+  color: {% if type == 'idea' %}#5b21b6{% elif type == 'issue' %}#991b1b{% elif type == 'review' %}#155e75{% elif type == 'decision' %}#3730a3{% else %}#64748b{% endif %};">{{ type }}</span>
+{% endmacro %}
+
+{% macro statusBadge(status) %}
+<span style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.75em; font-weight: 600; white-space: nowrap;
+  background: {% if status == 'open' %}#fef3c7{% elif status == 'active' %}#dbeafe{% elif status == 'resolved' %}#dcfce7{% else %}#f1f5f9{% endif %};
+  color: {% if status == 'open' %}#92400e{% elif status == 'active' %}#1e40af{% elif status == 'resolved' %}#166534{% else %}#64748b{% endif %};">{{ status | title }}</span>
+{% endmacro %}
+
+<section class="intro">
+    <h1>Backlog</h1>
+    <p>The single source of truth for ideas, issues, decisions, and reviews across Web Everything. Each item is one markdown file in <code>backlog/</code>, completely dynamic — its title, summary, and detail come from markdown (the item's own body, or a related report it mirrors), never hand-typed. Open questions raised on the standards' own pages are collected live below. Deep thinking stays in <code>reports/</code> — a backlog item links out to it or mirrors it.</p>
+</section>
+
+<section class="mb-12">
+    <h2 class="section-title">Tracked work</h2>
+    <div class="section-head">
+        <p class="section-desc">Ideas, issues, decisions, and reviews — ordered by status. Filter by keyword, or switch to a compact list.</p>
+        {{ displayToolbar("backlog") }}
+    </div>
+    <div class="project-grid">
+        {% set statusOrder = ["open", "active", "parked", "resolved"] %}
+        {% for group in statusOrder %}{% for item in backlog %}{% if item.status == group %}
+        <div class="project-card">
+            <a href="/backlog/{{ item.id }}/" class="project-card-link" aria-label="View {{ item.title }}"></a>
+            <div class="project-header" style="margin-bottom: 0.6rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
+                <h3 class="project-title" style="margin: 0; font-size: 1.05em;">{{ item.title }}</h3>
+                {{ statusBadge(item.status) }}
+            </div>
+            <div style="margin-bottom: 0.6rem;">{{ typeBadge(item.type) }}</div>
+            <p class="backlog-summary" style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ item.summary }}</p>
+            <div class="backlog-meta">
+                {% if item.tags %}
+                <div style="display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
+                    {% for tag in item.tags %}
+                    <span style="display: inline-block; padding: 0.1rem 0.5rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b); font-size: 0.75em;">{{ tag }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+                <div style="display: flex; flex-direction: column; gap: 0.25rem; font-size: 0.8em;">
+                    {% if item.crossRef %}
+                    <a href="{{ item.crossRef.url }}" style="color: var(--color-primary); text-decoration: none;">&rarr; {{ item.crossRef.label }}</a>
+                    {% endif %}
+                    {% if item.relatedProject %}
+                    <a href="/projects/{{ item.relatedProject }}/" style="color: var(--color-primary); text-decoration: none;">&rarr; project: {{ item.relatedProject }}</a>
+                    {% endif %}
+                    {% if item.relatedReport %}
+                    <span style="color: var(--color-text-muted); font-family: var(--font-mono, monospace);">report{% if item.reportDate %} · {{ item.reportDate }}{% endif %}: {{ item.relatedReport }}</span>
+                    {% endif %}
+                    {% if item.graduatedTo %}
+                    <span style="color: #166534; font-weight: 600;">graduated &rarr; {{ item.graduatedTo }}</span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endif %}{% endfor %}{% endfor %}
+    </div>
+</section>
+
+{% set pqCount = 0 %}
+{% for project in projects %}{% if project.openQuestions %}{% set pqCount = pqCount + 1 %}{% endif %}{% endfor %}
+{% if pqCount %}
+<section style="margin-top: 3rem; border-top: 1px solid var(--color-border); padding-top: 2rem;">
+    <h2 class="section-title" style="margin-bottom: 0.5rem;">Live from the standards</h2>
+    <p style="margin-bottom: 1.5rem; color: var(--color-text-muted); font-size: 0.9em;">Open questions declared on the standards' own pages, collected here automatically. Edit them on the project, not in the backlog.</p>
+    <div class="project-grid">
+        {% for project in projects %}{% if project.openQuestions %}
+        <div class="project-card">
+            <div class="project-header" style="margin-bottom: 0.75rem; border-bottom: 1px solid var(--color-border); padding-bottom: 0.5rem;">
+                <h3 class="project-title" style="margin: 0;"><a href="/projects/{{ project.id }}/" style="text-decoration: none; color: inherit;">{{ project.name }}</a></h3>
+            </div>
+            <ul style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.6rem;">
+                {% for q in project.openQuestions %}
+                <li style="font-size: 0.9em;">
+                    <a href="/projects/{{ project.id }}/{% if q.anchor %}#{{ q.anchor }}{% endif %}" style="color: var(--color-text); text-decoration: none;">{{ q.question }}</a>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}{% endfor %}
+    </div>
+</section>
+{% endif %}
+
+<script src="/assets/js/home-display.js"></script>

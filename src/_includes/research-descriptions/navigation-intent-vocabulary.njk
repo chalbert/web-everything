@@ -1,0 +1,194 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+    "What standard do we have around navigation?" The
+    <a href="/intents/navigation/">Navigation Intent</a> carried a single dimension —
+    <code>structure</code> = <code>hierarchical</code> | <code>lateral</code> | <code>linear</code> —
+    making it the thinnest intent in the catalog. Its siblings carry five or six axes
+    (<a href="/intents/modal/">modal</a> 5, <a href="/intents/anchor/">anchor</a> 6,
+    <a href="/intents/loader/">loader</a> 5, <a href="/intents/validation/">validation</a> 5).
+    Meanwhile the <a href="/blocks/router/">Router block</a> already shipped <code>scroll</code>,
+    <code>transition</code>, <code>route:guard:leave</code>, and Navigation-API history control.
+</p>
+<p>
+    The intent <strong>under-described its own implementation</strong>: a Tabs (<code>lateral</code>)
+    or Wizard (<code>linear</code>) block could declare its information-architecture shape but had
+    no vocabulary to declare scroll behavior, history contribution, transition direction, or
+    leave-guarding. The question this research answers: which other separable navigation-UX
+    concerns deserve to be first-class dimensions, and which belong elsewhere?
+</p>
+
+<h2>The Intent Bar</h2>
+<p>
+    A candidate concern earns a dimension only if it is all four of: (a) <strong>user-perceivable
+    behavior</strong>, (b) a <strong>real choice with 2–4 named values</strong>, (c)
+    <strong>orthogonal</strong> to <code>structure</code>, and (d) grounded in a <strong>web
+    platform standard</strong> or a strong cross-framework convention. Held to that bar, of eight
+    candidates investigated, four became dimensions, one was added with weaker grounding, two
+    deferred to neighbouring intents, and the rest were classed implementation detail.
+</p>
+
+<h2>The Five Dimensions</h2>
+<table>
+    <tr><th>Dimension</th><th>Values</th><th>What the user perceives</th><th>Grounding</th></tr>
+    <tr>
+        <td><code>structure</code> <em>(kept)</em></td>
+        <td>hierarchical · lateral · linear</td>
+        <td>The IA model: back-stack vs peer tabs vs locked wizard</td>
+        <td>Information-architecture convention</td>
+    </tr>
+    <tr>
+        <td><code>history</code></td>
+        <td>push · replace · none</td>
+        <td>What the browser Back button does after this navigation</td>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Navigation/navigate">Navigation API <code>navigate({history})</code></a></td>
+    </tr>
+    <tr>
+        <td><code>scroll</code></td>
+        <td>auto · top · preserve · manual</td>
+        <td>Where the viewport lands after the view swaps</td>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/NavigateEvent/intercept"><code>intercept({scroll})</code></a> + <a href="https://developer.mozilla.org/en-US/docs/Web/API/History/scrollRestoration"><code>scrollRestoration</code></a></td>
+    </tr>
+    <tr>
+        <td><code>transition</code></td>
+        <td>directional · fade · none</td>
+        <td>Whether forward slides forward and Back slides back</td>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/View_Transition_API">View Transitions API</a> + transition types</td>
+    </tr>
+    <tr>
+        <td><code>guard</code></td>
+        <td>free · confirm · blocked</td>
+        <td>Whether leaving can be interrupted (unsaved changes)</td>
+        <td>Navigation <a href="https://developer.mozilla.org/en-US/docs/Web/API/NavigateEvent/intercept"><code>intercept</code></a> + <a href="https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event"><code>beforeunload</code></a></td>
+    </tr>
+    <tr>
+        <td><code>persistence</code></td>
+        <td>url · memory · session</td>
+        <td>Whether this view state is bookmarkable / shareable</td>
+        <td>WHATWG URL vs <a href="https://developer.mozilla.org/en-US/docs/Web/API/History_API/Working_with_the_History_API">History <code>state</code></a> split</td>
+    </tr>
+</table>
+
+<h3>Why each one clears the bar</h3>
+<ul>
+    <li>
+        <strong><code>history</code> — the textbook fit.</strong> <code>navigate(url, { history:
+        "auto" | "push" | "replace" })</code> is a named platform enum that directly determines
+        what the Back button does. <code>none</code> covers transient view changes that should
+        not enter the back stack at all.
+    </li>
+    <li>
+        <strong><code>scroll</code> — the platform's binary knob, refined for users.</strong> The
+        API exposes only <code>scroll: "after-transition" | "manual"</code> and
+        <code>scrollRestoration: "auto" | "manual"</code>. The user-facing refinement of "what
+        manual does" is <code>top</code> vs <code>preserve</code> — exactly the abstraction an
+        intent adds over the raw API. React Router's <code>&lt;ScrollRestoration&gt;</code> exists
+        because the SPA default isn't enough; the choice is real.
+    </li>
+    <li>
+        <strong><code>transition</code> — directionality has no other home.</strong>
+        Browser-initiated Back navigations (back button, edge-swipe) carry <strong>no</strong>
+        View-Transition type, so directional animation must be <em>derived from</em>
+        history-traversal direction. The <a href="/intents/motion/">motion intent</a> owns
+        <em>feel</em> (<code>physics: natural|immediate|reduced</code>, honoring
+        <code>prefers-reduced-motion</code>); it structurally cannot know a navigation is
+        "forward." So <code>transition</code> owns <em>direction only</em> and defers timing and
+        easing to <code>motion</code>.
+    </li>
+    <li>
+        <strong><code>guard</code> — doubly grounded.</strong> "Can the user be stopped before
+        leaving" is standardized on <em>both</em> the Navigation API (<code>navigate</code> event
+        <code>canIntercept</code> + <code>preventDefault</code>/<code>intercept</code>) and
+        <code>beforeunload</code> (cross-document / tab-close). Cross-framework convergence (React
+        Router <code>useBlocker</code>, Vue <code>beforeRouteLeave</code>) corroborates. The in-app
+        "unsaved changes" prompt composes with <a href="/intents/modal/">modal</a>.
+    </li>
+    <li>
+        <strong><code>persistence</code> — the deep-linkability choice.</strong> Most relevant
+        exactly where <code>structure</code> is <code>lateral</code> (is the active tab in the
+        URL?) or <code>linear</code> (is the wizard step shareable?). <code>url</code> lives in
+        path/search and survives refresh and share; <code>session</code> rides History
+        <code>state</code> and survives traversal but not a fresh share; <code>memory</code> is
+        in-memory only. This is the <strong>weakest grounding</strong> of the five — a
+        URL-vs-<code>state</code> convention rather than a single enum — and is flagged as an open
+        point.
+    </li>
+</ul>
+
+<h2>Composition Boundary — What Navigation Does NOT Own</h2>
+<table>
+    <tr><th>Concern</th><th>Verdict</th><th>Why</th></tr>
+    <tr>
+        <td>Prefetch eagerness</td>
+        <td>→ <a href="/intents/prefetch/">prefetch intent</a></td>
+        <td><code>eagerness: viewport|hover|interaction</code> already owns it; navigation composes, doesn't duplicate.</td>
+    </tr>
+    <tr>
+        <td>Animation feel (spring / instant / reduced)</td>
+        <td>→ <a href="/intents/motion/">motion intent</a></td>
+        <td><code>motion.physics</code> owns feel; <code>navigation.transition</code> owns direction only.</td>
+    </tr>
+    <tr>
+        <td>Focus-on-route-change</td>
+        <td>reference, don't own</td>
+        <td>The correct answer is opinionated (WAI-ARIA APG: move to the new view's main heading) and overlaps <a href="/intents/focus-delegation/">focus-delegation</a>. Navigation cites the <code>focusReset</code> contract; the closed value set stays with a focus-owning intent.</td>
+    </tr>
+    <tr>
+        <td><code>aria-current</code> (page / step / location)</td>
+        <td>derived, not a dimension</td>
+        <td><code>page</code> for hierarchical/lateral, <code>step</code> for linear — a <em>function of</em> <code>structure</code>, so it fails orthogonality. The structure contract specifies the mapping.</td>
+    </tr>
+</table>
+<p>
+    Classed <strong>implementation/config, not UX preference</strong> (kept out entirely): nested
+    / parallel routing, base path, hash-vs-history router mode, deep-link 404 fallback,
+    cross-document-vs-same-document execution mode, and lazy view loading (eagerness →
+    <code>prefetch</code>, pending-state UX → <code>loader</code>).
+</p>
+
+<h2>Web Standards Alignment</h2>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How It Grounds a Dimension</th></tr>
+    <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Navigation/navigate">Navigation API <code>navigate()</code></a></td><td>Baseline 2024</td><td><code>history</code> (push/replace), <code>guard</code> (intercept/preventDefault)</td></tr>
+    <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/NavigateEvent/intercept"><code>NavigateEvent.intercept()</code></a></td><td>Baseline 2024</td><td><code>scroll</code> (<code>scroll: after-transition|manual</code>), focus (<code>focusReset</code>, referenced)</td></tr>
+    <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/History/scrollRestoration"><code>History.scrollRestoration</code></a></td><td>Baseline</td><td><code>scroll</code> auto/manual base</td></tr>
+    <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/View_Transition_API">View Transitions API</a></td><td>Baseline 2024 (same-doc)</td><td><code>transition</code> directionality via transition types</td></tr>
+    <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event"><code>beforeunload</code></a></td><td>Legacy / wide support</td><td><code>guard</code> for cross-document & tab-close</td></tr>
+    <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/History_API/Working_with_the_History_API">History <code>state</code></a> vs URL</td><td>Baseline</td><td><code>persistence</code> url/session/memory split</td></tr>
+</table>
+
+<h2>The Intent Was Lagging the Block</h2>
+<p>
+    Every added dimension maps 1:1 to a Router attribute that already exists — documenting the
+    vocabulary closes a <a href="/research/">design-first</a> gap, it does not request new
+    implementation:
+</p>
+<table>
+    <tr><th>Dimension</th><th>Existing Router surface</th></tr>
+    <tr><td><code>scroll</code></td><td><code>&lt;route-view scroll="auto|manual|none"&gt;</code></td></tr>
+    <tr><td><code>transition</code></td><td><code>&lt;route-view transition&gt;</code> + View Transitions integration</td></tr>
+    <tr><td><code>guard</code></td><td><code>route:guard:leave</code> (exit guard)</td></tr>
+    <tr><td><code>history</code></td><td>Navigation API <code>history</code> option in <code>navigate(path, options)</code></td></tr>
+    <tr><td><code>persistence</code></td><td>URLPattern params/query vs in-memory route state</td></tr>
+</table>
+
+<h2>Open Points</h2>
+<ul>
+    <li><strong>persistence grounding</strong> 🔶 — confirm <code>url | memory | session</code> or collapse to <code>url | memory</code>; the three-way set rests on convention, not a single enum.</li>
+    <li><strong>transition vs motion</strong> ⚠ — keep the boundary clean: <code>navigation.transition</code> = direction, <code>motion.physics</code> = feel.</li>
+    <li><strong>focus-reset home</strong> 🔶 — decide whether <code>heading | target | preserve | auto</code> becomes an axis on <a href="/intents/focus-delegation/">focus-delegation</a> or stays an APG-cited prose contract.</li>
+</ul>
+<p>
+    These are tracked in the backlog (<code>backlog/nav-persistence-grounding.md</code>,
+    <code>backlog/nav-transition-vs-motion.md</code>, <code>backlog/nav-focus-reset-home.md</code>)
+    and the companion report <code>reports/2026-06-03-navigation-intent-vocabulary.md</code>.
+</p>
+
+<h2>Cross-References</h2>
+<ul>
+    <li><a href="/intents/navigation/">Navigation Intent</a> — the expanded vocabulary this research drives.</li>
+    <li><a href="/blocks/router/">Router block</a> — the concrete implementation of <code>structure: hierarchical</code>.</li>
+    <li><a href="/intents/motion/">Motion</a>, <a href="/intents/prefetch/">Prefetch</a>, <a href="/intents/loader/">Loader</a>, <a href="/intents/focus-delegation/">Focus Delegation</a>, <a href="/intents/modal/">Modal</a> — intents Navigation composes with.</li>
+    <li><a href="/projects/webintents/">Web Intents</a> — the project that owns the intent vocabulary.</li>
+</ul>
+{% endraw %}

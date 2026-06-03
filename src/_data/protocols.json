@@ -1,0 +1,69 @@
+[
+  {
+    "id": "validation",
+    "name": "Validation",
+    "summary": "Conformance reference for form validation interop. Observable states/events per level (control/group/form/nested), three conformance tiers, DI-replaceable concerns. Implementations from different creators become swappable (L1) and combinable (L2).",
+    "status": "concept",
+    "ownedByProject": "webvalidation",
+    "realizesIntent": "validation",
+    "anchor": "protocol-validation"
+  },
+  {
+    "id": "error-recovery",
+    "name": "Error Recovery",
+    "summary": "Conformance reference for mechanism failure recovery via pluggable handlers. Defines the CustomRecoveryHandler contract, registry resolution pattern, and observable states. Applies to any operation — HTTP, database, computation, async tasks.",
+    "status": "concept",
+    "ownedByProject": "webreliability",
+    "realizesIntent": "reliability",
+    "anchor": "protocol-error-recovery"
+  },
+  {
+    "id": "anchor-positioning",
+    "name": "Anchor Positioning",
+    "summary": "Single positioning provider that any component delegates to via the CustomPositioner contract. Native-first (CSS Anchor Positioning) with pluggable adapters (Floating UI) so components share one engine instead of bundling many.",
+    "status": "concept",
+    "ownedByProject": "webpositioning",
+    "anchor": "protocol-anchor-positioning"
+  },
+  {
+    "id": "typed-event",
+    "name": "Typed Event",
+    "summary": "Typed, self-describing event classes with provider-based scoping. Defines TypedEventClass plus listenForScoped / provider option so cross-team events discriminate via instanceof instead of fragile name matching.",
+    "status": "concept",
+    "ownedByProject": "webevents",
+    "anchor": "protocol-typed-event"
+  },
+  {
+    "id": "trace-observability",
+    "name": "Trace Observability",
+    "summary": "Trace propagation and instrumentation contract aligning with W3C Trace Context and OpenTelemetry. Defines header propagation, optional trace-id meta embedding, and suggested client API shape (trace / effect).",
+    "status": "concept",
+    "ownedByProject": "webtraces",
+    "anchor": "protocol-trace-observability"
+  },
+  {
+    "id": "analytics-vocabulary",
+    "name": "Analytics Event Vocabulary",
+    "summary": "Vendor-neutral analytics instrumentation contract using the Segment Spec vocabulary (Identify, Track, Page). One call site routes to any conformant backend (Segment, Mixpanel, GA4, custom).",
+    "status": "draft",
+    "ownedByProject": "webanalytics",
+    "anchor": "protocol-analytics-vocabulary"
+  },
+  {
+    "id": "change-tracking",
+    "name": "Change Tracking",
+    "summary": "Conformance reference for observing state mutation as a normalized Change Record (path/op/old/new/source/timestamp). Defines the CustomChangeStrategy contract, a strategy registry with per-scope selection, and observable change events — so snapshot-diff, Proxy, signals, Immer-patch, JSON Patch, and CRDT strategies become configurable and interoperable in one app. Generalizes the validation change-detection concern.",
+    "status": "concept",
+    "ownedByProject": "webstates",
+    "anchor": "protocol-change-tracking"
+  },
+  {
+    "id": "localization",
+    "name": "Localization",
+    "summary": "Conformance reference for localization interop. Defines the CustomTranslationProvider contract, a provider registry with namespace + fallback-chain resolution, the MF2 message-function shape, and observable locale states — so message catalogs and locale strategies from different vendors are swappable and combinable. Native Intl is the default formatter; libraries plug in behind the registry.",
+    "status": "concept",
+    "ownedByProject": "webintl",
+    "realizesIntent": "locale",
+    "anchor": "protocol-localization"
+  }
+]

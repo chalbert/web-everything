@@ -21,6 +21,13 @@ module.exports = function (eleventyConfig) {
     );
   });
 
+  // The backlog feeds off backlog/*.md (parsed by src/_data/backlog.js, which
+  // lives outside the input dir) — watch it so edits trigger a rebuild in dev.
+  // reports/*.md is watched too: pointer items mirror a report, so editing a
+  // report must refresh the backlog that loads it.
+  eleventyConfig.addWatchTarget("backlog");
+  eleventyConfig.addWatchTarget("reports");
+
   eleventyConfig.addPassthroughCopy("src/css");
   eleventyConfig.addPassthroughCopy("src/assets");
   eleventyConfig.addPassthroughCopy("demos");

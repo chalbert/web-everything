@@ -13,7 +13,52 @@
         <li><strong>Scoped Registries:</strong> Allow multiple versions of a component to coexist without name collisions (aligns with the <a href="https://github.com/WICG/webcomponents/blob/gh-pages/proposals/Scoped-Custom-Element-Registries.md">Scoped Custom Element Registries proposal</a>).</li>
         <li><strong>Injector Integration:</strong> Custom elements resolve dependencies from the <a href="/projects/webinjectors/">Web Injectors</a> hierarchy instead of relying on global state or module scope.</li>
         <li><strong>Transient Components:</strong> Custom elements that replace themselves with semantically correct native HTML — solving the "dynamic tag" problem without permanent wrapper nodes.</li>
+        <li><strong>Declarative Definition:</strong> Define a brand-new custom element entirely from HTML — tag name, template, and shadow options — via the <a href="/blocks/component/"><code>&lt;component&gt;</code> element</a>, with a deterministic build-time AST transform to the class form.</li>
     </ul>
+</section>
+
+<section id="declarative-definition" class="section-card">
+    <h3 id="declarative-definition-heading">Declarative Definition</h3>
+    <p>
+        Declarative Shadow DOM lets you ship an element's <em>shadow content</em> in markup, and
+        <a href="#transient-components">Transient Components</a> <em>resolve</em> an element to native HTML.
+        But <strong>defining a brand-new reusable custom element</strong> still required imperative JavaScript.
+        The <a href="/blocks/component/"><code>&lt;component&gt;</code></a> element closes that gap — the
+        definition itself becomes markup:
+    </p>
+
+    {% highlight "html" %}
+<component name="user-card" shadow="open">
+  <template>
+    <style>:host { display: block }</style>
+    <h3><slot name="title">Untitled</slot></h3>
+    <slot></slot>
+  </template>
+</component>
+
+<user-card><span slot="title">Ada</span><p>First programmer.</p></user-card>
+    {% endhighlight %}
+
+    <p>
+        On connect, <code>&lt;component&gt;</code> reads <code>name</code> and the child
+        <code>&lt;template&gt;</code>, registers the element (attaching a Declarative-Shadow-DOM-aligned
+        shadow root and projecting slots), then removes itself — leaving no wrapper node. The
+        <strong>intended implementation is a deterministic, build-time, AST-based transform</strong>
+        (the <a href="/adapters/declarative-component/">Declarative Component adapter</a>) that lowers
+        each definition to the equivalent class element, the same way Svelte and Lit-style tooling do.
+    </p>
+
+    <div class="comparison-block" style="background: rgba(99, 102, 241, 0.05); padding: 1.25rem; border-radius: 8px; border-left: 4px solid var(--color-primary); margin: 1.5rem 0;">
+        <h4 id="declarative-definition-status" style="margin-top: 0; color: var(--color-primary); font-size: 1rem;">Standards Status</h4>
+        <p style="margin-bottom: 0; font-size: 0.95rem;">
+            Declarative custom-element definition is the open frontier of web components — the
+            <a href="https://github.com/WICG/webcomponents/issues/1009">WICG strawman</a> is stalled pending
+            unshipped primitives (Template Instantiation, DOM Parts). We ship the static, DSD-aligned tier now
+            and compose the binding primitives later. All design forks are held
+            <strong>open for progressive resolution</strong> (see the
+            <a href="/blocks/component/#open-questions">Component block's open questions</a>).
+        </p>
+    </div>
 </section>
 
 <section id="scoped-registries" class="section-card">

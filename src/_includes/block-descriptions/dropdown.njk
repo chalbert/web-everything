@@ -1,0 +1,234 @@
+{% from "source-toggle.njk" import sourceToggle, jsxSource, endSource %}
+
+<h2>Dropdown — the single-select droplist</h2>
+<p>The <strong>dropdown</strong> is the canonical concrete member of the <a href="/blocks/droplist/">droplist family</a>: a button-triggered, non-filtering, single-select listbox. It exists at three altitudes of the trait language — raw HTML substrate, named custom-element preset, and TypeScript trait composition — all of which produce the same composition. As a form-associated custom element, it participates in <code>&lt;form&gt;</code> submission, <code>FormData</code>, reset, and validity exactly like the native <code>&lt;select&gt;</code>.</p>
+
+<h3>Trait selection at a glance</h3>
+<p>The dropdown's identity is fixed by these trait selections. Structural picks are <strong>local</strong> (an author cannot change them via props or ambient intent); behavioral picks are this component's <em>stance</em> and remain overridable by an ambient <code>droplistIntent</code>:</p>
+<table>
+  <thead>
+    <tr><th>Trait</th><th>Dimension</th><th>Value</th><th>Kind</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><a href="/intents/selection/">Selection</a></td><td><code>model</code></td><td><code>single</code>, follows focus</td><td><strong>structural</strong></td></tr>
+    <tr><td><a href="/intents/type-ahead/">Type-Ahead</a></td><td>presence</td><td>on (mutually exclusive with filter)</td><td><strong>structural</strong></td></tr>
+    <tr><td><a href="/intents/focus-delegation/">Focus Delegation</a></td><td><code>strategy</code></td><td><code>virtual</code> (<code>aria-activedescendant</code>)</td><td>behavioral</td></tr>
+    <tr><td><a href="/intents/anchor/">Anchor</a></td><td>placement / collision</td><td><code>bottom-start</code> / <code>flip,resize</code></td><td>behavioral</td></tr>
+  </tbody>
+</table>
+
+<h3>Altitude 1 — HTML, explicit behaviors (the substrate)</h3>
+<p>Each attribute is one trait; the attribute <em>value</em> is the trait selection. This is what the substrate looks like at the DOM level, with hardcoded items for clarity. The JSX mirror is near-identity — only the inline comments (<code>&lt;!-- --&gt;</code> → <code>{/* */}</code>) and the two-root wrapper (a <code>&lt;&gt;</code> fragment) differ:</p>
+{{ sourceToggle("dropdown-substrate") }}
+{% highlight "html" %}
+<button aria-haspopup="listbox" anchor="country-list"
+        commandfor="country-list" command="toggle-popover">Country</button>
+
+<ul id="country-list" role="listbox"
+    focus-delegation="strategy=virtual"     <!-- behavioral; may default from ambient intent -->
+    selection="model=single"                <!-- STRUCTURAL: always local -->
+    type-ahead
+    anchored="placement=bottom-start;collision=flip,resize"
+    popover>
+  <li role="option" composite-descendant data-value="ar">Argentina</li>
+  <li role="option" composite-descendant data-value="au">Australia</li>
+</ul>
+{% endhighlight %}
+{{ jsxSource("dropdown-substrate") }}
+{% highlight "tsx" %}
+<>
+  <button aria-haspopup="listbox" anchor="country-list"
+          commandfor="country-list" command="toggle-popover">Country</button>
+
+  <ul id="country-list" role="listbox"
+      focus-delegation="strategy=virtual"     {/* behavioral; may default from ambient intent */}
+      selection="model=single"                {/* STRUCTURAL: always local */}
+      type-ahead
+      anchored="placement=bottom-start;collision=flip,resize"
+      popover>
+    <li role="option" composite-descendant data-value="ar">Argentina</li>
+    <li role="option" composite-descendant data-value="au">Australia</li>
+  </ul>
+</>
+{% endhighlight %}
+{{ endSource() }}
+
+<h3>Altitude 1a — Inside <code>&lt;drop-list&gt;</code>: the class</h3>
+<p>A dropdown does not bake in <em>which</em> options or <em>whose</em> selection — it is generic. The component class bridges the public surface (attributes, <code>value</code>, the form, events) and the private substrate (the locals its template reads). Two things are non-negotiable: it is a <strong>form-associated custom element</strong> (so <code>&lt;form&gt;</code> / <code>FormData</code> / reset / validity all just work — no hidden input), and it exposes its resolved attributes on <strong>its own injector</strong> as locals nothing outside the element can see.</p>
+<pre><code class="language-typescript">const { injectors, InjectorRoot } = window;
+
+class DropList extends HTMLElement {
+  static formAssociated = true;                                  // → real form control
+  static observedAttributes = ['value', 'options', 'name', 'placeholder'];
+
+  #internals = this.attachInternals();
+  #injector  = injectors.ensureInjector(this);                   // private to this element
+  #options: ReadonlyArray&lt;{ value: string; label: string }&gt; = [];
+  #selected: { value: string; label: string } | null = null;
+  static #counter = 0;
+
+  connectedCallback() {
+    // Public attributes → private contexts, scoped to this element's injector.
+    // Descendants of &lt;drop-list&gt; see @options / @placeholder / @surfaceId;
+    // anything outside the element does not.
+    this.#options = this.#resolveOptions(this.getAttribute('options'));
+    this.#injector.set('customContexts:options',     this.#options);
+    this.#injector.set('customContexts:placeholder', this.getAttribute('placeholder') ?? '');
+    this.#injector.set('customContexts:surfaceId',   `drop-list-${++DropList.#counter}`);
+
+    this.value = this.getAttribute('value') ?? '';               // initial selection
+    this.addEventListener('selection-change', this.#onInnerSelection);
+  }
+
+  // ── Form-control surface (string value, like &lt;select&gt;) ─────────────
+  get value() { return this.#selected?.value ?? ''; }
+  set value(v: string) {
+    this.#selected = this.#options.find(o =&gt; o.value === v) ?? null;
+    this.#injector.set('customContexts:selected', this.#selected ?? { value: '', label: '' });
+    this.#internals.setFormValue(this.value);
+  }
+  get selectedOption() { return this.#selected; }
+
+  formResetCallback() { this.value = this.getAttribute('value') ?? ''; }
+  formStateRestoreCallback(state: string) { this.value = state; }
+
+  // ── Event boundary ───────────────────────────────────────────────────
+  // The inner `selection="model=single"` trait fires selection-change inside
+  // the template; we update state and re-emit a public `change` event that
+  // consumers listen for on &lt;drop-list&gt; itself.
+  #onInnerSelection = (e: CustomEvent&lt;{ value: string }&gt;) =&gt; {
+    e.stopPropagation();
+    this.value = e.detail.value;
+    this.dispatchEvent(new CustomEvent('change', { detail: this.#selected, bubbles: true }));
+  };
+
+  // `options="@countries"` → ancestor-injector lookup; literal JSON also accepted.
+  #resolveOptions(raw: string | null) {
+    if (!raw) return [];
+    if (raw.startsWith('@')) {
+      return InjectorRoot.getProviderOf(this, `customContexts:${raw.slice(1)}`) ?? [];
+    }
+    return JSON.parse(raw);
+  }
+}
+
+customElements.define('drop-list', DropList);</code></pre>
+
+<p>The locals the class just set — <code>@options</code>, <code>@selected</code>, <code>@placeholder</code>, <code>@surfaceId</code> — are the <em>only</em> contexts the template references. There is no hidden input: form participation moved to the element itself via <code>ElementInternals.setFormValue</code>.</p>
+<pre><code class="language-html">&lt;button anchor="{{ '{{' }}@surfaceId}}"
+        aria-haspopup="listbox"
+        commandfor="{{ '{{' }}@surfaceId}}" command="toggle-popover"&gt;
+  {{ '{{' }}@selected.label ?? @placeholder}}
+&lt;/button&gt;
+
+&lt;ul id="{{ '{{' }}@surfaceId}}" role="listbox"
+    focus-delegation="strategy=virtual"
+    selection="model=single"
+    type-ahead
+    anchored="placement=bottom-start;collision=flip,resize"
+    popover&gt;
+  &lt;template for-each="@options as option"&gt;
+    &lt;li role="option" composite-descendant
+        data-value="{{ '{{' }}@option.value}}"
+        aria-selected="{{ '{{' }}@option.value === @selected.value}}"&gt;
+      {{ '{{' }}@option.label}}
+    &lt;/li&gt;
+  &lt;/template&gt;
+&lt;/ul&gt;</code></pre>
+
+<h4>Reading the pair as trait language</h4>
+<ul>
+  <li><strong>Literal — structural identity.</strong> <code>selection="model=single"</code>, <code>type-ahead</code>, <code>role="listbox"</code>, <code>role="option"</code>, <code>composite-descendant</code>, <code>aria-haspopup="listbox"</code>. These make this a single dropdown and not a multi-select or a menu; the trait language locks them, so a consumer cannot pass them in as a prop.</li>
+  <li><strong>Literal — behavioral, ambient-overridable.</strong> <code>focus-delegation="strategy=virtual"</code>, <code>anchored="placement=…;collision=…"</code>. Hardcoded as this widget's stance; the ambient <code>droplistIntent</code> injector still wins on any dimension the author has not stated.</li>
+  <li><strong>Erased — open state.</strong> No literal <code>aria-expanded="false"</code> and no <code>hidden</code> to keep in sync. <code>commandfor</code> + <code>command="toggle-popover"</code> drives the native popover machinery; the platform owns <code>aria-expanded</code> on the trigger and the visibility of the surface. The <code>anchored</code> trait only layers placement/collision on top.</li>
+  <li><strong>Erased — form participation.</strong> No hidden <code>&lt;input&gt;</code>. <code>static formAssociated = true</code> + <code>#internals.setFormValue(this.value)</code> is the whole story: <code>&lt;form&gt;</code> submission, <code>FormData.get('country')</code>, <code>form.reset()</code> (→ <code>formResetCallback</code>), bfcache restore (→ <code>formStateRestoreCallback</code>), <code>&lt;label for&gt;</code>, <code>setValidity()</code>, <code>:user-valid</code> / <code>:user-invalid</code>, and the <code>autocomplete</code> attribute all light up with no extra HTML.</li>
+  <li><strong>Bound — data via private context.</strong> <code>&lt;template for-each="@options as option"&gt;</code> stamps one <code>&lt;li&gt;</code> per option from the component-local <code>@options</code>; <code>data-value</code>, the label, and <code>aria-selected</code> all read the same locals. They are scoped to the element's own injector — nothing outside the <code>&lt;drop-list&gt;</code> can read or shadow them.</li>
+  <li><strong>Bound — selection event, scoped.</strong> No imperative click wiring on <code>&lt;li&gt;</code>. The <code>selection="model=single"</code> trait controller owns click / Enter / Space / typeahead → a <code>selection-change</code> event; the class's <code>#onInnerSelection</code> listener catches it, calls <code>stopPropagation</code>, updates <code>@selected</code> via <code>set value()</code>, and re-emits a public <code>change</code> event consumers listen for on <code>&lt;drop-list&gt;</code> itself.</li>
+</ul>
+
+<h3>Altitude 2 — Component (the consumer call site)</h3>
+<p>The element and its attributes <em>are</em> the trait selection. The consumer passes the data in; the component handles the rest.</p>
+<pre><code class="language-html">&lt;drop-list name="country"
+           options="@countries"
+           on:change="setCountry($event)"&gt;&lt;/drop-list&gt;
+&lt;!-- `single` is baked into the preset; `options` accepts a context reference
+     (resolved from an ancestor injector) or an inline expression, and is
+     re-exposed inside the component as the private @options context. --&gt;</code></pre>
+
+<h3>Altitude 3 — TypeScript, explicit composition</h3>
+<p>A list of <code>with*</code> factories — structurally identical to <code>loader.load(promise, [traitA, traitB])</code>. This is what <code>&lt;drop-list&gt;</code> would invoke under the hood if its inner assembly were re-expressed in TypeScript:</p>
+<pre><code class="language-typescript">const country = composeDroplist(trigger, [
+  withAnchoredSurface({ placement: 'bottom-start', collision: ['flip', 'resize'] }),
+  withFocusDelegation({ strategy: 'virtual' }),   // omit strategy → inherits ambient intent
+  withSelection({ model: 'single' }),             // structural: stated here, never inherited
+  withTypeAhead(),
+]);
+// → returns a handle; country.cleanup() reverts every trait, in reverse.</code></pre>
+<p><code>withSelection({ model: 'single' })</code> is the entire "I am a single dropdown" statement. It reads as construction, because it is.</p>
+
+<h3>Example — a project's country dropdown</h3>
+<p>A project consumes the generic <code>&lt;drop-list&gt;</code> by passing data and a handler at the boundary; the component is otherwise untouched. The same <code>&lt;drop-list&gt;</code> is reused for currency, language, time zone, role, or account by changing <code>options=</code> and the handler — never by editing the component.</p>
+<pre><code class="language-html">&lt;form on:submit="saveAddress($event)"&gt;
+  &lt;label for="country"&gt;Country&lt;/label&gt;
+  &lt;drop-list id="country"
+             name="country"
+             options="@countries"
+             placeholder="Select a country…"
+             on:change="setCountry($event)"&gt;&lt;/drop-list&gt;
+
+  &lt;!-- … other fields … --&gt;
+
+  &lt;button type="submit"&gt;Save&lt;/button&gt;
+&lt;/form&gt;</code></pre>
+<pre><code class="language-javascript">import { SimpleStore } from '/blocks/stores/simple';
+const { injectors } = window;
+
+// Project data — could equally come from a fetch or a generated list.
+const COUNTRIES = [
+  { value: 'ar', label: 'Argentina' },
+  { value: 'au', label: 'Australia' },
+  { value: 'br', label: 'Brazil' },
+  { value: 'ca', label: 'Canada' },
+  // …
+];
+
+const addressStore = new SimpleStore({ country: null });
+
+// Provide @countries and the action handlers at the document root —
+// any &lt;drop-list options="@countries"&gt; in the tree can resolve them.
+const root = injectors.getInjectorOf(document);
+root.set('customContexts:countries', COUNTRIES);
+root.set('customContexts:handlers', {
+  setCountry: (e) =&gt; addressStore.setItem('country', e.detail.value),
+  saveAddress: (e) =&gt; {
+    e.preventDefault();
+    // POST addressStore state
+  },
+});
+
+window.attributes.upgrade(document.body);</code></pre>
+
+<h4>What the project owns vs. what the dropdown owns</h4>
+<ul>
+  <li><strong>Project</strong>: the country list (<code>@countries</code>), the persistent selection (<code>addressStore.country</code>), the submit handler. Nothing about <em>how a dropdown works</em>.</li>
+  <li><strong><code>&lt;drop-list&gt;</code></strong>: trait composition, popover open/close, keyboard navigation, single-selection commit semantics, the private <code>@options</code>/<code>@selected</code>/<code>@placeholder</code> locals — and the public <code>change</code> event. Nothing about <em>what is in the list</em>.</li>
+</ul>
+
+<h3>Public API</h3>
+<table>
+  <thead>
+    <tr><th>Surface</th><th>Shape</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Attribute <code>name</code></td><td>string</td><td>Form-control name; flows through to the enclosing <code>&lt;form&gt;</code>.</td></tr>
+    <tr><td>Attribute <code>options</code></td><td><code>@contextPath</code> or JSON</td><td><code>@countries</code> resolves through the ancestor injector chain; a JSON literal is parsed in place.</td></tr>
+    <tr><td>Attribute <code>value</code></td><td>string</td><td>Initial selection; mirrored to the DOM property.</td></tr>
+    <tr><td>Attribute <code>placeholder</code></td><td>string</td><td>Trigger label when nothing is selected.</td></tr>
+    <tr><td>Property <code>.value</code></td><td>string</td><td>Form-submittable surface (matches <code>&lt;select&gt;.value</code>).</td></tr>
+    <tr><td>Property <code>.selectedOption</code></td><td><code>{ value, label } | null</code></td><td>Rich, programmatic access; not form-submittable.</td></tr>
+    <tr><td>Event <code>change</code></td><td><code>CustomEvent&lt;{ value, label }&gt;</code></td><td>Re-emitted on commit; consumers bind with <code>on:change="…"</code>.</td></tr>
+    <tr><td>Form participation</td><td><code>static formAssociated = true</code></td><td><code>FormData</code>, reset, bfcache restore, <code>setValidity()</code>, <code>&lt;label for&gt;</code>, <code>autocomplete</code> attribute.</td></tr>
+  </tbody>
+</table>
+
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">Family-level rules (intent vs. trait, three altitudes, trait surface map) live on the <a href="/blocks/droplist/">droplist family page</a>. Design history: <code>reports/2026-06-02-droplist-trait-language.md</code>, <code>reports/2026-06-02-dropdown-trait-composition.md</code>.</p>

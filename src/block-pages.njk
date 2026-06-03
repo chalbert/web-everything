@@ -46,6 +46,22 @@ eleventyComputed:
         </div>
         {% endif %}
 
+        {% if block.composesIntents %}
+        <div class="section-card mt-8">
+            <h2>Composes Intents</h2>
+            <p class="mb-4 text-slate-600">This block is a <strong>composition manifest</strong> — it defers each behavior to the intent that owns it, rather than re-specifying them. It composes:</p>
+            <ul class="list-disc pl-5">
+            {% for composedId in block.composesIntents %}
+                {% for intent in intents %}
+                    {% if intent.id == composedId %}
+                <li><a href="/intents/{{ intent.id }}/">{{ intent.name }}</a> — {{ intent.summary | lower }}</li>
+                    {% endif %}
+                {% endfor %}
+            {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
         {% if block.traits %}
         <div class="section-card mt-8">
             <h2>Traits</h2>

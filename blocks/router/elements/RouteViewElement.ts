@@ -506,10 +506,15 @@ export default class RouteViewElement extends HTMLElement {
       // Append
       stampTarget.appendChild(fragment);
 
+      // Accumulate (don't overwrite): a single navigation may stamp more than
+      // one fragment into the same target (e.g. an outlet match that falls back
+      // to `this` when its outlet is absent). Overwriting here would orphan the
+      // earlier nodes so the next #unstampFrom couldn't remove them — leaking
+      // content that piles up across navigations.
       if (stampTarget === this) {
-        this.#stampedContent = nodes;
+        this.#stampedContent.push(...nodes);
       } else {
-        (stampTarget as any).__routeStampedContent = nodes;
+        ((stampTarget as any).__routeStampedContent ??= []).push(...nodes);
       }
     }
   }

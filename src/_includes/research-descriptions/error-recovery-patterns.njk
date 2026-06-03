@@ -1,0 +1,89 @@
+<h3>Context</h3>
+<p>
+    This research grounds the <a href="/projects/webreliability/">Web Reliability</a> standard's design
+    decisions by surveying how established frameworks implement retry strategies, circuit breakers,
+    offline queuing, and HTTP error classification. The goal is to identify which patterns are
+    HTTP-specific (and therefore belong in adapter implementations) versus universally applicable
+    (and therefore belong in the protocol contract).
+</p>
+
+<h3>Framework Survey</h3>
+
+<h4>TanStack Query</h4>
+<table>
+    <tr><th>API</th><th>What it does</th><th>Applicability</th></tr>
+    <tr><td><code>retry</code> (number | fn)</td><td>Max retry count; or a predicate <code>(failureCount, error) =&gt; boolean</code></td><td>Universal — predicate pattern directly maps to <code>tryRecover</code> returning null</td></tr>
+    <tr><td><code>retryDelay</code> (number | fn)</td><td>Delay before next attempt; fn receives attempt count</td><td>Universal — maps to <code>RecoveryResult.delay</code></td></tr>
+    <tr><td><code>networkMode: 'online'</code></td><td>Pauses queries when <code>navigator.onLine</code> is false</td><td>HTTP / network specific — an offline-queue handler concern, not the protocol</td></tr>
+    <tr><td><code>onError</code> callback</td><td>Notification after final failure</td><td>Universal — maps to consumer's post-recovery hook</td></tr>
+</table>
+
+<h4>axios-retry</h4>
+<table>
+    <tr><th>API</th><th>What it does</th><th>Applicability</th></tr>
+    <tr><td><code>retries</code></td><td>Max retry count</td><td>Universal</td></tr>
+    <tr><td><code>retryCondition</code> (fn)</td><td>Predicate <code>(error) =&gt; boolean</code> — mirrors <code>tryRecover</code> null vs result</td><td>Universal — the predicate shape directly inspired the null-means-decline decision</td></tr>
+    <tr><td><code>exponentialDelay</code></td><td>Built-in backoff helper</td><td>HTTP handler specific — belongs in an adapter</td></tr>
+    <tr><td>Interceptor composition</td><td>Attaches retry logic at the Axios interceptor layer</td><td>HTTP specific — not a protocol concern</td></tr>
+</table>
+
+<h4>urql retryExchange</h4>
+<table>
+    <tr><th>API</th><th>What it does</th><th>Applicability</th></tr>
+    <tr><td><code>initialDelayMs</code> / <code>maxDelayMs</code></td><td>Backoff range</td><td>Universal — maps to <code>RecoveryResult.delay</code> computation</td></tr>
+    <tr><td><code>randomDelay</code> (jitter)</td><td>Randomises delay to prevent thundering herd</td><td>Universal — jitter is a best practice for any distributed system retry</td></tr>
+    <tr><td><code>maxNumberAttempts</code></td><td>Cap</td><td>Universal</td></tr>
+    <tr><td>Exchange pipeline</td><td>Composable middleware chain around operations</td><td>GraphQL-specific mechanism — informed the first-that-accepts registry pattern</td></tr>
+</table>
+
+<h4>SWR</h4>
+<table>
+    <tr><th>API</th><th>What it does</th><th>Applicability</th></tr>
+    <tr><td><code>onErrorRetry</code> callback</td><td>Full control over retry logic; called with error + key + config + revalidate + info</td><td>Universal — closest model to the handler receiving context and deciding outcome</td></tr>
+    <tr><td><code>errorRetryCount</code></td><td>Max retries</td><td>Universal</td></tr>
+    <tr><td>Pause on offline</td><td>Stops retrying when <code>navigator.onLine</code> is false</td><td>Network specific</td></tr>
+</table>
+
+<h4>Apollo RetryLink</h4>
+<table>
+    <tr><th>API</th><th>What it does</th><th>Applicability</th></tr>
+    <tr><td><code>delay.initial</code> / <code>delay.max</code> / <code>delay.jitter</code></td><td>Exponential backoff with jitter</td><td>Universal backoff parameters</td></tr>
+    <tr><td><code>attempts.retryIf</code> (fn)</td><td>Predicate receiving operation + error</td><td>Universal — predicate pattern reinforces null-means-decline</td></tr>
+    <tr><td>Link chain</td><td>Wraps operations; composable layers</td><td>GraphQL-specific — informed registry-as-chain thinking</td></tr>
+</table>
+
+<h3>Key Design Decisions Informed by This Research</h3>
+<table>
+    <thead>
+        <tr><th>Decision</th><th>Evidence from frameworks</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>null-means-decline</strong> over a separate <code>canHandle()</code></td>
+            <td>axios-retry's <code>retryCondition</code> and Apollo's <code>retryIf</code> both use a single predicate function that returns true/false. Combining predicate + action into one <code>tryRecover()</code> removes the two-step call pattern.</td>
+        </tr>
+        <tr>
+            <td><strong>Registry, not a dedicated chain object</strong></td>
+            <td>urql and Apollo use exchange/link chains, but these are framework-specific pipeline constructs. <code>CustomRegistry.values()</code> already provides ordered iteration — no new abstraction needed.</td>
+        </tr>
+        <tr>
+            <td><strong>HTTP-specific logic stays in handlers, not the protocol</strong></td>
+            <td>Every framework ties backoff math, status-code classification, and Retry-After handling to its HTTP transport. These are not universal — a database timeout handler has no HTTP status code to inspect. The protocol carries only what any operation type needs: the raw Error and attempt count.</td>
+        </tr>
+        <tr>
+            <td><strong>Jitter is a best practice, not a default</strong></td>
+            <td>urql and Apollo both offer jitter as opt-in. Jitter prevents thundering herd in distributed systems — relevant for HTTP adapters, overkill for local computation retries. Handlers that know their domain add jitter; the protocol does not mandate it.</td>
+        </tr>
+        <tr>
+            <td><strong><code>RecoveryContext.attempt</code> is 1-based</strong></td>
+            <td>TanStack Query, SWR, and urql all pass attempt/failure count to retry predicates. 1-based is more natural for humans reading logs ("attempt 3 of 3") and avoids off-by-one in exponential backoff formulas (<code>2^(attempt-1)</code> yields 1, 2, 4 starting at attempt 1).</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Open Questions</h3>
+<ul>
+    <li>Should <code>RecoveryContext</code> carry the operation's <em>category</em> (e.g. <code>'http' | 'database' | 'compute'</code>) so handlers can quickly filter without inspecting the error object?</li>
+    <li>Is a <code>maxAttempts</code> field in context useful, or should handlers track their own attempt caps?</li>
+    <li>Should jitter be a protocol-level utility, or strictly a handler concern?</li>
+</ul>

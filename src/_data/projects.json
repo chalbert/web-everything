@@ -156,6 +156,37 @@
     "isSvg": true
   },
   {
+    "id": "webreliability",
+    "name": "Web Reliability",
+    "description": "Standard for handling mechanism failures — retries, recovery strategies, and resilience patterns — across any operation (HTTP, database, computation, async tasks). A registry of recovery handlers tried in priority order; the first that accepts the error owns the recovery. Distinct from validation: reliability handles system failures, not input invalidity.",
+    "status": "concept",
+    "category": "standard",
+    "icon": "/assets/icons/webreliability.svg",
+    "isSvg": true
+  },
+  {
+    "id": "webvalidation",
+    "name": "Web Validation",
+    "description": "Standard for <strong>input invalidity</strong> across form controls, groups, forms, and nested wizards. Defines the Validation protocol — observable states/events per level, merged validity from independent sources, commitment strategies, async resolution registries — so implementations from different vendors are swappable and combinable. Distinct from reliability: validation handles user data; reliability handles mechanism failure.",
+    "status": "concept",
+    "category": "standard",
+    "icon": "/assets/icons/webvalidation.svg",
+    "isSvg": true,
+    "openQuestions": [
+      { "question": "When validity merges from independent sources, is it strictest-wins or last-writer-wins?", "anchor": "merge-strategy" },
+      { "question": "Does a custom form control built on ElementInternals get :user-invalid for free, or must the standard re-expose touched/dirty state?", "anchor": "user-invalid" }
+    ]
+  },
+  {
+    "id": "webintl",
+    "name": "Web Intl",
+    "description": "Standard for <strong>localization</strong> — turning one UI into many locales: message formatting (Unicode MessageFormat 2.0), locale negotiation and fallback chains, lazy translation loading, and RTL/bidi adaptation. Native <code>Intl</code> and CSS logical properties are the default; FormatJS / i18next / Lingui plug in behind a translation registry. Defines the Localization protocol so message catalogs and locale strategies from different vendors are swappable and combinable.",
+    "status": "concept",
+    "category": "standard",
+    "icon": "/assets/icons/webintl.svg",
+    "isSvg": true
+  },
+  {
     "id": "webtraits",
     "name": "Web Traits",
     "description": "Standard for creating granular, auto-loadable features that bridge the gap between easy developer experience and optimal performance.",

@@ -4,6 +4,7 @@ title: Web Everything - Home
 ---
 
 {% from "project-status.njk" import projectStatus %}
+{% from "display-toolbar.njk" import displayToolbar %}
 
 <section class="intro">
     <h1>Web Everything</h1>
@@ -24,7 +25,10 @@ title: Web Everything - Home
 
 <section class="mb-12">
     <h2 class="section-title">Core Standards</h2>
-    <p class="section-desc">Low-level specifications expanding the capabilities of the platform.</p>
+    <div class="section-head">
+        <p class="section-desc">Low-level specifications expanding the capabilities of the platform.</p>
+        {{ displayToolbar("standards") }}
+    </div>
     <div class="project-grid">
         {% for project in projects %}
         {% if project.category == 'standard' %}
@@ -50,7 +54,10 @@ title: Web Everything - Home
 
 <section>
     <h2 class="section-title">Application Protocols</h2>
-    <p class="section-desc">High-level standards for architecture, interoperability, and application design.</p>
+    <div class="section-head">
+        <p class="section-desc">High-level standards for architecture, interoperability, and application design.</p>
+        {{ displayToolbar("protocols") }}
+    </div>
     <div class="project-grid">
         {% for project in projects %}
         {% if project.category == 'utility' or project.category == 'ecosystem' %}
@@ -75,8 +82,8 @@ title: Web Everything - Home
 </section>
 
 <section style="margin-top: 3rem;">
-    <h2 class="section-title">Implementations</h2>
-    <p class="section-desc">Projects that bring Web Everything protocols to life. Building your own? The protocols are open for anyone to implement.</p>
+    <h2 class="section-title">Implementations &amp; Tools</h2>
+    <p class="section-desc">Projects that bring Web Everything protocols to life, and the platforms built on top of them. Building your own? The protocols are open for anyone to implement.</p>
     <div class="project-grid">
         <div class="project-card">
             <a href="{{ links.frontierUrl }}" class="project-card-link" aria-label="View FrontierUI" target="_blank" rel="noopener"></a>
@@ -88,6 +95,17 @@ title: Web Everything - Home
             </div>
             <p>A reference implementation of Web Everything protocols. Production-ready building blocks for state management, routing, views, tabs, and more.</p>
             {{ projectStatus('active') }}
+        </div>
+        <div class="project-card">
+            <a href="{{ links.plateauUrl }}" class="project-card-link" aria-label="View Plateau" target="_blank" rel="noopener"></a>
+            <div class="project-header">
+                <div class="project-icon">
+                    <img src="/assets/icons/plateau.svg" alt="Plateau icon" width="48" height="48">
+                </div>
+                <h2 class="project-title">Plateau</h2>
+            </div>
+            <p>An enterprise front-end platform management product, built natively on Web Everything. Catalogs applications, libraries, and standards across an organization, and ships configurator tools assembled entirely from the protocols.</p>
+            {{ projectStatus('poc') }}
         </div>
     </div>
 </section>
@@ -109,3 +127,5 @@ title: Web Everything - Home
         </a>
     </div>
 </section>
+
+<script src="/assets/js/home-display.js"></script>

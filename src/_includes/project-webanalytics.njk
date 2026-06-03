@@ -1,0 +1,81 @@
+<section class="intro-section mb-12">
+  <h3 id="mission">Mission</h3>
+  <p>
+    <strong>Web Analytics</strong> standardizes <strong>vendor-neutral user behavior tracking</strong>
+    so applications instrument once and route events to any analytics backend (Segment, Mixpanel,
+    Amplitude, GA4, PostHog, self-hosted) without rewriting the instrumentation. The contract is the
+    <a href="#protocol-analytics-vocabulary">Analytics Event Vocabulary Protocol</a> below — a small
+    set of canonical event shapes (Identify, Track, Page) borrowed from the
+    <a href="https://segment.com/docs/connections/spec/">Segment Spec</a>, which most major vendors
+    already accept verbatim.
+  </p>
+</section>
+
+<section id="protocol-analytics-vocabulary" class="section-card">
+  <h3 id="analytics-vocabulary-protocol">Analytics Event Vocabulary Protocol</h3>
+  <p>
+    Conformance reference for vendor-neutral analytics instrumentation. Adopts the
+    <a href="https://segment.com/docs/connections/spec/">Segment Spec</a> as the canonical event
+    vocabulary so a single call site can target any conformant backend.
+  </p>
+
+  <h4 id="canonical-events">Canonical Events</h4>
+  <table>
+    <thead>
+      <tr><th>Event</th><th>Purpose</th><th>Required Fields</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>identify(userId, traits?)</code></td>
+        <td>Link the current session to a known user; attach long-lived attributes.</td>
+        <td><code>userId</code> · <code>traits</code> (optional record)</td>
+      </tr>
+      <tr>
+        <td><code>track(event, properties?)</code></td>
+        <td>Record a discrete user action (button click, purchase, custom domain event).</td>
+        <td><code>event</code> (verb-noun string) · <code>properties</code> (optional record)</td>
+      </tr>
+      <tr>
+        <td><code>page(category?, name?, properties?)</code></td>
+        <td>Record a page view or virtual route change.</td>
+        <td>All optional; vendor fills missing fields from <code>document</code>.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h4 id="contract-shape">Contract Shape</h4>
+  {% highlight "typescript" %}
+interface AnalyticsBackend {
+  identify(userId: string, traits?: Record<string, unknown>): void;
+  track(event: string, properties?: Record<string, unknown>): void;
+  page(category?: string, name?: string, properties?: Record<string, unknown>): void;
+}
+  {% endhighlight %}
+  <p>
+    Any conformant adapter (Segment, Mixpanel, GA4, custom) satisfies this interface. Components
+    resolve the backend through the injector chain — they never import a vendor SDK directly.
+  </p>
+
+  <h4 id="why-segment-spec">Why Segment Spec</h4>
+  <ul>
+    <li>Vendor-agnostic by construction — most analytics platforms accept Segment events natively or via a one-line shim.</li>
+    <li>Stable, well-documented vocabulary with conventions for verb-noun naming and common e-commerce / SaaS events.</li>
+    <li>Allows swapping backends without touching call sites — a procurement / privacy decision rather than an engineering migration.</li>
+  </ul>
+</section>
+
+<section id="composition" class="section-card">
+  <h3 id="composition">Composition With Other Standards</h3>
+  <ul style="font-size: 0.9rem;">
+    <li><strong><a href="/projects/webtraces/">Web Traces</a></strong> — analytics records <em>what users did</em>; traces record <em>how the system processed it</em>. They share trace IDs when correlated.</li>
+    <li><strong><a href="/projects/webevents/">Web Events</a></strong> — analytics adapters can subscribe to typed events emitted by other blocks to instrument without sprinkling <code>track()</code> calls.</li>
+  </ul>
+</section>
+
+<section id="status" class="section-card">
+  <h3 id="status">Status</h3>
+  <p>
+    Web Analytics is in <strong>draft</strong> phase. The vocabulary is fixed (Segment Spec); the
+    adapter ecosystem (Segment, Mixpanel, GA4, self-hosted) is the next deliverable.
+  </p>
+</section>

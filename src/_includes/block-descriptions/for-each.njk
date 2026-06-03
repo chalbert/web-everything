@@ -1,15 +1,27 @@
+{% from "source-toggle.njk" import sourceToggle, jsxSource, endSource %}
+
 <h2>Protocol: For Each</h2>
 <p>Iterates over a collection (Array, Observable, or Promise) and stamps a template for each item.</p>
 <h3>Virtual Implementation</h3>
 <p>Uses Custom Comments (e.g. <code>&lt;!-- control:for-each --&gt;</code>) to mark the list boundaries. This behaves like a Repeater without a wrapper element.</p>
 <h3>Usage Example</h3>
-<pre><code class="language-html">&lt;!-- control:for-each
-  items="users"
-  key="id"
---&gt;
-  &lt;template&gt;
-    &lt;div class="user-row"&gt;
-       &lt;span data-bind="name"&gt;&lt;/span&gt;
-    &lt;/div&gt;
-  &lt;/template&gt;
-&lt;!-- /control:for-each --&gt;</code></pre>
+<p>The same iteration in canonical HTML (the comment-directive form) and its JSX mirror — the customized built-in <code>&lt;template is="for-each"&gt;</code>, into which the comment markers and inner <code>&lt;template&gt;</code> collapse (see the <a href="/adapters/jsx-adapter/">JSX Adapter</a> mapping, row 8):</p>
+{{ sourceToggle("for-each-usage") }}
+{% highlight "html" %}
+<!-- control:for-each items="users" key="id" -->
+  <template>
+    <div class="user-row">
+      <span data-bind="name"></span>
+    </div>
+  </template>
+<!-- /control:for-each -->
+{% endhighlight %}
+{{ jsxSource("for-each-usage") }}
+{% highlight "tsx" %}
+<template is="for-each" items="users" key="id">
+  <div class="user-row">
+    <span data-bind="name" />
+  </div>
+</template>
+{% endhighlight %}
+{{ endSource() }}

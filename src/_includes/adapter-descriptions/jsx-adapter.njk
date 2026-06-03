@@ -1,8 +1,53 @@
+{% from "source-toggle.njk" import sourceToggle, jsxSource, endSource %}
+
 <h2>JSX Adapter</h2>
 <p>
     The JSX Adapter enables authoring Web Everything components using JSX/TSX syntax while compiling to the same primitives as HTML.
     It provides full type safety and IDE support while maintaining interconvertibility with other formats.
 </p>
+
+<section class="section-card">
+    <h3 id="authoring-model">Authoring model — a mirror of HTML, not React</h3>
+    <p>
+        Because the goal is to define <em>any</em> element as HTML or JSX and toggle <strong>losslessly</strong>, JSX here is a
+        faithful, reversible <strong>mirror dialect</strong> of the canonical HTML adapter — deliberately <em>not</em> React. So
+        <code>class</code> (never <code>className</code>), <code>for</code> (never <code>htmlFor</code>), events as <code>on:*</code>
+        string behaviors, and directives as the literal <code>&lt;template is="…"&gt;</code> element. Toggle the example below
+        between the two spellings of the same element tree:
+    </p>
+
+    {{ sourceToggle("user-card-mirror") }}
+    {% highlight "html" %}
+<user-card class="featured" name="Ada Lovelace" on:select="choose($event)">
+  <span slot="title">Ada Lovelace</span>
+  <ul role="list">
+    <template is="for-each" items="@links" key="id">
+      <li><a history-link="/profile">Profile</a></li>
+    </template>
+  </ul>
+  <output bind-text="status"></output>
+</user-card>
+    {% endhighlight %}
+    {{ jsxSource("user-card-mirror") }}
+    {% highlight "tsx" %}
+<user-card class="featured" name="Ada Lovelace" onselect={choose}>
+  <span slot="title">Ada Lovelace</span>
+  <ul role="list">
+    <template is="for-each" items="@links" key="id">
+      <li><a history-link="/profile">Profile</a></li>
+    </template>
+  </ul>
+  <output bind-text="status" />
+</user-card>
+    {% endhighlight %}
+    {{ endSource() }}
+
+    <p style="margin-bottom: 0; font-size: 0.9rem; color: var(--color-text-muted);">
+        <strong>Note:</strong> the full row-by-row correspondence (events, directives, interpolation, slots) is specified in
+        <code>reports/2026-06-03-jsx-adapter-feature-mapping.md</code>. How a component <em>updates over time</em> — binding,
+        virtual DOM, fine-grained reactivity — is a separate axis, parked as <a href="/backlog/jsx-rendering-strategy-axis/">rendering-strategy</a>.
+    </p>
+</section>
 
 <section class="section-card">
     <h3 id="design-principles">Design Principles</h3>

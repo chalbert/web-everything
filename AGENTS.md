@@ -9,7 +9,7 @@
 - **Plugs** (`plugs/`) — core primitives that patch/extend browser APIs (CustomStore, CustomAttribute, InjectorRoot). Exposed on `window` in **plugged mode**; tree-shakeable in **unplugged mode**.
 - **Blocks** (`blocks/`) — reusable implementations built on plugs (SimpleStore, OnEventAttribute, CallParser). Imported directly.
 
-[Frontier UI](../frontierui/) is the **reference implementation** of these standards. This repo is canonical for shared terminology, naming, and protocol contracts; Frontier UI points back here.
+[Frontier UI](../frontierui/) is the **reference implementation** of these standards. This repo is canonical for shared terminology, naming, **protocols** (conformance contracts owned by a Project, surfaced via `/protocols/`), and **intents** (UX preference vocabularies, surfaced via `/intents/`). Frontier UI points back here.
 
 ## The website IS the spec
 `src/_data/*.json` + `src/_includes/*-descriptions/*.njk` are the **source of truth**. Implementation follows documented API. If it isn't documented, document it first. These specs are large — **query one entry at a time** (grep/jq), never load whole.
@@ -38,16 +38,17 @@
 | Plugs/blocks, injectors, registries, parsers, debugging | [docs/agent/architecture.md](docs/agent/architecture.md) |
 | Adding a block/plug/intent/adapter, doc requirements, the standard-authoring method | [docs/agent/design-first.md](docs/agent/design-first.md) (Claude: `/new-standard` triggers it) |
 | Processing `plans/` → research pages, reports | [docs/agent/research-workflow.md](docs/agent/research-workflow.md) |
+| Capturing ideas/issues/decisions/reviews, report open questions → `/backlog/` (one md file per item in `backlog/`) | [docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md) |
 | Dev environment & scripts | `DEV_GUIDE.md` |
-| Canonical specs (per-entry) | `src/_data/{blocks,plugs,intents,semantics,references}.json` |
+| Canonical specs (per-entry) | `src/_data/{blocks,plugs,intents,protocols,semantics,references}.json`; backlog = `backlog/*.md` |
 
 ## Repository inventory
 <!-- AUTO-GENERATED:inventory — run `npm run gen:inventory`; do not edit by hand -->
-- **Plugs** 37 — 31 active · 4 concept · 2 experimental
-- **Blocks** 27 — 13 active · 8 concept · 6 draft
-- **Intents** 22 — 7 concept · 15 draft
-- **Glossary terms** 100 · **Research topics** 14 (14 open)
-- **Projects** 22: webadapters, webanalytics, webbehaviors, webblocks, webcases, webcomponents, webcontexts, webdirectives, webdocs, webevents, webexpressions, webinjectors, webintents, webmanifests, webplugs, webportals, webpositioning, webregistries, webresources, webstates, webtraces, webtraits
+- **Plugs** 41 — 31 active · 8 concept · 2 experimental
+- **Blocks** 27 — 13 active · 7 concept · 7 draft
+- **Intents** 28 — 9 concept · 19 draft
+- **Glossary terms** 140 · **Research topics** 18 (18 open)
+- **Projects** 25: webadapters, webanalytics, webbehaviors, webblocks, webcases, webcomponents, webcontexts, webdirectives, webdocs, webevents, webexpressions, webinjectors, webintents, webintl, webmanifests, webplugs, webportals, webpositioning, webregistries, webreliability, webresources, webstates, webtraces, webtraits, webvalidation
 <!-- /AUTO-GENERATED:inventory -->
 
 ## Commands

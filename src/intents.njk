@@ -1,0 +1,93 @@
+---
+layout: base.njk
+title: Web Everything — Intents
+---
+
+<section class="intro">
+  <h1>Intents</h1>
+  <p>
+    Intents are the <strong>UX preference vocabulary</strong>. A project expresses its intents through
+    config (typically JSON) that is consumed at build or runtime by adapters to deeply configure
+    components — motion, density, interaction modality, prefetch eagerness, validation commitment,
+    and so on. Each intent below defines its dimensions and the values they accept.
+  </p>
+</section>
+
+<section style="margin: 1.5rem 0 2rem;">
+  <div style="display: flex; flex-wrap: wrap; gap: 2rem; align-items: flex-end;">
+    <div style="flex: 1; min-width: 220px;">
+      <h3 style="margin: 0 0 0.5rem; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted);">Search</h3>
+      <input type="search" id="intent-search" placeholder="Filter by name, summary, or dimension…"
+             style="width: 100%; padding: 0.5rem 0.75rem; border: 1px solid var(--color-border); border-radius: 6px; font-size: 0.9em; background: var(--color-surface, #fff);">
+    </div>
+    <div>
+      <h3 style="margin: 0 0 0.5rem; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted);">Status</h3>
+      <div id="filter-status" style="display: flex; flex-wrap: wrap; gap: 0.4rem;">
+        {% for status in ['concept', 'draft', 'experimental', 'active'] %}
+          {% set hit = false %}
+          {% for i in intents %}{% if i.status == status %}{% set hit = true %}{% endif %}{% endfor %}
+          {% if hit %}
+          <label style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.6rem; border: 1px solid var(--color-border); border-radius: 9999px; font-size: 0.85em; cursor: pointer; background: var(--color-surface, #fff);">
+            <input type="checkbox" data-filter="status" value="{{ status }}" checked style="margin: 0;">
+            {{ status | title }}
+          </label>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="project-grid" id="intent-grid">
+  {% for intent in intents %}
+    {% set dimKeys = [] %}
+    {% for key, _ in intent.dimensions %}{% set dimKeys = (dimKeys.push(key), dimKeys) %}{% endfor %}
+    <a href="/intents/{{ intent.id }}/"
+       class="project-card intent-tile"
+       data-status="{{ intent.status }}"
+       data-haystack="{{ intent.id }} {{ intent.name | lower }} {{ intent.summary | lower }} {{ dimKeys | join(' ') | lower }}"
+       style="text-decoration: none; color: inherit; display: block;">
+      <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
+        <h3 class="project-title" style="margin: 0;">{{ intent.name }}</h3>
+        <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if intent.status == 'concept' %}#fef3c7{% elif intent.status == 'draft' %}#dbeafe{% elif intent.status == 'experimental' %}#fde68a{% elif intent.status == 'active' %}#dcfce7{% else %}#f1f5f9{% endif %}; color: {% if intent.status == 'concept' %}#92400e{% elif intent.status == 'draft' %}#1e40af{% elif intent.status == 'experimental' %}#854d0e{% elif intent.status == 'active' %}#166534{% else %}#64748b{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ intent.status | title }}</span>
+      </div>
+      <p style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ intent.summary }}</p>
+      {% if dimKeys.length %}
+      <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+        {% for key in dimKeys %}
+        <span style="display: inline-block; padding: 0.1rem 0.5rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b); font-size: 0.75em; font-family: ui-monospace, monospace;">{{ key }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </a>
+  {% endfor %}
+</div>
+
+<p id="intent-empty" style="display: none; text-align: center; color: var(--color-text-muted); margin: 2rem 0;">No intents match.</p>
+
+<script>
+(function () {
+  var grid = document.getElementById('intent-grid');
+  var empty = document.getElementById('intent-empty');
+  var search = document.getElementById('intent-search');
+  var tiles = Array.prototype.slice.call(grid.querySelectorAll('.intent-tile'));
+  var checkboxes = Array.prototype.slice.call(document.querySelectorAll('input[type="checkbox"][data-filter="status"]'));
+
+  function apply() {
+    var statuses = checkboxes.filter(function (c) { return c.checked; }).map(function (c) { return c.value; });
+    var q = (search.value || '').trim().toLowerCase();
+    var visible = 0;
+    tiles.forEach(function (tile) {
+      var statusOk = statuses.indexOf(tile.dataset.status) !== -1;
+      var textOk = !q || tile.dataset.haystack.indexOf(q) !== -1;
+      var ok = statusOk && textOk;
+      tile.style.display = ok ? '' : 'none';
+      if (ok) visible++;
+    });
+    empty.style.display = visible === 0 ? '' : 'none';
+  }
+
+  checkboxes.forEach(function (c) { c.addEventListener('change', apply); });
+  search.addEventListener('input', apply);
+})();
+</script>

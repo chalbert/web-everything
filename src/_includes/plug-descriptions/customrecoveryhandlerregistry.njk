@@ -1,0 +1,90 @@
+{% from "mode-selector.njk" import pluggedContent, unpluggedContent, comparisonContent, endContent %}
+
+<h3 id="overview">Overview</h3>
+<p>
+    Exposes <code>window.customRecovery</code> for registering named <strong>recovery handlers</strong>.
+    A handler is any service that can intercept a mechanism failure — HTTP errors, timeouts, offline
+    conditions, circuit breaker trips, or custom domain failures — and decide whether to retry, queue,
+    or escalate. Handlers are tried in registration order; the first whose
+    <code>tryRecover()</code> returns a non-null result owns the recovery. Any system (Resource Loader,
+    form submission, background task) resolves the registry through the injector chain and delegates,
+    so recovery logic is never hardwired into consumers.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/AbortController">AbortController</a></td>
+        <td>Baseline</td>
+        <td>Each recovery attempt receives a fresh <code>AbortSignal</code>; the previous attempt's signal is aborted before the next begins. Handlers may expose the signal to the underlying operation.</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Navigator/onLine">navigator.onLine</a></td>
+        <td>Baseline</td>
+        <td>Available to handlers for offline detection and queuing. Not mandated by the registry — handlers opt in to connectivity gating as needed.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+interface CustomRecoveryHandlerRegistry extends CustomRegistry<CustomRecoveryHandler> {
+    readonly localName = 'customRecovery';
+
+    // Register a named handler (e.g. 'http-retry', 'circuit-breaker', 'offline-queue').
+    // Registration order is priority order — first registered is tried first.
+    define(name: string, handler: CustomRecoveryHandler): void;
+
+    // Ordered iterator — consumers try handlers in definition order.
+    values(): IterableIterator<CustomRecoveryHandler>;
+}
+{% endhighlight %}
+
+<h3 id="usage-example">Usage Example</h3>
+
+{{ pluggedContent("recovery-registry-example", code=true) }}
+{% highlight "javascript" %}
+// Register handlers at bootstrap in priority order.
+import { OfflineQueueHandler } from '@web-reliability/offline-queue';
+import { CircuitBreakerHandler } from '@web-reliability/circuit-breaker';
+import { HttpRetryHandler } from '@web-reliability/http';
+
+customRecovery.define('offline-queue', new OfflineQueueHandler());
+customRecovery.define('circuit-breaker', new CircuitBreakerHandler({ threshold: 5 }));
+customRecovery.define('http-retry', new HttpRetryHandler({ strategy: 'exponential', maxRetries: 3 }));
+
+// Any consumer delegates — never knows which handler accepted.
+for (const handler of customRecovery.values()) {
+    const result = await handler.tryRecover(error, context);
+    if (result) return applyResult(result);
+}
+{% endhighlight %}
+
+{{ unpluggedContent("recovery-registry-example", code=true) }}
+{% highlight "javascript" %}
+consume { customRecovery } of '@web-reliability';
+
+customRecovery.define('http-retry', new HttpRetryHandler({ strategy: 'exponential' }));
+
+for (const handler of customRecovery.values()) {
+    const result = await handler.tryRecover(error, context);
+    if (result) return applyResult(result);
+}
+{% endhighlight %}
+
+{{ endContent() }}
+
+<h3 id="design-decisions">Design Decisions</h3>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+    <li><strong>Registry, not a chain object.</strong> <code>CustomRegistry.values()</code> already provides ordered iteration. A purpose-built chain object would duplicate that. Registration order is the priority — explicit and reviewable.</li>
+    <li><strong>First-that-accepts pattern.</strong> Handlers return <code>null</code> to decline without side effects; the next handler is tried. This is consistent with <code>CustomExpressionParserRegistry</code> (<code>tryParse</code>) and route matching (<code>matchRoute</code>).</li>
+    <li><strong>No built-in handlers.</strong> HTTP retry logic, circuit-breaker state, and offline-queue mechanics belong in implementations — not the protocol. Applications choose and compose only what they need.</li>
+    <li><strong>Applies to any operation.</strong> The registry is domain-agnostic. HTTP, database, computation, or background task failures all use the same contract. Consumers do not need separate recovery registries per operation type.</li>
+</ul>
+
+<p class="text-sm text-gray-600 mt-4">
+    Handlers satisfy the
+    <a href="/plugs/customrecoveryhandler/"><code>CustomRecoveryHandler</code></a> contract.
+    See <a href="/projects/webreliability/">Web Reliability</a> for the full feature surface and
+    <a href="/projects/webreliability/#protocol-error-recovery">Error Recovery Protocol</a> for the conformance reference.
+</p>

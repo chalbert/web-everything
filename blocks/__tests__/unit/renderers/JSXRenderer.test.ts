@@ -148,6 +148,34 @@ describe('JSXRenderer', () => {
     });
   });
 
+  describe('mirror dialect', () => {
+    it('should set class from a direct class prop (not just className)', () => {
+      const div = jsx.createElement('div', { class: 'featured' });
+      expect(div.getAttribute('class')).toBe('featured');
+    });
+
+    it('should set for from a direct for prop (not just htmlFor)', () => {
+      const label = jsx.createElement('label', { for: 'input-id' });
+      expect(label.getAttribute('for')).toBe('input-id');
+    });
+
+    it('should set on:* string behaviors as attributes, not listeners', () => {
+      const handler = vi.fn();
+      const button = jsx.createElement('button', { 'on:click': 'inc($event)' });
+      expect(button.getAttribute('on:click')).toBe('inc($event)');
+      // a string behavior must NOT be wired as a real listener
+      button.click();
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('should reflect the is attribute for customized built-in directives', () => {
+      const tpl = jsx.createElement('template', { is: 'for-each', items: '@links', key: 'id' });
+      expect(tpl.getAttribute('is')).toBe('for-each');
+      expect(tpl.getAttribute('items')).toBe('@links');
+      expect(tpl.getAttribute('key')).toBe('id');
+    });
+  });
+
   describe('Fragment', () => {
     it('should create DocumentFragment', () => {
       const fragment = jsx.createElement(Fragment, null, 'text');

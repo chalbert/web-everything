@@ -76,11 +76,26 @@ effect(operation, { input, output, attributes });
   </div>
 </details>
 
-<section id="ssr" class="section-card">
-    <h3 id="ssr-contract">SSR: Trace Context Propagation</h3>
+<section id="protocol-trace-observability" class="section-card">
+    <h3 id="ssr-contract">Trace Observability Protocol</h3>
     <p>
-        <strong>Web Traces</strong> is primarily a client-side observability system. However, the server plays a role in
-        propagating trace context so that client-side spans can be correlated with server-side traces.
+        Aligns Web Traces with <a href="https://www.w3.org/TR/trace-context/">W3C Trace Context</a>
+        and <a href="https://opentelemetry.io/">OpenTelemetry</a>. Defines the trace propagation
+        contract servers and clients must observe so distributed traces correlate across the
+        client/server boundary, plus the suggested client-side API shape (<code>trace()</code> /
+        <code>effect()</code>) that components instrument against.
+    </p>
+
+    <h4>Suggested Client API Shape</h4>
+    <pre><code>trace(value, { attributes });
+effect(operation, { input, output, attributes });
+    </code></pre>
+    <p>Compatible with both distributed and local tracing needs; aligns with OpenTelemetry's span/context model.</p>
+
+    <h4>Trace Context Propagation</h4>
+    <p>
+        <strong>Web Traces</strong> is primarily a client-side observability system. The server plays a role in
+        propagating trace context so client-side spans correlate with server-side traces.
     </p>
     <ul class="list-disc ml-6 text-gray-600 text-sm">
         <li><strong>Header propagation:</strong> Server MUST propagate <code>traceparent</code> and <code>tracestate</code> headers per the <a href="https://www.w3.org/TR/trace-context/">W3C Trace Context</a> specification.</li>
