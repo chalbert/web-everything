@@ -71,8 +71,35 @@ customElements.define('user-card', UserCard);
 </section>
 
 <section class="section-card">
+    <h3 id="directionality">Directionality &amp; compatibility</h3>
+    <p>
+        Unlike the <a href="/adapters/jsx-adapter/">JSX adapter</a> — a <strong>two-way</strong>, reversible
+        <em>mirror</em> of HTML (the same element tree in two spellings, lossless round-trip) — the Declarative
+        Component adapter is <strong>one-way</strong>: it <em>lowers</em> a declarative definition to a class. A
+        class is strictly more expressive than a declarative definition (arbitrary lifecycle, imperative logic,
+        observed attributes), so <code>class → &lt;component&gt;</code> is not generally recoverable.
+    </p>
+    <table>
+        <tr><th></th><th>JSX adapter</th><th>Declarative Component adapter</th></tr>
+        <tr><td>Maps</td><td>HTML ⇄ JSX — same tree, two spellings</td><td>declarative <code>&lt;component&gt;</code> → class custom element</td></tr>
+        <tr><td>Directionality</td><td><strong>Two-way</strong> (bidirectional)</td><td><strong>One-way</strong> (lowering / desugaring)</td></tr>
+        <tr><td>Round-trip</td><td>Lossless for named constructs; inline closures &amp; eager interpolation lossy</td><td>Only the exact generated class shape reverses; arbitrary classes do not</td></tr>
+        <tr><td>Transform time</td><td>Build-time AST (<code>jsxToHtml</code>/<code>htmlToJsx</code>)</td><td>Build-time AST (runtime twin in the playground)</td></tr>
+        <tr><td>Output</td><td>The other authoring format (peer)</td><td>A registered custom element (lower layer)</td></tr>
+        <tr><td>Category</td><td>Rendering (format peer of HTML)</td><td>Syntax (sugar → class)</td></tr>
+    </table>
+    <p style="margin-bottom: 0;">
+        So the <a href="/blocks/component/">block page's</a> declarative↔class toggle shows <em>input beside
+        generated output</em>, not two interchangeable spellings. The two adapters <strong>compose</strong>: a
+        <code>&lt;component&gt;</code> definition can itself be authored in JSX spelling, which the JSX adapter
+        reverses to HTML, which this adapter then lowers to a class.
+    </p>
+</section>
+
+<section class="section-card">
     <h3 id="related">Related</h3>
     <ul style="margin-bottom: 0;">
+        <li><a href="/demos/component-adapter-demo/">Component Adapter Playground</a> — live test surface: declarative source → generated class → rendered element</li>
         <li><a href="/blocks/component/">Component block</a> — the standard this adapter implements</li>
         <li><a href="/projects/webcomponents/">Web Components</a> — the owning project</li>
         <li><a href="/adapters/html-adapter/">HTML Adapter</a> — canonical format; AST-transformation lineage</li>

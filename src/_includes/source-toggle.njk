@@ -46,3 +46,30 @@
     </div>
 </div>
 {% endmacro %}
+
+{#
+  autoToggle(id, html) — author the HTML once; the JSX pane is GENERATED from it at build time via
+  the `htmlToJsx` filter (the conversion adapter, build-time). Usage:
+
+    {% set myHtml %}
+    <user-card name="Ada"><span slot="title">Ada</span></user-card>
+    {% endset %}
+    {{ autoToggle("user-card", myHtml) }}
+#}
+{% macro autoToggle(id, html) %}
+<div class="mode-selector-container" data-mode-selector="{{ id }}" style="border: 1px solid #e5e7eb; border-radius: 0.375rem; overflow: hidden; margin-bottom: 1rem;">
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.75rem; background: #f9fafb; border-bottom: 1px solid #e5e7eb;">
+        <span style="font-size: 0.7rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #9ca3af;">Source <span style="font-weight: 400; text-transform: none; letter-spacing: 0;">— JSX generated from HTML</span></span>
+        <div class="mode-tabs" style="display: flex; gap: 0; border: 1px solid #d1d5db; border-radius: 0.25rem; overflow: hidden;">
+            <button class="mode-tab active" data-mode="html" style="padding: 0.25rem 0.75rem; font-size: 0.75rem; font-weight: 500; background: #059669; color: white; border: none; cursor: pointer;">HTML</button>
+            <button class="mode-tab" data-mode="jsx" style="padding: 0.25rem 0.75rem; font-size: 0.75rem; font-weight: 500; background: white; color: #6b7280; border: none; border-left: 1px solid #d1d5db; cursor: pointer;">JSX</button>
+        </div>
+    </div>
+    <div class="mode-content" data-mode-content="{{ id }}" data-mode="html" style="display: block;">
+        <pre class="source-toggle-code"><code class="language-html">{{ html | trim | escape }}</code></pre>
+    </div>
+    <div class="mode-content" data-mode-content="{{ id }}" data-mode="jsx" style="display: none;">
+        <pre class="source-toggle-code"><code class="language-tsx">{{ html | htmlToJsx | escape }}</code></pre>
+    </div>
+</div>
+{% endmacro %}

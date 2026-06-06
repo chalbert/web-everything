@@ -52,10 +52,14 @@ customElements.define('user-card', UserCard);
     <p class="text-sm text-gray-600">
         <strong>Concept.</strong> The standard ships with its design forks held
         <strong>open for progressive resolution</strong> — see
-        <a href="/backlog/">Open Points (DC-1…DC-8)</a> and the grounding report
+        <a href="/backlog/">Open Points (DC-1…DC-10)</a> and the grounding report
         <code>reports/2026-06-03-declarative-component-element.md</code>.
         This page documents <em>contracts</em>; the concrete transform/runtime is the
         reference implementation's job (Frontier UI).
+    </p>
+    <p class="text-sm text-gray-600">
+        <strong>Try it:</strong> the <a href="/demos/component-adapter-demo/">Component Adapter Playground</a>
+        runs the transform live — author a definition, see the generated class, and render the element.
     </p>
 </section>
 
@@ -174,10 +178,11 @@ customElements.define('x-byline', XByline);
     <h3 id="open-questions">Open questions (progressive resolution)</h3>
     <p>
         None of the design forks are resolved by fiat. Each is tracked as a
-        <code>decision</code> thread in the <a href="/backlog/">backlog</a> (DC-1…DC-9) and in the
+        <code>decision</code> thread in the <a href="/backlog/">backlog</a> (DC-1…DC-10) and in the
         grounding report's Open Points Register, carrying a <em>current recommendation</em> only —
         tag name vs Vue ambiguity (DC-1), <code>shadow</code> spelling (DC-2), registration timing
         (DC-3), reactive depth (DC-4), the scripting hook (DC-5), adapter placement (DC-6), toggle
-        interactivity (DC-7), Protocol extraction (DC-8), and implicit empty template (DC-9).
+        interactivity (DC-7), Protocol extraction (DC-8), implicit empty template (DC-9), and the
+        explicit-empty round-trip sub-decision (DC-10).
     </p>
 </section>

@@ -8,6 +8,8 @@
     "dev:vite": "vite --port 3000",
     "build": "npm run build:docs && npm run build:demo",
     "build:docs": "eleventy",
+    "build:check": "eleventy --output=/tmp/we-build-check --quiet",
+    "verify": "vitest run && npm run build:check",
     "build:demo": "vite build",
     "start": "npm run dev",
     "clean": "rm -rf _site",

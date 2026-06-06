@@ -1,6 +1,14 @@
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
+  // Mirror vite.config.mts so .tsx files (the shared mapping fixtures + conformance suites)
+  // compile the JSX mirror dialect through the realigned renderer here exactly as they do in
+  // the browser. esbuild only applies these to .tsx/.jsx, so plain .ts tests are unaffected.
+  esbuild: {
+    jsxFactory: 'jsx.createElement',
+    jsxFragment: 'jsx.Fragment',
+    jsxInject: `import jsx from '/blocks/renderers/jsx'`,
+  },
   test: {
     globals: true,
     environment: 'happy-dom',
@@ -35,8 +43,8 @@ export default defineConfig({
       },
     },
     include: [
-      'plugs/**/__tests__/**/*.test.ts',
-      'blocks/**/__tests__/**/*.test.ts',
+      'plugs/**/__tests__/**/*.test.{ts,tsx}',
+      'blocks/**/__tests__/**/*.test.{ts,tsx}',
     ],
   },
   resolve: {

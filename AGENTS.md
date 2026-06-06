@@ -40,6 +40,7 @@
 | Adding a block/plug/intent/adapter, doc requirements, the standard-authoring method | [docs/agent/design-first.md](docs/agent/design-first.md) (Claude: `/new-standard` triggers it) |
 | Processing `plans/` → research pages, reports | [docs/agent/research-workflow.md](docs/agent/research-workflow.md) |
 | Capturing ideas/issues/decisions/reviews, report open questions → `/backlog/` (one md file per item in `backlog/`) | [docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md) |
+| Building or changing a runtime demo under `demos/` | [docs/agent/demo-workflow.md](docs/agent/demo-workflow.md) |
 | Dev environment & scripts | `DEV_GUIDE.md` |
 | Canonical specs (per-entry) | `src/_data/{blocks,plugs,intents,protocols,semantics,references}.json`; backlog = `backlog/*.md` |
 

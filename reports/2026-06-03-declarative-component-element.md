@@ -120,6 +120,7 @@ independently over time. `🔶 DECIDE` = pending; current recommendation only.
 | DC-7 | 🔶 DECIDE | Toggle editor interactivity | Docs examples show both forms | Static toggle now; live in-browser transform deferred to tier 2 |
 | DC-8 | 🔶 DECIDE | Protocol extraction | Multiple engines may need a conformance contract | Ship as a Block now; extract a "declarative-component-definition" Protocol once the contract stabilizes |
 | DC-9 | 🔶 DECIDE | Implicit empty `<template>` for childless `<component>` | A childless `<component>` is meaningful; declarative shorthand vs explicit-required | Transform desugars omitted child to empty `<template>` until a native standard lands; only the canonical (omitted) form is byte-identical on round-trip |
+| DC-10 | 🔶 DECIDE | Explicit empty `<template></template>` round-trip | Sub-decision of DC-9: user authors the explicit-empty form | Normalize to the omitted canonical form (breaks byte-identical for that input) vs reject as redundant with a named-rule error; decide when the first non-empty fixture lands |
 
 ## Next Steps
 

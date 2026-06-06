@@ -13,6 +13,25 @@ module.exports = function (eleventyConfig) {
     return blocks.filter(b => b.implementsIntent === intentId);
   });
 
+  // Build-time HTML → JSX (mirror dialect). Lazily esbuild-transpiles the shared TS transform
+  // (blocks/renderers/jsx/htmlToJsx.ts — the same source the browser/tests use) and runs it over a
+  // linkedom document so the source-toggle's JSX pane is generated from the authored HTML.
+  let _htmlToJsx;
+  eleventyConfig.addFilter("htmlToJsx", function(html) {
+    if (!_htmlToJsx) {
+      const fs = require("fs");
+      const { transformSync } = require("esbuild");
+      const src = fs.readFileSync(__dirname + "/blocks/renderers/jsx/htmlToJsx.ts", "utf8");
+      const { code } = transformSync(src, { loader: "ts", format: "cjs" });
+      const m = { exports: {} };
+      new Function("module", "exports", "require", code)(m, m.exports, require);
+      _htmlToJsx = m.exports.htmlToJsx;
+    }
+    const { parseHTML } = require("linkedom");
+    const { document } = parseHTML("<!DOCTYPE html><html><body></body></html>");
+    return _htmlToJsx(String(html), document);
+  });
+
   // Flatten adapters from categories for pagination
   eleventyConfig.addCollection("flatAdapters", function(collectionApi) {
     const adapters = require("./src/_data/adapters.json");
