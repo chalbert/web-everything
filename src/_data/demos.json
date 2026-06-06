@@ -1,5 +1,31 @@
 [
   {
+    "id": "module-as-a-service-demo",
+    "name": "Module-as-a-Service Playground",
+    "summary": "Serve one authored <component> in any form — declarative source, Web Component class, template HTML, or JSX — chosen by a single request param. Each card has a form toggle and a live element registered from the served WC form. Backlog #081.",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>A live surface for <a href=\"/backlog/081-module-as-a-service-provider/\">backlog #081</a> — a provider that serves <strong>one authored component in any form</strong> via a single request param. Pick a form per card and the same <a href=\"/blocks/component/\"><code>&lt;component&gt;</code></a> definition is returned as declarative source, a Web Component class, template HTML, or JSX; the live element is registered from the served WC form.</p><h3>No drift</h3><p>The resolver owns no transform — it dispatches to the <strong>same shared transforms</strong> the <a href=\"/adapters/\">rendering adapters</a> use, so the served form provably matches the documented one. Unsupported params (<code>transpileTarget</code>, <code>strategy</code>) are flagged, never silently dropped.</p><h3>Scope</h3><p>v1 walking skeleton: a single synchronous resolve. Reactivity and ESM-over-HTTP delivery are phase 2 — see the <a href=\"/demos/maas-consumer-demo.html\">Consumer demo</a> for native import.</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/module-as-a-service-demo.html",
+    "projects": [
+      "webadapters",
+      "webcomponents"
+    ]
+  },
+  {
+    "id": "maas-consumer-demo",
+    "name": "Module-as-a-Service Consumer",
+    "summary": "A consumer with no build step: a native import('/_maas/user-card.js?form=wc-class') returns a self-contained ES module that registers the element on evaluation — the server applied the adapter transform. Backlog #081 phase 2a.",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>The native-only seam of <a href=\"/backlog/081-module-as-a-service-provider/\">backlog #081</a>, phase 2a. This page is a consumer with <strong>no build step</strong>: it does a native <code>import('/_maas/user-card.js?form=wc-class')</code> and the returned ES module registers the element on evaluation. The server applied the adapter transform — nothing is bundled or transpiled on the consumer.</p><h3>Scope</h3><p>v1 serves the <code>wc-class</code> form (self-contained ESM). The <code>jsx</code> form needs the delegated transpile step (phase 2b) before it is import-able. Import-map / bare-specifier resolution starts to matter only once a served module imports another.</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/maas-consumer-demo.html",
+    "projects": [
+      "webadapters",
+      "webcomponents"
+    ]
+  },
+  {
     "id": "component-adapter-demo",
     "name": "Component Adapter Playground",
     "summary": "Live test surface for the declarative <component> element and its build-time AST transform: each definition shows its authored source, the generated class the adapter emits, and a live-registered element — with a conformance badge. Includes an editable sandbox to try your own definitions.",

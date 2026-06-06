@@ -92,6 +92,11 @@ module.exports = function backlog() {
     .filter((f) => f.endsWith('.md'))
     .map((file) => {
       const id = file.replace(/\.md$/, '');
+      // Filenames are `NNN-slug.md`: `num` (the leading NNN) is the stable unique id shown as
+      // "#042" and used for short references; `slug` is the human-readable text. `id` stays the
+      // full filename stem so it remains the route key (permalink = /backlog/<id>/).
+      const num = (id.match(/^(\d+)-/) || [])[1];
+      const slug = id.replace(/^\d+-/, '');
       const { data, content } = matter(readFileSync(join(BACKLOG_DIR, file), 'utf8'));
       const ownBody = content.trim();
 
@@ -107,6 +112,8 @@ module.exports = function backlog() {
       return {
         ...data,
         id,
+        num,
+        slug,
         title: src.title || data.title || id,
         summary: src.summary || data.summary,
         dateOpened: toDateString(data.dateOpened),

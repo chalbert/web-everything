@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Module-as-a-Service Playground - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/module-as-a-service-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Module-as-a-Service Playground</h1>
+      <p>
+        A live test surface for <a href="/backlog/081-module-as-a-service-provider/">backlog #081</a> — a
+        provider that serves <strong>one authored component in any form</strong>, chosen by a single request
+        param. Pick a form per card: the same <a href="/blocks/component/"><code>&lt;component&gt;</code></a>
+        definition is returned as <strong>declarative source</strong>, a <strong>Web Component class</strong>,
+        <strong>template HTML</strong>, or <strong>JSX</strong> — and the live element below is registered from
+        the served WC form so you can see it run.
+      </p>
+      <p class="play-caveat">
+        This is the v1 <em>walking skeleton</em>: a single synchronous resolve. The resolver owns no transform
+        of its own — it dispatches to the <strong>same shared transforms</strong> the
+        <a href="/adapters/">rendering adapters</a> demos use, so the served form provably matches the
+        documented one (no drift). Reactivity, <code>transpileTarget</code>, and ESM-over-HTTP delivery are
+        phase 2 — requesting an unsupported param is flagged, never silently dropped.
+      </p>
+    </header>
+
+    <div id="examples">Loading examples&hellip;</div>
+  </main>
+
+  <script type="module" src="/demos/module-as-a-service-demo.ts"></script>
+</body>
+</html>

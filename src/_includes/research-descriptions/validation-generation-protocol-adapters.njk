@@ -1,0 +1,37 @@
+<h2>The Question</h2>
+
+<p>Web Validation defines an <strong>interop vocabulary</strong> — intents, states, events, merged validity — so engines from different vendors are swappable. What it lacks is the <strong>generation layer</strong>: the machinery that takes one declaration in that vocabulary and <em>materializes</em> it as runnable validation. This research scopes that layer narrowly — <strong>purely protocol + adapters</strong>, explicitly excluding the UI, component integration, the validity-model (<a href="/backlog/004-validation-engine-open-design-points/">#004</a>), and the conformance meta-layer (<a href="/backlog/005-validation-spec-versioning-adherence-tooling/">#005</a>) — and asks: <strong>is the two-mode framing right, what is the strongest existing model for each mode, and how should an adapter expose which intents it complies with?</strong></p>
+
+<h2>What we found</h2>
+
+<p><strong>Both delivery modes are already shipped patterns.</strong> Web Everything's contribution is not inventing them but unifying them under one intent vocabulary with declared compliance — the flexibility-first stance: offer both, enforce neither.</p>
+
+<ul>
+  <li><strong>Mode 1 — single-source generation (no runtime link).</strong> Best embodied by <strong>protovalidate</strong> (Buf): declare rules once on a Protobuf schema and they enforce identically in Go, TypeScript, Java, Python, and C++, because the rule logic lives in <strong>CEL</strong> (a portable expression language), not just a shape. A lower-fidelity, pragmatic variant is <strong>JSON-Schema-as-source + per-target codegen</strong> (<code>datamodel-code-generator</code> → Pydantic, <code>quicktype</code> → TypeScript) — shapes survive, cross-field logic often does not (the lossy case). A third, TS-only flavor is <strong>Standard Schema</strong>, a ~60-line interface implemented by Zod/Valibot/ArkType that lets tools consume any schema and <strong>reduces the adapter problem from N×M to N+M</strong>.</li>
+  <li><strong>Mode 2 — backend exposes validation as a service.</strong> Best embodied by <strong>Laravel Precognition</strong>: the backend runs its <em>real</em> validation rules but stops before executing the controller (no side effects), returning <code>204</code> on pass or <code>422</code> + errors on fail, so the front-end gets live validation from the exact server rules with zero duplication. It even supports phase-conditional rules (cheap checks live, expensive checks on submit).</li>
+</ul>
+
+<h2>Three answers it gives the standard</h2>
+
+<table>
+  <thead><tr><th>Open question</th><th>Finding</th></tr></thead>
+  <tbody>
+    <tr><td>Mode-2 wire format (was "plural, TBD")</td><td>The de-facto format is already <strong>HTTP 422/204 + an error body</strong>; standardize on <strong>RFC 9457 <code>application/problem+json</code></strong> by default, richer formats via <code>Accept</code> negotiation.</td></tr>
+    <tr><td>How adapters "expose which intents they comply with"</td><td>Model it on JSON Schema's <strong><code>$vocabulary</code></strong> — a dialect declares required vs. optional vocabularies, and an impl <em>must refuse</em> an unrecognized <em>required</em> one. Maps onto the <a href="/backlog/005-validation-spec-versioning-adherence-tooling/">#005</a> capability manifest; unsupported intent = flagged lossy, never silent.</td></tr>
+    <tr><td>Is "single-source" one pattern?</td><td>No — <strong>three fidelities</strong> (portable rule language vs. shape-schema codegen vs. interface-consumer). The registry must not assume cross-field logic is portable.</td></tr>
+  </tbody>
+</table>
+
+<h2>A gap to claim</h2>
+
+<p>RFC 9457 standardizes the error <em>envelope</em> (<code>type</code>/<code>title</code>/<code>status</code>) but <strong>explicitly does not</strong> standardize the field-level validation-error shape — the common <code>errors: [{ detail, pointer }]</code> pattern is convention, not spec. A WE Validation protocol could define that field-error shape (pointer + rule + message) as a first-class intent — squarely in-charter for an interop vocabulary, and covered by no existing standard.</p>
+
+<h2>Open questions carried forward</h2>
+
+<ul>
+  <li>Does WE define its own portable rule-expression language (CEL-like) for cross-field logic, or stay shape-only and treat cross-field rules as Mode-2-only?</li>
+  <li>Is the field-error shape part of <em>this</em> standard's output, or a sibling "validation reporting" protocol?</li>
+  <li>Do we standardize the <em>precognition</em> behavior (run-rules-without-side-effects) as a protocol behavior, or leave it to the service adapter?</li>
+</ul>
+
+<p>Full analysis, prior-art comparison tables, and sources in the research report (<code>reports/2026-06-06-validation-generation-protocol-adapters.md</code>), which feeds <a href="/backlog/085-validation-adapters-multi-language/">backlog #085</a>.</p>

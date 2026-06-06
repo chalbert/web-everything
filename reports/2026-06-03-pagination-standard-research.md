@@ -3,7 +3,7 @@
 **Date:** 2026-06-03
 **Scope:** Pagination as a *first-class* concern — deliberately excluding the infinite-scroll / async-option-list slice already covered by the [Dropdown UX Behaviors report](./2026-06-01-dropdown-ux-behaviors.md) (load-more lifecycle, debounced async filtering, virtualization a11y) and the existing Custom Pagination resource protocol (`page/offset/cursor → next()/previous()`). Focuses on the blind spots: classic numbered pagination, URL/state sync, SEO/SSR, accessibility, cursor-vs-offset UX consequences, native platform primitives, and the overall pattern taxonomy.
 **Method:** Deep-research fan-out (5 angles → 23 sources → 99 claims → 25 adversarially verified, 24 surviving). Primary sources: MDN, Chrome web-platform docs, W3C WAI-ARIA APG, Google Search Central, Slack Engineering. Secondary UX: Baymard, Smashing Magazine, NN/g.
-**Goal:** Decide whether pagination is its own UX intent, a facet of a broader **Collection operations** intent, or stays a resource-protocol concern — and what dimensions/traits it would expose. Feeds [gap-10](../backlog/gap-10-collection-ops-intent.md) and [dropdown-async-pagination-paradigm](../backlog/dropdown-async-pagination-paradigm.md).
+**Goal:** Decide whether pagination is its own UX intent, a facet of a broader **Collection operations** intent, or stays a resource-protocol concern — and what dimensions/traits it would expose. Feeds [gap-10](../backlog/006-gap-10-collection-ops-intent.md) and [dropdown-async-pagination-paradigm](../backlog/018-dropdown-async-pagination-paradigm.md).
 
 ---
 
@@ -83,7 +83,7 @@ Wrap controls in a `nav` element (navigation landmark); give each navigation lan
 
 ## What this means for the standard's shape
 
-The research is decisive on the **platform/SEO/a11y defaults** and confirms pagination's home (the `page` dimension of the existing Collection Operations Intent). The concrete next step is enriching that `page` dimension; the *intra-Collection-operations* dimensioning (how page/filter/sort/group share traits) stays with [gap-10](../backlog/gap-10-collection-ops-intent.md).
+The research is decisive on the **platform/SEO/a11y defaults** and confirms pagination's home (the `page` dimension of the existing Collection Operations Intent). The concrete next step is enriching that `page` dimension; the *intra-Collection-operations* dimensioning (how page/filter/sort/group share traits) stays with [gap-10](../backlog/006-gap-10-collection-ops-intent.md).
 
 1. **Enrich the existing `page` dimension of Collection Operations** (keep it UX-only — the protocol stays in the Custom Pagination resource):
    - **Presentation, decomposed into two orthogonal axes** — `pageMode` (`paged` replace-slice / `append` grow-list) × `advance` (`manual` / `auto`, default `manual`). Infinite scroll = `append` + `auto`, a derived opt-in rather than a peer mode (resolves the seam below); `auto` native-grounds on IntersectionObserver and delegates rendering to Windowed Collection / lifecycle to Loader.
@@ -101,10 +101,10 @@ The research is decisive on the **platform/SEO/a11y defaults** and confirms pagi
 
 Registered on the [backlog](../backlog/) — see those items, not restated here:
 
-1. Focus + screen-reader announcement after a page change → [pagination-focus-announcement](../backlog/pagination-focus-announcement.md) (instance of [gap-6](../backlog/gap-6-focus-announcements.md)).
-2. Result-range labels + page-size selectors → [pagination-range-labels-page-size](../backlog/pagination-range-labels-page-size.md).
-3. The `infinite`/`virtualized` seam with windowed-collection/loader → [pagination-windowed-collection-seam](../backlog/pagination-windowed-collection-seam.md) — **resolved**: `infinite` = `append` + `advance:auto`, `virtualized` stays Windowed Collection.
-4. Shared-vs-distinct dimensions across filter / sort / page / group — already owned by [gap-10](../backlog/gap-10-collection-ops-intent.md) (its "still open" per-dimension vocabulary).
+1. Focus + screen-reader announcement after a page change → [pagination-focus-announcement](../backlog/059-pagination-focus-announcement.md) (instance of [gap-6](../backlog/013-gap-6-focus-announcements.md)).
+2. Result-range labels + page-size selectors → [pagination-range-labels-page-size](../backlog/060-pagination-range-labels-page-size.md).
+3. The `infinite`/`virtualized` seam with windowed-collection/loader → [pagination-windowed-collection-seam](../backlog/062-pagination-windowed-collection-seam.md) — **resolved**: `infinite` = `append` + `advance:auto`, `virtualized` stays Windowed Collection.
+4. Shared-vs-distinct dimensions across filter / sort / page / group — already owned by [gap-10](../backlog/006-gap-10-collection-ops-intent.md) (its "still open" per-dimension vocabulary).
 
 ## Caveats
 

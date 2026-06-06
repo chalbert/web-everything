@@ -1960,9 +1960,11 @@
     "type": "Directive",
     "summary": "The <component> element — defines a brand-new custom element entirely from HTML (tag name, template, shadow options). The fourth gap in Web Components, alongside scoped registries, injector integration, and transient components. Intended implementation: a deterministic build-time AST transform to a class-based element.",
     "exports": [
-      "ComponentElement",
-      "defineFromTemplate",
-      "ComponentDefinition"
+      "parseDefinition",
+      "generateClassSource",
+      "defineFromDefinition",
+      "ComponentDef",
+      "ShadowMode"
     ],
     "dependsOn": [
       "transient-component"
@@ -1983,13 +1985,13 @@
       "declarativeShadowDOM": {
         "status": "Baseline 2024",
         "pattern": "<template shadowrootmode> attaches a shadow root during HTML parsing, no JS",
-        "adoption": "shadow=\"open|closed\" maps onto attachShadow / DSD. The definition's <template> becomes the element's shadow content.",
+        "adoption": "shadow=\"open|closed\" maps onto attachShadow / DSD. The component's children become the element's shadow content. attachShadow options forward as boolean attributes — delegates-focus maps onto attachShadow({ delegatesFocus: true }) / shadowrootdelegatesfocus.",
         "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/template#shadowrootmode"
       },
       "htmlTemplate": {
         "status": "Baseline",
         "pattern": "<template> holds inert, cloneable content",
-        "adoption": "The single <template> child of <component> is the render source — cloned into the shadow (or light) tree on connect.",
+        "adoption": "The component's own children are the render source (implicit template, DC-11) — cloned into the shadow (or light) tree on connect. A lone direct-child <template> is the explicit, inert form for un-built runtime delivery or parser-sensitive markup; both lower identically.",
         "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/template"
       },
       "slot": {
@@ -2009,17 +2011,29 @@
         "pattern": "<definition name constructor> — define a custom element from markup",
         "adoption": "Prior art. We choose <component> over <definition>; we ship the static tier now and compose the unshipped binding primitives (Template Instantiation, DOM Parts) later.",
         "reference": "https://github.com/WICG/webcomponents/issues/1009"
+      },
+      "elementInternals": {
+        "status": "Baseline",
+        "pattern": "attachInternals() exposes form participation (static formAssociated), default ARIA semantics (internals.role), and custom states (internals.states / :state())",
+        "adoption": "form-associated maps onto static formAssociated + attachInternals(); default-role maps onto internals.role default semantics. Custom states and form value/validation wiring are deferred (DC-14, compose with Web Validation).",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/ElementInternals"
+      },
+      "atomicMove": {
+        "status": "Baseline 2025",
+        "pattern": "Element.moveBefore() relocates a connected node without disconnecting it; a connectedMoveCallback opts custom elements into state preservation",
+        "adoption": "preserve-on-move emits an empty connectedMoveCallback() so moveBefore() preserves the element's state (focus, media, iframes, shadow) instead of teardown/rebuild.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Element/moveBefore"
       }
     },
     "designDecisions": {
       "openForProgressiveResolution": {
-        "description": "The design forks below are tracked as open points (DC-1..DC-8) in reports/2026-06-03-declarative-component-element.md and as backlog 'decision' threads. They carry a current recommendation, not a final ruling.",
+        "description": "The design forks below are tracked as open points (DC-1..DC-15) in reports/2026-06-03-declarative-component-element.md and as backlog 'decision' threads. They carry a current recommendation, not a final ruling.",
         "rationale": "The platform is landing declarative-component primitives bottom-up; resolving these by fiat now would couple the standard to unsettled upstream shapes. Each resolves independently as evidence arrives."
       },
       "tagName": {
         "description": "The definition element is <component name=\"...\">. (Open point DC-1.)",
         "openPoint": "DC-1",
-        "rationale": "Reads naturally as the thing you author. The name attribute + required <template> child disambiguate it from Vue's instantiate-here <component :is>. Alternatives kept open: <define-element>, <custom-element>, the WICG <definition>."
+        "rationale": "Reads naturally as the thing you author. The name attribute + the define-here children disambiguate it from Vue's instantiate-here <component :is>. Alternatives kept open: <define-element>, <custom-element>, the WICG <definition>."
       },
       "shadowAttribute": {
         "description": "shadow=\"open|closed|none\" selects the shadow mode; none means a light-DOM component. (Open point DC-2.)",
@@ -2040,6 +2054,25 @@
         "description": "Declarative-only in tier 1. A tier-2 behavior/extends hook associates a registered class/trait for progressive enhancement. No inline <script> in the definition. (Open point DC-5.)",
         "openPoint": "DC-5",
         "rationale": "Answers WICG #1009's 'can a declarative element be enhanced with script?' without the script-gadget XSS surface that an inline <script> in a parsed definition would open."
+      },
+      "implicitTemplate": {
+        "description": "The component's own children are the template — no nested <template> required. A lone direct-child <template> is the explicit, inert escape hatch; both forms lower to byte-identical output. A childless <component> is an empty template. (Open point DC-11; supersedes the narrower DC-9 'omitted = empty' framing.)",
+        "openPoint": "DC-11",
+        "rationale": "Children-as-template is the nicer authoring surface and is safe under the intended build-time AST transform — it reads source text, so children never go live in a browser. The inert <template> wrapper is kept for un-built runtime delivery and for parser-sensitive content (e.g. table-fragment <tr> the parser drops outside a table, leak-prone <style> before self-removal). The remaining open edge is whether to ever require the explicit form."
+      },
+      "shadowInitOptions": {
+        "description": "attachShadow() options forward as boolean attributes that map onto the matching Declarative Shadow DOM attribute: delegates-focus (delegatesFocus / shadowrootdelegatesfocus), clonable (shadowrootclonable), and serializable (shadowrootserializable) are all implemented. Only valid with a shadow root (shadow != none). Tracked in backlog 076.",
+        "rationale": "Map-through, native-first: the platform already settled the spelling via DSD, so we forward it into the lowering's attachShadow(init) rather than invent new vocabulary. Option keys emit in a fixed order to keep generated output byte-identical."
+      },
+      "elementInternals": {
+        "description": "attachInternals() is exposed declaratively: form-associated (DC-12) emits static formAssociated + attachInternals() for form participation; default-role=\"…\" (DC-13) sets internals.role default ARIA semantics (instance role= still overrides). Custom states / :state() (DC-14) and form value/validation wiring are deferred (tier-2/3, compose with Web Validation). Tracked in backlog 082.",
+        "openPoint": "DC-12/DC-13/DC-14",
+        "rationale": "ElementInternals is the platform's imperative-only surface with no HTML form today, so it is the richest declarative target. default-role is chosen over reusing role= to avoid ambiguity on the definition element (the definition's own role vs the defined element's default). The generated class sets internals.role in the constructor and declares static formAssociated; the runtime twin guards attachInternals for non-browser test runtimes (happy-dom) while real browsers wire it up."
+      },
+      "preserveOnMove": {
+        "description": "preserve-on-move (boolean) emits an empty connectedMoveCallback(). Defining the callback opts the element into atomic moves: Element.moveBefore() preserves state (focus, media, iframes, shadow tree) instead of firing disconnected + connected. (Open point DC-15.) Tracked in backlog 084.",
+        "openPoint": "DC-15",
+        "rationale": "The opt-in IS the method's presence, so an empty body suffices and the lowering stays declarative-complete (no author JS). The method is conditionally added so other elements keep default disconnect/reconnect semantics. happy-dom lacks moveBefore, so unit tests assert source emission + conditional prototype presence; real browsers exercise the move."
       },
       "intendedImplementation": {
         "description": "Reference implementation is a deterministic, build-time, AST-based transform to a class element — the declarative-component adapter — not a browser-side interpreter.",

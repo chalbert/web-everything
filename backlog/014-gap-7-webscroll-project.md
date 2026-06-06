@@ -20,4 +20,4 @@ IntersectionObserver, scroll-driven animations (`animation-timeline`), scroll-sn
 
 Project vs intent — and whether to subsume the existing `prefetch`/`viewport` eagerness handling.
 
-**Seam to resolve (added 2026-06-03):** the Collection Operations Intent's `advance:auto` page trigger is an IntersectionObserver scroll-proximity concern. Decide whether that scroll trigger stays owned by `collection-operations` or delegates to this domain — it overlaps directly with the "infinite scroll / IntersectionObserver" surface above. See [pagination-windowed-collection-seam](/backlog/pagination-windowed-collection-seam/) and the 2026-06-03 pagination research report.
+**Seam to resolve (added 2026-06-03):** the Collection Operations Intent's `advance:auto` page trigger is an IntersectionObserver scroll-proximity concern. Decide whether that scroll trigger stays owned by `collection-operations` or delegates to this domain — it overlaps directly with the "infinite scroll / IntersectionObserver" surface above. See [pagination-windowed-collection-seam](/backlog/062-pagination-windowed-collection-seam/) and the 2026-06-03 pagination research report.

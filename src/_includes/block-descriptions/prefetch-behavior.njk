@@ -1,3 +1,4 @@
+{% from "source-toggle.njk" import autoToggle %}
 <h2>Prefetch Behavior</h2>
 <p>
     Attribute-based behavior that implements the <a href="/intents/prefetch/">Prefetch Intent</a> by detecting user conditions
@@ -159,11 +160,12 @@
 <h3>Usage Examples</h3>
 
 <h4>Viewport Prefetch on Links</h4>
-{% highlight "html" %}
+{% set prefetchHtml %}
 <a href="/products/123" prefetch="viewport">
     Product Details
 </a>
-{% endhighlight %}
+{% endset %}
+{{ autoToggle("prefetch-usage", prefetchHtml) }}
 
 <h4>Hover Prefetch with Router</h4>
 {% highlight "html" %}

@@ -6,8 +6,31 @@
 <section class="section-card">
     <h3 id="status">Status</h3>
     <p class="text-sm text-gray-600">
-        <strong>Concept Phase:</strong> This adapter is in early design. The API and implementation details are being explored.
+        <strong>POC:</strong> A first generator exists — it lowers a <code>&lt;component&gt;</code> definition to a
+        functional component (a function returning JSX) plus a Custom Element wrapper that mounts it. It is one of the
+        forms served by <a href="/backlog/081-module-as-a-service-provider/">Module-as-a-Service (#081)</a>; reactivity
+        (hooks/effects) is not yet implemented. Try it in the
+        <a href="/demos/maas-consumer-demo.html">Module-as-a-Service Consumer</a> demo.
     </p>
+</section>
+
+<section class="section-card">
+    <h3 id="poc-shape">POC shape &amp; the import-map seam</h3>
+    <p>
+        The current generator emits a function returning the template as JSX (via the shared <code>htmlToJsx</code>
+        transform, so it mirrors the other adapter forms) plus a thin element wrapper. Unlike the class form, the
+        output is <strong>not self-contained</strong> — it imports the jsx runtime via a <em>bare specifier</em>
+        (<code>@webeverything/jsx-runtime</code>). A consumer therefore resolves it with an
+        <strong>import map</strong> — the canonical native-platform answer:
+    </p>
+    {% highlight "html" %}
+&lt;script type="importmap"&gt;
+  { "imports": { "@webeverything/jsx-runtime": "/blocks/renderers/jsx/index.ts" } }
+&lt;/script&gt;
+&lt;script type="module"&gt;
+  await import('/_maas/user-card.js?form=functional'); // self-registers &lt;user-card&gt;
+&lt;/script&gt;
+    {% endhighlight %}
 </section>
 
 <section class="section-card">

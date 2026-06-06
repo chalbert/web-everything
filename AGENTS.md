@@ -23,6 +23,7 @@
 
 ## Definition of Done (run before finishing)
 - Changed an API? Update its `.njk` description **and** its `src/_data/*.json` entry.
+- **Added or changed a standard's feature?** Its conformance demo must reflect the **full** feature set — add a shared **fixture/case** for it (demos are fixture-driven, so one fixture updates the demo *and* its unit tests at once). A shipped feature with no demo case is **not done**. See [demo-workflow.md](docs/agent/demo-workflow.md).
 - Introduced a term? Add it to `semantics.json`.
 - Wrote a `reports/*.md` report? It's **outside the 11ty build** — expose it: promote it to a `/research/` topic, or mirror it with a **backlog pointer item** (`relatedReport`, no body). `check:standards` fails on a hidden report (see [backlog-workflow.md](docs/agent/backlog-workflow.md) → "Three homes — nothing stays hidden").
 - Added/removed a block, plug, or intent? Run `npm run gen:inventory` (refreshes the generated summary below — never edit it by hand).
@@ -40,6 +41,7 @@
 | Adding a block/plug/intent/adapter, doc requirements, the standard-authoring method | [docs/agent/design-first.md](docs/agent/design-first.md) (Claude: `/new-standard` triggers it) |
 | Processing `plans/` → research pages, reports | [docs/agent/research-workflow.md](docs/agent/research-workflow.md) |
 | Capturing ideas/issues/decisions/reviews, report open questions → `/backlog/` (one md file per item in `backlog/`) | [docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md) |
+| Picking the next item to work on (dev-ready first) | [docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md) → "Selecting the next item to work on" (Claude: `/next-backlog-item` triggers it) |
 | Building or changing a runtime demo under `demos/` | [docs/agent/demo-workflow.md](docs/agent/demo-workflow.md) |
 | Dev environment & scripts | `DEV_GUIDE.md` |
 | Canonical specs (per-entry) | `src/_data/{blocks,plugs,intents,protocols,semantics,references}.json`; backlog = `backlog/*.md` |
@@ -49,7 +51,7 @@
 - **Plugs** 41 — 31 active · 8 concept · 2 experimental
 - **Blocks** 27 — 13 active · 7 concept · 7 draft
 - **Intents** 28 — 9 concept · 19 draft
-- **Glossary terms** 140 · **Research topics** 18 (18 open)
+- **Glossary terms** 148 · **Research topics** 19 (19 open)
 - **Projects** 25: webadapters, webanalytics, webbehaviors, webblocks, webcases, webcomponents, webcontexts, webdirectives, webdocs, webevents, webexpressions, webinjectors, webintents, webintl, webmanifests, webplugs, webportals, webpositioning, webregistries, webreliability, webresources, webstates, webtraces, webtraits, webvalidation
 <!-- /AUTO-GENERATED:inventory -->
 

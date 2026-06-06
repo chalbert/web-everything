@@ -23,13 +23,11 @@ registries, injector integration, and transient components.
   customElements.define('user-card', UserCard);
 </script>
 
-<!-- PROPOSED — the definition is markup -->
+<!-- PROPOSED — the definition is markup; the children ARE the template -->
 <component name="user-card" shadow="open">
-  <template>
-    <style>:host { display:block } h3 { margin:0 }</style>
-    <h3><slot name="title">Untitled</slot></h3>
-    <slot></slot>
-  </template>
+  <style>:host { display:block } h3 { margin:0 }</style>
+  <h3><slot name="title">Untitled</slot></h3>
+  <slot></slot>
 </component>
 ```
 
@@ -111,7 +109,7 @@ independently over time. `🔶 DECIDE` = pending; current recommendation only.
 
 | ID | 🔖 | Point | Condition | Current recommendation |
 |----|----|-------|-----------|------------------------|
-| DC-1 | 🔶 DECIDE | Tag name & define-vs-instantiate ambiguity | `<component>` reads like Vue's instantiate-here | Keep `<component name>`; `name` + `<template>` child disambiguate. Alts: `<define-element>`, `<custom-element>`, `<definition>` |
+| DC-1 | 🔶 DECIDE | Tag name & define-vs-instantiate ambiguity | `<component>` reads like Vue's instantiate-here | Keep `<component name>`; `name` + the define-here children disambiguate. Alts: `<define-element>`, `<custom-element>`, `<definition>` |
 | DC-2 | 🔶 DECIDE | Shadow attribute spelling | Native DSD uses `shadowrootmode` | `shadow="open\|closed\|none"` mapped onto DSD/`attachShadow`; `none` = light DOM |
 | DC-3 | 🔶 DECIDE | Registration timing | `<component>` must register without a global scanner | Autonomous element registers in `connectedCallback`, then self-removes (transient-like) |
 | DC-4 | 🔶 DECIDE | Reactive template depth | Bindings depend on unshipped specs | Tier 1 static; `{{expr}}`/`if`/`each` compose later with web-expressions/for-each |
@@ -119,8 +117,13 @@ independently over time. `🔶 DECIDE` = pending; current recommendation only.
 | DC-6 | 🔶 DECIDE | Adapter placement | Overlaps html-adapter's AST Transformation | Standalone `declarative-component` adapter cross-referencing html-adapter; revisit merge later |
 | DC-7 | 🔶 DECIDE | Toggle editor interactivity | Docs examples show both forms | Static toggle now; live in-browser transform deferred to tier 2 |
 | DC-8 | 🔶 DECIDE | Protocol extraction | Multiple engines may need a conformance contract | Ship as a Block now; extract a "declarative-component-definition" Protocol once the contract stabilizes |
-| DC-9 | 🔶 DECIDE | Implicit empty `<template>` for childless `<component>` | A childless `<component>` is meaningful; declarative shorthand vs explicit-required | Transform desugars omitted child to empty `<template>` until a native standard lands; only the canonical (omitted) form is byte-identical on round-trip |
+| DC-9 | 🔶 DECIDE | Implicit empty `<template>` for childless `<component>` | A childless `<component>` is meaningful; declarative shorthand vs explicit-required | A childless `<component>` is an empty template (subsumed by DC-11: children-as-template, zero children = empty) |
 | DC-10 | 🔶 DECIDE | Explicit empty `<template></template>` round-trip | Sub-decision of DC-9: user authors the explicit-empty form | Normalize to the omitted canonical form (breaks byte-identical for that input) vs reject as redundant with a named-rule error; decide when the first non-empty fixture lands |
+| DC-11 | 🔶 DECIDE | Children-as-template default vs inert `<template>` escape hatch | Should authors nest a `<template>`, or are the component's children the template directly? | **Implicit: the component's children ARE the template** — no nested `<template>`. A lone direct-child `<template>` stays supported as the explicit, inert form (un-built runtime delivery, parser-sensitive `<tr>` markup, leak-prone `<style>` before self-removal); both lower to byte-identical output. Safe because the build-time transform reads source text — children never go live. Open edge: whether to ever *require* the explicit form |
+| DC-12 | 🔶 DECIDE | Form participation spelling | `attachInternals()` form association has no HTML form | **`form-associated`** (boolean) → emits `static formAssociated = true` + `attachInternals()`. Value/validation wiring composes with Web Validation later (not built now). Implemented (tier 2) |
+| DC-13 | 🔶 DECIDE | Default ARIA role spelling | Reusing `role=` on the definition element is ambiguous (definition's own role vs the defined element's default) | **`default-role="…"`** → sets `internals.role` default semantics; instance `role=` still overrides. Chosen over `role=` to disambiguate. Implemented (tier 2). Other `aria-*` defaults deferred |
+| DC-14 | 🔶 DECIDE | Custom states (`:state()`) | States are dynamic (added/removed at runtime); only seeding is declarative | **Defer.** Seeding initial states via `states="…"` is possible but low-value vs runtime toggling; revisit when a concrete use lands. Tier 3 |
+| DC-15 | 🔶 DECIDE | State-preserving moves | `connectedMoveCallback` + `moveBefore()` has no declarative opt-in | **`preserve-on-move`** (boolean) → emits an empty `connectedMoveCallback()`; defining it makes `moveBefore()` atomic (focus/media/iframe/shadow state preserved). Implemented (tier 2). Declarative-complete — no author JS |
 
 ## Next Steps
 
@@ -128,6 +131,11 @@ independently over time. `🔶 DECIDE` = pending; current recommendation only.
   hook (resolves DC-5); `scope` scoped registration; reactive bindings composing
   with Web Expressions / Template Instantiation (resolves DC-4); live in-browser
   transform in the toggle editor (resolves DC-7).
+- **ElementInternals (landed)** — `form-associated` (DC-12) and `default-role`
+  (DC-13) are implemented in the lowering, fixtures, conformance suite, and docs.
+  Remaining: custom states / `:state()` (DC-14, deferred), form value &
+  validation wiring (compose with Web Validation), and other `aria-*` defaults.
+  Backlog: `082-component-attach-internals`.
 - **Tier 3** — `<component>` inheritance/extension; declarative lifecycle hooks.
 - **Protocol** — if a second independent transform/runtime appears, extract the
   conformance contract per DC-8.

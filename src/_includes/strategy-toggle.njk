@@ -1,0 +1,56 @@
+{#
+  Render-strategy toggle (Axis-2) — the orthogonal sibling of the html/jsx source toggle.
+
+  Where source-toggle.njk switches the *spelling* of one tree (Axis-1: HTML ⇄ JSX), this switches
+  the *update machine* (Axis-2: declarative-static · vdom · fine-grained · imperative — how the tree
+  updates over time). See /projects/webcomponents/#protocol-render-strategy and
+  reports/2026-06-06-render-strategy-axis.md.
+
+  Tabs are rendered from the `renderStrategies` data list (the build-time mirror of
+  CustomRenderStrategyRegistry's catalog), NOT hardcoded — adding a strategy to that list adds a tab.
+  The author writes the declarative-static source once; the vdom pane is GENERATED from it at build
+  time by the `liftToVdom` filter (the #078 cross-strategy lift compiler). fine-grained shares the
+  vdom authoring spelling (reactivity differs only at runtime); imperative has no declarative form.
+
+  Reuses the global mode-selector.js handler (keys off .mode-selector-container /
+  .mode-tab[data-mode] / [data-mode-content][data-mode]) — generic over N tabs.
+
+  Usage:
+    {% from "strategy-toggle.njk" import strategyToggle %}
+    {% set ex %}
+    <template is="for-each" items="users" item="user"><li>{{ user.name }}</li></template>
+    {% endset %}
+    {{ strategyToggle("users-list", renderStrategies, ex) }}
+#}
+
+{% macro strategyToggle(id, strategies, declarativeSource) %}
+<div class="mode-selector-container" data-mode-selector="{{ id }}" style="border: 1px solid #e5e7eb; border-radius: 0.375rem; overflow: hidden; margin-bottom: 1rem;">
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.75rem; background: #f9fafb; border-bottom: 1px solid #e5e7eb;">
+        <span style="font-size: 0.7rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #9ca3af;">Render strategy <span style="font-weight: 400; text-transform: none; letter-spacing: 0;">— Axis-2: how the tree updates</span></span>
+        <div class="mode-tabs" style="display: flex; gap: 0; border: 1px solid #d1d5db; border-radius: 0.25rem; overflow: hidden;">
+            {% for s in strategies %}
+            <button class="mode-tab{% if s.default %} active{% endif %}" data-mode="{{ s.id }}" title="{{ s.summary }}" style="padding: 0.25rem 0.75rem; font-size: 0.75rem; font-weight: 500; background: {% if s.default %}#059669{% else %}white{% endif %}; color: {% if s.default %}white{% else %}#6b7280{% endif %}; border: none;{% if not loop.first %} border-left: 1px solid #d1d5db;{% endif %} cursor: pointer;">{{ s.name }}</button>
+            {% endfor %}
+        </div>
+    </div>
+    {% for s in strategies %}
+    <div class="mode-content" data-mode-content="{{ id }}" data-mode="{{ s.id }}" style="display: {% if s.default %}block{% else %}none{% endif %};">
+        {% if s.id == "declarative-static" %}
+        <pre class="source-toggle-code"><code class="language-tsx">{{ declarativeSource | trim | escape }}</code></pre>
+        {% elif s.id == "vdom" %}
+        <pre class="source-toggle-code"><code class="language-tsx">{{ declarativeSource | liftToVdom | escape }}</code></pre>
+        {% elif s.id == "fine-grained" %}
+        <div style="padding: 0.75rem; font-size: 0.85rem; color: #4b5563;">
+            <p style="margin: 0 0 0.5rem;">{{ s.summary }}</p>
+            <p style="margin: 0; color: #6b7280;"><em>Same authoring spelling as the vdom pane — the difference is at runtime (read-time tracking, surgical updates), not in the JSX. Consumes a <code>native-signals</code> Change Strategy.</em></p>
+        </div>
+        {% else %}
+        <div style="padding: 0.75rem; font-size: 0.85rem; color: #4b5563;">
+            <p style="margin: 0 0 0.5rem;">{{ s.summary }}</p>
+            <p style="margin: 0; color: #6b7280;"><em>No declarative form — a hand-written <code>createElement</code> loop. Not auto-generated.</em></p>
+        </div>
+        {% endif %}
+    </div>
+    {% endfor %}
+</div>
+{% endmacro %}

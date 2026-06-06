@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Module-as-a-Service Consumer - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/module-as-a-service-demo.css">
+  <!--
+    Import map — resolves the BARE specifier that served functional-component modules import. A served
+    module can't use an app-relative runtime path (it bypasses the dev-server's import rewriting), so
+    the consumer maps the runtime name to a real URL here. This is the import-map seam (#081 phase 2c).
+  -->
+  <script type="importmap">
+    { "imports": { "@webeverything/jsx-runtime": "/blocks/renderers/jsx/index.ts" } }
+  </script>
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Module-as-a-Service Consumer</h1>
+      <p>
+        The native-only seam of <a href="/backlog/081-module-as-a-service-provider/">backlog #081</a>, phase 2a.
+        This page is a consumer with <strong>no build step</strong>: it does a native
+        <code>import('/_maas/user-card.js?form=wc-class')</code> and the returned ES module registers the
+        element on evaluation. The server applied the adapter transform; nothing is bundled or transpiled here.
+        Compare with the <a href="/demos/module-as-a-service-demo.html">Module-as-a-Service Playground</a>, which
+        shows the forms in-process.
+      </p>
+      <p class="play-caveat">
+        v1 serves the <code>wc-class</code> form (self-contained ESM). The <code>jsx</code> form needs the
+        delegated transpile step (phase 2b) before it is import-able; <code>declarative</code>/<code>html</code>
+        are previewable but not JS modules. Import-map / bare-specifier resolution kicks in only once a served
+        module imports another — v1 components are self-contained.
+      </p>
+    </header>
+
+    <div id="app">Loading&hellip;</div>
+  </main>
+
+  <script type="module" src="/demos/maas-consumer-demo.ts"></script>
+</body>
+</html>

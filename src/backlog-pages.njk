@@ -29,7 +29,7 @@ eleventyComputed:
             <span class="plug-crumb plug-crumb-current">{{ item.title }}</span>
         </nav>
         <div class="plug-title-row">
-            <h1 class="plug-title">{{ item.title }}</h1>
+            <h1 class="plug-title">{% if item.num %}<span style="color: var(--color-text-muted, #94a3b8); font-weight: 600; font-variant-numeric: tabular-nums;">#{{ item.num }}</span> {% endif %}{{ item.title }}</h1>
             <div class="plug-status" style="display: flex; gap: 0.5rem; align-items: center;">
                 {{ typeBadge(item.type) }}
                 {{ statusBadge(item.status) }}

@@ -167,6 +167,20 @@ for (const intent of intents) {
 
 dupCheck(backlog, 'backlog/');
 
+// Backlog filenames are `NNN-slug.md`: NNN (item.num) is the stable unique id used in the URL.
+// Enforce the prefix and that numbers don't collide, so authoring a new item can't silently reuse
+// or drop an id. See docs/agent/backlog-workflow.md → "Authoring an item".
+const seenNums = new Map();
+for (const item of backlog) {
+  if (!item.num) {
+    err(`Backlog item "${item.id}" is missing the NNN- id prefix — rename to "<NNN>-${item.id}.md"`);
+  } else if (seenNums.has(item.num)) {
+    err(`Backlog id #${item.num} is used by both "${seenNums.get(item.num)}" and "${item.id}" — ids must be unique`);
+  } else {
+    seenNums.set(item.num, item.id);
+  }
+}
+
 // ── 6d. Backlog (single source of truth for ideas/issues/reviews/decisions) ──
 // Feeds off backlog/*.md (frontmatter = fields, body = the per-item page).
 // Validate the registry shape and that every outward reference resolves.

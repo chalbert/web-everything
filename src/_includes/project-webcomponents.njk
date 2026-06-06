@@ -320,6 +320,85 @@ class TransientElement extends HTMLElement {
     </div>
 </section>
 
+<section id="protocol-render-strategy" class="section-card">
+    <h3 id="render-strategy-heading">Render Strategy Protocol</h3>
+    <p>
+        A conformance contract for <strong>how a component's element tree updates over time</strong> —
+        the second of two orthogonal axes (the first, <em>syntax</em>, is HTML&nbsp;⇄&nbsp;JSX spelling, owned by
+        <a href="/projects/webadapters/">Web Adapters</a>). Render Strategy is the sibling of the
+        <a href="/projects/webstates/#protocol-change-tracking">Change Tracking Protocol</a> in Web States:
+        Change Tracking detects <em>what</em> mutated (Change Records); Render Strategy commits <em>how</em> the
+        DOM reflects it. They compose — a strategy may consume a <code>CustomChangeStrategy</code> as its
+        reactivity source, or be self-contained.
+    </p>
+    <p>
+        <strong>Render Strategy is a technical contract, not a UX preference</strong> — it is a Protocol, not an
+        Intent, and surfaces under <code>/protocols/</code>, never <code>/intents/</code>.
+        Web Components ships this specification; concrete strategies ship in <a href="../frontierui/">Frontier UI</a>.
+        Full design rationale, the cross-strategy lowering compiler, and the lossy-boundary analysis live in
+        <code>reports/2026-06-06-render-strategy-axis.md</code>.
+    </p>
+
+    <h4 id="render-strategy-contract">Contract</h4>
+    <p>Mirrors <code>CustomChangeStrategy</code> so the two read as a family. Capability is feature-detected by which optional methods a provider implements — a strategy without <code>update</code> is mount-once.</p>
+{% highlight "typescript" %}
+interface RenderStrategy {
+  // Realize a tree into live DOM under host; return a handle for later updates.
+  mount(tree: RenderInput, host: ParentNode, scope: Scope): RenderHandle;
+  // Reflect new state into the mounted tree (rebind / diff / recompute / rerun).
+  update?(handle: RenderHandle, next: RenderInput): void;
+  // Tear down bindings/subscriptions; leave the DOM removable.
+  dispose?(handle: RenderHandle): void;
+}
+{% endhighlight %}
+    <p>
+        The active strategy is resolved per scope through the injector chain via
+        <code>CustomRenderStrategyRegistry</code> — <strong>nearest-scope wins</strong> — so different subtrees of
+        one app render with different strategies simultaneously (a static header on <code>declarative-static</code>,
+        a live grid on <code>fine-grained</code>). Identical resolution rule to <code>CustomChangeStrategyRegistry</code>.
+        The native-first default is <code>declarative-static</code>: parse-once DOM + <code>bind-*</code> behaviors +
+        <code>{% raw %}{{ }}{% endraw %}</code> text parsers + <code>&lt;template is="for-each|if"&gt;</code> directives — zero runtime framework.
+    </p>
+
+    <h4 id="render-strategy-catalog">Registered strategies</h4>
+    <table>
+        <tr><th>Strategy</th><th>How it updates</th><th>Iteration / conditionals</th><th>Reactivity source</th></tr>
+        <tr><td><strong>declarative-static</strong> <span class="text-xs text-gray-500">(default)</span></td><td>parse-once DOM + <code>bind-*</code> + <code>{% raw %}{{ }}{% endraw %}</code> + directives</td><td><code>&lt;template is="for-each"&gt;</code>, <code>&lt;template is="if"&gt;</code></td><td>binds by path; no records needed</td></tr>
+        <tr><td><strong>vdom</strong></td><td><code>render()</code> returns a tree; diff + patch</td><td>plain JS — <code>items.map(…)</code>, <code>cond &amp;&amp; &lt;X/&gt;</code></td><td>self-contained diff</td></tr>
+        <tr><td><strong>fine-grained</strong></td><td>expressions become reactive computations; surgical DOM, no diff</td><td>plain JS, tracked at read-time</td><td>consumes a <code>native-signals</code> Change Strategy</td></tr>
+        <tr><td><strong>imperative</strong></td><td>direct, hand-written manipulation</td><td><code>for</code> loop + <code>createElement</code></td><td>author-managed</td></tr>
+    </table>
+    <p class="text-gray-600 text-sm">
+        The registry is open, not a fixed enum — a future platform target (DOM Parts / Template Instantiation)
+        registers as another provider without touching the contract. Directives belong to this axis, not the syntax
+        axis: <code>&lt;template is="for-each"&gt;</code> exists only because inert HTML cannot iterate, so directives
+        appear and disappear <em>with the strategy</em>.
+    </p>
+
+    <h4 id="render-strategy-lowering">Cross-strategy lowering</h4>
+    <p>
+        Same-strategy conversion is pure spelling (Axis-1, shipped). <em>Cross</em>-strategy conversion is compiler
+        work: <strong>lower</strong> JS control-flow into directives, <strong>lift</strong> directives back into JS.
+        A reference <code>lower()</code> / <code>lift()</code> compiler implements the correspondence below
+        (<code>blocks/renderers/jsx/render-strategy/crossStrategy.ts</code>); structural control-flow round-trips,
+        and every crossing of the lossy <code>{% raw %}{ }{% endraw %}</code> boundary raises a diagnostic
+        (<code>result.lossy</code>) rather than corrupting silently.
+    </p>
+    <table>
+        <tr><th>JS control-flow (vdom / fine-grained)</th><th>⇄</th><th>declarative-static primitive</th><th>Reversible?</th></tr>
+        <tr><td><code>items.map(i =&gt; …)</code></td><td>⇄</td><td><code>&lt;template is="for-each" items key&gt;</code></td><td>✅ structural</td></tr>
+        <tr><td><code>cond &amp;&amp; &lt;X/&gt;</code> / ternary</td><td>⇄</td><td><code>&lt;template is="if" condition&gt;</code></td><td>✅ structural</td></tr>
+        <tr><td><code>{expr}</code> (eager JS value)</td><td>⇄</td><td><code>{% raw %}{{ expr }}{% endraw %}</code> / <code>bind-text</code></td><td>⛔ lossy boundary</td></tr>
+        <tr><td><code>onclick={namedFn}</code></td><td>⇄</td><td><code>on:click="namedFn($event)"</code></td><td>✅ named handlers</td></tr>
+    </table>
+    <p class="text-gray-600 text-sm">
+        <strong>The one hard boundary:</strong> eager JS <code>{expr}</code> has no faithful inverse to a reactive
+        runtime path <code>{% raw %}{{ expr }}{% endraw %}</code>. Lowering can emit a binding; lifting cannot recover author intent. The
+        contract declares this boundary lossy — the compiler treats <code>{% raw %}{{ }}{% endraw %}</code> as <code>bind-*</code> by
+        convention, never as eager <code>{}</code>, or refuses the round-trip with a diagnostic.
+    </p>
+</section>
+
 <section id="standards" class="section-card">
     <h3 id="web-standards">Web Standards Alignment</h3>
     <table>

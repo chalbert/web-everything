@@ -65,5 +65,13 @@
     "ownedByProject": "webintl",
     "realizesIntent": "locale",
     "anchor": "protocol-localization"
+  },
+  {
+    "id": "render-strategy",
+    "name": "Render Strategy",
+    "summary": "Conformance reference for how a component's element tree updates over time. Defines the CustomRenderStrategy contract (mount/update/dispose), a per-scope provider registry (nearest-scope wins), and the four registered strategies (declarative-static, vdom, fine-grained, imperative). The sibling of Change Tracking: change strategies detect, render strategies commit. Technical contract, not a UX preference — a Protocol, not an Intent.",
+    "status": "concept",
+    "ownedByProject": "webcomponents",
+    "anchor": "protocol-render-strategy"
   }
 ]

@@ -32,7 +32,7 @@ The test for any new markdown: *is it research (→ report + a `/research/` topi
 
 ## Authoring an item
 
-Create `backlog/<id>.md`. **The filename (kebab-case) is the `id`.** Frontmatter is metadata only — **no `title`, no `summary`**; those are derived from the body's `# H1` (title) and first paragraph (summary). There are two shapes:
+Create `backlog/<NNN>-<slug>.md`. **The filename is the `id`**, and it has two parts: a zero-padded **`NNN` number** (the stable unique id — shown as `#042`, used in the URL `/backlog/<NNN>-<slug>/` and for short refs) plus a kebab-case **`slug`** (the human-readable text, which may be reworded). **Allocate `NNN` = the current highest number + 1** (`ls backlog/ | sort | tail -1` → next). The number is permanent; never reuse a deleted item's number. Frontmatter is metadata only — **no `title`, no `summary`, no `id`/`num`**; the title/summary derive from the body's `# H1` and first paragraph, the id/num from the filename. `check:standards` fails if the `NNN-` prefix is missing or a number collides. There are two shapes:
 
 **1 — Content item** (its own write-up):
 
@@ -75,16 +75,73 @@ Live-collected form, on a `projects.json` entry:
 ]
 ```
 
-## Lifecycle — resolve vs. graduate
+## Closing out a completed item — delete it (after a final-capture pass)
 
-A backlog item ends one of two ways. Model both so the trail closes instead of forking:
-- **Resolve** — an `issue`/`review` gets done → `status: resolved`. (No `graduatedTo` expected.)
-- **Graduate** — an `idea`/`decision` becomes a real entity → `status: resolved` **and** `graduatedTo: "intent:droplist"` (or `block:…`, `protocol:…`). The validator warns if a resolved idea/decision has no `graduatedTo`.
+The backlog tracks **open** work, not history. When an item — or a plan it mirrors — is **fully done**, **delete its `backlog/<id>.md`**. The lasting record is the shipped thing: the spec entity on the website, and the report (kept exposed) for the deep trail. Never delete on a hunch — run this gate first, **carefully**, because deletion is where leftover work and report links silently disappear:
+
+1. **Confirm it's actually done.** Re-check the item's own acceptance criteria against reality — relevant tests green, `npm run check:standards` green, build green. **If the item added or changed a standard's feature, the standard's conformance demo must reflect it** — a shared fixture/case exists for the new feature and the playground shows it (demos are fixture-driven; see the Definition of Done in AGENTS.md). If any criterion is unmet — including a feature with no demo case — it is **not** done; leave the item.
+2. **Take a careful last look for leftovers.** Did the work surface anything deferred, half-finished, or newly exposed (a follow-up, an edge case, a related cleanup)? Each such point gets its **own new backlog item now** — *review-before-adding / dedup first* (see Rules). Capturing leftovers before deletion is the whole point: nothing dies with the file.
+3. **Pointer guard — don't orphan a report.** If the item is a *pointer* mirroring a report (`relatedReport`, no body) and it is that report's **only** exposure, deleting it turns the report into a *hidden doc* and `npm run check:standards` fails. First promote the report to a `/research/` topic (or keep one pointer), *then* delete. Re-run `check:standards` afterward to prove the build still passes.
+4. **Graduated ideas.** When an `idea`/`decision` became a real entity (block/intent/protocol/…), that entity **is** the record — delete the backlog file; you don't need a lingering `resolved` + `graduatedTo` stub.
+
+> `status: resolved | parked` stay valid for an item you *deliberately keep visible* (e.g. parked for later, or a decision whose `graduatedTo` trail you want on the site). But the default for **done** work is **deletion**, not a resolved tombstone.
+
+## Selecting the next item to work on
+
+> Use when asked "what's next?", "pick the next backlog item", "what should I work on?" — or via the `next-backlog-item` skill. The goal is the item an **agent can implement now**, not just the most interesting one.
+
+**Gather.** `ls backlog/*.md`; read each item's frontmatter (`type`, `status`) and skim its body. Keep only `status: open`. **Drop `active`** (already in progress — see *Starting an item* below), `resolved`, and `parked`.
+
+**Score each candidate for dev-readiness** — the test is *"could an agent open a PR for this today, without a design call?"*:
+
+| Signal | Ready ↑ | Not ready ↓ |
+|---|---|---|
+| `type` | `issue` (known fix) › `idea` (concrete build) | `decision` (open fork), `review` (needs human judgment) |
+| Body verbs | "Implement / Roll / Add / Align / Extract" + **named file paths** + acceptance criteria | "Decide whether / Open sub-decision / alternative held open / held open" |
+| `relatedReport` | a **plan** or an IMPLEMENTED / self-contained-handoff report | an open exploration with unsettled options |
+| Prerequisites | none, or "now that X is proven", or every item it references is `resolved` | references an unresolved item, "blocked on …", "surfaces the moment …" |
+
+**Tier the candidates:**
+- **A — agent-ready:** `issue`/`idea`, concrete bounded build, no blocking fork, prereqs resolved. **Pick the next item from here.**
+- **B — one nod away:** a `decision` that already states a recommendation — needs only the user to ratify, then it's a quick edit/build. Offer it; don't auto-run it.
+- **C — needs design / not agent-ready:** open `decision` forks, `review`s, anything blocked. Surface for discussion, never auto-pick.
+
+**Order within Tier A:** `issue` before `idea`; smaller blast-radius / clearer acceptance criteria first; **items that unblock a chain before their dependents** (e.g. reconcile a page before graduating it); cluster around recently-shipped work for momentum.
+
+**Dependency check.** An item that says "see the `<other>` item", "prerequisite", or "after X" is Tier A only if that prerequisite is `resolved`; otherwise it's blocked — surface the prerequisite instead.
+
+**Output (don't start work yet).** Present a short ranked shortlist (top 3–5, grouped by tier, one-line rationale each), then the single recommended next item with its reasoning, then ask whether to start. Follow the planning-as-discussion style — recommend, don't rapid-fire multiple-choice.
+
+**Always give two links per offered item** so the user can open it either way:
+- the **live page** — `[<id>](http://localhost:3000/backlog/<id>/)`. Browse on `:3000` (Vite), which **proxies `/backlog/` to the 11ty server on `:8080`** — that's the URL the user actually has open. (A *newly authored* item can `404` until the running 11ty server rebuilds — it's stale, not a wrong URL; a clean `eleventy` build always has it.)
+- the **source file** — `[backlog/<id>.md](backlog/<id>.md)` (opens the markdown in the editor; always works regardless of server state).
+
+Example offer line: *`jsx-directive-sugar` — add the deferred `<For>/<Show>/<Resource>` layer ([live](http://localhost:3000/backlog/070-jsx-directive-sugar/) · [md](backlog/070-jsx-directive-sugar.md))*.
+
+## Working an item — claim it, then keep it live
+
+The backlog file is the **durable, resumable record** of in-flight work — treat it that way so a lost or interrupted session can pick up exactly where you left off:
+
+1. **Claim it on start.** The moment you begin work, set the item's frontmatter `status: open` → **`status: active`** and save — *before* writing any code. Selection drops `active` (see *Gather*), so a fresh session won't re-pick work already underway. Add `dateStarted: "YYYY-MM-DD"` if useful.
+2. **Keep it in sync as you go.** Maintain a short **`## Progress`** section in the item's body and update it *as work happens*, not at the end — if the session dies mid-task, this section is **all the next session has** (recovering the prior chat is not reliable; the item body is the contract). Keep this exact shape so any session can resume in seconds:
+   ```markdown
+   ## Progress
+   - **Status:** active — <one line: where things stand>
+   - **Branch:** <git branch with the WIP>
+   - **Done:** <what's landed + green>
+   - **Next:** <the single concrete next step>
+   - **Notes:** <key file paths, decisions, gotchas>
+   ```
+   (An in-session TodoWrite list is fine for live tracking, but it is **not** durable — only the item body survives the session.)
+3. **If abandoned unfinished,** flip `active` → `open`, leave the `## Progress` section as-is (it says where it stopped), so it returns to the pool instead of looking claimed-but-dead.
+4. **Reclaiming a stranded claim.** An item left `active` by a crashed/forgotten session would otherwise be invisible forever (selection drops `active`). So when asked to work and the pool looks empty — or when explicitly told to continue one — treat an `active` item as **resumable**: read its `## Progress`, check out its branch, and continue from **Next**. Don't re-pick it as fresh; resume it.
+
+When it's fully done, follow *Closing out a completed item* (delete after the final-capture pass).
 
 ## Rules
 
 - **Review before adding (dedup).** Always scan the existing backlog first — list the titles and grep related terms (`grep -rilE "<topic>" backlog/`). If an item already covers the idea, **extend it** rather than adding a near-duplicate sibling. Watch for *parallel* tracks that look similar but are distinct (e.g. the `<component>` adapter items vs. the JSX adapter items) — cross-reference instead of merging.
-- The `id` is the filename (kebab-case) — unique by construction. `type` and `status` come from the enums above (validated).
+- The `id` is the filename stem `<NNN>-<slug>` — unique by construction. The `NNN` number (`item.num`) is the stable routing key and short ref (`#042`); the `slug` is reword-able text. `type` and `status` come from the enums above (validated, incl. the `NNN-` prefix + number-collision checks).
 - **No `title`/`summary` in frontmatter** — title = the body's `# H1`, summary = its first paragraph (or, for a pointer item, both come from the report). The loader derives them; the validator checks the *derived* values exist, so every item needs either a body or a `relatedReport`.
 - `relatedReport` must exist on disk; `relatedProject` must resolve in `projects.json`; `crossRef` needs both `url` and `label`.
 - `reports/` is **not** in the 11ty build, so `relatedReport` shows as a path label, not a link. Real site links go via `crossRef` / `relatedProject`.

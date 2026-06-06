@@ -20,7 +20,7 @@ What shipped:
 - **#E/#16** `plugs/__tests__/e2e/playgrounds.spec.ts` (data-driven over `kind:"playground"`, zero-console
   + green-badges + sandbox exercise). **#9/#7/#11** `kind:"playground"` added to `demos.json`;
   `blocks/__tests__/e2e/source-toggle.spec.ts` (generated `<template is="for-each">` pane + tab toggle).
-- **#8** report mirrored via `backlog/jsx-adapter-demo-testing.md` (`relatedReport`); `check:standards` green.
+- **#8** report mirrored via `backlog/067-jsx-adapter-demo-testing.md` (`relatedReport`); `check:standards` green.
 
 The original plan is preserved below for context.
 
@@ -31,7 +31,7 @@ The original plan is preserved below for context.
 - Conventions for demos: [docs/agent/demo-workflow.md](../docs/agent/demo-workflow.md)
 - Testing strategy (pyramid, locations, commands): [docs/agent/testing.md](../docs/agent/testing.md)
 - The feature mapping this all implements: [reports/2026-06-03-jsx-adapter-feature-mapping.md](2026-06-03-jsx-adapter-feature-mapping.md)
-- Parked/related design: [backlog/jsx-rendering-strategy-axis.md](../backlog/jsx-rendering-strategy-axis.md), [backlog/jsx-event-style-toggle.md](../backlog/jsx-event-style-toggle.md)
+- Parked/related design: [backlog/052-jsx-rendering-strategy-axis.md](../backlog/052-jsx-rendering-strategy-axis.md), [backlog/051-jsx-event-style-toggle.md](../backlog/051-jsx-event-style-toggle.md)
 
 ## 1. What the JSX Adapter work IS (context)
 

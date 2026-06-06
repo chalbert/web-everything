@@ -3,7 +3,8 @@
 <h2>The <code>&lt;component&gt;</code> Element</h2>
 <p>
     <strong>Component</strong> defines a brand-new custom element <em>entirely from HTML</em> — its
-    tag name, template, and shadow options live in markup, with no authored
+    tag name and shadow options live in markup, its <strong>own children are the template</strong>
+    (no nested <code>&lt;template&gt;</code> wrapper required), and there is no authored
     <code>class extends HTMLElement</code>. It is the fourth gap Web Components fills, alongside
     <a href="/projects/webcomponents/#scoped-registries">scoped registries</a>,
     <a href="/projects/webcomponents/#injector-integration">injector integration</a>, and
@@ -20,11 +21,9 @@
 {{ sourceToggle("user-card") }}
 {% highlight "html" %}
 <component name="user-card" shadow="open">
-  <template>
-    <style>:host { display: block } h3 { margin: 0 }</style>
-    <h3><slot name="title">Untitled</slot></h3>
-    <slot></slot>
-  </template>
+  <style>:host { display: block } h3 { margin: 0 }</style>
+  <h3><slot name="title">Untitled</slot></h3>
+  <slot></slot>
 </component>
 
 <!-- used anywhere after the definition -->
@@ -38,9 +37,10 @@ TEMPLATE.innerHTML =
   `<h3><slot name="title">Untitled</slot></h3><slot></slot>`;
 
 class UserCard extends HTMLElement {
+  #root = this.shadowRoot;
   connectedCallback() {
-    const root = this.shadowRoot ?? this.attachShadow({ mode: 'open' });
-    if (!root.childNodes.length) root.append(TEMPLATE.content.cloneNode(true));
+    this.#root ??= this.attachShadow({ mode: 'open' });
+    if (!this.#root.childNodes.length) this.#root.append(TEMPLATE.content.cloneNode(true));
   }
 }
 customElements.define('user-card', UserCard);
@@ -68,7 +68,13 @@ customElements.define('user-card', UserCard);
     <ul>
         <li><code>name</code> — <strong>required</strong>. The custom element tag to register (must contain a hyphen).</li>
         <li><code>shadow="open|closed|none"</code> — shadow mode; <code>none</code> renders into light DOM. Maps onto <a href="#standards">Declarative Shadow DOM</a> / <code>attachShadow</code>. Defaults to <code>open</code>. <em>(DC-2)</em></li>
-        <li>An optional child <code>&lt;template&gt;</code> — the render source. Cloned into the shadow (or light) tree on first connect. May contain <code>&lt;style&gt;</code> and <code>&lt;slot&gt;</code>. If omitted, an empty <code>&lt;template&gt;</code> is implied — <code>&lt;component name="x-foo"&gt;&lt;/component&gt;</code> is shorthand for <code>&lt;component name="x-foo"&gt;&lt;template&gt;&lt;/template&gt;&lt;/component&gt;</code>. <em>(DC-9)</em></li>
+        <li><code>delegates-focus</code> — boolean attribute mapping onto <code>attachShadow({ delegatesFocus: true })</code> / DSD <code>shadowrootdelegatesfocus</code>. Focusing the host (or clicking non-focusable shadow content) moves focus to the first focusable element in the shadow tree. Requires a shadow root (<code>shadow</code> ≠ <code>none</code>).</li>
+        <li><code>clonable</code> / <code>serializable</code> — boolean attributes mapping onto <code>attachShadow({ clonable: true })</code> / <code>{ serializable: true }</code> (DSD <code>shadowrootclonable</code> / <code>shadowrootserializable</code>). <code>clonable</code> lets <code>cloneNode()</code> copy the shadow tree; <code>serializable</code> lets <code>getHTML({ serializableShadowRoots: true })</code> include it. Both require a shadow root.</li>
+        <li><code>form-associated</code> — boolean attribute; emits <code>static formAssociated = true</code> + <code>this.attachInternals()</code> so the element participates in forms (gets <code>:disabled</code> from a fieldset, form-lifecycle callbacks, <code>form</code>/<code>labels</code> access). Value &amp; validation wiring composes with <a href="/projects/webvalidation/">Web Validation</a> later. <em>(DC-12)</em></li>
+        <li><code>default-role="…"</code> — sets the element's <strong>default</strong> ARIA semantics via <code>internals.role</code> (e.g. <code>default-role="slider"</code>). An instance <code>role=</code> attribute still overrides it for assistive tech. ARIA role token only. <em>(DC-13)</em></li>
+        <li><code>preserve-on-move</code> — boolean attribute; emits an empty <code>connectedMoveCallback()</code>. Defining it makes <a href="https://developer.mozilla.org/en-US/docs/Web/API/Element/moveBefore"><code>Element.moveBefore()</code></a> relocate the element <strong>atomically</strong> — focus, media playback, iframes, and shadow state are preserved instead of being torn down and rebuilt. <em>(DC-15)</em></li>
+        <li>The component's <strong>own children are the template</strong> — the render source, cloned into the shadow (or light) tree on first connect. May contain <code>&lt;style&gt;</code> and <code>&lt;slot&gt;</code>. <strong>No nested <code>&lt;template&gt;</code> is required.</strong> A childless <code>&lt;component&gt;</code> registers an element with an empty template. <em>(DC-11, DC-9)</em></li>
+        <li>A lone direct-child <code>&lt;template&gt;</code> is supported as the <strong>explicit, inert form</strong> — needed only when content must stay inert before the build transform runs (un-built runtime delivery, or table-fragment markup like <code>&lt;tr&gt;</code> the parser would otherwise drop). Both forms lower to byte-identical output. <em>(DC-11)</em></li>
         <li>The <code>&lt;component&gt;</code> element <strong>registers its definition then removes itself</strong> — no wrapper node remains. <em>(DC-3)</em></li>
     </ul>
 </section>
@@ -123,6 +129,13 @@ customElements.define('user-card', UserCard);
         <tr><td>Register element by <code>name</code> from markup</td><td>built-in</td><td>1</td></tr>
         <tr><td>Shadow template (<code>shadow="open|closed"</code>, DSD-aligned)</td><td>built-in</td><td>1</td></tr>
         <tr><td>Light-DOM template (<code>shadow="none"</code>)</td><td>built-in</td><td>1</td></tr>
+        <tr><td>Focus delegation (<code>delegates-focus</code> → <code>attachShadow</code> <code>delegatesFocus</code>)</td><td>built-in (maps native DSD attr)</td><td>2</td></tr>
+        <tr><td>Clonable / serializable shadow (<code>clonable</code> / <code>serializable</code>)</td><td>built-in (maps native DSD attr)</td><td>2</td></tr>
+        <tr><td>Form participation (<code>form-associated</code> → <code>attachInternals</code>)</td><td>built-in (DC-12)</td><td>2</td></tr>
+        <tr><td>Default ARIA semantics (<code>default-role</code> → <code>internals.role</code>)</td><td>built-in (DC-13)</td><td>2</td></tr>
+        <tr><td>Custom states (<code>:state()</code> seeding/toggling)</td><td>defer (DC-14)</td><td>3</td></tr>
+        <tr><td>Form value &amp; validation wiring</td><td>compose (<a href="/projects/webvalidation/">Web Validation</a>)</td><td>3</td></tr>
+        <tr><td>State-preserving moves (<code>preserve-on-move</code> → <code>connectedMoveCallback</code>)</td><td>built-in (DC-15)</td><td>2</td></tr>
         <tr><td>Slots / content projection</td><td>compose (native <code>&lt;slot&gt;</code>)</td><td>1</td></tr>
         <tr><td>Build-time AST transform → class</td><td>adapter</td><td>1</td></tr>
         <tr><td>Observed attributes → reflect to template</td><td>built-in</td><td>2</td></tr>
@@ -144,9 +157,7 @@ customElements.define('user-card', UserCard);
     {{ sourceToggle("byline") }}
 {% highlight "html" %}
 <component name="x-byline" shadow="none">
-  <template>
-    <small><slot></slot></small>
-  </template>
+  <small><slot></slot></small>
 </component>
 {% endhighlight %}
     {{ classSource("byline") }}
@@ -165,6 +176,45 @@ customElements.define('x-byline', XByline);
 </section>
 
 <section class="section-card">
+    <h3 id="element-internals">Element internals (<code>form-associated</code>, <code>default-role</code>)</h3>
+    <p>
+        <code>attachInternals()</code> is the platform's imperative-only surface for form participation,
+        default ARIA semantics, and custom states — it has no HTML form today. <code>&lt;component&gt;</code>
+        adds the two highest-value pieces declaratively: <code>form-associated</code> opts the element into
+        forms, and <code>default-role</code> declares its default accessibility role. Custom states
+        (<code>:state()</code>) and form value/validation wiring remain tier-2/3 (DC-14, compose with Web
+        Validation).
+    </p>
+    {{ sourceToggle("rating") }}
+{% highlight "html" %}
+<component name="x-rating" shadow="open" form-associated default-role="slider">
+  <span><slot>★</slot></span>
+</component>
+{% endhighlight %}
+    {{ classSource("rating") }}
+{% highlight "typescript" %}
+const TEMPLATE = document.createElement('template');
+TEMPLATE.innerHTML = `<span><slot>★</slot></span>`;
+
+class XRating extends HTMLElement {
+  static formAssociated = true;
+  #internals = this.attachInternals();
+  #root = this.shadowRoot;
+  constructor() {
+    super();
+    this.#internals.role = 'slider';
+  }
+  connectedCallback() {
+    this.#root ??= this.attachShadow({ mode: 'open' });
+    if (!this.#root.childNodes.length) this.#root.append(TEMPLATE.content.cloneNode(true));
+  }
+}
+customElements.define('x-rating', XRating);
+{% endhighlight %}
+    {{ endSource() }}
+</section>
+
+<section class="section-card">
     <h3 id="composition">Composition</h3>
     <ul>
         <li><a href="/blocks/transient-component/">Transient Component</a> — <code>&lt;component&gt;</code> reuses the self-removal lifecycle; transient elements <em>resolve</em> to native HTML, this <em>defines</em> a reusable element.</li>
@@ -178,11 +228,14 @@ customElements.define('x-byline', XByline);
     <h3 id="open-questions">Open questions (progressive resolution)</h3>
     <p>
         None of the design forks are resolved by fiat. Each is tracked as a
-        <code>decision</code> thread in the <a href="/backlog/">backlog</a> (DC-1…DC-10) and in the
+        <code>decision</code> thread in the <a href="/backlog/">backlog</a> (DC-1…DC-15) and in the
         grounding report's Open Points Register, carrying a <em>current recommendation</em> only —
         tag name vs Vue ambiguity (DC-1), <code>shadow</code> spelling (DC-2), registration timing
         (DC-3), reactive depth (DC-4), the scripting hook (DC-5), adapter placement (DC-6), toggle
-        interactivity (DC-7), Protocol extraction (DC-8), implicit empty template (DC-9), and the
-        explicit-empty round-trip sub-decision (DC-10).
+        interactivity (DC-7), Protocol extraction (DC-8), implicit empty template (DC-9), the
+        explicit-empty round-trip sub-decision (DC-10), children-as-template default vs the
+        inert <code>&lt;template&gt;</code> escape hatch (DC-11), and the ElementInternals surface —
+        <code>form-associated</code> (DC-12), <code>default-role</code> spelling (DC-13), and custom
+        states (DC-14); and state-preserving moves <code>preserve-on-move</code> (DC-15).
     </p>
 </section>

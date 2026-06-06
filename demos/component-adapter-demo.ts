@@ -32,11 +32,12 @@ type Example = ComponentCase;
 // ── Conformance: does the rendered tree equal the authored template? ──────────
 
 /** Compare the element's rendered template region against the authored template HTML. */
-function conformance(el: Element, def: ComponentDef): { ok: boolean; rendered: string } {
+function conformance(el: Element, def: ComponentDef): { ok: boolean; rendered: string; opaque?: boolean } {
   let rendered = '';
   if (def.shadow === 'open') rendered = el.shadowRoot ? el.shadowRoot.innerHTML : '';
   else if (def.shadow === 'none') rendered = el.innerHTML;
-  else return { ok: true, rendered: '(closed shadow — not introspectable)' }; // closed: trust, can't read
+  // closed: the root is not exposed (el.shadowRoot is null), so the tree can't be read.
+  else return { ok: true, rendered: '(closed shadow — not introspectable)', opaque: true };
   return { ok: htmlEqual(rendered, def.templateHTML), rendered };
 }
 
@@ -108,7 +109,13 @@ function buildCard(ex: Example): { node: HTMLElement; run: () => void } {
       badge.textContent = '✗ no instance';
       return;
     }
-    const { ok } = conformance(instance, def);
+    const { ok, opaque } = conformance(instance, def);
+    if (opaque) {
+      badge.className = 'badge info';
+      badge.textContent = '✓ closed (opaque)';
+      passCount++;
+      return;
+    }
     badge.className = `badge ${ok ? 'pass' : 'fail'}`;
     badge.textContent = ok ? '✓ conformant' : '✗ drift';
     if (ok) passCount++;
@@ -134,10 +141,8 @@ function buildSandbox(): HTMLElement {
   input.spellcheck = false;
   input.value =
     `<component name="hello-box" shadow="open">\n` +
-    `  <template>\n` +
-    `    <style>:host { display:block; padding:.5rem; border:1px solid #e5e7eb; border-radius:.375rem }</style>\n` +
-    `    👋 <slot>world</slot>\n` +
-    `  </template>\n` +
+    `  <style>:host { display:block; padding:.5rem; border:1px solid #e5e7eb; border-radius:.375rem }</style>\n` +
+    `  👋 <slot>world</slot>\n` +
     `</component>\n\n` +
     `<!-- usage (instantiates the element above) -->\n` +
     `<hello-box>there</hello-box>`;

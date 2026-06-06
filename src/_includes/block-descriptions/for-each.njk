@@ -1,4 +1,5 @@
 {% from "source-toggle.njk" import autoToggle %}
+{% from "strategy-toggle.njk" import strategyToggle %}
 
 <h2>Protocol: For Each</h2>
 <p>Iterates over a collection (Array, Observable, or Promise) and stamps a template for each item.</p>
@@ -16,3 +17,13 @@
 <!-- /control:for-each -->
 {% endset %}
 {{ autoToggle("for-each-usage", forEachHtml) }}
+
+<h3>Rendering strategy — for-each <em>is</em> the declarative-static spelling</h3>
+<p>The <code>for-each</code> directive only exists because inert HTML can't iterate — it is an artifact of the
+<a href="/projects/webcomponents/#protocol-render-strategy">declarative-static render strategy</a>. Switch the
+strategy and it becomes a plain <code>.map()</code> (the vdom pane is generated at build time by the cross-strategy
+<code>lift</code> compiler):</p>
+{% set forEachStrategy %}
+<template is="for-each" items="users" item="user" key="id"><div class="user-row">{{ '{{' }} user.name {{ '}}' }}</div></template>
+{% endset %}
+{{ strategyToggle("for-each-strategy", renderStrategies, forEachStrategy) }}

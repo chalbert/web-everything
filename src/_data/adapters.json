@@ -33,8 +33,8 @@
       {
         "id": "functional-component-adapter",
         "name": "Functional Component Adapter",
-        "status": "concept",
-        "summary": "Allows writing functional-style components that map to class-based Web Components."
+        "status": "poc",
+        "summary": "Functional-style components (a function returning JSX) lowered to a class-based Web Component. A POC generator exists; served as a form of <a href=\"/backlog/081-module-as-a-service-provider/\">Module-as-a-Service</a>."
       },
       {
         "id": "declarative-component",

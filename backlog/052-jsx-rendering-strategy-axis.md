@@ -1,7 +1,8 @@
 ---
 type: idea
-status: parked
+status: resolved
 dateOpened: '2026-06-03'
+dateResolved: '2026-06-06'
 tags:
   - jsx
   - adapters
@@ -9,12 +10,23 @@ tags:
   - reactivity
   - vdom
   - directives
-relatedReport: reports/2026-05-31-change-tracking-observability.md
-relatedProject: webadapters
-crossRef: { url: /adapters/jsx-adapter/, label: JSX Adapter }
+relatedReport: reports/2026-06-06-render-strategy-axis.md
+relatedProject: webcomponents
+crossRef: { url: /projects/webcomponents/#protocol-render-strategy, label: Render Strategy Protocol }
+graduatedTo: protocol:render-strategy
 ---
 
 # JSX adapter — the rendering-strategy axis (binding, vdom, directives)
+
+> **Resolved 2026-06-06 — graduated to the `render-strategy` Protocol (Web Components).** The axis is now
+> a first-class conformance contract (`CustomRenderStrategy` / `CustomRenderStrategyRegistry`), sibling to the
+> Change Tracking Protocol, designed in [reports/2026-06-06-render-strategy-axis.md](reports/2026-06-06-render-strategy-axis.md)
+> and specified at `/projects/webcomponents/#protocol-render-strategy`. The open placement decision below is
+> **resolved: own standard (Protocol under Web Components), not folded into the JSX adapter** — the adapter merely
+> targets it. Remaining implementation work spun out as agent-ready items: **#077** (make `JSXRenderer.ts` an
+> explicit `declarative-static` provider — the seam), **#078** (cross-strategy lowering/lifting compiler),
+> **#079** (strategy toggle UI), **#080** (finalize the contract's open decisions). Kept visible to expose the
+> report and the graduation trail; the original design narrative is preserved below.
 
 The JSX adapter has two **orthogonal** axes that the first cut deliberately keeps separate: the *syntax* (how an element tree is spelled — HTML ↔ JSX ↔ template-string, fully reversible) and the *rendering strategy* (how that tree **updates over time**). This item parks the second axis — a pluggable choice between declarative-static bindings, virtual-DOM render methods, fine-grained signals, and imperative DOM — to attack after the syntax/conversion work ships. The strategy must be a registry-backed, swappable seam (native-first default = declarative-static), **not** baked into JSX, so the adapter never owns reactivity and the "no runtime magic" principle holds.
 

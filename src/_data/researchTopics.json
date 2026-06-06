@@ -196,5 +196,16 @@
     "relatedBlocks": ["router"],
     "relatedPlugs": [],
     "relatedProject": "webintents"
+  },
+  {
+    "id": "validation-generation-protocol-adapters",
+    "title": "Validation Generation: Protocol + Adapters, Two Delivery Modes",
+    "status": "open",
+    "summary": "How one validation intent declaration becomes runnable validation — purely the generation layer (protocol + adapters), excluding UI, component integration, the validity-model, and the conformance meta-layer. Confirms the two-mode framing is right and both modes already ship: Mode 1 (single-source generation, no runtime link) is best embodied by protovalidate (CEL on Protobuf → identical rules in Go/TS/Java/Python/C++), with JSON-Schema-as-source + per-target codegen (datamodel-code-generator, quicktype) as the pragmatic, lossier variant, and Standard Schema as the TS-only interface-consumer pattern that reduces the adapter problem from N×M to N+M; Mode 2 (backend exposes validation as a service) is best embodied by Laravel Precognition (runs the real rules without executing the controller, returns 422 + errors for live FE validation). Narrows the Mode-2 wire format to RFC 9457 application/problem+json by default with content-negotiated richer formats; models 'declare which intents you comply with' on JSON Schema's $vocabulary required/optional mechanism (consuming the #005 capability manifest); and identifies a gap to claim — RFC 9457 standardizes the error envelope but not the field-level error shape, which a WE Validation protocol could define as a first-class intent.",
+    "dateOpened": "2026-06-06",
+    "tags": ["validation", "protocol", "adapters", "codegen", "validation-as-a-service", "json-schema", "rfc-9457", "conformance", "vocabulary"],
+    "relatedBlocks": ["validation"],
+    "relatedPlugs": [],
+    "relatedProject": "webvalidation"
   }
 ]

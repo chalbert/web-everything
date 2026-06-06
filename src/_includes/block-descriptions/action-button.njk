@@ -1,3 +1,4 @@
+{% from "source-toggle.njk" import autoToggle %}
 <h2>Action Button</h2>
 <p>
     Behavioral implementation of the <a href="/intents/action/">Action Intent</a>, handling visual priority rendering,
@@ -135,13 +136,14 @@
     The button declares <em>what</em> icon it needs (name, size); the Icon Intent decides <em>how</em> to render it
     (SVG sprite, icon font, inline SVG).
 </p>
-{% highlight "html" %}
+{% set actionButtonHtml %}
 <button action-intent="primary"
         action-icon="save"
         action-icon-position="start">
     Save Changes
 </button>
-{% endhighlight %}
+{% endset %}
+{{ autoToggle("action-button-usage", actionButtonHtml) }}
 
 <h3>Usage Examples</h3>
 

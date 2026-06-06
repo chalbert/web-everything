@@ -2,14 +2,14 @@
 
 **Date**: 2026-06-03
 **Point**: There is no sorting (or filter/page/group) standard yet; this is the research that feeds gap #10. Finding: model the four operations as one *Collection Operations Intent* with four pipeline-stage dimensions, anchoring sort to the native semantics the platform already standardizes.
-**Plan file**: — (initiated from `backlog/gap-10-collection-ops-intent.md`, no `plans/` inbox file)
+**Plan file**: — (initiated from `backlog/006-gap-10-collection-ops-intent.md`, no `plans/` inbox file)
 **Research page**: `/research/collection-operations/`
 
 ---
 
 ## Question
 
-"What standard do we have around sorting?" — expecting the flow UX intent → traits → blocks. Answer: none exists. Sorting is logged only as triage stub [gap-10](../backlog/gap-10-collection-ops-intent.md) ("filter/sort/page/group; no single native API; vocabulary standardization play"), with no research topic, no report, and no intent. The trait layer has `withSortable` purely as an illustrative mixin; no block implements it. So the top layer of the chain (the intent) is undecided, which is why nothing below it is anchored. This research does the missing first step: investigate the design space so gap-10's open call ("confirm intent shape and dimensions") can be answered.
+"What standard do we have around sorting?" — expecting the flow UX intent → traits → blocks. Answer: none exists. Sorting is logged only as triage stub [gap-10](../backlog/006-gap-10-collection-ops-intent.md) ("filter/sort/page/group; no single native API; vocabulary standardization play"), with no research topic, no report, and no intent. The trait layer has `withSortable` purely as an illustrative mixin; no block implements it. So the top layer of the chain (the intent) is undecided, which is why nothing below it is anchored. This research does the missing first step: investigate the design space so gap-10's open call ("confirm intent shape and dimensions") can be answered.
 
 ## Recommendation
 
@@ -51,7 +51,7 @@ These convert gap-10's open call into settled positions; the research page now r
 | `src/_data/researchTopics.json` | Added `collection-operations` registry entry |
 | `src/_includes/research-descriptions/collection-operations.njk` | New full research write-up |
 | `reports/2026-06-03-collection-operations-intent.md` | This report |
-| `backlog/gap-10-collection-ops-intent.md` | Added `relatedReport` + recorded decisions in the open call |
+| `backlog/006-gap-10-collection-ops-intent.md` | Added `relatedReport` + recorded decisions in the open call |
 | `AGENTS.md` | Regenerated inventory (`npm run gen:inventory`) for new topic count |
 | `plateau-app: src/technical-configurator/seed-sorting-strategy.ts` | New — Sorting Strategy domain (8 axes, 7 strategies) |
 | `plateau-app: .../provider.ts` | Registered `sortingStrategyDomain` |

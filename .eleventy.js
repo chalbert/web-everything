@@ -32,9 +32,30 @@ module.exports = function (eleventyConfig) {
     return _htmlToJsx(String(html), document);
   });
 
-  // Flatten adapters from categories for pagination
+  // Build-time Axis-2 lowering: declarative-static JSX → vdom JSX (the #078 cross-strategy
+  // compiler). Lazily esbuild-transpiles the shared TS — the SAME lift() the tests exercise — so
+  // the strategy toggle's vdom pane is generated from the authored declarative source, not hand-kept.
+  let _crossStrategy;
+  eleventyConfig.addFilter("liftToVdom", function(declarative) {
+    if (!_crossStrategy) {
+      const fs = require("fs");
+      const { transformSync } = require("esbuild");
+      const src = fs.readFileSync(__dirname + "/blocks/renderers/jsx/render-strategy/crossStrategy.ts", "utf8");
+      const { code } = transformSync(src, { loader: "ts", format: "cjs" });
+      const m = { exports: {} };
+      new Function("module", "exports", "require", code)(m, m.exports, require);
+      _crossStrategy = m.exports;
+    }
+    return _crossStrategy.lift(String(declarative).trim()).code;
+  });
+
+  // Flatten adapters from categories for pagination.
+  // Read the file fresh each build (not `require`, which Node module-caches) so adapter additions
+  // hot-reload on the watch server like blocks/projects/intents do via the data cascade — see
+  // backlog/050-eleventy-adapter-require-cache.md. The watch target below triggers the rebuild.
   eleventyConfig.addCollection("flatAdapters", function(collectionApi) {
-    const adapters = require("./src/_data/adapters.json");
+    const fs = require("fs");
+    const adapters = JSON.parse(fs.readFileSync(__dirname + "/src/_data/adapters.json", "utf8"));
     return adapters.flatMap(category =>
       category.items.map(item => ({ ...item, category: category.id, categoryTitle: category.title }))
     );
@@ -46,6 +67,9 @@ module.exports = function (eleventyConfig) {
   // report must refresh the backlog that loads it.
   eleventyConfig.addWatchTarget("backlog");
   eleventyConfig.addWatchTarget("reports");
+  // adapters.json is read fresh in the flatAdapters collection (not the data cascade), so watch it
+  // explicitly — otherwise new adapter pages 404 on the live dev server until restart.
+  eleventyConfig.addWatchTarget("src/_data/adapters.json");
 
   eleventyConfig.addPassthroughCopy("src/css");
   eleventyConfig.addPassthroughCopy("src/assets");

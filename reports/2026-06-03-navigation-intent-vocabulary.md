@@ -119,6 +119,6 @@ mode, lazy view loading (eagerness → `prefetch`; pending UX → `loader`).
 | `src/_data/intents.json` | `navigation`: split `structure`, added `history`/`scroll`/`transition`/`guard`/`persistence`, status `concept → draft`, summary + description rewrite |
 | `src/_data/semantics.json` | Added `deep link`, `view transition`, `history disposition` |
 | `src/_data/blocks.json` | Router cross-check (no change needed / dimension-attribute map noted) |
-| `backlog/nav-persistence-grounding.md` | Created — open point |
-| `backlog/nav-transition-vs-motion.md` | Created — open point |
-| `backlog/nav-focus-reset-home.md` | Created — open point |
+| `backlog/057-nav-persistence-grounding.md` | Created — open point |
+| `backlog/058-nav-transition-vs-motion.md` | Created — open point |
+| `backlog/056-nav-focus-reset-home.md` | Created — open point |

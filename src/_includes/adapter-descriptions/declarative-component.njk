@@ -22,14 +22,12 @@
 
 <section class="section-card">
     <h3 id="concept">Concept</h3>
-    <p>The transform takes declarative markup in:</p>
+    <p>The transform takes declarative markup in — the component's own children are the template (no nested <code>&lt;template&gt;</code> needed):</p>
     {% highlight "html" %}
 <component name="user-card" shadow="open">
-  <template>
-    <style>:host { display: block }</style>
-    <h3><slot name="title">Untitled</slot></h3>
-    <slot></slot>
-  </template>
+  <style>:host { display: block }</style>
+  <h3><slot name="title">Untitled</slot></h3>
+  <slot></slot>
 </component>
     {% endhighlight %}
     <p>…and deterministically emits the class form out:</p>
@@ -40,9 +38,10 @@ TEMPLATE.innerHTML =
   `<h3><slot name="title">Untitled</slot></h3><slot></slot>`;
 
 class UserCard extends HTMLElement {
+  #root = this.shadowRoot;
   connectedCallback() {
-    const root = this.shadowRoot ?? this.attachShadow({ mode: 'open' });
-    if (!root.childNodes.length) root.append(TEMPLATE.content.cloneNode(true));
+    this.#root ??= this.attachShadow({ mode: 'open' });
+    if (!this.#root.childNodes.length) this.#root.append(TEMPLATE.content.cloneNode(true));
   }
 }
 customElements.define('user-card', UserCard);
@@ -50,8 +49,14 @@ customElements.define('user-card', UserCard);
     <p>
         The class name is derived from <code>name</code> (kebab → PascalCase); <code>shadow</code>
         selects the <code>attachShadow</code> mode (or light DOM for <code>none</code>); the
-        <code>&lt;template&gt;</code> becomes the cloned render source. This is the same lowering
+        component's children become the cloned render source. This is the same lowering
         Svelte's compiler and Lit-style tooling already perform.
+    </p>
+    <p class="text-sm text-gray-600">
+        Both authoring forms lower identically: the <strong>implicit</strong> form (children are the
+        template) and the <strong>explicit</strong> form (a lone direct-child <code>&lt;template&gt;</code>,
+        kept inert before the transform runs). Because the transform reads source text at build time,
+        the implicit form is safe — the children never go live in a browser (DC-11).
     </p>
 </section>
 

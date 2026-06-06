@@ -1,4 +1,5 @@
 {% from "source-toggle.njk" import sourceToggle, jsxSource, endSource %}
+{% from "strategy-toggle.njk" import strategyToggle %}
 
 <h2>JSX Adapter</h2>
 <p>
@@ -43,19 +44,72 @@
     {{ endSource() }}
 
     <p style="margin-bottom: 0; font-size: 0.9rem; color: var(--color-text-muted);">
-        <strong>Note:</strong> the full row-by-row correspondence (events, directives, interpolation, slots) is specified in
+        <strong>Note:</strong> the full row-by-row correspondence is the mapping table below, specified in
         <code>reports/2026-06-03-jsx-adapter-feature-mapping.md</code>. How a component <em>updates over time</em> — binding,
-        virtual DOM, fine-grained reactivity — is a separate axis, parked as <a href="/backlog/jsx-rendering-strategy-axis/">rendering-strategy</a>.
+        virtual DOM, fine-grained reactivity — is a separate axis, now a first-class standard: the
+        <a href="/projects/webcomponents/#protocol-render-strategy">Render Strategy Protocol</a> (Web Components).
+        Try the two spellings side by side in the <a href="/demos/jsx-adapter-demo.html">JSX Adapter Playground</a>.
     </p>
+</section>
+
+<section class="section-card">
+    <h3 id="rendering-strategy">Rendering strategy — the second, orthogonal axis</h3>
+    <p>
+        The toggle above switches the <em>spelling</em> of one tree (Axis-1: HTML ⇄ JSX). This second
+        toggle switches the <em>update machine</em> (Axis-2): the same element tree authored under each
+        registered <a href="/projects/webcomponents/#protocol-render-strategy">render strategy</a>. JSX
+        only spells the tree — it never owns reactivity; the strategy is resolved from
+        <code>CustomRenderStrategyRegistry</code>, so this toggle's tabs come from that catalog, not a
+        hardcoded list.
+    </p>
+    <p style="font-size: 0.9rem; color: var(--color-text-muted);">
+        The author writes the <strong>declarative-static</strong> source once; the <strong>vdom</strong> pane
+        is generated from it at build time by the cross-strategy <code>lift</code> compiler
+        (<code>blocks/renderers/jsx/render-strategy/crossStrategy.ts</code>). Note how the directive
+        <code>&lt;template is="for-each"&gt;</code> becomes a plain <code>.map()</code> — directives are an
+        artifact of the declarative-static strategy, so they appear and disappear <em>with the strategy</em>.
+    </p>
+    {% set strategyExample %}
+<template is="for-each" items="users" item="user" key="id"><li class="user-row">{{ '{{' }} user.name {{ '}}' }}</li></template>
+    {% endset %}
+    {{ strategyToggle("users-list-strategy", renderStrategies, strategyExample) }}
+</section>
+
+<section class="section-card">
+    <h3 id="feature-mapping">Feature mapping — the contract</h3>
+    <p>
+        Each HTML-adapter construct has one JSX spelling of the <em>same</em> element tree. This is the reversible
+        contract the <a href="/demos/jsx-adapter-demo.html">playground</a> and the build-time transform both conform to.
+        Most rows are mechanical; the designed cells are events (5), directives (7–8), and interpolation (9).
+    </p>
+    <table>
+        <thead>
+            <tr><th>HTML adapter</th><th>JSX mirror</th><th>Round-trip</th><th>Notes</th></tr>
+        </thead>
+        <tbody>
+            <tr><td><code>&lt;div class="x"&gt;</code></td><td><code>&lt;div class="x"&gt;</code></td><td>✅</td><td><code>class</code>, never <code>className</code></td></tr>
+            <tr><td><code>&lt;user-card name="Ana"&gt;</code></td><td><code>&lt;user-card name="Ana"&gt;</code></td><td>✅</td><td>custom element = string tag (no PascalCase rename)</td></tr>
+            <tr><td><code>&lt;input required&gt;</code></td><td><code>&lt;input required /&gt;</code></td><td>✅</td><td>bare boolean ⇄ <code>required={true}</code></td></tr>
+            <tr><td><code>history-link="/x"</code></td><td>same kebab attrs</td><td>✅</td><td>behaviors are plain attributes</td></tr>
+            <tr><td><code>on:click="inc($event)"</code></td><td><code>onclick={inc}</code> <em>or</em> <code>on:click="inc($event)"</code></td><td>✅¹</td><td>¹reversible for <strong>named</strong> handlers; inline closures are one-way (lossy)</td></tr>
+            <tr><td><code>&lt;span slot="header"&gt;</code></td><td><code>&lt;span slot="header"&gt;</code></td><td>✅</td><td>named slots = <code>slot</code> attribute</td></tr>
+            <tr><td><code>&lt;template is="for-each" items="…" key="…"&gt;</code></td><td><code>&lt;template is="for-each" items="…" key="…"&gt;</code></td><td>✅</td><td>literal element form is canonical; <code>&lt;For&gt;</code>/<code>&lt;Show&gt;</code> sugar deferred</td></tr>
+            <tr><td><code>&lt;!-- control:for-each … --&gt;</code></td><td><code>&lt;template is="for-each" …&gt;</code></td><td>⚠️</td><td>JSX can't carry semantic comments, so it canonicalizes on the element form</td></tr>
+            <tr><td><code>&#123;&#123; expr &#125;&#125;</code> / <code>[[ expr ]]</code> text</td><td>—</td><td>⛔</td><td>reactive text is <strong>Axis 2</strong> (reactive-by-path); not mapped here</td></tr>
+            <tr><td><code>bind-text="count"</code></td><td><code>bind-text="count"</code></td><td>✅</td><td>the Axis-1 reversible binding form</td></tr>
+            <tr><td><code>options="@countries"</code></td><td><code>options="@countries"</code></td><td>✅</td><td>injector/context refs are string-valued</td></tr>
+            <tr><td><code>&lt;component name="…"&gt;</code></td><td><code>&lt;component name="…"&gt;</code></td><td>✅</td><td>declarative element passes through</td></tr>
+        </tbody>
+    </table>
 </section>
 
 <section class="section-card">
     <h3 id="design-principles">Design Principles</h3>
     <ul>
-        <li><strong>Semantic Equivalence:</strong> Every JSX construct has a direct HTML equivalent and vice versa.</li>
+        <li><strong>Semantic Equivalence:</strong> Every JSX construct maps to the same HTML element tree (and most map back).</li>
         <li><strong>No Runtime Magic:</strong> JSX compiles to standard Web Everything primitives—no framework-specific runtime.</li>
         <li><strong>Type Safety:</strong> Full TypeScript support with typed props, events, and slots.</li>
-        <li><strong>AST Reversibility:</strong> The transformation is bidirectional—JSX can be converted back to HTML losslessly.</li>
+        <li><strong>Reversible where it can be:</strong> the transform round-trips the mechanical rows and named handlers; inline closures, comment-form directives, and reactive <code>&#123;&#123; &#125;&#125;</code> text are <strong>lossy by design</strong> (see the mapping notes) and don't round-trip.</li>
     </ul>
 </section>
 
@@ -101,54 +155,47 @@ customElements.define('user-card', UserCard);
 
 <section class="section-card">
     <h3 id="directive-syntax">Directive Syntax</h3>
-    <p>Web Directives are expressed as JSX components:</p>
+    <p>
+        The canonical directive spelling is the literal <code>&lt;template is="…"&gt;</code> customized built-in —
+        <strong>identical on both sides</strong>, because it is the one form JSX can both express and reverse. So a
+        directive is authored the same way in HTML and JSX:
+    </p>
 
     <h4 id="for-each-directive">For Each</h4>
     {% highlight "tsx" %}
-// JSX
-<For each={items} key="id">
-    {(item) => <ListItem data={item} />}
-</For>
+// JSX — same element tree as HTML
+<ul role="list">
+    <template is="for-each" items="@links" key="id">
+        <li><a history-link="/profile">Profile</a></li>
+    </template>
+</ul>
 
-// Equivalent HTML
-<template is="for-each" items="items" key="id">
-    <list-item data-bind="item"></list-item>
-</template>
+// HTML — identical
+<ul role="list">
+    <template is="for-each" items="@links" key="id">
+        <li><a history-link="/profile">Profile</a></li>
+    </template>
+</ul>
     {% endhighlight %}
 
     <h4 id="conditional-directive">Conditionals</h4>
     {% highlight "tsx" %}
-// JSX
-<Show when={isVisible}>
-    <Modal title="Hello" />
-</Show>
-
-// Equivalent HTML
+// Both HTML and JSX
 <template is="if" condition="isVisible">
     <modal-dialog title="Hello"></modal-dialog>
 </template>
     {% endhighlight %}
 
-    <h4 id="resource-loader-directive">Resource Loader</h4>
-    {% highlight "tsx" %}
-// JSX - Multiple templates via props
-<Resource
-    source={userQuery}
-    loading={<Skeleton />}
-    error={(err) => <ErrorCard message={err.message} />}
-    empty={<EmptyState />}
->
-    {(data) => <UserProfile user={data} />}
-</Resource>
-
-// Equivalent HTML (comment directive)
-<!-- resource:loader source="userQuery" -->
-    <template slot="loading"><skeleton-card></skeleton-card></template>
-    <template slot="error"><error-card data-bind="error.message"></error-card></template>
-    <template slot="empty"><empty-state></empty-state></template>
-    <template slot="success"><user-profile data-bind="data"></user-profile></template>
-<!-- /resource:loader -->
-    {% endhighlight %}
+    <div class="callout" style="border-left: 3px solid var(--color-primary); padding: 0.5rem 0 0.5rem 1rem; margin-top: 1rem;">
+        <p style="margin: 0 0 0.4rem 0;"><strong>Deferred sugar — <code>&lt;For&gt;</code> / <code>&lt;Show&gt;</code> / <code>&lt;Resource&gt;</code>.</strong></p>
+        <p style="margin: 0; font-size: 0.9rem; color: var(--color-text-muted);">
+            The prettier component spellings (<code>&lt;For each&gt;</code>, <code>&lt;Show when&gt;</code>, <code>&lt;Resource&gt;</code>)
+            are <strong>optional sugar</strong> that lower to and from the same <code>&lt;template is="…"&gt;</code> directive
+            registry. They are <strong>not yet implemented</strong> — tracked at
+            <a href="/backlog/070-jsx-directive-sugar/">jsx-directive-sugar</a>. Author directives as
+            <code>&lt;template is="…"&gt;</code> today; the component layer is purely an alternative spelling, not a different runtime.
+        </p>
+    </div>
 </section>
 
 <section class="section-card">
@@ -180,16 +227,16 @@ interface BehaviorAttributes {
     <p>Named slots work naturally with JSX children:</p>
 
     {% highlight "tsx" %}
-// JSX
-<Card>
-    <CardHeader>Title</CardHeader>
-    <CardBody>Content here</CardBody>
-    <CardFooter>
-        <Button>Action</Button>
-    </CardFooter>
-</Card>
+// JSX — custom elements stay string tags; slots are the `slot` attribute (same tree as HTML)
+<card-element>
+    <span slot="header">Title</span>
+    <div slot="body">Content here</div>
+    <div slot="footer">
+        <button>Action</button>
+    </div>
+</card-element>
 
-// Equivalent HTML
+// HTML — identical
 <card-element>
     <span slot="header">Title</span>
     <div slot="body">Content here</div>
@@ -198,68 +245,84 @@ interface BehaviorAttributes {
     </div>
 </card-element>
     {% endhighlight %}
+    <p style="margin: 0.75rem 0 0 0; font-size: 0.9rem; color: var(--color-text-muted);">
+        The mirror dialect does <strong>not</strong> rename elements to PascalCase components
+        (<code>&lt;Card&gt;</code>/<code>&lt;CardHeader&gt;</code>) — that would break round-trip. The element tree is the
+        same on both sides; only the surrounding syntax differs.
+    </p>
 </section>
 
 <section class="section-card">
     <h3 id="events">Event Handling</h3>
-    <p>Events map to Web Everything's <code>on:*</code> behavior pattern:</p>
+    <p>
+        The <strong>canonical, reversible</strong> form is the <code>on:*</code> <em>string</em> behavior — it has an HTML
+        representation, so it round-trips. JSX also accepts a <strong>function</strong> prop (<code>onclick={fn}</code>);
+        a <em>named</em> reference round-trips (resolved through the injector handler context), but an inline closure
+        <code>onclick={() =&gt; …}</code> has no string form and is <strong>one-way (lossy)</strong>.
+    </p>
 
     {% highlight "tsx" %}
-// JSX
-<button
-    on:click={handleClick}
-    on:keydown.enter={handleSubmit}
-    on:focus.once={handleFirstFocus}
->
-    Submit
-</button>
+// JSX — canonical string form (round-trips), identical to HTML
+<button on:click="inc($event)">Submit</button>
 
-// Equivalent HTML
-<button
-    on:click="handleClick"
-    on:keydown.enter="handleSubmit"
-    on:focus.once="handleFirstFocus"
->
-    Submit
-</button>
+// JSX — function form: named ref round-trips, inline closure is lossy
+<button onclick={inc}>Submit</button>           // ✅ reversible (named)
+<button onclick={() => inc()}>Submit</button>   // ⛔ one-way (no HTML form)
+
+// HTML — the canonical spelling
+<button on:click="inc($event)">Submit</button>
     {% endhighlight %}
+    <p style="margin: 0.75rem 0 0 0; font-size: 0.9rem; color: var(--color-text-muted);">
+        Whether the playground <em>displays</em> events in string vs function form is a planned UI sub-toggle
+        (<a href="/backlog/051-jsx-event-style-toggle/">jsx-event-style-toggle</a>).
+    </p>
 </section>
 
 <section class="section-card">
-    <h3 id="ast-transformation">AST Transformation</h3>
-    <p>The JSX adapter provides bidirectional transformation:</p>
+    <h3 id="ast-transformation">The transform — built and running</h3>
+    <p>
+        The bidirectional transform is <strong>implemented and tested</strong>, not aspirational. Two small,
+        DOM-impl-agnostic functions live in <code>blocks/renderers/jsx/</code> and run in the browser, in tests
+        (happy-dom), and in the 11ty build (linkedom):
+    </p>
 
     {% highlight "typescript" %}
-import { jsxToHtml, htmlToJsx } from '@web-adapters/jsx';
+import { htmlToJsx } from 'blocks/renderers/jsx/htmlToJsx';  // HTML → JSX (mirror dialect)
+import { jsxToHtml } from 'blocks/renderers/jsx/jsxToHtml';  // JSX  → HTML (lean, regex-based)
 
-// Convert JSX AST to HTML
-const htmlAst = jsxToHtml(jsxAst, {
-    preserveComments: true,
-    formatOutput: 'pretty'
-});
+// htmlToJsx walks nodeType/nodeName and takes an injectable document, so it is
+// portable across DOM implementations:
+const jsx = htmlToJsx(html, document);   // browser / happy-dom / linkedom
 
-// Convert HTML AST to JSX
-const jsxAst = htmlToJsx(htmlAst, {
-    componentCase: 'PascalCase',
-    typeDefinitions: true
-});
+// jsxToHtml is the reverse spelling (no DOM needed):
+const html = jsxToHtml(jsx);
     {% endhighlight %}
 
-    <p>This enables:</p>
+    <p style="margin-bottom: 0.5rem;">Where it already runs today:</p>
     <ul style="margin-bottom: 0;">
-        <li>Migrating existing HTML components to JSX</li>
-        <li>Exporting JSX components as HTML for SSR</li>
-        <li>IDE refactoring across format boundaries</li>
-        <li>Publishing component libraries in multiple formats</li>
+        <li><strong>Build-time source panes.</strong> The <code>autoToggle</code> macro authors HTML once and
+            generates the JSX pane at build time via an 11ty <code>htmlToJsx</code> filter — see the
+            <a href="/blocks/for-each/">for-each block page</a>.</li>
+        <li><strong>The playground.</strong> The <a href="/demos/jsx-adapter-demo.html">JSX Adapter Playground</a>
+            renders mirror-dialect examples live and shows <em>conformance</em> (JSX→DOM == canonical HTML) and
+            <em>round-trip</em> (<code>htmlToJsx</code> ⇄ authored) badges, backed by CI.</li>
+        <li><strong>Migrating &amp; exporting</strong> existing HTML ⇄ JSX across the format boundary, within the
+            reversibility limits noted in the mapping table.</li>
     </ul>
 </section>
 
 <section class="section-card">
     <h3 id="related">Related</h3>
     <ul style="margin-bottom: 0;">
-        <li><a href="/adapters/html-adapter/">HTML Adapter</a> — The canonical format</li>
+        <li><a href="/demos/jsx-adapter-demo.html">JSX Adapter Playground</a> — live mirror-dialect examples with conformance + round-trip badges</li>
+        <li><a href="/adapters/html-adapter/">HTML Adapter</a> — The canonical format this mirrors</li>
         <li><a href="/adapters/template-string-adapter/">Template String Adapter</a> — Tagged template literal alternative</li>
+        <li><a href="/backlog/070-jsx-directive-sugar/">jsx-directive-sugar</a> — the deferred <code>&lt;For&gt;</code>/<code>&lt;Show&gt;</code>/<code>&lt;Resource&gt;</code> layer</li>
+        <li><a href="/backlog/052-jsx-rendering-strategy-axis/">jsx-rendering-strategy-axis</a> — Axis 2 (how the tree updates over time), parked</li>
         <li><a href="/projects/webdirectives/">Web Directives</a> — Structural directives documentation</li>
         <li><a href="/projects/webbehaviors/">Web Behaviors</a> — Custom attribute behaviors</li>
     </ul>
+    <p style="margin: 0.75rem 0 0 0; font-size: 0.9rem; color: var(--color-text-muted);">
+        Full row-by-row spec: <code>reports/2026-06-03-jsx-adapter-feature-mapping.md</code>.
+    </p>
 </section>

@@ -5,7 +5,7 @@
     never reorders or removes rows. <a href="/intents/windowed-collection/">Windowed Collection</a> decides
     <em>which items are realised in the DOM</em>, explicitly <em>not</em> which items are in the set or in what
     order. <a href="/intents/loader/">Loader</a> fetches asynchronously. None of them <em>transform the dataset</em>.
-    This is <a href="/backlog/gap-10-collection-ops-intent/">gap&nbsp;#10</a>, and its open call is narrow:
+    This is <a href="/backlog/006-gap-10-collection-ops-intent/">gap&nbsp;#10</a>, and its open call is narrow:
     <strong>confirm the intent shape and the dimensions to standardize.</strong>
 </p>
 <p>
@@ -200,7 +200,7 @@ interface CollectionOperationsIntent {
 
 <h3>Placement &amp; Cross-References</h3>
 <ul>
-    <li><a href="/backlog/gap-10-collection-ops-intent/">Gap&nbsp;#10</a> — the decision this research feeds; its open call ("confirm intent shape and dimensions") is answered provisionally above.</li>
+    <li><a href="/backlog/006-gap-10-collection-ops-intent/">Gap&nbsp;#10</a> — the decision this research feeds; its open call ("confirm intent shape and dimensions") is answered provisionally above.</li>
     <li><a href="/intents/windowed-collection/">Windowed Collection</a> — adjacent and complementary: it renders the window, this selects/orders the set. Compose, don't merge.</li>
     <li><a href="/intents/type-ahead/">Type-Ahead</a> — explicitly <em>not</em> this: focus movement, not data transform. The gap exists precisely because type-ahead was mistaken for "search/filter."</li>
     <li><a href="/intents/locale/">Locale</a> / <a href="/projects/webintl/">Web Intl</a> — owns <code>Intl.Collator</code>; the ambient collation default should derive from the active locale.</li>

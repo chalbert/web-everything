@@ -44,6 +44,13 @@ interface DomDocument {
 const isElement = (n: DomNode) => n.nodeType === ELEMENT_NODE;
 const isTemplate = (n: DomNode) => n.nodeName.toUpperCase() === 'TEMPLATE';
 
+// Raw-text elements: their text content is CSS/JS, not markup. In JSX the braces in `:host { … }`
+// would be parsed as expression containers, so the content must be emitted as a JSX string
+// expression — `<style>{`…`}</style>` — not bare text. (Without this the JSX is unparseable.)
+const RAW_TEXT_ELEMENTS = new Set(['style', 'script']);
+const escapeTemplateLiteral = (s: string) =>
+  s.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
+
 function isSignificant(node: DomNode): boolean {
   if (node.nodeType === TEXT_NODE) return (node.textContent || '').trim() !== '';
   return true;
@@ -64,8 +71,15 @@ function childrenOf(el: DomNode): DomNode[] {
 function elementToJsx(el: DomNode): string {
   const tag = el.nodeName.toLowerCase();
   const attrs = serializeAttrs(el);
-  const inner = serializeChildren(childrenOf(el));
 
+  // Raw-text elements carry CSS/JS — emit as a JSX string expression so braces aren't parsed as JSX.
+  if (RAW_TEXT_ELEMENTS.has(tag)) {
+    const text = el.textContent || '';
+    if (text.trim() === '') return `<${tag}${attrs} />`;
+    return `<${tag}${attrs}>{\`${escapeTemplateLiteral(text)}\`}</${tag}>`;
+  }
+
+  const inner = serializeChildren(childrenOf(el));
   if (VOID_ELEMENTS.has(tag) || inner.trim() === '') {
     return `<${tag}${attrs} />`;
   }
