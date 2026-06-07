@@ -1,7 +1,8 @@
 ---
 type: idea
-status: active
+status: resolved
 dateOpened: "2026-06-06"
+graduatedTo: "plateau/src/blocks/attributes/Anchor.ts + Anchored.ts"
 tags: [droplist, autocomplete, anchor, popover, positioning, traits, behavior]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -35,24 +36,34 @@ glue, so opening, dismissing, and `aria-expanded` are the trait's responsibility
 
 ## Progress
 
-**Status:** active
-**Branch:** plateau `<current>` (impl); webeverything `docs/standard-authoring-workflow` (backlog file)
+**Status:** resolved
+**Branch:** plateau (impl); webeverything `docs/standard-authoring-workflow` (backlog file)
 
-**Plan (behavior/provider split per #023, native-first per #063):**
-- `Anchor` (behavior, on the trigger/input) — the binding half: open on focus/click/typing,
-  dismiss on Escape/outside-click/blur/commit; reflect `aria-expanded`, wire `aria-controls`.
-- `Anchored` (positioning, on the surface) — the provider half, native-first: emit CSS Anchor
-  Positioning (`position-anchor`/`position-area`/`position-try-fallbacks`) + Popover when available.
-- Rewire `Autocomplete.trace.test.ts` to compose `Anchor` instead of the open/dismiss glue.
+**Done — built the anchor trait as two real CustomAttribute behaviors (behavior/provider split
+per #023, native-first per #063):**
+- `plateau/src/blocks/attributes/Anchor.ts` — the **binding** half on the trigger/input: opens on
+  focus/click/typing/open-keys, dismisses on Escape (with focus-return), outside-click, blur, and
+  commit; reflects `aria-expanded` and wires `aria-controls`; toggles surface `hidden` + Popover
+  top layer when available. 18 unit tests (`__tests__/Anchor.test.ts`).
+- `plateau/src/blocks/attributes/Anchored.ts` — the **positioning** half on the surface: native-first
+  CSS Anchor Positioning (`anchor-name` ↔ `position-anchor`, `position-area`,
+  `position-try-fallbacks`), Popover opt-in, placement reflected to `data-anchored-placement`.
+  9 unit tests (`__tests__/Anchored.test.ts`).
+- Rewired `__tests__/Autocomplete.trace.test.ts` — the "par → arrow → enter" trace now composes
+  `Anchor`; the open-on-focus and dismiss-on-commit glue is gone (only the autocomplete-specific
+  "write chosen label into input" glue remains). aria-expanded open/dismiss is the trait's job.
+- Expanded `plateau/src/definitions/anchor.md` to document the two behaviors.
 
-**Done:**
-- Explored the proven stack (FocusDelegation/Selection/Filter/Clearable), registry, test conventions.
+**Verification:** full plateau suite green (147 tests); webeverything `check:standards` 0 errors.
 
-**Next:**
-- Write `Anchor.ts` + unit test; `Anchored.ts` + unit test; rewire the trace; expand `anchor.md`.
+**Findings worth keeping:**
+- Enter/Space must NOT be anchor open-keys — a commit dismisses via a nested `selectionchange`, so
+  if anchor's own keydown then treated Enter as an open-key it reopened. Open-keys are arrows only;
+  button keyboard activation arrives as a synthesized `click` (covered by `openOn: 'click'`).
+- Escape's focus-return must not reopen: a `#ignoreNextFocus` guard suppresses the programmatic
+  refocus, matching combobox semantics (closed but focused).
 
-**Notes:**
-- Tests: plateau vitest + happy-dom; `@withOptions` is mocked in unit tests, options set directly.
-- Surface resolution mirrors `controller`: `options.surface` → `aria-controls` → `aria-owns`.
-- Leftover (likely): swappable positioning *strategy* via DI provider (Floating UI adapter) — the
-  genuinely open fork in #023/open-Q#2; not baked here.
+**Leftover → new item:** [#149](/backlog/149-anchor-positioning-strategy-provider/) — make the
+positioning *strategy* a swappable DI provider (JS/Floating-UI fallback for engines without CSS
+anchor positioning) + validate placement in a real browser. The native CSS path shipped here is the
+default; the strategy swap is the genuinely open fork from #023/open-Q#2.
