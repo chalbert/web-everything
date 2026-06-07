@@ -8,6 +8,8 @@ tags:
   - droplist
   - native-first
 relatedReport: reports/2026-06-02-native-platform-substrate.md
+# Former URL before the NNN-prefix migration (#110 old-slug redirect — keeps the old link alive):
+formerSlugs: [base-select-first-class-adapter]
 ---
 
 # Promote appearance:base-select to a first-class adapter?

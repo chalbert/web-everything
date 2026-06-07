@@ -1,0 +1,148 @@
+<h2>Pagination</h2>
+<p>The blocks-layer home for the <a href="/intents/collection-operations/">Collection Operations</a> intent's <strong><code>page</code> stage</strong>. It renders the paged controls the intent describes — numbered, prev/next, or load-more — inside a <a href="https://www.w3.org/WAI/ARIA/apg/patterns/landmark-regions/"><code>&lt;nav aria-label="pagination"&gt;</code></a> landmark with <code>aria-current="page"</code>, syncs the active page to a shareable self-canonical <code>?page=n</code> URL, and wires <code>advance:auto</code> to an <code>IntersectionObserver</code> scroll sentinel. Until this block existed the pagination standard described the <em>what</em> with no <em>how</em>; this is the runnable home for it.</p>
+
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">
+  <strong>Terminology:</strong> See <a href="/semantics/">Semantics &amp; Glossary</a> for terms like
+  <a href="/semantics/#term-aria-current">aria-current</a>,
+  <a href="/semantics/#term-navigation-landmark">navigation landmark</a>,
+  <a href="/semantics/#term-scroll-sentinel">scroll sentinel</a>,
+  <a href="/semantics/#term-result-range-label">result-range label</a>, and
+  <a href="/semantics/#term-deep-link">deep link</a>.
+</p>
+
+<h3>Web Standards Alignment</h3>
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr>
+    <td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/landmark-regions/">Pagination nav landmark</a></td>
+    <td>W3C WAI-ARIA APG</td>
+    <td>Controls are wrapped in <code>&lt;nav aria-label="pagination"&gt;</code>; each landmark gets a unique label when more than one exists</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current">aria-current</a></td>
+    <td>WAI-ARIA 1.1</td>
+    <td>The active page link is marked <code>aria-current="page"</code></td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/History/pushState">History API</a></td>
+    <td>Baseline 2020</td>
+    <td>The native-first baseline for <code>urlSync</code>: <code>pushState</code> writes <code>?page=n</code>, <code>popstate</code> restores it on back/forward, <code>scrollRestoration</code> manages scroll</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API">Navigation API</a></td>
+    <td>Baseline 2026</td>
+    <td>Progressive enhancement — a single <code>navigate</code> event intercepts same-document navigations; used where available, never required</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.chrome.com/docs/web-platform/view-transitions/cross-document">Cross-document View Transitions</a></td>
+    <td>Progressive enhancement</td>
+    <td><code>@view-transition { navigation: auto; }</code> animates server-rendered page-to-page navigation with <strong>zero JS</strong></td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/IntersectionObserver">IntersectionObserver</a></td>
+    <td>Baseline</td>
+    <td>A scroll sentinel requests the next slice at the scroll boundary — the native grounding for <code>advance:auto</code></td>
+  </tr>
+  <tr>
+    <td><a href="https://developers.google.com/search/docs/specialty/ecommerce/pagination-and-incremental-page-loading">Self-canonical page URLs</a></td>
+    <td>Google Search Central</td>
+    <td>Each page is its own self-referencing canonical <code>?page=n</code>; server-rendered <code>&lt;a href&gt;</code> links are the indexable default. <code>rel=next/prev</code> is deprecated and never emitted as primary machinery</td>
+  </tr>
+</table>
+
+<h3>Framework Research</h3>
+<table>
+  <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
+  <tr>
+    <td><a href="https://tanstack.com/table/latest/docs/guide/pagination">TanStack Table</a></td>
+    <td>Page-state model (<code>pageIndex</code> / <code>pageSize</code> / <code>pageCount</code>) — the data shape behind the controls</td>
+  </tr>
+  <tr>
+    <td><a href="https://react-spectrum.adobe.com/react-aria/usePagination.html">React Aria</a></td>
+    <td>Accessibility wiring for the nav landmark and active-page semantics</td>
+  </tr>
+  <tr>
+    <td><a href="https://primer.style/components/pagination">GitHub Primer Pagination</a></td>
+    <td>Server-rendered <code>&lt;a href&gt;</code> numbered links inside a nav landmark — closest to our SEO-safe default</td>
+  </tr>
+  <tr>
+    <td><a href="https://react-spectrum.adobe.com/">Adobe React Spectrum</a></td>
+    <td>Prior art for the result-range label and page-size selector affordances (recommended defaults pending <a href="/backlog/060-pagination-range-labels-page-size/">#060</a>)</td>
+  </tr>
+</table>
+
+<h3>Architecture</h3>
+<p>Pagination is a <strong>Module</strong> that composes the <code>page</code> stage of Collection Operations; it owns only the paging UI and URL/advance wiring, delegating rendering and lifecycle to its neighbours:</p>
+<ul>
+  <li><strong>PaginationModule</strong>: resolves the active page + total against the <a href="/resources/pagination/">Custom Pagination</a> resource protocol and exposes the page-state model.</li>
+  <li><strong>PaginationBehavior</strong> (<code>page:nav</code>): attaches to the control container, renders the <code>&lt;nav aria-label="pagination"&gt;</code> landmark, projects <code>aria-current="page"</code> onto the active link, and (when <code>withUrlSync</code>) reflects the page to <code>?page=n</code>.</li>
+  <li><a href="/intents/windowed-collection/">Windowed Collection</a> renders the visible slice; <a href="/intents/loader/">Loader</a> owns the <code>loadingMore</code> lifecycle at the <code>advance:auto</code> sentinel. <strong>Compose, never merge.</strong></li>
+</ul>
+
+<h3>Presentation — two orthogonal axes</h3>
+<p><code>pageMode</code> (does advancing <em>replace</em> the slice or <em>grow</em> the list) and <code>advance</code> (is the next slice requested by a <em>click</em> or <em>automatically</em> at the scroll boundary) are independent. <strong>Infinite scroll is not a third mode</strong> — it is <code>append</code> + <code>advance:auto</code>, a derived opt-in carrying the documented infinite-scroll harms (unreachable footer, no stopping point), so it is never the default.</p>
+<table>
+  <tr><th></th><th><code>advance: manual</code></th><th><code>advance: auto</code></th></tr>
+  <tr><td><code>pageMode: paged</code></td><td>Numbered / prev-next — replace the slice on click (jump-to-page, known total)</td><td><em>Undefined</em> — you do not auto-replace a slice on scroll</td></tr>
+  <tr><td><code>pageMode: append</code></td><td>Load-more button — grow the list on click</td><td>Infinite scroll — grow the list at an IntersectionObserver sentinel</td></tr>
+</table>
+
+<h3>Accessibility contract (verified)</h3>
+<ul>
+  <li>Controls live in a <code>&lt;nav aria-label="pagination"&gt;</code> navigation landmark; give each landmark a unique label when more than one exists.</li>
+  <li>The active page link carries <code>aria-current="page"</code> (WAI-ARIA APG, primary source).</li>
+  <li><strong>Open:</strong> focus management and screen-reader announcement <em>after</em> a page change are not yet verified — tracked in <a href="/backlog/059-pagination-focus-announcement/">#059</a>, deliberately unresolved here rather than guessed.</li>
+</ul>
+
+<h3>SEO / SSR (load-bearing, not optional)</h3>
+<ul>
+  <li>Each page is a unique, self-referencing canonical <code>?page=n</code>; never canonicalize the sequence to page 1, and never use fragments for page numbers.</li>
+  <li>Server-rendered <code>&lt;a href&gt;</code> page links are the SEO-safe default — Googlebot does not fire the user-action JS behind load-more / <code>advance:auto</code>, so an indexable paginated path must exist alongside the interactive UI.</li>
+  <li><code>rel=next/prev</code> was deprecated by Google (2019); at most an optional hint, never primary machinery.</li>
+  <li>Consequence: <code>urlSync: query-param</code> is <strong>load-bearing</strong> for <code>append</code> modes — without it the footer and back button break.</li>
+</ul>
+
+<h3>Cross-layer constraint</h3>
+<p>A <a href="/resources/pagination/">resource pagination protocol</a> choice binds what UX is expressible: <strong>jump-to-page and the <code>rangeLabel</code></strong> (<code>"showing 21–40 of 500"</code>) need a known total, so they pair <strong>only</strong> with an offset/page protocol. A cursor protocol has no total and structurally forces prev-next or load-more with <code>rangeLabel</code> off. This constraint is inherited from the resource layer, not re-modeled here.</p>
+
+<h3>HTML Usage</h3>
+<pre><code class="language-html">&lt;!-- Numbered pagination (paged + manual), SEO-safe server-rendered links --&gt;
+&lt;nav page:nav aria-label="pagination" data-url-sync="query-param"&gt;
+  &lt;a href="?page=1"&gt;1&lt;/a&gt;
+  &lt;a href="?page=2" aria-current="page"&gt;2&lt;/a&gt;
+  &lt;a href="?page=3"&gt;3&lt;/a&gt;
+  &lt;a href="?page=3"&gt;Next&lt;/a&gt;&lt;!-- no rel=next/prev: deprecated, never primary machinery --&gt;
+&lt;/nav&gt;
+
+&lt;!-- Infinite scroll (append + auto): a sentinel the IntersectionObserver watches --&gt;
+&lt;ul windowed-collection&gt;&lt;!-- rendered slice --&gt;&lt;/ul&gt;
+&lt;div page:nav data-page-mode="append" data-advance="auto" aria-hidden="true"&gt;&lt;/div&gt;</code></pre>
+
+<h3>Interface (contracts only)</h3>
+<p>Web Everything defines the contract; concrete strategy implementations (a URL-state provider, an alternate advance trigger) live in <strong>Frontier UI</strong> and register against these seams without changing the contract.</p>
+<pre><code class="language-typescript">type PageMode = 'paged' | 'append';
+type Advance  = 'manual' | 'auto';
+type UrlSync  = 'none' | 'query-param';
+type RangeLabel = 'none' | 'range';
+
+interface PageState {
+  pageIndex: number;          // zero-based active page
+  pageSize: number;           // items per slice (selector defaults pending #060)
+  pageCount?: number;         // absent under a cursor protocol (no total)
+  total?: number;             // absent under a cursor protocol
+}
+
+interface PaginationContract {
+  mode: PageMode;
+  advance: Advance;           // default 'manual'; append + auto = infinite scroll
+  urlSync: UrlSync;           // 'query-param' writes a self-canonical ?page=n
+  rangeLabel: RangeLabel;     // 'range' requires a total -> offset/page protocol only
+  // Observable events: 'pagechange' (the page stage of the intent's pipeline events).
+}</code></pre>
+
+<h3>Status &amp; scope</h3>
+<p><code>status: draft</code> — the contract, a11y/SEO/URL-state design, and a fixture-driven
+<a href="/demos/pagination-demo.html">conformance demo</a> ship here; concrete strategy
+implementations are deferred to Frontier UI. The companion <code>sortDirection → aria-sort</code>
+projection and the filter/sort/group rendering home belong to a separate grid/data-table block,
+tracked independently.</p>

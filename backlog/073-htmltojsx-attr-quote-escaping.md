@@ -1,7 +1,8 @@
 ---
 type: issue
-status: open
+status: resolved
 dateOpened: "2026-06-06"
+dateResolved: "2026-06-06"
 tags: [jsx, adapters, htmlToJsx, transform, bug]
 relatedReport: reports/2026-06-03-jsx-adapter-feature-mapping.md
 relatedProject: webadapters
@@ -9,6 +10,10 @@ crossRef: { url: /adapters/jsx-adapter/, label: JSX Adapter }
 ---
 
 # htmlToJsx does not escape double-quotes inside attribute values
+
+> **Resolved 2026-06-06.** `blocks/renderers/jsx/htmlToJsx.ts` now serializes attribute values through an
+> `escapeAttr` helper (`&`→`&amp;`, `"`→`&quot;`), mirroring `outerHTML` so a value containing double quotes
+> no longer closes the attribute early and the canonical-HTML round-trip holds. Original narrative below.
 
 `blocks/renderers/jsx/htmlToJsx.ts` serializes every attribute as `name="value"` without escaping a `"` that occurs *inside* the value. So an attribute whose value contains double quotes produces malformed output: the input `broadcast-detail='{"theme": "dark"}'` transforms to `broadcast-detail="{"theme": "dark"}"` — the inner `"` closes the attribute early, breaking both the JSX and any round-trip.
 

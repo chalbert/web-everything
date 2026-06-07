@@ -23,6 +23,21 @@
       "details": "Eliminates manual 'glue code' for the developer."
     }
   ],
+  "map_materialization": {
+    "title": "The Map — Materialization Decision",
+    "status": "Decided 2026-06-06 — revisit when building The Enforcer.",
+    "decision": "The Map is materialized as a <strong>standalone trait manifest</strong>: a single attribute&rarr;module table of lazy <code>import()</code> thunks in the reference implementation (e.g. <code>{ sortable: () =&gt; import('./traits/Sortable') }</code>), applied by a <code>registerTraits()</code> helper that calls <code>CustomAttributeRegistry.defineLazy</code> for each entry. Chosen over folding the map into per-block manifests (a <code>composesTraits</code> field on each block) and over holding it as JSON in the standard repository.",
+    "rationale": [
+      "<strong>One global table, one wiring point.</strong> A single attribute&rarr;module manifest gives one place to see every trait and one call to register them all &mdash; mirroring how the other runtime registries are bootstrapped &mdash; rather than scattering the map across per-block declarations.",
+      "<strong>Runtime-only, no build tooling required.</strong> The literal <code>import()</code> specifiers are statically analyzable, so a bundler can code-split each trait <em>today</em>, before The Enforcer exists. This makes the runtime lazy path real on its own.",
+      "<strong>Forward-compatible with The Enforcer.</strong> This table is exactly what The Enforcer will later <em>generate</em> from scanned usage, so build tooling slots in by emitting the manifest instead of hand-authoring it &mdash; with no change to the runtime contract."
+    ],
+    "considerations": [
+      "<strong>Source-of-truth tension.</strong> Because the manifest values are implementation module paths, the manifest lives in the reference implementation, not the standard. If the standard should later own the Map as data (a JSON manifest under Web Docs &mdash; the original framing above), note that JSON cannot carry the literal <code>import()</code> specifiers a bundler needs to split; it would still require a generated thunk table. So a JSON-in-standard source of truth is an Enforcer-era concern, not a runtime one.",
+      "<strong>Registration must precede upgrade.</strong> Like eager <code>define</code>, <code>defineLazy</code> must run before a tree is upgraded &mdash; the attribute observer's filter is fixed at upgrade time. <code>registerTraits()</code> therefore runs during bootstrap, ahead of the first upgrade.",
+      "<strong>Default delivery is still open.</strong> Whether a trait is eager-baked or split-and-lazy by default &mdash; and whether that is per-trait overridable in the manifest &mdash; is deferred to The Enforcer."
+    ]
+  },
   "example": {
     "component": "class DataGrid extends HTMLElement {\n  // Core logic only (2KB)\n}",
     "usage": "<data-grid \n  sortable \n  export-csv \n  theme=\"material\"\n></data-grid>",

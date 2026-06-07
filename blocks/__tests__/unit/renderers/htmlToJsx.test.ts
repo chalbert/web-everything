@@ -40,3 +40,15 @@ describe('htmlToJsx — comment-directive lowering (no playground fixture)', () 
     expect(norm(htmlToJsx(`<div><!-- a note -->text</div>`))).toBe(norm(`<div>text</div>`));
   });
 });
+
+describe('htmlToJsx — attribute value escaping (backlog 073)', () => {
+  it('escapes double-quotes inside an attribute value so the JSX attr cannot close early', () => {
+    // A JSON-valued attribute: the inner " must become &quot;, not break out of name="…".
+    expect(htmlToJsx(`<broadcast-channel broadcast-detail='{"theme":"dark"}'></broadcast-channel>`))
+      .toBe(`<broadcast-channel broadcast-detail="{&quot;theme&quot;:&quot;dark&quot;}" />`);
+  });
+
+  it('escapes ampersands the same way HTML serialization does', () => {
+    expect(htmlToJsx(`<a href="/x?a=1&b=2">go</a>`)).toBe(`<a href="/x?a=1&amp;b=2">go</a>`);
+  });
+});

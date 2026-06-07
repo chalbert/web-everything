@@ -1,6 +1,6 @@
 ---
 type: idea
-status: active
+status: open
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-06"
 tags: [module-as-a-service, adapters, functional-component, plateau, dev-server, esm, render-strategy]
@@ -42,7 +42,7 @@ The rendering adapters answer *"can this tree be spelled three ways?"* (Axis 1 �
 
 ## Progress
 
-- **Status:** active — v1 walking skeleton landed and verified.
+- **Status:** open — v1 + phases 2a/2b/2c landed and verified; **non-blocking follow-ons + an open "home" decision remain**, so it's parked-open rather than in-progress. Verified 2026-06-06: `moduleService.ts`, `tools/maas/vite-plugin.ts`, `functional/functionalComponent.ts`, both demos present; `moduleService.test.ts` 16/16 + full suite 1418 passing; `check:standards` 0 errors. Re-open as `active` when picking up a follow-on (reactivity / real resolver / prod delivery) or settling the home decision.
 - **Branch:** docs/standard-authoring-workflow
 - **Done (v1 skeleton — serve one component in N forms, single-core, native):**
   - **Resolver core** `blocks/renderers/module-service/moduleService.ts` — `serve(definition, { form })` returning `{ form, code, language, lossy, diagnostics }`, plus a `FORMS` catalog (`declarative` | `wc-class` | `html` | `jsx`). It owns **no transform** — it dispatches to the existing shared modules (`declarativeComponent.parseDefinition`/`generateClassSource`, `htmlToJsx`), which is the **anti-drift guarantee**: the served form is the same transform the [/adapters/](/adapters/) demos document, not a parallel copy.

@@ -14,7 +14,7 @@
       {
         "id": "jsx-adapter",
         "name": "JSX Adapter",
-        "status": "draft",
+        "status": "implemented",
         "summary": "Converts JSX/TSX syntax into standard templates, slots, and directive structures with full type safety."
       },
       {

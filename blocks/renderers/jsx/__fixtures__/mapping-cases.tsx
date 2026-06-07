@@ -127,6 +127,14 @@ export const mappingCases: MappingCase[] = [
     ),
     html: `<template is="for-each" items="users" key="id"><div class="user-row"><span data-bind="name"></span></div></template>`,
   },
+  {
+    id: 'json-valued-attr',
+    title: '9 · JSON-valued attribute (quote escaping)',
+    note: 'A JSON attribute value contains double-quotes; they serialize as &quot; so the inner " can\'t close the JSX attribute early. Round-trips because canonical HTML escapes identically.',
+    jsx: `<broadcast-channel broadcast-detail="{&quot;theme&quot;:&quot;dark&quot;}"></broadcast-channel>`,
+    render: () => <broadcast-channel broadcast-detail="{&quot;theme&quot;:&quot;dark&quot;}"></broadcast-channel>,
+    html: `<broadcast-channel broadcast-detail="{&quot;theme&quot;:&quot;dark&quot;}"></broadcast-channel>`,
+  },
 ];
 
 export default mappingCases;

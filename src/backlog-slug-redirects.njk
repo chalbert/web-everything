@@ -1,0 +1,27 @@
+---
+# Old-slug redirects (backlog #110): one tiny page per former slug at /backlog/<former-slug>/ that
+# redirects to the item's canonical /backlog/<id>/. Sourced from each item's `formerSlugs:` list
+# (flattened by src/_data/backlogAliases.js). This is the back-compat companion to #075's number-only
+# /backlog/<NNN>/ redirect — together, both a cited number AND a previously-published slug survive a
+# reword. Empty `formerSlugs` everywhere → this generates zero pages.
+pagination:
+    data: backlogAliases
+    size: 1
+    alias: alias
+permalink: "backlog/{{ alias.from }}/"
+eleventyExcludeFromCollections: true
+---
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Redirecting to {{ alias.title }}…</title>
+<link rel="canonical" href="/backlog/{{ alias.to }}/">
+<meta http-equiv="refresh" content="0; url=/backlog/{{ alias.to }}/">
+<meta name="robots" content="noindex">
+<script>location.replace("/backlog/{{ alias.to }}/");</script>
+</head>
+<body>
+<p>Redirecting to <a href="/backlog/{{ alias.to }}/">/backlog/{{ alias.to }}/</a>…</p>
+</body>
+</html>

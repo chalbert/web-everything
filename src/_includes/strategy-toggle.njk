@@ -36,9 +36,9 @@
     {% for s in strategies %}
     <div class="mode-content" data-mode-content="{{ id }}" data-mode="{{ s.id }}" style="display: {% if s.default %}block{% else %}none{% endif %};">
         {% if s.id == "declarative-static" %}
-        <pre class="source-toggle-code"><code class="language-tsx">{{ declarativeSource | trim | escape }}</code></pre>
+        <pre class="source-toggle-code"><code class="language-tsx">{{ declarativeSource | trim | highlightCode("tsx") | safe }}</code></pre>
         {% elif s.id == "vdom" %}
-        <pre class="source-toggle-code"><code class="language-tsx">{{ declarativeSource | liftToVdom | escape }}</code></pre>
+        <pre class="source-toggle-code"><code class="language-tsx">{{ declarativeSource | liftToVdom | highlightCode("tsx") | safe }}</code></pre>
         {% elif s.id == "fine-grained" %}
         <div style="padding: 0.75rem; font-size: 0.85rem; color: #4b5563;">
             <p style="margin: 0 0 0.5rem;">{{ s.summary }}</p>

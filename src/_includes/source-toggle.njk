@@ -66,10 +66,10 @@
         </div>
     </div>
     <div class="mode-content" data-mode-content="{{ id }}" data-mode="html" style="display: block;">
-        <pre class="source-toggle-code"><code class="language-html">{{ html | trim | escape }}</code></pre>
+        <pre class="source-toggle-code"><code class="language-html">{{ html | trim | highlightCode("html") | safe }}</code></pre>
     </div>
     <div class="mode-content" data-mode-content="{{ id }}" data-mode="jsx" style="display: none;">
-        <pre class="source-toggle-code"><code class="language-tsx">{{ html | htmlToJsx | escape }}</code></pre>
+        <pre class="source-toggle-code"><code class="language-tsx">{{ html | htmlToJsx | highlightCode("tsx") | safe }}</code></pre>
     </div>
 </div>
 {% endmacro %}

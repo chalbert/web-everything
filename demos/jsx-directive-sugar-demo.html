@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JSX Directive Sugar Playground - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/jsx-adapter-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>JSX Directive Sugar Playground</h1>
+      <p>
+        The prettier <code>&lt;For each&gt;</code> / <code>&lt;Show when&gt;</code> /
+        <code>&lt;Resource from&gt;</code> components are <strong>optional sugar</strong> for the canonical
+        <code>&lt;template is="…"&gt;</code> directives — an alternative <em>spelling</em> of the same
+        directive, mapped through one registry. Each card authors the sugar, renders it live (the runtime
+        components build the same DOM as the canonical form), and shows <code>desugar()</code> lowering it
+        to <code>&lt;template is&gt;</code>. See the
+        <a href="http://localhost:8080/adapters/jsx-adapter/">HTML&#8596;JSX feature mapping</a> (rows 7&ndash;8).
+      </p>
+      <p class="play-caveat">
+        This is a <em>spelling</em> layer (Axis-1), not a rendering-strategy change: <code>&lt;For&gt;</code>
+        builds an inert <code>&lt;template is="for-each"&gt;</code> exactly as the canonical spelling does;
+        actually expanding the loop is the parked rendering-strategy axis (Axis-2).
+      </p>
+    </header>
+
+    <div id="examples">Loading examples&hellip;</div>
+  </main>
+
+  <!-- Bootstrap: applies patches and exposes globals (CustomAttribute, injectors, attributes). -->
+  <script type="module" src="/plugs/bootstrap.ts"></script>
+
+  <!-- Playground: renders the directive-sugar examples. JSX is auto-injected by vite.config.mts. -->
+  <script type="module" src="/demos/jsx-directive-sugar-demo.tsx"></script>
+</body>
+</html>

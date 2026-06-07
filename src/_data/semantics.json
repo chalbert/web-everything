@@ -5,6 +5,11 @@
     "usage": "Standardized by Action Intent."
   },
   {
+    "term": "Background Task",
+    "definition": "A long-running operation that has gone async — handed off from an in-view loader past its escalation threshold to a persistent surface, where it continues while the user is free to navigate away.",
+    "usage": "Standardized by Background Task Intent. The receiving end of the Loader Intent's <code>escalation: async</code> handoff; hosted in an app-shell region (Layout Intent <code>dock</code>)."
+  },
+  {
     "term": "beforetoggle",
     "definition": "A cancelable event fired before a visibility change. Call preventDefault() to cancel the transition.",
     "usage": "Matches Popover API pattern. Fired by ViewEngine on all View blocks. Event detail contains <code>oldState</code> and <code>newState</code> ('hidden' or 'visible')."
@@ -18,6 +23,11 @@
     "term": "Anchored Element",
     "definition": "The floating element (tooltip, popover, menu) positioned relative to an anchor element. Maps to CSS Anchor Positioning's 'anchored element'.",
     "usage": "Standardized by Anchor Intent; positioned by a Positioning Provider via the Web Positioning plug."
+  },
+  {
+    "term": "Anti-Flicker Threshold",
+    "definition": "The paired entry-delay and minimum-hold contract that prevents a loading indicator from flashing on fast operations: the indicator is only shown once the wait passes an entry threshold (≈50ms), and once shown is held for a minimum duration (≈100ms) even if the operation resolves sooner. Both values are configurable defaults.",
+    "usage": "Standardized by Loader Intent (the <code>timing</code> entry threshold + the <code>holdFloor</code> minimum hold)."
   },
   {
     "term": "Placement",
@@ -48,6 +58,26 @@
     "term": "aria-current",
     "definition": "ARIA attribute indicating the current item within a set. For navigation, aria-current='page' identifies the current page link.",
     "usage": "Set by RouteLinkBehavior on the link matching the current URL. Screen readers announce it as 'current page'."
+  },
+  {
+    "term": "aria-sort",
+    "definition": "ARIA attribute on a column (or row) header indicating the table's current sort state: ascending, descending, none (sortable but not currently sorted), or other (a non-standard order). Only one header is sorted at a time.",
+    "usage": "The <a href=\"/blocks/data-table/\">Data Table block</a> projects the Collection Operations <code>sortDirection</code> onto it verbatim; the active sort key's <code>&lt;th&gt;</code> carries the direction, other sortable headers carry <code>none</code>."
+  },
+  {
+    "term": "sortable table",
+    "definition": "The WAI-ARIA APG recipe for a table whose columns can be reordered: a native <code>&lt;table&gt;</code> with <code>&lt;th scope=\"col\"&gt;</code> headers, each sortable header wrapping its label in a <code>&lt;button&gt;</code>, and the active column carrying <code>aria-sort</code>. Distinct from <code>role=\"grid\"</code>, which adds cell-level keyboard navigation.",
+    "usage": "The accessible-today pattern the <a href=\"/blocks/data-table/\">Data Table block</a> realizes for the sort stage of Collection Operations."
+  },
+  {
+    "term": "filter match",
+    "definition": "How a set of active filter predicates combine: <code>all</code> (AND — a row must satisfy every predicate) or <code>any</code> (OR — a row satisfies at least one). The predicates themselves are call-site data, not part of the standard.",
+    "usage": "The <code>filterMatch</code> dimension of the <a href=\"/intents/collection-operations/\">Collection Operations intent</a>, realized by the Data Table block's filter stage."
+  },
+  {
+    "term": "group summary",
+    "definition": "The aggregate value shown for each group when a collection is grouped — count, sum, average, minimum, or maximum — named after the SQL aggregate functions, the nearest cross-platform standard (the web has none).",
+    "usage": "The <code>groupSummary</code> dimension of the <a href=\"/intents/collection-operations/\">Collection Operations intent</a>; the <a href=\"/blocks/data-table/\">Data Table block</a> renders it in a <code>scope=\"rowgroup\"</code> summary row per group."
   },
   {
     "term": "Behavior",
@@ -317,6 +347,11 @@
     "term": "Selection",
     "definition": "The behavior of choosing items from a set, defining cardinality (Single vs Multi) and required state.",
     "usage": "Standardized by Selection Intent."
+  },
+  {
+    "term": "Skeleton",
+    "definition": "A placeholder shaped like the content that will (or may) load, shown during an indeterminate wait. It sets the user's expectation of the incoming content's nature and limits layout shift when real content arrives; preferably subtly animated to indicate ongoing work. Distinct from a loader (an abstract activity animation such as a spinner) in that it mirrors the content's shape.",
+    "usage": "Standardized by Loader Intent (the <code>skeleton</code> value of the <code>indicator</code> dimension, typically over the <code>replacement</code> strategy)."
   },
   {
     "term": "show/hide (view)",
@@ -737,5 +772,40 @@
     "term": "leave guard",
     "definition": "Logic that can interrupt a navigation away from the current view — proceeding freely, prompting for confirmation (e.g. unsaved changes), or blocking until a condition clears.",
     "usage": "The <code>guard</code> dimension of the Navigation Intent (<code>free|confirm|blocked</code>). Grounded in the Navigation API <code>navigate</code> event (<code>preventDefault</code>/<code>intercept</code>) and <code>beforeunload</code>. Distinct from a route entry <code>guard</code> (canActivate); a leave guard is canDeactivate. The Router exposes it as <code>route:guard:leave</code>."
+  },
+  {
+    "term": "scroll sentinel",
+    "definition": "A zero-height marker element placed at the boundary of a scrollable list. When it enters the viewport, an IntersectionObserver fires and the next slice is requested — the native-first grounding for auto-advance (infinite scroll) without scroll-position math.",
+    "usage": "The Pagination block wires <code>advance:auto</code> (the Collection Operations <code>advance</code> dimension) to a sentinel observed by <a href=\"https://developer.mozilla.org/en-US/docs/Web/API/IntersectionObserver\">IntersectionObserver</a>. Rendering of the grown list delegates to Windowed Collection; the <code>loadingMore</code> lifecycle to Loader. Only meaningful with <code>pageMode:append</code> (append + auto = infinite scroll)."
+  },
+  {
+    "term": "result-range label",
+    "definition": "A status label that names the visible slice of a paged collection — e.g. ‘showing 21–40 of 500’. Requires a known total, so it composes only over an offset/page resource protocol; a cursor protocol has no total and forces it off.",
+    "usage": "The <code>rangeLabel</code> dimension of the Collection Operations Intent, surfaced by the Pagination block's <code>withRangeLabel</code> trait. Recommended page-size options, defaults, and how the label degrades when the total is unavailable are unverified — owned by <a href=\"/backlog/060-pagination-range-labels-page-size/\">backlog #060</a>."
+  },
+  {
+    "term": "Reorder",
+    "definition": "A user interaction that mutates the <em>order</em> of items in a collection while leaving the item set unchanged. Distinct from a computed sort (which derives order from a comparator) and from data transfer (which moves a payload between zones).",
+    "usage": "Standardized by the <a href=\"/intents/reorder/\">Reorder Intent</a> and realized by the <a href=\"/blocks/reorderable-list/\">Reorderable List</a> block. The manual counterpart to the <a href=\"/intents/collection-operations/\">Collection Operations</a> <code>sort</code> dimension — a list is hand-ordered or sorted, never both at once."
+  },
+  {
+    "term": "Reorderable List",
+    "definition": "A list whose item order is user-mutable by both pointer drag and keyboard, with live-region announcement and a pluggable commit strategy. Relocates items atomically with <code>Element.moveBefore()</code> so a moved item keeps its focus, animation, and connection state.",
+    "usage": "The <a href=\"/blocks/reorderable-list/\">Reorderable List</a> block; implements the <a href=\"/intents/reorder/\">Reorder Intent</a>. Pairs each item with <code>preserve-on-move</code> for the atomic relocation."
+  },
+  {
+    "term": "Drag Handle",
+    "definition": "A scoped affordance within an item that initiates a drag, as opposed to the whole item being draggable. Leaves the rest of the item interactive (links, buttons) while still allowing it to be moved.",
+    "usage": "The <code>handle</code> value of the Reorder Intent's <code>grab</code> dimension, surfaced by the Reorderable List block's <code>withDragHandle</code> trait. Marked in markup with <code>[data-reorder-handle]</code>."
+  },
+  {
+    "term": "Keyboard Reorder",
+    "definition": "The keyboard-operable path for reordering — roving tabindex over items plus grab/move/drop keys plus a polite live-region announcement of each move. It is a mandatory part of the reorder contract, not an enhancement; the deprecated <code>aria-grabbed</code>/<code>aria-dropeffect</code> are not used.",
+    "usage": "The <code>keyboard</code> value of the Reorder Intent's <code>movement</code> dimension, surfaced by the Reorderable List block's <code>withKeyboardReorder</code> trait. Composes <a href=\"/intents/focus-delegation/\">Focus Delegation</a> and <a href=\"/intents/live-region-status/\">Live Region Status</a>."
+  },
+  {
+    "term": "Reorder Commit Strategy",
+    "definition": "The strategy that decides where a new order is written after a reorder — ephemeral (session only), localStorage, or written back to the source. Distinct from the validation <a href=\"/semantics/#term-commit-policy\">Commit Policy</a>, which governs when form field edits are written.",
+    "usage": "The <code>commit</code> dimension of the Reorder Intent, surfaced by the Reorderable List block's <code>withCommitStrategy</code> trait behind the cancelable <code>reorder-commit</code> event. Defaults to ephemeral."
   }
 ]

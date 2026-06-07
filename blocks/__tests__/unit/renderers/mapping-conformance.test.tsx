@@ -22,21 +22,35 @@ import { jsxToHtml } from '../../../renderers/jsx/jsxToHtml';
 const norm = (s: string) =>
   s.replace(/=""/g, '').replace(/>\s+</g, '><').replace(/\s+/g, ' ').trim();
 
+const VOID_ELEMENTS = new Set([
+  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+  'link', 'meta', 'param', 'source', 'track', 'wbr',
+]);
+
+// Escape an attribute value the way the HTML spec / real browsers serialize it. happy-dom's
+// own `outerHTML` does NOT escape `"` inside an attribute value (emitting `a="{"k":"v"}"`), so
+// we serialize structure ourselves rather than trusting it — the same class of happy-dom ≠
+// browser gap this harness already exists to bridge. See backlog 073-htmltojsx-attr-quote-escaping.
+const escapeAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+
 /**
- * Serialize a rendered node to HTML (handles elements, <template> content, and fragments).
- * Uses nodeType/nodeName rather than `instanceof` to avoid happy-dom realm mismatches
- * (a DocumentFragment built via `document.createDocumentFragment()` failed `instanceof`).
+ * Serialize a rendered node to canonical HTML (handles elements, void elements, <template>
+ * content, and fragments). Uses nodeType/nodeName rather than `instanceof` to avoid happy-dom
+ * realm mismatches (a DocumentFragment built via `document.createDocumentFragment()` failed
+ * `instanceof`), and spec-correct attribute escaping rather than happy-dom's `outerHTML`.
  */
 function serialize(node: Node): string {
   const ELEMENT = 1, FRAGMENT = 11;
   if (node.nodeType === ELEMENT) {
     const el = node as HTMLElement;
-    if (el.nodeName.toUpperCase() === 'TEMPLATE') {
-      const attrs = Array.from(el.attributes).map((a) => ` ${a.name}="${a.value}"`).join('');
-      const inner = Array.from((el as HTMLTemplateElement).content.childNodes).map(serialize).join('');
-      return `<template${attrs}>${inner}</template>`;
-    }
-    return el.outerHTML;
+    const tag = el.nodeName.toLowerCase();
+    const attrs = Array.from(el.attributes).map((a) => ` ${a.name}="${escapeAttr(a.value)}"`).join('');
+    if (VOID_ELEMENTS.has(tag)) return `<${tag}${attrs}>`;
+    const kids = el.nodeName.toUpperCase() === 'TEMPLATE'
+      ? (el as HTMLTemplateElement).content.childNodes
+      : el.childNodes;
+    const inner = Array.from(kids).map(serialize).join('');
+    return `<${tag}${attrs}>${inner}</${tag}>`;
   }
   if (node.nodeType === FRAGMENT) return Array.from(node.childNodes).map(serialize).join('');
   return node.textContent || '';

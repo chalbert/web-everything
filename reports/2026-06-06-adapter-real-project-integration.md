@@ -137,16 +137,16 @@ untouched — that's the "any element, authored as HTML *or* JSX" promise landin
 - **Function event handlers are lossy** (no HTML form) — fine at runtime, but they don't round-trip in the
   source-toggle; the contract flags them.
 
-## 7. Open questions to settle (register in `/backlog/`)
+## 7. Open questions to settle
 
-- **Packaging granularity** — one umbrella `@webeverything/adapters` vs. the three split packages in §2.
-  Recommendation: split (runtime / compiler / plugins) so a `<component>`-only adopter ships *zero*
-  runtime and a JSX-only adopter skips the compiler.
-- **Automatic vs classic runtime as the documented default** — recommend **automatic** (`jsxImportSource`)
-  for external projects (no per-file import, type-checked), keep classic `jsxInject` internally.
-- **SWC/Turbopack story** — pre-transform pipeline vs. investing in a Rust port of the component compiler.
-  Recommend pre-transform first; revisit a Rust plugin only if Next/Turbopack adoption demands it.
-- **`<component>` source surface** — a dedicated `.component` file type vs. inline `<component>` inside
-  `.html`/template strings vs. inside `.tsx`. Affects every plugin's match rule.
-- **`tsc`-only consumers** get types but no `<component>` transform — do we document "bundler required," or
-  ship a `tsc` custom-transformer via `ts-patch`/`ttypescript`?
+These have been harvested into `/backlog/` as trackable items (the prerequisite engineering plus its
+shaping decisions):
+
+- **#125 — Extract the adapter packages** (§2): the foundational `@webeverything/{jsx-runtime,
+  component-compiler, *-plugin}` extraction; folds in the **packaging-granularity** decision (split, not
+  umbrella).
+- **#126 — Documented JSX runtime default**: automatic (`jsxImportSource`) vs classic — recommend
+  automatic externally, keep classic in-repo.
+- **#127 — `<component>` compiler toolchain reach**: the **SWC/Turbopack** story (pre-transform),
+  the **`<component>` source surface** (`.component` vs inline — the one genuinely open fork), and the
+  **`tsc`-only consumer** path.

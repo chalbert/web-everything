@@ -1,0 +1,252 @@
+{% from "source-toggle.njk" import sourceToggle, jsxSource, endSource %}
+
+<h2>Autocomplete — the editable, filterable droplist</h2>
+<p>The <strong>autocomplete</strong> is the richest concrete member of the <a href="/blocks/droplist/">droplist family</a>: an editable <code>&lt;input role="combobox"&gt;</code> bound to a separate <code>role="listbox"</code> surface, where typing <em>narrows</em> the collection rather than seeking within it. It is the one member that splits the substrate across two elements — the input is the focus host, the listbox is the collection — which is exactly what authoring it pressure-tests. As a form-associated custom element (<code>&lt;auto-complete&gt;</code>) it participates in <code>&lt;form&gt;</code> submission, <code>FormData</code>, reset, and validity, and it mirrors the WAI-ARIA APG <a href="https://www.w3.org/WAI/ARIA/apg/patterns/combobox/">Combobox</a> (<code>aria-autocomplete="list"</code>) pattern.</p>
+
+<h3>The one idea that unlocks it — focus host ≠ collection</h3>
+<p>In the <a href="/blocks/dropdown/">dropdown</a>, one element played two roles: the <code>&lt;ul role="listbox"&gt;</code> was <em>both</em> the focus host (it took <code>tabindex=0</code> and received keydown) <em>and</em> the collection holding the options. Autocomplete breaks that: DOM focus must stay on the <code>&lt;input&gt;</code> so typing is never interrupted — so the input is the <strong>focus host</strong> while the <code>&lt;ul&gt;</code> remains the <strong>collection</strong>. They are two different elements, and that single separation is the whole story of how autocomplete differs. Everything else follows from it:</p>
+<blockquote>
+  <p><strong>Input-side = text &amp; query</strong> (<code>filter</code>, <code>clearable</code>). <strong>Listbox-side = collection &amp; active item</strong> (<code>focus-delegation</code>, <code>selection</code>, <code>anchor</code>, <code>live-status</code>, <code>windowed</code>).</p>
+</blockquote>
+
+<h3>Trait selection at a glance</h3>
+<p>The autocomplete's identity is fixed by these trait selections. The two structural moves versus the dropdown are <strong>editable</strong> (the focus host becomes the input, via <code>focus-delegation</code>'s <code>controller</code>) and <strong>filter</strong> replacing <strong>type-ahead</strong> (mutually exclusive — both consume printable keys). Structural picks are <strong>local</strong> (an author cannot change them via props or ambient intent); behavioral picks are this component's <em>stance</em> and remain overridable by an ambient <code>droplistIntent</code>:</p>
+<table>
+  <thead>
+    <tr><th>Trait</th><th>Dimension</th><th>Value</th><th>Kind</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><a href="/intents/selection/">Selection</a></td><td><code>model</code></td><td><code>single</code>, <code>selectionFollowsFocus=false</code> (arrow previews, Enter commits)</td><td><strong>structural</strong></td></tr>
+    <tr><td><a href="/intents/focus-delegation/">Focus Delegation</a></td><td><code>strategy</code> / <code>controller</code></td><td><code>virtual</code>, <code>controller=&lt;input&gt;</code> — host is the input, not the listbox</td><td><strong>structural</strong></td></tr>
+    <tr><td><a href="/intents/input/">Input</a></td><td><code>filter</code> + <code>clearable</code></td><td>typing narrows the list (replaces type-ahead); the X clears</td><td><strong>structural</strong></td></tr>
+    <tr><td><a href="/intents/loader/">Loader</a></td><td><code>filter</code> lifecycle</td><td><code>async</code> (debounce, de-stale, loading state) or <code>client</code></td><td>behavioral</td></tr>
+    <tr><td><a href="/intents/live-region-status/">Live Region Status</a></td><td>presence</td><td>on — announces result counts &amp; the active option</td><td>behavioral</td></tr>
+    <tr><td><a href="/intents/windowed-collection/">Windowed Collection</a></td><td>presence</td><td>optional — virtualize large result sets</td><td>behavioral</td></tr>
+    <tr><td><a href="/intents/anchor/">Anchor</a></td><td>placement / collision</td><td><code>bottom-start</code> / <code>flip,resize</code></td><td>behavioral</td></tr>
+  </tbody>
+</table>
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">Only <code>focus-delegation</code> (now with <code>controller</code>), <code>selection</code>, and <code>anchor</code> are built today; <code>filter</code>, <code>clearable</code>, <code>live-status</code>, and <code>windowed</code> are spec-<strong>proposed</strong> trait surfaces. This page defines them as contracts — exactly as the family already does for <code>anchor</code>'s positioning strategy — not as shipped implementations.</p>
+
+<h3>Altitude 1 — HTML, explicit behaviors (the substrate)</h3>
+<p>Two elements, split by role: an <code>&lt;input role="combobox"&gt;</code> that owns the text and the query, and a <code>&lt;ul role="listbox"&gt;</code> that owns the collection and the active item. The input's <code>aria-activedescendant</code> points <em>into</em> the listbox; the listbox's <code>focus-delegation</code> declares the input as its <code>controller</code>. The JSX mirror is near-identity — only the inline comments (<code>&lt;!-- --&gt;</code> → <code>{/* */}</code>) and the two-root wrapper (a <code>&lt;&gt;</code> fragment) differ:</p>
+{{ sourceToggle("autocomplete-substrate") }}
+{% highlight "html" %}
+<!-- INPUT-SIDE: owns DOM focus, the text, and the query -->
+<input id="city-input" role="combobox"
+       aria-controls="city-list"
+       aria-autocomplete="list"
+       aria-expanded="false"
+       anchor="city-list"
+       filter="async"                          <!-- STRUCTURAL: replaces type-ahead -->
+       clearable>                              <!-- the "Clear" affordance -->
+
+<!-- LISTBOX-SIDE: owns the collection and the active item -->
+<ul id="city-list" role="listbox"
+    focus-delegation="strategy=virtual;controller=city-input"   <!-- host is the input -->
+    selection="model=single;selectionFollowsFocus=false"        <!-- STRUCTURAL: always local -->
+    anchored="placement=bottom-start;collision=flip,resize"
+    live-status                                <!-- "{n} results", "No results found" -->
+    windowed                                   <!-- optional: virtualize large result sets -->
+    popover>
+  <!-- options are injected by `filter`, not authored -->
+</ul>
+{% endhighlight %}
+{{ jsxSource("autocomplete-substrate") }}
+{% highlight "tsx" %}
+<>
+  {/* INPUT-SIDE: owns DOM focus, the text, and the query */}
+  <input id="city-input" role="combobox"
+         aria-controls="city-list"
+         aria-autocomplete="list"
+         aria-expanded="false"
+         anchor="city-list"
+         filter="async"                          {/* STRUCTURAL: replaces type-ahead */}
+         clearable />                            {/* the "Clear" affordance */}
+
+  {/* LISTBOX-SIDE: owns the collection and the active item */}
+  <ul id="city-list" role="listbox"
+      focus-delegation="strategy=virtual;controller=city-input"   {/* host is the input */}
+      selection="model=single;selectionFollowsFocus=false"        {/* STRUCTURAL: always local */}
+      anchored="placement=bottom-start;collision=flip,resize"
+      live-status                                {/* "{n} results", "No results found" */}
+      windowed                                   {/* optional: virtualize large result sets */}
+      popover>
+    {/* options are injected by `filter`, not authored */}
+  </ul>
+</>
+{% endhighlight %}
+{{ endSource() }}
+<p>Compared to the dropdown substrate, two attributes carry the entire delta: the listbox's <code>focus-delegation</code> gains <code>;controller=city-input</code> (its host is now the input), and the input's <code>filter</code> replaces the listbox's <code>type-ahead</code>. <code>selection</code> and <code>anchored</code> are otherwise the dropdown's, with <code>selectionFollowsFocus=false</code> so arrowing previews and Enter commits.</p>
+
+<h3>Altitude 1a — Inside <code>&lt;auto-complete&gt;</code>: the class</h3>
+<p>An autocomplete does not bake in <em>which</em> options or <em>whose</em> selection — it is generic. The component class bridges the public surface (the <code>name</code>/<code>src</code> attributes, <code>value</code>, the form, events) and the private two-element substrate. Two things are non-negotiable: it is a <strong>form-associated custom element</strong> (so <code>&lt;form&gt;</code> / <code>FormData</code> / reset / validity all just work — no hidden input), and the only autocomplete-specific glue is the commit handler: <em>on commit, write the label into the input, dismiss the surface, keep focus on the input.</em></p>
+<pre><code class="language-typescript">const { injectors } = window;
+
+class AutoComplete extends HTMLElement {
+  static formAssociated = true;                                  // → real form control
+  static observedAttributes = ['value', 'src', 'name', 'placeholder'];
+
+  #internals = this.attachInternals();
+  #injector  = injectors.ensureInjector(this);                   // private to this element
+  #input!: HTMLInputElement;                                     // the focus host
+  #selected: { value: string; label: string } | null = null;
+  static #counter = 0;
+
+  connectedCallback() {
+    // Public attributes → private contexts, scoped to this element's injector.
+    const surfaceId = `auto-complete-${++AutoComplete.#counter}`;
+    this.#injector.set('customContexts:surfaceId',   surfaceId);
+    this.#injector.set('customContexts:inputId',     `${surfaceId}-input`);
+    this.#injector.set('customContexts:placeholder', this.getAttribute('placeholder') ?? '');
+    // `filter` reads `src` to know where to fetch matches from (async mode).
+    this.#injector.set('customContexts:src',         this.getAttribute('src') ?? '');
+
+    this.value = this.getAttribute('value') ?? '';               // initial selection
+    // The inner `selection` trait commits the active option; we hear it once.
+    this.addEventListener('selection-change', this.#onCommit);
+  }
+
+  // ── Form-control surface (string value, like &lt;input&gt;) ───────────────
+  get value() { return this.#selected?.value ?? ''; }
+  set value(v: string) {
+    this.#selected = v ? { value: v, label: v } : null;          // label resolved on commit
+    this.#internals.setFormValue(this.value);
+  }
+  get selectedOption() { return this.#selected; }
+
+  formResetCallback() { this.value = this.getAttribute('value') ?? ''; }
+  formStateRestoreCallback(state: string) { this.value = state; }
+
+  // ── The only autocomplete-specific logic: glue on commit ──────────────
+  // `filter` injects the options and `focus-delegation`+`selection` drive the
+  // keyboard; the sole bespoke step is "on commit, set the input text + close".
+  #onCommit = (e: CustomEvent&lt;{ value: string; label: string }&gt;) =&gt; {
+    e.stopPropagation();
+    this.#selected = e.detail;
+    this.#input.value = e.detail.label;                          // write label into the input
+    this.#internals.setFormValue(this.value);
+    this.#input.setAttribute('aria-expanded', 'false');         // anchor dismisses the surface
+    this.#input.focus();                                        // focus stays on the input
+    this.dispatchEvent(new CustomEvent('change', { detail: this.#selected, bubbles: true }));
+  };
+}
+
+customElements.define('auto-complete', AutoComplete);</code></pre>
+
+<p>The locals the class set — <code>@surfaceId</code>, <code>@inputId</code>, <code>@src</code>, <code>@placeholder</code> — are the <em>only</em> contexts the template references. There is no hidden input; form participation lives on the element itself via <code>ElementInternals.setFormValue</code>. The template wires the two-element substrate, naming the input as the listbox's focus controller:</p>
+<pre><code class="language-html">&lt;input id="{{ '{{' }}@inputId}}" role="combobox"
+       aria-controls="{{ '{{' }}@surfaceId}}"
+       aria-autocomplete="list"
+       aria-expanded="false"
+       anchor="{{ '{{' }}@surfaceId}}"
+       placeholder="{{ '{{' }}@placeholder}}"
+       filter="async"
+       clearable&gt;
+
+&lt;ul id="{{ '{{' }}@surfaceId}}" role="listbox"
+    focus-delegation="strategy=virtual;controller={{ '{{' }}@inputId}}"
+    selection="model=single;selectionFollowsFocus=false"
+    anchored="placement=bottom-start;collision=flip,resize"
+    live-status
+    popover&gt;
+  &lt;!-- `filter` injects &lt;li role="option"&gt; from `src` matches; nothing authored here --&gt;
+&lt;/ul&gt;</code></pre>
+
+<h4>Reading the pair as trait language</h4>
+<ul>
+  <li><strong>Literal — structural identity.</strong> <code>filter</code> on the input, <code>focus-delegation="…;controller=…"</code> and <code>selection="model=single;selectionFollowsFocus=false"</code> on the listbox, <code>role="combobox"</code>, <code>role="listbox"</code>, <code>aria-autocomplete="list"</code>. These make this an editable, filterable autocomplete and not a dropdown or a menu; the trait language locks them. <code>filter</code> and <code>type-ahead</code> are mutually exclusive, so this member has no <code>type-ahead</code> at all.</li>
+  <li><strong>Literal — behavioral, ambient-overridable.</strong> <code>anchored="placement=…;collision=…"</code>, the loader mode behind <code>filter="async"</code>, and the presence of <code>live-status</code> / <code>windowed</code>. Hardcoded as this widget's stance; the ambient <code>droplistIntent</code> injector still wins on any dimension the author has not stated.</li>
+  <li><strong>Erased — focus host.</strong> No <code>tabindex</code> anywhere. The input is already focusable; <code>controller=@inputId</code> tells <code>focus-delegation</code> to attach keydown to the input and write <code>aria-activedescendant</code> onto it, while the listbox stays out of the tab order. The listbox is the collection, never the focus host.</li>
+  <li><strong>Erased — open state &amp; form participation.</strong> <code>commandfor</code>/<code>anchor</code> + the platform own surface visibility and <code>aria-expanded</code>; <code>static formAssociated = true</code> + <code>setFormValue</code> own <code>FormData</code>, reset, validity, bfcache restore, <code>&lt;label for&gt;</code>, and the native <code>autocomplete</code> attribute — no hidden input.</li>
+  <li><strong>Bound — options via <code>filter</code>, not authored.</strong> No <code>&lt;template for-each&gt;</code>: <code>filter</code> reads the input's text, runs the loader lifecycle against <code>@src</code> (debounce ~250ms, enter <code>filtering</code>, de-stale, inject <code>&lt;li role="option"&gt;</code>), and <code>live-status</code> announces the count on settle. The author never writes the options.</li>
+  <li><strong>Bound — commit glue, scoped.</strong> The <code>selection</code> trait commits the active option and fires <code>selection-change</code>; the class's <code>#onCommit</code> catches it, calls <code>stopPropagation</code>, writes the label into the input, dismisses the surface, keeps focus on the input, and re-emits a public <code>change</code> event. That handful of lines is the only genuinely autocomplete-specific logic — everything else is composed traits.</li>
+</ul>
+
+<h3>Altitude 2 — Component (the consumer call site)</h3>
+<p>The element and its attributes <em>are</em> the trait selection. <code>editable</code>/<code>filter</code> are baked into this preset; the consumer points <code>src</code> at a query endpoint and reads the value.</p>
+<pre><code class="language-html">&lt;auto-complete name="city"
+               src="/api/cities?q="
+               placeholder="Search a city…"
+               on:change="setCity($event)"&gt;&lt;/auto-complete&gt;
+&lt;!-- `filter="async"` is baked into the preset; `src` is the query endpoint the
+     filter trait appends the typed text to. A `client`-mode autocomplete would
+     instead receive an inline option set and filter it in place. --&gt;</code></pre>
+
+<h3>Altitude 3 — TypeScript, explicit composition</h3>
+<p>A list of <code>with*</code> factories — structurally identical to the dropdown's, with the editable delta made explicit: <code>controller</code> on focus, <code>withFilter</code> in place of <code>withTypeAhead</code>, plus <code>clearable</code> and <code>live-status</code>:</p>
+<pre><code class="language-typescript">const city = composeDroplist(input, [
+  withAnchoredSurface({ placement: 'bottom-start', collision: ['flip', 'resize'] }),
+  withFocusDelegation({ strategy: 'virtual', controller: input }),  // host is the input
+  withSelection({ model: 'single', selectionFollowsFocus: false }), // arrow previews, Enter commits
+  withFilter({ mode: 'async', src: '/api/cities?q=' }),             // replaces withTypeAhead
+  withClearable(),                                                  // the X affordance
+  withLiveStatus(),                                                 // announce counts + active option
+]);
+// → returns a handle; city.cleanup() reverts every trait, in reverse.</code></pre>
+<p>Diff it against the dropdown's composition and the delta is exact: <code>controller</code> is added to focus, <code>withTypeAhead()</code> becomes <code>withFilter(...)</code>, and <code>withClearable()</code> + <code>withLiveStatus()</code> come along. <code>selection</code> and <code>anchor</code> are unchanged.</p>
+
+<h3>Example — a project's city autocomplete</h3>
+<p>A project consumes the generic <code>&lt;auto-complete&gt;</code> by pointing <code>src</code> at an endpoint and handling the commit; the component is otherwise untouched. The same element is reused for users, products, or tags by changing <code>src=</code> and the handler — never by editing the component.</p>
+<pre><code class="language-html">&lt;form on:submit="saveTrip($event)"&gt;
+  &lt;label for="city"&gt;Destination&lt;/label&gt;
+  &lt;auto-complete id="city"
+                 name="city"
+                 src="/api/cities?q="
+                 placeholder="Search a city…"
+                 on:change="setCity($event)"&gt;&lt;/auto-complete&gt;
+
+  &lt;!-- … other fields … --&gt;
+
+  &lt;button type="submit"&gt;Save&lt;/button&gt;
+&lt;/form&gt;</code></pre>
+<pre><code class="language-javascript">const { injectors } = window;
+
+// Provide the action handlers at the document root — any &lt;auto-complete&gt; in
+// the tree resolves them. The city list itself is fetched by `filter` from `src`.
+const root = injectors.getInjectorOf(document);
+root.set('customContexts:handlers', {
+  setCity: (e) =&gt; tripStore.setItem('city', e.detail.value),
+  saveTrip: (e) =&gt; {
+    e.preventDefault();
+    // POST tripStore state — city is the committed value string
+  },
+});
+
+window.attributes.upgrade(document.body);</code></pre>
+
+<h4>What the project owns vs. what the autocomplete owns</h4>
+<ul>
+  <li><strong>Project</strong>: the query endpoint (<code>src</code>), the persistent selection (<code>tripStore.city</code>), the submit handler. Nothing about <em>how an autocomplete works</em>.</li>
+  <li><strong><code>&lt;auto-complete&gt;</code></strong>: trait composition, the input↔listbox focus split, the filter/loader lifecycle, result announcements, single-selection commit semantics, and the public <code>change</code> event. Nothing about <em>what is in the list</em> or <em>where it comes from</em> beyond the <code>src</code> contract.</li>
+</ul>
+
+<h3>Trace — typing "par", arrow, enter</h3>
+<ol>
+  <li>Focus enters the input → <strong>anchor</strong> opens the surface, <code>aria-expanded="true"</code>.</li>
+  <li><strong>filter</strong> hears <code>input</code> events, debounces, enters loader <code>filtering</code>, calls <code>src</code>, de-stales, injects <code>&lt;li role="option"&gt;</code> into the listbox.</li>
+  <li><strong>focus-delegation</strong> re-reads the descendants (<code>aria-setsize</code>/<code>aria-posinset</code>); active stays unset — editable lists don't auto-highlight.</li>
+  <li><strong>live-status</strong> announces "7 results available."</li>
+  <li>User presses <strong>ArrowDown</strong> — keydown fires <em>on the input</em>; focus-delegation (listening on the controller) moves the active option and writes <code>aria-activedescendant</code> on the input. <code>selectionFollowsFocus=false</code>, so nothing commits — just a preview.</li>
+  <li>User presses <strong>Enter</strong> — <strong>selection</strong> reads the active item via the input's <code>aria-activedescendant</code>, commits it, fires <code>selection-change</code>.</li>
+  <li>The <code>&lt;auto-complete&gt;</code> glue (<code>#onCommit</code>) writes "Paris" into the input, <strong>anchor</strong> dismisses the surface, focus stays on the input, and <strong>clearable</strong> now shows the X (value non-empty).</li>
+</ol>
+
+<h3>Public API</h3>
+<table>
+  <thead>
+    <tr><th>Surface</th><th>Shape</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Attribute <code>name</code></td><td>string</td><td>Form-control name; flows through to the enclosing <code>&lt;form&gt;</code>.</td></tr>
+    <tr><td>Attribute <code>src</code></td><td>URL prefix</td><td>Query endpoint the <code>filter</code> trait appends the typed text to (async mode); omit for a <code>client</code>-mode inline option set.</td></tr>
+    <tr><td>Attribute <code>value</code></td><td>string</td><td>Initial committed value; mirrored to the DOM property.</td></tr>
+    <tr><td>Attribute <code>placeholder</code></td><td>string</td><td>Input placeholder when empty.</td></tr>
+    <tr><td>Attribute <code>clearable</code></td><td>boolean</td><td>Show the clear (X) affordance once the value is non-empty.</td></tr>
+    <tr><td>Property <code>.value</code></td><td>string</td><td>Form-submittable surface (matches <code>&lt;input&gt;.value</code>).</td></tr>
+    <tr><td>Property <code>.selectedOption</code></td><td><code>{ value, label } | null</code></td><td>Rich, programmatic access to the committed option; not form-submittable.</td></tr>
+    <tr><td>Event <code>change</code></td><td><code>CustomEvent&lt;{ value, label }&gt;</code></td><td>Re-emitted on commit; consumers bind with <code>on:change="…"</code>.</td></tr>
+    <tr><td>Form participation</td><td><code>static formAssociated = true</code></td><td><code>FormData</code>, reset, bfcache restore, <code>setValidity()</code>, <code>&lt;label for&gt;</code>, <code>autocomplete</code> attribute.</td></tr>
+  </tbody>
+</table>
+
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">The non-editable siblings are the <a href="/blocks/dropdown/">dropdown</a> (single-select) and <a href="/blocks/multi-select-dropdown/">multi-select dropdown</a>; family-level rules (intent vs. trait, three altitudes, trait surface map) live on the <a href="/blocks/droplist/">droplist family page</a>. Design history: <code>reports/2026-06-02-dropdown-trait-composition.md</code> ("Autocomplete in detail" — focus host ≠ collection, the <code>controller</code> param, type-ahead → filter, the typing trace), <code>reports/2026-06-02-droplist-trait-language.md</code> ("Autocomplete — swap one trait, move the focus host").</p>

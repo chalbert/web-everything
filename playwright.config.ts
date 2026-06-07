@@ -6,6 +6,10 @@ export default defineConfig({
     'plugs/**/__tests__/**/*.spec.ts',
     'blocks/**/__tests__/**/*.spec.ts',
   ],
+  // The 11ty default build copies `.spec.ts` source files into `_site/`, where `testMatch` would
+  // also match them — but their relative `../../../src/_data/*.json` imports resolve to nothing from
+  // inside `_site/`, throwing at collection-time and blocking the whole run. Ignore the build output.
+  testIgnore: '**/_site/**',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

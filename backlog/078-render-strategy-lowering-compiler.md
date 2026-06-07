@@ -1,8 +1,10 @@
 ---
 type: idea
-status: active
+status: resolved
 dateOpened: '2026-06-06'
 dateStarted: '2026-06-06'
+dateResolved: '2026-06-06'
+graduatedTo: "blocks/renderers/jsx/render-strategy/crossStrategy.ts (lower/lift compiler)"
 tags:
   - rendering
   - render-strategy
@@ -27,7 +29,7 @@ Also resolves the Axis-1 leftover (feature-mapping row 8): which canonical HTML 
 **Acceptance:** structural control-flow round-trips with tests; the lossy `{}`⇄`{{ }}` boundary is pinned by a *failing-by-design* test asserting the documented convention/diagnostic, not silent corruption. Depends on **#077** (needs the registry seam).
 
 ## Progress
-- **Status:** active — implementation landed and green; ready for review/close.
+- **Status:** resolved (2026-06-06) — implementation landed; crossStrategy.test.ts 17/17 green, full suite + check:standards clean. Verified against working tree.
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
   - New `blocks/renderers/jsx/render-strategy/crossStrategy.ts` — `lower(vdom)` / `lift(declarative)` returning `{ code, lossy, diagnostics }`. Implements the report §4 correspondence: `.map()` ⇄ `<template is="for-each" items item [key]>` (alias preserved via `item=`), `&&` / `cond ? x : null` ⇄ `<template is="if" condition>`, `onEVENT={namedFn}` ⇄ `on:EVENT="fn($event)"`, eager `{expr}` ⇄ reactive `{{ expr }}`.

@@ -43,6 +43,7 @@ import { registerTransient } from '../blocks/transient/registerTransient';
 import { registerNavigation } from '../blocks/navigation/registerNavigation';
 import { registerForEach } from '../blocks/for-each/registerForEach';
 import { registerTypeAhead } from '../blocks/type-ahead/registerTypeAhead';
+import { registerDataGrid } from '../blocks/data-grid/registerDataGrid';
 
 // Extend Window interface
 declare global {
@@ -206,6 +207,9 @@ registerForEach(window.attributes);
 // Register type-ahead behavior (type-ahead)
 registerTypeAhead(window.attributes);
 
+// Register data-grid behavior (grid:cell-navigation)
+registerDataGrid(window.attributes);
+
 console.log('[Web Everything] Bootstrap complete');
 console.log('[Web Everything] Globals available: injectors, contexts, stores, attributes, customTextNodeParsers, customTextNodes');
 console.log('[Web Everything] Event attributes registered: on:click, on:submit, on:change, etc.');
@@ -214,3 +218,4 @@ console.log('[Web Everything] Router registered: route-view, route-outlet, route
 console.log('[Web Everything] Transient components registered: auto-heading');
 console.log('[Web Everything] Navigation registered: nav:list, nav:section');
 console.log('[Web Everything] Directives registered: for-each');
+console.log('[Web Everything] Data Grid registered: grid:cell-navigation');

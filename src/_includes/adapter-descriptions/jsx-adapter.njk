@@ -93,7 +93,7 @@
             <tr><td><code>history-link="/x"</code></td><td>same kebab attrs</td><td>✅</td><td>behaviors are plain attributes</td></tr>
             <tr><td><code>on:click="inc($event)"</code></td><td><code>onclick={inc}</code> <em>or</em> <code>on:click="inc($event)"</code></td><td>✅¹</td><td>¹reversible for <strong>named</strong> handlers; inline closures are one-way (lossy)</td></tr>
             <tr><td><code>&lt;span slot="header"&gt;</code></td><td><code>&lt;span slot="header"&gt;</code></td><td>✅</td><td>named slots = <code>slot</code> attribute</td></tr>
-            <tr><td><code>&lt;template is="for-each" items="…" key="…"&gt;</code></td><td><code>&lt;template is="for-each" items="…" key="…"&gt;</code></td><td>✅</td><td>literal element form is canonical; <code>&lt;For&gt;</code>/<code>&lt;Show&gt;</code> sugar deferred</td></tr>
+            <tr><td><code>&lt;template is="for-each" items="…" key="…"&gt;</code></td><td><code>&lt;template is="for-each" items="…" key="…"&gt;</code></td><td>✅</td><td>literal element form is canonical; <code>&lt;For&gt;</code>/<code>&lt;Show&gt;</code>/<code>&lt;Resource&gt;</code> sugar is an equivalent spelling (implemented)</td></tr>
             <tr><td><code>&lt;!-- control:for-each … --&gt;</code></td><td><code>&lt;template is="for-each" …&gt;</code></td><td>⚠️</td><td>JSX can't carry semantic comments, so it canonicalizes on the element form</td></tr>
             <tr><td><code>&#123;&#123; expr &#125;&#125;</code> / <code>[[ expr ]]</code> text</td><td>—</td><td>⛔</td><td>reactive text is <strong>Axis 2</strong> (reactive-by-path); not mapped here</td></tr>
             <tr><td><code>bind-text="count"</code></td><td><code>bind-text="count"</code></td><td>✅</td><td>the Axis-1 reversible binding form</td></tr>
@@ -187,13 +187,15 @@ customElements.define('user-card', UserCard);
     {% endhighlight %}
 
     <div class="callout" style="border-left: 3px solid var(--color-primary); padding: 0.5rem 0 0.5rem 1rem; margin-top: 1rem;">
-        <p style="margin: 0 0 0.4rem 0;"><strong>Deferred sugar — <code>&lt;For&gt;</code> / <code>&lt;Show&gt;</code> / <code>&lt;Resource&gt;</code>.</strong></p>
+        <p style="margin: 0 0 0.4rem 0;"><strong>Component sugar — <code>&lt;For&gt;</code> / <code>&lt;Show&gt;</code> / <code>&lt;Resource&gt;</code>.</strong></p>
         <p style="margin: 0; font-size: 0.9rem; color: var(--color-text-muted);">
-            The prettier component spellings (<code>&lt;For each&gt;</code>, <code>&lt;Show when&gt;</code>, <code>&lt;Resource&gt;</code>)
+            The prettier component spellings (<code>&lt;For each&gt;</code>, <code>&lt;Show when&gt;</code>, <code>&lt;Resource from&gt;</code>)
             are <strong>optional sugar</strong> that lower to and from the same <code>&lt;template is="…"&gt;</code> directive
-            registry. They are <strong>not yet implemented</strong> — tracked at
-            <a href="/backlog/070-jsx-directive-sugar/">jsx-directive-sugar</a>. Author directives as
-            <code>&lt;template is="…"&gt;</code> today; the component layer is purely an alternative spelling, not a different runtime.
+            registry. They are now <strong>implemented</strong> — <code>desugar()</code> lowers them, <code>sugarize()</code> lifts the
+            canonical form back, and the runtime <code>&lt;For&gt;</code>/<code>&lt;Show&gt;</code>/<code>&lt;Resource&gt;</code> components
+            build the same DOM as the canonical directive. See the
+            <a href="/demos/jsx-directive-sugar-demo.html">Directive Sugar Playground</a>. Both spellings are equivalent; the
+            component layer is purely an alternative <em>spelling</em>, not a different runtime.
         </p>
     </div>
 </section>
@@ -317,7 +319,7 @@ const html = jsxToHtml(jsx);
         <li><a href="/demos/jsx-adapter-demo.html">JSX Adapter Playground</a> — live mirror-dialect examples with conformance + round-trip badges</li>
         <li><a href="/adapters/html-adapter/">HTML Adapter</a> — The canonical format this mirrors</li>
         <li><a href="/adapters/template-string-adapter/">Template String Adapter</a> — Tagged template literal alternative</li>
-        <li><a href="/backlog/070-jsx-directive-sugar/">jsx-directive-sugar</a> — the deferred <code>&lt;For&gt;</code>/<code>&lt;Show&gt;</code>/<code>&lt;Resource&gt;</code> layer</li>
+        <li><a href="/demos/jsx-directive-sugar-demo.html">Directive Sugar Playground</a> — the <code>&lt;For&gt;</code>/<code>&lt;Show&gt;</code>/<code>&lt;Resource&gt;</code> sugar layer, live</li>
         <li><a href="/backlog/052-jsx-rendering-strategy-axis/">jsx-rendering-strategy-axis</a> — Axis 2 (how the tree updates over time), parked</li>
         <li><a href="/projects/webdirectives/">Web Directives</a> — Structural directives documentation</li>
         <li><a href="/projects/webbehaviors/">Web Behaviors</a> — Custom attribute behaviors</li>

@@ -1,0 +1,135 @@
+<h2>Data Table</h2>
+<p>The blocks-layer home for the <a href="/intents/collection-operations/">Collection Operations</a> intent's <strong><code>filter</code>, <code>sort</code>, and <code>group</code> stages</strong> — the three pipeline stages the <a href="/blocks/pagination/">Pagination block</a> (the <code>page</code> stage) leaves unrealized. It renders a native <code>&lt;table&gt;</code> whose sortable column headers project the intent's <code>sortDirection</code> onto the WAI-ARIA APG <a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-sort"><code>aria-sort</code></a> attribute, orders rows through <a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator"><code>Intl.Collator</code></a>, narrows them by <code>filterMatch</code>, and partitions them into <code>&lt;tbody&gt;</code> groups with SQL-named aggregate summaries. It <strong>consumes</strong> the intent's vocabulary verbatim — it does not reinvent it.</p>
+
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">
+  <strong>Terminology:</strong> See <a href="/semantics/">Semantics &amp; Glossary</a> for terms like
+  <a href="/semantics/#term-aria-sort">aria-sort</a>,
+  <a href="/semantics/#term-sortable-table">sortable table</a>,
+  <a href="/semantics/#term-filter-match">filter match</a>, and
+  <a href="/semantics/#term-group-summary">group summary</a>.
+</p>
+
+<h3>Web Standards Alignment</h3>
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr>
+    <td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/table/">APG Sortable Table</a></td>
+    <td>W3C WAI-ARIA APG</td>
+    <td>Tabular data in a native <code>&lt;table&gt;</code> with <code>&lt;th scope="col"&gt;</code> headers; sortable headers wrap their label in a <code>&lt;button&gt;</code> and the active column carries <code>aria-sort</code></td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-sort">aria-sort</a></td>
+    <td>WAI-ARIA 1.1</td>
+    <td><code>sortDirection</code> projects verbatim onto <code>aria-sort</code> (<code>ascending</code>/<code>descending</code>); a sortable-but-unsorted header is <code>none</code>; only the primary key's header is marked (one header at a time)</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator">Intl.Collator</a></td>
+    <td>ECMA-402 (Baseline)</td>
+    <td>The reference comparator. The intent's <code>textSensitivity</code> / <code>numericOrdering</code> / <code>caseFirst</code> / <code>ignorePunctuation</code> are its option names verbatim, so <code>img2</code> sorts before <code>img10</code> with no bespoke comparator</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/toSorted">Array stable sort / toSorted</a></td>
+    <td>Baseline 2023</td>
+    <td>Guaranteed-stable sort makes multi-key tiebreaking and <code>sortKeys:single</code> (preserve prior order) well-defined without extra bookkeeping</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/th#scope"><code>th scope="rowgroup"</code></a></td>
+    <td>HTML / WAI-ARIA</td>
+    <td>Each group is its own <code>&lt;tbody&gt;</code> led by a <code>scope="rowgroup"</code> summary row carrying the group key + aggregate, so assistive tech announces the grouping</td>
+  </tr>
+</table>
+
+<h3>Framework Research</h3>
+<table>
+  <tr><th>Framework</th><th>Key Patterns Adopted</th></tr>
+  <tr>
+    <td><a href="https://tanstack.com/table/latest/docs/guide/row-models">TanStack Table</a></td>
+    <td>The row-model pipeline (filter → sort → group → paginate) as ordered, optional transforms — the architecture this block's configurable pipeline mirrors</td>
+  </tr>
+  <tr>
+    <td><a href="https://react-spectrum.adobe.com/react-aria/useTable.html">React Aria</a></td>
+    <td>Accessibility wiring for sortable column headers (<code>aria-sort</code>, <code>scope</code>, button-in-header)</td>
+  </tr>
+  <tr>
+    <td><a href="https://www.ag-grid.com/javascript-data-grid/grouping/">AG Grid</a></td>
+    <td>Multi-column sort and per-group aggregate summaries — we name the aggregates after SQL rather than a bespoke set</td>
+  </tr>
+</table>
+
+<h3>Architecture</h3>
+<p>Data Table is a <strong>Module</strong> that composes the <code>filter</code>, <code>sort</code>, and <code>group</code> stages of Collection Operations; it owns only set selection/ordering and the table projection, delegating the rest to its neighbours:</p>
+<ul>
+  <li><strong>DataTableModule</strong>: resolves the row set, runs the configurable stage pipeline (<code>applyPipeline</code>: default <code>filter → sort → group → page</code>), and exposes the normalized groups.</li>
+  <li><strong>DataTableBehavior</strong> (<code>sort:header</code>): attaches to the table, renders <code>&lt;th scope="col"&gt;</code> headers, projects the primary sort key onto <code>aria-sort</code>, and emits <code>sortchange</code> / <code>filterchange</code> / <code>groupchange</code>.</li>
+  <li><a href="/blocks/pagination/">Pagination</a> owns the <code>page</code> slice + URL/advance; <a href="/intents/windowed-collection/">Windowed Collection</a> owns which rows are realized in the DOM; <a href="/intents/selection/">Selection</a> is an orthogonal co-resident axis. <strong>Compose, never merge.</strong></li>
+</ul>
+
+<h3>The three stages</h3>
+<p><strong>Sort</strong> — the only stage with internal depth. The active key's direction projects onto <code>aria-sort</code> on its <code>&lt;th&gt;</code>; text comparison runs through <code>Intl.Collator</code> honoring <code>textSensitivity</code>, <code>numericOrdering</code>, <code>caseFirst</code>, and <code>ignorePunctuation</code>; <code>emptyPlacement</code> mirrors SQL <code>NULLS FIRST/LAST</code> and is <em>direction-independent</em>. <code>sortKeys: multiple</code> stacks keys (ties on the first break on the next); <code>single</code> uses only the primary.</p>
+<p><strong>Filter</strong> — call-site predicates combined by <code>filterMatch</code>: <code>all</code> = AND, <code>any</code> = OR. The predicates themselves are app data; the intent owns only how they combine.</p>
+<p><strong>Group</strong> — rows partition into one <code>&lt;tbody&gt;</code> per group, each led by a summary row whose value is the <code>groupSummary</code> aggregate (<code>count</code> / <code>sum</code> / <code>average</code> / <code>minimum</code> / <code>maximum</code>), named after the SQL aggregate functions.</p>
+
+<h3>Accessibility contract (verified)</h3>
+<ul>
+  <li>A native <code>&lt;table&gt;</code>; column headers are <code>&lt;th scope="col"&gt;</code>; sortable headers wrap their label in a <code>&lt;button&gt;</code> (APG Sortable Table recipe).</li>
+  <li>Exactly one header carries <code>aria-sort</code> ∈ {<code>ascending</code>, <code>descending</code>} when a sort is active, matching the primary key; every other sortable header is <code>aria-sort="none"</code>; non-sortable headers carry no <code>aria-sort</code>.</li>
+  <li>Each group's summary row uses <code>scope="rowgroup"</code> so the aggregate is associated with the group's cells.</li>
+  <li><strong>Live interactivity (wired):</strong> clicking a sortable header cycles its state <code>none → ascending → descending → none</code> (re-running the pipeline), and every sort/filter/group change is announced through one polite <code>aria-live</code> region as a clause-joined status — e.g. <em>"Sorted by Salary, descending; 3 of 6 shown"</em> — the Data Table analogue of pagination's "page 2 of 10" (<a href="/backlog/059-pagination-focus-announcement/">#059</a>). Exercised live in the <a href="/demos/data-table-demo.html">playground</a> and in CI.</li>
+  <li><strong>Open:</strong> <code>role="grid"</code> cell-level keyboard (arrow-key) navigation — a distinct interaction model from the read-only Sortable Table — remains out of scope here; it composes <a href="/intents/focus-delegation/">Focus Delegation</a> and belongs in a <a href="/backlog/123-data-grid-cell-navigation-block/">separate Data Grid block</a>.</li>
+</ul>
+
+<h3>Composition &amp; seam decisions</h3>
+<p>The <code>sortDirection → aria-sort</code> projection is exposed as a named <code>sort:header</code> behavior seam — plausibly reusable on a non-table sortable header bar — but realized inside this block; extracting a standalone behavior is deferred until a second, non-table consumer exists. Virtualization stays with <a href="/intents/windowed-collection/">Windowed Collection</a> and paging with <a href="/blocks/pagination/">Pagination</a>; this block renders the full filtered/sorted/grouped set and composes those neighbours on the same collection.</p>
+
+<h3>HTML Usage</h3>
+<pre><code class="language-html">&lt;!-- Sortable table: the active column projects aria-sort; a button toggles it --&gt;
+&lt;table sort:header&gt;
+  &lt;thead&gt;
+    &lt;tr&gt;
+      &lt;th scope="col" aria-sort="ascending"&gt;&lt;button type="button" data-action="sort" data-field="name"&gt;Name&lt;/button&gt;&lt;/th&gt;
+      &lt;th scope="col" aria-sort="none"&gt;&lt;button type="button" data-action="sort" data-field="team"&gt;Team&lt;/button&gt;&lt;/th&gt;
+      &lt;th scope="col"&gt;Location&lt;/th&gt;&lt;!-- non-sortable: no aria-sort --&gt;
+    &lt;/tr&gt;
+  &lt;/thead&gt;
+  &lt;tbody data-group="Engineering"&gt;
+    &lt;tr class="group-row"&gt;&lt;th scope="rowgroup" colspan="3"&gt;Engineering — count: 2&lt;/th&gt;&lt;/tr&gt;
+    &lt;tr&gt;&lt;td&gt;Aaron&lt;/td&gt;&lt;td&gt;Engineering&lt;/td&gt;&lt;td&gt;Oslo&lt;/td&gt;&lt;/tr&gt;
+  &lt;/tbody&gt;
+&lt;/table&gt;</code></pre>
+
+<h3>Interface (contracts only)</h3>
+<p>Web Everything defines the contract; concrete strategy implementations (an alternate comparator, server-delegated ordering, a virtualization provider) live in <strong>Frontier UI</strong> and register against these seams without changing the contract.</p>
+<pre><code class="language-typescript">type SortDirection = 'ascending' | 'descending';            // aria-sort
+type Sensitivity   = 'base' | 'accent' | 'case' | 'variant'; // Intl.Collator
+type EmptyPlacement = 'first' | 'last';                      // SQL NULLS FIRST/LAST
+type FilterMatch   = 'all' | 'any';
+type GroupSummary  = 'count' | 'sum' | 'average' | 'minimum' | 'maximum'; // SQL aggregates
+type Operation     = 'filter' | 'sort' | 'group' | 'page';
+
+interface SortKey {
+  field: string;
+  direction: SortDirection;
+  // Comparison preferences mirror Intl.Collator option names verbatim
+  sensitivity?: Sensitivity;
+  numeric?: boolean;            // natural numeric order: img2 before img10
+  caseFirst?: 'upper' | 'lower' | 'false';
+  ignorePunctuation?: boolean;
+  emptyPlacement?: EmptyPlacement;  // default 'last'; direction-independent
+}
+
+interface DataTableContract {
+  columns: { field: string; label: string; sortable?: boolean }[];
+  order?: Operation[];          // default ['filter','sort','group','page']
+  filter?: { match: FilterMatch; predicates: ((row: Row) => boolean)[] };
+  sort?:   { by: SortKey[]; keys: 'single' | 'multiple' };
+  group?:  { field: string; summary: GroupSummary; summaryField?: string };
+  // Observable events: 'sortchange' | 'filterchange' | 'groupchange'.
+}</code></pre>
+
+<h3>Status &amp; scope</h3>
+<p><code>status: draft</code> — the contract, the APG/Intl.Collator/SQL-aggregate design, and a fixture-driven
+<a href="/demos/data-table-demo.html">conformance demo</a> ship here; concrete strategy implementations
+(comparator providers, server-delegated ordering, virtualization) are deferred to Frontier UI. The
+<code>page</code> stage is the separate <a href="/blocks/pagination/">Pagination block</a>. Click-to-sort
+wiring and live-region announcements on stage changes are now realized (a live playground card + CI);
+<code>role="grid"</code> cell navigation stays out of scope for a distinct block.</p>

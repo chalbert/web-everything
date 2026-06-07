@@ -32,6 +32,31 @@ module.exports = function (eleventyConfig) {
     return _htmlToJsx(String(html), document);
   });
 
+  // Build-time syntax highlighting for the autoToggle-generated source panes. The manual
+  // `{% highlight %}` panes are colored by @11ty/eleventy-plugin-syntaxhighlight (Prism), but the
+  // autoToggle macro emits plain escaped text — so the generated HTML/JSX panes had no `.token`
+  // markup and looked inconsistent (backlog/071). This filter runs the SAME Prism the plugin uses
+  // over a code string and returns its token markup; the macro injects it with `| safe` (Prism
+  // already escapes `<`/`&`, so do NOT also pipe through `escape`). `prism-theme.css` styles the
+  // tokens, so generated and hand-authored panes now match.
+  let _prism;
+  eleventyConfig.addFilter("highlightCode", function(code, lang) {
+    if (!_prism) {
+      _prism = require("prismjs");
+      require("prismjs/components/prism-markup");
+      require("prismjs/components/prism-clike");
+      require("prismjs/components/prism-javascript");
+      require("prismjs/components/prism-jsx");
+      require("prismjs/components/prism-typescript");
+      require("prismjs/components/prism-tsx");
+    }
+    const grammar = _prism.languages[lang];
+    const text = String(code).trim();
+    // Unknown language → fall back to a manually-escaped, untokenized string (never raw HTML).
+    if (!grammar) return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return _prism.highlight(text, grammar, lang);
+  });
+
   // Build-time Axis-2 lowering: declarative-static JSX → vdom JSX (the #078 cross-strategy
   // compiler). Lazily esbuild-transpiles the shared TS — the SAME lift() the tests exercise — so
   // the strategy toggle's vdom pane is generated from the authored declarative source, not hand-kept.

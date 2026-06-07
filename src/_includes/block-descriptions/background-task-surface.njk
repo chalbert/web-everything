@@ -1,0 +1,214 @@
+<h2>Background Task Surface</h2>
+<p>
+    The persistent app-shell surface that hosts long-running work <strong>after it goes async</strong> &mdash;
+    the receiving end of a <a href="/intents/loader/">Loader</a>'s <code>escalation: async</code> handoff.
+    It implements the <a href="/intents/background-task/">Background Task Intent</a>: the intent declares
+    <em>what</em> should be true of that surface; this block is the surface itself.
+</p>
+<p>
+    It renders one entry per registered task with per-task progress, exposes per-task retry, and arms the
+    navigation-away guard while any task is in flight. It is a distinct UX surface, not a loader: it
+    <strong>outlives the originating view</strong> and aggregates concurrent tasks.
+</p>
+
+<h3>Not the Loader, not Feedback</h3>
+<table>
+    <thead>
+        <tr><th></th><th><a href="/intents/loader/">Loader</a></th><th>Background Task Surface</th><th><a href="/intents/feedback/">Feedback</a></th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Lifetime</strong></td>
+            <td>Dies with its view</td>
+            <td>Outlives the originating view</td>
+            <td>Transient, fire-and-forget</td>
+        </tr>
+        <tr>
+            <td><strong>Tracks ongoing state</strong></td>
+            <td>Yes (in-view)</td>
+            <td>Yes (off-view, aggregated)</td>
+            <td>No</td>
+        </tr>
+        <tr>
+            <td><strong>Concurrency</strong></td>
+            <td>One pending region</td>
+            <td>Many tasks, per-task progress + retry</td>
+            <td>A queue of notices</td>
+        </tr>
+        <tr>
+            <td><strong>Relationship</strong></td>
+            <td>Upstream (hands a task here at <code>escalation: async</code>)</td>
+            <td>&mdash;</td>
+            <td>Downstream (may emit a toast on completion)</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Composition (defers, does not redefine)</h3>
+<table>
+    <thead>
+        <tr><th>Intent</th><th>What this surface borrows</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><a href="/intents/loader/">Loader</a></td>
+            <td>Per-task progress is the Loader's <code>determinate</code>/<code>indeterminate</code> indicator, version/generation token, and lifecycle &mdash; the same state machine, hosted off-view. The handoff transfers a live handle, not a snapshot.</td>
+        </tr>
+        <tr>
+            <td><a href="/intents/reliability/">Reliability</a></td>
+            <td>Retry of a failed task delegates here; the surface exposes only the affordance, not the recovery policy.</td>
+        </tr>
+        <tr>
+            <td><a href="/intents/layout/">Layout</a></td>
+            <td>The surface is an app-shell region &mdash; a persistent <code>rail</code> (Layout's edge-region behavior). Placement mechanics defer to Layout.</td>
+        </tr>
+        <tr>
+            <td><a href="/intents/feedback/">Feedback</a></td>
+            <td>Downstream. A completed task may emit a transient toast (<code>withCompletionToast</code>); Feedback does not track ongoing state, this surface does.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/CustomEvent">CustomEvent</a></td>
+        <td>Baseline</td>
+        <td>Registration is a bubbling <code>background-task-register</code> event carrying the Loader-state handle &mdash; a one-shot handoff that decouples the surface from the (possibly torn-down) originating element.</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event">beforeunload</a></td>
+        <td>Baseline</td>
+        <td>The cross-document half of <code>navigationGuard: warn</code> &mdash; arms while any task is active, cleared when the last resolves.</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Navigation/navigate_event">Navigation API <code>navigate</code></a></td>
+        <td>Baseline 2024</td>
+        <td>The same-document half of the guard &mdash; intercepts SPA route changes for the route-leave confirm. The two primitives present as one guard (harvested as the navigation-guard intent, #129).</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Background_Fetch_API">Background Fetch API</a></td>
+        <td>Limited availability</td>
+        <td>The opt-in <code>durability: reload</code> tier &mdash; work that survives a full reload/close. Delegated to a service-worker adapter, NOT baked into the baseline (the intent borrows the vocabulary &ldquo;without requiring a service worker&rdquo;).</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Roles/status_role"><code>role="status"</code></a></td>
+        <td>WAI-ARIA</td>
+        <td>Because the surface is off the current view, completion and failure are announced via a polite live region so a screen-reader user learns a backgrounded task finished without watching the rail.</td>
+    </tr>
+</table>
+
+<h3>Task Lifecycle</h3>
+<p>A task entry moves through the Background Task Intent's states:</p>
+<table>
+    <thead>
+        <tr><th>State</th><th>Description</th><th>Surface behavior</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>registered</code></td><td>Handed off (escalated async); now has an entry.</td><td>Entry appears in the rail.</td></tr>
+        <tr><td><code>active</code></td><td>Work in progress.</td><td>Shows progress; arms the navigation guard.</td></tr>
+        <tr><td><code>success</code></td><td>Resolved successfully.</td><td>Behaves per <code>persistence</code> (auto-clear if transient; may emit a toast).</td></tr>
+        <tr><td><code>error</code></td><td>Failed.</td><td>Entry stays (sticky) and exposes retry via Reliability.</td></tr>
+        <tr><td><code>dismissed</code></td><td>Removed by the user or by auto-clear.</td><td>Entry leaves the rail.</td></tr>
+    </tbody>
+</table>
+
+<h3>Dimensions (offered choices) vs. fixed mechanics</h3>
+<p>
+    A fork is exposed as a configurable dimension only when both branches are legitimate end-states for
+    different products. The registration mechanism and surface resolution are fixed (variants would
+    fragment interop); the rest are dimensions.
+</p>
+<table>
+    <thead>
+        <tr><th>Axis</th><th>Values</th><th>Kind</th><th>Trait (non-default)</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><strong>aggregation</strong></td><td><code>single</code> · <code>batch</code></td><td>Dimension (from intent)</td><td><code>withBatchAggregation</code></td></tr>
+        <tr><td><strong>persistence</strong></td><td><code>transient</code> · <code>sticky</code></td><td>Dimension (from intent)</td><td><code>withStickyEntries</code></td></tr>
+        <tr><td><strong>navigationGuard</strong></td><td><code>none</code> · <code>warn</code></td><td>Dimension (from intent)</td><td><code>withNavigationGuard</code></td></tr>
+        <tr><td><strong>durability</strong></td><td><code>route</code> · <code>reload</code></td><td>Dimension (block-added)</td><td><code>withReloadDurability</code></td></tr>
+        <tr><td><em>registration</em></td><td>bubbling <code>background-task-register</code> event</td><td><strong>Fixed mechanic</strong></td><td>&mdash;</td></tr>
+        <tr><td><em>surface resolution</em></td><td>nearest-ancestor, global-by-default</td><td><strong>Fixed mechanic</strong></td><td>&mdash;</td></tr>
+    </tbody>
+</table>
+
+<h3>Registration handoff</h3>
+<p>
+    A Loader crossing <code>escalation: async</code> dispatches a bubbling registration event; the nearest
+    ancestor <code>&lt;background-tasks&gt;</code> surface adopts the carried Loader-state handle and renders
+    its entry. The surface subscribes to a live handle &mdash; it does not re-implement progress.
+</p>
+{% highlight "html" %}
+<!-- Placed once in the app shell (a Layout rail) -->
+<background-tasks aggregation="batch" persistence="sticky" guard="warn"></background-tasks>
+{% endhighlight %}
+{% highlight "typescript" %}
+// A Loader hands a still-running task off when it crosses the async threshold.
+el.dispatchEvent(new CustomEvent('background-task-register', {
+  bubbles: true,
+  detail: {
+    id: 'upload-42',
+    label: 'Uploading photos',     // sentence case, -ing verb, <= 3 words (Loader label conventions)
+    progress: 'determinate',
+    loaderState,                    // the live Loader state machine, subscribed off-view
+  },
+}));
+{% endhighlight %}
+
+<h3>Events</h3>
+<table>
+    <thead>
+        <tr><th>Event</th><th>Direction</th><th>Detail</th><th>Cancelable</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>background-task-register</code></td><td>In (handoff)</td><td><code>{ id, label, progress, loaderState }</code></td><td>No</td></tr>
+        <tr><td><code>background-task-state-change</code></td><td>Out</td><td><code>{ id, from, to }</code></td><td>No</td></tr>
+        <tr><td><code>background-task-retry</code></td><td>Out (user)</td><td><code>{ id }</code></td><td>Yes</td></tr>
+        <tr><td><code>background-task-dismiss</code></td><td>Out (user / auto)</td><td><code>{ id, reason }</code></td><td>Yes</td></tr>
+    </tbody>
+</table>
+
+<h3>Interface</h3>
+<pre><code class="language-typescript">type TaskAggregation = 'single' | 'batch';
+type TaskPersistence = 'transient' | 'sticky';
+type TaskNavigationGuard = 'none' | 'warn';
+type TaskDurability = 'route' | 'reload';   // block-added axis (reload = Background Fetch adapter)
+type BackgroundTaskState = 'registered' | 'active' | 'success' | 'error' | 'dismissed';
+
+interface BackgroundTaskSurfaceConfig {
+    aggregation: TaskAggregation;       // default 'single'
+    persistence: TaskPersistence;       // default 'transient' (errors are always sticky)
+    navigationGuard: TaskNavigationGuard; // default 'none'
+    durability: TaskDurability;         // default 'route'
+}
+
+interface BackgroundTask {
+    id: string;
+    label: string;                      // Loader label conventions
+    state: BackgroundTaskState;
+    progress: 'determinate' | 'indeterminate';
+    value?: number;                     // 0-100 when determinate
+    loaderState: unknown;               // the off-view Loader state-machine handle
+    retry?: () => void;                 // present on error; delegates to Reliability
+}</code></pre>
+
+<h3>Exports</h3>
+<table>
+    <thead>
+        <tr><th>Export</th><th>Kind</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>BackgroundTasksElement</code></td><td>Class</td><td>The surface custom element (a Layout rail)</td></tr>
+        <tr><td><code>withBatchAggregation</code></td><td>Trait</td><td>Many concurrent tasks, each with its own progress + retry</td></tr>
+        <tr><td><code>withStickyEntries</code></td><td>Trait</td><td>Resolved entries stay until dismissed</td></tr>
+        <tr><td><code>withNavigationGuard</code></td><td>Trait</td><td>Arm beforeunload + route-leave confirm while a task is active</td></tr>
+        <tr><td><code>withCompletionToast</code></td><td>Trait</td><td>Emit a Feedback toast on completion</td></tr>
+        <tr><td><code>withPerTaskRetry</code></td><td>Trait</td><td>Retry affordance delegating to Reliability</td></tr>
+        <tr><td><code>withReloadDurability</code></td><td>Trait</td><td>Opt into reload-durable work (Background Fetch adapter)</td></tr>
+        <tr><td><code>BackgroundTaskRegisterEvent</code></td><td>Event Class</td><td>The registration handoff</td></tr>
+        <tr><td><code>BackgroundTaskSurfaceConfig</code></td><td>Interface</td><td>Configuration type</td></tr>
+        <tr><td><code>registerBackgroundTasks</code></td><td>Function</td><td>Registers the element with its default name</td></tr>
+    </tbody>
+</table>

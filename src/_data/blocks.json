@@ -59,6 +59,51 @@
     ]
   },
   {
+    "id": "multi-select-dropdown",
+    "name": "Multi-select Dropdown",
+    "status": "draft",
+    "type": "Component",
+    "summary": "The multiple-select concrete member of the droplist family — the same button-triggered listbox substrate as the dropdown with one trait flipped: selection.model=multiple, selectionFollowsFocus=false (aria-multiselectable; Space toggles the focused option, arrows move focus only). A form-associated custom element with a multi-value surface (.values array, FormData repeating the name) like the native <select multiple> baseline.",
+    "implementsIntent": "selection",
+    "composesIntents": [
+      "anchor",
+      "focus-delegation",
+      "selection",
+      "type-ahead"
+    ],
+    "designDecisions": [
+      "One trait flip from the dropdown, nothing else: single→multiple is a single value change on the selection behavior — selection=\"model=multiple;selectionFollowsFocus=false\" — while focus-delegation, anchor, and type-ahead are byte-for-byte identical to the dropdown. That clean isolation (the focus behavior never learns selection became multiple) is the family's evidence that Selection was correctly factored out of \"dropdown\". Multiplicity is structural identity locked by the trait language, never an ambient-intent override.",
+      "Decoupled toggle selection model: model=multiple sets aria-multiselectable on the listbox; Space toggles aria-selected on the focused option and selectionFollowsFocus=false stops auto-commit, so arrows move virtual focus only. This is the standard multi-select listbox keyboard model, distinct from the dropdown's follows-focus single commit.",
+      "Multi-value form-control surface mirroring <select multiple>: the form-associated element submits one entry per selected value by passing a FormData (repeating name) to ElementInternals.setFormValue, instead of a single string. The public surface is plural — a .values string[] and .selectedOptions array — and the change event detail carries the full selection, not a single option.",
+      "Trigger shows a summary, not a single label: with multiple values the button renders a count or summary (e.g. \"3 selected\") falling back to the placeholder when empty, rather than a single option's label — the only template-level difference from the dropdown beyond the selection trait value."
+    ]
+  },
+  {
+    "id": "autocomplete",
+    "name": "Autocomplete",
+    "status": "draft",
+    "type": "Component",
+    "summary": "The editable, filterable concrete member of the droplist family — an <input role=\"combobox\"> bound to a separate role=\"listbox\" surface (<auto-complete>). The richest member: typing narrows the collection (filter) instead of seeking within it (type-ahead), and DOM focus stays on the input while virtual focus moves through the listbox. A form-associated custom element so <form>/FormData/reset/validity work like a native control, mirroring the WAI-ARIA APG Combobox (list-autocomplete) pattern.",
+    "implementsIntent": "selection",
+    "composesIntents": [
+      "anchor",
+      "focus-delegation",
+      "selection",
+      "input",
+      "live-region-status",
+      "loader",
+      "windowed-collection",
+      "typography"
+    ],
+    "designDecisions": [
+      "Focus host ≠ collection: this is the one member where the focus host and the option collection are different elements. DOM focus must stay on the <input> so typing is never interrupted, so the input is the focus host (role=combobox, carries aria-activedescendant and aria-expanded) while a separate <ul role=listbox> is the collection. focus-delegation=\"strategy=virtual;controller=<input-id>\" tells the trait its host is elsewhere: keydown attaches to the input, aria-activedescendant is written onto the input, and no tabindex is added (the input is already focusable). The dropdown conflated container and host on one element; autocomplete is the case that pulls them apart — the controller param (now real in plateau FocusDelegation.ts) is exactly that generalization.",
+      "Filter swaps in for type-ahead, and the two are mutually exclusive: both consume printable keystrokes, so a member composes one or the other. In the dropdown, typing seeks (type-ahead jumps the active item to a match); in the autocomplete, typing filters (filter narrows the list). \"Autocomplete = dropdown made editable\" precisely means: swap type-ahead for filter and move the focus host from the listbox to the input. selection, anchor, and focus movement are otherwise unchanged — selectionFollowsFocus=false, so arrowing only previews, Enter commits.",
+      "filter is a thin composition over loader + live-region-status, not a monolith: filter consumes the loader intent (customContexts:loaderIntent) for the async lifecycle — debounce (~250ms), enter a loading state, cancel stale in-flight responses, inject the results — and pushes a count to the live-status announcer on each settle (\"7 results available\" / \"No results found\"). filter=\"client\" skips the async path and just hides non-matching options. live-region-status owns the single announcer region; filter announces counts on settle and focus-delegation announces the active option (\"Paris, 2 of 7\") on each move — two callers, one region.",
+      "Concrete member is its own element, not a flag on <drop-list>: the two-element input+listbox substrate is a genuinely different shape than the dropdown's single button-triggered listbox, so autocomplete ships as a distinct <auto-complete name src> custom element rather than <drop-list editable>. This keeps each concrete droplist member one block (dropdown, multi-select-dropdown, autocomplete), consistent with the family rule that members are distinct trait selections over the substrate, not configurations of one widget.",
+      "Form-associated, single string surface like the dropdown: static formAssociated = true + ElementInternals.setFormValue, so FormData, reset, validity, bfcache restore, <label for>, and autocomplete attribute all work with no hidden input. On commit the only autocomplete-specific glue runs — write the selected label into the input value, dismiss the surface, keep focus on the input, and reveal the clear (X) affordance (input.clearable) when the value is non-empty. clearable, filter, live-status, and windowed are spec-proposed trait surfaces (only focus-delegation, selection, and anchor are built today); the block defines them as contracts, exactly as the family already does for anchor's positioning strategy."
+    ]
+  },
+  {
     "id": "type-ahead",
     "name": "Type-Ahead",
     "status": "draft",
@@ -2097,5 +2142,653 @@
         "notes": "Userland proof that HTML-defined components are viable today; informs the static tier."
       }
     }
+  },
+  {
+    "id": "pagination",
+    "name": "Pagination",
+    "status": "draft",
+    "type": "Module",
+    "summary": "The blocks-layer home for the Collection Operations `page` stage. Renders paged controls inside a `<nav aria-label=\"pagination\">` landmark with `aria-current=\"page\"`, syncs the active page to a shareable self-canonical `?page=n` URL via the History API (Navigation API as enhancement; cross-document View Transitions for zero-JS server-rendered transitions), and wires `advance:auto` to an IntersectionObserver scroll sentinel. Numbered / prev-next / load-more presentations over the orthogonal `pageMode` × `advance` axes; infinite scroll = append + auto, never a peer mode.",
+    "exports": [
+      "PaginationModule",
+      "PaginationBehavior",
+      "registerPagination"
+    ],
+    "implementsIntent": "collection-operations",
+    "dependsOn": [
+      "resource-loader"
+    ],
+    "sourcePath": "blocks/renderers/pagination/",
+    "webStandards": {
+      "paginationNavLandmark": {
+        "status": "W3C WAI-ARIA APG",
+        "pattern": "Pagination controls wrapped in a `<nav aria-label=\"pagination\">` landmark; the active page link marked `aria-current=\"page\"`",
+        "adoption": "PaginationBehavior renders the nav landmark and projects the active page as aria-current='page'; each landmark gets a unique label when more than one exists",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/landmark-regions/"
+      },
+      "ariaCurrent": {
+        "status": "WAI-ARIA 1.1",
+        "pattern": "aria-current='page' marks the active page within the pagination nav",
+        "adoption": "Set on the active page link; the companion sortDirection->aria-sort projection on table headers is deferred to the grid block",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current"
+      },
+      "historyApi": {
+        "status": "Baseline 2020",
+        "pattern": "pushState/popstate/scrollRestoration sync ?page=n to a shareable, back-button-restorable URL",
+        "adoption": "The native-first baseline for urlSync='query-param'; the active page is a self-canonical ?page=n and restores on back/forward",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/History/pushState"
+      },
+      "navigationApi": {
+        "status": "Baseline 2026",
+        "pattern": "A single navigate event intercepts same-origin same-document navigations",
+        "adoption": "Progressive enhancement over the History API baseline — used when available, never required",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API"
+      },
+      "crossDocumentViewTransitions": {
+        "status": "Progressive enhancement",
+        "pattern": "@view-transition { navigation: auto; } animates full-page navigation between server-rendered ?page=n pages with zero JS",
+        "adoption": "The MPA/server-rendered branch opts in via the CSS rule on both pages; no script required",
+        "reference": "https://developer.chrome.com/docs/web-platform/view-transitions/cross-document"
+      },
+      "intersectionObserver": {
+        "status": "Baseline",
+        "pattern": "A scroll sentinel observed by IntersectionObserver requests the next slice at the scroll boundary",
+        "adoption": "Wires advance:auto (append + auto = infinite scroll); rendering delegates to Windowed Collection, lifecycle to Loader",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/IntersectionObserver"
+      },
+      "selfCanonicalUrls": {
+        "status": "Google Search Central",
+        "pattern": "Each page is its own unique self-referencing canonical ?page=n; rel=next/prev is deprecated (2019) and never emitted as primary machinery",
+        "adoption": "Server-rendered <a href> page links are the indexable default; load-more/auto content provides a crawlable paginated path alongside the interactive UI",
+        "reference": "https://developers.google.com/search/docs/specialty/ecommerce/pagination-and-incremental-page-loading"
+      }
+    },
+    "designDecisions": {
+      "dedicatedBlockOverGrid": {
+        "description": "A dedicated pagination block realizing the `page` dimension family, rather than folding it into a broad grid/data-table block",
+        "rationale": "Every concrete renderable in the gap is pagination (nav landmark, aria-current, page-size selector, range label, scroll sentinel). The filter/sort/group rendering home (and the sortDirection->aria-sort projection, a table-header concern) is a separate, larger block tracked independently. Keeps this contract bounded and demonstrable against the verified WAI-ARIA APG pattern."
+      },
+      "pageModeXAdvance": {
+        "description": "Two orthogonal axes — pageMode (paged | append) x advance (manual | auto) — not one coupled `mode` list",
+        "rationale": "Infinite scroll is a derived opt-in (append + auto), not a peer mode. paged + auto is undefined (you do not auto-replace a slice on scroll). Matches the Collection Operations intent vocabulary verbatim.",
+        "default": "paged + manual"
+      },
+      "nativeFirstUrlState": {
+        "description": "History API is the baseline for urlSync; Navigation API and cross-document View Transitions are enhancements",
+        "rationale": "Native-first: the History API has been Baseline since 2020 and covers ?page=n + back/forward + scroll restoration with no library. The Navigation API (Baseline 2026) and zero-JS View Transitions layer on where supported."
+      },
+      "seoLoadBearing": {
+        "description": "urlSync is load-bearing for append modes, not optional polish",
+        "rationale": "Googlebot does not fire user-action JS, so load-more/auto content is not reliably crawlable; append modes are only advisable with query-param URL sync on, else the footer and back button break. Server-rendered self-canonical ?page=n links are the SEO-safe default; rel=next/prev is dead."
+      },
+      "rangeLabelRequiresTotal": {
+        "description": "rangeLabel ('showing 21-40 of 500') and jump-to-page compose only over an offset/page resource protocol",
+        "rationale": "A cursor protocol has no total, so it structurally forces prev-next or load-more and forces rangeLabel off. This cross-layer constraint is inherited from the Custom Pagination resource, not re-modeled here.",
+        "openQuestion": "Recommended page-size options and defaults, and how the range label degrades with no total, are unverified — owned by backlog #060."
+      },
+      "contractsOnly": {
+        "description": "This block defines the contract (nav structure, observable events, URL-state and advance strategies); concrete strategy implementations live in Frontier UI",
+        "rationale": "Web Everything is the standard. The block names the registry/strategy seams; competing implementations (a custom URL-state provider, an alternate advance trigger) register against them without changing the contract."
+      },
+      "focusAfterPageChange": {
+        "description": "Focus and screen-reader announcement after a page change are intentionally unresolved here",
+        "rationale": "The APG landmark + aria-current contract is verified; post-change focus/announcement is an open question tracked in backlog #059 and must not be guessed."
+      }
+    },
+    "frameworkComparison": {
+      "react": {
+        "patterns": [
+          "TanStack Table pagination model (pageIndex/pageSize/pageCount)",
+          "React Aria usePagination"
+        ],
+        "notes": "TanStack models the page state; React Aria supplies the a11y wiring. We compose both into one declarative block over the intent."
+      },
+      "vue": {
+        "patterns": [
+          "Vuetify v-pagination",
+          "Quasar QPagination"
+        ],
+        "notes": "Component-level numbered pagination with aria-current; no built-in cursor/offset protocol coupling."
+      },
+      "github": {
+        "patterns": [
+          "Primer Pagination"
+        ],
+        "notes": "Server-rendered <a href> numbered links inside a nav landmark — closest to our SEO-safe default."
+      },
+      "adobe": {
+        "patterns": [
+          "React Spectrum (range labels, page-size)"
+        ],
+        "notes": "Prior art for the result-range label and page-size selector affordances (defaults pending #060)."
+      }
+    },
+    "traits": [
+      {
+        "name": "withRangeLabel",
+        "description": "Surfaces the slice as a 'showing 21-40 of 500' result-range label. Requires a known total -> offset/page protocol only.",
+        "intentDimension": "rangeLabel"
+      },
+      {
+        "name": "withPageSizeSelect",
+        "description": "Adds a page-size selector (e.g. 10 / 25 / 50 / 100). Recommended options and persistence pending #060.",
+        "intentDimension": "page"
+      },
+      {
+        "name": "withAutoAdvance",
+        "description": "Turns append into infinite scroll by fetching the next slice at an IntersectionObserver scroll sentinel (advance:auto).",
+        "intentDimension": "advance"
+      },
+      {
+        "name": "withUrlSync",
+        "description": "Reflects the active page in a shareable, back-button-restorable ?page=n URL via the History API.",
+        "intentDimension": "urlSync"
+      }
+    ]
+  },
+  {
+    "id": "data-table",
+    "name": "Data Table",
+    "status": "draft",
+    "type": "Module",
+    "summary": "The blocks-layer home for the Collection Operations `filter`, `sort`, and `group` stages (the `page` stage is the companion Pagination block — compose, never merge). Renders a native `<table>` whose sortable column headers project `sortDirection` onto the WAI-ARIA APG `aria-sort` attribute (ascending/descending, sortable-but-unsorted = none) via button-wrapped `<th scope=\"col\">`, orders rows with `Intl.Collator` (sensitivity/numeric/caseFirst/ignorePunctuation) and SQL-style empty placement, narrows them by `filterMatch` (all/any), and partitions them into `<tbody>` groups with `groupSummary` aggregates named after the SQL functions (count/sum/average/minimum/maximum). The pipeline order is data (default filter → sort → group → page).",
+    "exports": [
+      "DataTableModule",
+      "DataTableBehavior",
+      "registerDataTable"
+    ],
+    "implementsIntent": "collection-operations",
+    "dependsOn": [
+      "resource-loader"
+    ],
+    "sourcePath": "blocks/renderers/data-table/",
+    "webStandards": {
+      "apgSortableTable": {
+        "status": "W3C WAI-ARIA APG",
+        "pattern": "Tabular data in a native `<table>` with `<th scope=\"col\">` headers; sortable headers wrap their label in a `<button>` and the active column carries `aria-sort`",
+        "adoption": "DataTableBehavior renders the table and projects the primary sort key onto `aria-sort` on its `<th>`; sortable-but-unsorted headers are `aria-sort=\"none\"`, non-sortable headers carry none",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/table/"
+      },
+      "ariaSort": {
+        "status": "WAI-ARIA 1.1",
+        "pattern": "aria-sort = ascending | descending | none | other, on one header at a time",
+        "adoption": "The intent's `sortDirection` projects verbatim onto `aria-sort`; only the primary sort key's header is marked (APG: one sorted header at a time), even under a multi-key sort",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-sort"
+      },
+      "intlCollator": {
+        "status": "ECMA-402 (Baseline)",
+        "pattern": "Locale-aware comparison via `sensitivity`, `numeric`, `caseFirst`, `ignorePunctuation` options",
+        "adoption": "The reference comparator is `Intl.Collator`; the intent's text-comparison dimensions adopt its option names verbatim, so `numeric:true` gives natural order (img2 before img10) with no bespoke comparator",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator"
+      },
+      "arrayToSorted": {
+        "status": "Baseline 2023",
+        "pattern": "`Array.prototype.sort` is guaranteed stable (ES2019); `toSorted()` is non-mutating (ES2023)",
+        "adoption": "Stable sort makes multi-key tiebreaking and `sortKeys:single` (which preserves prior order) well-defined without extra bookkeeping",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/toSorted"
+      },
+      "rowgroupScope": {
+        "status": "HTML / WAI-ARIA",
+        "pattern": "A `<th scope=\"rowgroup\">` associates a header with all cells in its row group",
+        "adoption": "Each group renders as its own `<tbody>` led by a `scope=\"rowgroup\"` summary row carrying the group key + its aggregate, so assistive tech announces the grouping",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/th#scope"
+      }
+    },
+    "designDecisions": {
+      "sortableTableOverGrid": {
+        "description": "Realized as the APG Sortable Table recipe (`<table>` + button-wrapped `<th scope=\"col\">` + `aria-sort`), not the interactive `role=\"grid\"` pattern",
+        "rationale": "filter/sort/group is a read-and-reorder concern; the verified-today accessible pattern is the APG Sortable Table. `role=\"grid\"` layers cell-level keyboard navigation — a separate interactivity axis that composes later, not a prerequisite for the data operations.",
+        "default": "native <table> semantics"
+      },
+      "intlCollatorComparator": {
+        "description": "`Intl.Collator` is the reference comparator; the intent's comparison dimensions are its option names verbatim",
+        "rationale": "Native-first: the platform already standardizes locale-aware comparison. The block never invents a comparator vocabulary — `numericOrdering`/`textSensitivity`/`caseFirst`/`ignorePunctuation` are passed straight through. A different comparator strategy (numeric-only, decorate-sort-undecorate, server-delegated ORDER BY) is a Frontier UI / app concern, catalogued in the Technical Configurator's Sorting Strategy domain."
+      },
+      "emptyPlacementDirectionIndependent": {
+        "description": "`emptyPlacement` (first/last) is applied independently of sort direction, mirroring SQL NULLS FIRST/LAST",
+        "rationale": "The web platform has no native term for null ordering, so the intent borrows SQL's. Empties do not flip with ascending/descending — `NULLS LAST` stays last in both, which matches every SQL engine and user expectation."
+      },
+      "ariaSortOneHeader": {
+        "description": "Only the primary sort key's header is marked aria-sort != none, even under a multi-key sort",
+        "rationale": "WAI-ARIA defines aria-sort as one-header-at-a-time. Multi-key sorting still orders rows by the full key list, but the projected state names the primary column; surfacing secondary keys is a presentational affordance, not an aria-sort value."
+      },
+      "sortHeaderProjectionSeam": {
+        "description": "The sortDirection → aria-sort header projection is exposed as a named `sort:header` behavior seam, realized inside this block",
+        "rationale": "It is the one piece plausibly reusable outside a table (e.g. a sortable card-list header bar). Naming the seam keeps the door open, but extracting a standalone behavior block now would be speculative — defer until a second, non-table consumer actually exists.",
+        "openQuestion": "Promote `sort:header` to a standalone behavior block when a non-table consumer appears; tracked as a follow-up rather than built speculatively."
+      },
+      "composeNotMerge": {
+        "description": "Pagination (page stage) and Windowed Collection (virtualization) are composed on the same collection, never merged into this block",
+        "rationale": "This block owns only filter/sort/group — selecting and ordering the set. Pagination owns the page slice + URL/advance; Windowed Collection owns which rows are realized in the DOM. They co-reside on one collection as orthogonal axes; folding any of them in here would entangle independent contracts."
+      },
+      "contractsOnly": {
+        "description": "This block defines the contract (table structure, aria-sort projection, comparator/aggregate seams, observable events); concrete strategy implementations live in Frontier UI",
+        "rationale": "Web Everything is the standard. The block names the seams; competing implementations (an alternate comparator, server-side execution, a virtualization provider) register against them without changing the contract."
+      }
+    },
+    "frameworkComparison": {
+      "react": {
+        "patterns": [
+          "TanStack Table row-model pipeline (filter → sort → group → paginate)",
+          "React Aria useTable / aria-sort wiring"
+        ],
+        "notes": "TanStack models the four operations as ordered, optional row-model transforms — the architecture this block's configurable pipeline mirrors; React Aria supplies the aria-sort / scope a11y wiring."
+      },
+      "agGrid": {
+        "patterns": [
+          "Column sort state",
+          "Row grouping with aggregations"
+        ],
+        "notes": "Prior art for multi-column sort and per-group aggregate summaries; we name the aggregates after SQL rather than a bespoke set."
+      },
+      "vue": {
+        "patterns": [
+          "Vuetify v-data-table sort/group",
+          "Quasar QTable"
+        ],
+        "notes": "Component-level sortable/groupable tables; no shared comparison vocabulary — we anchor to Intl.Collator instead."
+      }
+    },
+    "traits": [
+      {
+        "name": "withSortableHeader",
+        "description": "Projects the active sort key's direction onto `aria-sort` on a button-wrapped `<th scope=\"col\">` (the `sort:header` seam). Sortable-but-unsorted headers are `aria-sort=\"none\"`.",
+        "intentDimension": "sortDirection"
+      },
+      {
+        "name": "withFilter",
+        "description": "Narrows the rows by combining call-site predicates per `filterMatch` (all = AND, any = OR).",
+        "intentDimension": "filterMatch"
+      },
+      {
+        "name": "withGrouping",
+        "description": "Partitions rows into `<tbody>` groups, each led by a `scope=\"rowgroup\"` summary row carrying the `groupSummary` aggregate (count/sum/average/minimum/maximum).",
+        "intentDimension": "groupSummary"
+      }
+    ]
+  },
+  {
+    "id": "data-grid",
+    "name": "Data Grid",
+    "status": "draft",
+    "type": "Module",
+    "summary": "The interactive twin of the Data Table block: same tabular data, the *other* WAI-ARIA APG pattern. Renders a native `<table role=\"grid\">` of `role=\"row\"` / `role=\"columnheader\"` / `role=\"gridcell\"` cells with cell-level keyboard navigation — arrow keys move one cell (clamping at the edges), Home/End jump to the row ends, Ctrl+Home/Ctrl+End to the grid corners, PageUp/PageDown by a page — over a roving tabindex (exactly one cell is `tabindex=\"0\"`, every other is `-1`). It is the concrete consumer of the Focus Delegation intent (strategy `roving`, orientation `both`); the column-header row is itself navigable. Where the Data Table is read-and-reorder (`role=\"table\"` + `aria-sort`), the Data Grid is navigate-the-cells (`role=\"grid\"` + roving focus) — APG documents them as separate patterns, so they are parallel blocks, not one upgraded in place.",
+    "exports": [
+      "DataGridModule",
+      "DataGridBehavior",
+      "registerDataGrid"
+    ],
+    "implementsIntent": "focus-delegation",
+    "composesIntents": [
+      "focus-delegation"
+    ],
+    "sourcePath": "blocks/renderers/data-grid/",
+    "webStandards": {
+      "apgDataGrid": {
+        "status": "W3C WAI-ARIA APG",
+        "pattern": "A `role=\"grid\"` of `role=\"row\"` rows and `role=\"gridcell\"` / `role=\"columnheader\"` cells with arrow-key cell navigation and a roving tabindex",
+        "adoption": "DataGridBehavior renders the native `<table>` with the grid roles and realizes the APG keyboard model verbatim (arrows clamp, Home/End to row ends, Ctrl+Home/End to grid corners, PageUp/Down by a page); the header row is navigable",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/grid/"
+      },
+      "rovingTabindex": {
+        "status": "WAI-ARIA APG (Managing Focus)",
+        "pattern": "Exactly one descendant is `tabindex=\"0\"` (the active item) and all others are `tabindex=\"-1\"`; the value moves with focus",
+        "adoption": "The active cell carries `tabindex=\"0\"`, every other cell `-1`; a keystroke recomputes the active cell and the tabindex roves to it, so Tab enters/leaves the grid as one stop while arrows move within",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/#kbd_roving_tabindex"
+      },
+      "ariaGridIndices": {
+        "status": "WAI-ARIA 1.1",
+        "pattern": "`aria-rowcount` / `aria-colcount` on the grid and `aria-rowindex` / `aria-colindex` on rows and cells declare the full extent and a cell's position",
+        "adoption": "The grid declares `aria-rowcount` / `aria-colcount` (header row included) and each row/cell carries its 1-based `aria-rowindex` / `aria-colindex`, so the position is announced even when not every row is realized in the DOM",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-colindex"
+      }
+    },
+    "designDecisions": {
+      "parallelBlockNotUpgrade": {
+        "description": "The Data Grid is its own block alongside the Data Table, not a sortable table \"upgraded\" with cell navigation",
+        "rationale": "The read-only Sortable Table (`role=\"table\"`, click-to-sort, `aria-sort`) and the interactive Data Grid (`role=\"grid\"`, arrow-key cell focus) are two distinct APG patterns with different interaction models and a11y contracts — APG documents them separately. Folding grid navigation into the Data Table would conflate them. They compose onto the same collection when both reordering and cell traversal are wanted (decision carried from backlog #115).",
+        "default": "two parallel blocks, cross-referenced"
+      },
+      "composesFocusDelegation": {
+        "description": "The grid is a concrete consumer of the Focus Delegation intent (strategy `roving`, orientation `both`), not a bespoke focus model",
+        "rationale": "Focus Delegation already standardizes roving tabindex vs. virtual focus, arrow-key movement, and the Tab-between / arrows-within invariant. The grid realizes the `roving` strategy over two axes rather than reinventing focus management; the movement engine is the verifiable seam."
+      },
+      "headerRowNavigable": {
+        "description": "The column-header row is part of the navigable grid (arrow-up reaches the headers); positions range over `1 (header) + dataRows` rows",
+        "rationale": "The APG Data Grid examples include the header row in arrow navigation so a keyboard user can read column labels in place. Modelling row 0 as the header keeps Ctrl+Home a true grid origin and avoids a special-case off-by-one between the visual table and the position model."
+      },
+      "clampNotWrap": {
+        "description": "Movement clamps at the grid edges; it does not wrap (last → first)",
+        "rationale": "APG lists wrapping as an opt-in, not the default. Clamping matches the unsurprising default and a spreadsheet's behavior; a wrapping option is a Focus Delegation `wrap` concern a concrete implementation can layer on."
+      },
+      "contractsOnly": {
+        "description": "This block defines the contract (grid roles, the roving-tabindex invariant, the keyboard movement model, the audit); concrete strategies live in Frontier UI",
+        "rationale": "Web Everything is the standard. The block names the seams (the movement engine, the active-cell projection); competing implementations (virtualized rows, editable cells, server paging, two-dimensional selection) register against them without changing the contract."
+      }
+    },
+    "frameworkComparison": {
+      "react": {
+        "patterns": [
+          "React Aria useGridList / useGrid (roving focus + grid keyboard model)",
+          "AG Grid cell navigation (arrow keys, Ctrl+Home/End, Page keys)"
+        ],
+        "notes": "React Aria supplies the grid/roving-focus a11y wiring this block names as the Focus Delegation seam; AG Grid is prior art for the exact key bindings (arrows, Home/End, Ctrl corners, Page) we adopt from APG."
+      },
+      "vue": {
+        "patterns": [
+          "Vuetify v-data-table-virtual focus model",
+          "PrimeVue DataTable cell navigation / cellSelection"
+        ],
+        "notes": "Component-level grid keyboard navigation; no shared focus vocabulary — we anchor to the APG roving-tabindex model and the Focus Delegation intent instead."
+      }
+    },
+    "traits": [
+      {
+        "name": "withCellNavigation",
+        "description": "Realizes the APG Data Grid keyboard model over a roving tabindex — arrows (clamped), Home/End, Ctrl+Home/End, PageUp/Down — moving the single `tabindex=\"0\"` cell with DOM focus.",
+        "intentDimension": "strategy"
+      },
+      {
+        "name": "withGridRoles",
+        "description": "Projects the tabular data onto the `role=\"grid\"` / `role=\"row\"` / `role=\"columnheader\"` / `role=\"gridcell\"` structure with `aria-rowcount` / `aria-colcount` and per-cell `aria-rowindex` / `aria-colindex`.",
+        "intentDimension": "orientation"
+      }
+    ]
+  },
+  {
+    "id": "reorderable-list",
+    "name": "Reorderable List",
+    "status": "draft",
+    "type": "Component",
+    "sourcePath": "blocks/renderers/reorderable-list/",
+    "exports": [
+      "reduceReorder",
+      "renderReorderableList",
+      "auditReorderableList",
+      "reconcileOrder",
+      "announce",
+      "initialState"
+    ],
+    "summary": "A list whose item order is user-mutable by pointer drag and by keyboard, with live-region announcement and a pluggable commit strategy. Relocates items with atomic Element.moveBefore() so an item keeps its focus/animation/connection state across a move. Manual order — not Collection Operations' computed sort.",
+    "implementsIntent": "reorder",
+    "composesIntents": [
+      "interaction",
+      "focus-delegation",
+      "live-region-status",
+      "collection-operations"
+    ],
+    "webStandards": {
+      "pointerEvents": {
+        "status": "Baseline",
+        "pattern": "Pointer Events + setPointerCapture",
+        "adoption": "The default drag path — unifies mouse/touch/pen and captures the pointer for the duration of a drag. Preferred over the HTML5 Drag and Drop API for in-list reorder (better touch + a11y).",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Pointer_events"
+      },
+      "elementMoveBefore": {
+        "status": "Baseline 2025 (progressive enhancement)",
+        "pattern": "Element.moveBefore() atomic relocation",
+        "adoption": "Relocate an item without disconnecting it, preserving focus, animations, iframes, and custom-element connection. Wired declaratively via the Component block's preserve-on-move attribute; falls back to insertBefore where unsupported.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Element/moveBefore"
+      },
+      "ariaApgDrag": {
+        "status": "WAI-ARIA Authoring Practices",
+        "pattern": "Keyboard-operable drag with live-region announcement",
+        "adoption": "Roving tabindex over items + grab/move/drop keys; announce moves via a polite live region. The deprecated aria-grabbed/aria-dropeffect are NOT used.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/"
+      },
+      "htmlDragAndDrop": {
+        "status": "Baseline",
+        "pattern": "HTML Drag and Drop API (draggable, dragstart/dragover/drop)",
+        "adoption": "Reserved for cross-window and OS file transfer (a data-transfer concern, see backlog #007); NOT the in-list reorder default.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API"
+      }
+    },
+    "events": {
+      "reorder-start": {
+        "description": "Fired when an item is grabbed (pointer down on the grab affordance, or keyboard grab key)",
+        "taxonomy": "notification",
+        "detail": {
+          "item": "HTMLElement",
+          "fromIndex": "number"
+        },
+        "bubbles": true,
+        "cancelable": false
+      },
+      "reorder-move": {
+        "description": "Fired as the grabbed item passes a new candidate position during a drag",
+        "taxonomy": "notification",
+        "detail": {
+          "item": "HTMLElement",
+          "fromIndex": "number",
+          "toIndex": "number"
+        },
+        "bubbles": true,
+        "cancelable": false
+      },
+      "reorder-commit": {
+        "description": "Fired when a move is committed (dropped). Cancelable — preventDefault to reject the new order (e.g. server validation); the commit strategy listens here to persist",
+        "taxonomy": "notification",
+        "detail": {
+          "item": "HTMLElement",
+          "fromIndex": "number",
+          "toIndex": "number",
+          "order": "string[]"
+        },
+        "bubbles": true,
+        "cancelable": true
+      },
+      "reorder-cancel": {
+        "description": "Fired when a grab is abandoned (Esc, or pointer released outside a valid target); order is unchanged",
+        "taxonomy": "notification",
+        "detail": {
+          "item": "HTMLElement",
+          "fromIndex": "number"
+        },
+        "bubbles": true,
+        "cancelable": false
+      }
+    },
+    "designDecisions": {
+      "keyboardParityMandatory": {
+        "description": "A conforming reorderable list provides a keyboard path (roving tabindex + grab/move/drop keys + live-region announcement) equivalent to the pointer path.",
+        "rationale": "WAI-ARIA APG requires a keyboard alternative for drag interactions; the deprecated aria-grabbed/aria-dropeffect are unfit. Pointer-only reorder is non-conforming, not 'partially done'."
+      },
+      "pointerNotHtml5Dnd": {
+        "description": "The default drag path uses Pointer Events, not the HTML5 Drag and Drop API.",
+        "rationale": "Pointer Events unify mouse/touch/pen and give clean capture; HTML5 DnD is clunky and weak for touch/a11y. HTML5 DnD is reserved for OS file / cross-window transfer (data-transfer, backlog #007)."
+      },
+      "atomicMove": {
+        "description": "Item relocation uses Element.moveBefore() (the Component block's preserve-on-move), not remove+insert.",
+        "rationale": "Reordered cards are often interactive; an atomic move preserves focus, in-flight animations, iframes, and custom-element connection state that a disconnect/reconnect would reset."
+      },
+      "manualVsComputedOrder": {
+        "description": "Reorder produces a manual order, mutually exclusive with the Collection Operations sort dimension.",
+        "rationale": "A list is hand-ordered OR comparator-sorted, never both at once; the two intents are distinct answers to 'what determines order' and cross-reference rather than merge."
+      },
+      "commitStrategyProvider": {
+        "description": "Where the new order is written is a provider behind the cancelable reorder-commit event, defaulting to ephemeral.",
+        "rationale": "Persistence varies (none / localStorage / write-back to source); keep it a strategy the host supplies rather than baking one backend into the block. Start as an attribute; promote to a CustomReorderCommitRegistry only if multiple backends emerge."
+      }
+    },
+    "traits": [
+      {
+        "name": "withDragHandle",
+        "description": "Restrict the grab affordance to a scoped handle within each item, leaving the rest interactive",
+        "intentDimension": "reorder.grab.handle"
+      },
+      {
+        "name": "withPointerReorder",
+        "description": "Drag-to-reorder via Pointer Events with pointer capture (mouse, touch, pen)",
+        "intentDimension": "reorder.movement.pointer"
+      },
+      {
+        "name": "withKeyboardReorder",
+        "description": "Roving-tabindex keyboard path: grab, move with arrows, drop or cancel",
+        "intentDimension": "reorder.movement.keyboard"
+      },
+      {
+        "name": "withLiveAnnounce",
+        "description": "Announce each move and the final commit via a polite live region (replaces deprecated aria-grabbed)",
+        "intentDimension": "reorder.announce.live-region"
+      },
+      {
+        "name": "withCommitStrategy",
+        "description": "Persist the new order (localStorage or write-back) behind the cancelable reorder-commit event",
+        "intentDimension": "reorder.commit.persisted"
+      },
+      {
+        "name": "withCrossListReorder",
+        "description": "Move items between sibling lists that share a group key",
+        "intentDimension": "reorder.scope.cross-list"
+      }
+    ]
+  },
+  {
+    "id": "background-task-surface",
+    "name": "Background Task Surface",
+    "status": "draft",
+    "type": "Component",
+    "summary": "The persistent app-shell surface that hosts long-running work after it goes async — the receiving end of a Loader's escalation:async handoff. Renders one entry per registered task with per-task progress (the Loader's own state machine, hosted off-view), per-task retry delegating to Reliability, and arms the navigation-away / before-unload guard while any task is in flight. Distinct from the Feedback Intent (transient toasts) and the Loader Intent (in-view pending state that dies with its view).",
+    "implementsIntent": "background-task",
+    "composesIntents": [
+      "loader",
+      "reliability",
+      "layout",
+      "feedback"
+    ],
+    "webStandards": {
+      "customEvent": {
+        "status": "Baseline",
+        "pattern": "Bubbling CustomEvent as the registration handoff",
+        "adoption": "A Loader at escalation:async dispatches a bubbling background-task-register event carrying its loader-state handle; the surface listens and adopts it. A one-shot, fire-and-handoff registration that decouples the surface from the (possibly torn-down) originating element — chosen over an injector/DI registry because the task must outlive its originating view.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/CustomEvent"
+      },
+      "beforeunload": {
+        "status": "Baseline",
+        "pattern": "beforeunload prompt for cross-document leave / close",
+        "adoption": "While navigationGuard:warn and any task is active, the surface arms beforeunload so closing the tab or a full reload prompts the user. Cleared automatically when the last in-flight task resolves. This guard is why the route-only baseline is safe: a hard reload that would lose in-flight work is gated, not silently dropped.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event"
+      },
+      "navigationApi": {
+        "status": "Baseline 2024",
+        "pattern": "Navigation API navigate event intercept for same-document route-leave",
+        "adoption": "The SPA route-leave confirm half of navigationGuard:warn intercepts the Navigation API's navigate event (preventing/confirming same-document navigations) — the same-document counterpart to beforeunload. The two primitives present as one guard contract (harvested as the navigation-guard intent, #129).",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Navigation/navigate_event"
+      },
+      "backgroundFetch": {
+        "status": "Limited availability (opt-in enhancement)",
+        "pattern": "Background Fetch API + service worker for reload-durable work",
+        "adoption": "The durability:reload tier — work that genuinely survives a full reload or tab close — is delegated here, NOT baked into the baseline. The intent borrows Background Fetch's vocabulary 'without requiring a service worker', so this surface stays usable as a route-only in-memory baseline and treats reload-durability as an opt-in adapter (see backlog spin-off).",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Background_Fetch_API"
+      },
+      "ariaStatusRegion": {
+        "status": "WAI-ARIA",
+        "pattern": "Live status region for off-view progress announcement",
+        "adoption": "Because the surface is off the user's current view, task completion and failure are announced via a polite live region (role=status) so a screen-reader user learns a backgrounded task finished without watching the rail. Reuses the Live Region Status paradigm rather than redefining it.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Roles/status_role"
+      }
+    },
+    "events": {
+      "background-task-register": {
+        "description": "The handoff IN. A Loader (or any producer) dispatches this when work goes async; the nearest ancestor surface adopts the carried task handle and begins rendering its entry. This is the block's registration mechanism.",
+        "taxonomy": "command",
+        "detail": {
+          "id": "string",
+          "label": "string",
+          "progress": "'determinate' | 'indeterminate'",
+          "loaderState": "object (the Loader state-machine handle, subscribed to off-view)"
+        },
+        "bubbles": true,
+        "cancelable": false
+      },
+      "background-task-state-change": {
+        "description": "Re-emitted by the surface as a task entry moves through the intent lifecycle. Surfaces the Background Task Intent's registered → active → success → error → dismissed states as a single observable event.",
+        "taxonomy": "notification",
+        "detail": {
+          "id": "string",
+          "from": "BackgroundTaskState",
+          "to": "BackgroundTaskState"
+        },
+        "bubbles": true,
+        "cancelable": false
+      },
+      "background-task-retry": {
+        "description": "Fired when the user activates retry on a failed entry. The surface only exposes the affordance; recovery policy is delegated to the Reliability Intent. Cancelable so a host can intercept and run its own recovery.",
+        "taxonomy": "command",
+        "detail": {
+          "id": "string"
+        },
+        "bubbles": true,
+        "cancelable": true
+      },
+      "background-task-dismiss": {
+        "description": "Fired when an entry is removed — by the user, or by auto-clear for a transient entry that resolved successfully. Cancelable to allow a host to keep a sticky entry.",
+        "taxonomy": "command",
+        "detail": {
+          "id": "string",
+          "reason": "'user' | 'auto-clear'"
+        },
+        "bubbles": true,
+        "cancelable": true
+      }
+    },
+    "designDecisions": {
+      "registrationEventBus": {
+        "description": "Tasks are registered via a bubbling background-task-register CustomEvent, NOT an injector/DI registry.",
+        "rationale": "Registration must outlive the originating view, and it is a one-shot handoff rather than an ongoing dependency. An event decouples the surface from the (possibly already torn-down) originating element; the event carries the Loader's existing state machine, so the surface subscribes to a handle it did not create — the intent's 'same machine, hosted off-view'. This is a fixed mechanic, not a configurable choice: two registration protocols would mean no protocol."
+      },
+      "nearestAncestorResolution": {
+        "description": "A register event routes to the nearest ancestor surface; an app places one <background-tasks> in its shell, giving a single global instance by default while allowing a composable per-shell surface.",
+        "rationale": "Falls straight out of the bubbling-event choice — exactly like event bubbling finds the first listener. The platform analog (Background Fetch UI, a download manager) is one global surface, but an embedded sub-app can drop in its own surface with no extra config. Also a fixed mechanic, not an offered choice."
+      },
+      "durabilityRouteBaseline": {
+        "description": "The baseline surface is route-only (survives SPA route changes, in-memory); reload-durability is an opt-in durability:reload dimension delegated to the Background Fetch / service-worker adapter.",
+        "rationale": "Native-first: the platform's durable answer (Background Fetch) is a documented enhancement, not the baseline dependency — the intent explicitly borrows its vocabulary 'without requiring a service worker'. The navigationGuard:warn prompt covers the gap a hard reload would otherwise leave. Unlike the two mechanics above, this IS a legitimate per-product choice, so it is exposed as a dimension."
+      },
+      "fixedMechanicsVsConfigurableDimensions": {
+        "description": "Internal mechanics (registration via event bus, nearest-ancestor resolution) are fixed; user-facing axes are exposed as dimensions: aggregation (single/batch), persistence (transient/sticky), navigationGuard (none/warn), and the block-added durability (route/reload).",
+        "rationale": "A fork becomes a configurable axis only when both branches are legitimate end-states for different products; it stays a fixed decision when one branch is simply the correct way to build the contract and variants would fragment interop. The three intent dimensions plus durability meet that bar; the two registration mechanics do not."
+      },
+      "reusesLoaderStateMachine": {
+        "description": "Per-task progress is the Loader Intent's determinate/indeterminate indicator, version/generation token, and lifecycle — the same state machine, hosted off-view — not a reimplementation.",
+        "rationale": "A backgrounded task is a Loader that crossed the escalation:async threshold; reusing its machine keeps progress semantics identical on- and off-view and means the handoff transfers a live handle rather than snapshotting state."
+      },
+      "distinctFromFeedbackAndLoader": {
+        "description": "This surface is neither the Feedback Intent (transient fire-and-forget toasts) nor the Loader Intent (in-view pending state that dies with its view); it owns ongoing off-view task state and may emit a Feedback toast downstream on completion.",
+        "rationale": "Keeps the three surfaces from collapsing: Feedback does not track ongoing state, the Loader does not outlive its view, and only this surface aggregates concurrent tasks with per-task retry."
+      }
+    },
+    "traits": [
+      {
+        "name": "withBatchAggregation",
+        "description": "Present multiple concurrent tasks, each with its own progress and retry, where one task's failure does not abort the others (default is single — one entry at a time)",
+        "intentDimension": "background-task.aggregation.batch"
+      },
+      {
+        "name": "withStickyEntries",
+        "description": "Keep a resolved entry until explicitly dismissed instead of auto-clearing on success (error entries are sticky regardless, so a failure that happened off-view is still reviewable)",
+        "intentDimension": "background-task.persistence.sticky"
+      },
+      {
+        "name": "withNavigationGuard",
+        "description": "While any task is active, arm the beforeunload prompt (cross-document close/reload) and the Navigation API route-leave confirm (same-document); cleared when the last in-flight task resolves",
+        "intentDimension": "background-task.navigationGuard.warn"
+      },
+      {
+        "name": "withCompletionToast",
+        "description": "Emit a transient Feedback Intent toast when a task completes, for the case where the user is on another view and the rail entry auto-clears",
+        "intentDimension": "background-task.persistence.transient"
+      },
+      {
+        "name": "withPerTaskRetry",
+        "description": "Expose a retry affordance on a failed entry that delegates recovery to the Reliability Intent (the surface owns the affordance, not the policy)",
+        "intentDimension": "background-task.recovery.manual"
+      },
+      {
+        "name": "withReloadDurability",
+        "description": "Opt into reload-durable work via the Background Fetch / service-worker adapter so an in-flight task survives a full page reload or tab close (default is route-only, in-memory)",
+        "intentDimension": "background-task.durability.reload"
+      }
+    ]
   }
 ]

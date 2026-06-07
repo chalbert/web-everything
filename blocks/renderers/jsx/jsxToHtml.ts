@@ -4,6 +4,7 @@
  * The reverse direction of the conversion adapter. Because the mirror dialect is near-identity with
  * HTML, this is a small set of string rewrites (no DOM needed):
  *
+ *   - directive sugar       <For each="…">    → <template is="for-each" items="…"> (./directives)
  *   - fragment wrapper      <>…</>            → siblings (dropped)
  *   - aliases               className/htmlFor → class/for
  *   - expression props      name={…}          → dropped (no HTML representation — LOSSY, e.g. onclick={fn})
@@ -13,13 +14,17 @@
  * nested braces and exotic JSX are out of scope. See reports/2026-06-03-jsx-adapter-feature-mapping.md.
  */
 
+import { desugar } from './directives';
+
 const VOID_ELEMENTS = new Set([
   'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
   'link', 'meta', 'param', 'source', 'track', 'wbr',
 ]);
 
 export function jsxToHtml(jsx: string): string {
-  let s = jsx.trim();
+  // 0. lower directive sugar (<For>/<Show>/<Resource>) to the canonical <template is> form, so the
+  //    rest of the pipeline (template passes through as identity HTML) emits the canonical directive.
+  let s = desugar(jsx.trim());
 
   // 1. drop fragment wrappers
   s = s.replace(/<>\s*/g, '').replace(/\s*<\/>/g, '');

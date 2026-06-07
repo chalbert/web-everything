@@ -20,11 +20,59 @@ document.addEventListener('DOMContentLoaded', function () {
             card._searchText = ((title ? title.textContent : '') + ' ' + (desc ? desc.textContent : '')).toLowerCase();
         });
 
+        const countTarget = section.querySelector('[data-count-target]');
+
+        // Status filter — opt-in: only sections that render status chips (e.g.
+        // /backlog/). Persists the visible-status set per section; resolved is
+        // hidden by default until the user opts it back in.
+        const statusChips = Array.from(section.querySelectorAll('[data-status-chip]'));
+        const statusKey = 'we-status-filter:' + ((section.querySelector('.section-title') || {}).textContent || '');
+        let activeStatuses = null;
+
         function applyFilter() {
             const q = filter ? filter.value.trim().toLowerCase() : '';
+            let shown = 0;
             cards.forEach(function (card) {
-                card.classList.toggle('is-filtered-out', !!q && card._searchText.indexOf(q) === -1);
+                const failSearch = !!q && card._searchText.indexOf(q) === -1;
+                const failStatus = activeStatuses && card.dataset.status && !activeStatuses.has(card.dataset.status);
+                const hidden = failSearch || failStatus;
+                card.classList.toggle('is-filtered-out', hidden);
+                if (!hidden) shown++;
             });
+            if (countTarget) countTarget.textContent = shown;
+        }
+
+        if (statusChips.length) {
+            const allStatuses = statusChips.map(function (c) { return c.dataset.statusChip; });
+            let saved = null;
+            try { saved = JSON.parse(localStorage.getItem(statusKey)); } catch (e) { /* ignore */ }
+            if (Array.isArray(saved)) {
+                activeStatuses = new Set(saved.filter(function (s) { return allStatuses.indexOf(s) !== -1; }));
+            } else {
+                // Default: everything visible except resolved.
+                activeStatuses = new Set(allStatuses.filter(function (s) { return s !== 'resolved'; }));
+            }
+
+            function syncChips() {
+                statusChips.forEach(function (chip) {
+                    const on = activeStatuses.has(chip.dataset.statusChip);
+                    chip.classList.toggle('is-active', on);
+                    chip.setAttribute('aria-pressed', on ? 'true' : 'false');
+                });
+            }
+
+            statusChips.forEach(function (chip) {
+                chip.addEventListener('click', function () {
+                    const s = chip.dataset.statusChip;
+                    if (activeStatuses.has(s)) { activeStatuses.delete(s); } else { activeStatuses.add(s); }
+                    try { localStorage.setItem(statusKey, JSON.stringify(Array.from(activeStatuses))); } catch (e) { /* ignore */ }
+                    syncChips();
+                    applyFilter();
+                });
+            });
+
+            syncChips();
+            applyFilter();
         }
 
         function setView(view) {

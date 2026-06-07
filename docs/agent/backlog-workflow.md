@@ -32,7 +32,11 @@ The test for any new markdown: *is it research (→ report + a `/research/` topi
 
 ## Authoring an item
 
-Create `backlog/<NNN>-<slug>.md`. **The filename is the `id`**, and it has two parts: a zero-padded **`NNN` number** (the stable unique id — shown as `#042`, used in the URL `/backlog/<NNN>-<slug>/` and for short refs) plus a kebab-case **`slug`** (the human-readable text, which may be reworded). **Allocate `NNN` = the current highest number + 1** (`ls backlog/ | sort | tail -1` → next). The number is permanent; never reuse a deleted item's number. Frontmatter is metadata only — **no `title`, no `summary`, no `id`/`num`**; the title/summary derive from the body's `# H1` and first paragraph, the id/num from the filename. `check:standards` fails if the `NNN-` prefix is missing or a number collides. There are two shapes:
+Create `backlog/<NNN>-<slug>.md`. **The filename is the `id`**, and it has two parts: a zero-padded **`NNN` number** (the stable unique id — shown as `#042`, used in the URL `/backlog/<NNN>-<slug>/` and for short refs) plus a kebab-case **`slug`** (the human-readable text, which may be reworded). **Allocate `NNN` = the current highest number + 1** (`ls backlog/ | sort | tail -1` → next), or any never-used gap number. Re-check `ls backlog/` *immediately before* you write the file; if your chosen number is taken by the time you save (a concurrent session grabbed it), take the next free one — **yield, don't shuffle**.
+
+> **The `NNN` is immutable — never renumber an existing item.** Once a file has a number, that number is its id for life. **Do not rename `backlog/<NNN>-…` to a different `NNN`** — not to tidy the sequence, not to close a gap, not to resolve a collision. Renumbering silently breaks every `#NNN` short-ref and the `/backlog/<NNN>/` URL, and under concurrent agents it cascades into id collisions (two sessions chasing the same next-number, each renumbering the other's work). **On any number collision the *newer* item yields:** give the item you are *adding* a different free number; never touch a number already on disk. You may reword the *slug* (see *Renaming an item* below) — you may never change the *number*. Reusing a deleted item's number is likewise forbidden (a never-allocated gap number is fine).
+
+Frontmatter is metadata only — **no `title`, no `summary`, no `id`/`num`**; the title/summary derive from the body's `# H1` and first paragraph, the id/num from the filename. `check:standards` fails if the `NNN-` prefix is missing or a number collides. There are two shapes:
 
 **1 — Content item** (its own write-up):
 
@@ -68,6 +72,22 @@ relatedProject: webtraits
 ---
 ```
 
+**Renaming an item (slug reword *only* — never the number) — keep old links alive.** Only the `slug`
+half is reword-able; the `NNN` is immutable (see the immutability rule above — never renumber an
+existing item). The `NNN` number is permanent, so a
+cited `/backlog/<NNN>/` URL survives any reword (it redirects to canonical via `src/backlog-redirects.njk`).
+But a previously-published link to the **old slug** (`/backlog/<NNN>-old-wording/`, or a pre-NNN
+`/backlog/old-wording/`) would 404 after the rename. To preserve it, add the **full former URL segment**
+(the whole old filename stem) to a `formerSlugs:` array on the renamed item:
+
+```yaml
+formerSlugs: [042-old-wording, even-older-wording]
+```
+
+A build-time template (`src/backlog-slug-redirects.njk`, fed by `src/_data/backlogAliases.js`) then
+emits one tiny redirect page per entry at `/backlog/<former>/` → the item's canonical `/backlog/<id>/`.
+`check:standards` rejects a `formerSlug` that collides with a live item id or with another item's alias.
+
 Live-collected form, on a `projects.json` entry:
 ```json
 "openQuestions": [
@@ -75,22 +95,25 @@ Live-collected form, on a `projects.json` entry:
 ]
 ```
 
-## Closing out a completed item — delete it (after a final-capture pass)
+## Closing out a completed item — mark it `resolved` (after a final-capture pass)
 
-The backlog tracks **open** work, not history. When an item — or a plan it mirrors — is **fully done**, **delete its `backlog/<id>.md`**. The lasting record is the shipped thing: the spec entity on the website, and the report (kept exposed) for the deep trail. Never delete on a hunch — run this gate first, **carefully**, because deletion is where leftover work and report links silently disappear:
+The backlog tracks **open** work; when an item — or a plan it mirrors — is **fully done**, flip its frontmatter `status` → **`resolved`** (don't delete the file). `resolved` items are dropped from selection (see *Gather*) and hidden by default on `/backlog/`, so they don't clutter the live view, but the file stays as an audit trail and keeps any `relatedReport` exposed. Never close on a hunch — run this gate first, **carefully**, because close-out is where leftover work silently disappears:
 
-1. **Confirm it's actually done.** Re-check the item's own acceptance criteria against reality — relevant tests green, `npm run check:standards` green, build green. **If the item added or changed a standard's feature, the standard's conformance demo must reflect it** — a shared fixture/case exists for the new feature and the playground shows it (demos are fixture-driven; see the Definition of Done in AGENTS.md). If any criterion is unmet — including a feature with no demo case — it is **not** done; leave the item.
-2. **Take a careful last look for leftovers.** Did the work surface anything deferred, half-finished, or newly exposed (a follow-up, an edge case, a related cleanup)? Each such point gets its **own new backlog item now** — *review-before-adding / dedup first* (see Rules). Capturing leftovers before deletion is the whole point: nothing dies with the file.
-3. **Pointer guard — don't orphan a report.** If the item is a *pointer* mirroring a report (`relatedReport`, no body) and it is that report's **only** exposure, deleting it turns the report into a *hidden doc* and `npm run check:standards` fails. First promote the report to a `/research/` topic (or keep one pointer), *then* delete. Re-run `check:standards` afterward to prove the build still passes.
-4. **Graduated ideas.** When an `idea`/`decision` became a real entity (block/intent/protocol/…), that entity **is** the record — delete the backlog file; you don't need a lingering `resolved` + `graduatedTo` stub.
+1. **Confirm it's actually done.** Re-check the item's own acceptance criteria against reality — relevant tests green, `npm run check:standards` green, build green. **If the item added or changed a standard's feature, the standard's conformance demo must reflect it** — a shared fixture/case exists for the new feature and the playground shows it (demos are fixture-driven; see the Definition of Done in AGENTS.md). If any criterion is unmet — including a feature with no demo case — it is **not** done; leave the item `active`.
+2. **Take a careful last look for leftovers.** Did the work surface anything deferred, half-finished, or newly exposed (a follow-up, an edge case, a related cleanup)? Each such point gets its **own new backlog item now** — *review-before-adding / dedup first* (see Rules). Capturing leftovers before close-out is the whole point: nothing is lost when the item leaves the live view.
+3. **Mark it resolved.** Set `status: resolved` and save. If the item became a real entity (block/intent/protocol/…), add `graduatedTo: <entity>` so the graduation trail is recorded on the item. Re-run `npm run check:standards` to prove the build still passes. Because the file stays, a pointer item keeps its `relatedReport` exposed — there's no orphaned-report risk to guard against.
 
-> `status: resolved | parked` stay valid for an item you *deliberately keep visible* (e.g. parked for later, or a decision whose `graduatedTo` trail you want on the site). But the default for **done** work is **deletion**, not a resolved tombstone.
+> Deletion is no longer the close-out step — `resolved` is. The only time you remove a `backlog/<id>.md` is to discard an item that was opened in error or fully superseded, not to record completed work.
 
 ## Selecting the next item to work on
 
 > Use when asked "what's next?", "pick the next backlog item", "what should I work on?" — or via the `next-backlog-item` skill. The goal is the item an **agent can implement now**, not just the most interesting one.
 
 **Gather.** `ls backlog/*.md`; read each item's frontmatter (`type`, `status`) and skim its body. Keep only `status: open`. **Drop `active`** (already in progress — see *Starting an item* below), `resolved`, and `parked`.
+
+**Concurrency is real — the snapshot goes stale.** Multiple agents work this backlog at once, so the `status` you read while gathering can be claimed by another agent before you finish presenting. Two guards, both cheap:
+- **Cross-check the working tree, not just `status`.** Run `git status --short` during *Gather*. A racing agent often edits an item's named files **before** it flips `status: open → active` — so any candidate whose named file paths (or branch) already show uncommitted edits is **in progress**; drop it even though it still reads `open`.
+- **Re-read fresh right before you commit to it.** The instant before you present the single recommendation — and again the instant before you claim it (see *Working an item* → *Claim it on start*) — re-`cat` *that one item's* frontmatter from disk (not the bulk snapshot) and re-run `git status --short`. If it now reads `active`, or its files are now dirty, you lost the race: drop it and fall to the next Tier-A item.
 
 **Score each candidate for dev-readiness** — the test is *"could an agent open a PR for this today, without a design call?"*:
 
@@ -122,7 +145,7 @@ Example offer line: *`jsx-directive-sugar` — add the deferred `<For>/<Show>/<R
 
 The backlog file is the **durable, resumable record** of in-flight work — treat it that way so a lost or interrupted session can pick up exactly where you left off:
 
-1. **Claim it on start.** The moment you begin work, set the item's frontmatter `status: open` → **`status: active`** and save — *before* writing any code. Selection drops `active` (see *Gather*), so a fresh session won't re-pick work already underway. Add `dateStarted: "YYYY-MM-DD"` if useful.
+1. **Claim it on start — re-read first to win the race.** The moment you begin work, **re-`cat` the item from disk** to confirm it's still `status: open` (a concurrent agent may have claimed it since you presented it; see *Selecting* → *Concurrency is real*). If it's already `active` or its named files are dirty in `git status --short`, **stop — it's taken**; go back and pick another. Only if it's still genuinely open: set `status: open` → **`status: active`**, add `dateStarted: "YYYY-MM-DD"`, and save — *before* writing any code. Selection drops `active` (see *Gather*), so a fresh session won't re-pick work already underway.
 2. **Keep it in sync as you go.** Maintain a short **`## Progress`** section in the item's body and update it *as work happens*, not at the end — if the session dies mid-task, this section is **all the next session has** (recovering the prior chat is not reliable; the item body is the contract). Keep this exact shape so any session can resume in seconds:
    ```markdown
    ## Progress
@@ -136,12 +159,14 @@ The backlog file is the **durable, resumable record** of in-flight work — trea
 3. **If abandoned unfinished,** flip `active` → `open`, leave the `## Progress` section as-is (it says where it stopped), so it returns to the pool instead of looking claimed-but-dead.
 4. **Reclaiming a stranded claim.** An item left `active` by a crashed/forgotten session would otherwise be invisible forever (selection drops `active`). So when asked to work and the pool looks empty — or when explicitly told to continue one — treat an `active` item as **resumable**: read its `## Progress`, check out its branch, and continue from **Next**. Don't re-pick it as fresh; resume it.
 
-When it's fully done, follow *Closing out a completed item* (delete after the final-capture pass).
+When it's fully done, follow *Closing out a completed item* (mark `resolved` after the final-capture pass).
 
 ## Rules
 
+- **Don't touch commits (for now).** Backlog work never reviews, discusses, proposes, or performs git commits — not mid-work, not at close-out. Leave changes uncommitted in the working tree; the user owns committing and chooses the branch/commit strategy. Likewise, don't audit or comment on *unrelated* changes already in the tree — work your item and stop. Close-out (mark the item `resolved` after the capture pass) does **not** require anything to be committed.
 - **Review before adding (dedup).** Always scan the existing backlog first — list the titles and grep related terms (`grep -rilE "<topic>" backlog/`). If an item already covers the idea, **extend it** rather than adding a near-duplicate sibling. Watch for *parallel* tracks that look similar but are distinct (e.g. the `<component>` adapter items vs. the JSX adapter items) — cross-reference instead of merging.
 - The `id` is the filename stem `<NNN>-<slug>` — unique by construction. The `NNN` number (`item.num`) is the stable routing key and short ref (`#042`); the `slug` is reword-able text. `type` and `status` come from the enums above (validated, incl. the `NNN-` prefix + number-collision checks).
+- **Never renumber an existing item.** The `NNN` is immutable for life — don't rename `backlog/<NNN>-…` to a different number to tidy the sequence, close a gap, or dodge a collision. It breaks `#NNN` refs and `/backlog/<NNN>/` URLs and, under concurrent agents, cascades into id collisions. On a collision the *newer* item takes a different free number; the number already on disk is never touched. (Slug rewording is fine — see *Renaming an item*.)
 - **No `title`/`summary` in frontmatter** — title = the body's `# H1`, summary = its first paragraph (or, for a pointer item, both come from the report). The loader derives them; the validator checks the *derived* values exist, so every item needs either a body or a `relatedReport`.
 - `relatedReport` must exist on disk; `relatedProject` must resolve in `projects.json`; `crossRef` needs both `url` and `label`.
 - `reports/` is **not** in the 11ty build, so `relatedReport` shows as a path label, not a link. Real site links go via `crossRef` / `relatedProject`.

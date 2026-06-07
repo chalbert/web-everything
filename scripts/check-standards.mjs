@@ -203,6 +203,34 @@ for (const item of backlog) {
     warn(`Backlog item "${item.id}" is resolved but has no graduatedTo — record what it became`);
 }
 
+// ── 6d-bis. Old-slug redirects (#110): validate `formerSlugs` back-compat aliases ──
+// A renamed item lists prior URL segments in `formerSlugs:`; src/backlog-slug-redirects.njk turns
+// each into a redirect page at /backlog/<former>/ → /backlog/<id>/. Guard the field so a former slug
+// can't shadow a live item or collide with another item's alias (either would make a redirect win
+// over a real page, or two redirects fight for one URL).
+const realIds = new Set(backlog.map((it) => it.id));
+const aliasOwner = new Map();
+const SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+for (const item of backlog) {
+  if (item.formerSlugs === undefined) continue;
+  if (!Array.isArray(item.formerSlugs)) {
+    err(`Backlog item "${item.id}" formerSlugs must be an array of prior URL segments`);
+    continue;
+  }
+  for (const former of item.formerSlugs) {
+    if (typeof former !== 'string' || !SLUG_RE.test(former))
+      err(`Backlog item "${item.id}" formerSlugs entry "${former}" must be a kebab-case URL segment`);
+    else if (former === item.id)
+      err(`Backlog item "${item.id}" lists its own current slug in formerSlugs — drop it`);
+    else if (realIds.has(former))
+      err(`Backlog item "${item.id}" formerSlug "${former}" collides with a live item — a redirect would shadow it`);
+    else if (aliasOwner.has(former))
+      err(`Backlog formerSlug "${former}" is claimed by both "${aliasOwner.get(former)}" and "${item.id}" — aliases must be unique`);
+    else
+      aliasOwner.set(former, item.id);
+  }
+}
+
 // ── 6e. No hidden reports — every report must be exposed somewhere ────────────
 // "Three homes": research → a /research/ topic, spec → the website, everything else → a
 // backlog item. reports/ is NOT in the 11ty build, so a report is only reachable when it is
@@ -232,6 +260,35 @@ try {
     err('AGENTS.md inventory is stale — run `npm run gen:inventory`');
 } catch (e) {
   err(`AGENTS.md inventory check failed: ${e.message}`);
+}
+
+// ── 8. No compiled artifacts shadowing TS sources ────────────────────────────
+// A stray `tsc <file>` (or an editor "compile on save") emits `.js`/`.d.ts` next to the `.ts`/
+// `.tsx` source, ignoring tsconfig `outDir`. Because Vite/vitest resolve extensionless imports
+// `.js` BEFORE `.tsx`, the stale `.js` then silently shadows the real source in tests — and tsc
+// does not honour `jsxInject`, so JSX fixtures throw `jsx is not defined` while looking "done".
+// (This is exactly what masked backlog #067's conformance suite.) Fail on any such shadow so the
+// drift can't return; clean with e.g. `find blocks plugs demos -name '*.js' -delete` (paired only).
+const COMPILE_ROOTS = ['blocks', 'plugs', 'demos'].map((d) => join(ROOT, d)).filter(existsSync);
+const walk = (dir, out = []) => {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    if (e.name === 'node_modules' || e.name === 'dist' || e.name === '_site') continue;
+    const p = join(dir, e.name);
+    if (e.isDirectory()) walk(p, out);
+    else out.push(p);
+  }
+  return out;
+};
+const allCompileFiles = COMPILE_ROOTS.flatMap((r) => walk(r));
+const fileSet = new Set(allCompileFiles);
+for (const f of allCompileFiles) {
+  const base = f.endsWith('.d.ts') ? f.slice(0, -5) : f.endsWith('.js') ? f.slice(0, -3) : null;
+  if (!base) continue;
+  if (fileSet.has(`${base}.ts`) || fileSet.has(`${base}.tsx`))
+    err(
+      `Compiled artifact "${f.replace(ROOT + '/', '')}" shadows its TS source — delete it. ` +
+      `Stale .js/.d.ts next to .ts/.tsx silently override the source in vitest (.js resolves first).`,
+    );
 }
 
 // ── Report ────────────────────────────────────────────────────────────────────

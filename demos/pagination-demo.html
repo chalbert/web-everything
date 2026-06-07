@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pagination Playground - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/pagination-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Pagination Playground</h1>
+      <p>
+        The runnable home for the <a href="/blocks/pagination/">Pagination block</a> — the
+        blocks-layer realization of the <a href="/intents/collection-operations/">Collection
+        Operations</a> intent's <code>page</code> stage. Each card pairs a page-state with a
+        contract (<code>pageMode</code> × <code>advance</code>, <code>urlSync</code>,
+        <code>rangeLabel</code>), renders the controls through the reference renderer, and runs the
+        <strong>same a11y/SEO audit the CI conformance suite asserts</strong>.
+      </p>
+      <p class="play-caveat">
+        A green badge means the rendered controls satisfy the <em>verified</em> contract: a
+        <code>&lt;nav aria-label="pagination"&gt;</code> landmark with <code>aria-current="page"</code>
+        on the active page, self-canonical <code>?page=n</code> links as the SEO default, the
+        result-range label only over a known total, and infinite scroll rendered as a
+        <strong>scroll sentinel</strong> (append + auto) rather than a peer mode. The renderer here
+        is a deterministic <em>reference</em>; concrete strategies live in Frontier UI.
+      </p>
+    </header>
+
+    <div id="examples">Loading examples&hellip;</div>
+  </main>
+
+  <!-- Playground: renders pagination controls + audits the verified contract. Native DOM only. -->
+  <script type="module" src="/demos/pagination-demo.ts"></script>
+</body>
+</html>

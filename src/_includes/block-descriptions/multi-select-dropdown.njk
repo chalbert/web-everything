@@ -1,0 +1,250 @@
+{% from "source-toggle.njk" import sourceToggle, jsxSource, endSource %}
+
+<h2>Multi-select Dropdown — the multiple-select droplist</h2>
+<p>The <strong>multi-select dropdown</strong> is the <a href="/blocks/droplist/">droplist family</a> member for choosing <em>several</em> values from one button-triggered listbox. It is the <a href="/blocks/dropdown/">dropdown</a> with exactly one trait flipped — <code>selection</code> moves from <code>model=single</code> to <code>model=multiple;selectionFollowsFocus=false</code> — and nothing else. As a form-associated custom element it participates in <code>&lt;form&gt;</code> submission, <code>FormData</code>, reset, and validity exactly like the native <code>&lt;select multiple&gt;</code>, submitting one entry per selected value.</p>
+
+<h3>Trait selection at a glance</h3>
+<p>The multi-select dropdown's identity is fixed by these trait selections. The <strong>only</strong> difference from the dropdown is the <code>selection</code> row; the focus, anchor, and type-ahead picks are identical. Structural picks are <strong>local</strong> (an author cannot change them via props or ambient intent); behavioral picks are this component's <em>stance</em> and remain overridable by an ambient <code>droplistIntent</code>:</p>
+<table>
+  <thead>
+    <tr><th>Trait</th><th>Dimension</th><th>Value</th><th>Kind</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><a href="/intents/selection/">Selection</a></td><td><code>model</code></td><td><code>multiple</code>, <code>selectionFollowsFocus=false</code></td><td><strong>structural</strong></td></tr>
+    <tr><td><a href="/intents/type-ahead/">Type-Ahead</a></td><td>presence</td><td>on (mutually exclusive with filter)</td><td><strong>structural</strong></td></tr>
+    <tr><td><a href="/intents/focus-delegation/">Focus Delegation</a></td><td><code>strategy</code></td><td><code>virtual</code> (<code>aria-activedescendant</code>)</td><td>behavioral</td></tr>
+    <tr><td><a href="/intents/anchor/">Anchor</a></td><td>placement / collision</td><td><code>bottom-start</code> / <code>flip,resize</code></td><td>behavioral</td></tr>
+  </tbody>
+</table>
+
+<h3>Altitude 1 — HTML, explicit behaviors (the substrate)</h3>
+<p>The same substrate as the dropdown; only the <code>selection</code> attribute value changes, and the listbox carries <code>aria-multiselectable="true"</code>. <code>model=multiple</code> switches selection to the decoupled toggle model — Space toggles <code>aria-selected</code> on the focused option — and <code>selectionFollowsFocus=false</code> stops auto-commit, so the arrow keys move virtual focus only. The JSX mirror is near-identity — only the inline comments (<code>&lt;!-- --&gt;</code> → <code>{/* */}</code>) and the two-root wrapper (a <code>&lt;&gt;</code> fragment) differ:</p>
+{{ sourceToggle("multi-substrate") }}
+{% highlight "html" %}
+<button aria-haspopup="listbox" anchor="tag-list"
+        commandfor="tag-list" command="toggle-popover">Tags</button>
+
+<ul id="tag-list" role="listbox" aria-multiselectable="true"
+    focus-delegation="strategy=virtual"                       <!-- behavioral; may default from ambient intent -->
+    selection="model=multiple;selectionFollowsFocus=false"    <!-- STRUCTURAL: always local -->
+    type-ahead
+    anchored="placement=bottom-start;collision=flip,resize"
+    popover>
+  <li role="option" composite-descendant data-value="design">Design</li>
+  <li role="option" composite-descendant data-value="eng">Engineering</li>
+</ul>
+{% endhighlight %}
+{{ jsxSource("multi-substrate") }}
+{% highlight "tsx" %}
+<>
+  <button aria-haspopup="listbox" anchor="tag-list"
+          commandfor="tag-list" command="toggle-popover">Tags</button>
+
+  <ul id="tag-list" role="listbox" aria-multiselectable="true"
+      focus-delegation="strategy=virtual"                       {/* behavioral; may default from ambient intent */}
+      selection="model=multiple;selectionFollowsFocus=false"    {/* STRUCTURAL: always local */}
+      type-ahead
+      anchored="placement=bottom-start;collision=flip,resize"
+      popover>
+    <li role="option" composite-descendant data-value="design">Design</li>
+    <li role="option" composite-descendant data-value="eng">Engineering</li>
+  </ul>
+</>
+{% endhighlight %}
+{{ endSource() }}
+<p>Compared to the dropdown substrate, the focus, anchor, and type-ahead attributes are byte-for-byte identical. The focus behavior does not even know selection became multiple — single→multi is a one-attribute flip on the <em>selection</em> behavior alone.</p>
+
+<h3>Altitude 1a — Inside <code>&lt;drop-list&gt;</code>: the class</h3>
+<p>The same generic bridge as the dropdown, with a <strong>plural</strong> form-control surface. It is still a <strong>form-associated custom element</strong>, but its submitted value is multi-valued: rather than a single string, it hands <code>setFormValue</code> a <code>FormData</code> that repeats the control's <code>name</code> once per selected value — exactly how the native <code>&lt;select multiple&gt;</code> submits. It exposes its resolved attributes on <strong>its own injector</strong> as locals nothing outside the element can see.</p>
+<pre><code class="language-typescript">const { injectors, InjectorRoot } = window;
+
+class DropList extends HTMLElement {
+  static formAssociated = true;                                  // → real form control
+  static observedAttributes = ['values', 'options', 'name', 'placeholder'];
+
+  #internals = this.attachInternals();
+  #injector  = injectors.ensureInjector(this);                   // private to this element
+  #options: ReadonlyArray&lt;{ value: string; label: string }&gt; = [];
+  #selected: Array&lt;{ value: string; label: string }&gt; = [];      // plural: an ordered set
+  static #counter = 0;
+
+  connectedCallback() {
+    // Public attributes → private contexts, scoped to this element's injector.
+    this.#options = this.#resolveOptions(this.getAttribute('options'));
+    this.#injector.set('customContexts:options',     this.#options);
+    this.#injector.set('customContexts:placeholder', this.getAttribute('placeholder') ?? '');
+    this.#injector.set('customContexts:surfaceId',   `drop-list-${++DropList.#counter}`);
+
+    this.values = this.#parseValues(this.getAttribute('values'));  // initial selection (array)
+    this.addEventListener('selection-change', this.#onInnerSelection);
+  }
+
+  // ── Form-control surface (multi-value, like &lt;select multiple&gt;) ──────
+  get values() { return this.#selected.map((o) =&gt; o.value); }
+  set values(vs: readonly string[]) {
+    const set = new Set(vs);
+    this.#selected = this.#options.filter((o) =&gt; set.has(o.value));
+    this.#injector.set('customContexts:selected', this.#selected);
+    this.#injector.set('customContexts:summary',  this.#summaryLabel());
+    // One FormData entry per value → form submits `tags=design&tags=eng`, like native.
+    const fd = new FormData();
+    for (const o of this.#selected) fd.append(this.getAttribute('name') ?? '', o.value);
+    this.#internals.setFormValue(fd);
+  }
+  get selectedOptions() { return this.#selected.slice(); }
+
+  #summaryLabel() {
+    const n = this.#selected.length;
+    return n === 0 ? (this.getAttribute('placeholder') ?? '') : `${n} selected`;
+  }
+
+  formResetCallback() { this.values = this.#parseValues(this.getAttribute('values')); }
+  formStateRestoreCallback(state: File | string) {
+    this.values = typeof state === 'string' ? state.split(',').filter(Boolean) : [];
+  }
+
+  // ── Event boundary ───────────────────────────────────────────────────
+  // The inner `selection="model=multiple"` trait fires selection-change with
+  // the full toggled set; we update state and re-emit a public `change` event.
+  #onInnerSelection = (e: CustomEvent&lt;{ values: string[] }&gt;) =&gt; {
+    e.stopPropagation();
+    this.values = e.detail.values;
+    this.dispatchEvent(new CustomEvent('change', { detail: this.selectedOptions, bubbles: true }));
+  };
+
+  #parseValues(raw: string | null) { return raw ? raw.split(',').filter(Boolean) : []; }
+
+  // `options="@interests"` → ancestor-injector lookup; literal JSON also accepted.
+  #resolveOptions(raw: string | null) {
+    if (!raw) return [];
+    if (raw.startsWith('@')) {
+      return InjectorRoot.getProviderOf(this, `customContexts:${raw.slice(1)}`) ?? [];
+    }
+    return JSON.parse(raw);
+  }
+}
+
+customElements.define('drop-list', DropList);</code></pre>
+
+<p>The locals the class set — <code>@options</code>, <code>@selected</code> (now an array), <code>@summary</code>, <code>@placeholder</code>, <code>@surfaceId</code> — are the <em>only</em> contexts the template references. The trigger shows the <code>@summary</code> (a count) rather than a single option's label, and each <code>&lt;li&gt;</code>'s <code>aria-selected</code> reads membership in <code>@selected</code>:</p>
+<pre><code class="language-html">&lt;button anchor="{{ '{{' }}@surfaceId}}"
+        aria-haspopup="listbox"
+        commandfor="{{ '{{' }}@surfaceId}}" command="toggle-popover"&gt;
+  {{ '{{' }}@summary}}
+&lt;/button&gt;
+
+&lt;ul id="{{ '{{' }}@surfaceId}}" role="listbox" aria-multiselectable="true"
+    focus-delegation="strategy=virtual"
+    selection="model=multiple;selectionFollowsFocus=false"
+    type-ahead
+    anchored="placement=bottom-start;collision=flip,resize"
+    popover&gt;
+  &lt;template for-each="@options as option"&gt;
+    &lt;li role="option" composite-descendant
+        data-value="{{ '{{' }}@option.value}}"
+        aria-selected="{{ '{{' }}@selected | some(o =&gt; o.value === @option.value)}}"&gt;
+      {{ '{{' }}@option.label}}
+    &lt;/li&gt;
+  &lt;/template&gt;
+&lt;/ul&gt;</code></pre>
+
+<h4>Reading the pair as trait language</h4>
+<ul>
+  <li><strong>Literal — structural identity.</strong> <code>selection="model=multiple;selectionFollowsFocus=false"</code>, <code>aria-multiselectable="true"</code>, <code>type-ahead</code>, <code>role="listbox"</code>, <code>role="option"</code>, <code>composite-descendant</code>. These make this a multi-select and not a single dropdown or a menu; the trait language locks them, so a consumer cannot pass them in as a prop. Ambient <code>droplistIntent</code> can never make this single.</li>
+  <li><strong>Literal — behavioral, ambient-overridable.</strong> <code>focus-delegation="strategy=virtual"</code>, <code>anchored="placement=…;collision=…"</code> — identical to the dropdown. Hardcoded as this widget's stance; the ambient <code>droplistIntent</code> injector still wins on any dimension the author has not stated.</li>
+  <li><strong>Erased — open state.</strong> Same as the dropdown: <code>commandfor</code> + <code>command="toggle-popover"</code> drives the native popover; the platform owns <code>aria-expanded</code> and surface visibility. Selecting an option does <em>not</em> close the surface — multi-select stays open for the next toggle.</li>
+  <li><strong>Erased — form participation.</strong> No hidden inputs. <code>static formAssociated = true</code> + <code>#internals.setFormValue(formData)</code> submits one <code>name=value</code> pair per selected option, so <code>FormData.getAll('tags')</code> returns the array, and <code>form.reset()</code> / bfcache restore / <code>setValidity()</code> all work — exactly like <code>&lt;select multiple&gt;</code>.</li>
+  <li><strong>Bound — data via private context.</strong> <code>&lt;template for-each="@options as option"&gt;</code> stamps one <code>&lt;li&gt;</code> per option; <code>aria-selected</code> reads membership in the <code>@selected</code> array rather than equality with a single value.</li>
+  <li><strong>Bound — selection event, scoped.</strong> The <code>selection="model=multiple"</code> trait controller owns click / Space-toggle / type-ahead-seek → a <code>selection-change</code> event carrying the full toggled set; the class's <code>#onInnerSelection</code> listener catches it, calls <code>stopPropagation</code>, updates the <code>@selected</code> array via <code>set values()</code>, and re-emits a public <code>change</code> event whose detail is the selected-options array.</li>
+</ul>
+
+<h3>Altitude 2 — Component (the consumer call site)</h3>
+<p>The element and its attributes <em>are</em> the trait selection. <code>multiple</code> is baked into this preset; the consumer passes data in and the component handles the rest.</p>
+<pre><code class="language-html">&lt;drop-list name="tags"
+           multiple
+           options="@interests"
+           on:change="setTags($event)"&gt;&lt;/drop-list&gt;
+&lt;!-- `multiple` is baked into the preset; `options` accepts a context reference
+     (resolved from an ancestor injector) or an inline expression, and is
+     re-exposed inside the component as the private @options context. --&gt;</code></pre>
+
+<h3>Altitude 3 — TypeScript, explicit composition</h3>
+<p>A list of <code>with*</code> factories — identical to the dropdown except for the single <code>withSelection</code> argument:</p>
+<pre><code class="language-typescript">const tags = composeDroplist(trigger, [
+  withAnchoredSurface({ placement: 'bottom-start', collision: ['flip', 'resize'] }),
+  withFocusDelegation({ strategy: 'virtual' }),                 // omit strategy → inherits ambient intent
+  withSelection({ model: 'multiple', selectionFollowsFocus: false }),   // the one line that differs
+  withTypeAhead(),
+]);
+// → returns a handle; tags.cleanup() reverts every trait, in reverse.</code></pre>
+<p><code>withSelection({ model: 'multiple', selectionFollowsFocus: false })</code> is the entire "I am a multi-select" statement. Diff it against the dropdown's <code>withSelection({ model: 'single' })</code> and that one argument is the whole delta.</p>
+
+<h3>Example — a project's interests picker</h3>
+<p>A project consumes the generic <code>&lt;drop-list multiple&gt;</code> by passing data and a handler at the boundary; the component is otherwise untouched. The handler receives the full array of selected options on every toggle.</p>
+<pre><code class="language-html">&lt;form on:submit="saveProfile($event)"&gt;
+  &lt;label for="interests"&gt;Interests&lt;/label&gt;
+  &lt;drop-list id="interests"
+             name="interests"
+             multiple
+             options="@interests"
+             placeholder="Select interests…"
+             on:change="setInterests($event)"&gt;&lt;/drop-list&gt;
+
+  &lt;!-- … other fields … --&gt;
+
+  &lt;button type="submit"&gt;Save&lt;/button&gt;
+&lt;/form&gt;</code></pre>
+<pre><code class="language-javascript">import { SimpleStore } from '/blocks/stores/simple';
+const { injectors } = window;
+
+// Project data — could equally come from a fetch or a generated list.
+const INTERESTS = [
+  { value: 'design', label: 'Design' },
+  { value: 'eng',    label: 'Engineering' },
+  { value: 'product', label: 'Product' },
+  { value: 'data',   label: 'Data' },
+  // …
+];
+
+const profileStore = new SimpleStore({ interests: [] });
+
+// Provide @interests and the action handlers at the document root —
+// any &lt;drop-list options="@interests"&gt; in the tree can resolve them.
+const root = injectors.getInjectorOf(document);
+root.set('customContexts:interests', INTERESTS);
+root.set('customContexts:handlers', {
+  setInterests: (e) =&gt; profileStore.setItem('interests', e.detail.map((o) =&gt; o.value)),
+  saveProfile: (e) =&gt; {
+    e.preventDefault();
+    // POST profileStore state — interests is a string[]
+  },
+});
+
+window.attributes.upgrade(document.body);</code></pre>
+
+<h4>What the project owns vs. what the multi-select owns</h4>
+<ul>
+  <li><strong>Project</strong>: the interests list (<code>@interests</code>), the persistent selection (<code>profileStore.interests</code>, an array), the submit handler. Nothing about <em>how multi-selection works</em>.</li>
+  <li><strong><code>&lt;drop-list multiple&gt;</code></strong>: trait composition, popover open/close, keyboard navigation, the Space-toggle / arrows-move-focus model, the multi-value form surface, the private <code>@options</code>/<code>@selected</code>/<code>@summary</code> locals — and the public <code>change</code> event. Nothing about <em>what is in the list</em>.</li>
+</ul>
+
+<h3>Public API</h3>
+<p>Plural where the dropdown is singular — a <code>.values</code> array replaces <code>.value</code>, <code>.selectedOptions</code> replaces <code>.selectedOption</code>, and the form submits repeating entries.</p>
+<table>
+  <thead>
+    <tr><th>Surface</th><th>Shape</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Attribute <code>name</code></td><td>string</td><td>Form-control name; each selected value submits as a separate <code>name=value</code> pair.</td></tr>
+    <tr><td>Attribute <code>multiple</code></td><td>boolean</td><td>Selects this preset; locks <code>selection.model=multiple</code> structurally.</td></tr>
+    <tr><td>Attribute <code>options</code></td><td><code>@contextPath</code> or JSON</td><td><code>@interests</code> resolves through the ancestor injector chain; a JSON literal is parsed in place.</td></tr>
+    <tr><td>Attribute <code>values</code></td><td>comma-separated string</td><td>Initial selection; mirrored to the <code>.values</code> property as an array.</td></tr>
+    <tr><td>Attribute <code>placeholder</code></td><td>string</td><td>Trigger label when nothing is selected (otherwise a count summary).</td></tr>
+    <tr><td>Property <code>.values</code></td><td><code>string[]</code></td><td>Form-submittable surface (matches <code>&lt;select multiple&gt;</code>'s selected values).</td></tr>
+    <tr><td>Property <code>.selectedOptions</code></td><td><code>{ value, label }[]</code></td><td>Rich, programmatic access; not form-submittable.</td></tr>
+    <tr><td>Event <code>change</code></td><td><code>CustomEvent&lt;{ value, label }[]&gt;</code></td><td>Re-emitted on every toggle; consumers bind with <code>on:change="…"</code>.</td></tr>
+    <tr><td>Form participation</td><td><code>static formAssociated = true</code></td><td><code>FormData.getAll(name)</code>, reset, bfcache restore, <code>setValidity()</code>, <code>&lt;label for&gt;</code>.</td></tr>
+  </tbody>
+</table>
+
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">The single-select sibling is the <a href="/blocks/dropdown/">dropdown block</a>; family-level rules (intent vs. trait, three altitudes, trait surface map) live on the <a href="/blocks/droplist/">droplist family page</a>. Design history: <code>reports/2026-06-02-droplist-trait-language.md</code> ("Multi-dropdown — one trait flip"), <code>reports/2026-06-02-dropdown-trait-composition.md</code> (Step 2).</p>

@@ -1,7 +1,8 @@
 ---
 type: idea
-status: open
+status: resolved
 dateOpened: "2026-06-06"
+graduatedTo: "src/_data/adapters.json#jsx-adapter (status: implemented)"
 tags: [jsx, adapters, source-toggle, docs]
 relatedReport: reports/2026-06-03-jsx-adapter-feature-mapping.md
 relatedProject: webadapters
@@ -16,13 +17,13 @@ Roll `autoToggle` onto the remaining block pages whose examples are clean, parse
 
 ## Progress
 
-- **Status:** open — **rollout half done; only the graduation half remains** (deferred by user 2026-06-06: keep `draft` for now). Resumable: when ready, flip `jsx-adapter` `draft → implemented` in `adapters.json`, then close out.
+- **Status:** resolved 2026-06-06 — graduation done (`jsx-adapter` `draft → implemented`), plus broadcast static-detail example converted to `autoToggle` (post-073 escaping verified well-formed on live build). Secondary-snippet sweep carried forward to #136.
 - **Branch:** docs/standard-authoring-workflow
 - **Survey:** `autoToggle` live only on `for-each.njk`. Pages with `{% highlight "html" %}` examples (candidates): action-button, prefetch-behavior, interpolation-text-node, workflow, broadcast, component (manual), dropdown (manual/pseudo), resource-action, router.
 - **Done:**
   - Converted 4 pages to `autoToggle` (primary usage example each): `action-button`, `prefetch-behavior`, `broadcast` (close-modals example), `resource-action`. Coverage now **5 pages** (incl. `for-each`).
   - Verified via real `htmlToJsx` run + build-smoke: all 4 generated JSX panes well-formed; 11ty build green (Wrote 262), no template errors.
-  - Filed the transform defect found en route → [073-htmltojsx-attr-quote-escaping](/backlog/073-htmltojsx-attr-quote-escaping/) (attrs with `"` in the value emit malformed JSX; avoided in chosen examples).
+  - Filed the transform defect found en route → 073-htmltojsx-attr-quote-escaping (attrs with `"` in the value emit malformed JSX; avoided in chosen examples). **RESOLVED 2026-06-06** — `htmlToJsx` now escapes attribute values (`&`→`&amp;`, `"`→`&quot;`). So the constraint is lifted: JSON-valued attributes are now safe to `autoToggle`.
 - **Deliberately skipped:** `router` (`@route` `{{ }}` reactive interpolation — Axis-2 unmapped + Nunjucks collision), interpolation/bracket-parser pages (`{{ }}`/`[[ ]]`), `dropdown`/`component` (already on manual/own track), `workflow` (large, comment-heavy — comments drop in JSX).
-- **Next:** **Graduation decision (awaiting user):** flip `jsx-adapter` `draft → implemented` in `adapters.json` (transform built+tested, now demonstrated on 5 pages). Then `check:standards` + close out.
-- **Notes:** Pages whose example is pseudo-HTML or reactive `{{ }}`/`[[ ]]` text (Axis 2) stay on the manual `sourceToggle` — that's correct, not missing coverage.
+- **Next:** _(done)_ Graduated `jsx-adapter` to `implemented`; broadcast static-detail snippet now on `autoToggle`. Remaining secondary-snippet conversions → #136.
+- **Notes:** Pages whose example is pseudo-HTML or reactive `{{ }}`/`[[ ]]` text (Axis 2) stay on the manual `sourceToggle` — that's correct, not missing coverage. Now-unblocked candidate (post-073): broadcast's "With static detail" example (`broadcast.njk:68-74`, the `broadcast-detail='{"theme":"dark"}'` JSON snippet) is still on a manual `{% highlight "html" %}` — convertible to `autoToggle` now that quote escaping works.

@@ -97,12 +97,44 @@ The research is decisive on the **platform/SEO/a11y defaults** and confirms pagi
 
 ---
 
+## Result-range labels & page-size selectors (verified 2026-06-06)
+
+This fills the gap the original report flagged ("no verified claim" for these affordances). Method: a focused fan-out over NN/g, Baymard, W3C WCAG/ARIA, GOV.UK/GDS, and the documented pagination components of IBM Carbon, MUI/Material, Ant Design, Shopify Polaris, USWDS, GitHub Primer, Atlassian. **Headline:** these are mostly *de facto design-system convention*, not controlled UX research — with **one exception that has real W3C/WCAG backing** (the live-region announcement). Each claim is tagged accordingly.
+
+### Result-range labels ("showing 21–40 of 500")
+
+> **The range+total label is a fragmented convention, not a researched usability win — but its a11y announcement is a WCAG mandate.** *[Convention: High / Research: Low / A11y: High]*
+
+- **Show-by-default is split by list type, not universal.** Data/enterprise tables ship it by default (Carbon `1–10 of 40 items`; MUI `1–10 of 50`; Ant `showTotal` → `1-20 of 85 items`); content/government systems **omit it entirely** (USWDS, GOV.UK pagination are page-navigation-only). No controlled NN/g or Baymard study backs "showing it improves usability" — the rationale (orientation / sense of scale) is principle, not measurement. *(Convention High, research Low.)*
+- **Format convention:** `{from}–{to} of {total} {noun}`. The `Showing` prefix is prose-only — the component libraries omit it. **En-dash** for the range is typographically correct and is MUI's default; Ant uses an ASCII hyphen — adopt the en-dash. Run all three numbers through **`Intl.NumberFormat`** (MUI does; aligns with the intent's existing Intl-vocabulary stance). *(Convention/typography, Medium-High.)*
+- **Degradation when total is unavailable (the key question — cursor protocols have no total):** ranked recommendation, drawn from convergent convention since no authority covers it —
+  1. **Best — drop the total, keep the range:** `showing 21–40`, with next/prev driven by a `hasNextPage` boolean (Shopify Polaris is cursor-native and total-free by design; n+1 / fetch-`size+1` is the standard way to know "is there more" without a `COUNT`).
+  2. **If a floor is cheaply known:** MUI's documented `count={-1}` → `21–40 of more than 40`, or the `500+` form.
+  3. **Avoid `of many`** — folklore, no system or authority backs it.
+  *(Engineered convention, Medium; explicitly not researched UX.)*
+- **A11y — the one authority-backed mandate:** wrap the label in **`role="status"` + `aria-atomic="true"`** so the new range is announced politely after a page/filter change. This is W3C technique **ARIA22**, a *sufficient* technique for **WCAG 2.1 SC 4.1.3 Status Messages (AA)**. The pagination components themselves do **not** ship this wiring — it is an APG/WCAG-derived practice you apply yourself. *(High, primary W3C.)*
+- **Structure/placement:** the label sits **outside** the `<nav aria-label="pagination">` landmark (the nav holds only page links); tables place it **below** the table (Material, Carbon, GOV.UK-after-content). Above-vs-below for search results is unsettled convention, no authority. *(Medium.)*
+
+### Page-size selectors ("10 / 25 / 50 / 100 per page")
+
+> **The 10/25/50/100 ladder is one fragmented convention, contradicted by NN/g; persistence is the one clearly-recommended behavior.** *[Convention: High / Ladder: fragmented / Persist: High]*
+
+- **No canonical ladder.** `10/25/50/100` is MUI's default but not universal: Ant Design defaults to `[10, 20, 50, 100]`, Carbon demos `[10, 15, 20]`, and **USWDS, Polaris, Primer, GOV.UK, and Atlassian's core pagination ship no page-size selector at all** (items-per-page is left to app logic). Treat `10/25/50/100` as a *defensible default*, not a researched optimum. *(Convention High, fragmented.)*
+- **Default size:** convention clusters at **10–25** (Ant/MUI default 10; Material example 25). NN/g's actual *research* recommendation: a single sensible default of **10 or 20**, and if you offer choices, **offer only two** (one substantially bigger) — which directly contradicts the ubiquitous 4-option dropdown. Honest framing: design systems ship 4 options; NN/g research argues for fewer. *(Default Medium-High; "fewer options" is a real NN/g claim but general item-list context.)*
+- **Persistence — recommended.** NN/g is explicit: "almost always respect the user's stated preference and employ it as the default the next time around" (Atlassian concurs). **So the standard's default should be: persist the chosen page size.** The *mechanism* (URL query param vs localStorage vs server profile) has **no UX authority** — it's an implementation choice; a hybrid (query param for shareability + localStorage/server for the cross-session default) is reasonable engineering, not a researched rule. *(Persist: High; mechanism: unsettled.)*
+- **A11y:** it is a native `<select>` — no bespoke APG pattern exists. Give it a visible label + `aria-label` (Carbon: "Items per page"). On change, announce the content update via the same live region as the range label; for focus/scroll there is **consensus on consistency, not on a specific target** (move focus to the first new row *or* keep it on the control — either is fine if done consistently and announced). Scroll-to-top is sensible but uncited. *(Labeling High; focus Medium.)*
+- **Caveats:** very large page sizes hurt performance/perceived load (USWDS) and are only safe paired with lazy-loading (Baymard); **lower the ceiling on mobile** (Baymard ~15–30 loaded at once); an **"All" option** is appreciated when present but should be capped (~100 items) to avoid a scan/perf footgun (NN/g). *(High.)*
+
+### What this changes in the standard
+
+The `page` dimension of [Collection Operations](../src/_data/intents.json) gains a **`pageSize` dimension** (`fixed` | `selectable`) with the persistence default and ladder/default-size guidance in its prose, and the **`rangeLabel`** dimension's description is enriched with the no-total degradation ladder and the `role="status"` + `aria-atomic` WCAG-4.1.3 announcement mandate. Both stay **UX-only** (the offset/page-vs-cursor protocol remains in the Custom Pagination resource); the cross-layer constraint is unchanged — both affordances need a known total, so they compose only over an offset/page protocol.
+
 ## Open questions
 
 Registered on the [backlog](../backlog/) — see those items, not restated here:
 
 1. Focus + screen-reader announcement after a page change → [pagination-focus-announcement](../backlog/059-pagination-focus-announcement.md) (instance of [gap-6](../backlog/013-gap-6-focus-announcements.md)).
-2. Result-range labels + page-size selectors → [pagination-range-labels-page-size](../backlog/060-pagination-range-labels-page-size.md).
+2. Result-range labels + page-size selectors → **resolved 2026-06-06** (see *Result-range labels & page-size selectors* above); folded into the Collection Operations `page` dimension.
 3. The `infinite`/`virtualized` seam with windowed-collection/loader → [pagination-windowed-collection-seam](../backlog/062-pagination-windowed-collection-seam.md) — **resolved**: `infinite` = `append` + `advance:auto`, `virtualized` stays Windowed Collection.
 4. Shared-vs-distinct dimensions across filter / sort / page / group — already owned by [gap-10](../backlog/006-gap-10-collection-ops-intent.md) (its "still open" per-dimension vocabulary).
 

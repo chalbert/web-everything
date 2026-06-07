@@ -51,6 +51,18 @@
     ]
   },
   {
+    "id": "jsx-directive-sugar-demo",
+    "name": "JSX Directive Sugar Playground",
+    "summary": "The <For each>/<Show when>/<Resource from> sugar layer (#070): each card renders the prettier components live, proving they build the same DOM as the canonical <template is=\"…\"> directive, and shows desugar() lowering them back. Fixture-driven, backed by the conformance suite.",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>The pretty <code>&lt;For each&gt;</code> / <code>&lt;Show when&gt;</code> / <code>&lt;Resource from&gt;</code> components are <strong>optional sugar</strong> for the canonical <code>&lt;template is=\"…\"&gt;</code> directives — an alternative <em>spelling</em> of the same directive, mapped through one registry (see the <a href=\"/adapters/jsx-adapter/\">JSX Adapter</a>). Each card authors the sugar, renders it live through the runtime directive components, checks the produced DOM equals the canonical directive's DOM, and shows <code>desugar()</code> lowering it to <code>&lt;template is&gt;</code> plus the <code>sugarize()</code> round-trip.</p><h3>One registry, three surfaces</h3><p>The desugar transform, the <code>sugarize</code> lift, and the runtime components all read the same directive registry, so a new directive is one entry and the spelling can never drift from the canonical form.</p><h3>Scope</h3><p>A <em>spelling</em> layer (Axis-1): <code>&lt;For&gt;</code> builds an inert <code>&lt;template is=\"for-each\"&gt;</code> exactly as the canonical spelling does. Actually expanding the loop is the parked rendering-strategy axis (Axis-2).</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/jsx-directive-sugar-demo.html",
+    "projects": [
+      "webadapters"
+    ]
+  },
+  {
     "id": "declarative-spa",
     "name": "Declarative Single-Page Application",
     "summary": "A fully interactive SPA using only declarative HTML with zero JavaScript bootstrap or custom elements. Demonstrates maximum interactivity through pure markup and Web Everything standards.",
@@ -128,6 +140,58 @@
       "webbehaviors",
       "webinjectors",
       "webexpressions"
+    ]
+  },
+  {
+    "id": "pagination-demo",
+    "name": "Pagination Playground",
+    "summary": "The runnable home for the Pagination block — the blocks-layer realization of the Collection Operations `page` stage. Each card pairs a page-state with a contract (pageMode × advance, urlSync, rangeLabel), renders the controls, and runs the same a11y/SEO audit the CI conformance suite asserts. Backlog #036.",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>A live surface for the <a href=\"/blocks/pagination/\">Pagination block</a>, which realizes the <code>page</code> stage of the <a href=\"/intents/collection-operations/\">Collection Operations</a> intent. For each shared fixture it shows the <strong>contract options</strong>, renders the controls through the reference renderer, shows the <strong>produced HTML</strong>, and runs the <strong>contract audit</strong> — a green badge means the rendered controls satisfy the verified accessibility/SEO contract.</p><h3>Verified contract</h3><p>The audit checks the <a href=\"https://www.w3.org/WAI/ARIA/apg/patterns/landmark-regions/\">WAI-ARIA APG</a> pattern — a <code>&lt;nav aria-label=\"pagination\"&gt;</code> landmark with <code>aria-current=\"page\"</code> — plus the SEO-safe self-canonical <code>?page=n</code> default, the result-range label's known-total requirement, and infinite scroll rendered as a <strong>scroll sentinel</strong> (append + auto), never a peer mode.</p><h3>No drift</h3><p>The renderer, the audit, and the fixtures are the <strong>one shared source</strong> the CI conformance suite runs, so the badges here and CI exercise the exact same code. The renderer is a deterministic <em>reference</em>; concrete strategies (a real URL-state provider, windowing) live in Frontier UI.</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/pagination-demo.html",
+    "projects": [
+      "webblocks",
+      "webintents"
+    ]
+  },
+  {
+    "id": "data-table-demo",
+    "name": "Data Table Playground",
+    "summary": "The runnable home for the Data Table block — the blocks-layer realization of the Collection Operations `filter` / `sort` / `group` stages. Each card pairs a row set with a contract (sort keys + Intl.Collator options, filterMatch, groupSummary), renders the table, and runs the same APG / Intl.Collator / SQL-aggregate audit the CI conformance suite asserts. Plus a live interactive card: click a header to cycle its sort, toggle the filter, and hear the change announced through a polite `aria-live` region. Backlog #112, #115.",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>A live surface for the <a href=\"/blocks/data-table/\">Data Table block</a>, which realizes the <code>filter</code>, <code>sort</code>, and <code>group</code> stages of the <a href=\"/intents/collection-operations/\">Collection Operations</a> intent (the <code>page</code> stage is the companion <a href=\"/blocks/pagination/\">Pagination block</a> — compose, never merge). For each shared fixture it shows the <strong>contract options</strong>, renders the table through the reference renderer, shows the <strong>produced HTML</strong>, and runs the <strong>contract audit</strong> — a green badge means the rendered table satisfies the verified accessibility / comparison contract.</p><h3>Verified contract</h3><p>The audit checks the <a href=\"https://www.w3.org/WAI/ARIA/apg/patterns/table/\">WAI-ARIA APG Sortable Table</a> pattern — a native <code>&lt;table&gt;</code> with <code>&lt;th scope=\"col\"&gt;</code> headers, the active column projecting <code>aria-sort</code>, sortable-but-unsorted headers at <code>none</code> — plus <code>Intl.Collator</code> ordering (numeric / sensitivity), SQL <code>NULLS FIRST/LAST</code> empty placement, <code>filterMatch</code> AND/OR narrowing, and per-group SQL-named <code>groupSummary</code> aggregates.</p><h3>No drift</h3><p>The renderer, the audit, and the fixtures are the <strong>one shared source</strong> the CI conformance suite runs, so the badges here and CI exercise the exact same code. The renderer is a deterministic <em>reference</em>; concrete strategies (an alternate comparator, server-delegated ordering, virtualization) live in Frontier UI.</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/data-table-demo.html",
+    "projects": [
+      "webblocks",
+      "webintents"
+    ]
+  },
+  {
+    "id": "data-grid-demo",
+    "name": "Data Grid Playground",
+    "summary": "The runnable home for the Data Grid block — the interactive twin of the Data Table block (same data, the `role=\"grid\"` APG pattern). Each card pairs a key sequence with the cell it lands on, renders the grid there, and runs the same APG Data Grid / roving-tabindex audit the CI conformance suite asserts. Plus a live interactive card: click into the grid and arrow / Home / End / Ctrl+Home/End / PageUp/Down around the cells with real DOM focus. Backlog #123.",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>A live surface for the <a href=\"/blocks/data-grid/\">Data Grid block</a> — the interactive twin of the read-only <a href=\"/blocks/data-table/\">Data Table block</a>. Same tabular data, the <em>other</em> WAI-ARIA APG pattern: <code>role=\"grid\"</code> with cell-level keyboard navigation over a roving tabindex, the concrete consumer of the <a href=\"/intents/focus-delegation/\">Focus Delegation</a> intent (strategy <code>roving</code>, orientation <code>both</code>). For each shared fixture it shows the <strong>key sequence</strong>, renders the grid at the cell that sequence lands on through the reference renderer, shows the <strong>produced HTML</strong>, and runs the <strong>contract audit</strong> — a green badge means the rendered grid satisfies the verified accessibility contract.</p><h3>Verified contract</h3><p>The audit checks the <a href=\"https://www.w3.org/WAI/ARIA/apg/patterns/grid/\">WAI-ARIA APG Data Grid</a> pattern — a native <code>&lt;table role=\"grid\"&gt;</code> of <code>role=\"row\"</code> / <code>role=\"columnheader\"</code> / <code>role=\"gridcell\"</code> cells with <code>aria-rowcount</code> / <code>aria-colcount</code> — plus the <strong>roving tabindex</strong> invariant: exactly one cell is <code>tabindex=\"0\"</code> (the active cell) and every other is <code>-1</code>. Arrows clamp at the edges, Home/End jump to the row ends, Ctrl+Home/End to the grid corners, PageUp/Down by a page.</p><h3>No drift</h3><p>The renderer, the audit, the movement engine, and the fixtures are the <strong>one shared source</strong> the CI conformance suite runs, so the badges here and CI exercise the exact same code. The renderer is a deterministic <em>reference</em>; concrete strategies (virtualization, editable cells, server paging) live in Frontier UI.</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/data-grid-demo.html",
+    "projects": [
+      "webblocks",
+      "webintents"
+    ]
+  },
+  {
+    "id": "reorderable-list-demo",
+    "name": "Reorderable List Playground",
+    "summary": "The runnable home for the Reorderable List block — the order-is-user-mutable half of drag-and-drop (the reorder intent). Each card pairs a key sequence with the order it leaves behind, renders the list there, and runs the same roving-tabindex / grab-then-move audit the CI conformance suite asserts. Plus a live interactive card: grab an item with the keyboard (Space, arrows, Space/Enter to drop, Escape to cancel) or drag it with the pointer — items relocate with the atomic Element.moveBefore(). Backlog #130.",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>A live surface for the <a href=\"/blocks/reorderable-list/\">Reorderable List block</a>, which realizes the <a href=\"/intents/reorder/\">reorder</a> intent — the <em>order-is-user-mutable</em> half of \"drag and drop\" (moving a payload into a zone is the separate data-transfer concern in <a href=\"/backlog/007-gap-11-clipboard-dnd-files-intents/\">#007</a>). For each shared fixture it shows the <strong>key sequence</strong>, renders the list at the order that sequence lands on, shows the <strong>produced HTML</strong>, and runs the <strong>contract audit</strong> — a green badge means the rendered list satisfies the verified accessibility contract.</p><h3>Verified contract</h3><p>The audit checks a native <code>&lt;ul reorderable role=\"listbox\"&gt;</code> of <code>role=\"option\"</code> items (each with a stable <code>data-reorder-id</code> and <code>preserve-on-move</code>), the DOM order matching the order model, and the <strong>roving tabindex</strong> invariant — exactly one item is <code>tabindex=\"0\"</code> (the focused item) and every other is <code>-1</code>, with the grabbed item marked <code>data-reorder-grabbed</code> (never the deprecated <code>aria-grabbed</code>). The headline is the mandated <strong>keyboard path</strong>: <a href=\"https://www.w3.org/WAI/ARIA/apg/\">WAI-ARIA APG</a> grab-then-move with a polite live-region announcement of every move.</p><h3>No drift</h3><p>The reducer, the renderer, the announcer, the audit, and the fixtures are the <strong>one shared source</strong> the CI conformance suite runs, so the badges here and CI exercise the exact same code. The renderer is a deterministic <em>reference</em>; concrete strategies (a real persistence backend, cross-list groups, virtualization) live in Frontier UI.</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/reorderable-list-demo.html",
+    "projects": [
+      "webblocks",
+      "webintents"
     ]
   }
 ]

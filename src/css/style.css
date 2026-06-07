@@ -409,6 +409,19 @@ h1, h2, h3, h4, h5, h6 {
     margin-top: var(--spacing-md);
 }
 
+/* Centered variant for sections with only a couple of cards, so they
+   don't hug the left edge with empty space on the right. */
+.project-grid--centered {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.project-grid--centered .project-card {
+    flex: 1 1 300px;
+    max-width: 380px;
+}
+
 .project-card {
     background: var(--color-surface);
     border: 1px solid var(--color-border);
@@ -959,6 +972,19 @@ a.plug-crumb:hover {
     margin-top: var(--spacing-md);
 }
 
+.section-title .count-badge {
+    display: inline-block;
+    margin-left: 0.4rem;
+    padding: 0.05rem 0.55rem;
+    border-radius: 9999px;
+    background: var(--color-surface-alt, #f1f5f9);
+    color: var(--color-text-muted, #64748b);
+    font-size: 0.6em;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    vertical-align: middle;
+}
+
 .section-desc {
     color: var(--color-text-muted);
     margin-bottom: 0.75rem;
@@ -1290,10 +1316,60 @@ table td, table th {
     display: none;
 }
 
+/* Status filter chips — toggle which backlog statuses are shown (per-section,
+   persisted; resolved off by default). Inactive = hidden status. */
+/* Filter row: status chips on the left, search + density toggle on the right. */
+.backlog-filter-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--spacing-sm);
+    flex-wrap: wrap;
+    margin: 0 0 1.25rem;
+}
+
+.status-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+
+.status-filter-chip {
+    padding: 0.25rem 0.7rem;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 9999px;
+    background: transparent;
+    color: rgba(0, 0, 0, 0.45);
+    font-size: 0.8em;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.status-filter-chip:hover {
+    color: rgba(0, 0, 0, 0.75);
+    border-color: rgba(0, 0, 0, 0.25);
+}
+
+.status-filter-chip.is-active {
+    color: var(--color-primary);
+    border-color: var(--color-primary);
+    background: color-mix(in srgb, var(--color-primary) 8%, transparent);
+}
+
 /* Compact list view — smaller tiles, denser grid, for quick browsing */
 .home-list-view .project-grid {
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: var(--spacing-xs);
+}
+
+/* In list view, defer to the dense grid layout instead of the centered flex variant. */
+.home-list-view .project-grid--centered {
+    display: grid;
+}
+
+.home-list-view .project-grid--centered .project-card {
+    max-width: none;
 }
 
 .home-list-view .project-card {

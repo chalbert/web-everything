@@ -69,6 +69,48 @@ test.describe('Conformance playgrounds (data-driven from demos.json)', () => {
 });
 
 /**
+ * Data Table Playground ships a LIVE interactive card (backlog #115): clicking a header cycles
+ * aria-sort and announces the new state through a polite live region; the filter narrows the set.
+ * Exercise the interactivity axis end-to-end (the static cards are covered by the data-driven smoke).
+ */
+test.describe('Data Table Playground — interactive axis', () => {
+  test('header click cycles aria-sort + announces; filter narrows + announces', async ({ page }) => {
+    const errors = collectErrors(page);
+    await page.goto('/demos/data-table-demo.html');
+    await page.waitForFunction(() => (window as unknown as { playgroundReady?: boolean }).playgroundReady === true);
+
+    const card = page.locator('section.interactive');
+    const live = card.locator('.live-region');
+    const salaryHeader = card.locator('thead th', { hasText: 'Salary' });
+    const salaryBtn = salaryHeader.locator('button[data-action="sort"]');
+
+    // Live region starts empty (load must not announce).
+    await expect(live).toHaveText('');
+
+    // First click → ascending + announcement.
+    await salaryBtn.click();
+    await expect(salaryHeader).toHaveAttribute('aria-sort', 'ascending');
+    await expect(live).toHaveText('Sorted by Salary (k), ascending; 6 rows.');
+
+    // Second click → descending.
+    await salaryBtn.click();
+    await expect(salaryHeader).toHaveAttribute('aria-sort', 'descending');
+    await expect(live).toContainText('descending');
+
+    // Third click → cleared back to none.
+    await salaryBtn.click();
+    await expect(salaryHeader).toHaveAttribute('aria-sort', 'none');
+    await expect(live).toHaveText(/^Not sorted;/);
+
+    // Filter toggle narrows the set and announces the "of total" count.
+    await card.locator('.control-btn').click();
+    await expect(live).toContainText('of 6 shown');
+
+    expect(errors, errors.join('\n')).toHaveLength(0);
+  });
+});
+
+/**
  * Component Adapter Playground proves a DIFFERENT invariant (one-way lowering, not round-trip), and
  * ships an editable sandbox. Exercise it end-to-end: type a definition → Run → a live custom element
  * with the lowered template renders.

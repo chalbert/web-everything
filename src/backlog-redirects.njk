@@ -1,0 +1,27 @@
+---
+# Stable-route redirects: one tiny page per backlog item at /backlog/<NNN>/ that
+# redirects to the canonical, slug-bearing /backlog/<NNN>-<slug>/. The NNN number
+# is the permanent routing key, so cross-refs can cite /backlog/<NNN>/ and survive
+# any slug reword (the canonical page moves with the slug; this redirect tracks it).
+# Filenames are always `NNN-slug.md` (validated), so item.num != item.id — no collision.
+pagination:
+    data: backlog
+    size: 1
+    alias: item
+permalink: "backlog/{{ item.num }}/"
+eleventyExcludeFromCollections: true
+---
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Redirecting to {{ item.title }}…</title>
+<link rel="canonical" href="/backlog/{{ item.id }}/">
+<meta http-equiv="refresh" content="0; url=/backlog/{{ item.id }}/">
+<meta name="robots" content="noindex">
+<script>location.replace("/backlog/{{ item.id }}/");</script>
+</head>
+<body>
+<p>Redirecting to <a href="/backlog/{{ item.id }}/">/backlog/{{ item.id }}/</a>…</p>
+</body>
+</html>

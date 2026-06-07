@@ -56,9 +56,15 @@ function isSignificant(node: DomNode): boolean {
   return true;
 }
 
+// Escape an attribute VALUE the same way HTML serialization does, so a value containing `"`
+// (e.g. a JSON-valued attr `data-config='{"k":"v"}'`) can't close the JSX attribute early.
+// Mirrors `outerHTML` exactly (`&`→`&amp;`, `"`→`&quot;`), keeping the canonical-HTML round-trip
+// intact; JSX decodes these entities back to the raw value at compile time.
+const escapeAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+
 function serializeAttrs(el: DomNode): string {
   return Array.from(el.attributes || [])
-    .map((a) => (a.value === '' ? ` ${a.name}` : ` ${a.name}="${a.value}"`))
+    .map((a) => (a.value === '' ? ` ${a.name}` : ` ${a.name}="${escapeAttr(a.value)}"`))
     .join('');
 }
 

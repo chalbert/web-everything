@@ -1,6 +1,6 @@
 ---
 type: idea
-status: active
+status: open
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-06"
 tags: [webcomponents, component, declarative, attach-internals]
@@ -40,7 +40,7 @@ Mechanical — the platform settled the spelling via Declarative Shadow DOM; we 
 - [ ] Shared stylesheets — `<style>` covers per-component; cross-instance `adoptedStyleSheets` sharing has no form — defer
 
 ## Progress
-- **Status:** active — **Bucket 2 fully landed**; **Bucket 3: attachInternals** (DC-12/13) **and `preserve-on-move`** (DC-15) **landed**. Every *cleanly-buildable, self-contained* item is now done — the rest are genuinely design-blocked (see re-tiered Bucket 3 list above).
+- **Status:** open — **all currently-buildable work is landed**; the remainder is **design-blocked**, so this is parked-open rather than in-progress. Bucket 2 fully landed; Bucket 3 `attachInternals` (DC-12/13) and `preserve-on-move` (DC-15) landed. Verified 2026-06-06: lowering present in `blocks/renderers/component/declarativeComponent.ts`; renderer + full suite green (1418 passing), `check:standards` 0 errors. Re-open as `active` only when one of the design-blocked items below gets a design call.
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
   - Bucket 2 — `delegates-focus` / `clonable` / `serializable` via `shadowInitLiteral()` (fixed key order); fixtures #6–#7; docs; `shadowInitOptions` decision.

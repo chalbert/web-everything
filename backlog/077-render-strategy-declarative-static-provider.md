@@ -1,8 +1,10 @@
 ---
 type: idea
-status: active
+status: resolved
 dateOpened: '2026-06-06'
 dateStarted: '2026-06-06'
+dateResolved: '2026-06-06'
+graduatedTo: "blocks/renderers/jsx/render-strategy/ (CustomRenderStrategyRegistry + declarative-static provider)"
 tags:
   - rendering
   - render-strategy
@@ -22,7 +24,7 @@ This unblocks #078 (cross-strategy lowering) and #079 (the strategy toggle UI), 
 **Acceptance:** `CustomRenderStrategyRegistry` exists with `declarative-static` registered as the default; `JSXRenderer` mounts through it; existing JSX adapter tests stay green; a mount-once provider (no `update`) is feature-detected correctly. Contracts live in Web Everything (`project-webcomponents.njk` — done); the concrete provider lives in Frontier UI.
 
 ## Progress
-- **Status:** active — implementation landed and green; ready for review/close.
+- **Status:** resolved (2026-06-06) — implementation landed; renderStrategy.test.ts 13/13 green, full suite + check:standards clean. Verified against working tree.
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
   - New `blocks/renderers/jsx/render-strategy/` layer: `CustomRenderStrategy.ts` (contract — `mount`/optional `update`/optional `dispose`, `RenderInput`/`RenderHandle`/`RenderScope`), `DeclarativeStaticStrategy.ts` (native-first default, mount-once — **no `update`**), `CustomRenderStrategyRegistry.ts` (name-keyed, parent-chain scope resolution = nearest-scope-wins; pre-seeded `renderStrategyRegistry` + `render()` helper), `index.ts` barrel.

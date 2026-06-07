@@ -1,0 +1,98 @@
+<h2>Reorderable List</h2>
+<p>A list whose <strong>item order is user-mutable</strong> — by pointer drag and, equally, by keyboard. It relocates items with the atomic <code>Element.moveBefore()</code> so a moved card keeps its focus, in-flight animations, iframes, and custom-element connection state instead of being torn down and rebuilt. This is the <em>reorder</em> half of "drag and drop"; moving a payload (item or file) into a zone that validates what it accepts is a separate, data-transfer concern (<a href="/backlog/007-gap-11-clipboard-dnd-files-intents/">backlog #007</a>).</p>
+
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">
+  <strong>Terminology:</strong> See <a href="/semantics/">Semantics &amp; Glossary</a> for <a href="/semantics/#term-reorder">Reorder</a>, <a href="/semantics/#term-reorderable-list">Reorderable List</a>, <a href="/semantics/#term-drag-handle">Drag Handle</a>, <a href="/semantics/#term-keyboard-reorder">Keyboard Reorder</a>, and <a href="/semantics/#term-reorder-commit-strategy">Reorder Commit Strategy</a>.
+</p>
+
+<p><strong>Manual order, not computed sort.</strong> Reorder produces a hand-set order; the <a href="/intents/collection-operations/"><code>sort</code> dimension of Collection Operations</a> produces a comparator-computed order. A list is one or the other, never both at once — they are distinct answers to "what determines order" and cross-reference rather than merge.</p>
+
+<h3>Web Standards Alignment</h3>
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Pointer_events">Pointer Events</a></td><td>Baseline</td><td>The default drag path — unifies mouse/touch/pen, captured for the duration of a drag. Preferred over HTML5 DnD for in-list reorder (better touch &amp; a11y)</td></tr>
+  <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Element/moveBefore">Element.moveBefore()</a></td><td>Baseline 2025 (progressive)</td><td>Atomic relocation that preserves item state; wired via the <a href="/blocks/component/">Component</a> block's <code>preserve-on-move</code>, with an <code>insertBefore</code> fallback</td></tr>
+  <tr><td><a href="https://www.w3.org/WAI/ARIA/apg/">WAI-ARIA APG</a></td><td>Authoring Practices</td><td>Keyboard-operable drag + polite live-region announcement; the deprecated <code>aria-grabbed</code>/<code>aria-dropeffect</code> are <strong>not</strong> used</td></tr>
+  <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API">HTML Drag and Drop API</a></td><td>Baseline</td><td>Reserved for cross-window / OS file transfer (data-transfer, <a href="/backlog/007-gap-11-clipboard-dnd-files-intents/">#007</a>) — not the in-list reorder default</td></tr>
+</table>
+
+<h3>Framework Research</h3>
+<table>
+  <tr><th>Source</th><th>Key Patterns Adopted</th></tr>
+  <tr><td><a href="https://dndkit.com/">dnd-kit</a></td><td>Pointer / keyboard / touch as peer <em>sensors</em> — keyboard is a first-class sensor, not a bolt-on</td></tr>
+  <tr><td><a href="https://sortablejs.github.io/Sortable/">SortableJS</a></td><td><code>handle</code> (scoped grab), cross-list groups, <code>onEnd</code> commit hook</td></tr>
+  <tr><td><a href="https://atlassian.design/components/pragmatic-drag-and-drop/">Atlassian Pragmatic drag-and-drop</a></td><td>Explicit a11y guidance; reorder announced via live region</td></tr>
+  <tr><td><a href="https://github.com/SortableJS/vue.draggable.next">Vue Draggable</a> / <a href="https://github.com/atlassian/react-beautiful-dnd">react-beautiful-dnd</a></td><td>Order model is the source of truth; the DOM follows the array</td></tr>
+</table>
+
+<h3>Accessibility is part of the contract</h3>
+<p>Keyboard-reorder is <strong>mandatory</strong>, not an enhancement. A conforming list provides a keyboard path equivalent to the pointer path: a <a href="/intents/focus-delegation/">roving tabindex</a> over items, grab/move/drop keys, and a polite <a href="/intents/live-region-status/">live-region</a> announcement of each move and the final commit (e.g. "Moved item 3 to position 1 of 8"). A pointer-only reorderable list is <strong>non-conforming</strong>, not "partially done".</p>
+
+<h3>Usage</h3>
+<pre><code class="language-html">&lt;ul role="listbox" reorderable&gt;
+  &lt;li role="option" tabindex="-1" preserve-on-move&gt;First&lt;/li&gt;
+  &lt;li role="option" tabindex="-1" preserve-on-move&gt;Second&lt;/li&gt;
+  &lt;li role="option" tabindex="-1" preserve-on-move&gt;Third&lt;/li&gt;
+&lt;/ul&gt;
+&lt;!-- Drag an item, or focus one and press Space to grab, Arrow keys to move, Space to drop, Esc to cancel. --&gt;</code></pre>
+
+<h3>Configuration</h3>
+<pre><code class="language-html">&lt;!-- Grab: whole item (default) vs a scoped handle --&gt;
+&lt;ul reorderable grab="handle"&gt;
+  &lt;li&gt;&lt;span data-reorder-handle&gt;⠿&lt;/span&gt; Draggable by the handle only&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;!-- Commit: ephemeral (default) | persisted --&gt;
+&lt;ul reorderable commit="persisted"&gt;...&lt;/ul&gt;
+
+&lt;!-- Scope: within-list (default) | cross-list (sibling lists sharing a group key) --&gt;
+&lt;ul reorderable scope="cross-list" reorder-group="columns"&gt;...&lt;/ul&gt;</code></pre>
+
+<h3>Behavior</h3>
+<table>
+  <tr><th>Input</th><th>Result</th></tr>
+  <tr><td>Pointer down on the grab affordance + drag</td><td>Item lifts; passing a new position fires <code>reorder-move</code>; release commits</td></tr>
+  <tr><td><kbd>Space</kbd> on a focused item</td><td>Grab (fires <code>reorder-start</code>)</td></tr>
+  <tr><td><kbd>↑</kbd>/<kbd>↓</kbd> while grabbed</td><td>Move the grabbed item; announced via live region</td></tr>
+  <tr><td><kbd>Space</kbd>/<kbd>Enter</kbd> while grabbed</td><td>Drop — commit the new order (fires cancelable <code>reorder-commit</code>)</td></tr>
+  <tr><td><kbd>Esc</kbd> while grabbed</td><td>Cancel — order unchanged (fires <code>reorder-cancel</code>)</td></tr>
+</table>
+
+<h3>Commit Strategy</h3>
+<p>Where the new order is written is a <em>strategy</em> the host supplies, defaulting to <code>ephemeral</code> (session-only). The block fires a cancelable <code>reorder-commit</code> event carrying the new <code>order</code>; a host (or a <code>withCommitStrategy</code> trait) listens to persist it — to <code>localStorage</code> or by writing back to the source — and may <code>preventDefault()</code> to reject the move (e.g. on server validation failure), reverting the DOM. Starts as the <code>commit</code> attribute; promotes to a <code>CustomReorderCommitRegistry</code> only if multiple persistence backends emerge.</p>
+
+<h3>Composed Traits</h3>
+<table>
+  <tr><th>Trait</th><th>Intent Dimension</th><th>Capability</th></tr>
+  <tr><td><code>withDragHandle</code></td><td><code>reorder.grab.handle</code></td><td>Restrict the grab to a scoped handle, leaving the rest of the item interactive</td></tr>
+  <tr><td><code>withPointerReorder</code></td><td><code>reorder.movement.pointer</code></td><td>Drag-to-reorder via Pointer Events with pointer capture</td></tr>
+  <tr><td><code>withKeyboardReorder</code></td><td><code>reorder.movement.keyboard</code></td><td>Roving-tabindex keyboard path: grab, move, drop, cancel</td></tr>
+  <tr><td><code>withLiveAnnounce</code></td><td><code>reorder.announce.live-region</code></td><td>Announce moves and commit via a polite live region</td></tr>
+  <tr><td><code>withCommitStrategy</code></td><td><code>reorder.commit.persisted</code></td><td>Persist the new order behind the cancelable <code>reorder-commit</code> event</td></tr>
+  <tr><td><code>withCrossListReorder</code></td><td><code>reorder.scope.cross-list</code></td><td>Move items between sibling lists sharing a group key</td></tr>
+</table>
+
+<h3>Events</h3>
+<table>
+  <tr><th>Event</th><th>Detail</th><th>Cancelable</th></tr>
+  <tr><td><code>reorder-start</code></td><td><code>{ item, fromIndex }</code></td><td>No</td></tr>
+  <tr><td><code>reorder-move</code></td><td><code>{ item, fromIndex, toIndex }</code></td><td>No</td></tr>
+  <tr><td><code>reorder-commit</code></td><td><code>{ item, fromIndex, toIndex, order }</code></td><td>Yes &mdash; <code>preventDefault()</code> reverts</td></tr>
+  <tr><td><code>reorder-cancel</code></td><td><code>{ item, fromIndex }</code></td><td>No</td></tr>
+</table>
+
+<h3>Styling Hooks</h3>
+<pre><code class="language-css">/* The item currently grabbed */
+[reorderable] [data-reorder-grabbed] { ... }
+
+/* The candidate drop position (gap / placeholder) */
+[reorderable] [data-reorder-target] { ... }
+
+/* The scoped handle (when grab="handle") */
+[data-reorder-handle] { cursor: grab; }
+</code></pre>
+
+<h3>Composition</h3>
+<p>Composes <a href="/intents/interaction/">Interaction</a> (pointer/touch modality), <a href="/intents/focus-delegation/">Focus Delegation</a> (roving tabindex for the keyboard path), and <a href="/intents/live-region-status/">Live Region Status</a> (announcement). Item relocation uses the <a href="/blocks/component/">Component</a> block's <code>preserve-on-move</code> so an atomic move keeps each card's state. The generic drag-source / drop-target / data-transfer family (files, cross-window) is out of scope here — see <a href="/backlog/007-gap-11-clipboard-dnd-files-intents/">backlog #007</a>.</p>
+
+<p style="font-size: 0.9rem; color: var(--color-text-muted);"><strong>Status:</strong> <code>concept</code> — the UX contract and trait surface are specified; implementation and a fixture-driven conformance demo (keyboard-reorder is the headline case) land as the block is built out. See <a href="/backlog/022-drag-and-drop-paradigms/">backlog #022</a> and <code>reports/2026-06-06-reorder-paradigms.md</code>.</p>

@@ -1,8 +1,10 @@
 ---
 type: idea
-status: active
+status: resolved
 dateOpened: '2026-06-06'
 dateStarted: '2026-06-06'
+dateResolved: '2026-06-06'
+graduatedTo: "src/_includes/strategy-toggle.njk + src/_data/renderStrategies.json (Axis-2 strategy toggle, liftToVdom 11ty filter)"
 tags:
   - rendering
   - render-strategy
@@ -22,7 +24,7 @@ First applied on the JSX Adapter page and a representative block page as the dem
 **Acceptance:** strategy selector renders from the registry; switching strategy shows the same element tree under a different update machine (or, until #078 lands, at least the declarative-static vs imperative lowering); reuses the global `mode-selector.js` structure like the existing toggle. Depends on **#077** (registry) and benefits from **#078** (lowering, to populate non-default panes).
 
 ## Progress
-- **Status:** active — implementation landed and green; ready for review/close.
+- **Status:** resolved (2026-06-06) — toggle + catalog + liftToVdom filter landed on JSX Adapter and for-each pages; full suite + check:standards clean. Verified against working tree.
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
   - New `src/_includes/strategy-toggle.njk` — `strategyToggle(id, strategies, declarativeSource)` macro. Tabs are rendered from the `renderStrategies` data list (the build-time mirror of `CustomRenderStrategyRegistry`'s catalog — **not hardcoded**; adding a strategy adds a tab). Reuses the global `mode-selector.js` (generic over N tabs).

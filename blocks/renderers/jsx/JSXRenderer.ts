@@ -66,12 +66,23 @@ export interface JSXProps {
 }
 
 /**
- * Element type: string tag name, class constructor, or Fragment
+ * A function component the factory invokes (rather than `new`-ing) — the directive-sugar layer
+ * (`<For>`/`<Show>`/`<Resource>`, see ./directives) uses this. Discriminated at runtime by a
+ * `directiveIs` marker so it can't be confused with a custom-element class constructor.
+ */
+export type JSXFunctionComponent = (
+  props: JSXProps | null,
+  ...children: JSXChild[]
+) => HTMLElement | DocumentFragment | Node;
+
+/**
+ * Element type: string tag name, class constructor, function component, or Fragment
  */
 export type JSXElementType =
   | string
   | typeof DocumentFragment
-  | (new (props?: JSXProps) => HTMLElement);
+  | (new (props?: JSXProps) => HTMLElement)
+  | JSXFunctionComponent;
 
 /**
  * JSX Renderer class
@@ -99,6 +110,13 @@ class JSXRenderer {
   ): HTMLElement | DocumentFragment {
     // Flatten and filter children
     const flatChildren = this.#flattenChildren(children);
+
+    // Directive-sugar function component (<For>/<Show>/<Resource>): it owns building its own
+    // node from the (already-flattened) children — delegate entirely. Detected by the duck-typed
+    // `directiveIs` marker so we don't import ./directives here (one-way dependency).
+    if (typeof type === 'function' && typeof (type as { directiveIs?: unknown }).directiveIs === 'string') {
+      return (type as JSXFunctionComponent)(props, ...flatChildren) as HTMLElement | DocumentFragment;
+    }
 
     // Handle Fragment
     if (type === DocumentFragment || type === this.Fragment) {

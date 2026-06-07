@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Data Grid Playground - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/data-grid-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Data Grid Playground</h1>
+      <p>
+        The runnable home for the <a href="/blocks/data-grid/">Data Grid block</a> — the interactive
+        twin of the read-only <a href="/blocks/data-table/">Data Table block</a>. Same tabular data,
+        a different WAI-ARIA APG pattern: <code>role="grid"</code> with <strong>cell-level keyboard
+        navigation</strong> and a <strong>roving tabindex</strong>, the concrete consumer of the
+        <a href="/intents/focus-delegation/">Focus Delegation</a> intent (strategy <code>roving</code>,
+        orientation <code>both</code>). Each card pairs a key sequence with the cell it lands on,
+        renders the grid there, and runs the <strong>same audit the CI conformance suite asserts</strong>.
+        The last card is <strong>live</strong>: click in and arrow around the cells with real DOM focus.
+      </p>
+      <p class="play-caveat">
+        A green badge means the rendered grid satisfies the <em>verified</em> contract: a native
+        <code>&lt;table role="grid"&gt;</code> of <code>role="row"</code> /
+        <code>role="columnheader"</code> / <code>role="gridcell"</code> cells
+        (<a href="https://www.w3.org/WAI/ARIA/apg/patterns/grid/">WAI-ARIA APG Data Grid</a>), with
+        <strong>exactly one</strong> cell at <code>tabindex="0"</code> — the active cell — and every
+        other at <code>-1</code> (the roving tabindex). The arrow keys move one cell (clamping at the
+        edges), Home/End jump to the row ends, Ctrl+Home/Ctrl+End to the grid corners, and
+        PageUp/PageDown by a page. The renderer here is a deterministic <em>reference</em>; concrete
+        strategies (virtualization, editable cells, server paging) live in Frontier UI.
+      </p>
+    </header>
+
+    <div id="examples">Loading examples&hellip;</div>
+  </main>
+
+  <!-- Playground: renders the data grid + audits the verified APG Data Grid contract. Native DOM only. -->
+  <script type="module" src="/demos/data-grid-demo.ts"></script>
+</body>
+</html>

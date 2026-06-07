@@ -66,12 +66,13 @@ with full <code>instanceof</code> discrimination. Other teams dispatching unrela
 are silently ignored.</p>
 
 <h4>With static detail</h4>
-{% highlight "html" %}
+{% set broadcastDetailHtml %}
 <button broadcast="customEvents:theme-change"
         broadcast-detail='{"theme": "dark"}'>
     Dark Mode
 </button>
-{% endhighlight %}
+{% endset %}
+{{ autoToggle("broadcast-detail", broadcastDetailHtml) }}
 
 <h4>With a different trigger event</h4>
 {% highlight "html" %}

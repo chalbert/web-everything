@@ -22,16 +22,21 @@ title: Backlog
     <p>The single source of truth for ideas, issues, decisions, and reviews across Web Everything. Each item is one markdown file in <code>backlog/</code>, completely dynamic — its title, summary, and detail come from markdown (the item's own body, or a related report it mirrors), never hand-typed. Open questions raised on the standards' own pages are collected live below. Deep thinking stays in <code>reports/</code> — a backlog item links out to it or mirrors it.</p>
 </section>
 
+{% set statusOrder = ["open", "active", "parked", "resolved"] %}
 <section class="mb-12">
-    <h2 class="section-title">Tracked work</h2>
-    <div class="section-head">
-        <p class="section-desc">Ideas, issues, decisions, and reviews — ordered by status. Filter by keyword, or switch to a compact list.</p>
+    <h2 class="section-title">Tracked work <span class="count-badge" data-count-target>{{ backlog | length }}</span></h2>
+    <p class="section-desc">Ideas, issues, decisions, and reviews — ordered by status. Filter by status or keyword, or switch to a compact list. Resolved items are hidden by default.</p>
+    <div class="backlog-filter-row">
+        <div class="status-filter" role="group" aria-label="Filter by status">
+            {% for s in statusOrder %}
+            <button type="button" class="status-filter-chip" data-status-chip="{{ s }}" aria-pressed="true">{{ s | title }}</button>
+            {% endfor %}
+        </div>
         {{ displayToolbar("backlog") }}
     </div>
     <div class="project-grid">
-        {% set statusOrder = ["open", "active", "parked", "resolved"] %}
         {% for group in statusOrder %}{% for item in backlog %}{% if item.status == group %}
-        <div class="project-card">
+        <div class="project-card" data-status="{{ item.status }}">
             <a href="/backlog/{{ item.id }}/" class="project-card-link" aria-label="View {{ item.title }}"></a>
             <div class="project-header" style="margin-bottom: 0.6rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
                 <h3 class="project-title" style="margin: 0; font-size: 1.05em;">{% if item.num %}<span style="color: var(--color-text-muted, #94a3b8); font-weight: 600; font-variant-numeric: tabular-nums;">#{{ item.num }}</span> {% endif %}{{ item.title }}</h3>

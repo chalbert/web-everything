@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reorderable List Playground - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/reorderable-list-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Reorderable List Playground</h1>
+      <p>
+        The runnable home for the <a href="/blocks/reorderable-list/">Reorderable List block</a> — the
+        <em>order-is-user-mutable</em> half of "drag and drop", realizing the
+        <a href="/intents/reorder/">reorder</a> intent. The headline here is the
+        <strong>keyboard path</strong>, which is part of the contract, not an add-on: a roving tabindex
+        over the items plus the <strong>grab-then-move</strong> model (Space to grab, arrows to move,
+        Space/Enter to drop, Escape to cancel), each move announced through a polite live region. Each
+        card pairs a key sequence with the order it leaves behind, renders the list at that state, and
+        runs the <strong>same audit the CI conformance suite asserts</strong>. The last card is
+        <strong>live</strong>: drag items with the pointer, or grab and move them with the keyboard —
+        items relocate with the atomic <code>Element.moveBefore()</code>.
+      </p>
+      <p class="play-caveat">
+        A green badge means the rendered list satisfies the <em>verified</em> contract: a native
+        <code>&lt;ul reorderable role="listbox"&gt;</code> of <code>role="option"</code> items, each with
+        a stable <code>data-reorder-id</code> and <code>preserve-on-move</code>, the DOM order matching
+        the order model, <strong>exactly one</strong> item at <code>tabindex="0"</code> — the focused
+        item — and every other at <code>-1</code> (the roving tabindex), with the grabbed item marked
+        <code>data-reorder-grabbed</code> (never the deprecated <code>aria-grabbed</code>). The reducer,
+        renderer, announcer, and audit are the one shared source the CI suite runs. The renderer here is
+        a deterministic <em>reference</em>; concrete strategies (a real persistence backend, cross-list
+        groups, virtualization) live in Frontier UI.
+      </p>
+    </header>
+
+    <div id="examples">Loading examples&hellip;</div>
+  </main>
+
+  <!-- Playground: renders the reorderable list + audits the verified reorder contract. Native DOM only. -->
+  <script type="module" src="/demos/reorderable-list-demo.ts"></script>
+</body>
+</html>

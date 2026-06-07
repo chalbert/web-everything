@@ -2,9 +2,16 @@
 
 **Date**: 2026-06-06
 **Goal:** Give consistent, strong, low-maintenance test coverage to the JSX Adapter work (renderer + HTML↔JSX transforms + the playground demo + the build-time source-toggle) so it can be iterated on without silent breakage — a self-contained plan a fresh session can execute.
-**Status**: ✅ IMPLEMENTED (2026-06-06). All P0/P1/P2 items below landed and are green
-(`npm run verify` = `vitest run` + `eleventy` build-smoke; `npm run test:integration` for E2E).
-What shipped:
+**Status**: ✅ IMPLEMENTED (2026-06-06), then **repaired 2026-06-06** — the suites below had silently
+gone red: stale compiled `.js`/`.d.ts` artifacts (from a stray per-file `tsc`) sat next to the `.tsx`
+sources, and because Vite/vitest resolve extensionless imports `.js` **before** `.tsx`, the conformance
+fixtures loaded the compiled `.js` — which has `jsx.createElement(…)` calls but no `import jsx` (tsc
+doesn't honour `jsxInject`), so every `render:` case threw `jsx is not defined` (and the directive-sugar
+suite lost its exports the same way). Fix: deleted the shadowing artifacts (sources are the only truth)
+**and** added a `check:standards` guard (§8) that fails on any `.js`/`.d.ts` shadowing a `.ts`/`.tsx` —
+so this exact silent-breakage can't return. `npm run verify` is green again (1386 unit tests pass).
+All P0/P1/P2 items below landed (`npm run verify` = `vitest run` + `eleventy` build-smoke;
+`npm run test:integration` for E2E). What shipped:
 - **#A** shared fixtures `blocks/renderers/jsx/__fixtures__/mapping-cases.tsx` (incl. the `jsxEquivalent`
   contract), imported by the demo + all JSX suites. **#2/#3** the two transform unit tests now source
   from it (no duplicated literals).
