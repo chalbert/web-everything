@@ -1,5 +1,7 @@
 ---
 type: idea
+workItem: task
+parent: "140"
 status: open
 dateOpened: "2026-06-07"
 tags: [product-strategy, dev-experience, dev-browser, ai-generated, brainstorm, candidate-features, full-context-debug, ownership-routing, introspection]

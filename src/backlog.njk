@@ -5,6 +5,33 @@ title: Backlog
 
 {% from "display-toolbar.njk" import displayToolbar %}
 
+<style>
+.backlog-tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid var(--color-border); margin: 0 0 1.5rem; }
+.backlog-tab { appearance: none; background: none; border: none; border-bottom: 2px solid transparent; padding: 0.6rem 1rem; font: inherit; font-weight: 600; color: var(--color-text-muted, #64748b); cursor: pointer; margin-bottom: -1px; }
+.backlog-tab:hover { color: var(--color-text); }
+.backlog-tab.is-active { color: var(--color-primary); border-bottom-color: var(--color-primary); }
+.bd-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 0.75rem; margin-bottom: 1.5rem; }
+.bd-card { border: 1px solid var(--color-border); border-radius: 0.6rem; padding: 0.85rem 1rem; background: var(--color-surface-alt, #f8fafc); }
+.bd-card .n { font-size: 1.6em; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.bd-card .l { font-size: 0.78em; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.bd-callout { border-left: 4px solid; padding: 0.75rem 1rem; border-radius: 0 0.5rem 0.5rem 0; margin-bottom: 1.5rem; font-size: 0.92em; }
+.bd-callout.diverging { border-color: #dc2626; background: #fef2f2; color: #991b1b; }
+.bd-callout.converging { border-color: #16a34a; background: #f0fdf4; color: #166534; }
+.bd-ratetable { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; font-size: 0.88em; }
+.bd-ratetable th, .bd-ratetable td { text-align: right; padding: 0.4rem 0.75rem; border-bottom: 1px solid var(--color-border); font-variant-numeric: tabular-nums; }
+.bd-ratetable th:first-child, .bd-ratetable td:first-child { text-align: left; }
+.bd-ratetable thead th { color: var(--color-text-muted); font-weight: 600; }
+.bd-gran { display: inline-flex; gap: 0.25rem; margin-bottom: 0.75rem; }
+.bd-gran button { appearance: none; border: 1px solid var(--color-border); background: var(--color-surface, #fff); padding: 0.3rem 0.75rem; font: inherit; font-size: 0.85em; cursor: pointer; }
+.bd-gran button:first-child { border-radius: 0.4rem 0 0 0.4rem; }
+.bd-gran button:last-child { border-radius: 0 0.4rem 0.4rem 0; }
+.bd-gran button.is-active { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+.bd-chart-wrap { border: 1px solid var(--color-border); border-radius: 0.6rem; padding: 1rem; }
+.bd-legend { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 0.75rem; font-size: 0.82em; color: var(--color-text-muted); }
+.bd-legend span { display: inline-flex; align-items: center; gap: 0.4rem; }
+.bd-legend i { width: 18px; height: 0; border-top-width: 3px; border-top-style: solid; display: inline-block; }
+</style>
+
 {% macro typeBadge(type) %}
 <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.7em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
   background: {% if type == 'idea' %}#ede9fe{% elif type == 'issue' %}#fee2e2{% elif type == 'review' %}#cffafe{% elif type == 'decision' %}#e0e7ff{% else %}#f1f5f9{% endif %};
@@ -22,21 +49,38 @@ title: Backlog
     <p>The single source of truth for ideas, issues, decisions, and reviews across Web Everything. Each item is one markdown file in <code>backlog/</code>, completely dynamic — its title, summary, and detail come from markdown (the item's own body, or a related report it mirrors), never hand-typed. Open questions raised on the standards' own pages are collected live below. Deep thinking stays in <code>reports/</code> — a backlog item links out to it or mirrors it.</p>
 </section>
 
+<div class="backlog-tabs" role="tablist" aria-label="Backlog views">
+    <button type="button" class="backlog-tab is-active" role="tab" aria-selected="true" aria-controls="panel-tracked" id="tab-tracked" data-bd-tab="tracked">Tracked work</button>
+    <button type="button" class="backlog-tab" role="tab" aria-selected="false" aria-controls="panel-burndown" id="tab-burndown" data-bd-tab="burndown">Burndown</button>
+</div>
+
+<div id="panel-tracked" role="tabpanel" aria-labelledby="tab-tracked">
 {% set statusOrder = ["open", "active", "parked", "resolved"] %}
+{# Item types present in the backlog, in preferred order. #}
+{% set typeOrder = ["idea", "issue", "decision", "review"] %}
+{% set typeChips = [] %}
+{% for t in typeOrder %}{% if (backlog | selectattr("type", "equalto", t) | list | length) %}{% set typeChips = (typeChips.push(t), typeChips) %}{% endif %}{% endfor %}
 <section class="mb-12">
     <h2 class="section-title">Tracked work <span class="count-badge" data-count-target>{{ backlog | length }}</span></h2>
-    <p class="section-desc">Ideas, issues, decisions, and reviews — ordered by status. Filter by status or keyword, or switch to a compact list. Resolved items are hidden by default.</p>
+    <p class="section-desc">Ideas, issues, decisions, and reviews — ordered by status. Filter by status, type, or keyword, or switch to a compact list. Resolved items are hidden by default.</p>
     <div class="backlog-filter-row">
-        <div class="status-filter" role="group" aria-label="Filter by status">
-            {% for s in statusOrder %}
-            <button type="button" class="status-filter-chip" data-status-chip="{{ s }}" aria-pressed="true">{{ s | title }}</button>
-            {% endfor %}
+        <div class="filter-groups">
+            <div class="status-filter" role="group" aria-label="Filter by status">
+                {% for s in statusOrder %}
+                <button type="button" class="status-filter-chip" data-status-chip="{{ s }}" aria-pressed="true">{{ s | title }}</button>
+                {% endfor %}
+            </div>
+            <div class="status-filter" role="group" aria-label="Filter by type">
+                {% for t in typeChips %}
+                <button type="button" class="status-filter-chip" data-type-chip="{{ t }}" aria-pressed="true">{{ t | title }}</button>
+                {% endfor %}
+            </div>
         </div>
         {{ displayToolbar("backlog") }}
     </div>
     <div class="project-grid">
         {% for group in statusOrder %}{% for item in backlog %}{% if item.status == group %}
-        <div class="project-card" data-status="{{ item.status }}">
+        <div class="project-card" data-status="{{ item.status }}" data-type="{{ item.type }}">
             <a href="/backlog/{{ item.id }}/" class="project-card-link" aria-label="View {{ item.title }}"></a>
             <div class="project-header" style="margin-bottom: 0.6rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
                 <h3 class="project-title" style="margin: 0; font-size: 1.05em;">{% if item.num %}<span style="color: var(--color-text-muted, #94a3b8); font-weight: 600; font-variant-numeric: tabular-nums;">#{{ item.num }}</span> {% endif %}{{ item.title }}</h3>
@@ -97,4 +141,72 @@ title: Backlog
 </section>
 {% endif %}
 
+</div>{# /#panel-tracked #}
+
+<div id="panel-burndown" role="tabpanel" aria-labelledby="tab-burndown" hidden>
+    <section class="mb-12">
+        <h2 class="section-title">Burndown <span class="count-badge">{{ burndown.points.remaining }} pts left</span></h2>
+        <p class="section-desc">Continuous-flow burndown in <strong>agile points</strong>, not item counts — scope grows as items are opened and falls as they're resolved. Points are summed once per item: a <code>story</code> carries its <code>size</code>, a <code>task</code> never does, a storied <code>epic</code> defers to its child stories, an unstoried <code>epic</code> carries its own — so nothing is double-counted. Resolution dates drive the completed line.</p>
+
+        {% if burndown.empty %}
+        <p>No sized items yet.</p>
+        {% else %}
+        <div class="bd-cards">
+            <div class="bd-card"><div class="n">{{ burndown.points.total }}</div><div class="l">Total points</div></div>
+            <div class="bd-card"><div class="n">{{ burndown.points.done }}</div><div class="l">Completed</div></div>
+            <div class="bd-card"><div class="n">{{ burndown.points.remaining }}</div><div class="l">Remaining</div></div>
+            <div class="bd-card"><div class="n">{{ burndown.counts.story }}</div><div class="l">Stories</div></div>
+            <div class="bd-card"><div class="n">{{ burndown.counts.epic }}</div><div class="l">Epics</div></div>
+            <div class="bd-card"><div class="n">{{ burndown.counts.task }}</div><div class="l">Tasks</div></div>
+        </div>
+
+        {% if burndown.diverging %}
+        <div class="bd-callout diverging">
+            <strong>Diverging</strong> — over the last {{ burndown.rates.windowDays }} days scope is opening at
+            <strong>{{ burndown.rates.intake.week | round(1) }} pts/wk</strong> but completing at only
+            <strong>{{ burndown.rates.completion.week | round(1) }} pts/wk</strong> (net
+            {{ burndown.rates.net.week | round(1) }} pts/wk), so there is no projected clear date at the current pace.
+            If intake froze today, the {{ burndown.points.remaining }} remaining points would clear around
+            <strong>{{ burndown.clearDateFrozen }}</strong>.
+        </div>
+        {% else %}
+        <div class="bd-callout converging">
+            <strong>Converging</strong> — completing
+            <strong>{{ burndown.rates.completion.week | round(1) }} pts/wk</strong> against intake of
+            {{ burndown.rates.intake.week | round(1) }} pts/wk (net +{{ burndown.rates.net.week | round(1) }} pts/wk).
+            Projected to clear around <strong>{{ burndown.clearDateNet }}</strong> if both rates hold
+            ({{ burndown.clearDateFrozen }} if intake froze today).
+        </div>
+        {% endif %}
+
+        <table class="bd-ratetable">
+            <thead><tr><th>Burn rate (trailing {{ burndown.rates.windowDays }}d)</th><th>/ day</th><th>/ week</th><th>/ month</th></tr></thead>
+            <tbody>
+                <tr><td>Completion</td><td>{{ burndown.rates.completion.day | round(1) }}</td><td>{{ burndown.rates.completion.week | round(1) }}</td><td>{{ burndown.rates.completion.month | round(1) }}</td></tr>
+                <tr><td>Intake</td><td>{{ burndown.rates.intake.day | round(1) }}</td><td>{{ burndown.rates.intake.week | round(1) }}</td><td>{{ burndown.rates.intake.month | round(1) }}</td></tr>
+                <tr><td>Net</td><td>{{ burndown.rates.net.day | round(1) }}</td><td>{{ burndown.rates.net.week | round(1) }}</td><td>{{ burndown.rates.net.month | round(1) }}</td></tr>
+            </tbody>
+        </table>
+
+        <div class="bd-gran" role="group" aria-label="Chart granularity">
+            <button type="button" data-bd-gran="daily">Daily</button>
+            <button type="button" data-bd-gran="weekly" class="is-active">Weekly</button>
+            <button type="button" data-bd-gran="monthly">Monthly</button>
+        </div>
+        <div class="bd-chart-wrap">
+            <svg id="bd-chart" viewBox="0 0 900 360" role="img" aria-label="Backlog burndown chart of remaining, scope and completed agile points over time, with future projection"></svg>
+            <div class="bd-legend">
+                <span><i style="border-color:#0ea5e9"></i>Scope (opened)</span>
+                <span><i style="border-color:#16a34a"></i>Completed</span>
+                <span><i style="border-color:#7c3aed"></i>Remaining</span>
+                <span><i style="border-color:#7c3aed; border-top-style:dashed"></i>Projection (intake frozen)</span>
+                {% if not burndown.diverging %}<span><i style="border-color:#94a3b8; border-top-style:dotted"></i>Projection (intake continues)</span>{% endif %}
+            </div>
+        </div>
+        <script type="application/json" id="burndown-data">{{ burndown | dump | safe }}</script>
+        {% endif %}
+    </section>
+</div>{# /#panel-burndown #}
+
 <script src="/assets/js/home-display.js"></script>
+<script src="/assets/js/backlog-burndown.js"></script>

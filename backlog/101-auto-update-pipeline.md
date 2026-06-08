@@ -1,5 +1,8 @@
 ---
 type: idea
+workItem: story
+size: 5
+parent: "099"
 status: open
 dateOpened: "2026-06-06"
 tags: [auto-update, evergreen, change-management, dependencies, risk-analysis, phased-rollout, reversion, pre-test, monitoring, ci]

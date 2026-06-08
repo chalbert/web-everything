@@ -20,10 +20,18 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA = join(ROOT, 'src/_data');
 const INC = join(ROOT, 'src/_includes');
 
+// `--json` emits machine-readable failure descriptors (backlog #089 idea 1) so the
+// conformance auto-fix agent (#095) can target failures structurally instead of
+// scraping ANSI text. Human output is unchanged when the flag is absent.
+const JSON_MODE = process.argv.includes('--json');
+
+// Each entry is { message, descriptor? }. The optional descriptor is the structured,
+// agent-targetable form of the failure — populated only for the classes a fixer can
+// act on (MVP: deprecated-status). Most calls pass a message only.
 const errors = [];
 const warnings = [];
-const err = (m) => errors.push(m);
-const warn = (m) => warnings.push(m);
+const err = (m, descriptor) => errors.push({ message: m, descriptor });
+const warn = (m, descriptor) => warnings.push({ message: m, descriptor });
 
 const readJson = (rel) => {
   const p = join(DATA, rel);
@@ -41,15 +49,29 @@ const RESEARCH_STATUSES = new Set(['open', 'resolved', 'draft', 'closed']);
 // Backlog uses its own operational axis (not the implementation lifecycle).
 const BACKLOG_STATUSES = new Set(['open', 'active', 'parked', 'resolved']);
 const BACKLOG_TYPES = new Set(['idea', 'issue', 'review', 'decision']);
+// Agile sizing axis (orthogonal to type/status). Points live at exactly one
+// level — see docs/agent/backlog-workflow.md → "Agile sizing".
+const WORK_ITEMS = new Set(['story', 'epic', 'task']);
+const FIB = new Set([1, 2, 3, 5, 8, 13]);
 // Deprecated synonyms → canonical. Flagged as errors so the drift can't return.
 const STATUS_SYNONYMS = { implemented: 'active', stable: 'active', done: 'active', planned: 'concept', wip: 'draft' };
 const BLOCK_TYPES = new Set(['Store', 'Parser', 'Behavior', 'Directive', 'Component', 'Module']);
 
+// Which spec file each status-bearing entity lives in — lets the deprecated-status
+// descriptor point a fixer (#095) at the exact JSON array to edit.
+const KIND_FILE = { Block: 'src/_data/blocks.json', Plug: 'src/_data/plugs.json', Protocol: 'src/_data/protocols.json', Intent: 'src/_data/intents.json' };
+
 const checkStatus = (kind, id, status) => {
   if (!status) return;
-  if (STATUS_SYNONYMS[status])
-    err(`${kind} "${id}" uses deprecated status "${status}" — use canonical "${STATUS_SYNONYMS[status]}"`);
-  else if (!LIFECYCLE.has(status))
+  if (STATUS_SYNONYMS[status]) {
+    const to = STATUS_SYNONYMS[status];
+    err(
+      `${kind} "${id}" uses deprecated status "${status}" — use canonical "${to}"`,
+      // Deterministically fixable: the canonical target is known, so #095's reference
+      // fixer can rewrite the field and the verify gate confirms it cleared.
+      KIND_FILE[kind] ? { kind: 'deprecated-status', entity: kind, id, file: KIND_FILE[kind], field: 'status', from: status, to } : undefined,
+    );
+  } else if (!LIFECYCLE.has(status))
     err(`${kind} "${id}" has invalid status "${status}" (expected ${[...LIFECYCLE].join(' / ')})`);
 };
 
@@ -201,6 +223,40 @@ for (const item of backlog) {
     err(`Backlog item "${item.id}" crossRef must have both "url" and "label"`);
   if (item.status === 'resolved' && !item.graduatedTo && item.type !== 'issue' && item.type !== 'review')
     warn(`Backlog item "${item.id}" is resolved but has no graduatedTo — record what it became`);
+
+  // ── Agile sizing — drives the /backlog/ burndown ──
+  // Every item is a story | epic | task; points (`size`, Fibonacci) sit on
+  // stories and unstoried epics only, so the burndown never double-counts.
+  if (!item.workItem)
+    err(`Backlog item "${item.id}" missing required field "workItem" (story / epic / task)`);
+  else if (!WORK_ITEMS.has(item.workItem))
+    err(`Backlog item "${item.id}" has invalid workItem "${item.workItem}" (expected ${[...WORK_ITEMS].join(' / ')})`);
+  if (item.size !== undefined && !FIB.has(item.size))
+    err(`Backlog item "${item.id}" has non-Fibonacci size "${item.size}" (expected one of ${[...FIB].join(', ')})`);
+  if (item.workItem === 'story' && item.size === undefined)
+    err(`Backlog item "${item.id}" is a story but has no size — every story must carry Fibonacci points`);
+  if (item.workItem === 'task' && item.size !== undefined)
+    err(`Backlog item "${item.id}" is a task but has a size — tasks are never sized (they roll up under a story/epic)`);
+  if (item.parent !== undefined && !seenNums.has(String(item.parent)) && !backlog.some((b) => b.num === String(item.parent)))
+    err(`Backlog item "${item.id}" parent "#${item.parent}" does not resolve to an existing item`);
+  // Resolution date is what the burndown plots — required once resolved.
+  if (item.status === 'resolved' && !item.dateResolved)
+    err(`Backlog item "${item.id}" is resolved but has no dateResolved — the burndown needs the resolution date`);
+}
+
+// Double-counting guard: an UNstoried epic (one that carries its own size) must
+// have no sized child; a sized child means its points are already counted, so
+// the epic must be storied (no size) instead.
+const sizedChildrenOf = new Map();
+for (const item of backlog) {
+  if (item.parent !== undefined && typeof item.size === 'number') {
+    const p = String(item.parent);
+    sizedChildrenOf.set(p, (sizedChildrenOf.get(p) || 0) + 1);
+  }
+}
+for (const item of backlog) {
+  if (item.workItem === 'epic' && typeof item.size === 'number' && sizedChildrenOf.get(item.num))
+    err(`Backlog item "${item.id}" is a sized (unstoried) epic but has ${sizedChildrenOf.get(item.num)} sized child item(s) — that double-counts. Make it storied (drop its size) or re-parent the children.`);
 }
 
 // ── 6d-bis. Old-slug redirects (#110): validate `formerSlugs` back-compat aliases ──
@@ -292,12 +348,25 @@ for (const f of allCompileFiles) {
 }
 
 // ── Report ────────────────────────────────────────────────────────────────────
-const RED = '\x1b[31m', YEL = '\x1b[33m', GRN = '\x1b[32m', DIM = '\x1b[2m', RST = '\x1b[0m';
-console.log(`${DIM}check-standards — Web Everything${RST}`);
-for (const w of warnings) console.log(`${YEL}  warn${RST} ${w}`);
-for (const e of errors) console.log(`${RED} error${RST} ${e}`);
-console.log(
-  `\n${errors.length ? RED : GRN}${errors.length} error(s)${RST}, ${warnings.length} warning(s) ` +
-  `${DIM}(checked ${blocks.length} blocks, ${plugs.length} plugs, ${protocols.length} protocols, ${intents.length} intents, ${semantics.length} terms, ${research.length} research topics, ${backlog.length} backlog items)${RST}`,
-);
+const summary = {
+  blocks: blocks.length, plugs: plugs.length, protocols: protocols.length, intents: intents.length,
+  terms: semantics.length, research: research.length, backlog: backlog.length,
+  errors: errors.length, warnings: warnings.length,
+};
+
+if (JSON_MODE) {
+  // Single JSON object on stdout — the auto-fix agent's failure feed (#095). Exit code
+  // still signals pass/fail, so `check:standards --json` is both pipeable and CI-usable.
+  const shape = (list) => list.map((x) => (x.descriptor ? { message: x.message, descriptor: x.descriptor } : { message: x.message }));
+  console.log(JSON.stringify({ ok: errors.length === 0, summary, errors: shape(errors), warnings: shape(warnings) }, null, 2));
+} else {
+  const RED = '\x1b[31m', YEL = '\x1b[33m', GRN = '\x1b[32m', DIM = '\x1b[2m', RST = '\x1b[0m';
+  console.log(`${DIM}check-standards — Web Everything${RST}`);
+  for (const w of warnings) console.log(`${YEL}  warn${RST} ${w.message}`);
+  for (const e of errors) console.log(`${RED} error${RST} ${e.message}`);
+  console.log(
+    `\n${errors.length ? RED : GRN}${errors.length} error(s)${RST}, ${warnings.length} warning(s) ` +
+    `${DIM}(checked ${blocks.length} blocks, ${plugs.length} plugs, ${protocols.length} protocols, ${intents.length} intents, ${semantics.length} terms, ${research.length} research topics, ${backlog.length} backlog items)${RST}`,
+  );
+}
 process.exit(errors.length ? 1 : 0);

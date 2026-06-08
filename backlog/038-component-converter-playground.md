@@ -1,5 +1,8 @@
 ---
 type: idea
+workItem: story
+size: 3
+parent: "049"
 status: open
 dateOpened: '2026-06-03'
 tags:

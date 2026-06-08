@@ -1,8 +1,9 @@
 ---
 type: idea
-status: resolved
+workItem: story
+size: 8
+status: open
 dateOpened: "2026-06-06"
-graduatedTo: "plateau/src/blocks/attributes/LiveStatus.ts + Windowed.ts (with a backward-compat defer added to Filter.ts); invariants proven by LiveStatus.test.ts + Windowed.test.ts"
 tags: [droplist, autocomplete, live-status, windowed, virtualization, traits, behavior, a11y]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -31,6 +32,10 @@ family surfaces** to here: `live-status` and `windowed`. Both are reused well be
 Acceptance: `live-status` and `windowed` exist as real CustomAttribute behaviors composing with the
 `filter`/`focus-delegation`/`selection` stack; the shared-announcer and active-always-mounted
 invariants are enforced by tests, not convention.
+
+## Correction (reopened 2026-06-07)
+
+> **Was resolved in error.** The only implementation of this surface was built in the **legacy `plateau` repo**, since confirmed **abandoned** — the initial single-repo prototype, superseded by Web Everything + Frontier UI + plateau-app. It is **not in the live project**: the WE *spec* exists, but there is **no reference implementation** in Frontier UI or the WE `plugs/`, and the (now-removed) `graduatedTo` pointed into dead code. Reopened as a **fresh build** against the live reference implementation (Frontier UI / WE `plugs/`, per AGENTS.md) — **do not migrate or consult plateau** (explicitly not a model). The original `## Progress` below describes the void plateau build and is retained only as history.
 
 ## Progress
 

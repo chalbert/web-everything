@@ -1,8 +1,10 @@
 ---
 type: idea
-status: active
+workItem: task
+status: resolved
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-07"
+dateResolved: "2026-06-07"
 tags: [webtraits, lazy-loading, bootstrap, demo, e2e, regression, frontier-ui]
 relatedReport: reports/2026-06-02-lazy-traits-loading.md
 relatedProject: webtraits
@@ -31,3 +33,22 @@ Add a persistent artifact that drives a trait through the real bootstrap and `wi
 
 Surfaced closing out #116 (the bootstrap→manifest wiring). Low risk; lands in Frontier UI (the impl
 repo), same place as the #116 change.
+
+## Progress
+- **Status:** resolved — the standing guard exists and is green; it re-homed the whole e2e suite too.
+- **Branch:** frontierui working tree (webeverything on docs/standard-authoring-workflow).
+- **Done (all in `/Users/nicolasgilbert/workspace/frontierui`):**
+  - `demos/lazy-traits-plugged.html` + `demos/lazy-traits-plugged.ts` — a plugged demo whose
+    `<ul sortable>` is upgraded through the **global `window.attributes`** that bootstrap creates and
+    onto which it ran `registerTraits(window.attributes, traitManifest)`. Deliberately uses no own
+    registry (contrast `demos/lazy-traits.ts`), so it exercises the real app-wide lazy path.
+  - `plugs/__tests__/e2e/plugged-traits.spec.ts` — asserts `data-sortable-ready` /
+    `data-sort-direction` appear and the list sorts. An empty/disconnected manifest fails it.
+  - `playwright.config.ts` — there was **none** in frontierui (e2e specs were carried in by the
+    consolidate commit but never runnable). Added it (vite :3001, reuses the running dev server),
+    which re-homes the whole suite.
+- **Verified:** `npx playwright test plugged-traits` green; full `playwright test` = **140 passed**;
+  `npm run check:standards` (frontierui) green.
+- **Notes / gotcha:** Vite `bootstrapPatches()` skips injecting bootstrap into any demo HTML that
+  already contains the literal string `/plugs/bootstrap.ts` — so don't write that exact path in a
+  plugged demo's prose/comments (it silently disables the trait path). Documented inline in the demo.

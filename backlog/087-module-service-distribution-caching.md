@@ -1,5 +1,8 @@
 ---
 type: idea
+workItem: story
+size: 5
+parent: "081"
 status: open
 dateOpened: "2026-06-06"
 tags: [module-as-a-service, caching, distribution, cdn, eager-lazy, self-hosted, edge, immutability, adapters, plateau, esm]

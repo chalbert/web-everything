@@ -75,23 +75,25 @@ are silently ignored.</p>
 {{ autoToggle("broadcast-detail", broadcastDetailHtml) }}
 
 <h4>With a different trigger event</h4>
-{% highlight "html" %}
+{% set broadcastTriggerHtml %}
 <!-- Broadcasts on form submit instead of click -->
 <form broadcast="customEvents:search-submitted"
       broadcast-on="submit">
     <input type="search" name="q" />
     <button type="submit">Search</button>
 </form>
-{% endhighlight %}
+{% endset %}
+{{ autoToggle("broadcast-trigger", broadcastTriggerHtml) }}
 
 <h4>With dynamic detail from a store</h4>
-{% highlight "html" %}
+{% set broadcastFromHtml %}
 <!-- Reads current detail from a named store -->
 <button broadcast="customEvents:filter-applied"
         broadcast-from="filterStore">
     Apply Filters
 </button>
-{% endhighlight %}
+{% endset %}
+{{ autoToggle("broadcast-from", broadcastFromHtml) }}
 
 <h3>Web Standards Alignment</h3>
 

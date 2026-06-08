@@ -1,5 +1,8 @@
 ---
 type: idea
+workItem: story
+size: 5
+parent: "099"
 status: open
 dateOpened: "2026-06-06"
 tags: [app-shell, micro-frontend, micro-apps, meta-framework, compatibility-map, spa, routing, evergreen, dashboard, platform]

@@ -1,5 +1,8 @@
 ---
 type: idea
+workItem: story
+size: 3
+parent: "089"
 status: open
 dateOpened: "2026-06-06"
 tags: [monetization, business-model, consultancy, services, migration, adoption, accessibility, training, open-source]

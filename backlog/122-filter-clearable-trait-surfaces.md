@@ -1,8 +1,9 @@
 ---
 type: idea
-status: resolved
+workItem: story
+size: 3
+status: open
 dateOpened: "2026-06-06"
-graduatedTo: "plateau/src/blocks/attributes/Filter.ts + Clearable.ts (with controller symmetry added to Selection/FocusDelegation); proven by Autocomplete.trace.test.ts"
 tags: [droplist, autocomplete, filter, clearable, input, loader, traits, behavior]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -36,6 +37,10 @@ CustomAttribute behaviors (plateau/Frontier UI), composing with the proven
 "par → arrow → enter" trace on the autocomplete page passes against a live source. Mind the inter-trait
 invariant tracked in [#023](/backlog/023-droplist-composition-open-contracts/): `filter` and
 `live-status` both write status, so route both through the one announcer region rather than two.
+
+## Correction (reopened 2026-06-07)
+
+> **Was resolved in error.** The only implementation of this surface was built in the **legacy `plateau` repo**, since confirmed **abandoned** — the initial single-repo prototype, superseded by Web Everything + Frontier UI + plateau-app. It is **not in the live project**: the WE *spec* exists, but there is **no reference implementation** in Frontier UI or the WE `plugs/`, and the (now-removed) `graduatedTo` pointed into dead code. Reopened as a **fresh build** against the live reference implementation (Frontier UI / WE `plugs/`, per AGENTS.md) — **do not migrate or consult plateau** (explicitly not a model). The original `## Progress` below describes the void plateau build and is retained only as history.
 
 ## Progress
 

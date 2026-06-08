@@ -1,7 +1,10 @@
 ---
 type: idea
+workItem: story
+size: 5
 status: resolved
 dateOpened: "2026-06-06"
+dateResolved: "2026-06-07"
 dateStarted: "2026-06-07"
 graduatedTo: "blocks/data-grid/DataGridBehavior.ts (grid:cell-navigation behavior; registered in plugs/bootstrap.ts)"
 tags: [data-grid, frontier-ui, focus-delegation, behavior, a11y, keyboard]

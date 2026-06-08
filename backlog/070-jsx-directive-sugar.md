@@ -1,7 +1,10 @@
 ---
 type: idea
+workItem: story
+size: 3
 status: resolved
 dateOpened: "2026-06-06"
+dateResolved: "2026-06-07"
 dateStarted: "2026-06-06"
 tags: [jsx, adapters, directives]
 relatedReport: reports/2026-06-03-jsx-adapter-feature-mapping.md

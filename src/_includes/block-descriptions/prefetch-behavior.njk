@@ -168,13 +168,14 @@
 {{ autoToggle("prefetch-usage", prefetchHtml) }}
 
 <h4>Hover Prefetch with Router</h4>
-{% highlight "html" %}
+{% set prefetchNavHtml %}
 <nav>
     <a href="/dashboard" prefetch="hover">Dashboard</a>
     <a href="/settings" prefetch="hover">Settings</a>
     <a href="/profile" prefetch="interaction">Profile</a>
 </nav>
-{% endhighlight %}
+{% endset %}
+{{ autoToggle("prefetch-nav", prefetchNavHtml) }}
 
 <h4>Programmatic Configuration</h4>
 {% highlight "typescript" %}

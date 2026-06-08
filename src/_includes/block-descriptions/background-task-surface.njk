@@ -1,3 +1,4 @@
+{% from "source-toggle.njk" import autoToggle %}
 <h2>Background Task Surface</h2>
 <p>
     The persistent app-shell surface that hosts long-running work <strong>after it goes async</strong> &mdash;
@@ -128,7 +129,7 @@
         <tr><td><strong>aggregation</strong></td><td><code>single</code> · <code>batch</code></td><td>Dimension (from intent)</td><td><code>withBatchAggregation</code></td></tr>
         <tr><td><strong>persistence</strong></td><td><code>transient</code> · <code>sticky</code></td><td>Dimension (from intent)</td><td><code>withStickyEntries</code></td></tr>
         <tr><td><strong>navigationGuard</strong></td><td><code>none</code> · <code>warn</code></td><td>Dimension (from intent)</td><td><code>withNavigationGuard</code></td></tr>
-        <tr><td><strong>durability</strong></td><td><code>route</code> · <code>reload</code></td><td>Dimension (block-added)</td><td><code>withReloadDurability</code></td></tr>
+        <tr><td><strong>durability</strong></td><td><code>route</code> · <code>reload</code></td><td>Dimension (block-added) &mdash; <strong>future #134</strong>, not in the shipped baseline</td><td><code>withReloadDurability</code> (future)</td></tr>
         <tr><td><em>registration</em></td><td>bubbling <code>background-task-register</code> event</td><td><strong>Fixed mechanic</strong></td><td>&mdash;</td></tr>
         <tr><td><em>surface resolution</em></td><td>nearest-ancestor, global-by-default</td><td><strong>Fixed mechanic</strong></td><td>&mdash;</td></tr>
     </tbody>
@@ -140,10 +141,11 @@
     ancestor <code>&lt;background-tasks&gt;</code> surface adopts the carried Loader-state handle and renders
     its entry. The surface subscribes to a live handle &mdash; it does not re-implement progress.
 </p>
-{% highlight "html" %}
+{% set backgroundTasksHtml %}
 <!-- Placed once in the app shell (a Layout rail) -->
-<background-tasks aggregation="batch" persistence="sticky" guard="warn"></background-tasks>
-{% endhighlight %}
+<background-tasks aggregation="batch" persistence="sticky" navigation-guard></background-tasks>
+{% endset %}
+{{ autoToggle("background-tasks-surface", backgroundTasksHtml) }}
 {% highlight "typescript" %}
 // A Loader hands a still-running task off when it crosses the async threshold.
 el.dispatchEvent(new CustomEvent('background-task-register', {
@@ -171,27 +173,28 @@ el.dispatchEvent(new CustomEvent('background-task-register', {
 </table>
 
 <h3>Interface</h3>
-<pre><code class="language-typescript">type TaskAggregation = 'single' | 'batch';
-type TaskPersistence = 'transient' | 'sticky';
-type TaskNavigationGuard = 'none' | 'warn';
-type TaskDurability = 'route' | 'reload';   // block-added axis (reload = Background Fetch adapter)
-type BackgroundTaskState = 'registered' | 'active' | 'success' | 'error' | 'dismissed';
+<p>
+    This is the shipped <strong>route-only baseline</strong> (#135). The reload-durability axis
+    (<code>durability</code> / <code>withReloadDurability</code>) is a documented <strong>future</strong>
+    tier (#134), not part of this config &mdash; see the dimensions table above.
+</p>
+<pre><code class="language-typescript">type BackgroundTaskState = 'registered' | 'active' | 'success' | 'error' | 'dismissed';
+type ProgressMode = 'determinate' | 'indeterminate';
 
-interface BackgroundTaskSurfaceConfig {
-    aggregation: TaskAggregation;       // default 'single'
-    persistence: TaskPersistence;       // default 'transient' (errors are always sticky)
-    navigationGuard: TaskNavigationGuard; // default 'none'
-    durability: TaskDurability;         // default 'route'
+// A single observation of the backgrounded Loader's state (subscribed off-view).
+interface LoaderSnapshot {
+    state: 'active' | 'success' | 'error';
+    progress?: number;                  // 0..1 fraction; only meaningful when determinate
+    error?: Error;                      // present on 'error'
 }
 
-interface BackgroundTask {
-    id: string;
-    label: string;                      // Loader label conventions
-    state: BackgroundTaskState;
-    progress: 'determinate' | 'indeterminate';
-    value?: number;                     // 0-100 when determinate
-    loaderState: unknown;               // the off-view Loader state-machine handle
-    retry?: () => void;                 // present on error; delegates to Reliability
+// Resolved surface behavior — set from defaults, flipped by traits (route-only baseline).
+interface BackgroundTasksConfig {
+    aggregation: 'single' | 'batch';     // default 'single'
+    persistence: 'transient' | 'sticky'; // default 'transient' (errors are always sticky)
+    navigationGuard: boolean;            // default false — arm beforeunload + route-leave guard
+    completionToast: boolean;            // default false — emit a Feedback toast on completion
+    retry: boolean;                      // default false — expose a per-task retry affordance
 }</code></pre>
 
 <h3>Exports</h3>
@@ -206,9 +209,10 @@ interface BackgroundTask {
         <tr><td><code>withNavigationGuard</code></td><td>Trait</td><td>Arm beforeunload + route-leave confirm while a task is active</td></tr>
         <tr><td><code>withCompletionToast</code></td><td>Trait</td><td>Emit a Feedback toast on completion</td></tr>
         <tr><td><code>withPerTaskRetry</code></td><td>Trait</td><td>Retry affordance delegating to Reliability</td></tr>
-        <tr><td><code>withReloadDurability</code></td><td>Trait</td><td>Opt into reload-durable work (Background Fetch adapter)</td></tr>
-        <tr><td><code>BackgroundTaskRegisterEvent</code></td><td>Event Class</td><td>The registration handoff</td></tr>
-        <tr><td><code>BackgroundTaskSurfaceConfig</code></td><td>Interface</td><td>Configuration type</td></tr>
+        <tr><td><code>withReloadDurability</code></td><td>Trait <em>(future)</em></td><td><strong>Not shipped</strong> &mdash; the reload-durable tier (Background Fetch adapter) lands with #134</td></tr>
+        <tr><td><code>BackgroundTaskRegisterDetail</code> · <code>…StateChangeDetail</code> · <code>…RetryDetail</code> · <code>…DismissDetail</code></td><td>Detail types</td><td>The <code>detail</code> shape of each lifecycle event (see Events above)</td></tr>
+        <tr><td><code>BackgroundTasksConfig</code></td><td>Interface</td><td>Resolved surface config (with <code>DEFAULT_CONFIG</code>)</td></tr>
+        <tr><td><code>LoaderSnapshot</code> · <code>LoaderStateHandle</code></td><td>Interfaces</td><td>The carried live Loader-state handle and its snapshots</td></tr>
         <tr><td><code>registerBackgroundTasks</code></td><td>Function</td><td>Registers the element with its default name</td></tr>
     </tbody>
 </table>

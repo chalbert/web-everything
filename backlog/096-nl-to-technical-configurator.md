@@ -1,5 +1,8 @@
 ---
 type: idea
+workItem: story
+size: 5
+parent: "097"
 status: open
 dateOpened: "2026-06-06"
 tags: [monetization, business-model, ai-agnostic, technical-configurator, natural-language, provider-registry, decision-support, plateau, self-run-tool]

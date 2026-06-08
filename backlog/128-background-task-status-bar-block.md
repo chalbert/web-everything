@@ -1,7 +1,10 @@
 ---
 type: idea
+workItem: story
+size: 3
 status: resolved
 dateOpened: "2026-06-06"
+dateResolved: "2026-06-07"
 graduatedTo: "blocks.json#background-task-surface"
 tags: [block, background-task, status-bar, async, layout, surface, ux]
 relatedProject: webintents

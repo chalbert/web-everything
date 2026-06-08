@@ -44,6 +44,7 @@ import { registerNavigation } from '../blocks/navigation/registerNavigation';
 import { registerForEach } from '../blocks/for-each/registerForEach';
 import { registerTypeAhead } from '../blocks/type-ahead/registerTypeAhead';
 import { registerDataGrid } from '../blocks/data-grid/registerDataGrid';
+import { registerDataGridEdit } from '../blocks/data-grid/registerDataGridEdit';
 
 // Extend Window interface
 declare global {
@@ -209,6 +210,9 @@ registerTypeAhead(window.attributes);
 
 // Register data-grid behavior (grid:cell-navigation)
 registerDataGrid(window.attributes);
+
+// Register data-grid editable sub-pattern behavior (grid:cell-edit)
+registerDataGridEdit(window.attributes);
 
 console.log('[Web Everything] Bootstrap complete');
 console.log('[Web Everything] Globals available: injectors, contexts, stores, attributes, customTextNodeParsers, customTextNodes');

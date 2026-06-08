@@ -1,7 +1,9 @@
 ---
 type: decision
+workItem: task
 status: resolved
 dateOpened: '2026-05-31'
+dateResolved: "2026-06-06"
 tags:
   - webintl
   - internationalization

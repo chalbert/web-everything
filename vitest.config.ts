@@ -45,6 +45,8 @@ export default defineConfig({
     include: [
       'plugs/**/__tests__/**/*.test.{ts,tsx}',
       'blocks/**/__tests__/**/*.test.{ts,tsx}',
+      'src/**/__tests__/**/*.test.{ts,tsx}', // build-time data files (e.g. burndown accounting)
+      'scripts/**/__tests__/**/*.test.mjs', // build/CI tooling (e.g. conformance auto-fix engine, #095)
     ],
   },
   resolve: {

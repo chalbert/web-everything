@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Data Grid Edit Bootstrap Fixture - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+</head>
+<body>
+  <!--
+    A deliberately minimal, bootstrapped page that proves the EDITABLE sub-pattern `grid:cell-edit`
+    AUTO-UPGRADES (backlog #157), the editing twin of demos/data-grid-bootstrap-fixture.html (#144).
+
+    Nothing here constructs DataGridEditBehavior by hand. The grid is plain authored markup carrying BOTH
+    attributes — `grid:cell-navigation grid:cell-edit` — and the ONLY wiring is the bootstrap's registry
+    upgrade. If `registerDataGridEdit(window.attributes)` in plugs/bootstrap.ts ever stops firing, Enter/F2
+    never opens an editor and the e2e fails. There is no other source of the editor on this page.
+
+    The Salary column is authored `aria-readonly="true"` so the same fixture also guards #159 through the
+    bootstrap: Enter/F2 on a read-only cell must NOT open an editor.
+  -->
+  <main>
+    <h1>Data Grid — editable bootstrap auto-upgrade fixture</h1>
+
+    <table role="grid" grid:cell-navigation grid:cell-edit aria-rowcount="3" aria-colcount="3" data-test="grid">
+      <thead>
+        <tr role="row" aria-rowindex="1">
+          <th role="columnheader" tabindex="-1" aria-colindex="1" data-row="0" data-col="0">Name</th>
+          <th role="columnheader" tabindex="-1" aria-colindex="2" data-row="0" data-col="1">Team</th>
+          <th role="columnheader" tabindex="-1" aria-colindex="3" data-row="0" data-col="2">Salary</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr role="row" aria-rowindex="2">
+          <td role="gridcell" tabindex="-1" aria-colindex="1" data-row="1" data-col="0">Aaron</td>
+          <td role="gridcell" tabindex="-1" aria-colindex="2" data-row="1" data-col="1">Engineering</td>
+          <td role="gridcell" tabindex="-1" aria-colindex="3" data-row="1" data-col="2" aria-readonly="true">110</td>
+        </tr>
+        <tr role="row" aria-rowindex="3">
+          <td role="gridcell" tabindex="-1" aria-colindex="1" data-row="2" data-col="0">Bianca</td>
+          <td role="gridcell" tabindex="-1" aria-colindex="2" data-row="2" data-col="1">Design</td>
+          <td role="gridcell" tabindex="-1" aria-colindex="3" data-row="2" data-col="2" aria-readonly="true">120</td>
+        </tr>
+      </tbody>
+    </table>
+  </main>
+
+  <!-- Bootstrap: applies patches, exposes globals, runs registerDataGrid + registerDataGridEdit. -->
+  <script type="module" src="/plugs/bootstrap.ts"></script>
+
+  <script type="module">
+    // The page never touches the behaviors directly — it only asks the registry to upgrade the tree,
+    // exactly what a real app's bootstrap does, and the registered behaviors attach themselves.
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+
+    function init() {
+      window.attributes.upgrade(document.body);
+      window.fixtureReady = true;
+    }
+  </script>
+</body>
+</html>

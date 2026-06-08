@@ -150,7 +150,9 @@ main.project-page-container {
     margin: 0;
 }
 
-@media (max-width: 768px) {
+/* Drop the tagline once the full nav + tagline stop fitting on one row,
+   well before the nav itself needs to collapse. */
+@media (max-width: 1280px) {
     .site-tagline {
         display: none;
     }
@@ -161,6 +163,31 @@ main.project-page-container {
     align-items: center;
     gap: 1rem;
 }
+
+/* Desktop nav layout (was inline on the <nav>; moved here so the mobile
+   media query can override it cleanly). */
+.site-nav {
+    display: flex;
+    gap: 0.75rem;
+    margin-right: 1.5rem;
+    align-items: center;
+    position: relative;
+    top: 2px;
+}
+
+/* Hamburger toggle: desktop-hidden, revealed only at mobile widths.
+   Scoped to .header-controls so it outranks the later `.header-icon`
+   display rule the button also carries. */
+.header-controls .nav-toggle {
+    display: none;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+}
+.nav-toggle .nav-toggle-close { display: none; }
+.site-header.nav-open .nav-toggle .nav-toggle-open { display: none; }
+.site-header.nav-open .nav-toggle .nav-toggle-close { display: block; }
 
 /* Grouped nav: light rounded containers with a small group header on top */
 .nav-group {
@@ -208,6 +235,57 @@ main.project-page-container {
 .nav-link:hover {
     opacity: 1;
     color: var(--color-primary);
+}
+
+/* ── Mobile nav: collapse the grouped nav into a hamburger dropdown.
+   Desktop (>860px) is untouched — the toggle stays hidden and the inline
+   nav renders exactly as before. ── */
+@media (max-width: 940px) {
+    .header-controls .nav-toggle {
+        display: flex;
+        align-items: center;
+        color: var(--color-text-muted);
+    }
+    .nav-toggle:hover {
+        color: var(--color-primary);
+    }
+
+    .site-nav {
+        position: absolute;
+        top: 100%;
+        left: 0;
+        right: 0;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.5rem;
+        margin: 0;
+        padding: var(--spacing-sm) var(--spacing-md);
+        background: rgba(255, 255, 255, 0.96);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border-bottom: 1px solid var(--color-border);
+        box-shadow: var(--shadow-md);
+        max-height: calc(100vh - var(--header-height, 57px));
+        overflow-y: auto;
+        display: none;
+    }
+    .site-header.nav-open .site-nav {
+        display: flex;
+    }
+
+    .nav-group {
+        width: 100%;
+        box-sizing: border-box;
+    }
+    .nav-group-links {
+        flex-wrap: wrap;
+        gap: 1rem 1.25rem;
+    }
+    /* Larger tap targets on touch screens. */
+    .nav-link {
+        padding: 0.25rem 0;
+        font-size: 1em;
+    }
 }
 
 .header-icon {
@@ -1326,6 +1404,13 @@ table td, table th {
     gap: var(--spacing-sm);
     flex-wrap: wrap;
     margin: 0 0 1.25rem;
+}
+
+/* Two chip groups (status + type) stacked on the left of the filter row. */
+.filter-groups {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
 }
 
 .status-filter {

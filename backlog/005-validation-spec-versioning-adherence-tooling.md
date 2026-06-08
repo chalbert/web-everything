@@ -1,5 +1,7 @@
 ---
 type: idea
+workItem: story
+size: 8
 status: open
 dateOpened: '2026-05-30'
 tags:

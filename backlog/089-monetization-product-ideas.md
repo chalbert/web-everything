@@ -1,5 +1,6 @@
 ---
 type: idea
+workItem: epic
 status: open
 dateOpened: "2026-06-06"
 tags: [monetization, business-model, open-source, conformance, certification, adapters, module-as-a-service, webdocs, registries, migration]

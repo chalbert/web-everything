@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loader → Background Task Handoff Playground - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <!-- Reuse the surface's rail styling (.bt-*) so the two playgrounds can't drift. -->
+  <link rel="stylesheet" href="/demos/background-task-surface-demo.css">
+  <link rel="stylesheet" href="/demos/loader-background-handoff-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Loader → Background Task Handoff Playground</h1>
+      <p>
+        The <strong>producer</strong> half of the
+        <a href="/blocks/background-task-surface/">Background Task Surface</a> handoff: a real
+        <a href="/blocks/resource-loader/">Resource Loader</a> running <code>backgroundLoad()</code>
+        escalates a slow load into a live <code>&lt;background-tasks&gt;</code> rail. Each card drives
+        the <strong>real pair</strong> &mdash; not a scripted mock &mdash; and a <strong>badge proves an
+        invariant</strong> of the escalation contract.
+      </p>
+      <p class="play-caveat">
+        <strong>Escalation:async trigger.</strong> A load escalates exactly when it crosses the Loader's
+        debounce threshold into <code>loading</code> &mdash; the moment the Loader already decided the
+        work was slow enough to surface a pending UI. Fast loads that resolve first never enter
+        <code>loading</code>, so they never reach the rail. The threshold is shortened here for a snappy
+        demo. Scenarios and the controllable-promise lever come from the same shared fixture module the
+        unit suite imports, so the badges and CI can't drift. This wires
+        <a href="/backlog/152-loader-background-task-handoff-wiring/">#152</a>.
+      </p>
+    </header>
+
+    <div id="examples">Loading scenarios&hellip;</div>
+  </main>
+
+  <!-- Playground: drives a real ResourceLoader → real <background-tasks> surface. Native APIs only. -->
+  <script type="module" src="/demos/loader-background-handoff-demo.ts"></script>
+</body>
+</html>

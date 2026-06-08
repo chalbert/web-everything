@@ -136,13 +136,14 @@
 {{ autoToggle("resource-action-usage", resourceActionHtml) }}
 
 <h4>Delete with Confirmation</h4>
-{% highlight "html" %}
+{% set resourceActionConfirmHtml %}
 <button resource-action="deleteItem"
         resource-action-detail='{"id": "123"}'
         resource-action-confirm="Are you sure?">
     Delete
 </button>
-{% endhighlight %}
+{% endset %}
+{{ autoToggle("resource-action-confirm", resourceActionConfirmHtml) }}
 
 <h4>Optimistic Update</h4>
 {% highlight "typescript" %}

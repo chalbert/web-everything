@@ -1,5 +1,8 @@
 ---
 type: decision
+workItem: story
+size: 3
+parent: "089"
 status: open
 dateOpened: "2026-06-06"
 tags: [licensing, open-source, fair-source, source-available, business-model, apache, fsl, polyform, cla, monetization, constellation]

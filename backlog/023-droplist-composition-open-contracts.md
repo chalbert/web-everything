@@ -1,5 +1,6 @@
 ---
 type: decision
+workItem: epic
 status: open
 dateOpened: '2026-06-02'
 tags:

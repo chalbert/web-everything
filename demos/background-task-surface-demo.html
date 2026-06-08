@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Background Task Surface Playground - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/background-task-surface-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Background Task Surface Playground</h1>
+      <p>
+        A live test surface for the
+        <a href="/blocks/background-task-surface/">Background Task Surface</a> block — the
+        <code>&lt;background-tasks&gt;</code> element that hosts long-running work off-view after it goes
+        async. Each card drives a real surface through a scripted Loader handle and a
+        <strong>badge proves an invariant</strong> of the contract: a task is registered via a bubbling
+        <code>background-task-register</code> event, the surface subscribes to the Loader's own state machine,
+        and announces completion/failure in a polite <code>role="status"</code> region.
+      </p>
+      <p class="play-caveat">
+        The scripted handle is the <em>test twin</em> of a real Loader at <code>escalation:async</code> — the
+        surface only needs <code>subscribe</code>/<code>getSnapshot</code>/<code>retry</code> off-view. The
+        scenarios and assertions come from the same shared fixture module the unit tests use, so the badges
+        and CI can't drift. This is the <strong>route-only baseline</strong>; the reload-durable tier is the
+        separate <a href="/backlog/134-background-task-surface-reload-durable-tier/">#134</a> adapter.
+      </p>
+    </header>
+
+    <div id="examples">Loading scenarios&hellip;</div>
+  </main>
+
+  <!-- Playground: drives a real <background-tasks> surface through scripted Loader handles. Native APIs only. -->
+  <script type="module" src="/demos/background-task-surface-demo.ts"></script>
+</body>
+</html>

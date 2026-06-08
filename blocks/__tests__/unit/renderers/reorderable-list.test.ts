@@ -102,6 +102,28 @@ describe('Reorderable List structure & roving tabindex', () => {
     expect(root.querySelector('[aria-grabbed]')).toBeNull();
   });
 
+  it('marks the candidate landing slot with data-reorder-target during a move, none at rest', () => {
+    // During a move the grabbed item's slot is the drop target (the gap a theme draws).
+    const moving: ReorderState = { order: ['spec', 'build', 'test', 'demo', 'ship'], focusIndex: 1, grabbedIndex: 1, grabbedFrom: 1 };
+    const root = renderReorderableList(TASKS, {}, moving);
+    const target = root.querySelectorAll('[data-reorder-target]');
+    expect(target).toHaveLength(1);
+    expect(target[0].getAttribute('data-reorder-id')).toBe('build');
+    expect(target[0].hasAttribute('data-reorder-grabbed')).toBe(true); // co-locates with the grabbed card here
+
+    // At rest (nothing grabbed) there is no drop target.
+    const atRest = renderReorderableList(TASKS, {}, initialState(TASKS));
+    expect(atRest.querySelectorAll('[data-reorder-target]')).toHaveLength(0);
+  });
+
+  it('reconcileOrder clears data-reorder-target on drop (nothing grabbed)', () => {
+    const root = renderReorderableList(TASKS, {}, { order: ['spec', 'build', 'test', 'demo', 'ship'], focusIndex: 1, grabbedIndex: 1, grabbedFrom: 1 });
+    expect(root.querySelectorAll('[data-reorder-target]')).toHaveLength(1);
+    // Drop: reconcile to a grab-released state — the marker must clear.
+    reconcileOrder(root, { order: ['spec', 'build', 'test', 'demo', 'ship'], focusIndex: 1, grabbedIndex: -1, grabbedFrom: -1 });
+    expect(root.querySelectorAll('[data-reorder-target]')).toHaveLength(0);
+  });
+
   it('renders the scoped handle when grab="handle"', () => {
     const root = renderReorderableList(TASKS, { grab: 'handle' });
     expect(root.getAttribute('grab')).toBe('handle');

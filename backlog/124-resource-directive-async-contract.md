@@ -1,5 +1,8 @@
 ---
 type: decision
+workItem: story
+size: 2
+parent: "070"
 status: open
 dateOpened: "2026-06-06"
 tags: [jsx, adapters, directives, resource, async, loader, intent]

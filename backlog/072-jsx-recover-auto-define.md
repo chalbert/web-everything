@@ -1,5 +1,7 @@
 ---
 type: decision
+workItem: story
+size: 2
 status: open
 dateOpened: "2026-06-06"
 tags: [jsx, adapters, renderer, custom-elements]

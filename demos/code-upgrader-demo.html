@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Code Upgrader Playground - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/code-upgrader-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Code Upgrader Playground</h1>
+      <p>
+        A live surface for <a href="/backlog/094-ai-upgrader-tools/">backlog #094</a> — an
+        <strong>AI upgrader</strong> that takes <strong>existing/legacy code and lifts it onto the
+        standard</strong>. It is the inverse of <a href="/demos/module-as-a-service-demo.html">Module-as-a-Service</a>:
+        MaaS serves one authored component in many forms; the upgrader takes a legacy component and
+        produces the authored <a href="/blocks/component/"><code>&lt;component&gt;</code></a> in the first place.
+        Each card runs the shared engine: <strong>legacy source → neutral structure (IR) → generated
+        <code>&lt;component&gt;</code> → verify gate → live element</strong>.
+      </p>
+      <p class="play-caveat">
+        <strong>AI is a swappable provider.</strong> The analyzer (code → IR) is registry-backed — the same
+        inject-a-provider shape as the <a href="/backlog/081-module-as-a-service-provider/">MaaS</a> compiler
+        seam. A <strong>deterministic reference provider</strong> (no model key) handles one source path —
+        vanilla web components; a <strong>bring-your-own-key model provider</strong>
+        (<a href="/backlog/188-upgrader-byo-ai-model-analyzer/">#188</a>) drops into the same registry for the
+        messier input the heuristic rejects, with no engine change. Below, the model section is driven by a
+        <em>scripted</em> client (no key in the browser); a real run swaps in the thin Anthropic client.
+        <strong>The verify gate is the moat:</strong> output is only
+        <em>offered</em> when it re-parses, round-trips to the analyzed structure without drift, and references
+        only real intents — generic AI emits plausible code, this emits <em>checked</em> code. Un-verified output
+        is shown for inspection but never presented as trusted.
+      </p>
+    </header>
+
+    <div id="examples">Loading examples&hellip;</div>
+  </main>
+
+  <script type="module" src="/demos/code-upgrader-demo.ts"></script>
+</body>
+</html>

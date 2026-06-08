@@ -1,7 +1,10 @@
 ---
 type: decision
-status: open
+workItem: story
+size: 3
+status: resolved
 dateOpened: '2026-06-06'
+dateResolved: '2026-06-07'
 tags:
   - webcomponents
   - component
@@ -25,3 +28,11 @@ Both forms lower to byte-identical output. Implicit is safe under the intended b
 Parsing rule: a lone direct-child `<template>` is the explicit wrapper; anything else (multiple children, or a single non-`<template>` child) is implicit content. Edge: to render a *literal* `<template>` element, author it inside the explicit wrapper or alongside a sibling.
 
 **Open edge:** whether to ever *require* the explicit form (e.g. if a native declarative-custom-element standard mandates a `<template>` child). Until then, implicit is canonical.
+
+## Resolution (2026-06-07)
+
+**Ratified: the component's children ARE the template.** The recommendation above is the rule. This was already canonical in the [Component block](/blocks/component/) authoring contract ([component.njk](../src/_includes/block-descriptions/component.njk) — headline + authoring contract document both the implicit default and the inert-`<template>` escape hatch); this item just formalizes it. The report's Open Points Register (DC-11) is flipped `🔶 DECIDE` → `✅ RESOLVED`.
+
+The "Open edge" is carried forward as a **deferred reversal trigger**, not a present fork: revisit only if a native declarative-custom-element standard ships that *mandates* a `<template>` child.
+
+Sub-threads left as-is: [#040 (DC-9)](/backlog/040-component-implicit-template/) is subsumed by this decision (childless `<component>` = empty template, the zero-children case); [#039 (DC-10)](/backlog/039-component-explicit-empty-template/) remains genuinely open — the explicit-empty round-trip rule surfaces when the first non-empty-template fixture lands.

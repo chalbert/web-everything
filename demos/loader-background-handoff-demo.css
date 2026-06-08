@@ -1,0 +1,10 @@
+/* Loader → Background Task Handoff playground — producer-specific tweaks.
+   Shared chrome (.play, .ex, .pane, .badge, .summary, …) comes from playground.css;
+   the rail styling (.bt-*) is reused from background-task-surface-demo.css so the
+   two playgrounds can't drift. */
+
+/* The loader's target div sits inside the surface only as an event source —
+   keep it out of the rail's visual flow. */
+background-tasks > div:not([class]) {
+  display: none;
+}

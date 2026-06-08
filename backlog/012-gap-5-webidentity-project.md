@@ -1,5 +1,7 @@
 ---
 type: decision
+workItem: story
+size: 5
 status: open
 dateOpened: "2026-05-31"
 tags: [gap-analysis, project, protocol, identity, auth]

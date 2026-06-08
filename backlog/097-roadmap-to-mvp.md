@@ -1,119 +1,79 @@
 ---
-type: decision
+type: idea
+workItem: epic
+parent: "099"
 status: open
 dateOpened: "2026-06-06"
-tags: [roadmap, mvp, go-to-market, ci, auth, licensing, payments, distribution, marketing, legal, trademark, insurance, monetization, solo-founder]
+tags: [roadmap, mvp, go-to-market, strategy, emergent, monetization, solo-founder, product]
 crossRef: { url: /backlog/089-monetization-product-ideas/, label: "Product ideas (#089)" }
 ---
 
-# Roadmap to MVP — first paid product + the scaffolding to ship it (CI, auth, payments, distribution, marketing)
+# Emergent MVP strategy — work many product candidates; let the MVP emerge
 
 The path from "ideas catalogued" to **one shipped, paying product**, run by a
-single person. Sequencing is governed by the solo-founder lens in
-[#089](/backlog/089-monetization-product-ideas/): **lowest operational burden
-first** — a tier-1 *self-run tool* with **bring-your-own-AI** (no model cost, no
-uptime, no support SLA). This item is the self-contained plan; sub-items get their
-own write-ups as they start.
+single person. The earlier framing tried to *pick* the first product up front;
+the resolved approach is the opposite: **the product is too in flux to commit a
+scope to now, so we work as many candidate ideas as we can in parallel and let
+the MVP emerge** from what proves out. This item is the **living strategy doc**
+for that — not an authoritative product spec.
 
-## MVP product choice (recommendation in bold)
+Two things were decoupled to make this work:
 
-**Flagship = the AI code-tool family on the shared `webadapters` core, shipped as
-one licensed self-run CLI.** All three of mockup→code ([#086](/backlog/086-mockup-to-standard-code-tool/)),
-upgraders ([#094](/backlog/094-ai-upgrader-tools/)), and the conformance auto-fix
-agent ([#095](/backlog/095-conformance-auto-fix-agent/)) share ~80% of one engine:
-*input adapter → neutral structure → verify-gated generation*. **Ship the engine +
-one input adapter first**, then add the others as adapters — not separate products.
+- **Product candidates** (this epic) — worked in parallel, each as its own MVP
+  with its own growth path. The list below is a **menu, not a commitment.**
+- **Commercialization infrastructure** ([#181](/backlog/181-commercialization-infrastructure/))
+  — auth/licensing, payments, marketing site, marketing strategy, legal. This is
+  **product-agnostic scaffolding** and is tracked in its own epic so it isn't
+  tangled into any single product's roadmap. Sequencing is still governed by the
+  solo-founder lens in [#089](/backlog/089-monetization-product-ideas/):
+  **lowest operational burden first** (tier-1 self-run tools, bring-your-own-AI).
 
-- **Recommended first input adapter:** start with the one that best demos the
-  "propose-and-verify" moat with least model risk. Candidates: mockup→code (best
-  "wow"), upgrader (clearest enterprise pain), auto-fix (tightest verify loop).
-  *Open — pick one; the engine is shared regardless.*
+## Keep this updated — it's a living doc, not a one-time decision
 
-## Phases
+Because the MVP *emerges*, this strategy must track reality:
 
-**Phase 0 — Decide & scaffold**
-- Pick the first input adapter (above).
-- **Open-core split:** engine/standard stay open; decide where the *licensed* CLI
-  lives (new repo vs. Frontier UI vs. Plateau) and what's open vs. closed.
-- Pricing shape (per-seat / per-repo; subscription vs. perpetual+updates).
+- **When you work a product candidate, update this item** — note what's proving
+  out, what isn't, and how the picture of "the MVP" is converging. The emerging
+  MVP is whatever the worked candidates are pointing at, recorded here.
+- Treat the candidate list as **non-authoritative**: add, drop, or re-rank
+  candidates as the work teaches us. Don't gate a candidate on this doc; gate the
+  doc on the candidates.
 
-**Phase 1 — The MVP tool**
-- Build the self-run CLI on the `webadapters` AST core + analyzer/provider
-  registry + one reference AI provider (BYO key, 2–3 models behind the registry).
-- **Quality gate built in:** every emitted artifact round-trips + passes
-  `check:standards` before it's offered — the trust spine and the moat.
-- Package as `npx`-able CLI; cross-platform; offline-friendly.
+## Product candidates (a menu — non-authoritative)
 
-**Phase 2 — Monetization scaffolding ("CI, auth, etc.")**
-- **Auth/licensing — keep it tier-1:** a **license-key** model for a self-run
-  tool, *not* a hosted auth system. Signed, offline-tolerant keys with optional
-  periodic phone-home. Minimal serverless endpoint for issuance/validation — the
-  only always-on surface, kept tiny.
-- **Payments:** lean to a **merchant-of-record (Lemon Squeezy / Paddle)** over raw
-  Stripe — it handles global VAT/sales-tax, which is a real solo-founder time sink;
-  webhook → license-key issuance.
-- **Product CI/release:** build, test, **sign**, publish to npm, changelog, release
-  artifacts. (Distinct from the conformance CI *tool* the product itself runs.)
-- **Telemetry:** opt-in, privacy-first — **no source code leaves the machine**
-  (non-negotiable trust point for a code tool); usage counts only.
-- **BYO-AI key plumbing:** secure local key handling; provider registry is the
-  swap seam.
+All share ~80% of one engine: *input adapter → neutral structure →
+verify-gated generation*. Build each as an adapter on the shared `webadapters`
+core; the **verify gate** (round-trip + `check:standards` before any artifact is
+offered) is the trust spine and the moat, identical across all of them.
 
-**Phase 3 — Launch: marketing & distribution**
-- **Distribution:** npm/`npx` as the primary channel; GitHub releases; a VS Code
-  command later (the repo is already a VS Code extension context). Listing on
-  relevant registries/marketplaces.
-- **Marketing:** the **standard's own site is the top of funnel** — "the website IS
-  the spec" doubles as content marketing; the tool is the conversion. Dev-first
-  motion: the *propose-and-verify* demo (mockup/legacy code → provably-conformant
-  output) is the hook; show, don't tell. Launch surfaces: a landing+pricing page
-  (reuse **webdocs**, [#091](/backlog/091-web-docs-as-a-service-plateau/)),
-  a demo video, Show HN / dev communities, conformance-as-credibility.
-- **Free tier → paid:** free self-run on your own machine (limited); paid for scale
-  / CI / team use — the open suite + free self-attestation feeds the funnel.
-- **Support model — protect solo bandwidth:** docs-first to deflect; async/community
-  (GitHub issues, Discord); **explicit no-SLA**. No live-serve dependency that can
-  page you.
-
-## Legal & business protection (parallel track — start early)
-
-Not a product phase but a prerequisite to *charging money*; sequence alongside
-Phase 0–2, much of it before first sale. Treat as a checklist to review (likely
-with a one-off professional, not ongoing — keep it low-bottleneck):
-
-- **Legal entity** — form one before taking payment (liability shield, clean
-  ownership of IP and revenue). Jurisdiction/type TBD.
-- **Brand protection** — trademark the product/brand name; secure domains and
-  handles; confirm the name is clear before marketing spend. "Web Everything" /
-  "Plateau" / Frontier UI naming clearance.
-- **OSS license + commercial license** — the full split is its own decision in
-  [#098](/backlog/098-licensing-strategy/): WE = Apache (pure standard), Frontier UI
-  = Apache (open reference impl), Plateau = fair source ("available"), products =
-  proprietary EULA. Deferred there; not short-term-critical, but settle before
-  launch and keep the tiers labelled honestly.
-- **Terms of Service / EULA + Privacy Policy** — required to sell; the privacy
-  policy must state the telemetry stance ("no source code leaves the machine") and
-  be **GDPR-compliant** (EU customers likely). A merchant-of-record (Phase 2) also
-  offloads some compliance here.
-- **Insurance** — professional liability / E&O; relevant once enterprises rely on
-  the tool's output. Revisit as deal size grows.
-- **Data processing / DPA** — if any customer data touches our systems (the
-  license endpoint, telemetry), have a DPA ready; minimise data to minimise this.
-- **A "legal-requirements review" pass** — a single structured review of the above
-  (and tax registration via the MoR) before launch, captured as a checklist.
-
-## Cross-cutting open decisions
-
-- **First input adapter** (mockup vs. upgrader vs. auto-fix).
-- **Open-core boundary** — what ships open vs. licensed, and the repo home.
-- **License-key vs. hosted-auth** — strong recommendation: license-key (lowest ops).
-- **Merchant-of-record vs. Stripe-direct** — recommend MoR for solo (tax offload).
-- **Pricing** — model + tiers.
-- **Telemetry stance** — confirm "no code leaves the machine" as a public promise.
+- **AI upgrader** ([#094](/backlog/094-ai-upgrader-tools/)) — *MVP shipped (2026-06-08).*
+  Foreign/legacy code → conformant output. Clearest enterprise pain + bounded
+  model variance (structured input). The shared engine is now **real**: input
+  adapter → neutral `ComponentIR` → **verify-gated** generation, AI analyzer
+  behind a swappable registry with a deterministic no-key reference provider
+  proving the seam. Generation reuses the existing MaaS `serve()` core (no
+  parallel generator); the verify gate (parse + fidelity round-trip + intent
+  conformance) is the **propose-and-verify moat**, shared across the whole
+  candidate menu. Live playground + 16 unit tests. **This is the emerging MVP
+  spine** — the other candidates plug their input adapter onto this same engine.
+  Growth: BYO-AI provider ([#188](/backlog/188-upgrader-byo-ai-model-analyzer/)),
+  intent inference ([#189](/backlog/189-upgrader-intent-inference/)), more input
+  adapters ([#190](/backlog/190-upgrader-additional-input-adapters/)), version
+  codemods ([#191](/backlog/191-upgrader-version-migration-codemods/)).
+- **Conformance auto-fix agent** ([#095](/backlog/095-conformance-auto-fix-agent/))
+  — *being worked.* Fix violations against the checker; tightest verify loop,
+  lowest model risk. Effectively the upgrader's narrowest input case — folds onto
+  the same engine. Its own MVP, large room to grow.
+- **Mockup → code** ([#086](/backlog/086-mockup-to-standard-code-tool/)) —
+  **deferred post-MVP.** Best marketing "wow," but open-ended visual input =
+  highest model variance and a bigger/riskier build; not needed to prove the
+  engine or make a first sale. Add later on the same engine as a funnel demo.
 
 ## Sequencing note
 
-Everything here is deliberately **tier-1**: the one always-on surface is the tiny
-license endpoint. The bigger plays (MaaS live CDN #081, business-rule/compliance
+Everything here stays **tier-1**: self-run tools, BYO-AI, no model cost / uptime
+/ SLA. The bigger always-on plays (MaaS live CDN #081, business-rule/compliance
 manager #093, the relationship-graph dashboard #092) are **post-MVP** — they add
-uptime/contract burden and wait until the self-run tool funds taking that on.
+uptime/contract burden and wait until a self-run tool funds taking that on. The
+one tiny always-on surface (the license endpoint) lives in the infra epic
+([#181](/backlog/181-commercialization-infrastructure/)), not here.

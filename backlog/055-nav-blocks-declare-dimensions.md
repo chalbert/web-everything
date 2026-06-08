@@ -1,5 +1,6 @@
 ---
 type: idea
+workItem: task
 status: open
 dateOpened: "2026-06-03"
 tags: [navigation, intent, tabs, nav-list, blocks, vocabulary, propagation]

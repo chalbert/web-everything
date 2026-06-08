@@ -7,6 +7,14 @@
 export { default as ResourceLoader } from './ResourceLoader';
 export type { LoadResult } from './ResourceLoader';
 
+// Background Task Surface handoff (producer side)
+export {
+  backgroundLoad,
+  ResourceLoaderHandle,
+  BACKGROUND_TASK_REGISTER_EVENT,
+} from './backgroundHandoff';
+export type { BackgroundLoadOptions } from './backgroundHandoff';
+
 // Traits
 export { withSoftBlocking } from './traits/withSoftBlocking';
 export type { SoftBlockingOptions } from './traits/withSoftBlocking';

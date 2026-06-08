@@ -1,5 +1,8 @@
 ---
 type: idea
+workItem: story
+size: 8
+parent: "097"
 status: open
 dateOpened: "2026-06-06"
 tags: [design-to-code, mockup, ai-agnostic, provider-registry, codegen, standard-compliance, adapters, native-first, swappable-provider]

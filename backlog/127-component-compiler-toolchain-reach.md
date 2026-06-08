@@ -1,5 +1,8 @@
 ---
 type: decision
+workItem: story
+size: 2
+parent: "125"
 status: open
 dateOpened: "2026-06-06"
 tags: [component, adapters, packaging, build-tooling, swc, typescript]

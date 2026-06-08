@@ -340,17 +340,38 @@ class TransientElement extends HTMLElement {
     </p>
 
     <h4 id="render-strategy-contract">Contract</h4>
-    <p>Mirrors <code>CustomChangeStrategy</code> so the two read as a family. Capability is feature-detected by which optional methods a provider implements — a strategy without <code>update</code> is mount-once.</p>
+    <p>Mirrors <code>CustomChangeStrategy</code> so the two read as a family: a <code>readonly key</code> id, capability feature-detected by which optional methods a provider implements (a strategy without <code>update</code> is mount-once), and a <strong>non-generic</strong> registry signature — exactly as the sibling avoids <code>CustomChangeStrategy&lt;T&gt;</code>.</p>
 {% highlight "typescript" %}
+// RenderInput is a tagged union keyed by strategy id (resolved decision):
+// one registry signature, each variant carries its strategy's own payload,
+// and the registered provider validates the variant it receives. Mirrors the
+// id-based resolution already used by CustomRenderStrategyRegistry.
+type RenderInput =
+  | { strategy: 'declarative-static'; template: ParsedTemplate; bindings: BindingMap }
+  | { strategy: 'vdom'; render: () => VTree }
+  | { strategy: 'fine-grained'; computation: ReactiveComputation }
+  | { strategy: 'imperative'; build: (host: ParentNode) => void };
+
 interface RenderStrategy {
+  readonly key: string;   // 'declarative-static' | 'vdom' | … — symmetric with CustomChangeStrategy.key
   // Realize a tree into live DOM under host; return a handle for later updates.
   mount(tree: RenderInput, host: ParentNode, scope: Scope): RenderHandle;
   // Reflect new state into the mounted tree (rebind / diff / recompute / rerun).
+  // The STRATEGY owns when this runs — it subscribes to its own reactivity
+  // source (signals self-track; vdom schedules its own diff). The host NEVER
+  // calls update() on a Change Record. Mount-once strategies omit it entirely.
   update?(handle: RenderHandle, next: RenderInput): void;
   // Tear down bindings/subscriptions; leave the DOM removable.
   dispose?(handle: RenderHandle): void;
 }
 {% endhighlight %}
+    <p>
+        <strong>Re-render trigger ownership (resolved):</strong> the strategy subscribes itself to its
+        reactivity source; the host stays out of the reactivity loop. This matches fine-grained reality
+        (signals self-track at read-time), keeps the Change&nbsp;⁄&nbsp;Render seam explicit (change strategies
+        <em>detect</em>, render strategies <em>commit</em>), lets mount-once strategies simply omit
+        <code>update</code>, and preserves the project's <em>no&nbsp;runtime&nbsp;magic</em> guarantee.
+    </p>
     <p>
         The active strategy is resolved per scope through the injector chain via
         <code>CustomRenderStrategyRegistry</code> — <strong>nearest-scope wins</strong> — so different subtrees of

@@ -31,7 +31,10 @@
         <a href="/intents/focus-delegation/">Focus Delegation</a> intent (strategy <code>roving</code>,
         orientation <code>both</code>). Each card pairs a key sequence with the cell it lands on,
         renders the grid there, and runs the <strong>same audit the CI conformance suite asserts</strong>.
-        The last card is <strong>live</strong>: click in and arrow around the cells with real DOM focus.
+        The last navigation card is <strong>live</strong>: click in and arrow around the cells with real
+        DOM focus. A second section exercises the <strong>editable sub-pattern</strong>
+        (<code>grid:cell-edit</code>): Enter/F2 to edit a cell, arrows edit the field not the grid, Enter/Escape
+        to commit/cancel.
       </p>
       <p class="play-caveat">
         A green badge means the rendered grid satisfies the <em>verified</em> contract: a native
@@ -41,8 +44,10 @@
         <strong>exactly one</strong> cell at <code>tabindex="0"</code> — the active cell — and every
         other at <code>-1</code> (the roving tabindex). The arrow keys move one cell (clamping at the
         edges), Home/End jump to the row ends, Ctrl+Home/Ctrl+End to the grid corners, and
-        PageUp/PageDown by a page. The renderer here is a deterministic <em>reference</em>; concrete
-        strategies (virtualization, editable cells, server paging) live in Frontier UI.
+        PageUp/PageDown by a page. The editable section adds the <code>grid:cell-edit</code> mode model;
+        its badge is green while editing (navigation suspended) or navigating (no editor). The renderer
+        here is a deterministic <em>reference</em>; remaining strategies (virtualization, server paging) and
+        the commit strategy behind editing live in Frontier UI.
       </p>
     </header>
 

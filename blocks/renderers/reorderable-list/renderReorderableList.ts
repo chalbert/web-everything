@@ -191,7 +191,10 @@ function itemEl(item: ReorderItem, index: number, state: ReorderState, config: R
   li.setAttribute('data-reorder-id', item.id);
   li.setAttribute('preserve-on-move', ''); // atomic Element.moveBefore() keeps the card's state
   li.setAttribute('tabindex', index === state.focusIndex ? '0' : '-1');
-  if (index === state.grabbedIndex) li.setAttribute('data-reorder-grabbed', '');
+  if (index === state.grabbedIndex) {
+    li.setAttribute('data-reorder-grabbed', ''); // this card is the one being moved (lift it)
+    li.setAttribute('data-reorder-target', ''); // and its slot is the candidate landing position
+  }
 
   if (config.grab === 'handle') {
     const handle = document.createElement('span');
@@ -209,8 +212,10 @@ function itemEl(item: ReorderItem, index: number, state: ReorderState, config: R
 /**
  * Render the reorderable list for an item set + config at a given state. Returns a single
  * <ul role="listbox" reorderable> of <li role="option" data-reorder-id preserve-on-move> in
- * `state.order`, with the roving tabindex on `state.focusIndex` and `data-reorder-grabbed` on the
- * grabbed item (if any). Defaults to the initial state (original order, focus on the first item).
+ * `state.order`, with the roving tabindex on `state.focusIndex` and, on the grabbed item (if any),
+ * both `data-reorder-grabbed` (the lifted card) and `data-reorder-target` (its slot is the candidate
+ * landing position — the gap a theme draws). Defaults to the initial state (original order, focus on
+ * the first item).
  */
 export function renderReorderableList(
   items: ReorderItem[],
@@ -235,7 +240,8 @@ export function renderReorderableList(
 /**
  * Reconcile a rendered list's DOM to a state IN PLACE: relocate items to match `state.order` using the
  * atomic `Element.moveBefore()` (falling back to `insertBefore` where unsupported — so a moved card
- * keeps focus/animation/connection state), then refresh the roving tabindex and the grabbed marker.
+ * keeps focus/animation/connection state), then refresh the roving tabindex and the grabbed/target
+ * markers.
  * Returns the now-focusable item so a caller can `.focus()` it. Used by the live demo on each keystroke
  * without re-rendering — this is where the headline moveBefore substrate is exercised.
  */
@@ -258,8 +264,13 @@ export function reconcileOrder(root: HTMLElement, state: ReorderState): HTMLElem
     if (!item) return;
     const isFocus = index === state.focusIndex;
     item.setAttribute('tabindex', isFocus ? '0' : '-1');
-    if (index === state.grabbedIndex) item.setAttribute('data-reorder-grabbed', '');
-    else item.removeAttribute('data-reorder-grabbed');
+    if (index === state.grabbedIndex) {
+      item.setAttribute('data-reorder-grabbed', '');
+      item.setAttribute('data-reorder-target', ''); // the live candidate landing slot — clears on drop/cancel
+    } else {
+      item.removeAttribute('data-reorder-grabbed');
+      item.removeAttribute('data-reorder-target');
+    }
     if (isFocus) focusable = item;
   });
   return focusable;
@@ -282,7 +293,9 @@ export interface AuditResult {
  * `data-reorder-id` and `preserve-on-move`), DOM order matching `state.order`, the roving-tabindex
  * invariant (exactly one item is `tabindex="0"` and it is the focused item; every other is `-1`), and
  * the grabbed marker (exactly the grabbed item carries `data-reorder-grabbed`, or none when nothing is
- * grabbed). A bug in the projection, the order, or the roving logic turns this red.
+ * grabbed), and the drop-position marker (exactly one `data-reorder-target` — the candidate landing
+ * slot — during a move, none at rest). A bug in the projection, the order, or the roving logic turns
+ * this red.
  */
 export function auditReorderableList(root: HTMLElement, items: ReorderItem[], state: ReorderState): AuditResult {
   const checks: AuditCheck[] = [];
@@ -316,6 +329,17 @@ export function auditReorderableList(root: HTMLElement, items: ReorderItem[], st
   } else {
     add('exactly the grabbed item carries data-reorder-grabbed',
       grabbedEls.length === 1 && grabbedEls[0].getAttribute('data-reorder-id') === state.order[state.grabbedIndex]);
+  }
+
+  // ── Drop-position marker — the candidate landing slot (the gap a theme draws) ──
+  // The reference relocates the grabbed item live, so its slot IS the drop target: exactly one
+  // [data-reorder-target] during a move, none at rest.
+  const targetEls = lis.filter((li) => li.hasAttribute('data-reorder-target'));
+  if (state.grabbedIndex === -1) {
+    add('no item is marked the drop target at rest', targetEls.length === 0);
+  } else {
+    add('exactly one item marks the drop position (data-reorder-target) during a move',
+      targetEls.length === 1 && targetEls[0].getAttribute('data-reorder-id') === state.order[state.grabbedIndex]);
   }
 
   return { ok: checks.every((c) => c.pass), checks };

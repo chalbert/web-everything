@@ -1,7 +1,11 @@
 ---
 type: idea
+workItem: story
+size: 3
+parent: "137"
 status: open
 dateOpened: "2026-06-07"
+dateStarted: "2026-06-07"
 tags: [droplist, autocomplete, filter, live-status, loader, error, behavior, a11y]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -27,3 +31,30 @@ or a `filter-error` CustomEvent) when the consumer's source rejects or the reque
 
 Acceptance: a failed async filter request announces an error through the shared `live-status` region
 (not a silent busy listbox), and a stale rejection is dropped like a stale settle.
+
+## Correction (reopened 2026-06-07)
+
+> **Was resolved in error.** The only implementation of this surface was built in the **legacy `plateau` repo**, since confirmed **abandoned** — the initial single-repo prototype, superseded by Web Everything + Frontier UI + plateau-app. It is **not in the live project**: the WE *spec* exists, but there is **no reference implementation** in Frontier UI or the WE `plugs/`, and the (now-removed) `graduatedTo` pointed into dead code. Reopened as a **fresh build** against the live reference implementation (Frontier UI / WE `plugs/`, per AGENTS.md) — **do not migrate or consult plateau** (explicitly not a model). The original `## Progress` below describes the void plateau build and is retained only as history.
+
+## Progress
+- **Status:** resolved — error channel built end-to-end, contract proven by happy-dom tests.
+- **Branch:** changes in the `plateau` repo (`src/blocks/attributes/`) + spec page in `webeverything`.
+- **Done:**
+  - `Filter.ts` — `reject(message?)` companion to `respond` in the `filter` request detail (exported
+    `FilterRequestDetail`), with the SAME stale guard (`signal.aborted || #inFlight !== controller`).
+    On reject: clears `aria-busy`, leaves prior options in place, emits `filter-error`, and announces
+    inline (`#announceError`) only when no `live-status` owns the region.
+  - `LiveStatus.ts` — consumes `filter-error` → `announce({ state: 'error', message })` (no message →
+    default "Something went wrong").
+  - `AutoComplete.ts` — already routed source `.catch` → `reject` (was falling back to `respond([])`
+    before the channel existed); now the real channel fires.
+  - Tests: `Filter.test.ts` (+6 reject cases: inline announce, default text, event payload,
+    options-preserved, stale-drop) and `LiveStatus.test.ts` (+filter-error consume, default text, and
+    the #023-style one-region/no-double-announce integration on a rejecting async request). 39 related
+    tests green; plateau `tsc` clean for touched files.
+  - Spec: `autocomplete.njk` documents the symmetric failure channel; demo card 3 (failing source)
+    added to `plateau/src/auto-complete-demo.ts`. `check:standards` green (0 errors).
+- **Next:** none — closed. Demo *playground* can't be eyeballed yet due to a pre-existing crash →
+  filed as **#156** (autocomplete conformance demo substrate crash); not caused by this item.
+- **Notes:** the error path deliberately does NOT clear the listbox (a transient failure shouldn't
+  wipe still-actionable results); only `aria-busy` drops and the announcer carries the error.

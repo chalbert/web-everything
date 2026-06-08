@@ -18,7 +18,11 @@
             <p class="site-tagline" style="margin: 0; padding-left: 1rem; border-left: 1px solid var(--color-border, #e2e8f0); line-height: 1.2; position: relative; top: 2px;">Defining the missing standards for the modern web.</p>
         </div>
         <div class="header-controls">
-            <nav class="site-nav" style="display: flex; gap: 0.75rem; margin-right: 1.5rem; align-items: center; position: relative; top: 2px;">
+            <button id="nav-toggle" class="nav-toggle header-icon" aria-label="Menu" aria-controls="site-nav" aria-expanded="false">
+                <svg class="nav-toggle-open" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                <svg class="nav-toggle-close" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            </button>
+            <nav id="site-nav" class="site-nav">
                 <!-- Catalogs: browse the standards -->
                 <div class="nav-group">
                     <span class="nav-group-label">Standards</span>
@@ -66,6 +70,43 @@
     <script src="/assets/js/mode-selector.js"></script>
     <script src="/assets/js/format-selector.js"></script>
     </footer>
+
+    <!-- Mobile nav toggle (no effect on desktop — toggle is hidden there) -->
+    <script>
+    (function() {
+        var header = document.querySelector('.site-header');
+        var toggle = document.getElementById('nav-toggle');
+        var nav = document.getElementById('site-nav');
+        if (!header || !toggle || !nav) return;
+
+        function setOpen(open) {
+            header.classList.toggle('nav-open', open);
+            toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        }
+
+        toggle.addEventListener('click', function() {
+            setOpen(!header.classList.contains('nav-open'));
+        });
+        // Tapping a link navigates away — collapse the menu first.
+        nav.addEventListener('click', function(e) {
+            if (e.target.closest('a')) setOpen(false);
+        });
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') setOpen(false);
+        });
+        // Tap outside the open menu to dismiss.
+        document.addEventListener('click', function(e) {
+            if (header.classList.contains('nav-open') &&
+                !nav.contains(e.target) && !toggle.contains(e.target)) {
+                setOpen(false);
+            }
+        });
+        // Returning to a desktop width hides the toggle; clear any open state.
+        window.addEventListener('resize', function() {
+            if (window.innerWidth > 940) setOpen(false);
+        });
+    })();
+    </script>
 
     <!-- Spec Explorer side panel (dev only — loads from Vite dev server) -->
     <div id="claude-panel" class="claude-panel" aria-hidden="true">

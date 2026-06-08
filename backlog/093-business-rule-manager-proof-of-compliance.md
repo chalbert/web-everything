@@ -1,5 +1,8 @@
 ---
 type: idea
+workItem: story
+size: 8
+parent: "089"
 status: open
 dateOpened: "2026-06-06"
 tags: [monetization, business-model, plateau, platform-manager, business-rules, compliance, audit, webvalidation, webtraces, webexpressions, governance, enterprise]

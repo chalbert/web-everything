@@ -1,5 +1,7 @@
 ---
 type: idea
+workItem: story
+size: 5
 status: open
 dateOpened: "2026-06-06"
 tags: [mocks, proxy, dev-server, contract-testing, http, plateau, tooling, dx, standard]

@@ -33,7 +33,10 @@
         card pairs a key sequence with the order it leaves behind, renders the list at that state, and
         runs the <strong>same audit the CI conformance suite asserts</strong>. The last card is
         <strong>live</strong>: drag items with the pointer, or grab and move them with the keyboard —
-        items relocate with the atomic <code>Element.moveBefore()</code>.
+        items relocate with the atomic <code>Element.moveBefore()</code>. A second section covers the
+        Tier-2 <strong>cross-list</strong> scope (<code>withCrossListReorder</code>): items move between
+        sibling lists sharing a <code>reorder-group</code> key, the roving tabindex spanning the whole
+        group and Left/Right moving an item across lists.
       </p>
       <p class="play-caveat">
         A green badge means the rendered list satisfies the <em>verified</em> contract: a native
@@ -43,8 +46,8 @@
         item — and every other at <code>-1</code> (the roving tabindex), with the grabbed item marked
         <code>data-reorder-grabbed</code> (never the deprecated <code>aria-grabbed</code>). The reducer,
         renderer, announcer, and audit are the one shared source the CI suite runs. The renderer here is
-        a deterministic <em>reference</em>; concrete strategies (a real persistence backend, cross-list
-        groups, virtualization) live in Frontier UI.
+        a deterministic <em>reference</em>; production strategies (a real persistence backend,
+        virtualization, drag styling) live in Frontier UI.
       </p>
     </header>
 

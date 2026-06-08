@@ -1,5 +1,8 @@
 ---
 type: idea
+workItem: story
+size: 5
+parent: "089"
 status: open
 dateOpened: "2026-06-06"
 tags: [monetization, business-model, webdocs, plateau, hosting, conformance, design-system, documentation]

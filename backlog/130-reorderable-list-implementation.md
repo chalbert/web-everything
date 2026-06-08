@@ -1,7 +1,10 @@
 ---
 type: idea
+workItem: story
+size: 8
 status: resolved
 dateOpened: '2026-06-06'
+dateResolved: "2026-06-07"
 graduatedTo: blocks/renderers/reorderable-list/ (Reorderable List block, status draft) + demos/reorderable-list-demo.* (Reorderable List Playground)
 tags:
   - reorder

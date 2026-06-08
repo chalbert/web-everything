@@ -1,5 +1,8 @@
 ---
 type: idea
+workItem: story
+size: 5
+parent: "099"
 status: open
 dateOpened: "2026-06-06"
 tags: [changelog, manifest, versioning, semver, migration, codemod, auto-update, standard, evergreen, machine-readable]

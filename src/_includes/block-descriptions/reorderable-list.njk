@@ -85,7 +85,9 @@
 <pre><code class="language-css">/* The item currently grabbed */
 [reorderable] [data-reorder-grabbed] { ... }
 
-/* The candidate drop position (gap / placeholder) */
+/* The candidate drop position (gap / placeholder) the item would land in.
+   The reference relocates the grabbed item live, so this marks the grabbed item's
+   own slot — draw a gap/line here distinct from the lifted card above. */
 [reorderable] [data-reorder-target] { ... }
 
 /* The scoped handle (when grab="handle") */

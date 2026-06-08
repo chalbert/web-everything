@@ -1,7 +1,12 @@
 ---
 type: idea
-status: open
+workItem: story
+size: 3
+parent: "130"
+status: resolved
 dateOpened: '2026-06-07'
+dateResolved: "2026-06-07"
+graduatedTo: { url: /blocks/reorderable-list/, label: 'Reorderable List block — data-reorder-target styling hook' }
 tags:
   - reorder
   - drag-and-drop
@@ -38,3 +43,22 @@ draw the gap, without prescribing the visuals.
 
 See `reports/2026-06-06-reorder-paradigms.md` (Open points → "ROUGH — drop-position indicator") and
 the styling-hooks section of `src/_includes/block-descriptions/reorderable-list.njk`.
+
+## Progress
+
+- **Status:** resolved
+- **Branch:** docs/standard-authoring-workflow
+- **Done:**
+  - Settled the semantics: the reference reducer relocates the grabbed item *live* into its landing
+    slot (both keyboard + pointer), so the candidate drop position **is** the grabbed item's current
+    slot. `[data-reorder-target]` co-locates with `[data-reorder-grabbed]` here, but stays an
+    independent hook so a theme can draw the gap/placeholder distinctly from the lifted card.
+  - Emit `[data-reorder-target]` from `renderReorderableList` (`itemEl`) and `reconcileOrder` in
+    lockstep with the grabbed marker (set on grab, cleared on drop/cancel).
+  - Added audit checks: exactly one `[data-reorder-target]` during a move, none at rest.
+  - Added 2 conformance tests; all existing fixtures still audit clean (28 pass).
+  - Added a demo visual (dashed accent outline) + updated the njk styling-hooks note.
+  - Marked the report's 🔨 ROUGH open point resolved.
+  - Verified live in the playground (:3000): 9/9 conformant, one target during a move, cleared on
+    drop, no console errors.
+- **Notes:** Visuals (line vs. shaded slot) left to the theme, per the report.

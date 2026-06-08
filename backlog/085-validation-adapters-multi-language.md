@@ -1,5 +1,7 @@
 ---
 type: idea
+workItem: story
+size: 8
 status: open
 dateOpened: "2026-06-06"
 tags: [validation, protocol, adapters, multi-language, codegen, validation-as-a-service, conformance, intents, native-first]

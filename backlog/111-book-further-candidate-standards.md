@@ -1,5 +1,8 @@
 ---
 type: idea
+workItem: epic
+size: 3
+parent: "099"
 status: open
 dateOpened: "2026-06-06"
 tags: [book, candidates, intents, blocks, standards, form-controls, notifications, responsive, logging, tracking, nomenclature, deprecation, triage]

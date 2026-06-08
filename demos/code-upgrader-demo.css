@@ -1,0 +1,87 @@
+/**
+ * Code Upgrader Playground — demo-specific styles only. The shared chrome
+ * (body/header/.play/.summary/.badge/.ex/.ex-grid/.pane/.code/.preview) comes from
+ * /demos/playground.css, linked before this file. See demo-workflow.md §3.
+ */
+
+:root { --primary: #6366f1; }
+
+/* The pipeline grid: source · IR · generated · verify · live — wrap responsively. */
+.ex-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+@media (max-width: 760px) { .ex-grid { grid-template-columns: 1fr; } }
+
+/* ── Form toggle (reused from MaaS serve()) ─────────────────────── */
+.forms { display: flex; flex-wrap: wrap; gap: 0.375rem; margin: 0 0 0.5rem; }
+.form-btn {
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.form-btn:hover { background: #f3f4f6; }
+.form-btn.active { background: var(--primary); border-color: var(--primary); color: #fff; }
+
+/* ── Verify gate breakdown ──────────────────────────────────────── */
+.checks { margin: 0.5rem 0 0; padding-left: 1.1rem; font-size: 0.8rem; line-height: 1.55; }
+.checks .ok { color: #166534; }
+.checks .bad { color: #b91c1c; }
+
+.diag {
+  margin-top: 0.5rem;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  color: #92400e;
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  border-radius: 0.375rem;
+  padding: 0.375rem 0.625rem;
+}
+
+/* ── Editable sandbox ───────────────────────────────────────────── */
+.sandbox { margin-top: 1.75rem; border: 1px solid var(--primary); border-radius: 0.5rem; overflow: hidden; }
+.sandbox-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: rgba(99, 102, 241, 0.06);
+}
+.sandbox-head h2 { margin: 0; font-size: 0.95rem; }
+.sandbox-run {
+  padding: 0.35rem 0.9rem;
+  border: 1px solid var(--primary);
+  border-radius: 0.3rem;
+  background: var(--primary);
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.sandbox-run:hover { filter: brightness(1.05); }
+.sandbox-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 0; }
+@media (max-width: 900px) { .sandbox-grid { grid-template-columns: 1fr; } }
+.sandbox textarea {
+  width: 100%;
+  min-height: 240px;
+  border: none;
+  padding: 0.75rem 1rem;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  resize: vertical;
+}
+.sandbox textarea:focus { outline: 2px solid rgba(99, 102, 241, 0.4); outline-offset: -2px; }
+.sandbox-out { display: flex; flex-direction: column; gap: 1rem; padding: 0.75rem 1rem; border-left: 1px solid #eef2ff; }
+
+/* IR pane reads as data; tint it lightly so it stands apart from code. */
+.code[data-lang="json"] { background: #f8fafc; }
+.preview h3 { margin: 0 0 0.25rem; }
+
+/* ── Provider section dividers ───────────────────────────────────── */
+.section-head { margin: 2rem 0 0.5rem; padding-top: 1rem; border-top: 2px solid #e5e7eb; }
+.section-head h2 { margin: 0 0 0.2rem; font-size: 1.05rem; }
+.section-head .ex-note { margin: 0; }

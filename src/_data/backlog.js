@@ -117,6 +117,8 @@ module.exports = function backlog() {
         title: src.title || data.title || id,
         summary: src.summary || data.summary,
         dateOpened: toDateString(data.dateOpened),
+        dateStarted: toDateString(data.dateStarted),
+        dateResolved: toDateString(data.dateResolved),
         reportDate,
         details: src.details || data.details || undefined,
       };

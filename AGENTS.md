@@ -11,6 +11,8 @@
 
 [Frontier UI](../frontierui/) is the **reference implementation** of these standards. This repo is canonical for shared terminology, naming, **protocols** (conformance contracts owned by a Project, surfaced via `/protocols/`), and **intents** (UX preference vocabularies, surfaced via `/intents/`). Frontier UI points back here.
 
+> **`../plateau/` is the abandoned single-repo prototype** — superseded by this repo + Frontier UI + plateau-app. New implementation work lands in **Frontier UI**, never plateau. You *may* read plateau as a **non-authoritative reference** when nothing more recent exists (a behavioral sketch to adapt), but it is **not a model**: it predates current decisions and may contradict them, so anything taken from it must be re-derived against the live spec/conventions and called out as plateau-sourced — never copy its architecture wholesale. (`plateau-app` is a live product and is fine.)
+
 ## The website IS the spec
 `src/_data/*.json` + `src/_includes/*-descriptions/*.njk` are the **source of truth**. Implementation follows documented API. If it isn't documented, document it first. These specs are large — **query one entry at a time** (grep/jq), never load whole.
 
@@ -20,6 +22,7 @@
 3. **New terms** introduced by any block/plug/intent **must** be added to `src/_data/semantics.json` (term-first).
 4. **Tests required**: 80% coverage minimum. Unit/integration `*.test.ts` (Vitest), E2E `*.spec.ts` (Playwright).
 5. **Demo edits**: keep the `text/plain#demo-js-source` and the running `type="module"` sections of `demos/declarative-spa.html` in sync.
+6. **Browser-support floor is Baseline-2024**: assume modern primitives exist (FACE/`ElementInternals`, popover, `:state()`, `:user-invalid`, anchor positioning). Below Baseline-2024 is **out of scope** — don't shim it by default. Polyfills are an **opt-in enhancement layer** (a plug/trait the consumer adds), never a baseline assumption, so specs stay single-substrate. Decision [#031](backlog/031-polyfill-baseline-floor.md); substrate detail in `reports/2026-06-02-native-platform-substrate.md`.
 
 ## Definition of Done (run before finishing)
 - Changed an API? Update its `.njk` description **and** its `src/_data/*.json` entry.
@@ -40,7 +43,7 @@
 | Plugs/blocks, injectors, registries, parsers, debugging | [docs/agent/architecture.md](docs/agent/architecture.md) |
 | Adding a block/plug/intent/adapter, doc requirements, the standard-authoring method | [docs/agent/design-first.md](docs/agent/design-first.md) (Claude: `/new-standard` triggers it) |
 | Processing `plans/` → research pages, reports | [docs/agent/research-workflow.md](docs/agent/research-workflow.md) |
-| Capturing ideas/issues/decisions/reviews, report open questions → `/backlog/` (one md file per item in `backlog/`) | [docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md) |
+| Capturing ideas/issues/decisions/reviews, report open questions → `/backlog/` (one md file per item in `backlog/`; every item needs a `workItem` story/epic/task + Fibonacci `size` on stories/unstoried-epics — feeds the `/backlog/` burndown) | [docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md) → "Agile sizing" |
 | Picking the next item to work on (dev-ready first) | [docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md) → "Selecting the next item to work on" (Claude: `/next-backlog-item` triggers it) |
 | Building or changing a runtime demo under `demos/` | [docs/agent/demo-workflow.md](docs/agent/demo-workflow.md) |
 | Dev environment & scripts | `DEV_GUIDE.md` |
@@ -50,8 +53,8 @@
 <!-- AUTO-GENERATED:inventory — run `npm run gen:inventory`; do not edit by hand -->
 - **Plugs** 41 — 31 active · 8 concept · 2 experimental
 - **Blocks** 34 — 13 active · 7 concept · 14 draft
-- **Intents** 30 — 9 concept · 21 draft
-- **Glossary terms** 162 · **Research topics** 19 (19 open)
+- **Intents** 31 — 9 concept · 22 draft
+- **Glossary terms** 163 · **Research topics** 19 (19 open)
 - **Projects** 25: webadapters, webanalytics, webbehaviors, webblocks, webcases, webcomponents, webcontexts, webdirectives, webdocs, webevents, webexpressions, webinjectors, webintents, webintl, webmanifests, webplugs, webportals, webpositioning, webregistries, webreliability, webresources, webstates, webtraces, webtraits, webvalidation
 <!-- /AUTO-GENERATED:inventory -->
 

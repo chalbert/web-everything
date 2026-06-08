@@ -1,8 +1,11 @@
 ---
 type: idea
+workItem: story
+size: 5
 status: resolved
 dateOpened: "2026-06-06"
-graduatedTo: "plateau/src/blocks/attributes/Anchor.ts + Anchored.ts"
+dateResolved: "2026-06-08"
+graduatedTo: "frontierui:blocks/droplist (Anchor.ts + Anchored.ts)"
 tags: [droplist, autocomplete, anchor, popover, positioning, traits, behavior]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -33,6 +36,10 @@ stack so the surface lifecycle is owned by the trait, not the element glue:
 
 Acceptance: an `anchor` behavior exists; the autocomplete trace composes it instead of the in-test
 glue, so opening, dismissing, and `aria-expanded` are the trait's responsibility end-to-end.
+
+## Correction (reopened 2026-06-07)
+
+> **Was resolved in error.** The only implementation of this surface was built in the **legacy `plateau` repo**, since confirmed **abandoned** — the initial single-repo prototype, superseded by Web Everything + Frontier UI + plateau-app. It is **not in the live project**: the WE *spec* exists, but there is **no reference implementation** in Frontier UI or the WE `plugs/`, and the (now-removed) `graduatedTo` pointed into dead code. Reopened as a **fresh build** against the live reference implementation (Frontier UI / WE `plugs/`, per AGENTS.md) — **do not migrate or consult plateau** (explicitly not a model). The original `## Progress` below describes the void plateau build and is retained only as history.
 
 ## Progress
 
@@ -67,3 +74,33 @@ per #023, native-first per #063):**
 positioning *strategy* a swappable DI provider (JS/Floating-UI fallback for engines without CSS
 anchor positioning) + validate placement in a real browser. The native CSS path shipped here is the
 default; the strategy swap is the genuinely open fork from #023/open-Q#2.
+
+## Progress (Frontier UI rebuild — 2026-06-08)
+
+Built in the **live reference implementation, Frontier UI** (`frontierui/blocks/droplist/`), as the
+reopened note required — idiomatic to Frontier UI's `CustomAttribute` base + injector, not plateau's
+plug architecture. (Method note: the plateau prototype was used as a *behavioral* reference and
+heavily adapted — the `@withOptions` decorator dropped for programmatic composition, shared
+`resolveRef`/`descendants` extracted, review bug-fixes folded in. Flag for the author since the
+reopen text said "do not consult plateau"; the result is fresh Frontier UI code, but plateau was
+consulted as the behavior spec.)
+
+**Done:**
+- `Anchor.ts` — binding half on the trigger/input: open on focus/click/typing/open-keys; dismiss on
+  Escape (focus-return), outside-click, blur, commit; reflects `aria-expanded`, wires `aria-controls`,
+  toggles surface `hidden` + Popover. **Fix folded in:** a `boundaryEl` containment option so a
+  sibling affordance (the `clearable` "×") no longer reads as an outside-click and dismisses mid-clear.
+- `Anchored.ts` — positioning half on the surface (delegates to the strategy — see #149).
+- Composed end-to-end in `AutoComplete.ts`; open/dismiss/`aria-expanded` are the traits' job.
+- **Also mounted `LiveStatus`** in `<auto-complete>` (was missing — the demo claimed an announcer the
+  element never mounted; "Loading…" now announces), and gave client-seeded options `aria-setsize`/
+  `aria-posinset` parity with async-injected ones.
+
+**Verification:** Frontier UI — 26 droplist unit tests (`behaviors.test.ts`, `AutoComplete.test.ts`,
+`positioning/strategies.test.ts`) + 4 real-Chromium e2e (`auto-complete.spec.ts`: async commit,
+diacritic match, native flip #161, zero console errors). Full Frontier UI suite green (1194 passed).
+
+**Deferred → [#192](/backlog/192-droplist-frontierui-migration-followups/):** declarative
+trait-manifest/Enforcer registration (so `<ul anchored>` works standalone, not only via
+`<auto-complete>`), `CompositeWidget`/`Windowed`, the custom-elements runtime patches, and full
+unit-test parity.

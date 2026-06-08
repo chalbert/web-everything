@@ -1,5 +1,7 @@
 ---
 type: decision
+workItem: story
+size: 3
 status: open
 dateOpened: "2026-06-03"
 tags: [pagination, a11y, focus, announcements, collection-ops]

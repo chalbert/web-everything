@@ -1,5 +1,6 @@
 ---
 type: idea
+workItem: epic
 status: open
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-06"

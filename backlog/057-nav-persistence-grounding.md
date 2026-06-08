@@ -1,5 +1,7 @@
 ---
 type: decision
+workItem: story
+size: 2
 status: open
 dateOpened: "2026-06-03"
 tags: [navigation, intent, persistence, deep-linking, vocabulary]

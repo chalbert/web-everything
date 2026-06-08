@@ -1,5 +1,8 @@
 ---
 type: decision
+workItem: story
+size: 3
+parent: "023"
 status: open
 dateOpened: '2026-06-02'
 tags:

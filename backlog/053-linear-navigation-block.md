@@ -1,5 +1,7 @@
 ---
 type: idea
+workItem: story
+size: 3
 status: open
 dateOpened: "2026-06-03"
 tags: [navigation, intent, wizard, stepper, linear, block, gap]

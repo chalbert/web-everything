@@ -1,7 +1,11 @@
 ---
 type: idea
-status: active
+workItem: story
+size: 8
+status: resolved
 dateOpened: "2026-06-06"
+dateResolved: "2026-06-07"
+graduatedTo: block:background-task-surface
 tags: [block, background-task, custom-element, runtime, implementation]
 relatedProject: webintents
 crossRef: { url: /blocks/background-task-surface/, label: Background Task Surface }
@@ -22,3 +26,11 @@ Scope:
 Depends on the navigation-guard contract (#129) for the `withNavigationGuard` half; can ship route-only without #134.
 
 Spun off from #128 (the standard is authored; this is the build).
+
+## Progress
+
+- **Status:** resolved → `block:background-task-surface` (graduated `draft → active`).
+- **Branch:** docs/standard-authoring-workflow
+- **Done:** Built `blocks/background-task-surface/` — `BackgroundTasksElement` (register handoff w/ nearest-ancestor `stopPropagation`, off-view Loader-handle subscription, state machine + `background-task-state-change`/`-retry`/`-dismiss`, polite `role="status"` region, transient auto-clear vs sticky/error persistence, single/batch aggregation, route-only nav guard) + 5 traits (`withBatchAggregation`, `withStickyEntries`, `withNavigationGuard`, `withCompletionToast`, `withPerTaskRetry`) + `registerBackgroundTasks` + `index`. Shared fixture (`MockLoaderHandle` + scenarios) drives both the conformance playground (`demos/background-task-surface-demo.*`, registered in demos.json) and 18 unit tests. Added `sourcePath` + `exports` and flipped the block to `active`; fixed the block page's runnable example (`guard="warn"` → `navigation-guard`). Regenerated AGENTS.md inventory.
+- **Verified:** 1510 unit tests green (18 new); standalone strict typecheck clean; `check:standards` 0 errors; `build:check` clean; Playwright playground smoke green in a real browser on :3000.
+- **Notes:** `withReloadDurability` deliberately OUT (it's #134). `withNavigationGuard` ships route-only (beforeunload + Navigation API inline) with a forward-ref to #129. Leftovers captured: **#152** (real ResourceLoader→`LoaderStateHandle` producer wiring at `escalation:async`), **#153** (reconcile the block page's Interface/Exports with the shipped baseline runtime).

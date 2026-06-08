@@ -1,5 +1,7 @@
 ---
 type: idea
+workItem: story
+size: 5
 status: open
 dateOpened: "2026-06-06"
 tags: [jsx, component, adapters, packaging, build-tooling, frontier-ui]

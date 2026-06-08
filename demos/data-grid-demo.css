@@ -85,6 +85,41 @@
 .checks .check.pass { color: #15803d; }
 .checks .check.fail { color: #b91c1c; font-weight: 600; }
 
+/* ── Editable cells (grid:cell-edit) ────────────────────────────────── */
+/* The editor (an <input> or <select>, #158) the behavior drops into a cell on Enter/F2 — fills the cell
+   so the swap is seamless. */
+.data-grid .grid-cell-input {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+  padding: 0.1rem 0.2rem;
+  margin: -0.1rem 0;
+  border: 1px solid var(--primary);
+  border-radius: 0.2rem;
+  background: #fff;
+  color: #1f2937;
+}
+/* An invalid value (failed validation, #158): the editor stays open, marked, until it's fixed. */
+.data-grid .grid-cell-input[aria-invalid="true"] {
+  border-color: #dc2626;
+  outline: 1px solid #dc2626;
+  background: #fef2f2;
+}
+/* Read-only cells (#159): a subtle cue that Enter/F2 won't open an editor here. */
+.data-grid [role="gridcell"][aria-readonly="true"] {
+  background: #f9fafb;
+  color: #6b7280;
+  font-style: italic;
+}
+/* A section heading to separate the editable sub-pattern cards from the navigation ones. */
+.section-head {
+  margin: 2rem 0 0.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px dashed #d1d5db;
+}
+.section-head h2 { margin: 0 0 0.25rem; }
+.section-head p { margin: 0; font-size: 0.85rem; color: var(--color-text-muted, #6b7280); }
+
 /* ── Wrap toggle (interactive card) ─────────────────────────────────── */
 .wrap-toggle {
   display: inline-flex;

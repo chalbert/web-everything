@@ -1,7 +1,11 @@
 ---
 type: idea
-status: open
+workItem: story
+size: 5
+parent: "097"
+status: resolved
 dateOpened: "2026-06-06"
+dateResolved: "2026-06-08"
 tags: [monetization, business-model, ai-agnostic, conformance, auto-fix, agent, propose-and-verify, webcases, self-run-tool, provider-registry]
 relatedProject: webcases
 crossRef: { url: /backlog/089-monetization-product-ideas/, label: "Product ideas (#089)" }
@@ -43,3 +47,47 @@ because no one else has a machine-checkable conformance target.
 - Shared engine with #094 (input adapter = "a failing check" vs "existing code").
 - Needs the verification tool (#089 idea 1) to emit machine-readable failure
   descriptors the agent can target.
+
+## MVP scope — independently greenlit
+
+This is **being worked** as one of the parallel product candidates under the
+emergent MVP strategy ([#097](/backlog/097-roadmap-to-mvp/)) — **not** gated on a
+"pick one product" decision (that framing was dropped). It's the tightest
+verify-loop slice of the shared engine and effectively the narrowest input case of
+the upgrader ([#094](/backlog/094-ai-upgrader-tools/)), so it can fold onto the
+same core. Ship a bounded MVP (one failing-check class → fix loop), grow from
+there.
+
+## Progress
+
+- **Status:** resolved (MVP shipped 2026-06-08)
+- **Branch:** docs/standard-authoring-workflow
+- **Done:**
+  - `check-standards.mjs` gained a `--json` mode emitting structured failure
+    descriptors (the #089-idea-1 machine-readable feed); `deprecated-status`
+    enriched with `{ kind, entity, id, file, field, from, to }`. Human output
+    unchanged when the flag is absent.
+  - `scripts/autofix/engine.mjs` — pure, fs-free engine mirroring
+    `upgraderEngine.ts`: `CustomFixer` contract + `CustomFixerRegistry`
+    (replace-by-id) + the bounded, verify-gated `autofix()` loop (propose →
+    apply → re-verify → accept / revert-and-give-up / skip).
+  - Deterministic reference fixer `reference:deprecated-status` — surgical
+    string edit (anchors on the id, rewrites only the one field value, so the
+    diff stays reviewable).
+  - `scripts/conformance-autofix.mjs` CLI + `npm run autofix` (and `--dry-run`),
+    wiring the engine to the live suite via spawned `check:standards --json`.
+  - vitest (`scripts/autofix/__tests__/engine.test.mjs`, 6 tests): green path,
+    both revert paths (target not cleared / new failure introduced), skipped
+    (no fixer), surgical-edit byte-fidelity. `vitest.config.ts` include widened
+    for `scripts/**/__tests__`.
+  - Verified end-to-end against the real repo: seeded a `wip` synonym → `npm run
+    autofix` repaired it to `draft` in 2 verify rounds with a clean one-line
+    diff. Full suite green (1625 tests), `check:standards` green.
+- **Next:** follow-ons — [#196](/backlog/196-ai-model-fixer-provider/)
+  (BYO-key model fixer for content-generation classes — the actual moat) and
+  [#197](/backlog/197-broaden-conformance-failure-descriptors/) (descriptor
+  coverage for the remaining failure classes + order-independent anchoring).
+- **Notes:** MVP = one deterministic failing-check class (`deprecated-status`;
+  the fix is encoded in `STATUS_SYNONYMS`). AI is a swappable provider into the
+  same `CustomFixerRegistry` — documented (#196), not built. The verify gate is
+  the moat: a patch is kept only if its failure cleared and no new error appeared.

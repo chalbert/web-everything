@@ -1,5 +1,7 @@
 ---
 type: idea
+workItem: story
+size: 5
 status: open
 dateOpened: "2026-06-07"
 tags: [product-strategy, dev-browser, chromium, introspection, conformance, dev-experience, vision, monetization, local-first]

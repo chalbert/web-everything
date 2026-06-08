@@ -1,5 +1,7 @@
 ---
 type: idea
+workItem: story
+size: 3
 status: open
 dateOpened: "2026-06-06"
 tags: [development-guide, guidance, opinionated, technical-configurator, learn-pathway, plateau-app, decision-support, philosophy, webdocs, one-source-many-views]

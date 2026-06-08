@@ -120,8 +120,11 @@ Lifecycle events (high level): `reorder-start`, `reorder-move`, `reorder-commit`
   registry (a `CustomReorderCommitRegistry` of providers) vs. a simpler attribute (`commit="persist"`).
   Recommendation: start with the **attribute** (`ephemeral` default; `persisted` writes back via an
   event the host handles), promote to a registry only if multiple persistence backends emerge.
-- 🔨 **ROUGH — drop-position indicator.** The visual gap/placeholder during a drag is a styling-hook
-  concern; spec the hook (`[data-reorder-target]`), leave visuals to the implementation.
+- ✅ **RESOLVED — drop-position indicator** ([#147](/backlog/147-reorder-drop-position-indicator/)).
+  The reference renderer now emits `[data-reorder-target]` on the candidate landing slot during a move
+  (cleared at rest), audited and exercised in the playground. Because the model relocates the grabbed
+  item live, the target co-locates with `[data-reorder-grabbed]` here, but stays an independent hook so
+  a theme can draw the gap distinctly. Visuals remain the theme's call, per the original point.
 - ⚠ **RECONCILE — #007 boundary.** When #007 settles the data-transfer family, confirm `reorder`
   composes cleanly with a future `drag-source`/`drop-target` rather than overlapping it (cross-list
   reorder is the seam — it is "move" semantics within the app, not OS-level DataTransfer).

@@ -27,6 +27,20 @@ import {
   type ReorderState,
 } from '/blocks/renderers/reorderable-list/renderReorderableList';
 import { reorderableListCases, type ReorderableListCase } from '/blocks/renderers/reorderable-list/__fixtures__/reorderable-list-cases';
+import {
+  reduceCrossListReorder,
+  relocate,
+  renderCrossListReorder,
+  reconcileCrossList,
+  auditCrossListReorder,
+  announceCrossList,
+  initialCrossListState,
+  type CrossListConfig,
+  type CrossListEvent,
+  type CrossListState,
+  type ReorderList,
+} from '/blocks/renderers/reorderable-list/renderCrossListReorder';
+import { crossListReorderCases, type CrossListReorderCase } from '/blocks/renderers/reorderable-list/__fixtures__/cross-list-reorder-cases';
 
 function el(tag: string, className?: string, text?: string): HTMLElement {
   const node = document.createElement(tag);
@@ -254,15 +268,245 @@ function buildInteractiveCard(): HTMLElement {
   return section;
 }
 
+// ── Cross-list section (Tier-2 withCrossListReorder · reorder.scope.cross-list) ───────────────────
+//
+// The same block, one trait further: items move between SIBLING lists that share a reorder-group key.
+// The order model is per-list; the roving tabindex spans the whole group; Left/Right move focus (and a
+// grabbed item) ACROSS lists while ArrowUp/Down still move within the active list. Static fixture cards
+// fold the keys through the SAME reduceCrossListReorder the live card uses; the last card is operable.
+
+const CROSS_CONFIG: CrossListConfig = { group: 'board' };
+
+/** "Start → Space → ArrowRight → todo[…] | doing[…] | done[…]" — the per-list landing orders. */
+function crossKeyTrace(c: CrossListReorderCase): string {
+  const seq = c.keys.length ? c.keys.map((k) => (k === ' ' ? 'Space' : k)).join(' → ') : '(no keys)';
+  const orders = c.expected.lists.map((l) => `${l.label.toLowerCase()}[${l.order.join(', ')}]`).join(' | ');
+  return `Start → ${seq} → ${orders}`;
+}
+
+/** Fold a key sequence through the cross-list reducer from the initial state, tracking the last event. */
+function walkCross(lists: ReorderList[], keys: string[]): { state: CrossListState; lastEvent: CrossListEvent | null } {
+  let state = initialCrossListState(lists);
+  let lastEvent: CrossListEvent | null = null;
+  for (const key of keys) {
+    const r = reduceCrossListReorder(state, key);
+    state = r.state;
+    if (r.event) lastEvent = r.event;
+  }
+  return { state, lastEvent };
+}
+
+function buildCrossCard(c: CrossListReorderCase): HTMLElement {
+  const section = el('section', 'ex');
+  const title = el('h2', 'ex-title');
+  title.append(document.createTextNode(c.title + ' '));
+  const badge = el('span', 'badge info', '…');
+  title.append(badge);
+  section.append(title);
+
+  section.append(el('p', 'ex-contract', crossKeyTrace(c)));
+  if (c.note) section.append(el('p', 'ex-note', c.note));
+
+  const { state, lastEvent } = walkCross(c.lists, c.keys);
+  const root = renderCrossListReorder(c.lists, c.items, CROSS_CONFIG, state);
+  const result = auditCrossListReorder(root, c.items, state, CROSS_CONFIG);
+  if (result.ok) passCount++;
+
+  badge.className = `badge ${result.ok ? 'pass' : 'fail'}`;
+  badge.textContent = result.ok ? '✓ conformant' : '✗ contract violation';
+
+  const grid = el('div', 'ex-grid');
+  section.append(grid);
+
+  const live = el('div', 'preview');
+  live.append(root);
+  grid.append(pane('Group (sibling lists; grabbed item lifted)', live));
+  const ann = el('div', 'live-region');
+  ann.setAttribute('role', 'status');
+  ann.textContent = lastEvent ? announceCrossList(lastEvent, state, c.items) : '';
+  grid.append(pane('Announced', ann));
+  grid.append(pane('Produced HTML', el('pre', 'code', root.outerHTML)));
+  grid.append(pane('Contract audit', checklist(result)));
+
+  return section;
+}
+
+const BOARD_ITEMS: ReorderItem[] = [
+  { id: 'spec', label: 'Write the spec' },
+  { id: 'build', label: 'Build the block' },
+  { id: 'test', label: 'Add the conformance test' },
+  { id: 'ship', label: 'Ship it' },
+];
+const boardLists = (): ReorderList[] => [
+  { id: 'todo', label: 'Todo', order: ['spec', 'build'] },
+  { id: 'doing', label: 'Doing', order: ['test'] },
+  { id: 'done', label: 'Done', order: ['ship'] },
+];
+
+function buildCrossInteractiveCard(): HTMLElement {
+  const section = el('section', 'ex interactive');
+  const title = el('h2', 'ex-title');
+  title.append(document.createTextNode(`${crossListReorderCases.length + 1} · Live — move cards between sibling lists `));
+  const badge = el('span', 'badge info', '…');
+  title.append(badge);
+  section.append(title);
+
+  section.append(
+    el(
+      'p',
+      'ex-note',
+      'Operable: click a card or Tab in, then Space grabs it. ArrowUp/Down move it within its list; ArrowLeft/Right move it to a sibling list; Space/Enter drops (commits), Escape cancels (reverts across lists). Or drag a card with the pointer into another list. Cards relocate with the atomic Element.moveBefore() — even across lists — each move is announced, and the committed per-list order is written below. The model CI also drives the fixtures above.',
+    ),
+  );
+
+  const liveRegion = el('p', 'live-region');
+  liveRegion.setAttribute('role', 'status');
+  liveRegion.setAttribute('aria-live', 'polite');
+  section.append(liveRegion);
+
+  const grid = el('div', 'ex-grid');
+  section.append(grid);
+  const live = el('div', 'preview');
+  const checksPane = el('div');
+  grid.append(pane('Live board', live));
+  grid.append(pane('Contract audit', checksPane));
+
+  const committed = el('p', 'committed');
+  section.append(committed);
+
+  let state = initialCrossListState(boardLists());
+  const root = renderCrossListReorder(boardLists(), BOARD_ITEMS, CROSS_CONFIG, state);
+  live.append(root);
+
+  function runAudit(countInitial = false): void {
+    const result = auditCrossListReorder(root, BOARD_ITEMS, state, CROSS_CONFIG);
+    if (countInitial && result.ok) passCount++;
+    badge.className = `badge ${result.ok ? 'pass' : 'fail'}`;
+    badge.textContent = result.ok ? '✓ conformant' : '✗ contract violation';
+    checksPane.replaceChildren(checklist(result));
+  }
+
+  function apply(next: CrossListState, event: CrossListEvent | null, focus: boolean): void {
+    state = next;
+    const focusable = reconcileCrossList(root, state);
+    if (focus && focusable) focusable.focus();
+    if (event) {
+      liveRegion.textContent = announceCrossList(event, state, BOARD_ITEMS);
+      root.dispatchEvent(new CustomEvent(event.type, { detail: event, bubbles: true, cancelable: event.type === 'reorder-commit' }));
+    }
+    runAudit();
+  }
+
+  root.addEventListener('reorder-commit', ((e: CustomEvent<CrossListEvent>) => {
+    const orders = e.detail.orders ?? Object.fromEntries(state.lists.map((l) => [l.id, l.order]));
+    committed.textContent = `committed → ${state.lists.map((l) => `${l.label.toLowerCase()}[${(orders[l.id] ?? []).join(', ')}]`).join(' | ')}`;
+  }) as EventListener);
+
+  // ── Keyboard path (the headline). ──
+  root.addEventListener('keydown', (e) => {
+    if (!REORDER_KEYS.has(e.key)) return;
+    e.preventDefault();
+    const r = reduceCrossListReorder(state, e.key);
+    apply(r.state, r.event, true);
+  });
+
+  // Click-to-focus — clicking a card makes it the focused (roving) item when nothing is grabbed.
+  root.addEventListener('click', (e) => {
+    if (state.grabbedIndex !== -1) return;
+    const li = (e.target as HTMLElement).closest<HTMLElement>('[data-reorder-id]');
+    const ul = (e.target as HTMLElement).closest<HTMLElement>('[data-list-id]');
+    if (!li || !ul) return;
+    const listIndex = state.lists.findIndex((l) => l.id === ul.getAttribute('data-list-id'));
+    const idx = state.lists[listIndex]?.order.indexOf(li.getAttribute('data-reorder-id')!);
+    if (listIndex >= 0 && idx != null && idx >= 0 && (listIndex !== state.activeList || idx !== state.focusIndex)) {
+      apply({ ...state, activeList: listIndex, focusIndex: idx }, null, true);
+    }
+  });
+
+  // ── Pointer-drag path — grab a card, then hit-test which list + slot the pointer is over. ──
+  root.addEventListener('pointerdown', (e) => {
+    const li = (e.target as HTMLElement).closest<HTMLElement>('[data-reorder-id]');
+    const ul = (e.target as HTMLElement).closest<HTMLElement>('[data-list-id]');
+    if (!li || !ul || state.grabbedIndex !== -1) return;
+    const listIndex = state.lists.findIndex((l) => l.id === ul.getAttribute('data-list-id'));
+    const idx = state.lists[listIndex]?.order.indexOf(li.getAttribute('data-reorder-id')!);
+    if (listIndex < 0 || idx == null || idx < 0) return;
+    li.setPointerCapture?.(e.pointerId);
+    apply(
+      { ...state, activeList: listIndex, focusIndex: idx, grabbedIndex: idx, grabbedFromList: listIndex, grabbedFromIndex: idx },
+      { type: 'reorder-start', itemId: state.lists[listIndex].order[idx], fromList: listIndex, fromIndex: idx },
+      false,
+    );
+  });
+
+  root.addEventListener('pointermove', (e) => {
+    if (state.grabbedIndex === -1) return;
+    const uls = Array.from(root.querySelectorAll<HTMLElement>('[data-list-id]'));
+    // Which list is the pointer over (by horizontal band; fall back to the nearest)?
+    let targetList = uls.findIndex((u) => {
+      const r = u.getBoundingClientRect();
+      return e.clientX >= r.left && e.clientX <= r.right;
+    });
+    if (targetList < 0) return;
+    // Which slot within that list (by the Y midpoint of its cards)?
+    const cards = Array.from(uls[targetList].querySelectorAll<HTMLElement>('[data-reorder-id]'));
+    let targetIndex = cards.length;
+    for (let i = 0; i < cards.length; i++) {
+      const r = cards[i].getBoundingClientRect();
+      if (e.clientY < r.top + r.height / 2) { targetIndex = i; break; }
+    }
+    if (targetList === state.activeList && targetIndex > state.grabbedIndex) targetIndex--; // account for the gap the grabbed card leaves
+    if (targetList !== state.activeList || targetIndex !== state.grabbedIndex) {
+      const r = relocate(state, targetList, targetIndex);
+      if (r.event) apply(r.state, r.event, false);
+    }
+  });
+
+  const drop = () => {
+    if (state.grabbedIndex === -1) return;
+    const cur = state.grabbedIndex;
+    apply(
+      { ...state, grabbedIndex: -1, grabbedFromList: -1, grabbedFromIndex: -1, focusIndex: cur },
+      {
+        type: 'reorder-commit',
+        itemId: state.lists[state.activeList].order[cur],
+        fromList: state.grabbedFromList,
+        fromIndex: state.grabbedFromIndex,
+        toList: state.activeList,
+        toIndex: cur,
+        crossed: state.grabbedFromList !== state.activeList,
+        orders: Object.fromEntries(state.lists.map((l) => [l.id, l.order.slice()])),
+      },
+      true,
+    );
+  };
+  root.addEventListener('pointerup', drop);
+  root.addEventListener('pointercancel', drop);
+
+  runAudit(true);
+  return section;
+}
+
 const host = document.getElementById('examples');
 if (host) {
   const summary = el('div', 'summary', '');
   const cards = reorderableListCases.map(buildCard);
   const interactive = buildInteractiveCard(); // bumps passCount on its initial green audit
-  const total = reorderableListCases.length + 1; // + the live interactive card
-  host.replaceChildren(summary, ...cards, interactive);
+
+  // Tier-2 cross-list section — a heading, the fixture cards, then the live board.
+  const crossHeading = el('h2', 'section-heading', 'Cross-list scope — move items between sibling lists (withCrossListReorder)');
+  const crossIntro = el(
+    'p',
+    'section-intro',
+    'The Tier-2 scope: a reorder-group binds sibling lists so an item can move between them. The order model is per-list, the roving tabindex spans the whole group, and Left/Right move across lists while ArrowUp/Down move within one — the same reduceReorder is the inner loop for the within-list part.',
+  );
+  const crossCards = crossListReorderCases.map(buildCrossCard);
+  const crossInteractive = buildCrossInteractiveCard();
+
+  const total = reorderableListCases.length + 1 + crossListReorderCases.length + 1; // within-list + cross-list, each + its live card
+  host.replaceChildren(summary, ...cards, interactive, crossHeading, crossIntro, ...crossCards, crossInteractive);
   summary.className = `summary ${passCount === total ? 'pass' : 'fail'}`;
-  summary.textContent = `${passCount}/${total} cases satisfy the verified reorder contract`;
+  summary.textContent = `${passCount}/${total} cases satisfy the verified reorder contract (within-list + cross-list)`;
 }
 
 setPlaygroundReady(passCount);

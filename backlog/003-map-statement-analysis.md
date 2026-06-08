@@ -1,5 +1,6 @@
 ---
 type: idea
+workItem: task
 status: parked
 dateOpened: '2026-02-24'
 tags:

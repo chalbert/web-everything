@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Registered Behaviors Bootstrap Fixture - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+</head>
+<body>
+  <!--
+    A deliberately minimal, bootstrapped page that proves two more block behaviors AUTO-UPGRADE
+    through the live CustomAttributeRegistry — exactly as demos/data-grid-bootstrap-fixture.html does
+    for `grid:cell-navigation` (#144). This is the shared home for "registered block behaviors
+    auto-upgrade via bootstrap" coverage (#155): nav:list + type-ahead here, grid:cell-navigation and
+    grid:cell-edit in their own bootstrap fixtures. If a new `attributes.define` in plugs/bootstrap.ts
+    is added but its registration line never fires, the matching assertion below goes red.
+
+    Nothing here constructs a behavior by hand. The ONLY wiring is `window.attributes.upgrade(...)`.
+
+    nav:list  — every link is authored at tabindex="-1" with NO aria-current. The single roving
+                tabindex="0" that appears can only come from NavListBehavior's #setupRovingTabindex, and
+                an arrow key roving focus proves its keydown handler bound. No other source seeds it.
+
+    type-ahead — the behavior seeds NO post-connect state (it only binds keydown). The proof is purely
+                 keystroke-driven: focusing an option and typing a prefix moves focus to the matching
+                 option — which can only happen if the registration wired the listener.
+  -->
+  <main>
+    <h1>Registered behaviors — bootstrap auto-upgrade fixture</h1>
+
+    <nav aria-label="Main" nav:list data-test="nav">
+      <ul>
+        <li><a href="#alpha" tabindex="-1" data-test="nav-alpha">Alpha</a></li>
+        <li><a href="#bravo" tabindex="-1" data-test="nav-bravo">Bravo</a></li>
+        <li><a href="#charlie" tabindex="-1" data-test="nav-charlie">Charlie</a></li>
+      </ul>
+    </nav>
+
+    <ul role="listbox" type-ahead aria-label="Countries" data-test="listbox">
+      <li role="option" tabindex="-1" data-test="opt-argentina">Argentina</li>
+      <li role="option" tabindex="-1" data-test="opt-brazil">Brazil</li>
+      <li role="option" tabindex="-1" data-test="opt-canada">Canada</li>
+    </ul>
+  </main>
+
+  <!-- Bootstrap: applies patches, exposes globals, and runs registerNavigation/registerTypeAhead(window.attributes). -->
+  <script type="module" src="/plugs/bootstrap.ts"></script>
+
+  <script type="module">
+    // The page never touches NavListBehavior or TypeAheadBehavior directly — it only asks the registry
+    // to upgrade the tree, exactly what a real app's bootstrap does, and the registered behaviors
+    // attach themselves.
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
+
+    function init() {
+      window.attributes.upgrade(document.body);
+      window.fixtureReady = true;
+    }
+  </script>
+</body>
+</html>

@@ -1,5 +1,8 @@
 ---
 type: decision
+workItem: story
+size: 2
+parent: "076"
 status: open
 dateOpened: "2026-06-06"
 tags: [webcomponents, component, declarative, lifecycle]

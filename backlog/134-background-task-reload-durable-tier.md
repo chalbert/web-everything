@@ -1,5 +1,8 @@
 ---
 type: idea
+workItem: story
+size: 5
+parent: "135"
 status: open
 dateOpened: "2026-06-06"
 tags: [block, background-task, durability, background-fetch, service-worker, async, enhancement]

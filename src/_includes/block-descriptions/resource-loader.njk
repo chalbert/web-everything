@@ -323,6 +323,31 @@ customResources.define('user-profile', {
     </tbody>
 </table>
 
+<h3>Background Task Handoff</h3>
+<p>
+    A load can <strong>escalate</strong> off-view into the
+    <a href="/blocks/background-task-surface/">Background Task Surface</a> rail so long-running work
+    keeps running (with progress, completion announcement, and retry) after its originating view is
+    gone. This is opt-in: call <code>backgroundLoad(loader, fn, { id, label })</code> instead of
+    <code>load()</code>.
+</p>
+<p>
+    The <strong>escalation:async trigger reuses the timing threshold above</strong> — a load escalates
+    exactly when it crosses the debounce into <code>loading</code> (the moment the Loader already
+    decided the work was slow enough to surface a pending UI). Fast loads that resolve before the
+    threshold never enter <code>loading</code>, so they never reach the rail. No new threshold is
+    invented.
+</p>
+<p>
+    Under the hood, <code>ResourceLoaderHandle</code> projects the Loader's own events
+    (<code>resource-state-change</code> &rarr; <code>active</code>, <code>resource-load-end</code> &rarr;
+    <code>success</code>, <code>resource-load-error</code> &rarr; <code>error</code>) onto the surface's
+    <code>getSnapshot</code> / <code>subscribe</code> / <code>retry</code> handle, registered via a
+    bubbling <code>background-task-register</code> event. The surface's per-task retry delegates back to
+    <code>retry()</code>, which re-runs the original <code>load()</code>. See the
+    <a href="/demos/loader-background-handoff-demo/">handoff playground</a> for the live producer.
+</p>
+
 <h3>Infrastructure Integration</h3>
 <p>
     Resource Loader is the <strong>UI consumption layer</strong> for the <a href="/projects/webresources/">Web Resources</a>

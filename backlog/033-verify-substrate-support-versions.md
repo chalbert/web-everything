@@ -1,5 +1,6 @@
 ---
 type: review
+workItem: task
 status: open
 dateOpened: '2026-06-02'
 tags:

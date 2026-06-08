@@ -1,5 +1,7 @@
 ---
 type: idea
+workItem: task
+parent: "125"
 status: resolved
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-06"

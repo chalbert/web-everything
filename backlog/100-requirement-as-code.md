@@ -1,5 +1,8 @@
 ---
 type: idea
+workItem: story
+size: 8
+parent: "099"
 status: open
 dateOpened: "2026-06-06"
 tags: [requirement-as-code, bdd, ai, verification, evergreen, conformance, editor, spec, propose-and-verify]
