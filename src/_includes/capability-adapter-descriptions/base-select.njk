@@ -1,0 +1,34 @@
+<p style="font-size:1.05em;">
+  <strong>base-select</strong> is the <strong>native progressive-enhancement</strong> impl — and the registered
+  <strong>native substrate</strong> the <code>native-first</code> resolver prefers when a lightness tie needs
+  breaking. It's a real <code>&lt;select&gt;</code> opting into <code>appearance: base-select</code>: native
+  picker, keyboard model, accessibility tree, and form submission come <strong>for free</strong>, enhanced with
+  arbitrary <code>&lt;option&gt;</code> markup where supported and degrading to a plainly-styled
+  <code>&lt;select&gt;</code> where not.
+</p>
+
+<h3>Why the tiers fall where they do</h3>
+<p class="text-slate-600">
+  Because it <em>is</em> the native control, base-select serves <strong>native-ok</strong> exactly the capabilities
+  FACE has to give up — <code>showpicker</code>, <code>customizable-select</code> and <code>cross-root-aria</code>
+  are UA-privileged, and base-select <em>is</em> the UA's control, so it has them by construction. It also tiers
+  <code>anchor-positioning</code> as <strong>native-ok</strong> rather than polyfilled, since the native picker
+  positions itself.
+</p>
+<ul class="list-disc pl-5 text-slate-600">
+  <li>
+    <strong><code>invokers</code> · <code>field-sizing</code> · <code>dialog-closedby</code> —
+    <span style="color:#92400e;">polyfill-ok</span>.</strong> The few features not yet universally shipped degrade
+    to a shim, the same as anywhere — these are the only cells where base-select isn't already native.
+  </li>
+</ul>
+
+<h3>What it can / can't serve native</h3>
+<p class="text-slate-600">
+  base-select is the right pick whenever the native picker chrome, the built-in a11y tree, and zero-JS form
+  participation are what's wanted — it serves the whole stack native with the least code over baseline, which is
+  why <code>native-first</code> reaches for it first. Its ceiling is <strong>customization the native control
+  won't surrender</strong>: where an intent needs option markup or open/close behavior beyond what
+  <code>appearance: base-select</code> exposes, that's where the <a href="/capabilities/adapters/face/">FACE</a>
+  build-your-own impl earns its extra weight.
+</p>

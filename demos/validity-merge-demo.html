@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Validity Merge Playground - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/validity-merge-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Validity Merge Playground</h1>
+      <p>
+        A live test surface for the runtime <a href="/plugs/customvaliditymergeregistry/"><code>customValidityMerge</code></a>
+        plug (#215) — the real <code>window.customValidityMerge</code> registry driving a form-associated
+        <code>&lt;validity-merge-field&gt;</code> control. Toggle each of the four named
+        <strong>sources</strong> (<code>native</code>/<code>schema</code>/<code>async</code>/<code>manual</code>) and
+        watch them collapse into one <code>MergedValidity</code> that is pushed to native
+        <a href="https://developer.mozilla.org/en-US/docs/Web/API/ElementInternals/setValidity"><code>ElementInternals.setValidity</code></a>.
+      </p>
+      <p class="play-caveat">
+        The merged state drives the platform's own <code>:invalid</code> / <code>:user-invalid</code> styling —
+        no re-exposed touched/dirty. That is the answer to the webvalidation <code>:user-invalid</code> open
+        question: a custom control that delegates to <code>setValidity()</code> gets the interaction-gated
+        pseudo-class <strong>for free</strong> (try submitting the form while invalid).
+      </p>
+      <p class="play-caveat">
+        Swap the merge <strong>strategy</strong> below — <code>source-reduction</code> (native-first, strictest-wins)
+        ↔ <code>last-write-wins</code> — and the <em>same</em> sources collapse differently with
+        <strong>zero control edits</strong>. That is #004 OP-1 in motion: the surface is fixed, the merge math is swappable.
+      </p>
+    </header>
+
+    <div id="play-root">Loading playground&hellip;</div>
+  </main>
+
+  <!-- Plugged mode: bootstrap defines window.customValidityMerge + <validity-merge-field>. -->
+  <script type="module" src="/plugs/bootstrap.ts"></script>
+  <script type="module" src="/demos/validity-merge-demo.ts"></script>
+</body>
+</html>

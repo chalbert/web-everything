@@ -7,6 +7,23 @@ export { default } from './JSXRenderer';
 export { createElement, Fragment } from './JSXRenderer';
 export type { JSXChild, JSXProps, JSXElementType, JSXFunctionComponent } from './JSXRenderer';
 
+// Auto-Define (#241): `defineElement` rides on the jsx-runtime surface so a served functional module
+// can `import jsx, { defineElement } from '@webeverything/jsx-runtime'` — its one self-registration
+// call. Spec: /projects/webcomponents/#protocol-auto-define-strategy
+export { defineElement, explicitAutoDefine } from '../auto-define';
+export type { AutoDefineStrategy, AutoDefineTrigger, RegistryScope, DefiningModule } from '../auto-define';
+
+// Authoring dialect (#235): a soft dev-preference governing the emitted attribute spelling —
+// `html` (default) vs `react`. Both spellings are accepted on input. Spec: /adapters/jsx-adapter/
+export {
+  DEFAULT_DIALECT,
+  toReactPropName,
+  toHtmlAttrName,
+  applyDialect,
+} from './dialect';
+export type { JsxDialect } from './dialect';
+export type { HtmlToJsxOptions } from './htmlToJsx';
+
 // Directive-sugar layer (#070): <For>/<Show>/<Resource> — an optional, reversible *spelling* of the
 // canonical <template is="…"> directives. `desugar`/`sugarize` convert source either way; the runtime
 // components build the same DOM. Spec: /adapters/jsx-adapter/ (mapping rows 7–8).

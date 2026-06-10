@@ -2,7 +2,7 @@
 type: decision
 workItem: story
 size: 5
-status: active
+status: open
 dateOpened: "2026-06-07"
 tags: [personas, profiles, governance, plateau, dev-browser, review-approve-manage, dev-experience, vision]
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "Profiles: predefined personas (#141)" }

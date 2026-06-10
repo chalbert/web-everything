@@ -4,6 +4,7 @@ workItem: story
 size: 3
 parent: "097"
 status: open
+blockedBy: ["188"]
 dateOpened: "2026-06-08"
 tags: [upgrader, ai-agnostic, provider-registry, byo-key, model-client, multi-vendor, monetization]
 relatedProject: webadapters

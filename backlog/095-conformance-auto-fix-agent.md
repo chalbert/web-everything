@@ -6,6 +6,7 @@ parent: "097"
 status: resolved
 dateOpened: "2026-06-06"
 dateResolved: "2026-06-08"
+graduatedTo: "scripts/autofix/engine.mjs + scripts/conformance-autofix.mjs CLI (`npm run autofix`) + check-standards.mjs `--json` failure descriptors"
 tags: [monetization, business-model, ai-agnostic, conformance, auto-fix, agent, propose-and-verify, webcases, self-run-tool, provider-registry]
 relatedProject: webcases
 crossRef: { url: /backlog/089-monetization-product-ideas/, label: "Product ideas (#089)" }

@@ -5,6 +5,7 @@ status: resolved
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-06"
 dateResolved: "2026-06-06"
+graduatedTo: "Frontier UI plugs/bootstrap.ts — static import of `virtual:trait-manifest` (app-wide lazy traits) + plugs/virtual-trait-manifest.d.ts + vitest alias"
 tags: [webtraits, lazy-loading, bootstrap, enforcer, integration]
 relatedReport: reports/2026-06-02-lazy-traits-loading.md
 relatedProject: webtraits

@@ -17,15 +17,15 @@ title: Backlog
 .bd-callout { border-left: 4px solid; padding: 0.75rem 1rem; border-radius: 0 0.5rem 0.5rem 0; margin-bottom: 1.5rem; font-size: 0.92em; }
 .bd-callout.diverging { border-color: #dc2626; background: #fef2f2; color: #991b1b; }
 .bd-callout.converging { border-color: #16a34a; background: #f0fdf4; color: #166534; }
-.bd-ratetable { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; font-size: 0.88em; }
+.bd-ratetable { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; font-size: 0.88em; background: #fff; }
 .bd-ratetable th, .bd-ratetable td { text-align: right; padding: 0.4rem 0.75rem; border-bottom: 1px solid var(--color-border); font-variant-numeric: tabular-nums; }
 .bd-ratetable th:first-child, .bd-ratetable td:first-child { text-align: left; }
 .bd-ratetable thead th { color: var(--color-text-muted); font-weight: 600; }
-.bd-gran { display: inline-flex; gap: 0.25rem; margin-bottom: 0.75rem; }
-.bd-gran button { appearance: none; border: 1px solid var(--color-border); background: var(--color-surface, #fff); padding: 0.3rem 0.75rem; font: inherit; font-size: 0.85em; cursor: pointer; }
-.bd-gran button:first-child { border-radius: 0.4rem 0 0 0.4rem; }
-.bd-gran button:last-child { border-radius: 0 0.4rem 0.4rem 0; }
-.bd-gran button.is-active { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+.bd-gran, .bg-filter { display: inline-flex; gap: 0.25rem; margin-bottom: 0.75rem; }
+.bd-gran button, .bg-filter button { appearance: none; border: 1px solid var(--color-border); background: var(--color-surface, #fff); padding: 0.3rem 0.75rem; font: inherit; font-size: 0.85em; cursor: pointer; }
+.bd-gran button:first-child, .bg-filter button:first-child { border-radius: 0.4rem 0 0 0.4rem; }
+.bd-gran button:last-child, .bg-filter button:last-child { border-radius: 0 0.4rem 0.4rem 0; }
+.bd-gran button.is-active, .bg-filter button.is-active { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
 .bd-chart-wrap { border: 1px solid var(--color-border); border-radius: 0.6rem; padding: 1rem; }
 .bd-legend { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 0.75rem; font-size: 0.82em; color: var(--color-text-muted); }
 .bd-legend span { display: inline-flex; align-items: center; gap: 0.4rem; }
@@ -44,6 +44,21 @@ title: Backlog
   color: {% if status == 'open' %}#92400e{% elif status == 'active' %}#1e40af{% elif status == 'resolved' %}#166534{% else %}#64748b{% endif %};">{{ status | title }}</span>
 {% endmacro %}
 
+{% macro sizeBadge(size) %}
+<span title="Estimate: {{ size }} agile point{% if size != 1 %}s{% endif %}" style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.7em; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b);">{{ size }} pt{% if size != 1 %}s{% endif %}</span>
+{% endmacro %}
+
+{# Tier labels & one-line meaning — kept in one place so the chip, the card badge, and its tooltip stay in sync. #}
+{% set tierLabel = { "A": "Agent-ready", "B": "Decision-ready", "C": "Not ready" } %}
+{% set tierMeaning = { "A": "issue/idea with all prerequisites resolved — nothing structural blocks an agent starting", "B": "a decision awaiting a nod — ratify it, then it's a quick build", "C": "needs design or is blocked — an issue/idea with an unresolved prerequisite, or a review" } %}
+
+{# Agent-readiness chip. Heuristic HINT, not authoritative: derived in the loader from structured fields only (type + resolved blockers), so it's deterministic across rebuilds but cannot see the two prose signals the LLM selection pass weighs. #}
+{% macro tierBadge(tier) %}
+{% if tier %}<span title="Agent-readiness hint — {{ tierMeaning[tier] }}. Heuristic from structured fields only (type + resolved prerequisites); not authoritative — the selection pass still refines it." style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.7em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
+  background: {% if tier == 'A' %}#dcfce7{% elif tier == 'B' %}#fef3c7{% else %}#f1f5f9{% endif %};
+  color: {% if tier == 'A' %}#166534{% elif tier == 'B' %}#92400e{% else %}#64748b{% endif %};">{{ tierLabel[tier] }}</span>{% endif %}
+{% endmacro %}
+
 <section class="intro">
     <h1>Backlog</h1>
     <p>The single source of truth for ideas, issues, decisions, and reviews across Web Everything. Each item is one markdown file in <code>backlog/</code>, completely dynamic — its title, summary, and detail come from markdown (the item's own body, or a related report it mirrors), never hand-typed. Open questions raised on the standards' own pages are collected live below. Deep thinking stays in <code>reports/</code> — a backlog item links out to it or mirrors it.</p>
@@ -51,6 +66,8 @@ title: Backlog
 
 <div class="backlog-tabs" role="tablist" aria-label="Backlog views">
     <button type="button" class="backlog-tab is-active" role="tab" aria-selected="true" aria-controls="panel-tracked" id="tab-tracked" data-bd-tab="tracked">Tracked work</button>
+    <button type="button" class="backlog-tab" role="tab" aria-selected="false" aria-controls="panel-priority" id="tab-priority" data-bd-tab="priority">Prioritisation</button>
+    <button type="button" class="backlog-tab" role="tab" aria-selected="false" aria-controls="panel-graph" id="tab-graph" data-bd-tab="graph">Graph</button>
     <button type="button" class="backlog-tab" role="tab" aria-selected="false" aria-controls="panel-burndown" id="tab-burndown" data-bd-tab="burndown">Burndown</button>
 </div>
 
@@ -59,7 +76,15 @@ title: Backlog
 {# Item types present in the backlog, in preferred order. #}
 {% set typeOrder = ["idea", "issue", "decision", "review"] %}
 {% set typeChips = [] %}
-{% for t in typeOrder %}{% if (backlog | selectattr("type", "equalto", t) | list | length) %}{% set typeChips = (typeChips.push(t), typeChips) %}{% endif %}{% endfor %}
+{% for t in typeOrder %}{% if (backlog | where("type", t) | length) %}{% set typeChips = (typeChips.push(t), typeChips) %}{% endif %}{% endfor %}
+{# Agile-point estimates, in Fibonacci order; only sizes actually present become chips. #}
+{% set sizeOrder = [1, 2, 3, 5, 8, 13] %}
+{% set sizeChips = [] %}
+{% for s in sizeOrder %}{% if (backlog | where("size", s) | length) %}{% set sizeChips = (sizeChips.push(s), sizeChips) %}{% endif %}{% endfor %}
+{# Agent-readiness tiers actually present (only open items carry one); chip lets you filter to Tier A. #}
+{% set tierOrder = ["A", "B", "C"] %}
+{% set tierChips = [] %}
+{% for t in tierOrder %}{% if (backlog | where("tier", t) | length) %}{% set tierChips = (tierChips.push(t), tierChips) %}{% endif %}{% endfor %}
 <section class="mb-12">
     <h2 class="section-title">Tracked work <span class="count-badge" data-count-target>{{ backlog | length }}</span></h2>
     <p class="section-desc">Ideas, issues, decisions, and reviews — ordered by status. Filter by status, type, or keyword, or switch to a compact list. Resolved items are hidden by default.</p>
@@ -75,18 +100,31 @@ title: Backlog
                 <button type="button" class="status-filter-chip" data-type-chip="{{ t }}" aria-pressed="true">{{ t | title }}</button>
                 {% endfor %}
             </div>
+            {% if sizeChips | length %}
+            <div class="status-filter" role="group" aria-label="Filter by size">
+                {% for s in sizeChips %}
+                <button type="button" class="status-filter-chip" data-size-chip="{{ s }}" aria-pressed="true">{{ s }} pt{% if s != 1 %}s{% endif %}</button>
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% if tierChips | length %}
+            <div class="status-filter" role="group" aria-label="Filter by agent-readiness">
+                {% for t in tierChips %}
+                <button type="button" class="status-filter-chip" data-tier-chip="{{ t }}" aria-pressed="true" title="{{ tierMeaning[t] }}">{{ tierLabel[t] }}</button>
+                {% endfor %}
+            </div>
+            {% endif %}
         </div>
         {{ displayToolbar("backlog") }}
     </div>
     <div class="project-grid">
         {% for group in statusOrder %}{% for item in backlog %}{% if item.status == group %}
-        <div class="project-card" data-status="{{ item.status }}" data-type="{{ item.type }}">
+        <div class="project-card" data-status="{{ item.status }}" data-type="{{ item.type }}" data-size="{{ item.size }}" data-tier="{{ item.tier }}">
             <a href="/backlog/{{ item.id }}/" class="project-card-link" aria-label="View {{ item.title }}"></a>
-            <div class="project-header" style="margin-bottom: 0.6rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
+            <div class="project-header" style="margin-bottom: 0.4rem;">
                 <h3 class="project-title" style="margin: 0; font-size: 1.05em;">{% if item.num %}<span style="color: var(--color-text-muted, #94a3b8); font-weight: 600; font-variant-numeric: tabular-nums;">#{{ item.num }}</span> {% endif %}{{ item.title }}</h3>
-                {{ statusBadge(item.status) }}
             </div>
-            <div style="margin-bottom: 0.6rem;">{{ typeBadge(item.type) }}</div>
+            <div class="backlog-badges" style="margin-bottom: 0.6rem; display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">{{ typeBadge(item.type) }}{{ statusBadge(item.status) }}{% if item.size %}{{ sizeBadge(item.size) }}{% endif %}{{ tierBadge(item.tier) }}</div>
             <p class="backlog-summary" style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ item.summary }}</p>
             <div class="backlog-meta">
                 {% if item.tags %}
@@ -142,6 +180,124 @@ title: Backlog
 {% endif %}
 
 </div>{# /#panel-tracked #}
+
+<div id="panel-priority" role="tabpanel" aria-labelledby="tab-priority" hidden>
+{# Open items ranked by how much work resolving them would free — derived deterministically in the
+   loader (#254) by inverting `blockedBy`. `transitiveUnblocks` = every open item this one ultimately
+   gates; `unblocksToReady` = open issue/idea dependents this is the LAST open blocker for (resolving it
+   flips them to agent-ready). Sorted by `leverageScore` (transitive-dominant); only items that gate
+   something appear. #}
+{% set leverageItems = backlog | where("status", "open") | sort(attribute="leverageScore", reverse=true) %}
+{% set leverageCount = leverageItems | length %}
+{% set countBatch = backlog | where("batchable", true) | length %}
+{% set countA = backlog | where("tier", "A") | length %}
+{% set countB = backlog | where("tier", "B") | length %}
+{% set countC = backlog | where("tier", "C") | length %}
+<section class="mb-12">
+    <h2 class="section-title">Prioritisation <span class="count-badge">{{ leverageCount }}</span></h2>
+    <p class="section-desc">Every <strong>open</strong> item, sortable — ranked by default by <strong>how much work resolving it would unblock</strong> (the inverse of the <code>blockedBy</code> edges, computed deterministically from structured fields only, no LLM). <strong>Frees now</strong> counts the items this is the <em>last</em> open prerequisite for — resolving it flips them to agent-ready. <strong>Gates (chain)</strong> counts every open item it ultimately blocks, directly or transitively. The <strong>Readiness</strong> column is the agent-readiness tier; sort by it to surface the batchable work.</p>
+    <div style="display:flex; gap:0.6rem; flex-wrap:wrap; align-items:center; margin:0 0 1rem; font-size:0.85em;">
+        <button type="button" data-pfilter="batchable" aria-pressed="false" title="Click to filter the table to batchable only. Batchable (deterministic) — a Tier-A item that is also SMALL: a story of size ≤ 3, or a task. The batch skill can run several back-to-back. A SUBSET of agent-ready — it excludes ready-but-large work (story size ≥ 5, any epic)." style="cursor:pointer; appearance:none; border:2px solid transparent; display:inline-flex; align-items:center; gap:0.4rem; padding:0.25rem 0.6rem; border-radius:9999px; background:#166534; color:#fff; font:inherit; font-size:1em; font-weight:700;">{{ countBatch }} batchable <span style="font-weight:600; opacity:0.85;">(small Tier A)</span></button>
+        <button type="button" data-pfilter="batchable,agentready" aria-pressed="false" title="Click to filter the table to all agent-ready (Tier A). An issue/idea with every prerequisite resolved; startable now. Includes ready-but-large stories/epics that are NOT batchable on their own." style="cursor:pointer; appearance:none; border:2px solid transparent; display:inline-flex; align-items:center; gap:0.4rem; padding:0.25rem 0.6rem; border-radius:9999px; background:#dcfce7; color:#166534; font:inherit; font-size:1em; font-weight:700;">{{ countA }} agent-ready <span style="font-weight:600; opacity:0.8;">(Tier A)</span></button>
+        <button type="button" data-pfilter="decision" aria-pressed="false" title="Click to filter to decision-ready (Tier B) — a decision/review awaiting a nod; ratify it, then the build it gates becomes agent-ready." style="cursor:pointer; appearance:none; border:2px solid transparent; display:inline-flex; align-items:center; gap:0.4rem; padding:0.25rem 0.6rem; border-radius:9999px; background:#fef3c7; color:#92400e; font:inherit; font-size:1em; font-weight:700;">{{ countB }} decision-ready <span style="font-weight:600; opacity:0.8;">(Tier B)</span></button>
+        <button type="button" data-pfilter="notready" aria-pressed="false" title="Click to filter to not ready (Tier C) — an issue/idea that still has an open prerequisite, or a review; clear its blocker first." style="cursor:pointer; appearance:none; border:2px solid transparent; display:inline-flex; align-items:center; gap:0.4rem; padding:0.25rem 0.6rem; border-radius:9999px; background:#f1f5f9; color:#475569; font:inherit; font-size:1em; font-weight:700;">{{ countC }} not ready <span style="font-weight:600; opacity:0.8;">(Tier C)</span></button>
+    </div>
+    <p class="section-desc" style="margin:-0.5rem 0 1rem; font-size:0.82em;"><strong style="color:#166534;">Batchable</strong> = a small, agent-ready item — <strong>Tier A</strong> (issue/idea with every prerequisite resolved) <em>and</em> small (<strong>story&nbsp;≤&nbsp;3&nbsp;pts</strong> or a <strong>task</strong>), so the batch skill can run several back-to-back. It's a subset of agent-ready: ready-but-large work (story&nbsp;≥&nbsp;5, any epic) is agent-ready but <em>not</em> batchable. Computed deterministically from the <code>type</code>/<code>blockedBy</code>/<code>size</code> fields — no LLM.</p>
+    {% if leverageCount %}
+    {# Higher rank = more ready, so first-click (descending, like the other numeric columns) puts
+       Agent-ready on top. Value is a hidden sort key only — never shown. #}
+    {% set tierRank = { "A": 3, "B": 2, "C": 1 } %}
+    <p class="section-desc" style="margin-top:-0.5rem; font-size:0.82em;">Click a column header to sort; click again to reverse. Default order is by leverage (Gates, then Direct).</p>
+    {# Client-side filtering for the Prioritisation table (backlog-table-sort.js). Chips toggle; deselecting
+       every chip in a group means "no filter" (show all). The count badge reflects the visible rows. #}
+    <div class="ptable-filter" style="display:flex; gap:0.6rem 1rem; flex-wrap:wrap; align-items:center; margin-bottom:0.75rem;">
+        <input type="search" data-ptable-search placeholder="Filter by # or title…" aria-label="Filter the table by id or title" style="appearance:none; border:1px solid var(--color-border); border-radius:0.4rem; padding:0.3rem 0.6rem; font:inherit; font-size:0.85em; min-width:200px;">
+        <div class="status-filter" role="group" aria-label="Filter by readiness">
+            <button type="button" class="status-filter-chip" data-pready="batchable" aria-pressed="true" title="Small Tier-A — story ≤3 or task">Batchable</button>
+            <button type="button" class="status-filter-chip" data-pready="agentready" aria-pressed="true" title="Tier A but too large to batch (story ≥5 / epic)">Agent-ready</button>
+            <button type="button" class="status-filter-chip" data-pready="decision" aria-pressed="true" title="Tier B — a decision/review to ratify">Decision-ready</button>
+            <button type="button" class="status-filter-chip" data-pready="notready" aria-pressed="true" title="Tier C — has an open prerequisite, or a review">Not ready</button>
+        </div>
+        <div class="status-filter" role="group" aria-label="Filter by type">
+            {% for t in ["idea", "issue", "decision", "review"] %}{% if backlog | where("status","open") | where("type", t) | length %}
+            <button type="button" class="status-filter-chip" data-ptype="{{ t }}" aria-pressed="true">{{ t | title }}</button>
+            {% endif %}{% endfor %}
+        </div>
+        <span style="font-size:0.82em; color:var(--color-text-muted);"><strong data-ptable-count>{{ leverageCount }}</strong> shown</span>
+    </div>
+    <div style="overflow-x: auto;">
+    <table class="bd-ratetable sortable" style="min-width: 860px;">
+        <thead><tr>
+            <th data-sort-key="item" data-sort-type="num" style="text-align:left;">Item <span class="sort-ind"></span></th>
+            <th data-sort-key="type" data-sort-type="text" title="idea / issue / decision / review">Type <span class="sort-ind"></span></th>
+            <th data-sort-key="size" data-sort-type="num" title="Agile points — a story carries Fibonacci size (1/2/3/5/8/13); a task is unsized; an epic rolls up its children. Batchable = story ≤3 or task.">Size <span class="sort-ind"></span></th>
+            <th data-sort-key="readiness" data-sort-type="num" title="Agent-readiness tier — sorts Batchable (small Tier A) first, then Agent-ready (A), Decision-ready (B), Not-ready (C)">Readiness <span class="sort-ind"></span></th>
+            <th data-sort-key="frees" data-sort-type="num" title="Open items this is the last open prerequisite for — resolving it flips them to agent-ready">Frees now <span class="sort-ind"></span></th>
+            <th data-sort-key="gates" data-sort-type="num" title="Every open item this one ultimately blocks, directly or transitively">Gates (chain) <span class="sort-ind"></span></th>
+            <th data-sort-key="direct" data-sort-type="num" title="Open items directly blocked by this one">Direct <span class="sort-ind"></span></th>
+            <th style="text-align:left;">Would free</th>
+        </tr></thead>
+        <tbody>
+        {% for item in leverageItems %}
+            <tr data-type="{{ item.type }}" data-readiness="{% if item.batchable %}batchable{% elif item.tier == 'A' %}agentready{% elif item.tier == 'B' %}decision{% else %}notready{% endif %}" data-search="{{ item.num }} {{ item.title | lower }}">
+                <td style="text-align:left;" data-sort-val="{{ item.num }}">
+                    <a href="/backlog/{{ item.id }}/" style="color: var(--color-primary); text-decoration: none; font-weight: 600;"><span style="color: var(--color-text-muted, #94a3b8); font-variant-numeric: tabular-nums;">#{{ item.num }}</span> {{ item.title }}</a>
+                </td>
+                <td data-sort-val="{{ item.type }}">{{ typeBadge(item.type) }}</td>
+                <td data-sort-val="{{ item.size if item.size else 0 }}">{% if item.size %}{{ sizeBadge(item.size) }}{% else %}<span title="{{ item.workItem }} — unsized ({% if item.workItem == 'epic' %}rolls up its child stories{% else %}points roll up to a parent{% endif %})" style="font-size:0.78em; color:var(--color-text-muted, #94a3b8);">{{ item.workItem }}</span>{% endif %}</td>
+                <td data-sort-val="{{ 4 if item.batchable else (tierRank[item.tier] if item.tier else 0) }}">{{ tierBadge(item.tier) }}{% if item.batchable %} <span title="Batchable — small (story ≤3 or task) and Tier A, so the batch skill can run it back-to-back." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#166534; color:#fff; white-space:nowrap;">batch</span>{% endif %}</td>
+                <td style="font-weight: 700;{% if item.unblocksToReady %} color: #166534;{% endif %}" data-sort-val="{{ item.unblocksToReady }}">{{ item.unblocksToReady }}</td>
+                <td data-sort-val="{{ item.transitiveUnblocks }}">{{ item.transitiveUnblocks }}</td>
+                <td data-sort-val="{{ item.directUnblocks }}">{{ item.directUnblocks }}</td>
+                <td style="text-align:left; font-size: 0.92em;">
+                    {% for dep in item.dependents | where("status", "open") %}<a href="/backlog/{{ dep.id }}/" title="{{ dep.title }}" style="color: var(--color-text-muted); text-decoration: none; font-variant-numeric: tabular-nums;">#{{ dep.num }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <p class="section-desc" style="margin-top: 1rem;">All open items are listed; those that gate no open work simply show <strong>0</strong> in the leverage columns (sort by <strong>Gates</strong> to push them down, or by <strong>Readiness</strong> to surface the batchable ones). An <span style="color:#166534; font-weight:600;">Agent-ready</span> item with high leverage is the highest-value thing to start now; a <span style="color:#92400e; font-weight:600;">Decision-ready</span> or <span style="color:#64748b; font-weight:600;">Not ready</span> one with high leverage is the highest-leverage <em>blocker</em> to clear first.</p>
+    {% else %}
+    <p>No open items.</p>
+    {% endif %}
+</section>
+</div>{# /#panel-priority #}
+
+<div id="panel-graph" role="tabpanel" aria-labelledby="tab-graph" hidden>
+{# Dependency relationship graph — the `blockedBy` network as a diagram (#255). Nodes/edges/layers are
+   computed deterministically in src/_data/backlogGraph.js (reusing the #254 leverage fields); the SVG is
+   laid out + drawn by src/assets/js/backlog-graph.js. Only items that participate in an edge appear. #}
+<section class="mb-12">
+    <h2 class="section-title">Dependency graph <span class="count-badge" id="bg-count">{{ backlogGraph.nodes | length }} items</span></h2>
+    <p class="section-desc">The <code>blockedBy</code> network as a diagram — an arrow points <strong>prerequisite&nbsp;&rarr;&nbsp;dependent</strong>, so work flows left to right and the leftmost nodes are the roots that gate everything downstream. Nodes are coloured by agent-readiness (<span style="color:#166534;font-weight:600;">ready</span> / <span style="color:#92400e;font-weight:600;">decision</span> / <span style="color:#475569;font-weight:600;">blocked</span>; <span style="color:#94a3b8;font-weight:600;">muted</span> = already resolved/claimed) and sized by how much they unblock. Click any node to open its item. <strong>Open &amp; blockers</strong> shows <em>every</em> open item — those with prerequisites laid out in chains, the rest (no live dependency) as a standalone grid below the divider; <strong>All</strong> shows the full dependency network, resolved history included (so it can show fewer nodes than Open&nbsp;&amp;&nbsp;blockers, which also counts the standalone open items).</p>
+    {% if backlogGraph.empty %}
+    <p>No <code>blockedBy</code> edges yet — nothing to graph. As items declare prerequisites, the dependency network appears here.</p>
+    {% else %}
+    <div class="bg-legend" style="display:flex; gap:1.2rem; flex-wrap:wrap; align-items:center; margin-bottom:0.5rem; font-size:0.85em; color:var(--color-text-muted);">
+        <span style="display:inline-flex; align-items:center; gap:0.35rem;" title="Tier A — an issue/idea whose every prerequisite is already resolved. An agent can start it now (but a large one isn't batchable on its own)."><span style="width:14px;height:14px;border-radius:50%;background:#dcfce7;border:2px solid #16a34a;"></span><strong style="color:#166534;">Agent-ready</strong> — startable now</span>
+        <span style="display:inline-flex; align-items:center; gap:0.35rem;" title="Batchable — a small Tier-A item (story ≤3 or task) the batch skill can run back-to-back. Shown with a detached green ring. A subset of agent-ready."><span style="position:relative; width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center;"><span style="position:absolute; width:16px;height:16px;border-radius:50%;border:1.5px solid #16a34a;"></span><span style="width:9px;height:9px;border-radius:50%;background:#dcfce7;border:2px solid #16a34a;"></span></span><strong style="color:#166534;">Batchable</strong> — small &amp; ready (ring)</span>
+        <span style="display:inline-flex; align-items:center; gap:0.35rem;" title="Tier B — a decision/review. Ratify the call first, then the build it gates becomes agent-ready."><span style="width:14px;height:14px;border-radius:50%;background:#fef3c7;border:2px solid #d97706;"></span><strong style="color:#92400e;">Decision-ready</strong> — ratify, then build</span>
+        <span style="display:inline-flex; align-items:center; gap:0.35rem;" title="Tier C — an issue/idea that still has an open prerequisite (or a review). Clear its blocker(s) first."><span style="width:14px;height:14px;border-radius:50%;background:#f1f5f9;border:2px solid #94a3b8;"></span><strong style="color:#475569;">Not ready</strong> — has an open blocker</span>
+        <span style="display:inline-flex; align-items:center; gap:0.35rem;" title="Claimed — an agent is actively working it (status: active)."><span style="width:14px;height:14px;border-radius:50%;background:#dbeafe;border:2px solid #2563eb;"></span><strong style="color:#1e40af;">In progress</strong> — claimed</span>
+        <span style="display:inline-flex; align-items:center; gap:0.35rem;" title="Done — kept in the graph (in All view) for dependency history."><span style="width:14px;height:14px;border-radius:50%;background:#f8fafc;border:2px solid #cbd5e1;"></span>Resolved</span>
+        <span title="Node radius grows with the number of open items this one ultimately unblocks.">larger node = unblocks more</span>
+    </div>
+    <p class="section-desc" style="margin-top:0; margin-bottom:1rem; font-size:0.82em;">Colour = <strong>agent-readiness</strong>, the same deterministic tier as the Prioritisation tab: whether an agent could pick the item up right now. <em>Agent-ready</em> nodes with no incoming edge are the live frontier; a <em>Not-ready</em> node points back (left) to the open blocker it's waiting on.</p>
+    {# Filter toggle (#257): "Open & blockers" trims fully-resolved chains to the live frontier — open/active
+       nodes plus the still-open prerequisites gating them. Filter + re-layout happen client-side in
+       src/assets/js/backlog-graph.js (no second graph model); the choice persists in localStorage. #}
+    <div class="bg-filter" role="group" aria-label="Graph filter">
+        <button type="button" data-bg-filter="live" class="is-active">Open &amp; blockers</button>
+        <button type="button" data-bg-filter="all">All</button>
+    </div>
+    <div style="overflow-x:auto; border:1px solid var(--color-border); border-radius:8px; background:var(--color-surface, #fff);">
+        <svg id="backlog-graph" role="img" aria-label="Dependency graph of backlog items linked by blockedBy edges, prerequisite to dependent" style="display:block;"></svg>
+    </div>
+    <script type="application/json" id="backlog-graph-data">{{ backlogGraph | dump | safe }}</script>
+    {% endif %}
+</section>
+</div>{# /#panel-graph #}
 
 <div id="panel-burndown" role="tabpanel" aria-labelledby="tab-burndown" hidden>
     <section class="mb-12">
@@ -210,3 +366,5 @@ title: Backlog
 
 <script src="/assets/js/home-display.js"></script>
 <script src="/assets/js/backlog-burndown.js"></script>
+<script src="/assets/js/backlog-graph.js"></script>
+<script src="/assets/js/backlog-table-sort.js"></script>

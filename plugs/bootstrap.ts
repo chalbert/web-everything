@@ -28,6 +28,11 @@ import CustomStore from './webstates/CustomStore';
 import CustomStoreRegistry from './webstates/CustomStoreRegistry';
 import CustomAttribute from './webbehaviors/CustomAttribute';
 import CustomAttributeRegistry from './webbehaviors/CustomAttributeRegistry';
+import {
+  CustomValidityMergeRegistry,
+  createDefaultValidityMergeRegistry,
+  ValidityMergeField,
+} from './webvalidation';
 
 // Import expression parsers and event attributes
 import { CustomExpressionParserRegistry, CustomTextNodeParserRegistry, CustomTextNodeRegistry } from './webexpressions';
@@ -76,6 +81,9 @@ declare global {
     CustomAttribute: typeof CustomAttribute;
     CustomAttributeRegistry: typeof CustomAttributeRegistry;
     attributes: CustomAttributeRegistry;
+    // Web Validation
+    CustomValidityMergeRegistry: typeof CustomValidityMergeRegistry;
+    customValidityMerge: CustomValidityMergeRegistry;
     // Web Expressions
     customTextNodeParsers: CustomTextNodeParserRegistry;
     customTextNodes: CustomTextNodeRegistry;
@@ -145,6 +153,9 @@ window.CustomStoreRegistry = CustomStoreRegistry;
 window.CustomAttribute = CustomAttribute;
 window.CustomAttributeRegistry = CustomAttributeRegistry;
 
+// Web Validation
+window.CustomValidityMergeRegistry = CustomValidityMergeRegistry;
+
 // Create global registry instances
 console.log('[Web Everything] Creating global registries...');
 
@@ -190,6 +201,17 @@ textNodes.define('polymer', InterpolationTextNode);
 window.customTextNodes = textNodes;
 documentInjector?.set('customTextNodes', textNodes);
 
+// Setup validity-merge registry (#215): one merge policy the tree shares, resolved per-scope through
+// the injector chain. Pre-loaded with source-reduction (native-first default) + last-write-wins.
+const validityMerge = createDefaultValidityMergeRegistry();
+window.customValidityMerge = validityMerge;
+documentInjector?.set('customValidityMerge', validityMerge);
+
+// Define the form-associated control that delegates its validity to the plug.
+if (!customElements.get('validity-merge-field')) {
+  customElements.define('validity-merge-field', ValidityMergeField);
+}
+
 // Register event attributes (on:click, on:submit, on:change, etc.)
 registerEventAttributes(window.attributes);
 
@@ -223,3 +245,4 @@ console.log('[Web Everything] Transient components registered: auto-heading');
 console.log('[Web Everything] Navigation registered: nav:list, nav:section');
 console.log('[Web Everything] Directives registered: for-each');
 console.log('[Web Everything] Data Grid registered: grid:cell-navigation');
+console.log('[Web Everything] Validity merge registered: customValidityMerge (source-reduction default), <validity-merge-field>');

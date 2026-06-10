@@ -3,8 +3,11 @@ type: idea
 workItem: story
 size: 3
 parent: "097"
-status: open
+status: resolved
 dateOpened: "2026-06-08"
+dateStarted: "2026-06-09"
+dateResolved: "2026-06-09"
+graduatedTo: none   # enhanced the existing upgrader analyzer; no new entity spawned
 tags: [upgrader, intents, analyzer, conformance, neutral-structure]
 relatedProject: webintents
 crossRef: { url: /backlog/094-ai-upgrader-tools/, label: "AI upgrader MVP (#094)" }
@@ -27,3 +30,21 @@ verify but mislabel the component, so prefer omission over a shaky inference.
 Pairs naturally with the BYO-AI provider ([#188](/backlog/188-upgrader-byo-ai-model-analyzer/)),
 which can infer intents far better than heuristics — but a few high-confidence deterministic rules
 are worth shipping first so the field is exercised end-to-end without a key.
+
+## Progress
+- **Status:** resolved — deterministic intent inference shipped + demonstrated end-to-end.
+- **Branch:** docs/standard-authoring-workflow
+- **Done:**
+  - `inferIntents(template, code)` in `legacyWebComponent.ts` — two conservative rules:
+    `role="listbox"` + `aria-selected` → `selection`; `prefers-reduced-motion` guard → `motion`. Both
+    require unambiguous signals, each adds an analyzer note, and `analyze()` now populates `ir.intents`.
+  - Shared fixtures (`upgrader-cases.ts`): added `expectIntents` + two cases (`listbox-selection-intent`,
+    `reduced-motion-intent`); the suite loop now asserts `expectIntents`.
+  - `upgrader.test.ts`: +6 cases incl. the conservative-omission guard (listbox without aria-selected
+    infers nothing) and an inferred-intent passing the verify gate. Suite 23/23 green.
+  - Demo (`code-upgrader-demo.ts`): reference cards now pass `knownIntents` so the inferred intent
+    shows a green `✓ intents — N resolve` check. Playground verified live on :3000 — 13/13, both new
+    cards `✓ upgraded`, IR panes show the inferred intents, no page errors.
+  - `check:standards` 0 errors.
+- **Leftover captured:** `aria-expanded`/`hidden` → `disclosure` deferred to **#246** (blocked on the
+  disclosure intent, gap #008) — inferring a non-existent intent would fail the verify gate.

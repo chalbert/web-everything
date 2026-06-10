@@ -2,8 +2,11 @@
 type: idea
 workItem: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-06-07"
+dateStarted: "2026-06-10"
+dateResolved: "2026-06-10"
+graduatedTo: block:slider
 tags: [block, slider, range, input, selection, native-first, candidate, harvest]
 relatedProject: webblocks
 ---
@@ -25,3 +28,14 @@ Native-first by construction: a single-thumb slider *is* `<input type="range">`.
 - Relationship to a future numeric/stepper input — slider is the *continuous-along-a-track* member.
 
 > **Provenance:** surfaced during a final review of the legacy `plateau` repo, where `slider.md` was an empty stub. **Plateau is not a model and must not be consulted or copied** — build this fresh from the Selection Intent's existing `range` variant.
+
+## Progress
+
+- **Status:** resolved → `block:slider`.
+- **Done (authored fresh, design-first):**
+  - `blocks.json` — new `slider` Component (status draft): `implementsIntent: selection`, `composesIntents: [selection, input, locale, translation]`, and 4 design decisions (single-thumb IS native `<input type=range>` / dual-thumb = two bound ordered values / `aria-valuetext` formatted via Locale / slider vs stepper boundary).
+  - `block-descriptions/slider.njk` — overview, native-first feature-inventory table (disposition + tier marking where native suffices vs custom track/thumb), an Altitude-1 native single-thumb example and a dual-thumb-range example, and an explicit boundaries section.
+  - `semantics.json` — two new terms: **Slider** and **Dual-Thumb Range** (per AGENTS rule 3).
+  - Page route + webblocks catalog auto-wire from `blocks.json`. `gen:inventory` regenerated (36 blocks); `check:standards` green (0 errors).
+- **Realizes** the Selection Intent's pre-existing `range` variant — no new dimension invented; `constraints.min/max` become the two thumb bounds.
+- **Leftovers:** the future numeric/stepper input (named as the discrete-entry sibling) is out of scope; Frontier UI reference implementation is the standard-vs-impl follow-on.

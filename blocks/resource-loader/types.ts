@@ -98,6 +98,19 @@ export interface ResourceStateChangeDetail {
   newState: LoaderState;
 }
 
+/**
+ * Detail for `resource-progress` — determinate numeric progress for the in-flight
+ * load. Only meaningful when the resolved intent's `progress` is `determinate`.
+ */
+export interface ResourceProgressDetail {
+  /** Raw loaded amount (bytes/items), or the 0..1 fraction when reported alone. */
+  loaded: number;
+  /** Total when known (byte length, item count); omitted for an explicit fraction. */
+  total?: number;
+  /** Normalized 0..1 progress fraction (clamped). */
+  fraction: number;
+}
+
 // -----------------------------------------------------------------------
 // ResourceLoader options
 // -----------------------------------------------------------------------

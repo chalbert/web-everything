@@ -5,6 +5,7 @@ size: 5
 parent: "081"
 status: open
 dateOpened: "2026-06-06"
+blockedBy: ["081"]
 tags: [module-as-a-service, versioning, content-addressing, immutability, cache-key, semver, adapters, plateau, esm]
 relatedProject: webadapters
 crossRef: { url: /adapters/, label: Rendering Adapters }

@@ -1,0 +1,53 @@
+{
+  "description": "The static build-matrix — the default capability-provider implementation (D4′). Its <code>impls[]</code> array is the central <strong>registered capability adapter table</strong> (#206): one row per impl, authored by that impl but registered centrally, declaring its capability id → 3-state tier map: native-ok (the platform serves it directly) / polyfill-ok (a shim recovers the behavior) / capability-hard (a UA-privileged capability no shim can reach). The adapter table <em>is</em> the matrix's row source — one source of truth, no duplicated capability facts; adding a new impl is a single-row registration. Capability ids key off src/_data/capabilities.json. Grounded in reports/2026-06-02-native-platform-substrate.md. Paired with the default <code>build</code> venue; runtime + edge venues swap in their own provider impls (#208).",
+  "tiers": [
+    "native-ok",
+    "polyfill-ok",
+    "capability-hard"
+  ],
+  "impls": [
+    {
+      "id": "face",
+      "label": "FACE — build-your-own",
+      "summary": "A custom element built on Form-Associated Custom Elements (<code>ElementInternals</code>): owns its value/validity and renders its own listbox via popover + anchor positioning. Maximum control; pays for native picker chrome and cross-root a11y it cannot reach.",
+      "tiers": {
+        "dialog": "native-ok",
+        "request-submit": "native-ok",
+        "showpicker": "capability-hard",
+        "face": "native-ok",
+        "user-pseudos": "native-ok",
+        "declarative-shadow-dom": "native-ok",
+        "popover": "native-ok",
+        "custom-state": "native-ok",
+        "anchor-positioning": "polyfill-ok",
+        "invokers": "polyfill-ok",
+        "field-sizing": "polyfill-ok",
+        "dialog-closedby": "polyfill-ok",
+        "customizable-select": "capability-hard",
+        "cross-root-aria": "capability-hard"
+      }
+    },
+    {
+      "id": "base-select",
+      "label": "base-select — native progressive enhancement",
+      "native": true,
+      "summary": "A native customizable <code>&lt;select&gt;</code> opting into <code>appearance: base-select</code>: native picker, keyboard, a11y tree, and form submission for free; enhanced with arbitrary <code>&lt;option&gt;</code> markup where supported, degrading to a plain styled <code>&lt;select&gt;</code> otherwise.",
+      "tiers": {
+        "dialog": "native-ok",
+        "request-submit": "native-ok",
+        "showpicker": "native-ok",
+        "face": "native-ok",
+        "user-pseudos": "native-ok",
+        "declarative-shadow-dom": "native-ok",
+        "popover": "native-ok",
+        "custom-state": "native-ok",
+        "anchor-positioning": "native-ok",
+        "invokers": "polyfill-ok",
+        "field-sizing": "polyfill-ok",
+        "dialog-closedby": "polyfill-ok",
+        "customizable-select": "native-ok",
+        "cross-root-aria": "native-ok"
+      }
+    }
+  ]
+}

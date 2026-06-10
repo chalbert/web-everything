@@ -3,6 +3,7 @@ type: decision
 workItem: story
 size: 3
 status: open
+blockedBy: ["013"]
 dateOpened: "2026-06-03"
 tags: [pagination, a11y, focus, announcements, collection-ops]
 relatedReport: reports/2026-06-03-pagination-standard-research.md

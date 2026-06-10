@@ -420,6 +420,94 @@ interface RenderStrategy {
     </p>
 </section>
 
+<section id="protocol-auto-define-strategy" class="section-card">
+    <h3 id="auto-define-strategy-heading">Auto-Define Strategy Protocol</h3>
+    <p>
+        A conformance contract for <strong>how and when a custom element gets registered</strong>
+        (<code>customElements.define</code>). Self-registration is a <em>strategy axis</em>, not one
+        mechanism — the same configurable-dimension framing as
+        <a href="#protocol-render-strategy">Render Strategy</a>. Registration is a
+        <strong>module-import concern, not a JSX/renderer one</strong> (resolved in backlog #072): a
+        component module owns its own define; the renderer never registers.
+    </p>
+    <p>
+        <strong>The native baseline is explicit registration.</strong> The platform has
+        <em>no</em> auto-registration — natively you call <code>customElements.define</code> yourself.
+        So the axis's baseline point is the <em>explicit</em> strategy (decider: author/generator), and
+        every <em>inferring</em> strategy — one that registers an element the author never imported — is
+        <strong>opt-in</strong>: on-first-use / DOM-presence (MutationObserver), build-time HTML parse,
+        manifest / import-map, convention-URL, server-driven. This is a technical contract — a Protocol,
+        not an Intent — and surfaces under <code>/protocols/</code>.
+    </p>
+
+    <h4 id="auto-define-no-tool-default">No tool-baked default — config extends a platform flavor</h4>
+    <p>
+        The registry <strong>carries no default of its own.</strong> The default-strategy selection is a
+        value in the <strong>platform config a project extends</strong>, shipped in flavors — the same
+        model intents use (standardize the meta-schema, not the list). The strictest flavor
+        (<code>strict-explicit</code>) defaults to explicit registration (the native baseline);
+        <code>lazy-dom</code> defaults to on-first-use DOM-presence; <code>build-parsed</code> resolves
+        registration at build time. A project picks one by extending it and overrides per scope. This is
+        the canonical WE inheritance idiom: the registry <strong>extends core
+        <code>CustomRegistry</code></strong> (own → extended chain), never a bespoke <code>#defaultName</code>.
+    </p>
+
+    <h4 id="auto-define-strategy-contract">Contract</h4>
+    <p>A strategy is a registry value; capability is feature-detected by which optional methods it implements. The <em>explicit</em> baseline needs no strategy object at all — it is just the helper.</p>
+{% highlight "typescript" %}
+interface AutoDefineStrategy {
+  readonly key: string;          // 'explicit' | 'lazy-dom' | 'build-parsed' | …
+  // When this strategy triggers a define.
+  readonly trigger: 'import' | 'first-use' | 'in-viewport' | 'build-time' | 'server-render';
+  // Resolve an unknown tag to its defining module. Absent ⇒ no inference
+  // (the author/generator already imported the module). Present on the
+  // inferring strategies (DOM-presence, build-parse, manifest, convention).
+  resolve?(tag: string): Promise<DefiningModule> | DefiningModule | undefined;
+  // Perform the registration. Default scope is the global registry; a scope
+  // token is reserved for the Scoped Custom Element Registries proposal.
+  define(tag: string, ctor: CustomElementConstructor, scope?: RegistryScope): void;
+}
+
+// The native baseline, expressed safely. Idempotent + collision-safe +
+// HMR-safe — the one thing every module (generated OR hand-authored) calls.
+// Bare top-level customElements.define throws on re-import / dup tag / HMR.
+function defineElement(tag: string, ctor: CustomElementConstructor): void {
+  if (!customElements.get(tag)) customElements.define(tag, ctor);
+}
+{% endhighlight %}
+    <p>
+        <strong>Tag ↔ class binding (resolved):</strong> the generated class carries
+        <code>static tagName</code> as the single source of truth, so import-time registration and the
+        JSX class path agree without a side channel — <code>&lt;UserCard/&gt;</code> resolves
+        <code>tagName</code> → <code>document.createElement(tag)</code> (the registry upgrade path), never
+        a bare <code>new</code>. <code>static tagName</code> is also the natural tag → module key a
+        <a href="https://github.com/webcomponents/custom-elements-manifest">Custom Elements Manifest</a>
+        emits for the build-parse and manifest strategies.
+    </p>
+    <p>
+        <strong>Hand-authored parity:</strong> what an author writes by hand to get the same
+        self-registration the generators emit is <em>the same <code>defineElement</code> call</em> — not
+        folklore buried in one adapter doc. The generator emits it; the author calls it; both are
+        idempotent under re-import and HMR.
+    </p>
+
+    <h4 id="auto-define-strategy-catalog">Registered strategies (open, not an enum)</h4>
+    <table>
+        <tr><th>Strategy</th><th>Trigger</th><th>Decider</th><th>Resolves unknown tags?</th></tr>
+        <tr><td><strong>explicit</strong> <span class="text-xs text-gray-500">(native baseline)</span></td><td>import</td><td>author / generator</td><td>no — module already imported</td></tr>
+        <tr><td><strong>lazy-dom</strong></td><td>first-use / DOM-presence</td><td>tool-inferred</td><td>yes — MutationObserver dynamic-imports on tag appearance</td></tr>
+        <tr><td><strong>build-parsed</strong></td><td>build-time</td><td>tool-inferred</td><td>yes — parses HTML usage, injects imports / emits a manifest</td></tr>
+        <tr><td><strong>manifest / convention / server</strong></td><td>varies</td><td>config / convention / server</td><td>yes — tag→module via manifest, naming convention, or SSR set</td></tr>
+    </table>
+    <p class="text-gray-600 text-sm">
+        The registry is open — a team plugs a bespoke strategy (e.g. server-driven) that coexists
+        conflict-free, without forking. The standard defines the <em>contract</em> and resolution rules;
+        the strategies — built-in or custom — are plugged in. Web Components ships this specification;
+        concrete strategies ship in <a href="../frontierui/">Frontier UI</a>. Carries the concept from
+        plateau, never its render-time-WeakMap POC.
+    </p>
+</section>
+
 <section id="standards" class="section-card">
     <h3 id="web-standards">Web Standards Alignment</h3>
     <table>

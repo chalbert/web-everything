@@ -5,6 +5,7 @@ size: 8
 parent: "097"
 status: open
 dateOpened: "2026-06-08"
+blockedBy: ["005", "094", "102"]
 tags: [upgrader, codemod, migration, spec-versioning, breaking-change, machine-readable]
 relatedProject: webadapters
 crossRef: { url: /backlog/094-ai-upgrader-tools/, label: "AI upgrader MVP (#094)" }

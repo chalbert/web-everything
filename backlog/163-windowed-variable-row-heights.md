@@ -4,6 +4,7 @@ workItem: story
 size: 5
 parent: "137"
 status: open
+blockedBy: ["145"]
 dateOpened: "2026-06-07"
 tags: [droplist, windowed, virtualization, scroll, layout]
 relatedProject: webblocks

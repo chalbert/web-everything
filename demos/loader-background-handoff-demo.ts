@@ -42,6 +42,13 @@ function el(tag: string, className?: string, text?: string): HTMLElement {
 const rows = (s: Element) => s.querySelectorAll('.bt-entry');
 const stateOf = (s: Element, id: string) =>
   s.querySelector(`.bt-entry[data-task-id="${id}"]`)?.getAttribute('data-state') ?? null;
+/** The determinate <progress> value for an entry (null when indeterminate/absent). */
+const progressOf = (s: Element, id: string): number | null => {
+  const bar = s.querySelector(
+    `.bt-entry[data-task-id="${id}"] .bt-progress`,
+  ) as HTMLProgressElement | null;
+  return bar && bar.position >= 0 ? bar.value : null;
+};
 
 /** Build a surface with a loader target inside it (so the register bubbles up). */
 function makeSurface(attrs: Record<string, string> = {}): BackgroundTasksElement {
@@ -127,6 +134,39 @@ const runners: Record<string, (s: BackgroundTasksElement) => Promise<Result>> = 
       detail: `error-sticky=${failedSticky}, retry-reran=${reran}, active-again=${activeAgain}`,
     };
   },
+
+  async 'determinate-progress'(surface) {
+    // A determinate loader: the resolved intent's `progress` drives the rail's
+    // <progress> mode, so reported fractions render as a filling bar.
+    const loader = new ResourceLoader({
+      target: surface.querySelector('div') as HTMLElement,
+      timings: { debounced: THRESHOLD_MS },
+      intent: { progress: 'determinate' },
+    });
+    const d = createDeferred<string>();
+    const p = backgroundLoad(loader, () => d.promise, { id: 'upload', label: 'Upload file' });
+
+    await sleep(THRESHOLD_MS + 40);
+    const escalated = stateOf(surface, 'upload') === 'active';
+
+    loader.reportProgress(256, 1024); // 25% (loaded/total)
+    await tick();
+    const quarter = progressOf(surface, 'upload');
+
+    loader.reportProgress(768, 1024); // 75%
+    await tick();
+    const threeQuarter = progressOf(surface, 'upload');
+
+    d.resolve('uploaded');
+    await p;
+    await tick();
+    const succeeded = stateOf(surface, 'upload') === 'success';
+
+    return {
+      ok: escalated && quarter === 0.25 && threeQuarter === 0.75 && succeeded,
+      detail: `active=${escalated}, 25%=${quarter}, 75%=${threeQuarter}, success=${succeeded}`,
+    };
+  },
 };
 
 let passCount = 0;
@@ -156,7 +196,7 @@ function buildCard(scenario: HandoffScenario): { node: HTMLElement; run: () => P
   const surface = makeSurface(
     scenario.id === 'error-then-retry'
       ? { retry: '', persistence: 'sticky' }
-      : scenario.id === 'escalate-on-async'
+      : scenario.id === 'escalate-on-async' || scenario.id === 'determinate-progress'
         ? { persistence: 'sticky' }
         : {},
   );

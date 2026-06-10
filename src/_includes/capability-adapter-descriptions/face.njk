@@ -1,0 +1,41 @@
+<p style="font-size:1.05em;">
+  <strong>FACE</strong> (<em>Form-Associated Custom Element</em>) is the <strong>build-your-own</strong> impl: a
+  custom element wired to <code>ElementInternals</code> that owns its own value and validity and renders its own
+  listbox via the <code>popover</code> + CSS <code>anchor-positioning</code> stack. It buys <strong>maximum
+  control</strong> over markup and behavior — and pays for the native picker chrome and cross-root a11y wiring it
+  has to reconstruct by hand.
+</p>
+
+<h3>Why the tiers fall where they do</h3>
+<p class="text-slate-600">
+  FACE serves most capabilities <strong>native-ok</strong> because it composes them straight from the platform —
+  <code>dialog</code>, <code>popover</code>, <code>custom-state</code>, <code>declarative-shadow-dom</code>,
+  <code>user-pseudos</code> and the <code>face</code> form-association primitive itself are all used as-is. The
+  interesting cells are where it can't:
+</p>
+<ul class="list-disc pl-5 text-slate-600">
+  <li>
+    <strong><code>showpicker</code> · <code>customizable-select</code> · <code>cross-root-aria</code> —
+    <span style="color:#991b1b;">capability-hard</span>.</strong> These are <em>UA-privileged</em>: opening the
+    native picker, styling the native <code>&lt;select&gt;</code> internals, and reflecting ARIA across a shadow
+    boundary are actions only the user agent can perform. A custom element built outside the native control can't
+    reach them with any amount of JS — it can only <em>reimplement</em> the surface, which is a different thing
+    than serving the capability.
+  </li>
+  <li>
+    <strong><code>anchor-positioning</code> · <code>invokers</code> · <code>field-sizing</code> ·
+    <code>dialog-closedby</code> — <span style="color:#92400e;">polyfill-ok</span>.</strong> These are genuine
+    platform features FACE depends on but that aren't everywhere yet; a shim recovers the behavior, so they
+    degrade to a polyfill rather than a hard wall.
+  </li>
+</ul>
+
+<h3>What it can / can't serve native</h3>
+<p class="text-slate-600">
+  FACE is the right pick when an intent needs <strong>bespoke option markup, custom open/close choreography, or
+  control the native control won't surrender</strong> — it serves those native. It is the <em>wrong</em> pick
+  when the requirement is exactly the native picker chrome or a styleable native select: those tier
+  <code>capability-hard</code> here, so a <code>native-first</code> resolver weighing them against the
+  <a href="/capabilities/adapters/base-select/">base-select</a> substrate will fall through to native instead.
+  That differential — hard on FACE, native on base-select — is the fork the resolver exists to weigh.
+</p>

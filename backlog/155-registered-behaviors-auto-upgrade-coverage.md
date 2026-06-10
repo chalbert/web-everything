@@ -6,6 +6,7 @@ status: resolved
 dateOpened: "2026-06-07"
 dateStarted: "2026-06-07"
 dateResolved: "2026-06-07"
+graduatedTo: "Bootstrap auto-upgrade e2e coverage for nav:list + type-ahead (Frontier UI, extends the #144 data-grid pattern)"
 tags: [bootstrap, e2e, behavior, registration, testing, nav-list, type-ahead, coverage]
 relatedProject: webblocks
 crossRef: { url: /backlog/144-data-grid-behavior-auto-upgrade-e2e/, label: "#144 data-grid auto-upgrade e2e" }

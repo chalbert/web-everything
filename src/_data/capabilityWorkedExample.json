@@ -1,0 +1,72 @@
+{
+  "_generatedBy": "capabilities/workedExample.ts — regenerate with `UPDATE_WORKED_EXAMPLE=1 npx vitest run worked-example-artifact` (#213)",
+  "intents": [
+    "selection",
+    "anchor"
+  ],
+  "requiredCapabilities": [
+    "customizable-select",
+    "custom-state",
+    "anchor-positioning",
+    "popover"
+  ],
+  "winner": "base-select",
+  "winnerLabel": "base-select — native progressive enhancement",
+  "reason": "native-first over [customizable-select, custom-state, anchor-positioning, popover]; 1/2 impls eligible; \"base-select\" lightest (0 polyfills)",
+  "candidates": [
+    {
+      "impl": "face",
+      "label": "FACE — build-your-own",
+      "native": false,
+      "eligible": false,
+      "cost": 1,
+      "blockers": [
+        "customizable-select"
+      ],
+      "tiers": [
+        {
+          "capabilityId": "customizable-select",
+          "tier": "capability-hard"
+        },
+        {
+          "capabilityId": "custom-state",
+          "tier": "native-ok"
+        },
+        {
+          "capabilityId": "anchor-positioning",
+          "tier": "polyfill-ok"
+        },
+        {
+          "capabilityId": "popover",
+          "tier": "native-ok"
+        }
+      ]
+    },
+    {
+      "impl": "base-select",
+      "label": "base-select — native progressive enhancement",
+      "native": true,
+      "eligible": true,
+      "cost": 0,
+      "blockers": [],
+      "tiers": [
+        {
+          "capabilityId": "customizable-select",
+          "tier": "native-ok"
+        },
+        {
+          "capabilityId": "custom-state",
+          "tier": "native-ok"
+        },
+        {
+          "capabilityId": "anchor-positioning",
+          "tier": "native-ok"
+        },
+        {
+          "capabilityId": "popover",
+          "tier": "native-ok"
+        }
+      ]
+    }
+  ]
+}

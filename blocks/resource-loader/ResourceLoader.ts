@@ -38,6 +38,7 @@ import type {
   ResourceLoadEndDetail,
   ResourceLoadErrorDetail,
   ResourceStateChangeDetail,
+  ResourceProgressDetail,
   TraitHandle,
   TraitFactory,
 } from './types';
@@ -193,6 +194,31 @@ export default class ResourceLoader {
 
       return { state: 'error', error: err, duration, aborted: false };
     }
+  }
+
+  /**
+   * Report determinate numeric progress for the in-flight load.
+   *
+   * Pass `loaded`/`total` (e.g. fetched vs. total bytes from a `ReadableStream`,
+   * or an upload's `XMLHttpRequest.upload.onprogress`) and they are normalized to
+   * a 0..1 fraction; or call with a single 0..1 argument to report the fraction
+   * directly. Emits a bubbling `resource-progress` event so determinate UIs — and
+   * the Background Task handoff — can advance a real progress bar. No-op shape for
+   * indeterminate loaders, which simply ignore the value.
+   *
+   * @param loaded - Loaded amount, or the 0..1 fraction when called without `total`.
+   * @param total - Total amount when known; omit to report `loaded` as a fraction.
+   */
+  reportProgress(loaded: number, total?: number): void {
+    const raw = total && total > 0 ? loaded / total : loaded;
+    const fraction = Math.min(1, Math.max(0, raw));
+    this.#target.dispatchEvent(
+      new CustomEvent<ResourceProgressDetail>('resource-progress', {
+        bubbles: true,
+        cancelable: false,
+        detail: { loaded, total, fraction },
+      }),
+    );
   }
 
   /**

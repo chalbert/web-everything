@@ -4,6 +4,7 @@ workItem: task
 status: resolved
 dateOpened: "2026-06-06"
 dateResolved: "2026-06-06"
+graduatedTo: "src/_includes/source-toggle.njk — `highlightCode` Prism filter for autoToggle panes (filter added in .eleventy.js)"
 tags: [jsx, adapters, docs, source-toggle]
 relatedReport: reports/2026-06-03-jsx-adapter-feature-mapping.md
 relatedProject: webadapters

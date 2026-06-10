@@ -25,6 +25,12 @@ import { modelCases, knownModelIntents, scriptedResponderFor, type ModelCase } f
 const registry = new CustomAnalyzerRegistry();
 registerReferenceAnalyzers(registry);
 
+// Intent ids the standard knows, for the verify gate's conformance check on the reference path (#189).
+// In a real run this comes from intents.json; here we list the ones the reference analyzer can infer
+// (selection, motion). The check is a no-op for cards whose IR carries no inferred intents, so this
+// only lights up on the intent-inference fixtures.
+const knownReferenceIntents = new Set(['selection', 'motion']);
+
 // The AI registry adds a REAL model provider AHEAD of the reference one (backlog #188): messier input
 // the heuristic rejects escalates to the model, clean input still falls through to the reference. In
 // the browser there's no key, so we drive a deterministic SCRIPTED client — a real run swaps in
@@ -130,7 +136,7 @@ async function buildCard(c: UpgraderCase): Promise<{ node: HTMLElement; offered:
   const grid = el('div', 'ex-grid');
   section.append(grid);
 
-  const result = await upgrade({ code: c.source }, { registry });
+  const result = await upgrade({ code: c.source }, { registry, knownIntents: knownReferenceIntents });
 
   // Badge in the title reflects whether the verify gate matched the fixture's expectation.
   const matchesExpectation = result.offered === c.expectOffered;

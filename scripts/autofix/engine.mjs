@@ -29,12 +29,19 @@
 /**
  * @typedef {Object} FailureDescriptor
  * @property {string} kind   Failure class a fixer matches on (e.g. `deprecated-status`).
- * @property {string} [entity] Spec entity (`Block` / `Plug` / `Protocol` / `Intent`).
+ * @property {'reference'|'model'} [fix]  Routing call recorded by check-standards (#197):
+ *           `reference` = mechanically fixable (a deterministic fixer here derives the edit);
+ *           `model` = content-generation, deferred to the BYO-key model fixer (#196). A `model`
+ *           descriptor carries no matching deterministic fixer, so the loop reports it `skipped`.
+ * @property {string} [entity] Spec entity (`Block` / `Plug` / `Protocol` / `Intent` / `Capability` / …).
  * @property {string} [id]    Entity id within its registry.
- * @property {string} [file]  Repo-relative spec file the fix edits.
- * @property {string} [field] Field to change.
+ * @property {string} [file]  Repo-relative spec file the fix edits (or, for `missing-description`, creates).
+ * @property {string} [field] Field to change / supply.
  * @property {string} [from]  Current (offending) value.
  * @property {string} [to]    Canonical target value.
+ * @property {string[]} [allowed]  For `invalid-status`: the allowed values the model must pick from.
+ * @property {string} [value]      For `unresolved-ref`: the unresolved reference value.
+ * @property {string} [refRegistry] For `unresolved-ref`: the registry the value should resolve in.
  *
  * @typedef {Object} Failure
  * @property {string} message  Human-readable failure text (always present).
@@ -100,6 +107,35 @@ export const fixerRegistry = new CustomFixerRegistry();
 
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+/**
+ * String-aware spans of every object that is a *direct element* of the top-level JSON array — each
+ * `[start, end)` in source-text coordinates. A direct element opens on a `{` seen at bracket-depth 1
+ * and brace-depth 0, and closes when its braces re-balance; nested objects/arrays inside a row (a
+ * `crossRef`, a `dimensions` map, a `tiers` map) sit deeper, so they're never mistaken for a row.
+ * The string scan ignores braces/brackets inside JSON string values (a `{` in a summary, say).
+ * @param {string} content
+ * @returns {Array<[number, number]>}
+ */
+function topLevelObjectSpans(content) {
+  const spans = [];
+  let inStr = false, esc = false, brace = 0, bracket = 0, objStart = -1;
+  for (let i = 0; i < content.length; i++) {
+    const c = content[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === '[') bracket++;
+    else if (c === ']') bracket--;
+    else if (c === '{') { if (bracket === 1 && brace === 0) objStart = i; brace++; }
+    else if (c === '}') { brace--; if (brace === 0 && objStart !== -1) { spans.push([objStart, i + 1]); objStart = -1; } }
+  }
+  return spans;
+}
+
 /** @type {Fixer} */
 export const deprecatedStatusFixer = {
   id: 'reference:deprecated-status',
@@ -108,16 +144,24 @@ export const deprecatedStatusFixer = {
     const d = f.descriptor;
     if (!d?.file || !d.id || !d.field || d.from === undefined || d.to === undefined || d.from === d.to) return null;
     const content = read(d.file);
-    // SURGICAL edit — anchor on the unique id, then rewrite the first `"<field>": "<from>"` that
-    // follows it (specs list id before its fields), changing only that one value. A full
-    // JSON.parse → stringify would reformat the entire file (inline objects expand to multi-line),
-    // burying the one-field fix in hundreds of noise lines and defeating human diff review.
-    const idAnchor = content.indexOf(`"id": "${d.id}"`);
-    if (idAnchor === -1) return null; // can't locate the row — give up safely, don't guess
+    // SURGICAL edit — locate the row by its unique id, then rewrite that row's `"<field>": "<from>"`,
+    // changing only that one value. A full JSON.parse → stringify would reformat the entire file
+    // (inline objects expand to multi-line), burying the one-field fix in hundreds of noise lines and
+    // defeating human diff review.
+    const idRe = new RegExp(`"id"\\s*:\\s*"${escapeRegExp(d.id)}"`);
+    const idMatch = idRe.exec(content);
+    if (!idMatch) return null; // can't locate the row — give up safely, don't guess
+    // Bound the field rewrite to the row's OWN object span — order-independent (works whether the
+    // field precedes or follows the id) and sibling-safe (it can never reach into the next row even
+    // if this row's field is reordered ahead of its id). Falls back to whole-file only if the row
+    // isn't a top-level array element (defensive; spec files are always arrays of rows).
+    const span = topLevelObjectSpans(content).find(([s, e]) => idMatch.index >= s && idMatch.index < e);
+    const [from, to] = span ?? [0, content.length];
+    const region = content.slice(from, to);
     const fieldRe = new RegExp(`("${escapeRegExp(d.field)}"\\s*:\\s*)"${escapeRegExp(d.from)}"`);
-    const m = fieldRe.exec(content.slice(idAnchor));
-    if (!m) return null; // already fixed, or the field isn't where we expect — give up safely
-    const start = idAnchor + m.index;
+    const m = fieldRe.exec(region);
+    if (!m) return null; // already fixed, or the field isn't in this row — give up safely
+    const start = from + m.index;
     const newContent = content.slice(0, start) + m[1] + `"${d.to}"` + content.slice(start + m[0].length);
     return {
       file: d.file,

@@ -1,0 +1,64 @@
+<h2>Tooltip — anchored transient descriptive surface</h2>
+<p>The <strong>tooltip</strong> is a small, transient surface that appears on hover or keyboard focus of its trigger and is announced as the trigger's <em>accessible description</em>. It is referenced across the standard already — the <a href="/intents/surface/">Surface Intent</a> lists tooltips at elevation 3–5, and the <a href="/intents/typography/">Typography Intent</a>'s truncation-recovery names a <code>title</code>/tooltip as the way to read a clipped label — but no block delivered one until now. The tooltip <strong>composes existing intents</strong> rather than introducing a new paradigm: it borrows positioning from <a href="/intents/anchor/">Anchor</a>, material from <a href="/intents/surface/">Surface</a>, and the clipped-text case from <a href="/intents/typography/">Typography</a>.</p>
+
+<blockquote>
+  <p><strong>A tooltip describes; it does not name.</strong> It is wired with <code>aria-describedby</code> (supplementing the trigger's own accessible name), never <code>aria-label</code> (which would <em>replace</em> the name and lose it whenever the bubble is hidden). It is non-interactive — focus can never live inside it.</p>
+</blockquote>
+
+<h3>Native-first — the three-rung ladder</h3>
+<p>The browser already ships most of a tooltip. The default <strong>extends</strong> the platform rather than reimplementing it; a custom bubble is the last rung, reached only when content or positioning demands it. Each rung is a superset of the one below.</p>
+<table>
+  <thead>
+    <tr><th>Feature</th><th>Disposition</th><th>Tier</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Plain hover text on any element</td><td><code>built-in</code> — native <code>title</code></td><td>1</td><td>Zero-cost baseline. No styling, no touch, no focus parity, UA-controlled delay — but free and universal.</td></tr>
+    <tr><td>Styled, top-layer, light-dismissed bubble</td><td><code>built-in</code> — Popover API <code>popover="hint"</code></td><td>1</td><td>Default substrate where <a href="https://developer.mozilla.org/docs/Web/API/Popover_API">Baseline</a>-supported: real top-layer element, auto-closes when another hint opens, styleable.</td></tr>
+    <tr><td>Collision-aware placement (flip / shift / resize)</td><td><code>compose</code> — <a href="/intents/anchor/">Anchor Intent</a></td><td>1</td><td>The tooltip declares an <code>anchored=</code> placement; the Anchor Intent owns the engine. CSS Anchor Positioning is the native default; Floating UI is an opt-in adapter.</td></tr>
+    <tr><td>Elevation / material of the bubble</td><td><code>compose</code> — <a href="/intents/surface/">Surface Intent</a></td><td>1</td><td>Floating surface at elevation 3–5; the tooltip does not redefine depth.</td></tr>
+    <tr><td>Rich (non-text) content</td><td><code>built-in</code> — custom ARIA bubble</td><td>2</td><td>Top rung: an authored <code>role="tooltip"</code> element referenced by <code>aria-describedby</code>. Content stays non-interactive.</td></tr>
+    <tr><td>Read a truncated label in full</td><td><code>compose</code> — <a href="/intents/typography/">Typography Intent</a></td><td>2</td><td>The truncation-recovery case: a clipped label exposes its full text via the tooltip.</td></tr>
+    <tr><td>Click-revealed, re-summonable hint</td><td><code>compose</code> — toggletip (separate concern)</td><td>3</td><td>A <em>toggletip</em>, not a tooltip — see below. Tracked separately.</td></tr>
+    <tr><td>Interactive content (links, buttons)</td><td><code>compose</code> — non-modal popover</td><td>3</td><td>The moment content is focusable it is a popover, not a tooltip. Out of scope by definition.</td></tr>
+  </tbody>
+</table>
+
+<h3>Trigger contract — hover <em>and</em> focus, with WCAG 1.4.13</h3>
+<p>Parity is non-negotiable: a tooltip that only appears on mouse hover is inaccessible to keyboard and many AT users. The tooltip arms on <strong>both</strong> pointer hover and keyboard focus of the trigger, and honours the three obligations of <a href="https://www.w3.org/WAI/WCAG21/Understanding/content-on-hover-or-focus.html">WCAG 1.4.13 — Content on Hover or Focus</a>:</p>
+<table>
+  <thead>
+    <tr><th>Obligation</th><th>What the tooltip does</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Hoverable</strong></td><td>The pointer can travel from the trigger onto the bubble without it vanishing — a short pointer-leave <em>grace period</em> bridges the gap between the two elements.</td></tr>
+    <tr><td><strong>Persistent</strong></td><td>It stays visible until hover/focus genuinely leaves the trigger-and-bubble pair, or the user presses Escape — never auto-times-out while still hovered/focused.</td></tr>
+    <tr><td><strong>Dismissible</strong></td><td><kbd>Escape</kbd> hides it <em>without moving focus</em>, so the user can dismiss an obscuring tooltip and keep their place.</td></tr>
+  </tbody>
+</table>
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">Show delay ~500ms on hover (immediate on focus); a brief hide delay absorbs the grace period. There is no active-item model and no selection — a tooltip has exactly one descriptive payload.</p>
+
+<h3>Altitude 1 — HTML, the native substrate</h3>
+<p>The cheapest correct tooltip is the platform's own. The trigger names itself; the bubble describes it via <code>aria-describedby</code> and rides the top layer through <code>popover="hint"</code>, positioned by the Anchor Intent:</p>
+{% highlight "html" %}
+<!-- Rung 0: free, no markup — the native title -->
+<button title="Save the current draft">Save</button>
+
+<!-- Rung 1–2: styled, anchored, accessible bubble -->
+<button id="trash-btn" aria-describedby="trash-tip">
+  <svg aria-hidden="true"><!-- trash icon --></svg>
+  <span class="sr-only">Delete</span>          <!-- the NAME stays in the DOM -->
+</button>
+<div id="trash-tip" role="tooltip"
+     popover="hint"                            <!-- native top-layer, light-dismiss -->
+     anchored="placement=top;collision=flip,shift"   <!-- Anchor Intent owns the engine -->
+     surface="elevation=4">                     <!-- Surface Intent owns the material -->
+  Permanently deletes this item. This can't be undone.
+</div>
+{% endhighlight %}
+
+<h3>What a tooltip is <em>not</em></h3>
+<ul>
+  <li><strong>Not a toggletip.</strong> A toggletip is <em>click/tap-revealed</em> and re-summonable, and because it has no persistent describing relationship it is announced through a <a href="/intents/live-region-status/">live region</a> instead of <code>aria-describedby</code>. Different trigger, different a11y wiring — a separate concern, cross-referenced, not a flag on this block.</li>
+  <li><strong>Not a popover.</strong> A non-modal popover holds interactive content the user can Tab into. The instant content is focusable it stops being a tooltip — focus can never live in a tooltip — so links and buttons belong in a popover, not here.</li>
+  <li><strong>Not a carrier of essential information.</strong> Because the surface is hover/focus-only and transient, anything that <em>must</em> be perceived belongs in the always-rendered DOM. The tooltip only ever <em>supplements</em>.</li>
+</ul>

@@ -29,8 +29,12 @@ export function jsxToHtml(jsx: string): string {
   // 1. drop fragment wrappers
   s = s.replace(/<>\s*/g, '').replace(/\s*<\/>/g, '');
 
-  // 2. aliases lower to canonical HTML names
-  s = s.replace(/\bclassName=/g, 'class=').replace(/\bhtmlFor=/g, 'for=');
+  // 2. aliases lower to canonical HTML names — the `react` dialect (#235) is accepted on input and
+  //    normalized back to canonical HTML: className→class, htmlFor→for, on<Event>→on<event>.
+  s = s
+    .replace(/\bclassName=/g, 'class=')
+    .replace(/\bhtmlFor=/g, 'for=')
+    .replace(/\bon([A-Z][a-zA-Z]*)=/g, (_m, ev: string) => `on${ev.toLowerCase()}=`);
 
   // 3. drop expression / function props `name={…}` — they have no HTML representation (lossy)
   s = s.replace(/\s+[\w:-]+=\{[^{}]*\}/g, '');

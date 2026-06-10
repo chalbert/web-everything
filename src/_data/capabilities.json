@@ -1,0 +1,114 @@
+[
+  {
+    "id": "dialog",
+    "label": "Dialog",
+    "webFeaturesKey": "dialog",
+    "baseline": "2022",
+    "polyfill": "polyfillable",
+    "summary": "Native <code>&lt;dialog&gt;</code> — modal, top-layer, <code>::backdrop</code>, focus-trapping."
+  },
+  {
+    "id": "request-submit",
+    "label": "requestSubmit()",
+    "webFeaturesKey": "requestsubmit",
+    "baseline": "2022",
+    "polyfill": "polyfillable",
+    "summary": "Programmatic submit that <em>runs</em> constraint validation, unlike <code>form.submit()</code>."
+  },
+  {
+    "id": "showpicker",
+    "label": "showPicker()",
+    "webFeaturesKey": "showpicker",
+    "baseline": "2023",
+    "polyfill": "capability",
+    "summary": "Summon a control's native picker UI on demand — a UA-privileged action no other API exposes."
+  },
+  {
+    "id": "face",
+    "label": "Form-Associated Custom Elements",
+    "webFeaturesKey": "form-associated-custom-elements",
+    "baseline": "2023",
+    "polyfill": "polyfillable",
+    "summary": "<code>static formAssociated</code> + <code>ElementInternals</code> make a custom element a real form control (value, validity, lifecycle)."
+  },
+  {
+    "id": "user-pseudos",
+    "label": ":user-valid / :user-invalid",
+    "webFeaturesKey": "user-pseudos",
+    "baseline": "2023",
+    "polyfill": "polyfillable",
+    "summary": "Validation pseudo-classes that match only after user interaction — the native touched/dirty state."
+  },
+  {
+    "id": "declarative-shadow-dom",
+    "label": "Declarative Shadow DOM",
+    "webFeaturesKey": "declarative-shadow-dom",
+    "baseline": "2024",
+    "polyfill": "polyfillable",
+    "summary": "<code>&lt;template shadowrootmode&gt;</code> — SSR-able shadow roots with no JS."
+  },
+  {
+    "id": "popover",
+    "label": "Popover API",
+    "webFeaturesKey": "popover",
+    "baseline": "2024",
+    "polyfill": "polyfillable",
+    "summary": "<code>popover</code> attribute + <code>popovertarget</code> — top-layer, light-dismiss, focus management with no JS."
+  },
+  {
+    "id": "custom-state",
+    "label": "CustomStateSet / :state()",
+    "webFeaturesKey": "custom-state",
+    "baseline": "2024",
+    "polyfill": "polyfillable",
+    "summary": "Expose internal element state to CSS via <code>internals.states</code> / <code>:state(x)</code> without leaking attributes."
+  },
+  {
+    "id": "anchor-positioning",
+    "label": "CSS Anchor Positioning",
+    "webFeaturesKey": "anchor-positioning",
+    "baseline": false,
+    "polyfill": "polyfillable",
+    "summary": "<code>anchor-name</code> / <code>position-anchor</code> / <code>position-try-fallbacks</code> — tether a popover to its trigger and auto-flip on overflow."
+  },
+  {
+    "id": "invokers",
+    "label": "Invoker Commands",
+    "webFeaturesKey": "command",
+    "baseline": false,
+    "polyfill": "polyfillable",
+    "summary": "<code>command</code> / <code>commandfor</code> — declare a button's effect on another element in markup."
+  },
+  {
+    "id": "field-sizing",
+    "label": "field-sizing: content",
+    "webFeaturesKey": "field-sizing",
+    "baseline": false,
+    "polyfill": "polyfillable",
+    "summary": "Auto-grow inputs/textareas to their content via CSS."
+  },
+  {
+    "id": "dialog-closedby",
+    "label": "<dialog closedby>",
+    "webFeaturesKey": "dialog-closedby",
+    "baseline": false,
+    "polyfill": "polyfillable",
+    "summary": "Declarative light-dismiss control (<code>any</code> / <code>closerequest</code> / <code>none</code>), unifying the dismiss vocabulary popover uses."
+  },
+  {
+    "id": "customizable-select",
+    "label": "Customizable <select> (appearance: base-select)",
+    "webFeaturesKey": "customizable-select",
+    "baseline": false,
+    "polyfill": "capability",
+    "summary": "Arbitrary markup inside <code>&lt;option&gt;</code> + styleable picker while keeping native keyboard, a11y, picker, and form submission. Not polyfillable — only replaceable."
+  },
+  {
+    "id": "cross-root-aria",
+    "label": "Cross-root ARIA / Reference Target",
+    "webFeaturesKey": "cross-root-aria",
+    "baseline": false,
+    "polyfill": "partial",
+    "summary": "Point <code>aria-activedescendant</code> across a shadow boundary. The gap lives in the a11y tree JS can't write — partial mitigation only, the one genuine blocker for shadow-encapsulated comboboxes."
+  }
+]

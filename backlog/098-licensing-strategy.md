@@ -3,8 +3,10 @@ type: decision
 workItem: story
 size: 3
 parent: "089"
-status: open
+status: resolved
 dateOpened: "2026-06-06"
+dateStarted: "2026-06-08"
+dateResolved: "2026-06-08"
 tags: [licensing, open-source, fair-source, source-available, business-model, apache, fsl, polyform, cla, monetization, constellation]
 crossRef: { url: /backlog/097-roadmap-to-mvp/, label: "Roadmap to MVP (legal track)" }
 ---
@@ -60,13 +62,44 @@ thin fair-source seam in FU as a hedge.)
 - **CLA** on Plateau (and on Frontier UI to keep relicensing optionality) before
   accepting outside contributions.
 
-## Open decisions (defer — not short-term-critical)
+## Resolution (2026-06-08) — leans ratified as standing decision
 
-- Exact fair-source license for Plateau: **FSL vs PolyForm Shield vs BSL**, and the
-  conversion window (~2y).
-- WE spec-text license: **Apache-2.0 vs CC-BY** for the prose vs code.
-- Whether to add a **thin fair-source seam in Frontier UI** (e.g. premium/exotic
-  adapters) as a hedge against the open-FU competitor risk — current lean: keep FU
-  fully open, draw the line at Plateau.
-- Trademark/brand as the real enforcement lever even where code is open (the name,
-  not the bits) — coordinate with #097's brand-protection track.
+The gradient (above) is the structure; these fill the four blanks. Ratified "for
+now" — revisit only if a concrete pressure (first sale, a real FU-competitor,
+contributor influx) contradicts a lean. None is short-term-critical; this just
+removes the open forks so downstream work isn't blocked on legal ambiguity.
+
+1. **Plateau license → FSL-1.1 with a 2-year Apache-2.0 conversion.** Encodes the
+   exact "free for all incl. enterprise internal use; don't fork into a competing
+   platform" intent out-of-the-box; the 2y auto-convert keeps "fair source, genuinely
+   opens later" honest. PolyForm Shield rejected (no built-in conversion weakens the
+   opens-later story); BSL rejected (custom Additional-Use-Grant = more rope, 4y too
+   long for greenfield). Revisit → BSL only if per-feature custom grants ever needed.
+2. **WE spec license → split: CC-BY-4.0 for prose + Apache-2.0 for code/schemas.**
+   Mirrors WHATWG/W3C/OpenAPI; signals "real standard, copy the spec" while keeping
+   the conformance suite + schemas under a patent-grant code license. Ships as a
+   `LICENSE` + `LICENSE-DOCS` pair. Single-Apache rejected (reads as a company repo,
+   not a standard).
+3. **Frontier UI stays fully open — line drawn at Plateau.** No premium/exotic-adapter
+   fair-source seam. The open reference impl *is* the credibility + adoption funnel;
+   gating it undercuts the non-vendor-lock premise. A seam can be added later; a
+   partly-gated launch can't be un-tainted. The bet remains: out-operate on Plateau,
+   don't fence the adapters.
+4. **Trademark/brand is the real enforcement lever.** Register the marks (Web
+   Everything, Plateau, Frontier UI, webcases) + a trademark-use policy; gate a
+   **conformance mark** on passing `webcases`. Anyone may fork the bits; nobody ships
+   under the brand or claims "WE-conformant" without the mark. Coordinate with #097's
+   brand-protection track.
+
+### Also nailed down (were implied)
+
+- **`webcases` conformance suite stays Apache-2.0 permanently — no conversion clause,
+  never drifts toward Plateau's tier.** It's the self-implement guarantee and the
+  funnel; it must stay maximally open for life.
+- **CLA is a contribution *blocker*, not a defer.** Required on WE + FU + Plateau
+  **before** accepting any external PR (cheap now, expensive retroactively). This is
+  the one piece with a near-term trigger: the first outside contributor.
+
+No new entity created — this is a strategy ruling kept as audit trail (no
+`graduatedTo`). The CLA blocker is the only actionable spillover → captured as its
+own item.

@@ -244,6 +244,21 @@ describe('JSXRenderer', () => {
       const element = jsx.createElement(PropsElement, { value: 42 });
       expect((element as PropsElement).value).toBe(42);
     });
+
+    it('resolves a class with static tagName through the registry (document.createElement)', () => {
+      // Auto-Define #241: a generated class carries `static tagName`; the JSX path must create it
+      // via the registry-upgrade path (document.createElement(tag)), not a bare `new` that bypasses
+      // upgrade. happy-dom returns the upgraded instance for a defined tag.
+      class TaggedElement extends HTMLElement {
+        static tagName = 'tagged-jsx-element';
+        upgraded = true;
+      }
+      customElements.define('tagged-jsx-element', TaggedElement);
+      const element = jsx.createElement(TaggedElement, null);
+      expect(element).toBeInstanceOf(TaggedElement);
+      expect((element as TaggedElement).upgraded).toBe(true);
+      expect(element.tagName.toLowerCase()).toBe('tagged-jsx-element');
+    });
   });
 
   describe('named exports', () => {

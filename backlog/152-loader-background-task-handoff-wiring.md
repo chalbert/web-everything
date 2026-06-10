@@ -5,6 +5,7 @@ size: 3
 parent: "135"
 status: resolved
 dateOpened: "2026-06-07"
+blockedBy: ["135"]
 dateStarted: "2026-06-07"
 dateResolved: "2026-06-07"
 graduatedTo: demo:loader-background-handoff-demo

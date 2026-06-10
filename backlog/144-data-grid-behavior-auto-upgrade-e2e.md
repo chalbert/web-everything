@@ -5,6 +5,7 @@ parent: "131"
 status: resolved
 dateOpened: "2026-06-07"
 dateResolved: "2026-06-07"
+graduatedTo: "blocks/__tests__/e2e/data-grid-bootstrap.spec.ts + demos/data-grid-bootstrap-fixture.html — grid:cell-navigation bootstrap auto-upgrade e2e"
 tags: [data-grid, bootstrap, e2e, behavior, registration, testing]
 relatedProject: webblocks
 crossRef: { url: /blocks/data-grid/, label: Data Grid block }

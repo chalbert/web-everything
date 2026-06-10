@@ -2,8 +2,11 @@
 type: idea
 workItem: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-06-06"
+dateStarted: "2026-06-09"
+dateResolved: "2026-06-09"
+graduatedTo: "frontierui/packages/{jsx-runtime,component-compiler,vite-plugin,esbuild-plugin,rollup-plugin} — five installable @webeverything/* packages (npm workspaces)"
 tags: [jsx, component, adapters, packaging, build-tooling, frontier-ui]
 relatedReport: reports/2026-06-06-adapter-real-project-integration.md
 relatedProject: webadapters
@@ -49,3 +52,56 @@ component-compiler toolchain reach (#127).
 `declaration: true`) now compiles **clean (0 errors)** and emits `.d.ts` — it was previously broken
 (54 type errors). Shipping these packages means shipping their types, so a clean declaration build is
 a prerequisite; that gate is now green.
+
+## Progress
+
+- **Status:** active 2026-06-09 — discovery done; scope recalibrated (most engineering already exists).
+- **Branch:** TBD (impl lands in **frontierui**, not this repo).
+- **Recalibration (the big find):** the three artifacts are *not* greenfield —
+  - **Artifact 2 (`<component>` compiler)** and **Artifact 3 (bundler plugins)** are already **built and
+    tested** by **#231 (resolved)** in `frontierui/compiler/src/component-transform/`:
+    `index.ts` (`transform`), `compile.ts` (`compile(code,id,opts)` surface-aware), `surfaces.ts`
+    (`lowerSurface` html+tsx), `plugins.ts` (`componentVitePlugin` + `componentEsbuildPlugin`). #231's
+    own Progress flags the leftover: *"not wired as a package.json subpath export / standalone
+    `@webeverything/component-compiler` package — that packaging is #125's job."*
+  - **Artifact 1 (`@webeverything/jsx-runtime`)** does **not** exist as a package. Source lives at
+    `frontierui/blocks/renderers/jsx/JSXRenderer.ts` (classic: default `jsx`, named `createElement`,
+    `Fragment`), wired in-repo via classic `jsxInject` (`vite.config.mts` / `tsconfig.json`) per #126.
+    Missing: the **automatic** `/jsx-runtime` entry (`jsx`/`jsxs`/`Fragment`) + JSX type namespace +
+    `package.json` `exports`. This is the keystone unblocking **#233** (apply #126's automatic-default ruling).
+- **So #125 = packaging**, not transform engineering: (1) create `@webeverything/jsx-runtime` (new), and
+  (2) give the already-built compiler + plugins an installable `@webeverything/*` identity with `exports`,
+  types, and a clean `tsc` build. Extra bundler wrappers (Rollup/webpack/Babel) are spun out to **#234**;
+  deferred opt-ins are **#232**.
+- **Done:** read all source + sibling items (#126/#127 resolved, #231 resolved, #232/#234 open); confirmed
+  jsx source + a `declarative-spa-jsx.tsx` demo exist in frontierui (a ready demo target for `jsxImportSource`).
+- **Status:** resolved 2026-06-09. Built in **Frontier UI** (impl repo) as an npm-workspaces monorepo.
+- **Shipped — five installable `@webeverything/*` packages under `frontierui/packages/`** (the settled
+  split: runtime / compiler / plugins), wired via root `workspaces: ["compiler", "packages/*"]`:
+  - **`@webeverything/jsx-runtime`** (the genuinely-new artifact) — the canonical HTML-mirror-dialect
+    DOM factory, exposed **both** ways via `exports`: classic `.` (`jsx.createElement`/`Fragment`) **and**
+    automatic `./jsx-runtime` (`jsx`/`jsxs`/`Fragment` for `jsxImportSource`, #126's external default) +
+    `./jsx-dev-runtime` (`jsxDEV`). Ships a permissive `JSX` namespace so `tsc` type-checks the dialect.
+  - **`@webeverything/component-compiler`** — re-exports the `<component>` lowering + strategy-axis
+    `compile()`/`surfaces` from `@frontierui/compiler` (added a `./component-transform` subpath export
+    there — single source of truth, no dup) **plus** the pure HTML⇄JSX source toggle (`htmlToJsx`,
+    `jsxToHtml`, `desugar`/`sugarize`). String in → string out, zero runtime/DOM dep.
+  - **`@webeverything/{vite,esbuild,rollup}-plugin`** — thin re-export shells (the `webEverything()`
+    factory) over the compiler's already-built pre-transform plugins.
+- **Verification:**
+  - All 5 packages `tsc`-build clean and emit `.d.ts` (dual/subpath `exports` resolve).
+  - **`packages/__tests__/extraction-smoke.test.ts` (11 tests, green)** — imports every package by its
+    **public `@webeverything/*` name** (through the workspace symlink → `exports` → built `dist/`) and
+    exercises it: classic + automatic JSX build real DOM; `compile()` lowers a `<component>` in `.html`
+    and respects the native-first default surface; HTML⇄JSX round-trips; each plugin factory returns a
+    named plugin and the Vite hook lowers a module. This is the "external project can `import` it, not
+    copy-paste" acceptance.
+  - Full frontierui suite **87 files / 1333 tests green**; webeverything `check:standards` **0/0**.
+- **Leftovers spun out:**
+  - **#239** — make the packages self-contained for *registry publish* (the `@frontierui/compiler`
+    runtime dep is un-published; pick publish-too / relocate-source / bundle; add ordered build script).
+  - **#240** — collapse the now-triplicated `JSXRenderer` onto the package (in-repo consumers should
+    import `@webeverything/jsx-runtime`).
+  - Pre-existing successors unchanged: **#233** (apply #126's automatic-default to the docs — now
+    unblocked, the `jsxImportSource` package exists), **#234** (extra bundler wrappers — already in the
+    compiler), **#232** (deferred strategy opt-ins).

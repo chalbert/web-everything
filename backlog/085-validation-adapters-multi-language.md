@@ -3,6 +3,7 @@ type: idea
 workItem: story
 size: 8
 status: open
+blockedBy: ["004", "005"]
 dateOpened: "2026-06-06"
 tags: [validation, protocol, adapters, multi-language, codegen, validation-as-a-service, conformance, intents, native-first]
 relatedProject: webvalidation

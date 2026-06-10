@@ -1,0 +1,56 @@
+<h2>Segmented Control — single-select as a row of pressed buttons</h2>
+<p>The <strong>segmented control</strong> is a single-select choice rendered as a row of adjacent buttons — the iOS/macOS segmented control, or a "pill" toggle group. It is the <a href="/intents/selection/">Selection Intent</a>'s <code>single</code> model in a <strong>horizontal, always-visible</strong> variant: every option is on screen at once and exactly one is pressed. It <strong>composes existing intents</strong> rather than inventing a model — value from <a href="/intents/selection/">Selection</a>, keyboard from <a href="/intents/focus-delegation/">Focus Delegation</a>, sizing from <a href="/intents/typography/">Typography</a> / <a href="/intents/density/">Density</a>.</p>
+
+<blockquote>
+  <p><strong>Same contract as a radio group; different presentation.</strong> A segmented control, a radio group, a <code>&lt;select&gt;</code>, and a switch are all Selection <code>single</code>. What sets this one apart is that all options are visible as adjacent buttons and choosing <em>commits immediately</em> (<code>live</code> immediacy).</p>
+</blockquote>
+
+<h3>Where it sits among the single-select members</h3>
+<table>
+  <thead>
+    <tr><th>Member</th><th>Presentation</th><th>Immediacy</th><th>Best for</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Segmented control</strong></td><td>Adjacent buttons, all visible</td><td><code>live</code></td><td>2–5 short, mutually-exclusive options (view/sort/filter modes)</td></tr>
+    <tr><td>Radio group</td><td>Stacked inputs + labels, all visible</td><td><code>live</code></td><td>2–7 options needing descriptive labels</td></tr>
+    <tr><td><code>&lt;select&gt;</code></td><td>Collapsed until opened</td><td><code>live</code></td><td>Many options, space-constrained</td></tr>
+    <tr><td>Switch</td><td>Single toggle</td><td><code>live</code></td><td>A binary on/off (Selection <code>boolean</code>)</td></tr>
+  </tbody>
+</table>
+
+<h3>Composition — nothing re-implemented</h3>
+<table>
+  <thead>
+    <tr><th>Concern</th><th>Disposition</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>The value model (one pressed)</td><td><code>compose</code> — <a href="/intents/selection/">Selection</a> (<code>model=single</code>, <code>live</code>)</td><td>Choosing commits immediately; no separate confirm.</td></tr>
+    <tr><td>Keyboard (one tab stop, arrows move + select)</td><td><code>compose</code> — <a href="/intents/focus-delegation/">Focus Delegation</a> (<code>roving</code>, <code>horizontal</code>)</td><td>Tab enters at the pressed segment; Left/Right roving select as they move; Home/End jump to ends.</td></tr>
+    <tr><td>Sizing / spacing</td><td><code>compose</code> — <a href="/intents/typography/">Typography</a> / <a href="/intents/density/">Density</a></td><td>Compact / comfortable sizing; the control doesn't redefine scale.</td></tr>
+    <tr><td>Options as authored children</td><td><code>compose</code> — compound-child paradigm (see below)</td><td><code>&lt;segment&gt;</code> children map to value-model entries — the same shape as <code>&lt;tab&gt;</code> and <code>&lt;option&gt;</code>.</td></tr>
+  </tbody>
+</table>
+
+<h3>Altitude 1 — HTML, compound children</h3>
+<p>The author writes the options as children; the block maps each to the value model and the Focus Delegation Intent wires the roving keyboard:</p>
+{% highlight "html" %}
+<segmented-control name="view" aria-label="View"
+    selection="model=single;immediacy=live"
+    focus-delegation="strategy=roving;orientation=horizontal">
+  <segment value="list" selected>List</segment>
+  <segment value="grid">Grid</segment>
+  <segment value="map">Map</segment>
+</segmented-control>
+{% endhighlight %}
+
+<h3>The compound-child paradigm <span style="font-size:0.8em;color:var(--color-text-muted)">(cross-cutting — decision carried forward)</span></h3>
+<p>The <code>&lt;segment&gt;</code>-inside-<code>&lt;segmented-control&gt;</code> shape — <em>sub-elements that act as options for a parent</em> — is not unique to this block. It recurs across the standard: <code>&lt;tab&gt;</code> inside <a href="/blocks/tabs/">Tabs</a>, <code>&lt;option&gt;</code> inside the native <code>&lt;select&gt;</code>, the grouping axes of <a href="/intents/selection/">Selection</a>. The segmented control is the smallest clean instance, so it adopts the pattern directly. A parent declares its options as <strong>authored children</strong>, those children map to the value model, and under the JSX adapter the same authoring lowers to an <code>options</code> array rather than rendered child components.</p>
+<blockquote>
+  <p><strong>Open decision (carried forward):</strong> whether "compound child → option" should be promoted to its own <em>protocol/semantics contract</em> cross-referenced by Selection + Tabs, or remain documentation of Selection's existing grouping. <strong>Recommended default: document it as a shared paradigm (a protocol / semantics term), not a new UX intent</strong> — it is an authoring-and-lowering convention with no UX dimensions of its own. This block does not settle it; it is tracked as a separate backlog decision.</p>
+</blockquote>
+
+<h3>Boundaries</h3>
+<ul>
+  <li><strong>Not a multi-select button group.</strong> A toolbar of independent toggle buttons lets any number be pressed (multi-select, no roving-select). The segmented control keeps exactly one pressed.</li>
+  <li><strong>Not Tabs.</strong> It shares the compound-child shape with Tabs, but Tabs disclose associated <em>panels</em> while a segmented control sets a <em>value</em>. Separate blocks keep value-vs-panel concerns from merging.</li>
+</ul>

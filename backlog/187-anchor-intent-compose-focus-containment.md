@@ -5,6 +5,7 @@ status: resolved
 parent: "013"
 dateOpened: "2026-06-08"
 dateResolved: "2026-06-08"
+graduatedTo: "src/_data/intents.json — reciprocal Anchor ↔ Focus-Containment cross-link (wording-only)"
 tags: [intent, a11y, focus, anchor]
 ---
 

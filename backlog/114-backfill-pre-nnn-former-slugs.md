@@ -4,6 +4,7 @@ workItem: task
 status: resolved
 dateOpened: "2026-06-06"
 dateResolved: "2026-06-06"
+graduatedTo: "Documented no-op — won't backfill formerSlugs (pre-NNN URLs were never published); going-forward rewords stay covered by #075's /backlog/<NNN>/ redirect"
 tags: [backlog, routing, back-compat, dx]
 crossRef: { url: /backlog/, label: Backlog index }
 ---

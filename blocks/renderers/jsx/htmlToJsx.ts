@@ -14,7 +14,12 @@
  * DOM-implementation-agnostic: it walks nodes via nodeType/nodeName only (no instanceof) and takes
  * the parsing document as a parameter, so the SAME source runs in the browser, under vitest
  * (happy-dom), and in the 11ty build (node/linkedom). The default doc is the global document.
+ *
+ * Authoring dialect (#235): the emitted attribute spelling follows a soft preference — `html`
+ * (default: `class`/`for`/`onclick`) vs `react` (`className`/`htmlFor`/`onClick`). Only the
+ * attribute NAMES change; the tree is identical. The mapping lives in ./dialect.
  */
+import { type JsxDialect, DEFAULT_DIALECT, applyDialect } from './dialect';
 
 const VOID_ELEMENTS = new Set([
   'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
@@ -62,9 +67,12 @@ function isSignificant(node: DomNode): boolean {
 // intact; JSX decodes these entities back to the raw value at compile time.
 const escapeAttr = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
 
-function serializeAttrs(el: DomNode): string {
+function serializeAttrs(el: DomNode, dialect: JsxDialect): string {
   return Array.from(el.attributes || [])
-    .map((a) => (a.value === '' ? ` ${a.name}` : ` ${a.name}="${escapeAttr(a.value)}"`))
+    .map((a) => {
+      const name = applyDialect(a.name, dialect);
+      return a.value === '' ? ` ${name}` : ` ${name}="${escapeAttr(a.value)}"`;
+    })
     .join('');
 }
 
@@ -74,9 +82,9 @@ function childrenOf(el: DomNode): DomNode[] {
   return Array.from(source);
 }
 
-function elementToJsx(el: DomNode): string {
+function elementToJsx(el: DomNode, dialect: JsxDialect): string {
   const tag = el.nodeName.toLowerCase();
-  const attrs = serializeAttrs(el);
+  const attrs = serializeAttrs(el, dialect);
 
   // Raw-text elements carry CSS/JS — emit as a JSX string expression so braces aren't parsed as JSX.
   if (RAW_TEXT_ELEMENTS.has(tag)) {
@@ -85,14 +93,14 @@ function elementToJsx(el: DomNode): string {
     return `<${tag}${attrs}>{\`${escapeTemplateLiteral(text)}\`}</${tag}>`;
   }
 
-  const inner = serializeChildren(childrenOf(el));
+  const inner = serializeChildren(childrenOf(el), dialect);
   if (VOID_ELEMENTS.has(tag) || inner.trim() === '') {
     return `<${tag}${attrs} />`;
   }
   return `<${tag}${attrs}>${inner}</${tag}>`;
 }
 
-function serializeChildren(nodes: DomNode[]): string {
+function serializeChildren(nodes: DomNode[], dialect: JsxDialect): string {
   const out: string[] = [];
 
   for (let i = 0; i < nodes.length; i++) {
@@ -122,7 +130,7 @@ function serializeChildren(nodes: DomNode[]): string {
           content = Array.from(content[0].content.childNodes);
         }
         const open = `is="${name}"${attrs ? ' ' + attrs : ''}`;
-        out.push(`<template ${open}>${serializeChildren(content)}</template>`);
+        out.push(`<template ${open}>${serializeChildren(content, dialect)}</template>`);
         continue;
       }
       // non-directive comments are dropped (JSX cannot carry semantic HTML comments)
@@ -135,7 +143,7 @@ function serializeChildren(nodes: DomNode[]): string {
       continue;
     }
 
-    if (isElement(node)) out.push(elementToJsx(node));
+    if (isElement(node)) out.push(elementToJsx(node, dialect));
   }
 
   return out.join('');
@@ -173,17 +181,25 @@ function countRoots(nodes: DomNode[]): number {
   return count;
 }
 
+/** Options for {@link htmlToJsx}. */
+export interface HtmlToJsxOptions {
+  /** Authoring dialect for the emitted attribute spelling. Default `html` (HTML-mirror, native-first). */
+  dialect?: JsxDialect;
+}
+
 /**
- * Convert a canonical HTML string into JSX mirror-dialect source.
- * @param doc parsing document (browser/happy-dom/linkedom). Defaults to the global document.
+ * Convert a canonical HTML string into JSX source.
+ * @param doc  parsing document (browser/happy-dom/linkedom). Defaults to the global document.
+ * @param opts authoring options — currently the {@link JsxDialect} preference (#235).
  */
-export function htmlToJsx(html: string, doc?: DomDocument): string {
+export function htmlToJsx(html: string, doc?: DomDocument, opts?: HtmlToJsxOptions): string {
   const ownerDoc = doc || ((globalThis as unknown as { document: DomDocument }).document);
+  const dialect = opts?.dialect ?? DEFAULT_DIALECT;
   const template = ownerDoc.createElement('template');
   template.innerHTML = html.trim();
 
   const roots = Array.from(template.content.childNodes);
-  const body = serializeChildren(roots);
+  const body = serializeChildren(roots, dialect);
 
   // Multiple top-level roots → wrap in a fragment.
   if (countRoots(roots) > 1) return `<>${body}</>`;

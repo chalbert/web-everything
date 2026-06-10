@@ -63,4 +63,10 @@ export const handoffScenarios: HandoffScenario[] = [
     note: 'A failed background load shows a sticky error; the surface retry affordance re-invokes the real loader.',
     invariant: 'error → sticky entry → retry → loader.load() re-run → active again',
   },
+  {
+    id: 'determinate-progress',
+    title: 'Determinate progress fills the rail bar',
+    note: 'A determinate background load reports 0..1 progress mid-flight; the rail entry’s native <progress> advances to the reported fraction instead of spinning indeterminately.',
+    invariant: 'reportProgress(loaded,total) → snapshot.progress → entry <progress> value advances',
+  },
 ];

@@ -1,0 +1,120 @@
+/**
+ * @file scripts/backlog/__tests__/frontmatter.test.mjs
+ * Tests the surgical frontmatter splice + status transitions against in-memory fixtures — the body is
+ * never touched, illegal transitions are refused, and stamps land next to their anchors.
+ */
+import { describe, it, expect } from 'vitest';
+import { setFrontmatterField, readField, applyTransition } from '../frontmatter.mjs';
+import { nextNum, slugify, renderItem } from '../scaffold.mjs';
+
+const ITEM = [
+  '---',
+  'type: idea',
+  'workItem: story',
+  'size: 3',
+  'status: open',
+  'blockedBy: ["035", "136"]',
+  'dateOpened: "2026-06-06"',
+  'tags: [droplist, filter]',
+  '---',
+  '',
+  '# Build the filter surface',
+  '',
+  'A digest that mentions status: and dateStarted: and must never change.',
+  '',
+  '## Progress',
+  '- **Status:** open',
+  '',
+].join('\n');
+
+describe('setFrontmatterField — surgical, body never touched', () => {
+  it('replaces an existing field in place', () => {
+    const out = setFrontmatterField(ITEM, 'status', 'active');
+    expect(readField(out, 'status')).toBe('active');
+    expect(out).toContain('## Progress\n- **Status:** open'); // body status line untouched
+    expect(out).toContain('must never change');
+  });
+
+  it('inserts a new field after its anchor, not at the bottom', () => {
+    const out = setFrontmatterField(ITEM, 'dateStarted', '"2026-06-10"', { after: ['dateOpened', 'status'] });
+    const fm = out.slice(0, out.indexOf('\n---', 4));
+    expect(fm).toMatch(/dateOpened: "2026-06-06"\ndateStarted: "2026-06-10"/);
+    expect(readField(out, 'dateStarted')).toBe('2026-06-10');
+  });
+
+  it('returns null when there is no frontmatter', () => {
+    expect(setFrontmatterField('# just a body\n', 'status', 'active')).toBeNull();
+  });
+
+  it('only edits the frontmatter block — a body line that looks like a field is left alone', () => {
+    const out = setFrontmatterField(ITEM, 'status', 'resolved');
+    expect((out.match(/^status:/gm) || []).length).toBe(1); // still only one top-level status:
+    expect(out).toContain('- **Status:** open');
+  });
+});
+
+describe('applyTransition — legal from-status enforced', () => {
+  it('claim: open → active + dateStarted', () => {
+    const r = applyTransition(ITEM, 'claim', { today: '2026-06-10' });
+    expect(readField(r.content, 'status')).toBe('active');
+    expect(readField(r.content, 'dateStarted')).toBe('2026-06-10');
+  });
+
+  it('claim refuses a non-open item (lost the race)', () => {
+    const active = setFrontmatterField(ITEM, 'status', 'active');
+    const r = applyTransition(active, 'claim', { today: '2026-06-10' });
+    expect(r.error).toMatch(/expected "open"/);
+    expect(r.content).toBeUndefined();
+  });
+
+  it('resolve: active → resolved + dateResolved + graduatedTo', () => {
+    const active = setFrontmatterField(ITEM, 'status', 'active');
+    const r = applyTransition(active, 'resolve', { today: '2026-06-10', graduatedTo: 'intent:filter' });
+    expect(readField(r.content, 'status')).toBe('resolved');
+    expect(readField(r.content, 'dateResolved')).toBe('2026-06-10');
+    expect(readField(r.content, 'graduatedTo')).toBe('intent:filter');
+  });
+
+  it('release: active → open, stamps untouched', () => {
+    const active = applyTransition(ITEM, 'claim', { today: '2026-06-10' }).content;
+    const r = applyTransition(active, 'release', {});
+    expect(readField(r.content, 'status')).toBe('open');
+    expect(readField(r.content, 'dateStarted')).toBe('2026-06-10'); // not removed
+  });
+
+  it('release refuses an item that is not active', () => {
+    expect(applyTransition(ITEM, 'release', {}).error).toMatch(/expected "active"/);
+  });
+
+  it('is deterministic — same input, identical output', () => {
+    const a = applyTransition(ITEM, 'claim', { today: '2026-06-10' }).content;
+    const b = applyTransition(ITEM, 'claim', { today: '2026-06-10' }).content;
+    expect(a).toBe(b);
+  });
+});
+
+describe('scaffold helpers', () => {
+  it('nextNum is highest + 1, zero-padded', () => {
+    expect(nextNum(['001', '002', '254'])).toBe('255');
+    expect(nextNum([])).toBe('001');
+  });
+
+  it('slugify kebab-cases a title', () => {
+    expect(slugify('Build the `filter` + clearable surface!')).toBe('build-the-filter-clearable-surface');
+  });
+
+  it('renderItem emits a check:standards-shaped skeleton (story carries size, digest present)', () => {
+    const out = renderItem({ type: 'idea', workItem: 'story', size: 3, slug: 'x', title: 'Do the thing', today: '2026-06-10', blockedBy: ['254'] });
+    expect(out).toContain('type: idea');
+    expect(out).toContain('size: 3');
+    expect(out).toContain('status: open');
+    expect(out).toContain('blockedBy: ["254"]');
+    expect(out).toContain('# Do the thing');
+    expect(out).toMatch(/\n[^\n#-].*\n$/); // a non-empty digest paragraph at the end
+  });
+
+  it('a task carries no size', () => {
+    const out = renderItem({ type: 'issue', workItem: 'task', slug: 'x', title: 'Fix it', today: '2026-06-10' });
+    expect(out).not.toContain('size:');
+  });
+});

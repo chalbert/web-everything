@@ -4,6 +4,7 @@ workItem: story
 size: 3
 status: resolved
 dateOpened: '2026-06-06'
+blockedBy: ["077"]
 dateStarted: '2026-06-06'
 dateResolved: '2026-06-06'
 graduatedTo: "src/_includes/strategy-toggle.njk + src/_data/renderStrategies.json (Axis-2 strategy toggle, liftToVdom 11ty filter)"

@@ -7,7 +7,12 @@
 
   // ── Tab switching ──────────────────────────────────────────────────────
   var tabs = Array.prototype.slice.call(document.querySelectorAll('[data-bd-tab]'));
-  var panels = { tracked: document.getElementById('panel-tracked'), burndown: document.getElementById('panel-burndown') };
+  var panels = {
+    tracked: document.getElementById('panel-tracked'),
+    priority: document.getElementById('panel-priority'),
+    graph: document.getElementById('panel-graph'),
+    burndown: document.getElementById('panel-burndown'),
+  };
   var TAB_KEY = 'we-backlog-tab';
   function activate(name, focus) {
     tabs.forEach(function (t) {

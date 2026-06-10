@@ -4,6 +4,7 @@ workItem: story
 size: 3
 parent: "049"
 status: open
+blockedBy: ["048"]
 dateOpened: '2026-06-03'
 tags:
   - webcomponents

@@ -20,6 +20,9 @@
     "build:plugs": "tsc -p tsconfig.plugs.json",
     "gen:inventory": "node scripts/gen-inventory.mjs",
     "check:standards": "node scripts/check-standards.mjs",
+    "check:readiness": "node scripts/check-readiness.mjs",
+    "fix:readiness": "node scripts/check-readiness.mjs --apply",
+    "propose:readiness": "node scripts/propose-readiness.mjs",
     "autofix": "node scripts/conformance-autofix.mjs"
   },
   "devDependencies": {

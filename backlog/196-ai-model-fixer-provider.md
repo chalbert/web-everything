@@ -4,6 +4,7 @@ workItem: story
 size: 5
 parent: "097"
 status: open
+blockedBy: ["095", "197"]
 dateOpened: "2026-06-08"
 tags: [monetization, conformance, auto-fix, agent, ai-provider, byo-key, content-generation, propose-and-verify, provider-registry, webcases]
 relatedProject: webcases

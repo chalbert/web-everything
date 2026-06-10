@@ -4,6 +4,7 @@ workItem: story
 size: 5
 parent: "097"
 status: open
+blockedBy: ["094"]
 dateOpened: "2026-06-08"
 tags: [upgrader, input-adapter, analyzer, react, lit, vue, breadth]
 relatedProject: webadapters

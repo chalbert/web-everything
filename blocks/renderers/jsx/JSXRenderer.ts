@@ -157,8 +157,17 @@ class JSXRenderer {
         : document.createElement(type);
     }
 
-    // Class constructor - instantiate custom element
+    // Class constructor - instantiate custom element.
+    // Auto-Define (#241): a generated class carries `static tagName` as the single source of truth
+    // for its tag↔class binding and self-registers on import (defineElement). Resolve such a class
+    // through the registry — `document.createElement(tagName)` — so we get the *registered* upgraded
+    // element (the native path), not a bare `new` that bypasses upgrade. Classes WITHOUT a tagName
+    // (ad-hoc/hand-written, or props-via-constructor) keep the bare-`new` fallback.
     if (typeof type === 'function') {
+      const tagName = (type as { tagName?: unknown }).tagName;
+      if (typeof tagName === 'string' && tagName) {
+        return document.createElement(tagName) as HTMLElement;
+      }
       const ElementClass = type as new (props?: JSXProps) => HTMLElement;
       return new ElementClass(props || undefined);
     }
@@ -182,6 +191,15 @@ class JSXRenderer {
       if (key.startsWith('on') && typeof value === 'function') {
         const eventName = key.slice(2).toLowerCase();
         element.addEventListener(eventName, value as EventListener);
+        continue;
+      }
+
+      // Inline event-handler attribute as a STRING (e.g. onmouseover="hover()"). Unlike a function
+      // handler (added via addEventListener above), a string survives to HTML as a content attribute,
+      // so set it explicitly — otherwise it falls through to the on* IDL *property* below, which a
+      // non-function value won't reflect as an attribute, silently dropping it from serialized HTML (#245).
+      if (key.startsWith('on') && typeof value === 'string') {
+        element.setAttribute(key, value);
         continue;
       }
 

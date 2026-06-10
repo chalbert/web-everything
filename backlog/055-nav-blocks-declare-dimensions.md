@@ -2,6 +2,7 @@
 type: idea
 workItem: task
 status: open
+blockedBy: ["056", "057", "058"]
 dateOpened: "2026-06-03"
 tags: [navigation, intent, tabs, nav-list, blocks, vocabulary, propagation]
 relatedReport: reports/2026-06-03-navigation-intent-vocabulary.md

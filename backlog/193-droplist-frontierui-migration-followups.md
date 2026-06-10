@@ -4,6 +4,7 @@ workItem: story
 size: 5
 parent: "136"
 status: open
+blockedBy: ["136"]
 dateOpened: "2026-06-08"
 tags: [droplist, autocomplete, anchor, frontierui, migration, traits]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md

@@ -5,6 +5,7 @@ status: resolved
 dateOpened: '2026-06-02'
 dateStarted: "2026-06-06"
 dateResolved: "2026-06-06"
+graduatedTo: "Frontier UI lazy-traits path — plugs/webbehaviors/CustomAttributeRegistry.ts `defineLazy` + traitManifest.ts + tools/trait-enforcer/vite-plugin.ts"
 tags:
   - webtraits
   - lazy-loading

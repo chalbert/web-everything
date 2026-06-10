@@ -3,6 +3,7 @@ type: issue
 workItem: task
 parent: "048"
 status: open
+blockedBy: ["048"]
 dateOpened: '2026-06-08'
 tags:
   - webcomponents

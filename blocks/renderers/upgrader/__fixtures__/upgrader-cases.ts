@@ -18,6 +18,8 @@ export interface UpgraderCase {
   expectName?: string;
   /** Expected shadow mode in the IR. */
   expectShadow?: 'open' | 'closed' | 'none';
+  /** Intent ids the analyzer should infer (#189). Omit/`[]` ⇒ no intent should be inferred. */
+  expectIntents?: string[];
   /** Does the verify gate offer it? `false` = the analyzer should reject the input (out of subset). */
   expectOffered: boolean;
 }
@@ -91,5 +93,38 @@ export const upgraderCases: UpgraderCase[] = [
     note: 'A plain function with no define() call — the analyzer does not claim it; nothing is faked.',
     source: `function add(a, b) {\n  return a + b;\n}`,
     expectOffered: false,
+  },
+  {
+    id: 'listbox-selection-intent',
+    title: '6 · Intent inference — listbox → selection',
+    note: 'role="listbox" + aria-selected is an unambiguous selection signal (#189). The IR carries an inferred `intents: ["selection"]`, which the verify gate conformance-checks against the standard.',
+    source:
+      `class FruitPicker extends HTMLElement {\n` +
+      `  connectedCallback() {\n` +
+      `    this.innerHTML = '<ul role=\"listbox\" aria-label=\"Fruit\"><li role=\"option\" aria-selected=\"true\">Apple</li><li role=\"option\">Pear</li></ul>';\n` +
+      `  }\n` +
+      `}\n` +
+      `customElements.define('fruit-picker', FruitPicker);`,
+    expectName: 'fruit-picker',
+    expectShadow: 'none',
+    expectIntents: ['selection'],
+    expectOffered: true,
+  },
+  {
+    id: 'reduced-motion-intent',
+    title: '7 · Intent inference — reduced-motion guard → motion',
+    note: 'A `prefers-reduced-motion` guard means the component expresses motion it offers to tone down (#189) → inferred `intents: ["motion"]`.',
+    source:
+      `class PulseDot extends HTMLElement {\n` +
+      `  connectedCallback() {\n` +
+      `    this.attachShadow({ mode: 'open' });\n` +
+      "    this.shadowRoot.innerHTML = `<style>.dot{animation:pulse 1s infinite}@media (prefers-reduced-motion: reduce){.dot{animation:none}}</style><span class=\"dot\"></span>`;\n" +
+      `  }\n` +
+      `}\n` +
+      `customElements.define('pulse-dot', PulseDot);`,
+    expectName: 'pulse-dot',
+    expectShadow: 'open',
+    expectIntents: ['motion'],
+    expectOffered: true,
   },
 ];

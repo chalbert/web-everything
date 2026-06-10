@@ -314,6 +314,61 @@ const html = jsxToHtml(jsx);
 </section>
 
 <section class="section-card">
+    <h3 id="wiring">Wiring into a project — the JSX runtime</h3>
+    <p>
+        An external project wires the adapter with the <strong>automatic</strong> JSX runtime — the native,
+        per-file-free convention. Point the compiler's <code>jsxImportSource</code> at the published runtime
+        package and it injects the factory import for you; nothing per-file, no <code>jsxFactory</code> pragma:
+    </p>
+
+    {% highlight "json" %}
+// tsconfig.json — automatic runtime (the documented default for external projects)
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "@webeverything/jsx-runtime"
+  }
+}
+    {% endhighlight %}
+
+    <p style="margin-bottom: 0.5rem;">
+        The same one line works in esbuild / Vite (which read the field, or take it directly):
+    </p>
+
+    {% highlight "typescript" %}
+// esbuild / Vite — automatic runtime
+{ jsx: 'automatic', jsxImportSource: '@webeverything/jsx-runtime' }
+    {% endhighlight %}
+
+    <p>
+        Install <code>@webeverything/jsx-runtime</code> and the compiler resolves <code>jsx</code>/<code>jsxs</code>
+        from its <code>/jsx-runtime</code> export (and <code>/jsx-dev-runtime</code> in dev) automatically. The
+        factory is the same one this page documents — JSX still lowers to standard DOM, no framework runtime.
+    </p>
+
+    <p style="margin-bottom: 0.5rem;">
+        <strong>Classic is the in-repo / no-package fallback.</strong> Web&nbsp;Everything's own pages don't
+        install the package — they wire the factory <em>classically</em>, injecting it from the local source so
+        there's no bare-specifier to resolve:
+    </p>
+
+    {% highlight "typescript" %}
+// vite.config — classic, our in-repo wiring (no package install)
+esbuild: {
+  jsxFactory: 'jsx.createElement',
+  jsxFragment: 'jsx.Fragment',
+  jsxInject: `import jsx from 'blocks/renderers/jsx/JSXRenderer'`,
+}
+    {% endhighlight %}
+
+    <p style="margin: 0;">
+        Both produce identical DOM — <code>automatic</code> is the default we document for consumers (one
+        config line, real install), <code>classic</code> is the fallback when there's no package to install
+        (our repo, or a vendored copy). See <a href="/backlog/126-jsx-runtime-documented-default/">#126</a> for the ruling.
+    </p>
+</section>
+
+<section class="section-card">
     <h3 id="related">Related</h3>
     <ul style="margin-bottom: 0;">
         <li><a href="/demos/jsx-adapter-demo.html">JSX Adapter Playground</a> — live mirror-dialect examples with conformance + round-trip badges</li>

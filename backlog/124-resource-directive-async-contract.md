@@ -4,6 +4,7 @@ workItem: story
 size: 2
 parent: "070"
 status: open
+blockedBy: ["070"]
 dateOpened: "2026-06-06"
 tags: [jsx, adapters, directives, resource, async, loader, intent]
 relatedReport: reports/2026-06-03-jsx-adapter-feature-mapping.md

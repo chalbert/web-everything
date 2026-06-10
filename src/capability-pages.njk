@@ -1,0 +1,120 @@
+---
+pagination:
+    data: capabilities
+    size: 1
+    alias: cap
+permalink: "capabilities/{{ cap.id }}/"
+layout: base.njk
+eleventyComputed:
+    title: "Web Everything — Capability — {{ cap.label }}"
+---
+
+{% set tierBg = { 'native-ok': '#dcfce7', 'polyfill-ok': '#fef3c7', 'capability-hard': '#fee2e2' } %}
+{% set tierFg = { 'native-ok': '#166534', 'polyfill-ok': '#92400e', 'capability-hard': '#991b1b' } %}
+{% set polyfillLabel = { 'polyfillable': 'Polyfillable — a shim fully recovers the behavior', 'partial': 'Partial — only partial mitigation; a genuine residual gap remains', 'capability': 'Capability — not polyfillable, only replaceable (a UA-privileged action)' } %}
+
+<div class="plug-detail-header">
+    <div class="plug-detail-header-inner">
+        <nav class="plug-breadcrumb">
+            <a href="/capabilities/" class="plug-crumb">Capabilities</a>
+            <svg class="plug-crumb-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            <span class="plug-crumb plug-crumb-current">{{ cap.label }}</span>
+        </nav>
+        <div class="plug-title-row">
+            <h1 class="plug-title">{{ cap.label }}</h1>
+            <div class="plug-status">
+                {% if cap.baseline %}
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" style="background:#dcfce7; color:#166534; white-space:nowrap;">✓ Baseline {{ cap.baseline }}</span>
+                {% else %}
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" style="background:#fef3c7; color:#92400e; white-space:nowrap;">Not yet Baseline</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="container block-detail-page">
+    <div class="block-body content">
+        <div class="section-card">
+            <p style="font-size:1.05em;">{{ cap.summary | safe }}</p>
+            <dl style="display:grid; grid-template-columns:max-content 1fr; gap:0.5rem 1.25rem; margin:1rem 0 0; font-size:0.92em;">
+                <dt style="font-weight:600;">Capability id</dt>
+                <dd style="margin:0;"><code>{{ cap.id }}</code></dd>
+                <dt style="font-weight:600;"><code>web-features</code> key</dt>
+                <dd style="margin:0;"><code>{{ cap.webFeaturesKey }}</code></dd>
+                <dt style="font-weight:600;">Baseline</dt>
+                <dd style="margin:0;">{% if cap.baseline %}<span style="color:#166534;">✓ {{ cap.baseline }}</span>{% else %}<span style="color:var(--color-text-muted);">Not yet Baseline</span>{% endif %}</dd>
+                <dt style="font-weight:600;">Polyfillability</dt>
+                <dd style="margin:0;">{{ polyfillLabel[cap.polyfill] or cap.polyfill }}</dd>
+            </dl>
+        </div>
+
+        <div class="section-card mt-8">
+            <h2>Build-matrix row</h2>
+            <p class="mb-6 text-slate-600">
+                The tier this capability is served at on every registered
+                <a href="/capabilities/#:~:text=registered%20capability%20adapter%20table">capability adapter</a> — one column per impl, read straight from the
+                static build-matrix.
+            </p>
+            <div style="display: flex; gap: 1.25rem; flex-wrap: wrap; margin: 0 0 1rem; font-size: 0.85em;">
+                <span><span style="display:inline-block;width:0.7em;height:0.7em;border-radius:2px;background:#16a34a;margin-right:0.4em;"></span><strong>native-ok</strong> — the platform serves it directly</span>
+                <span><span style="display:inline-block;width:0.7em;height:0.7em;border-radius:2px;background:#d97706;margin-right:0.4em;"></span><strong>polyfill-ok</strong> — a shim recovers the behavior</span>
+                <span><span style="display:inline-block;width:0.7em;height:0.7em;border-radius:2px;background:#dc2626;margin-right:0.4em;"></span><strong>capability-hard</strong> — a UA-privileged wall no shim can reach</span>
+            </div>
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+                    <thead>
+                        <tr>
+                            {% for impl in capabilityMatrix.impls %}
+                            <th style="text-align: center; padding: 0.6rem 0.75rem; border-bottom: 2px solid var(--color-border);" title="{{ impl.summary | striptags }}">
+                                <a href="/capabilities/adapters/{{ impl.id }}/">{{ impl.label }}</a>
+                                {% if impl.native %}<span style="display:inline-block; margin-left:0.35em; padding:0.05rem 0.4rem; border-radius:9999px; background:#dcfce7; color:#166534; font-size:0.7em; font-weight:600; vertical-align:middle;" title="The native substrate — native-first prefers it to break lightness ties">native</span>{% endif %}
+                            </th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            {% for impl in capabilityMatrix.impls %}
+                            {% set t = impl.tiers[cap.id] %}
+                            <td style="padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--color-border); text-align: center;">
+                                <span style="display: inline-block; padding: 0.1rem 0.55rem; border-radius: 9999px; font-size: 0.78em; font-weight: 600; font-family: ui-monospace, monospace; background: {{ tierBg[t] }}; color: {{ tierFg[t] }};">{{ t }}</span>
+                            </td>
+                            {% endfor %}
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        {% set requiringIntents = [] %}
+        {% for intent in intents %}
+            {% if intent.requiresCapabilities and cap.id in intent.requiresCapabilities %}
+                {% set _ = requiringIntents.push(intent) %}
+            {% endif %}
+        {% endfor %}
+        {% if requiringIntents.length %}
+        <div class="section-card mt-8">
+            <h2>Intents that require this capability</h2>
+            <p class="mb-6 text-slate-600">The reverse of the <code>requiresCapabilities</code> mapping — intents that expand to this capability id.</p>
+            <div class="standards-grid">
+                {% for intent in requiringIntents %}
+                <a href="/intents/{{ intent.id }}/" class="standard-card">
+                    <h4 class="text-lg font-bold m-0 text-gray-900 mb-3">{{ intent.name }}</h4>
+                    {% if intent.summary %}<p class="text-gray-600 text-sm leading-relaxed m-0">{{ intent.summary }}</p>{% endif %}
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="section-card mt-8">
+            <h2>Underlying platform feature</h2>
+            <p class="mb-6 text-slate-600">Each capability borrows a <code>web-features</code> id. Follow it to the live Baseline / browser-support data.</p>
+            <ul class="list-disc pl-5 text-sm text-gray-600">
+                <li><a href="https://webstatus.dev/features/{{ cap.webFeaturesKey }}">webstatus.dev — Baseline status &amp; browser support</a> (<code>{{ cap.webFeaturesKey }}</code>)</li>
+                <li><a href="https://caniuse.com/?search={{ cap.webFeaturesKey }}">caniuse.com — version-level support tables</a></li>
+            </ul>
+        </div>
+    </div>
+</div>

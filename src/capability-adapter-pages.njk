@@ -1,0 +1,90 @@
+---
+pagination:
+    data: capabilityMatrix.impls
+    size: 1
+    alias: impl
+permalink: "capabilities/adapters/{{ impl.id }}/"
+layout: base.njk
+eleventyComputed:
+    title: "Web Everything — Capability Adapter — {{ impl.label }}"
+---
+
+{% set tierBg = { 'native-ok': '#dcfce7', 'polyfill-ok': '#fef3c7', 'capability-hard': '#fee2e2' } %}
+{% set tierFg = { 'native-ok': '#166534', 'polyfill-ok': '#92400e', 'capability-hard': '#991b1b' } %}
+{% set tierLabel = { 'native-ok': 'native-ok — the platform serves it directly', 'polyfill-ok': 'polyfill-ok — a shim recovers the behavior', 'capability-hard': 'capability-hard — a UA-privileged wall no shim can reach' } %}
+
+<div class="plug-detail-header">
+    <div class="plug-detail-header-inner">
+        <nav class="plug-breadcrumb">
+            <a href="/capabilities/" class="plug-crumb">Capabilities</a>
+            <svg class="plug-crumb-chevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+            <span class="plug-crumb plug-crumb-current">{{ impl.label }}</span>
+        </nav>
+        <div class="plug-title-row">
+            <h1 class="plug-title">{{ impl.label }}</h1>
+            <div class="plug-status">
+                {% if impl.native %}
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" style="background:#dcfce7; color:#166534; white-space:nowrap;" title="The native substrate — native-first prefers it to break lightness ties">native substrate</span>
+                {% else %}
+                <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium" style="background:var(--color-surface-alt, #f1f5f9); color:var(--color-text-muted); white-space:nowrap;">registered adapter</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="container block-detail-page">
+    <div class="block-body content">
+        <div class="section-card">
+            {% include "capability-adapter-descriptions/" + impl.id + ".njk" %}
+            <p style="font-size:0.85em; color:var(--color-text-muted); margin-top:1rem;">
+                Registered row in the <a href="/capabilities/#:~:text=registered%20capability%20adapter%20table">capability adapter table</a>
+                (<code>src/_data/capabilityMatrix.json</code> → <code>impls[]</code>). The tier breakdown below is read
+                straight from that single source — it cannot disagree with the matrix.
+            </p>
+        </div>
+
+        <div class="section-card mt-8">
+            <h2>Tier breakdown</h2>
+            <p class="mb-6 text-slate-600">
+                How this adapter serves every capability in the grid, grouped by tier. The
+                <span style="color:#92400e;">polyfill-ok</span> and <span style="color:#991b1b;">capability-hard</span>
+                cells are the interesting story — where this impl pays a cost or hits a wall the platform won't open.
+            </p>
+            {% for state in ['native-ok', 'polyfill-ok', 'capability-hard'] %}
+            {% set bucket = [] %}
+            {% for cap in capabilities %}
+                {% if impl.tiers[cap.id] == state %}{% set _ = bucket.push(cap) %}{% endif %}
+            {% endfor %}
+            {% if bucket.length %}
+            <div style="padding: 0.6rem 0.8rem; margin: 0 0 0.6rem; border: 1px solid var(--color-border); border-left: 3px solid {{ tierFg[state] }}; border-radius: 6px;">
+                <div style="display:flex; align-items:baseline; gap:0.5rem; flex-wrap:wrap;">
+                    <span style="display: inline-block; padding: 0.1rem 0.55rem; border-radius: 9999px; font-size: 0.78em; font-weight: 600; font-family: ui-monospace, monospace; background: {{ tierBg[state] }}; color: {{ tierFg[state] }};">{{ state }}</span>
+                    <span style="font-size:0.85em; color:var(--color-text-muted);">{{ tierLabel[state] }}</span>
+                </div>
+                <div style="display:flex; flex-wrap:wrap; gap:0.4rem; margin-top:0.6rem;">
+                    {% for cap in bucket %}
+                    <a href="/capabilities/{{ cap.id }}/"><code style="padding: 0.05rem 0.45rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); font-size: 0.85em;">{{ cap.id }}</code></a>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+
+        <div class="section-card mt-8">
+            <h2>The other registered adapters</h2>
+            <p class="mb-6 text-slate-600">Every impl the <a href="/capabilities/">capability provider</a> can enumerate when it resolves native-first.</p>
+            <div class="standards-grid">
+                {% for other in capabilityMatrix.impls %}
+                {% if other.id != impl.id %}
+                <a href="/capabilities/adapters/{{ other.id }}/" class="standard-card">
+                    <h4 class="text-lg font-bold m-0 text-gray-900 mb-3">{{ other.label }}{% if other.native %} <span style="font-size:0.7em; font-weight:600; color:#166534;">native</span>{% endif %}</h4>
+                    <p class="text-gray-600 text-sm leading-relaxed m-0">{{ other.summary | safe }}</p>
+                </a>
+                {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+</div>

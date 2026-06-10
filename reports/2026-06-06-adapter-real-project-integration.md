@@ -145,8 +145,12 @@ shaping decisions):
 - **#125 — Extract the adapter packages** (§2): the foundational `@webeverything/{jsx-runtime,
   component-compiler, *-plugin}` extraction; folds in the **packaging-granularity** decision (split, not
   umbrella).
-- **#126 — Documented JSX runtime default**: automatic (`jsxImportSource`) vs classic — recommend
-  automatic externally, keep classic in-repo.
+- **#126 — Documented JSX runtime default** *(resolved)*: automatic (`jsxImportSource`) vs classic —
+  ruled **automatic externally, classic in-repo**, and applied to the
+  [JSX Adapter page](/adapters/jsx-adapter/#wiring) (#233). Now that `@webeverything/jsx-runtime` is
+  extracted (#125) with `./jsx-runtime`/`./jsx-dev-runtime` exports, the consumer config is the single
+  `jsxImportSource: '@webeverything/jsx-runtime'` line shown in §4; in-repo wiring stays classic
+  (`jsxInject`), since our own pages don't install the package.
 - **#127 — `<component>` compiler toolchain reach**: the **SWC/Turbopack** story (pre-transform),
   the **`<component>` source surface** (`.component` vs inline — the one genuinely open fork), and the
   **`tsc`-only consumer** path.

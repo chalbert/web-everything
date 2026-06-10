@@ -13,6 +13,10 @@ import ResourceLoader from '../../../resource-loader/ResourceLoader';
 import { backgroundLoad } from '../../../resource-loader/backgroundHandoff';
 import { createDeferred } from '../../../resource-loader/__fixtures__/handoff-scenarios';
 import BackgroundTasksElement from '../../../background-task-surface/BackgroundTasksElement';
+import type {
+  LoaderStateHandle,
+  BackgroundTaskRegisterDetail,
+} from '../../../background-task-surface/types';
 
 if (!customElements.get('background-tasks')) {
   customElements.define('background-tasks', BackgroundTasksElement);
@@ -121,5 +125,124 @@ describe('backgroundLoad — Loader → Background Task Surface handoff', () => 
     // The re-run escalates again and the entry returns to active.
     vi.advanceTimersByTime(400);
     expect(stateOf(surface, 'sync')).toBe('active');
+  });
+
+  it('dispose-on-dismiss: dismissing the entry detaches the handle\'s loader listeners', async () => {
+    const { surface, target, loader } = mount({ persistence: 'sticky' });
+    const d = createDeferred<string>();
+
+    // Capture the live handle the producer registers with the surface.
+    let handle: LoaderStateHandle | undefined;
+    surface.addEventListener('background-task-register', (e) => {
+      handle = (e as CustomEvent<BackgroundTaskRegisterDetail>).detail.loaderState;
+    });
+
+    const p = backgroundLoad(loader, () => d.promise, { id: 'export', label: 'Export' });
+    vi.advanceTimersByTime(400);
+    expect(stateOf(surface, 'export')).toBe('active');
+    expect(handle).toBeDefined();
+
+    d.resolve('data');
+    await p;
+    await flush();
+    expect(stateOf(surface, 'export')).toBe('success');
+
+    // While registered, the handle still reflects the loader's event stream.
+    const live = vi.fn();
+    const unsub = handle!.subscribe(live);
+    target.dispatchEvent(new CustomEvent('resource-load-end'));
+    expect(live).toHaveBeenCalled();
+    unsub();
+
+    // User dismisses the entry → bubbles to the shared root → producer disposes.
+    const btn = surface.querySelector(
+      '.bt-entry[data-task-id="export"] .bt-dismiss',
+    ) as HTMLButtonElement | null;
+    expect(btn).toBeTruthy();
+    btn!.click();
+    expect(rows(surface).length).toBe(0);
+
+    // The handle's three loader listeners are now detached: a fresh loader event
+    // on the target no longer reaches the handle (no leak across many loads).
+    const after = vi.fn();
+    handle!.subscribe(after);
+    target.dispatchEvent(new CustomEvent('resource-load-end'));
+    target.dispatchEvent(
+      new CustomEvent('resource-load-error', { detail: { error: new Error('late') } }),
+    );
+    expect(after).not.toHaveBeenCalled();
+  });
+
+  it('determinate-progress: reportProgress forwards a clamped 0..1 fraction to the snapshot + bar', async () => {
+    const surface = document.createElement('background-tasks') as BackgroundTasksElement;
+    surface.setAttribute('persistence', 'sticky');
+    surface.autoClearDelayMs = 0;
+    document.body.appendChild(surface);
+    const target = document.createElement('div');
+    surface.appendChild(target);
+    // Determinate intent → the surface renders a value-bearing <progress>.
+    const loader = new ResourceLoader({ target, intent: { progress: 'determinate' } });
+    const d = createDeferred<string>();
+
+    let handle: LoaderStateHandle | undefined;
+    surface.addEventListener('background-task-register', (e) => {
+      handle = (e as CustomEvent<BackgroundTaskRegisterDetail>).detail.loaderState;
+    });
+
+    const p = backgroundLoad(loader, () => d.promise, { id: 'upload', label: 'Upload' });
+    vi.advanceTimersByTime(400);
+    expect(stateOf(surface, 'upload')).toBe('active');
+
+    // loaded/total normalizes to a fraction; state is preserved (still active).
+    loader.reportProgress(256, 1024);
+    expect(handle!.getSnapshot()).toMatchObject({ state: 'active', progress: 0.25 });
+    const bar = surface.querySelector(
+      '.bt-entry[data-task-id="upload"] .bt-progress',
+    ) as HTMLProgressElement;
+    expect(bar.value).toBe(0.25);
+
+    // Single-arg form reports the fraction directly.
+    loader.reportProgress(0.5);
+    expect(handle!.getSnapshot().progress).toBe(0.5);
+
+    // Over-100% input clamps to 1.
+    loader.reportProgress(2048, 1024);
+    expect(handle!.getSnapshot().progress).toBe(1);
+
+    d.resolve('done');
+    await p;
+    await flush();
+    expect(stateOf(surface, 'upload')).toBe('success');
+  });
+
+  it('dispose skips a cancelable dismiss the host kept sticky', async () => {
+    const { surface, target, loader } = mount({ persistence: 'sticky' });
+    const d = createDeferred<string>();
+
+    let handle: LoaderStateHandle | undefined;
+    surface.addEventListener('background-task-register', (e) => {
+      handle = (e as CustomEvent<BackgroundTaskRegisterDetail>).detail.loaderState;
+    });
+
+    const p = backgroundLoad(loader, () => d.promise, { id: 'keep', label: 'Keep' });
+    vi.advanceTimersByTime(400);
+    d.resolve('data');
+    await p;
+    await flush();
+
+    // A host on the surface vetoes the dismiss (keeps the entry) → the producer
+    // must NOT dispose, since the handle is still live off-view.
+    surface.addEventListener('background-task-dismiss', (e) => e.preventDefault());
+    const btn = surface.querySelector(
+      '.bt-entry[data-task-id="keep"] .bt-dismiss',
+    ) as HTMLButtonElement | null;
+    btn!.click();
+    expect(rows(surface).length).toBe(1); // entry kept
+
+    // Listeners survive: the handle still reacts to the loader.
+    const live = vi.fn();
+    handle!.subscribe(live);
+    target.dispatchEvent(new CustomEvent('resource-load-end'));
+    expect(live).toHaveBeenCalled();
   });
 });

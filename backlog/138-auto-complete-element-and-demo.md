@@ -2,8 +2,11 @@
 type: idea
 workItem: story
 size: 8
-status: open
+status: resolved
 dateOpened: "2026-06-06"
+dateStarted: "2026-06-08"
+dateResolved: "2026-06-08"
+graduatedTo: "frontierui:blocks/droplist/AutoComplete.ts (registered form-associated <auto-complete> composing all six traits; 4-card conformance demo demos/autocomplete-unplugged.{html,ts}; e2e blocks/droplist/__tests__/e2e/auto-complete.spec.ts; diacritic fold in Filter.ts)"
 tags: [droplist, autocomplete, custom-element, demo, registration, traits]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -39,7 +42,43 @@ full trace against a live source; the diacritic-insensitive client match lands w
 
 > **Was resolved in error.** The only implementation of this surface was built in the **legacy `plateau` repo**, since confirmed **abandoned** — the initial single-repo prototype, superseded by Web Everything + Frontier UI + plateau-app. It is **not in the live project**: the WE *spec* exists, but there is **no reference implementation** in Frontier UI or the WE `plugs/`, and the (now-removed) `graduatedTo` pointed into dead code. Reopened as a **fresh build** against the live reference implementation (Frontier UI / WE `plugs/`, per AGENTS.md) — **do not migrate or consult plateau** (explicitly not a model). The original `## Progress` below describes the void plateau build and is retained only as history.
 
-## Progress
+## Progress (fresh build — Frontier UI) — resolved 2026-06-08
+
+The fresh build is **complete and green in the live reference implementation**. The earlier "Done"
+section below describes the *void plateau build* and is retained only as history (per the correction);
+it is **not** what shipped. What actually shipped:
+
+- **Element** — [`frontierui/blocks/droplist/AutoComplete.ts`](../../frontierui/blocks/droplist/AutoComplete.ts):
+  a registered, form-associated (`ElementInternals`) `<auto-complete>` autonomous custom element that
+  composes the six trait behaviors (`Filter`, `Clearable`, `FocusDelegation`, `Selection`, `Anchor`,
+  `Anchored`) plus `LiveStatus` over a private `<input role="combobox">` + `<ul role="listbox">` +
+  shared `role="status"` substrate. Owns only the glue: source wiring (`.source` fn or `src` fetch,
+  abort-aware through filter's `respond`/`reject` channel), commit write-back, and form
+  value/reset/restore. Self-registers via `customElements.define` (guarded). Async by default;
+  `filter="client"` seeds an inline set via `.items`/`<option>`s. `openOn` excludes `click`.
+- **Diacritic-insensitive client match** — `frontierui/blocks/droplist/Filter.ts` folds both query
+  and option text (NFD + strip combining marks + lowercase), so `par` matches `Pärnu` / `aero` matches
+  `Aéroport`. Async stays the source's job.
+- **Conformance demo** — `frontierui/demos/autocomplete-unplugged.{html,ts}`: a 4-card runnable demo
+  (async live source with the debounced/cancellable "par → arrow → enter" trace; client diacritic
+  match; a failing source through the error channel; a viewport-edge flip card). Served by Frontier
+  UI's Vite (`:3001`). Impl + demo live in Frontier UI (the reference implementation per AGENTS.md);
+  webeverything has no dependency path to it by design, so the demo is **not** a webeverything
+  conformance-badge playground.
+- **Tests** — `frontierui/blocks/droplist/__tests__/AutoComplete.test.ts` + `behaviors.test.ts`
+  (26 unit, green) and the Playwright e2e `__tests__/e2e/auto-complete.spec.ts` (4 specs, green):
+  async commit + dismiss, client diacritic surfacing `Pärnu`, native-strategy viewport flip (#161),
+  zero console errors.
+
+**Verification (2026-06-08):** Frontier UI `vitest run blocks/droplist/` 26/26; `playwright test
+auto-complete.spec.ts` 4/4; Frontier UI `check:standards` 0 errors; webeverything `check:standards`
+0 errors.
+
+**Leftover → new item:** [#198](/backlog/198-autocomplete-spec-built-status-stale/) — the webeverything
+autocomplete spec text still calls `clearable`/`filter`/`live-status` "spec-proposed (only … built
+today)" and references plateau; stale now that all six traits ship in Frontier UI.
+
+## Progress (plateau — historical, void)
 
 - **Status:** resolved
 - **Branch:** plateau (impl); webeverything `docs/standard-authoring-workflow` (backlog file)

@@ -28,6 +28,8 @@
         const viewKey = 'we-home-view:' + titleText;
         const statusKey = 'we-status-filter:' + titleText;
         const typeKey = 'we-type-filter:' + titleText;
+        const sizeKey = 'we-size-filter:' + titleText;
+        const tierKey = 'we-tier-filter:' + titleText;
         const searchKey = 'we-search-filter:' + titleText;
 
         const buttons = Array.from(toolbar.querySelectorAll('.view-toggle-btn'));
@@ -36,8 +38,12 @@
         const countTarget = section.querySelector('[data-count-target]');
         const statusChips = Array.from(section.querySelectorAll('[data-status-chip]'));
         const typeChips = Array.from(section.querySelectorAll('[data-type-chip]'));
+        const sizeChips = Array.from(section.querySelectorAll('[data-size-chip]'));
+        const tierChips = Array.from(section.querySelectorAll('[data-tier-chip]'));
         const statusAll = statusChips.map(function (c) { return c.dataset.statusChip; });
         const typeAll = typeChips.map(function (c) { return c.dataset.typeChip; });
+        const sizeAll = sizeChips.map(function (c) { return c.dataset.sizeChip; });
+        const tierAll = tierChips.map(function (c) { return c.dataset.tierChip; });
 
         // Cards are re-queried live so a hot-reload that adds/removes a backlog
         // item is reflected without a captured stale list.
@@ -57,11 +63,15 @@
         }
         function activeStatuses() { return statusChips.length ? readSet(statusKey, statusAll, ['resolved']) : null; }
         function activeTypes() { return typeChips.length ? readSet(typeKey, typeAll, []) : null; }
+        function activeSizes() { return sizeChips.length ? readSet(sizeKey, sizeAll, []) : null; }
+        function activeTiers() { return tierChips.length ? readSet(tierKey, tierAll, []) : null; }
 
         function applyFilter() {
             const q = filter ? filter.value.trim().toLowerCase() : '';
             const st = activeStatuses();
             const ty = activeTypes();
+            const sz = activeSizes();
+            const tr = activeTiers();
             let shown = 0;
             cards().forEach(function (card) {
                 const title = card.querySelector('.project-title');
@@ -70,7 +80,11 @@
                 const failSearch = !!q && text.indexOf(q) === -1;
                 const failStatus = st && card.dataset.status && !st.has(card.dataset.status);
                 const failType = ty && card.dataset.type && !ty.has(card.dataset.type);
-                const hidden = failSearch || failStatus || failType;
+                const failSize = sz && card.dataset.size && !sz.has(card.dataset.size);
+                // Only open items carry a tier; a card with no data-tier always passes the tier
+                // facet, so filtering to Tier A narrows the open pool without hiding active/resolved.
+                const failTier = tr && card.dataset.tier && !tr.has(card.dataset.tier);
+                const hidden = failSearch || failStatus || failType || failSize || failTier;
                 card.classList.toggle('is-filtered-out', hidden);
                 if (!hidden) shown++;
             });
@@ -103,6 +117,8 @@
 
         wireChips(statusChips, 'statusChip', statusKey, statusAll, ['resolved'], activeStatuses);
         wireChips(typeChips, 'typeChip', typeKey, typeAll, [], activeTypes);
+        wireChips(sizeChips, 'sizeChip', sizeKey, sizeAll, [], activeSizes);
+        wireChips(tierChips, 'tierChip', tierKey, tierAll, [], activeTiers);
 
         function setView(view) {
             const isList = view === 'list';
@@ -171,6 +187,8 @@
         // Re-apply the saved state on every run (first load and hot-reload).
         syncChips(statusChips, 'statusChip', activeStatuses);
         syncChips(typeChips, 'typeChip', activeTypes);
+        syncChips(sizeChips, 'sizeChip', activeSizes);
+        syncChips(tierChips, 'tierChip', activeTiers);
         applyFilter();
         let savedView = 'grid';
         try { savedView = localStorage.getItem(viewKey) || 'grid'; } catch (e) { /* ignore */ }

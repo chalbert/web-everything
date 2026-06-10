@@ -336,5 +336,37 @@
     "type": "Global",
     "summary": "Base contract a translation provider implements — resolve(key, locale) returning a MessageFn or null. Returning null declines the key and passes control down the locale fallback chain and the next registered provider. Implementations include a native Intl MF2 formatter, lazy-namespace catalogs, and library adapters (FormatJS, i18next, Lingui, Paraglide).",
     "projects": ["webintl"]
+  },
+  {
+    "id": "customvaliditymergeregistry",
+    "name": "CustomValidityMergeRegistry",
+    "status": "concept",
+    "type": "Global",
+    "summary": "Exposes window.customValidityMerge for registering named validity-merge strategies — how a control reduces several independent SourceResults (native/schema/async/manual) into one MergedValidity. The #004 OP-1 ruling fixes the MergedValidity surface, not the merge math: source-reduction (native-first default) and last-write-wins ship registered, custom strategies are first-class, and the orchestrator auto-stamps generation tokens so devs never hand-author ids.",
+    "projects": ["webvalidation"]
+  },
+  {
+    "id": "customvaliditymergestrategy",
+    "name": "CustomValidityMergeStrategy",
+    "status": "concept",
+    "type": "Global",
+    "summary": "Base contract a merge strategy implements — merge(sources) returning a MergedValidity (the #004 OP-1 surface: state, valid/pending flags, ordered messages with sources, blocking source, generation token). Strategies vary the computation, never the surface — the only constraint that keeps them L1-swappable. Satisfied alike by the source-reduction default, the degenerate last-write-wins, and custom strategies.",
+    "projects": ["webvalidation"]
+  },
+  {
+    "id": "customvalidatorresolutionregistry",
+    "name": "CustomValidatorResolutionRegistry",
+    "status": "concept",
+    "type": "Global",
+    "summary": "Exposes window.customValidatorResolution for registering named async-validator-resolution strategies — how an in-flight async check is reconciled when the input keeps changing. The named sibling of the validity-merge plane (#212): versioning (native-first default — stamp a per-field generation token, drop answers older than the current input) and cancellation (abort the in-flight request via AbortController) ship registered, custom strategies are first-class, and the async runner emits the same pending{version} → valid|invalid SourceResult the merge plane consumes.",
+    "projects": ["webvalidation"]
+  },
+  {
+    "id": "customvalidatorresolution",
+    "name": "CustomValidatorResolution",
+    "status": "concept",
+    "type": "Global",
+    "summary": "Base contract an async-resolution strategy implements — startValidation(fieldId, input) opening a generation handle, shouldApplyResult(handle, result) deciding whether a freshly-arrived answer is still current (the heart of stale-drop), and onInputChange(fieldId, newInput) superseding/aborting an in-flight check. The only constraint is that results feed the same pending{version} → valid|invalid SourceResult #212 consumes. Satisfied alike by the versioning default, cancellation, and custom strategies.",
+    "projects": ["webvalidation"]
   }
 ]

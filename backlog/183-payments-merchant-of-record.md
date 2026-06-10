@@ -4,6 +4,7 @@ workItem: story
 size: 3
 parent: "181"
 status: open
+blockedBy: ["182"]
 dateOpened: "2026-06-08"
 tags: [monetization, payments, merchant-of-record, lemon-squeezy, paddle, tax, infrastructure, solo-founder]
 crossRef: { url: /backlog/181-commercialization-infrastructure/, label: "Commercialization infrastructure (#181)" }

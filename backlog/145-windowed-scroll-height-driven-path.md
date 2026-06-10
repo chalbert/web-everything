@@ -4,6 +4,7 @@ workItem: story
 size: 5
 parent: "137"
 status: open
+blockedBy: ["137"]
 dateOpened: "2026-06-07"
 tags: [droplist, windowed, virtualization, scroll, behavior, pointer, a11y]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md

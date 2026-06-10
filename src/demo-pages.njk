@@ -40,7 +40,7 @@ eleventyComputed:
                         </div>
                         <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
                             {% for projectId in demo.projects %}
-                            {% set project = projects | selectattr('id', 'equalto', projectId) | first %}
+                            {% set project = projects | where('id', projectId) | first %}
                             {% if project %}
                             <a href="/projects/{{ project.id }}/" class="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-white/20 hover:bg-white/30 transition-colors backdrop-blur-sm" style="text-decoration: none; color: white; border: 1px solid rgba(255,255,255,0.3);">
                                 {{ project.name }}

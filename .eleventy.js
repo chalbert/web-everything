@@ -8,6 +8,14 @@ module.exports = function (eleventyConfig) {
     return plugs.filter(plug => plug.projects && plug.projects.includes(projectId));
   });
 
+  // Filter a list to items whose `attr` strictly equals `value`. Nunjucks (unlike Jinja2) has no
+  // `equalto` test, so `selectattr("attr", "equalto", v)` silently falls back to a truthiness check and
+  // returns EVERYTHING — a real footgun that leaked resolved items into the /backlog/ Prioritisation
+  // table. Use this instead of selectattr+equalto for any equality filter in a template.
+  eleventyConfig.addFilter("where", function(list, attr, value) {
+    return (list || []).filter(item => item && item[attr] === value);
+  });
+
   // Reverse lookup: find blocks that implement a given intent
   eleventyConfig.addFilter("blocksForIntent", function(blocks, intentId) {
     return blocks.filter(b => b.implementsIntent === intentId);
@@ -19,12 +27,19 @@ module.exports = function (eleventyConfig) {
   let _htmlToJsx;
   eleventyConfig.addFilter("htmlToJsx", function(html) {
     if (!_htmlToJsx) {
-      const fs = require("fs");
-      const { transformSync } = require("esbuild");
-      const src = fs.readFileSync(__dirname + "/blocks/renderers/jsx/htmlToJsx.ts", "utf8");
-      const { code } = transformSync(src, { loader: "ts", format: "cjs" });
+      const { buildSync } = require("esbuild");
+      // Bundle (not just transpile) so htmlToJsx.ts's relative imports (e.g. ./dialect, #235) are
+      // inlined — a standalone transform would emit a bare require("./dialect") that can't resolve
+      // from the 11ty config's cwd.
+      const { outputFiles } = buildSync({
+        entryPoints: [__dirname + "/blocks/renderers/jsx/htmlToJsx.ts"],
+        bundle: true,
+        format: "cjs",
+        platform: "node",
+        write: false,
+      });
       const m = { exports: {} };
-      new Function("module", "exports", "require", code)(m, m.exports, require);
+      new Function("module", "exports", "require", outputFiles[0].text)(m, m.exports, require);
       _htmlToJsx = m.exports.htmlToJsx;
     }
     const { parseHTML } = require("linkedom");

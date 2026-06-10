@@ -3,6 +3,7 @@ type: idea
 workItem: story
 size: 3
 status: open
+blockedBy: ["057"]
 dateOpened: "2026-06-03"
 tags: [navigation, intent, wizard, stepper, linear, block, gap]
 relatedReport: reports/2026-06-03-navigation-intent-vocabulary.md

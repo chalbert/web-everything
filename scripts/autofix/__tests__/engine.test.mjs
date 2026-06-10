@@ -155,4 +155,41 @@ describe('conformance auto-fix loop (#095)', () => {
     // Exactly one substring changed; everything else (formatting, other rows) is byte-identical.
     expect(patch.newContent).toBe(original.replace('"status": "implemented"', '"status": "active"'));
   });
+
+  // ── Hardening carried from #095 (#197): the surgical edit must be order-INdependent ──
+  it('rewrites the target field even when it precedes the id in the row (#197)', () => {
+    // `status` authored BEFORE `id` — the old "search forward from the id" anchor would miss it here.
+    const original = JSON.stringify([{ status: 'implemented', id: 'foo' }], null, 2) + '\n';
+    const { read } = makeWorld({ 'src/_data/blocks.json': original });
+    const patch = deprecatedStatusFixer.fix(
+      { descriptor: { kind: 'deprecated-status', entity: 'Block', id: 'foo', file: 'src/_data/blocks.json', field: 'status', from: 'implemented', to: 'active' } },
+      { read },
+    );
+    expect(patch.newContent).toBe(original.replace('"status": "implemented"', '"status": "active"'));
+  });
+
+  it('never reaches into a sibling row even when its field is reordered ahead of its id (#197)', () => {
+    // Both rows carry `"status": "implemented"`, and in the TARGET row the field precedes the id.
+    // The old forward-from-id scan would have skipped foo's status and rewritten bar's instead.
+    const original = JSON.stringify([{ status: 'implemented', id: 'foo' }, { status: 'implemented', id: 'bar' }], null, 2) + '\n';
+    const { read } = makeWorld({ 'src/_data/blocks.json': original });
+    const patch = deprecatedStatusFixer.fix(
+      { descriptor: { kind: 'deprecated-status', entity: 'Block', id: 'foo', file: 'src/_data/blocks.json', field: 'status', from: 'implemented', to: 'active' } },
+      { read },
+    );
+    const data = JSON.parse(patch.newContent);
+    // foo (the target) flipped; bar (the sibling) untouched.
+    expect(data).toEqual([{ status: 'active', id: 'foo' }, { status: 'implemented', id: 'bar' }]);
+  });
+
+  it('ignores braces inside string values when bounding a row (#197)', () => {
+    // A summary containing `{ }` must not break the brace-span scan that bounds the row.
+    const original = JSON.stringify([{ id: 'foo', summary: 'uses { curly } braces', status: 'wip' }], null, 2) + '\n';
+    const { read } = makeWorld({ 'src/_data/blocks.json': original });
+    const patch = deprecatedStatusFixer.fix(
+      { descriptor: { kind: 'deprecated-status', entity: 'Block', id: 'foo', file: 'src/_data/blocks.json', field: 'status', from: 'wip', to: 'draft' } },
+      { read },
+    );
+    expect(JSON.parse(patch.newContent)).toEqual([{ id: 'foo', summary: 'uses { curly } braces', status: 'draft' }]);
+  });
 });

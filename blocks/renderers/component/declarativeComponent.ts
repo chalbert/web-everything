@@ -16,6 +16,8 @@
  *                    guard; the cache matters for closed roots, unreadable via this.shadowRoot).
  */
 
+import { defineElement } from '../auto-define';
+
 export type ShadowMode = 'open' | 'closed' | 'none';
 
 export interface ComponentDef {
@@ -112,9 +114,14 @@ export function generateClassSource(def: ComponentDef): string {
   const cls = pascal(def.name);
   const literal = '`' + def.templateHTML.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${') + '`';
   const hasInternals = def.formAssociated || !!def.defaultRole;
-  // Members in a FIXED order so output is byte-identical: static → fields (#internals, #root) →
-  // constructor (default ARIA role) → connectedCallback.
-  const statics = def.formAssociated ? ['  static formAssociated = true;'] : [];
+  // Members in a FIXED order so output is byte-identical: static (formAssociated, tagName) →
+  // fields (#internals, #root) → constructor (default ARIA role) → connectedCallback.
+  // `static tagName` (Auto-Define #241) is the single source of truth for the tag↔class binding —
+  // the JSX class path resolves <Foo/> → tagName → document.createElement(tag) (registry upgrade).
+  const statics = [
+    ...(def.formAssociated ? ['  static formAssociated = true;'] : []),
+    `  static tagName = '${def.name}';`,
+  ];
   // A `#root` field captures any DSD-hydrated shadow root at construction (open), and caches the
   // root we attach (closed roots are NOT readable via this.shadowRoot, so a plain re-read would
   // re-attach on reconnect and throw). Light DOM (none) needs no root.
@@ -148,7 +155,11 @@ export function generateClassSource(def: ComponentDef): string {
     `  }`,
     ...moveCb,
     `}`,
-    `customElements.define('${def.name}', ${cls});`,
+    // Auto-Define #241: idempotent self-registration — re-import / duplicate tag / HMR re-run no
+    // longer throw. This is the inline expansion of the `defineElement` helper, kept inline so the
+    // wc-class form stays a SELF-CONTAINED ESM (no import-map seam, unlike the functional form).
+    // The documented hand-author equivalent is `defineElement('${def.name}', ${cls})`.
+    `customElements.get('${def.name}') ?? customElements.define('${def.name}', ${cls});`,
   ].join('\n');
 }
 
@@ -161,6 +172,7 @@ export function defineFromDefinition(def: ComponentDef, tag: string): void {
   const wantsInternals = formAssociated || !!defaultRole;
   class Generated extends HTMLElement {
     static formAssociated = formAssociated;
+    static tagName = tag; // Auto-Define #241 — tag↔class source of truth, mirrors the emitted source.
     // attachInternals is unavailable in some non-browser runtimes (e.g. happy-dom) — guard so the
     // twin no-ops there; real browsers (and the demo) wire it up. Source emission is asserted in tests.
     #internals =
@@ -189,5 +201,5 @@ export function defineFromDefinition(def: ComponentDef, tag: string): void {
   // Conditionally opt into atomic moves — only present when requested, so other elements keep
   // default disconnect/reconnect semantics. moveBefore() then preserves state for this element.
   if (preserveOnMove) (Generated.prototype as { connectedMoveCallback?: () => void }).connectedMoveCallback = () => {};
-  customElements.define(tag, Generated);
+  defineElement(tag, Generated);
 }

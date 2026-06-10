@@ -812,5 +812,35 @@
     "term": "Reorder Commit Strategy",
     "definition": "The strategy that decides where a new order is written after a reorder — ephemeral (session only), localStorage, or written back to the source. Distinct from the validation <a href=\"/semantics/#term-commit-policy\">Commit Policy</a>, which governs when form field edits are written.",
     "usage": "The <code>commit</code> dimension of the Reorder Intent, surfaced by the Reorderable List block's <code>withCommitStrategy</code> trait behind the cancelable <code>reorder-commit</code> event. Defaults to ephemeral."
+  },
+  {
+    "term": "Tooltip",
+    "definition": "A small, transient, non-interactive surface that appears on hover or keyboard focus of a trigger and supplements it with an accessible description. Wired via <code>aria-describedby</code> (it describes; it does not name), never as the sole carrier of essential information, and never holding focusable content. Must satisfy WCAG 1.4.13 — hoverable, persistent, and dismissible.",
+    "usage": "Delivered by the <a href=\"/blocks/tooltip/\">Tooltip block</a>, composing the <a href=\"/intents/anchor/\">Anchor</a>, <a href=\"/intents/surface/\">Surface</a>, and <a href=\"/intents/typography/\">Typography</a> intents. Distinct from a Toggletip."
+  },
+  {
+    "term": "Toggletip",
+    "definition": "A click- or tap-revealed, re-summonable hint. Unlike a <a href=\"/semantics/#term-tooltip\">Tooltip</a> it has no persistent describing relationship with its trigger, so its content is announced through a live region rather than <code>aria-describedby</code>. Triggered by activation (not hover/focus), it is a separate concern from the tooltip.",
+    "usage": "Cross-referenced by the <a href=\"/blocks/tooltip/\">Tooltip block</a> as an explicitly-out-of-scope sibling; announced via the <a href=\"/intents/live-region-status/\">Live Region Status</a> intent."
+  },
+  {
+    "term": "Slider",
+    "definition": "A control for choosing a numeric value by position along a track. The single-thumb case is the native <code>&lt;input type=\"range\"&gt;</code>; the block enhances only the gaps the native control can't express. Distinct from a numeric/stepper field — the slider is the continuous-along-a-track member.",
+    "usage": "Delivered by the <a href=\"/blocks/slider/\">Slider block</a>, realizing the <a href=\"/intents/selection/\">Selection Intent</a>'s <code>range</code> variant and composing the <a href=\"/intents/input/\">Input</a> and <a href=\"/intents/locale/\">Locale</a> intents."
+  },
+  {
+    "term": "Dual-Thumb Range",
+    "definition": "A from–to range modelled as two coordinated thumbs over a single track, each with its own <code>aria-valuenow/min/max</code>, kept ordered (the low thumb cannot cross the high thumb) and reported as a pair. The platform has no single dual-thumb range element, so it is the standard composition for 'from–to'.",
+    "usage": "The concrete realization of the <a href=\"/intents/selection/\">Selection Intent</a>'s <code>range</code> variant in the <a href=\"/blocks/slider/\">Slider block</a>: <code>constraints.min</code> / <code>constraints.max</code> become the two thumb bounds."
+  },
+  {
+    "term": "Segmented Control",
+    "definition": "A single-select choice rendered as a row of adjacent, always-visible buttons (the iOS/macOS segmented control or 'pill' toggle group). The <a href=\"/intents/selection/\">Selection Intent</a>'s <code>single</code> model in a horizontal, live-immediacy variant — exactly one option pressed, choosing commits immediately. Distinct from a multi-select toggle-button group and from Tabs (which disclose panels rather than set a value).",
+    "usage": "Delivered by the <a href=\"/blocks/segmented-control/\">Segmented Control block</a>, composing <a href=\"/intents/selection/\">Selection</a>, <a href=\"/intents/focus-delegation/\">Focus Delegation</a> (roving, horizontal), and the Typography / Density intents."
+  },
+  {
+    "term": "Compound Child",
+    "definition": "A sub-element authored inside a parent block that acts as one of the parent's options, mapping to the parent's value model — e.g. <code>&lt;segment&gt;</code> in a segmented control, <code>&lt;tab&gt;</code> in Tabs, <code>&lt;option&gt;</code> in a native <code>&lt;select&gt;</code>. Under the JSX adapter the same authoring lowers to an <code>options</code> array rather than rendered child components. A recurring authoring-and-lowering paradigm; whether to promote it to its own protocol vs. document it under Selection's grouping is an open decision.",
+    "usage": "Exemplified by the <a href=\"/blocks/segmented-control/\">Segmented Control block</a>; shared with <a href=\"/blocks/tabs/\">Tabs</a> and the <a href=\"/intents/selection/\">Selection Intent</a>'s grouping. Promotion-to-protocol is tracked as a backlog decision."
   }
 ]

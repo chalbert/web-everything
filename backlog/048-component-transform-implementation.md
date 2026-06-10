@@ -6,6 +6,7 @@ parent: "049"
 status: resolved
 dateOpened: '2026-06-03'
 dateResolved: '2026-06-08'
+graduatedTo: "frontierui/compiler/src/component-transform/ — bidirectional `<component>` ⇄ class AST transform (POC)"
 tags:
   - webcomponents
   - component

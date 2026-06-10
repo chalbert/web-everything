@@ -1,0 +1,95 @@
+<h3 id="overview">Overview</h3>
+<p>
+    <code>CustomValidityMergeStrategy</code> is the single contract every merge strategy implements. Its one
+    method, <code>merge()</code>, reduces the named <code>SourceResult</code>s a control collects
+    (<code>native</code>/<code>schema</code>/<code>async</code>/<code>manual</code>, …) into the one
+    <code>MergedValidity</code> the view renders. The native-first default
+    (<a href="#source-reduction">source-reduction</a>), the degenerate
+    <a href="#last-write-wins">last-write-wins</a>, and every custom strategy satisfy this same interface —
+    which is what lets <a href="/plugs/customvaliditymergeregistry/">the registry</a> treat them
+    interchangeably. The <strong>only</strong> constraint is that the output is a conformant
+    <code>MergedValidity</code>: vary the computation, never the surface.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/ValidityState">ValidityState</a></td>
+        <td>Baseline</td>
+        <td>A <code>SourceResult</code> generalizes one validity reason to a named, versioned source so independent checks combine instead of clobbering.</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/ElementInternals/setValidity">ElementInternals.setValidity</a></td>
+        <td>Baseline 2023</td>
+        <td>The merged <code>state</code> + <code>messages</code> are what a custom control would hand to <code>setValidity()</code>.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+type SourceState = 'idle' | 'valid' | 'invalid' | 'pending';
+
+interface SourceResult {
+    source: string;          // 'native' | 'schema' | 'async' | 'manual' | custom
+    state: SourceState;
+    message?: string;        // human-facing, when invalid
+    version?: number;        // generation token — auto-stamped by the orchestrator
+}
+
+interface ValidityMessage { source: string; message: string; }
+
+// The surface contract (#004 OP-1) — fixed; only how it is computed varies.
+interface MergedValidity {
+    state: SourceState;
+    valid: boolean;          // state === 'valid'
+    pending: boolean;        // state === 'pending'
+    messages: ValidityMessage[];
+    blocking: string | null; // source that determines an invalid merged state
+    version: number;         // stable generation token of this merged result
+}
+
+interface CustomValidityMergeStrategy {
+    readonly key: string;    // 'source-reduction' | 'last-write-wins' | custom
+    merge(sources: SourceResult[]): MergedValidity;
+}
+{% endhighlight %}
+
+<h3 id="source-reduction">Source-Reduction (native-first default)</h3>
+{% highlight "typescript" %}
+// Reduce by KIND, not arrival order:
+//   any pending  -> pending   (still being checked, not yet decided)
+//   any invalid  -> invalid   (strictest-wins; precedence orders messages + blocking source)
+//   any valid    -> valid
+//   else         -> idle
+class SourceReductionStrategy implements CustomValidityMergeStrategy {
+    readonly key = 'source-reduction';
+    constructor(precedence = ['native', 'schema', 'async', 'manual']) { /* … */ }
+    merge(sources) { /* … */ }
+}
+{% endhighlight %}
+
+<h3 id="last-write-wins">Last-Write-Wins (degenerate)</h3>
+{% highlight "typescript" %}
+// The single-source reduction — the old "flat flag". The most recently written source
+// (highest generation token) clobbers the rest. Still emits a conformant MergedValidity,
+// so it conforms (L1) and stays swappable — which is why it is a registered strategy, not
+// a special case.
+class LastWriteWinsStrategy implements CustomValidityMergeStrategy {
+    readonly key = 'last-write-wins';
+    merge(sources) { /* … */ }
+}
+{% endhighlight %}
+
+<h3 id="design-decisions">Design Decisions</h3>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+    <li><strong>One method, one surface.</strong> A minimal contract keeps custom strategies trivial and makes the surface guard cheap — the registry asserts the output is a <code>MergedValidity</code> on every merge.</li>
+    <li><strong>Named, versioned sources.</strong> Modeling each reason as a named source with a generation token is what lets independent checks combine and lets a stale async answer be dropped.</li>
+    <li><strong>Strictest-wins is the default, not the law.</strong> Source-reduction answers the merge-strategy open question with any-invalid-fails; teams that want last-writer semantics swap to <code>last-write-wins</code> with no control edits.</li>
+</ul>
+
+<p class="text-sm text-gray-600 mt-4">
+    Registered through <a href="/plugs/customvaliditymergeregistry/"><code>CustomValidityMergeRegistry</code></a>.
+    Realizes the <a href="/protocols/">Validation protocol</a>. See
+    <a href="/projects/webvalidation/">Web Validation</a>.
+</p>

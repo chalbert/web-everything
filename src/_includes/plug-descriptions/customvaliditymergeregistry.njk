@@ -1,0 +1,87 @@
+{% from "mode-selector.njk" import pluggedContent, unpluggedContent, comparisonContent, endContent %}
+
+<h3 id="overview">Overview</h3>
+<p>
+    Exposes <code>window.customValidityMerge</code> for registering named <strong>merge strategies</strong>.
+    A control's validity often comes from several independent <em>sources</em> — the native constraint, a
+    schema check, an async server reconciliation, a manually-set error. How those collapse into the one
+    state the view renders is a <strong>swappable concern</strong>: per <a href="/backlog/004/">#004</a> OP-1 the
+    standard fixes the <code>MergedValidity</code> <em>surface</em>, not the merge <em>math</em>. Controls resolve
+    the application's strategy through the injector chain and delegate, so a page picks <strong>one</strong> merge
+    policy that every control shares rather than each baking its own.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/ValidityState">ValidityState</a></td>
+        <td>Baseline</td>
+        <td>The <code>native</code> source mirrors the platform <code>ValidityState</code>; source-reduction treats it as one input among several, never the whole truth.</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/:user-invalid">:user-invalid</a></td>
+        <td>Baseline 2023</td>
+        <td>The merged <code>state</code> drives the same touched/dirty-gated invalidity styling the pseudo-class expresses.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+interface CustomValidityMergeRegistry extends CustomRegistry<CustomValidityMergeStrategy> {
+    readonly localName = 'customValidityMerge';
+
+    // Register a named strategy ('source-reduction', 'last-write-wins', custom).
+    // The first registered (or one passed asDefault) is the default.
+    define(strategy: CustomValidityMergeStrategy, asDefault?: boolean): void;
+
+    // Resolve by name, falling back to the default when omitted; throws on unknown.
+    resolve(key?: string): CustomValidityMergeStrategy;
+}
+{% endhighlight %}
+
+<h3 id="usage-example">Usage Example</h3>
+
+{{ pluggedContent("validity-merge-example", code=true) }}
+{% highlight "javascript" %}
+// The application picks ONE merge policy for the tree.
+customValidityMerge.define(new SourceReductionStrategy(), true); // native-first default
+customValidityMerge.define(new LastWriteWinsStrategy());
+
+// A control feeds named sources to an orchestrator; it auto-stamps generation tokens.
+const validity = customValidityMerge.resolve(); // the default strategy
+const orchestrator = new ValiditySourceOrchestrator(validity);
+
+orchestrator.set('native', { state: 'valid' });            // version auto-stamped
+orchestrator.set('async',  { state: 'pending' });          // a server check in flight
+const merged = orchestrator.set('manual', {                // a server error — no id by hand
+    state: 'invalid', message: 'Email already taken',
+});
+// merged.state === 'pending'  (a value still being checked is not yet decided)
+{% endhighlight %}
+
+{{ unpluggedContent("validity-merge-example", code=true) }}
+{% highlight "javascript" %}
+consume { customValidityMerge } of '@web-validation';
+
+customValidityMerge.define(new SourceReductionStrategy(), true);
+
+const orchestrator = new ValiditySourceOrchestrator(customValidityMerge.resolve());
+orchestrator.set('manual', { state: 'invalid', message: 'Email already taken' });
+{% endhighlight %}
+
+{{ endContent() }}
+
+<h3 id="design-decisions">Design Decisions</h3>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+    <li><strong>Surface fixed, math swappable.</strong> Every strategy emits the same <code>MergedValidity</code>; only the reduction varies. Varying the surface forfeits L1 swappability (<a href="/backlog/004/">#004</a> OP-11), so the orchestrator asserts the contract on each result.</li>
+    <li><strong>Native-first default = source-reduction.</strong> Any source failing fails the field (strictest-wins); declared precedence only orders which message leads. <code>last-write-wins</code> ships too — the degenerate single-source reduction (the old "flat flag"), conformant and swappable.</li>
+    <li><strong>Auto-stamped generation tokens.</strong> Setting a server error never hand-authors ids — the orchestrator stamps a monotonic <code>version</code>; manual ids are only for explicit stale-control of late async answers.</li>
+    <li><strong>Sibling of async resolution.</strong> Peer to the <code>CustomValidatorResolution</code> plane (cancellation vs versioning of in-flight checks); together they are the two DI-replaceable validation concerns.</li>
+</ul>
+
+<p class="text-sm text-gray-600 mt-4">
+    Strategies satisfy the <a href="/plugs/customvaliditymergestrategy/"><code>CustomValidityMergeStrategy</code></a>
+    contract. Realizes the <a href="/protocols/">Validation protocol</a>. See
+    <a href="/projects/webvalidation/">Web Validation</a> for the full feature surface.
+</p>

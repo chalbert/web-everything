@@ -2,8 +2,11 @@
 type: idea
 workItem: story
 size: 8
-status: open
+status: resolved
 dateOpened: "2026-06-06"
+dateStarted: "2026-06-08"
+dateResolved: "2026-06-08"
+graduatedTo: "frontierui:blocks/droplist/LiveStatus.ts (shared-region announcer; Filter.ts defers via data-live-status) + blocks/droplist/Windowed.ts (active-always-mounted virtualization, filter-resolved collapse); invariants proven in blocks/droplist/__tests__/behaviors.test.ts (LiveStatus + Windowed suites)"
 tags: [droplist, autocomplete, live-status, windowed, virtualization, traits, behavior, a11y]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -32,6 +35,36 @@ family surfaces** to here: `live-status` and `windowed`. Both are reused well be
 Acceptance: `live-status` and `windowed` exist as real CustomAttribute behaviors composing with the
 `filter`/`focus-delegation`/`selection` stack; the shared-announcer and active-always-mounted
 invariants are enforced by tests, not convention.
+
+## Progress (fresh build — Frontier UI live repo)
+
+- **Status:** resolved
+- **Branch:** `frontierui` working tree (droplist behavior family, `blocks/droplist/`).
+- **Done:**
+  - `live-status` (found already-landed in the live repo): `blocks/droplist/LiveStatus.ts` owns the
+    one shared region, stamps `data-live-status` to claim it, bridges
+    `filter-request`/`filter-resolved`/`filter-error`, and exposes `announce()`. `Filter.ts` defers its
+    inline write when the region carries the marker. One-region / no-double-announce invariant proven in
+    `__tests__/behaviors.test.ts` (LiveStatus suite + "Filter defers" test).
+  - `windowed` (built this session): `blocks/droplist/Windowed.ts` — keeps the full set as a private
+    model, mounts only a recentred window slice as `[composite-descendant]`, stamps ABSOLUTE
+    `aria-setsize`/`aria-posinset`/`data-index` from the full model, and keeps the active option always
+    mounted (recentre + atomic `appendChild` moves, plus an active-index removal backstop). Coordinates
+    with `filter` on `filter-resolved` by harvesting the injected set into the model and collapsing to a
+    window. `overscan` keeps the next/prev item mounted before focus can arrow onto it.
+  - Tests (`__tests__/behaviors.test.ts`, Windowed suite, 2): against the **real** FocusDelegation —
+    49 ArrowDowns over a 50-item model, active stays connected at every step, window bounded ≤ size,
+    absolute posinset, head of model unmounted (genuinely virtualized); and the **real** Filter
+    coordination seam — 50 injected collapse to one window of 10, no duplicate descendants. Full
+    frontierui suite **1256 pass / 7 skipped**; webeverything `check:standards` **0 errors**.
+- **Leftovers → items:** opt-in wiring of `windowed` into `<auto-complete>` (gate + attach-before-focus)
+  → **#201** (#138 wired the other seven traits but not this). Scroll/height-driven window path already
+  tracked by **#145**; the `filter` error channel (#148) is already implemented + tested in the live
+  Filter/LiveStatus, so #148 looks satisfiable on its own verification.
+- **Notes:** behaviors are standalone modules proven by tests (filter/clearable aren't registered in
+  bootstrap either; no trait-manifest registration needed). happy-dom has no layout, so windowing here
+  is active/count-driven, not scroll/height (that's #145). The plateau Progress block below is retained
+  only as history — it describes the abandoned-repo build, **not** this one.
 
 ## Correction (reopened 2026-06-07)
 

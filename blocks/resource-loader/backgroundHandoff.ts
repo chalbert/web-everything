@@ -26,6 +26,7 @@ import type { LoadResult } from './ResourceLoader';
 import type {
   ResourceStateChangeDetail,
   ResourceLoadErrorDetail,
+  ResourceProgressDetail,
   TraitFactory,
 } from './types';
 // Type-only — the surface owns the handoff contract; no runtime coupling.
@@ -33,10 +34,14 @@ import type {
   LoaderSnapshot,
   LoaderStateHandle,
   BackgroundTaskRegisterDetail,
+  BackgroundTaskDismissDetail,
 } from '../background-task-surface/types';
 
 /** The bubbling registration event the surface listens for. */
 export const BACKGROUND_TASK_REGISTER_EVENT = 'background-task-register';
+
+/** The bubbling dismiss event the surface emits when an entry is removed. */
+export const BACKGROUND_TASK_DISMISS_EVENT = 'background-task-dismiss';
 
 /**
  * A live `LoaderStateHandle` over a {@link ResourceLoader}.
@@ -45,6 +50,7 @@ export const BACKGROUND_TASK_REGISTER_EVENT = 'background-task-register';
  * them onto the surface's off-view snapshot machine:
  *
  * - `resource-state-change` → `loading` ⇒ `active`
+ * - `resource-progress` ⇒ same state, with the determinate `0..1` fraction
  * - `resource-load-end` (success **or** empty) ⇒ `success`
  * - `resource-load-error` ⇒ `error` (carrying the `Error`)
  *
@@ -69,6 +75,12 @@ export class ResourceLoaderHandle implements LoaderStateHandle {
     const { error } = (e as CustomEvent<ResourceLoadErrorDetail>).detail;
     this.#emit({ state: 'error', error });
   };
+  // Forward determinate progress without changing state: keep the current snapshot
+  // and overlay the 0..1 fraction so the surface's determinate bar advances.
+  #onProgress = (e: Event): void => {
+    const { fraction } = (e as CustomEvent<ResourceProgressDetail>).detail;
+    this.#emit({ ...this.#snapshot, progress: fraction });
+  };
 
   constructor(
     loader: ResourceLoader,
@@ -80,6 +92,7 @@ export class ResourceLoaderHandle implements LoaderStateHandle {
     this.#traits = traits;
     this.#target = loader.target;
     this.#target.addEventListener('resource-state-change', this.#onStateChange);
+    this.#target.addEventListener('resource-progress', this.#onProgress);
     this.#target.addEventListener('resource-load-end', this.#onEnd);
     this.#target.addEventListener('resource-load-error', this.#onError);
   }
@@ -105,6 +118,7 @@ export class ResourceLoaderHandle implements LoaderStateHandle {
    */
   dispose(): void {
     this.#target.removeEventListener('resource-state-change', this.#onStateChange);
+    this.#target.removeEventListener('resource-progress', this.#onProgress);
     this.#target.removeEventListener('resource-load-end', this.#onEnd);
     this.#target.removeEventListener('resource-load-error', this.#onError);
     this.#listeners.clear();
@@ -166,6 +180,22 @@ export function backgroundLoad<T>(
         detail,
       }),
     );
+
+    // Close the loop: when the surface drops this entry, release the handle's
+    // loader listeners. The dismiss event bubbles UP from the `<background-tasks>`
+    // surface (an ancestor of `source`), so it never reaches `loader.target` — we
+    // listen on the shared root the surface bubbles into. `retry()` re-runs on the
+    // same handle without re-registering, so listeners stay alive across a retry
+    // and detach only on a true dismiss (`user` or transient `auto-clear`). A
+    // cancelable dismiss the host kept sticky (`defaultPrevented`) is left alone.
+    const root = source.getRootNode();
+    const onDismiss = (de: Event): void => {
+      const dismiss = de as CustomEvent<BackgroundTaskDismissDetail>;
+      if (dismiss.detail.id !== id || dismiss.defaultPrevented) return;
+      root.removeEventListener(BACKGROUND_TASK_DISMISS_EVENT, onDismiss);
+      handle.dispose();
+    };
+    root.addEventListener(BACKGROUND_TASK_DISMISS_EVENT, onDismiss);
   };
   // Attached AFTER the handle's own listener (constructor) so that on `loading`
   // the snapshot is already `active` before the surface reads getSnapshot().

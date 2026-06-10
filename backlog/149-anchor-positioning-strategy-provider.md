@@ -4,6 +4,7 @@ workItem: story
 size: 5
 parent: "136"
 status: open
+blockedBy: ["136"]
 dateOpened: "2026-06-07"
 tags: [droplist, anchor, popover, positioning, provider, floating-ui, di]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md

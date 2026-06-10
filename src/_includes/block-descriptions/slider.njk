@@ -1,0 +1,57 @@
+<h2>Slider — value or range along a track</h2>
+<p>The <strong>slider</strong> selects a numeric value, or a min–max <strong>range</strong>, by position along a track. The <a href="/intents/selection/">Selection Intent</a> already declares a <code>range</code> variant (<code>SelectionVariant = 'boolean' | 'item' | 'range'</code>), but no block realized it — the slider fills that gap. It <strong>composes existing intents</strong> rather than inventing a paradigm: the value model from <a href="/intents/selection/">Selection</a>, drag/keyboard/touch modality from <a href="/intents/input/">Input</a>, and formatted value output from the <a href="/intents/locale/">Locale</a> / <a href="/intents/translation/">Translation</a> intents.</p>
+
+<blockquote>
+  <p><strong>A single-thumb slider <em>is</em> <code>&lt;input type="range"&gt;</code>.</strong> The block defaults to the native control — keyboard, step, focus, and form submission come free — and adds custom code only for what the platform can't express: a dual-thumb range, rich ticks, vertical tracks, and locale-aware value text.</p>
+</blockquote>
+
+<h3>Native-first — enhance only the gaps</h3>
+<p>The platform already ships a complete single-thumb slider. The feature inventory below marks where the native element suffices (<code>built-in</code>, tier 1) versus where the block must compose another intent or fall back to a custom track/thumb.</p>
+<table>
+  <thead>
+    <tr><th>Feature</th><th>Disposition</th><th>Tier</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Single value on a track, keyboard + step + form-assoc</td><td><code>built-in</code> — native <code>&lt;input type="range"&gt;</code></td><td>1</td><td>Zero-JS baseline. Arrows, <code>step</code>, <code>min</code>/<code>max</code>, focus, and <code>&lt;form&gt;</code> submission are free.</td></tr>
+    <tr><td>The value / range model</td><td><code>compose</code> — <a href="/intents/selection/">Selection Intent</a> (<code>variant="range"</code>)</td><td>1</td><td><code>constraints.min</code> / <code>constraints.max</code> are the bounds; this block realizes the existing <code>range</code> variant.</td></tr>
+    <tr><td>Pointer-drag / keyboard / touch modality</td><td><code>compose</code> — <a href="/intents/input/">Input Intent</a></td><td>1</td><td>The Input Intent owns how the value is changed; the slider does not redefine modality.</td></tr>
+    <tr><td>Dual-thumb (from–to) range</td><td><code>built-in</code> — custom track, two coordinated thumbs</td><td>2</td><td>No native dual-thumb element exists. Two bound, ordered values over one track (see decisions).</td></tr>
+    <tr><td>Ticks, steps, labelled marks</td><td><code>built-in</code> — custom rendering over native steps</td><td>2</td><td>Snapping uses the native <code>step</code>; visible marks/labels are the enhancement.</td></tr>
+    <tr><td>Formatted value text (units, number format, %)</td><td><code>compose</code> — <a href="/intents/locale/">Locale</a> / <a href="/intents/translation/">Translation</a></td><td>2</td><td>Published via <code>aria-valuetext</code> ("$1,200", "40%"); <code>aria-valuenow</code> keeps the raw number.</td></tr>
+    <tr><td>Vertical orientation, RTL track</td><td><code>built-in</code> — custom track when native is unreliable</td><td>2</td><td>RTL flips direction so "increase" still maps to reading order.</td></tr>
+    <tr><td>Precise numeric entry / spinner</td><td><code>compose</code> — future numeric/stepper input</td><td>3</td><td>Out of scope: the slider is the <em>continuous-along-a-track</em> member, not a number field.</td></tr>
+  </tbody>
+</table>
+
+<h3>Altitude 1 — native single-thumb, enhanced in place</h3>
+<p>The common case writes no JavaScript. The native element carries the value and the form; the block layers ticks and formatted output on top:</p>
+{% highlight "html" %}
+<!-- Single value: the native control IS the slider -->
+<label for="vol">Volume</label>
+<input id="vol" type="range" min="0" max="100" step="5" value="40"
+       selection="variant=range"            <!-- Selection Intent: the value model -->
+       aria-valuetext="40%">                 <!-- Locale Intent formats the spoken value -->
+{% endhighlight %}
+
+<h3>Altitude — dual-thumb range (the native gap)</h3>
+<p>A from–to range has no single native element, so the block coordinates two thumbs over one track. Each thumb is a value with its own <code>aria-valuenow/min/max</code>, kept ordered so the low thumb never crosses the high thumb, and reported as a pair:</p>
+{% highlight "html" %}
+<div class="slider" role="group" aria-label="Price range"
+     selection="variant=range;constraints.min=0;constraints.max=2000">
+  <!-- low thumb -->
+  <div role="slider" tabindex="0"
+       aria-valuemin="0" aria-valuemax="2000" aria-valuenow="200"
+       aria-valuetext="$200"></div>
+  <!-- high thumb -->
+  <div role="slider" tabindex="0"
+       aria-valuemin="0" aria-valuemax="2000" aria-valuenow="1200"
+       aria-valuetext="$1,200"></div>
+</div>
+{% endhighlight %}
+
+<h3>Boundaries</h3>
+<ul>
+  <li><strong>Native is the baseline, not a fallback.</strong> The single-thumb case stays the real <code>&lt;input type="range"&gt;</code> — form-associated, accessible, zero-JS. Custom track/thumb code appears only when a feature (dual-thumb, vertical, rich ticks) rules the native element out.</li>
+  <li><strong>Value text is formatted, raw stays raw.</strong> <code>aria-valuetext</code> carries the human value ("3.5&nbsp;km", "40%") via the Locale Intent; <code>aria-valuenow</code> keeps the bare number so AT can compute percentages and ranges.</li>
+  <li><strong>Not a number field.</strong> Precise numeric entry belongs to a future stepper/numeric input — the slider is for choosing a value by <em>position</em>. Both are Selection-Intent members; keeping them distinct stops the slider absorbing spinner concerns.</li>
+</ul>

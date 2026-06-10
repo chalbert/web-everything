@@ -1,0 +1,92 @@
+<h3 id="overview">Overview</h3>
+<p>
+    <code>CustomValidatorResolution</code> is the single contract every async-resolution strategy implements.
+    Its three methods own the lifecycle of an in-flight check: <code>startValidation()</code> opens a
+    generation for a field's current input and returns a <code>handle</code>; <code>shouldApplyResult()</code>
+    decides — when an answer finally arrives — whether it is still current or a stale leftover; and
+    <code>onInputChange()</code> tells the strategy the input moved on while a check was in flight. The
+    native-first default (<a href="#versioning">versioning</a>), the <a href="#cancellation">cancellation</a>
+    strategy, and every custom strategy satisfy this same interface — which is what lets
+    <a href="/plugs/customvalidatorresolutionregistry/">the registry</a> treat them interchangeably. The
+    <strong>only</strong> constraint is that the result a strategy lets through feeds the same
+    <code>pending{version}</code> → <code>valid|invalid</code> <code>SourceResult</code> the
+    <a href="/plugs/customvaliditymergeregistry/">merge plane</a> (<a href="/backlog/212-validity-merge-registry-strategy-plane/">#212</a>) consumes.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/AbortController">AbortController</a></td>
+        <td>Baseline</td>
+        <td>The <code>ValidationHandle</code> carries an <code>AbortSignal</code> (cancellation strategy) so the validator's <code>fetch</code> is torn down when superseded.</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/ValidityState">ValidityState</a></td>
+        <td>Baseline</td>
+        <td>A resolved answer is the <code>async</code> source's <code>valid|invalid</code> reason — one input among the several the merge plane reduces.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+type ValidationInput = unknown;
+
+interface AsyncResult { state: 'valid' | 'invalid'; message?: string; }
+
+interface ValidationHandle {
+    fieldId: string;
+    version: number;          // generation token — becomes the pending{version} the merge plane keys on
+    input: ValidationInput;
+    signal?: AbortSignal;     // present only for the cancellation strategy
+}
+
+interface CustomValidatorResolution {
+    readonly key: string;     // 'versioning' | 'cancellation' | custom
+    startValidation(fieldId: string, input: ValidationInput): ValidationHandle;
+    shouldApplyResult(handle: ValidationHandle, result: AsyncResult): boolean;
+    onInputChange(fieldId: string, newInput: ValidationInput): void;
+}
+
+// What a strategy (via the runner) feeds #212 — never 'idle'.
+type ResolvedSource = SourceResult & { state: 'pending' | 'valid' | 'invalid'; version: number };
+{% endhighlight %}
+
+<h3 id="versioning">Versioning (native-first default)</h3>
+{% highlight "typescript" %}
+// Stamp a per-field generation token; apply an answer only if its handle is
+// still the current generation. Late answers for superseded input are dropped —
+// no request teardown needed. onInputChange bumps the generation too.
+class VersioningResolution implements CustomValidatorResolution {
+    readonly key = 'versioning';
+    startValidation(fieldId, input) { /* version = ++generation[fieldId] */ }
+    shouldApplyResult(handle)       { /* handle.version === generation[handle.fieldId] */ }
+    onInputChange(fieldId)          { /* ++generation[fieldId] — supersede in-flight */ }
+}
+{% endhighlight %}
+
+<h3 id="cancellation">Cancellation</h3>
+{% highlight "typescript" %}
+// Abort the in-flight request via AbortController. Each startValidation aborts
+// the field's prior controller and hands the validator a fresh signal, so the
+// fetch is actually torn down. shouldApplyResult drops an aborted answer.
+class CancellationResolution implements CustomValidatorResolution {
+    readonly key = 'cancellation';
+    startValidation(fieldId, input) { /* abort prior; new AbortController; signal on handle */ }
+    shouldApplyResult(handle)       { /* !handle.signal?.aborted */ }
+    onInputChange(fieldId)          { /* abort the in-flight request */ }
+}
+{% endhighlight %}
+
+<h3 id="design-decisions">Design Decisions</h3>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+    <li><strong>Three methods, one cross-plane surface.</strong> A minimal lifecycle contract keeps custom strategies trivial; the runner asserts the emitted <code>ResolvedSource</code> conforms so a stale-drop policy can never hand the merge plane a shape it can't read.</li>
+    <li><strong>Generation tokens, not timestamps.</strong> A monotonic per-field version is what lets a late answer be recognised as stale and dropped — and it doubles as the <code>pending{version}</code> token #212 stamps, so the two planes share one stable id.</li>
+    <li><strong>Versioning is the default, not the law.</strong> It needs no request teardown and works for any async source; teams whose checks are expensive swap to <code>cancellation</code> with no control edits.</li>
+</ul>
+
+<p class="text-sm text-gray-600 mt-4">
+    Registered through <a href="/plugs/customvalidatorresolutionregistry/"><code>CustomValidatorResolutionRegistry</code></a>.
+    Realizes the <a href="/protocols/">Validation protocol</a>. See
+    <a href="/projects/webvalidation/">Web Validation</a>.
+</p>

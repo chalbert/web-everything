@@ -31,12 +31,16 @@ describe('htmlToJsx — raw-text elements (the functional form prerequisite)', (
 });
 
 describe('generateFunctionalSource', () => {
-  it('emits a function, an element wrapper, the runtime import, and define()', () => {
+  it('emits a function, an element wrapper, the runtime import, static tagName, and defineElement()', () => {
     const src = generateFunctionalSource(parseDefinition(SHADOW_DEF));
-    expect(src).toContain(`import jsx from '${JSX_RUNTIME_SPECIFIER}'`);
+    // Auto-Define #241: the functional form pulls `defineElement` off the same jsx-runtime import
+    // and self-registers idempotently (not a bare customElements.define).
+    expect(src).toContain(`import jsx, { defineElement } from '${JSX_RUNTIME_SPECIFIER}'`);
     expect(src).toContain('export function UserCard()');
     expect(src).toContain('class UserCardElement extends HTMLElement');
-    expect(src).toContain("customElements.define('user-card', UserCardElement)");
+    expect(src).toContain("static tagName = 'user-card';");
+    expect(src).toContain("defineElement('user-card', UserCardElement)");
+    expect(src).not.toContain('customElements.define');
     expect(src).toContain('this.attachShadow({ mode: \'open\' })');
   });
 
@@ -55,7 +59,7 @@ describe('generateFunctionalSource', () => {
       jsxFragment: 'jsx.Fragment',
     });
     expect(out.code).toContain('jsx.createElement');
-    expect(out.code).toContain(`import jsx from "${JSX_RUNTIME_SPECIFIER}"`);
+    expect(out.code).toContain(`import jsx, { defineElement } from "${JSX_RUNTIME_SPECIFIER}"`);
     // No JSX left behind — it really lowered.
     expect(out.code).not.toMatch(/<\/?\w/);
   });

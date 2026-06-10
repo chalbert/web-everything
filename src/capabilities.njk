@@ -1,0 +1,299 @@
+---
+layout: base.njk
+title: Web Everything — Capabilities
+---
+
+<section class="intro">
+  <h1>Capabilities</h1>
+  <p>
+    Capabilities are the <strong>lower platform-feature layer</strong> beneath
+    <a href="/intents/">intents</a>. Each capability maps ~1:1 to a web-platform feature and
+    <strong>borrows its Baseline / <code>web-features</code> id</strong> — so the vocabulary is
+    bounded, stable, compact, and URL-serializable (the edge venue carries them in the component URL,
+    e.g. <code>/c/droplist@1?caps=…</code>). Intents declare which capabilities they require; the
+    <strong>capability provider</strong> answers, for a given implementation, at what
+    <strong>tier</strong> that capability can be served.
+  </p>
+</section>
+
+<section style="margin: 1.5rem 0 1rem;">
+  <h2 style="margin: 0 0 0.5rem;">The registered capability adapter table</h2>
+  <p style="color: var(--color-text-muted); max-width: 70ch;">
+    {{ capabilityMatrix.description | safe }}
+  </p>
+  <p style="color: var(--color-text-muted); max-width: 70ch; font-size: 0.9em;">
+    Each column below is a <strong>registered capability adapter</strong> — one row per implementation,
+    authored by that impl but registered centrally so the provider can enumerate every impl to resolve
+    native-first. The adapter table <em>is</em> the matrix's row source (one source of truth, no
+    duplicated capability facts); <strong>adding a new impl is a single-row registration</strong>.
+  </p>
+  <div style="display: flex; gap: 1.25rem; flex-wrap: wrap; margin: 0.75rem 0 1rem; font-size: 0.85em;">
+    <span><span style="display:inline-block;width:0.7em;height:0.7em;border-radius:2px;background:#16a34a;margin-right:0.4em;"></span><strong>native-ok</strong> — the platform serves it directly</span>
+    <span><span style="display:inline-block;width:0.7em;height:0.7em;border-radius:2px;background:#d97706;margin-right:0.4em;"></span><strong>polyfill-ok</strong> — a shim recovers the behavior</span>
+    <span><span style="display:inline-block;width:0.7em;height:0.7em;border-radius:2px;background:#dc2626;margin-right:0.4em;"></span><strong>capability-hard</strong> — a UA-privileged wall no shim can reach</span>
+  </div>
+
+  {% set tierBg = { 'native-ok': '#dcfce7', 'polyfill-ok': '#fef3c7', 'capability-hard': '#fee2e2' } %}
+  {% set tierFg = { 'native-ok': '#166534', 'polyfill-ok': '#92400e', 'capability-hard': '#991b1b' } %}
+
+  <div style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+      <thead>
+        <tr>
+          <th style="text-align: left; padding: 0.6rem 0.75rem; border-bottom: 2px solid var(--color-border);">Capability</th>
+          <th style="text-align: left; padding: 0.6rem 0.75rem; border-bottom: 2px solid var(--color-border);">Baseline</th>
+          {% for impl in capabilityMatrix.impls %}
+          <th style="text-align: center; padding: 0.6rem 0.75rem; border-bottom: 2px solid var(--color-border);" title="{{ impl.summary | striptags }}">
+            <a href="/capabilities/adapters/{{ impl.id }}/">{{ impl.label }}</a>
+            {% if impl.native %}<span style="display:inline-block; margin-left:0.35em; padding:0.05rem 0.4rem; border-radius:9999px; background:#dcfce7; color:#166534; font-size:0.7em; font-weight:600; vertical-align:middle;" title="The native substrate — native-first prefers it to break lightness ties">native</span>{% endif %}
+          </th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for cap in capabilities %}
+        <tr>
+          <td style="padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--color-border);">
+            <a href="/capabilities/{{ cap.id }}/"><code>{{ cap.id }}</code></a>
+            <div style="font-size: 0.85em; color: var(--color-text-muted);">{{ cap.label }}</div>
+          </td>
+          <td style="padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--color-border); white-space: nowrap;">
+            {% if cap.baseline %}<span style="color:#166534;">✓ {{ cap.baseline }}</span>{% else %}<span style="color: var(--color-text-muted);">—</span>{% endif %}
+          </td>
+          {% for impl in capabilityMatrix.impls %}
+          {% set t = impl.tiers[cap.id] %}
+          <td style="padding: 0.55rem 0.75rem; border-bottom: 1px solid var(--color-border); text-align: center;">
+            <span style="display: inline-block; padding: 0.1rem 0.55rem; border-radius: 9999px; font-size: 0.78em; font-weight: 600; font-family: ui-monospace, monospace; background: {{ tierBg[t] }}; color: {{ tierFg[t] }};">{{ t }}</span>
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p style="font-size: 0.85em; color: var(--color-text-muted); margin-top: 0.75rem;">
+    The differential is the point: <code>customizable-select</code> and <code>cross-root-aria</code> are
+    <strong>capability-hard</strong> on the FACE build-your-own impl but <strong>native-ok</strong> on the
+    native <code>base-select</code> impl — exactly the fork a native-first resolver weighs.
+  </p>
+</section>
+
+<section style="margin: 2rem 0 1rem;">
+  <h2 style="margin: 0 0 0.5rem;">Native-first resolution</h2>
+  <p style="color: var(--color-text-muted); max-width: 72ch;">
+    A provider <strong>slot</strong> holds either a <strong>concrete impl</strong> (a <em>pin</em> — no
+    resolution) or a <strong>named policy</strong> (resolve against the matrix above).
+    <code>native-first</code> is the first-class policy the shipped base uses. It runs
+    <strong>eligible&nbsp;→&nbsp;lightest&nbsp;→&nbsp;native&nbsp;wins&nbsp;ties</strong>:
+  </p>
+  <ol style="color: var(--color-text-muted); max-width: 72ch; line-height: 1.5;">
+    <li><strong>Eligible</strong> — every required capability (the union of the slot's intents'
+      requirements) tiers <code>native-ok</code> or <code>polyfill-ok</code>; none
+      <code>capability-hard</code>. <em>Check-before-choose</em>: eligibility is weighed for every impl
+      before a winner is picked, so the resolver never commits to native and only then hits a hard wall.</li>
+    <li><strong>Lightest</strong> — among eligibles, fewest polyfills (the <code>polyfill-ok</code> count
+      is the cost proxy for least JS over baseline).</li>
+    <li><strong>Native wins ties</strong> — among equally-light eligibles, prefer the native substrate
+      (<code>base-select</code> here).</li>
+  </ol>
+
+  {% set we = capabilityWorkedExample %}
+  <p style="max-width: 72ch; margin-top: 1rem;">
+    <strong>Worked example — a droplist slot</strong> (intents
+    {% for id in we.intents %}<code>{{ id }}</code>{% if not loop.last %} + {% endif %}{% endfor %}
+    → required
+    {% for capId in we.requiredCapabilities %}<code>{{ capId }}</code>{% if not loop.last %}, {% endif %}{% endfor %}).
+    <span style="font-size: 0.85em; color: var(--color-text-muted);">The native branch below is
+    <strong>computed from the resolver at build time</strong> (<code>capabilities/workedExample.ts</code> →
+    <code>capabilityWorkedExample.json</code>), not authored — so it cannot disagree with the matrix above.</span>
+  </p>
+  <div style="display: grid; gap: 0.6rem; margin: 0.5rem 0 0; max-width: 72ch;">
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #16a34a; border-radius: 6px;">
+      <strong>Native branch</strong> — on the shipped build-matrix, <code>native-first</code> resolves to
+      <strong><code>{{ we.winner }}</code></strong>:
+      <ul style="margin: 0.4rem 0 0; padding-left: 1.1rem; line-height: 1.5;">
+        {% for c in we.candidates %}
+        <li>
+          <code>{{ c.impl }}</code>{% if c.native %} <span style="display:inline-block; margin-left:0.25em; padding:0.02rem 0.35rem; border-radius:9999px; background:#dcfce7; color:#166534; font-size:0.75em; font-weight:600; vertical-align:middle;">native</span>{% endif %} —
+          {% if c.eligible %}<strong>eligible</strong>, cost {{ c.cost }} ({{ c.cost }} polyfill{% if c.cost != 1 %}s{% endif %} over baseline){% else %}<strong>ineligible</strong> — blocked by {% for b in c.blockers %}<code>{{ b }}</code>{% if not loop.last %}, {% endif %}{% endfor %} (<code>capability-hard</code>){% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #d97706; border-radius: 6px;">
+      <strong>Fallback branch</strong> — on a <em>constrained target</em> (the kind the runtime / edge
+      providers report) where a required capability is <strong>capability-hard on the native substrate</strong>
+      but the custom impl can still serve it, the <em>same</em> policy falls through to
+      <strong><code>face</code></strong>. Venue-agnostic: same algorithm, different provider. (This branch
+      illustrates a hypothetical constrained provider, not the shipped matrix, so it stays prose — its
+      winner is pinned by the resolver tests.)
+    </div>
+  </div>
+  <p style="font-size: 0.85em; color: var(--color-text-muted); margin-top: 0.75rem;">
+    Both branches are proven by the resolver tests (<code>capabilities/__tests__/resolver.test.ts</code>);
+    the native branch is additionally drift-guarded — <code>capabilities/__tests__/worked-example-artifact.test.ts</code>
+    recomputes it from the resolver and reddens if the committed artifact (or a matrix edit) makes the page
+    disagree. The pin path short-circuits — a concrete impl id is returned as-is, no resolution runs.
+  </p>
+</section>
+
+<section style="margin: 2rem 0 1rem;">
+  <h2 style="margin: 0 0 0.5rem;">Validation strictness</h2>
+  <p style="color: var(--color-text-muted); max-width: 72ch;">
+    <strong>One orthogonal knob</strong> — <code>silent</code> · <code>warn</code> · <code>error</code> —
+    lives in the base definition (overridable per scope, see below). It governs <em>how loudly</em> a
+    resolution problem is reported, not <em>whether</em> one exists: the problem is a fact of the matrix;
+    the knob is the reaction. It maps onto the three <strong>conformance tiers</strong> and applies
+    <strong>identically</strong> to the two ways a slot can be wrong.
+  </p>
+  <div style="display: grid; gap: 0.6rem; margin: 0.75rem 0 0; max-width: 72ch;">
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #dc2626; border-radius: 6px;">
+      <code>error</code> → <strong>strict</strong> tier. The problem throws — CI bumps to this so a
+      wrong guess <strong>fails the build</strong>.
+    </div>
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #d97706; border-radius: 6px;">
+      <code>warn</code> → <strong>standard</strong> tier, the <strong>base default</strong>. Reported,
+      but resolution proceeds — honoring progressive enhancement: a wrong guess <strong>degrades</strong>,
+      it does not break.
+    </div>
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #64748b; border-radius: 6px;">
+      <code>silent</code> → <strong>lenient</strong> tier. Swallowed — runtime PE-degradation uses this.
+    </div>
+  </div>
+  <p style="color: var(--color-text-muted); max-width: 72ch; margin-top: 0.75rem;">
+    The two wrong-slot cases collapse to <strong>one shape</strong>: a <strong>rejected concrete pin</strong>
+    (a slot pinned to an impl whose required capability is <code>capability-hard</code> there) and a
+    <strong>policy that resolves to a capability-hard wall</strong> (<code>native-first</code> found
+    nothing eligible). Same knob, same severity, same conformance tier.
+  </p>
+  <p style="font-size: 0.85em; color: var(--color-text-muted); margin-top: 0.5rem;">
+    Proven by <code>capabilities/__tests__/strictness.test.ts</code> — the same problem reported at all
+    three loudnesses, for both the pin and the policy case.
+  </p>
+</section>
+
+<section style="margin: 2rem 0 1rem;">
+  <h2 style="margin: 0 0 0.5rem;">Scoped binding cascade</h2>
+  <p style="color: var(--color-text-muted); max-width: 72ch;">
+    A slot (and its strictness knob, and the provider <em>context</em> it resolves in) can be bound at
+    four nested scopes — <strong>base → app → view → fragment</strong> — and the cascade is
+    <strong>plain nearest-scope-wins</strong>, borrowing context-provider / CSS-cascade semantics: the
+    most specific scope that sets a field overrides the broader ones; a scope that leaves it unset
+    inherits it.
+  </p>
+  <p style="color: var(--color-text-muted); max-width: 72ch; margin-top: 0.75rem;">
+    The deliberate rule: <strong>inheritance carries the slot value <em>as written</em>, not the
+    parent's resolution.</strong> A <code>native-first</code> policy stays a policy as it flows down and
+    is <strong>re-resolved at the leaf in the leaf's own context</strong> — so the <em>same</em>
+    inherited policy lands on the native impl in a Chrome-context view and a custom impl in a
+    Safari-context view, instead of freezing whatever the parent happened to pick.
+  </p>
+  <div style="display: grid; gap: 0.6rem; margin: 0.75rem 0 0; max-width: 72ch;">
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #16a34a; border-radius: 6px;">
+      <strong>Chrome-context view</strong> — inherits <code>native-first</code> from the app; every
+      required capability is native-ok → resolves to <strong><code>base-select</code></strong> (native).
+    </div>
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #d97706; border-radius: 6px;">
+      <strong>Safari-context view</strong> — inherits the <em>same</em> <code>native-first</code>;
+      <code>anchor-positioning</code> is capability-hard on the native substrate here → re-resolves to
+      the custom <strong><code>face</code></strong> impl. Not frozen: identical slot, divergent result.
+    </div>
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #64748b; border-radius: 6px;">
+      <strong>A fragment</strong> can override again — pin a concrete impl, and the pin short-circuits
+      resolution (nearest wins). No scope binding a slot is an error (no magic-on-absence — the base
+      must bind one).
+    </div>
+  </div>
+  <p style="font-size: 0.85em; color: var(--color-text-muted); margin-top: 0.5rem;">
+    Proven by <code>capabilities/__tests__/cascade.test.ts</code> — nearest-wins precedence, an
+    inherited policy re-resolving per context, a fragment pin override, and the cascade composing with
+    the strictness knob.
+  </p>
+</section>
+
+<section style="margin: 2rem 0 1rem;">
+  <h2 style="margin: 0 0 0.5rem;">Resolution venues</h2>
+  <p style="color: var(--color-text-muted); max-width: 72ch;">
+    <strong>Where and when</strong> the tiers above are computed is a <strong>configurable dimension</strong>,
+    not a fixed mechanic — three legitimate end-states share <em>one</em> interface and the <em>same</em>
+    <code>native-first</code> resolver. The base definition defaults to <code>build</code>; a project can
+    override it. Only <em>where</em> the platform-support signal comes from differs — never the resolution
+    logic.
+  </p>
+  <p style="color: var(--color-text-muted); max-width: 72ch; margin-top: 0.75rem;">
+    <strong>Authored as a cascade field.</strong> <code>venue</code> is a binding on the
+    <a href="#:~:text=Scoped%20binding%20cascade">scoped cascade</a> alongside <code>slot</code> and
+    <code>strictness</code> — a base definition declares <code>venue: build | runtime | edge</code> and a
+    project (or any nearer scope) overrides it, <strong>nearest-scope-wins</strong>. Unset anywhere it
+    inherits the <code>build</code> default (no magic-on-absence). At resolution the cascaded venue is
+    turned into the provider via <code>providerForVenue</code> — so authoring <code>venue: edge</code>
+    routes through the edge provider with <strong>no code change</strong>. An explicit provider context
+    bound on a scope is the escape hatch: it <strong>overrides</strong> the venue (venue picks the impl
+    class; an explicitly-supplied provider wins). Proven by <code>capabilities/__tests__/cascade.test.ts</code>
+    (the venue suite — nearest-wins, the <code>build</code> default, <code>venue: edge</code> flipping the
+    winner through the degrading provider, and the explicit-provider override).
+  </p>
+  <div style="display: grid; gap: 0.6rem; margin: 0.75rem 0 0; max-width: 72ch;">
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #16a34a; border-radius: 6px;">
+      <strong><code>build</code></strong> — known / narrow targets, <strong>zero runtime cost</strong>. The
+      <strong>default</strong>. Reads the static build-matrix above exactly as authored.
+    </div>
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #d97706; border-radius: 6px;">
+      <strong><code>runtime</code></strong> — unknown targets, <strong>no infra</strong>. Tiers each
+      capability by testing the <strong>actual UA</strong> (<code>CSS.supports(…)</code>,
+      <code>'popover' in HTMLElement.prototype</code>). Most accurate; where a capability isn't
+      runtime-detectable (e.g. <code>cross-root-aria</code>, a gap in the a11y tree JS can't probe), it
+      <strong>falls back to the static matrix</strong>.
+    </div>
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #2563eb; border-radius: 6px;">
+      <strong><code>edge</code></strong> — broad targets, smallest payload, <strong>cached</strong>. A
+      <strong>module-as-a-service</strong> venue: capabilities ride in the component URL
+      (<code>/c/droplist@1?caps=…</code>), the client signal is read <strong>server-side via Client Hints
+      (not UA sniffing)</strong>, and the chunk is <strong>cached per capability-equivalence class</strong> —
+      two clients whose hints resolve to the <em>same supported subset</em> share one chunk, so chunk count
+      tracks distinct capability sets, not distinct UAs.
+    </div>
+  </div>
+  <p style="color: var(--color-text-muted); max-width: 72ch; margin-top: 1rem;">
+    <strong>The shared mechanism is <code>degrade</code>.</strong> A matrix cell is an impl's
+    <em>architectural ceiling</em> (its best tier assuming the platform feature exists). The runtime and
+    edge venues lower that ceiling by live platform reality: an absent <strong>native-ok</strong> capability
+    becomes <strong>polyfill-ok</strong> when a shim can recover it (polyfillable / partial) or
+    <strong>capability-hard</strong> when it's UA-privileged. Degradation <strong>only ever lowers</strong> a
+    tier, so a venue's view is always a conservative refinement of the matrix. That is the
+    <strong>progressive-enhancement</strong> guarantee: a wrong guess about support <strong>degrades</strong>
+    (the resolver picks a heavier-but-working impl, or the strictness knob reports it) — it never breaks,
+    and never invents capability an impl doesn't have.
+  </p>
+  <p style="font-size: 0.85em; color: var(--color-text-muted); margin-top: 0.75rem;">
+    The edge venue is the resolution layer the <strong>module-as-a-service</strong> thread was missing —
+    <a href="/backlog/087-module-service-distribution-caching/">#087 distribution &amp; caching</a>,
+    <a href="/backlog/088-module-service-versioning/">#088 versioning</a>,
+    <a href="/backlog/085-validation-adapters-multi-language/">#085 multi-language adapters</a>.
+    Proven by <code>capabilities/__tests__/venues.test.ts</code> (the <code>degrade</code> truth table +
+    venue routing), <code>runtime.test.ts</code> (feature-detection tiering + matrix fallback), and
+    <code>edge.test.ts</code> (equivalence-class caching, the URL, and PE-degradation on a wrong guess).
+  </p>
+</section>
+
+<section style="margin: 2rem 0 1rem;">
+  <h2 style="margin: 0 0 0.5rem;">Intents → required capabilities</h2>
+  <p style="color: var(--color-text-muted); max-width: 70ch;">
+    The authored, data-driven mapping. An intent expands to its backing capability ids; the provider
+    tiers each; the resolver composes. Only intents that declare requirements appear here.
+  </p>
+  <div style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.75rem;">
+    {% for intent in intents %}
+      {% if intent.requiresCapabilities.length %}
+      <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; padding: 0.45rem 0.6rem; border: 1px solid var(--color-border); border-radius: 6px;">
+        <a href="/intents/{{ intent.id }}/" style="font-weight: 600; min-width: 12rem;">{{ intent.name }}</a>
+        <span style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+          {% for capId in intent.requiresCapabilities %}
+          <code style="padding: 0.05rem 0.45rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); font-size: 0.8em;">{{ capId }}</code>
+          {% endfor %}
+        </span>
+      </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+</section>

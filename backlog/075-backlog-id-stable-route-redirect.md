@@ -5,6 +5,7 @@ size: 3
 status: resolved
 dateOpened: "2026-06-06"
 dateResolved: "2026-06-07"
+graduatedTo: "src/backlog-redirects.njk + src/backlog-slug-redirects.njk + src/_data/backlogAliases.js — stable /backlog/<NNN>/ route + former-slug redirects"
 dateStarted: "2026-06-06"
 tags: [backlog, routing, build, dx]
 crossRef: { url: /backlog/, label: Backlog index }

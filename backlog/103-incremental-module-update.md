@@ -4,6 +4,7 @@ workItem: story
 size: 5
 parent: "099"
 status: open
+blockedBy: ["087", "088"]
 dateOpened: "2026-06-06"
 tags: [module-as-a-service, incremental-update, delta, patch, service-worker, cache-api, distribution, evergreen, performance]
 relatedReport: reports/2026-06-06-front-end-platform-book.md

@@ -46,6 +46,41 @@ function looksLikeWebComponent(code: string): boolean {
   return DEFINE_RE.test(code) && /\.innerHTML\s*=/.test(code);
 }
 
+/**
+ * Conservative intent inference (#189): populate `ir.intents` from high-confidence, deterministic
+ * signals in the lifted markup. "Flag, don't fake" — each rule needs an unambiguous pattern, prefers
+ * **omission over a shaky guess**, and only emits intents that actually resolve in the standard (a
+ * non-existent id would fail the verify gate). Every inference is also surfaced as a note. Richer,
+ * fuzzier inference is the BYO-AI provider's job (#188); these are the few deterministic wins worth
+ * shipping keyless, so the IR's `intents` field is exercised end-to-end.
+ *
+ * Scans the lifted `template` (markup) and, for guards that live outside markup, the full `code`.
+ */
+function inferIntents(template: string, code: string): { intents: string[]; notes: string[] } {
+  const intents: string[] = [];
+  const notes: string[] = [];
+
+  // selection — a listbox that marks a chosen option. BOTH signals are required: `role="listbox"`
+  // alone could be a non-selectable list, so `aria-selected` is what pins it to the selection intent.
+  if (/role\s*=\s*["']listbox["']/i.test(template) && /\baria-selected\b/i.test(template)) {
+    intents.push('selection');
+    notes.push('inferred intent "selection" from role="listbox" + aria-selected.');
+  }
+
+  // motion — a reduced-motion guard means the component expresses motion it offers to tone down. The
+  // guard can be in a `<style>` block (markup) or a `matchMedia` call (code), so scan both.
+  if (/prefers-reduced-motion/i.test(`${template}\n${code}`)) {
+    intents.push('motion');
+    notes.push('inferred intent "motion" from a prefers-reduced-motion guard.');
+  }
+
+  // NOTE: an `aria-expanded`/`hidden` toggle would map to a `disclosure` intent, but `disclosure` is
+  // not yet a standard intent (gap #008) — inferring it would fail the verify gate, so it is omitted
+  // until that intent exists. This is the "prefer omission" rule applied to a missing target.
+
+  return { intents, notes };
+}
+
 function analyze(input: SourceInput): ComponentIR {
   const { code } = input;
   const notes: string[] = [];
@@ -77,7 +112,11 @@ function analyze(input: SourceInput): ComponentIR {
       : `lifted from a ${shadow} shadow-root innerHTML assignment → shadow="${shadow}".`,
   );
 
-  return { name, shadow, template: template.trim(), intents: [], notes };
+  const cleanTemplate = template.trim();
+  const { intents, notes: intentNotes } = inferIntents(cleanTemplate, code);
+  notes.push(...intentNotes);
+
+  return { name, shadow, template: cleanTemplate, intents, notes };
 }
 
 /** The reference analyzer instance — `id` shows in diagnostics + the playground badge. */

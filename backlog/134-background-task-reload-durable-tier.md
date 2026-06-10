@@ -4,6 +4,7 @@ workItem: story
 size: 5
 parent: "135"
 status: open
+blockedBy: ["128", "135"]
 dateOpened: "2026-06-06"
 tags: [block, background-task, durability, background-fetch, service-worker, async, enhancement]
 relatedProject: webintents

@@ -49,6 +49,7 @@ Validation standard research (UX catalog, axis analysis, cross-cutting metas) �
 | A cross-cutting domain / mission | **Project** | `projects.json` (+ `project-*.njk`) |
 | A conformance contract owned by a Project (interfaces, registries, observable states/events) | **Protocol** | `protocols.json` (registry only); body lives in the owning `project-*.njk`. Catalog at `/protocols/`. |
 | A declarative UX/UI profile (the "what") | **Intent** | `intents.json`. Catalog at `/intents/`. |
+| A platform feature an intent needs, tiered per impl (the "can it?") | **Capability** | `capabilities.json` (vocabulary, borrows Baseline / `web-features` ids) + `capabilityMatrix.json` (the static build-matrix = default provider impl). Catalog at `/capabilities/`. |
 | A reusable implementation (the "how") | **Block** | `blocks.json` (+ `block-descriptions/{id}.njk`) |
 | A patch/extension to a browser primitive | **Plug** | `plugs.json` (+ `plug-descriptions/{id}.njk`) |
 | A bridge to a third-party library | **Adapter** | `adapters.json` (+ `adapter-descriptions/{id}.njk`) |
@@ -153,6 +154,27 @@ Intents are **JSON-only** — there is no `intent-descriptions/` njk dir; the sp
 
 > **Catalog auto-renders.** The `/intents/` tile catalog reads `intents.json` directly — no extra registry file to maintain. Tiles show name, status badge, summary, and the intent's dimension keys as chips; search filters across name/summary/dimension keys. Keep `summary` scannable (one line, vocabulary-rich) so search hits it. Prefer reusing established `dimensions` key names across related intents where it makes sense (e.g. `level`, `modality`, `mode`, `strategy`, `placement`) so the catalog stays coherent — but introduce a new key freely when the UX axis is genuinely new.
 
+> **Authoring a capability (the platform layer beneath intents).** A capability is a platform feature
+> an intent depends on, tiered per implementation — *not* a UX preference (that's an intent). Add it to
+> `capabilities.json` with an id that **borrows the Baseline / `web-features` key** (so the vocabulary
+> stays bounded, stable, compact, URL-serializable for the edge venue's `?caps=` key). Then add a tier
+> for it in **every** impl row of `capabilityMatrix.json` — the build-matrix is a complete (impl ×
+> capability) grid, so `tier()` is total; `check:standards` fails if any cell is missing or any
+> referenced id is unknown. The tier is one of `native-ok` / `polyfill-ok` / `capability-hard` (the
+> substrate report's polyfillability classes). Wire an intent to it via `requiresCapabilities: [...ids]`
+> in `intents.json`. The `/capabilities/` catalog and the `capabilities/` provider both read this same
+> JSON — the page can never disagree with the resolver. The provider is the default (build-venue) impl;
+> runtime/edge venues swap in their own impls behind the same interface (#208).
+>
+> **Registering a capability adapter (a new impl).** `capabilityMatrix.json`'s `impls[]` array *is* the
+> central **registered capability adapter table** (#206) — ownership distributed (each impl authors its
+> row), storage central (registration lives in one enumerable table the provider reads to resolve
+> native-first). Adding a new impl is a **single-row registration**: append one row (`id`, human
+> `label` + `summary`, optional `native: true` for the substrate, and a `tiers` map covering every
+> capability id). The adapter table is the matrix's row source — one source of truth, no duplicated
+> capability facts. `check:standards` validates each row as a registration record (required fields,
+> unique id, complete tier map, ≤1 native substrate); the provider exposes the rows via `adapters()`.
+
 ## Table formats (njk)
 ```html
 <h3>Web Standards Alignment</h3>
@@ -181,3 +203,10 @@ Material Design 3 · Carbon (IBM) · Radix UI · Fluent 2 · Apple HIG · WAI-AR
 ## Documentation Standards (11ty/Nunjucks)
 - Content lives in `src/_data/*.json`; render with `.njk`. Use `{% highlight "typescript" %}` for code; keep snippets short to avoid horizontal overflow.
 - Project page = high-level mission + grid of cards; sub-spec pages = dedicated detail pages.
+- **New top-level catalog route → add it to the Vite dev-proxy allowlist.** A new `src/*.njk` whose
+  permalink introduces a new first path segment (e.g. `/capabilities/`, `/adapters/`) renders on 11ty
+  (`:8080`) but **404s on the Vite dev server (`:3000`)** until that segment is added to the proxy
+  allowlist alternation in `vite.config.mts` (the `^/(projects|adapters|…)` regex). The 11ty watcher
+  picks the new `.njk` up automatically; the Vite proxy does not. `check:standards` guards this — it
+  cross-checks every catalog permalink against the proxy config and fails the build on a missing
+  segment — but the proxy edit only takes effect on a **Vite restart**, so apply it as you add the page.

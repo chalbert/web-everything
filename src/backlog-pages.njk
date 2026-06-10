@@ -58,6 +58,21 @@ eleventyComputed:
             <p style="font-size: 0.85em; color: var(--color-text-muted, #94a3b8);">Opened: {{ item.dateOpened }}</p>
         </div>
 
+        {% if item.blockers and item.blockers.length %}
+        <div class="section-card mt-8">
+            <h2>Blocked by</h2>
+            <p style="color: var(--color-text-muted); margin-top: -0.25rem;">This item can't start until each prerequisite is resolved.</p>
+            <ul style="list-style: none; padding: 0; margin: 0.75rem 0 0; display: flex; flex-direction: column; gap: 0.6rem;">
+                {% for blocker in item.blockers %}
+                <li style="display: flex; gap: 0.5rem; align-items: center;">
+                    <a href="/backlog/{{ blocker.id }}/" style="color: var(--color-primary); font-weight: 600; text-decoration: none;"><span style="color: var(--color-text-muted, #94a3b8); font-variant-numeric: tabular-nums;">#{{ blocker.num }}</span> {{ blocker.title }}</a>
+                    {{ statusBadge(blocker.status) }}
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
         {% if item.crossRef or item.relatedProject or item.relatedReport or item.graduatedTo %}
         <div class="section-card mt-8">
             <h2>References</h2>

@@ -128,6 +128,14 @@ export const mappingCases: MappingCase[] = [
     html: `<template is="for-each" items="users" key="id"><div class="user-row"><span data-bind="name"></span></div></template>`,
   },
   {
+    id: 'event-multiword-inline',
+    title: '10 · Multi-word inline event → real React casing',
+    note: 'A string event attribute survives to HTML (unlike a function handler). Toggle to the react dialect: onmouseover emits onMouseOver — React’s real camelCase, not onMouseover (#245).',
+    jsx: `<button class="btn" onmouseover="hover()">Hover</button>`,
+    render: () => <button class="btn" onmouseover="hover()">Hover</button>,
+    html: `<button class="btn" onmouseover="hover()">Hover</button>`,
+  },
+  {
     id: 'json-valued-attr',
     title: '9 · JSON-valued attribute (quote escaping)',
     note: 'A JSON attribute value contains double-quotes; they serialize as &quot; so the inner " can\'t close the JSX attribute early. Round-trips because canonical HTML escapes identically.',

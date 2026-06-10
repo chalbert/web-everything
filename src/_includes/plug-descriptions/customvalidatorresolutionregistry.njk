@@ -1,0 +1,89 @@
+{% from "mode-selector.njk" import pluggedContent, unpluggedContent, comparisonContent, endContent %}
+
+<h3 id="overview">Overview</h3>
+<p>
+    Exposes <code>window.customValidatorResolution</code> for registering named <strong>resolution strategies</strong>.
+    An async validity check (a server "is this email taken?" round-trip) is rarely instantaneous, and the
+    user keeps typing while it is in flight. <em>How</em> a stale, in-flight check is reconciled — cancel
+    the request? version it and drop the late answer? — is a <strong>swappable concern</strong>, the named
+    sibling of the <a href="/plugs/customvaliditymergeregistry/">validity-merge plane</a> (<a href="/backlog/212-validity-merge-registry-strategy-plane/">#212</a>).
+    Where #212 collapses several sources into one <code>MergedValidity</code>, this plane decides which
+    in-flight <em>async</em> answer is even allowed to become that source's result. Controls resolve the
+    application's strategy through the injector chain and delegate, so a page picks <strong>one</strong>
+    stale-answer policy that every control shares.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/AbortController">AbortController</a></td>
+        <td>Baseline</td>
+        <td>The <strong>cancellation</strong> strategy hands the validator the controller's <code>signal</code> so a <code>fetch</code> is actually torn down, not just ignored.</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/ElementInternals/setValidity">ElementInternals.setValidity</a></td>
+        <td>Baseline 2023</td>
+        <td>The resolved <code>valid|invalid</code> answer becomes the <code>async</code> source the merge plane feeds to native <code>setValidity()</code>.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+interface CustomValidatorResolutionRegistry extends CustomRegistry<CustomValidatorResolution> {
+    readonly localName = 'customValidatorResolution';
+
+    // Register a named strategy ('versioning', 'cancellation', custom).
+    // The first registered (or one passed asDefault) is the default.
+    define(strategy: CustomValidatorResolution, asDefault?: boolean): void;
+
+    // Resolve by name, falling back to the default when omitted; throws on unknown.
+    resolve(key?: string): CustomValidatorResolution;
+}
+{% endhighlight %}
+
+<h3 id="usage-example">Usage Example</h3>
+
+{{ pluggedContent("validator-resolution-example", code=true) }}
+{% highlight "javascript" %}
+// The application picks ONE stale-answer policy for the tree.
+customValidatorResolution.define(new VersioningResolution(), true); // native-first default
+customValidatorResolution.define(new CancellationResolution());
+
+// A runner drives the async check under the resolved strategy and emits source
+// results straight into #212's merge orchestrator.
+const runner = new AsyncValidationRunner(customValidatorResolution.resolve(), {
+    emit: (source) => orchestrator.set(source.source, source), // pending{v} → valid|invalid{v}
+});
+
+// The user types 'a@x' then 'ab@x' before the first server check returns.
+runner.validate('email', 'a@x',  (input, signal) => checkEmail(input, signal));
+runner.validate('email', 'ab@x', (input, signal) => checkEmail(input, signal));
+// The stale 'a@x' answer is dropped — only the current generation reaches the merge plane.
+{% endhighlight %}
+
+{{ unpluggedContent("validator-resolution-example", code=true) }}
+{% highlight "javascript" %}
+consume { customValidatorResolution } of '@web-validation';
+
+customValidatorResolution.define(new CancellationResolution(), true);
+
+const runner = new AsyncValidationRunner(customValidatorResolution.resolve());
+await runner.validate('email', input, (value, signal) => checkEmail(value, signal));
+{% endhighlight %}
+
+{{ endContent() }}
+
+<h3 id="design-decisions">Design Decisions</h3>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+    <li><strong>Policy swappable, source contract fixed.</strong> Every strategy must feed the same <code>pending{version}</code> → <code>valid|invalid</code> <code>SourceResult</code> the merge plane (<a href="/backlog/212-validity-merge-registry-strategy-plane/">#212</a>) consumes; the runner asserts it on each emit, so a custom policy that breaks the cross-plane surface is caught (<a href="/backlog/004/">#004</a> OP-11).</li>
+    <li><strong>Native-first default = versioning.</strong> Stamp a per-field generation token and apply an answer only when it is still current — late answers for superseded input are dropped, no request teardown needed. The generation it stamps IS #212's auto-stamped <code>pending{version}</code> token.</li>
+    <li><strong>Cancellation aborts for real.</strong> The alternative strategy aborts the in-flight request via <code>AbortController</code>, so an expensive server round-trip is actually torn down rather than left to complete and be ignored.</li>
+    <li><strong>Sibling of the merge plane.</strong> Peer to <a href="/plugs/customvaliditymergeregistry/"><code>CustomValidityMergeRegistry</code></a>; together they are the two DI-replaceable validation concerns under <a href="/backlog/004/">#004</a>.</li>
+</ul>
+
+<p class="text-sm text-gray-600 mt-4">
+    Strategies satisfy the <a href="/plugs/customvalidatorresolution/"><code>CustomValidatorResolution</code></a>
+    contract. Realizes the <a href="/protocols/">Validation protocol</a>. See
+    <a href="/projects/webvalidation/">Web Validation</a> for the full feature surface.
+</p>

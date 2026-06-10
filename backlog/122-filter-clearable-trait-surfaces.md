@@ -3,6 +3,7 @@ type: idea
 workItem: story
 size: 3
 status: open
+blockedBy: ["035", "136"]
 dateOpened: "2026-06-06"
 tags: [droplist, autocomplete, filter, clearable, input, loader, traits, behavior]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md

@@ -5,6 +5,7 @@ parent: "023"
 status: resolved
 dateOpened: '2026-06-02'
 dateResolved: '2026-06-06'
+graduatedTo: "Plateau src/blocks/attributes/FocusDelegation.ts — `controller` option (focus host ≠ collection)"
 tags:
   - droplist
   - autocomplete

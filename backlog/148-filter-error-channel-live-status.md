@@ -4,6 +4,7 @@ workItem: story
 size: 3
 parent: "137"
 status: open
+blockedBy: ["122", "137"]
 dateOpened: "2026-06-07"
 dateStarted: "2026-06-07"
 tags: [droplist, autocomplete, filter, live-status, loader, error, behavior, a11y]

@@ -124,6 +124,98 @@ module.exports = function backlog() {
       };
     });
 
+  // Resolve `blockedBy: ["NNN", …]` (a directional prerequisite edge — "cannot start until NNN is
+  // resolved", distinct from the "see also" `crossRef` and the epic-grouping `parent`) into a
+  // `blockers` array of lightweight references, so a detail page can link each prerequisite.
+  // Kept lightweight ({ id, num, slug, title, status }) rather than full item objects to avoid
+  // cyclic refs. The validator (check-standards.mjs) guards unresolvable / self / cyclic edges;
+  // here we simply drop any NNN that doesn't resolve so a page never renders a dead link.
+  const byNum = new Map(items.map((it) => [it.num, it]));
+  for (const item of items) {
+    const edges = Array.isArray(item.blockedBy) ? item.blockedBy : [];
+    item.blockers = edges
+      .map((n) => byNum.get(String(n)))
+      .filter(Boolean)
+      .map(({ id, num, slug, title, status }) => ({ id, num, slug, title, status }));
+
+    // Derived agent-readiness tier — a DETERMINISTIC pure function of structured frontmatter only
+    // (type + resolved prerequisites), so it's identical across rebuilds, no LLM in the path. It
+    // mirrors the four-signal rubric in docs/agent/backlog-workflow.md but ONLY its structurally
+    // decidable core: the two prose signals (body verbs, whether the `relatedReport` is a settled
+    // plan) are deliberately not read here, which is why the tier is an agent-ready *hint*, not a
+    // guarantee — the LLM selection pass still refines it. Only `open` items carry a tier; for
+    // active/resolved/parked items readiness is moot (already claimed, done, or shelved), so they
+    // get none (and thus no chip / no tier-filter effect).
+    //   A — agent-ready:  issue/idea with every blocker resolved (nothing structural blocks a start).
+    //   B — one nod away: a `decision` (it typically already states a recommendation, but that nuance
+    //                      is prose, so the structural proxy is just the type) — ratify, then build.
+    //   C — needs design / not ready: everything else open — an issue/idea with an unresolved
+    //                      blocker, or a `review`.
+    item.tier = item.status !== 'open' ? undefined
+      : ((item.type === 'issue' || item.type === 'idea')
+          && item.blockers.every((b) => b.status === 'resolved')) ? 'A'
+      : item.type === 'decision' ? 'B'
+      : 'C';
+
+    // Batchable (deterministic) — the STRUCTURAL half of the batch skill's eligibility
+    // (docs/agent/backlog-workflow.md → "Running a batch"): a Tier-A item that is also SMALL — a
+    // `story` of `size` ≤ 3, or a `task` (bounded sub-work, never sized). A `story` of `size` ≥ 5 and
+    // any `epic` are agent-ready but never batched. So `batchable` ⊂ `tier === 'A'`. The one
+    // non-structural guard the batch skill adds — no buried design fork in the body — can't be decided
+    // from fields, so this flag is the size+tier gate; selection still skims the body for a hidden fork.
+    item.batchable = item.tier === 'A' && (
+      (item.workItem === 'story' && typeof item.size === 'number' && item.size <= 3) ||
+      item.workItem === 'task'
+    );
+  }
+
+  // Reverse dependency edges + unblock-leverage (#254) — INVERT `blockedBy` so each item knows who
+  // depends on it, then score how much work resolving it would free. A pure, deterministic function of
+  // the structured edge set (no body parsing, no LLM), so it's identical across rebuilds — the same
+  // "downstream-unblock leverage" the next-backlog-item skill ranks by, made visible on /backlog/.
+  const dependentsByNum = new Map(items.map((it) => [it.num, []]));
+  for (const item of items) {
+    for (const b of item.blockers) {
+      // `b` is a resolvable prerequisite of `item` → `item` is a dependent of `b`.
+      if (dependentsByNum.has(b.num)) dependentsByNum.get(b.num).push(item);
+    }
+  }
+  const isOpen = (it) => it.status === 'open';
+  // Distinct OPEN items reachable along the reverse-dependency chain (the full set an item ultimately
+  // gates). Memoised DFS; the validator forbids cycles, but the in-stack guard keeps a stray cycle from
+  // looping forever (it just stops descending at the back-edge). DAG ⇒ the memo is always complete.
+  const transOpenCache = new Map();
+  function transitiveOpenDependents(num, stack = new Set()) {
+    if (transOpenCache.has(num)) return transOpenCache.get(num);
+    if (stack.has(num)) return new Set(); // cycle guard
+    stack.add(num);
+    const acc = new Set();
+    for (const dep of dependentsByNum.get(num) || []) {
+      if (isOpen(dep)) acc.add(dep.num);
+      for (const n of transitiveOpenDependents(dep.num, stack)) acc.add(n);
+    }
+    stack.delete(num);
+    transOpenCache.set(num, acc);
+    return acc;
+  }
+  for (const item of items) {
+    const directDeps = dependentsByNum.get(item.num) || [];
+    const openDirect = directDeps.filter(isOpen);
+    item.dependents = directDeps.map(({ id, num, slug, title, status }) => ({ id, num, slug, title, status }));
+    item.directUnblocks = openDirect.length; // open items directly blocked by this one
+    item.transitiveUnblocks = transitiveOpenDependents(item.num).size; // all open items it ultimately gates
+    // The dependents that would flip to agent-ready if THIS item resolved: open issue/idea whose every
+    // *other* blocker is already resolved, so this item is their last open prerequisite. This is the
+    // leverage that actually frees work (an edge to a still-multiply-blocked item frees nothing yet).
+    item.unblocksToReady = openDirect.filter((dep) =>
+      (dep.type === 'issue' || dep.type === 'idea') &&
+      dep.blockers.every((b) => b.status === 'resolved' || b.num === item.num),
+    ).length;
+    // Single composite for a deterministic template sort: transitive reach dominates (×1000, counts are
+    // far below that), direct count breaks ties. Higher = frees more work. (direct ≤ transitive always.)
+    item.leverageScore = item.transitiveUnblocks * 1000 + item.directUnblocks;
+  }
+
   items.sort((a, b) =>
     String(b.dateOpened || '').localeCompare(String(a.dateOpened || '')) ||
     a.id.localeCompare(b.id));

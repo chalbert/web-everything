@@ -5,6 +5,7 @@ status: resolved
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-07"
 dateResolved: "2026-06-07"
+graduatedTo: "Frontier UI plugs/__tests__/e2e/plugged-traits.spec.ts + demos/lazy-traits-plugged.* + playwright.config.ts — standing app-wide lazy-trait regression guard"
 tags: [webtraits, lazy-loading, bootstrap, demo, e2e, regression, frontier-ui]
 relatedReport: reports/2026-06-02-lazy-traits-loading.md
 relatedProject: webtraits

@@ -31,6 +31,7 @@ export interface CustomAttributeOptions {
 export type ImplementedAttribute = (new (options?: CustomAttributeOptions) => CustomAttribute) & {
   formAssociated?: (typeof CustomAttribute)['formAssociated'];
   observedAttributes?: (typeof CustomAttribute)['observedAttributes'];
+  activationSurface?: (typeof CustomAttribute)['activationSurface'];
 };
 
 /**
@@ -68,6 +69,27 @@ export default abstract class CustomAttribute<
    * Whether this attribute is associated with form functionality
    */
   static formAssociated?: boolean;
+
+  /**
+   * Declares this trait's **activation surface** — whether its behaviour responds
+   * to user *interaction* (the `inert` dead-zone, #222/#223).
+   *
+   * - `'interaction'` (the default) — the behaviour is driven by user interaction
+   *   (click, drag, pointer, focus). It is meaningless inside an `inert` subtree
+   *   (which the platform removes from the tab order, click handling, and the
+   *   assistive-technology *interaction* surface), so it goes **dormant** there
+   *   automatically: {@link deactivatedCallback} fires on entering `inert`,
+   *   {@link activatedCallback} on leaving. A per-usage `<trait>-active` attribute
+   *   re-enables a single placement.
+   * - `'ambient'` — the behaviour runs independently of interaction (autosave,
+   *   polling). `inert` says nothing about it, so the dead-zone leaves it
+   *   **unaffected** — it stays active inside an `inert` region.
+   *
+   * Native-first default: most traits *are* interaction-driven, and a live
+   * interaction behaviour in an inert region is usually a bug, so honouring
+   * `inert` is the default and `'ambient'` is the deliberate opt-out.
+   */
+  static activationSurface: 'interaction' | 'ambient' = 'interaction';
 
   /**
    * The target element this attribute is attached to
@@ -212,6 +234,17 @@ export default abstract class CustomAttribute<
    */
   isConnected: boolean = false;
 
+  /**
+   * Whether this attribute is currently **activated** — should be running — as
+   * distinct from {@link isConnected} (merely present in the DOM). The two are
+   * orthogonal: a connected interaction-driven behaviour inside an `inert`
+   * dead-zone is connected-but-*inactive* (#222/#223), and a future visibility
+   * gate (#221) likewise toggles activation without touching connectedness. The
+   * registry owns this flag and fires {@link activatedCallback}/
+   * {@link deactivatedCallback} on transitions.
+   */
+  isActivated: boolean = false;
+
   // Lifecycle callbacks
 
   /**
@@ -233,6 +266,28 @@ export default abstract class CustomAttribute<
    * Called when the element is disconnected from the document
    */
   disconnectedCallback?(): void;
+
+  /**
+   * Called when the attribute becomes **activated** — it should start running
+   * (e.g. attach interaction listeners). Distinct from {@link connectedCallback}
+   * (DOM presence): an interaction-driven trait is connected but *not* activated
+   * inside an `inert` dead-zone (#223). Fires after `connectedCallback` on a
+   * normal upgrade, and again whenever the trait re-enters an active scope (an
+   * `inert` region flipping live, or a `<trait>-active` re-enable).
+   *
+   * Named for the platform's `connectedCallback` lifecycle-callback convention
+   * (and to avoid colliding with domain methods like a tab group's `activate(name)`).
+   */
+  activatedCallback?(): void;
+
+  /**
+   * Called when the attribute becomes **deactivated** — it should stop running
+   * (e.g. detach interaction listeners) while remaining connected. Fires when an
+   * interaction-driven trait enters an `inert` dead-zone (#223), and before
+   * {@link disconnectedCallback} on removal if the trait was activated. The
+   * inverse of {@link activatedCallback}.
+   */
+  deactivatedCallback?(): void;
 
   /**
    * Called when the element is moved to a new document

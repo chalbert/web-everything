@@ -2,8 +2,10 @@
 type: issue
 workItem: task
 parent: "149"
-status: open
+status: resolved
 dateOpened: "2026-06-07"
+dateResolved: "2026-06-09"
+graduatedTo: block:droplist
 tags: [droplist, anchor, positioning, css-anchor, shift, native]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -34,3 +36,31 @@ on-screen along the axis without flipping it across the diagonal.
 Acceptance: with the **native** strategy and `shift` (flip off), a surface whose
 inline/block extent would spill off one edge slides back on-screen along that axis
 (not diagonally flipped) — validated in a real browser alongside the JS strategy.
+
+## Resolution (2026-06-09)
+
+Native `shift` no longer emits `flip-start`. The native strategy
+(`blocks/droplist/positioning/native.ts` in Frontier UI) now derives a `shift`
+fallback set of **same-side `position-area` variants** that slide the surface
+along the axis *perpendicular* to its placement side, and lets the browser pick
+the first that fits — a discrete slide, not a diagonal flip:
+
+```ts
+// bottom / top  → slide along the inline axis (span-right ↔ span-left)
+// left / right   → slide along the block axis  (span-bottom ↔ span-top)
+if (shift) fallbacks.push(...shiftFallbacks(placement));
+// e.g. bottom-start → "bottom, bottom span-left";  right-start → "right, right span-top"
+```
+
+CSS Anchor Positioning has no continuous clamp (the JS path uses `Math.min`/`max`),
+so this discrete same-side slide is the native-first realization of "stay on-screen
+along the axis." Centered variant is listed first (most balanced, fits most often),
+then the opposite extreme.
+
+Validated:
+- Unit — `blocks/droplist/positioning/__tests__/strategies.test.ts`: asserts
+  `shift` emits axis-slide `position-area`s and **never** `flip-start`.
+- Real browser — `blocks/droplist/positioning/__tests__/e2e/shift.spec.ts` +
+  `demos/positioning-shift.html`: a `bottom-start` surface parked against the right
+  viewport edge slides back on-screen along the inline axis and **stays below** its
+  trigger (no diagonal flip) under **both** the native and JS strategies.

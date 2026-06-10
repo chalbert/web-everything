@@ -96,11 +96,11 @@
       "typography"
     ],
     "designDecisions": [
-      "Focus host ≠ collection: this is the one member where the focus host and the option collection are different elements. DOM focus must stay on the <input> so typing is never interrupted, so the input is the focus host (role=combobox, carries aria-activedescendant and aria-expanded) while a separate <ul role=listbox> is the collection. focus-delegation=\"strategy=virtual;controller=<input-id>\" tells the trait its host is elsewhere: keydown attaches to the input, aria-activedescendant is written onto the input, and no tabindex is added (the input is already focusable). The dropdown conflated container and host on one element; autocomplete is the case that pulls them apart — the controller param (now real in plateau FocusDelegation.ts) is exactly that generalization.",
+      "Focus host ≠ collection: this is the one member where the focus host and the option collection are different elements. DOM focus must stay on the <input> so typing is never interrupted, so the input is the focus host (role=combobox, carries aria-activedescendant and aria-expanded) while a separate <ul role=listbox> is the collection. focus-delegation=\"strategy=virtual;controller=<input-id>\" tells the trait its host is elsewhere: keydown attaches to the input, aria-activedescendant is written onto the input, and no tabindex is added (the input is already focusable). The dropdown conflated container and host on one element; autocomplete is the case that pulls them apart — the controller param (now real in Frontier UI's blocks/droplist/FocusDelegation.ts) is exactly that generalization.",
       "Filter swaps in for type-ahead, and the two are mutually exclusive: both consume printable keystrokes, so a member composes one or the other. In the dropdown, typing seeks (type-ahead jumps the active item to a match); in the autocomplete, typing filters (filter narrows the list). \"Autocomplete = dropdown made editable\" precisely means: swap type-ahead for filter and move the focus host from the listbox to the input. selection, anchor, and focus movement are otherwise unchanged — selectionFollowsFocus=false, so arrowing only previews, Enter commits.",
       "filter is a thin composition over loader + live-region-status, not a monolith: filter consumes the loader intent (customContexts:loaderIntent) for the async lifecycle — debounce (~250ms), enter a loading state, cancel stale in-flight responses, inject the results — and pushes a count to the live-status announcer on each settle (\"7 results available\" / \"No results found\"). filter=\"client\" skips the async path and just hides non-matching options. live-region-status owns the single announcer region; filter announces counts on settle and focus-delegation announces the active option (\"Paris, 2 of 7\") on each move — two callers, one region.",
       "Concrete member is its own element, not a flag on <drop-list>: the two-element input+listbox substrate is a genuinely different shape than the dropdown's single button-triggered listbox, so autocomplete ships as a distinct <auto-complete name src> custom element rather than <drop-list editable>. This keeps each concrete droplist member one block (dropdown, multi-select-dropdown, autocomplete), consistent with the family rule that members are distinct trait selections over the substrate, not configurations of one widget.",
-      "Form-associated, single string surface like the dropdown: static formAssociated = true + ElementInternals.setFormValue, so FormData, reset, validity, bfcache restore, <label for>, and autocomplete attribute all work with no hidden input. On commit the only autocomplete-specific glue runs — write the selected label into the input value, dismiss the surface, keep focus on the input, and reveal the clear (X) affordance (input.clearable) when the value is non-empty. clearable, filter, live-status, and windowed are spec-proposed trait surfaces (only focus-delegation, selection, and anchor are built today); the block defines them as contracts, exactly as the family already does for anchor's positioning strategy."
+      "Form-associated, single string surface like the dropdown: static formAssociated = true + ElementInternals.setFormValue, so FormData, reset, validity, bfcache restore, <label for>, and autocomplete attribute all work with no hidden input. On commit the only autocomplete-specific glue runs — write the selected label into the input value, dismiss the surface, keep focus on the input, and reveal the clear (X) affordance (input.clearable) when the value is non-empty. clearable, filter, live-status, and windowed are all now built and tested in Frontier UI's reference implementation (blocks/droplist/Clearable.ts, Filter.ts, LiveStatus.ts, Windowed.ts), alongside focus-delegation, selection, and anchor — all six trait surfaces ship; the block defines them as contracts, exactly as the family already does for anchor's positioning strategy."
     ]
   },
   {
@@ -563,6 +563,7 @@
     "name": "Handler Expression Parser",
     "status": "active",
     "type": "Parser",
+    "sourcePath": "blocks/parsers/handler-expression/HandlerExpressionParser.ts",
     "summary": "Parser for function-call style event handler expressions. Extends CustomAttributeParser for registry integration.",
     "exports": [
       "HandlerExpressionParser",
@@ -617,7 +618,8 @@
     "id": "event-behaviors",
     "name": "Event Behaviors (on:*)",
     "status": "active",
-    "type": "Behavior Category",
+    "type": "Behavior",
+    "sourcePath": "blocks/attributes/on-event/OnEventAttribute.ts",
     "summary": "Declarative event-to-action mapping using expression syntax with context resolution.",
     "exports": [
       "createOnEventAttribute",
@@ -725,6 +727,7 @@
     "name": "View",
     "status": "active",
     "type": "Module",
+    "sourcePath": "blocks/view/ViewEngine.ts",
     "summary": "Foundation for all show/hide/render patterns. Provides a shared engine and specialized blocks (behaviors + directives) that higher-level components build on.",
     "blocks": {
       "ViewEngine": {
@@ -908,6 +911,7 @@
     "name": "Tabs",
     "status": "active",
     "type": "Component",
+    "sourcePath": "blocks/tabs/index.ts",
     "summary": "Accessible tab interface component built on View (ViewBehavior for panel switching), providing tab triggers, panels, and ARIA semantics.",
     "exports": [
       "TabsComponent",
@@ -1787,6 +1791,7 @@
     "name": "Transient Component",
     "status": "active",
     "type": "Module",
+    "sourcePath": "blocks/transient/TransientElement.ts",
     "summary": "Base class and utilities for custom elements that replace themselves with semantically correct native HTML during connectedCallback — enabling context-aware element selection without permanent wrapper nodes.",
     "exports": [
       "TransientElement",
@@ -2789,6 +2794,64 @@
         "description": "Opt into reload-durable work via the Background Fetch / service-worker adapter so an in-flight task survives a full page reload or tab close (default is route-only, in-memory)",
         "intentDimension": "background-task.durability.reload"
       }
+    ]
+  },
+  {
+    "id": "tooltip",
+    "name": "Tooltip",
+    "status": "draft",
+    "type": "Component",
+    "summary": "A small, transient, non-interactive surface that describes its trigger on hover or keyboard focus and is wired as the trigger's accessible description (aria-describedby, never aria-label). Native-first: it extends the built-in title attribute and the Popover API's popover=\"hint\" where supported, falling back to an ARIA-described custom bubble only when richer content or collision-aware positioning is needed. It composes the Anchor Intent (placement + flip/shift at the viewport edge), the Surface Intent (floating elevation/material of the bubble), and the Typography Intent (the truncation-recovery case that reads a clipped label). Deliberately distinct from a toggletip (click-revealed, live-region-announced) and from a non-modal popover with interactive content.",
+    "composesIntents": [
+      "anchor",
+      "surface",
+      "typography"
+    ],
+    "designDecisions": [
+      "Describes, never names — aria-describedby, not aria-label. A tooltip supplements an already-named control with extra description; it is not the control's name. Wiring it as aria-label would replace the accessible name (and silently lose it when the tooltip is hidden), so the trigger keeps its own name and the tooltip is referenced via aria-describedby. This also means a tooltip is never the sole carrier of essential information — content that must be perceivable belongs in the always-rendered DOM, not in a hover-only surface.",
+      "Native-first ladder: title → popover=hint → ARIA bubble. The built-in title attribute is the zero-cost baseline (free hover text, but no styling, no touch, no focus parity, and an uncontrollable UA delay), so the block extends it rather than forbidding it. The Popover API's popover=\"hint\" is the next rung — a real top-layer element with light-dismiss, styleable, that auto-closes when another hint opens — and is the default substrate where Baseline-supported. A fully custom ARIA-described bubble is the top rung, used only when content is richer than text or when Anchor-Intent collision handling (flip/shift/resize) is required. Third-party positioning (Floating UI) is an opt-in adapter behind the Anchor Intent, never the baseline.",
+      "Hover and keyboard-focus parity, with WCAG 1.4.13 obligations. The tooltip shows on pointer hover AND on keyboard focus of the trigger (parity is non-negotiable — a mouse-only tooltip is inaccessible), with a short show delay (~500ms hover, immediate on focus) and a hide delay. Per WCAG 1.4.13 (Content on Hover or Focus) the surface must be hoverable (the pointer can move onto the tooltip without it vanishing — a pointer-leave grace period bridges the gap), persistent (it stays until focus/hover leaves or Escape), and dismissible (Escape hides it without moving focus). There is no active-item model and no selection.",
+      "Tooltip ≠ toggletip ≠ popover — three distinct contracts. A tooltip is hover/focus-revealed, non-interactive, and announced as a description. A toggletip is click/tap-revealed, can be re-summoned, and is announced via a live region (because there is no persistent describing relationship) — it is a separate concern, cross-referenced, not a flag on this block. A non-modal popover holds interactive content the user can Tab into; the moment content is interactive it is no longer a tooltip (focus can't live in a tooltip). Keeping these separate stops the common anti-pattern of putting buttons or links inside a tooltip."
+    ]
+  },
+  {
+    "id": "slider",
+    "name": "Slider",
+    "status": "draft",
+    "type": "Component",
+    "summary": "A control for selecting a numeric value — or a min–max range — along a track. It realizes the Selection Intent's range variant (SelectionVariant = 'boolean' | 'item' | 'range'), which no block delivered before. Native-first by construction: a single-thumb slider IS <input type=\"range\">, so the block's job is only the enhancements the native control cannot express alone — a dual-thumb (from–to) range, rich ticks and labelled marks, and locale-aware value formatting (units, number format) surfaced through aria-valuetext. It composes the Selection Intent (variant=range, constraints.min/max), the Input Intent (pointer drag vs keyboard vs touch modality), and the Locale / Translation intents (value formatting). Native stays the baseline; a custom track/thumb is used only when the native element is ruled out.",
+    "implementsIntent": "selection",
+    "composesIntents": [
+      "selection",
+      "input",
+      "locale",
+      "translation"
+    ],
+    "designDecisions": [
+      "Single-thumb slider IS native <input type=\"range\"> — enhance, don't replace. A one-thumb slider is already a complete, accessible, form-associated platform control: keyboard arrows, step, focusability, and form submission all come free. The block defaults to the native element and only swaps to a custom track/thumb when a native gap is hit (dual-thumb, vertical orientation that the platform doesn't reliably expose, or rich tick rendering). This keeps the common case zero-JS and form-native, and confines custom code to the cases that genuinely need it.",
+      "Dual-thumb range is two bound values, not one element. The platform has no single dual-thumb range input, so a from–to range is modelled as two coordinated thumbs over one track, each a value with its own aria-valuenow/min/max, kept ordered (the low thumb can't cross the high thumb) and reported as a pair. This is the concrete realization of the Selection Intent's range variant — constraints.min and constraints.max become the two thumb bounds — rather than a new paradigm invented here.",
+      "Value reporting is formatted, not raw — aria-valuetext over the Locale Intent. A slider's accessible value is whatever the user should hear ('$1,200', '40%', '3.5 km'), not the bare number, so formatted output flows through the Locale / Translation intents and is published via aria-valuetext while aria-valuenow keeps the raw number for AT that computes percentages. RTL flips the track direction so 'increase' still maps to the start-to-end reading order.",
+      "Slider is the continuous-along-a-track member, distinct from a stepper. Stepping by keyboard arrows/PageUp-Down and snapping to ticks are in scope, but a slider is fundamentally for choosing a value by position on a track; precise numeric entry is a future numeric/stepper input's job. Naming that boundary now keeps the slider from absorbing spinner/number-field concerns and keeps the two as separate Selection-Intent members."
+    ]
+  },
+  {
+    "id": "segmented-control",
+    "name": "Segmented Control",
+    "status": "draft",
+    "type": "Component",
+    "summary": "A single-select choice rendered as a row of adjacent buttons — the iOS/macOS segmented control, or 'pill' toggle group. It is the Selection Intent's single model in a horizontal, always-visible variant (compare radio group / select / switch): every option is visible at once and exactly one is pressed. It composes the Selection Intent (model=single, live immediacy — selecting commits immediately), Focus Delegation (roving tabindex, horizontal orientation with arrow-key movement), and the Typography / Density intents for sizing. Its options are authored as compound children (<segment> elements inside the control) that map to the value model — an instance of the cross-cutting compound-child paradigm (see #176's spin-off) shared with Tabs and the native <select>/<option>.",
+    "implementsIntent": "selection",
+    "composesIntents": [
+      "selection",
+      "focus-delegation",
+      "typography",
+      "density"
+    ],
+    "designDecisions": [
+      "It is Selection single, always-visible and horizontal — not a new selection model. A segmented control is the same single-select contract as a radio group or a <select>; what differs is presentation (all options visible at once, laid out as adjacent pressed buttons) and immediacy (live — choosing commits immediately, no separate confirm). So it sets selection=\"model=single\" with live immediacy rather than introducing any new dimension, which keeps it swappable with the other single-select members under one ambient selectionIntent.",
+      "Roving tabindex, horizontal — one tab stop, arrows move within. Per the WAI-ARIA radio/tablist pattern the control is a single tab stop: Tab enters at the pressed segment, Left/Right (roving) move and (because immediacy is live) select as they move, Home/End jump to ends. This is delegated wholesale to the Focus Delegation Intent (strategy=roving;orientation=horizontal) rather than re-implemented, so keyboard behavior stays identical to every other roving widget.",
+      "Options are authored as compound children, not an options prop. The author writes <segment> children inside the control and the block maps each to a value-model entry; this is the same shape as <tab> inside Tabs and <option> inside <select>. The segmented control is the smallest clean instance of that recurring pattern, so it adopts it directly. Whether that 'compound child → option' pattern should be promoted to its own protocol/semantics contract (vs. remaining documentation of Selection's grouping) is a genuine cross-cutting fork, deliberately NOT settled inside this block — it is carried as a separate decision item. Recommended default there: document it as a shared paradigm (a protocol/semantics term cross-referenced by Selection + Tabs), not a new UX intent, since it is an authoring-and-lowering convention with no UX dimensions of its own.",
+      "Distinct from a multi-select button group and from Tabs. Each option pressed-or-not but exactly one pressed (aria-pressed / a rad/tablist-style roles) separates it from a toolbar of independent toggle buttons (multi-select, no roving-select). And although it shares the compound-child shape with Tabs, Tabs control which panel is shown (disclosure of associated regions) whereas a segmented control sets a value; keeping them separate blocks stops the value-vs-panel concerns from merging."
     ]
   }
 ]

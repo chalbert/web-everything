@@ -4,6 +4,7 @@ workItem: story
 size: 8
 status: resolved
 dateOpened: "2026-06-06"
+blockedBy: ["129"]
 dateResolved: "2026-06-07"
 graduatedTo: block:background-task-surface
 tags: [block, background-task, custom-element, runtime, implementation]

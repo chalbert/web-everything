@@ -54,7 +54,10 @@ export function generateFunctionalSource(def: ComponentDef): string {
         ];
 
   return [
-    `import jsx from '${JSX_RUNTIME_SPECIFIER}';`,
+    // Auto-Define #241: the functional form is already non-self-contained (it imports the jsx
+    // runtime), so it emits the literal `defineElement(...)` call — idempotent / HMR-safe — sharing
+    // that same bare-specifier import. `static tagName` is the tag↔class source of truth.
+    `import jsx, { defineElement } from '${JSX_RUNTIME_SPECIFIER}';`,
     ``,
     `export function ${fn}() {`,
     `  return (`,
@@ -63,11 +66,12 @@ export function generateFunctionalSource(def: ComponentDef): string {
     `}`,
     ``,
     `export class ${cls} extends HTMLElement {`,
+    `  static tagName = '${def.name}';`,
     ...fields,
     `  connectedCallback() {`,
     ...mount,
     `  }`,
     `}`,
-    `customElements.define('${def.name}', ${cls});`,
+    `defineElement('${def.name}', ${cls});`,
   ].join('\n');
 }

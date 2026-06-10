@@ -4,6 +4,7 @@ workItem: story
 size: 5
 status: resolved
 dateOpened: '2026-06-06'
+blockedBy: ["077"]
 dateStarted: '2026-06-06'
 dateResolved: '2026-06-06'
 graduatedTo: "blocks/renderers/jsx/render-strategy/crossStrategy.ts (lower/lift compiler)"

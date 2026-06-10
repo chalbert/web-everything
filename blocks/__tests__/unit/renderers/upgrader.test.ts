@@ -47,6 +47,51 @@ describe('reference analyzer — legacy web component → IR', () => {
   });
 });
 
+describe('reference analyzer — conservative intent inference (#189)', () => {
+  it('infers "selection" from role="listbox" + aria-selected, and notes it', async () => {
+    const registry = freshRegistry();
+    const src = upgraderCases.find((c) => c.id === 'listbox-selection-intent')!.source;
+    const r = await upgrade({ code: src }, { registry });
+    expect(r.ir!.intents).toEqual(['selection']);
+    expect(r.ir!.notes!.join(' ')).toMatch(/inferred intent "selection"/);
+  });
+
+  it('infers "motion" from a prefers-reduced-motion guard', async () => {
+    const registry = freshRegistry();
+    const src = upgraderCases.find((c) => c.id === 'reduced-motion-intent')!.source;
+    const r = await upgrade({ code: src }, { registry });
+    expect(r.ir!.intents).toEqual(['motion']);
+  });
+
+  it('does NOT infer "selection" from role="listbox" alone (both signals required — flag, don\'t fake)', async () => {
+    const registry = freshRegistry();
+    const src =
+      `class PlainList extends HTMLElement {\n` +
+      `  connectedCallback() {\n` +
+      `    this.innerHTML = '<ul role="listbox"><li role="option">A</li></ul>';\n` +
+      `  }\n` +
+      `}\n` +
+      `customElements.define('plain-list', PlainList);`;
+    const r = await upgrade({ code: src }, { registry });
+    expect(r.ir!.intents).toEqual([]);
+  });
+
+  it('infers no intents for a plain component (empty, not faked)', async () => {
+    const registry = freshRegistry();
+    const src = upgraderCases.find((c) => c.id === 'light-dom')!.source;
+    const r = await upgrade({ code: src }, { registry });
+    expect(r.ir!.intents).toEqual([]);
+  });
+
+  it('an inferred intent passes the verify gate when it resolves in the standard', async () => {
+    const registry = freshRegistry();
+    const src = upgraderCases.find((c) => c.id === 'listbox-selection-intent')!.source;
+    const r = await upgrade({ code: src }, { registry, knownIntents: new Set(['selection', 'motion']) });
+    expect(r.offered).toBe(true);
+    expect(r.verify.checks.find((c) => c.id === 'intents')!.ok).toBe(true);
+  });
+});
+
 describe('generation reuses the existing core', () => {
   it('emits a declarative <component> that parseDefinition accepts (no parallel generator)', () => {
     const ir: ComponentIR = { name: 'user-card', shadow: 'open', template: '<slot></slot>' };
@@ -129,6 +174,7 @@ describe('shared fixtures — demo + suite exercise the same engine', () => {
         expect(r.ir!.name).toBe(c.expectName);
         expect(r.ir!.shadow).toBe(c.expectShadow);
         expect(r.generated).not.toBeNull();
+        if (c.expectIntents) expect(r.ir!.intents).toEqual(c.expectIntents);
       }
     });
   }
