@@ -11,7 +11,7 @@
  *   - determinism: same state → identical output every run.
  */
 import { describe, it, expect } from 'vitest';
-import { computeReadiness, computeSelection, spliceStaleEdges } from '../engine.mjs';
+import { computeReadiness, computeSelection, computeBatchPack, spliceStaleEdges } from '../engine.mjs';
 
 /**
  * Build a loader-shaped item, resolving `blockedBy` into the lightweight `blockers` the real loader
@@ -29,13 +29,14 @@ function makeItems(specs) {
       : s.type === 'decision' ? 'B' : 'C';
     // Mirror the loader's #254 derivations so computeSelection consumes the same fields it would in prod.
     const batchable = tier === 'A'
-      && ((s.workItem === 'story' && typeof s.size === 'number' && s.size <= 3) || s.workItem === 'task');
+      && (s.workItem === 'task' || (s.workItem === 'story' && typeof s.size === 'number' && s.size <= 5));
+    const batchCost = s.workItem === 'task' ? 2 : typeof s.size === 'number' ? s.size : undefined;
     return {
       id: `${s.num}-${s.slug ?? 'slug'}`, num: String(s.num), slug: s.slug ?? 'slug',
       title: s.title ?? `#${s.num}`,
       type: s.type, status: s.status, workItem: s.workItem, size: s.size,
       dateStarted: s.dateStarted, blockedBy: s.blockedBy, blockers, tier,
-      batchable, leverageScore: s.leverageScore ?? 0,
+      batchable, batchCost, leverageScore: s.leverageScore ?? 0,
       directUnblocks: s.directUnblocks ?? 0, transitiveUnblocks: s.transitiveUnblocks ?? 0,
       unblocksToReady: s.unblocksToReady ?? 0,
     };
@@ -121,7 +122,7 @@ describe('selection view (#254 projection) — the skills consume this, never re
     const items = makeItems([
       { num: 1, type: 'idea', status: 'open', workItem: 'story', size: 3 },   // batchable Tier A
       { num: 2, type: 'issue', status: 'open', workItem: 'task' },            // batchable Tier A
-      { num: 3, type: 'idea', status: 'open', workItem: 'story', size: 8 },   // Tier A, NOT batchable (≥5)
+      { num: 3, type: 'idea', status: 'open', workItem: 'story', size: 8 },   // Tier A, NOT batchable (>5)
       { num: 4, type: 'decision', status: 'open', workItem: 'story', size: 2 }, // Tier B
       { num: 5, type: 'review', status: 'open', workItem: 'story', size: 3 },  // Tier C
       { num: 6, type: 'idea', status: 'resolved', workItem: 'story', size: 1 },// dropped (not open)
@@ -148,6 +149,38 @@ describe('selection view (#254 projection) — the skills consume this, never re
     const items = makeItems([{ num: 1, type: 'idea', status: 'open', workItem: 'story', size: 3, leverageScore: 1001, unblocksToReady: 1, transitiveUnblocks: 1 }]);
     const [it] = computeSelection(items).tierA;
     expect(it).toMatchObject({ num: '1', tier: 'A', batchable: true, leverageScore: 1001, unblocksToReady: 1, transitiveUnblocks: 1 });
+  });
+});
+
+describe('computeBatchPack — points budget, not a count cap', () => {
+  // size·5 joins when it fits; a task weighs 2 (no burndown points, but real context cost).
+  const ranked = (extra = {}) => computeSelection(makeItems([
+    { num: 1, type: 'issue', status: 'open', workItem: 'story', size: 3, leverageScore: 5000 },
+    { num: 2, type: 'idea', status: 'open', workItem: 'story', size: 5, leverageScore: 4000 },
+    { num: 3, type: 'idea', status: 'open', workItem: 'task', leverageScore: 3000 },
+    { num: 4, type: 'idea', status: 'open', workItem: 'story', size: 2, leverageScore: 2000 },
+    { num: 5, type: 'idea', status: 'open', workItem: 'story', size: 8, leverageScore: 1000 }, // ≥8 → never eligible
+    ...(extra.items ?? []),
+  ])).tierA;
+
+  it('packs as many points as possible, including a size·5 when it fits the budget', () => {
+    // budget 10: #1(3)→3, #2(size5)→8, #3 task(2)→10 fits exactly, #4(size2) would be 12 > 10, skip.
+    const { picked, spent } = computeBatchPack(ranked(), 10);
+    expect(picked.map((i) => i.num)).toEqual(['1', '2', '3']);
+    expect(spent).toBe(10);
+  });
+
+  it('skips a too-big item but keeps packing smaller, lower-ranked ones (max points, not first-fit-stop)', () => {
+    const { picked, spent } = computeBatchPack(ranked(), 6);
+    // budget 6: #1(3) fits → 3; #2(size5) would be 8 > 6, skip; #3 task(2) → 5; #4(size2) would be 7 > 6, skip
+    expect(picked.map((i) => i.num)).toEqual(['1', '3']);
+    expect(spent).toBe(5);
+  });
+
+  it('never packs a story·8 (split-candidate) even with budget to spare', () => {
+    const { picked } = computeBatchPack(ranked(), 999);
+    expect(picked.map((i) => i.num)).not.toContain('5');
+    expect(picked.map((i) => i.num)).toEqual(['1', '2', '3', '4']); // 3+5+2+2 = 12, all eligible
   });
 });
 

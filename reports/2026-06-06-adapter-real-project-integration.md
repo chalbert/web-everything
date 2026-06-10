@@ -37,14 +37,14 @@ and are wired only into *our* esbuild/Vite/Vitest config (`jsxInject`, the `.ele
 external project can't `import` from our repo. Adoption therefore depends on extracting three installable
 artifacts — this is the **first work item** any real integration blocks on:
 
-1. **`@webeverything/jsx-runtime`** — the DOM factory, exposed both ways:
+1. **`@frontierui/jsx-runtime`** — the DOM factory, exposed both ways:
    - classic: a named `jsx.createElement` + `jsx.Fragment` (what we use in-repo via `jsxInject`);
-   - automatic: a `@webeverything/jsx-runtime/jsx-runtime` entry exporting `jsx`, `jsxs`, `Fragment`
+   - automatic: a `@frontierui/jsx-runtime/jsx-runtime` entry exporting `jsx`, `jsxs`, `Fragment`
      (the ergonomic path for real projects — no per-file import, just `jsxImportSource`).
-2. **`@webeverything/component-compiler`** — the pure `<component>` → class transform
+2. **`@frontierui/component-compiler`** — the pure `<component>` → class transform
    (`declarativeComponent.ts`), framework-agnostic (string in → string out), plus the HTML⇄JSX transforms
    for tooling/source-toggle use.
-3. **Thin bundler-plugin wrappers** around #2 — `@webeverything/vite-plugin`, `/esbuild-plugin`,
+3. **Thin bundler-plugin wrappers** around #2 — `@frontierui/vite-plugin`, `/esbuild-plugin`,
    `/rollup-plugin`, a webpack loader, etc. Each is ~30 lines: match the source, call the compiler, return
    the module. (The JSX side needs *no* plugin — it rides the host's existing JSX transform via config.)
 
@@ -57,18 +57,18 @@ wiring** = where our compiler plugin hooks. **Runtime** = what WE-specific code 
 
 | Build system / tool | JSX wiring (config) | `<component>` wiring (plugin hook) | Runtime shipped | Notes / gotchas |
 |---|---|---|---|---|
-| **esbuild** *(what this repo uses)* | `jsx: 'automatic'`, `jsxImportSource: '@webeverything/jsx-runtime'` (or classic `jsxFactory: 'jsx.createElement'`, `jsxFragment: 'jsx.Fragment'` + `inject: [...]`) | `esbuild` plugin (`onLoad` filter) calling the component-compiler | JSX factory only | We already run the classic path via `jsxInject`/`inject`. Fastest, but plugin API is `onResolve`/`onLoad`-based — fine for our string-in/string-out transform. |
-| **Vite** | `esbuild.jsxInject` (dev) **or** `@vitejs/plugin-react`/native esbuild opts; cleanest = `jsxImportSource` in `tsconfig` + esbuild | `@webeverything/vite-plugin` (`transform` hook; `enforce: 'pre'`) | JSX factory only | Vite = esbuild (dev) + Rollup (build); the same plugin's `transform` runs in both. HMR for `<component>` needs care: `customElements.define` is one-shot, so the plugin must uniquify or full-reload (mirrors our demo gotcha). |
-| **Rollup** | via `@rollup/plugin-typescript`/Babel/SWC plugin's JSX opts | `@webeverything/rollup-plugin` (`transform` hook) | JSX factory only | Vite's production path; same plugin code. |
+| **esbuild** *(what this repo uses)* | `jsx: 'automatic'`, `jsxImportSource: '@frontierui/jsx-runtime'` (or classic `jsxFactory: 'jsx.createElement'`, `jsxFragment: 'jsx.Fragment'` + `inject: [...]`) | `esbuild` plugin (`onLoad` filter) calling the component-compiler | JSX factory only | We already run the classic path via `jsxInject`/`inject`. Fastest, but plugin API is `onResolve`/`onLoad`-based — fine for our string-in/string-out transform. |
+| **Vite** | `esbuild.jsxInject` (dev) **or** `@vitejs/plugin-react`/native esbuild opts; cleanest = `jsxImportSource` in `tsconfig` + esbuild | `@frontierui/vite-plugin` (`transform` hook; `enforce: 'pre'`) | JSX factory only | Vite = esbuild (dev) + Rollup (build); the same plugin's `transform` runs in both. HMR for `<component>` needs care: `customElements.define` is one-shot, so the plugin must uniquify or full-reload (mirrors our demo gotcha). |
+| **Rollup** | via `@rollup/plugin-typescript`/Babel/SWC plugin's JSX opts | `@frontierui/rollup-plugin` (`transform` hook) | JSX factory only | Vite's production path; same plugin code. |
 | **webpack** | `babel-loader` (`@babel/preset-react`, `runtime: 'automatic'`, `importSource`) **or** `swc-loader` | a custom **loader** for `*.component`/`<component>` calling the compiler | JSX factory only | Most config-heavy. Loader order matters (component loader before ts/babel). |
-| **Babel** (standalone) | `@babel/preset-react` `{ runtime: 'automatic', importSource: '@webeverything/jsx-runtime' }` (or classic `pragma`/`pragmaFrag`) | a Babel **plugin** visiting the `<component>` JSX element / a `.component` macro | JSX factory only | The reference JS-side wiring; SWC mirrors it. |
+| **Babel** (standalone) | `@babel/preset-react` `{ runtime: 'automatic', importSource: '@frontierui/jsx-runtime' }` (or classic `pragma`/`pragmaFrag`) | a Babel **plugin** visiting the `<component>` JSX element / a `.component` macro | JSX factory only | The reference JS-side wiring; SWC mirrors it. |
 | **SWC** | `jsc.transform.react.runtime: 'automatic'`, `importSource` (or `pragma`/`pragmaFrag`) | **hard** — SWC plugins are Rust/WASM. Fallback: run our JS compiler as a *separate* pre-step, let SWC see plain output | JSX factory only | Powers Next.js/Turbopack. The `<component>` transform can't be a native SWC plugin without a Rust port; pre-transform instead. |
-| **TypeScript (`tsc`)** | `compilerOptions.jsx: 'react-jsx'`, `jsxImportSource: '@webeverything/jsx-runtime'` (or `'react'` + `jsxFactory`/`jsxFragmentFactory`) | none — `tsc` only does JSX/types, not custom transforms (no public transform plugins) | JSX factory only | `tsc` gives **type-checked JSX** against our factory's JSX namespace. For `<component>` you still need a real bundler step. Ship JSX types with `@webeverything/jsx-runtime`. |
+| **TypeScript (`tsc`)** | `compilerOptions.jsx: 'react-jsx'`, `jsxImportSource: '@frontierui/jsx-runtime'` (or `'react'` + `jsxFactory`/`jsxFragmentFactory`) | none — `tsc` only does JSX/types, not custom transforms (no public transform plugins) | JSX factory only | `tsc` gives **type-checked JSX** against our factory's JSX namespace. For `<component>` you still need a real bundler step. Ship JSX types with `@frontierui/jsx-runtime`. |
 | **Parcel** | zero-config JSX via its Babel layer; set `importSource` in `.babelrc`-style config | a Parcel **transformer** plugin calling the compiler | JSX factory only | Parcel's convention-over-config means JSX "just works" once `importSource` is declared. |
 | **Next.js** | `next.config` JSX is SWC-driven; set `compiler`/`jsxImportSource` (App Router: server components complicate a DOM factory) | SWC limitation (above) → pre-transform `<component>` sources, or a webpack-loader escape hatch | JSX factory (client only) | **Caveat:** our JSX factory builds *DOM*, so it's client-only — incompatible with RSC server rendering. Use `'use client'`, or treat WE output as islands. |
-| **Astro** | per-island JSX via the chosen framework integration; or raw esbuild opts | a Vite plugin (Astro is Vite-based) — reuse `@webeverything/vite-plugin` | JSX factory (island) | Natural fit: `<component>` lowers to a custom element = a perfect Astro island with zero island-runtime. |
+| **Astro** | per-island JSX via the chosen framework integration; or raw esbuild opts | a Vite plugin (Astro is Vite-based) — reuse `@frontierui/vite-plugin` | JSX factory (island) | Natural fit: `<component>` lowers to a custom element = a perfect Astro island with zero island-runtime. |
 | **Bun** | `bunfig`/`tsconfig` `jsxImportSource` (Bun honors tsconfig JSX) | a Bun bundler plugin (`Bun.plugin`, `onLoad`) | JSX factory only | Bun's native JSX + plugin API make this one of the lightest integrations. |
-| **Deno** | `deno.json` `compilerOptions.jsx: 'react-jsx'`, `jsxImportSource` (+ import-map to the npm/JSR package) | an `esbuild-deno-loader`-style plugin, or pre-transform | JSX factory only | JSR-publish `@webeverything/jsx-runtime` for first-class Deno consumption. |
+| **Deno** | `deno.json` `compilerOptions.jsx: 'react-jsx'`, `jsxImportSource` (+ import-map to the npm/JSR package) | an `esbuild-deno-loader`-style plugin, or pre-transform | JSX factory only | JSR-publish `@frontierui/jsx-runtime` for first-class Deno consumption. |
 
 **Reading the matrix:** the JSX column collapses to *one idea expressed in each tool's dialect* —
 "automatic runtime, importSource = our package." The `<component>` column is *one plugin re-wrapped per
@@ -80,16 +80,16 @@ and **`tsc`** (no transform step → bundler still required); both are called ou
 A team has a plain Vite + TS single-page app and wants to start authoring some UI with WE adapters
 *without rewriting the app*.
 
-1. **Install:** `npm i @webeverything/jsx-runtime @webeverything/vite-plugin`.
+1. **Install:** `npm i @frontierui/jsx-runtime @frontierui/vite-plugin`.
 2. **Type-checked JSX** — `tsconfig.json`:
    ```jsonc
-   { "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@webeverything/jsx-runtime" } }
+   { "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@frontierui/jsx-runtime" } }
    ```
    Now `.tsx` files type-check against the mirror dialect (`class`, `for`, `on:*`) — `className` is a
    tolerated alias, function `onclick={fn}` is allowed-but-lossy (per the feature-mapping contract).
 3. **`<component>` support** — `vite.config.ts`:
    ```ts
-   import { webEverything } from '@webeverything/vite-plugin'
+   import { webEverything } from '@frontierui/vite-plugin'
    export default { plugins: [webEverything()] }
    ```
 4. **Author a component** (`cards.component` or inline) — declarative, zero-runtime:
@@ -105,9 +105,9 @@ A team has a plain Vite + TS single-page app and wants to start authoring some U
    const el = <x-user-card name="Ana"><span slot="footer">★</span></x-user-card>
    document.querySelector('#app')!.append(el)
    ```
-6. **Ship.** Bundle = the app + `@webeverything/jsx-runtime` (small) + the generated custom-element classes
+6. **Ship.** Bundle = the app + `@frontierui/jsx-runtime` (small) + the generated custom-element classes
    (plain JS). Tree-shakes normally; the `<component>` outputs carry no framework.
-7. **(Tooling bonus)** the same `@webeverything/component-compiler` powers an in-editor / docs
+7. **(Tooling bonus)** the same `@frontierui/component-compiler` powers an in-editor / docs
    **source-toggle** (HTML⇄JSX) via `htmlToJsx`/`jsxToHtml`, so the team sees both spellings of any element.
 
 **Net diff to adopt:** two installs, three tsconfig keys, one Vite plugin line. The app is otherwise
@@ -115,7 +115,7 @@ untouched — that's the "any element, authored as HTML *or* JSX" promise landin
 
 ## 5. Worked narrative B — a non-Vite project (esbuild CLI / Next.js island)
 
-- **esbuild CLI:** add `jsx: 'automatic'`, `jsxImportSource: '@webeverything/jsx-runtime'`, and
+- **esbuild CLI:** add `jsx: 'automatic'`, `jsxImportSource: '@frontierui/jsx-runtime'`, and
   `plugins: [webEverythingEsbuild()]`. One build command, no dev server assumptions. (This is closest to
   *our own* repo wiring, minus the in-repo paths.)
 - **Next.js:** the JSX factory is DOM-producing → **client-only**. Mark usage `'use client'` and treat WE
@@ -147,9 +147,9 @@ shaping decisions):
   umbrella).
 - **#126 — Documented JSX runtime default** *(resolved)*: automatic (`jsxImportSource`) vs classic —
   ruled **automatic externally, classic in-repo**, and applied to the
-  [JSX Adapter page](/adapters/jsx-adapter/#wiring) (#233). Now that `@webeverything/jsx-runtime` is
+  [JSX Adapter page](/adapters/jsx-adapter/#wiring) (#233). Now that `@frontierui/jsx-runtime` is
   extracted (#125) with `./jsx-runtime`/`./jsx-dev-runtime` exports, the consumer config is the single
-  `jsxImportSource: '@webeverything/jsx-runtime'` line shown in §4; in-repo wiring stays classic
+  `jsxImportSource: '@frontierui/jsx-runtime'` line shown in §4; in-repo wiring stays classic
   (`jsxInject`), since our own pages don't install the package.
 - **#127 — `<component>` compiler toolchain reach**: the **SWC/Turbopack** story (pre-transform),
   the **`<component>` source surface** (`.component` vs inline — the one genuinely open fork), and the

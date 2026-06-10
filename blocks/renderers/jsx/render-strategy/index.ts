@@ -13,6 +13,7 @@ export type {
 export { DeclarativeStaticStrategy } from './DeclarativeStaticStrategy';
 export {
   CustomRenderStrategyRegistry,
+  createDeclarativeStaticFlavor,
   renderStrategyRegistry,
   render,
 } from './CustomRenderStrategyRegistry';

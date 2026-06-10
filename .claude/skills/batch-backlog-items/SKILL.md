@@ -15,44 +15,68 @@ completed item"**). Don't restate the rubric here; if the method changes, edit t
 **Open `backlog-workflow.md` only for an edge case** (no Tier A → surface one decision; a stop-rule
 judgment call); the happy path is these commands:
 
-1. **`npm run check:readiness -- --select`** → its **batchable** list is the pool, already ranked. Take
-   the top `N` (default 3). Skim only those `N` bodies for a buried fork — **that's the whole
+1. **`npm run check:readiness -- --select`** → take its **`Suggested batch — points budget`** pack (the
+   greedy fill of the ranked Tier-A list up to `budget = capacityPoints × targetFraction`, where cost =
+   a story's `size`, a task = 2). The **count is whatever fills the budget** — not a fixed 3; a `size·5`
+   joins when it fits. Skim only the packed items' bodies for a buried fork — **that's the whole
    pre-flight.** Trust the projection: it only lists items with `blockedBy` resolved, so **don't
    re-`grep` already-resolved blockers**; a dirty-file flag means **drop or defer to `claim`**, not
    `git diff` it; and **only look one cluster deeper for a tighter alternative if the skim actually
-   surfaces a fork** — clean top-N → take it and go (full rule: *Running a batch* → *Eligibility* pre-flight note).
+   surfaces a fork** — clean pack → take it and go (full rule: *Running a batch* → *Eligibility* pre-flight note).
+   **When the skim shows an item is mis-flagged** (really a decision/fork, deferred/gated, or mis-sized),
+   **fix the flag in place, don't just skip it** — `type: decision` (→ Tier B), `status: parked`, or bump
+   `size` (to `8`/`13` to drop it from the eligible pool) — then re-run the gate. A clean pool is the
+   batch's own input (full rule: *Eligibility* → reclassification note). **If the eligible pool can't fill
+   the budget**, the batch is simply shorter (stop rule 3) — don't pad it with `≥8`/`epic` work; those stay
+   single-item (the *Other Tier-A* list), surfaced separately.
 2. **Present the ordered plan, get one "go"**, and emit the single `batch-<date>-<NNN>-<NNN>…` rename
    slug (the batch labels the session **once** — no per-item rename).
 3. **Loop, per item:** **`node scripts/backlog.mjs claim <NNN>`** → work → gate (tests + `npm run
    check:standards`) → leftovers via **`node scripts/backlog.mjs scaffold …`** → **`node scripts/backlog.mjs
-   resolve <NNN> [--graduated-to=…]`**. Update the compact ledger after each.
+   resolve <NNN> [--graduated-to=…]`**. Update the compact ledger after each (header tracks `cost
+   <spent>/<budget>`).
 4. **At each seam, evaluate the stop rule**; on continue, re-read the next item fresh (drop it if now
-   `active`/dirty). Stop → final ledger + stop reason + carry-forward.
+   `active`/dirty). **When the planned pack runs dry but budget + context remain, top up:** re-run
+   `npm run check:readiness -- --select --budget=<remaining>` (remaining = budget − resolved `cost`) and
+   pack its fresh suggestion — it absorbs items the just-resolved work cascade-freed to Tier A.
+   **Never** pull a close-out leftover this way (unvetted — capture and leave it). The budget is a
+   ceiling, not a quota: if the re-pack finds nothing new, stop short of budget. Stop → final ledger +
+   stop reason + carry-forward.
+5. **At close-out, calibrate:** **`node scripts/backlog.mjs calibrate --points=<cost resolved>
+   --context-pct=<context the user reports>`** folds the session into the budget estimate (the closing-session
+   skill runs this for you; do it by hand if you stop without /close). **The agent can't read the context
+   meter — ASK the user for the current reading and use it verbatim; never estimate it. No reading → skip
+   calibration** (a guessed value silently skews every future batch's budget).
 
-A batch runs several **small Tier-A** items in sequence — claim → work → close-out — **without
-stopping for approval between them**, to progress faster while still validating at every seam.
-"Small" is **explicit and pre-computed** — the loader's `item.batchable` flag, which
-**`npm run check:readiness -- --select` prints as a ready list** (also `--json` → `selection.batchable`),
-identical to the `/backlog/` Prioritisation tab. **That list is your candidate pool — read it, don't
-reconstruct it by hand** (the bug this fixes: a hand pass found 2 where the loader lists ~23). The rule
-behind the flag: a **`story` of `size` ≤ 3** or any **`task`**; a `story` of `size` ≥ 5 and any `epic`
-are **never** batched (full eligibility + fallback in *Running a batch* → *Eligibility*). It
+A batch runs several **agent-ready Tier-A** items in sequence — claim → work → close-out — **without
+stopping for approval between them**, to progress faster while still validating at every seam. **The size
+of a batch is a points budget, not an item count:** it packs as many points as possible up to
+`budget = capacityPoints × targetFraction` (default `100 × 0.5 = 50`, from
+`.claude/skills/batch-backlog-items/capacity.json`), where cost (`item.batchCost`) is a story's `size`
+and a task = 2. This fixes the old timidity — a fixed "top 3" cap left a real 10-item batch at only ~20%
+context. The **`Suggested batch — points budget`** block from `npm run check:readiness -- --select` (also
+`--json` → `batch.picked`) is the pre-computed pack — **read it, don't reconstruct it by hand** (the bug
+this fixes: a hand pass found 2 where the loader lists ~23). Batchable = Tier-A **`task`** or
+**`story·≤5`** (`item.batchable`); the budget packs **smallest-first**, reaching a single `size·5` only
+when the remaining points fit. A `story·≥8` and any `epic` are **never** packed (full eligibility +
+fallback in *Running a batch* → *Eligibility*). It
 reuses the single-item arc **unchanged**, including **per-item on-disk ownership** (each item is
 individually flipped `open → active` with `dateStarted` *before* code, `## Progress` kept in sync,
 and `resolved` at close-out after the full gate). The **only** thing it drops is the per-item
 chat-rename *stop* — because a batch labels the session **once**.
 
-When invoked (`/batch [N]` or `/batch-next [N] [NNN-slug]`):
+When invoked (`/batch [P]` or `/batch-next [P] [NNN-slug]`):
 
-1. **Parse args.** A bare number is the cap `N` (default **3**). A `NNN` or `NNN-slug` **seeds** the
-   chain's first item — skip its selection (like next-backlog-item step 0); the rest are picked by
-   ranking. Both forms may appear (`/batch-next 5 158-editable-grid-typed-editors-validation`).
+1. **Parse args.** A bare number is the **points budget** override `P` (default = the calibrated
+   `capacityPoints × targetFraction` from `--select`) — it is a points budget, **not** an item count.
+   A `NNN` or `NNN-slug` **seeds** the chain's first item — skip its selection (like next-backlog-item
+   step 0); the rest are packed by budget. Both forms may appear (`/batch-next 30 158-editable-grid-typed-editors-validation`).
 2. **Plan + approve once, and label the session in the same beat.** Start from
-   `npm run check:readiness -- --select` — its **batchable** list is the pool, already ranked; take the
-   top `N` from it. Present an **ordered batch plan** of up to `N` small Tier-A items (each with its
-   `live` + `md` links and a one-line rationale), per *Running a batch* → *The loop* step 1. Your only
-   per-item judgment is the body-fork pre-flight on those `N` (a `story·3` can still hide a design call)
-   — not a re-derivation of the whole batchable set. **If no Tier-A item exists to seed
+   `npm run check:readiness -- --select` and take its **`Suggested batch — points budget`** pack (already
+   ranked + budget-filled). Present it as an **ordered batch plan** (each item with its `live` + `md`
+   links, its `batchCost`, and the running total against the budget), per *Running a batch* → *The loop*
+   step 1. Your only per-item judgment is the body-fork pre-flight on the packed items (a `story·3` can
+   still hide a design call) — not a re-derivation of the pack. **If no Tier-A item exists to seed
    the batch** (the ready pool is empty), there's no batch to run — fall back to `backlog-workflow.md`
    → **"When nothing is agent-ready"**: surface the **single** highest-leverage blocker for the user to
    resolve (the decision that unblocks the most downstream items), discuss it, and stop. Don't open a
@@ -71,18 +95,26 @@ When invoked (`/batch [N]` or `/batch-next [N] [NNN-slug]`):
    at claim, **re-evaluate the item's `blockedBy` edges and its digest** (lead paragraph), and on any
    close-out spin-off **set its `blockedBy` + write a digest** — see `backlog-workflow.md` → **"Keep the
    blocker DAG honest"** and **"The digest"**. At every **seam** (after close-out, before claiming the
-   next) evaluate the **stop rule**.
+   next) evaluate the **stop rule**, and **if the planned pack is exhausted with budget + context left,
+   top up** by re-running `--select --budget=<remaining>` to absorb any cascade-freed Tier-A items (never
+   raw leftovers) — see *Running a batch* → *The loop* step 4.
 4. **Stop + hand off** per *Running a batch* → *Stopping*: the final ledger, the **stop reason**
    (which rule fired), and the **carry-forward** block. When the stop was the **context seam**,
    recommend starting a **fresh agent** so context resets, emitting `/batch-next <NNN-slug>` in its
    own fenced code block.
+5. **Calibrate at close-out** per *Running a batch* → *Calibrating the budget*: **ask the user for the
+   editor's current context-meter reading** (the agent can't see it), then run
+   `node scripts/backlog.mjs calibrate --points=<cost resolved> --context-pct=<reading from user>` so the
+   budget tracks what a session actually fits (closing-session does this automatically when a batch ran).
+   Never estimate the context percentage; skip calibration if the user gives none.
 
 **The stop rule (solid by construction)** — stop the batch at a seam if ANY holds (full text in
 *Running a batch* → *The stop rule*): **gate red** (safety stop — never batch past a red gate),
-**count cap reached** (deterministic backstop — always terminates by `N`), **no eligible small
-Tier-A item left**, **a new design fork surfaced** (or an item outgrew its "small" assumption), or a
-**context seam** (self-assessed; can only stop *earlier*, never extend). The cap guarantees the batch
-ends regardless of the softer calls — that is what makes running longer safe.
+**points budget reached** (deterministic backstop — the resolved `batchCost` sum fills the budget; every
+item costs ≥ 2 so it always terminates), **no eligible Tier-A item left** (`task`/`story·≤5`), **a new
+design fork surfaced** (or an item outgrew its estimate), or a **context seam** (self-assessed; can only
+stop *earlier*, never extend). The budget guarantees the batch ends regardless of the softer calls — that
+is what makes running longer safe.
 
 Everything per item — claim-as-`active`, the `## Progress` block, the close-out gate and
 leftover-capture pass, the immutable-`NNN` rules — is **exactly** the single-item arc. Batch adds

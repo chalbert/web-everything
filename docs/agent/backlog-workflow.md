@@ -118,7 +118,7 @@ Every item carries a `workItem` category, and **points (`size`) live at exactly 
 
 **The no-double-count rule, mechanically:** the burndown sums every item's `size`. A `task` has none; a *storied* epic has none; a `story` and an *unstoried* epic each have exactly one. So each unit of scope is counted once. The validator **errors** if: a story lacks a size, a task has one, a size isn't Fibonacci, a `parent` doesn't resolve, or an **unstoried (sized) epic has a sized child** (that would count its scope twice — make it storied or re-parent the child).
 
-**Sizing guide:** `1` trivial · `2` small · `3` moderate · `5` substantial · `8` large · `13` very large (should-split). Size *relative effort/uncertainty*, not hours. `parent` (quote it — leading zeros) links a story/task to the epic it rolls under, for grouping; it does not affect the point sum.
+**Sizing guide:** `1` trivial · `2` small · `3` moderate · `5` substantial · `8` large · `13` very large (should-split). Size *relative effort/uncertainty*, not hours. A `story` of `size` > 5 (`8`/`13`) is a **split candidate** — too big to batch and at risk of bundling several deliverables in one item; see *Splitting a large story* for when (and when **not**) to slice it. `parent` (quote it — leading zeros) links a story/task to the epic it rolls under, for grouping; it does not affect the point sum.
 
 ## Closing out a completed item — mark it `resolved` (after a final-capture pass)
 
@@ -235,7 +235,9 @@ When it's fully done, follow *Closing out a completed item* (mark `resolved` aft
 
 ## Running a batch — chain several small items, stop on a solid condition
 
-> Use via the `batch-backlog-items` skill (`/batch`, `/batch-next`). A batch works several **small, agent-ready** items back-to-back **without stopping for approval between them** — to run a bit longer and progress faster — while keeping a real validation stop at every seam and a hard backstop that guarantees it ends. It **reuses the single-item arc unchanged** (*Selecting*, *Working an item*, *Closing out*); it only adds the loop and the stop rule below.
+> Use via the `batch-backlog-items` skill (`/batch`, `/batch-next`). A batch works several **agent-ready** items back-to-back **without stopping for approval between them** — to run a bit longer and progress faster — while keeping a real validation stop at every seam and a hard backstop that guarantees it ends. It **reuses the single-item arc unchanged** (*Selecting*, *Working an item*, *Closing out*); it only adds the loop and the stop rule below.
+
+**The size of a batch is a POINTS BUDGET, not an item count.** The old "take the top 3 small items" cap left a session ~80% idle (a real 10-item batch consumed only ~20% of the window). So a batch now **packs as many points as possible up to a budget** — `budget = capacityPoints × targetFraction` (default `100 × 0.5 = 50`), read from `.claude/skills/batch-backlog-items/capacity.json`. The cost it sums is **`batchCost`** — a story's `size`, and **`2` for a task** (tasks carry no burndown points but still consume context, so they aren't free). The budget is the **deterministic backstop** that guarantees the batch ends (every item costs ≥ 2, so the sum strictly rises) — replacing the count cap. Because the count is now "whatever fills the budget," a single `size·5` story joins the chain when it fits the remaining points, where the old `≤3`-only gate would have left both the points and the slot on the table. **`capacityPoints` self-calibrates at close-out** (see *Calibrating the budget* below), so the target tracks what a session actually fits rather than a fixed guess.
 
 **What a batch keeps (unchanged): per-item on-disk ownership.** Every item is still claimed individually — re-read to win the race → `status: open → active` + `dateStarted` *before* any code → `## Progress` kept in sync → `resolved` at close-out after the full gate. A stranded batch is therefore exactly as recoverable as a single item: each one is claimed and progress-tracked on disk, and selection still drops `active`, so nothing gets re-picked mid-flight.
 
@@ -243,53 +245,71 @@ When it's fully done, follow *Closing out a completed item* (mark `resolved` aft
 
 > **Claim as the *first keystroke* on an item — before any file read.** Because claim and work now flow together with no stop between them, it is easy to slide into exploring/editing code while the item is still `open` and only flip it at close-out. That leaves a real window where a concurrent agent sees it as unclaimed. So on starting each item, **flip `open → active` + `dateStarted` first**, then read code. (Re-read to win the race, then immediately claim — don't interleave exploration between the two.)
 
-**Eligibility — take the batchable set straight from the ranker; don't re-derive it.** Only **small
-Tier-A** items, and "small" is **explicit, not a guess** — the size+tier gate is **deterministic**, so
-the loader derives it as `item.batchable` (`src/_data/backlog.js`) and `npm run check:readiness -- --select`
-prints the ready batchable list directly (also `--json` → `selection.batchable`), identical to the
-`/backlog/` Prioritisation tab. **That list *is* your candidate pool — read it, don't reconstruct it**
-(reconstructing it by hand from frontmatter is exactly the slow, under-counting pass this replaces). The
-rule below is documented so the derivation stays auditable; keep it and `item.batchable` identical if
-either changes. The flag is the structural gate only — the body-fork pre-flight below is the
-non-structural guard a field can't decide, applied **only to the items you're about to chain**.
+**Eligibility — take the suggested pack straight from the ranker; don't re-derive it.** The size+tier
+gates are **deterministic**, so the loader derives them (`src/_data/backlog.js`) and
+`npm run check:readiness -- --select` prints them directly (also `--json` → `selection` + `batch`),
+identical to the `/backlog/` Prioritisation tab. Two derived sets matter:
 
-- A **`story` with `size` ≤ 3** (Fibonacci `1`/`2`/`3` = trivial/small/moderate), **or**
-- a **`task`** (bounded sub-work — regression guard, e2e/coverage, wiring, doc/runtime reconcile, small fix; carries no `size`, its points roll up to a parent).
+- **`item.batchable`** — the candidate set the budget may pack: a Tier-A item small enough to chain —
+  a **`task`**, or a **`story` of `size` ≤ 5**. This is what the packer walks. There is no separate
+  ≤3 "core" tier — the budget packs **smallest-first** (the rank orders by effort), reaching a single
+  `size·5` only when the remaining points fit, so genuinely small work still leads.
 
-Plus the Tier-A guards on top of the size gate: `issue`/`idea`, concrete bounded build, prereqs resolved, **no design fork**, **named file paths**, **clear acceptance criteria**. **Never batched:** a **`story` of `size` ≥ 5** (substantial/large/should-split), any **`epic`**, and all Tier B/C items (decisions, reviews, anything needing a design call) — surface those for discussion as usual. (If an item has no `size`/`workItem` yet, fall back to the blast-radius heuristic — a handful of files / one subsystem — and treat it as batchable only if it's clearly trivial.)
+The CLI's **`Suggested batch — points budget`** block *is* the pack: it greedily walks the ranked Tier-A
+list and lists the items whose cumulative `batchCost` fills the budget (`--json` → `batch.picked`/`spent`).
+**That pack is your plan — read it, don't reconstruct it** (reconstructing it by hand from frontmatter is
+the slow, under-counting pass this replaces). The rules below are documented so the derivation stays
+auditable; keep them and the loader fields identical if either changes. The gates are structural only —
+the body-fork pre-flight below is the non-structural guard a field can't decide, applied **only to the
+items in the pack you're about to chain**.
+
+Plus the Tier-A guards every packed item must still clear: `issue`/`idea`, concrete bounded build,
+prereqs resolved, **no design fork**, **named file paths**, **clear acceptance criteria**. **Never
+packed:** a **`story` of `size` ≥ 8** (the should-split band), any **`epic`**, and all Tier B/C items
+(decisions, reviews, anything needing a design call) — surface those for discussion as usual. (If an item
+has no `size`/`workItem` yet, fall back to the blast-radius heuristic — a handful of files / one subsystem
+— and treat it as eligible only if it's clearly small.)
 
 > **Pre-flight each candidate's *body* for a buried fork — `size` measures effort, not decision-weight.** A `story·3` can still hide a real design call ("decide whether the served form stays self-contained or imports the helper") that the size field never shows. Before approving the plan, skim each body for **"decide whether / alternative held open / open sub-decision"**; a small item with a buried fork is a **stop risk** (stop rule 4), not a clean batch item — either resolve the fork in discussion first (Tier B) or drop it from the chain.
 
-> **Keep the pre-flight to the body skim — don't re-derive what the selection already settled.** The `--select` projection is the source of truth for *ranking and readiness*; re-computing its inputs by hand is wasted turns at equal quality. Specifically: **(a) Don't re-verify already-resolved blockers.** An item only reaches the batchable pool with its `blockedBy` edges resolved — that's the projection's guarantee. The only blocker work here is the body-fork skim catching an *undeclared* prereq (corrected at claim, per *Keep the blocker DAG honest*), not re-`grep`ping that listed `resolved` blockers are still resolved. **(b) A dirty working-tree flag means *drop or defer*, not investigate.** The bulk `git status --short` from *Gather* is a race signal; if a candidate's file is dirty, drop it (or let `claim` adjudicate — it refuses a dirty file). Don't spend a turn `git diff`-ing the change to rationalize keeping it — `claim` is the gate. **(c) Don't hunt for a "better" cluster by default.** Reach one cluster deeper for a tighter same-subsystem alternative **only when the top-N body skim actually surfaces a fork or an "outgrew small"** — that's when the exploration earns its cost. If the ranked top-N skims clean, take it and go.
+> **When the body-skim shows an item is mis-flagged, *fix the flag* — don't just skip it.** The batchable flag is a structural proxy (`type` + `size` + resolved prereqs); a body that reveals the item is really a **decision/fork**, **deferred-by-intent / gated on an unmet precondition / on-demand-only**, or **mis-sized** is *mis-flagged at the source*. Silently skipping it leaves it to re-surface and re-cost the same pre-flight in every future batch — so **correct the frontmatter in place** (a one-line splice, body untouched) as part of the batch's opening pre-flight, not as a separate chore: a clean `--select` pool is the batch's own input. The lever map (the same fields the loader keys on — `tier` ← `type`/blockers, `batchable` ← `tier A` + `story·≤3`/`task`):
+> - a genuine fork, strategy, or triage call → `type: decision` (moves to Tier B, "discuss, don't auto-build");
+> - explicitly deferred / gated on an unmet precondition / on-demand-only → `status: parked` (drops out of the pool until reopened);
+> - agent-ready but too big to batch (e.g. new-standard / new-intent authoring) → bump `size` to its honest points (`8`/`13`) so it stays Tier-A *single-item*, out of the eligible pool.
+>
+> Run the standards gate after the splices and report the reclassifications in the plan so the user can object — they are reversible (git) and internal (backlog metadata), but they *are* edits to shared state.
+
+> **Keep the pre-flight to the body skim — don't re-derive what the selection already settled.** The `--select` projection is the source of truth for *ranking and readiness*; re-computing its inputs by hand is wasted turns at equal quality. Specifically: **(a) Don't re-verify already-resolved blockers.** An item only reaches the batchable pool with its `blockedBy` edges resolved — that's the projection's guarantee. The only blocker work here is the body-fork skim catching an *undeclared* prereq (corrected at claim, per *Keep the blocker DAG honest*), not re-`grep`ping that listed `resolved` blockers are still resolved. **(b) A dirty working-tree flag means *drop or defer*, not investigate.** The bulk `git status --short` from *Gather* is a race signal; if a candidate's file is dirty, drop it (or let `claim` adjudicate — it refuses a dirty file). Don't spend a turn `git diff`-ing the change to rationalize keeping it — `claim` is the gate. **(c) Don't hunt for a "better" cluster by default.** Reach one cluster deeper for a tighter same-subsystem alternative **only when the pack's body skim actually surfaces a fork or an "outgrew its estimate"** — that's when the exploration earns its cost. If the suggested pack skims clean, take it and go.
 
 ### The loop
 
-1. **Plan the batch, approve once.** Run *Selecting*, but instead of one recommendation present an **ordered batch plan**: the small Tier-A items it intends to chain, up to the cap `N` (default **3**; override with `/batch N`), each with its live + md links. A single "go" (or one `AskUserQuestion`) authorizes the **whole batch**, not each item. If `/batch-next <NNN-slug>` named a seed, that item starts the chain (skip its selection, per *Selecting* step 0); the rest are picked by ranking. **Cluster the order by subsystem/repo, and treat a repo or subsystem boundary as a *planned* context-seam:** group items that touch the same files/package together, and put items in a different repo (e.g. a frontierui-side change after a run of webeverything ones) **last** — that boundary is a fresh-context load and the natural place the batch will stop (stop rule 5). Predicting the seam at plan time beats discovering it mid-batch.
+1. **Plan the batch, approve once.** Run *Selecting*, then take the CLI's **`Suggested batch — points budget`** pack (the greedy fill of the ranked Tier-A list up to the budget) and present it as an **ordered batch plan** — the items it intends to chain, each with its live + md links and its `batchCost`, plus the running total against the budget. A single "go" (or one `AskUserQuestion`) authorizes the **whole batch**, not each item. `/batch <P>` overrides the budget (a points number, not an item count); `/batch-next <NNN-slug>` seeds the chain's first item (skip its selection, per *Selecting* step 0) and packs the rest by budget. **Cluster the order by subsystem/repo, and treat a repo or subsystem boundary as a *planned* context-seam:** group items that touch the same files/package together, and put items in a different repo (e.g. a frontierui-side change after a run of webeverything ones) **last** — that boundary is a fresh-context load and the natural place the batch will stop (stop rule 5). Predicting the seam at plan time beats discovering it mid-batch. **The pack packs smallest-first but is free to reach a `size·5`** when it fits the remaining points — that's the point of budgeting over counting. If the batchable pool can't fill the budget, the plan is simply shorter (stop rule 3 fires early); don't pad it with `≥8`/`epic` work — those stay single-item (the *Other Tier-A* list), surfaced separately, not packed.
 2. **Work each item through its full arc** — claim → work → close-out gate — reporting the **compact ledger** (below) instead of per-item prose.
-3. **At each seam** (after an item's close-out, before claiming the next) **evaluate the stop rule.** If it says continue, **re-read the next item fresh from disk** to win the race (if it's now `active`/dirty, drop to the next eligible; if none remain, stop).
+3. **At each seam** (after an item's close-out, before claiming the next) **evaluate the stop rule.** If it says continue, **re-read the next item fresh from disk** to win the race (if it's now `active`/dirty, drop to the next eligible).
+4. **Top up the plan at a seam when the original pack runs dry but budget + context remain.** The pack was planned off the *opening* snapshot; resolving an item can **cascade-free** a previously-blocked item to Tier A. So if you reach the end of the planned pack with budget left (and context is still fine), **re-run `npm run check:readiness -- --select --budget=<remaining>`** (`remaining` = budget − the ledger's resolved `cost`) and pack its fresh suggestion — the newly-eligible items absorb the leftover budget, and momentum favours them (a freed item is often in the subsystem you just touched). Pre-flight each topped-up item's body for a fork exactly as in the opening plan. **Never auto-absorb a close-out leftover/spin-off** this way: those are brand-new and unvetted (they may hide a fork — stop rule 4's whole point), so they are *captured and left* for a future batch, not claimed to spend budget. If the re-pack finds nothing new, the batch is genuinely done short of budget — stop (rule 3). The budget is a **ceiling, not a quota**: it caps how far a batch may run, it never manufactures work to hit the number.
 
 ### The stop rule — solid by construction
 
 Built so the fuzzy signal can only ever **shorten** the batch, never extend it: a hard backstop guarantees termination, and every other condition only stops *earlier*. Evaluate at each seam. **Stop the batch if ANY is true:**
 
 1. **Gate red (safety stop).** The item just finished isn't fully green — relevant tests, `npm run check:standards`, and build must all pass (the close-out gate). On red: leave that item `active`, do **not** start another, report the failure. Never batch past a red gate — this is the per-item validation that makes "running longer" safe.
-2. **Count cap reached (deterministic backstop).** Completed count == `N`. This **always** fires by `N` regardless of any judgment call, so the batch always terminates — that is what makes the remaining, softer conditions safe to be approximate.
-3. **No eligible next item.** Nothing left that is small Tier-A — next is a decision/review, larger than a handful of files, blocked, or the pool is empty after the concurrency re-read.
-4. **New fork surfaced.** The completed item raised an open design question, **or** an item turned out **bigger than its "small" assumption mid-work** (sprawled across subsystems / needs a design call). Capture it as its own backlog item (per *Closing out* → leftovers), then stop — that's the user's call, not the batch's.
-5. **Context seam (earlier stop only).** If at a seam you judge context is getting heavy (long transcript, many large reads, repeated full test runs), **finish the current item cleanly and stop here** rather than claiming another. This is self-assessed, so it is *allowed* to be imperfect: because the count cap (rule 2) already guarantees termination, an over- or under-eager context call can only make the batch a little shorter — never runaway. **Err toward stopping at a seam:** it is the cheapest possible handoff point — the just-finished item is `resolved` and green, nothing is half-done.
+2. **Points budget reached (deterministic backstop).** The resolved items' summed `batchCost` has reached the budget (no remaining-budget room for the next eligible item). Every item costs ≥ 2, so the sum strictly rises and this **always** fires — the batch always terminates, which is what makes the remaining, softer conditions safe to be approximate. (This replaced the old fixed count cap.)
+3. **No eligible next item — *after a seam re-pack*.** The planned pack is exhausted **and** a fresh `--select --budget=<remaining>` surfaces nothing new (the cascade freed nothing eligible; what's left is a decision/review, a `story·≥8`/`epic`, blocked, or the pool is empty after the concurrency re-read). This is the budget-left-on-the-table stop: it's correct, not a failure — don't pad the batch with unvetted close-out leftovers to reach the number.
+4. **New fork surfaced.** The completed item raised an open design question, **or** an item turned out **bigger than its estimate mid-work** (sprawled across subsystems / needs a design call). Capture it as its own backlog item (per *Closing out* → leftovers), then stop — that's the user's call, not the batch's.
+5. **Context seam (earlier stop only).** If at a seam you judge context is getting heavy (long transcript, many large reads, repeated full test runs), **finish the current item cleanly and stop here** rather than claiming another. This is self-assessed, so it is *allowed* to be imperfect: because the points budget (rule 2) already guarantees termination, an over- or under-eager context call can only make the batch a little shorter — never runaway. **Err toward stopping at a seam:** it is the cheapest possible handoff point — the just-finished item is `resolved` and green, nothing is half-done. **This seam is also the calibration signal:** note the context level you stopped at against the points resolved — *Calibrating the budget* (below) folds it back in.
 
 ### Reporting — a compact ledger, not prose per item
 
 After each item, update a single running ledger — one line per item, scannable:
 
 ```
-Batch 2/3 · gate ✓ · pts 5 · net −1/+1 · next: #155
+Batch · cost 5/50 · gate ✓ · pts 3 · net −2/+1 · next: #155
 ✓ #154 cross-list-empty-tabstop — story·3 — fixed empty-list tabstop; tests+standards green
 ✓ #151 cross-list-empty-fixtures — task — added shared fixtures; green (+#162 leftover)
 ▶ #155 registered-behaviors-coverage — task — working
 ```
 
-Each line carries the item's `workItem`/`size` so the chain's effort is visible; the header's `pts` sums resolved story/unstoried-epic points (tasks contribute none — see *Agile sizing*), which is exactly what the `/backlog/` Burndown moves. The header also shows **net flow** `−<resolved>/+<opened>` — a batch both resolves items *and* opens new ones (leftovers captured at close-out), and capture can outpace drain; surfacing the net keeps that honest. Note each captured leftover inline on its parent item's line (`+#NNN`). Expand to full close-out detail only on a **red gate** (show the failure) or when asked. Keep the body lean — the ledger *is* the report.
+The header tracks the batch against its budget: **`cost <spent>/<budget>`** sums the resolved items' `batchCost` (the budget driver — a story's `size`, a task = 2), so you can see how close the budget backstop (stop rule 2) is. Each line carries the item's `workItem`/`size` so the chain's effort is visible. The header's **`pts`** sums resolved story/unstoried-epic *burndown* points (tasks contribute none — see *Agile sizing*), which is exactly what the `/backlog/` Burndown moves; it is intentionally ≤ `cost` (tasks add cost but no burndown points). The header also shows **net flow** `−<resolved>/+<opened>` — a batch both resolves items *and* opens new ones (leftovers captured at close-out), and capture can outpace drain; surfacing the net keeps that honest. Note each captured leftover inline on its parent item's line (`+#NNN`). Expand to full close-out detail only on a **red gate** (show the failure) or when asked. Keep the body lean — the ledger *is* the report.
 
 ### Stopping — report + hand off
 
@@ -301,6 +321,56 @@ When the batch stops, end with: the final ledger, the **stop reason** (which rul
 > ```
 
 If the stop was a **red gate** or a **surfaced fork**, the carry-forward instead points at what needs attention — the `active` item to fix, or the new decision item to discuss — not a fresh batch.
+
+### Calibrating the budget — fold each session back into the estimate
+
+The budget is only as good as `capacityPoints`, and a fixed guess goes stale (the seed was extrapolated from one batch). So **at the end of a batch session, record what actually happened** and let it correct the estimate. This is the feedback loop the count cap never had — with no count cap, the budget *must* learn what a session really fits.
+
+Run, once, at close-out (the **closing-session** skill does this automatically when a batch ran; do it by hand otherwise). **First ask the user for the editor's current context-meter reading** — the agent can't see it, so this value must come from the user, not a guess:
+
+```
+node scripts/backlog.mjs calibrate --points=<cost-points resolved> --context-pct=<context used at close>
+```
+
+- **`--points`** = the resolved items' summed `batchCost` — the ledger's `cost <spent>` figure (a story's `size`, a task = 2). Count only items that actually `resolved` this session.
+- **`--context-pct`** = the share of the context window consumed at close (the editor's context meter, 1–100). **The agent cannot read this meter — so ASK the user for the current reading and use it verbatim; never estimate or guess it.** If the user doesn't supply one, skip calibration this session rather than invent a number (it's EMA-blended, so a fabricated value silently skews the target for every future batch). A rough reading *from the user* is fine.
+
+It computes the implied full-session capacity (`points ÷ contextFraction`), blends it into `capacityPoints` (EMA, `α` from the file), appends a raw sample, and prints the new budget. Over a few sessions the budget converges on what this repo's batches actually sustain. Don't hand-edit `capacityPoints` — let the command move it; the raw `samples` array stays for audit.
+
+## Splitting a large story — slice only when safe, never at quality's expense
+
+> Use via the `split-backlog-item` skill (`/split`). Splitting takes a **`story` of `size` > 5** (`8`/`13` — too big to batch, the *should-split* band) and tries to break it into **smaller, agent-ready, independently-deliverable slices** that flow straight into `/batch`. The output is **always a report**; the on-disk split itself is **gated on approval** and **only happens when it's provably safe**. The governing instinct is conservative: a *needless* split fragments one coherent deliverable into pieces that only make sense together (quality loss, more review overhead, no gain); a *missed* split just leaves a big item to single-pass later. So **when a clean seam isn't obvious, don't split** — record it as "could not split" with the action that *would* make it splittable, and move on.
+
+**Candidate set.** Open (`status` ≠ `resolved`) items with `workItem: story` and `size` > 5. The ranked tiers from `npm run check:readiness -- --select` (`--json` → `selection.tierA`/`selection.tierB`) cover the unblocked ones; **blocked (Tier C) candidates aren't enumerated there**, so a one-pass frontmatter scan of `backlog/*.md` (`workItem: story` + `size` ≥ 8 + not `resolved`) is the complete list. `/split <NNN>` focuses one item; bare `/split` reports across the whole candidate set.
+
+### The split-safety rubric — split only if ALL five hold
+
+1. **Volume, not uncertainty.** The size comes from the *amount* of independent work, not from an unresolved design fork. **You cannot split away a decision** — if the body holds an open call ("decide whether…", an alternative held open, a `type: decision` smell), slicing just scatters the same unresolved fork across children. → *could not split*; action: **resolve the decision first** (surface it Tier-B), then re-evaluate.
+2. **≥2 nameable slices, each with a real home.** Each slice is either its **own `story`** (standalone, independently valuable) or a **`task` under the parent** (bounded sub-work — guard, wiring, coverage). If you can't name a clean seam where one slice ends and the next begins, it's atomic — don't force it.
+3. **Slices land small (agent-ready & batchable).** Each slice re-estimates to `size` ≤ 5 (or is a `task`) with **no buried fork and named file paths** — i.e. it satisfies the Tier-A/batchable gate (see *Running a batch* → *Eligibility*). A "split" that yields another `size·8` lump hasn't split anything.
+4. **Clean DAG with real independence.** The slices form an **acyclic** dependency graph (edges via `blockedBy`) in which **≥2 can proceed independently**, *or* the chain at least unlocks **incremental delivery** (each slice ships valid on its own). A forced linear chain where every slice blocks the next and nothing is usable until the last gains nothing over leaving it whole. → if the only decomposition is a rigid chain, *could not split* unless incremental delivery is genuinely valuable.
+5. **No coherence / quality loss — every slice leaves a valid, demoable state.** Per the Definition of Done (AGENTS.md), each shipped feature needs a fixture-driven demo. A slice that leaves the standard in a **partial/broken intermediate state** (half a protocol, half an algorithm, a registry with no consumer) violates this → atomic. Sometimes a **shared fixture authored up front** is what makes the slices independently demoable — record that as the unblocking action.
+
+If any condition fails, the item is **could-not-split** and the report names the **specific action that would unblock a future split**: *resolve decision X*; *land foundational slice A as a standalone story first — its artifact then exposes the seams for the rest*; *author shared fixture F so the slices demo independently*; *re-scope as an unstoried epic and revisit once Y ships*.
+
+### The report — always produced
+
+Write `reports/<YYYY-MM-DD>-backlog-split-analysis.md` (single-item runs may append/update the same dated report). Two tables:
+
+- **Could split** — one row per candidate: `#NNN` · title · proposed slices (each with its re-estimated `size`/`workItem` and a one-line scope) · the slice DAG (which `blockedBy` which) · which slices are independently batchable.
+- **Could not split** — one row per candidate: `#NNN` · title · **which rubric condition failed** · the **unblocking action** that would make it splittable later.
+
+Register the report's open questions back in the backlog per *Where an open question goes* — a "could not split, pending decision X" is itself a Tier-B decision worth tracking. The report is the deliverable even when **zero** items are split.
+
+### Executing a split — only after approval, mechanically
+
+Present the proposed slices + DAG for the candidate(s) and get **one "go"** before mutating anything (mirrors the batch plan-approval beat). Then, per item:
+
+1. **Convert the original `NNN` in place → a *storied* epic.** Splice its frontmatter `workItem: story` → `epic` and **remove `size`** (children now carry the points — a storied epic must have no size, see *Agile sizing*); refresh its **digest** to an umbrella framing ("Umbrella for …; sliced into #A/#B/#C"). Keep `status: open` and **keep the `NNN`** — never renumber (see *Rules*). *Edge case:* if the original already has a `parent` epic, prefer **not** nesting — keep it a `story` re-sized to its core slice and add the rest as **siblings under the same parent** instead of making a nested epic.
+2. **Scaffold each slice** with `node scripts/backlog.mjs scaffold --type=… --workitem=story|task [--size=…] --title="…" --parent=<NNN> [--blocked-by=<NNN>,…] --digest="…"` — `--parent` rolls it under the epic, `--blocked-by` lays the DAG edges. Write a real digest per slice (it's the loader's `summary`).
+3. **Gate.** Run `npm run check:standards` — it errors on a storied epic that kept a size, an unresolvable `parent`/`blockedBy`, a cyclic edge, or a missing digest, so green proves the split is structurally sound. Confirm the backlog count rose by the number of slices (proves each new file parsed; see *Closing out* step 2 for the hot-reload footgun). Re-evaluate `blockedBy` per *Keep the blocker DAG honest*.
+
+A split **opens** items and converts one — it never `resolve`s the original (its scope now lives in the children) and never deletes anything. Report the result as a net-flow line (`+<slices opened>`, original → epic) and point `/batch` at the freshly-batchable slices.
 
 ## Rules
 

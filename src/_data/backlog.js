@@ -157,16 +157,27 @@ module.exports = function backlog() {
       : item.type === 'decision' ? 'B'
       : 'C';
 
-    // Batchable (deterministic) — the STRUCTURAL half of the batch skill's eligibility
-    // (docs/agent/backlog-workflow.md → "Running a batch"): a Tier-A item that is also SMALL — a
-    // `story` of `size` ≤ 3, or a `task` (bounded sub-work, never sized). A `story` of `size` ≥ 5 and
-    // any `epic` are agent-ready but never batched. So `batchable` ⊂ `tier === 'A'`. The one
-    // non-structural guard the batch skill adds — no buried design fork in the body — can't be decided
-    // from fields, so this flag is the size+tier gate; selection still skims the body for a hidden fork.
+    // Batchable (deterministic) — the candidate set a POINTS-BUDGETED batch may pack
+    // (docs/agent/backlog-workflow.md → "Running a batch"): a Tier-A item small enough to chain — a
+    // `task` (bounded sub-work, never sized), or a `story` of `size` ≤ 5. A `story` of `size` ≥ 8 and
+    // any `epic` are agent-ready but never batched. So `batchable` ⊂ `tier === 'A'`. There is no
+    // separate ≤3 "core" tier: the budget packs SMALLEST-FIRST (the selection rank orders by effort),
+    // reaching a single `size·5` only when the remaining budget fits — one pool, ordered by `batchCost`.
+    // The one non-structural guard the batch skill adds — no buried design fork in the body — can't be
+    // decided from fields, so this flag is the size+tier gate; selection still skims the body for a fork.
     item.batchable = item.tier === 'A' && (
-      (item.workItem === 'story' && typeof item.size === 'number' && item.size <= 3) ||
-      item.workItem === 'task'
+      item.workItem === 'task' ||
+      (item.workItem === 'story' && typeof item.size === 'number' && item.size <= 5)
     );
+
+    // Batch COST (deterministic) — the context-budget weight used to pack a POINTS-BUDGETED batch
+    // (docs/agent/backlog-workflow.md → "Running a batch"). Distinct from burndown `size`: a `task`
+    // carries no burndown points (they roll up to a parent) but still consumes a session's context, so
+    // it is weighted at a nominal TASK_COST (2). A `story`/unstoried-epic uses its own `size`. The
+    // budget sums this, NOT burndown `size`, so a task-heavy chain can't slip through "free".
+    item.batchCost = item.workItem === 'task' ? 2
+      : typeof item.size === 'number' ? item.size
+      : undefined;
   }
 
   // Reverse dependency edges + unblock-leverage (#254) — INVERT `blockedBy` so each item knows who

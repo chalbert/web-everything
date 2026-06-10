@@ -244,5 +244,17 @@
     "projects": [
       "webvalidation"
     ]
+  },
+  {
+    "id": "validator-resolution-demo",
+    "name": "Validator Resolution Playground",
+    "summary": "The runnable home for the runtime customValidatorResolution plug (#224) — the async sibling of validity-merge (#215). A real <async-validator-field> drives an async check that resolves on a controllable delay, so you can fire overlapping checks and watch the race: a slow, now-stale answer arrives last and the resolution strategy reconciles it — versioning drops the late answer, cancellation aborts the in-flight request — swapped with zero field edits. The surviving answer feeds a composed <validity-merge-field>'s async source so the merged :user-invalid styling reacts live. A runtime-conformance section asserts the plug's invariants (versioning-drops-stale, cancellation-aborts, pending{version}-then-terminal, cross-plane compose, per-scope resolution).",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>A live surface for the runtime <a href=\"/plugs/customvalidatorresolutionregistry/\"><code>customValidatorResolution</code></a> plug (<a href=\"/backlog/224-validator-resolution-runtime-plug-element/\">#224</a>) — the async sibling of the <a href=\"/demos/validity-merge-demo.html\">validity-merge</a> plane (#215) and the live counterpart of the dependency-free <code>validator-resolution/</code> model (<a href=\"/backlog/214-async-validator-resolution-strategy-plane/\">#214</a>). A real <code>&lt;async-validator-field&gt;</code> drives an async check whose answer resolves on a <strong>controllable delay</strong>.</p><h3>The concept is a race</h3><p>The plane only shows its value when answers arrive out of order. Raise the delay, then fire a <strong>stale race</strong>: a slow check starts, a fast fresh one follows, and the slow — now stale — answer arrives <em>last</em>. The race log shows the resolution strategy reconcile it: <code>versioning</code> lets the request finish then <strong>drops</strong> the late answer; <code>cancellation</code> <strong>aborts</strong> the in-flight request outright.</p><h3>Policy swappable, surface fixed</h3><p>Per <a href=\"/backlog/004-validation-engine-open-design-points/\">#004</a> OP-1 the standard fixes the <code>pending{version} → valid|invalid</code> surface, not the stale-answer policy. Swap <code>versioning</code> ↔ <code>cancellation</code> with <strong>zero field edits</strong>.</p><h3>Two planes composed</h3><p>The surviving answer feeds the <code>async</code> source of a composed <code>&lt;validity-merge-field&gt;</code> (#215), so the merged state flows to native <a href=\"https://developer.mozilla.org/en-US/docs/Web/API/ElementInternals/setValidity\"><code>setValidity()</code></a> and drives <code>:user-invalid</code> for free.</p><h3>Verified contract</h3><p>The runtime-conformance section asserts the live plug against its contract: versioning drops a superseded answer, cancellation aborts the prior request, the runner emits <code>pending{version}</code> then the terminal source, the async field feeds the merge field, and per-scope (nearest-wins) resolution. The strategies + runner are the <strong>same source</strong> the #214 unit suite runs.</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/validator-resolution-demo.html",
+    "projects": [
+      "webvalidation"
+    ]
   }
 ]

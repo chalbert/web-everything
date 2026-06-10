@@ -2,9 +2,11 @@
 type: issue
 workItem: task
 parent: "048"
-status: open
+status: resolved
 blockedBy: ["048"]
 dateOpened: '2026-06-08'
+dateStarted: "2026-06-10"
+dateResolved: "2026-06-10"
 tags:
   - webcomponents
   - component
@@ -47,5 +49,18 @@ rule at a time."
   this repo owns its own canon).
 
 ## Progress
-- **Status:** open — surfaced during #048 close-out (2026-06-08). No `closed` fixture exists yet, so the
-  gap is latent; fix it together with the first `closed` fixture.
+- **Status:** resolved (2026-06-10, in a batch). Fixed in frontierui.
+- **Done:**
+  - `compiler/src/component-transform/imperative.ts` — `emitImperative` now lowers both `open` and
+    `closed` to the reconnect-safe `#root`-field shape: a `#root;` field plus
+    `this.#root ??= this.attachShadow({ mode })` and `if (!this.#root.childNodes.length) this.#root.append(…)`.
+    The old `const root = this.shadowRoot ?? this.attachShadow(…)` form re-attached on every reconnect for
+    closed roots (closed roots are unreadable via `this.shadowRoot`) and the second `attachShadow` threw.
+    Chose to **unify `open` onto the same shape** (per the second decision above) — one form is simpler to
+    reason about; the doc comment was updated to match. `shadow="none"` (light DOM) is unchanged.
+  - Authored the first `closed` fixture pair (`x-shadow-closed.html` / `.ts`) and rewrote the existing
+    `x-empty.ts` open fixture to the new bytes; registered a `contract('x-shadow-closed', …)` in
+    `transform.test.ts`. The `parseImperative` AST walk already keyed only on the `attachShadow` call, so
+    `toDeclarative` needed no change.
+  - Gate: full frontierui suite green — 1342 passed / 7 skipped (88 files); the transform contract suite
+    grew 8 → 12 (the closed pair's four byte-identical round-trip assertions).

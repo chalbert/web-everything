@@ -2,9 +2,11 @@
 type: idea
 workItem: story
 size: 3
-status: open
+status: resolved
 blockedBy: ["035", "136"]
 dateOpened: "2026-06-06"
+dateResolved: "2026-06-10"
+graduatedTo: frontierui/blocks/droplist/Filter.ts + Clearable.ts
 tags: [droplist, autocomplete, filter, clearable, input, loader, traits, behavior]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -39,9 +41,27 @@ CustomAttribute behaviors (plateau/Frontier UI), composing with the proven
 invariant tracked in [#023](/backlog/023-droplist-composition-open-contracts/): `filter` and
 `live-status` both write status, so route both through the one announcer region rather than two.
 
-## Correction (reopened 2026-06-07)
+## Resolution (verified 2026-06-10) — done in Frontier UI; reopened in error
 
-> **Was resolved in error.** The only implementation of this surface was built in the **legacy `plateau` repo**, since confirmed **abandoned** — the initial single-repo prototype, superseded by Web Everything + Frontier UI + plateau-app. It is **not in the live project**: the WE *spec* exists, but there is **no reference implementation** in Frontier UI or the WE `plugs/`, and the (now-removed) `graduatedTo` pointed into dead code. Reopened as a **fresh build** against the live reference implementation (Frontier UI / WE `plugs/`, per AGENTS.md) — **do not migrate or consult plateau** (explicitly not a model). The original `## Progress` below describes the void plateau build and is retained only as history.
+> **The `filter` + `clearable` surfaces this item owns are built and tested in the live project.** The
+> 2026-06-07 "reopened as a fresh build" note below was wrong — it checked only the abandoned `plateau`
+> repo, not the live Frontier UI tree, and concluded no reference implementation existed. It does:
+>
+> - `frontierui/blocks/droplist/Filter.ts` (265 lines) — the loader-intent async orchestrator this item
+>   specs: `async` (debounce ~250ms, loading state, stale-cancel, inject options) + `client` modes,
+>   diacritic-insensitive folding, the `controller` (focus host ≠ collection) split, and the ONE shared
+>   `status` aria-live region per the [#023](/backlog/023-droplist-composition-open-contracts/) invariant.
+> - `frontierui/blocks/droplist/Clearable.ts` (81 lines) — the input-side X affordance (reveal when
+>   non-empty, clear + re-run `filter`, return focus).
+> - `<auto-complete>` is registered and runs end-to-end composed over `focus-delegation`+`selection`+
+>   `anchor`; **26 tests pass** (`AutoComplete.test.ts` + `behaviors.test.ts`), covering async source,
+>   client filter, clearable, live-status, windowed, and positioning.
+>
+> So `src/_data/blocks.json`'s autocomplete design decision ("all now built and tested in Frontier UI's
+> reference implementation") was **correct** — no change needed there; the spec-desync was this item's own
+> stale note, now removed. The original `## Progress` (the abandoned plateau build) is retained below as
+> history only. The cross-cutting `live-status`/`windowed` surfaces and `anchor` remained tracked
+> separately (#136/#137/#138) and have since been built in that same droplist work.
 
 ## Progress
 

@@ -59,6 +59,44 @@
   var countEl = document.querySelector('[data-ptable-count]');
   if (!readyChips.length && !typeChips.length && !search) return;
 
+  // ── Visual state + persistence ──────────────────────────────────────────────
+  // A chip's pressed state lives in `aria-pressed`, but the chip palette (style.css) only highlights
+  // `.status-filter-chip.is-active` — the same class home-display.js drives on the Tracked-work chips. So
+  // mirror aria-pressed → .is-active on every render, or a click changes nothing visible. The resulting
+  // filter (which chips are on + the search box) is remembered in localStorage and re-applied on reload,
+  // matching every other backlog filter (graph toggle, tab, home chips).
+  var READY_KEY = 'we-backlog-priority-ready';
+  var TYPE_KEY = 'we-backlog-priority-type';
+  var SEARCH_KEY = 'we-backlog-priority-search';
+  function pressedVals(chips, attr) {
+    return chips.filter(function (c) { return c.getAttribute('aria-pressed') !== 'false'; })
+                .map(function (c) { return c.getAttribute(attr); });
+  }
+  function syncVisual() {
+    readyChips.concat(typeChips).forEach(function (c) {
+      c.classList.toggle('is-active', c.getAttribute('aria-pressed') !== 'false');
+    });
+  }
+  function save() {
+    try {
+      localStorage.setItem(READY_KEY, JSON.stringify(pressedVals(readyChips, 'data-pready')));
+      localStorage.setItem(TYPE_KEY, JSON.stringify(pressedVals(typeChips, 'data-ptype')));
+      localStorage.setItem(SEARCH_KEY, (search && search.value) || '');
+    } catch (e) { /* ignore */ }
+  }
+  // Restore before the first apply(). A chip not in the saved list is set unpressed; a missing/garbled key
+  // leaves the server default (all pressed = no filter) untouched.
+  function restore() {
+    try {
+      var r = JSON.parse(localStorage.getItem(READY_KEY));
+      if (Array.isArray(r)) readyChips.forEach(function (c) { c.setAttribute('aria-pressed', r.indexOf(c.getAttribute('data-pready')) >= 0 ? 'true' : 'false'); });
+      var t = JSON.parse(localStorage.getItem(TYPE_KEY));
+      if (Array.isArray(t)) typeChips.forEach(function (c) { c.setAttribute('aria-pressed', t.indexOf(c.getAttribute('data-ptype')) >= 0 ? 'true' : 'false'); });
+      var q = localStorage.getItem(SEARCH_KEY);
+      if (search && typeof q === 'string') search.value = q;
+    } catch (e) { /* ignore */ }
+  }
+
   // Active set for a chip group; empty (= none pressed) is treated as "no filter" by the caller.
   function active(chips, attr) {
     var set = {}, any = false;
@@ -81,6 +119,10 @@
       if (ok) shown++;
     });
     if (countEl) countEl.textContent = shown;
+    // Every code path that changes chip/search state calls apply() afterwards, so this is the single place
+    // to mirror the pressed state onto the chips and persist the whole filter.
+    syncVisual();
+    save();
   }
 
   // Summary count chips (data-pfilter) are one-click shortcuts that drive the readiness filter. Manually
@@ -126,5 +168,6 @@
     });
   });
 
+  restore();
   apply();
 })();

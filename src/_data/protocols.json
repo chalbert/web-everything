@@ -81,5 +81,13 @@
     "status": "concept",
     "ownedByProject": "webcomponents",
     "anchor": "protocol-auto-define-strategy"
+  },
+  {
+    "id": "changelog-manifest",
+    "name": "Changelog Manifest",
+    "summary": "Conformance reference for a release's machine-readable change description — the dual of a prose CHANGELOG.md. Defines per-module entries (the unit is the module/file, not the package) keyed to a semver severity (major/minor/patch) and a Keep a Changelog / Conventional Commits change type, plus a migration linkage: a breaking entry references the codemod that mechanically applies it, with author + integrity-hash trust metadata so the auto-update pipeline can verify a migration before running it on consumer source. Release severity is derived strictest-wins from the entries, not hand-asserted. Borrows existing vocabulary (semver, Keep a Changelog, Conventional Commits) for the human layer; standardizes only the machine schema + migration linkage (the novel part). Consumed by the auto-update pipeline (#101), upgraders (#094), incremental delivery (#103), and MaaS versioning (#088).",
+    "status": "concept",
+    "ownedByProject": "webmanifests",
+    "anchor": "protocol-changelog-manifest"
   }
 ]

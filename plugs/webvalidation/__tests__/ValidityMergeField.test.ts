@@ -7,7 +7,7 @@
  * element's real resolution / recompute / event logic without a live form-associated element (the
  * demo + e2e prove the native `:user-invalid` styling, which no JS-DOM can model anyway).
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import ValidityMergeField from '../ValidityMergeField';
 import { createDefaultValidityMergeRegistry } from '../CustomValidityMergeRegistry';
 import type { MergedValidity } from '../../../validity-merge/provider.js';
@@ -111,5 +111,74 @@ describe('<validity-merge-field>', () => {
     el.appendChild(input);
     el.setSource('manual', { state: 'invalid', message: 'bad' });
     expect(setValidityCalls.at(-1)).toEqual([{ customError: true }, 'bad', input]);
+  });
+});
+
+describe('<validity-merge-field> — native source auto-derive (#218)', () => {
+  const mounted: HTMLElement[] = [];
+
+  function mount(input: HTMLInputElement, strategy?: string): { el: ValidityMergeField; input: HTMLInputElement } {
+    const el = makeField(strategy);
+    el.appendChild(input);
+    document.body.appendChild(el); // triggers connectedCallback → wires + derives
+    mounted.push(el);
+    return { el, input };
+  }
+
+  function requiredEmpty(): HTMLInputElement {
+    const i = document.createElement('input');
+    i.required = true;
+    return i;
+  }
+
+  afterEach(() => {
+    while (mounted.length) mounted.pop()!.remove();
+  });
+
+  it('stays idle until the control is touched, then derives invalid from ValidityState', () => {
+    const { el, input } = mount(requiredEmpty());
+    expect(el.merged?.state).toBe('idle'); // connected but untouched → no premature failure
+
+    input.dispatchEvent(new Event('input')); // interaction → read validity
+    expect(el.merged?.state).toBe('invalid');
+    expect(el.merged?.blocking).toBe('native');
+  });
+
+  it('derives valid once a constraint is satisfied', () => {
+    const input = document.createElement('input');
+    input.type = 'email';
+    input.value = 'a@b.com';
+    const { el } = mount(input);
+    input.dispatchEvent(new Event('input'));
+    expect(el.merged?.state).toBe('valid');
+  });
+
+  it('the auto-derived native participates in the merge with the manually-fed sources', () => {
+    const input = document.createElement('input');
+    input.type = 'email';
+    input.value = 'a@b.com';
+    const { el } = mount(input);
+    input.dispatchEvent(new Event('input')); // native → valid
+    const merged = el.setSource('manual', { state: 'invalid', message: 'Email already taken' });
+    expect(merged.state).toBe('invalid'); // source-reduction: any invalid fails
+    expect(merged.blocking).toBe('manual'); // native is valid, manual blocks
+  });
+
+  it('an explicit setSource("native") wins over the auto-derive', () => {
+    const { el, input } = mount(requiredEmpty());
+    el.setSource('native', { state: 'valid' }); // hand-fed despite the empty required control
+    input.dispatchEvent(new Event('input')); // would derive invalid — but manual is in force
+    expect(el.merged?.state).toBe('valid');
+  });
+
+  it('clearSource("native") releases the hand-off and resumes auto-deriving', () => {
+    const { el, input } = mount(requiredEmpty());
+    el.setSource('native', { state: 'valid' });
+    input.dispatchEvent(new Event('input')); // suppressed (manual wins)
+    expect(el.merged?.state).toBe('valid');
+
+    const merged = el.clearSource('native'); // resume auto-derive; control is touched + invalid
+    expect(merged.state).toBe('invalid');
+    expect(merged.blocking).toBe('native');
   });
 });

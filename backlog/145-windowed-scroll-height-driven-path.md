@@ -3,9 +3,12 @@ type: idea
 workItem: story
 size: 5
 parent: "137"
-status: open
+status: resolved
 blockedBy: ["137"]
 dateOpened: "2026-06-07"
+dateStarted: "2026-06-10"
+dateResolved: "2026-06-10"
+graduatedTo: frontierui:blocks/droplist/Windowed.ts (scroll-driven windowing path — itemHeight-gated; computeScrollWindow/spacerHeights pure helpers; #023 active-always-mounted under scroll via out-of-flow active node). Proven by blocks/droplist/__tests__/behaviors.test.ts (scroll suites) + e2e/windowed-scroll.spec.ts (real-layout, scrollHeight===total*itemHeight)
 tags: [droplist, windowed, virtualization, scroll, behavior, pointer, a11y]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -69,3 +72,37 @@ scrollbar reflects the full model, and the active-always-mounted invariant still
 - **Done (close-out):** plateau unit suite **188/188**, e2e **5/5**, WE `check:standards` **0 errors**.
 - **Notes:** keyboard moves scroll active into view → scroll handler recomputes window, so keyboard +
   scroll stay coherent. plateau `.eslintrc` is pre-existingly broken (flat-config `ignores` key) — unrelated.
+
+## Progress (live build, 2026-06-10)
+
+- **Status:** resolved — built fresh against the **live** Frontier UI reference impl
+  (`frontierui/blocks/droplist/Windowed.ts`), not migrated from the abandoned plateau code above.
+- **Done:**
+  - `Windowed.ts` — added the scroll path alongside the existing count path, one shared window
+    computation. New `itemHeight` option switches modes: set → **scroll** (window from
+    `scrollTop`/`clientHeight` via a `scroll` listener), unset → **count** (#137 active-driven, the
+    only happy-dom-testable path) untouched. Top/bottom spacer `<li data-windowed-spacer aria-hidden>`
+    (NOT `[composite-descendant]`) pad to `total × itemHeight` so the scrollbar reflects the full model.
+    Keyboard `activedescendantchange` → `#scrollActiveIntoView` sets `scrollTop` then recomputes (one
+    window). `#activeIndex` now defaults to `-1` (no active designation until focus/keyboard) so the
+    backstop doesn't pin row 0 during pure scrolling.
+  - **#023 active-always-mounted holds under scroll** — and `scrollHeight` stays exact: an active row
+    scrolled outside the window is kept mounted but **out of flow** (`position:absolute` at its true
+    offset), so it never inflates `scrollHeight`. This is the fresh build's answer to the plateau-era
+    overshoot (#164) — designed out, not deferred.
+  - Pure helpers `computeScrollWindow` / `spacerHeights` exported — the layout-free math.
+  - Unit tests (`__tests__/behaviors.test.ts`, 16→28): 7 pure cases (top/middle/bottom/partial/
+    zero-overscan/empty window + spacer-sum identity) + 5 synthetic-layout integration tests (faked
+    `clientHeight`: visible-slice-only, re-window on scroll, spacer sum = full height, active-mounted-
+    when-scrolled-off, keyboard-scrolls-active-into-view).
+  - Real-layout proof (Playwright, reusing FUI's existing `test:e2e` + `playwright.config.ts` on :3001):
+    demo `demos/windowed-scroll.{html,ts}` (5,000 rows, composes the real `Windowed` in scroll mode) +
+    `blocks/droplist/__tests__/e2e/windowed-scroll.spec.ts` (6 tests): visible-slice-only,
+    `scrollHeight === total × itemHeight` (the assertion happy-dom can't make), re-window on scroll,
+    active-stays-mounted-off-window (`position:absolute`), keyboard-scrolls-active-into-view, zero
+    console errors.
+- **Gate:** FUI unit suite **1357 passed / 7 skipped (88 files)**, scroll e2e **6/6**, WE
+  `check:standards` **0 errors**.
+- **Leftover:** variable per-row heights (only **fixed** `itemHeight` built) remains for **#163**
+  (already open, `blockedBy: ["145"]` — now unblocked). #162/#164 were plateau-era leftovers already
+  resolved; #164's overshoot is designed out here.

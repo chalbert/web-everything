@@ -3,8 +3,11 @@ type: idea
 workItem: story
 size: 5
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-06"
+dateStarted: "2026-06-10"
+dateResolved: "2026-06-10"
+graduatedTo: protocol changelog-manifest (Changelog Manifest, src/_data/protocols.json + src/_includes/project-webmanifests.njk anchor protocol-changelog-manifest, status concept) — the webmanifests project's first standard; per-module entries keyed to semver severity + Keep-a-Changelog type, migration linkage with author/integrity trust, strictest-wins severity derivation. Human layer borrows semver/Conventional-Commits/Keep-a-Changelog; only the machine schema + migration linkage standardized. Consumed by #101/#094/#103/#088.
 tags: [changelog, manifest, versioning, semver, migration, codemod, auto-update, standard, evergreen, machine-readable]
 relatedReport: reports/2026-06-06-front-end-platform-book.md
 relatedProject: webmanifests

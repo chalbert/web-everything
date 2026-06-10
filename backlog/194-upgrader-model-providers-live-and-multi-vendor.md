@@ -3,9 +3,12 @@ type: idea
 workItem: story
 size: 3
 parent: "097"
-status: open
+status: resolved
 blockedBy: ["188"]
 dateOpened: "2026-06-08"
+dateStarted: "2026-06-10"
+dateResolved: "2026-06-10"
+graduatedTo: none
 tags: [upgrader, ai-agnostic, provider-registry, byo-key, model-client, multi-vendor, monetization]
 relatedProject: webadapters
 crossRef: { url: /backlog/188-upgrader-byo-ai-model-analyzer/, label: "BYO-AI model analyzer (#188)" }
@@ -35,3 +38,25 @@ Open points: where the keyed smoke test lives so it never blocks the default sui
 `looksMessy()` routing heuristic should gain a "prefer model when a key is configured" mode; and
 whether to publish the `ModelClient` contract as a documented extension point (a short authoring
 note) so downstream adopters can bring their own vendor.
+
+## Progress
+
+- **Status:** resolved (2026-06-10, in a batch). The two concrete deliverables shipped; the two
+  *decisions* among the open points were deferred, not built (they're forks, not work — see below).
+- **Done — second vendor (objective 2):** `createOpenAIClient` in
+  `blocks/renderers/upgrader/analyzers/modelComponent.ts` — a thin OpenAI Chat-Completions `fetch`
+  client implementing the same `ModelClient` contract (`id: 'openai'`, structured
+  `response_format: json_schema`, BYO `OPENAI_API_KEY`, fails loudly with no key). The analyzer,
+  engine, and verify gate are untouched, proving the vendor is config not architecture. A deterministic
+  no-key unit test (`upgrader-model.test.ts`) covers it (drops into the registry, surfaces a
+  `model:openai` diagnostic with no key) — hermetic, no network.
+- **Done — keyed live run (objective 1):** `upgrader-model.live.test.ts` runs one real end-to-end
+  `upgrade()` per available vendor and asserts the **unchanged verify gate accepts** the live model's
+  output (`model:<id>` handled it, `offered === true`, hyphenated tag, no leftover `${…}`). Resolved
+  the *smoke-test-placement* open point in favour of **`describe.skipIf(!key)`** (the env-gated form):
+  it's picked up by the default include but skips the whole block without a key, so CI without secrets
+  stays green by skipping — no config change, runnable on demand by setting the key.
+- **Deferred (not built — these are decisions, belong in discussion, not a batch):** the
+  `looksMessy()` "prefer-model-when-a-key-is-configured" routing mode, and publishing the `ModelClient`
+  contract as a documented extension point. Both are genuine forks; left as open points for a future
+  decision item if/when demand appears.

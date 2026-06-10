@@ -1,7 +1,7 @@
 ---
-type: idea
+type: decision
 workItem: story
-size: 3
+size: 5
 status: open
 dateOpened: "2026-06-06"
 tags: [intent, navigation-guard, beforeunload, unsaved-work, async, ux, harvest]

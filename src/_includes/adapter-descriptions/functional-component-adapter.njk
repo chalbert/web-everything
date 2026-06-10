@@ -20,12 +20,12 @@
         The current generator emits a function returning the template as JSX (via the shared <code>htmlToJsx</code>
         transform, so it mirrors the other adapter forms) plus a thin element wrapper. Unlike the class form, the
         output is <strong>not self-contained</strong> — it imports the jsx runtime via a <em>bare specifier</em>
-        (<code>@webeverything/jsx-runtime</code>). A consumer therefore resolves it with an
+        (<code>@frontierui/jsx-runtime</code>). A consumer therefore resolves it with an
         <strong>import map</strong> — the canonical native-platform answer:
     </p>
     {% highlight "html" %}
 &lt;script type="importmap"&gt;
-  { "imports": { "@webeverything/jsx-runtime": "/blocks/renderers/jsx/index.ts" } }
+  { "imports": { "@frontierui/jsx-runtime": "/blocks/renderers/jsx/index.ts" } }
 &lt;/script&gt;
 &lt;script type="module"&gt;
   await import('/_maas/user-card.js?form=functional'); // self-registers &lt;user-card&gt;

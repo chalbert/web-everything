@@ -1,0 +1,34 @@
+{
+  "_doc": "Calibrated session capacity for POINTS-BUDGETED batches (docs/agent/backlog-workflow.md → 'Running a batch'). The batch's point budget = round(capacityPoints * targetFraction) — 'take as many points as possible up to ~half a session's worth', not a fixed item count. 'points' here = batchCost (a story's size; a task counts as 2, since tasks carry no burndown points but still consume context). `node scripts/backlog.mjs calibrate --points=<P> --context-pct=<C>` updates capacityPoints via EMA from each session's observed (points resolved ÷ context fraction); the closing-session skill runs it. Seeded from batch-2026-06-10-240-195-038-194-182 (10 items, ~25 cost-pts at ~20% context → implied ~125 capacity), haircut to 100 pending the first real calibration.",
+  "capacityPoints": 59,
+  "targetFraction": 0.5,
+  "ema": 0.3,
+  "samples": [
+    {
+      "date": "2026-06-10",
+      "slug": "batch-2026-06-10-240-195-038-194-182",
+      "points": 25,
+      "contextPct": 20,
+      "impliedCapacity": 125,
+      "seed": true
+    },
+    {
+      "date": "2026-06-10",
+      "points": 23,
+      "contextPct": 70,
+      "impliedCapacity": 33
+    },
+    {
+      "date": "2026-06-10",
+      "points": 13,
+      "contextPct": 20,
+      "impliedCapacity": 65
+    },
+    {
+      "date": "2026-06-10",
+      "points": 2,
+      "contextPct": 11,
+      "impliedCapacity": 18
+    }
+  ]
+}

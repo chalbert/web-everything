@@ -1,0 +1,184 @@
+<section class="intro-section mb-12">
+  <h3 id="mission">Mission</h3>
+  <p>
+    <strong>Web Manifests</strong> standardizes <strong>machine-readable project and release metadata</strong> —
+    the structured descriptors that let tooling reason about a module without reading its source or a prose
+    changelog. Its first protocol is the
+    <a href="#protocol-changelog-manifest">Changelog Manifest</a>: a per-release, per-module description of
+    <em>what changed and how breaking it is</em>, with the migration that mechanically applies each breaking
+    change. It is the contract that makes safe <strong>auto-update</strong> possible.
+  </p>
+  <p>
+    A human <code>CHANGELOG.md</code> cannot be acted on by a machine. The Changelog Manifest is the
+    <strong>dual</strong> of it: a readable summary for people <em>and</em> a typed API for tools. The
+    <a href="/backlog/101-auto-update-pipeline/">auto-update pipeline (#101)</a> reads it to classify an
+    update's risk, the <a href="/backlog/094-ai-upgrader-tools/">upgraders (#094)</a> read it to apply bundled
+    codemods without hand-editing call sites, and <a href="/backlog/103-incremental-delivery/">incremental
+    delivery (#103)</a> reads it to compute exactly which modules moved.
+  </p>
+
+  <div class="comparison-block" style="background: rgba(5, 150, 105, 0.08); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #059669; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #047857; font-size: 1rem;">Borrow the human layer; standardize only the machine layer</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      The Changelog Manifest does <strong>not</strong> invent a versioning vocabulary. The human-readable
+      surface reuses <a href="https://keepachangelog.com/">Keep a Changelog</a> sections and
+      <a href="https://www.conventionalcommits.org/">Conventional Commits</a> types; the change-severity
+      vocabulary is <a href="https://semver.org/">semver</a> verbatim (<code>major</code> / <code>minor</code> /
+      <code>patch</code>). What is <em>new</em>, and all this standard actually defines, is the
+      <strong>machine schema</strong> — per-module entries keyed to a severity and a migration reference — and
+      the <strong>migration-script linkage</strong> that turns a breaking change into an executable codemod.
+    </p>
+  </div>
+</section>
+
+<section id="features" class="section-card">
+  <h3 id="feature-surface">Feature Surface</h3>
+  <p>
+    What a changelog-manifest standard covers, and how each capability is fulfilled.
+    <strong>Built-in</strong> = defined by this standard's schema;
+    <strong>Compose</strong> = deferred to an existing vocabulary or Web Everything standard.
+  </p>
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 680px;">
+      <thead>
+        <tr><th>Feature</th><th>Applies To</th><th>What it does</th><th>Built-in</th><th>Compose</th></tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="5" style="font-weight:600; background:rgba(5,150,105,0.06);">Change description</td></tr>
+        <tr><td><strong>Per-module entries</strong></td><td>Each release</td><td>The unit is the module/file, not the whole package — consumers know exactly what moved</td><td>✅ schema</td><td>—</td></tr>
+        <tr><td><strong>Change severity</strong></td><td>Each entry</td><td>major / minor / patch — drives risk routing and semver derivation</td><td>✅ schema</td><td>🔗 <a href="https://semver.org/">semver</a> vocabulary</td></tr>
+        <tr><td><strong>Change type</strong></td><td>Each entry</td><td>added / changed / deprecated / removed / fixed / security</td><td>✅ schema</td><td>🔗 <a href="https://keepachangelog.com/">Keep a Changelog</a> + <a href="https://www.conventionalcommits.org/">Conventional Commits</a></td></tr>
+        <tr><td><strong>Human summary</strong></td><td>Each entry / release</td><td>The readable half of the dual format</td><td>✅ schema</td><td>🔗 Keep a Changelog rendering</td></tr>
+        <tr><td colspan="5" style="font-weight:600; background:rgba(99,102,241,0.06);">Migration (the novel part)</td></tr>
+        <tr><td><strong>Migration reference</strong></td><td>Breaking entries</td><td>Links a <code>major</code> change to the codemod that mechanically applies it</td><td>✅ schema</td><td>🔗 <a href="/backlog/094-ai-upgrader-tools/">Upgraders (#094)</a></td></tr>
+        <tr><td><strong>Migration trust metadata</strong></td><td>Each migration</td><td>Author, integrity hash, and the scope of code it rewrites — codemods run on consumer source</td><td>✅ schema</td><td>🔗 <a href="/backlog/101-auto-update-pipeline/">Pipeline (#101)</a> security step</td></tr>
+        <tr><td colspan="5" style="font-weight:600; background:rgba(5,150,105,0.06);">Consumption — read, not reimplemented</td></tr>
+        <tr><td><strong>Risk classification</strong></td><td>Updater</td><td>Aggregate per-module severity into an update-wide risk band</td><td colspan="2">🔗 <a href="/backlog/101-auto-update-pipeline/">Auto-update pipeline (#101)</a></td></tr>
+        <tr><td><strong>Incremental delivery</strong></td><td>Bundler / CDN</td><td>Ship only the modules whose entries changed</td><td colspan="2">🔗 <a href="/backlog/103-incremental-delivery/">Incremental delivery (#103)</a></td></tr>
+        <tr><td><strong>Served-artifact versioning</strong></td><td>Module-as-a-Service</td><td>Content-address the version bumps this manifest records</td><td colspan="2">🔗 <a href="/backlog/088-module-service-versioning/">MaaS versioning (#088)</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="how" class="section-card">
+  <h3 id="how-it-works">How It Works</h3>
+  <p>
+    A release publishes one manifest. Each entry names a module, its change severity and type, a human
+    summary, and — when the change is breaking — a reference to the migration that applies it. Tools read
+    the manifest; they never parse prose.
+  </p>
+  {% highlight "json" %}
+{
+  "manifestVersion": "1",
+  "package": "@frontierui/droplist",
+  "release": "3.0.0",
+  "previous": "2.4.1",
+  "entries": [
+    {
+      "module": "blocks/droplist/AutoComplete.ts",
+      "severity": "major",
+      "type": "changed",
+      "summary": "`filter` prop renamed to `filterStrategy`.",
+      "migration": {
+        "ref": "migrations/3.0.0/rename-filter-prop.codemod.ts",
+        "author": "frontierui",
+        "integrity": "sha256-…",
+        "rewrites": "consumer call sites of <auto-complete filter>"
+      }
+    },
+    {
+      "module": "blocks/droplist/Filter.ts",
+      "severity": "patch",
+      "type": "fixed",
+      "summary": "Diacritic folding now matches `Intl.Collator` sensitivity."
+    }
+  ]
+}
+  {% endhighlight %}
+  <p>
+    The updater derives the package bump from the strictest entry severity (one <code>major</code> entry makes
+    the release <code>major</code>), routes the breaking entries through their migrations, and — for a clean
+    update — applies them without a human editing a single call site.
+  </p>
+</section>
+
+<section id="protocol-changelog-manifest" class="section-card">
+  <h3 id="changelog-manifest-protocol">Changelog Manifest Protocol</h3>
+  <p>
+    Conformance reference for a release's machine-readable change description. A conformant manifest is a dual
+    artifact: a <strong>human-readable</strong> projection (Keep a Changelog sections) and a
+    <strong>machine schema</strong> (the typed entries above). The protocol standardizes <em>only</em> the
+    machine schema and the migration linkage; the human layer is a rendering of the same entries and borrows
+    existing vocabulary rather than defining one.
+  </p>
+
+  <h4 id="schema-contract">Schema Contract</h4>
+  <p>The novel, standardized surface — every conformant manifest entry satisfies this shape:</p>
+  {% highlight "typescript" %}
+type Severity = 'major' | 'minor' | 'patch';            // semver, verbatim
+type ChangeType =                                        // Keep a Changelog vocabulary
+    'added' | 'changed' | 'deprecated' | 'removed' | 'fixed' | 'security';
+
+interface ChangelogEntry {
+    // The unit is the module/file, never the whole package.
+    module: string;
+    severity: Severity;
+    type: ChangeType;
+    // The human half of the dual format.
+    summary: string;
+    // Present iff the change is breaking and mechanically applicable.
+    migration?: MigrationRef;
+}
+
+interface MigrationRef {
+    // The codemod that applies this breaking change to consumer source.
+    ref: string;
+    // Trust metadata — a migration runs on the consumer's code (#101 security step).
+    author: string;
+    integrity: string;           // content hash of the referenced codemod
+    rewrites: string;            // human description of the scope it touches
+}
+
+interface ChangelogManifest {
+    manifestVersion: string;
+    package: string;
+    release: string;             // the new version (semver)
+    previous: string;           // the version this manifest migrates from
+    entries: ChangelogEntry[];
+}
+  {% endhighlight %}
+
+  <h4 id="severity-derivation">Severity Derivation</h4>
+  <p>
+    The package's release severity is the <strong>strictest entry severity</strong>: any <code>major</code>
+    entry makes the release <code>major</code>; otherwise any <code>minor</code> makes it <code>minor</code>;
+    else <code>patch</code>. This makes semver a <em>derived</em> fact of the per-module entries, not a
+    hand-asserted label — the same strictest-wins reduction the
+    <a href="/projects/webvalidation/#protocol-validation">Validation Protocol</a> uses for merged validity.
+  </p>
+
+  <h4 id="migration-trust">Migration Trust</h4>
+  <p>
+    A migration is executable code that rewrites the <em>consumer's</em> source, so it is the manifest's one
+    security-sensitive surface. The protocol requires every <code>MigrationRef</code> to carry an
+    <code>integrity</code> hash of the referenced codemod and an <code>author</code>, so the
+    <a href="/backlog/101-auto-update-pipeline/">auto-update pipeline (#101)</a> can verify a migration before
+    running it and refuse one whose hash does not match. The protocol defines the <em>linkage and trust
+    fields</em>; how a codemod is authored and how trust is established is the pipeline's security step, not
+    this schema's.
+  </p>
+
+  <h4 id="consumer-pattern">How Consumers Use the Manifest</h4>
+  <table>
+    <thead>
+      <tr><th>Consumer</th><th>Reads</th><th>To</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><a href="/backlog/101-auto-update-pipeline/">Auto-update pipeline (#101)</a></td><td>entry severities + migration trust</td><td>classify update risk; verify then apply migrations</td></tr>
+      <tr><td><a href="/backlog/094-ai-upgrader-tools/">Upgraders (#094)</a></td><td>migration refs</td><td>run the bundled codemod against consumer call sites</td></tr>
+      <tr><td><a href="/backlog/103-incremental-delivery/">Incremental delivery (#103)</a></td><td>changed module list</td><td>ship only the modules whose entries changed</td></tr>
+      <tr><td><a href="/backlog/088-module-service-versioning/">MaaS versioning (#088)</a></td><td>derived release severity</td><td>content-address the version bump</td></tr>
+    </tbody>
+  </table>
+</section>

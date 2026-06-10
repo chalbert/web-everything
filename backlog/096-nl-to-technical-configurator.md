@@ -1,5 +1,5 @@
 ---
-type: idea
+type: decision
 workItem: story
 size: 5
 parent: "097"
@@ -11,6 +11,11 @@ crossRef: { url: /backlog/089-monetization-product-ideas/, label: "Product ideas
 ---
 
 # NL → Technical Configurator — describe the behavior, AI wires the strategy
+
+> **Reclassified `idea` → `decision` (2026-06-10, batch claim-time pre-flight).** A product concept
+> under epic #097, not a mechanical build: the hard NL → requirement-axes extraction step and the
+> *Open follow-ons* (provider boundary, surface = CLI/editor-command/panel) are decisions that must
+> settle before any code. Surface-and-discuss (Tier B), don't auto-build.
 
 An **AI front-end to the Technical Configurator**: the developer describes desired
 behavior in plain language ("undo/redo with an audit trail", "locale-aware sorting

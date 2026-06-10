@@ -127,4 +127,20 @@ export const upgraderCases: UpgraderCase[] = [
     expectIntents: ['motion'],
     expectOffered: true,
   },
+  {
+    id: 'disclosure-intent',
+    title: '8 · Intent inference — aria-expanded + hidden → disclosure',
+    note: 'A toggle control carrying `aria-expanded` paired with a `hidden` collapsible region is the unambiguous show/hide signal (#008/#246) → inferred `intents: ["disclosure"]`. Both signals are required, and the `hidden` match is anchored so the unrelated `aria-hidden` attribute never trips it.',
+    source:
+      `class FaqItem extends HTMLElement {\n` +
+      `  connectedCallback() {\n` +
+      `    this.innerHTML = '<button aria-expanded=\"false\" aria-controls=\"panel\">Details</button><div id=\"panel\" hidden>Answer text</div>';\n` +
+      `  }\n` +
+      `}\n` +
+      `customElements.define('faq-item', FaqItem);`,
+    expectName: 'faq-item',
+    expectShadow: 'none',
+    expectIntents: ['disclosure'],
+    expectOffered: true,
+  },
 ];

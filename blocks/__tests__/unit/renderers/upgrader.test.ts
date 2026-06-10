@@ -63,6 +63,40 @@ describe('reference analyzer — conservative intent inference (#189)', () => {
     expect(r.ir!.intents).toEqual(['motion']);
   });
 
+  it('infers "disclosure" from aria-expanded + hidden, and notes it', async () => {
+    const registry = freshRegistry();
+    const src = upgraderCases.find((c) => c.id === 'disclosure-intent')!.source;
+    const r = await upgrade({ code: src }, { registry });
+    expect(r.ir!.intents).toEqual(['disclosure']);
+    expect(r.ir!.notes!.join(' ')).toMatch(/inferred intent "disclosure"/);
+  });
+
+  it('does NOT infer "disclosure" from aria-expanded alone (both signals required)', async () => {
+    const registry = freshRegistry();
+    const src =
+      `class MenuButton extends HTMLElement {\n` +
+      `  connectedCallback() {\n` +
+      `    this.innerHTML = '<button aria-expanded="false">Menu</button><ul><li>Open</li></ul>';\n` +
+      `  }\n` +
+      `}\n` +
+      `customElements.define('menu-button', MenuButton);`;
+    const r = await upgrade({ code: src }, { registry });
+    expect(r.ir!.intents).toEqual([]);
+  });
+
+  it('does NOT mistake aria-hidden for the disclosure `hidden` attribute (anchored match)', async () => {
+    const registry = freshRegistry();
+    const src =
+      `class IconLabel extends HTMLElement {\n` +
+      `  connectedCallback() {\n` +
+      `    this.innerHTML = '<button aria-expanded="false"><span aria-hidden="true">★</span>More</button>';\n` +
+      `  }\n` +
+      `}\n` +
+      `customElements.define('icon-label', IconLabel);`;
+    const r = await upgrade({ code: src }, { registry });
+    expect(r.ir!.intents).toEqual([]);
+  });
+
   it('does NOT infer "selection" from role="listbox" alone (both signals required — flag, don\'t fake)', async () => {
     const registry = freshRegistry();
     const src =

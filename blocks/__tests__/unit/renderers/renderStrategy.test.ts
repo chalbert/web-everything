@@ -9,6 +9,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   CustomRenderStrategyRegistry,
   DeclarativeStaticStrategy,
+  createDeclarativeStaticFlavor,
   render,
   renderStrategyRegistry,
 } from '../../../renderers/jsx/render-strategy';
@@ -81,10 +82,21 @@ describe('CustomRenderStrategyRegistry — resolution', () => {
     registry = new CustomRenderStrategyRegistry();
   });
 
-  it('first registered strategy in a root registry becomes the default', () => {
+  it('a bare registry has NO default — registration order does not seed one (#243 config-extends model)', () => {
     registry.register(new DeclarativeStaticStrategy());
+    expect(registry.defaultName).toBeUndefined(); // the tool no longer bakes a default
+    expect(() => registry.resolve()).toThrow(/No render strategy registered/);
+    // The default comes from setDefault (or from extending a flavor) — not from being first.
+    registry.setDefault('declarative-static');
     expect(registry.defaultName).toBe('declarative-static');
     expect(registry.resolve()).toBeInstanceOf(DeclarativeStaticStrategy);
+  });
+
+  it('a project inherits the default by EXTENDING the native-first flavor (not from the tool)', () => {
+    const project = new CustomRenderStrategyRegistry({ extends: [createDeclarativeStaticFlavor()] });
+    expect(project.defaultName).toBe('declarative-static');
+    expect(project.has('declarative-static')).toBe(true);
+    expect(project.resolve()).toBeInstanceOf(DeclarativeStaticStrategy);
   });
 
   it('resolves a strategy by explicit name', () => {
@@ -107,21 +119,22 @@ describe('CustomRenderStrategyRegistry — resolution', () => {
     expect(() => registry.setDefault('vdom')).toThrow(/Unknown render strategy: vdom/);
   });
 
-  it('nearest-scope wins: a child override shadows the parent default', () => {
-    const parent = new CustomRenderStrategyRegistry().register(new DeclarativeStaticStrategy());
+  it('nearest-scope wins: a child override shadows the inherited default (via the extends chain)', () => {
+    // The platform config a project would extend (declarative-static default).
+    const platform = createDeclarativeStaticFlavor();
 
-    // A stub alternate strategy registered only in the child scope.
+    // A stub alternate strategy registered only in the child scope, which extends the platform.
     const stub: CustomRenderStrategy = {
       name: 'stub',
       mount: (tree, host): RenderHandle => ({ strategy: 'stub', host, nodes: [] }),
     };
-    const child = new CustomRenderStrategyRegistry(parent).register(stub).setDefault('stub');
+    const child = new CustomRenderStrategyRegistry({ extends: [platform] }).register(stub).setDefault('stub');
 
-    // Child default is its own; parent default is still declarative-static.
+    // Child default is its own; the extended platform default is still declarative-static (not mutated).
     expect(child.defaultName).toBe('stub');
-    expect(parent.defaultName).toBe('declarative-static');
+    expect(platform.defaultName).toBe('declarative-static');
 
-    // Child still resolves inherited strategies through the parent (nearest-scope wins,
+    // Child still resolves inherited strategies through the extends chain (nearest-scope wins,
     // but the chain is walked for names the child doesn't hold).
     expect(child.resolve('declarative-static')).toBeInstanceOf(DeclarativeStaticStrategy);
     expect(child.has('declarative-static')).toBe(true);

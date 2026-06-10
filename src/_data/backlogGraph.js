@@ -54,7 +54,7 @@ module.exports = () => {
       type: it.type,
       status: it.status,
       tier: it.tier || null,           // only open items carry a tier (#249)
-      batchable: !!it.batchable,       // small Tier-A (story ≤3 / task) — the batch skill's eligibility
+      batchable: !!it.batchable,        // Tier-A task or story ≤5 — the batch pool a points-budgeted batch packs
       direct: it.directUnblocks,        // #254 leverage fields
       chain: it.transitiveUnblocks,
       leverage: it.leverageScore,

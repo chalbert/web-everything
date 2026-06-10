@@ -326,7 +326,7 @@ const html = jsxToHtml(jsx);
 {
   "compilerOptions": {
     "jsx": "react-jsx",
-    "jsxImportSource": "@webeverything/jsx-runtime"
+    "jsxImportSource": "@frontierui/jsx-runtime"
   }
 }
     {% endhighlight %}
@@ -337,11 +337,11 @@ const html = jsxToHtml(jsx);
 
     {% highlight "typescript" %}
 // esbuild / Vite — automatic runtime
-{ jsx: 'automatic', jsxImportSource: '@webeverything/jsx-runtime' }
+{ jsx: 'automatic', jsxImportSource: '@frontierui/jsx-runtime' }
     {% endhighlight %}
 
     <p>
-        Install <code>@webeverything/jsx-runtime</code> and the compiler resolves <code>jsx</code>/<code>jsxs</code>
+        Install <code>@frontierui/jsx-runtime</code> and the compiler resolves <code>jsx</code>/<code>jsxs</code>
         from its <code>/jsx-runtime</code> export (and <code>/jsx-dev-runtime</code> in dev) automatically. The
         factory is the same one this page documents — JSX still lowers to standard DOM, no framework runtime.
     </p>

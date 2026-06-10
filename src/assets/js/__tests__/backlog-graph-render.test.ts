@@ -36,8 +36,8 @@ describe('backlog dependency graph — SVG rendering', () => {
   it('draws one node per rendered node and one line per edge (All view = edge participants)', () => {
     const svg = mount(graph); // forces the "all" view, which renders only edge-participating nodes (#257)
     const rendered = graph.nodes.filter((n: any) => n.inEdge);
-    // Each node draws one circle; a batchable (small Tier-A) node adds a detached outer ring, so the
-    // circle count is rendered-nodes + batchable-among-them (see backlog-graph.js `if (n.batchable)`).
+    // Each node draws one circle; a batchable (Tier-A task / story ≤5) node adds a detached outer ring,
+    // so the circle count is rendered-nodes + batchable-among-them (see backlog-graph.js `if (n.batchable)`).
     const rings = rendered.filter((n: any) => n.batchable).length;
     expect(svg.querySelectorAll('circle').length).toBe(rendered.length + rings);
     // All edges connect two edge participants, so every edge renders in the All view.

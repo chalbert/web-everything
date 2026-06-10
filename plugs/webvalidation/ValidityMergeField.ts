@@ -13,6 +13,12 @@
  *
  * Swapping the strategy (`strategy="last-write-wins"` or `.useStrategy()`) re-resolves and recomputes
  * with zero source-feeding edits — the whole point of the plane.
+ *
+ * #218 — the `native` source is **auto-derived** from the inner form control's `ValidityState`
+ * (`required`/`type=email`/`pattern`/… ): on connect and on the control's `input`/`change`/`invalid`
+ * events the control's validity is mapped to the `native` source, so a dev only wires the *non-native*
+ * sources. An explicit `setSource('native', …)` still wins (the auto-derive backs off until the
+ * manual source is `clearSource`d) — explicit over inferred, the native-first default in practice.
  */
 import type { SourceUpdate, ValiditySourceOrchestrator } from '../../validity-merge/registry.js';
 import { ValiditySourceOrchestrator as Orchestrator } from '../../validity-merge/registry.js';
@@ -34,6 +40,9 @@ function resolveRegistry(node: Node): CustomValidityMergeRegistry | undefined {
   return typeof window !== 'undefined' ? window.customValidityMerge : undefined;
 }
 
+/** The inner form control whose `ValidityState` feeds the auto-derived `native` source (#218). */
+type NativeControl = HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement;
+
 export default class ValidityMergeField extends HTMLElement {
   static formAssociated = true;
   static observedAttributes = ['strategy'];
@@ -41,6 +50,19 @@ export default class ValidityMergeField extends HTMLElement {
   readonly #internals: ElementInternals;
   #orchestrator: ValiditySourceOrchestrator | null = null;
   #last: MergedValidity | null = null;
+
+  /** Once `native` is fed by hand, the auto-derive backs off until it is `clearSource`d (explicit wins). */
+  #nativeManual = false;
+  /** The native source stays `idle` until the user touches the control — no premature failure. */
+  #nativeInteracted = false;
+  /** The control we have listeners on (re-synced when the light DOM swaps it). */
+  #controlEl: NativeControl | null = null;
+
+  /** A control `input`/`change`/`invalid` marks interaction and re-derives the `native` source. */
+  readonly #onControlEvent = (): void => {
+    this.#nativeInteracted = true;
+    this.#deriveNative();
+  };
 
   constructor() {
     super();
@@ -54,6 +76,12 @@ export default class ValidityMergeField extends HTMLElement {
 
   connectedCallback(): void {
     this.#resolveOrchestrator();
+    this.#syncControlListeners();
+    this.#deriveNative();
+  }
+
+  disconnectedCallback(): void {
+    this.#detachControlListeners();
   }
 
   attributeChangedCallback(name: string): void {
@@ -86,12 +114,63 @@ export default class ValidityMergeField extends HTMLElement {
 
   /** Feed (or replace) a named source's result and push the recomputed validity to the platform. */
   setSource(source: string, update: SourceUpdate): MergedValidity {
+    if (source === 'native') this.#nativeManual = true; // explicit native wins over the auto-derive
     return this.#recompute(this.#ensureOrchestrator().set(source, update));
   }
 
   /** Drop a named source (e.g. a cleared async check) and recompute. */
   clearSource(source: string): MergedValidity {
-    return this.#recompute(this.#ensureOrchestrator().clear(source));
+    const merged = this.#recompute(this.#ensureOrchestrator().clear(source));
+    if (source === 'native') {
+      this.#nativeManual = false; // hand-off released — resume auto-deriving from the control
+      return this.#deriveNative() ?? merged;
+    }
+    return merged;
+  }
+
+  /**
+   * Auto-derive the `native` source from the inner control's `ValidityState` (#218): `valid` when
+   * `validity.valid`, else `invalid` carrying `validationMessage`, `idle` when the control is absent
+   * or untouched. A no-op while a manual `native` source is in force (explicit wins) or before a
+   * registry is in scope. Feeds the orchestrator directly so it never trips the manual flag.
+   */
+  #deriveNative(): MergedValidity | null {
+    if (this.#nativeManual) return null;
+    if (!this.#orchestrator) {
+      this.#resolveOrchestrator();
+      if (!this.#orchestrator) return null; // not bootstrapped yet — connect/set will re-derive
+    }
+    const control = this.#findControl();
+    let update: SourceUpdate;
+    if (!control || !this.#nativeInteracted) update = { state: 'idle' };
+    else if (control.validity.valid) update = { state: 'valid' };
+    else update = { state: 'invalid', message: control.validationMessage };
+    return this.#recompute(this.#orchestrator.set('native', update));
+  }
+
+  #findControl(): NativeControl | null {
+    return this.querySelector('input, select, textarea');
+  }
+
+  /** (Re)attach the interaction listeners to the current inner control, dropping any stale ones. */
+  #syncControlListeners(): void {
+    const control = this.#findControl();
+    if (control === this.#controlEl) return;
+    this.#detachControlListeners();
+    this.#controlEl = control;
+    if (!control) return;
+    control.addEventListener('input', this.#onControlEvent);
+    control.addEventListener('change', this.#onControlEvent);
+    control.addEventListener('invalid', this.#onControlEvent);
+  }
+
+  #detachControlListeners(): void {
+    const control = this.#controlEl;
+    if (!control) return;
+    control.removeEventListener('input', this.#onControlEvent);
+    control.removeEventListener('change', this.#onControlEvent);
+    control.removeEventListener('invalid', this.#onControlEvent);
+    this.#controlEl = null;
   }
 
   /** Swap the active merge strategy by name (re-resolved through scope) and recompute. */

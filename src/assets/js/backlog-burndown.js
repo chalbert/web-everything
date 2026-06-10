@@ -161,13 +161,21 @@
     svg.innerHTML = s;
   }
 
+  // Granularity toggle, persisted in localStorage so the chosen scale survives a reload (default weekly),
+  // matching the graph filter and tab restore above.
+  var GRAN_KEY = 'we-backlog-burndown-gran';
+  var GRANS = { daily: 1, weekly: 1, monthly: 1 };
   var granBtns = Array.prototype.slice.call(document.querySelectorAll('[data-bd-gran]'));
+  function setGran(gran) {
+    granBtns.forEach(function (x) { x.classList.toggle('is-active', x.dataset.bdGran === gran); });
+    try { localStorage.setItem(GRAN_KEY, gran); } catch (e) { /* ignore */ }
+    render(gran);
+  }
   granBtns.forEach(function (b) {
-    b.addEventListener('click', function () {
-      granBtns.forEach(function (x) { x.classList.toggle('is-active', x === b); });
-      render(b.dataset.bdGran);
-    });
+    b.addEventListener('click', function () { setGran(b.dataset.bdGran); });
   });
 
-  render('weekly');
+  var savedGran = 'weekly';
+  try { var g = localStorage.getItem(GRAN_KEY); if (g && GRANS[g]) savedGran = g; } catch (e) { /* ignore */ }
+  setGran(savedGran);
 })();

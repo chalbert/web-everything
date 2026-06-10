@@ -74,9 +74,15 @@ function inferIntents(template: string, code: string): { intents: string[]; note
     notes.push('inferred intent "motion" from a prefers-reduced-motion guard.');
   }
 
-  // NOTE: an `aria-expanded`/`hidden` toggle would map to a `disclosure` intent, but `disclosure` is
-  // not yet a standard intent (gap #008) — inferring it would fail the verify gate, so it is omitted
-  // until that intent exists. This is the "prefer omission" rule applied to a missing target.
+  // disclosure — a toggle control (aria-expanded) paired with a collapsible region carrying the bare
+  // `hidden` attribute. BOTH signals are required: aria-expanded alone could be a combobox/menu button,
+  // and a lone `hidden` is just hidden content, so the pair is what pins it to the show/hide disclosure
+  // pattern (#008). The `hidden` match is anchored to a leading boundary so it never fires on the
+  // unrelated `aria-hidden` attribute.
+  if (/\baria-expanded\b/i.test(template) && /(?:^|[\s"'])hidden(?:[\s=>/]|$)/i.test(template)) {
+    intents.push('disclosure');
+    notes.push('inferred intent "disclosure" from aria-expanded + hidden (toggled show/hide).');
+  }
 
   return { intents, notes };
 }

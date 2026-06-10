@@ -18,6 +18,7 @@ import {
   registerModelAnalyzer,
   createScriptedClient,
   createAnthropicClient,
+  createOpenAIClient,
   parseModelIR,
 } from '../../../renderers/upgrader/analyzers/modelComponent';
 import { modelCases, knownModelIntents, scriptedResponderFor } from '../../../renderers/upgrader/__fixtures__/model-cases';
@@ -147,6 +148,26 @@ describe('thin Anthropic client — BYO key, never bundled', () => {
       expect(r.diagnostics.join(' ')).toMatch(/ANTHROPIC_API_KEY|API key/);
     } finally {
       if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
+    }
+  });
+});
+
+describe('thin OpenAI client — second vendor, BYO key, never bundled (#194)', () => {
+  it('drops into the same registry and fails loudly when no key is configured', async () => {
+    // Hermetic: stub away the env so the no-key path is exercised without a network call, even on a
+    // machine that has OPENAI_API_KEY set. resolveOpenAIKey throws before fetch is ever reached.
+    const saved = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+    try {
+      const registry = new CustomAnalyzerRegistry();
+      registerModelAnalyzer(registry, createOpenAIClient());
+      const src = modelCases.find((c) => c.id === 'dynamic-resolved')!.source;
+      const r = await upgrade({ code: src }, { registry, knownIntents });
+      expect(r.offered).toBe(false);
+      expect(r.analyzerId).toBe('model:openai'); // distinct vendor id, proving the seam is swappable
+      expect(r.diagnostics.join(' ')).toMatch(/OPENAI_API_KEY|API key/);
+    } finally {
+      if (saved !== undefined) process.env.OPENAI_API_KEY = saved;
     }
   });
 });

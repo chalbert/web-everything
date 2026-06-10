@@ -24,7 +24,10 @@
         "field-sizing": "polyfill-ok",
         "dialog-closedby": "polyfill-ok",
         "customizable-select": "capability-hard",
-        "cross-root-aria": "capability-hard"
+        "cross-root-aria": "capability-hard",
+        "details": "native-ok",
+        "details-name": "native-ok",
+        "hidden-until-found": "native-ok"
       }
     },
     {
@@ -46,7 +49,10 @@
         "field-sizing": "polyfill-ok",
         "dialog-closedby": "polyfill-ok",
         "customizable-select": "native-ok",
-        "cross-root-aria": "native-ok"
+        "cross-root-aria": "native-ok",
+        "details": "native-ok",
+        "details-name": "native-ok",
+        "hidden-until-found": "native-ok"
       }
     }
   ]

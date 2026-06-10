@@ -1,5 +1,5 @@
 ---
-type: idea
+type: decision
 workItem: story
 size: 2
 status: open

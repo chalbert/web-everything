@@ -1,18 +1,21 @@
 ---
 type: issue
 workItem: story
-size: 8
+size: 3
 status: open
 blockedBy: ["167"]
 dateOpened: "2026-06-09"
-tags: [plugs, custom-elements, lifecycle, registry, disconnect, attribute-changed, form-associated]
+tags: [plugs, custom-elements, lifecycle, registry, construction, scoped-registry]
 relatedProject: webcomponents
 parent: "167"
 crossRef: { url: /blocks/autocomplete/, label: Autocomplete block }
 ---
 
-# Make the scoped `CustomElementRegistry` autonomous-element path functional in real browsers (construct + drive the full lifecycle)
+# Make the scoped `CustomElementRegistry` autonomous-element path constructible in real browsers (the root fix)
 
+**Core slice of the scoped-autonomous-element work** — this item now owns the *root construction fix*;
+the three lifecycle drivers it gates are spun out as sibling tasks under #167: **#261** (disconnectedCallback),
+**#262** (attributeChangedCallback), **#263** (form-associated callbacks), each `blockedBy` this item.
 Verification of #167 (real Chromium, `plugs/__tests__/e2e/autonomous-element-lifecycle.spec.ts`)
 found the scoped autonomous-element path is **non-functional in a real browser before any lifecycle
 question even arises**:
@@ -37,22 +40,19 @@ legal means — e.g. register the real class (not a bare stand-in) natively unde
 construct via the upgrade/`customElements.upgrade` path the browser actually supports — so an
 autonomous scoped element can exist at all.
 
-**Once construction works, drive the lifecycle the platform spec defines (each currently has no
-driver in `plugs/`):**
-- **`disconnectedCallback`** — there is **no removal-path patch**. `removeChild`/`remove` are
-  unpatched; `replaceChildren` is patched only as an *insertion* method and never disconnects the
-  children it removes. Removing a scoped element must fire it (no listener/effect leak).
-- **`attributeChangedCallback`** — no `setAttribute` patch / `MutationObserver`, and the native
-  stand-in declares no `observedAttributes`. A scoped element's `observedAttributes` must react.
-- **Form-associated callbacks** — the stand-in lacks `static formAssociated = true`, so the
-  browser never associates it; `formResetCallback`/`formStateRestoreCallback`/`formDisabledCallback`
-  never fire. Form-associated scoped elements must drive these.
+**Once construction works, the lifecycle drivers it gates are the three sibling tasks** (each
+`blockedBy` this item, each currently with no driver in `plugs/` — split out 2026-06-10):
+- **#261 — `disconnectedCallback`** — no removal-path patch (`removeChild`/`remove` unpatched;
+  `replaceChildren` patched only as insertion). Removing a scoped element must fire it.
+- **#262 — `attributeChangedCallback`** — no `setAttribute` patch / `MutationObserver`, stand-in
+  declares no `observedAttributes`. A scoped element's `observedAttributes` must react.
+- **#263 — Form-associated callbacks** — stand-in lacks `static formAssociated = true`, so
+  `formResetCallback`/`formStateRestoreCallback`/`formDisabledCallback` never fire.
 
-**Acceptance:** the three "currently blocked by the scoped-define barrier" guards in
-`autonomous-element-lifecycle.spec.ts` flip — rewrite each to construct a scoped element and assert
-its callback fires under the named DOM mutation (remove / setAttribute / form.reset). The
-"upstream blocker" guard's assertions invert from "throws Illegal constructor" to "defines
-successfully". Native control test stays green.
+**Acceptance (this slice):** the **"upstream blocker"** guard in `autonomous-element-lifecycle.spec.ts`
+inverts from "throws Illegal constructor" to "defines successfully" — the scoped registry produces a
+legally-constructed real-class instance. Native control test stays green. (The three per-callback guards
+flip in #261/#262/#263, which build on this construction fix.)
 
 See #167 (verification that opened this), and the spec file for the exact, currently-passing
 contract these fixes must overturn.

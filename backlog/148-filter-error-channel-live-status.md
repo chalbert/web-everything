@@ -3,10 +3,12 @@ type: idea
 workItem: story
 size: 3
 parent: "137"
-status: open
+status: resolved
 blockedBy: ["122", "137"]
 dateOpened: "2026-06-07"
-dateStarted: "2026-06-07"
+dateStarted: "2026-06-10"
+dateResolved: "2026-06-10"
+graduatedTo: droplist-filter-error-channel
 tags: [droplist, autocomplete, filter, live-status, loader, error, behavior, a11y]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -59,3 +61,24 @@ Acceptance: a failed async filter request announces an error through the shared 
   filed as **#156** (autocomplete conformance demo substrate crash); not caused by this item.
 - **Notes:** the error path deliberately does NOT clear the listbox (a transient failure shouldn't
   wipe still-actionable results); only `aria-busy` drops and the announcer carries the error.
+
+## Resolution (fresh build — 2026-06-10)
+
+The reopened "fresh build against the live reference implementation" (Frontier UI, per AGENTS.md) is
+**complete**. On review the error channel itself was already present in the live reference impl; the gap
+was acceptance-test coverage of `filter`'s async `reject()` path, which this close-out fills.
+
+- **Filter — `frontierui/blocks/droplist/Filter.ts`:** carries the symmetric error channel —
+  `FilterRequestDetail.reject(message?)` alongside `respond`, a `reject` handler honoring the abort/stale
+  guard (`signal.aborted || #inFlight !== controller` → drop, symmetric to `respond`), drops `aria-busy`,
+  **leaves prior options in place**, calls `#announceError` (defers to a `live-status` owner via the
+  shared region's `data-live-status` flag), and dispatches `filter-error`.
+- **LiveStatus — `frontierui/blocks/droplist/LiveStatus.ts`:** consumes `filter-error` →
+  `announce({ state: 'error', message })`, mapping to the message or the default `Something went wrong`.
+- **Tests added — `frontierui/blocks/droplist/__tests__/behaviors.test.ts`:** new
+  `Filter — async error channel (#148)` block (3) — a rejecting source announces **once** through the
+  shared region + drops `aria-busy` + keeps prior options; a message-less rejection → default text; a
+  **stale rejection from a superseded request is dropped** (newer request still loading/busy). Frontier
+  UI full unit suite green (1345 passed).
+- **Acceptance met:** a failed async filter request announces an error through the one shared
+  `live-status` region (not a silent busy listbox), and a stale rejection is dropped like a stale settle.

@@ -53,7 +53,7 @@
 <!-- AUTO-GENERATED:inventory — run `npm run gen:inventory`; do not edit by hand -->
 - **Plugs** 45 — 31 active · 12 concept · 2 experimental
 - **Blocks** 37 — 13 active · 7 concept · 17 draft
-- **Intents** 31 — 9 concept · 22 draft
+- **Intents** 33 — 10 concept · 23 draft
 - **Glossary terms** 169 · **Research topics** 19 (19 open)
 - **Projects** 25: webadapters, webanalytics, webbehaviors, webblocks, webcases, webcomponents, webcontexts, webdirectives, webdocs, webevents, webexpressions, webinjectors, webintents, webintl, webmanifests, webplugs, webportals, webpositioning, webregistries, webreliability, webresources, webstates, webtraces, webtraits, webvalidation
 <!-- /AUTO-GENERATED:inventory -->

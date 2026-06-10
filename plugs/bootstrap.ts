@@ -32,6 +32,8 @@ import {
   CustomValidityMergeRegistry,
   createDefaultValidityMergeRegistry,
   ValidityMergeField,
+  createDefaultValidatorResolutionRegistry,
+  AsyncValidatorField,
 } from './webvalidation';
 
 // Import expression parsers and event attributes
@@ -210,6 +212,17 @@ documentInjector?.set('customValidityMerge', validityMerge);
 // Define the form-associated control that delegates its validity to the plug.
 if (!customElements.get('validity-merge-field')) {
   customElements.define('validity-merge-field', ValidityMergeField);
+}
+
+// Setup async validator-resolution registry (#224): the stale-answer policy the tree shares, resolved
+// per-scope through the injector chain. Pre-loaded with versioning (native-first default) + cancellation.
+const validatorResolution = createDefaultValidatorResolutionRegistry();
+window.customValidatorResolution = validatorResolution;
+documentInjector?.set('customValidatorResolution', validatorResolution);
+
+// Define the async driver that feeds a <validity-merge-field>'s `async` source.
+if (!customElements.get('async-validator-field')) {
+  customElements.define('async-validator-field', AsyncValidatorField);
 }
 
 // Register event attributes (on:click, on:submit, on:change, etc.)

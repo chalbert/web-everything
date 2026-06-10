@@ -21,21 +21,44 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { computeReadiness, computeSelection, spliceStaleEdges } from './readiness/engine.mjs';
+import { computeReadiness, computeSelection, computeBatchPack, spliceStaleEdges } from './readiness/engine.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const loadBacklog = require(join(ROOT, 'src/_data/backlog.js')); // the SINGLE loader (#248/#249 derivations)
 
+// Calibrated session capacity for points-budgeted batches (.claude/skills/batch-backlog-items/
+// capacity.json, kept current by `backlog.mjs calibrate` at close-out). The batch's point budget is
+// `capacityPoints × targetFraction` — "take as many points as possible up to ~half a session's worth,"
+// not a fixed item count. Missing/unreadable → a conservative built-in default so the CLI still runs.
+const CAPACITY_PATH = join(ROOT, '.claude/skills/batch-backlog-items/capacity.json');
+function loadCapacity() {
+  try {
+    const c = JSON.parse(readFileSync(CAPACITY_PATH, 'utf8'));
+    return { capacityPoints: c.capacityPoints ?? 100, targetFraction: c.targetFraction ?? 0.5 };
+  } catch { return { capacityPoints: 100, targetFraction: 0.5 }; }
+}
+
 const APPLY = process.argv.includes('--apply');
 const JSON_MODE = process.argv.includes('--json');
 const SELECT = process.argv.includes('--select');
+// --budget=<P> overrides the calibrated budget. Two uses: `/batch <P>` (a one-off budget), and the
+// mid-batch SEAM top-up — pass the REMAINING budget (full budget − cost already resolved) so the
+// re-pack fills only what's left, absorbing any items the just-resolved work cascade-freed to Tier A.
+const BUDGET_OVERRIDE = (() => {
+  const m = process.argv.find((a) => a.startsWith('--budget='));
+  const n = m ? Number(m.slice('--budget='.length)) : NaN;
+  return Number.isFinite(n) && n >= 0 ? n : undefined;
+})();
 
 const RED = '\x1b[31m', YEL = '\x1b[33m', GRN = '\x1b[32m', DIM = '\x1b[2m', CYA = '\x1b[36m', BLD = '\x1b[1m', RST = '\x1b[0m';
 
 const items = typeof loadBacklog === 'function' ? loadBacklog() : loadBacklog;
 const report = computeReadiness(items);
 const selection = computeSelection(items); // the deterministic ranked view (same source as the Prioritisation tab)
+const capacity = loadCapacity();
+const budget = BUDGET_OVERRIDE ?? Math.round(capacity.capacityPoints * capacity.targetFraction);
+const batchPack = computeBatchPack(selection.tierA, budget); // the suggested points-budgeted batch
 
 // ── --apply: the only mechanical edit — drop stale (resolved) blockedBy edges ────
 const applied = [];
@@ -55,7 +78,7 @@ if (APPLY) {
 }
 
 if (JSON_MODE) {
-  console.log(JSON.stringify({ ...report, selection, applied: APPLY ? applied : undefined, gaveUp: APPLY ? gaveUp : undefined }, null, 2));
+  console.log(JSON.stringify({ ...report, selection, batch: { capacity, budget, ...batchPack }, applied: APPLY ? applied : undefined, gaveUp: APPLY ? gaveUp : undefined }, null, 2));
   process.exit(0);
 }
 
@@ -69,12 +92,26 @@ if (SELECT) {
   const c = selection.counts;
   console.log(`${BLD}${c.open} open${RST} · ${GRN}${c.tierA} Tier A${RST} · ${CYA}${c.batchable} batchable${RST} · ${YEL}${c.tierB} Tier B (decisions)${RST} · ${DIM}${c.tierC} Tier C${RST}\n`);
 
-  console.log(`${CYA}${BLD}Batchable — small Tier-A (story·≤3 or task) — pre-flight each body for a buried fork before chaining${RST}`);
+  console.log(`${CYA}${BLD}Batchable — Tier-A task or story·≤5 (the batch pool) — pre-flight each body for a buried fork before chaining${RST}`);
   if (selection.batchable.length) selection.batchable.forEach((it) => line(it, `${CYA}◆${RST}`));
   else console.log(`${DIM}  none.${RST}`);
 
+  // The suggested points-budgeted batch — "take as many points as possible up to ~half a session,"
+  // not a fixed item count. Budget = capacityPoints × targetFraction (calibrated at close-out); cost
+  // sums each item's batchCost (size; a task = 2), so a size·5 joins when it fits the remaining points.
+  const budgetSrc = BUDGET_OVERRIDE !== undefined ? `override; remaining at a seam` : `${capacity.capacityPoints} capacity × ${capacity.targetFraction}`;
+  console.log(`\n${CYA}${BLD}Suggested batch — points budget ${budget}${RST} ${DIM}(${budgetSrc}; cost = size, task = 2)${RST}`);
+  if (batchPack.picked.length) {
+    let run = 0;
+    batchPack.picked.forEach((it) => {
+      run += it.batchCost;
+      console.log(`  ${CYA}＋${RST} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}— ${eff(it)} · cost ${it.batchCost} · running ${run}/${budget}${RST}`);
+    });
+    console.log(`  ${DIM}= ${batchPack.spent}/${budget} pts packed across ${batchPack.picked.length} item(s). Pre-flight each body for a buried fork; the count is whatever fills the budget.${RST}`);
+  } else console.log(`${DIM}  none eligible — no Tier-A item fits the budget.${RST}`);
+
   const restA = selection.tierA.filter((it) => !it.batchable);
-  console.log(`\n${GRN}${BLD}Other Tier-A — agent-ready, single-item (story·≥5 / epic / unsized)${RST}`);
+  console.log(`\n${GRN}${BLD}Other Tier-A — agent-ready, single-item (story·≥8 / epic / unsized)${RST}`);
   if (restA.length) restA.forEach((it) => line(it, `${GRN}▲${RST}`));
   else console.log(`${DIM}  none.${RST}`);
 

@@ -1,5 +1,5 @@
 ---
-type: idea
+type: decision
 workItem: story
 size: 5
 status: open
@@ -9,6 +9,12 @@ crossRef: { url: /backlog/, label: Backlog }
 ---
 
 # Agent file-lock coordination — JIT temporary ownership with queue + safeties
+
+> **Reclassified `idea` → `decision` (2026-06-10, batch claim-time pre-flight).** Not an unprompted
+> build: the *Key decisions* section + *Honest scope note* leave open whether to build this at all —
+> the `/batch` parallel-lanes design deliberately took the cheaper static-partition route *instead of*
+> this JIT lock. The v1 (`lock.mjs` + hook) is only worth building once that "is the residual overlap
+> case real enough" call is made. Surface-and-discuss (Tier B), don't auto-build.
 
 When multiple agents work on **close features that sometimes touch the same files**, and you
 **don't know upfront which files an agent will edit**, we want agents to **negotiate temporary
@@ -58,6 +64,36 @@ lock mechanism.
 A tiny `lock.mjs` (acquire/release/queue against `.locks/`) + a `PreToolUse`/`PostToolUse` hook in
 `settings.json` that calls it, validated on two parallel agents reaching for the same per-entry file.
 Anything heavier (central broker, sub-file locks) is over-engineering for this repo's scale.
+
+## Application — parallel `/batch` via partitioned worktree lanes
+
+The batch skill ([batch-backlog-items](../.claude/skills/batch-backlog-items/SKILL.md) →
+*Parallel lanes*) is the first concrete consumer, and it takes the **cheaper partition route over the
+JIT lock** — deliberately, because the batch's safety model is reliability-first and a lock protocol
+is more machinery than the batch needs. The design, reliability-first by construction:
+
+- **Serial is the floor; `--parallel` is an opt-in speculative optimization.** It can only *speed up a
+  clean batch or fall back to serial* — never trade correctness for throughput. Every uncertainty
+  resolves toward serial (a wrong "disjoint" call corrupts a merge; a wrong "collides" call only costs
+  speed).
+- **Partition on provable independence, not a lock.** Two items share a parallel **lane boundary**
+  only if their **declared file paths are disjoint** *and* neither is on the other's `blockedBy` edge
+  (a DAG edge forces same-lane-after, never concurrent). Overlapping/ambiguous → same lane, serial.
+  Declared files are a *lower bound*, so the metadata is not trusted as truth — git is.
+- **Lanes run in isolated git worktrees; each keeps the full serial arc** (claim → work → close-out
+  gate at every seam, stop rule per lane). A red gate contains to its lane — nothing merges until it's
+  individually green.
+- **Git is the conflict detector.** Merge clean lanes back **one at a time**; a merge conflict *is* the
+  proof the partition was wrong → **abort that lane and replay its items serially** on the merged
+  result. Never force-merge. One **final gate** on the merged tree before close-out is final.
+- **No silent speculation** — report the partition (which items, which lane, why independent) up front,
+  and `log` any lane that conflicted and fell back, so a fallback never reads as "ran in parallel."
+
+When the ready pool has no provably-disjoint pair, `--parallel` **degenerates to the serial batch** —
+correct, not a failure. This is the *partition-by-Project* cheaper rule (above) applied at item
+granularity; the JIT lock in this item's *Core model* remains the residual answer for **coincidental
+same-file overlap between fully independent agent sessions**, which the batch's static partition
+sidesteps by construction.
 
 ## Honest scope note
 

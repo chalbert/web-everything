@@ -1183,7 +1183,7 @@
         ]
       },
       "persistence": {
-        "description": "Whether this navigation state is reflected in a deep-linkable, shareable URL or held ephemerally",
+        "description": "Whether this navigation state is reflected in a deep-linkable, shareable URL or held ephemerally. Grounded in the WHATWG split between the URL (path/search) and the History API state object: url = the URL (survives refresh + share), session = History state (survives traversal but not a fresh share), memory = neither (in-memory only). Unlike history/scroll this rests on that convention rather than a single platform enum; the three-way set is kept because session is a distinct user-perceivable outcome (a wizard step that survives Back/Forward but isn't shareable), subject to review if no block exercises session within two implementing blocks (#057).",
         "values": [
           "url",
           "memory",
@@ -1803,6 +1803,79 @@
       "reorder-move",
       "reorder-commit",
       "reorder-cancel"
+    ]
+  },
+{
+    "id": "disclosure",
+    "name": "Disclosure Intent",
+    "requiresCapabilities": [
+      "details",
+      "details-name",
+      "hidden-until-found"
+    ],
+    "status": "draft",
+    "summary": "Show/hide of a content region via a toggle control — expand/collapse, exclusive accordion grouping, and find-in-page reveal. Built on the native <details>/<summary> substrate.",
+    "dimensions": {
+      "defaultState": {
+        "description": "Initial expanded state of the region",
+        "values": [
+          "open",
+          "closed"
+        ]
+      },
+      "multiplicity": {
+        "description": "How grouped panels behave: exclusively (one open at a time) or independently",
+        "values": [
+          "exclusive",
+          "independent"
+        ]
+      },
+      "findable": {
+        "description": "Whether collapsed content is still revealed by browser find-in-page",
+        "values": [
+          "true",
+          "false"
+        ]
+      }
+    },
+    "description": "<h3>What Disclosure Is</h3><p class=\"text-sm text-gray-600 mb-2\">Disclosure makes a content region's <strong>visibility</strong> user-toggleable through a labelled control — the show/hide widget the <a href=\"https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/\">WAI-ARIA APG Disclosure pattern</a> names. Expand/collapse panels, accordions, and \"read more\" sections are all disclosure. The native substrate is <code>&lt;details&gt;</code>/<code>&lt;summary&gt;</code>: the summary is the toggle (exposing <code>aria-expanded</code>), the rest of the element is the region, and the <code>open</code> attribute is the state. No JavaScript is required for the base behavior.</p><h3>Default State</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>closed</code>: <strong>Default</strong>. Region starts collapsed (bare <code>&lt;details&gt;</code>).</li><li><code>open</code>: Region starts expanded (<code>&lt;details open&gt;</code>).</li></ul><p class=\"text-sm text-gray-600 mb-2\">The values mirror the platform exactly: a <code>ToggleEvent</code>'s <code>newState</code> is literally the string <code>\"open\"</code> or <code>\"closed\"</code>.</p><h3>Multiplicity</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>independent</code>: <strong>Default</strong>. Each panel toggles on its own; any number can be open at once (ungrouped <code>&lt;details&gt;</code>).</li><li><code>exclusive</code>: Panels sharing a group key form an <em>exclusive accordion</em> — opening one closes its siblings. The native mechanism is a shared <code>&lt;details name=\"…\"&gt;</code>; <code>exclusive</code> is the HTML spec's own term for this grouping.</li></ul><h3>Findable</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>false</code>: <strong>Default</strong>. Collapsed content is removed from rendering and not searchable.</li><li><code>true</code>: Collapsed content is hidden with <code>hidden=\"until-found\"</code>, so browser find-in-page still matches it and auto-expands the region (firing <code>beforematch</code>).</li></ul><h3>Animated Reveal — Composed, Not Redefined</h3><p class=\"text-sm text-gray-600 mb-2\">Disclosure stays about <em>state</em>, not animation. An animated expand/collapse is supplied by composing the <a href=\"/intents/motion/\">Motion Intent</a> rather than re-specifying timing here — mirroring how the <a href=\"/intents/modal/\">Modal Intent</a> composes <a href=\"/intents/focus-containment/\">Focus Containment</a> instead of redefining focus. The native height animation is pure CSS over the <code>::details-content</code> pseudo-element using <code>interpolate-size: allow-keywords</code> and <code>transition-behavior: allow-discrete</code>, which is exactly Motion's territory.</p><h3>Composition</h3><p class=\"text-sm text-gray-600\">Disclosure composes with <a href=\"/intents/motion/\">Motion</a> (animated reveal, honoring <code>prefers-reduced-motion</code>) and, for the toggle control's modality, <a href=\"/intents/interaction/\">Interaction</a>. It does not own focus management — the summary is a normal focusable control.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type DisclosureState = 'open' | 'closed';\ntype Multiplicity = 'exclusive' | 'independent';\n\ninterface DisclosureIntent {\n    // Initial expanded state (maps to the `open` attribute)\n    defaultState: DisclosureState;\n    // Exclusive accordion grouping (maps to &lt;details name&gt;) vs independent\n    multiplicity: Multiplicity;\n    // Reveal collapsed content to find-in-page (maps to hidden=until-found)\n    findable: boolean;\n    // Optional animated reveal — see the Motion Intent\n    motion?: MotionIntent;\n}</code></pre>",
+    "events": [
+      "toggle",
+      "beforetoggle"
+    ]
+  },
+  {
+    "id": "file-revision",
+    "name": "File Revision Intent",
+    "status": "concept",
+    "summary": "UX-only protocol for the distinguishing trait of a file-UPDATE control over a plain upload: a value already exists, so the control owns revert-to-original and the moment the staged replacement becomes the displayed value. Models presence as an axis (valuePresence: existing vs empty) so file-upload and file-update are the SAME control at two settings — the droplist-style answer to 'is update a distinct standard or just upload's under-modeled current-value dimension'. Entry/accept (file-source, drop-target, accepts) is the data-transfer intent's territory (#007); transfer/commit/persistence are technical and live in the File Upload & Update configurator domain, not here. INITIAL vocabulary, pending owner review.",
+    "dimensions": {
+      "valuePresence": {
+        "description": "Whether a current value already exists when the control mounts — the single axis that separates UPDATE from UPLOAD. 'existing' unlocks revert and the swap model below; 'empty' degrades the same control to a plain upload with no original to preserve. Modeling it as a dimension is the claim that upload and update are one component, not two.",
+        "values": [
+          "existing",
+          "empty"
+        ]
+      },
+      "swapModel": {
+        "description": "When the displayed value flips from the current file to the staged replacement. 'confirmed' (default) keeps showing the original until the commit succeeds — the data-safe choice when an existing value is precious; 'optimistic' shows the replacement immediately and rolls back to the original on failure. UX-only: where the bytes actually go (endpoint / OPFS / File System Access handle / form value) is the technical commit strategy, handled in the configurator.",
+        "values": [
+          "confirmed",
+          "optimistic"
+        ]
+      },
+      "revert": {
+        "description": "Whether restoring the original value is offered while a replacement is staged (the affordance a greenfield upload has no concept of). 'enabled' (default) lets the user back out to the pristine value before committing; 'disabled' makes the replacement one-way once staged. Pairs with the observable revision state pristine → staged → committed that drives both the control's affordances and its live-region announcements.",
+        "values": [
+          "enabled",
+          "disabled"
+        ]
+      }
+    },
+    "description": "<h3>What File Revision Is</h3><p class=\"text-sm text-gray-600 mb-2\">A <em>file update</em> control is not a new widget — it is a plain file <em>upload</em> that starts with a <strong>current value</strong>. That one precondition is the whole intent: because a value already exists, the control owns semantics a greenfield upload never needs — <strong>revert-to-original</strong> and a deliberate choice about <strong>when the staged replacement becomes the displayed value</strong>. File Revision names exactly that delta and nothing else, so a bare <code>&lt;input type=\"file\"&gt;</code>, a drag-and-drop dropzone, and a resumable chunked uploader are the <em>same</em> control at different trait altitudes (the droplist decomposition, applied to files).</p><h3>Presence Is the Axis</h3><p class=\"text-sm text-gray-600 mb-2\">The open question 'is file-update a distinct standard, or just the observation that the upload component always had an under-modeled current-value dimension?' is answered by making presence a <em>dimension</em>: <code>valuePresence: existing</code> is an update, <code>empty</code> is an upload, and they are one component. <code>existing</code> is what unlocks <a href=\"#\">revert</a> and the swap model; <code>empty</code> degrades cleanly to the platform default.</p><h3>Scope — UX Only</h3><p class=\"text-sm text-gray-600 mb-2\">Per <a href=\"/backlog/004-validation-engine-open-design-points/\">the intent rule</a>, this models the user-facing concern only. The technical axes a real upload needs are deliberately <strong>not</strong> dimensions here:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>How files enter</strong> (native picker / dropzone / paste / directory / File System Access handle) and <strong>what is accepted</strong> (type / size / count) are the <a href=\"/backlog/007-gap-11-clipboard-dnd-files-intents/\">data-transfer intent's</a> drop-target / accepts contract (#007) — File Revision <em>composes</em> it, never redefines it.</li><li><strong>How bytes move</strong> (single / chunked / resumable) and <strong>where they are written</strong> (POST/PUT endpoint, OPFS, FS handle, form value) are <em>technical</em> strategies, operationalized as the <strong>File Upload &amp; Update</strong> domain in the <a href=\"/technical-configurator\">Technical Configurator</a> — not intent vocabulary.</li><li><strong>Resumability</strong> (the IETF Resumable Uploads draft / the de-facto <em>tus</em> protocol) maps onto a <a href=\"/intents/reliability/\">Reliability</a> recovery handler (resume = retry-from-offset), so it belongs there rather than in a bespoke transfer trait.</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600\">File Revision composes, rather than re-specifies: the data-transfer intent (#007) for the source affordance and accept-constraint; the <a href=\"/intents/validation/\">Validation</a> intent for pre-transfer gating of type/size/count; the <a href=\"/intents/loader/\">Loader</a> / <a href=\"/intents/background-task/\">Background Task</a> intents for the <code>idle → selected → transferring → done | error</code> progress lifecycle and its live-region announcements; and <a href=\"/intents/reliability/\">Reliability</a> for resumable transfer. Its <em>own</em> contribution is purely the revision delta below.</p><h3>Native Substrate</h3><p class=\"text-sm text-gray-600 mb-2\">The always-keyboard-operable baseline is <code>&lt;input type=\"file\"&gt;</code> (with <code>accept</code>, <code>multiple</code>, <code>capture</code>, <code>webkitdirectory</code>); the File API (<code>File</code>/<code>Blob</code>/<code>FileList</code>) carries the bytes. A bare input has no notion of a current value, so the revision state (pristine vs staged) is the component's to track — but every higher trait must degrade back to that operable input, and progress-state changes must announce via a live region. This intent mandates the a11y floor; it does not bolt it on.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type ValuePresence = 'existing' | 'empty';\ntype SwapModel = 'confirmed' | 'optimistic';\ntype RevisionState = 'pristine' | 'staged' | 'committed';\n\ninterface FileRevisionIntent {\n    // Does a current value exist at mount? 'existing' = update, 'empty' = upload.\n    valuePresence: ValuePresence;\n    // When the staged replacement becomes the displayed value.\n    swapModel: SwapModel;          // default 'confirmed'\n    // Offer restore-to-original while a replacement is staged.\n    revert: boolean;               // default true\n    // Observable revision lifecycle — drives affordances + announcements.\n    readonly state: RevisionState;\n    // Source affordance + accept-constraint are composed from the data-transfer intent (#007),\n    // not owned here; transfer + commit strategy are technical (see the configurator).\n}</code></pre>",
+    "events": [
+      "change",
+      "cancel"
     ]
   }
 ]

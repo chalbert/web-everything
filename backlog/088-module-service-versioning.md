@@ -27,7 +27,7 @@ A served module is a function of several independently-moving inputs. Any of the
 | **`webadapters` AST core** | the transform code changes (the anti-drift core, #081) | none — implicit "latest" |
 | **Form / target / strategy** params | per request | encoded in the query string only |
 | **Compiler** (esbuild provider, #081 phase 2b) | esbuild version, options change | none |
-| **Runtime dependency** (`@webeverything/jsx-runtime` for the functional form, #081 phase 2c) | the bare-specifier package publishes | resolved by the consumer's import map, unversioned |
+| **Runtime dependency** (`@frontierui/jsx-runtime` for the functional form, #081 phase 2c) | the bare-specifier package publishes | resolved by the consumer's import map, unversioned |
 
 So a single logical component has a **matrix** of served artifacts, and the version must compose: `(definition version) × (transform/compiler version) × (params)`. This is exactly the seam where an immutable, content-addressed URL belongs.
 

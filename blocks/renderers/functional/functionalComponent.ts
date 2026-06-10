@@ -22,7 +22,7 @@ import { htmlToJsx } from '../jsx/htmlToJsx';
  * rewriting, so the runtime can't be an app-relative path; the consumer must resolve this name via
  * an **import map** (the canonical native-platform answer). This is the import-map seam #081 flagged.
  */
-export const JSX_RUNTIME_SPECIFIER = '@webeverything/jsx-runtime';
+export const JSX_RUNTIME_SPECIFIER = '@frontierui/jsx-runtime';
 
 /** attachShadow init literal — mirrors declarativeComponent's, stable key order for deterministic output. */
 function shadowInitLiteral(def: ComponentDef): string {

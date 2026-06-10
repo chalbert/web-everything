@@ -27,9 +27,9 @@ registerReferenceAnalyzers(registry);
 
 // Intent ids the standard knows, for the verify gate's conformance check on the reference path (#189).
 // In a real run this comes from intents.json; here we list the ones the reference analyzer can infer
-// (selection, motion). The check is a no-op for cards whose IR carries no inferred intents, so this
-// only lights up on the intent-inference fixtures.
-const knownReferenceIntents = new Set(['selection', 'motion']);
+// (selection, motion, disclosure). The check is a no-op for cards whose IR carries no inferred intents,
+// so this only lights up on the intent-inference fixtures.
+const knownReferenceIntents = new Set(['selection', 'motion', 'disclosure']);
 
 // The AI registry adds a REAL model provider AHEAD of the reference one (backlog #188): messier input
 // the heuristic rejects escalates to the model, clean input still falls through to the reference. In

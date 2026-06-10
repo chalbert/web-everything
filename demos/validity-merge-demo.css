@@ -61,6 +61,8 @@ validity-merge-field:valid .vm-field { border-color: #16a34a; background: #f0fdf
   cursor: pointer;
 }
 .vm-states button.active { background: #1e293b; color: #fff; border-color: #1e293b; }
+.vm-states-auto { align-items: center; }
+.vm-auto-note { font-size: 0.72rem; color: #64748b; font-style: italic; }
 
 .vm-strategy { display: flex; gap: 0.5rem; align-items: center; margin: 0.25rem 0 0.75rem; flex-wrap: wrap; }
 .vm-strategy button {

@@ -1,5 +1,5 @@
 ---
-type: idea
+type: decision
 workItem: story
 size: 5
 parent: "089"
@@ -11,6 +11,11 @@ crossRef: { url: /backlog/089-monetization-product-ideas/, label: "Product ideas
 ---
 
 # Web Docs as a Service — a hosted Plateau offering
+
+> **Reclassified `idea` → `decision` (2026-06-10, batch claim-time pre-flight).** A monetization
+> product concept under epic #089, not a mechanical build: the *Open follow-ons* (ingestion contract,
+> conformance-dashboard surface, Plateau-offering-vs-graduated-project home) are strategy decisions that
+> must settle before any code. Surface-and-discuss (Tier B), don't auto-build.
 
 Promote **"Web Docs as a Service"** (idea 4 in [#089](/backlog/089-monetization-product-ideas/))
 into a first-class **Plateau offering**: hosted, private, conformance-aware

@@ -110,5 +110,29 @@
     "baseline": false,
     "polyfill": "partial",
     "summary": "Point <code>aria-activedescendant</code> across a shadow boundary. The gap lives in the a11y tree JS can't write — partial mitigation only, the one genuine blocker for shadow-encapsulated comboboxes."
+  },
+  {
+    "id": "details",
+    "label": "Details / Summary",
+    "webFeaturesKey": "details",
+    "baseline": "2020",
+    "polyfill": "polyfillable",
+    "summary": "Native <code>&lt;details&gt;</code>/<code>&lt;summary&gt;</code> disclosure widget — the <code>open</code> attribute, <code>toggle</code>/<code>beforetoggle</code> events, and a summary that exposes <code>aria-expanded</code> without script."
+  },
+  {
+    "id": "details-name",
+    "label": "Exclusive Accordion (details name)",
+    "webFeaturesKey": "details-name",
+    "baseline": "2024",
+    "polyfill": "polyfillable",
+    "summary": "The <code>name</code> attribute on <code>&lt;details&gt;</code> groups panels into an <em>exclusive accordion</em> — opening one closes its siblings, no script required."
+  },
+  {
+    "id": "hidden-until-found",
+    "label": "Hidden Until Found",
+    "webFeaturesKey": "hidden-until-found",
+    "baseline": "2024",
+    "polyfill": "polyfillable",
+    "summary": "<code>hidden=\"until-found\"</code> keeps collapsed content matchable by browser find-in-page, auto-revealing it and firing <code>beforematch</code> on a hit."
   }
 ]

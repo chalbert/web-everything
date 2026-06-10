@@ -3,10 +3,12 @@
  *
  * Bootstrap (loaded first) defines `window.customValidityMerge` (pre-loaded with source-reduction +
  * last-write-wins) and the `<validity-merge-field>` form-associated control. This script builds a
- * control with the four named sources wired to buttons, a strategy switcher, and a live readout — so
- * you can watch independent sources collapse into one `MergedValidity` that drives native
- * `:invalid` / `:user-invalid` via `ElementInternals.setValidity`, and swap the merge math with zero
- * source-feeding edits. Native DOM only; see /demos/validity-merge-demo.html and /plugs/webvalidation/.
+ * control whose `native` source is **auto-derived** from the inner `type=email required` control's
+ * `ValidityState` (#218) — it reflects live as you type — while the other three sources (schema /
+ * async / manual) are wired to buttons. A strategy switcher and a live readout let you watch the
+ * independent sources collapse into one `MergedValidity` that drives native `:invalid` /
+ * `:user-invalid` via `ElementInternals.setValidity`, and swap the merge math with zero source-feeding
+ * edits. Native DOM only; see /demos/validity-merge-demo.html and /plugs/webvalidation/.
  */
 import { setPlaygroundReady } from '/demos/playground-harness';
 import type { MergedValidity, SourceState } from '/plugs/webvalidation/index.ts';
@@ -18,7 +20,15 @@ interface ValidityMergeFieldEl extends HTMLElement {
   readonly merged: MergedValidity | null;
 }
 
-const SOURCES = ['native', 'schema', 'async', 'manual'] as const;
+/** The #224 async driver — feeds a merge field's `async` source under a per-scope resolution strategy. */
+interface AsyncValidatorFieldEl extends HTMLElement {
+  useValidator(fn: (input: unknown, signal?: AbortSignal) => Promise<{ state: 'valid' | 'invalid'; message?: string }>): void;
+  useTargetField(target: ValidityMergeFieldEl): void;
+  validate(input: unknown): Promise<{ state: string } | null>;
+}
+
+// `native` is auto-derived from the control's own ValidityState (#218); only these are toggled by hand.
+const MANUAL_SOURCES = ['schema', 'async', 'manual'] as const;
 const STATES: SourceState[] = ['idle', 'valid', 'invalid', 'pending'];
 const STRATEGIES = [
   { key: 'source-reduction', label: 'source-reduction (native-first)' },
@@ -147,6 +157,74 @@ const CHECKS: Check[] = [
       return merged.state === 'valid';
     },
   },
+  {
+    title: 'native source auto-derives from the inner control ValidityState (#218)',
+    run: () => {
+      const host = el('div', { hidden: '' });
+      document.body.appendChild(host);
+      const f = document.createElement('validity-merge-field') as unknown as ValidityMergeFieldEl;
+      const inp = el('input', { type: 'email', required: '' });
+      f.append(inp);
+      host.appendChild(f); // control present at connect → auto-derive wires
+      const idle = f.merged?.state === 'idle'; // untouched → native idle
+      inp.value = 'nope';
+      inp.dispatchEvent(new Event('input'));
+      const invalid = f.merged?.state === 'invalid' && f.merged?.blocking === 'native';
+      inp.value = 'a@b.com';
+      inp.dispatchEvent(new Event('input'));
+      const valid = f.merged?.state === 'valid';
+      host.remove();
+      return idle && invalid && valid;
+    },
+  },
+  {
+    title: 'async-validator-field feeds the surviving answer into a merge field’s async source (#224)',
+    run: async () => {
+      const host = el('div', { hidden: '' });
+      document.body.appendChild(host);
+      const field = mountField(host); // a real <validity-merge-field>
+      const asyncEl = document.createElement('async-validator-field') as unknown as AsyncValidatorFieldEl;
+      asyncEl.useTargetField(field);
+      asyncEl.useValidator(async (input) =>
+        String(input).includes('@') ? { state: 'valid' } : { state: 'invalid', message: 'bad' },
+      );
+      host.appendChild(asyncEl);
+      const r = await asyncEl.validate('nope'); // async → invalid, blocking the merge
+      const invalid = field.merged?.state === 'invalid' && field.merged?.blocking === 'async';
+      await asyncEl.validate('a@b.com'); // async → valid
+      const valid = field.merged?.state === 'valid';
+      host.remove();
+      return r?.state === 'invalid' && invalid && valid;
+    },
+  },
+  {
+    title: 'per-scope resolution: a scoped customValidatorResolution overrides the global (nearest-wins) (#224)',
+    run: async () => {
+      const reg = window.customValidatorResolution;
+      if (!reg || !window.injectors) return false;
+      // A scoped registry defaulting to cancellation (the global default is versioning, which has no signal).
+      const scoped = new (reg.constructor as new () => typeof reg)();
+      (scoped as unknown as { define: (s: unknown, d?: boolean) => void }).define(reg.resolve('cancellation'), true);
+      const wrapper = el('div', { hidden: '', injectors: '' });
+      document.body.appendChild(wrapper);
+      const injector = window.injectors.getInjectorOf(wrapper) ?? window.injectors.ensureInjector(wrapper);
+      injector.set('customValidatorResolution', scoped as never);
+      const asyncEl = document.createElement('async-validator-field') as unknown as AsyncValidatorFieldEl;
+      wrapper.appendChild(asyncEl); // connects → resolves the scoped cancellation strategy
+      let firstSignal: AbortSignal | undefined;
+      asyncEl.useValidator(
+        (_input, signal) =>
+          new Promise(() => {
+            firstSignal ??= signal;
+          }),
+      );
+      void asyncEl.validate('a'); // controller 1
+      void asyncEl.validate('b'); // cancellation aborts controller 1 — proves the scoped strategy resolved
+      const aborted = firstSignal?.aborted === true;
+      wrapper.remove();
+      return aborted;
+    },
+  },
 ];
 
 async function runConformance(host: HTMLElement): Promise<number> {
@@ -198,7 +276,8 @@ async function main(): Promise<void> {
   field.setAttribute('strategy', 'source-reduction');
 
   const fieldBox = el('div', { class: 'vm-field' });
-  const input = el('input', { type: 'text', placeholder: 'name@example.com', value: 'name@example.com' });
+  // A real native constraint — the `native` source is auto-derived from this control's ValidityState (#218).
+  const input = el('input', { type: 'email', required: '', placeholder: 'name@example.com' });
   const hint = el('p', { class: 'vm-hint' });
   fieldBox.append(el('label', {}, 'Email'), input, hint);
   field.append(fieldBox);
@@ -230,8 +309,36 @@ async function main(): Promise<void> {
   }
 
   const sourcesBox = el('div', { class: 'vm-sources' });
+
+  // ── native: auto-derived, not toggled — a live badge that mirrors the control's ValidityState (#218) ──
+  const nativeBadge = el('span', { class: 'vm-badge', 'data-state': 'idle' }, 'idle');
+  let nativeInteracted = false;
+  function refreshNativeBadge(): void {
+    const state: SourceState = !nativeInteracted ? 'idle' : input.validity.valid ? 'valid' : 'invalid';
+    nativeBadge.textContent = state;
+    nativeBadge.setAttribute('data-state', state);
+  }
+  const markNativeInteracted = (): void => {
+    nativeInteracted = true;
+    refreshNativeBadge();
+  };
+  input.addEventListener('input', markNativeInteracted);
+  input.addEventListener('change', markNativeInteracted);
+  input.addEventListener('invalid', markNativeInteracted);
+  const nativeRow = el('div', { class: 'vm-source' });
+  nativeRow.append(
+    el('span', {}, 'native'),
+    el(
+      'div',
+      { class: 'vm-states vm-states-auto' },
+      el('span', { class: 'vm-auto-note' }, 'auto-derived from the field constraint →'),
+      nativeBadge,
+    ),
+  );
+  sourcesBox.append(nativeRow);
+
   const stateButtons: Record<string, HTMLButtonElement[]> = {};
-  for (const source of SOURCES) {
+  for (const source of MANUAL_SOURCES) {
     stateButtons[source] = [];
     const states = el('div', { class: 'vm-states' });
     for (const state of STATES) {
@@ -255,7 +362,11 @@ async function main(): Promise<void> {
   controlsCard.append(
     el('h2', {}, 'Sources & strategy'),
     strategyRow,
-    el('p', { class: 'vm-hint' }, 'Set each named source; they collapse into one merged validity below.'),
+    el(
+      'p',
+      { class: 'vm-hint' },
+      'native is auto-derived from the field’s own constraint (type=email required) — type to see it react. Set the other three by hand; they all collapse into one merged validity below.',
+    ),
     sourcesBox,
   );
 

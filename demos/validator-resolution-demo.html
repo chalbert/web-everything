@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Validator Resolution Playground - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/validator-resolution-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Validator Resolution Playground</h1>
+      <p>
+        A live test surface for the runtime <a href="/plugs/customvalidatorresolutionregistry/"><code>customValidatorResolution</code></a>
+        plug (<a href="/backlog/224-validator-resolution-runtime-plug-element/">#224</a>) — the async sibling of the
+        <a href="/demos/validity-merge-demo.html">validity-merge</a> plane (#215). A real
+        <code>&lt;async-validator-field&gt;</code> drives an async check whose answer resolves on a
+        <strong>controllable delay</strong>, so you can fire overlapping checks and watch which answer wins.
+      </p>
+      <p class="play-caveat">
+        The concept is a <strong>race</strong>: it only shows its value when answers arrive out of order. Fire a
+        slow check, then a fast one — the slow, now-stale answer arrives <em>last</em>. Watch the resolution
+        strategy reconcile it: <code>versioning</code> lets the stale request finish but <strong>drops</strong>
+        its late answer; <code>cancellation</code> <strong>aborts</strong> the in-flight request outright. Swap
+        the strategy below with <strong>zero field edits</strong> — that is the #004 OP-1 rule: vary the
+        stale-answer policy, never the <code>pending{version} → valid|invalid</code> surface.
+      </p>
+      <p class="play-caveat">
+        The surviving answer feeds the <code>async</code> source of a composed
+        <code>&lt;validity-merge-field&gt;</code> (#215), so the merged <code>:user-invalid</code> styling reacts
+        live — the two validation planes working together, exactly as a real form would wire them.
+      </p>
+    </header>
+
+    <div id="play-root">Loading playground&hellip;</div>
+  </main>
+
+  <!-- Plugged mode: bootstrap defines window.customValidatorResolution + <async-validator-field> + <validity-merge-field>. -->
+  <script type="module" src="/plugs/bootstrap.ts"></script>
+  <script type="module" src="/demos/validator-resolution-demo.ts"></script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 ---
-type: idea
+type: decision
 workItem: task
 parent: "140"
 status: open

@@ -247,6 +247,76 @@ export function createAnthropicClient(opts: AnthropicClientOptions = {}): ModelC
   };
 }
 
+// ── Second real provider: a thin OpenAI client (BYO key, never bundled) ──────────
+//
+// Proves the `ModelClient` seam is genuinely vendor-neutral (#194): the analyzer, engine, and verify
+// gate are untouched — only this implementation differs from the Anthropic one above. Same contract
+// (prompt in, raw JSON text out), same BYO-key discipline, same structured-output guarantee.
+
+export interface OpenAIClientOptions {
+  /** BYO key. Defaults to `OPENAI_API_KEY` from the environment. NEVER bundle a key. */
+  apiKey?: string;
+  /** Model id — defaults to a structured-output-capable GPT-4o. Swap freely; the frontier is config. */
+  model?: string;
+  baseUrl?: string;
+  maxTokens?: number;
+}
+
+const DEFAULT_OPENAI_MODEL = 'gpt-4o';
+
+function resolveOpenAIKey(explicit?: string): string {
+  const fromEnv = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.OPENAI_API_KEY;
+  const key = explicit ?? fromEnv;
+  if (!key)
+    throw new Error('no OpenAI API key — set OPENAI_API_KEY (BYO key; never bundled) or pass { apiKey }.');
+  return key;
+}
+
+/**
+ * A minimal OpenAI Chat-Completions client over native `fetch` — the SECOND reference `ModelClient`,
+ * proving the vendor is swappable config, not architecture (#194). Uses the structured-output
+ * `response_format: json_schema` so the completion is a JSON object shaped by `COMPONENT_IR_SCHEMA`
+ * (`strict: false` because the IR's `intents`/`notes` are optional, which OpenAI strict mode would
+ * force into `required`). Intended for Node/CI; keep server-side — a key must never reach the browser.
+ * A `@anthropic-ai/sdk`- or `openai`-SDK-backed client implementing `ModelClient` drops in unchanged.
+ */
+export function createOpenAIClient(opts: OpenAIClientOptions = {}): ModelClient {
+  const model = opts.model ?? DEFAULT_OPENAI_MODEL;
+  const baseUrl = (opts.baseUrl ?? 'https://api.openai.com').replace(/\/$/, '');
+  const maxTokens = opts.maxTokens ?? 1024;
+
+  return {
+    id: 'openai',
+    async complete(prompt) {
+      const apiKey = resolveOpenAIKey(opts.apiKey);
+      const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: maxTokens,
+          messages: [{ role: 'user', content: prompt }],
+          response_format: {
+            type: 'json_schema',
+            json_schema: { name: 'component_ir', strict: false, schema: COMPONENT_IR_SCHEMA },
+          },
+        }),
+      });
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '');
+        throw new Error(`OpenAI API ${res.status}: ${detail.slice(0, 300)}`);
+      }
+      const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+      const text = data.choices?.[0]?.message?.content ?? '';
+      if (!text) throw new Error('OpenAI API returned no message content.');
+      return text;
+    },
+  };
+}
+
 // ── No-key client: deterministic stand-in for tests + the playground ─────────────
 
 /**

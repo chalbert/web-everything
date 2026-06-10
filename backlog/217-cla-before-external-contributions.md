@@ -1,5 +1,5 @@
 ---
-type: issue
+type: decision
 workItem: task
 status: open
 blockedBy: ["098"]

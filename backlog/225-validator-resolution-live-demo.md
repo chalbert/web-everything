@@ -2,9 +2,12 @@
 type: issue
 workItem: story
 size: 3
-status: open
+status: resolved
 dateOpened: '2026-06-09'
 blockedBy: ["224"]
+dateStarted: "2026-06-10"
+dateResolved: "2026-06-10"
+graduatedTo: "demos/validator-resolution-demo.{html,ts,css} (Validator Resolution Playground, registered in demos.json) — live race surface for the runtime customValidatorResolution plug (#224): controllable-delay async checks, versioning↔cancellation toggle, surviving answer composed into a <validity-merge-field> async source; 7-check runtime-conformance section covered by the data-driven playgrounds.spec.ts e2e"
 tags:
   - validation
   - async

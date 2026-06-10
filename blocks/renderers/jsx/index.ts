@@ -8,7 +8,7 @@ export { createElement, Fragment } from './JSXRenderer';
 export type { JSXChild, JSXProps, JSXElementType, JSXFunctionComponent } from './JSXRenderer';
 
 // Auto-Define (#241): `defineElement` rides on the jsx-runtime surface so a served functional module
-// can `import jsx, { defineElement } from '@webeverything/jsx-runtime'` — its one self-registration
+// can `import jsx, { defineElement } from '@frontierui/jsx-runtime'` — its one self-registration
 // call. Spec: /projects/webcomponents/#protocol-auto-define-strategy
 export { defineElement, explicitAutoDefine } from '../auto-define';
 export type { AutoDefineStrategy, AutoDefineTrigger, RegistryScope, DefiningModule } from '../auto-define';

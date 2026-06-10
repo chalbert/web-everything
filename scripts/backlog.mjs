@@ -29,6 +29,7 @@ import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = join(ROOT, 'backlog');
+const CAPACITY_PATH = join(ROOT, '.claude/skills/batch-backlog-items/capacity.json');
 const RED = '\x1b[31m', GRN = '\x1b[32m', YEL = '\x1b[33m', DIM = '\x1b[2m', BLD = '\x1b[1m', RST = '\x1b[0m';
 
 const argv = process.argv.slice(2);
@@ -125,15 +126,49 @@ function scaffold() {
     `${GRN}✓ scaffolded${RST} ${BLD}#${finalNum}${RST} ${DIM}backlog/${finalName}${RST}\n${YEL}→ ${filled ? 'add the body (digest set), then re-run check:standards' : 'fill the digest (TODO line) and body, then re-run check:standards'}${RST}`);
 }
 
+/**
+ * calibrate — fold one session's observed (points resolved ÷ context fraction) into the rolling
+ * session-capacity estimate that sizes a points-budgeted batch (capacity.json). This is the close-out
+ * feedback loop: the count cap is gone, so the budget must stay honest about what a session actually
+ * fits. EMA-blend so a single odd session can't swing the target, and keep the last 12 raw samples for
+ * audit. `--points` = cost-points resolved (sum of each item's batchCost: a story's size, a task = 2);
+ * `--context-pct` = the share of the window consumed at close (the editor's context meter, 1–100).
+ */
+function calibrate() {
+  const points = Number(flag('points'));
+  const ctxPct = Number(flag('context-pct'));
+  if (!Number.isFinite(points) || points <= 0) die('calibrate needs --points=<cost-points resolved this session>');
+  if (!Number.isFinite(ctxPct) || ctxPct <= 0 || ctxPct > 100) die('calibrate needs --context-pct=<1–100, context consumed at close>');
+
+  let cap;
+  try { cap = JSON.parse(readFileSync(CAPACITY_PATH, 'utf8')); }
+  catch { die(`cannot read ${CAPACITY_PATH} — run a batch in this repo first (the file ships seeded)`); }
+
+  const implied = Math.round(points / (ctxPct / 100)); // what a full session would have fit at this rate
+  const alpha = Number.isFinite(cap.ema) ? cap.ema : 0.3;
+  const prev = Number.isFinite(cap.capacityPoints) ? cap.capacityPoints : implied;
+  const next = Math.round(alpha * implied + (1 - alpha) * prev);
+
+  cap.capacityPoints = next;
+  cap.samples = [...(Array.isArray(cap.samples) ? cap.samples : []), { date: today(), points, contextPct: ctxPct, impliedCapacity: implied }].slice(-12);
+  writeFileSync(CAPACITY_PATH, JSON.stringify(cap, null, 2) + '\n');
+
+  const budget = Math.round(next * (cap.targetFraction ?? 0.5));
+  ok({ verb: 'calibrate', points, contextPct: ctxPct, impliedCapacity: implied, capacityPoints: next, budget },
+    `${GRN}✓ calibrated${RST} ${DIM}— ${points} pts at ${ctxPct}% → implied ${implied}; capacity ${prev} → ${BLD}${next}${RST}${DIM}; next batch budget ≈ ${RST}${BLD}${budget} pts${RST}`);
+}
+
 switch (verb) {
   case 'claim': case 'resolve': case 'release': transition(verb); break;
   case 'scaffold': scaffold(); break;
+  case 'calibrate': calibrate(); break;
   default:
     console.error(`${BLD}backlog.mjs${RST} — mechanical backlog-status CLI\n` +
       `  ${GRN}claim${RST} <NNN>                 open → active + dateStarted\n` +
       `  ${GRN}resolve${RST} <NNN> [--graduated-to=X]   active → resolved + dateResolved\n` +
       `  ${GRN}release${RST} <NNN>               active → open\n` +
       `  ${GRN}scaffold${RST} --type= --workitem= --size= --title= [--digest=] [--blocked-by=] [--parent=]\n` +
+      `  ${GRN}calibrate${RST} --points= --context-pct=   fold a session into the batch point-budget estimate\n` +
       `  (add --json for machine output)`);
     process.exit(verb ? 1 : 0);
 }

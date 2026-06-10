@@ -137,6 +137,7 @@ export function computeSelection(items) {
   const project = (it) => ({
     num: it.num, id: it.id, title: it.title, type: it.type,
     workItem: it.workItem, size: it.size, tier: it.tier, batchable: !!it.batchable,
+    batchCost: it.batchCost,
     leverageScore: it.leverageScore ?? 0,
     directUnblocks: it.directUnblocks ?? 0,
     transitiveUnblocks: it.transitiveUnblocks ?? 0,
@@ -162,6 +163,32 @@ export function computeSelection(items) {
     counts: { open: open.length, tierA: tierA.length, tierB: tierB.length, tierC: tierC.length, batchable: batchable.length },
     tierA, batchable, tierB,
   };
+}
+
+/**
+ * Greedy POINTS-BUDGET pack — the suggested batch for a given points budget. Walks the already-ranked
+ * Tier-A list (leverage → issue → smaller → NNN) and takes each batchable item whose `batchCost`
+ * fits the remaining budget, until the budget is exhausted or the list ends. This is "take as many
+ * points as possible," not "take N items": a single `size·5` joins when it fits, and the old count cap
+ * + ≤3 gate would have left both the points and the slot on the table. A too-large item is SKIPPED (not
+ * a hard break), so a smaller, lower-ranked item still gets packed behind it — maximising points used.
+ * Deterministic: ranked input + greedy walk → identical pack for identical state + budget.
+ *
+ * @param {Array<object>} tierA   Ranked Tier-A projections from {@link computeSelection}.
+ * @param {number} budget         The points budget to fill (sum of `batchCost`).
+ * @returns {{ picked: Array<object>, spent: number, budget: number, skipped: Array<object> }}
+ */
+export function computeBatchPack(tierA, budget) {
+  const picked = [];
+  const skipped = [];
+  let spent = 0;
+  for (const it of tierA) {
+    if (!it.batchable || typeof it.batchCost !== 'number') continue;
+    if (spent + it.batchCost > budget) { skipped.push(it); continue; } // doesn't fit — keep scanning
+    picked.push(it);
+    spent += it.batchCost;
+  }
+  return { picked, spent, budget, skipped };
 }
 
 /**
