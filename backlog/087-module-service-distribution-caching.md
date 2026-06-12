@@ -5,7 +5,7 @@ size: 5
 parent: "081"
 status: open
 dateOpened: "2026-06-06"
-blockedBy: ["088"]
+blockedBy: ["389"]
 tags: [module-as-a-service, caching, distribution, cdn, eager-lazy, self-hosted, edge, immutability, adapters, plateau, esm]
 relatedProject: webadapters
 crossRef: { url: /adapters/, label: Rendering Adapters }

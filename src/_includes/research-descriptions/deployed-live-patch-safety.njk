@@ -1,0 +1,73 @@
+<h2>Purpose</h2>
+<p>
+  Safety-design grounding for the dev browser's single riskiest capability
+  (<a href="/backlog/410-dev-browser-deployed-app-live-patch-gated-capability-safety-/">backlog #410</a>,
+  carved from the <a href="/backlog/141-dev-browser-vision/">dev-browser vision (#141, Fork 2)</a>): an AI
+  applying a fix to a <em>running deployed</em> app. The v1 fix-loop (report → propose →
+  <em>local-session</em> live-verify → open-PR) is settled; #410 designs the deferred deployed-app case
+  before it can ship. #141 named the four concerns this must answer — <strong>isolation, authorization,
+  session-only revertibility, and an audit trail</strong>. Session report:
+  <code>reports/2026-06-12-deployed-live-patch-safety.md</code>.
+</p>
+
+<h2>The central finding — patch the deployed <em>view</em>, not the deployed <em>app</em></h2>
+<p>
+  The scariest reading is mutating the running production artifact (kernel-style hot-patch / Erlang
+  hot-code-load). But the dev browser already controls the rendering surface via CDP, and the web platform
+  has an exact precedent for a <strong>session-scoped, server-untouched</strong> patch:
+  <strong>Chrome DevTools "Local Overrides"</strong> serve a locally-modified copy of a site's files
+  <em>only within the viewer's own browser session</em> — the server is never changed, and overrides are
+  active only while the session runs, persisting across reloads until it closes. So the AI can prove a fix
+  on the live, rendered deployed app (the demo value #141 wants) while the deployed artifact is never
+  mutated — blast radius is one session, revert is ending it, and the PR stays the only path to a real
+  change. Most of the risk is <em>designed out</em>, not merely guarded.
+</p>
+
+<h2>What the prior art says, per concern</h2>
+<table>
+  <thead><tr><th>Concern</th><th>Established practice</th><th>What #410 borrows</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Isolation</strong></td>
+      <td>Client-side overlay (Local Overrides) · server-side canary/shadow · live-fleet hot-patch
+        (kpatch/Ksplice — <em>kpatch can't revert without a reboot</em>). Kernel practice: canary rings
+        first, tested rollback, documented escape hatches.</td>
+      <td>Default to the client-side session overlay; reversibility comes free, not assumed.</td>
+    </tr>
+    <tr>
+      <td><strong>Authorization</strong></td>
+      <td>Break-glass + just-in-time access: emergency path that alerts + requires lead authorization +
+        post-review; records who/why/expiry (standing access is itself a finding); two-party for high-risk.</td>
+      <td>Per-patch, expiring, alerting elevation, capped by app policy; bar scales with the isolation model.</td>
+    </tr>
+    <tr>
+      <td><strong>Revertibility / lifetime</strong></td>
+      <td>Overlays persist across reloads, evaporate on session close; feature-flag kill switches give
+        instant revert.</td>
+      <td>Session-scoped + hard TTL + kill switch; never sticky past the session (that's a deploy → a PR).</td>
+    </tr>
+    <tr>
+      <td><strong>Audit</strong></td>
+      <td>SOC2 minimum fields — user · action · timestamp · affected resource — + justification; break-glass
+        needs detailed logs + retroactive approval.</td>
+      <td>Emit to the app's own introspectable trace substrate (+ attach to the PR); native-first, no new sink.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Classification</h2>
+<p>
+  A <strong>product capability</strong> of the dev browser (the constellation's product layer), not a Web
+  Everything standard — the only standard surface it reuses is the app's trace self-description as the audit
+  sink. The usual most-permissive-default bias is <strong>inverted</strong>: this is a safety guardrail, so
+  the default is the most-restrictive-safe option (client-side overlay · ephemeral · break-glass
+  authorized), and server-side mutation is the explicit, separately-gated opt-in.
+</p>
+
+<h2>What this feeds</h2>
+<p>
+  Four prepared forks in <a href="/backlog/410-dev-browser-deployed-app-live-patch-gated-capability-safety-/">#410</a>:
+  isolation model (client-side session overlay), authorization (break-glass JIT, policy-capped), lifetime
+  (session-scoped + TTL + kill switch), and audit (reuse the trace substrate). Each maps to one of the four
+  concerns #141 named.
+</p>

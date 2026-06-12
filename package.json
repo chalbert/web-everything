@@ -20,10 +20,14 @@
     "build:plugs": "tsc -p tsconfig.plugs.json",
     "gen:inventory": "node scripts/gen-inventory.mjs",
     "check:standards": "node scripts/check-standards.mjs",
+    "check:app-conformance": "node scripts/check-app-conformance.mjs",
+    "check:validation-adherence": "vitest run capability-manifest/__tests__/check.test.ts",
+    "validation:see": "node scripts/validation-normalize/live-config.mjs",
     "check:readiness": "node scripts/check-readiness.mjs",
     "fix:readiness": "node scripts/check-readiness.mjs --apply",
     "propose:readiness": "node scripts/propose-readiness.mjs",
-    "autofix": "node scripts/conformance-autofix.mjs"
+    "autofix": "node scripts/conformance-autofix.mjs",
+    "design-refs": "node scripts/design-refs.mjs"
   },
   "devDependencies": {
     "@11ty/eleventy": "^2.0.1",

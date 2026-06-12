@@ -30,6 +30,7 @@
         const typeKey = 'we-type-filter:' + titleText;
         const sizeKey = 'we-size-filter:' + titleText;
         const tierKey = 'we-tier-filter:' + titleText;
+        const workItemKey = 'we-workitem-filter:' + titleText;
         const searchKey = 'we-search-filter:' + titleText;
 
         const buttons = Array.from(toolbar.querySelectorAll('.view-toggle-btn'));
@@ -40,10 +41,12 @@
         const typeChips = Array.from(section.querySelectorAll('[data-type-chip]'));
         const sizeChips = Array.from(section.querySelectorAll('[data-size-chip]'));
         const tierChips = Array.from(section.querySelectorAll('[data-tier-chip]'));
+        const workItemChips = Array.from(section.querySelectorAll('[data-workitem-chip]'));
         const statusAll = statusChips.map(function (c) { return c.dataset.statusChip; });
         const typeAll = typeChips.map(function (c) { return c.dataset.typeChip; });
         const sizeAll = sizeChips.map(function (c) { return c.dataset.sizeChip; });
         const tierAll = tierChips.map(function (c) { return c.dataset.tierChip; });
+        const workItemAll = workItemChips.map(function (c) { return c.dataset.workitemChip; });
 
         // Cards are re-queried live so a hot-reload that adds/removes a backlog
         // item is reflected without a captured stale list.
@@ -65,6 +68,7 @@
         function activeTypes() { return typeChips.length ? readSet(typeKey, typeAll, []) : null; }
         function activeSizes() { return sizeChips.length ? readSet(sizeKey, sizeAll, []) : null; }
         function activeTiers() { return tierChips.length ? readSet(tierKey, tierAll, []) : null; }
+        function activeWorkItems() { return workItemChips.length ? readSet(workItemKey, workItemAll, []) : null; }
 
         function applyFilter() {
             const q = filter ? filter.value.trim().toLowerCase() : '';
@@ -72,6 +76,7 @@
             const ty = activeTypes();
             const sz = activeSizes();
             const tr = activeTiers();
+            const wi = activeWorkItems();
             let shown = 0;
             cards().forEach(function (card) {
                 const title = card.querySelector('.project-title');
@@ -84,7 +89,8 @@
                 // Only open items carry a tier; a card with no data-tier always passes the tier
                 // facet, so filtering to Tier A narrows the open pool without hiding active/resolved.
                 const failTier = tr && card.dataset.tier && !tr.has(card.dataset.tier);
-                const hidden = failSearch || failStatus || failType || failSize || failTier;
+                const failWorkItem = wi && card.dataset.workitem && !wi.has(card.dataset.workitem);
+                const hidden = failSearch || failStatus || failType || failSize || failTier || failWorkItem;
                 card.classList.toggle('is-filtered-out', hidden);
                 if (!hidden) shown++;
             });
@@ -104,11 +110,21 @@
             chips.forEach(function (chip) {
                 if (chip.__homeWired) return;
                 chip.__homeWired = true;
-                chip.addEventListener('click', function () {
+                chip.addEventListener('click', function (e) {
                     const set = readSet(storageKey, allValues, defaultExclude);
                     const v = chip.dataset[attr];
-                    if (set.has(v)) { set.delete(v); } else { set.add(v); }
-                    try { localStorage.setItem(storageKey, JSON.stringify(Array.from(set))); } catch (e) { /* ignore */ }
+                    if (e.metaKey || e.ctrlKey) {
+                        // ⌘/Ctrl-click toggles every OTHER chip in this category, leaving the clicked
+                        // one untouched — so ⌘-clicking a lone-active chip "solos" it (turns the rest
+                        // off), and ⌘-clicking again flips them all back on.
+                        allValues.forEach(function (val) {
+                            if (val === v) return;
+                            if (set.has(val)) { set.delete(val); } else { set.add(val); }
+                        });
+                    } else {
+                        if (set.has(v)) { set.delete(v); } else { set.add(v); }
+                    }
+                    try { localStorage.setItem(storageKey, JSON.stringify(Array.from(set))); } catch (e2) { /* ignore */ }
                     syncChips(chips, attr, activeFn);
                     applyFilter();
                 });
@@ -119,6 +135,7 @@
         wireChips(typeChips, 'typeChip', typeKey, typeAll, [], activeTypes);
         wireChips(sizeChips, 'sizeChip', sizeKey, sizeAll, [], activeSizes);
         wireChips(tierChips, 'tierChip', tierKey, tierAll, [], activeTiers);
+        wireChips(workItemChips, 'workitemChip', workItemKey, workItemAll, [], activeWorkItems);
 
         function setView(view) {
             const isList = view === 'list';
@@ -189,6 +206,7 @@
         syncChips(typeChips, 'typeChip', activeTypes);
         syncChips(sizeChips, 'sizeChip', activeSizes);
         syncChips(tierChips, 'tierChip', activeTiers);
+        syncChips(workItemChips, 'workitemChip', activeWorkItems);
         applyFilter();
         let savedView = 'grid';
         try { savedView = localStorage.getItem(viewKey) || 'grid'; } catch (e) { /* ignore */ }

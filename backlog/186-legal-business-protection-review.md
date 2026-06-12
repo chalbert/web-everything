@@ -1,9 +1,9 @@
 ---
-type: decision
+type: idea
 workItem: story
 size: 3
 parent: "181"
-status: open
+status: parked
 dateOpened: "2026-06-08"
 tags: [monetization, legal, trademark, entity, eula, privacy, gdpr, insurance, compliance, solo-founder]
 crossRef: { url: /backlog/098-licensing-strategy/, label: "Licensing strategy (#098)" }
@@ -32,3 +32,11 @@ Checklist to review and settle:
 - **Insurance** — professional liability / E&O; revisit as deal size grows.
 - **Data processing / DPA** — ready if any customer data touches our systems
   (license endpoint, telemetry); minimise data to minimise this.
+
+## Note (2026-06-11)
+**Parked** — not agent-ready. Every line item (form a legal entity, file
+trademarks, retain counsel for ToS/EULA + privacy policy, buy E&O insurance) is a
+**human professional-services action**, not code a batch agent can execute; the body
+itself frames it as *"a one-off professional review."* Deferred to the pre-launch
+window (sequence alongside the rest of the #181 infra once #097 picks the MVP).
+Resurface when launch is actually near.

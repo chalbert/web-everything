@@ -336,3 +336,123 @@ class UserCard extends HTMLElement {
         No additional server-side logic is needed beyond what the target primitives specify.
     </p>
 </section>
+
+<section id="protocol-maas-versioning" class="section-card">
+    <h3 id="maas-versioning-heading">MaaS Served-Artifact Versioning Protocol</h3>
+    <p>
+        <strong>Module-as-a-Service</strong> is the serve-time twin of the build-time rendering adapters above: where
+        the demos pre-render an authored <code>&lt;component&gt;</code> into a page, MaaS serves it as a URL the
+        consumer <code>import</code>s natively (<code>GET /_maas/&lt;name&gt;.js?form=wc-class</code>) — one authored
+        definition, resolved into any <em>form</em> on demand, with zero build step on the consumer. A served URL,
+        though, has <strong>no version identity</strong>: its bytes are a function of independently-moving inputs
+        (the authored definition, the transform/compiler version, the requested form/target/strategy), and any of
+        them can change underneath a consumer silently. This Protocol fixes that — it is the prerequisite for
+        cache-immutable <a href="/backlog/087-module-service-distribution-caching/">distribution&nbsp;(#087)</a>:
+        you cannot mark a URL <code>immutable</code> if its identity is undefined.
+    </p>
+    <p>
+        <strong>This is a technical contract, not a UX preference</strong> — a Protocol, not an Intent, surfaced under
+        <code>/protocols/</code>. WE <em>defines</em> the contract (the identity rule, the pin grammar, the provenance
+        and compat-range <em>formats</em>); <a href="../frontierui/">Frontier UI</a> <em>implements</em> it
+        (<a href="/backlog/390-frontier-ui-jsx-runtime-api-contract-version-export-maas-che/">#390</a> — the runtime
+        <code>__API_VERSION__</code> export + the opt-in <code>maas-check</code> validator). The framing follows
+        <a href="/backlog/088-module-service-versioning/">#088</a>: WE supports <em>any coherent</em> way to consume a
+        served module and mandates none — so only the identity invariant is forced; everything else (the pin ladder,
+        the dual unit-of-version, the provenance header) is <em>supported by default</em>, not a decision.
+    </p>
+    <p class="text-gray-600 text-sm">
+        <strong>Scope (2026-06-12):</strong> the contract <em>formats</em> below are authorable now (design-first); the
+        serve-path <em>emission</em> of the hash, headers, and metadata is deferred until a production serve path
+        exists to realize them in (today's <code>tools/maas/vite-plugin.ts</code> is a dev-only Vite middleware that
+        serves <code>name&nbsp;×&nbsp;form&nbsp;×&nbsp;target</code> with no hash and no cache header). This section is
+        the spec that emission will conform to.
+    </p>
+
+    <h4 id="maas-versioning-identity">1 · Identity invariant — content-addressed id</h4>
+    <p>
+        A served artifact's <strong>version id is a content hash over every byte-determining input</strong>. Same hash
+        ⇒ byte-identical artifact (safe to cache forever); any input moves ⇒ a new id. The <em>only</em> excluded
+        option is a rule that omits a byte-determining input — it silently serves drifted bytes, the exact failure
+        versioning exists to prevent. The hashed inputs:
+    </p>
+    <table>
+        <tr><th>Input</th><th>Moves when</th></tr>
+        <tr><td><strong>Authored definition</strong></td><td>the author edits the <code>&lt;component&gt;</code> source</td></tr>
+        <tr><td><strong>Transform/compiler version</strong></td><td>the <code>webadapters</code> AST core or esbuild version/options change</td></tr>
+        <tr><td><strong>Params</strong> — <code>form</code> · <code>target</code> · <code>strategy</code></td><td>per request (the resolved render strategy is part of identity, not a side channel)</td></tr>
+        <tr><td><strong>Provenance</strong> (folded in)</td><td>the producing core/compiler version changes — see §3</td></tr>
+    </table>
+{% highlight "typescript" %}
+// The id is opaque: a hash digest, not a parse target. Inputs are canonicalized
+// (stable key order, normalized params) before hashing so equal inputs ⇒ equal id.
+type ContentAddressedId = string; // e.g. "sha256-9f86d08…" (algorithm-prefixed, base64url)
+
+interface ArtifactIdentity {
+  id: ContentAddressedId;                 // hash(definition + transform/compiler ver + params + provenance)
+  inputs: {
+    definitionHash: ContentAddressedId;   // hash of the authored <component> source
+    compilerVersion: string;              // transform/compiler version folded into the id
+    params: { form: string; target?: string; strategy?: string };
+  };
+}
+{% endhighlight %}
+
+    <h4 id="maas-versioning-pins">2 · Pin grammar — the floating → semver → hash ladder</h4>
+    <p>
+        A consumer pins at whatever rung suits how it develops; WE mandates no single style. Each rung
+        <strong>resolves down</strong> to the immutable content-addressed URL — the standard "mutable pointer,
+        immutable build" shape (npm's <code>tag → version → tarball</code>). Floating and exact pins are
+        <em>revalidatable redirects</em>; the content-hash URL is terminal and never revalidates.
+    </p>
+    <table>
+        <tr><th>Rung</th><th>Example</th><th>Resolves to</th><th>Cache policy</th></tr>
+        <tr><td><strong>Floating tag</strong></td><td><code>/_maas/user-card@latest.js</code></td><td>the current exact semver → its hash URL</td><td>short-TTL, revalidate</td></tr>
+        <tr><td><strong>Exact semver</strong></td><td><code>/_maas/user-card@1.4.2.js</code></td><td>the content-hash URL it was built as</td><td>short-TTL, revalidate</td></tr>
+        <tr><td><strong>Content hash</strong></td><td><code>/_maas/user-card@sha256-9f86d08….js</code></td><td>itself (terminal)</td><td><code>immutable</code>, max-age forever</td></tr>
+    </table>
+    <p class="text-gray-600 text-sm">
+        Unit of version is <strong>dual, not either/or</strong>: an author may carry a human semver on the definition
+        <em>and</em> the derived content hash always exists (semver = the human contract, hash = the integrity
+        contract). The two coexist exactly as npm's tag and tarball-integrity do.
+    </p>
+
+    <h4 id="maas-versioning-provenance">3 · Provenance header</h4>
+    <p>
+        The service emits the <strong>producing core/compiler version</strong> as a response header beside the
+        existing <code>X-MaaS-Lossy</code> / <code>X-MaaS-Diagnostic</code> contract, and <strong>folds it into the
+        identity hash</strong> (§1) — so a compiler bump alone mints a new id even when the authored source is
+        untouched. Pure added metadata: a consumer may read it for diagnostics or ignore it entirely.
+    </p>
+{% highlight "http" %}
+X-MaaS-Producer: webadapters/2.3.0; esbuild/0.21.5   ; core ver ; compiler ver
+X-MaaS-Lossy: 1                                       ; existing contract (#081)
+X-MaaS-Diagnostic: <url-encoded>                      ; existing contract (#081)
+{% endhighlight %}
+
+    <h4 id="maas-versioning-compat">4 · Runtime API-contract-version compat range</h4>
+    <p>
+        The functional form imports a <strong>bare specifier</strong> (<code>@frontierui/jsx-runtime</code>) resolved
+        by the <em>consumer's</em> import map — its version is outside the service's control, and WE does not mandate
+        the consumer's toolchain. So the artifact <strong>declares a compatibility range against the runtime's public
+        API contract</strong> in its metadata — a consumer↔provider seam-contract, the same shape
+        <a href="/projects/webregistries/#protocol-provider-consumer-graph">#092</a> generalizes. The
+        <em>API-contract version</em> is decoupled from the runtime's package semver: it bumps <strong>only on a
+        public-API change</strong>, exposed by the runtime as <code>__API_VERSION__</code> (Frontier UI's half, #390).
+    </p>
+{% highlight "typescript" %}
+interface RuntimeCompat {
+  specifier: string;       // the bare import, e.g. "@frontierui/jsx-runtime"
+  apiContractRange: string; // a semver range over __API_VERSION__, e.g. ">=2 <3"
+}
+// "satisfies" = the resolved runtime's __API_VERSION__ falls within apiContractRange.
+// Advertise-only by default; a consumer MAY opt into @frontierui/maas-check to
+// fail-loud on a mismatch (resolve-time / CI / optional load-time guard). The only
+// excluded option is serving with NO compat contract — a silent runtime mismatch.
+{% endhighlight %}
+    <p class="text-gray-600 text-sm">
+        <strong>Layer split (#088 ruling).</strong> WE owns the <em>format</em> of <code>apiContractRange</code> and
+        what "satisfies" means; Frontier UI owns the <em>value</em> (<code>__API_VERSION__</code>, bumped on public-API
+        change) and the <em>opt-in validator</em>. The validator is inert unless the consumer chooses it — advertise +
+        offer, never mandate.
+    </p>
+</section>

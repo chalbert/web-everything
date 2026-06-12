@@ -1,0 +1,28 @@
+{
+  "id": "7f7621c90218424f",
+  "contentHash": "7f7621c90218424f947adecba1ed2e77451244b3e5f77eb54e41f84a9fde216d",
+  "sourceUrl": "https://www.tldraw.com",
+  "captureMethod": "playwright",
+  "dateCollected": "2026-06-12T12:26:51.966Z",
+  "datePublished": null,
+  "app": "tldraw",
+  "company": "tldraw",
+  "category": "whiteboard-diagramming",
+  "surface": null,
+  "designRegister": "minimal",
+  "theme": "light",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "dpr": 2,
+  "imageDims": {
+    "width": 2880,
+    "height": 1800
+  },
+  "bytes": 31558,
+  "tags": [],
+  "sourceCredit": "tldraw",
+  "collectionRun": "2026-06-12T12-26-38-221Z",
+  "reviewState": "confirmed"
+}

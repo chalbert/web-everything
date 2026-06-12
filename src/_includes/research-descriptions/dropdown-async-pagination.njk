@@ -1,0 +1,127 @@
+<h3>The Question</h3>
+<p>
+    The dropdown UX research (2026-06-01 report) materialized 13 cross-cutting
+    paradigms into intents but flagged one as noted-but-unspecified: <strong>async pagination beyond simple
+    load-more</strong> — cursor vs offset/keyset, "load earlier" / bidirectional, and windowing combined with
+    async. This survey gathers the pagination-strategy literature, the WAI-ARIA APG <strong>Feed</strong>
+    pattern, React Aria's <code>useAsyncList</code>, and the open feature-requests across the major libraries,
+    then checks them against the standards the repo has shipped <em>since</em> the item was filed. It grounds
+    the open forks in <a href="/backlog/018-dropdown-async-pagination-paradigm/">backlog&nbsp;#018</a>.
+</p>
+
+<h3>Recommendation (forks for #018)</h3>
+<ol>
+    <li><strong>No net-new contract.</strong> The item is largely overtaken: cursor/offset already lives in the
+        <a href="/resources/pagination/">Custom Pagination</a> protocol, and windowing+async is already a
+        composition of <a href="/intents/windowed-collection/">Windowed Collection</a>
+        (<code>dataSource:&nbsp;infinite</code>) over <a href="/intents/loader/">Loader</a>
+        (<code>loadingMore</code>). The dropdown <em>composes</em> these; it does not re-specify them.</li>
+    <li><strong>Fetch trigger:</strong> wire Collection Operations' <code>advance:&nbsp;manual&nbsp;|&nbsp;auto</code>
+        onto the autocomplete member, default <code>auto</code> (scroll sentinel), with a manual "Load more"
+        row as the keyboard / screen-reader fallback.</li>
+    <li><strong>Load-earlier:</strong> <strong>forward-only</strong> for the family. The protocol exposes
+        <code>previous()</code>, but top-loading is a Feed/chat/inbox paradigm, not a dropdown one — no
+        surveyed library implements it in a combobox listbox.</li>
+    <li><strong>Unknown-total a11y:</strong> adopt the Feed pattern — <code>aria-setsize="-1"</code> while the
+        total is unknown, <code>aria-busy</code> during batch insert — as the progressive-load rule Windowed
+        Collection currently omits.</li>
+</ol>
+
+<h3>Finding 1 — the item is largely overtaken by work landed since 2026-06-01</h3>
+<p>
+    The item was filed off the dropdown report's open-question&nbsp;#3. Most of what it asks for now exists:
+</p>
+<ul>
+    <li><strong>cursor vs offset</strong> → the <a href="/resources/pagination/">Custom Pagination</a> protocol
+        models <code>strategy:&nbsp;'offset'&nbsp;|&nbsp;'page'&nbsp;|&nbsp;'cursor'</code> with the
+        cross-layer constraint baked in.</li>
+    <li><strong>windowing + async</strong> → <a href="/intents/windowed-collection/">Windowed Collection</a>'s
+        <code>dataSource:&nbsp;infinite</code> "composes the Loader <code>loadingMore</code> state", and Loader
+        names Windowed Collection back — the two reference each other.</li>
+    <li><strong>load-more lifecycle</strong> → Loader's <code>loadingMore</code> state (announced progress row
+        at the list end, never a blocking overlay).</li>
+    <li><strong>bidirectional API</strong> → the protocol's <code>previous()</code> + <code>hasPrevious</code>.</li>
+</ul>
+<p>
+    So #018 is <em>not</em> "design a new contract." It is the narrower call: does the family need any new
+    standard, or does it just compose the three that exist — and what family-specific gaps remain?
+</p>
+
+<h3>Finding 2 — cursor / offset / keyset is a backend strategy with a UX consequence, already modeled</h3>
+<p>
+    The pagination literature is unanimous: <strong>offset/page</strong> is the only strategy yielding a known
+    <code>total</code>, so it alone drives jump-to-page and a "showing&nbsp;21–40&nbsp;of&nbsp;500" range label —
+    at the cost of slow deep pages and rows skipped/duplicated under concurrent writes.
+    <strong>Cursor/keyset</strong> (pass the last-seen sort key) is fast at any depth and stable under writes
+    but exposes <em>no total</em> — only <code>next()</code>/<code>previous()</code>, forcing an append /
+    prev-next UX. This is exactly the model in the <a href="/resources/pagination/">Custom Pagination</a>
+    resource. <strong>Nothing is left to specify</strong>, and it correctly lives at the resource (technical)
+    layer, not as a UX intent — per the repo's intents-are-UX-only rule.
+</p>
+
+<h3>Finding 3 — <code>filtering</code> vs <code>loadingMore</code>: two distinct async states, both modeled</h3>
+<p>
+    A combobox fires two different async events, and Loader already enumerates both:
+    <strong><code>filtering</code></strong> (re-query on new filter text — keeps prior results visible,
+    debounced, stale resolutions dropped via the version token) and
+    <strong><code>loadingMore</code></strong> (fetch the next page of the <em>same</em> query on scroll).
+    React Aria's <code>useAsyncList</code> is the reference implementation of exactly this split: one
+    <code>load({signal, cursor, filterText})</code> function where a changed <code>filterText</code> re-filters
+    from page one and a present <code>cursor</code> appends the next page, with the
+    <code>signal</code>&nbsp;<code>AbortSignal</code> cancelling stale in-flight requests. This corroborates the
+    repo's two-state model — nothing new to add.
+</p>
+
+<h3>Finding 4 — the genuinely-open family gaps (the real forks)</h3>
+<ul>
+    <li><strong>Fetch trigger (fork&nbsp;2):</strong> Collection Operations has
+        <code>advance:&nbsp;manual&nbsp;|&nbsp;auto</code> ("infinite scroll = append + auto") but it lives on
+        grids, never wired onto the autocomplete member. Every surveyed library defaults to scroll-triggered
+        auto-load (React Aria <code>onLoadMore</code>; the MUI/Fluent/SAP requests all assume infinite scroll),
+        with a manual "Load more" row as the accessible fallback.</li>
+    <li><strong>Load-earlier (fork&nbsp;3):</strong> the protocol has <code>previous()</code>, but top-loading
+        (growing upward, preserving scroll anchor) is a <em>feed/chat/inbox</em> paradigm. No surveyed dropdown
+        library implements it; the listbox is forward-append, and top-loading reintroduces the
+        "scroll&nbsp;jumps&nbsp;to&nbsp;top&nbsp;on&nbsp;append" bug libraries fight hardest to avoid. The family
+        default is forward-only; load-earlier belongs to a future Feed block.</li>
+    <li><strong>Unknown-total a11y (fork&nbsp;4):</strong> Windowed Collection mandates <code>aria-setsize</code>
+        = full count, but that assumes the count is <em>known</em>. Under cursor pagination it is unknown until
+        the last page. The WAI-ARIA <a href="https://www.w3.org/WAI/ARIA/apg/patterns/feed/">Feed pattern</a>
+        gives the platform answer: <code>aria-setsize="-1"</code> when the total is indeterminate, with
+        <code>aria-busy="true"</code> during a batch insert flipped to <code>false</code> on completion.</li>
+</ul>
+
+<h3>Finding 5 — async option-pagination is community-driven, not native; no library treats it as solved</h3>
+<p>
+    Across <a href="https://github.com/mui/material-ui/issues/18450">MUI</a>,
+    <a href="https://github.com/microsoft/fluentui/issues/31261">Fluent</a>,
+    <a href="https://github.com/SAP/ui5-webcomponents/issues/6483">SAP UI5</a>,
+    <a href="https://github.com/mui/base-ui/issues/3719">Base UI</a>, and
+    <a href="https://github.com/radix-ui/primitives/issues/894">Radix</a>, "paginated / infinite-scroll
+    combobox" is an <em>open feature request</em>, not a shipped primitive. React Aria
+    (<code>useAsyncList</code> + <code>onLoadMore</code> + <code>ListBoxLoadMoreItem</code>) is the outlier with
+    a first-class answer. The recurring bug everyone hits is
+    <a href="https://github.com/mui/material-ui/issues/30249">scroll-resets-to-top-on-append</a> — which is why
+    forward-append with a preserved scroll anchor is the safe family default, and why the active-always-mounted
+    invariant Windowed Collection already mandates carries the load here.
+</p>
+
+<h3>Finding 6 — there is no native async combobox pagination</h3>
+<p>
+    Native <code>&lt;select&gt;</code> renders its full <code>&lt;option&gt;</code> set eagerly; there is no
+    platform mechanism for progressively fetching options. So async pagination is necessarily an ARIA-composed
+    custom-element concern, and the native-first baseline degrades to a fully-materialized list. This keeps the
+    decision firmly in compose-existing-standards territory rather than waiting on a platform primitive.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/018-dropdown-async-pagination-paradigm/">#018 — async pagination beyond
+        load-more for the dropdown family</a></li>
+    <li>Already owns the axes: <a href="/resources/pagination/">Custom Pagination</a> (cursor/offset) ·
+        <a href="/intents/windowed-collection/">Windowed Collection</a> (<code>dataSource:infinite</code>) ·
+        <a href="/intents/loader/">Loader</a> (<code>filtering</code>/<code>loadingMore</code>) ·
+        <a href="/intents/collection-operations/">Collection Operations</a> (<code>advance</code>/<code>pageMode</code>)</li>
+    <li>Family: <a href="/blocks/droplist/">droplist block</a></li>
+    <li>Origin: dropdown UX behaviors research (2026-06-01 report), open question&nbsp;#3</li>
+</ul>

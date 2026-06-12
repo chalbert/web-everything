@@ -1,9 +1,12 @@
 ---
 type: idea
 workItem: task
-status: open
-blockedBy: ["056", "057", "058"]
+status: resolved
+blockedBy: ["057", "058", "287"]
 dateOpened: "2026-06-03"
+dateStarted: "2026-06-11"
+dateResolved: "2026-06-11"
+graduatedTo: none
 tags: [navigation, intent, tabs, nav-list, blocks, vocabulary, propagation]
 relatedReport: reports/2026-06-03-navigation-intent-vocabulary.md
 relatedProject: webblocks

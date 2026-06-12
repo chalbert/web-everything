@@ -1,0 +1,135 @@
+<h3>The Question</h3>
+<p>
+    Backlog <a href="/backlog/083-agent-file-lock-coordination/">#083</a> proposes a just-in-time, fine-grained
+    file lock for when multiple agents work close features that <em>sometimes</em> touch the same files and the
+    file set isn't known upfront: claim a file right before editing, hold for seconds, release after, backed by a
+    per-file FIFO queue plus crash/deadlock safeties. Before authoring <code>lock.mjs</code> + a
+    <code>PreToolUse</code>/<code>PostToolUse</code> hook, this survey grounds each open fork —
+    <strong>advisory vs hook-enforced, crash safety / TTL, deadlock avoidance, granularity, queue
+    fairness</strong> — in decades of OS, database, and distributed-systems prior art, and checks the design
+    against the coordination this repo <em>already</em> runs.
+</p>
+
+<h3>Recommendation (to ratify in #083)</h3>
+<ol>
+    <li><strong>Enforced via a <code>PreToolUse</code> hook</strong> — the harness is the "kernel" that can deny
+        an <code>Edit</code>/<code>Write</code>; advisory is the <code>flock</code> model one bad actor breaks.</li>
+    <li><strong>Lease + TTL + heartbeat</strong>, log every steal; git is the ground-truth backstop; fencing
+        tokens are the principled escalation, not a v1 requirement.</li>
+    <li><strong>No-hold-while-blocked</strong> — the only feasible Coffman-condition breaker when the lock set is
+        unknowable upfront (2PL needs it known; wait-die forces rollbacks).</li>
+    <li><strong>File-level grain for per-entry files; hot shared files stay single-writer by policy</strong>,
+        outside the lock; no mechanical sub-file locking.</li>
+    <li><strong>FIFO by enqueue time + a TTL on queued waiters</strong> so a stalled waiter ages out and the line
+        advances.</li>
+    <li><strong>Keep parked</strong> — build the v1 only when a real residual same-file collision survives the
+        cheaper rules (worktree-partition + item-claim + single-writer-hot-files).</li>
+</ol>
+
+<h3>Finding 1 — advisory vs mandatory is the OS's exact framing of fork 1; mandatory needs a kernel</h3>
+<p>
+    Unix has run this fork for decades. <strong>Advisory locks</strong>
+    (<a href="https://man7.org/linux/man-pages/man2/flock.2.html"><code>flock(2)</code></a>, <code>fcntl()</code>
+    default) work <em>only if every cooperating process uses the same mechanism and checks it</em> — a process
+    can ignore the lock and do the I/O anyway. <strong>Mandatory locks</strong> are
+    <a href="https://www.kernel.org/doc/Documentation/filesystems/mandatory-locking.txt">kernel-enforced</a>: the
+    kernel suspends any process that touches a locked region regardless of cooperation. The decisive fact —
+    mandatory enforcement requires a privileged layer <em>below</em> the actors that intercepts every access; you
+    cannot get it from a convention.
+</p>
+<p>
+    <strong>Implication (fork 1):</strong> "tell agents to check" is the <code>flock</code> model, broken by one
+    undisciplined agent. The only mandatory equivalent in an agent harness is a <code>PreToolUse</code> hook the
+    harness runs before every edit and that can <em>deny</em> the call — the hook is our kernel. Enforced is not
+    "advisory but stricter"; it is the only real lock.
+</p>
+
+<h3>Finding 2 — crash safety = leases with TTL; the sharp edge is fencing tokens (fork 2)</h3>
+<p>
+    Every distributed-lock system answers "what if the holder dies?" the same way: the lock is a
+    <strong>lease with a TTL</strong> that auto-expires unless refreshed — etcd ties a lock to a kept-alive lease
+    ID, Redlock sets an expiry, Consul/ZooKeeper use session liveness
+    (<a href="https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html">Kleppmann</a>,
+    <a href="https://redis.antirez.com/fundamental/redlock.html">Redlock</a>). The sharp edge research surfaced:
+    TTL <em>alone</em> is unsafe — a holder can pause past its TTL, the lock is re-granted, then the paused holder
+    wakes and writes (two writers). The principled fix is a <strong>fencing token</strong> (a monotonic number
+    the protected resource checks, rejecting stale writes).
+</p>
+<p>
+    <strong>Implication (fork 2):</strong> TTL + heartbeat is right and standard. For this repo's scale full
+    fencing is over-engineering — our cheap backstop is the one the batch already uses: <strong>git is the
+    ground-truth conflict detector</strong>, so a stale late write becomes a visible merge conflict, not silent
+    corruption. Adopt TTL + heartbeat, log every steal, cite fencing as the escalation if a real two-writer
+    corruption is ever observed.
+</p>
+
+<h3>Finding 3 — no-hold-while-blocked is "deny the hold-and-wait condition" (fork 3)</h3>
+<p>
+    Breaking any one of the four Coffman conditions prevents deadlock. The textbook strategies —
+    <strong>lock-ordering / two-phase locking</strong> (acquire all locks up front in a global order) and
+    <strong>wait-die / wound-wait</strong> (timestamp-ordered preemption) — both assume something #083 denies:
+    2PL needs the <em>full lock set known in advance</em>
+    (<a href="https://cs186berkeley.net/notes/note12/">cs186</a>,
+    <a href="https://dspmuranchi.ac.in/pdf/Blog/Deadlock_prevention.pdf">Wait-Die / Wound-Wait</a>).
+</p>
+<p>
+    <strong>Implication (fork 3):</strong> with the file set discovered lazily, lock-ordering is infeasible. The
+    remaining lever is to break <strong>hold-and-wait</strong> directly — release everything you hold and requeue
+    when you block. A recognized prevention discipline, not an ad-hoc rule; it makes circular wait impossible by
+    construction. Wait-die is rejected (forces rollbacks of partial edits; assumes a global timestamp across
+    independent sessions we lack).
+</p>
+
+<h3>Finding 4 — granularity: hot append-only files want single-writer, not finer locks (fork 4)</h3>
+<p>
+    <code>flock()</code> is whole-file; <code>fcntl()</code> adds byte-range locks for databases that need
+    different processes on different pages of one file
+    (<a href="https://www.baeldung.com/linux/file-locking">Baeldung</a>). But the hotspot lesson is the inverse of
+    "lock finer": for a contention hotspot the win is to <strong>not route it through the general lock at all</strong>
+    and serialize it specially (<a href="https://arxiv.org/pdf/2103.09906">Releasing Locks As Early As You Can</a>).
+</p>
+<p>
+    <strong>Implication (fork 4):</strong> file-level is right for normal per-entry <code>*.json</code>/<code>*.njk</code>
+    files. The hottest shared files (<code>semantics.json</code>, generated inventories) are append-from-everyone;
+    one file lock there serializes <em>all</em> agents and a sub-file/section lock is brittle (no stable byte ranges
+    in hand-edited JSON). Keep hot files <strong>single-writer by policy</strong> (one merge agent), outside the
+    lock — matching the repo's existing splice-only-changed-entries discipline.
+</p>
+
+<h3>Finding 5 — queue fairness: FIFO is standard; the real risk is a wedged waiter (fork 5)</h3>
+<p>
+    etcd orders waiters by a globally unique, monotonically increasing <strong>Revision</strong>, giving fair FIFO
+    acquisition (<a href="https://etcd.io/docs/v3.5/learning/why/">etcd</a>). The known failure is not unfairness but
+    a <strong>stalled waiter</strong> holding its slot forever and wedging the line.
+</p>
+<p>
+    <strong>Implication (fork 5):</strong> FIFO by enqueue time, plus a <strong>TTL on queued waiters</strong> so a
+    stalled/dead waiter ages out — the queue analogue of the holder's lease TTL.
+</p>
+
+<h3>Finding 6 — the build-at-all question: the repo already chose the cheaper route</h3>
+<p>
+    The 2025–2026 multi-agent-coding consensus is <strong>git worktrees + isolated working dirs</strong>, converting
+    "silent runtime file corruption into visible merge-time conflicts"
+    (<a href="https://www.augmentcode.com/guides/git-worktrees-parallel-ai-agent-execution">Augment Code</a>).
+    Claude Code's own pattern is "<strong>status flags that lock work claims</strong> + git worktrees + dependency
+    markers" (<a href="https://www.mindstudio.ai/blog/claude-code-agent-teams-shared-task-list">MindStudio</a>) —
+    exactly this repo's item-level <code>status: active</code> claim plus the batch skill's worktree lanes, not a
+    file lock. <a href="https://arxiv.org/pdf/2510.18893">CodeCRDT</a> notes lock-based coordination introduces
+    O(N×L) contention and argues re-read-shared-state often beats locking.
+</p>
+<p>
+    <strong>Implication (meta-fork):</strong> the JIT lock earns its keep <em>only</em> for the residual the static
+    partition can't sidestep — coincidental same-file overlap between fully independent sessions not running under
+    one <code>/batch</code>. So <strong>keep #083 parked</strong>: ship the v1 lock only once a real residual
+    collision is observed that worktree-partition + item-claim + single-writer-hot-files didn't catch.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/083-agent-file-lock-coordination/">#083 — agent file-lock coordination</a></li>
+    <li>Existing claim machinery: <code>scripts/backlog.mjs</code> ·
+        <code>scripts/backlog/frontmatter.mjs</code> (<code>status: open → active</code> splice)</li>
+    <li>Cheaper route already shipped: <a href="/backlog/">batch skill</a> <code>/batch --parallel</code>
+        partitioned worktree lanes</li>
+</ul>

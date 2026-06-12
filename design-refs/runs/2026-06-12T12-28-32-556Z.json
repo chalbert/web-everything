@@ -1,0 +1,90 @@
+{
+  "runId": "2026-06-12T12-28-32-556Z",
+  "startedAt": "2026-06-12T12:28:32.557Z",
+  "captured": [],
+  "skipped": [
+    {
+      "url": "https://excalidraw.com",
+      "reason": "in-ledger",
+      "id": "50badce4ea54a544"
+    },
+    {
+      "url": "https://www.tldraw.com",
+      "reason": "in-ledger",
+      "id": "7f7621c90218424f"
+    },
+    {
+      "url": "https://www.photopea.com",
+      "reason": "in-ledger",
+      "id": "76167c6870ef2f53"
+    },
+    {
+      "url": "https://app.diagrams.net",
+      "reason": "in-ledger",
+      "id": "9dbdb7f79955781d"
+    },
+    {
+      "url": "https://play.grafana.org/d/000000012/grafana-play-home",
+      "reason": "in-ledger",
+      "id": "a442034bf181e54e"
+    },
+    {
+      "url": "https://www.openstreetmap.org",
+      "reason": "in-ledger",
+      "id": "af3d9641c661a0c5"
+    },
+    {
+      "url": "https://jsfiddle.net",
+      "reason": "in-ledger",
+      "id": "d816d448027c02f4"
+    },
+    {
+      "url": "https://codepen.io/pen/",
+      "reason": "in-ledger",
+      "id": "4737eee855a78c80"
+    },
+    {
+      "url": "https://www.desmos.com/calculator",
+      "reason": "in-ledger",
+      "id": "af041413afb82b9f"
+    },
+    {
+      "url": "https://www.geogebra.org/calculator",
+      "reason": "in-ledger",
+      "id": "4881dac6e3b8d3dc"
+    },
+    {
+      "url": "https://editor.swagger.io",
+      "reason": "in-ledger",
+      "id": "638732d38137113a"
+    },
+    {
+      "url": "https://mermaid.live",
+      "reason": "in-ledger",
+      "id": "185f8175b4461706"
+    },
+    {
+      "url": "https://regex101.com",
+      "reason": "in-ledger",
+      "id": "afb31f046a4c8662"
+    },
+    {
+      "url": "https://carbon.now.sh",
+      "reason": "in-ledger",
+      "id": "927a40f01e6d845b"
+    },
+    {
+      "url": "https://squoosh.app",
+      "reason": "in-ledger",
+      "id": "fa9784419e22bdbd"
+    },
+    {
+      "url": "https://play.tailwindcss.com",
+      "reason": "in-ledger",
+      "id": "85ccface0c22ac07"
+    }
+  ],
+  "duplicates": [],
+  "failed": [],
+  "finishedAt": "2026-06-12T12:28:32.837Z"
+}

@@ -1,0 +1,165 @@
+/**
+ * @file webtheme/tokens.ts
+ * @description Web Theme token model — backlog #404 (Fork 3 of the #364 ruling), built on the #403
+ *   webtheme project + DTCG↔CSS protocol.
+ *
+ * The **concrete-value layer** a design system resolves into. Tokens are authored + interchanged as
+ * **DTCG 2025.10** (`{ $type, $value }` nodes with `{group.token}` aliasing — the one legitimate Protocol
+ * here, adopted not coined, #403) across a **3-tier** taxonomy:
+ *
+ *   - **primitive** — raw scales (color / space / radius / elevation / type ramp); owned here.
+ *   - **semantic** — NOT a parallel vocabulary: the existing intents (surface/density/typography/motion/
+ *     theme-color) ARE the semantic tier; a token never re-coins a role name. (Excluded from this model
+ *     by design — see #403.)
+ *   - **component** — per-component overrides (a button's own radius/padding), authored as DTCG nodes
+ *     that **alias** a primitive (`{radius.md}`) so a component value can never silently disagree with
+ *     the scale it points into.
+ *
+ * This module owns the model + the two operations the rest of webtheme builds on: **`extends`** (a project
+ * token document deep-merges over the {@link defaultTokens platform default} — config-extends-platform-
+ * default, never authored from scratch) and **alias resolution** (a `{group.token}` ref → its target,
+ * cycle- and dangling-ref-checked). The DTCG→CSS compile is its sibling {@link ./compile}. Pure + dependency-free.
+ */
+
+/** The DTCG `$type`s Web Theme's primitive + component tiers use. A group's `$type` is inherited by its tokens. */
+export type DtcgType = 'color' | 'dimension' | 'number' | 'duration' | 'fontFamily' | 'fontWeight' | 'shadow';
+
+/** A DTCG token leaf: a concrete `$value` (or a `{group.token}` alias string) and an optional own `$type`. */
+export interface DtcgToken {
+  $value: string | number;
+  $type?: DtcgType;
+  $description?: string;
+}
+
+/** A DTCG group: an optional `$type` (inherited by descendants) plus child groups/tokens, keyed by name. */
+export interface DtcgGroup {
+  $type?: DtcgType;
+  $description?: string;
+  [name: string]: DtcgGroup | DtcgToken | DtcgType | string | undefined;
+}
+
+/** A whole DTCG token document — the root group. */
+export type DtcgDocument = DtcgGroup;
+
+/** A token flattened out of the tree: its dot-path segments, resolved `$type`, raw value, description. */
+export interface FlatToken {
+  readonly path: readonly string[];
+  readonly type: DtcgType | undefined;
+  readonly value: string | number;
+  readonly description?: string;
+}
+
+const META_KEYS = new Set(['$type', '$value', '$description']);
+
+/** A node is a token iff it carries `$value`; otherwise it is a group. */
+export function isToken(node: unknown): node is DtcgToken {
+  return typeof node === 'object' && node !== null && '$value' in (node as object);
+}
+
+/** True for a `{group.token}` alias string (DTCG reference syntax). */
+export function isAlias(value: unknown): value is string {
+  return typeof value === 'string' && /^\{[A-Za-z0-9_.-]+\}$/.test(value);
+}
+
+/** The dot-path inside a `{group.token}` alias (no braces), e.g. `{radius.md}` → `radius.md`. */
+export function aliasTarget(value: string): string {
+  return value.slice(1, -1);
+}
+
+/** The CSS custom-property name for a token path — `['radius','md']` → `--radius-md`. */
+export function cssVarName(path: readonly string[]): string {
+  return `--${path.join('-')}`;
+}
+
+/**
+ * Walk a DTCG document into a flat token list, inheriting each token's `$type` from the nearest ancestor
+ * group (or its own `$type`). Deterministic depth-first order, so the compiled CSS is stable.
+ */
+export function flattenTokens(doc: DtcgDocument): FlatToken[] {
+  const out: FlatToken[] = [];
+  const walk = (node: DtcgGroup, path: string[], inheritedType: DtcgType | undefined): void => {
+    const groupType = (node.$type as DtcgType | undefined) ?? inheritedType;
+    for (const [key, child] of Object.entries(node)) {
+      if (META_KEYS.has(key) || child === undefined) continue;
+      if (isToken(child)) {
+        out.push({
+          path: [...path, key],
+          type: child.$type ?? groupType,
+          value: child.$value,
+          description: child.$description,
+        });
+      } else if (typeof child === 'object') {
+        walk(child as DtcgGroup, [...path, key], groupType);
+      }
+    }
+  };
+  walk(doc, [], undefined);
+  return out;
+}
+
+/** Thrown when an alias points at a missing token or forms a cycle — a malformed token document. */
+export class TokenResolutionError extends Error {
+  constructor(reason: string) {
+    super(`webtheme token resolution — ${reason}`);
+    this.name = 'TokenResolutionError';
+  }
+}
+
+/** A flat token plus its resolved-to-literal value and the path it aliases (if any). */
+export interface ResolvedToken extends FlatToken {
+  /** The final non-alias literal this token resolves to (alias chains followed to the end). */
+  readonly resolved: string | number;
+  /** When this token is an alias, the dot-path it points at (for `var(--ref)` compilation); else null. */
+  readonly aliasOf: string | null;
+}
+
+/**
+ * Resolve every token's value to a literal, following `{group.token}` alias chains to the end. Throws
+ * {@link TokenResolutionError} on a dangling reference or an alias cycle — lossy-but-loud, never a silent
+ * bad value. The per-token `aliasOf` is kept so the compiler can emit `var(--ref)` for a direct alias
+ * (matching the #403 example `--button-radius: var(--radius-md)`) while still knowing the literal for
+ * an `@property` initial-value.
+ */
+export function resolveTokens(flat: readonly FlatToken[]): ResolvedToken[] {
+  const byPath = new Map(flat.map((t) => [t.path.join('.'), t]));
+
+  const resolveValue = (key: string, seen: Set<string>): string | number => {
+    const token = byPath.get(key);
+    if (!token) throw new TokenResolutionError(`alias points at unknown token "{${key}}"`);
+    if (!isAlias(token.value)) return token.value;
+    const next = aliasTarget(token.value);
+    if (seen.has(next)) throw new TokenResolutionError(`alias cycle: ${[...seen, next].join(' → ')}`);
+    return resolveValue(next, new Set(seen).add(next));
+  };
+
+  return flat.map((t) => {
+    const aliasOf = isAlias(t.value) ? aliasTarget(t.value) : null;
+    const key = t.path.join('.');
+    return { ...t, aliasOf, resolved: resolveValue(key, new Set([key])) };
+  });
+}
+
+/**
+ * `extends` — the platform-default override mechanism (config-extends-platform-default, #403). Deep-merge
+ * a project's `override` token document over the `base` (the {@link defaultTokens} set): a project supplies
+ * only the tokens it changes and inherits the complete default for everything else. Token leaves (nodes
+ * with `$value`) replace wholesale; groups merge recursively. Pure — neither input is mutated.
+ */
+export function extendTokens(base: DtcgDocument, override: DtcgDocument): DtcgDocument {
+  const merge = (a: DtcgGroup, b: DtcgGroup): DtcgGroup => {
+    const out: DtcgGroup = { ...a };
+    for (const [key, bVal] of Object.entries(b)) {
+      const aVal = out[key];
+      if (META_KEYS.has(key) || bVal === undefined) {
+        out[key] = bVal as DtcgGroup[string];
+      } else if (isToken(bVal) || isToken(aVal) || typeof bVal !== 'object' || typeof aVal !== 'object') {
+        // A token leaf (either side) or a primitive — the override wins wholesale.
+        out[key] = bVal as DtcgGroup[string];
+      } else {
+        out[key] = merge(aVal as DtcgGroup, bVal as DtcgGroup);
+      }
+    }
+    return out;
+  };
+  return merge(base, override);
+}

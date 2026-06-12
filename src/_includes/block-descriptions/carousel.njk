@@ -1,0 +1,44 @@
+<h2>Overview</h2>
+<p>
+  <strong>Carousel</strong> presents a set of <em>equivalent slides</em> one (or a few) at a time, advanced
+  by controls, pagination markers, swipe, or optional autoplay. It is for peer content the user browses
+  (promos, images, cards) — distinct from <a href="/blocks/tabs/">tabs</a> (distinctly-labelled panels) and
+  from paginated data (the <a href="/intents/collection-operations/">Collection Operations</a> intent).
+</p>
+<p>
+  Native-first by construction: the substrate is a <strong>CSS scroll-snap container</strong>, and where
+  supported the emerging <strong>CSS carousel pseudo-elements</strong> provide native prev/next and dot
+  markers — so the block leans on the platform rather than re-implementing scroll logic in JavaScript.
+</p>
+
+<h2>Web Standards Alignment</h2>
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr><td><a href="https://developer.mozilla.org/docs/Web/CSS/CSS_scroll_snap">CSS Scroll Snap</a> (<code>scroll-snap-type</code> / <code>scroll-snap-align</code>)</td><td>Baseline 2024</td><td>The substrate — paging, momentum, touch, and arrow-key scrolling for free. The block defaults to it.</td></tr>
+  <tr><td><a href="https://developer.mozilla.org/docs/Web/CSS/::scroll-button">::scroll-button()</a> / <a href="https://developer.mozilla.org/docs/Web/CSS/::scroll-marker">::scroll-marker</a> (CSS Overflow 5)</td><td>Emerging (Open UI / CSS WG)</td><td>Native prev/next buttons and pagination dots where shipped — used instead of JS handlers; JS paging is the fallback only.</td></tr>
+  <tr><td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/carousel/">WAI-ARIA APG Carousel</a></td><td>WAI-ARIA 1.2</td><td>Rotation announced via a live region; prev/next + slide-picker controls; slides as a named group. Baked in, not optional.</td></tr>
+  <tr><td><a href="https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html">WCAG 2.2.2 Pause, Stop, Hide</a></td><td>WCAG 2.2</td><td>Autoplay (opt-in) requires a visible pause control and pauses on hover/focus; no auto-advance under <code>prefers-reduced-motion</code>.</td></tr>
+</table>
+
+<h2>Framework / Library Research</h2>
+<table>
+  <tr><th>Source</th><th>Key Patterns Adopted</th></tr>
+  <tr><td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/carousel/">WAI-ARIA APG</a></td><td>Live-region rotation announcement, pause control, slide grouping, keyboard model.</td></tr>
+  <tr><td><a href="https://open-ui.org/components/carousel.explainer/">Open UI Carousel</a> / CSS WG</td><td>Native carousel via <code>::scroll-button()</code> + <code>scroll-marker-group</code> — the direction the platform is moving.</td></tr>
+  <tr><td><a href="https://www.embla-carousel.com/">Embla</a> / <a href="https://splidejs.com/">Splide</a></td><td>Snap-based paging, optional autoplay with pause, accessible controls — as JS fallbacks.</td></tr>
+</table>
+
+<h2>Behaviour</h2>
+<ul>
+  <li><strong>Paging.</strong> CSS scroll-snap pages between slides; controls and markers drive <code>scrollIntoView</code> (or the native scroll-button) — no bespoke transform math.</li>
+  <li><strong>Accessibility (mandatory).</strong> The rotating region announces the current slide via a live region; prev/next + a slide-picker are exposed; slides form an accessibly-named group.</li>
+  <li><strong>Autoplay (opt-in, gated).</strong> Off by default. When on: pauses on hover/focus, honours <code>prefers-reduced-motion</code> (no auto-advance), and exposes a visible pause/play control.</li>
+  <li><strong>Motion.</strong> Slide transitions compose the <a href="/intents/motion/">Motion Intent</a>; navigation controls compose the <a href="/intents/navigation/">Navigation Intent</a>.</li>
+</ul>
+
+<h2>Boundaries</h2>
+<p>
+  Equivalent slides, not labelled panels (<a href="/blocks/tabs/">tabs</a>) and not paginated data
+  (<a href="/intents/collection-operations/">Collection Operations</a>). A carousel composes Navigation for
+  its prev/next + markers but is its own pattern.
+</p>

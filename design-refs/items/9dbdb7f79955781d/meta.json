@@ -1,0 +1,28 @@
+{
+  "id": "9dbdb7f79955781d",
+  "contentHash": "9dbdb7f79955781d763b4a09088624db31ce9b19c520e10eb67224615b608ade",
+  "sourceUrl": "https://app.diagrams.net",
+  "captureMethod": "playwright",
+  "dateCollected": "2026-06-12T12:27:04.773Z",
+  "datePublished": null,
+  "app": "draw.io",
+  "company": "JGraph",
+  "category": "diagramming",
+  "surface": null,
+  "designRegister": "enterprise-dense",
+  "theme": "light",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "dpr": 2,
+  "imageDims": {
+    "width": 2880,
+    "height": 1800
+  },
+  "bytes": 136700,
+  "tags": [],
+  "sourceCredit": "JGraph",
+  "collectionRun": "2026-06-12T12-26-38-221Z",
+  "reviewState": "confirmed"
+}

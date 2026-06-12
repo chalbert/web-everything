@@ -41,6 +41,23 @@ eleventyComputed:
             {% for intent in intents %}
                 {% if intent.id == block.implementsIntent %}
             <p class="mb-4">This block is a technical implementation of the <a href="/intents/{{ intent.id }}/">{{ intent.name }}</a> — {{ intent.summary | lower }}</p>
+                {% if block.intentDimensions and intent.dimensions %}
+            <p class="mb-2 text-slate-600">The values this block realizes for the intent's <a href="/intents/{{ intent.id }}/">configurable dimensions</a> (axes it does not declare defer to a composed block):</p>
+            <table>
+                <thead>
+                    <tr><th>Dimension</th><th>Realized value</th><th>Axis</th></tr>
+                </thead>
+                <tbody>
+                    {% for dimKey, dimValue in block.intentDimensions %}
+                    <tr>
+                        <td><code>{{ dimKey }}</code></td>
+                        <td><code>{{ dimValue }}</code></td>
+                        <td class="text-slate-600">{% if intent.dimensions[dimKey] %}{{ intent.dimensions[dimKey].description }}{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+                {% endif %}
                 {% endif %}
             {% endfor %}
         </div>

@@ -1,0 +1,130 @@
+<h3>The Question</h3>
+<p>
+    <a href="/backlog/178-access-control-authorization-gate/">Access control</a> is the settled <em>entry</em>
+    mirror of the <em>exit</em> guard (<a href="/backlog/129-navigation-guard-intent/">#129</a> →
+    <a href="/backlog/273-exit-guard-intent-confirm-before-tearing-down-a-region-with-/">#273</a>): built
+    <strong>on</strong> the <a href="/projects/webguards/#protocol-guard">Guard protocol</a>'s
+    predicate-provider seam, not as its own project. The home fork is resolved; what's open is the
+    <strong>member design</strong>. This survey gathers web-platform and library prior art per design-first
+    step&nbsp;1 so the two surfaces, the deny-outcome family, and the authority vocabulary reuse platform and
+    ecosystem terms instead of coining them — and so the trust boundary is stated identically to the
+    <a href="/backlog/012-gap-5-webidentity-project/">#012 identity</a> finding (the front-end is a UX mirror;
+    the back-end is authoritative).
+</p>
+
+<h3>Recommendation (to ratify in #178)</h3>
+<ol>
+    <li><strong>Two surfaces, one provider</strong> — author <em>both</em> the routing entry guard and the
+        rendering access gate as one member sharing one authz provider; don't split into two members or
+        collapse to one surface.</li>
+    <li><strong>The UX names the deny-outcome family</strong> (<code>hide | redirect | forbid | cloak</code>),
+        but the <code>forbid</code> (403) vs <code>cloak</code> (404) existence-hiding choice is decided
+        <em>behind the provider</em> — a security call, not a UX dimension.</li>
+    <li><strong>Feature flags are an authority <em>kind</em></strong>, not separate machinery: a flag source is
+        one <code>CustomGuardProvider</code> resolving through the same seam, inheriting the same UX-mirror
+        trust boundary.</li>
+    <li><strong>Restate, don't re-decide, the trust boundary</strong> — the member declares the front-end a UX
+        mirror and the back-end authoritative, inherited verbatim from the Guard protocol.</li>
+</ol>
+
+<h3>Finding 1 — authorization is universally factored into TWO surfaces, fed by one ability source</h3>
+<p>
+    Every surveyed stack keeps <strong>navigation-entry</strong> authorization separate from
+    <strong>render-time</strong> authorization, with one shared policy source feeding both:
+</p>
+<ul>
+    <li><strong>Route guard (entry):</strong> Angular
+        <a href="https://angular.dev/guide/routing/route-guards"><code>CanActivate</code></a> returns
+        <code>true | false | UrlTree</code> (a <code>UrlTree</code> cancels navigation and redirects); React
+        Router checks authorization in a route <strong>loader</strong> that
+        <code>throw redirect('/login')</code> (v7 hoists it to route middleware); Vue Router uses
+        <a href="https://router.vuejs.org/guide/advanced/navigation-guards.html">navigation guards</a>
+        (<code>router.beforeEach</code> / per-route <code>beforeEnter</code>) reading declarative
+        <code>meta: { requiresAuth }</code> and returning a redirect location.</li>
+    <li><strong>Element gate (render):</strong> CASL's
+        <a href="https://casl.js.org/v6/en/package/casl-vue/"><code>&lt;Can&gt;</code></a> component (React) /
+        <code>$can</code> (Vue) conditionally renders a subtree from the <em>same</em> <code>Ability</code>
+        instance used server-side.</li>
+</ul>
+<p>
+    <strong>Implication:</strong> the member is genuinely two surfaces off one authz provider — a routing entry
+    guard (deny → navigation outcome) and a rendering access gate (deny → render-or-hide a subtree). They share
+    only the predicate.
+</p>
+
+<h3>Finding 2 — the entry deny-branch is a small named family; 403-vs-404 is a security call</h3>
+<p>
+    Entry-deny outcomes collapse to <strong>redirect</strong> (to login/fallback), <strong>block</strong>
+    (cancel in place), or render a <strong>forbidden / not-found</strong> view. The load-bearing one is
+    forbidden-vs-not-found:
+    <a href="https://lockmedown.com/when-should-you-return-404-instead-of-403-http-status-code/">RFC&nbsp;9110</a>
+    sanctions existence hiding — an origin server that wishes to hide a forbidden resource MAY respond
+    <code>404</code> instead of <code>403</code>, because a <code>403</code> <em>confirms the resource exists</em>
+    and lets an attacker enumerate protected resources
+    (<a href="https://authress.io/knowledge-base/articles/choosing-the-right-http-error-code-401-403-404">Authress</a>).
+    So the UX-only intent names the outcomes (<code>hide | redirect | forbid | cloak</code>), but which fires —
+    especially <code>forbid</code>(403) vs <code>cloak</code>(404) — belongs <strong>behind the provider</strong>,
+    exactly as the Guard protocol summary already states.
+</p>
+
+<h3>Finding 3 — the trust boundary is identical to the identity finding</h3>
+<p>
+    Every source repeats the warning unprompted: Angular — <em>"Never rely on client-side guards as the sole
+    source of access control… Always enforce user authorization server-side."</em> CASL is <em>isomorphic</em>
+    precisely so the <strong>same</strong> ability object runs on the server (the enforcement point) and the
+    client (the mirror). This is the same boundary the
+    <a href="/projects/webguards/#protocol-guard">Guard protocol</a> already fixes (async, server-authoritative,
+    revocable; the front-end is a UX mirror, never enforcement) and the same one
+    <a href="/backlog/012-gap-5-webidentity-project/">#012 identity</a> landed on. The member restates it, it
+    does not re-decide it.
+</p>
+
+<h3>Finding 4 — policy engines (OPA) are the back-end provider impl, validating the provider seam</h3>
+<p>
+    <a href="https://www.openpolicyagent.org/docs">OPA</a> externalizes authorization: the app is a
+    <strong>Policy Enforcement Point</strong> querying a <strong>Policy Decision Point</strong> with JSON and
+    getting an allow/deny back; Rego policies change without touching app code. That is structurally the Guard
+    <strong>provider seam</strong> — the guarded surface (PEP) stays untouched while the policy source (PDP) is
+    swapped. OPA, CASL, and a feature-flag SDK are all just different <code>CustomGuardProvider</code>
+    implementations behind the same async predicate, so the member consumes a verdict and never bakes a policy
+    model.
+</p>
+
+<h3>Finding 5 — feature-flags-as-authority: same abstraction, different stakes</h3>
+<p>
+    A widely-cited argument holds feature flags and authorization
+    <a href="https://ntietz.com/blog/feature-flags-and-authorization/">abstract the same concept</a> — a gate
+    over subject + context returning a boolean — and
+    <a href="https://launchdarkly.com/docs/guides/flags/entitlements">LaunchDarkly entitlements</a> are
+    long-lived flag targeting. But the same sources draw a sharp line: <strong>failure stakes differ</strong>
+    (a wrong promotion is embarrassing; leaking another user's data is a regulator problem),
+    <strong>permanence differs</strong> (flags are temporary; authorization is permanent), and a
+    <strong>client-side flag is not a control</strong> unless coupled to a backend flag. So feature-flags-as-
+    authority is a first-class <strong>authority <em>kind</em></strong> the gate resolves through the same
+    provider seam — not separate machinery, and not a license to enforce on the client.
+</p>
+
+<h3>Finding 6 — no native authorization primitive, but the Navigation API is the route-guard substrate</h3>
+<p>
+    There is no browser authorization API — the Permissions API is a <em>different</em> concern
+    (camera/geolocation, owned by <a href="/backlog/009-gap-13-webpermissions-project/">#009</a>, explicitly not
+    this). But the
+    <a href="https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API">Navigation API</a>'s
+    <code>navigate</code> event (<code>intercept()</code> + redirect) is the native substrate for the route-guard
+    surface — the same primitive the
+    <a href="/intents/navigation/">Navigation Intent</a> names as its SPA-grade enhancement and the exit guard's
+    <code>route</code> scope already intercepts. The entry guard composes the existing navigation machinery; it
+    does not invent it.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/178-access-control-authorization-gate/">#178 — access control / authorization gate</a></li>
+    <li>Built on: <a href="/projects/webguards/#protocol-guard">Guard protocol</a> ·
+        <a href="/backlog/288-author-the-guard-protocol-standard-provider-predicate-seam/">#288 (authoring)</a></li>
+    <li>Sibling member: <a href="/intents/exit-guard/">Exit Guard intent</a>
+        (<a href="/backlog/273-exit-guard-intent-confirm-before-tearing-down-a-region-with-/">#273</a>) ·
+        <a href="/backlog/129-navigation-guard-intent/">#129</a></li>
+    <li>Upstream: <a href="/backlog/012-gap-5-webidentity-project/">#012 Web Identity</a> (identity → authorization)</li>
+    <li>Composes: <a href="/intents/navigation/">Navigation intent</a> (the route-guard substrate)</li>
+</ul>

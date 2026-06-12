@@ -1,8 +1,9 @@
 ---
-type: decision
+type: idea
 workItem: task
 parent: "140"
 status: open
+blockedBy: ["140"]
 dateOpened: "2026-06-07"
 tags: [product-strategy, dev-experience, dev-browser, ai-generated, brainstorm, candidate-features, full-context-debug, ownership-routing, introspection]
 relatedReport: reports/2026-06-07-dev-surface-feature-market-landscape.md
@@ -10,6 +11,8 @@ crossRef: { url: /backlog/140-dev-surface-product-feature-matrix/, label: "Produ
 ---
 
 # AI-generated candidate dev-experience features — full-context debugging & "the best person does the work"
+
+> **Reclassified `decision` → `idea` (2026-06-11).** This is an AI-generated brainstorm **inventory**, not an open fork — there's no single call to ratify here. Its real action is *triaging which of these candidates graduate to #140 rows (or their own items)*, and that triage is owned by the [#140 feature matrix](/backlog/140-dev-surface-product-feature-matrix/) (this card is `parent: 140`). Kept as a `task`-level idea rolling under #140; `status: open` so it stays available as the candidate pool.
 
 > ⚠️ **AI-generated.** This card was produced by Claude in a brainstorm extending the [feature matrix (#140)](/backlog/140-dev-surface-product-feature-matrix/) along two threads the user raised — *having the full context to debug* and *getting the best person on the team to do the work*. It is a **raw idea inventory to triage**, not vetted, deduped, or prioritised specs. Promote the good ones to #140 rows or their own items; discard the rest.
 

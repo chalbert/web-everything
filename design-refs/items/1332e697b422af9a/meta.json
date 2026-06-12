@@ -1,0 +1,28 @@
+{
+  "id": "1332e697b422af9a",
+  "contentHash": "1332e697b422af9a6c99f1e13d222e8a5df9e4da440cf874acb21d508b267be9",
+  "sourceUrl": "https://play.tailwindcss.com",
+  "captureMethod": "playwright",
+  "reviewState": "confirmed",
+  "dateCollected": "2026-06-12T21:50:30.810Z",
+  "datePublished": null,
+  "app": "Tailwind Play",
+  "company": "Tailwind Labs",
+  "category": "code-playground",
+  "surface": null,
+  "designRegister": "dark-dev",
+  "theme": "dark",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "dpr": 2,
+  "imageDims": {
+    "width": 2880,
+    "height": 1800
+  },
+  "bytes": 307626,
+  "tags": [],
+  "sourceCredit": "Tailwind Labs",
+  "collectionRun": "2026-06-12T21-48-32-270Z"
+}

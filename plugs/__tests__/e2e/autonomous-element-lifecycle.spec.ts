@@ -12,18 +12,23 @@
  *                `customElements.define` and keeps the real definition itself, so lifecycle driving
  *                on this path would be the plug's responsibility. This is the path #167 is about.
  *
- * VERIFIED FINDING (2026-06-09, real Chromium): the SCOPED path is non-functional in a real browser
- * *before any lifecycle question arises*. `CustomElementRegistry.define()` does `new element()` to
+ * ORIGINAL FINDING (2026-06-09, real Chromium): the SCOPED path was non-functional in a real browser
+ * *before any lifecycle question arose*. `CustomElementRegistry.define()` does `new element()` to
  * snapshot instance-field callbacks, and constructing a custom-element class that is NOT itself
- * natively registered throws `TypeError: Failed to construct 'HTMLElement': Illegal constructor`.
- * The same barrier hits `Reflect.construct(RealClass, …)` in pathInsertionMethods' upgrade flow.
- * The existing jsdom unit tests pass only because jsdom permits constructing unregistered
- * custom-element classes — Chromium does not. So disconnect/attributeChanged/form callbacks can't be
- * verified as firing because no real instance can be produced at all.
+ * natively registered threw `TypeError: Failed to construct 'HTMLElement': Illegal constructor`.
+ * The same barrier hit `Reflect.construct(RealClass, …)` in pathInsertionMethods' upgrade flow.
  *
- * These tests pin that contract. They are written to PASS today and to START FAILING the moment the
- * scoped path can construct/drive — at which point whoever closes the follow-up item rewrites the
- * assertions to require the callbacks fire.
+ * ROOT FIX (#228, 2026-06-10): the scoped registry now registers the real autonomous class natively
+ * under a unique *private* tag (`ensureNativelyConstructible`), which makes the class a registered
+ * constructor — so `new element()` and `Reflect.construct(RealClass, …)` are legal — without
+ * colliding with the user's tag (which still carries the no-op stand-in). The construction barrier
+ * below has therefore INVERTED: scoped `define()` now succeeds and produces a legally-constructed
+ * real-class instance. The native control test still proves the browser was always capable.
+ *
+ * What remains is *driving* the per-callback reactions on the scoped path — disconnectedCallback
+ * (#261), attributeChangedCallback (#262), form-associated callbacks (#263) — each of which now has
+ * a constructible instance to react. Those items flip the three per-callback probes below from
+ * "construction succeeds" to "the callback actually fires".
  *
  * We navigate to a served page first so `/plugs/*.ts` imports resolve against a real origin —
  * page.setContent alone yields an about:blank origin where those imports silently never load (which
@@ -41,10 +46,13 @@ test.describe('autonomous element lifecycle — scoped CustomElementRegistry (pl
     await page.evaluate(async () => {
       const { default: CustomElement } = await import('/plugs/webcomponents/CustomElement.ts');
       const { applyPatches, applyInsertionPatch } = await import('/plugs/webcomponents/index.ts');
+      const { applyPatches: applyInjectorsPatches } = await import('/plugs/webinjectors/index.ts');
       const { default: CustomElementRegistry } = await import('/plugs/webregistries/CustomElementRegistry.ts');
-      // bootstrap.ts calls applyPatches() (clone handlers + cloneNode); applyInsertionPatch() is
-      // exported but NOT called by applyPatches(), so apply it explicitly to give the scoped path its
-      // best shot at the connect half.
+      // bootstrap.ts order: injectors before components. The insertion patch and the path-insertion
+      // walker (which replaceChildren/remove route through) call `this.getClosestInjector()`, added
+      // by the injectors patch. applyInsertionPatch() is exported but NOT called by applyPatches(),
+      // so apply it explicitly to give the scoped path its best shot at the connect/disconnect halves.
+      applyInjectorsPatches();
       applyPatches();
       applyInsertionPatch();
       (window as any).__CustomElement = CustomElement;
@@ -52,7 +60,7 @@ test.describe('autonomous element lifecycle — scoped CustomElementRegistry (pl
     });
   });
 
-  test('upstream blocker: scoped define() of an autonomous element throws "Illegal constructor"', async ({ page }) => {
+  test('root fix: scoped define() of an autonomous element succeeds and produces a legally-constructed real-class instance', async ({ page }) => {
     const result = await page.evaluate(() => {
       const CustomElement = (window as any).__CustomElement;
       const CustomElementRegistry = (window as any).__CustomElementRegistry;
@@ -71,48 +79,139 @@ test.describe('autonomous element lifecycle — scoped CustomElementRegistry (pl
 
       try {
         registry.define('scoped-lifecycle-el', ScopedEl);
-        return { defined: true, error: null as string | null };
+        // Prove a real instance can now be legally constructed (the wall #228 tore down).
+        const instance = new ScopedEl();
+        return {
+          defined: true,
+          error: null as string | null,
+          isRealInstance: instance instanceof ScopedEl && instance instanceof HTMLElement,
+        };
       } catch (e) {
-        return { defined: false, error: String((e as Error).message || e) };
+        return { defined: false, error: String((e as Error).message || e), isRealInstance: false };
       }
     });
 
-    // CONTRACT: scoped define() cannot construct the real class in a real browser. Until the scoped
-    // path natively registers the real class (or constructs instances some other legal way), this is
-    // the wall every lifecycle callback sits behind. Flip these assertions when the path is fixed.
-    expect(result.defined).toBe(false);
-    expect(result.error).toContain('Illegal constructor');
+    // CONTRACT (inverted by #228): the scoped registry registers the real class natively under a
+    // private tag, so constructing it is legal. define() succeeds and a real-class instance exists.
+    expect(result.defined).toBe(true);
+    expect(result.error).toBeNull();
+    expect(result.isRealInstance).toBe(true);
   });
 
-  // The three callbacks #167 named are unverifiable while define() itself throws (above). We still
-  // attempt each so this file fails loudly — prompting a real assertion — the day construction works.
-  for (const probe of [
-    { name: 'disconnectedCallback', attr: false, form: false },
-    { name: 'attributeChangedCallback', attr: true, form: false },
-    { name: 'form-associated callbacks', attr: false, form: true },
-  ]) {
-    test(`${probe.name} — currently blocked by the scoped-define barrier`, async ({ page }) => {
-      const result = await page.evaluate(() => {
-        const CustomElement = (window as any).__CustomElement;
-        const CustomElementRegistry = (window as any).__CustomElementRegistry;
-        const registry = new CustomElementRegistry();
-        class Probe extends CustomElement {
-          static observedAttributes = ['value'];
-          static formAssociated = true;
-        }
-        try {
-          registry.define('probe-el', Probe);
-          return { constructed: true };
-        } catch {
-          return { constructed: false };
-        }
-      });
-      // No instance can exist yet, so the callback cannot be exercised. Asserting the blocker keeps
-      // the named concern visible; the day `constructed` becomes true, rewrite this to drive the
-      // mutation (remove / setAttribute / form.reset) and assert the callback fired.
-      expect(result.constructed).toBe(false);
+  // disconnectedCallback (#261): DRIVEN. Because #228 registers the real class natively under a
+  // private ctor tag, an instance built with `new ScopedEl()` is a genuinely native-upgraded custom
+  // element — so the browser drives its removal reactions itself. No bespoke removeChild/remove patch
+  // is needed: removing the element (and the disconnect half of replaceChildren) fires
+  // disconnectedCallback natively. This probe drives both removal paths and asserts the callback ran.
+  test('disconnectedCallback — fires natively on remove() and on the replaceChildren disconnect half (#261)', async ({ page }) => {
+    const result = await page.evaluate(() => {
+      const CustomElement = (window as any).__CustomElement;
+      const CustomElementRegistry = (window as any).__CustomElementRegistry;
+      const registry = new CustomElementRegistry();
+      const fired: string[] = [];
+      class Probe extends CustomElement {
+        connectedCallback() { fired.push('connected'); }
+        disconnectedCallback() { fired.push('disconnected'); }
+      }
+      registry.define('probe-disconnect-el', Probe);
+
+      // Path 1: remove()
+      const el = new Probe();
+      document.body.appendChild(el);
+      const connectedFirst = fired.filter((f) => f === 'connected').length;
+      el.remove();
+      const disconnectedAfterRemove = fired.filter((f) => f === 'disconnected').length;
+
+      // Path 2: the disconnect half of replaceChildren()
+      const host = document.createElement('div');
+      const el2 = new Probe();
+      host.appendChild(el2);
+      document.body.appendChild(host);
+      host.replaceChildren();
+      const disconnectedAfterReplace = fired.filter((f) => f === 'disconnected').length;
+
+      return { connectedFirst, disconnectedAfterRemove, disconnectedAfterReplace };
     });
-  }
+
+    expect(result.connectedFirst).toBe(1);
+    expect(result.disconnectedAfterRemove).toBe(1);
+    expect(result.disconnectedAfterReplace).toBe(2);
+  });
+
+  // attributeChangedCallback (#262): DRIVEN. Same mechanism as #261 — the #228 private-tag native
+  // registration carries the real class's `static observedAttributes`, so the browser observes those
+  // attributes natively and fires attributeChangedCallback on setAttribute, honouring the observed
+  // list (non-observed attributes are ignored). No setAttribute/MutationObserver patch is needed.
+  test('attributeChangedCallback — fires natively for observed attributes, ignores the rest (#262)', async ({ page }) => {
+    const result = await page.evaluate(() => {
+      const CustomElement = (window as any).__CustomElement;
+      const CustomElementRegistry = (window as any).__CustomElementRegistry;
+      const registry = new CustomElementRegistry();
+      const calls: Array<[string, string | null, string | null]> = [];
+      class Probe extends CustomElement {
+        static observedAttributes = ['value'];
+        attributeChangedCallback(name: string, oldValue: string | null, newValue: string | null) {
+          calls.push([name, oldValue, newValue]);
+        }
+      }
+      registry.define('probe-attr-el', Probe);
+
+      const el = new Probe();
+      document.body.appendChild(el);
+      el.setAttribute('value', 'x'); // observed → fires (null → 'x')
+      el.setAttribute('value', 'y'); // observed → fires ('x' → 'y')
+      el.setAttribute('ignored', 'z'); // not observed → no fire
+      return { calls };
+    });
+
+    expect(result.calls).toEqual([
+      ['value', null, 'x'],
+      ['value', 'x', 'y'],
+    ]);
+  });
+
+  // form-associated callbacks (#263): DRIVEN. Same mechanism as #261/#262 — the #228 private-tag
+  // native registration carries the real class's `static formAssociated = true`, so the browser
+  // associates a scoped instance with its owning form and drives the form callbacks natively:
+  // formResetCallback on form.reset(), formDisabledCallback when an ancestor fieldset toggles
+  // disabled. No additional form-association wiring was added. (formStateRestoreCallback is invoked
+  // only by browser-initiated state restoration — bfcache/autofill — so it is not synchronously
+  // triggerable in a test; the two callbacks below prove the element is genuinely form-associated.)
+  test('form-associated callbacks — formReset + formDisabled fire natively on the scoped element (#263)', async ({ page }) => {
+    const result = await page.evaluate(() => {
+      const CustomElement = (window as any).__CustomElement;
+      const CustomElementRegistry = (window as any).__CustomElementRegistry;
+      const registry = new CustomElementRegistry();
+      const fired: string[] = [];
+      class Probe extends CustomElement {
+        static formAssociated = true;
+        constructor(options?: any) {
+          super(options);
+          (this as any).attachInternals();
+        }
+        formResetCallback() { fired.push('reset'); }
+        formDisabledCallback(disabled: boolean) { fired.push('disabled:' + disabled); }
+      }
+      registry.define('probe-form-el', Probe);
+
+      const form = document.createElement('form');
+      const fieldset = document.createElement('fieldset');
+      const el = new Probe();
+      fieldset.appendChild(el);
+      form.appendChild(fieldset);
+      document.body.appendChild(form);
+
+      form.reset(); // → formResetCallback
+      const afterReset = [...fired];
+      fieldset.disabled = true; // → formDisabledCallback(true)
+      fieldset.disabled = false; // → formDisabledCallback(false)
+
+      return { afterReset, fired };
+    });
+
+    expect(result.afterReset).toEqual(['reset']);
+    expect(result.fired).toEqual(['reset', 'disabled:true', 'disabled:false']);
+  });
 });
 
 test.describe('control — natively-registered autonomous element drives the full lifecycle', () => {

@@ -1,0 +1,137 @@
+<h3>The Question</h3>
+<p>
+    <a href="/blocks/droplist/">Tree-select</a> is named as a concrete member of the droplist family, but no
+    design exists yet. Before authoring an intent/block standard, this survey gathers web-platform and library
+    prior art per design-first step&nbsp;1, so the trait selections for <strong>hierarchy, expand/collapse,
+    focus, and commit-depth</strong> reuse platform vocabulary instead of coining terms. It grounds the open
+    forks in <a href="/backlog/064-tree-select-block/">backlog&nbsp;#064</a> — three the item raised, plus a
+    fourth (multi-select parent/child cascade) the survey surfaced.
+</p>
+
+<h3>Recommendation (ratified in #064)</h3>
+<ol>
+    <li><strong>A new <code>hierarchy</code> intent</strong> (the APG term, not the item's
+        <code>tree-collection</code>) owning nesting structure + flatten-to-visible-rows projection +
+        Right/Left traversal + <code>aria-level/setsize/posinset</code>; it delegates selection to
+        <a href="/intents/selection/">Selection</a>, focus to
+        <a href="/intents/focus-delegation/">Focus-Delegation</a>, and type-ahead to
+        <a href="/intents/type-ahead/">Type-Ahead</a>. <em>Sub-decision:</em> factor a separate
+        <code>disclosure</code> intent (reused by <code>&lt;details&gt;</code>/accordion) rather than fold
+        open/closed into <code>hierarchy</code>.</li>
+    <li><strong>Windowing unchanged</strong> — a flat visible-rows projection; keep the family's
+        <code>virtual</code> focus, because the active-always-mounted invariant
+        <a href="/intents/windowed-collection/">Windowed Collection</a> already mandates is exactly what
+        <code>aria-activedescendant</code> needs. Adopt collapse-focuses-ancestor.</li>
+    <li><strong>A <code>selectableNodes: any | leaf</code> dimension</strong>, default <code>any</code> (APG +
+        six-library consensus); <code>leaf</code> is the opt-in constraint.</li>
+    <li><strong>A multi-select cascade dimension</strong> (new) — parent/child cascade + indeterminate state
+        + value-reporting strategy on the multi-select-tree member.</li>
+</ol>
+
+<h3>Finding 1 — the platform separates three axes: disclosure, hierarchy, selection</h3>
+<p>
+    The WAI-ARIA APG
+    <a href="https://www.w3.org/WAI/ARIA/apg/patterns/treeview/">Tree View pattern</a> and every surveyed
+    library (Ant, MUI, Fluent, Carbon, PrimeReact, Shoelace) model expand/collapse <em>separately from</em>
+    selection — unanimous distinct controlled/uncontrolled prop pairs for <code>expanded</code> vs
+    <code>selected</code>. The concern decomposes into three independent axes:
+</p>
+<ul>
+    <li><strong>Disclosure</strong> (<code>aria-expanded</code>) — the pure open/closed paradigm, shared with
+        native <code>&lt;details&gt;</code>/<code>&lt;summary&gt;</code> (which nests arbitrarily but has
+        <em>no</em> selection model) and accordions. A reusable axis in its own right.</li>
+    <li><strong>Hierarchy</strong> — the nesting structure <code>role=tree</code> ›
+        <code>treeitem</code> › <code>role=group</code>, carrying <code>aria-level</code>,
+        <code>aria-setsize</code>, <code>aria-posinset</code>.</li>
+    <li><strong>Selection</strong> (<code>aria-selected</code>) — already owned by WE's
+        <a href="/intents/selection/">Selection Intent</a>.</li>
+</ul>
+<p>
+    <strong>Implication (fork&nbsp;1):</strong> a <code>hierarchy</code> intent should own the nesting +
+    traversal, delegate selection to Selection, and compose a separate <code>disclosure</code> axis rather
+    than absorb it.
+</p>
+
+<h3>Finding 2 — the keyboard model is fully specified by APG (reuse verbatim)</h3>
+<ul>
+    <li><strong>Right Arrow:</strong> closed node → opens it (focus stays); open node → first child; end node
+        → nothing.</li>
+    <li><strong>Left Arrow:</strong> open node → closes it; end/closed child → moves to parent; root end node
+        → nothing.</li>
+    <li><strong>Up/Down:</strong> move through the <em>visible</em> set without opening/closing.</li>
+    <li><strong>Home/End, type-ahead, <code>*</code> (expand siblings):</strong> standard.</li>
+</ul>
+<p>
+    So Right/Left carry both expand/collapse <em>and</em> horizontal traversal; Up/Down never change
+    disclosure. Type-ahead is the existing <a href="/intents/type-ahead/">Type-Ahead</a> intent.
+</p>
+
+<h3>Finding 3 — selection allows ANY node, not just leaves (grounds fork&nbsp;3)</h3>
+<p>
+    APG lets any <code>treeitem</code> carry <code>aria-selected</code> (only <code>aria-expanded</code> is
+    parent-only), and <strong>every surveyed library makes any node selectable by default</strong>. Only
+    Shoelace offers an explicit opt-in <code>leaf</code> mode, and even there it is not the default.
+    <strong>Verdict:</strong> any-depth commit is the grounded default; <code>leaf</code> is an author opt-in
+    constraint, matching Selection Intent's existing <code>constraints</code> pattern.
+</p>
+
+<h3>Finding 4 — windowing is flatten-to-visible-rows; the real coupling is FOCUS (grounds fork&nbsp;2)</h3>
+<p>
+    The universal virtualization technique (react-arborist, TanStack, ag-Grid tree data) flattens the tree to
+    a linear array of currently-visible rows and virtualizes that flat list. Expand/collapse just changes the
+    array's length — <strong>no tree-specific offset math exists</strong>, so
+    <a href="/intents/windowed-collection/">Windowed Collection</a> needs zero tree changes. The load-bearing
+    question research relocated is the <strong>focus model</strong>:
+</p>
+<ul>
+    <li>The family uses <code>virtual</code> focus (<code>aria-activedescendant</code>), which under windowing
+        requires the active node to stay a mounted, owned, scrolled-into-view element
+        (<a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-activedescendant">MDN</a>).
+        That is <em>exactly</em> the active-always-mounted invariant Windowed Collection already mandates — so
+        virtual focus is viable.</li>
+    <li>Counterpoint (<a href="https://sarahmhigley.com/writing/activedescendant/">Sarah Higley</a>): for giant
+        trees, <strong>roving tabindex</strong> is more robust (the browser handles scroll-into-view), at the
+        cost of family inconsistency.</li>
+    <li><strong>Collapse-focuses-ancestor:</strong> moving focus up to the collapsing ancestor keeps the
+        focused node in the visible projection, so the item's "deep leaf in a collapsed branch" worry cannot
+        arise.</li>
+</ul>
+
+<h3>Finding 5 — there is NO native tree-select</h3>
+<p>
+    <code>&lt;select&gt;&lt;optgroup&gt;</code> is flat — <code>optgroup</code> cannot nest
+    (<a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/optgroup">MDN</a>; the proposal
+    <a href="https://github.com/whatwg/html/issues/5789">whatwg/html#5789</a> is not standardized).
+    <code>&lt;details&gt;</code> gives recursive disclosure but no selection. So tree-select is necessarily an
+    ARIA-composed custom widget; the native-first baseline degrades to a single-level grouped
+    <code>&lt;select&gt;</code>.
+</p>
+
+<h3>Finding 6 — data shape: nested children dominant; flat+parentId is the large-tree variant</h3>
+<p>
+    Libraries split between nested <code>children</code> (Ant, PrimeReact, MUI RichTreeView) or declarative
+    child elements (MUI SimpleTreeView, Carbon, Shoelace <code>&lt;sl-tree-item&gt;</code>), plus a deliberate
+    flat-list+<code>parentId</code> variant for large/virtualized trees (Fluent <code>FlatTree</code>, Ant
+    <code>treeDataSimpleMode</code>). WE's HTML-first / Compound-Child paradigm aligns with declarative nested
+    elements, projected to the flat visible-rows model for windowing.
+</p>
+
+<h3>Finding 7 — a NEW fork the item omitted: multi-select parent/child cascade</h3>
+<p>
+    For <strong>multi-select</strong> trees, checking a parent can cascade to all descendants, with parents
+    showing an <strong>indeterminate</strong> state on partial selection. This is a real, divergent axis:
+    cascade ON by default in Ant, Fluent, Shoelace, PrimeReact; OFF in MUI; absent in Carbon. Ant also exposes
+    which nodes the value reports (<code>SHOW_CHILD</code> / <code>SHOW_PARENT</code> / <code>SHOW_ALL</code>).
+    It belongs in #064's scope as a fourth decision — a dimension on the multi-select-tree member, not a silent
+    omission.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/064-tree-select-block/">#064 — design and author the tree-select block</a></li>
+    <li>Composes: <a href="/intents/selection/">Selection</a> ·
+        <a href="/intents/focus-delegation/">Focus-Delegation</a> ·
+        <a href="/intents/type-ahead/">Type-Ahead</a> ·
+        <a href="/intents/windowed-collection/">Windowed Collection</a></li>
+    <li>Family: <a href="/blocks/droplist/">droplist block</a></li>
+</ul>

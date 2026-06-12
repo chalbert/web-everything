@@ -18,6 +18,8 @@
  *   node scripts/backlog.mjs resolve <NNN> [--graduated-to=X]    # active  → resolved + dateResolved=today (+ graduatedTo)
  *   node scripts/backlog.mjs release <NNN>                       # active  → open (abandon/redirect; stamps untouched)
  *   node scripts/backlog.mjs scaffold --type=idea --workitem=story --size=3 --title="..." [--digest="..."] [--blocked-by=NNN,NNN] [--parent=NNN]
+ *   node scripts/backlog.mjs reserve   <NNN...> --session=<slug>     # soft-hold planned items (#083 cross-session deprioritize)
+ *   node scripts/backlog.mjs unreserve [--session=<slug>] [<NNN...>] # release soft holds (whole session, or specific items)
  *   add --json to any verb for machine-readable output.
  */
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -26,10 +28,12 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { applyTransition, readField } from './backlog/frontmatter.mjs';
 import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
+import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize } from './readiness/reservations.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = join(ROOT, 'backlog');
 const CAPACITY_PATH = join(ROOT, '.claude/skills/batch-backlog-items/capacity.json');
+const RESERVATIONS_PATH = join(ROOT, '.claude/skills/batch-backlog-items/reservations.json');
 const RED = '\x1b[31m', GRN = '\x1b[32m', YEL = '\x1b[33m', DIM = '\x1b[2m', BLD = '\x1b[1m', RST = '\x1b[0m';
 
 const argv = process.argv.slice(2);
@@ -64,11 +68,16 @@ function resolveFile(ref) {
   return matches[0];
 }
 
-/** Warn (don't block) if the working tree already has uncommitted edits to this file — a concurrency smell. */
+/**
+ * True only if the working tree has a *tracked* modification to this file — the real concurrency smell
+ * (a racing agent dirties a tracked item before flipping its status). An untracked-new file (`??`) is the
+ * normal state of a freshly-scaffolded item that was never committed, NOT a race — so it must pass (#422).
+ * Parse the porcelain XY code per line: `??` is untracked; anything else (` M`, `MM`, `M `, `A `, …) is tracked.
+ */
 function isDirty(relPath) {
   try {
     const out = execFileSync('git', ['status', '--short', '--', relPath], { cwd: ROOT, encoding: 'utf8' });
-    return out.trim().length > 0;
+    return out.split('\n').some((line) => line.trim().length > 0 && !line.startsWith('??'));
   } catch { return false; }
 }
 
@@ -85,6 +94,11 @@ function transition(v) {
   const id = file.replace(/\.md$/, '');
   const slug = id; // the rename slug is the full id (NNN-slug)
   if (v === 'claim') {
+    // Clear-on-claim (#083 invariant 2): a hard claim supersedes any soft reservation on this item —
+    // drop it so the now-`active` item never lingers as a stale hold against another session.
+    saveReservations(removeNums(loadReservations(), [file.match(/^\d+/)[0]]));
+  }
+  if (v === 'claim') {
     ok({ verb: v, id, file: rel, slug, status: 'active' },
       `${GRN}✓ claimed${RST} ${id} ${DIM}→ active (dateStarted ${today()})${RST}\n\n${DIM}Rename this chat via the tab menu to label this session — copy:${RST}\n\`\`\`\n${slug}\n\`\`\``);
   }
@@ -94,6 +108,55 @@ function transition(v) {
       `${GRN}✓ resolved${RST} ${id} ${DIM}→ resolved (dateResolved ${today()}${g ? `, graduatedTo ${g}` : ''})${RST}${g ? '' : `\n${YEL}note:${RST} ${DIM}no --graduated-to set; if a resolved idea spawned no entity, set graduatedTo=none by hand${RST}`}`);
   }
   ok({ verb: v, id, file: rel, status: 'open' }, `${GRN}✓ released${RST} ${id} ${DIM}→ open${RST}`);
+}
+
+/** Read the cross-session reservation registry (#083); a missing/unreadable file degrades to empty. */
+function loadReservations() {
+  try { return parseReservations(readFileSync(RESERVATIONS_PATH, 'utf8')); }
+  catch { return emptyState(); }
+}
+/** Write the registry, self-pruning expired holds on every write (TTL hygiene). */
+function saveReservations(state) {
+  writeFileSync(RESERVATIONS_PATH, serialize(pruneExpired(state, Date.now())));
+}
+
+/**
+ * reserve <NNN...> --session=<slug> — soft-hold the items a batch PLANS at plan-approval (#083). A live
+ * hold deprioritizes (never excludes) those items for OTHER sessions' `check:readiness --select`, so a
+ * second concurrent batch packs around them. Advisory: the real lock is still `claim`. First-holder-wins
+ * (a num already held by another session is left alone); the holding session is recorded for cleanup.
+ */
+function reserve() {
+  const session = flag('session');
+  if (!session) die('reserve needs --session=<batch-slug> — the session that holds these (e.g. batch-2026-06-12-083)');
+  const nums = positional.map((p) => (String(p).match(/^(\d+)/) || [])[1]).filter(Boolean);
+  if (!nums.length) die('reserve needs one or more <NNN> to soft-hold');
+  for (const n of nums) resolveFile(n); // a typo must not hold a phantom item
+  const state = addHolds(pruneExpired(loadReservations(), Date.now()), nums, session, new Date().toISOString());
+  saveReservations(state);
+  const padded = nums.map((n) => n.padStart(3, '0'));
+  ok({ verb: 'reserve', session, held: padded, ttlMinutes: state.ttlMinutes },
+    `${GRN}✓ reserved${RST} #${padded.join(', #')} ${DIM}→ soft-held by ${session} (deprioritized for other sessions; advisory, TTL ${state.ttlMinutes}m)${RST}\n${DIM}clear on stop: ${RST}node scripts/backlog.mjs unreserve --session=${session}`);
+}
+
+/**
+ * unreserve [--session=<slug>] [<NNN...>] — release soft holds (#083 invariant 2). `--session` clears
+ * the WHOLE session's holds (the batch stop/hand-off path); bare `<NNN>` releases specific items. At
+ * least one must be given. Idempotent — releasing an already-free item is a no-op.
+ */
+function unreserve() {
+  const session = flag('session');
+  const nums = positional.map((p) => (String(p).match(/^(\d+)/) || [])[1]).filter(Boolean);
+  if (!session && !nums.length) die('unreserve needs --session=<slug> (clear a whole session) and/or one or more <NNN>');
+  let state = loadReservations();
+  const before = state.held.length;
+  if (session) state = removeBySession(state, session);
+  if (nums.length) state = removeNums(state, nums);
+  state = pruneExpired(state, Date.now());
+  saveReservations(state);
+  const cleared = before - state.held.length;
+  ok({ verb: 'unreserve', session: session ?? null, nums: nums.map((n) => n.padStart(3, '0')), cleared },
+    `${GRN}✓ unreserved${RST} ${DIM}— released ${cleared} hold(s)${session ? ` for ${session}` : ''}; ${state.held.length} still held${RST}`);
 }
 
 function scaffold() {
@@ -162,6 +225,8 @@ switch (verb) {
   case 'claim': case 'resolve': case 'release': transition(verb); break;
   case 'scaffold': scaffold(); break;
   case 'calibrate': calibrate(); break;
+  case 'reserve': reserve(); break;
+  case 'unreserve': unreserve(); break;
   default:
     console.error(`${BLD}backlog.mjs${RST} — mechanical backlog-status CLI\n` +
       `  ${GRN}claim${RST} <NNN>                 open → active + dateStarted\n` +
@@ -169,6 +234,8 @@ switch (verb) {
       `  ${GRN}release${RST} <NNN>               active → open\n` +
       `  ${GRN}scaffold${RST} --type= --workitem= --size= --title= [--digest=] [--blocked-by=] [--parent=]\n` +
       `  ${GRN}calibrate${RST} --points= --context-pct=   fold a session into the batch point-budget estimate\n` +
+      `  ${GRN}reserve${RST} <NNN...> --session=<slug>    soft-hold planned items (deprioritize for other sessions)\n` +
+      `  ${GRN}unreserve${RST} [--session=<slug>] [<NNN...>]  release soft holds (clear a session, or specific items)\n` +
       `  (add --json for machine output)`);
     process.exit(verb ? 1 : 0);
 }

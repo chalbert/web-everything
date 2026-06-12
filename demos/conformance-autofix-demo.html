@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Conformance Auto-Fix Playground - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/conformance-autofix-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Conformance Auto-Fix Playground</h1>
+      <p>
+        A live surface for <a href="/backlog/298-conformance-auto-fix-playground-interactive-propose-verify-a/">backlog #298</a> —
+        the interactive front end on the conformance <strong>auto-fix loop</strong>
+        (<a href="/backlog/095-conformance-autofix-loop/">#095</a> engine,
+        <a href="/backlog/196-autofix-byo-model-fixer/">#196</a> model fixer,
+        <a href="/backlog/293-autofix-cost-bound-review-diff/">#293</a> cost-bound + review hook). It is the sibling of
+        <a href="/demos/code-upgrader-demo.html">the Code Upgrader</a>, one domain over: the upgrader lifts legacy code
+        <em>onto</em> the standard; this drives a <strong>failing conformance suite back to green</strong>. Each card runs the
+        whole loop: <strong>failure → proposed patch → diff → verify gate → accept / revert</strong>.
+      </p>
+      <p class="play-caveat">
+        <strong>The verify gate is the moat.</strong> A proposed patch is <em>applied</em>, the suite is <em>re-run</em>, and the
+        patch is kept only if its target failure cleared and it introduced no new error — else it is reverted automatically. So a
+        plausible-but-wrong fix is never shipped: trustworthiness is structural, not promised.
+        <strong>AI is a swappable provider.</strong> A fixer (failure → patch) drops into the same registry whether it is the
+        deterministic <em>reference</em> fixer or a bring-your-own-key <em>model</em> fixer; the model cards below are driven by a
+        <em>scripted</em> client (no key in the browser), through the exact seam a real Anthropic client would use, gated by the
+        same verify pass and the same model-fix cost bound.
+      </p>
+    </header>
+
+    <div id="examples">Loading examples&hellip;</div>
+  </main>
+
+  <script type="module" src="/demos/conformance-autofix-demo.ts"></script>
+</body>
+</html>

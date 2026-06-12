@@ -2,9 +2,12 @@
 type: issue
 workItem: story
 size: 3
-status: open
+status: resolved
 blockedBy: ["167"]
 dateOpened: "2026-06-09"
+dateStarted: "2026-06-10"
+dateResolved: "2026-06-11"
+graduatedTo: plugs/webregistries/CustomElementRegistry.ts (ensureNativelyConstructible)
 tags: [plugs, custom-elements, lifecycle, registry, construction, scoped-registry]
 relatedProject: webcomponents
 parent: "167"
@@ -56,3 +59,23 @@ flip in #261/#262/#263, which build on this construction fix.)
 
 See #167 (verification that opened this), and the spec file for the exact, currently-passing
 contract these fixes must overturn.
+
+## Progress
+
+**Resolved 2026-06-10.** Root construction fix landed in
+[plugs/webregistries/CustomElementRegistry.ts](../plugs/webregistries/CustomElementRegistry.ts):
+a new `ensureNativelyConstructible()` registers the **real autonomous class natively under a unique
+private tag** (`scoped-ctor-N-el`), memoised per constructor via a `WeakMap`. Because the class is
+now a *registered* constructor, both `new element()` in `define()` and `Reflect.construct(element, …)`
+in `pathInsertionMethods`' upgrade flow are legal in a real browser — without colliding with the
+user's tag (which keeps its no-op stand-in) or the customized-built-in path (guarded by
+`!options?.extends`, this slice's exact scope).
+
+The e2e contract in
+[plugs/__tests__/e2e/autonomous-element-lifecycle.spec.ts](../plugs/__tests__/e2e/autonomous-element-lifecycle.spec.ts)
+**inverted as specified**: the former "upstream blocker → throws Illegal constructor" guard now
+asserts `define()` succeeds and produces a legally-constructed real-class instance; the native
+control stays green; the three per-callback probes now assert construction succeeds (driving the
+reactions is **#261** / **#262** / **#263**, each unblocked by this).
+
+Gate: 5/5 e2e green, 696 plugs unit tests green, `check:standards` 0 errors.

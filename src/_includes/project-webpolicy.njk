@@ -1,0 +1,163 @@
+<section class="intro-section mb-12">
+  <h3 id="mission">Mission</h3>
+  <p>
+    <strong>Web Policy</strong> standardizes <strong>declarative domain policy</strong> &mdash; the rules
+    that decide whether an <em>action</em> is permitted, an entity qualifies, or an approval is required.
+    &ldquo;Orders over $50k need a second sign-off,&rdquo; &ldquo;a minor cannot consent,&rdquo; &ldquo;a
+    policy can't bind without an underwriter review&rdquo;: each is a business rule, and today every app
+    re-encodes them as scattered <code>if</code>-branches that no auditor can read and no product can
+    govern.
+  </p>
+  <p>
+    Web Policy fixes the <strong>rule meta-schema</strong> &mdash; how a rule is <em>expressed</em>,
+    <em>versioned</em>, and <em>scoped</em> &mdash; by adopting the OMG <strong>DMN</strong> vocabulary
+    (decision tables + FEEL-style expressions). It standardizes the meta-schema, <em>not</em> the rule list
+    (the same doctrine as the intents). The rule engine, the tamper-evident proof, and the enforcement seam
+    are the slices that build on top; this project is the declarative vocabulary they share.
+  </p>
+
+  <div class="comparison-block" style="background: rgba(79, 70, 229, 0.08); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #4f46e5; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #4338ca; font-size: 1rem;">Not validation, not the engine</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      <a href="/projects/webvalidation/">Web Validation</a> owns input <em>invalidity</em> &mdash; a field
+      is wrong. Web Policy owns whether an <em>action</em> is allowed &mdash; a different concern, so it
+      earns its own home rather than extending validation (separate-and-decouple). And it is not the
+      <em>engine</em>: the proof-of-compliance machinery (hash-chained signed decision log) and the OPA
+      PDP/PEP enforcement split are the <a href="/backlog/093-business-rule-manager-proof-of-compliance/">#093</a>
+      Forks 2&ndash;3 that compose <em>on</em> this meta-schema. Web Policy composes
+      <a href="/projects/webexpressions/">Web Expressions</a>, <a href="/projects/webcontexts/">Web
+      Contexts</a>, Web Validation, and <a href="/projects/webtraces/">Web Traces</a> &mdash; it does not
+      absorb them.
+    </p>
+  </div>
+</section>
+
+<section id="features" class="section-card">
+  <h3 id="feature-surface">Feature Surface</h3>
+  <p>
+    What a domain-policy standard covers. <strong>Protocol</strong> = fixed by the Policy Rule meta-schema;
+    <strong>Compose</strong> = deferred to a neighbouring Web Everything standard.
+  </p>
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 720px;">
+      <thead>
+        <tr><th>Feature</th><th>Prior art</th><th>What it does</th><th>Layer</th></tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(79,70,229,0.06);">The rule meta-schema (fixed by the protocol — adopts DMN)</td></tr>
+        <tr><td><strong>PolicyRuleSet</strong></td><td>DMN decision table</td><td><code>{ id, version, scope?, hitPolicy, inputs[], rules[] }</code> &mdash; one decision</td><td>Protocol</td></tr>
+        <tr><td><strong>Decision-table rule</strong></td><td>DMN rule rows</td><td>A row: <code>{ when: inputEntry[], then: outputEntry[] }</code>, entries are FEEL-style expressions</td><td>Protocol</td></tr>
+        <tr><td><strong>Hit policy</strong></td><td>DMN <code>UNIQUE/FIRST/PRIORITY/COLLECT</code></td><td>Disambiguates when several rules match</td><td>Protocol</td></tr>
+        <tr><td><strong>Versioning</strong></td><td>Versioned rulesets</td><td>A ruleSet carries its version &mdash; a decision replays against the exact rules</td><td>Protocol</td></tr>
+        <tr><td><strong>Scope</strong></td><td>Per-tenant policy</td><td>Binds a ruleSet per context / tenant</td><td>Protocol</td></tr>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(79,70,229,0.06);">Composed with neighbours (this project does not own these)</td></tr>
+        <tr><td><strong>Expression evaluation</strong></td><td>FEEL, CEL</td><td>Evaluates an input/output entry expression</td><td>🔗 Compose &mdash; <a href="/projects/webexpressions/">Web Expressions</a></td></tr>
+        <tr><td><strong>Input data resolution</strong></td><td>Policy context</td><td>Resolves <code>inputs[]</code> references against scoped data</td><td>🔗 Compose &mdash; <a href="/projects/webcontexts/">Web Contexts</a></td></tr>
+        <tr><td><strong>Proof of application</strong></td><td>OPA decision log, OSCAL</td><td>The tamper-evident record that a rule ran &mdash; at a trace span</td><td>🔗 Compose &mdash; <a href="/projects/webtraces/">Web Traces</a> · proof-of-compliance (<a href="/backlog/093-business-rule-manager-proof-of-compliance/">#093</a>)</td></tr>
+        <tr><td><strong>Enforcement</strong></td><td>OPA PDP/PEP, Cedar</td><td>Where the verdict attaches + is enforced at runtime</td><td>🔗 Compose &mdash; enforcement slice (#093 Fork 3)</td></tr>
+        <tr><td><strong>Authoring UI</strong></td><td>Decision-table editors</td><td>Building a ruleSet without code</td><td>🔗 Compose &mdash; Technical Configurator (plateau-app)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="protocol-policy-rule" class="section-card">
+  <h3 id="how-it-works">Policy Rule Meta-Schema (DMN-aligned)</h3>
+  <p>
+    A rule is a <strong>decision table</strong>, the DMN model: named inputs, a set of rules each mapping
+    input conditions to outputs, and a hit policy for when several match. WE fixes the <em>shape</em> of
+    that table &mdash; the meta-schema &mdash; and adopts FEEL as the entry expression language, evaluated by
+    Web Expressions. The policy <em>language</em> behind a rule (DMN/FEEL vs Rego vs Cedar) is a downstream
+    implementation choice; the meta-schema is what makes rulesets portable and a decision reproducible.
+  </p>
+  {% highlight "typescript" %}
+// The meta-schema — the contract. Adopts DMN's decision-table model; FEEL-style entry expressions.
+type HitPolicy = 'UNIQUE' | 'FIRST' | 'PRIORITY' | 'COLLECT';
+
+interface PolicyInput {
+  id: string;                 // e.g. 'order.total'
+  label?: string;
+  ref: string;                // data reference, resolved against Web Contexts
+}
+
+interface PolicyRule {
+  id: string;
+  when: string[];             // one FEEL entry per input — '> 50000', '"minor"', '-' (any)
+  then: Record<string, string>;  // output name → FEEL value — { decision: '"refer"', reason: '"high-value"' }
+}
+
+interface PolicyRuleSet {
+  id: string;
+  version: string;            // reproducibility — a decision replays against THIS version
+  scope?: { context?: string; tenant?: string };   // per-context/tenant binding
+  hitPolicy: HitPolicy;
+  inputs: PolicyInput[];
+  rules: PolicyRule[];
+}
+
+// Authored ruleset — "orders over $50k refer for sign-off".
+const approvals: PolicyRuleSet = {
+  id: 'order-approval', version: '1.2.0', hitPolicy: 'FIRST',
+  inputs: [{ id: 'total', ref: 'order.total' }, { id: 'tier', ref: 'customer.tier' }],
+  rules: [
+    { id: 'r1', when: ['> 50000', '-'],        then: { decision: '"refer"',  reason: '"high-value"' } },
+    { id: 'r2', when: ['-', '"untrusted"'],    then: { decision: '"refer"',  reason: '"new-customer"' } },
+    { id: 'r3', when: ['-', '-'],              then: { decision: '"allow"' } },
+  ],
+};
+// The engine evaluates each `when` entry via Web Expressions, applies hitPolicy, emits a verdict —
+// and (proof-of-compliance slice) logs the evaluation as a Web Traces span carrying ruleSet version.
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+    <li><strong>DMN adopted, not coined:</strong> decision tables + FEEL are a mature OMG standard with
+      existing tooling (Drools, Camunda). WE standardizes the meta-schema, not a new rule language.</li>
+    <li><strong>Reproducible by version:</strong> a ruleSet carries its <code>version</code>, so a stored
+      decision re-explains against the exact rules that produced it &mdash; the seam the proof-of-compliance
+      log depends on.</li>
+    <li><strong>Composes, doesn't absorb:</strong> entry expressions are Web Expressions; input data is Web
+      Contexts; the proof point is a Web Traces span. Web Policy owns only the rule's shape.</li>
+    <li><strong>Authoring is a Configurator domain:</strong> a ruleSet is built in the plateau-app Technical
+      Configurator (the data-driven decision tool), not hand-written, for non-developer authors.</li>
+  </ul>
+</section>
+
+<section id="composition" class="section-card">
+  <h3 id="composition">Composition With Other Standards</h3>
+  <ul style="font-size: 0.9rem;">
+    <li><strong><a href="/projects/webexpressions/">Web Expressions</a></strong> &mdash; evaluates each FEEL
+      input/output entry; Web Policy supplies the table, Web Expressions runs the cell.</li>
+    <li><strong><a href="/projects/webcontexts/">Web Contexts</a></strong> &mdash; resolves a rule's
+      <code>inputs[]</code> data references in the scoped policy context.</li>
+    <li><strong><a href="/projects/webtraces/">Web Traces</a> + proof-of-compliance
+      (<a href="/backlog/093-business-rule-manager-proof-of-compliance/">#093</a> Fork 2)</strong> &mdash;
+      each evaluation logs at a trace span; the hash-chained, signed, OSCAL-aligned decision log is the
+      tamper-evident proof that a rule ran.</li>
+    <li><strong>Enforcement (#093 Fork 3)</strong> &mdash; the OPA PDP/PEP split: a decision point evaluates
+      the ruleset, enforcement points attach to actions/components, runtime is the baseline proof venue.</li>
+    <li><strong>Technical Configurator (plateau-app)</strong> &mdash; rule authoring surfaces as a
+      Configurator domain.</li>
+  </ul>
+</section>
+
+<section id="status" class="section-card">
+  <h3 id="status">Status</h3>
+  <p>
+    Web Policy is in <strong>concept</strong> phase; the Policy Rule (DMN-aligned) meta-schema is specified
+    here at <strong>draft</strong>. The project was ratified by
+    <a href="/backlog/093-business-rule-manager-proof-of-compliance/">#093</a> (the business-rule manager +
+    proof-of-compliance decision, grounded in a
+    <a href="/research/business-rule-proof-of-compliance/">prior-art survey</a> of DMN, OPA, the
+    tamper-evident-audit ladder, and OSCAL). This page establishes Fork 1 &mdash; the project and the
+    meta-schema. The graduated builds layer on top: proof-of-compliance (Fork 2, hash-chained signed
+    decision log + external anchoring) and enforcement (Fork 3, OPA PDP/PEP runtime).
+  </p>
+  <h4 style="margin-top: 1rem;">Open Questions</h4>
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <li>Is the project name <code>webpolicy</code> the right scope (access/consent/governance umbrella), or
+      should the narrower <code>webrules</code> own just decision tables?</li>
+    <li>Do nested/chained decisions (one ruleSet's output feeds another's input &mdash; DMN's DRD) ship in
+      v1, or flat tables only?</li>
+    <li>Is the FEEL subset WE adopts the full grammar, or a constrained safe subset Web Expressions can
+      guarantee to evaluate deterministically?</li>
+  </ul>
+</section>

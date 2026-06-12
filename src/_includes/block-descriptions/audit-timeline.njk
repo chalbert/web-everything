@@ -1,0 +1,30 @@
+<h2>Audit Timeline</h2>
+<p>The reference render for the <a href="/intents/audit-timeline/">Audit Timeline</a> intent — the visual
+member of the <a href="/projects/webaudit/">Web Audit</a> protocol. <code>renderAuditTimeline</code> turns
+an entity's <code>AuditEvent[]</code> into a chronological, filterable feed, so an audit log stops being a
+bespoke table per screen.</p>
+
+<h3>Dimensions</h3>
+<ul>
+  <li><code>density</code> — <code>compact | comfortable</code>: tight for a side panel, roomy for a
+    full-page history.</li>
+  <li><code>grouping</code> — <code>flat | by-day | by-actor</code>: a single stream, or partitioned under
+    date / actor headers.</li>
+  <li><code>detail</code> — <code>summary | expanded</code>: actor + action + time per row, or also the
+    before&rarr;after change set.</li>
+</ul>
+
+<h3>Web Standards Alignment</h3>
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/time"><code>&lt;time datetime&gt;</code></a></td>
+    <td>HTML Living Standard</td>
+    <td>Each entry's timestamp is a machine-readable <code>&lt;time datetime&gt;</code> element; the
+      container carries <code>role="list"</code> with an accessible label.</td>
+  </tr>
+</table>
+
+<h3>Forms</h3>
+<p>Ships an element form (<code>renderAuditTimeline</code> &rarr; <code>HTMLElement</code>) and a string
+form (<code>auditTimelineHTML</code>) for template-literal contexts.</p>

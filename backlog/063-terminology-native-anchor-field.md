@@ -4,14 +4,71 @@ workItem: story
 size: 2
 status: open
 dateOpened: "2026-06-03"
+preparedDate: "2026-06-12"
 tags: [terminology, gap-analysis, docs]
 crossRef: { url: /research/collection-operations/, label: collection-operations research (local fix applied) }
 ---
 
 # Decide whether to rename the "Native anchor" gap-analysis field repo-wide
 
-The `**Native anchor**` triage field appears on all 13 `gap-*` backlog items and means "the native platform API the standard grounds in." The word collides with the positioning **Anchor Intent** (CSS anchor positioning), which can confuse a reader skimming a page that mentions both.
+**Prepared decision — ready to ratify.** A single binary terminology fork over existing repo state (no
+greenfield design, so no web survey — the prepared shape here is the concrete-refs check). The
+`**Native anchor**` triage label means "the native platform API the standard grounds in," and collides
+with the positioning **Anchor Intent** ([intents.json:anchor](src/_data/intents.json)) — a real readability
+snag on any page mentioning both. One fork, **bold** default below.
 
-The collection-operations research page already avoids the term *locally* (renamed to "Native Grounding" / "native primitive", with a disambiguating note), but the shared field label on every gap item is untouched, for cross-gap uniformity.
+## The axis — what a rename actually touches (concrete scope)
 
-**Decide:** rename the field repo-wide (e.g. `Native grounding` / `Platform primitive`) across all `gap-*` items and the gen/validator that reads it, or keep the established label and rely on local disambiguation. Low effort either way; the cost of renaming is touching all 13 gap files + any tooling that references the label.
+The label is a **markdown-convention triage field**, not a parsed data key. It appears as `**Native
+anchor**` in **12 backlog files**: the gap-* set —
+[006](backlog/006-gap-10-collection-ops-intent.md),
+[007](backlog/007-gap-11-clipboard-dnd-files-intents.md),
+[008](backlog/008-gap-12-disclosure-intent.md),
+[009](backlog/009-gap-13-webpermissions-project.md),
+[010](backlog/010-gap-3-theme-color-intent.md),
+[011](backlog/011-gap-4-webpersistence-project.md),
+[012](backlog/012-gap-5-webidentity-project.md),
+[013](backlog/013-gap-6-focus-announcements.md),
+[015](backlog/015-gap-8-view-transitions-protocol.md),
+[016](backlog/016-gap-9-webcommands-project.md) — plus the newer gap-derived blocks
+[358](backlog/358-toast-notification-block.md) and [360](backlog/360-drawer-sheet-block.md).
+
+**Key concrete finding (sharpens the call):** a repo-wide `grep` of `scripts/` shows **no tooling parses
+the literal `Native anchor` string** — it is prose, not a field a generator/validator reads. The separate
+`nativeAnchor` **camelCase JSON key** in [benchmarkCoverage.json](src/_data/benchmarkCoverage.json) /
+[benchmarkCapabilities.json](src/_data/benchmarkCapabilities.json) is an *independent* coverage-matrix
+field that a label rename would **not** touch and need not change. So the rename is a **bounded
+prose-only edit of 12 markdown files** — cheaper and lower-risk than the original "13 files + any tooling"
+framing implied. The collection-operations research page already renamed it *locally* to "Native
+Grounding" / "native primitive" ([collection-operations.njk](src/_includes/research-descriptions/collection-operations.njk)),
+establishing the preferred replacement term.
+
+## Recommended path at a glance
+
+| Fork | Recommended default | Main alternative | Confidence |
+|---|---|---|---|
+| **1 · Rename the field?** | **Rename repo-wide to `Native grounding`** (prose-only, 12 files) | Keep the label, rely on local disambiguation | High |
+
+## Fork 1 — Rename the "Native anchor" field repo-wide, or keep it?
+
+**Crux:** the collision with the Anchor Intent recurs on every gap page; a per-page disambiguating note
+must be re-encountered by each future reader. The rename scope is now known to be prose-only (no tooling),
+and a preferred term already exists from the local fix.
+
+- **A. Rename repo-wide to `Native grounding`.** Touch the `**Native anchor**` label in the 12 files
+  above to `**Native grounding**` (matching the already-applied collection-ops local rename). Removes the
+  collision everywhere, one-time bounded cost, no tooling changes (the camelCase `nativeAnchor` JSON key
+  is independent and stays).
+- **B. Keep `Native anchor`, rely on local disambiguation.** Zero edits, but every gap page keeps the
+  collision and each future reader re-encounters it; the local-note approach doesn't scale across 12 files.
+
+**Recommended default: A — rename repo-wide to `Native grounding`.** The collision is a real, recurring
+readability cost; the rename is now confirmed prose-only across 12 files (no generator/validator touched,
+the `nativeAnchor` JSON key untouched); and the replacement term is already established by the
+collection-ops local fix, so it's uniform rather than a fresh coinage. Trivial, bounded, high-confidence —
+ratify and execute as one mechanical edit.
+
+*Rejected:* B — defers a known recurring snag indefinitely for a near-zero saving.
+
+*Graduation (on ratification):* a single agent-ready mechanical edit — `**Native anchor**` →
+`**Native grounding**` across the 12 files — no `blockedBy` chain needed.

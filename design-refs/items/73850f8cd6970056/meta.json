@@ -1,0 +1,28 @@
+{
+  "id": "73850f8cd6970056",
+  "contentHash": "73850f8cd697005660fe80cc9237dcadac0a4484efa6aaee5a1c9d95c4a2a763",
+  "sourceUrl": "https://regex101.com",
+  "captureMethod": "playwright",
+  "reviewState": "ungated",
+  "dateCollected": "2026-06-12T21:52:44.625Z",
+  "datePublished": null,
+  "app": "regex101",
+  "company": "regex101",
+  "category": "developer-tools",
+  "surface": null,
+  "designRegister": "dark-dev",
+  "theme": "dark",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "dpr": 2,
+  "imageDims": {
+    "width": 2880,
+    "height": 1800
+  },
+  "bytes": 141738,
+  "tags": [],
+  "sourceCredit": "regex101",
+  "collectionRun": "2026-06-12T21-51-12-668Z"
+}

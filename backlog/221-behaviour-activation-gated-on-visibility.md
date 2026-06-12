@@ -1,9 +1,12 @@
 ---
-type: idea
+type: decision
 workItem: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-06-08"
+dateStarted: "2026-06-10"
+dateResolved: "2026-06-11"
+graduatedTo: webtraits
 tags: [webtraits, webbehaviors, activation-lifecycle, visibility, intersection-observer, native-first]
 relatedReport: reports/2026-06-02-lazy-traits-loading.md
 relatedProject: webtraits
@@ -59,3 +62,30 @@ currently loads at bootstrap regardless.
 
 Companion to [#222](/backlog/222-inert-dead-zone-behaviour-disable-scope/) (the `inert` dead-zone —
 the *other* activation gate). Harvested from the #202 discussion (2026-06-08).
+
+## Resolution (2026-06-10)
+
+The four open design questions are decided; recorded as the **Visibility Gate** section of the
+webtraits spec (`src/_data/traits.json` → `visibility_gate`, rendered on `/projects/webtraits/`).
+Mirrors the #222 → #223 split: this `decision` item carries the rulings; the build is spun off as an
+agent-ready item.
+
+- **Default vs. opt-in** → two-layer shape like `delivery` (#202) / `inert` (#222): trait-author
+  manifest default + page-author per-usage override. Default is the status quo (**activate-on-connect**),
+  so the gate is strictly opt-in and non-breaking.
+- **Vocabulary** → reserved **`<trait>-when="visible"`**, joining the `-delivery`/`-active` suffix
+  family. `when` is a general *activation-trigger* axis (first value `visible`; room for `idle`/media
+  triggers later); read at **runtime** like `-active`, not build-time like `-delivery`.
+- **Dormant semantics** → falls out of composing with `delivery`, not a separate choice:
+  `visible` + **lazy** = **fetch-on-view** (don't `import()` the chunk until intersecting — the real
+  win); `visible` + **eager** = **apply-on-view** (defer construction/activation only). "Dormant" =
+  *not-yet-activated*, never half-running.
+- **Re-activation** → **derived from the existing `activationSurface` axis (#222)**, not declared a
+  third time: `ambient` → **recurring** (deactivate on exit / re-activate on re-entry — pausing
+  off-screen is the point); `interaction` → **once** (activate-and-stay; don't tear down wiring on
+  scroll). Trait author may override. The gate toggles the shared
+  `activatedCallback()`/`deactivatedCallback()` lifecycle (#223) via an `IntersectionObserver`,
+  composing with the dead-zone's `MutationObserver`.
+
+Build spun off → [#280](/backlog/280-implement-the-visibility-gate-intersectionobserver-activatio/).
+Graduated to: `webtraits`.

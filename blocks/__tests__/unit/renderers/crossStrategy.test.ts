@@ -85,6 +85,30 @@ describe('lift — declarative-static → vdom JSX', () => {
     const out = lift(`<button on:click="save($event)">Save</button>`);
     expect(norm(out.code)).toBe(`<button onclick={save}>Save</button>`);
   });
+
+  it('lifts a resource template to the vdom use()/Suspense form (not lossy upward)', () => {
+    const out = lift(`<template is="resource" from="users"><ul data-bind="items"></ul></template>`);
+    expect(norm(out.code)).toBe(`<Suspense>{use(users)}<ul data-bind="items"></ul></Suspense>`);
+    expect(out.lossy).toBe(false);
+  });
+
+  it('lifts a self-closing resource template', () => {
+    const out = lift(`<template is="resource" from="count" />`);
+    expect(norm(out.code)).toBe(`<Suspense>{use(count)}</Suspense>`);
+    expect(out.lossy).toBe(false);
+  });
+});
+
+describe('lower — resource (suspend-on-read is lossy, #337)', () => {
+  it('lowers the vdom use()/Suspense form to a resource template AND flags resource-suspends-on-read', () => {
+    const out = lower(`<Suspense>{use(users)}<ul data-bind="items"></ul></Suspense>`);
+    expect(norm(out.code)).toBe(
+      `<template is="resource" from="users"><ul data-bind="items"></ul></template>`
+    );
+    expect(out.lossy).toBe(true);
+    expect(out.diagnostics[0].rule).toBe('resource-suspends-on-read');
+    expect(out.diagnostics[0].fragment).toBe('use(users)');
+  });
 });
 
 describe('structural round-trips (reversible by construction)', () => {
@@ -125,5 +149,16 @@ describe('the lossy boundary — pinned, never silent (report §4)', () => {
     const relowered = lower(lifted.code);
     expect(norm(relowered.code)).toBe(`<span>{{ count }}</span>`);
     expect(norm(relowered.code)).not.toBe(norm(declarative)); // round-trip not identity, by design
+  });
+
+  it('resource is STRUCTURALLY reversible but suspend-on-read is flagged on the way down (#337)', () => {
+    const declarative = `<template is="resource" from="users"><ul data-bind="items"></ul></template>`;
+    // lift is clean; lower restores the exact declarative form but MUST flag the lost suspend-on-read.
+    const lifted = lift(declarative);
+    expect(lifted.lossy).toBe(false);
+    const round = lower(lifted.code);
+    expect(norm(round.code)).toBe(norm(declarative)); // text identity…
+    expect(round.lossy).toBe(true); // …but the suspend-on-read semantics did not survive — flagged.
+    expect(round.diagnostics[0].rule).toBe('resource-suspends-on-read');
   });
 });

@@ -1,0 +1,102 @@
+<h3>The Question</h3>
+<p>
+    The evergreen app names an <a href="/backlog/101-auto-update-pipeline/">auto-update pipeline</a> that keeps an
+    app current on deps/standards safely, but no design exists yet. Before authoring a standard, this survey
+    gathers change-management prior art per design-first step&nbsp;1, so the two open forks —
+    <strong>where the pipeline lives</strong> (a declared protocol vs. a runnable service) and
+    <strong>the gate model</strong> (manual approval vs. automated-with-gates vs. staged rollout) — reuse the
+    vocabulary the ecosystem already standardized instead of coining terms. It grounds the forks in
+    <a href="/backlog/101-auto-update-pipeline/">backlog&nbsp;#101</a>.
+</p>
+
+<h3>Recommendation (prepared for #101)</h3>
+<ol>
+    <li><strong>A thin protocol declares update policy + capability</strong> (the escapable lock), with the
+        <strong>orchestration as a Plateau / reliability service</strong> (disposable leverage) — the same
+        registry+provider shape as the <a href="/protocols/">Guard</a> and render-strategy protocols, not a
+        monolithic project and not a hardcoded runner.</li>
+    <li><strong>A graded, configurable gate policy with safe defaults</strong> spanning one axis: a pre-merge
+        gate (stability buffer → confidence/severity → auto-merge low-risk-green, human-gate major + visual-diff)
+        and a post-deploy staged-rollout gate (metric analysis → auto-rollback). The default flavor is what a
+        project config extends; nothing is a constant in the tool.</li>
+</ol>
+
+<h3>Finding 1 — the ecosystem splits policy declaration from the runner: TWO homes</h3>
+<p>
+    Every automated-update tool separates a <strong>declarative policy file</strong> committed to the consumer
+    repo from the <strong>engine that executes it</strong>: Renovate reads <code>renovate.json</code>,
+    Dependabot <code>.github/dependabot.yml</code>, changesets <code>.changeset/config.json</code>,
+    semantic-release <code>.releaserc</code>. The policy is the portable, version-controlled contract; the
+    runner is swappable infrastructure (Mend-hosted Renovate, self-hosted Renovate CLI, GitHub-native
+    Dependabot — same grammar, different runner).
+</p>
+<p>
+    <strong>Implication (fork&nbsp;1):</strong> this is the WE shape — the declared policy is the
+    <strong>protocol (the only lock)</strong>, the orchestration runner is a disposable service. Same split as
+    the <a href="/protocols/">Guard</a> protocol (a policy attached to a region, resolved by a swappable
+    provider) and render-strategy.
+</p>
+
+<h3>Finding 2 — the gate is graded config keyed to severity + signal, not one fixed mechanic</h3>
+<ul>
+    <li><strong>Stability / cool-off buffer:</strong> Renovate's <code>minimumReleaseAge</code> holds a release
+        for N days before it is eligible — "don't chase every whim" as a knob; a multi-week age is the 2026
+        recommended default.</li>
+    <li><strong>Merge confidence:</strong> Renovate scores age / adoption / pass-rate into a confidence level
+        used to decide whether an update is safe to auto-merge without manual review.</li>
+    <li><strong>Auto-merge boundaries:</strong> consensus default is auto-merge low-risk-green (patch / pinned
+        dev-deps, tests passing); human-gate major bumps and anything with a visual/behavioral diff.</li>
+</ul>
+<p>
+    <strong>Implication (fork&nbsp;2):</strong> the gate is a configurable policy with a default flavor, never a
+    constant; the safe defaults are what a project config extends.
+</p>
+
+<h3>Finding 3 — release flow spans full-auto to human-checkpoint; both are legitimate</h3>
+<p>
+    <strong>semantic-release</strong> is the fully-automated pole (reads Conventional-Commits, derives semver,
+    generates the changelog, publishes — no human in the loop). <strong>changesets</strong> inserts a deliberate
+    human checkpoint: CI opens a "Version Packages" PR that acts as the final gateway, and a human merges to
+    ship. So <strong>automated and human-gated are both valid configured modes of the same pipeline</strong> —
+    confirming the gate is a dimension (full-auto ↔ checkpoint-PR ↔ staged), not a fork between two products.
+</p>
+
+<h3>Finding 4 — progressive delivery makes the gate a runtime metric gate too</h3>
+<p>
+    Beyond merge-time, progressive delivery (Argo Rollouts, Flagger, Spinnaker) graduates traffic to the new
+    version incrementally and lets <strong>metric analysis drive automated promote-or-rollback</strong>
+    (Kayenta / Datadog / Prometheus feed the analysis). The risk model shifts from a binary cut-over to
+    "graduate and let data decide." So the gate model is really <strong>two gates on one axis</strong> — a
+    pre-merge gate (confidence/severity → auto vs human) and a post-deploy staged-rollout gate (metrics →
+    promote vs auto-rollback); staged rollout is the third point on the spectrum, not a separate concern.
+</p>
+
+<h3>Finding 5 — codemod migration delivery is a CONSUMER of the manifest, already homed in WE</h3>
+<p>
+    Breaking-change migration is delivered as <strong>codemods shipped alongside the release</strong>
+    (jscodeshift / Codemod.com / Hypermod; TypeORM's <code>@typeorm/codemod</code>, Next.js / Storybook upgrade
+    transforms). In WE this is already built: the upgrader engine
+    (<a href="/backlog/094-ai-upgrader-tools/">#094</a>, analyze → generate → verify-gate) runs the codemods,
+    and the <a href="/protocols/">changelog-manifest</a> protocol
+    (<a href="/backlog/102-changelog-manifest-standard/">#102</a>) is the per-module descriptor linking a
+    breaking entry to its migration script with author + integrity-hash trust. The pipeline
+    <strong>consumes</strong> these; it does not re-own migration — which is exactly why #101 is
+    <code>blockedBy</code> #102/#094.
+</p>
+
+<h3>Finding 6 — Platform-side pre-testing is WE's net-new edge</h3>
+<p>
+    Renovate/Dependabot test an update <em>after</em> release against the consumer's suite. WE's relationship
+    graph (#092) lets a Platform-side update be <strong>pre-tested against its consumers' suites before
+    release</strong> — known-compatible up front rather than hoped-safe. A genuine differentiator (no industry
+    analogue surveyed), riding on top of the same pipeline.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/101-auto-update-pipeline/">#101 — auto-update pipeline</a></li>
+    <li>Blocked by / consumes: <a href="/backlog/102-changelog-manifest-standard/">#102 — changelog manifest</a> ·
+        <a href="/backlog/094-ai-upgrader-tools/">#094 — AI upgrader tools</a></li>
+    <li>Shape precedents: <a href="/protocols/">Guard · render-strategy protocols</a></li>
+    <li>Vision: <a href="/backlog/099-evergreen-app-vision/">#099 — evergreen app</a></li>
+</ul>

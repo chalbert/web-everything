@@ -1,0 +1,28 @@
+{
+  "id": "af041413afb82b9f",
+  "contentHash": "af041413afb82b9f5945335511bec41eb463df2ee5f19268e88d19fe4fd68f6e",
+  "sourceUrl": "https://www.desmos.com/calculator",
+  "captureMethod": "playwright",
+  "dateCollected": "2026-06-12T12:27:37.338Z",
+  "datePublished": null,
+  "app": "Desmos Graphing Calculator",
+  "company": "Desmos",
+  "category": "education-tools",
+  "surface": null,
+  "designRegister": "friendly-minimal",
+  "theme": "light",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "dpr": 2,
+  "imageDims": {
+    "width": 2880,
+    "height": 1800
+  },
+  "bytes": 50874,
+  "tags": [],
+  "sourceCredit": "Desmos",
+  "collectionRun": "2026-06-12T12-26-38-221Z",
+  "reviewState": "confirmed"
+}

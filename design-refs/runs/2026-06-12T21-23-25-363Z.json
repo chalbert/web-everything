@@ -1,0 +1,15 @@
+{
+  "runId": "2026-06-12T21-23-25-363Z",
+  "startedAt": "2026-06-12T21:23:25.364Z",
+  "captured": [],
+  "skipped": [],
+  "duplicates": [],
+  "quarantined": [
+    {
+      "url": "https://www.photopea.com",
+      "selector": "canvas"
+    }
+  ],
+  "failed": [],
+  "finishedAt": "2026-06-12T21:23:48.932Z"
+}

@@ -21,6 +21,19 @@ export { default as HTMLRegistry, type BaseDefinition, type ConstructorDefinitio
 export { type Registry } from './Registry';
 export { applyNodeInjectorsPatches, removeNodeInjectorsPatches, isNodeInjectorsPatched } from './Node.injectors.patch';
 
+// Declarative `<script type="injector">` domain/Protocol binding (#278) — the runtime, no-build,
+// no-resolver form of the injector DSL (pulled forward from #002's @domain = Protocol ruling).
+export {
+  applyDeclarativeInjectors,
+  parseInjectorScript,
+  resolveDeclaredProvider,
+  InjectorScriptError,
+  INJECTOR_SCRIPT_TYPE,
+  INJECTOR_ASSOC_ATTR,
+  type InjectorScriptBinding,
+  type DeclarativeInjectorResult,
+} from './declarativeInjector';
+
 /**
  * Apply webinjectors patches to native DOM APIs.
  *

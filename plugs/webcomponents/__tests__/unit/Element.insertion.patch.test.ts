@@ -351,9 +351,29 @@ describe('Element.insertion.patch', () => {
       newElement.textContent = 'After';
       
       target.insertAdjacentElement('afterend', newElement);
-      
+
       expect(container.children.length).toBe(2);
       expect(container.children[1].textContent).toBe('After');
+    });
+
+    it('routes the ELEMENT (not the leading position string) to the upgrade lookup', () => {
+      // Regression: the leadin/trailing arg-slicing was inverted, so for insertAdjacentElement
+      // the leading `position` string was treated as the node-to-upgrade and the real element
+      // rode in as a trailing arg — never reaching the upgrade path. The element must be the
+      // node that flows to the constructor-keyed upgrade lookup.
+      const spy = vi.spyOn(InjectorRoot, 'getDefinitionInProviderOf');
+
+      const undetermined = document.createElement('div') as any;
+      undetermined.determined = false;
+
+      target.insertAdjacentElement('beforeend', undetermined);
+
+      // Fixed: the element is the node, so the upgrade lookup runs for ITS constructor.
+      // Buggy: `nodes` was the position string (matching no node branch), so the lookup for
+      // the element never happened — the spy would not be called at all.
+      expect(spy).toHaveBeenCalledWith(target, 'customElements', undetermined.constructor);
+
+      spy.mockRestore();
     });
   });
 

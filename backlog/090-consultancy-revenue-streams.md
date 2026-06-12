@@ -1,5 +1,5 @@
 ---
-type: decision
+type: idea
 workItem: story
 size: 3
 parent: "089"
@@ -10,6 +10,8 @@ crossRef: { url: /backlog/089-monetization-product-ideas/, label: "Product ideas
 ---
 
 # Consultancy & services revenue — the human-delivered side of the standard
+
+> **Reclassified `decision` → `idea` (2026-06-11).** This item carries **no open fork** — it enumerates a service catalog (six engagement types) under the open-source flywheel, as a strategy/reference companion to the products in #089. There is nothing to ratify here; it's reference material that informs go-to-market work, not a decision. Kept `status: open` so it stays visible as the consultancy reference.
 
 The services revenue stream for the Web Everything ecosystem: **human-delivered
 engagements** (vs. the licensed *products* in [#089](/backlog/089-monetization-product-ideas/)).

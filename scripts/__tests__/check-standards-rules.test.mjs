@@ -19,6 +19,7 @@ import {
   checkStatus, validateProtocol, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, isSegmentCovered, permalinkSegment,
   validateViteProxyCoverage, deDateReport,
+  isExportsSafeTarget, validateModuleResolutionLock, findRawHtmlInMarkdown,
 } from '../check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -329,4 +330,94 @@ describe('real data stays clean (per family)', () => {
   // (Compiled-artifact shadow has no per-family real-data guard here — its live filesystem walk is the
   // production check; findCompiledShadows is exercised by the synthetic cases above. The live
   // `npm run check:standards` remains the production gate over the real tree.)
+});
+
+describe('module-resolution exports-lock (#274/#271)', () => {
+  it('isExportsSafeTarget: URL / node_modules / bare specifier are safe', () => {
+    expect(isExportsSafeTarget('https://esm.sh/@frontierui/jsx-runtime@1')).toBe(true);
+    expect(isExportsSafeTarget('/node_modules/@frontierui/jsx-runtime/dist/index.js')).toBe(true);
+    expect(isExportsSafeTarget('@frontierui/jsx-runtime')).toBe(true);
+    expect(isExportsSafeTarget('@frontierui/jsx-runtime/jsx-dev-runtime')).toBe(true);
+  });
+
+  it('isExportsSafeTarget: raw in-repo / foreign source paths are NOT safe', () => {
+    expect(isExportsSafeTarget('/plugs/jsx-runtime')).toBe(false);
+    expect(isExportsSafeTarget('./jsx-runtime')).toBe(false);
+    expect(isExportsSafeTarget('../frontierui/blocks/renderers/jsx')).toBe(false);
+    expect(isExportsSafeTarget('/abs/path/frontierui/src/jsx')).toBe(false);
+    expect(isExportsSafeTarget('')).toBe(false);
+  });
+
+  it('flags a locked-scope entry pointing at WE/foreign source', () => {
+    const { errors } = validateModuleResolutionLock([
+      { specifier: '@frontierui/jsx-runtime', target: '/plugs/blocks/jsx', source: 'vite.config.mts' },
+    ]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain('@frontierui/jsx-runtime');
+  });
+
+  it('passes a locked-scope entry that resolves to a URL or bare specifier', () => {
+    const { errors } = validateModuleResolutionLock([
+      { specifier: '@frontierui/jsx-runtime', target: 'https://esm.sh/@frontierui/jsx-runtime@1', source: 'x' },
+      { specifier: '@frontierui/blocks', target: '@frontierui/blocks', source: 'y' },
+    ]);
+    expect(errors).toEqual([]);
+  });
+
+  it('ignores non-locked-scope specifiers (e.g. internal @webinjectors alias)', () => {
+    const { errors } = validateModuleResolutionLock([
+      { specifier: '@webinjectors', target: '/plugs/webinjectors', source: 'vite.config.mts' },
+    ]);
+    expect(errors).toEqual([]);
+  });
+
+  it('real data stays clean: the live vite aliases carry no locked-scope violation', () => {
+    const viteCfg = readFileSync(join(ROOT, 'vite.config.mts'), 'utf8');
+    const entries = [...viteCfg.matchAll(/(['"])(@[^'"]+)\1\s*:\s*(['"])([^'"]+)\3/g)].map((m) => ({
+      specifier: m[2], target: m[4], source: 'vite.config.mts',
+    }));
+    const { errors } = validateModuleResolutionLock(entries);
+    expect(errors.map((e) => e.message)).toEqual([]);
+  });
+});
+
+describe('findRawHtmlInMarkdown — raw HTML in backlog body (#290)', () => {
+  const names = (body) => findRawHtmlInMarkdown(body).map((f) => f.name);
+
+  it('flags an un-backticked interactive tag (the #020 content-swallow bug)', () => {
+    const f = findRawHtmlInMarkdown('A digest with a literal <select> in it.');
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ line: 1, name: 'select', tag: '<select>' });
+  });
+
+  it('ignores a tag inside an inline code span', () => {
+    expect(names('Native: `<select>` and `<dialog>` are the anchors.')).toEqual([]);
+  });
+
+  it('ignores tags inside a fenced code block (``` and ~~~)', () => {
+    expect(names('before\n```html\n<select><option>x</option></select>\n```\nafter')).toEqual([]);
+    expect(names('~~~\n<table><tr><td>x</td></tr></table>\n~~~')).toEqual([]);
+  });
+
+  it('does NOT flag placeholder tokens that are not HTML elements (<NNN>, <date>, <slug>)', () => {
+    expect(names('Rename to <NNN>-slug on <date>, e.g. <my-id> — these are not tags.')).toEqual([]);
+  });
+
+  it('does NOT flag a hyphenated custom element (inert, not a standard element)', () => {
+    expect(names('A bare <auto-complete> mounts a window.')).toEqual([]);
+  });
+
+  it('reports each raw tag with its body line number', () => {
+    const f = findRawHtmlInMarkdown('line one\n\n<div>raw</div> and <ul> here');
+    expect(f.map((x) => [x.line, x.name])).toEqual([[3, 'div'], [3, 'div'], [3, 'ul']]);
+  });
+
+  it('matches close tags and tags carrying attributes', () => {
+    expect(names('<input type="file"> then </form>')).toEqual(['input', 'form']);
+  });
+
+  it('returns [] for an empty or non-string body', () => {
+    expect(findRawHtmlInMarkdown('')).toEqual([]);
+    expect(findRawHtmlInMarkdown(undefined)).toEqual([]);
+  });
 });

@@ -5,9 +5,22 @@
     "status": "open",
     "summary": "Exploring the gap between Web Everything's scoping discipline (injectors, registries, dynamic block names) and the globally-scoped nature of DOM CustomEvent names.",
     "dateOpened": "2026-02-22",
-    "tags": ["events", "scoping", "registry", "cross-team"],
-    "relatedBlocks": ["event-behaviors", "view", "tabs", "router"],
-    "relatedPlugs": ["webbehaviors", "webregistries"],
+    "tags": [
+      "events",
+      "scoping",
+      "registry",
+      "cross-team"
+    ],
+    "relatedBlocks": [
+      "event-behaviors",
+      "view",
+      "tabs",
+      "router"
+    ],
+    "relatedPlugs": [
+      "webbehaviors",
+      "webregistries"
+    ],
     "relatedProject": "webevents"
   },
   {
@@ -16,9 +29,23 @@
     "status": "open",
     "summary": "Researching every programming pattern and runtime solution that enables React-like component wrapping without adding DOM elements — from comment-based markers to display:contents, transient elements, and functional components.",
     "dateOpened": "2026-02-23",
-    "tags": ["composition", "dom", "fragments", "transient", "layout"],
-    "relatedBlocks": ["transient-component", "view", "renderer"],
-    "relatedPlugs": ["webinjectors", "webcomponents", "webdirectives"],
+    "tags": [
+      "composition",
+      "dom",
+      "fragments",
+      "transient",
+      "layout"
+    ],
+    "relatedBlocks": [
+      "transient-component",
+      "view",
+      "renderer"
+    ],
+    "relatedPlugs": [
+      "webinjectors",
+      "webcomponents",
+      "webdirectives"
+    ],
     "relatedProject": "webcomponents"
   },
   {
@@ -27,9 +54,21 @@
     "status": "open",
     "summary": "Surveying what major frameworks provide for i18n and translation that is not yet part of web standards — from message formatting and locale negotiation to compile-time translations and type-safe keys.",
     "dateOpened": "2026-02-23",
-    "tags": ["i18n", "translation", "locale", "messageformat", "rtl"],
-    "relatedBlocks": ["expression-parser", "router"],
-    "relatedPlugs": ["customtranslationprovider", "customtranslationproviderregistry"],
+    "tags": [
+      "i18n",
+      "translation",
+      "locale",
+      "messageformat",
+      "rtl"
+    ],
+    "relatedBlocks": [
+      "expression-parser",
+      "router"
+    ],
+    "relatedPlugs": [
+      "customtranslationprovider",
+      "customtranslationproviderregistry"
+    ],
     "relatedProject": "webintl"
   },
   {
@@ -38,9 +77,24 @@
     "status": "open",
     "summary": "Analyzing whether virtual elements (comment-based DOM-less markers) belong in Web Directives or Web Components, how they relate to transient elements, and when JSX makes transient syntax redundant.",
     "dateOpened": "2026-02-23",
-    "tags": ["virtual-elements", "comments", "directives", "transient", "jsx", "dom-parts"],
-    "relatedBlocks": ["transient-component", "for-each", "resource-loader", "view"],
-    "relatedPlugs": ["webdirectives", "webcomponents"],
+    "tags": [
+      "virtual-elements",
+      "comments",
+      "directives",
+      "transient",
+      "jsx",
+      "dom-parts"
+    ],
+    "relatedBlocks": [
+      "transient-component",
+      "for-each",
+      "resource-loader",
+      "view"
+    ],
+    "relatedPlugs": [
+      "webdirectives",
+      "webcomponents"
+    ],
     "relatedProject": "webdirectives"
   },
   {
@@ -49,9 +103,22 @@
     "status": "open",
     "summary": "Researching how the 400ms debounce loading threshold should be configurable through the Intent system, backed by UX perception research and framework precedent.",
     "dateOpened": "2026-02-23",
-    "tags": ["loading", "debounce", "timing", "intents", "ux-research", "skeleton"],
-    "relatedBlocks": ["resource-loader", "router"],
-    "relatedPlugs": ["webinjectors", "webcontexts"],
+    "tags": [
+      "loading",
+      "debounce",
+      "timing",
+      "intents",
+      "ux-research",
+      "skeleton"
+    ],
+    "relatedBlocks": [
+      "resource-loader",
+      "router"
+    ],
+    "relatedPlugs": [
+      "webinjectors",
+      "webcontexts"
+    ],
     "relatedProject": "webintents"
   },
   {
@@ -60,9 +127,24 @@
     "status": "open",
     "summary": "Analyzing how listenForScoped discriminates between concurrent resource loaders in the same scope, the relationship between loader events and tracing, and how trace context flows through resource requests.",
     "dateOpened": "2026-02-23",
-    "tags": ["events", "scoping", "resource-loader", "tracing", "instanceof", "discrimination"],
-    "relatedBlocks": ["resource-loader", "resource-action", "broadcast", "router"],
-    "relatedPlugs": ["webevents", "webresources"],
+    "tags": [
+      "events",
+      "scoping",
+      "resource-loader",
+      "tracing",
+      "instanceof",
+      "discrimination"
+    ],
+    "relatedBlocks": [
+      "resource-loader",
+      "resource-action",
+      "broadcast",
+      "router"
+    ],
+    "relatedPlugs": [
+      "webevents",
+      "webresources"
+    ],
     "relatedProject": "webevents"
   },
   {
@@ -71,9 +153,22 @@
     "status": "open",
     "summary": "Documenting how the resource-loader's transport (fetch by default) and cache should be injectable via the injector system, enabling projects to swap in axios, GraphQL clients, or custom cache implementations.",
     "dateOpened": "2026-02-23",
-    "tags": ["fetch", "transport", "cache", "middleware", "adapter", "injector"],
-    "relatedBlocks": ["resource-loader", "resource-action"],
-    "relatedPlugs": ["webresources", "webinjectors"],
+    "tags": [
+      "fetch",
+      "transport",
+      "cache",
+      "middleware",
+      "adapter",
+      "injector"
+    ],
+    "relatedBlocks": [
+      "resource-loader",
+      "resource-action"
+    ],
+    "relatedPlugs": [
+      "webresources",
+      "webinjectors"
+    ],
     "relatedProject": "webresources"
   },
   {
@@ -82,9 +177,26 @@
     "status": "open",
     "summary": "Exploring how an HTML-first, standards-based component library can handle visual variations of the same core component — injecting icons, badges, popovers, or different visual treatments — without rebuilding accessibility logic. Catalogs strategies from React composition to web component slots and headless UI patterns.",
     "dateOpened": "2026-02-23",
-    "tags": ["configuration", "composition", "slots", "css-parts", "design-tokens", "headless", "customization"],
-    "relatedBlocks": ["nav-list", "tabs", "view", "renderer"],
-    "relatedPlugs": ["webbehaviors", "webinjectors", "webcontexts"],
+    "tags": [
+      "configuration",
+      "composition",
+      "slots",
+      "css-parts",
+      "design-tokens",
+      "headless",
+      "customization"
+    ],
+    "relatedBlocks": [
+      "nav-list",
+      "tabs",
+      "view",
+      "renderer"
+    ],
+    "relatedPlugs": [
+      "webbehaviors",
+      "webinjectors",
+      "webcontexts"
+    ],
     "relatedProject": "webblocks"
   },
   {
@@ -93,9 +205,22 @@
     "status": "open",
     "summary": "Cataloging the four layers of provide/consume/injector syntax explored in the plateau project — from runtime API (Consumable, consume(), Node context methods) through HTML declarative forms (script type=expression/context), decorators (@provide, @context), and language-level DSL (injector blocks, provide/consume/map statements). Evaluates what should carry forward to Web Everything and what was exploratory.",
     "dateOpened": "2026-02-24",
-    "tags": ["injector", "provide", "consume", "syntax", "dsl", "consumable", "decorators", "context"],
+    "tags": [
+      "injector",
+      "provide",
+      "consume",
+      "syntax",
+      "dsl",
+      "consumable",
+      "decorators",
+      "context"
+    ],
     "relatedBlocks": [],
-    "relatedPlugs": ["webinjectors", "webcontexts", "webstates"],
+    "relatedPlugs": [
+      "webinjectors",
+      "webcontexts",
+      "webstates"
+    ],
     "relatedProject": "webinjectors"
   },
   {
@@ -104,9 +229,21 @@
     "status": "open",
     "summary": "Tracking features present in the plateau injector system that are missing or incomplete in Web Everything's webinjectors — Consumable class, Node context methods, scoped createElement, cloneNode preservation, CustomContext auto-attachment, ModuleInjector, provider replacement, and Window/ShadowRoot entry points.",
     "dateOpened": "2026-02-24",
-    "tags": ["injector", "migration", "consumable", "context", "createElement", "cloneNode", "gap-analysis"],
+    "tags": [
+      "injector",
+      "migration",
+      "consumable",
+      "context",
+      "createElement",
+      "cloneNode",
+      "gap-analysis"
+    ],
     "relatedBlocks": [],
-    "relatedPlugs": ["webinjectors", "webcontexts", "webstates"],
+    "relatedPlugs": [
+      "webinjectors",
+      "webcontexts",
+      "webstates"
+    ],
     "relatedProject": "webinjectors"
   },
   {
@@ -115,9 +252,23 @@
     "status": "open",
     "summary": "Formal draft specification for the injector syntax system — provide, consume, and injector block declarations. Defines three conformance tiers (Runtime API, TypeScript API, DSL), maps every DSL construct to an unplugged runtime equivalent, addresses both module-scope and DOM-scope injection, and documents tooling requirements for esbuild, TypeScript, Chrome DevTools, and transpiler plugins.",
     "dateOpened": "2026-02-24",
-    "tags": ["injector", "syntax", "spec", "provide", "consume", "dsl", "tooling", "module-injector", "consumable"],
+    "tags": [
+      "injector",
+      "syntax",
+      "spec",
+      "provide",
+      "consume",
+      "dsl",
+      "tooling",
+      "module-injector",
+      "consumable"
+    ],
     "relatedBlocks": [],
-    "relatedPlugs": ["webinjectors", "webcontexts", "webstates"],
+    "relatedPlugs": [
+      "webinjectors",
+      "webcontexts",
+      "webstates"
+    ],
     "relatedProject": "webinjectors"
   },
   {
@@ -126,9 +277,22 @@
     "status": "open",
     "summary": "Comprehensive catalog of all TODO, stub, and placeholder code remaining from the plateau migration across every module — webregistries, webinjectors, webcontexts, webcomponents, and core utilities. Tracks what's genuinely incomplete vs outdated comments, and identifies the highest-impact items for completion.",
     "dateOpened": "2026-02-24",
-    "tags": ["migration", "todo", "stubs", "plateau", "gap-analysis", "registries", "patching"],
+    "tags": [
+      "migration",
+      "todo",
+      "stubs",
+      "plateau",
+      "gap-analysis",
+      "registries",
+      "patching"
+    ],
     "relatedBlocks": [],
-    "relatedPlugs": ["webregistries", "webinjectors", "webcontexts", "webcomponents"],
+    "relatedPlugs": [
+      "webregistries",
+      "webinjectors",
+      "webcontexts",
+      "webcomponents"
+    ],
     "relatedProject": "webinjectors"
   },
   {
@@ -137,8 +301,16 @@
     "status": "open",
     "summary": "Discovering that validation's core concerns (async lifecycle, severity vocabulary, error handling) are universal patterns already in the repo (Loader, Feedback, Message, Reliability). Validation composes these shared metas rather than redefining them—a pattern applicable to any standard with optional features.",
     "dateOpened": "2026-05-30",
-    "tags": ["validation", "composition", "meta-intents", "interop", "design-pattern"],
-    "relatedBlocks": ["validation"],
+    "tags": [
+      "validation",
+      "composition",
+      "meta-intents",
+      "interop",
+      "design-pattern"
+    ],
+    "relatedBlocks": [
+      "validation"
+    ],
     "relatedPlugs": [],
     "relatedProject": "webintents"
   },
@@ -148,7 +320,18 @@
     "status": "open",
     "summary": "Researching how Volar.js and Vue language tools will interact with TypeScript 7's native Go rewrite (Project Corsa / tsgo). Covers the Corsa IPC-based API surface, the loss of TSServer plugin support, the viability of writing Volar language plugins in Go or native code, performance profiles and bottlenecks of Volar-based language servers, and potential IPC/WASM/FFI communication patterns between native analysis engines and Volar's Node.js-based framework.",
     "dateOpened": "2026-02-26",
-    "tags": ["volar", "typescript", "tsgo", "corsa", "language-server", "ipc", "wasm", "performance", "go", "tooling"],
+    "tags": [
+      "volar",
+      "typescript",
+      "tsgo",
+      "corsa",
+      "language-server",
+      "ipc",
+      "wasm",
+      "performance",
+      "go",
+      "tooling"
+    ],
     "relatedBlocks": [],
     "relatedPlugs": [],
     "relatedProject": "webtooling"
@@ -159,9 +342,22 @@
     "status": "open",
     "summary": "Framework and library patterns for retry strategies, circuit breakers, offline queuing, and HTTP error classification. Covers TanStack Query, axios-retry, urql retryExchange, SWR, and Apollo RetryLink — analyzing their retry configuration models, backoff algorithms, and offline handling. Grounds the Web Reliability standard's design decisions: why first-that-accepts over a chain object, why null-means-decline, and which patterns are HTTP-specific vs. universally applicable.",
     "dateOpened": "2026-05-30",
-    "tags": ["reliability", "retry", "circuit-breaker", "offline", "backoff", "http", "recovery"],
-    "relatedBlocks": ["error-recovery"],
-    "relatedPlugs": ["customrecoveryhandlerregistry", "customrecoveryhandler"],
+    "tags": [
+      "reliability",
+      "retry",
+      "circuit-breaker",
+      "offline",
+      "backoff",
+      "http",
+      "recovery"
+    ],
+    "relatedBlocks": [
+      "error-recovery"
+    ],
+    "relatedPlugs": [
+      "customrecoveryhandlerregistry",
+      "customrecoveryhandler"
+    ],
     "relatedProject": "webreliability"
   },
   {
@@ -170,9 +366,22 @@
     "status": "open",
     "summary": "Cataloging every client-side change-tracking strategy — snapshot+diff, dirty-checking, Proxy interception (Vue 3/MobX/Valtio), signals/observers (TC39 Signals, SolidJS), Immer/Mutative structural-sharing patches, JSON Patch (RFC 6902), JSON Merge Patch (RFC 7386), event sourcing, CRDTs (Yjs/Automerge), Operational Transformation, MutationObserver, accessor tracking, polling — as a facet of observability rather than a form concern. Defines the classification axes (granularity, eagerness, representation, attribution, reversibility, transport, soundness, cost), sketches a provisional canonical change record and an interop/configuration layer that lets one app pick a preferred strategy and bridge several at once, and generalizes the validation customValidation:change-detection concern. Grounded in primary sources (RFC 6902/7386, TC39 Signals, Shapiro et al. CRDT survey, W3C Trace Context) via an adversarially-verified deep-research pass.",
     "dateOpened": "2026-05-31",
-    "tags": ["change-tracking", "observability", "diff", "json-patch", "crdt", "signals", "proxy", "event-sourcing", "attribution", "interop"],
+    "tags": [
+      "change-tracking",
+      "observability",
+      "diff",
+      "json-patch",
+      "crdt",
+      "signals",
+      "proxy",
+      "event-sourcing",
+      "attribution",
+      "interop"
+    ],
     "relatedBlocks": [],
-    "relatedPlugs": ["customstoreregistry"],
+    "relatedPlugs": [
+      "customstoreregistry"
+    ],
     "relatedProject": "webstates"
   },
   {
@@ -181,8 +390,20 @@
     "status": "open",
     "summary": "Resolving gap #10 — the data operations on collections (filter, sort, page, group) that no current intent owns. type-ahead is focus-movement, windowed-collection is rendering-which-items, loader is async fetch; none transform the dataset. Surveys the native semantics anchors that DO exist (aria-sort's ascending/descending/none/other state model, Intl.Collator for locale-aware comparison, the stable Array.prototype.sort comparator, the Open UI <th sortable> proposal) versus the absence of any native operation API, and the headless-table precedent (TanStack Table, AG Grid, MUI DataGrid) that models the four ops as an ordered, composable row-model pipeline (filter → sort → group → paginate). Decided 2026-06-03: a single, UX-only Collection Operations Intent whose dimensions are the four pipeline stages with a configurable order and sort given a structured sub-shape (key(s), direction, collation/case/numeric preference, empty-value placement); ambient defaults (collation/locale preference, page size) ride the intent DI channel, structural choices (sortable columns, multi-sort) ride trait selection. The intent carries no technical references — the technical sorting strategies (default sort, Intl.Collator, numeric comparator, decorate-sort-undecorate, server delegation) with their advantages/disadvantages are materialised as a Sorting Strategy domain in Plateau's Technical Configurator; server-side execution is documented as front-end-out-of-scope.",
     "dateOpened": "2026-06-03",
-    "tags": ["collections", "intent", "sorting", "filtering", "pagination", "grouping", "collation", "gap-analysis", "vocabulary"],
-    "relatedBlocks": ["droplist"],
+    "tags": [
+      "collections",
+      "intent",
+      "sorting",
+      "filtering",
+      "pagination",
+      "grouping",
+      "collation",
+      "gap-analysis",
+      "vocabulary"
+    ],
+    "relatedBlocks": [
+      "droplist"
+    ],
     "relatedPlugs": [],
     "relatedProject": "webintents"
   },
@@ -192,8 +413,21 @@
     "status": "open",
     "summary": "The Navigation Intent was the thinnest in the catalog — a single structure axis (hierarchical/lateral/linear) — while the Router block already shipped scroll, history, transition, and leave-guard behaviors with no UX vocabulary to name them. This research holds the intent to the standard intent bar (user-perceivable, closed 2–4 value set, orthogonal to structure, web-standards grounded) and adds four dimensions plus one softer fifth: history (push/replace/none, Navigation API navigate({history})), scroll (auto/top/preserve/manual, NavigateEvent.intercept({scroll}) + History.scrollRestoration), transition (directional/fade/none — direction only, deferring feel to the motion intent because browser-initiated Back carries no View-Transition type), guard (free/confirm/blocked, Navigation intercept/preventDefault + beforeunload), and persistence (url/memory/session, the WHATWG URL-vs-History-state split — the deep-linkability choice most relevant to tabs and wizards). Establishes the composition boundary: prefetch eagerness stays in the prefetch intent, animation feel stays in motion, focus-on-route-change is referenced (APG: move to main heading) not owned and overlaps focus-delegation, and aria-current is derived from structure rather than a separable axis. Nested routing, base path, router mode, 404 fallback, and cross-document execution are classed implementation/config, not UX dimensions. Every added dimension maps 1:1 to an existing Router attribute — the intent was lagging the block, not requesting new implementation.",
     "dateOpened": "2026-06-03",
-    "tags": ["navigation", "routing", "intent", "scroll-restoration", "history", "view-transitions", "navigation-guards", "deep-linking", "vocabulary", "gap-analysis"],
-    "relatedBlocks": ["router"],
+    "tags": [
+      "navigation",
+      "routing",
+      "intent",
+      "scroll-restoration",
+      "history",
+      "view-transitions",
+      "navigation-guards",
+      "deep-linking",
+      "vocabulary",
+      "gap-analysis"
+    ],
+    "relatedBlocks": [
+      "router"
+    ],
     "relatedPlugs": [],
     "relatedProject": "webintents"
   },
@@ -203,9 +437,711 @@
     "status": "open",
     "summary": "How one validation intent declaration becomes runnable validation — purely the generation layer (protocol + adapters), excluding UI, component integration, the validity-model, and the conformance meta-layer. Confirms the two-mode framing is right and both modes already ship: Mode 1 (single-source generation, no runtime link) is best embodied by protovalidate (CEL on Protobuf → identical rules in Go/TS/Java/Python/C++), with JSON-Schema-as-source + per-target codegen (datamodel-code-generator, quicktype) as the pragmatic, lossier variant, and Standard Schema as the TS-only interface-consumer pattern that reduces the adapter problem from N×M to N+M; Mode 2 (backend exposes validation as a service) is best embodied by Laravel Precognition (runs the real rules without executing the controller, returns 422 + errors for live FE validation). Narrows the Mode-2 wire format to RFC 9457 application/problem+json by default with content-negotiated richer formats; models 'declare which intents you comply with' on JSON Schema's $vocabulary required/optional mechanism (consuming the #005 capability manifest); and identifies a gap to claim — RFC 9457 standardizes the error envelope but not the field-level error shape, which a WE Validation protocol could define as a first-class intent.",
     "dateOpened": "2026-06-06",
-    "tags": ["validation", "protocol", "adapters", "codegen", "validation-as-a-service", "json-schema", "rfc-9457", "conformance", "vocabulary"],
-    "relatedBlocks": ["validation"],
+    "tags": [
+      "validation",
+      "protocol",
+      "adapters",
+      "codegen",
+      "validation-as-a-service",
+      "json-schema",
+      "rfc-9457",
+      "conformance",
+      "vocabulary"
+    ],
+    "relatedBlocks": [
+      "validation"
+    ],
     "relatedPlugs": [],
     "relatedProject": "webvalidation"
+  },
+  {
+    "id": "tree-select-hierarchical-selection",
+    "title": "Tree-select & Hierarchical Selection",
+    "status": "resolved",
+    "summary": "Web-platform and library prior art for a hierarchical member of the droplist family, grounding backlog #064's open forks. WAI-ARIA APG and all six surveyed libraries (Ant/MUI/Fluent/Carbon/PrimeReact/Shoelace) keep three axes independent — disclosure (aria-expanded, shared with <details>/accordion), hierarchy (role=tree›treeitem›group + aria-level/setsize/posinset), and selection (aria-selected, already WE's Selection Intent) — so hierarchy earns its own intent that delegates selection/focus/type-ahead and composes a separate disclosure axis. The keyboard model is fully APG-specified (Right/Left carry expand+traversal; Up/Down never change disclosure). Any node is selectable by default (leaf-only is an opt-in constraint). Windowing is flatten-to-visible-rows so Windowed Collection needs zero tree changes; the real coupling is focus — virtual aria-activedescendant is viable because the active-always-mounted invariant already holds, with roving tabindex the alternative for giant trees and collapse-focuses-ancestor keeping focus in the projection. There is no native tree-select (optgroup can't nest). The survey also surfaced a fork the item omitted: multi-select parent/child cascade (divergent across libraries) — a configurable cascade + value-reporting dimension.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "droplist",
+      "tree-select",
+      "hierarchy",
+      "disclosure",
+      "selection",
+      "windowing",
+      "aria-activedescendant",
+      "apg",
+      "gap-analysis",
+      "vocabulary"
+    ],
+    "relatedBlocks": [
+      "droplist"
+    ],
+    "relatedPlugs": [],
+    "relatedProject": "webblocks"
+  },
+  {
+    "id": "menu-menubar-context-menu",
+    "title": "Menu / Menubar / Context-menu — Action Invocation",
+    "status": "resolved",
+    "summary": "Web-platform and library prior art for a Web Everything Menu block (the ARIA menu/menubar/menu-button/context-menu family — action invocation, not value selection), grounding backlog #173. Every benchmark library (Radix/Headless/MUI/Fluent/Carbon/Ant/Shoelace) models menu as a separate component from listbox/select. WAI-ARIA APG fully specifies the roles and keyboard model and — contrary to the item's premise — permits roving tabindex OR aria-activedescendant (WE chooses roving by convention, fixed). Native substrate is thin: <menu> is a <ul> alias, type=context is dead, but Popover supplies the surface and the newly-Baseline Invoker Commands API (command/commandfor + CommandEvent) is the action-dispatch substrate for the command intent (#016) — the menu's one net-new dependency. Everything else composes existing intents (Anchor, Focus Delegation roving, Type-Ahead, Selection for checkable items, Disclosure for submenus, Action for prominence). Forks: command intent vs Action (A), roving as fixed default (B), one block with a shape dimension vs three (C), checkable=Selection under a trait (D), submenu=Disclosure not the hierarchy intent (E); plus two the item omitted — separator/group semantics (F) and the menu-button double-home in the droplist roster (G).",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "menu",
+      "menubar",
+      "context-menu",
+      "command",
+      "invoker-commands",
+      "apg",
+      "roving-tabindex",
+      "disclosure",
+      "selection",
+      "gap-analysis",
+      "vocabulary"
+    ],
+    "relatedBlocks": [
+      "droplist"
+    ],
+    "relatedPlugs": [],
+    "relatedProject": "webblocks"
+  },
+  {
+    "id": "web-permissions-project",
+    "title": "Web Permissions / Notifications / Push",
+    "status": "open",
+    "summary": "Web-platform prior art grounding backlog #009's 'project vs intent vs fold into Feedback' call. The platform's seams force a three-way decomposition the item collapsed: the Permissions API is a cross-cutting state layer (granted | denied | prompt, spanning camera/geolocation/clipboard/notifications) — an own permission intent, not a notification render; the Notifications API is a system-level render surface (sibling to in-app Feedback and in-session Background Task) — a distinct system-notification intent; and the Push API is a server-authoritative VAPID transport/orchestration whose swappable-provider shape matches the Guard protocol — a push protocol with a CustomPushProvider lock under a narrowed project. Permissions-Policy is a deployment gate for webmanifests, not UX. Net: resolves to all three on different axes; nothing folds into Feedback.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "permissions",
+      "notifications",
+      "push",
+      "intent",
+      "protocol",
+      "feedback",
+      "background-task",
+      "guard",
+      "gap-analysis",
+      "vocabulary"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webmanifests"
+  },
+  {
+    "id": "web-identity-project",
+    "title": "Web Identity Project",
+    "status": "open",
+    "summary": "Web-platform and library prior art grounding backlog #012's project/protocol/intent/defer call for identity & auth. The platform already unified identity behind one browser-mediated dispatcher — navigator.credentials.get() — routing to passwords (PasswordCredential), passkeys/WebAuthn (PublicKeyCredential), federated FedCM (IdentityCredential), and Digital Credentials (mDoc) through one call and mediation enum. That is structurally a protocol with a provider/predicate seam (mirroring Guard), not a monolithic project: a webidentity project owning one credential-acquisition protocol with families as swappable CustomCredentialProviders. Authentication is back-end-authoritative — WE standardizes only the UX-only surface (mediation, credential-request declaration, auth-state predicate that feeds #178's Guard access-gate). Verbose ceremonies (SimpleWebAuthn/Hanko) are swappable adapters. Recommends authoring the thin mediation intent now, deferring the full protocol + Configurator domain. Distinct from #009 permissions.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "identity",
+      "auth",
+      "credential-management",
+      "webauthn",
+      "passkeys",
+      "fedcm",
+      "digital-credentials",
+      "protocol",
+      "guard",
+      "gap-analysis",
+      "vocabulary"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webguards"
+  },
+  {
+    "id": "web-scroll-observation",
+    "title": "Scroll / Observation",
+    "status": "open",
+    "summary": "Web-platform prior art grounding backlog #014's 'project vs intent vs neither' call for the scroll surface. The platform ships no 'scroll domain' — just independent primitives sharing a scrollbar: IntersectionObserver (the in-view trigger), scroll-driven animations (animation-timeline — a motion concern), scroll-snap (layout), content-visibility (the virtualization floor), History.scrollRestoration (navigation), scrollend. So scroll earns neither a project nor a monolithic intent; decompose onto native seams that mostly already have homes. The one reusable residue is a thin viewport-presence mechanism intent owning the observe-vocabulary (root/rootMargin/threshold/enter-leave) that three existing IntersectionObserver consumers compose — Collection Operations' advance:auto, Prefetch's eagerness:viewport, and visibility-gated trait activation. advance:auto stays a Collection Operations dimension and composes that trigger, resolving the dated seam with one home for the trigger, three for the intent.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "scroll",
+      "observation",
+      "intersection-observer",
+      "viewport-presence",
+      "infinite-scroll",
+      "virtualization",
+      "content-visibility",
+      "scroll-restoration",
+      "gap-analysis",
+      "vocabulary"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webblocks"
+  },
+  {
+    "id": "web-persistence-offline",
+    "title": "Persistence & Offline",
+    "status": "open",
+    "summary": "Web-platform and library prior art grounding backlog #011, which completes the data story (webresources fetches, webstates holds, nothing persists). The platform splits persistence into four orthogonal layers: durable structured storage (IndexedDB + navigator.storage.persist()), HTTP-response caching (Cache Storage + Service Worker, a webresources/fetch concern), deferred replay (Background Sync, unsupported in Safari — a JS outbox is the portable fallback), and cross-tab coordination (Web Locks). Verdict per fork: storage is a thin Protocol (CustomStorageStrategy, IndexedDB native-first, Dexie/RxDB/PouchDB adapters) — possibly a webstates facet rather than a new top-level project; optimistic UX already lives in the Loader intent, only the durable outbox is new (a fixed mechanism); conflict resolution is a strategy dimension of the existing Change Tracking protocol; offline cache leans to webresources, the durable store to webstates. Default: no new top-level project.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "persistence",
+      "offline",
+      "indexeddb",
+      "cache-api",
+      "background-sync",
+      "service-worker",
+      "storage",
+      "protocol",
+      "change-tracking",
+      "gap-analysis",
+      "vocabulary"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webstates"
+  },
+  {
+    "id": "app-shell-compatibility-map",
+    "title": "App Shell + Micro-App Compatibility Map",
+    "status": "open",
+    "summary": "Web-platform and industry prior art grounding backlog #104: a thin App Shell that loads independently-developed micro-apps as pages of one SPA, deciding on navigation whether the next page loads in the same SPA or needs a hard refresh, plus a Platform compatibility map. single-spa (bootstrap/mount/unmount lifecycle, activeWhen, import maps) and Module Federation (semver-ranged shared deps) are mature, but none ships a declared, introspectable per-app compatibility chart — the novel artifact, sitting on the #092 provider/consumer graph. Recommends: split the home — a thin app-shell-compatibility protocol owned by webmanifests plus the live map as a Plateau dashboard; declare a flat requirement manifest, render a browser-compat-data-style support matrix; borrow the Storage eviction model (best-effort/persistent classes + LRU under a mounted-app budget). Adapters-via-DI (webinjectors) shrink the incompatible set so hard refresh is the last resort.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "app-shell",
+      "micro-frontend",
+      "micro-apps",
+      "compatibility-map",
+      "spa",
+      "module-federation",
+      "import-maps",
+      "browser-compat-data",
+      "eviction",
+      "evergreen"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webmanifests"
+  },
+  {
+    "id": "tool-agnostic-chart-config",
+    "title": "Tool-agnostic Chart Config",
+    "status": "open",
+    "summary": "Prior-art survey grounding backlog #105: a tool-agnostic, standard JSON describing a chart (data, encodings, axes, interactions, styling intent), rendered by any conforming tool and scored on its support. Vega-Lite is the only pure-JSON, schema-published grammar of graphics (Observable Plot is a JS API; Plotly/ECharts are JSON-with-callbacks), so the recommendation is profile it rather than greenfield. The real ask is the comparison layer — the constellation's provider/registry + conformance pattern (a CustomChartRenderer registry, native-first SVG default, pluggable Vega/Plotly/ECharts adapters) like Anchor Positioning and Localization. Accessibility is first-class spec content plus a weighted conformance axis (WAI-ARIA Graphics roles, a spec-derived data-table, Vega-Lite's description channel). No webcharts project exists today, so a standalone project is net-new scaffolding — the genuine open fork.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "charts",
+      "dataviz",
+      "vega-lite",
+      "grammar-of-graphics",
+      "json-schema",
+      "conformance",
+      "provider-registry",
+      "native-first",
+      "accessibility",
+      "gap-analysis"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webblocks"
+  },
+  {
+    "id": "mock-proxy-dev-service",
+    "title": "Mock & Service-Proxy Dev Service",
+    "status": "open",
+    "summary": "Prior-art survey grounding backlog #107: a dev-time HTTP mock + service-proxy standard whose hard rule is that mocks never live in deployable code — a real local server transparently mocks/proxies APIs via config + console. Surveying MSW, Mockoon, Prism, WireMock, Pact and OpenAPI, the field splits code-defined (MSW, non-portable by design) from data-defined (the only kind that yields a portable artifact), so the schema is the standard and the server is a swappable provider — OpenAPI-anchored shape plus a WE behavior layer for latency/fault/conditional and a mock|proxy|record response-kind. Every survivor leads self-run with a hosted broker as the commercial upsell, so ship the tier-1 self-run tool first. 'One contract, two uses' (Pact/BDCT) holds only if the artifact carries consumer interactions, not just a shape — verified in webcases.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "mocks",
+      "proxy",
+      "dev-server",
+      "contract-testing",
+      "http",
+      "openapi",
+      "pact",
+      "self-run-tool",
+      "tooling",
+      "gap-analysis"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webcases"
+  },
+  {
+    "id": "nl-to-technical-configurator",
+    "title": "NL → Technical Configurator",
+    "status": "open",
+    "summary": "Prior-art survey grounding backlog #096: an AI front-end to the Technical Configurator where a developer describes behavior in plain language and the AI selects and wires the right strategy from the registries. The survey settles four forks. Surface: panel-first (an NL box inside the configurator that populates the requirements state exactly as a preset does), reusing the ranking, verdict badges and decision-record emitter; CLI and editor command are follow-ons. Provider contract: a surface-agnostic describe(nl, domain) → Requirements that translates intent only, leaving strategy selection to the deterministic compat engine. Grounding: a per-domain JSON schema derived from the seed run under constrained decoding, so the model cannot emit off-vocabulary axes/values. Failure: partial fill that degrades into the panel's manual mode. The registry the output is constrained to is the moat, not the model.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "technical-configurator",
+      "natural-language",
+      "structured-output",
+      "constrained-decoding",
+      "ai-agnostic",
+      "provider-registry",
+      "decision-support",
+      "byo-key",
+      "self-run-tool",
+      "monetization"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webregistries"
+  },
+  {
+    "id": "auto-update-pipeline",
+    "title": "Auto-update Pipeline & Change Management",
+    "status": "open",
+    "summary": "Change-management prior-art survey grounding backlog #101: the orchestration that keeps an app current on deps/standards safely — trigger → security scan → cool-off → auto-branch+test → gates → merge/deploy → monitor → revert. Every tool (Dependabot, Renovate, semantic-release, changesets) splits a committed policy file from a swappable runner, so the WE shape is a thin protocol declaring update policy + capability (the escapable lock) with orchestration as a Plateau/reliability service — the same registry+provider pattern as Guard and render-strategy. The gate is graded config keyed to severity + signal, never one mechanic: a pre-merge gate (stability buffer → merge confidence → auto-merge low-risk-green, human-gate major + visual-diff) plus a post-deploy staged-rollout metric gate (auto-rollback). Migration/codemods are consumed from #102/#094 (hence blockedBy); the net-new edge is Platform-side pre-testing against consumers' suites before release.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "auto-update",
+      "evergreen",
+      "change-management",
+      "dependencies",
+      "risk-gates",
+      "phased-rollout",
+      "reversion",
+      "protocol",
+      "reliability",
+      "gap-analysis"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webreliability"
+  },
+  {
+    "id": "jsx-event-style",
+    "title": "JSX Event-Style — Function Prop vs String Behavior",
+    "status": "open",
+    "summary": "Framework prior art grounding backlog #051: the JSX adapter mirrors the canonical HTML adapter and accepts one event handler two ways — the function prop onclick={inc} (JSX's type-checked ergonomic draw) and the string behavior on:click=\"inc($event)\" (the canonical form that survives to HTML). The handler-attachment surface is the most divergent across the ecosystem (React/Preact onClick={fn}, Solid on:click={fn}, Vue @click=\"inc($event)\", Lit @click=${fn}, native inline-string vs addEventListener), so it is a spelling choice, not a semantic one. Only the string form serializes to an HTML attribute, so it must be canonical; named handlers round-trip while inline closures are one-way (lossy). Recommends authoring function-style with string canonicalization, plus a string-function display sub-toggle reusing the shipped soft html | react dialect machinery — not a new protocol.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "jsx",
+      "adapters",
+      "events",
+      "event-handlers",
+      "round-trip",
+      "lossy",
+      "dialect",
+      "spelling",
+      "vocabulary"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webadapters"
+  },
+  {
+    "id": "pagination-focus-announcement",
+    "title": "Pagination: Focus & Announcement After a Page Change",
+    "status": "open",
+    "summary": "WAI-ARIA APG / NN-g / screen-reader-practice pass grounding backlog #059: when the user moves to a new page, where does focus land and what is announced? The load-bearing finding is that neither half is net-new vocabulary — both are already-owned intents the pagination block composes. Focus is the focus-after-view-swap question owned by Autofocus-on-Activation (landing: heading|target|preserve|auto, default heading; the APG answer), which Navigation already composes; the WebAIM thread shows no industry consensus, so it stays a configurable dimension. Announcement is the shipped clause-joined polite-status pattern (role=status + aria-atomic, W3C ARIA22 / WCAG 4.1.3) owned by Live Region Status — always announce \"Page 2 of 10\", a fixed mechanic, not a toggle. The platform offers no native focus/announce after a non-reload page change, so the only build is thin renderer wiring — zero new intents, zero protocols.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "pagination",
+      "a11y",
+      "focus",
+      "announcements",
+      "live-region",
+      "apg",
+      "autofocus-on-activation",
+      "collection-ops",
+      "composition"
+    ],
+    "relatedBlocks": [
+      "pagination"
+    ],
+    "relatedPlugs": [],
+    "relatedProject": "webintents"
+  },
+  {
+    "id": "agent-file-lock-coordination",
+    "title": "Agent File-Lock Coordination",
+    "status": "open",
+    "summary": "OS / database / distributed-systems prior art grounding backlog #083: a just-in-time, fine-grained file lock for when independent agents sometimes touch the same files and the file set is unknown upfront — claim right before editing, hold for seconds, release after, with a per-file FIFO queue plus crash/deadlock safeties. Each fork maps to established theory: advisory-vs-mandatory is the flock/kernel split (only a PreToolUse hook is a real lock, not a convention); crash safety is a lease + TTL + heartbeat with git as the ground-truth backstop and fencing tokens as the principled escalation; deadlock is broken via no-hold-while-blocked (the only Coffman-breaker when the lock set is unknowable); granularity stays file-level with hot shared files single-writer by policy; queue fairness is FIFO + a TTL on waiters. Meta-fork: the 2025-2026 worktree-isolation consensus already covers most value, so keep parked — build the v1 (lock.mjs + hook) only on an observed residual same-file collision.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "agent-coordination",
+      "file-locking",
+      "multi-agent",
+      "hooks",
+      "concurrency",
+      "deadlock",
+      "lease-ttl",
+      "worktrees",
+      "dev-workflow"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": []
+  },
+  {
+    "id": "governance-persona-charter-schema",
+    "title": "Governance Persona Roster + Charter Schema",
+    "status": "open",
+    "summary": "Governance and access-control prior art grounding backlog #166: the platform's stakeholder personas (developer, designer, manager, translator, analyst/QA, security, legal) already ship as a charter schema rendering at plateau-app /profiles, and four model questions are unsettled. The schema exists, so the forks reshape it, not design it. RACI/RASCI decision-rights is the right vocabulary (one Accountable per gate, no system permissions) and RBAC is a category error — the personas govern who reviews/approves, not who may act. Defaults: canonical built-ins + clone-to-derive custom personas (the SaaS RBAC template guardrail); built-ins free, custom/shareable personas the paid affordance (composing #141's local-free/server-paid cost-flat rule); a shared data home both lenses read — product data, not a WE standard entity; and widen the descriptive blocksDeployment boolean to the four governance gate types (Advisory/Validating/Blocking/Escalating) so enforcement can arrive later without a schema break.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "personas",
+      "profiles",
+      "governance",
+      "raci",
+      "rbac",
+      "charter",
+      "gate-types",
+      "plateau",
+      "dev-browser",
+      "vision"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": []
+  },
+  {
+    "id": "dropdown-async-pagination",
+    "title": "Dropdown Async Pagination",
+    "status": "open",
+    "summary": "Prior-art survey (pagination literature, the WAI-ARIA APG Feed pattern, React Aria useAsyncList, open MUI/Fluent/SAP/Radix feature-requests) grounding backlog #018's async-pagination forks for the dropdown family. The load-bearing finding: the item is largely overtaken by work landed since it was filed — cursor-vs-offset already lives in the Custom Pagination protocol, and windowing+async is a composition of Windowed Collection (dataSource:infinite) over Loader (filtering/loadingMore), which the autocomplete member already declares. So no net-new contract; the dropdown composes the three existing standards. The genuinely-open residue is three family-specific gaps: wire Collection Operations advance:manual|auto onto autocomplete (default auto + manual fallback), keep the family forward-only (load-earlier is a Feed concern), and adopt the Feed aria-setsize=\"-1\" + aria-busy rule for the unknown-total case. No native async combobox pagination exists.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "dropdown",
+      "async",
+      "pagination",
+      "cursor",
+      "windowed-collection",
+      "loader",
+      "feed-pattern",
+      "aria-setsize",
+      "apg",
+      "composition"
+    ],
+    "relatedBlocks": [
+      "droplist"
+    ],
+    "relatedPlugs": [],
+    "relatedProject": "webintents"
+  },
+  {
+    "id": "web-docs-as-a-service",
+    "title": "Web Docs as a Service",
+    "status": "open",
+    "summary": "Docs-as-a-service prior-art survey (Mintlify, Docusaurus, ReadMe, GitBook, Storybook+Chromatic, plus conformance/coverage dashboards) grounding backlog #091's three follow-ons before any code. The market splits ingestion two ways — docs-as-code (source of truth stays in the customer's repo) vs platform-first (vendor becomes the source of record, the lock-in WE refuses). WE is structurally docs-as-code: a customer's webmanifest+webcases are the source, so Plateau resolves and serves but never owns content (the Mintlify model). The conformance differentiator already exists on disk — reuse the /protocols/ index + capabilityMatrix + continuous-verification machinery as one pipeline, not a parallel bolt-on dashboard. Home: a managed offering under the Plateau umbrella, resolved in lockstep with Module-as-a-Service (#081), graduating to its own project only when a second consumer demands it. The open premise holds only if the webdocs generator stays self-hostable: paid = licensed hosting, not the generator.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "monetization",
+      "webdocs",
+      "plateau",
+      "docs-as-code",
+      "conformance",
+      "hosting",
+      "open-core",
+      "documentation",
+      "mintlify"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webdocs"
+  },
+  {
+    "id": "web-docs-open-core-tiering",
+    "title": "Web Docs Open-Core Tiering Mechanics",
+    "status": "open",
+    "summary": "Pricing/metering prior-art survey (Chromatic, Mintlify, ReadMe, GitBook, Netlify, Vercel) grounding backlog #428's open-core mechanics — the metered unit, the free/paid threshold, and the billing surface — after #091 ratified the open-core-by-usage principle. The market meters on four distinct units, and the choice is the product's pricing identity: per-seat (Mintlify/GitBook — penalizes teams; Netlify is fleeing it), per-site/project (GitBook/ReadMe — simple but underprices), per-value-action (Chromatic's snapshot — meter the unit that delivers the value, graceful pause at the free ceiling), and pure infra credits (Netlify/Vercel — commoditized, captures no differentiator). Web Docs' differentiator is that the docs prove conformance, so the value-action to meter is the conformance-verified regeneration — the Chromatic-snapshot analog — reusing #089 idea-1's continuous-verification machinery as the meter. The threshold is a principle (free clears the self-host floor and onboards a real OSS/solo project; paid begins at ongoing production value), numbers deferred to the #427 build with real usage. The billing surface is a ratify, not a fork: #183's Lemon Squeezy MoR now supports usage-based/metered subscriptions, so the metered hosted model fits the chosen rail with no reopen.",
+    "dateOpened": "2026-06-12",
+    "tags": [
+      "monetization",
+      "open-core",
+      "pricing",
+      "metered-billing",
+      "webdocs",
+      "plateau",
+      "chromatic",
+      "lemon-squeezy",
+      "solo-founder"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webdocs"
+  },
+  {
+    "id": "development-guide-learn-pathway",
+    "title": "Development Guide & Learn Pathway",
+    "status": "open",
+    "summary": "Documentation-architecture prior-art survey (Diátaxis, MDN's framework-docs policy, Rails Doctrine, Vue/MDN learning-path UIs) grounding backlog #109's shape forks for an opinionated development guide surfaced as the Technical Configurator's learn pathway — deliberately neither the neutral standard (Web Everything) nor the reference impl (Frontier UI). Diátaxis maps the constellation cleanly: standard = Reference, configurator = How-to, guide = Explanation+Tutorial. Resolves to one guide surface in two registers (decision-support + philosophy/handbook); the Configurator's existing Domain type IS the single source, so the learn view is a read-only second view over the same CapabilityProvider (no drift, no second authoring path); render via webdocs (#091) from that source; free browse is the floor with a curated prev/next path as a thin ordering layer. No off-the-shelf decision-guide surface exists — it's a genuine composition of established parts.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "development-guide",
+      "opinionated",
+      "technical-configurator",
+      "learn-pathway",
+      "plateau-app",
+      "diataxis",
+      "decision-support",
+      "one-source-many-views",
+      "webdocs",
+      "documentation"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webdocs"
+  },
+  {
+    "id": "resource-directive-async-contract",
+    "title": "Resource Directive — Async Contract",
+    "status": "open",
+    "summary": "Web-platform and library prior-art survey (SolidJS createResource/Suspense/ErrorBoundary, React 19 use()/useTransition, TanStack Query/Router) grounding backlog #124's four forks for the <Resource> directive — net-new with no defined behavior, currently pure spelling, unlike <For>/<Show> which the lowering compiler already round-trips. Loading and error are universally separate composable boundaries, so <Resource> owns named loading/error slots whose names ARE Loader Intent lifecycle states (resolve through the Loader Intent + Resource Loader block, no new state machine). The suspend-on-read accessor (use()/createResource) is the lowering target, lifting to a use()-style suspending read with Suspense/ErrorBoundary boundaries and a lossy diagnostic. Pagination is a Loader loadingMore + Windowed Collection composition, deferred to #018. There is no native <resource> element. Net: <Resource> is a declarative composition of the Loader Intent — no new intent, no parallel async model.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "jsx",
+      "adapters",
+      "directives",
+      "resource",
+      "async",
+      "loader",
+      "suspense",
+      "lowering-compiler",
+      "intent",
+      "composition"
+    ],
+    "relatedBlocks": [
+      "resource-loader"
+    ],
+    "relatedPlugs": [],
+    "relatedProject": "webadapters"
+  },
+  {
+    "id": "dev-browser-vision",
+    "title": "Dev-browser Vision",
+    "status": "open",
+    "summary": "Market-landscape and repo-machinery survey grounding backlog #141's four open design forks for a Chromium-based developer browser whose tooling lights up only on a standard-conformant app, depth scaling with conformance. The novel move is gating on a vendor-neutral standard rather than a framework (React/Vue/Redux DevTools are the only precedent, framework-gated). Fork 1: gate on a capability manifest and degrade per-feature (reuse the capabilityMatrix vocabulary), not all-or-nothing. Fork 2: reuse the existing verify-gated conformance-autofix loop generalized to a running app — autonomy is a configured ladder defaulting to open-PR-for-review, and live-patching a deployed app is session-only, revertible, authorization-gated. Fork 3: yes a commercial license (free panel funnel → paid browser, cost-flat open-core), deferred to first-sale. Fork 4: a distinct shell embedding plateau-app's existing configurator/profile panels, not a fork of it. The sequencing fork (extension/panel first) is already ruled.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "dev-browser",
+      "chromium",
+      "introspection",
+      "conformance",
+      "capability-manifest",
+      "autofix",
+      "monetization",
+      "local-first",
+      "plateau",
+      "vision"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": []
+  },
+  {
+    "id": "access-control-authorization-gate",
+    "title": "Access Control — Authorization Gate",
+    "status": "open",
+    "summary": "Web-platform and library prior-art survey (CASL isomorphic <Can>, Angular CanActivate, React Router loaders, Vue navigation guards, OPA/PDP, LaunchDarkly entitlements, the RFC 9110 403-vs-404 existence-hiding rule) grounding backlog #178's member-design forks. The home is ruled — access control is the entry member of the Guard protocol (the entry mirror of the exit guard), built on its predicate-provider seam, not its own project. Authorization is universally factored into two surfaces fed by one ability source: a routing entry guard and a render-time element gate — so the member exposes both off one authz provider. The UX names the deny-outcome family (hide|redirect|forbid|cloak) but the forbid(403)-vs-cloak(404) existence-hiding call lives behind the provider (a security decision). Feature flags are an authority kind resolved through the same seam, not separate machinery. The trust boundary (front-end = UX mirror, back-end authoritative) is restated, not re-decided. The Navigation API is the route-guard substrate; there is no native authorization primitive.",
+    "dateOpened": "2026-06-11",
+    "tags": [
+      "access-control",
+      "authorization",
+      "feature-flags",
+      "route-guard",
+      "guard-protocol",
+      "casl",
+      "opa",
+      "rfc-9110",
+      "trust-boundary",
+      "navigation-api"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webguards"
+  },
+  {
+    "id": "dropdown-ux-behaviors",
+    "title": "Dropdown UX Behaviors",
+    "status": "resolved",
+    "summary": "Foundational best-practice survey of the full dropdown family (native <select>, custom listbox/select, filterable combobox, menu-button) across the WAI-ARIA APG, WCAG, CSS WG/MDN, and top UX authorities (NN/g, Carbon, USWDS, Baymard, React Aria, MUI). Its load-bearing finding: almost none of a dropdown's hard parts are about dropdowns — anchored positioning, dismissal-and-focus-return, focus delegation, type-ahead, the selection model, live-region status, windowed rendering, async lifecycle, validation, clearability, truncation, and grouping are general capabilities a dropdown merely composes. The survey extracted 13 cross-cutting paradigms, all materialized as intents (3 new, 5 extended, 5 pre-existing) plus the droplist composition manifest. It is the parent research of the droplist family — its one noted-but-unspecified item (async pagination beyond load-more) spun out as #018 / the Dropdown Async Pagination topic.",
+    "dateOpened": "2026-06-01",
+    "tags": [
+      "droplist",
+      "dropdown",
+      "combobox",
+      "listbox",
+      "apg",
+      "cross-cutting-paradigms",
+      "composition",
+      "selection",
+      "focus-delegation",
+      "harvest"
+    ],
+    "relatedBlocks": [
+      "droplist"
+    ],
+    "relatedPlugs": []
+  },
+  {
+    "id": "benchmark-corpus",
+    "title": "Benchmark corpus — design systems & UI libraries for competitive coverage analysis",
+    "status": "open",
+    "summary": "The canonical input to the competitive coverage gap-analysis program (backlog #315): an explicit, reproducible list of the leading design systems and UI libraries to benchmark, governed by stated selection criteria so a re-run lands on a comparable list. Spans five category axes — mature opinionated design systems (Material 3, Carbon, Fluent, Spectrum, Polaris, Atlassian, Primer, Lightning), headless/a11y-first primitives (Radix, React Aria, Base UI, Ark, Headless UI), web-component systems (Shoelace, Spectrum Web Components, FAST, Lion), popular component kits (MUI, Ant, Chakra, Mantine, shadcn/ui), and platform/standards guidance (Apple HIG, GOV.UK, WAI-ARIA APG, Open UI) — deliberately so the gap sweep is not biased toward one design philosophy. The corpus data lives in src/_data/benchmarkCorpus.json; the references.json 'Reference Design Systems' set is its curated docs-surface subset. Phase 2 (extraction, #346) and phase 3 (mapping & gap detection, #347) join against it.",
+    "dateOpened": "2026-06-12",
+    "tags": [
+      "gap-analysis",
+      "competitive-analysis",
+      "design-systems",
+      "ui-libraries",
+      "corpus",
+      "benchmark",
+      "native-first"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webdocs"
+  },
+  {
+    "id": "benchmark-capabilities",
+    "title": "Benchmark capability matrix — extracted components, patterns, tokens & standards",
+    "status": "open",
+    "summary": "Phase 2 of the competitive coverage gap-analysis program (backlog #346): the normalized capability matrix extracted from the benchmark corpus, deduped across sources into stable capability ids spanning four kinds — components, patterns, tokens, and standards. Each row carries a coarse cross-corpus ubiquity signal, standout implementations (notableIn), and a nativeAnchorHint (the native API/element it plausibly maps to) so phase 3's gap detection stays native-first. First pass keyed for diffability; exact per-source presence + deep doc URLs are deferred to a per-source fan-out. Data: src/_data/benchmarkCapabilities.json. Phase 3 (mapping & gap detection, #347) joins each row to a Web Everything entity and labels covered/partial/missing.",
+    "dateOpened": "2026-06-12",
+    "tags": [
+      "gap-analysis",
+      "competitive-analysis",
+      "extraction",
+      "capability-matrix",
+      "components",
+      "patterns",
+      "native-first"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webdocs"
+  },
+  {
+    "id": "benchmark-coverage",
+    "title": "Benchmark coverage & gap detection — what Web Everything is missing",
+    "status": "open",
+    "summary": "Phase 3 of the competitive coverage gap-analysis program (backlog #347): each extracted capability joined to a Web Everything entity (block/intent/plug/protocol/project) and labelled covered / partial / missing / native-covered, weighed native-first. Of 96 capabilities: 52 covered, 9 native-covered, 24 partial, 11 missing. After deduping against the backlog — 9 already tracked, incl. #028 file-upload, #018 async-pagination, #064 tree-select, #010 theme-color, #022 drag-and-drop, and (found at phase-4 file time) #173/#300 menu/menubar/context-menu, #299 command-palette, #008 accordion/disclosure — 7 fileable gaps remained, ranked, led by a toast/notification block, a date/time picker block, and a unified design-token/theming system. Phase 4 (#348) filed them as candidate items #358–#364. Data: src/_data/benchmarkCoverage.json.",
+    "dateOpened": "2026-06-12",
+    "tags": [
+      "gap-analysis",
+      "competitive-analysis",
+      "coverage",
+      "gap-detection",
+      "native-first",
+      "triage"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webdocs"
+  },
+  {
+    "id": "design-token-theming-system",
+    "title": "Unified design-token / theming system — how Web Everything structures the concrete-value layer",
+    "status": "open",
+    "summary": "Prior-art survey grounding decision #364 (the design-token project #010 deferred as \"the technical half\"). The W3C Design Tokens Community Group reached its first stable format (DTCG 2025.10, Oct 2025); the native CSS substrate (custom properties, @property typed registration, light-dark()/color-scheme, relative color syntax + color-mix) is Baseline; and the benchmark design systems (MD3 ref/sys/comp, Fluent global/alias, Spectrum, Radix 12-step scales, Apple HIG dynamic system colors) are unanimous on a 2-3 tier primitive→semantic→component taxonomy. The WE-specific reframe: WE already owns the semantic tier as Intents (surface/density/typography/motion + theme-color #010), so the token project should own the primitive + component tiers and leave the semantic tier to the intents — not coin a parallel vocabulary. Grounds four forks: home/layer, format (adopt DTCG), tier taxonomy + the #010 seam, and scheme/accent-derivation (native-auto vs curated — the one divergent call). Report: reports/2026-06-12-design-token-theming-system.md.",
+    "dateOpened": "2026-06-12",
+    "tags": [
+      "gap-analysis",
+      "design-tokens",
+      "theming",
+      "native-first",
+      "color-scheme",
+      "intents",
+      "dtcg"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webintents"
+  },
+  {
+    "id": "provider-consumer-graph",
+    "title": "Provider↔consumer relationship graph & governance — ingestion, seam-contracts, and the WE/Plateau split",
+    "status": "open",
+    "summary": "Prior-art survey grounding decision #092 (the control plane that makes Plateau an enterprise web platform manager). Two ingestion models are mature industry patterns with a documented complementary consensus: build-time/declared (Backstage catalog-info.yaml spec.providesApis/consumesApis; CycloneDX SBOM) — complete and auditable but lost-at-runtime and hand-authored-drift; and runtime-agent (OpenTelemetry service-graph connector) — only-accurate-from-real-traffic but stale-fast. The field recommends both: static discovery validated by runtime, edges marked potential until trace-confirmed. The WE-specific reframe: WE introspectable registries/injectors/contexts/events ARE the graph, so the build-time manifest is auto-derived (no hand-authored catalog-info.yaml bottleneck) — making build-first staging natural. Seam-contracts map to consumer-driven contract testing (Pact broker as the safe-to-deploy-together source of truth; drift detection reactive to proactive), reused from WE protocol conformance contracts recorded bidirectionally. Home splits per the constellation: graph-model and contracts are the WE open standard, aggregation and UI and governance are the Plateau licensed product. Report: reports/2026-06-12-provider-consumer-graph.md.",
+    "dateOpened": "2026-06-12",
+    "tags": [
+      "plateau",
+      "platform-manager",
+      "provider-consumer",
+      "graph",
+      "governance",
+      "contract-testing",
+      "introspection",
+      "native-first"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webcontexts"
+  },
+  {
+    "id": "business-rule-proof-of-compliance",
+    "title": "Business-rule manager with proof of compliance — rule meta-schema, proof/trust model, enforcement seam",
+    "status": "open",
+    "summary": "Prior-art survey grounding decision #093 (a Plateau offering to author/version/govern/enforce business rules declaratively and emit an auditable proof they were applied). Two open standards answer different forks: DMN (OMG Decision Model and Notation) is the business-friendly rule meta-schema (decision tables + FEEL expression language) for authoring; OPA/Rego is the policy-as-code enforcement architecture (Policy Decision Point evaluates, Policy Enforcement Point enforces, decision logs record every verdict and why, replayable). Separate-and-decouple plus the standardize-the-meta-schema doctrine point at a new project adopting DMN rather than extending webvalidation (input invalidity is a different concern from domain policy). Proof-of-compliance is a known tamper-evidence ladder: hash chain (SHA-256 each record links the previous) to Merkle tree (O(log n) inclusion proofs) to transparency log (anchor the root externally), with blockchain as the heavy overkill end; the proof content is OPA-style decision logs anchored to webtraces spans, framed as OSCAL-aligned machine-readable compliance artifacts. Enforcement is the OPA PDP/PEP split observed at a trace point, runtime as the baseline proof-emitting venue. The divergent call is how far up the tamper-evidence ladder to go. Report: reports/2026-06-12-business-rule-proof-of-compliance.md.",
+    "dateOpened": "2026-06-12",
+    "tags": [
+      "plateau",
+      "business-rules",
+      "compliance",
+      "proof-of-compliance",
+      "policy-as-code",
+      "dmn",
+      "opa",
+      "tamper-evident",
+      "webtraces"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webvalidation"
+  },
+  {
+    "id": "expressive-symbols-reactions",
+    "title": "Expressive symbols & reactions — emoji rendering, picker surface, sticker, reaction interaction",
+    "status": "open",
+    "summary": "Prior-art survey grounding decision #370 (a web-platform standard for emoji / sticker / reaction — genuine whitespace beside the icon intent, which covers UI iconography only). The survey (web platform standards + the benchmark design systems) says decompose into SEPARATE standards rather than one family, matching the only system that ships all of this first-class: Atlassian splits @atlaskit/emoji (glyph + EmojiPicker) from @atlaskit/reactions, where reactions imports the emoji provider but is never merged in. Four paradigms: (1) expressive-glyph rendering — a new intent sibling to icon (meaningful role=img+aria-label vs decorative aria-hidden; Unicode variation selectors VS15/VS16 + emoji modifier base / skin tone + ZWJ sequences; native-font-vs-image-set render strategy); (2) picker surface — composed, not a new primitive: a searchable popover grid over the existing droplist/autocomplete blocks specifying the browse-grid to search-listbox transform; (3) sticker — folded into glyph rendering as a custom-image-glyph mode (only Apple HIG models it first-class); (4) reaction interaction — a block + intent that consumes glyph rendering: aria-pressed toggle + aggregate count + who-reacted roster + optimistic update (Atlassian ReactionSummary contract baseline), set policy defaulting to a constrained quick-set with an allowAllEmojis escape hatch (most-shipped and most-permissive; GitHub's locked-8 is the rigid extreme), count changes announced via live-region-status. Nothing here is a protocol — no swappable-vendor interop story. Report: reports/2026-06-12-expressive-symbols-reactions.md.",
+    "dateOpened": "2026-06-12",
+    "tags": [
+      "emoji",
+      "sticker",
+      "reaction",
+      "icon",
+      "intent",
+      "accessibility",
+      "unicode",
+      "candidate-standard"
+    ],
+    "relatedBlocks": [
+      "droplist",
+      "autocomplete"
+    ],
+    "relatedPlugs": [],
+    "relatedProject": "webcomponents"
+  },
+  {
+    "id": "design-ref-taxonomy",
+    "title": "Design-reference corpus taxonomy — how to seed categories, registers & first-run scope",
+    "status": "open",
+    "summary": "The taxonomy seed for the design-reference screenshot corpus (backlog #382/#394): how to classify and grow the worklist of real web-app screenshots so design patterns can be codified later. Surveys how the established reference galleries taxonomise UIs — Mobbin’s faceted model (app-category × UI-pattern/flow × UI-element × platform × design-trend), Page Flows / Screenlane’s screen-type axis (onboarding, dashboard, settings, checkout, empty/error…) — and the information-architecture finding that a faceted controlled vocabulary that grows beats both a closed enum (too rigid) and free-text folksonomy (synonym/polysemy noise), the way G2/Capterra keep evolving keyed category taxonomies. Three implications drive the seed: split the conflated ‘designRegister’ into productRegister (archetype, deterministic) + visualStyle (named aesthetic — flat/material/glass/neobrutalist — deferred to the vision pass); store the seed as an open-growing keyed registry (design-refs/taxonomy.json, mirroring benchmarkCorpus.json); and scope the first run by scarcity-weighted grow-targets that fill the registers thin today (everything outside dev-tools/editors). Internal research-corpus tooling — no standard, zero project-facing lock-in.",
+    "dateOpened": "2026-06-12",
+    "tags": [
+      "design-reference",
+      "corpus",
+      "taxonomy",
+      "screenshots",
+      "classification",
+      "controlled-vocabulary",
+      "faceted-classification"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webdocs"
+  },
+  {
+    "id": "deployed-live-patch-safety",
+    "title": "Deployed-app live-patch safety — isolation, authorization, revertibility, audit",
+    "status": "open",
+    "summary": "Safety design for the dev browser’s riskiest capability (backlog #410, carved from the dev-browser vision #141 Fork 2): an AI applying a fix to a *running deployed* app. Surveys established practice across the four concerns #141 named. The central finding reframes the capability: Chrome DevTools ‘Local Overrides’ is an exact precedent for a session-scoped, server-untouched patch — modified files served only in the viewer’s own browser session, active only while it runs — so the dev browser can patch the live *view* of a deployed app (the demo value) without ever mutating the deployed artifact; the PR stays the only path to a real change. The heavy alternatives (server-side canary; kernel-style live-fleet hot-patch via kpatch/Ksplice, where kpatch can’t even revert without a reboot) are contained or rejected. Authorization follows break-glass + just-in-time privileged access (per-patch, expiring, alerting, optional two-party); lifetime is session-scoped with a hard TTL + kill switch; audit reuses the app’s own introspectable trace substrate with SOC2 minimum fields. A product capability, not a standard — and the one case where the usual most-permissive default is inverted to most-restrictive-safe.",
+    "dateOpened": "2026-06-12",
+    "tags": [
+      "dev-browser",
+      "live-patch",
+      "safety",
+      "deployed-app",
+      "break-glass",
+      "audit",
+      "local-overrides",
+      "capability-gating"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webtooling"
   }
 ]

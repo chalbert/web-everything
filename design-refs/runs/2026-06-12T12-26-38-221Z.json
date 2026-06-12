@@ -1,0 +1,90 @@
+{
+  "runId": "2026-06-12T12-26-38-221Z",
+  "startedAt": "2026-06-12T12:26:38.222Z",
+  "captured": [
+    {
+      "url": "https://excalidraw.com",
+      "id": "50badce4ea54a544",
+      "bytes": 61474
+    },
+    {
+      "url": "https://www.tldraw.com",
+      "id": "7f7621c90218424f",
+      "bytes": 31558
+    },
+    {
+      "url": "https://www.photopea.com",
+      "id": "76167c6870ef2f53",
+      "bytes": 189774
+    },
+    {
+      "url": "https://app.diagrams.net",
+      "id": "9dbdb7f79955781d",
+      "bytes": 136700
+    },
+    {
+      "url": "https://play.grafana.org/d/000000012/grafana-play-home",
+      "id": "a442034bf181e54e",
+      "bytes": 103202
+    },
+    {
+      "url": "https://www.openstreetmap.org",
+      "id": "af3d9641c661a0c5",
+      "bytes": 254416
+    },
+    {
+      "url": "https://jsfiddle.net",
+      "id": "d816d448027c02f4",
+      "bytes": 97640
+    },
+    {
+      "url": "https://codepen.io/pen/",
+      "id": "4737eee855a78c80",
+      "bytes": 33328
+    },
+    {
+      "url": "https://www.desmos.com/calculator",
+      "id": "af041413afb82b9f",
+      "bytes": 50874
+    },
+    {
+      "url": "https://www.geogebra.org/calculator",
+      "id": "4881dac6e3b8d3dc",
+      "bytes": 97502
+    },
+    {
+      "url": "https://editor.swagger.io",
+      "id": "638732d38137113a",
+      "bytes": 292886
+    },
+    {
+      "url": "https://mermaid.live",
+      "id": "185f8175b4461706",
+      "bytes": 121842
+    },
+    {
+      "url": "https://regex101.com",
+      "id": "afb31f046a4c8662",
+      "bytes": 144328
+    },
+    {
+      "url": "https://carbon.now.sh",
+      "id": "927a40f01e6d845b",
+      "bytes": 116456
+    },
+    {
+      "url": "https://squoosh.app",
+      "id": "fa9784419e22bdbd",
+      "bytes": 107994
+    },
+    {
+      "url": "https://play.tailwindcss.com",
+      "id": "85ccface0c22ac07",
+      "bytes": 307784
+    }
+  ],
+  "skipped": [],
+  "duplicates": [],
+  "failed": [],
+  "finishedAt": "2026-06-12T12:28:23.522Z"
+}

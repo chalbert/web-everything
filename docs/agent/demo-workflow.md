@@ -1,6 +1,24 @@
 # Demo Workflow — building runtime demos
 
 > Tier-1 reference. Read when creating or changing a demo under `demos/`.
+> Building one of the flagship **exercise apps** (#314)? Read [exercise-app-workflow.md](exercise-app-workflow.md) too.
+
+## Objective & the platform-first rule (applies to every demo)
+
+A demo exists to **exercise a standard in a real browser**, built *from* the platform. **Every codified
+surface must be consumed, never re-implemented.** Before hand-writing any UI or behavior, resolve it
+against the registry (`src/_data/{blocks,intents,plugs}.json`):
+
+- **ACTIVE** block/plug/intent → **use it.** Hand-rolling an active surface (a `<table>` instead of the
+  data-table block, `addEventListener` instead of `on:*`, module vars instead of a store) is a *defect*,
+  not a shortcut.
+- **DRAFT** contract with no runtime → that's a **gap** — implement the runtime, or tag the scaffold
+  `// PLATFORM-GAP: #NNN` against a tracked backlog item.
+- **UNCODIFIED** → candidate **new standard** (`/new-standard`).
+
+The authoring substrate is the **JSX mirror dialect** (`.tsx`) over the active blocks — not `.ts` with
+`innerHTML` string-concat. The `check:app-conformance` benchmark enforces this for exercise apps; the
+same spirit applies to all demos.
 
 Demos are **runtime, interactive** pages served by Vite on **:3000** and passthrough-copied into the
 11ty docs site. Each is registered in `demos.json` and surfaces at `/demos/` (index) and

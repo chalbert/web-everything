@@ -1,5 +1,41 @@
 [
   {
+    "id": "auto-insurance",
+    "name": "Auto Insurance (exercise app B)",
+    "summary": "A full, complex personal-auto insurance app — the second flagship exercise app (#314/#318), in a modern-SaaS register. Slice S0 (foundation) is live: a 4,000-policy seeded book is rated + underwritten client-side (a per-policy premium breakdown and an underwriting decision-trace), rendered through the SAME shipped blocks the loan app drove — data-table, pagination, master-detail, decision-trace, status-indicator, lifecycle, audit, router — making insurance their second consumer (a cross-app conformance check). The quote wizard, coverage tree, and claims follow.",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>Candidate <strong>B</strong> of the <a href=\"/backlog/314-flagship-exercise-apps/\">flagship exercise-apps</a> program — a <strong>personal-auto</strong> policy lifecycle (quote → bind → issue → endorse → renew → cancel) plus FNOL/claims, chosen for its deeply conditional questionnaires, coverage hierarchy, rating/underwriting rules, and roles. Approximated, not a compliant rating plan. Requirements: <a href=\"/reports/2026-06-12-exercise-app-auto-insurance-requirements/\">requirements report</a>. Tracked by epic <a href=\"/backlog/318-exercise-app-auto-insurance-lifecycle/\">#318</a>.</p><h3>Live now — S0 foundation</h3><p>The domain core: a rating engine (multiplicative factors → 6-month premium) and an underwriting rules engine that emits a per-policy <strong>decision-trace</strong>, a deterministic 4k-policy book seed, and two entity lifecycles (policy + claim). The harness rates the whole book client-side and renders the finding distribution plus a clickable per-policy detail.</p><h3>The point: a second consumer</h3><p>Insurance <strong>reuses</strong> the standards the loan app drove (lifecycle, status-indicator, audit, decision-trace, master-detail, data-table, pagination, selection, router) in a different domain and a different visual register — proving the platform reskins and the standards compose across apps. It will <strong>drive</strong> the next gap set: tree-select, configurator, file handling, view-transitions, permissions, persistence.</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/auto-insurance/index.html",
+    "projects": [
+      "weblifecycle",
+      "webaudit",
+      "webdecisions"
+    ],
+    "epic": {
+      "url": "/backlog/318-exercise-app-auto-insurance-lifecycle/",
+      "label": "#318 — Auto insurance (epic)"
+    }
+  },
+  {
+    "id": "loan-origination",
+    "name": "Loan Origination (exercise app A)",
+    "summary": "A full, complex mortgage loan-origination app built to exercise the standard end-to-end (flagship exercise-app program, backlog #314/#317). Slice S0 (foundation) is live: 5,000 seeded applications run through a rules-as-data underwriting engine in ~19ms, with an AUS-style finding spread and a per-loan proof-of-compliance trace. Borrower 1003 wizard, document checklist, product/rate configurator, and the underwriter workbench follow.",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>Candidate <strong>A</strong> of the <a href=\"/backlog/314-flagship-exercise-apps/\">flagship exercise-apps</a> program — a residential mortgage <strong>origination</strong> flow (application → clear-to-close) chosen because it stresses the whole standard: complex multi-step validation, codifiable business rules, identity/permissions, persistence, a product configurator, file handling, and a pipeline at scale. Structure is anchored on real industry shape (URLA/1003, DTI/LTV, AUS findings, TRID) but <strong>approximated, not a compliant LOS</strong>. Requirements: <a href=\"/reports/2026-06-11-exercise-app-loan-origination-requirements/\">requirements report</a>.</p><h3>Live now — S0 foundation</h3><p>The framework-agnostic domain core: a <strong>rules-as-data engine</strong> (JSON predicate DSL, versioned, AUS-style aggregation) that emits a per-rule <strong>proof-of-compliance trace</strong>, a product catalog + rate sheet with LLPA pricing, derived underwriting facts (DTI/LTV/reserves), a deterministic 5k-application seed, and a mock provider seam (credit/AUS/verification/e-sign/doc-classify). The harness generates and evaluates all 5,000 applications client-side and renders the finding distribution plus a clickable trace per loan.</p><h3>Built against the standard</h3><p>Hosted under <code>demos/loan-origination/</code> on the declarative-SPA shell so the app dogfoods the standard's own routing, loader, components, and intents as later slices land (S1 permissions → S2 lifecycle → S3 the 1003 wizard).</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/loan-origination/index.html",
+    "projects": [
+      "webvalidation",
+      "webintents",
+      "webblocks"
+    ],
+    "epic": {
+      "url": "/backlog/317-exercise-app-loan-origination/",
+      "label": "#317 — Loan origination (epic)"
+    }
+  },
+  {
     "id": "background-task-surface-demo",
     "name": "Background Task Surface Playground",
     "summary": "A live <background-tasks> rail driven through scripted Loader handles. Each card proves one invariant of the surface contract — register handoff, off-view progress, transient auto-clear vs sticky/error persistence, batch isolation, and retry delegation. Scenarios shared with the unit suite. Backlog #135.",
@@ -62,6 +98,18 @@
     "projects": [
       "webadapters",
       "webcomponents"
+    ]
+  },
+  {
+    "id": "conformance-autofix-demo",
+    "name": "Conformance Auto-Fix Playground",
+    "summary": "The interactive surface over the conformance auto-fix loop (#095/#196/#293): drive a failing conformance suite back to green, card by card. Each card runs the real autofix orchestrator — failure (check:standards) → proposed patch → diff → verify gate → accept/revert. The verify gate is the moat: a patch is kept only if its target failure cleared and it introduced no new error, else reverted automatically. AI is a swappable provider (a scripted no-key model fixer runs through the same registry a BYO-key client would), with a model-fix cost bound. Backlog #298.",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>A live surface for <a href=\"/backlog/298-conformance-auto-fix-playground-interactive-propose-verify-a/\">backlog #298</a> — the interactive front end on the conformance <strong>auto-fix loop</strong>. It is the sibling of <a href=\"/demos/code-upgrader-demo.html\">the Code Upgrader</a>, one domain over: the upgrader lifts legacy code <em>onto</em> the standard; this drives a <strong>failing conformance suite back to green</strong>. Each card runs the whole loop: <strong>failure &rarr; proposed patch &rarr; diff &rarr; verify gate &rarr; accept / revert</strong>, driving the same <code>autofix</code> orchestrator the CLI and unit suite use over an in-memory world.</p><h3>The verify gate is the moat</h3><p>A proposed patch is <em>applied</em>, the suite <em>re-run</em>, and the patch kept only if its target failure cleared and it introduced no new error &mdash; else reverted automatically. A plausible-but-wrong fix is never shipped.</p><h3>AI is a swappable provider</h3><p>A fixer (failure &rarr; patch) drops into the same registry whether it is the deterministic <em>reference</em> fixer or a bring-your-own-key <em>model</em> fixer. The model cards run a <em>scripted</em> no-key client through the exact seam a real Anthropic client would use, gated by the same verify pass and the same model-fix cost bound.</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/conformance-autofix-demo.html",
+    "projects": [
+      "webvalidation"
     ]
   },
   {

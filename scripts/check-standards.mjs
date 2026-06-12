@@ -18,6 +18,7 @@ import {
   dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem,
   checkStatus, validateProtocol, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, permalinkSegment, validateViteProxyCoverage,
+  validateModuleResolutionLock, findRawHtmlInMarkdown,
 } from './check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -256,6 +257,28 @@ for (const item of backlog) {
   for (const w of itemWarnings) warn(w.message, w.descriptor);
 }
 
+// ── 6d-bis. Raw-HTML-in-body lint (#290) ──
+// An un-backticked HTML tag in a backlog body is passed through by 11ty and parsed by the browser; a
+// void/unclosed interactive one (`<select>`, `<dialog>`) swallows the rest of the page, rendering the
+// item visibly empty (the #020 bug). Warn (don't fail) so the author wraps it in backticks — balanced
+// raw HTML (e.g. #028) renders fine, so this nudges rather than red-gates. The loader exposes only the
+// rendered `details`, so read the raw body here and strip the leading frontmatter before scanning.
+for (const item of backlog) {
+  if (!item.id) continue;
+  const p = join(ROOT, 'backlog', `${item.id}.md`);
+  if (!existsSync(p)) continue;
+  const body = readFileSync(p, 'utf8').replace(/^---\n[\s\S]*?\n---\n/, '');
+  const hits = findRawHtmlInMarkdown(body);
+  if (!hits.length) continue;
+  // One warning per item (not per tag) so a rich-HTML body like #028 doesn't flood the output. List
+  // the distinct element names + the body lines so the author can find and backtick-wrap them.
+  const tags = [...new Set(hits.map((h) => h.name))].map((n) => `<${n}>`).join(', ');
+  const lines = [...new Set(hits.map((h) => h.line))].join(', ');
+  warn(`Backlog item "${item.id}" has raw HTML (${tags}) at body line(s) ${lines} outside code — ` +
+    `11ty passes it through and the browser parses it as a live element; a void/unclosed interactive ` +
+    `tag (e.g. <select>/<script>) swallows the rest of the page. Wrap them in backticks.`);
+}
+
 // ── 6d-ter. blockedBy dependency edges (#248) ──
 // `blockedBy: ["NNN", …]` is a directional prerequisite edge ("this can't start until NNN is
 // resolved"), making the backlog a real DAG that a deterministic readiness function (#249/#250)
@@ -429,6 +452,41 @@ try {
   for (const e of ve) err(e.message, e.descriptor);
 } catch (e) {
   err(`Vite proxy allowlist check failed: ${e.message}`);
+}
+
+// ── 9b. Module-resolution exports-lock (#274/#271) ──
+// Gather every `@frontierui/*` (locked-scope) entry from the project's SHIPPED native resolution
+// manifests — vite `resolve.alias` + every `<script type="importmap">` in the served catalog pages
+// (src/*.{njk,html}) — and assert each terminates at the package exports (URL / node_modules / bare
+// specifier), never a raw in-repo source path. The lock is "protocol is the only lock"; it guards a
+// frontierui repoint (#265) from silently aliasing the shipped config back to WE/foreign source.
+// Scope note: POC sandbox demos (demos/*.html) are intentionally NOT scanned — they predate the
+// published package and stand-in with a local src path by design (Demo-First); the lock governs the
+// project's real resolution config, not throwaway sandboxes. (maas-consumer-demo's @frontierui/jsx
+// importmap is a known such case, to be cleaned up with the jsx-runtime dedupe #265/#081.)
+try {
+  const entries = [];
+  // vite resolve.alias: `'key': 'value'` string pairs inside the alias block.
+  const viteCfg = readFileSync(join(ROOT, 'vite.config.mts'), 'utf8');
+  for (const m of viteCfg.matchAll(/(['"])(@[^'"]+)\1\s*:\s*(['"])([^'"]+)\3/g))
+    entries.push({ specifier: m[2], target: m[4], source: 'vite.config.mts resolve.alias' });
+  // importmaps in served catalog pages: parse each `<script type="importmap">…</script>` JSON `imports`.
+  const importmapSources = [];
+  const srcDir = join(ROOT, 'src');
+  for (const f of readdirSync(srcDir).filter((n) => n.endsWith('.njk') || n.endsWith('.html')))
+    importmapSources.push([`src/${f}`, readFileSync(join(srcDir, f), 'utf8')]);
+  for (const [source, body] of importmapSources) {
+    for (const block of body.matchAll(/<script[^>]*type=["']importmap["'][^>]*>([\s\S]*?)<\/script>/gi)) {
+      let map;
+      try { map = JSON.parse(block[1]); } catch { continue; } // skip non-JSON / templated importmaps
+      for (const [specifier, target] of Object.entries(map.imports ?? {}))
+        entries.push({ specifier, target, source: `${source} importmap` });
+    }
+  }
+  const { errors: me } = validateModuleResolutionLock(entries);
+  for (const e of me) err(e.message, e.descriptor);
+} catch (e) {
+  err(`Module-resolution exports-lock check failed: ${e.message}`);
 }
 
 // ── Report ────────────────────────────────────────────────────────────────────

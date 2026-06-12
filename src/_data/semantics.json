@@ -1,5 +1,30 @@
 [
   {
+    "term": "Viewport Presence",
+    "definition": "Whether an element is currently within a reference frame (the viewport or a scrolling ancestor), surfaced as enter/leave transitions. The shared in/out-of-view trigger, owning the observe-vocabulary (reference / margin / coverage, mapping to IntersectionObserver root / rootMargin / threshold) but never the UX decision a consumer takes on it.",
+    "usage": "Standardized by the Viewport Presence Intent. Composed by Collection Operations <code>advance:auto</code>, Prefetch <code>eagerness:viewport</code>, and the visibility-gated trait so the IntersectionObserver trigger has one home, not three."
+  },
+  {
+    "term": "Mock Contract",
+    "definition": "A portable, interaction-bearing artifact that defines how an HTTP service responds during development: consumer interactions whose response shape is anchored on OpenAPI and whose dev-time behavior (latency, fault, conditional, response-kind, auth) lives in a layer on top. Because it is data, not code, any conformant server can serve it and any drift-checker can verify it.",
+    "usage": "Standardized by the Mock Contract Protocol (Web Cases). The standard artifact of the mock & service-proxy dev-service — the server is a swappable provider. One contract, two uses: drive a mock and drift-check the real service."
+  },
+  {
+    "term": "Consumer Interaction",
+    "definition": "A single consumer expectation in a Mock Contract: a request to match paired with the response the consumer depends on. Pact/BDCT terminology — it makes the artifact contract-bearing rather than shape-describing, since a real consumer's dependency on an interaction is what a contract verifies.",
+    "usage": "The unit of the Mock Contract Protocol's <code>interactions[]</code>. Drives a mock (serve the response) and a drift-check (replay against the real provider)."
+  },
+  {
+    "term": "Response-Kind",
+    "definition": "How a Mock Contract interaction is fulfilled: <code>mock</code> (serve the defined response), <code>proxy</code> (forward to the real backend), or <code>record</code> (proxy and capture the live response to seed a mock). Mixed per-interaction on one service.",
+    "usage": "The <code>kind</code> field of a Mock Contract interaction. Why the proxy is a mode of the one schema, not a sibling standard."
+  },
+  {
+    "term": "Contract Drift",
+    "definition": "Divergence between a recorded consumer interaction and the real service's current behavior — the provider stopped honouring an interaction a consumer depends on. Distinct from shape non-conformance: schema-validation proves a payload is well-formed, contract-verification proves the interaction still holds.",
+    "usage": "Detected by the Web Cases drift-check, which replays a Mock Contract's interactions against the live service. The dev-time half of proving the seams still hold."
+  },
+  {
     "term": "Action",
     "definition": "The abstract concept of a user trigger that initiates a process or side-effect (e.g., 'Save', 'Delete'). It decouples the trigger (Button) from the handler.",
     "usage": "Standardized by Action Intent."
@@ -460,8 +485,8 @@
   },
   {
     "term": "guard",
-    "definition": "Conditional navigation logic that can allow, prevent, or redirect navigation. Common types: canActivate, canDeactivate, canLoad.",
-    "usage": "Term from Angular Router. Used as <code>route:guard=\"requireAuth\"</code> for entry guards, <code>route:guard:leave=\"confirmUnsaved\"</code> for exit guards."
+    "definition": "A predicate/policy attached to a <a href=\"#term-guarded-region\">region</a>, evaluated at a lifecycle event of that region, whose deny-branch resolves to a member-specific outcome. The route-navigation case (Angular <code>canActivate</code>/<code>canDeactivate</code>) is one member; the concept is scale-invariant across the document, routes, modals, and elements.",
+    "usage": "Standardized by the <a href=\"/projects/webguards/#protocol-guard\">Guard protocol</a> (Web Guards), which fixes only the seam — region + event + predicate + <a href=\"#term-guard-provider\">guard provider</a> — and leaves each member's <a href=\"#term-deny-outcome\">deny-outcome</a> to that member. Surface vocabulary: <code>route:guard=\"requireAuth\"</code> (<a href=\"#term-entry-guard\">entry guard</a>), <code>route:guard:leave=\"confirmUnsaved\"</code> (<a href=\"#term-exit-guard\">exit guard</a>)."
   },
   {
     "term": "loader",
@@ -750,7 +775,7 @@
   },
   {
     "term": "Droplist",
-    "definition": "The abstract family — the substrate that every list-based selection surface (Dropdown, Multi-dropdown, Autocomplete, Tree-select, Menu button, native <code>&lt;select&gt;</code>) conforms to. Not itself a shippable widget.",
+    "definition": "The abstract family — the substrate that every list-based selection surface (Dropdown, Multi-dropdown, Autocomplete, Tree-select, native <code>&lt;select&gt;</code>) conforms to. Not itself a shippable widget. (A menu button is not a member — it invokes commands via a role=menu owned by the Menu block; only its trigger shape is shared.)",
     "usage": "Standardized by the Droplist block. Documents the trait surface map, the two-channel resolution rule, and the preset table that each concrete member resolves into."
   },
   {
@@ -840,7 +865,97 @@
   },
   {
     "term": "Compound Child",
-    "definition": "A sub-element authored inside a parent block that acts as one of the parent's options, mapping to the parent's value model — e.g. <code>&lt;segment&gt;</code> in a segmented control, <code>&lt;tab&gt;</code> in Tabs, <code>&lt;option&gt;</code> in a native <code>&lt;select&gt;</code>. Under the JSX adapter the same authoring lowers to an <code>options</code> array rather than rendered child components. A recurring authoring-and-lowering paradigm; whether to promote it to its own protocol vs. document it under Selection's grouping is an open decision.",
-    "usage": "Exemplified by the <a href=\"/blocks/segmented-control/\">Segmented Control block</a>; shared with <a href=\"/blocks/tabs/\">Tabs</a> and the <a href=\"/intents/selection/\">Selection Intent</a>'s grouping. Promotion-to-protocol is tracked as a backlog decision."
+    "definition": "A sub-element authored inside a parent block that acts as one of the parent's options, mapping to the parent's value model — e.g. <code>&lt;segment&gt;</code> in a segmented control, <code>&lt;option&gt;</code> in a native <code>&lt;select&gt;</code>. Under the JSX adapter the same authoring lowers to an <code>options</code> array rather than rendered child components. This is a shared authoring-and-lowering <em>paradigm</em>, not a UX intent: it has no user-facing dimensions of its own, so it lives as a semantics term that the <a href=\"/intents/selection/\">Selection Intent</a> and option-bearing blocks cross-reference, rather than as an intent or (yet) a protocol. It is a sibling of — not subordinate to — Selection's <code>grouping</code> dimension, which arranges options into labeled sets (<code>&lt;optgroup&gt;</code> / <code>role=group</code>) rather than declaring them.",
+    "usage": "Exemplified directly by the <a href=\"/blocks/segmented-control/\">Segmented Control block</a> (<code>&lt;segment&gt;</code> children) and native <code>&lt;select&gt;</code> (<code>&lt;option&gt;</code> children). Tabs is a related-but-distinct shape: it binds via <code>tab-trigger</code>/<code>tab-panel</code> attributes on arbitrary elements rather than positional <code>&lt;tab&gt;</code> children. Promotion to a first-class protocol was considered and deferred (no proven multi-vendor interop demand); the one real conformance contract — how authored children lower to an <code>options</code> array under the JSX adapter — is specified by the <a href=\"#term-compound-child-lowering\">Compound-Child Lowering</a> term (with the <a href=\"#term-child-materialization-dialect\">Child-Materialization Dialect</a> axis governing <code>options</code> vs <code>compound</code> output), the latent protocol seed."
+  },
+  {
+    "term": "Compound-Child Lowering",
+    "definition": "The conformance contract behind the <a href=\"#term-compound-child\">Compound Child</a> paradigm: how a parent block's positional children lower to an <code>options</code> array under the JSX adapter instead of rendering as child components. <strong>Field mapping</strong> — a child's <code>value</code> attribute &rarr; <code>value</code>, its text content &rarr; <code>label</code>, <code>disabled</code> &rarr; <code>disabled</code>; a <code>selected</code>/<code>checked</code>/<code>pressed</code> child lifts to the parent's <code>value</code> (an array when the parent is <code>model=multiple</code>). Grouping (<code>&lt;optgroup&gt;</code>) and hierarchy (tree children) nest as a second structural axis (<code>{ group, options }</code> / <code>{ …, children }</code>). <strong>Round-trip</strong> is reversible for plain-text children; it turns lossy once a child carries rich markup — a flat <code>label</code> string cannot hold it — which the <a href=\"#term-child-materialization-dialect\">Child-Materialization Dialect</a> resolves (a <code>render</code> slot under the <code>options</code> form, or the lossless <code>compound</code> form). Tabs is <em>out of scope</em>: it binds via <code>tab-trigger</code>/<code>tab-panel</code> attributes on arbitrary elements, not positional children, so it keeps structural children and does not collapse to an <code>options</code> array.",
+    "usage": "Specifies the one real contract named in <a href=\"#term-compound-child\">Compound Child</a>, exercised by the <a href=\"/blocks/segmented-control/\">Segmented Control block</a> (<code>&lt;segment&gt;</code>) and the Droplist family (already an <code>options</code> array via <code>&lt;template for-each&gt;</code>); worked authoring&hArr;JSX examples live in <a href=\"/backlog/281-specify-the-compound-child-to-options-array-lowering-under-t/\">backlog #281</a>. Writable as an adapter convention today, before any render-strategy protocol. Graduates to a first-class <code>compound-child</code> protocol only if independent-vendor interop demand on the child-authoring shape is proven; its natural owner would then be the render-strategy / component-compiler path, not Selection."
+  },
+  {
+    "term": "Child-Materialization Dialect",
+    "definition": "A structural JSX-authoring preference governing how a parent's compound children materialize: <code>options</code> (a flat data prop, <code>options={[…]}</code>) vs <code>compound</code> (subcomponents, <code>&lt;Parent.Option&gt;</code> authored as children). Both are faithful lowerings of the <em>same</em> authored HTML; the difference is the child tree's <em>shape</em>, which makes this axis orthogonal to the attribute-spelling JSX dialect (#235, <code>html</code>/<code>react</code>) that leaves the tree identical. The <code>compound</code> form round-trips rich-markup children losslessly (its children are JSX); the <code>options</code> form needs a <code>render</code> slot for the same case (see <a href=\"#term-compound-child-lowering\">Compound-Child Lowering</a>).",
+    "usage": "A <em>soft</em> authoring preference, not a protocol — it offends a convention rather than breaking interop (the #150 protocol-vs-preference test) — so any enforcement lowers into an incumbent linter, never a Web Everything sheriff. The adapter is <strong>default-less</strong>: it resolves the dialect from a development-preference config the project extends in a chain (team &rarr; business line &rarr; company &rarr; a base config offered online); <code>options</code> is what a native-/static-first base config sets at the root, not a constant baked into the adapter. Input accepts either form regardless of the codegen choice (round-trip), mirroring how <code>jsxToHtml</code> ingests either attribute dialect. Alignment task: fold the adapter's baked <code>DEFAULT_DIALECT</code> into the base config — the same config-extends-platform-default migration tracked in #243."
+  },
+  {
+    "term": "guarded region",
+    "definition": "The scope a <a href=\"#term-guard\">guard</a> protects — scale-invariant across the document (the outermost region), a route, a modal, a panel, or a single element. A guard hooks a region's <em>cancelable</em> lifecycle event (a close button, route change, <code>beforeunload</code>), never raw DOM removal: imperative teardown that bypasses a guardable trigger cannot be caught.",
+    "usage": "Defined by the <a href=\"/projects/webguards/#protocol-guard\">Guard protocol</a> (Web Guards) as the first element of its fixed seam (region + event + predicate + provider). Same intent applies whether the region is the whole document, a route, or a modal."
+  },
+  {
+    "term": "guard provider",
+    "definition": "The swappable policy engine that resolves a <a href=\"#term-guard\">guard</a>'s predicate — <code>CustomGuardProvider.evaluate(region, event, context): Promise&lt;GuardDecision&gt;</code>. Resolved through the injector chain (default platform provider &rarr; project override &rarr; custom plug); the provider contract is the protocol's <em>only</em> lock. Unlike the synchronous, client-side positioning provider it shares a pattern with, a guard provider crosses a trust boundary: it is <strong>async</strong>, <strong>server-authoritative</strong> (the front-end decision is a UX mirror, never enforcement), and <strong>revocable</strong> (an optional <code>subscribe()</code> invalidation signal). The <code>forbid</code>(403)/<code>cloak</code>(404) disclosure decision lives here, surfaced as <code>GuardDecision.reason</code> — not in the UX-only member intent.",
+    "usage": "Held in <code>CustomGuardRegistry</code> (<code>window.customGuards</code>); the project selects/overrides it via the platform config it extends (flavors), the tool carrying no default. Standardized by the <a href=\"/projects/webguards/#protocol-guard\">Guard protocol</a> (Web Guards)."
+  },
+  {
+    "term": "deny-outcome",
+    "definition": "What a <a href=\"#term-guard\">guard</a>'s deny-branch resolves to. Deny-outcome families are member-specific and deliberately <em>not</em> unified: an <a href=\"#term-exit-guard\">exit guard</a>'s is a user-mediated <code>confirm</code> (stay/discard); an <a href=\"#term-entry-guard\">entry guard</a>'s is <code>hide | redirect | forbid | cloak</code>. This divergence is exactly why guard members are siblings over one provider seam, not one merged intent.",
+    "usage": "Each member intent owns its deny-outcome; the <a href=\"/projects/webguards/#protocol-guard\">Guard protocol</a> fixes the provider seam but says nothing about the deny branch."
+  },
+  {
+    "term": "entry guard",
+    "definition": "The Guard member that gates <em>entering</em> a region — <em>may I activate/enter this?</em> Predicate = authorization/precondition; <a href=\"#term-deny-outcome\">deny-outcome</a> = <code>hide | redirect | forbid (403) | cloak (404)</code>, where the 403-vs-404 choice (revealing whether the resource exists) is a security call made behind the <a href=\"#term-guard-provider\">guard provider</a>. The routing-and-rendering face of access control.",
+    "usage": "The access-control member (<a href=\"/backlog/178-access-control-authorization-gate/\">#178</a>) of the <a href=\"/projects/webguards/#protocol-guard\">Guard protocol</a>. Prior art: Angular <code>canActivate</code>, Vue route enter, CASL <code>&lt;Can&gt;</code> (rendering)."
+  },
+  {
+    "term": "exit guard",
+    "definition": "The Guard member that gates <em>tearing down</em> a region the user is in — <em>may I leave/dismiss this?</em> Predicate = loss-of-state (dirty form, unsaved editor, in-flight task); <a href=\"#term-deny-outcome\">deny-outcome</a> = a user-mediated <code>confirm</code> (stay/discard). Arms on the cancelable dismissal trigger at any scale: document (<code>beforeunload</code>), same-document route (Navigation API <code>intercept</code>), in-app dismissal (modal/panel close).",
+    "usage": "The exit-guard member (<a href=\"/backlog/273-exit-guard-intent-confirm-before-tearing-down-a-region-with-/\">#273</a>) of the <a href=\"/projects/webguards/#protocol-guard\">Guard protocol</a>; successor of the navigation-guard intent (#129). Prior art: Angular <code>canDeactivate</code>, Vue <code>beforeRouteLeave</code>, React <code>useBlocker</code>, SvelteKit <code>beforeNavigate</code>."
+  },
+  {
+    "term": "Notification",
+    "definition": "A transient, non-blocking, in-page message that appears, is accessibly announced, persists for a bounded time (or until dismissed), and is removed. The general concept — temporary, dismissable, queued, severity-weighted, announced — of which a <em>toast</em> or <em>snackbar</em> is one <em>presentation</em>. Distinct from the OS-level Web Notifications API (system notifications outside the tab), from a persistent background-task surface, and from an inline (in-flow) message banner.",
+    "usage": "Realized by the <a href=\"/blocks/notification/\">Notification block</a>, which implements the <a href=\"/intents/feedback/\">Feedback Intent</a>. Presentation styles (toast, snackbar, banner-position) belong to the implementation, not the standard."
+  },
+  {
+    "term": "Notification Region",
+    "definition": "The top-layer host element that displays notifications and is the live region for their announcements. Placed declaratively once per app; mounts to the platform top layer via the Popover API (<code>popover=\"manual\"</code>), falling back to a Web Portals mount. Reads the Feedback Intent's <code>placement</code> and <code>stackLimit</code> to position and bound the visible set.",
+    "usage": "The Component half of the <a href=\"/blocks/notification/\">Notification block</a>; its injectable controller is the imperative half (<code>show</code>/<code>dismiss</code>). Emits <code>notification-shown</code> / <code>notification-dismissed</code>."
+  },
+  {
+    "term": "Breadcrumb",
+    "definition": "A structured trail showing the user's location within a site or data hierarchy, as an ordered list of links from root to current page. Answers \"where am I?\" — distinct from a navigation menu (\"where can I go?\"), tabs (\"which panel?\"), or a stepper (\"how far through this process?\"). Realized as a <code>nav[aria-label]</code> landmark wrapping an ordered list, the current crumb a non-link carrying <code>aria-current=\"page\"</code>, with presentational (never announced) separators.",
+    "usage": "Realized by the <a href=\"/blocks/breadcrumb/\">Breadcrumb block</a>, which implements the <a href=\"/intents/navigation/\">Navigation Intent</a> and composes the Typography Intent for crumb-label truncation. Overflow collapses the middle behind an ellipsis disclosure, keeping root + current visible."
+  },
+  {
+    "term": "Dialog (family substrate)",
+    "definition": "The abstract substrate every dialog-based surface conforms to — a top-layer surface that interrupts or overlays the page, owning the shared modal-surface machinery (focus containment, escape/outside/backdrop dismissal, scroll-lock, modal/non-modal mode, top-layer mount). Not a shippable widget; its concrete members are distinct configurations of the Modal Intent's <code>placement</code> over this one substrate: centered modal (center), drawer (start/end), bottom sheet (bottom). The droplist-family pattern applied to dialogs (<code>droplist : dropdown :: dialog : drawer</code>).",
+    "usage": "The <a href=\"/blocks/dialog/\">Dialog block</a> (abstract), realized on native <code>&lt;dialog&gt;</code> + the Popover API; implements the <a href=\"/intents/modal/\">Modal Intent</a> and composes Focus Containment, Surface, and Motion. Concrete members (<a href=\"/backlog/360-drawer-sheet-block/\">drawer</a> #360, sheet, modal) extend it rather than re-implementing the machinery."
+  },
+  {
+    "term": "Drawer",
+    "definition": "The edge-anchored, sliding concrete member of the dialog family — a panel entering from a viewport inline edge (navigation drawer, filter panel, detail pane). It extends the abstract dialog substrate (inheriting focus containment, dismissal, backdrop, scroll-lock, mode, top-layer) and only fixes the configuration to an edge: the Modal Intent's <code>placement: start | end</code> (RTL-aware), with slide motion and swipe-to-dismiss added. Sibling of the centered modal (center) and bottom sheet (bottom).",
+    "usage": "Realized by the <a href=\"/blocks/drawer/\">Drawer block</a>, a concrete member of the <a href=\"/blocks/dialog/\">dialog family</a> (<code>droplist : dropdown :: dialog : drawer</code>). It re-implements none of the dialog machinery — a drawer IS a dialog at an inline edge."
+  },
+  {
+    "term": "Carousel",
+    "definition": "A set of equivalent slides presented one (or a few) at a time, advanced by controls, pagination markers, swipe, or optional autoplay. Native-first on a CSS scroll-snap container, with the emerging CSS carousel pseudo-elements (<code>::scroll-button()</code>, <code>::scroll-marker</code>) as native controls where shipped. Distinct from tabs (labelled panels) and from paginated data (Collection Operations).",
+    "usage": "Realized by the <a href=\"/blocks/carousel/\">Carousel block</a>; composes the Motion, Live-Region Status, and Navigation intents. Autoplay is opt-in and accessibility-gated (pause control, pause-on-hover/focus, honours prefers-reduced-motion) per WCAG 2.2.2 + the WAI-ARIA APG carousel pattern."
+  },
+  {
+    "term": "Content-Addressed Id",
+    "definition": "The version identity of a Module-as-a-Service served artifact: an opaque hash digest over <em>every</em> byte-determining input — the authored definition, the transform/compiler version, the request params (form/target/strategy), and the folded provenance. Same id ⇒ byte-identical artifact (cacheable forever); any input moving mints a new id. Omitting a byte-determining input is the one excluded (broken) rule — it serves drift.",
+    "usage": "The identity invariant of the <a href=\"/projects/webadapters/#protocol-maas-versioning\">MaaS Served-Artifact Versioning Protocol</a> (ratified in #088, realized by #389). The terminal rung of the pin ladder resolves to the content-addressed URL, the only rung served <code>immutable</code>."
+  },
+  {
+    "term": "Pin Ladder",
+    "definition": "The grammar by which a consumer pins a Module-as-a-Service artifact: a floating-tag → exact-semver → content-hash ladder, each rung resolving <em>down</em> to the immutable content-addressed URL (the npm <code>tag → version → tarball</code> shape). Floating and exact pins are revalidatable short-TTL redirects; the content-hash rung is terminal and never revalidates. WE supports pinning at any rung and mandates none.",
+    "usage": "Part 2 of the <a href=\"/projects/webadapters/#protocol-maas-versioning\">MaaS Served-Artifact Versioning Protocol</a>. Unit of version is dual — a human semver on the definition and the derived <a href=\"/glossary/#content-addressed-id\">content-addressed id</a> coexist (human contract vs. integrity contract)."
+  },
+  {
+    "term": "API-Contract Version",
+    "definition": "A version number that bumps <em>only on a public-API change</em> of a runtime dependency, decoupled from that package's release semver — exposed by the runtime as <code>__API_VERSION__</code>. A served artifact declares a compatibility <em>range</em> over it (e.g. <code>&gt;=2 &lt;3</code>) against its bare-specifier runtime (e.g. <code>@frontierui/jsx-runtime</code>); 'satisfies' means the resolved runtime's <code>__API_VERSION__</code> falls in the range.",
+    "usage": "Part 4 of the <a href=\"/projects/webadapters/#protocol-maas-versioning\">MaaS Served-Artifact Versioning Protocol</a> — a consumer↔provider seam-contract (the #092 shape). WE owns the range format + what 'satisfies' means; Frontier UI owns the value (<code>__API_VERSION__</code>) and the opt-in <code>maas-check</code> validator (#390). Advertise-only by default; the validator is consumer-opt-in, never mandated."
+  },
+  {
+    "term": "Consumption Edge",
+    "definition": "A directed <em>consumes</em> edge in the provider–consumer graph: a record that one consumer depends on one provider, surfaced by WE introspection at the DI seam (<code>Injector.consumptionEdges()</code>, opt-in via <code>Injector.trackConsumption</code>). Bidirectional by construction — the same edge answers both 'what do I depend on?' and 'who depends on me?', the latter being what makes impact analysis possible. Build-derived edges are <em>confirmed</em>; a runtime drift agent may add <em>potential</em> edges until a trace confirms them.",
+    "usage": "Part 1 of the <a href=\"/projects/webregistries/#protocol-provider-consumer-graph\">Provider–Consumer Graph Protocol</a> (#401), populated by the introspection extension in #400. The graph is build-time auto-derived (no live agent), the #092 most-permissive ingestion default."
+  },
+  {
+    "term": "Consumer-Driven Projection",
+    "definition": "The net-new, consumer side of a provider↔consumer seam-contract: the consumer declares the subset of a protocol's dimensions/capabilities it actually depends on (<code>consumerRequires</code>), rather than the whole protocol. The provider side is <em>reused</em> from the existing protocol conformance contract (the provider declares its tier). Compatible ⇔ the consumer's required subset is contained in what the provider's tier supplies; a drift is any change removing a required member.",
+    "usage": "Part 2 of the <a href=\"/projects/webregistries/#protocol-provider-consumer-graph\">Provider–Consumer Graph Protocol</a> (#401, #092 Fork 2). The only new schema at the seam — it deliberately reuses <a href=\"/protocols/\">protocols.json</a> rather than coining a parallel Pact-style format. Feeds drift detection, impact analysis, and continuous verification on one definition."
   }
 ]

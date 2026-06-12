@@ -35,6 +35,7 @@ import {
   createDefaultValidatorResolutionRegistry,
   AsyncValidatorField,
 } from './webvalidation';
+import { CustomGuardRegistry, createDefaultGuardRegistry } from './webguards';
 
 // Import expression parsers and event attributes
 import { CustomExpressionParserRegistry, CustomTextNodeParserRegistry, CustomTextNodeRegistry } from './webexpressions';
@@ -86,6 +87,9 @@ declare global {
     // Web Validation
     CustomValidityMergeRegistry: typeof CustomValidityMergeRegistry;
     customValidityMerge: CustomValidityMergeRegistry;
+    // Web Guards
+    CustomGuardRegistry: typeof CustomGuardRegistry;
+    customGuards: CustomGuardRegistry;
     // Web Expressions
     customTextNodeParsers: CustomTextNodeParserRegistry;
     customTextNodes: CustomTextNodeRegistry;
@@ -224,6 +228,14 @@ documentInjector?.set('customValidatorResolution', validatorResolution);
 if (!customElements.get('async-validator-field')) {
   customElements.define('async-validator-field', AsyncValidatorField);
 }
+
+// Setup guard registry (#289): the swappable guard-provider policy the tree shares, resolved per-scope
+// through the injector chain. Pre-loaded with the native-first default provider (permissive — no policy
+// ⇒ allow). Both guard members (exit guard #273, access control #178) delegate to a provider resolved here.
+const guards = createDefaultGuardRegistry();
+window.CustomGuardRegistry = CustomGuardRegistry;
+window.customGuards = guards;
+documentInjector?.set('customGuards', guards);
 
 // Register event attributes (on:click, on:submit, on:change, etc.)
 registerEventAttributes(window.attributes);

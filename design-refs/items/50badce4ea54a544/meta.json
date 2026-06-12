@@ -1,0 +1,28 @@
+{
+  "id": "50badce4ea54a544",
+  "contentHash": "50badce4ea54a5443b470b9ec8e80d5440a4dcdd139a9289b26777341fd376a9",
+  "sourceUrl": "https://excalidraw.com",
+  "captureMethod": "playwright",
+  "dateCollected": "2026-06-12T12:26:45.835Z",
+  "datePublished": null,
+  "app": "Excalidraw",
+  "company": "Excalidraw",
+  "category": "whiteboard-diagramming",
+  "surface": null,
+  "designRegister": "minimal-hand-drawn",
+  "theme": "light",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "dpr": 2,
+  "imageDims": {
+    "width": 2880,
+    "height": 1800
+  },
+  "bytes": 61474,
+  "tags": [],
+  "sourceCredit": "Excalidraw",
+  "collectionRun": "2026-06-12T12-26-38-221Z",
+  "reviewState": "confirmed"
+}

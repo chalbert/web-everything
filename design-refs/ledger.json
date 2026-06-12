@@ -1,0 +1,98 @@
+{
+  "https://excalidraw.com": {
+    "id": "50badce4ea54a544",
+    "contentHash": "50badce4ea54a5443b470b9ec8e80d5440a4dcdd139a9289b26777341fd376a9",
+    "dateCollected": "2026-06-12T21:51:19.073Z",
+    "runId": "2026-06-12T21-51-12-668Z"
+  },
+  "https://www.tldraw.com": {
+    "id": "7f7621c90218424f",
+    "contentHash": "7f7621c90218424f947adecba1ed2e77451244b3e5f77eb54e41f84a9fde216d",
+    "dateCollected": "2026-06-12T21:51:25.363Z",
+    "runId": "2026-06-12T21-51-12-668Z"
+  },
+  "https://app.diagrams.net": {
+    "id": "9dbdb7f79955781d",
+    "contentHash": "9dbdb7f79955781d763b4a09088624db31ce9b19c520e10eb67224615b608ade",
+    "dateCollected": "2026-06-12T21:51:40.079Z",
+    "runId": "2026-06-12T21-51-12-668Z"
+  },
+  "https://www.openstreetmap.org": {
+    "id": "4f5835c2e9f3d948",
+    "contentHash": "4f5835c2e9f3d9486ee5c995d32b85fcbd7d74a57f3a8e36d91c253424bbce86",
+    "dateCollected": "2026-06-12T21:51:56.786Z",
+    "runId": "2026-06-12T21-51-12-668Z"
+  },
+  "https://jsfiddle.net": {
+    "id": "1a0273866ba10567",
+    "contentHash": "1a0273866ba1056789667ba5806e2a42736e474f8592ede3bf3c4fc01cbdcbfe",
+    "dateCollected": "2026-06-12T21:52:03.107Z",
+    "runId": "2026-06-12T21-51-12-668Z"
+  },
+  "https://codepen.io/pen/": {
+    "id": "c780a2b232065f4e",
+    "contentHash": "c780a2b232065f4ec3020356d0b0afe1142c9c74f83f488b11b83ab4b0f058bc",
+    "dateCollected": "2026-06-12T21:52:09.539Z",
+    "runId": "2026-06-12T21-51-12-668Z"
+  },
+  "https://www.desmos.com/calculator": {
+    "id": "af041413afb82b9f",
+    "contentHash": "af041413afb82b9f5945335511bec41eb463df2ee5f19268e88d19fe4fd68f6e",
+    "dateCollected": "2026-06-12T21:52:16.785Z",
+    "runId": "2026-06-12T21-51-12-668Z"
+  },
+  "https://www.geogebra.org/calculator": {
+    "id": "4881dac6e3b8d3dc",
+    "contentHash": "4881dac6e3b8d3dccf3f5ecc1c171cea54905578f849b6930d827d076aaa6252",
+    "dateCollected": "2026-06-12T21:52:24.495Z",
+    "runId": "2026-06-12T21-51-12-668Z"
+  },
+  "https://editor.swagger.io": {
+    "id": "638732d38137113a",
+    "contentHash": "638732d38137113af40bb789f76be559b3af0a2bf0c18ec089383272acaa1970",
+    "dateCollected": "2026-06-12T21:52:31.512Z",
+    "runId": "2026-06-12T21-51-12-668Z"
+  },
+  "https://mermaid.live": {
+    "id": "185f8175b4461706",
+    "contentHash": "185f8175b44617062ce5a98cfe7235ef100bb9304d2903cf949ca6973addf119",
+    "dateCollected": "2026-06-12T21:52:37.506Z",
+    "runId": "2026-06-12T21-51-12-668Z"
+  },
+  "https://regex101.com": {
+    "id": "73850f8cd6970056",
+    "contentHash": "73850f8cd697005660fe80cc9237dcadac0a4484efa6aaee5a1c9d95c4a2a763",
+    "dateCollected": "2026-06-12T21:52:44.625Z",
+    "runId": "2026-06-12T21-51-12-668Z"
+  },
+  "https://carbon.now.sh": {
+    "id": "a64c3aba7f6710d5",
+    "contentHash": "a64c3aba7f6710d5c6ad81f0bb551332812eaa39e0df6a9cf4713afd56129fce",
+    "dateCollected": "2026-06-12T21:52:50.806Z",
+    "runId": "2026-06-12T21-51-12-668Z"
+  },
+  "https://squoosh.app": {
+    "id": "44ae534ae469ef45",
+    "contentHash": "44ae534ae469ef4575adf2bee524a6bd37993e0851ab615c97f4984cab945ef6",
+    "dateCollected": "2026-06-12T21:52:57.974Z",
+    "runId": "2026-06-12T21-51-12-668Z"
+  },
+  "https://play.tailwindcss.com": {
+    "id": "1332e697b422af9a",
+    "contentHash": "1332e697b422af9a6c99f1e13d222e8a5df9e4da440cf874acb21d508b267be9",
+    "dateCollected": "2026-06-12T21:53:04.189Z",
+    "runId": "2026-06-12T21-51-12-668Z"
+  },
+  "https://play.grafana.org": {
+    "id": "253b45a916c9cfe2",
+    "contentHash": "253b45a916c9cfe2a33850bec927838d54e320c85a1de7e1113e00695ec59168",
+    "dateCollected": "2026-06-12T21:51:49.875Z",
+    "runId": "2026-06-12T21-51-12-668Z"
+  },
+  "https://www.photopea.com": {
+    "id": "4c98c80ae393cf0a",
+    "contentHash": "4c98c80ae393cf0ad3db75c83540d546da3d7056635c1281b369aeebcf0ebc9b",
+    "dateCollected": "2026-06-12T21:51:33.924Z",
+    "runId": "2026-06-12T21-51-12-668Z"
+  }
+}

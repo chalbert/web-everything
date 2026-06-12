@@ -1,0 +1,128 @@
+<h3>The Question</h3>
+<p>
+    The <a href="/research/front-end-platform-book/">platform essay</a> names charts as its canonical
+    "a tool makes more sense than a library" example: charting is so feature-rich any library becomes huge.
+    The proposal is a <strong>tool-agnostic, standard JSON</strong> that describes a chart (data, encodings,
+    axes, interactions, styling intent), rendered by <em>any conforming tool</em>, with tools scored on their
+    support for the standard (feature coverage, output size, styling fidelity, accessibility). Before authoring
+    a standard, this survey gathers prior art per design-first step&nbsp;1 so the schema reuses ecosystem
+    vocabulary instead of coining a chart language — grounding the three open forks in
+    <a href="/backlog/105-tool-agnostic-chart-config/">backlog&nbsp;#105</a> (profile vs greenfield,
+    project vs example, where accessibility sits).
+</p>
+
+<h3>Recommendation (to ratify in #105)</h3>
+<ol>
+    <li><strong>Profile Vega-Lite</strong>, do not greenfield — it is the only <em>pure-JSON</em>,
+        schema-published grammar of graphics; the standardized JSON is the soft/escapable contract, renderers
+        are <a href="/protocols/">swappable providers</a>. <em>Sub-decision:</em> how thin the L1 core is
+        (<code>data/mark/encoding</code> + scales/axes vs. including selections/transforms).</li>
+    <li><strong>Factor into a Protocol</strong> (a <code>CustomChartRenderer</code> registry + conformance
+        suite, native-first SVG default, pluggable Vega/Plotly/ECharts adapters), optionally plus a thin UX
+        chart-description intent — then decide whether that earns a standalone <code>webcharts</code>
+        <em>project</em> (net-new) vs. a worked example under an existing project.</li>
+    <li><strong>Accessibility = first-class spec content + a weighted conformance axis</strong> (not a baked
+        default): carry Vega-Lite's <code>description</code> channel, a renderer-derived data
+        <code>&lt;table&gt;</code>, and the WAI-ARIA Graphics roles, required at L1 with graceful
+        degradation.</li>
+</ol>
+
+<h3>Finding 1 — one prior-art grammar is pure, serializable JSON; the others are not contracts</h3>
+<p>
+    The <strong>Grammar of Graphics</strong> (Wilkinson; ggplot2) is the shared theory: a chart maps
+    <em>data fields → visual encodings</em> over a chosen <em>mark</em>, with scales/axes/legends derived.
+    Of the modern tools, only one is a serializable contract:
+</p>
+<ul>
+    <li><strong>Vega-Lite</strong>
+        (<a href="https://vega.github.io/vega-lite/">vega.github.io</a>) — a
+        <code>(data, transform, mark, encoding)</code> four-tuple as <strong>pure JSON</strong> that
+        <em>cannot</em> hold functions or custom objects, so a spec is fully serializable text with a published
+        <a href="https://idl.cs.washington.edu/files/2017-VegaLite-InfoVis.pdf">JSON Schema</a>. Exactly the
+        "settings saved in a tool-agnostic standard JSON file" the essay asks for.</li>
+    <li><strong>Observable Plot</strong>
+        (<a href="https://observablehq.com/@observablehq/plot-vega-lite">observablehq.com</a>) — a layered
+        grammar but a <em>JavaScript API</em>, not a serializable document. Not a contract.</li>
+    <li><strong>Plotly / ECharts</strong>
+        (<a href="https://npm-compare.com/chart.js,d3,plotly.js,vega-lite">comparison</a>) —
+        "JSON with callbacks" hybrids whose specs may embed functions, breaking serializability and pinning one
+        runtime. Disqualified as the neutral contract; viable as <em>renderers</em>.</li>
+</ul>
+<p>
+    <strong>Implication (fork&nbsp;1):</strong> profile Vega-Lite. Greenfielding would re-derive Wilkinson's
+    grammar and ship a project-facing format with no interop upside — refused under minimize-lock-in.
+</p>
+
+<h3>Finding 2 — the real ask is the comparison layer: that's the constellation's Protocol shape</h3>
+<p>
+    The essay's ask is not a chart language but the <strong>comparison layer</strong> — which tool covers which
+    features, at what size, styling fidelity, and a11y. That is the established <strong>provider/registry +
+    conformance</strong> pattern:
+</p>
+<ul>
+    <li><a href="/protocols/anchor-positioning/">Anchor Positioning</a> — one neutral contract
+        (<code>CustomPositioner</code>), native-first with pluggable adapters (Floating&nbsp;UI). Same shape:
+        neutral chart spec, native-first default renderer, pluggable renderer adapters.</li>
+    <li><a href="/protocols/localization/">Localization</a> — a <code>CustomTranslationProvider</code>
+        <strong>registry</strong> with default→project→custom resolution and conformance tiers. A
+        <code>CustomChartRenderer</code> registry is the same machine.</li>
+    <li>Native-first / library-opt-in is already codified in the adapter layer (the <code>lib</code> provider
+        registry, Floating-UI adapter): the default renderer targets the web platform (SVG + ARIA Graphics),
+        Vega/Plotly/ECharts plug in.</li>
+</ul>
+<p>
+    <strong>Implication (fork&nbsp;2):</strong> the concern factors into a <em>Protocol</em> (the renderer-swap
+    contract + conformance suite — the only escapable lock) plus optionally a thin UX intent. Whether that
+    earns a standalone <code>webcharts</code> project vs. a worked example is fork&nbsp;2; no
+    <code>webcharts</code> project exists today, so a project is net-new scaffolding.
+</p>
+
+<h3>Finding 3 — profile, don't adopt whole: a tiered native-aligned core</h3>
+<p>
+    Vega-Lite is large (selections, transforms, layering, faceting). A WE <em>profile</em> conformance-defines
+    a tiered core — <code>(data, mark, encoding)</code> + scales/axes/legends as the L1 baseline every renderer
+    must satisfy — and treats interactions/transforms/composition as higher tiers a renderer <em>may</em>
+    satisfy and be scored on. Mirrors the existing validation-protocol L1/L2/L3 idiom and the
+    "an impl satisfies a standard" framing: a renderer is an impl satisfying the spec at a tier, not itself a
+    standards artifact.
+</p>
+
+<h3>Finding 4 — accessibility is a separable axis with published vocabulary, and Vega-Lite proves it lives IN the spec</h3>
+<ul>
+    <li><strong>WAI-ARIA Graphics Module</strong> (W3C 2018) — roles <code>graphics-document</code> /
+        <code>graphics-object</code> / <code>graphics-symbol</code> for SVG charts
+        (<a href="https://data.europa.eu/apps/data-visualisation-guide/accessible-svg-and-aria">data.europa.eu</a>;
+        <a href="https://www.w3.org/wiki/SVG_Accessibility/ARIA_chart_taxonomy_discussion">W3C wiki</a>).</li>
+    <li><strong>Data-table alternative</strong> — the consensus fallback is a real <code>&lt;table&gt;</code>
+        of the underlying data; alt text alone is insufficient
+        (<a href="https://www.sarasoueidan.com/blog/accessible-data-charts-for-khan-academy-2018-annual-report/">Soueidan</a>,
+        <a href="https://blog.tenon.io/accessible-charts-with-aria/">Tenon</a>). The spec already holds the data
+        + encodings, so the table is <strong>derivable from the spec</strong> — an a11y output every renderer
+        can be required to emit.</li>
+    <li><strong>Vega-Lite's built-in <code>description</code> encoding channel</strong> emits ARIA
+        descriptions, auto-generates one from the encoding, and gates via <code>config.aria</code>/
+        <code>mark.aria</code>
+        (<a href="https://vega.github.io/vega-lite/docs/encoding.html">docs</a>). Accessible output is
+        <em>expressible declaratively in the spec the renderer consumes</em> — no separate side-channel.</li>
+</ul>
+<p>
+    <strong>Implication (fork&nbsp;3):</strong> a11y is neither a scoring afterthought nor a single baked
+    default — it is first-class spec content <em>and</em> a weighted conformance dimension. Most-flexible
+    default: accessible output required at L1, renderers degrading gracefully.
+</p>
+
+<h3>Finding 5 — native baseline: there is no native chart element</h3>
+<p>
+    The web platform ships no chart primitive — charts are SVG (or Canvas) drawn by JS. The native-first floor
+    is SVG + the WAI-ARIA Graphics Module + a data-<code>&lt;table&gt;</code> fallback; heavyweight renderers
+    (Vega, Plotly, ECharts) are opt-in adapters over that floor, matching the native-first/library-opt-in
+    default already codified for positioning.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/105-tool-agnostic-chart-config/">#105 — tool-agnostic chart config</a></li>
+    <li>Pattern: <a href="/protocols/anchor-positioning/">Anchor Positioning</a> ·
+        <a href="/protocols/localization/">Localization</a> (provider/registry + conformance)</li>
+    <li>Surface: <a href="/protocols/">Conformance protocols</a></li>
+</ul>

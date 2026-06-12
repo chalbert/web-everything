@@ -1,0 +1,155 @@
+---
+layout: base.njk
+title: Design Reference Library
+permalink: /research/design-references/
+---
+
+<style>
+  .dref-intro { margin-bottom: 1.5rem; }
+  .dref-controls {
+    display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;
+    margin-bottom: 1.5rem; padding: 0.75rem 1rem; border: 1px solid var(--color-border, #e2e8f0);
+    border-radius: 0.75rem; background: var(--color-surface-alt, #f8fafc);
+  }
+  .dref-controls input, .dref-controls select {
+    padding: 0.35rem 0.6rem; border: 1px solid var(--color-border, #e2e8f0);
+    border-radius: 0.5rem; font: inherit; font-size: 0.85em; background: var(--color-surface, #fff);
+  }
+  .dref-controls input { flex: 1 1 220px; min-width: 160px; }
+  .dref-count { margin-left: auto; font-size: 0.85em; color: var(--color-text-muted, #64748b); white-space: nowrap; }
+  .dref-grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 1.25rem;
+  }
+  .dref-card {
+    border: 1px solid var(--color-border, #e2e8f0); border-radius: 0.75rem; overflow: hidden;
+    background: var(--color-surface, #fff); display: flex; flex-direction: column;
+  }
+  .dref-shot { display: block; background: #1e293b; line-height: 0; }
+  .dref-shot img { width: 100%; height: auto; display: block; }
+  .dref-body { padding: 0.75rem 0.9rem 0.9rem; display: flex; flex-direction: column; gap: 0.35rem; }
+  .dref-titlerow { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+  .dref-app { font-weight: 600; }
+  .dref-company { font-size: 0.85em; color: var(--color-text-muted, #64748b); }
+  .dref-tags { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-top: 0.15rem; }
+  .dref-chip {
+    font-size: 0.72em; padding: 0.08rem 0.5rem; border-radius: 9999px;
+    background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b);
+  }
+  .dref-foot { display: flex; gap: 0.5rem; align-items: center; font-size: 0.78em; color: var(--color-text-muted, #64748b); margin-top: 0.2rem; }
+  .dref-foot a { color: var(--color-primary, #2563eb); text-decoration: none; }
+  .dref-badge { font-size: 0.68em; padding: 0.08rem 0.5rem; border-radius: 9999px; font-weight: 600; white-space: nowrap; }
+  .dref-badge.confirmed { background: #dcfce7; color: #166534; }
+  .dref-badge.ungated { background: #fef3c7; color: #92400e; }
+  .dref-empty { padding: 2rem; text-align: center; color: var(--color-text-muted, #64748b); }
+</style>
+
+<section class="intro dref-intro">
+  <h1>Design Reference Library</h1>
+  <p>Real web-<strong>application</strong> screenshots collected as design references — to be analysed
+  and codified into Web Everything later. Subject is app UIs only (no static / marketing pages); each
+  shot is captured unzoomed at 1440×900 @2×. Auto-generated from the
+  <code>design-refs/</code> corpus (backlog
+  <a href="/backlog/382-design-reference-screenshot-corpus-collect-dedup-codify/">#382</a>); re-run
+  <code>npm run design-refs collect</code> to grow it.</p>
+</section>
+
+<div class="dref-controls">
+  <input id="dref-search" type="search" placeholder="Search app, company, category…" aria-label="Search design references">
+  <select id="dref-category" aria-label="Filter by category"><option value="">All categories</option></select>
+  <select id="dref-register" aria-label="Filter by design register"><option value="">All registers</option></select>
+  <select id="dref-theme" aria-label="Filter by theme"><option value="">All themes</option></select>
+  <select id="dref-review" aria-label="Filter by review state"><option value="">All states</option></select>
+  <span class="dref-count" id="dref-count"></span>
+</div>
+
+{% if designRefs.length %}
+<div class="dref-grid" id="dref-grid">
+  {% for item in designRefs %}
+  <article class="dref-card"
+           data-app="{{ item.app | lower }}"
+           data-company="{{ item.company | lower }}"
+           data-category="{{ item.category }}"
+           data-register="{{ item.designRegister }}"
+           data-theme="{{ item.theme }}"
+           data-review="{{ item.reviewLabel }}"
+           data-search="{{ item.app | lower }} {{ item.company | lower }} {{ item.category | lower }} {{ item.designRegister | lower }}">
+    <a class="dref-shot" href="{{ item.shotUrl }}" target="_blank" rel="noopener" title="Open full size">
+      <img src="{{ item.shotUrl }}" loading="lazy"
+           width="{{ item.imageDims.width }}" height="{{ item.imageDims.height }}"
+           alt="{{ item.app }} — {{ item.category }}">
+    </a>
+    <div class="dref-body">
+      <div class="dref-titlerow">
+        <span class="dref-app">{{ item.app }}</span>
+        <span class="dref-badge {{ item.reviewLabel }}">{{ item.reviewLabel }}</span>
+      </div>
+      <span class="dref-company">{{ item.company }}</span>
+      <div class="dref-tags">
+        {% if item.category %}<span class="dref-chip">{{ item.category }}</span>{% endif %}
+        {% if item.designRegister %}<span class="dref-chip">{{ item.designRegister }}</span>{% endif %}
+        {% if item.theme %}<span class="dref-chip">{{ item.theme }}</span>{% endif %}
+      </div>
+      <div class="dref-foot">
+        <a href="{{ item.sourceUrl }}" target="_blank" rel="noopener">source ↗</a>
+        <span>·</span>
+        <span>{{ item.dateShort }}</span>
+      </div>
+    </div>
+  </article>
+  {% endfor %}
+</div>
+<div class="dref-empty" id="dref-noresults" hidden>No screenshots match these filters.</div>
+{% else %}
+<div class="dref-empty">No screenshots collected yet. Run <code>npm run design-refs collect</code> to populate the corpus.</div>
+{% endif %}
+
+<script>
+(function () {
+  var grid = document.getElementById('dref-grid');
+  if (!grid) return;
+  var cards = Array.prototype.slice.call(grid.querySelectorAll('.dref-card'));
+  var search = document.getElementById('dref-search');
+  var selects = {
+    category: document.getElementById('dref-category'),
+    register: document.getElementById('dref-register'),
+    theme: document.getElementById('dref-theme'),
+    review: document.getElementById('dref-review'),
+  };
+  var count = document.getElementById('dref-count');
+  var noResults = document.getElementById('dref-noresults');
+
+  // Populate filter dropdowns from the cards' data attributes (distinct, sorted).
+  Object.keys(selects).forEach(function (key) {
+    var values = {};
+    cards.forEach(function (c) { var v = c.getAttribute('data-' + key); if (v) values[v] = true; });
+    Object.keys(values).sort().forEach(function (v) {
+      var opt = document.createElement('option');
+      opt.value = v; opt.textContent = v;
+      selects[key].appendChild(opt);
+    });
+  });
+
+  function apply() {
+    var q = (search.value || '').trim().toLowerCase();
+    var f = {};
+    Object.keys(selects).forEach(function (k) { f[k] = selects[k].value; });
+    var shown = 0;
+    cards.forEach(function (c) {
+      var ok = (!q || c.getAttribute('data-search').indexOf(q) !== -1)
+        && (!f.category || c.getAttribute('data-category') === f.category)
+        && (!f.register || c.getAttribute('data-register') === f.register)
+        && (!f.theme || c.getAttribute('data-theme') === f.theme)
+        && (!f.review || c.getAttribute('data-review') === f.review);
+      c.hidden = !ok;
+      if (ok) shown++;
+    });
+    count.textContent = shown + ' / ' + cards.length + ' shots';
+    if (noResults) noResults.hidden = shown !== 0;
+  }
+
+  search.addEventListener('input', apply);
+  Object.keys(selects).forEach(function (k) { selects[k].addEventListener('change', apply); });
+  apply();
+})();
+</script>

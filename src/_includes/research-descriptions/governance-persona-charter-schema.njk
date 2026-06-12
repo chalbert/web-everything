@@ -1,0 +1,102 @@
+<h3>The Question</h3>
+<p>
+    The platform's stakeholder <strong>personas</strong> (developer, designer, manager, translator, analyst/QA,
+    security, legal) are already implemented as a charter schema rendering at plateau-app
+    <code>/profiles</code>, but four design questions about the model are unsettled. Before canonicalizing the
+    roster, this survey gathers governance and access-control prior art per design-first step&nbsp;1, so the
+    decisions about <strong>roster model, free/paid tiering, registry home, and gate enforcement</strong> reuse
+    established vocabulary instead of coining terms. It grounds the four open forks in
+    <a href="/backlog/166-governance-persona-roster-charter-schema/">backlog&nbsp;#166</a> — the four questions
+    the item raised, reshaped into bold-defaulted decisions.
+</p>
+
+<h3>Recommendation (prepared in #166)</h3>
+<ol>
+    <li><strong>Canonical built-ins + clone-to-derive custom personas.</strong> The seven personas are the
+        canonical roster; an org may publish its own ("release-manager", "support") only by cloning a built-in
+        template and overriding — the SaaS RBAC guardrail — never as a free-form parallel roster.</li>
+    <li><strong>Built-ins free; custom/shareable personas are the paid affordance.</strong> The canonical
+        personas are content and ship free; org-authored and team-templated personas imply a publish/share
+        plane (server-shaped) and sit on the paid/enterprise side, per #141's cost-flat principle.</li>
+    <li><strong>A shared data home both lenses read</strong> — not a WE standard entity. The roster graduates
+        from the static <code>plateau-app/src/profiles/profiles.ts</code> array to a data file the SaaS page and
+        the dev-browser both import; it is product data, not an intent/protocol-class standard.</li>
+    <li><strong>Keep gates descriptive now, but widen the enforcement seam.</strong> Replace the single
+        <code>blocksDeployment: boolean</code> with the four established gate types
+        (Advisory / Validating / Blocking / Escalating) so enforcement can arrive later without a schema break.</li>
+</ol>
+
+<h3>Finding 1 — the schema already exists; the forks reshape it, not design it</h3>
+<p>
+    The charter is implemented and rendering at plateau-app <code>/profiles</code>:
+    <code>Profile</code> (<code>profiles.ts:85</code>) carries <code>signals[]</code>,
+    <code>reviewAreas[]</code>, <code>artifactsOwned[]</code>, <code>escalation</code>;
+    <code>ReviewArea</code> (<code>profiles.ts:17</code>) pins each concern to a real platform domain via
+    <code>platformArea</code> (<code>profiles.ts:22</code>); <code>Gate</code> (<code>profiles.ts:34</code>)
+    holds a <code>trigger</code> and a <code>blocksDeployment</code> boolean. The roster is a hand-authored
+    array, <code>export const profiles</code> (<code>profiles.ts:941</code>). So a profile is a
+    <em>lens over the platform</em>, not a parallel world — and the four forks decide how that lens is
+    customized, tiered, homed, and enforced.
+</p>
+
+<h3>Finding 2 — RACI is the right vocabulary; RBAC is the wrong one</h3>
+<p>
+    RACI / RASCI (Responsible, Accountable, Consulted, Informed, +Support) is the canonical
+    <strong>decision-rights</strong> model — it answers <em>who owns a decision</em>, which is exactly what the
+    charter's <code>reviewAreas</code> + <code>gates</code> express. A well-formed RACI matrix has
+    <strong>exactly one Accountable</strong> per decision, mirroring the one-owner-per-gate shape. Crucially RACI
+    confers <em>no system permissions</em>: the WE personas are a governance/decision-rights family (who reviews
+    and approves), <strong>not</strong> an authorization family (who <em>may</em> act). Treating the roster as
+    RBAC would be a category error.
+</p>
+
+<h3>Finding 3 — design-system governance names the four gate types (grounds fork&nbsp;4)</h3>
+<p>
+    The design-system governance literature (Brad Frost, zeroheight, Cabin) converges on exactly four gate
+    types: <strong>Advisory</strong> (logged, no block), <strong>Validating</strong> (signed off, continues),
+    <strong>Blocking</strong> (must pass, halts on fail), and <strong>Escalating</strong> (routes to higher
+    authority). The current schema collapses all four into a single <code>blocksDeployment: boolean</code>
+    (<code>profiles.ts:39</code>) — only Advisory (<code>false</code>) vs. Blocking (<code>true</code>). That
+    enum is the grounded forward-compatible vocabulary, and the existing <code>escalation</code> field
+    (<code>profiles.ts:104</code>) is already the Escalating route. It also distinguishes
+    <em>centralized / federated / hybrid</em> governance models — the roster is centralized authorship with
+    federated consumption.
+</p>
+
+<h3>Finding 4 — SaaS RBAC's clone-a-template guardrail answers "shareable?" (grounds fork&nbsp;1)</h3>
+<p>
+    The multi-tenant SaaS RBAC pattern (WorkOS, Aserto, PropelAuth, Azure custom roles): most tenants stay on
+    stable built-in defaults; only advanced orgs remix — and the strong guardrail is that
+    <strong>a new role must clone an existing template, then modify</strong>, never invent a taxonomy from
+    scratch. Applied to personas: an org <em>can</em> publish its own ("release-manager", "support"), but as a
+    <strong>derivation of a canonical built-in</strong>, not a free-form parallel roster. Custom roles are
+    stored in a directory and shareable across subscriptions — the team-templated case, gated to advanced /
+    paid tenants.
+</p>
+
+<h3>Finding 5 — tiering aligns to the cost-flat principle (grounds fork&nbsp;2)</h3>
+<p>
+    The SaaS convention — built-in defaults universally available, custom/derived roles an enterprise-tier
+    capability — composes with #141's monetization rule
+    (<a href="/backlog/141-dev-browser-vision/">#141</a>: local = free, remote/server = paid). The seven
+    canonical personas are <em>content</em>, so they ship free; org-authored and shareable team-template
+    personas imply a publish/share plane (server-shaped), so they are the <strong>paid/enterprise
+    affordance</strong>. The free tier never takes on server cost.
+</p>
+
+<h3>Finding 6 — registry home: shared data, not a standard entity (grounds fork&nbsp;3)</h3>
+<p>
+    The "charter drives the toggle-map" relationship (<a href="/backlog/166-governance-persona-roster-charter-schema/">#166</a>)
+    means both lenses read one roster: a persona's <code>reviewAreas</code> determine which dev-browser surfaces
+    it lights up. Today the roster is a static array compiled into plateau-app (<code>profiles.ts:941</code>),
+    which the dev-browser cannot import without coupling to the SaaS app. The roster is <strong>product
+    data</strong>, not an intent/protocol-class standard (it describes org roles, not browser behavior), so it
+    earns a shared data home both products read — not a WE standard-entity registry like intents or protocols.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/166-governance-persona-roster-charter-schema/">#166 — canonical governance-persona roster + charter schema</a></li>
+    <li>Sibling lens: <a href="/backlog/141-dev-browser-vision/">#141 — dev-browser vision (the toggle-map lens + tiering principle)</a></li>
+    <li>Substrate: <code>plateau-app/src/profiles/profiles.ts</code> (the implemented charter schema + seven personas)</li>
+</ul>

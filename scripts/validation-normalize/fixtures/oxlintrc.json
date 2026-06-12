@@ -1,0 +1,10 @@
+{
+  "_doc": "Sample project Oxlint config. Note the deliberate divergences from the ESLint fixture: no-console is off here, and there is no boundary rule at all.",
+  "rules": {
+    "no-unused-vars": "error",
+    "no-console": "off",
+    "eqeqeq": "error",
+    "no-debugger": "error",
+    "react/exhaustive-deps": "warn"
+  }
+}

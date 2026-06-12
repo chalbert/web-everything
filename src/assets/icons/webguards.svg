@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="guardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#34d399" />
+      <stop offset="100%" stop-color="#059669" />
+    </linearGradient>
+    <filter id="guardShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#ecfdf5" />
+
+  <g filter="url(#guardShadow)">
+    <!-- Shield: the region being guarded -->
+    <path d="M64 26 L94 38 V64 C94 84 80 96 64 102 C48 96 34 84 34 64 V38 Z"
+          fill="url(#guardGrad)" stroke="#047857" stroke-width="3" stroke-linejoin="round" />
+    <!-- Predicate verdict: the allow checkmark -->
+    <path d="M51 64 L60 73 L79 52" stroke="#fff" stroke-width="7"
+          stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  </g>
+</svg>

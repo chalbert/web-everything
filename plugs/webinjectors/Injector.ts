@@ -40,6 +40,26 @@ export default abstract class Injector<
   /** Set to true after dispose() — prevents in-flight loaders from writing zombie state */
   #disposed = false;
 
+  /**
+   * Consumption-edge introspection (#400, the empirical prerequisite for the #092 provider↔consumer
+   * graph). The provider side is already introspectable (`entries()`, `keys()`, the injector tree,
+   * the registries); the *consumer* side was not — `consume()` carried the querier purely to
+   * validate it, then dropped it, so no "X consumes @y" edge existed. With tracking enabled, each
+   * resolved `consume(name, querier)` records a `(provider ← querier)` edge here, the `consumesApis`-
+   * equivalent the graph build reads.
+   *
+   * **Opt-in and off by default** (`Injector.trackConsumption = false`) so production runtime is
+   * untouched: a graph/build tool flips it on, exercises the app, then reads {@link consumptionEdges}.
+   * It holds strong references to queriers, so it is a build-time / dev introspection aid, not a
+   * long-lived production recorder. The #092 ruling keeps the autonomous runtime agent deferred; this
+   * is only the introspection surface that makes edges *readable*, with edges "potential until
+   * trace-confirmed" exactly as that ruling frames them.
+   */
+  static trackConsumption = false;
+
+  /** provider key → the set of queriers observed consuming it (when tracking is enabled). */
+  #consumptionEdges = new Map<string, Set<Querier>>();
+
   // Child injectors in the hierarchy
   childInjectors = new Set<Injector<ProviderType, Target, Querier>>();
 
@@ -139,6 +159,21 @@ export default abstract class Injector<
   }
 
   /**
+   * The consumer→provider edges this injector observed (#400) — the `consumesApis`-equivalent the
+   * #092 graph build reads, as `{ provider, querier }` pairs. Empty unless
+   * {@link Injector.trackConsumption} was enabled before the `consume()` calls. Edges are recorded
+   * at the injector where `consume()` was invoked; a graph builder walks {@link childInjectors} /
+   * {@link parentInjector} and dedups across the tree.
+   */
+  consumptionEdges(): { provider: string; querier: Querier }[] {
+    const edges: { provider: string; querier: Querier }[] = [];
+    for (const [provider, queriers] of this.#consumptionEdges) {
+      for (const querier of queriers) edges.push({ provider, querier });
+    }
+    return edges;
+  }
+
+  /**
    * Get all provider values.
    */
   values() {
@@ -164,6 +199,14 @@ export default abstract class Injector<
     querier: Querier,
   ): Promise<ProviderTypeMap[Key]> {
     const key = name as string;
+
+    // #400 — record the consumer→provider edge at the seam where consumption actually happens.
+    // Off by default (zero cost in production); enabled by a graph/build tool to harvest edges.
+    if (Injector.trackConsumption && querier != null) {
+      let consumers = this.#consumptionEdges.get(key);
+      if (!consumers) this.#consumptionEdges.set(key, (consumers = new Set<Querier>()));
+      consumers.add(querier);
+    }
 
     // State 3: Already loaded
     const existing = this.providers.get(name);
@@ -225,6 +268,7 @@ export default abstract class Injector<
     this.providers.clear();
     this.#registry.clear();
     this.#loading.clear();
+    this.#consumptionEdges.clear();
 
     if (this.parentInjector) {
       this.parentInjector.childInjectors.delete(this);

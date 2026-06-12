@@ -8,6 +8,18 @@ title: Research & References
     <p>A curated collection of external standards, proposals, and ecosystem libraries that influence the architectural decisions of Web Everything.</p>
 </section>
 
+{% if designRefs.length %}
+<section style="margin-bottom: 3rem;">
+    <a href="/research/design-references/" class="project-card" style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; text-decoration: none; color: inherit;">
+        <div>
+            <h3 class="project-title" style="margin: 0 0 0.35rem 0;">Design Reference Library →</h3>
+            <p style="margin: 0; color: var(--color-text-muted); font-size: 0.9em;">A growing, deduplicated corpus of real web-<strong>app</strong> screenshots, captured with rich metadata for later analysis and codification.</p>
+        </div>
+        <span style="padding: 0.1rem 0.6rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b); font-size: 0.8em; font-weight: 600; white-space: nowrap;">{{ designRefs.length }} shots</span>
+    </a>
+</section>
+{% endif %}
+
 {% if researchTopics.length %}
 <section style="margin-bottom: 3rem;">
     <h2 style="margin-bottom: 1rem;">Open Research Topics</h2>

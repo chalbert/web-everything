@@ -1,0 +1,38 @@
+<h2>Audit</h2>
+<p>The reference runtime for the <a href="/projects/webaudit/">Web Audit</a> protocol — a domain entity's
+immutable, actor-attributed history. The block ships the protocol's seam and nothing about the store
+behind it.</p>
+
+<h3>What it provides</h3>
+<ul>
+  <li><code>AuditEvent</code> — the normalized record
+    (<code>{ target, action, actor, at, before?, after?, correlationId? }</code>); <code>before</code>/
+    <code>after</code> reuse the <a href="/projects/webstates/">Web States</a> <code>ChangeRecord</code>
+    shape.</li>
+  <li><code>CustomAuditProvider</code> — the swappable contract: <code>append()</code> (immutable),
+    <code>queryByEntity()</code>, optional <code>subscribe()</code>.</li>
+  <li><code>DefaultAuditProvider</code> — a native-first, in-memory, <strong>append-only</strong> reference
+    that freezes each event (never mutates or deletes — the property regulated audit depends on).</li>
+  <li><code>CustomAuditRegistry</code> (<code>window.customAudit</code>) — named providers the project
+    selects or overrides via the injector chain.</li>
+  <li><code>auditLifecycle()</code> — the headline composition: subscribes a
+    <a href="/projects/weblifecycle/">Web Lifecycle</a> provider so every transition becomes one
+    <code>AuditEvent</code> automatically.</li>
+</ul>
+
+<h3>What it deliberately does not own</h3>
+<ul>
+  <li><strong>The before/after vocabulary</strong> — reused from Web States change-tracking, not
+    redefined.</li>
+  <li><strong>The timeline UI</strong> — the canonical per-entity render is the
+    <a href="/intents/audit-timeline/">Audit Timeline</a> intent (the <code>audit-timeline</code> block).</li>
+  <li><strong>Durability / retention / tamper-evidence</strong> — provider concerns; the default is an
+    in-memory log, a real deployment plugs in an event-sourced or OSCAL-aligned backend.</li>
+</ul>
+
+<h3>Composition</h3>
+<p>The first real consumer is the
+<a href="/backlog/317-exercise-app-loan-origination/">loan-origination exercise app</a>, where the
+lifecycle provider's transitions auto-feed the audit log and the timeline renders the selected loan's
+history. <a href="/backlog/351-web-compliance-project/">Web Compliance</a> can reuse the
+<code>AuditEvent</code> schema at the platform level.</p>

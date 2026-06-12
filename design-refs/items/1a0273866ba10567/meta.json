@@ -1,0 +1,28 @@
+{
+  "id": "1a0273866ba10567",
+  "contentHash": "1a0273866ba1056789667ba5806e2a42736e474f8592ede3bf3c4fc01cbdcbfe",
+  "sourceUrl": "https://jsfiddle.net",
+  "captureMethod": "playwright",
+  "reviewState": "ungated",
+  "dateCollected": "2026-06-12T21:52:03.107Z",
+  "datePublished": null,
+  "app": "JSFiddle",
+  "company": "JSFiddle",
+  "category": "code-playground",
+  "surface": null,
+  "designRegister": "utilitarian",
+  "theme": "light",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "dpr": 2,
+  "imageDims": {
+    "width": 2880,
+    "height": 1800
+  },
+  "bytes": 86992,
+  "tags": [],
+  "sourceCredit": "JSFiddle",
+  "collectionRun": "2026-06-12T21-51-12-668Z"
+}

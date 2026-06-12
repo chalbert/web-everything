@@ -3,8 +3,11 @@ type: issue
 workItem: story
 size: 3
 parent: "125"
-status: open
+status: resolved
 dateOpened: "2026-06-09"
+dateStarted: "2026-06-10"
+dateResolved: "2026-06-10"
+graduatedTo: none
 tags: [jsx, adapters, packaging, dedupe, frontier-ui]
 relatedReport: reports/2026-06-06-adapter-real-project-integration.md
 relatedProject: webadapters
@@ -75,3 +78,21 @@ bare-specifier resolution mechanism (#264 decision — built `dist` vs vite src-
 repoint `frontierui/blocks/renderers/jsx` at the package + delete copy #2, update `vite.config.mts`
 `jsxInject`/`jsxFactory` + `tsconfig`; (e) verify both repos' suites (FUI build, WE blocks suite +
 `check:standards`).
+
+## Progress
+
+- **Status:** resolved
+- **Branch:** docs/standard-authoring-workflow (WE); changes also in `../frontierui` working tree
+- **Done:**
+  - (a) Re-synced `frontierui/packages/jsx-runtime/src/JSXRenderer.ts` from WE canonical: ported the
+    #241 Auto-Define `static tagName` → `document.createElement(tagName)` registry path in
+    `#createElement`, and the #245 inline string-event-handler-attribute branch in `#applyProps`.
+    Preserved the package's one `as unknown as Record<string, unknown>` strict-build cast. The two
+    files are now byte-identical modulo that single cast.
+  - (d) Added drift guard `frontierui/packages/jsx-runtime/__tests__/canonical-sync.test.ts` — reads
+    both files, normalizes the sanctioned strict-cast, asserts equality; `it.skipIf` when the sibling
+    `../webeverything` checkout is absent (same convention as FUI `check-standards.mjs`).
+- **Verification:** FUI `JSXRenderer.test.ts` green (26 tests); new sync test green; package `tsc`
+  strict build OK; WE `check:standards` 0 errors.
+- **Notes:** No consumer repointing — that decision-gated remainder stays in **#265** (`blockedBy`
+  this + the #264 bare-specifier-resolution decision). dist artifacts are gitignored in FUI.

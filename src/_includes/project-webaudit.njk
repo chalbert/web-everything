@@ -1,0 +1,154 @@
+<section class="intro-section mb-12">
+  <h3 id="mission">Mission</h3>
+  <p>
+    <strong>Web Audit</strong> standardizes a domain entity's <strong>immutable, actor-attributed
+    history</strong> &mdash; who did what to it, when, and before&rarr;after. A loan that moved to
+    <code>underwriting</code>, a condition cleared, a document rejected, a decision issued: each is an
+    append-only record, and together they are the queryable timeline that the permissions and
+    proof-of-compliance stories rest on. It is universal in regulated line-of-business software (finance,
+    insurance, healthcare, government), and today every app re-invents it as ad-hoc log rows.
+  </p>
+  <p>
+    Web Audit fixes one seam &mdash; a normalized <strong>AuditEvent</strong> appended through a swappable
+    <strong>audit provider</strong> &mdash; and nothing else. The provider is the only lock: an in-memory
+    log, an event-sourced store, or an OSCAL-aligned backend satisfy the same contract, so the audit store
+    swaps without touching the producers.
+  </p>
+
+  <div class="comparison-block" style="background: rgba(79, 70, 229, 0.08); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #4f46e5; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #4338ca; font-size: 1rem;">Not change-tracking, not compliance evidence</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      <a href="/projects/webstates/">Web States</a> change-tracking observes mutation <em>reactively and
+      transiently</em> (a <code>ChangeRecord</code> with <code>channel</code> attribution) &mdash; Web Audit
+      adds persistence, actor attribution, immutability, and query on top, and <em>reuses</em> the
+      ChangeRecord shape for its before/after rather than redefining one. <a href="/backlog/351-web-compliance-project/">Web
+      Compliance</a>'s evidence trail is the <em>platform-enforcement</em> twin (what conformance rule was
+      enforced, when, against which standard version) &mdash; same schema, a different subject. Web Audit is
+      the <em>domain object's</em> operational record.
+    </p>
+  </div>
+</section>
+
+<section id="features" class="section-card">
+  <h3 id="feature-surface">Feature Surface</h3>
+  <p>
+    What an audit standard covers, and where each capability is fulfilled. <strong>Protocol</strong> =
+    fixed by the Audit Trail contract (the only lock); <strong>Provider</strong> = resolved behind the
+    swappable audit provider; <strong>Compose</strong> = deferred to a neighbouring Web Everything standard.
+  </p>
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 720px;">
+      <thead>
+        <tr><th>Feature</th><th>Prior art</th><th>What it does</th><th>Layer</th></tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(79,70,229,0.06);">The seam (fixed by the protocol)</td></tr>
+        <tr><td><strong>AuditEvent schema</strong></td><td>Audit log rows, domain events</td><td><code>{ target, action, actor, at, before?, after?, correlationId? }</code></td><td>Protocol</td></tr>
+        <tr><td><strong>Append-only / immutability</strong></td><td>Event sourcing, WORM stores</td><td>A recorded event is never mutated or deleted &mdash; a contract guarantee</td><td>Protocol</td></tr>
+        <tr><td><strong>Provider seam</strong></td><td>—</td><td>Default &rarr; project override &rarr; custom plug, resolved off the injector chain</td><td>Protocol</td></tr>
+        <tr><td><strong>Query by entity</strong></td><td>Temporal tables, log search</td><td>The per-entity history feed the timeline renders</td><td>Protocol</td></tr>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(79,70,229,0.06);">Composed from neighbours (reused, not owned)</td></tr>
+        <tr><td><strong>before / after shape</strong></td><td>RFC 6902 JSON Patch</td><td>Reuses the Web States <code>ChangeRecord</code> (path/op/oldValue/newValue)</td><td>🔗 Compose &mdash; <a href="/projects/webstates/">Web States</a></td></tr>
+        <tr><td><strong>Lifecycle events</strong></td><td>State-machine transitions</td><td>Each <code>LifecycleEvent</code> becomes one AuditEvent automatically</td><td>🔗 Compose &mdash; <a href="/projects/weblifecycle/">Web Lifecycle</a></td></tr>
+        <tr><td><strong>correlationId / span</strong></td><td>W3C Trace Context</td><td>Links related events, or an audit event to a distributed-trace span</td><td>🔗 Compose &mdash; Web Traces</td></tr>
+        <tr><td><strong>Timeline rendering</strong></td><td>Activity feeds, history panels</td><td>Canonical chronological render + filtering of an entity's history</td><td>🔗 Member &mdash; <a href="/intents/audit-timeline/">Audit Timeline intent</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="protocol-audit-trail" class="section-card">
+  <h3 id="how-it-works">Audit Trail Protocol</h3>
+  <p>
+    A producer never bundles an audit store. It constructs an <strong>AuditEvent</strong>, resolves the
+    application's <strong>audit provider</strong> through the injector chain, and appends. The provider
+    guarantees the write is append-only and durable; readers query by entity to render the timeline. The
+    protocol fixes only the seam &mdash; the store behind the provider is swappable.
+  </p>
+  {% highlight "typescript" %}
+// The AuditEvent — normalized, with before/after reusing the Web States ChangeRecord shape.
+interface AuditEvent {
+  target: { type: string; id: string };       // the entity audited (e.g. { type: 'loan', id: 'L-1042' })
+  action: string;                              // verb, e.g. 'lifecycle.transition' | 'document.rejected'
+  actor: { id?: string; role: string };        // who did it
+  at: string;                                  // ISO timestamp
+  before?: ChangeRecord[];                     // optional prior state (Web States shape)
+  after?: ChangeRecord[];                      // optional new state
+  correlationId?: string;                      // links related events / a Web Traces span
+}
+
+// The provider seam — the ONLY lock. Append-only by contract; an in-memory log, an event-sourced
+// store, or an OSCAL backend satisfy it alike.
+interface CustomAuditProvider {
+  append(event: AuditEvent): Promise<void>;                          // immutable write
+  queryByEntity(id: string, filters?: AuditQuery): Promise<AuditEvent[]>;
+  subscribe?(id: string, onAppend: (e: AuditEvent) => void): () => void;
+}
+
+// 1. The application registers ONE provider (default in-memory; project overrides it).
+customAudit.define('loan-store', new EventSourcedAuditProvider(db));
+
+injector Application {
+  provide { audit: 'loan-store' } to '@web-audit';   // every descendant resolves this provider
+}
+
+// 2. The HEADLINE composition — wire a lifecycle provider's events straight into the audit log.
+lifecycleProvider.subscribe((ev) =>
+  auditProvider.append({
+    target: { type: 'loan', id: ev.entity },
+    action: 'lifecycle.transition',
+    actor: { role: ev.actor },
+    at: ev.at,
+    after: [{ path: '/state', op: 'replace', oldValue: ev.from, newValue: ev.to }],
+  }),
+);
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+    <li><strong>One contract:</strong> <code>CustomAuditProvider</code> &mdash; <code>append()</code> +
+      <code>queryByEntity()</code> &mdash; is satisfied by the default and every plugged store alike.</li>
+    <li><strong>One registry:</strong> <code>CustomAuditRegistry</code> (<code>window.customAudit</code>)
+      holds the named providers; the project selects/overrides via the injector chain.</li>
+    <li><strong>Append-only is a guarantee, not a convention:</strong> the contract forbids mutation and
+      deletion of a recorded event &mdash; the property regulated audit depends on.</li>
+    <li><strong>Compose, don't duplicate:</strong> before/after reuse the Web States
+      <code>ChangeRecord</code>; lifecycle transitions auto-feed the log; correlationId reaches Web
+      Traces. Web Audit owns only the append-only, actor-attributed record and its query seam.</li>
+  </ul>
+</section>
+
+<section id="composition" class="section-card">
+  <h3 id="composition">Composition With Other Standards</h3>
+  <ul style="font-size: 0.9rem;">
+    <li><strong><a href="/intents/audit-timeline/">Audit Timeline intent</a></strong> &mdash; the UX half:
+      the canonical chronological render + filtering of an entity's history. It reads the same provider; it
+      is the audit trail's visual member.</li>
+    <li><strong><a href="/projects/weblifecycle/">Web Lifecycle</a></strong> &mdash; every
+      <code>LifecycleEvent</code> becomes one AuditEvent automatically (the headline composition).</li>
+    <li><strong><a href="/projects/webstates/">Web States</a></strong> &mdash; the before/after of an
+      AuditEvent reuse the <code>ChangeRecord</code> shape; change-tracking is the substrate, audit adds
+      persistence + actor + query.</li>
+    <li><strong><a href="/backlog/351-web-compliance-project/">Web Compliance</a></strong> &mdash; a
+      <em>consumer</em>: its enforcement-evidence trail reuses the AuditEvent schema at the platform level
+      (same shape, different subject). Domain audit is not folded into the compliance project.</li>
+  </ul>
+</section>
+
+<section id="status" class="section-card">
+  <h3 id="status">Status</h3>
+  <p>
+    Web Audit is in <strong>concept</strong> phase; the Audit Trail protocol's seam (AuditEvent + provider
+    + append-only + query) is specified here at <strong>draft</strong>. It was surfaced by the
+    loan-origination exercise app (<a href="/backlog/317-exercise-app-loan-origination/">#317</a>), whose
+    every consequential action is recorded with actor / timestamp / before-after. The native-first default
+    provider, the lifecycle&rarr;audit composition wiring, and a reference timeline render are the first
+    planned work, on top of this contract.
+  </p>
+  <h4 style="margin-top: 1rem;">Open Questions</h4>
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <li>Does the provider assign the event id / sequence, or does the producer? (Ordering + idempotency.)</li>
+    <li>Tamper-evidence (hash-chaining / signing) as an opt-in provider upgrade, or out of scope &mdash;
+      deferred to the proof-of-compliance proof format (<a href="/backlog/093-business-rule-manager-proof-of-compliance/">#093</a>)?</li>
+    <li>Retention / redaction of PII in <code>before/after</code> &mdash; a provider concern, or a
+      protocol-level field policy?</li>
+  </ul>
+</section>

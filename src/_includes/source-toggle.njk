@@ -73,3 +73,39 @@
     </div>
 </div>
 {% endmacro %}
+
+{#
+  autoToggleEvents(id, html) — autoToggle plus the event-handler DISPLAY-FORM sub-toggle (#324). A
+  third "JSX · fn" pane shows the same generated JSX with named handlers rewritten from the canonical
+  string behavior (on:click="inc($event)") to the convenience function prop (onclick={inc}) via the
+  `eventHandlerToFunctionProp` filter. A second presentation axis over the SAME canonical source —
+  ratified #051 Fork 1 ("the toggle just chooses which form is shown"), reusing mode-selector.js
+  unchanged (the fn pane is just another data-mode). Closures stay function-only and carry the #325
+  lossy rule in the reverse (function → canonical) direction, which this display path never invokes.
+
+    {% set myHtml %}
+    <button on:click="inc($event)">Add</button>
+    {% endset %}
+    {{ autoToggleEvents("counter", myHtml) }}
+#}
+{% macro autoToggleEvents(id, html) %}
+<div class="mode-selector-container" data-mode-selector="{{ id }}" style="border: 1px solid #e5e7eb; border-radius: 0.375rem; overflow: hidden; margin-bottom: 1rem;">
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.75rem; background: #f9fafb; border-bottom: 1px solid #e5e7eb;">
+        <span style="font-size: 0.7rem; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #9ca3af;">Source <span style="font-weight: 400; text-transform: none; letter-spacing: 0;">— JSX generated from HTML</span></span>
+        <div class="mode-tabs" style="display: flex; gap: 0; border: 1px solid #d1d5db; border-radius: 0.25rem; overflow: hidden;">
+            <button class="mode-tab active" data-mode="html" style="padding: 0.25rem 0.75rem; font-size: 0.75rem; font-weight: 500; background: #059669; color: white; border: none; cursor: pointer;">HTML</button>
+            <button class="mode-tab" data-mode="jsx" style="padding: 0.25rem 0.75rem; font-size: 0.75rem; font-weight: 500; background: white; color: #6b7280; border: none; border-left: 1px solid #d1d5db; cursor: pointer;">JSX</button>
+            <button class="mode-tab" data-mode="jsx-fn" title="Event handlers as the convenience function prop (onclick={fn})" style="padding: 0.25rem 0.75rem; font-size: 0.75rem; font-weight: 500; background: white; color: #6b7280; border: none; border-left: 1px solid #d1d5db; cursor: pointer;">JSX · fn</button>
+        </div>
+    </div>
+    <div class="mode-content" data-mode-content="{{ id }}" data-mode="html" style="display: block;">
+        <pre class="source-toggle-code"><code class="language-html">{{ html | trim | highlightCode("html") | safe }}</code></pre>
+    </div>
+    <div class="mode-content" data-mode-content="{{ id }}" data-mode="jsx" style="display: none;">
+        <pre class="source-toggle-code"><code class="language-tsx">{{ html | htmlToJsx | highlightCode("tsx") | safe }}</code></pre>
+    </div>
+    <div class="mode-content" data-mode-content="{{ id }}" data-mode="jsx-fn" style="display: none;">
+        <pre class="source-toggle-code"><code class="language-tsx">{{ html | htmlToJsx | eventHandlerToFunctionProp | highlightCode("tsx") | safe }}</code></pre>
+    </div>
+</div>
+{% endmacro %}

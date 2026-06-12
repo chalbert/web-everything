@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Declarative &lt;script type="injector"&gt; Demo - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 820px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+    h1 { font-size: 1.5rem; }
+    .region { border: 1px solid #d0d0d0; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
+    .region h2 { font-size: 1rem; margin: 0 0 .5rem; }
+    code { background: #f3f3f3; padding: .1rem .3rem; border-radius: 4px; }
+    .result { font-family: ui-monospace, monospace; }
+    .ok { color: #137333; } .miss { color: #b3261e; }
+    pre { background: #f7f7f7; border-radius: 6px; padding: .75rem; overflow-x: auto; font-size: .85rem; }
+  </style>
+</head>
+<body>
+  <h1>Declarative <code>&lt;script type="injector"&gt;</code> (#278)</h1>
+  <p>
+    A <code>&lt;script type="injector"&gt;</code> binds its parent subtree to a <strong>domain</strong>
+    (a <a href="/protocols/">Protocol</a> identity, per #002) and the impl provided for it — no build
+    step, no resolver. Descendants inherit the domain implicitly; an element with
+    <code>injector="id"</code> binds to a named injector regardless of position.
+  </p>
+
+  <!-- Region A: declares @date/core for its subtree -->
+  <div class="region" id="region-a">
+    <h2>Region A — declares <code>@date/core</code></h2>
+    <script type="injector" id="dateProvider">
+      { "domain": "@date/core", "provide": { "name": "tiny-date", "addMonths": "(d,n)=>…" } }
+    </script>
+    <p>Descendant resolves <code>@date/core</code>:
+      <span class="result" data-test="a-descendant">…</span></p>
+  </div>
+
+  <!-- Region B: no declaration; a remote element opts in via injector="id" -->
+  <div class="region" id="region-b">
+    <h2>Region B — no declaration of its own</h2>
+    <p>Implicit resolve of <code>@date/core</code> here (isolated — should miss):
+      <span class="result" data-test="b-implicit">…</span></p>
+    <p>Explicit <code>injector="dateProvider"</code> opt-in:
+      <span class="result" data-test="b-explicit" injector="dateProvider">…</span></p>
+  </div>
+
+  <script type="module">
+    import { InjectorRoot, applyDeclarativeInjectors, resolveDeclaredProvider }
+      from '/plugs/webinjectors/index.ts';
+
+    const root = new InjectorRoot();
+    root.attach(document);
+
+    // Install every <script type="injector"> in the page.
+    const result = applyDeclarativeInjectors(root, document);
+
+    const show = (selector, value) => {
+      const el = document.querySelector(selector);
+      if (value === undefined) { el.textContent = '✗ not in scope'; el.classList.add('miss'); }
+      else { el.textContent = '✓ ' + JSON.stringify(value); el.classList.add('ok'); }
+    };
+
+    // Region A descendant — implicit subtree inheritance.
+    show('[data-test="a-descendant"]',
+      resolveDeclaredProvider(root, result, document.querySelector('[data-test="a-descendant"]'), '@date/core'));
+
+    // Region B implicit — isolated, should be undefined (miss).
+    show('[data-test="b-implicit"]',
+      resolveDeclaredProvider(root, result, document.querySelector('[data-test="b-implicit"]'), '@date/core'));
+
+    // Region B explicit injector="id" — resolves despite being outside Region A.
+    show('[data-test="b-explicit"]',
+      resolveDeclaredProvider(root, result, document.querySelector('[data-test="b-explicit"]'), '@date/core'));
+
+    // Signal ready for E2E tests
+    window.demoReady = true;
+  </script>
+</body>
+</html>

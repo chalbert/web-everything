@@ -14,16 +14,20 @@
 import { setPlaygroundReady } from '/demos/playground-harness';
 import { CustomAnalyzerRegistry, upgrade, type UpgradeResult } from '/blocks/renderers/upgrader/upgraderEngine';
 import { registerReferenceAnalyzers } from '/blocks/renderers/upgrader/analyzers/legacyWebComponent';
+import { registerFrameworkAnalyzers } from '/blocks/renderers/upgrader/analyzers/frameworkAnalyzers';
 import { registerModelAnalyzer, createScriptedClient } from '/blocks/renderers/upgrader/analyzers/modelComponent';
 import { serve, FORMS, type ServeForm } from '/blocks/renderers/module-service/moduleService';
 import { parseDefinition, defineFromDefinition } from '/blocks/renderers/component/declarativeComponent';
 import { upgraderCases, type UpgraderCase } from '/blocks/renderers/upgrader/__fixtures__/upgrader-cases';
+import { frameworkCases, type FrameworkCase } from '/blocks/renderers/upgrader/__fixtures__/framework-cases';
 import { modelCases, knownModelIntents, scriptedResponderFor, type ModelCase } from '/blocks/renderers/upgrader/__fixtures__/model-cases';
 
-// The analyzer registry is the swap point: here we inject the reference (no-key) provider. A BYO-AI
-// provider would be a sibling `registry.register(anthropicAnalyzer)` — nothing else changes.
+// The analyzer registry is the swap point: here we inject the reference (no-key) provider plus the
+// deterministic framework input adapters (#190 — React/Lit/Vue). A BYO-AI provider would be a sibling
+// `registry.register(anthropicAnalyzer)` — nothing else changes.
 const registry = new CustomAnalyzerRegistry();
 registerReferenceAnalyzers(registry);
+registerFrameworkAnalyzers(registry);
 
 // Intent ids the standard knows, for the verify gate's conformance check on the reference path (#189).
 // In a real run this comes from intents.json; here we list the ones the reference analyzer can infer
@@ -156,6 +160,42 @@ async function buildCard(c: UpgraderCase): Promise<{ node: HTMLElement; offered:
   return { node: section, offered: matchesExpectation };
 }
 
+// ── Framework input-adapter cards (backlog #190) ────────────────────────────────
+//
+// Same pipeline and verify gate as the reference path, with a `language` routing hint and a
+// `via {analyzerId}` label so each dialect (React/Lit/Vue) reads distinctly. Out-of-subset inputs
+// (dynamic markup, an underivable tag) are correctly rejected by the same gate.
+
+async function buildFrameworkCard(c: FrameworkCase): Promise<{ node: HTMLElement; offered: boolean }> {
+  const section = el('section', 'ex');
+  const title = el('h2', 'ex-title');
+  title.append(document.createTextNode(c.title + ' '));
+  section.append(title);
+  if (c.note) section.append(el('p', 'ex-note', c.note));
+
+  const grid = el('div', 'ex-grid');
+  section.append(grid);
+
+  const result = await upgrade({ code: c.source, language: c.language }, { registry, knownIntents: knownReferenceIntents });
+
+  const matchesExpectation = result.offered === c.expectOffered;
+  const badge = el(
+    'span',
+    `badge ${matchesExpectation ? 'pass' : 'fail'}`,
+    matchesExpectation ? (result.offered ? '✓ upgraded' : '✓ correctly rejected') : '✗ unexpected',
+  );
+  title.append(badge);
+  title.append(el('span', 'pane-label', ` via ${result.analyzerId ?? 'no provider'}`));
+
+  grid.append(pane(`${c.language} source (input)`, c.source, c.language === 'vue' ? 'html' : 'javascript'));
+  grid.append(pane('Neutral structure (IR)', result.ir ? JSON.stringify(result.ir, null, 2) : '— no IR (analyzer declined)', 'json'));
+  grid.append(pane('Generated <component>', result.generated ?? '— nothing offered', 'html'));
+  grid.append(verifyPane(result));
+  if (result.offered && result.generated) grid.append(livePane(result.generated));
+
+  return { node: section, offered: matchesExpectation };
+}
+
 // ── Model-provider cards (backlog #188) ─────────────────────────────────────────
 //
 // Same pipeline, with an extra "Model response" pane and an explicit `via {analyzerId}` label so a
@@ -246,11 +286,12 @@ function sectionHeading(title: string, blurb: string): HTMLElement {
 
 const host = document.getElementById('examples');
 if (host) {
-  const [refBuilt, modelBuilt] = await Promise.all([
+  const [refBuilt, frameworkBuilt, modelBuilt] = await Promise.all([
     Promise.all(upgraderCases.map(buildCard)),
+    Promise.all(frameworkCases.map(buildFrameworkCard)),
     Promise.all(modelCases.map(buildModelCard)),
   ]);
-  const built = [...refBuilt, ...modelBuilt];
+  const built = [...refBuilt, ...frameworkBuilt, ...modelBuilt];
   const passCount = built.filter((b) => b.offered).length;
   const summary = el(
     'div',
@@ -262,6 +303,8 @@ if (host) {
     buildSandbox(),
     sectionHeading('Reference analyzer (deterministic, no key)', 'The MVP source path: vanilla web components lifted by the heuristic provider.'),
     ...refBuilt.map((b) => b.node),
+    sectionHeading('Framework input adapters (deterministic, no key)', 'React function components, Lit elements, and Vue SFCs lifted by dialect-specific analyzers behind the same registry — a new source path is a registration, not a pipeline change (#190).'),
+    ...frameworkBuilt.map((b) => b.node),
     sectionHeading('Model provider (BYO key — scripted here)', 'The messier input the heuristic rejects, escalated to a model. Hallucinated structure is caught by the same verify gate and never offered.'),
     ...modelBuilt.map((b) => b.node),
   );

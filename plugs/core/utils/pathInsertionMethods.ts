@@ -190,9 +190,15 @@ export default function pathInsertionMethods<Type extends Node>(
           const connectedNodes: Node[] = [];
 
           if (this.isConnected) {
-            // Parse arguments based on method type
-            const trailingArgs = leadinMethods.includes(methodName as any) ? args.slice(1) : [];
-            const leadingArgs = trailingMethods.includes(methodName as any) ? args.slice(-1) : [];
+            // Parse arguments based on method type. Leading non-node args (e.g.
+            // `insertAdjacentElement`'s `position`) precede the nodes; trailing non-node
+            // args (e.g. `insertBefore`'s reference node) follow them. The nodes are
+            // whatever sits between, and only they are upgraded — so each kind of arg
+            // must be sliced off its OWN side (previously `leadinMethods` drove the
+            // trailing slice and vice-versa, leaving the leading `position` string treated
+            // as the node and the real element passed through un-upgraded).
+            const leadingArgs = leadinMethods.includes(methodName as any) ? args.slice(0, 1) : [];
+            const trailingArgs = trailingMethods.includes(methodName as any) ? args.slice(-1) : [];
             const nodes = args.slice(leadingArgs.length, args.length - trailingArgs.length);
 
             // Upgrade undetermined nodes

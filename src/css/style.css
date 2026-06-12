@@ -118,6 +118,20 @@ main.project-page-container {
     max-width: 1400px;
 }
 
+/* Page sheet — a white surface for long-form content pages.
+   The body background is a pale→darker gradient; on a long page the lower
+   portion darkens until text placed directly on it becomes unreadable. So any
+   page that is mostly flowing prose/tables (not a grid of self-contained cards)
+   wraps its content in `.page-sheet`: the gradient becomes the surrounding
+   canvas, the readable content always sits on opaque white. */
+.page-sheet {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: clamp(1.5rem, 4vw, 3rem);
+    box-shadow: var(--shadow-glass);
+}
+
 .site-header {
     background: rgba(255, 255, 255, 0.8);
     backdrop-filter: blur(12px);

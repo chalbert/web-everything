@@ -1,0 +1,120 @@
+<h3>The Question</h3>
+<p>
+    The <a href="/blocks/pagination/">pagination</a> a11y baseline is verified
+    (<code>&lt;nav aria-label="pagination"&gt;</code> + <code>aria-current="page"</code>), but one behavior was
+    deliberately left unverified by the pagination standard research report
+    (<code>reports/2026-06-03-pagination-standard-research.md</code>):
+    when the user moves to a new page, <strong>what happens to focus</strong> and <strong>what is
+    announced</strong>? This survey runs the owed WAI-ARIA APG / NN-g / screen-reader-practice pass that grounds
+    the open fork in <a href="/backlog/059-pagination-focus-announcement/">backlog&nbsp;#059</a> — and asks the
+    prior question: is either half net-new vocabulary, or already-owned composition?
+</p>
+
+<h3>Recommendation (grounds #059)</h3>
+<ol>
+    <li><strong>Neither half is net-new.</strong> Focus after a page change <em>is</em> the focus-after-view-swap
+        question, already owned by <a href="/intents/autofocus-on-activation/">Autofocus-on-Activation</a> (the
+        <a href="/intents/navigation/">Navigation</a> intent already composes it for view swaps). The
+        announcement <em>is</em> the clause-joined polite-status pattern already shipped by
+        <a href="/blocks/data-table/">Data Table</a>, owned by
+        <a href="/intents/live-region-status/">Live Region Status</a>.</li>
+    <li><strong>Focus → compose <code>autofocus-on-activation</code>.</strong> Default <code>heading</code> (the
+        APG answer — focus the results region's heading); <code>preserve</code> is the rapid-paging opt-in (stay
+        on the control); <code>auto</code> for a full-reload <code>?page=n</code>.</li>
+    <li><strong>Announcement → compose <code>live-region-status</code>, <code>urgency: polite</code>.</strong>
+        Populate the one polite region with <em>"Page 2 of 10"</em> on every change — the same
+        <code>announce()</code> shape Data Table uses. Mandatory, not a toggle.</li>
+    <li><strong>Build = renderer wiring, not authoring.</strong> The pagination renderer already has the
+        <code>role="status"</code> region; it is simply not populated on a page change, and focus is not moved.
+        A thin block-author task — no new intent, no protocol.</li>
+</ol>
+
+<h3>Finding 1 — focus and announcement are two independent axes</h3>
+<p>
+    Every source treats them separately. Moving focus to a heading incidentally reads that heading, but the
+    <a href="https://webaim.org/discussion/mail_thread?thread=9022">WebAIM thread</a> is explicit it is
+    insufficient alone (<em>"screen readers will definitely need some information letting them know… the page
+    was updated"</em>); and a live-region announcement moves no focus. So the trait model needs <strong>two</strong>
+    dimensions, not one coupled "a11y" toggle — mirroring pagination's own presentation&nbsp;×&nbsp;protocol split.
+</p>
+
+<h3>Finding 2 — a page change IS a surface activation (grounds the focus fork)</h3>
+<p>
+    The WAI-ARIA APG answer to <em>"a new surface became active, where does focus land?"</em> is the results
+    region's heading, made focusable (<code>tabindex="-1"</code> + <code>.focus()</code>). WE already extracted
+    this as <a href="/intents/autofocus-on-activation/">Autofocus-on-Activation</a>, whose <code>landing</code>
+    dimension is exactly <code>heading | target | preserve | auto</code>, default <code>heading</code>. The
+    <a href="/intents/navigation/">Navigation</a> intent <em>already composes</em> this atom for view swaps. A
+    <code>paged</code> page change is a view swap of the results region — so pagination composes the same atom.
+    The four values map onto every option the sources debate:
+</p>
+<ul>
+    <li><strong><code>heading</code> (default)</strong> — focus the results heading (<em>"Search results, page 2
+        of 10"</em>); the APG answer and the option a screen-reader user in the WebAIM thread <em>"marginally
+        prefer[s]… it lines me up for reading the new records."</em></li>
+    <li><strong><code>target</code></strong> — an author-named element (e.g. the first result).</li>
+    <li><strong><code>preserve</code></strong> — leave focus on the control; the rapid-paging preference
+        (<em>"I might want to hit 'next page' several times"</em>) and the natural value for load-more.</li>
+    <li><strong><code>auto</code></strong> — platform default for a full-document reload of <code>?page=n</code>,
+        where the browser handles focus and no script runs.</li>
+</ul>
+
+<h3>Finding 3 — the announcement is the shipped clause-joined polite status (grounds the announce fork)</h3>
+<p>
+    The page-change announcement is the same mechanism the verified range-label is: <code>role="status"</code> +
+    <code>aria-atomic="true"</code> — W3C technique <strong>ARIA22</strong>, <em>sufficient</em> for
+    <strong>WCAG&nbsp;2.1 SC&nbsp;4.1.3 Status Messages (AA)</strong>. WE's prior art is concrete:
+    <code>announce()</code> in <code>blocks/renderers/data-table/renderDataTable.ts</code> builds a clause-joined
+    string (<em>"Sorted by Salary, descending; 3 of 6 shown"</em>) for one polite region, and its own doc comment
+    names pagination's <em>"page 2 of 10"</em> as the analogue to share the <strong>pattern</strong> (region +
+    clause string), not the wording. Home = <a href="/intents/live-region-status/">Live Region Status</a>,
+    <code>urgency: polite</code> (a page change is advisory, never an <code>alert</code>).
+</p>
+
+<h3>Finding 4 — no industry consensus on focus-movement → make it a dimension, not a baked mechanic</h3>
+<p>
+    The WebAIM list is the canonical airing of this question and does <strong>not</strong> converge: focus-to-heading
+    vs focus-stays-on-control, with the synthesis <em>"whichever you choose, as long as you do it accessibly and
+    consistently, users get used to it."</em> Design systems split along a different seam —
+    <a href="https://primer.style/product/components/pagination/accessibility/">GitHub Primer</a>:
+    <em>"When Pagination reloads the page, there is no need for any focus management"</em> vs move focus
+    <em>"for dynamic in-page updates."</em> Both focus branches are legitimate end-states, so per WE's
+    "dimension only if both branches are legitimate" rule, focus-movement is <strong>configurable</strong> — and
+    it already is, because it <em>is</em> <code>autofocus-on-activation.landing</code> (default <code>heading</code>,
+    <code>preserve</code> the opt-in). <strong>Announcement, by contrast, has unanimous support — a fixed
+    mechanic (always announce), not a toggle.</strong>
+</p>
+
+<h3>Finding 5 — this is composition, not new vocabulary (the load-bearing conclusion)</h3>
+<p>
+    The item's framing predates the intents that now own both halves. With
+    <a href="/intents/autofocus-on-activation/">Autofocus-on-Activation</a> (owns <code>landing</code>) and
+    <a href="/intents/live-region-status/">Live Region Status</a> (owns the polite region) both shipped, and
+    <a href="/intents/navigation/">Navigation</a> already demonstrating the exact focus-after-swap composition,
+    the pagination block has nothing to <em>author</em> — only to <em>compose and wire</em>. This is the same
+    outcome <a href="/backlog/013-gap-6-focus-announcements/">gap-6 (#013)</a> reached for the general
+    focus/announce concern: the pieces are owned; only specific compositions remain. #059 is the pagination-specific
+    composition — adding zero intents and zero protocols.
+</p>
+
+<h3>Finding 6 — there is no native focus/announce-after-page-change</h3>
+<p>
+    A full-document reload of <code>?page=n</code> lets the browser handle focus natively (and a URL fragment can
+    target a heading) — that is the <code>landing: auto</code> path. But the usable patterns (load-more,
+    SPA-paged) update content <em>without</em> a reload, so the platform provides no automatic focus move or
+    announcement for them; both must be scripted. There is no <code>&lt;paginate&gt;</code> element. So the
+    behavior is necessarily an ARIA-composed wiring, degrading to the native reload path for server-rendered
+    numbered pagination.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/059-pagination-focus-announcement/">#059 — focus + announcement after a page change</a></li>
+    <li>Parent research: pagination standard research report <code>reports/2026-06-03-pagination-standard-research.md</code> (this answers its open question #1)</li>
+    <li>Composes: <a href="/intents/autofocus-on-activation/">Autofocus-on-Activation</a> (focus) ·
+        <a href="/intents/live-region-status/">Live Region Status</a> (announcement)</li>
+    <li>Prior art: <a href="/blocks/data-table/">Data Table</a> (<code>announce()</code> clause-joined status) ·
+        <a href="/intents/navigation/">Navigation</a> (focus-after-view-swap composition) ·
+        <a href="/backlog/013-gap-6-focus-announcements/">gap-6 (#013)</a> (the general concern)</li>
+    <li>Family: <a href="/blocks/pagination/">pagination block</a> · <a href="/intents/collection-operations/">Collection Operations</a> (<code>page</code> dimension)</li>
+</ul>

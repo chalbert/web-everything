@@ -47,3 +47,13 @@ Canonical template: `src/assets/icons/_template.svg`.
   - Indigo `@web-states` Data/Store (`#818cf8`→`#4f46e5`)
   - Purple `@web-injectors` Structure/Wiring (`#c084fc`→`#9333ea`)
   - Sky `@web-plugs` Utilities/Polyfills (`#38bdf8`→`#0284c7`)
+
+## Page Backgrounds & Surfaces (`.njk`)
+The `<body>` background is a **pale → darker gradient** (`linear-gradient` in `src/css/style.css`). On a long page the lower portion darkens until anything sitting directly on it becomes unreadable. So nothing readable may sit on the bare gradient — it is a *canvas*, not a content surface.
+
+- **Long-form content pages** (mostly flowing prose / tables, e.g. Capabilities, Validation) — wrap the whole page body in `<div class="page-sheet">…</div>`. `.page-sheet` is the white sheet that text rides on; the gradient becomes the surrounding frame. This is the default for any page that isn't a grid of self-contained cards. Add it the moment a page grows past ~1.5 screens, not after the bottom goes unreadable.
+- **Grid/tile index pages** (Intents, Protocols, Research) are exempt — their content is already inside opaque white cards, so the gradient only shows in the gutters.
+
+When a sheet isn't used (or for one-off framed elements that escape it), the same readability rule applies element-by-element — set `background: #fff;`:
+- **Data tables** — set `background: #fff;` on the `<table>`. Row/cell tints (divergence highlights, confidence pills) layer on top of the white base.
+- **Bordered boxes** — any framed `<div>` with `border: 1px solid var(--color-border)` (callout/message panels, list rows like intent → capability) — set `background: #fff;` on the box. Accents (colored left border, chips) stay on top.

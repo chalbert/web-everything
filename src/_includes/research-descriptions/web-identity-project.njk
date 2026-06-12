@@ -1,0 +1,119 @@
+<h3>The Question</h3>
+<p>
+    Gap-analysis item <a href="/backlog/012-gap-5-webidentity-project/">#012</a> asks whether Identity/Auth should
+    be a Web Everything <strong>project</strong>, a <strong>protocol</strong>, an <strong>intent</strong>, or
+    <strong>deferred</strong> — and what shape. The triage note ("Project + Protocol… heaviest to spec and least
+    UI-shaped… rank behind data/i18n/theme") was an unresearched guess. This survey, per design-first step&nbsp;1,
+    gathers web-platform and library prior art so the call reuses platform vocabulary instead of coining terms,
+    and pins the boundaries with <a href="/backlog/009-gap-13-webpermissions-project/">#009 webpermissions</a> and
+    <a href="/backlog/178-access-control-authorization-gate/">#178 access-control</a>.
+</p>
+
+<h3>Recommendation (for #012)</h3>
+<ol>
+    <li><strong>A <code>webidentity</code> project owning one <code>credential-acquisition</code> protocol</strong>
+        — the <code>navigator.credentials.get()</code> dispatcher + mediation model as the normalized seam, with
+        WebAuthn / FedCM / Digital Credentials / password as swappable providers behind a
+        <code>CustomCredentialProvider</code> contract. Mirrors <a href="/projects/">webvalidation→Validation</a>
+        and <a href="/protocols/guard/">webguards→Guard</a>.</li>
+    <li><strong>Split timing</strong> — author the thin <code>mediation</code>/credential-request <strong>intent
+        now</strong> (UX-only, composes Loader/Feedback), <strong>defer</strong> the full protocol + provider
+        contract + Configurator domain.</li>
+    <li><strong>Identity produces an auth-state predicate; #178's Guard access-gate consumes it</strong> — no new
+        gate in <code>webidentity</code>.</li>
+    <li><strong>One protocol, families as providers</strong> — a
+        <code>credentials: [passkey | federated | digital | password]</code> request dimension, not three
+        per-family standards.</li>
+</ol>
+
+<h3>Finding 1 — the platform already unified identity behind one dispatcher: <code>navigator.credentials.get()</code></h3>
+<p>
+    The Credential Management API's
+    <a href="https://developer.mozilla.org/en-US/docs/Web/API/CredentialsContainer/get"><code>navigator.credentials.get()</code></a>
+    is not one auth method — it is a <strong>browser-mediated dispatcher</strong> that routes a request to whichever
+    credential family can satisfy it, returning a typed <code>Credential</code> subclass:
+</p>
+<ul>
+    <li><strong>Passwords</strong> → <code>PasswordCredential</code> (stored-pair autofill).</li>
+    <li><strong>WebAuthn / Passkeys</strong> →
+        <a href="https://developer.mozilla.org/en-US/docs/Web/API/PublicKeyCredential"><code>PublicKeyCredential</code></a>
+        — device-bound public-key auth (FIDO2); biometric/hardware trust anchor, private key never leaves the device
+        (<a href="https://www.w3.org/TR/webauthn-3/">WebAuthn L3</a>).</li>
+    <li><strong>Federated (FedCM)</strong> → <code>IdentityCredential</code> — privacy-preserving "Sign in with X"
+        without third-party cookies/redirects (<a href="https://www.w3.org/TR/fedcm/">FedCM</a>; Chrome 117+,
+        mandatory for Google One&nbsp;Tap since Aug&nbsp;2025).</li>
+    <li><strong>Digital Credentials</strong> → <code>DigitalCredential</code> — wallet-held verifiable identity
+        (mDoc / ISO&nbsp;18013-5, OpenID4VP) for gov ID / age checks
+        (<a href="https://www.w3.org/TR/digital-credentials/">Digital Credentials</a>; Chrome 141 + iOS 26 Safari,
+        Oct&nbsp;2025).</li>
+</ul>
+<p>
+    All four are invoked through the <strong>same</strong>
+    <code>get({ password, publicKey, identity, digital })</code> call and <code>mediation</code> model
+    (<code>silent | optional | required | conditional</code>, plus proposed <code>immediate</code>). The browser owns
+    the chooser UI; the site receives a typed credential and verifies it server-side.
+    <strong>Implication (fork&nbsp;1 &amp; 4):</strong> the platform itself factored identity into <em>one
+    normalized seam + N swappable mechanisms</em> — structurally a <strong>protocol with a provider/predicate
+    seam</strong>, exactly the shape WE minted for the <a href="/protocols/guard/">Guard protocol</a>; not a
+    monolithic project with a baked method.
+</p>
+
+<h3>Finding 2 — authentication is back-end-authoritative; the front-end is a UX mirror</h3>
+<p>
+    Every credential family terminates in <strong>server-side verification</strong> (the RP validates the WebAuthn
+    assertion, exchanges the FedCM token, or decrypts the mDoc response). The browser API only <em>gathers</em> a
+    credential; sessions, tokens, and refresh are off-platform. This is the <strong>identical trust boundary</strong>
+    already stated for the Guard protocol ("enforcement is server-side; the front-end is a UX mirror, never the
+    enforcement point") and for #178. WE's job is therefore to standardize the <strong>UX-only declarative
+    surface</strong> over the gather-a-credential seam — <em>not</em> to own auth, a security domain it must not own.
+</p>
+
+<h3>Finding 3 — the boundary with #009, #178, #129 is clean (three distinct gaps)</h3>
+<ul>
+    <li><strong>#012 (this) — identity / credential acquisition:</strong> <em>who is the user; prove it.</em> Native
+        anchor = Credential Management / WebAuthn / FedCM / Digital Credentials. <strong>Open.</strong></li>
+    <li><strong>#009 webpermissions — browser capability grants:</strong> <em>may the page use the camera / notify?</em>
+        Permissions / Notifications / Push API. A <strong>different</strong> gap (#178 says the two
+        "should not be conflated").</li>
+    <li><strong>#178 access-control — app authorization:</strong> <em>is this identified user allowed here?</em>
+        Already resolved as the <a href="/protocols/guard/">Guard protocol</a> entry-guard + access-gate member.
+        Identity is its <em>upstream</em>.</li>
+</ul>
+<p>
+    So #012 sits cleanly above #178: <strong>identity (who) → authorization (allowed)</strong>. They share the Guard
+    provider-seam <em>pattern</em> but carry different predicates (a credential vs a policy).
+</p>
+
+<h3>Finding 4 — the raw ceremony is verbose, so a library ecosystem exists: that is the adapter case</h3>
+<p>
+    The WebAuthn registration/authentication ceremony (challenge, <code>create()</code>/<code>get()</code>,
+    attestation/assertion verification, base64url ArrayBuffer juggling) is notoriously fiddly, which is why
+    <a href="https://simplewebauthn.dev/">SimpleWebAuthn</a>,
+    <a href="https://github.com/github/webauthn-json"><code>@github/webauthn-json</code></a>,
+    <a href="https://github.com/passwordless-id/webauthn">Passwordless.ID</a>, and full passwordless SDKs
+    (<a href="https://www.hanko.io/">Hanko</a>) exist. <strong>Implication:</strong> a textbook WE layering — a
+    native-first default (the raw ceremony behind a declarative element) with opt-in adapters plugged behind the
+    same provider contract. The only durable lock is the provider/credential contract; the ceremony libs are
+    swappable implementations.
+</p>
+
+<h3>Finding 5 — the UX-shaped slice is small and intent-friendly (grounds fork&nbsp;2)</h3>
+<p>
+    Most of identity is technical (ceremonies, token verification, session storage) → a <strong>Technical
+    Configurator</strong> domain, not an intent. What is UX-shaped is narrow but real: <strong>mediation</strong>
+    (<code>silent | optional | required | conditional | immediate</code> — the autofill-vs-modal-vs-nothing axis,
+    borrow the platform enum verbatim); <strong>credential-request declaration</strong> (which families a sign-in
+    surface accepts); and <strong>auth-state presence</strong> (signed-in / out / pending — the predicate that feeds
+    #178's access provider). These compose existing <a href="/intents/loader/">Loader</a> and
+    <a href="/intents/feedback/">Feedback</a> intents and do not justify a heavy standalone project up front.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/012-gap-5-webidentity-project/">#012 — webidentity project</a></li>
+    <li>Distinct gaps: <a href="/backlog/009-gap-13-webpermissions-project/">#009 webpermissions</a> ·
+        <a href="/backlog/178-access-control-authorization-gate/">#178 access-control</a> (downstream consumer)</li>
+    <li>Reused machinery: <a href="/protocols/guard/">Guard protocol</a> (provider/predicate seam,
+        server-authoritative trust boundary)</li>
+    <li>Composes: <a href="/intents/loader/">Loader</a> · <a href="/intents/feedback/">Feedback</a></li>
+</ul>

@@ -1,0 +1,62 @@
+<h2>Purpose</h2>
+<p>
+  Phase 3 of the <a href="/backlog/315-competitive-coverage-gap-analysis-program/">competitive coverage
+  gap-analysis program</a> (<a href="/backlog/347-capability-mapping-gap-detection/">#347</a>): each
+  capability in the <a href="/research/benchmark-capabilities/">extracted matrix</a> joined to a Web
+  Everything entity and labelled <strong>covered / partial / missing / native-covered</strong>, weighed
+  native-first. This answers the program's question — <em>what is the platform missing?</em> The
+  <code>gaps</code> array feeds phase 4 (<a href="/backlog/348-gap-to-backlog-pipeline/">#348</a>), which
+  files un-tracked gaps as candidate backlog items. Data: <code>src/_data/benchmarkCoverage.json</code>.
+</p>
+
+<h2>Coverage summary</h2>
+<table>
+  <thead><tr><th>Covered</th><th>Native-covered</th><th>Partial</th><th>Missing</th><th>Total</th><th>Fileable gaps</th><th>Already tracked</th></tr></thead>
+  <tbody>
+    <tr>
+      <td>{{ benchmarkCoverage.summary.covered }}</td>
+      <td>{{ benchmarkCoverage.summary.nativeCovered }}</td>
+      <td>{{ benchmarkCoverage.summary.partial }}</td>
+      <td>{{ benchmarkCoverage.summary.missing }}</td>
+      <td>{{ benchmarkCoverage.summary.total }}</td>
+      <td>{{ benchmarkCoverage.summary.fileableGaps }}</td>
+      <td>{{ benchmarkCoverage.summary.alreadyTracked }}</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  <strong>Native-first:</strong> {{ benchmarkCoverage.method.join }}
+</p>
+
+<h2>Gaps (input to #348)</h2>
+<p>Un-tracked partial/missing capabilities, ranked. Each becomes a candidate backlog item in phase 4.</p>
+<table>
+  <thead><tr><th>Rank</th><th>Capability</th><th>Coverage</th><th>Nearest WE entity</th><th>Native anchor</th><th>Gap</th><th>Effort</th></tr></thead>
+  <tbody>
+    {% for g in benchmarkCoverage.gaps %}
+    <tr>
+      <td>{{ g.triage.rank }}</td>
+      <td><strong>{{ g.id }}</strong> &mdash; {{ g.gapNote }}</td>
+      <td>{{ g.coverage }}</td>
+      <td>{% if g.we %}{{ g.we }}{% else %}&mdash; (none){% endif %}</td>
+      <td>{% if g.nativeAnchor %}{{ g.nativeAnchor }}{% else %}&mdash;{% endif %}</td>
+      <td>{{ g.triage.gap }}</td>
+      <td>{{ g.triage.effort }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Already tracked (deduped, not re-filed)</h2>
+<table>
+  <thead><tr><th>Capability</th><th>WE entity</th><th>Tracked by</th><th>Note</th></tr></thead>
+  <tbody>
+    {% for t in benchmarkCoverage.alreadyTracked %}
+    <tr><td><strong>{{ t.id }}</strong></td><td>{{ t.we }}</td><td>#{{ t.trackedBy }}</td><td>{{ t.note }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Skipped (low value, logged not filed)</h2>
+<p>{{ benchmarkCoverage.skippedReason }}</p>
+<p>{% for s in benchmarkCoverage.skippedLowValue %}<code>{{ s }}</code>{% if not loop.last %} · {% endif %}{% endfor %}</p>

@@ -1,0 +1,76 @@
+<h2>The Question</h2>
+<p>
+  <a href="/backlog/093-business-rule-manager-proof-of-compliance/">#093</a> is a Plateau offering to
+  <strong>author, version, govern, and enforce business rules declaratively — and emit an auditable
+  <em>proof of compliance</em> that the rules were applied.</strong> Business rules are broader than input
+  validation ("orders over $X need approval", "EU users require consent"). The differentiator is the proof:
+  not "the rule exists," but "here is the record proving it ran" — what regulated enterprises produce for
+  auditors. This survey grounds the three forks the item names — <strong>home + rule meta-schema · proof
+  format & trust model · enforcement seam</strong> — in open standards so WE adopts vocabulary rather than
+  coining it.
+</p>
+
+<h2>What the survey found</h2>
+
+<h3>1 · Rule meta-schema — two open standards, two audiences</h3>
+<ul>
+  <li><strong><a href="https://www.omg.org/dmn/">DMN — Decision Model and Notation</a> (OMG).</strong> The
+    open standard for declarative business rules: business-friendly <strong>decision tables</strong> + the
+    FEEL expression language, so business users express rules as Excel-like models. Implemented by Drools,
+    Trisotech, OpenRules. The <strong>authoring</strong> vocabulary.</li>
+  <li><strong><a href="https://www.openpolicyagent.org/">Open Policy Agent (OPA) / Rego</a>.</strong>
+    Policy-as-code: a <strong>Policy Decision Point (PDP)</strong> evaluates Rego against input; the service
+    is the <strong>Policy Enforcement Point (PEP)</strong>; <strong>decision logs</strong> store every
+    verdict ("exactly why a decision was made," replayable). The <strong>enforcement + audit</strong>
+    architecture.</li>
+</ul>
+<p>
+  They answer different forks: <strong>DMN is the rule meta-schema</strong> (authoring), <strong>the OPA
+  PDP/PEP + decision-log pattern is the enforcement seam + proof content.</strong> WE's "standardize the
+  meta-schema, not the rule list" doctrine points at adopting DMN's vocabulary; separate-and-decouple cuts
+  the home question — input invalidity (<a href="/backlog/011-gap-4-webpersistence-project/">webvalidation</a>)
+  is a different concern from domain policy, so business rules earn their own home, not an extension.
+</p>
+
+<h3>2 · Proof &amp; trust — a known tamper-evidence ladder, anchored to webtraces</h3>
+<ul>
+  <li><strong>Hash chain</strong> — each record's SHA-256 covers its data + the previous record's hash;
+    history can't be modified without breaking the chain. The baseline.</li>
+  <li><strong><a href="https://www.designgurus.io/answers/detail/how-do-you-design-tamperevident-audit-logs-merkle-trees-hashing">Merkle
+    tree</a></strong> — append-only over all entries; an inclusion proof is O(log n) hashes, not the full
+    log.</li>
+  <li><strong><a href="https://transparency.dev/">Transparency log</a></strong> — anchor the Merkle root
+    externally (the Certificate-Transparency model) for third-party verifiability. Blockchain is the heavy
+    end of the same spectrum — overkill for most.</li>
+</ul>
+<p>
+  The proof <strong>content</strong> is an OPA-style decision log (rule, inputs, verdict, actor, time)
+  <strong>anchored to a webtraces span</strong> — the item's "the trace proving it ran." The compliance-
+  artifact <strong>framing</strong> is
+  <a href="https://www.thoughtworks.com/radar/languages-and-frameworks/open-security-control-assessment-language-oscal">OSCAL</a>
+  (NIST's machine-readable compliance format). So the proof is a <strong>hash-chained (optionally
+  Merkle/transparency-anchored) signed decision log over webtraces, in an OSCAL-aligned artifact.</strong>
+  How far up the ladder to go is the one market-driven judgment.
+</p>
+
+<h3>3 · Enforcement seam — the OPA PDP/PEP split, observed at a trace point</h3>
+<p>
+  OPA answers where rules apply + where enforcement is observed: a <strong>decision point</strong> (PDP)
+  evaluates; <strong>enforcement points</strong> (PEP) attach to actions/components and enforce; the
+  interaction is <strong>logged</strong> (the proof + trace point). Build-time / runtime / gate venues
+  aren't exclusive — most-permissive default supports multiple, with <strong>runtime as the baseline</strong>
+  because that is where proof-of-application is emitted (a build-time-only rule can't prove it ran for a
+  given user/action).
+</p>
+
+<h2>Forks this grounds (see <a href="/backlog/093-business-rule-manager-proof-of-compliance/">#093</a>)</h2>
+<ol>
+  <li><strong>Home + rule meta-schema</strong> — new project (<code>webpolicy</code>) adopting DMN vs extending webvalidation.</li>
+  <li><strong>Proof format &amp; trust</strong> — hash-chained signed decision log over webtraces, OSCAL-aligned; Merkle/transparency anchoring as the strength dial (the divergent call).</li>
+  <li><strong>Enforcement seam</strong> — OPA PDP/PEP, runtime as the baseline proof-emitting venue.</li>
+</ol>
+
+<p style="font-size:0.85em;color:var(--color-text-muted,#94a3b8);">
+  Session report: <code>reports/2026-06-12-business-rule-proof-of-compliance.md</code>. No ruling made
+  here — the decision turn is <code>/next decision</code>.
+</p>

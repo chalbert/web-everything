@@ -1,0 +1,28 @@
+{
+  "id": "c780a2b232065f4e",
+  "contentHash": "c780a2b232065f4ec3020356d0b0afe1142c9c74f83f488b11b83ab4b0f058bc",
+  "sourceUrl": "https://codepen.io/pen/",
+  "captureMethod": "playwright",
+  "reviewState": "ungated",
+  "dateCollected": "2026-06-12T21:52:09.539Z",
+  "datePublished": null,
+  "app": "CodePen",
+  "company": "CodePen",
+  "category": "code-playground",
+  "surface": null,
+  "designRegister": "modern-saas",
+  "theme": "dark",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "dpr": 2,
+  "imageDims": {
+    "width": 2880,
+    "height": 1800
+  },
+  "bytes": 39584,
+  "tags": [],
+  "sourceCredit": "CodePen",
+  "collectionRun": "2026-06-12T21-51-12-668Z"
+}

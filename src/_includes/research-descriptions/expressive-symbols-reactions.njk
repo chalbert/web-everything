@@ -1,0 +1,139 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+  Web Everything has an <a href="/intents/">icon intent</a> for UI iconography, but no standard for
+  <strong>expressive symbols or reactions</strong> — emoji rendering, sticker insertion, and
+  reacting-to-content. Avatar, badge, and tag were deliberately skipped as styling idioms, but these three
+  are genuine whitespace. This survey grounds decision
+  <a href="/backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke/">#370</a>: is this
+  <em>one</em> "expressive symbols" family or <em>several</em> standards, and what does each cover? It
+  surveyed both the web platform (MDN / WHATWG / W3C / WAI-ARIA APG / Unicode UTS&nbsp;#51) and the
+  benchmark design systems (Material&nbsp;3, Carbon, Radix, Fluent, Apple&nbsp;HIG, Atlassian, GitHub
+  Primer, Ant, Lightning, Polaris).
+</p>
+
+<h2>Headline finding — decompose into separate standards, with a provider→consumer seam</h2>
+<p>
+  The strongest evidence comes from the only system that ships all of this first-class.
+  <strong>Atlassian splits it into two packages</strong>:
+  <a href="https://atlaskit.atlassian.com/packages/elements/emoji"><code>@atlaskit/emoji</code></a>
+  (glyph rendering + <code>EmojiPicker</code>) and
+  <a href="https://www.npmjs.com/package/@atlaskit/reactions"><code>@atlaskit/reactions</code></a>.
+  Crucially, <code>reactions</code> <em>imports</em> the emoji provider but is <strong>never merged into
+  it</strong> — reaction <em>depends on</em> emoji as a substrate. GitHub mirrors this conceptually
+  (reactions are a constrained <em>consumer</em> of the emoji set). <strong>No surveyed system bundles
+  reaction + emoji into one primitive.</strong> This matches the repo's standing bias toward
+  separation and its provider-seam pattern: glyph rendering is the provider; reaction is the consumer.
+</p>
+<p>
+  All asset-owning systems also <strong>sharply separate interface icons from emoji</strong>
+  (Octicons / SF Symbols / Material Symbols vs Fluent Emoji / Noto / Twemoji) — evidence that a
+  glyph-rendering standard is a <em>sibling</em> of the icon intent, not a mode of it (icon's axis is
+  size/weight/style; an expressive glyph's axis is presentation/skin-tone/render-strategy/a11y-role).
+</p>
+
+<h2>The four paradigms</h2>
+
+<h3>1 · Expressive-glyph rendering — a new intent (sibling to <code>icon</code>)</h3>
+<ul>
+  <li><strong>Accessibility vocabulary to reuse:</strong> <code>role="img"</code> + <code>aria-label</code>
+    for a <em>meaningful</em> emoji; <code>aria-hidden="true"</code> for a <em>decorative</em> one. (A bare
+    <code>&lt;span&gt;</code> ignores <code>aria-label</code> unless <code>role="img"</code> is also
+    present.)</li>
+  <li><strong>Unicode UTS&nbsp;#51 vocabulary:</strong> <em>variation selector</em> (VS15 <code>U+FE0E</code>
+    text, VS16 <code>U+FE0F</code> emoji presentation); <em>emoji modifier base</em> + skin-tone modifier
+    (Fitzpatrick <code>U+1F3FB–U+1F3FF</code>); <em>ZWJ sequence</em> (<code>U+200D</code>). Surface these
+    as the dimensions rather than inventing names.</li>
+  <li><strong>Render strategy:</strong> native-font (platform-consistent, free, inconsistent across OSes)
+    vs an image set (Twemoji-style <code>&lt;img alt&gt;</code> — cross-platform-consistent, payload cost).
+    <strong>Native-first default; image-set opt-in</strong> (the native-first doctrine).</li>
+  <li><strong>Default a11y policy:</strong> treat a glyph as <em>meaningful</em> by default (require an
+    accessible name) — silently-hidden meaning is the worse failure than a redundant label.</li>
+</ul>
+
+<h3>2 · Picker surface — composed, not a new primitive</h3>
+<ul>
+  <li>Reuse the <code>popover</code> attribute (Open-UI-originated) as the container; <strong>combobox +
+    listbox</strong> APG semantics when searching; a category <strong>grid</strong> when browsing.</li>
+  <li>The canonical accessible recipe (Nolan Lawson) <strong>transforms browse-mode
+    <code>menu</code>/<code>menuitem</code> into <code>listbox</code>/<code>option</code> on search</strong>,
+    with a collapsible skin-tone listbox. That transform is where a11y breaks, so it is the part a standard
+    must specify.</li>
+  <li>Only Atlassian ships a picker as a design-system component; everyone else defers to the OS picker or
+    third parties — which <strong>converge</strong> on search&nbsp;+ category-grid&nbsp;+ skin-tone&nbsp;+
+    recents. So: compose over the existing <a href="/blocks/droplist/">droplist</a> /
+    <a href="/blocks/autocomplete/">autocomplete</a> blocks; the emoji picker and sticker picker are two
+    instances of one surface.</li>
+</ul>
+
+<h3>3 · Sticker — a custom-image-glyph mode, not a fourth peer</h3>
+<p>
+  Only <a href="https://developer.apple.com/design/human-interface-guidelines/imessage-apps-and-stickers">Apple
+  HIG</a> models stickers as a first-class concept. Everywhere else the nearest analog is "custom emoji"
+  (an uploaded image — Slack/Teams/Trello; Atlassian's <code>EmojiUploader</code> models it as custom
+  emoji, <em>not</em> a sticker). The prior art renders an image-glyph and an emoji identically, so model a
+  sticker as a <strong>custom-image-glyph mode of the rendering intent</strong>. Lowest priority of the
+  four.
+</p>
+
+<h3>4 · Reaction interaction — a block + intent (the consumer)</h3>
+<ul>
+  <li><strong>Each reaction = a toggle button</strong> (<code>aria-pressed="true|false"</code>, APG);
+    <strong>count changes announced via a live region</strong> (composes with
+    <a href="/intents/">live-region-status</a>). "Reactions" is the near-universal name.</li>
+  <li><strong>Reference contract</strong> (Atlassian <code>ReactionSummary</code>): <code>count</code>
+    (aggregate) · <code>users[]</code> (who-reacted roster) · <code>reacted</code> (toggle-your-own) ·
+    <code>optimisticallyUpdated</code> · a <code>toggleReaction</code> action · a tooltip user limit. Adopt
+    as the schema baseline.</li>
+  <li><strong>Set policy splits two ways:</strong> constrained-fixed (GitHub's locked 8) vs
+    constrained-default-with-escape-hatch (Atlassian: a quick set + an <code>allowAllEmojis</code> prop
+    opening the full picker). <strong>No major system defaults to a purely free picker.</strong> The
+    most-permissive-default doctrine and real usage both point at the
+    <strong>constrained quick-set + escape hatch</strong>.</li>
+</ul>
+
+<h2>Layer classification (per-fork)</h2>
+<table>
+  <thead><tr><th>Paradigm</th><th>Layer</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>Glyph rendering</td><td>Intent (new, sibling to <code>icon</code>)</td><td>Declarative "what" — render a meaningful symbol; axis differs from icon's size/weight/style.</td></tr>
+    <tr><td>Picker surface</td><td>Block (composed)</td><td>Runnable surface; one instance of a searchable popover grid already covered by droplist/autocomplete.</td></tr>
+    <tr><td>Sticker</td><td>Mode of the glyph intent</td><td>Custom-image-glyph; renders identically to emoji. Not its own standard.</td></tr>
+    <tr><td>Reaction</td><td>Block + Intent</td><td>Ships runnable toggle/aggregate behavior (block) with declarative set/roster dimensions (intent); consumes glyph rendering.</td></tr>
+  </tbody>
+</table>
+<p>
+  <strong>None is a protocol.</strong> There is no swappable-vendor / engine-interop story (the
+  <code>ReactionSummary</code> shape is a data contract, not a multi-vendor conformance surface), so
+  reaching for a protocol would be lock-in for no interop gain.
+</p>
+
+<h2>Recommended decomposition at a glance</h2>
+<table>
+  <thead><tr><th>Standard</th><th>Kind</th><th>Depends on</th><th>Default</th></tr></thead>
+  <tbody>
+    <tr><td>Expressive-glyph rendering</td><td>Intent</td><td>—</td><td>meaningful (<code>role="img"</code>) · native-font</td></tr>
+    <tr><td>Symbol picker</td><td>Block (composed)</td><td>glyph · <code>popover</code> · droplist/autocomplete</td><td>search + grid + skin-tone + recents</td></tr>
+    <tr><td>Reaction</td><td>Block + Intent</td><td>glyph (· picker)</td><td>quick-set + <code>allowAllEmojis</code> escape hatch</td></tr>
+    <tr><td>Sticker</td><td>Mode of glyph</td><td>glyph</td><td>custom-image-glyph w/ alt text</td></tr>
+  </tbody>
+</table>
+
+<h2>Citations</h2>
+<ul>
+  <li><a href="https://www.unicode.org/reports/tr51/">Unicode UTS&nbsp;#51</a> — variation selectors, emoji modifier base, ZWJ sequences.</li>
+  <li><a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/img_role">MDN — <code>img</code> role</a> + <a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-hidden"><code>aria-hidden</code></a> — meaningful vs decorative glyphs.</li>
+  <li><a href="https://www.w3.org/WAI/ARIA/apg/patterns/button/">WAI-ARIA APG — Button (toggle, <code>aria-pressed</code>)</a> and <a href="https://www.w3.org/WAI/ARIA/apg/patterns/combobox/">Combobox</a> patterns.</li>
+  <li><a href="https://open-ui.org/components/combobox.explainer/">Open UI — Combobox explainer</a> — searchable-picker substrate.</li>
+  <li><a href="https://nolanlawson.com/2020/07/01/building-an-accessible-emoji-picker/">Nolan Lawson — accessible emoji picker</a> — browse-menu ↔ search-listbox transform.</li>
+  <li><a href="https://www.npmjs.com/package/@atlaskit/reactions"><code>@atlaskit/reactions</code></a> + <a href="https://atlaskit.atlassian.com/packages/elements/emoji"><code>@atlaskit/emoji</code></a> — the two-package split and <code>ReactionSummary</code> contract.</li>
+  <li><a href="https://developer.apple.com/design/human-interface-guidelines/imessage-apps-and-stickers">Apple HIG — iMessage apps and stickers</a> — the only first-class sticker model.</li>
+</ul>
+
+<p>
+  Decision item: <a href="/backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke/">#370</a>.
+  Sibling candidate: <a href="/backlog/354-status-indicator-badge-intent/">#354 status-indicator / badge</a>
+  (a reaction count chip looks like a badge but means "N people reacted," not "this state" — they compose,
+  they don't merge).
+</p>
+{% endraw %}

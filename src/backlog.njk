@@ -3,6 +3,10 @@ layout: base.njk
 title: Backlog
 ---
 
+{# PARITY RULE: this is the tile index. Anything you expose on a tile here MUST also be exposed on the
+   /backlog/{id}/ detail page (src/backlog-pages.njk) — the detail page is a superset of the tile.
+   Add tile fields to both in the same change. See docs/agent/backlog-workflow.md ("Tile ⊆ detail"). #}
+
 {% from "display-toolbar.njk" import displayToolbar %}
 
 <style>
@@ -30,6 +34,15 @@ title: Backlog
 .bd-legend { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 0.75rem; font-size: 0.82em; color: var(--color-text-muted); }
 .bd-legend span { display: inline-flex; align-items: center; gap: 0.4rem; }
 .bd-legend i { width: 18px; height: 0; border-top-width: 3px; border-top-style: solid; display: inline-block; }
+/* Collapsible top blurb + legends — open by default, state persisted to localStorage (data-persist key). */
+.bk-collapse { margin-bottom: 1.5rem; }
+.bk-collapse > summary { cursor: pointer; font-weight: 600; color: var(--color-text-muted, #64748b); font-size: 0.82em; text-transform: uppercase; letter-spacing: 0.03em; list-style: none; display: inline-flex; align-items: center; gap: 0.4rem; user-select: none; padding: 0.15rem 0; width: fit-content; }
+.bk-collapse > summary::-webkit-details-marker { display: none; }
+.bk-collapse > summary::before { content: "\25B8"; font-size: 0.9em; transition: transform 0.15s ease; }
+.bk-collapse[open] > summary::before { transform: rotate(90deg); }
+.bk-collapse > summary:hover { color: var(--color-text); }
+.bk-collapse[data-persist="intro"] { margin-bottom: 0; }
+.bk-collapse[data-persist="intro"] > summary { margin-top: 0.25rem; }
 </style>
 
 {% macro typeBadge(type) %}
@@ -48,6 +61,53 @@ title: Backlog
 <span title="Estimate: {{ size }} agile point{% if size != 1 %}s{% endif %}" style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.7em; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b);">{{ size }} pt{% if size != 1 %}s{% endif %}</span>
 {% endmacro %}
 
+{# Stand-in for the size badge on an UNSIZED item (an epic rolls its children's points; a task's roll up
+   to its parent) so every tile shows something in the size slot — mirrors the Prioritisation cell. #}
+{% macro workItemBadge(workItem) %}
+<span title="{{ workItem }} — unsized ({% if workItem == 'epic' %}rolls up its child stories{% else %}points roll up to its parent{% endif %})" style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.7em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b);">{{ workItem }}</span>
+{% endmacro %}
+
+{# A child of an epic, drawn as a numbered circle coloured by the SAME agent-readiness palette as the
+   dependency graph nodes (resolved=grey · active=blue · ready=green · decision=amber · not-ready=slate),
+   so the epic tile reads at a glance like a mini constellation of its slices. Sits above the card's
+   overlay link (z-index 2) so each circle is independently clickable. #}
+{% macro childCircle(child) %}
+{% set bg = "#f1f5f9" %}{% set bd = "#94a3b8" %}{% set fg = "#475569" %}
+{% if child.status == 'resolved' %}{% set bg = "#f8fafc" %}{% set bd = "#cbd5e1" %}{% set fg = "#94a3b8" %}
+{% elif child.status == 'active' %}{% set bg = "#dbeafe" %}{% set bd = "#2563eb" %}{% set fg = "#1e40af" %}
+{% elif child.tier == 'A' %}{% set bg = "#dcfce7" %}{% set bd = "#16a34a" %}{% set fg = "#166534" %}
+{% elif child.tier == 'B' %}{% set bg = "#fef3c7" %}{% set bd = "#d97706" %}{% set fg = "#92400e" %}{% endif %}
+<a href="/backlog/{{ child.id }}/" title="#{{ child.num }} {{ child.title }} · {% if child.size %}{{ child.size }} pt{% if child.size != 1 %}s{% endif %}{% else %}{{ child.workItem }}{% endif %} · {{ child.status }}" style="position: relative; z-index: 2; display: inline-flex; align-items: center; justify-content: center; min-width: 1.7rem; height: 1.7rem; padding: 0 0.35rem; border-radius: 9999px; background: {{ bg }}; border: 1.5px solid {{ bd }}; color: {{ fg }}; font-size: 0.72em; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none;">{{ child.num }}</a>
+{% endmacro %}
+
+{# A prerequisite (`blockedBy`) drawn as a pill: a still-open blocker is red with ⛔ (it's what's holding
+   this item back), a resolved one is green with ✓ (cleared — kept so the dependency reads in full). Sits
+   above the card overlay (z-index 2) so it stays clickable. #}
+{% macro blockerChip(b) %}
+{% if b.status == 'resolved' %}
+<a href="/backlog/{{ b.id }}/" title="#{{ b.num }} {{ b.title }} · resolved — cleared" style="position: relative; z-index: 2; display: inline-flex; align-items: center; gap: 0.15rem; padding: 0.05rem 0.45rem; border-radius: 9999px; font-size: 0.72em; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none; background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0;">&#10003; #{{ b.num }}</a>
+{% else %}
+<a href="/backlog/{{ b.id }}/" title="#{{ b.num }} {{ b.title }} · {{ b.status }} — still blocking" style="position: relative; z-index: 2; display: inline-flex; align-items: center; gap: 0.15rem; padding: 0.05rem 0.45rem; border-radius: 9999px; font-size: 0.72em; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca;">&#9940; #{{ b.num }}</a>
+{% endif %}
+{% endmacro %}
+
+{# The "unsliced" badge for a childless epic — when the author has recorded a `childlessReason` it reads
+   "unsliced · <why>" with a colour + tooltip from childlessReasonMeta; otherwise a bare "unsliced". #}
+{% macro unslicedBadge(reason) %}
+{% set m = childlessReasonMeta[reason] %}
+{% if m %}<span title="{{ m.tip }}" style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.7em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: {{ m.bg }}; color: {{ m.fg }};">unsliced &middot; {{ m.label }}</span>{% else %}<span title="Unsliced epic — no child stories cut yet, and no reason recorded (add a childlessReason)." style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.7em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #f1f5f9; color: #64748b;">unsliced</span>{% endif %}
+{% endmacro %}
+
+{# Why a childless epic has no child stories yet — author-supplied (`childlessReason`), since the reason
+   lives in the body, not in derivable fields. Rendered as an at-a-glance badge on the tile. `blocked` is
+   the one case also shown structurally (the red Blocked-by row), so its badge stays muted. #}
+{% set childlessReasonMeta = {
+  "blocked":   { label: "blocked",         bg: "#fef2f2", fg: "#991b1b", tip: "No child stories yet — it's waiting on the prerequisites in the Blocked-by row. The slices can't be cut until those clear." },
+  "undecided": { label: "needs decisions", bg: "#fef3c7", fg: "#92400e", tip: "No child stories yet — open design decisions determine where the slices fall. Resolve them and it splits into stories." },
+  "untriaged": { label: "needs triage",    bg: "#ede9fe", fg: "#5b21b6", tip: "No child stories yet — a holding-pen of candidates; each must be triaged (promote / fold / drop) before any become stories." },
+  "program":   { label: "ongoing program", bg: "#e0f2fe", fg: "#075985", tip: "No child stories by design — a continuous program measured by progress, not a fixed set of child stories." }
+} %}
+
 {# Tier labels & one-line meaning — kept in one place so the chip, the card badge, and its tooltip stay in sync. #}
 {% set tierLabel = { "A": "Agent-ready", "B": "Decision-ready", "C": "Not ready" } %}
 {% set tierMeaning = { "A": "issue/idea with all prerequisites resolved — nothing structural blocks an agent starting", "B": "a decision awaiting a nod — ratify it, then it's a quick build", "C": "needs design or is blocked — an issue/idea with an unresolved prerequisite, or a review" } %}
@@ -61,7 +121,10 @@ title: Backlog
 
 <section class="intro">
     <h1>Backlog</h1>
-    <p>The single source of truth for ideas, issues, decisions, and reviews across Web Everything. Each item is one markdown file in <code>backlog/</code>, completely dynamic — its title, summary, and detail come from markdown (the item's own body, or a related report it mirrors), never hand-typed. Open questions raised on the standards' own pages are collected live below. Deep thinking stays in <code>reports/</code> — a backlog item links out to it or mirrors it.</p>
+    <details class="bk-collapse" data-persist="intro" open>
+        <summary>About the backlog</summary>
+        <p>The single source of truth for ideas, issues, decisions, and reviews across Web Everything. Each item is one markdown file in <code>backlog/</code>, completely dynamic — its title, summary, and detail come from markdown (the item's own body, or a related report it mirrors), never hand-typed. Open questions raised on the standards' own pages are collected live below. Deep thinking stays in <code>reports/</code> — a backlog item links out to it or mirrors it.</p>
+    </details>
 </section>
 
 <div class="backlog-tabs" role="tablist" aria-label="Backlog views">
@@ -85,6 +148,10 @@ title: Backlog
 {% set tierOrder = ["A", "B", "C"] %}
 {% set tierChips = [] %}
 {% for t in tierOrder %}{% if (backlog | where("tier", t) | length) %}{% set tierChips = (tierChips.push(t), tierChips) %}{% endif %}{% endfor %}
+{# Work-item kinds present (epic / story / task); chip lets you filter to e.g. just epics. #}
+{% set workItemOrder = ["epic", "story", "task"] %}
+{% set workItemChips = [] %}
+{% for w in workItemOrder %}{% if (backlog | where("workItem", w) | length) %}{% set workItemChips = (workItemChips.push(w), workItemChips) %}{% endif %}{% endfor %}
 <section class="mb-12">
     <h2 class="section-title">Tracked work <span class="count-badge" data-count-target>{{ backlog | length }}</span></h2>
     <p class="section-desc">Ideas, issues, decisions, and reviews — ordered by status. Filter by status, type, or keyword, or switch to a compact list. Resolved items are hidden by default.</p>
@@ -114,18 +181,75 @@ title: Backlog
                 {% endfor %}
             </div>
             {% endif %}
+            {% if workItemChips | length %}
+            <div class="status-filter" role="group" aria-label="Filter by work item">
+                {% for w in workItemChips %}
+                <button type="button" class="status-filter-chip" data-workitem-chip="{{ w }}" aria-pressed="true" title="{% if w == 'epic' %}umbrella — rolls up child stories{% elif w == 'story' %}an independently valuable, sized deliverable{% else %}bounded sub-work under a parent{% endif %}">{{ w | title }}</button>
+                {% endfor %}
+            </div>
+            {% endif %}
         </div>
         {{ displayToolbar("backlog") }}
     </div>
+    {# Legend for the "Contains" circles on epic tiles — each child is a numbered circle coloured by the
+       SAME agent-readiness palette as the dependency-graph nodes. Only shown if some epic has children. #}
+    {% set hasEpicChildren = false %}
+    {% for item in backlog %}{% if item.children | length %}{% set hasEpicChildren = true %}{% endif %}{% endfor %}
+    {% if hasEpicChildren %}
+    <details class="bk-collapse" data-persist="legend-epic-children" open>
+    <summary>Readiness legend</summary>
+    <div class="epic-children-legend" style="display:flex; flex-wrap:wrap; align-items:center; gap:0.4rem 1rem; margin:0.5rem 0 1rem; font-size:0.8em; color:var(--color-text-muted);">
+        <span style="flex-basis:100%; font-weight:600;">Epic tiles list the items they <strong style="text-transform:uppercase; letter-spacing:0.03em; font-weight:700;">contain</strong> as numbered circles, coloured by readiness:</span>
+        <span style="display:inline-flex; align-items:center; gap:0.35rem;"><span style="width:14px; height:14px; border-radius:50%; background:#dcfce7; border:1.5px solid #16a34a;"></span><strong style="color:#166534;">Agent-ready</strong></span>
+        <span style="display:inline-flex; align-items:center; gap:0.35rem;"><span style="width:14px; height:14px; border-radius:50%; background:#fef3c7; border:1.5px solid #d97706;"></span><strong style="color:#92400e;">Decision-ready</strong></span>
+        <span style="display:inline-flex; align-items:center; gap:0.35rem;"><span style="width:14px; height:14px; border-radius:50%; background:#f1f5f9; border:1.5px solid #94a3b8;"></span><strong style="color:#475569;">Not ready</strong></span>
+        <span style="display:inline-flex; align-items:center; gap:0.35rem;"><span style="width:14px; height:14px; border-radius:50%; background:#dbeafe; border:1.5px solid #2563eb;"></span><strong style="color:#1e40af;">In progress</strong></span>
+        <span style="display:inline-flex; align-items:center; gap:0.35rem;"><span style="width:14px; height:14px; border-radius:50%; background:#f8fafc; border:1.5px solid #cbd5e1;"></span>Resolved</span>
+    </div>
+    </details>
+    {% endif %}
+    {# Legend for the `unsliced · <why>` badge — why a childless epic has no child stories yet. Only shown
+       if some childless epic carries a recorded reason. Colours match childlessReasonMeta / the badges. #}
+    {% set hasUnslicedReason = false %}
+    {% for item in backlog %}{% if item.workItem == 'epic' and not (item.children | length) and item.childlessReason %}{% set hasUnslicedReason = true %}{% endif %}{% endfor %}
+    {% if hasUnslicedReason %}
+    <details class="bk-collapse" data-persist="legend-unsliced" open>
+    <summary>Epic status legend</summary>
+    <div class="unsliced-legend" style="display:flex; flex-wrap:wrap; align-items:center; gap:0.4rem 1rem; margin:0.5rem 0 1rem; font-size:0.8em; color:var(--color-text-muted);">
+        <span style="flex-basis:100%; font-weight:600;">An <strong style="text-transform:uppercase; letter-spacing:0.03em; font-weight:700;">unsliced</strong> epic has no child stories cut yet; the tag says <em>why</em>:</span>
+        {% for key, m in childlessReasonMeta %}
+        <span style="display:inline-flex; align-items:center; gap:0.4rem;" title="{{ m.tip }}"><span style="padding:0.05rem 0.45rem; border-radius:9999px; font-size:0.92em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:{{ m.bg }}; color:{{ m.fg }};">{{ m.label }}</span><span>{% if key == 'blocked' %}waiting on prerequisites (see Blocked-by){% elif key == 'undecided' %}open decisions set where the slices fall{% elif key == 'untriaged' %}candidates to promote / fold / drop first{% else %}continuous program — no fixed child stories{% endif %}</span></span>
+        {% endfor %}
+        <span style="flex-basis:100%; font-weight:600; margin-top:0.2rem;">A <em>storied</em> epic (one with child slices) may also flag its completion state:</span>
+        <span style="display:inline-flex; align-items:center; gap:0.4rem;" title="Every child slice is resolved but the epic is still open — its scope looks delivered. Review the epic: resolve it, or add the remaining child work."><span style="padding:0.05rem 0.45rem; border-radius:9999px; font-size:0.92em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#dcfce7; color:#166534;">all slices done</span><span>every child resolved — review &amp; resolve the epic (or add stories)</span></span>
+        <span style="display:inline-flex; align-items:center; gap:0.4rem;" title="The epic is resolved but some child slice is still open — a contradiction. Reopen the epic, re-parent, or resolve the children."><span style="padding:0.05rem 0.45rem; border-radius:9999px; font-size:0.92em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#fef2f2; color:#991b1b;">&#9888; open slice</span><span>epic resolved but a child is still open — contradiction to fix</span></span>
+    </div>
+    </details>
+    {% endif %}
     <div class="project-grid">
         {% for group in statusOrder %}{% for item in backlog %}{% if item.status == group %}
-        <div class="project-card" data-status="{{ item.status }}" data-type="{{ item.type }}" data-size="{{ item.size }}" data-tier="{{ item.tier }}">
+        <div class="project-card" data-status="{{ item.status }}" data-type="{{ item.type }}" data-size="{{ item.size }}" data-tier="{{ item.tier }}" data-workitem="{{ item.workItem }}">
             <a href="/backlog/{{ item.id }}/" class="project-card-link" aria-label="View {{ item.title }}"></a>
             <div class="project-header" style="margin-bottom: 0.4rem;">
                 <h3 class="project-title" style="margin: 0; font-size: 1.05em;">{% if item.num %}<span style="color: var(--color-text-muted, #94a3b8); font-weight: 600; font-variant-numeric: tabular-nums;">#{{ item.num }}</span> {% endif %}{{ item.title }}</h3>
             </div>
-            <div class="backlog-badges" style="margin-bottom: 0.6rem; display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">{{ typeBadge(item.type) }}{{ statusBadge(item.status) }}{% if item.size %}{{ sizeBadge(item.size) }}{% endif %}{{ tierBadge(item.tier) }}</div>
+            <div class="backlog-badges" style="margin-bottom: 0.6rem; display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;">{{ typeBadge(item.type) }}{{ statusBadge(item.status) }}{% if item.workItem == 'epic' %}{{ workItemBadge('epic') }}{% if item.size %}{{ sizeBadge(item.size) }}{% endif %}{% elif item.size %}{{ sizeBadge(item.size) }}{% elif item.workItem %}{{ workItemBadge(item.workItem) }}{% endif %}{{ tierBadge(item.tier) }}{% if item.workItem == 'epic' %}{% if not (item.children | length) %}{{ unslicedBadge(item.childlessReason) }}{% elif item.openChildCount == 0 and (item.status == 'open' or item.status == 'active') %}<span title="Every child slice is resolved but the epic is still open — its scope looks delivered. Resolve it, or add the remaining child work." style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.7em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #dcfce7; color: #166534;">all slices done</span>{% elif item.openChildCount and item.status == 'resolved' %}<span title="The epic is resolved but {{ item.openChildCount }} child slice(s) are still open — a contradiction. Reopen the epic, re-parent, or resolve the children." style="padding: 0.1rem 0.5rem; border-radius: 9999px; font-size: 0.7em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #fef2f2; color: #991b1b;">&#9888; {{ item.openChildCount }} open slice{% if item.openChildCount != 1 %}s{% endif %}</span>{% endif %}{% endif %}</div>
+            {% if item.blockers | length %}
+            {# Prerequisites (`blockedBy`) on every tile — open ones (red ⛔) are why an item is Not-ready;
+               for an unsliced epic they double as "why it's empty". Resolved ones (green ✓) show the edge
+               was satisfied. #}
+            <div class="backlog-blockers" style="position: relative; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; margin: 0 0 0.6rem;">
+                <span style="font-size: 0.72em; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.03em; font-weight: 600;">Blocked by</span>
+                {% for b in item.blockers %}{{ blockerChip(b) }}{% endfor %}
+            </div>
+            {% endif %}
             <p class="backlog-summary" style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ item.summary }}</p>
+            {% if item.children | length %}
+            <div class="epic-children" style="position: relative; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; margin: 0 0 0.75rem;">
+                <span style="font-size: 0.72em; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.03em; font-weight: 600;">Contains</span>
+                {% for child in item.children %}{{ childCircle(child) }}{% endfor %}
+            </div>
+            {% endif %}
             <div class="backlog-meta">
                 {% if item.tags %}
                 <div style="display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 0.75rem;">
@@ -192,17 +316,22 @@ title: Backlog
 {% set countBatch = backlog | where("batchable", true) | length %}
 {% set countA = backlog | where("tier", "A") | length %}
 {% set countB = backlog | where("tier", "B") | length %}
+{% set countPrepared = backlog.countPreparedB %}
 {% set countC = backlog | where("tier", "C") | length %}
+{% set pointsBatch = backlog.pointsBatch %}
+{% set pointsA = backlog.pointsTierA %}
+{% set pointsB = backlog.pointsTierB %}
+{% set pointsC = backlog.pointsTierC %}
 <section class="mb-12">
     <h2 class="section-title">Prioritisation <span class="count-badge">{{ leverageCount }}</span></h2>
     <p class="section-desc">Every <strong>open</strong> item, sortable — ranked by default by <strong>how much work resolving it would unblock</strong> (the inverse of the <code>blockedBy</code> edges, computed deterministically from structured fields only, no LLM). <strong>Frees now</strong> counts the items this is the <em>last</em> open prerequisite for — resolving it flips them to agent-ready. <strong>Gates (chain)</strong> counts every open item it ultimately blocks, directly or transitively. The <strong>Readiness</strong> column is the agent-readiness tier; sort by it to surface the batchable work.</p>
     <div style="display:flex; gap:0.6rem; flex-wrap:wrap; align-items:center; margin:0 0 1rem; font-size:0.85em;">
-        <button type="button" data-pfilter="batchable" aria-pressed="false" title="Click to filter the table to the batch pool. Batchable (deterministic) — the candidate set a points-budgeted batch may pack: a Tier-A task or a story of size ≤ 5. The budget packs smallest-first, reaching a single size·5 when the remaining points fit. Story ≥8 and any epic are never packed." style="cursor:pointer; appearance:none; border:2px solid transparent; display:inline-flex; align-items:center; gap:0.4rem; padding:0.25rem 0.6rem; border-radius:9999px; background:#166534; color:#fff; font:inherit; font-size:1em; font-weight:700;">{{ countBatch }} batchable <span style="font-weight:600; opacity:0.85;">(≤5 pool)</span></button>
-        <button type="button" data-pfilter="batchable,agentready" aria-pressed="false" title="Click to filter the table to all agent-ready (Tier A). An issue/idea with every prerequisite resolved; startable now. Includes ready-but-large stories/epics (story ≥8) that are beyond the batch pool." style="cursor:pointer; appearance:none; border:2px solid transparent; display:inline-flex; align-items:center; gap:0.4rem; padding:0.25rem 0.6rem; border-radius:9999px; background:#dcfce7; color:#166534; font:inherit; font-size:1em; font-weight:700;">{{ countA }} agent-ready <span style="font-weight:600; opacity:0.8;">(Tier A)</span></button>
-        <button type="button" data-pfilter="decision" aria-pressed="false" title="Click to filter to decision-ready (Tier B) — a decision/review awaiting a nod; ratify it, then the build it gates becomes agent-ready." style="cursor:pointer; appearance:none; border:2px solid transparent; display:inline-flex; align-items:center; gap:0.4rem; padding:0.25rem 0.6rem; border-radius:9999px; background:#fef3c7; color:#92400e; font:inherit; font-size:1em; font-weight:700;">{{ countB }} decision-ready <span style="font-weight:600; opacity:0.8;">(Tier B)</span></button>
-        <button type="button" data-pfilter="notready" aria-pressed="false" title="Click to filter to not ready (Tier C) — an issue/idea that still has an open prerequisite, or a review; clear its blocker first." style="cursor:pointer; appearance:none; border:2px solid transparent; display:inline-flex; align-items:center; gap:0.4rem; padding:0.25rem 0.6rem; border-radius:9999px; background:#f1f5f9; color:#475569; font:inherit; font-size:1em; font-weight:700;">{{ countC }} not ready <span style="font-weight:600; opacity:0.8;">(Tier C)</span></button>
+        <button type="button" data-pfilter="batchable" aria-pressed="false" title="Click to filter the table to the batch pool. Batchable (deterministic) — the candidate set a points-budgeted batch may pack: a Tier-A task or a story of size ≤ 8. The budget packs smallest-first, reaching a single size·8 when the remaining points fit. Story ≥13 and any epic are never packed." style="cursor:pointer; appearance:none; border:2px solid transparent; display:inline-flex; align-items:center; gap:0.4rem; padding:0.25rem 0.6rem; border-radius:9999px; background:#166534; color:#fff; font:inherit; font-size:1em; font-weight:700;">{{ countBatch }} batchable <span style="font-weight:600; opacity:0.85;">(≤8 pool · {{ pointsBatch }} pts)</span></button>
+        <button type="button" data-pfilter="batchable,agentready" aria-pressed="false" title="Click to filter the table to all agent-ready (Tier A). An issue/idea with every prerequisite resolved; startable now. Includes ready-but-large stories/epics (story ≥13) that are beyond the batch pool." style="cursor:pointer; appearance:none; border:2px solid transparent; display:inline-flex; align-items:center; gap:0.4rem; padding:0.25rem 0.6rem; border-radius:9999px; background:#dcfce7; color:#166534; font:inherit; font-size:1em; font-weight:700;">{{ countA }} agent-ready <span style="font-weight:600; opacity:0.8;">(Tier A · {{ pointsA }} pts)</span></button>
+        <button type="button" data-pfilter="decision" aria-pressed="false" title="Click to filter to decision-ready (Tier B) — a decision/review awaiting a nod; ratify it, then the build it gates becomes agent-ready. A ✓ prepared one has its forks researched + options stated (preparedDate) — ready to ratify, not research." style="cursor:pointer; appearance:none; border:2px solid transparent; display:inline-flex; align-items:center; gap:0.4rem; padding:0.25rem 0.6rem; border-radius:9999px; background:#fef3c7; color:#92400e; font:inherit; font-size:1em; font-weight:700;">{{ countB }} decision-ready <span style="font-weight:600; opacity:0.8;">(Tier B · {{ pointsB }} pts{% if countPrepared %} · <span style="color:#15803d;">{{ countPrepared }} ✓ prepared</span>{% endif %})</span></button>
+        <button type="button" data-pfilter="notready" aria-pressed="false" title="Click to filter to not ready (Tier C) — an issue/idea that still has an open prerequisite, or a review; clear its blocker first." style="cursor:pointer; appearance:none; border:2px solid transparent; display:inline-flex; align-items:center; gap:0.4rem; padding:0.25rem 0.6rem; border-radius:9999px; background:#f1f5f9; color:#475569; font:inherit; font-size:1em; font-weight:700;">{{ countC }} not ready <span style="font-weight:600; opacity:0.8;">(Tier C · {{ pointsC }} pts)</span></button>
     </div>
-    <p class="section-desc" style="margin:-0.5rem 0 1rem; font-size:0.82em;"><strong style="color:#166534;">Batchable</strong> = the batch pool — <strong>Tier A</strong> (issue/idea with every prerequisite resolved) <em>and</em> small enough to chain: a <strong>task</strong> or a <strong>story&nbsp;≤&nbsp;5&nbsp;pts</strong>. A points-budgeted batch packs from this set smallest-first, reaching a single <code>size·5</code> when the remaining points fit. Only <strong>story&nbsp;≥&nbsp;8</strong> and any <strong>epic</strong> are agent-ready but <em>never</em> batched. All computed deterministically from the <code>type</code>/<code>blockedBy</code>/<code>size</code> fields — no LLM.</p>
+    <p class="section-desc" style="margin:-0.5rem 0 1rem; font-size:0.82em;"><strong style="color:#166534;">Batchable</strong> = the batch pool — <strong>Tier A</strong> (issue/idea with every prerequisite resolved) <em>and</em> small enough to chain: a <strong>task</strong> or a <strong>story&nbsp;≤&nbsp;8&nbsp;pts</strong>. A points-budgeted batch packs from this set smallest-first, reaching a single <code>size·8</code> when the remaining points fit. Only <strong>story&nbsp;≥&nbsp;13</strong> and any <strong>epic</strong> are agent-ready but <em>never</em> batched. All computed deterministically from the <code>type</code>/<code>blockedBy</code>/<code>size</code> fields — no LLM.</p>
     {% if leverageCount %}
     {# Higher rank = more ready, so first-click (descending, like the other numeric columns) puts
        Agent-ready on top. Value is a hidden sort key only — never shown. #}
@@ -213,8 +342,8 @@ title: Backlog
     <div class="ptable-filter" style="display:flex; gap:0.6rem 1rem; flex-wrap:wrap; align-items:center; margin-bottom:0.75rem;">
         <input type="search" data-ptable-search placeholder="Filter by # or title…" aria-label="Filter the table by id or title" style="appearance:none; border:1px solid var(--color-border); border-radius:0.4rem; padding:0.3rem 0.6rem; font:inherit; font-size:0.85em; min-width:200px;">
         <div class="status-filter" role="group" aria-label="Filter by readiness">
-            <button type="button" class="status-filter-chip" data-pready="batchable" aria-pressed="true" title="The batch pool — Tier-A task or story ≤5; a points-budgeted batch packs from here">Batchable</button>
-            <button type="button" class="status-filter-chip" data-pready="agentready" aria-pressed="true" title="Tier A but beyond the batch pool (story ≥8 / epic)">Agent-ready</button>
+            <button type="button" class="status-filter-chip" data-pready="batchable" aria-pressed="true" title="The batch pool — Tier-A task or story ≤8; a points-budgeted batch packs from here">Batchable</button>
+            <button type="button" class="status-filter-chip" data-pready="agentready" aria-pressed="true" title="Tier A but beyond the batch pool (story ≥13 / epic)">Agent-ready</button>
             <button type="button" class="status-filter-chip" data-pready="decision" aria-pressed="true" title="Tier B — a decision/review to ratify">Decision-ready</button>
             <button type="button" class="status-filter-chip" data-pready="notready" aria-pressed="true" title="Tier C — has an open prerequisite, or a review">Not ready</button>
         </div>
@@ -230,8 +359,8 @@ title: Backlog
         <thead><tr>
             <th data-sort-key="item" data-sort-type="num" style="text-align:left;">Item <span class="sort-ind"></span></th>
             <th data-sort-key="type" data-sort-type="text" title="idea / issue / decision / review">Type <span class="sort-ind"></span></th>
-            <th data-sort-key="size" data-sort-type="num" title="Agile points — a story carries Fibonacci size (1/2/3/5/8/13); a task is unsized; an epic rolls up its children. Batchable = task or story ≤5.">Size <span class="sort-ind"></span></th>
-            <th data-sort-key="readiness" data-sort-type="num" title="Agent-readiness tier — sorts Batchable (task or story ≤5) first, then Agent-ready (A), Decision-ready (B), Not-ready (C)">Readiness <span class="sort-ind"></span></th>
+            <th data-sort-key="size" data-sort-type="num" title="Agile points — a story carries Fibonacci size (1/2/3/5/8/13); a task is unsized; an epic rolls up its children. Batchable = task or story ≤8.">Size <span class="sort-ind"></span></th>
+            <th data-sort-key="readiness" data-sort-type="num" title="Agent-readiness tier — sorts Batchable (task or story ≤8) first, then Agent-ready (A), Decision-ready (B), Not-ready (C)">Readiness <span class="sort-ind"></span></th>
             <th data-sort-key="frees" data-sort-type="num" title="Open items this is the last open prerequisite for — resolving it flips them to agent-ready">Frees now <span class="sort-ind"></span></th>
             <th data-sort-key="gates" data-sort-type="num" title="Every open item this one ultimately blocks, directly or transitively">Gates (chain) <span class="sort-ind"></span></th>
             <th data-sort-key="direct" data-sort-type="num" title="Open items directly blocked by this one">Direct <span class="sort-ind"></span></th>
@@ -245,7 +374,7 @@ title: Backlog
                 </td>
                 <td data-sort-val="{{ item.type }}">{{ typeBadge(item.type) }}</td>
                 <td data-sort-val="{{ item.size if item.size else 0 }}">{% if item.size %}{{ sizeBadge(item.size) }}{% else %}<span title="{{ item.workItem }} — unsized ({% if item.workItem == 'epic' %}rolls up its child stories{% else %}points roll up to a parent{% endif %})" style="font-size:0.78em; color:var(--color-text-muted, #94a3b8);">{{ item.workItem }}</span>{% endif %}</td>
-                <td data-sort-val="{{ 4 if item.batchable else (tierRank[item.tier] if item.tier else 0) }}">{{ tierBadge(item.tier) }}{% if item.batchable %} <span title="Batchable — a Tier-A task or story ≤5; a points-budgeted batch packs from this pool when the remaining budget fits." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#166534; color:#fff; white-space:nowrap;">batch</span>{% endif %}</td>
+                <td data-sort-val="{{ 4 if item.batchable else (2.5 if (item.tier == 'B' and item.preparedDate) else (tierRank[item.tier] if item.tier else 0)) }}">{{ tierBadge(item.tier) }}{% if item.batchable %} <span title="Batchable — a Tier-A task or story ≤8; a points-budgeted batch packs from this pool when the remaining budget fits." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#166534; color:#fff; white-space:nowrap;">batch</span>{% endif %}{% if item.tier == 'B' and item.preparedDate %} <span title="Prepared — its forks are researched (research published as a /research/ topic), each with options + a bold default, and preparedDate is set. Ready to ratify, not research; sorts above un-prepared decisions." style="padding:0.05rem 0.4rem; border-radius:9999px; font-size:0.62em; font-weight:700; text-transform:uppercase; letter-spacing:0.03em; background:#15803d; color:#fff; white-space:nowrap;">✓ ready</span>{% endif %}</td>
                 <td style="font-weight: 700;{% if item.unblocksToReady %} color: #166534;{% endif %}" data-sort-val="{{ item.unblocksToReady }}">{{ item.unblocksToReady }}</td>
                 <td data-sort-val="{{ item.transitiveUnblocks }}">{{ item.transitiveUnblocks }}</td>
                 <td data-sort-val="{{ item.directUnblocks }}">{{ item.directUnblocks }}</td>
@@ -275,8 +404,8 @@ title: Backlog
     <p>No <code>blockedBy</code> edges yet — nothing to graph. As items declare prerequisites, the dependency network appears here.</p>
     {% else %}
     <div class="bg-legend" style="display:flex; gap:1.2rem; flex-wrap:wrap; align-items:center; margin-bottom:0.5rem; font-size:0.85em; color:var(--color-text-muted);">
-        <span style="display:inline-flex; align-items:center; gap:0.35rem;" title="Tier A — an issue/idea whose every prerequisite is already resolved. An agent can start it now (but a large one — story ≥8 / epic — is beyond the batch pool)."><span style="width:14px;height:14px;border-radius:50%;background:#dcfce7;border:2px solid #16a34a;"></span><strong style="color:#166534;">Agent-ready</strong> — startable now</span>
-        <span style="display:inline-flex; align-items:center; gap:0.35rem;" title="Batchable — a Tier-A task or story ≤5; a points-budgeted batch packs from this pool. Shown with a detached green ring. A subset of agent-ready."><span style="position:relative; width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center;"><span style="position:absolute; width:16px;height:16px;border-radius:50%;border:1.5px solid #16a34a;"></span><span style="width:9px;height:9px;border-radius:50%;background:#dcfce7;border:2px solid #16a34a;"></span></span><strong style="color:#166534;">Batchable</strong> — ready &amp; small (ring)</span>
+        <span style="display:inline-flex; align-items:center; gap:0.35rem;" title="Tier A — an issue/idea whose every prerequisite is already resolved. An agent can start it now (but a large one — story ≥13 / epic — is beyond the batch pool)."><span style="width:14px;height:14px;border-radius:50%;background:#dcfce7;border:2px solid #16a34a;"></span><strong style="color:#166534;">Agent-ready</strong> — startable now</span>
+        <span style="display:inline-flex; align-items:center; gap:0.35rem;" title="Batchable — a Tier-A task or story ≤8; a points-budgeted batch packs from this pool. Shown with a detached green ring. A subset of agent-ready."><span style="position:relative; width:16px; height:16px; display:inline-flex; align-items:center; justify-content:center;"><span style="position:absolute; width:16px;height:16px;border-radius:50%;border:1.5px solid #16a34a;"></span><span style="width:9px;height:9px;border-radius:50%;background:#dcfce7;border:2px solid #16a34a;"></span></span><strong style="color:#166534;">Batchable</strong> — ready &amp; small (ring)</span>
         <span style="display:inline-flex; align-items:center; gap:0.35rem;" title="Tier B — a decision/review. Ratify the call first, then the build it gates becomes agent-ready."><span style="width:14px;height:14px;border-radius:50%;background:#fef3c7;border:2px solid #d97706;"></span><strong style="color:#92400e;">Decision-ready</strong> — ratify, then build</span>
         <span style="display:inline-flex; align-items:center; gap:0.35rem;" title="Tier C — an issue/idea that still has an open prerequisite (or a review). Clear its blocker(s) first."><span style="width:14px;height:14px;border-radius:50%;background:#f1f5f9;border:2px solid #94a3b8;"></span><strong style="color:#475569;">Not ready</strong> — has an open blocker</span>
         <span style="display:inline-flex; align-items:center; gap:0.35rem;" title="Claimed — an agent is actively working it (status: active)."><span style="width:14px;height:14px;border-radius:50%;background:#dbeafe;border:2px solid #2563eb;"></span><strong style="color:#1e40af;">In progress</strong> — claimed</span>
@@ -364,6 +493,20 @@ title: Backlog
     </section>
 </div>{# /#panel-burndown #}
 
+<script>
+// Persist the open/closed state of the collapsible blurb + legends (open by default).
+(function () {
+    document.querySelectorAll('details.bk-collapse[data-persist]').forEach(function (d) {
+        var key = 'backlog:collapse:' + d.dataset.persist;
+        var saved = localStorage.getItem(key);
+        if (saved === 'closed') d.open = false;
+        else if (saved === 'open') d.open = true;
+        d.addEventListener('toggle', function () {
+            localStorage.setItem(key, d.open ? 'open' : 'closed');
+        });
+    });
+})();
+</script>
 <script src="/assets/js/home-display.js"></script>
 <script src="/assets/js/backlog-burndown.js"></script>
 <script src="/assets/js/backlog-graph.js"></script>

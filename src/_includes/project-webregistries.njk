@@ -172,3 +172,94 @@ adminIcons.define('menu', '<svg viewBox="0 0 24 24">...<!-- Admin Menu --></svg>
         </p>
     </div>
 </section>
+
+<section id="protocol-provider-consumer-graph" class="section-card">
+    <h3 id="provider-consumer-graph-heading">Provider–Consumer Graph Protocol</h3>
+    <p>
+        Everything in Web Everything resolves through <strong>introspectable</strong> registries, injectors,
+        <a href="/projects/webcontexts/">contexts</a>, and <a href="/projects/webevents/">events</a> — so that
+        introspection <em>is</em> a dependency graph. This Protocol fixes the <strong>graph-model schema</strong>
+        (the node/edge shape that introspection materializes) and the <strong>seam-contract</strong> declared at each
+        provider↔consumer edge. It is the open, self-hostable half of
+        <a href="/backlog/092-provider-consumer-graph-platform-manager/">#092</a>'s ruling — the
+        <code>@webeverything</code>-scoped "nothing to lock into" guarantee. The cross-repo aggregation, the graph UI,
+        and the governance workflows that <em>consume</em> this schema are the licensed plateau-app product and are
+        <strong>not</strong> defined here.
+    </p>
+    <p>
+        <strong>This is a technical contract, not a UX preference</strong> — a Protocol, not an Intent, surfaced under
+        <code>/protocols/</code>. Unlike Backstage's hand-authored <code>catalog-info.yaml</code>, the graph is
+        <strong>build-time auto-derived from WE introspection</strong> (the most-permissive, lowest-operational-cost
+        ingestion default — no live agent to run); a runtime drift-detection agent is a deferred enrichment (#092
+        Fork&nbsp;1), and edges it would add are marked <em>potential until trace-confirmed</em>. The provider side is
+        already introspectable; <a href="/backlog/400-verify-extend-we-introspection-to-emit-provider-consumer-edg/">#400</a>
+        added the consumer side at the DI seam (<code>Injector.consumptionEdges()</code>, opt-in via
+        <code>Injector.trackConsumption</code>).
+    </p>
+
+    <h4 id="provider-consumer-graph-model">1 · Graph-model schema</h4>
+    <p>
+        A directed multigraph. <strong>Nodes</strong> are the introspectable units (a project, a registered provider,
+        a protocol). <strong>Edges</strong> are of two kinds, both already surfaced by introspection: a
+        <em>provides</em> edge (a provider implements a protocol, at a conformance tier — read from
+        <a href="/protocols/">protocols.json</a> + the provider's declared tier) and a <em>consumes</em> edge
+        (a consumer depends on a provider — read from <code>Injector.consumptionEdges()</code>). Consumption is
+        <strong>bidirectional by construction</strong>: the same edge answers both "what do I depend on?" and "who
+        depends on me?" (the latter is what makes impact analysis possible).
+    </p>
+{% highlight "typescript" %}
+// Auto-derived at build time by walking the introspection surface (registry
+// entries(), injector childInjectors/parentInjector + consumptionEdges(),
+// contexts/events provide-sides). The schema is the lock; the walker is a build tool.
+interface GraphNode {
+  id: string;                          // stable: project id, provider key, or protocol id
+  kind: 'project' | 'provider' | 'protocol';
+  label?: string;
+}
+interface GraphEdge {
+  from: string;                        // node id
+  to: string;                          // node id
+  kind: 'provides' | 'consumes';
+  // 'potential' until a runtime trace confirms it (build-derived edges are 'confirmed').
+  confidence: 'confirmed' | 'potential';
+  seam?: SeamContract;                 // the contract declared at this edge — §2
+}
+interface ProviderConsumerGraph {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  derivedAt?: string;                  // provenance: build timestamp / commit
+}
+{% endhighlight %}
+
+    <h4 id="provider-consumer-graph-seam">2 · Seam-contract at each edge</h4>
+    <p>
+        The contract at a provider↔consumer edge <strong>reuses the existing protocol conformance contract</strong>
+        rather than coining a parallel Pact-style format (#092 Fork&nbsp;2). The provider side already exists: a
+        provider declares the <strong>conformance tier</strong> it implements for a protocol. The
+        <strong>consumer-driven projection is net-new</strong> — the consumer declares the subset of a protocol's
+        dimensions/capabilities it actually depends on. One definition then feeds drift detection, impact analysis,
+        and continuous verification alike; "compatible" means the consumer's required subset is contained in what the
+        provider's tier supplies.
+    </p>
+{% highlight "typescript" %}
+interface SeamContract {
+  protocol: string;                    // a protocols.json id — the shared vocabulary at this seam
+  // Provider side (REUSED — already modelled by protocols.json + the provider's tier):
+  providerTier?: string;               // the conformance tier the provider implements
+  // Consumer side (NET-NEW — the consumer-driven projection, the only new schema here):
+  consumerRequires?: string[];         // the dimension/capability subset the consumer depends on
+}
+// Compatible ⇔ consumerRequires ⊆ (what providerTier supplies). A drift is any change
+// that removes a member of consumerRequires from the provider's tier. The contract is
+// the lock; the broker/aggregator that stores & compares contracts cross-repo is
+// plateau-app's licensed product, NOT this standard.
+{% endhighlight %}
+    <p class="text-gray-600 text-sm">
+        <strong>Boundary.</strong> Web Registries ships this schema + contract specification (open, self-hostable);
+        it ships no aggregator and no UI. npm + git remain the source of bytes — this Protocol tracks
+        <em>relationships</em>, not packages. Composes with the
+        <a href="/projects/webinjectors/">injector</a> introspection (consumption edges), the
+        <a href="/protocols/">protocol</a> registry (the provider-side conformance contract it reuses), and the
+        Decision/Audit protocols where a governance product records why an edge changed.
+    </p>
+</section>

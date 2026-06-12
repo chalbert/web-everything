@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- GLOBAL FILTER: Do Not Modify -->
+    <filter id="floatShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <!-- Indigo (States) -->
+    <linearGradient id="gradIndigo" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#4f46e5" />
+    </linearGradient>
+  </defs>
+
+  <!-- BASE: Rounded Container (Slate-50) -->
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc" />
+
+  <!-- CONTENT: a guarded state cycle — arc + arrowhead + three state nodes -->
+  <g filter="url(#floatShadow)" fill="none">
+    <!-- the lifecycle arc (open at the top-right for the arrowhead) -->
+    <path d="M 88 40 A 34 34 0 1 0 96 70"
+          stroke="url(#gradIndigo)" stroke-width="8" stroke-linecap="round" />
+    <!-- arrowhead closing the cycle -->
+    <path d="M 80 34 L 90 40 L 84 50"
+          stroke="url(#gradIndigo)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" />
+    <!-- three state nodes along the path -->
+    <circle cx="40" cy="44" r="8" fill="url(#gradIndigo)" />
+    <circle cx="38" cy="84" r="8" fill="url(#gradIndigo)" />
+    <circle cx="84" cy="86" r="8" fill="url(#gradIndigo)" />
+  </g>
+</svg>

@@ -1,0 +1,90 @@
+<h3>The Question</h3>
+<p>
+    <a href="/backlog/091-web-docs-as-a-service-plateau/">Web Docs as a Service</a> is named as a hosted
+    Plateau offering (idea 4 in <a href="/backlog/089-monetization-product-ideas/">#089</a>), but three
+    follow-ons must settle before any code: the <strong>ingestion contract</strong> (what a customer supplies),
+    the <strong>conformance-dashboard surface</strong> (reuse existing machinery or build bespoke), and the
+    <strong>home</strong> (a Plateau offering vs a graduated project entry). This survey gathers docs-as-a-service
+    prior art per design-first step&nbsp;1, so the forks reuse the incumbents' vocabulary instead of coining
+    terms.
+</p>
+
+<h3>Recommendation (forks in #091)</h3>
+<ol>
+    <li><strong>Docs-as-code ingestion</strong> — the customer's <code>webmanifest</code> +
+        <code>webcases</code> <em>are</em> the source of truth (the Mintlify/OpenAPI model), Plateau never owns
+        the content; not a platform-first dashboard (ReadMe/GitBook) that would create the very lock-in WE
+        refuses.</li>
+    <li><strong>Reuse the existing conformance surface</strong> — generate the dashboard from
+        <a href="/protocols/">/protocols/</a> + the <a href="/capabilities/">capabilityMatrix</a> + #089's
+        continuous-verification signal (idea&nbsp;1), one pipeline; do not bolt on a parallel a11y-report
+        dashboard the way Chromatic/Gestalt/VPAT do.</li>
+    <li><strong>A managed offering under the Plateau umbrella</strong>, resolving its home in lockstep with
+        Module-as-a-Service (<a href="/backlog/081-module-as-a-service-provider/">#081</a>); graduate to its own
+        project entry only when a second consumer demands it.</li>
+</ol>
+
+<h3>Finding 1 — the market splits ingestion two ways: docs-as-code vs platform-first</h3>
+<p>
+    Every managed docs platform sits on one of two ingestion models. <strong>Docs-as-code</strong> keeps the
+    source of truth in the customer's repo: Mintlify generates API-reference pages from the customer's
+    <a href="https://www.mintlify.com/library/api-docs-with-git-integration">OpenAPI spec</a>, detects spec
+    changes on commit, and re-publishes — the spec (an artifact maintained for another reason) <em>is</em> the
+    source, the platform never owns content. Docusaurus is the open self-hosted end of the same axis.
+    <strong>Platform-first</strong> (ReadMe's dashboard-driven onboarding, GitBook's hybrid block editor) lets
+    the vendor become the source of record — exactly the lock-in WE refuses.
+</p>
+
+<h3>Finding 2 — WE is structurally docs-as-code; the source already exists and is not prose</h3>
+<p>
+    A customer's <code>webmanifest</code> + <code>webcases</code> are the same artifacts that drive their tests
+    and their conformance signal. The registry already states <code>webdocs</code> is
+    "the meta-standard that orchestrates Web Manifests and Web Cases to generate documentation sites." So the
+    OpenAPI-spec equivalent is the manifest+cases pair — the Mintlify model, not ReadMe's. This repo's own
+    <code>cases.js</code> loader already performs exactly this ingestion at build time (read a directory of
+    HTML/TS cases per block, render them into pages); the serve-time offering is that loader, hosted and
+    parameterized per customer.
+</p>
+
+<h3>Finding 3 — the conformance dashboard is the real differentiator, and it already exists here</h3>
+<p>
+    #091's edge over <a href="https://www.chromatic.com/pricing">Storybook/Chromatic</a> is that the docs
+    <em>prove conformance</em>. The market validates the demand: Chromatic surfaces an axe-core
+    "Accessibility tests" section per component page; design systems publish
+    <a href="https://designsystem.digital.gov/documentation/accessibility/">VPAT/ACR</a> reports; Pinterest's
+    Gestalt ships an "A11y readiness indicator" scorecard. But the whole category <em>bolts</em> a conformance
+    view onto docs after the fact. WE has it natively — the <a href="/protocols/">/protocols/</a> index renders
+    what implementations must agree on (filterable by project + status), the
+    <a href="/capabilities/">capabilityMatrix</a> maps each impl to a 3-state tier
+    (native-ok / polyfill-ok / capability-hard), and #089 idea&nbsp;1 re-runs the suite over time. So fork&nbsp;2
+    is <em>reuse vs rebuild</em>, not <em>build from scratch</em>.
+</p>
+
+<h3>Finding 4 — the home question is already framed by Module-as-a-Service</h3>
+<p>
+    #091's third follow-on ("a Plateau offering vs a graduated Plateau-side project entry") is verbatim the
+    open "home decision" <a href="/backlog/081-module-as-a-service-provider/">#081/MaaS</a> parks
+    ("stays under <code>webadapters</code> or graduates to its own Plateau-side project entry"). Both are
+    managed providers on the same Plateau serve-time host sharing one billing/auth/hosting surface (#089 puts
+    ideas 2/4/5 under "Plateau as the enterprise web platform"). Resolving the two homes the same way avoids
+    one-off provider taxonomies — which is what makes this a shared, not a local, decision.
+</p>
+
+<h3>Finding 5 — the open premise survives only if the generator stays self-hostable</h3>
+<p>
+    Docusaurus proves "free" docs cost plenty in hosting/CI/CD/maintenance; managed platforms sell exactly that
+    operational layer. #091's open premise mirrors this: the <code>webdocs</code> generator and the standards it
+    consumes stay open and self-hostable — <strong>the paid product is the licensed hosting, not the
+    generator</strong>. "Cancel and self-host" must always hold; the customer keeps the generator and the
+    output. This constrains all three forks: any ingestion contract, dashboard surface, or home that the paid
+    tier cannot relinquish would break the premise.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/091-web-docs-as-a-service-plateau/">#091 — Web Docs as a Service on Plateau</a></li>
+    <li>Epic: <a href="/backlog/089-monetization-product-ideas/">#089 — monetization product ideas (idea 4)</a></li>
+    <li>Sibling (shared home decision): <a href="/backlog/081-module-as-a-service-provider/">#081 — Module-as-a-Service</a></li>
+    <li>Reused surfaces: <a href="/protocols/">Protocols index</a> · <a href="/capabilities/">Capability matrix</a></li>
+    <li>Projects: <a href="/projects/webdocs/">Web Docs</a> · <a href="/projects/webcases/">Web Cases</a> · <a href="/projects/webmanifests/">Web Manifests</a></li>
+</ul>

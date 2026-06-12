@@ -1,0 +1,24 @@
+{
+  "app": "auto-insurance",
+  "_comment": "Exercise app B (#318). Standards it COMMITS to conforming to (Layer 1) — at S0 these are the standards the loan app drove, now consumed by a second app (a cross-app conformance check) — plus candidate standards it will drive in later slices (Layer 2). See docs/agent/exercise-app-workflow.md.",
+  "standards": [
+    { "id": "data-table", "concept": "the policy book table", "evidence": "data-table|DataTableBehavior|aria-sort" },
+    { "id": "pagination", "concept": "windowing the 4k book", "evidence": "aria-label=[\"']pagination|PaginationBehavior" },
+    { "id": "collection-operations", "concept": "sort / page the book", "evidence": "data-table|DataTableBehavior|renderDataTable" },
+    { "id": "selection", "concept": "selecting a policy (via the master-detail coordinator)", "evidence": "SelectionBehavior|MasterDetailBehavior" },
+    { "id": "master-detail", "concept": "policy row → detail coordination", "evidence": "MasterDetailBehavior" },
+    { "id": "router", "concept": "client-side module navigation", "evidence": "route:link|<route-view" },
+    { "id": "lifecycle", "concept": "the policy status machine (Web Lifecycle)", "evidence": "DefaultLifecycleProvider|POLICY_LIFECYCLE|customLifecycles" },
+    { "id": "status-indicator", "concept": "policy state + UW finding chips", "evidence": "statusIndicatorHTML|renderStatusIndicator" },
+    { "id": "decision-trace", "concept": "the underwriting decision as a DecisionRecord", "evidence": "decisionTraceHTML|toDecisionRecord" },
+    { "id": "audit-trail", "concept": "per-policy immutable history; transitions auto-log + timeline", "evidence": "auditLifecycle|DefaultAuditProvider|\\.queryByEntity\\(" },
+    { "id": "stepper", "concept": "the multi-step quote wizard (locked progression + per-step gate)", "evidence": "StepperBehavior" },
+    { "id": "tree-select", "concept": "the coverage hierarchy builder (role=tree, cascade selection)", "evidence": "TreeSelectBehavior" }
+  ],
+  "candidateStandards": [
+    { "concept": "permissions / authorization (Web Guards CustomGuardProvider — server-authoritative; the UW workbench uses the in-app lifecycle GuardResolver as a stand-in)", "backlog": "289" },
+    { "concept": "configurator / NL-to-config constraint graph (conditional questionnaire branching + coverage eligibility constraints)", "backlog": "096" },
+    { "concept": "view-transitions (directional step transitions)", "backlog": "015" },
+    { "concept": "file-upload block (dropzone / preview / multi-file / progress UX — the FNOL uses a native <input type=file> as the native-first baseline; the richer component is uncodified)", "backlog": "028" }
+  ]
+}

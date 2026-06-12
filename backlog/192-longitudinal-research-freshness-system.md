@@ -4,6 +4,8 @@ workItem: epic
 size: 8
 status: open
 dateOpened: "2026-06-08"
+childlessReason: undecided
+blockedBy: ["441"]
 tags: [research, freshness, longitudinal, versioning, reports, staleness, meta, axis-discovery]
 relatedProject: webdocs
 crossRef: { url: /research/, label: "/research/ topic index" }
@@ -43,22 +45,20 @@ account for?" and **feeds the backlog** — each newly-surfaced axis or subject 
 item or a refresh trigger on an existing topic. Mechanism is open (periodic prompt, a
 checklist, an agent sweep), but the output channel is the existing tracker.
 
-## Open design points (resolve before building)
+## Open design points
 
-- **History model:** dated-report chain under one topic id with a `supersedes` pointer, vs. a
-  single living report with an in-file changelog. The chain preserves the literal historical
-  document; the changelog is lighter but loses the original framing. Leaning chain.
-- **Freshness metadata home:** `researchTopics.json` (`lastReviewed`, `reviewHorizon`/volatility),
-  vs. report frontmatter, vs. both. The topic registry is the natural render source for
-  `/research/`, so it likely owns the surfaced date.
-- **Staleness enforcement:** warn-only in `check:standards`, vs. a visible badge on `/research/`,
-  vs. both. Almost certainly both — badge for readers, warning for maintainers.
-- **Axis-discovery trigger:** manual periodic skill/command, vs. a scheduled agent sweep, vs.
-  piggy-backing on whenever a topic is touched. Affects whether this is process or automation.
-- **Scope of "research":** `/research/` topics only, or every `reports/*.md` (including
-  backlog-mirrored pointer reports)? Freshness probably applies to promoted topics; ad-hoc
-  reports may stay frozen by design.
+The forks live in their own decision items (forks don't belong in an epic body):
 
-Likely splits into child stories once the history model and freshness-metadata home are
-settled (hence epic). The output of capability 3 is itself new backlog items, so this system
-partly maintains the backlog as a side effect.
+- **Foundation forks → #441** (`blockedBy`): history model, freshness-metadata home, staleness
+  enforcement, and scope-of-"research". These four land on the same surfaces
+  (`researchTopics.json` + the `/research/` renders + `check:standards`), so they resolve
+  together. Each carries a stated lean — a near-ratification pass. Resolving #441 unblocks
+  capabilities 1 and 2 (refresh-without-losing-history, freshness signals) as build slices.
+- **Axis-discovery trigger** (capability 3): manual periodic skill/command, vs. a scheduled
+  agent sweep, vs. piggy-backing on whenever a topic is touched — process vs automation. This
+  one is genuinely open and is *not* part of #441; carve it as its own decision when capability
+  3 is taken up.
+
+Build slices fall out once #441 rules (foundation → staleness + history/supersedes). The
+output of capability 3 is itself new backlog items, so this system partly maintains the
+backlog as a side effect.

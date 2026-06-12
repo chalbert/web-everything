@@ -1,0 +1,172 @@
+<section class="intro-section mb-12">
+  <h3 id="mission">Mission</h3>
+  <p>
+    <strong>Web Theme</strong> standardizes the <strong>concrete-value layer</strong> of a design system
+    &mdash; the layer every benchmark system has and the web platform leaves to each library to reinvent.
+    Web Everything already owns the <em>semantic</em> tier as <a href="/projects/webintents/">Web
+    Intents</a>: <a href="/intents/density/">density</a>, <a href="/intents/surface/">surface</a> (a
+    <code>0&ndash;5</code> elevation scale), typography, motion, and the theme-color dimensions
+    (<code>scheme</code>/<code>contrast</code>/<code>accent</code>). What was missing is the layer those
+    semantic roles <em>resolve into</em> &mdash; the primitive scales (spacing, radius, elevation/shadow,
+    type ramp, color palette) and the per-component overrides. Web Theme is that layer, and nothing above
+    it.
+  </p>
+  <p>
+    It makes two decisions and inherits the rest from the platform. Tokens are authored and interchanged as
+    <strong>DTCG 2025.10</strong> &mdash; the W3C Design Tokens format that reached its first stable version
+    on 2025-10-28 &mdash; <em>adopted, not coined</em>, because a now-stable standard with 10+ tool
+    implementations is the one place a Protocol is warranted (minimize lock-in: a protocol is the single
+    escapable lock). And tokens compile to the <strong>native CSS runtime</strong> &mdash; custom
+    properties + <code>@property</code>, <code>light-dark()</code>, relative-color, <code>color-mix()</code>
+    &mdash; all Baseline since 2024, so there is no build-time theming engine to lock into.
+  </p>
+
+  <div class="comparison-block" style="background: rgba(79, 70, 229, 0.08); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #4f46e5; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #4338ca; font-size: 1rem;">Not the intents, not a new vocabulary</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      The <strong>semantic tier is owned by <a href="/projects/webintents/">Web Intents</a></strong>, and
+      Web Theme does <em>not</em> re-name it. The intents stay the UX-&ldquo;what&rdquo; (this surface is
+      <em>elevated</em>, this region is <em>dense</em>); Web Theme supplies the concrete value that
+      &ldquo;what&rdquo; points into (elevation 2 = <em>this</em> shadow token). Coining a parallel semantic
+      naming was rejected (it would have intents and tokens disagree on role names). This is the structural
+      answer to &ldquo;how do tokens relate to the theme-color intent&rdquo;: one tier beneath it, resolved
+      <em>by</em> it. Ruling: <a href="/backlog/364-unified-design-token-theming-system/">#364</a>.
+    </p>
+  </div>
+</section>
+
+<section id="features" class="section-card">
+  <h3 id="feature-surface">Feature Surface</h3>
+  <p>
+    What a design-token standard covers. <strong>Protocol</strong> = fixed by the Design Tokens (DTCG &harr;
+    CSS) contract; <strong>Compose</strong> = deferred to a neighbouring Web Everything standard;
+    <strong>Member</strong> = realized as an intent dimension.
+  </p>
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 720px;">
+      <thead>
+        <tr><th>Feature</th><th>Prior art</th><th>What it does</th><th>Layer</th></tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(79,70,229,0.06);">The 3-tier taxonomy (fixed mechanic — every system has it)</td></tr>
+        <tr><td><strong>Primitive tier</strong></td><td>MD3 <em>ref</em>, Fluent <em>global</em>, Radix scales</td><td>Raw scales: spacing, radius, elevation/shadow, type ramp, the full color palette &mdash; owned here</td><td>Protocol</td></tr>
+        <tr><td><strong>Semantic tier</strong></td><td>MD3 <em>sys</em>, Fluent <em>alias</em></td><td>Role names (elevation, density, accent) &mdash; <em>NOT</em> redefined; the intents are this tier</td><td>🔗 Compose &mdash; <a href="/projects/webintents/">Web Intents</a></td></tr>
+        <tr><td><strong>Component tier</strong></td><td>MD3 <em>comp</em>, Spectrum <em>component</em></td><td>Per-component overrides (a button's own radius/padding token) &mdash; owned here</td><td>Protocol</td></tr>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(79,70,229,0.06);">Format + runtime (fixed by the protocol)</td></tr>
+        <tr><td><strong>DTCG authoring</strong></td><td>DTCG 2025.10, Style Dictionary, Tokens Studio</td><td><code>{ $type, $value }</code> nodes with <code>{group.token}</code> aliasing &mdash; the portable source of truth</td><td>Protocol</td></tr>
+        <tr><td><strong>CSS compile</strong></td><td>Open Props, Style Dictionary CSS</td><td>Each token &rarr; a custom property; typed numerics register via <code>@property</code></td><td>Protocol</td></tr>
+        <tr><td><strong>Default token set</strong></td><td>Open Props, Radix Colors</td><td>A <em>complete</em> native-first default; a project overrides via DTCG <code>extends</code></td><td>Protocol</td></tr>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(79,70,229,0.06);">Theming (the configurable axis — Fork 4)</td></tr>
+        <tr><td><strong>Scheme</strong></td><td><code>light-dark()</code>, <code>color-scheme</code></td><td>Light/dark resolved at runtime, no build step</td><td>🔗 Member &mdash; theme-color <code>scheme</code> (<a href="/backlog/010-gap-3-theme-color-intent/">#010</a>)</td></tr>
+        <tr><td><strong>Contrast</strong></td><td><code>prefers-contrast</code>, APCA/WCAG</td><td>High-contrast schemes; each derived step validated against WCAG/APCA</td><td>🔗 Member &mdash; theme-color <code>contrast</code></td></tr>
+        <tr><td><strong>Accent derivation</strong></td><td>MD3 HCT, Adobe Leonardo, Radix</td><td>Relative-color + <code>color-mix()</code> derive a scale from one accent, contrast-gated; curated = override</td><td>🔗 Member &mdash; theme-color <code>accent</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="protocol-design-tokens" class="section-card">
+  <h3 id="how-it-works">Design Tokens Protocol (DTCG &harr; CSS)</h3>
+  <p>
+    The contract has two halves. <strong>Authoring/interchange</strong> is W3C DTCG 2025.10 &mdash; a
+    vendor-neutral JSON the whole tooling ecosystem already reads (Style Dictionary, Tokens Studio, Figma,
+    Terrazzo), so a token set is portable and a vendor swappable. <strong>Runtime</strong> is native CSS:
+    every resolved token compiles to a custom property, and the theming axes resolve through Baseline CSS
+    with no build-time engine. The default token set is complete; a consuming project overrides via DTCG
+    <code>extends</code>, never authoring from scratch (config-extends-platform-default).
+  </p>
+  {% highlight "json" %}
+// Authoring tier — DTCG 2025.10. Portable across Style Dictionary / Tokens Studio / Figma.
+{
+  "color": {
+    "$type": "color",
+    "blue": { "9":  { "$value": "oklch(0.55 0.18 256)" } },
+    "accent": { "$value": "{color.blue.9}" }        // {group.token} aliasing
+  },
+  "space": {
+    "$type": "dimension",
+    "4": { "$value": "1rem" }
+  },
+  "radius": { "$type": "dimension", "md": { "$value": "0.5rem" } }
+}
+  {% endhighlight %}
+  {% highlight "css" %}
+/* Runtime tier — the compile output. One custom property per resolved token. */
+:root {
+  /* primitive tier */
+  --color-blue-9: oklch(0.55 0.18 256);
+  --space-4: 1rem;
+  --radius-md: 0.5rem;
+  /* component tier — a per-component override that ALIASES a primitive */
+  --button-radius: var(--radius-md);
+}
+
+/* Typed numerics register via @property so they animate + validate. */
+@property --button-radius {
+  syntax: "<length>"; inherits: true; initial-value: 0.5rem;
+}
+
+/* Scheme resolves at runtime — no build step, no second token file. */
+:root { color-scheme: light dark; }
+.surface { background: light-dark(var(--color-bg-light), var(--color-bg-dark)); }
+
+/* Accent derivation — one accent token derives a whole scale, contrast-gated. */
+:root {
+  --accent-9:  var(--color-accent);
+  --accent-10: oklch(from var(--accent-9) calc(l - 0.06) c h);  /* relative color */
+  --accent-a3: color-mix(in oklab, var(--accent-9) 12%, transparent);
+}
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+    <li><strong>DTCG adopted, not coined:</strong> the format is the one legitimate Protocol here. WE
+      conforms to the W3C standard so tokens interop with the existing tool ecosystem &mdash; coining a
+      WE-native schema would be lock-in for zero interop gain.</li>
+    <li><strong>Native CSS is the only runtime:</strong> custom properties + <code>@property</code> +
+      <code>light-dark()</code> + relative-color + <code>color-mix()</code>, all Baseline 2024. There is no
+      theming engine to depend on; the output is plain CSS.</li>
+    <li><strong>Contrast-validation gate (Fork 4, A&prime;):</strong> derived accent/state steps are
+      validated against WCAG/APCA per step, so accessibility is by-default; hand-curated scales (Radix-style)
+      are a brand-precision <em>override</em>, not the accessibility safety net.</li>
+    <li><strong>Semantic tier excluded by design:</strong> the protocol fixes primitive + component +
+      format + runtime. The semantic role names are the intents, which resolve <em>into</em> a primitive
+      token &mdash; no parallel vocabulary is defined here.</li>
+  </ul>
+</section>
+
+<section id="composition" class="section-card">
+  <h3 id="composition">Composition With Other Standards</h3>
+  <ul style="font-size: 0.9rem;">
+    <li><strong><a href="/projects/webintents/">Web Intents</a></strong> &mdash; owns the semantic tier
+      (density, surface, typography, motion, theme-color). An intent's <code>accent</code>/elevation ref
+      resolves into a Web Theme primitive token; the two never disagree on a role name.</li>
+    <li><strong>theme-color intent (<a href="/backlog/010-gap-3-theme-color-intent/">#010</a>)</strong>
+      &mdash; the still-unauthored intent whose <code>scheme</code>/<code>contrast</code>/<code>accent</code>
+      dimensions are the theming axis; Web Theme supplies the concrete values they point into. Authoring that
+      intent stays #010's separate <code>/new-standard</code> build, which this feeds.</li>
+    <li><strong><a href="/projects/webvalidation/">Web Validation</a> / APCA-WCAG</strong> &mdash; the
+      contrast-validation gate reuses an accessibility check, not a new one, to qualify derived steps.</li>
+  </ul>
+</section>
+
+<section id="status" class="section-card">
+  <h3 id="status">Status</h3>
+  <p>
+    Web Theme is in <strong>concept</strong> phase; the Design Tokens (DTCG &harr; CSS) protocol is specified
+    here at <strong>draft</strong>. The project was ratified by
+    <a href="/backlog/364-unified-design-token-theming-system/">#364</a> (the unified design-token / theming
+    decision, grounded in a <a href="/research/design-token-theming-system/">prior-art survey</a> of the
+    benchmark systems + the native CSS substrate). This page establishes Forks 1&ndash;2 &mdash; the project
+    and the DTCG&harr;CSS mapping. The remaining graduated builds layer on top: the primitive + component
+    token tiers and the platform default set (Fork 3), then the scheme/accent runtime + curated-override path
+    (Fork 4).
+  </p>
+  <h4 style="margin-top: 1rem;">Open Questions</h4>
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <li>Does the default token set ship as one DTCG document, or split per <code>$type</code> group
+      (color/space/type) for selective <code>extends</code>?</li>
+    <li>Component-tier overrides: authored as DTCG nodes that alias primitives, or emitted only at compile
+      time from a component manifest?</li>
+    <li>Is the WCAG/APCA contrast gate a build-time check, a runtime <code>@supports</code> fallback, or
+      both?</li>
+  </ul>
+</section>

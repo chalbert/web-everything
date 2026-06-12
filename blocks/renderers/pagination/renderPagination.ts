@@ -52,6 +52,24 @@ export function rangeText(state: PageState): string {
   return `Showing ${start}${EN_DASH}${end} of ${state.total ?? '?'}`;
 }
 
+/**
+ * The clause-joined screen-reader status announced on a page change — pagination's "Page N of M"
+ * (#059 Fork 2), optionally extended with the visible range as a second clause ("Page 2 of 10;
+ * Showing 21–40 of 500."). Shares the Data Table `announce()` shape (one polite region, a
+ * `clause; clause; .` string) rather than inventing a second; the reusable seam is the pattern.
+ *
+ * Returns '' when there is nothing determinate to announce (a cursor protocol carries no page count
+ * and no total, so there is no "of M" to state — announcing a bare "Page N" would be noise). The
+ * announce-on-change wiring lives in PaginationBehavior, since a region re-created by a re-render
+ * cannot announce; this function only computes the text.
+ */
+export function announcePagination(state: PageState, opts: PaginationOptions): string {
+  const clauses: string[] = [];
+  if (state.pageCount != null) clauses.push(`Page ${state.pageIndex + 1} of ${state.pageCount}`);
+  if (opts.rangeLabel === 'range' && state.total != null) clauses.push(rangeText(state));
+  return clauses.length ? clauses.join('; ') + '.' : '';
+}
+
 function a(href: string, text: string, current = false): HTMLAnchorElement {
   const el = document.createElement('a');
   el.setAttribute('href', href);

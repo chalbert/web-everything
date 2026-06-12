@@ -67,6 +67,20 @@
     </ul>
 </section>
 {% endif %}
+{% if traits.visibility_gate %}
+<section class="traits-visibility-gate mb-12">
+    <h3 id="visibility-gate" class="text-xl font-bold mb-2">{{ traits.visibility_gate.title | safe }}</h3>
+    <p class="text-xs uppercase tracking-wider text-blue-600 font-bold mb-3">{{ traits.visibility_gate.status }}</p>
+    <p class="text-gray-700 mb-4">{{ traits.visibility_gate.decision | safe }}</p>
+    <p class="text-gray-700 mb-4">{{ traits.visibility_gate.shape | safe }}</p>
+    <p class="text-gray-700 mb-4">{{ traits.visibility_gate.semantics | safe }}</p>
+    <p class="text-gray-700 mb-4">{{ traits.visibility_gate.reactivation | safe }}</p>
+    <h4 class="text-sm font-bold text-gray-500 uppercase mb-2 no-toc">Why</h4>
+    <ul class="list-disc pl-5 text-sm text-gray-600 space-y-1">
+        {% for item in traits.visibility_gate.rationale %}<li>{{ item | safe }}</li>{% endfor %}
+    </ul>
+</section>
+{% endif %}
 <section class="traits-example traits-vision-box">
     <h3 id="the-vision" class="text-lg font-bold mb-4">The Vision</h3>
     <div class="traits-vision-grid">

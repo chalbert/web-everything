@@ -1,0 +1,28 @@
+{
+  "id": "44ae534ae469ef45",
+  "contentHash": "44ae534ae469ef4575adf2bee524a6bd37993e0851ab615c97f4984cab945ef6",
+  "sourceUrl": "https://squoosh.app",
+  "captureMethod": "playwright",
+  "reviewState": "confirmed",
+  "dateCollected": "2026-06-12T21:52:57.974Z",
+  "datePublished": null,
+  "app": "Squoosh",
+  "company": "Google Chrome Labs",
+  "category": "developer-tools",
+  "surface": null,
+  "designRegister": "minimal",
+  "theme": "dark",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "dpr": 2,
+  "imageDims": {
+    "width": 2880,
+    "height": 1800
+  },
+  "bytes": 116660,
+  "tags": [],
+  "sourceCredit": "Google Chrome Labs",
+  "collectionRun": "2026-06-12T21-51-12-668Z"
+}

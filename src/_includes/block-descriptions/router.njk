@@ -677,6 +677,15 @@ interface NavigationResult {
   &lt;template route="/heavy" lazy&gt;...&lt;/template&gt;
 &lt;/route-view&gt;</code></pre>
 
+<h3>Transition direction vs Motion feel</h3>
+<p>A route change can read <strong>two intents</strong> at once: the <a href="/intents/navigation/">Navigation intent</a>'s <code>transition</code> dimension (<code>directional</code> · <code>fade</code> · <code>none</code>) owns the view-transition's <em>direction</em> — derived from history-traversal direction, which Motion structurally cannot know — while the <a href="/intents/motion/">Motion intent</a>'s <code>physics</code> dimension (<code>natural</code> · <code>immediate</code> · <code>reduced</code>) owns its <em>feel</em> (easing, duration, <code>prefers-reduced-motion</code>). They are orthogonal, not ranked: <code>transition</code> decides <em>whether / which direction</em>, <code>physics</code> decides <em>duration / easing and whether decorative motion plays at all</em>. The Router resolves the two genuine overlaps with three rules:</p>
+<ol class="text-sm text-gray-600 list-decimal pl-5">
+  <li><strong><code>transition: none</code> &rArr; no view transition.</strong> The UX has explicitly opted this navigation out of animation, so <code>document.startViewTransition()</code> is skipped regardless of <code>physics</code> &mdash; an instant swap.</li>
+  <li><strong><code>physics &isin; {reduced, immediate}</code> &rArr; collapse to an instant / minimal swap.</strong> The motion preference suppresses the animation, so direction (<code>directional</code> / <code>fade</code>) becomes moot. <code>reduced</code> is preference-driven (honors <code>prefers-reduced-motion</code>); <code>immediate</code> is performance-driven (&lt; 16ms, no decorative motion) &mdash; same outcome by design.</li>
+  <li><strong>Otherwise</strong> (<code>physics: natural</code>) &rArr; play the full animation in <code>transition</code>'s direction.</li>
+</ol>
+<p><strong>Invariant above all three: the route / DOM change always commits.</strong> <code>physics</code> and <code>transition</code> only gate the <em>decorative wrapper</em> &mdash; neither ever cancels the navigation. A <code>transition: none</code> with a non-<code>reduced</code> <code>physics</code> is not a contradiction, and a <code>reduced</code> <code>physics</code> degrades a <code>directional</code> transition to an instant change rather than blocking the view swap. Any block that composes both intents (e.g. <a href="/blocks/tabs/">Tabs</a>) inherits this precedence by reference.</p>
+
 <h3>Styling</h3>
 <p>Both <code>&lt;route-view&gt;</code> and <code>&lt;route-outlet&gt;</code> are real DOM elements &mdash; natural CSS targets:</p>
 <pre><code class="language-css">/* Primary view layout */

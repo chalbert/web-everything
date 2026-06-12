@@ -27,3 +27,13 @@ Child stories:
 - **#184** — marketing landing + pricing site (reuse webdocs).
 - **#185** — go-to-market / marketing strategy.
 - **#186** — legal & business-protection review (entity, trademark, ToS/EULA, privacy, insurance).
+
+## Deferred behind product maturity (2026-06-11)
+
+This whole epic is **deprioritized until the product is in a much better state** — we won't ship
+until then, so none of the commercialization scaffolding is on the critical path. Selection should
+**not** surface these children as live work yet. The design *shapes* are being settled cheaply as
+decisions (e.g. [#182](/backlog/182-license-key-issuance-validation/) resolved its key-design forks)
+so nothing is blocked on ambiguity, but the *builds* wait. Re-open the implementation stories when
+the product is near first sale — the change-later cost stays near-zero until then (no keys issued,
+no sales).

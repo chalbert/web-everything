@@ -1,9 +1,11 @@
 ---
 type: issue
 workItem: task
-status: open
+status: resolved
 blockedBy: ["228"]
 dateOpened: "2026-06-09"
+dateStarted: "2026-06-11"
+dateResolved: "2026-06-11"
 tags: [plugs, custom-elements, e2e, playwright, test-infra]
 relatedProject: webcomponents
 parent: "167"
@@ -31,3 +33,23 @@ reduce to "delete/rewrite the dead scoped-path assertions and keep the genuinely
 
 **Acceptance:** `webcomponents.spec.ts` runs green against the dev server (no timeouts), testing
 real behavior rather than silently dead about:blank fixtures.
+
+## Progress
+
+**Resolved 2026-06-10.** All 8 tests pass against the live dev server (chromium). Changes:
+
+- **Origin fix** — every fixture rebuilt with `page.goto('/')` + dynamic `import()` inside
+  `page.evaluate` (the `autonomous-element-lifecycle.spec.ts` pattern), replacing the `setContent`
+  about:blank fixtures that silently never loaded the `/plugs/*.ts` modules.
+- **Bootstrap order** — the fixtures now apply the **webinjectors** patch before the components
+  patch (per `plugs/bootstrap.ts`): the insertion patch and the upgrade walker call
+  `this.getClosestInjector()`, supplied by the injectors patch.
+- **Dead scoped-path assertions rebased** (the carried caveat) — `TestElement` now holds an
+  `options` data field and renders nothing via lifecycle. Writing `textContent` in the constructor
+  proved hostile to cloning (it doubled the clone's text and wiped deep-cloned children), and the
+  scoped path does not drive `connectedCallback`. The clone tests now assert the genuinely-portable
+  contract: the clone-handler carries `options` across `cloneNode` (shallow + deep) and preserves
+  nested structure. A directly-constructed scoped element's `localName` is the private ctor tag
+  (#228), not the user tag, so the deep-clone child is located structurally, not by user-tag
+  `querySelector`. Cross-browser element registered through the scoped registry so it is natively
+  constructible. Insertion-ordering tests kept as-is (only the origin/injector fix).

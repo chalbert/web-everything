@@ -2,8 +2,11 @@
 type: decision
 workItem: story
 size: 2
-status: open
+status: resolved
 dateOpened: "2026-06-10"
+dateStarted: "2026-06-11"
+dateResolved: "2026-06-11"
+graduatedTo: none
 tags: [paradigm, compound-children, selection, tabs, protocol, decision, harvest]
 ---
 
@@ -25,3 +28,18 @@ The `Compound Child` glossary term is already seeded in `semantics.json`, and th
 
 - Verify overlap with Selection's grouping (`<optgroup>` / `role=group`) and with the Tabs block's `<tab>` children — is there already a contract to extend rather than invent?
 - Check whether the JSX adapter's children→options lowering is already specified anywhere (the render-strategy / component-compiler path).
+
+## Decision (2026-06-11)
+
+**Document it as a shared semantics paradigm — the existing `Compound Child` glossary term — cross-referenced *by* Selection + Tabs + the Segmented Control block. Do not mint a protocol now; do not nest it under Selection's grouping.**
+
+Two pre-decision findings shaped the call:
+
+- **Selection's `grouping` is a different concern.** [`intents.json`](../src/_data/intents.json) `grouping` (`flat`/`grouped`, `<optgroup>`/`role=group`) *arranges* options into labeled sets; it does not *declare* options. So "document under Selection's grouping" was a mismatched home — Compound Child is a **sibling** of grouping, not subordinate to it.
+- **The cross-standard shape is less uniform than claimed.** Only `<segment>` (Segmented Control) and native `<option>` are the strict positional compound-child form. Tabs binds via `tab-trigger`/`tab-panel` **attributes** on arbitrary elements ([`TabGroupBehavior.ts`](../blocks/tabs/TabGroupBehavior.ts)), so it is a related-but-distinct variant, not a third instance.
+
+Rejected **promote-to-protocol** *for now*: the item's own bar — proven multi-vendor interop demand — is unmet, and a protocol is the one real lock-in ([[feedback_minimize_lock_in_protocol_only_lock]]). It has no UX dimensions, so it is not an intent ([[feedback_intent_ux_only_technical_to_configurator]]) and is a fixed mechanic, not a configurable dimension ([[feedback_dimension_vs_fixed_mechanic]]). Rejected **do-nothing**: the harvest flagged the ad-hoc status quo as the gap.
+
+The one real conformance contract — how authored children lower to an `options` array under the JSX adapter — is **unspecified anywhere** today. It is the latent protocol seed and is tracked standalone as **#281** (its natural owner is the render-strategy / component-compiler path, not Selection); a future protocol would crystallize there if interop demand appears.
+
+**Applied:** enriched the `Compound Child` term in [`semantics.json`](../src/_data/semantics.json) (settled language, Tabs corrected to related-but-distinct, lowering noted as the seed); added cross-refs from the Selection grouping description, the Tabs block description, and the Segmented Control block description (open-decision blockquote → settled).

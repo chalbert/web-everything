@@ -1,0 +1,28 @@
+{
+  "id": "4f5835c2e9f3d948",
+  "contentHash": "4f5835c2e9f3d9486ee5c995d32b85fcbd7d74a57f3a8e36d91c253424bbce86",
+  "sourceUrl": "https://www.openstreetmap.org",
+  "captureMethod": "playwright",
+  "reviewState": "confirmed",
+  "dateCollected": "2026-06-12T21:51:56.786Z",
+  "datePublished": null,
+  "app": "OpenStreetMap",
+  "company": "OpenStreetMap Foundation",
+  "category": "maps",
+  "surface": null,
+  "designRegister": "utilitarian",
+  "theme": "light",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "dpr": 2,
+  "imageDims": {
+    "width": 2880,
+    "height": 1800
+  },
+  "bytes": 254412,
+  "tags": [],
+  "sourceCredit": "OpenStreetMap Foundation",
+  "collectionRun": "2026-06-12T21-51-12-668Z"
+}

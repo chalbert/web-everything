@@ -3,9 +3,12 @@ type: idea
 workItem: story
 size: 5
 parent: "136"
-status: open
+status: resolved
 blockedBy: ["136"]
 dateOpened: "2026-06-08"
+dateStarted: "2026-06-11"
+dateResolved: "2026-06-11"
+graduatedTo: frontierui pathInsertionMethods fix + split to #275/#276/#277
 tags: [droplist, autocomplete, anchor, frontierui, migration, traits]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -48,5 +51,28 @@ This item tracks the deliberately-deferred remainder so it isn't lost:
 
 Acceptance: each bullet either landed (with tests) in Frontier UI or is split into its own item; the
 droplist family is usable both programmatically (done) and declaratively (this item).
-EOF
-echo "created #193"; cd /Users/nicolasgilbert/workspace/webeverything && npm run check:standards 2>&1 | tail -4
+
+## Progress (resolved 2026-06-10)
+
+Each bullet is now either landed or split, per the acceptance:
+
+- **Declarative trait registration** → split to [#275](/backlog/275-declarative-trait-registration-for-droplist-behaviors/).
+- **JS-strategy real-browser demo + injector swap** → **landed** in [#149](/backlog/149-anchor-positioning-strategy-provider/):
+  `frontierui/demos/positioning-strategy-swap.{html,ts}` + a 3-test e2e flipping
+  `data-positioning-strategy` native↔js via one `injector.set` line.
+- **Port `CompositeWidget` + `Windowed`** → `Windowed` was already ported
+  (`frontierui/blocks/droplist/Windowed.ts`); `CompositeWidget` (which carries the dropped-Escape
+  decision) → split to [#276](/backlog/276-port-compositewidget-to-frontier-ui-decide-escape-handling/).
+- **Custom-elements runtime patches** → **landed**: the `insertAdjacentElement` arg-slicing bug
+  (inverted leadin/trailing slice left the leading `position` string treated as the node and the real
+  element un-upgraded) is fixed in `plugs/core/utils/pathInsertionMethods.ts` in **both** Web Everything
+  and Frontier UI, with a regression test in each (`Element.insertion.patch.test.ts`, verified to fail
+  on the pre-fix code). The `Node[Symbol.hasInstance]` recursion is **not present** in Frontier UI — its
+  `Node.injectors.patch.ts` delegates `hasInstance` to `OriginalNode`, so there is no recursion to fix.
+- **Full unit-test parity** → split to [#277](/backlog/277-port-plateau-droplist-unit-test-suites-to-frontier-ui/).
+- **Retarget #179/#180** → already done; both bodies already cite
+  `frontierui/blocks/droplist/positioning/native.ts` (no remaining plateau paths).
+
+Gate: insertion-patch suites green in both repos (30 tests each), 65 droplist unit tests green;
+`check:standards` 0 errors. Also fixed a stray heredoc artifact (`EOF` + shell line) left at the foot
+of this file.

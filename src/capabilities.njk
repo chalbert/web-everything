@@ -3,6 +3,8 @@ layout: base.njk
 title: Web Everything — Capabilities
 ---
 
+<div class="page-sheet">
+
 <section class="intro">
   <h1>Capabilities</h1>
   <p>
@@ -18,10 +20,10 @@ title: Web Everything — Capabilities
 
 <section style="margin: 1.5rem 0 1rem;">
   <h2 style="margin: 0 0 0.5rem;">The registered capability adapter table</h2>
-  <p style="color: var(--color-text-muted); max-width: 70ch;">
+  <p style="color: var(--color-text-muted);">
     {{ capabilityMatrix.description | safe }}
   </p>
-  <p style="color: var(--color-text-muted); max-width: 70ch; font-size: 0.9em;">
+  <p style="color: var(--color-text-muted); font-size: 0.9em;">
     Each column below is a <strong>registered capability adapter</strong> — one row per implementation,
     authored by that impl but registered centrally so the provider can enumerate every impl to resolve
     native-first. The adapter table <em>is</em> the matrix's row source (one source of truth, no
@@ -37,7 +39,7 @@ title: Web Everything — Capabilities
   {% set tierFg = { 'native-ok': '#166534', 'polyfill-ok': '#92400e', 'capability-hard': '#991b1b' } %}
 
   <div style="overflow-x: auto;">
-    <table style="width: 100%; border-collapse: collapse; font-size: 0.9em;">
+    <table style="width: 100%; border-collapse: collapse; font-size: 0.9em; background: #fff;">
       <thead>
         <tr>
           <th style="text-align: left; padding: 0.6rem 0.75rem; border-bottom: 2px solid var(--color-border);">Capability</th>
@@ -108,7 +110,7 @@ title: Web Everything — Capabilities
     <code>capabilityWorkedExample.json</code>), not authored — so it cannot disagree with the matrix above.</span>
   </p>
   <div style="display: grid; gap: 0.6rem; margin: 0.5rem 0 0; max-width: 72ch;">
-    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #16a34a; border-radius: 6px;">
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #16a34a; border-radius: 6px; background: #fff;">
       <strong>Native branch</strong> — on the shipped build-matrix, <code>native-first</code> resolves to
       <strong><code>{{ we.winner }}</code></strong>:
       <ul style="margin: 0.4rem 0 0; padding-left: 1.1rem; line-height: 1.5;">
@@ -120,7 +122,7 @@ title: Web Everything — Capabilities
         {% endfor %}
       </ul>
     </div>
-    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #d97706; border-radius: 6px;">
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #d97706; border-radius: 6px; background: #fff;">
       <strong>Fallback branch</strong> — on a <em>constrained target</em> (the kind the runtime / edge
       providers report) where a required capability is <strong>capability-hard on the native substrate</strong>
       but the custom impl can still serve it, the <em>same</em> policy falls through to
@@ -147,16 +149,16 @@ title: Web Everything — Capabilities
     <strong>identically</strong> to the two ways a slot can be wrong.
   </p>
   <div style="display: grid; gap: 0.6rem; margin: 0.75rem 0 0; max-width: 72ch;">
-    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #dc2626; border-radius: 6px;">
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #dc2626; border-radius: 6px; background: #fff;">
       <code>error</code> → <strong>strict</strong> tier. The problem throws — CI bumps to this so a
       wrong guess <strong>fails the build</strong>.
     </div>
-    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #d97706; border-radius: 6px;">
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #d97706; border-radius: 6px; background: #fff;">
       <code>warn</code> → <strong>standard</strong> tier, the <strong>base default</strong>. Reported,
       but resolution proceeds — honoring progressive enhancement: a wrong guess <strong>degrades</strong>,
       it does not break.
     </div>
-    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #64748b; border-radius: 6px;">
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #64748b; border-radius: 6px; background: #fff;">
       <code>silent</code> → <strong>lenient</strong> tier. Swallowed — runtime PE-degradation uses this.
     </div>
   </div>
@@ -189,16 +191,16 @@ title: Web Everything — Capabilities
     Safari-context view, instead of freezing whatever the parent happened to pick.
   </p>
   <div style="display: grid; gap: 0.6rem; margin: 0.75rem 0 0; max-width: 72ch;">
-    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #16a34a; border-radius: 6px;">
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #16a34a; border-radius: 6px; background: #fff;">
       <strong>Chrome-context view</strong> — inherits <code>native-first</code> from the app; every
       required capability is native-ok → resolves to <strong><code>base-select</code></strong> (native).
     </div>
-    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #d97706; border-radius: 6px;">
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #d97706; border-radius: 6px; background: #fff;">
       <strong>Safari-context view</strong> — inherits the <em>same</em> <code>native-first</code>;
       <code>anchor-positioning</code> is capability-hard on the native substrate here → re-resolves to
       the custom <strong><code>face</code></strong> impl. Not frozen: identical slot, divergent result.
     </div>
-    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #64748b; border-radius: 6px;">
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #64748b; border-radius: 6px; background: #fff;">
       <strong>A fragment</strong> can override again — pin a concrete impl, and the pin short-circuits
       resolution (nearest wins). No scope binding a slot is an error (no magic-on-absence — the base
       must bind one).
@@ -234,18 +236,18 @@ title: Web Everything — Capabilities
     winner through the degrading provider, and the explicit-provider override).
   </p>
   <div style="display: grid; gap: 0.6rem; margin: 0.75rem 0 0; max-width: 72ch;">
-    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #16a34a; border-radius: 6px;">
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #16a34a; border-radius: 6px; background: #fff;">
       <strong><code>build</code></strong> — known / narrow targets, <strong>zero runtime cost</strong>. The
       <strong>default</strong>. Reads the static build-matrix above exactly as authored.
     </div>
-    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #d97706; border-radius: 6px;">
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #d97706; border-radius: 6px; background: #fff;">
       <strong><code>runtime</code></strong> — unknown targets, <strong>no infra</strong>. Tiers each
       capability by testing the <strong>actual UA</strong> (<code>CSS.supports(…)</code>,
       <code>'popover' in HTMLElement.prototype</code>). Most accurate; where a capability isn't
       runtime-detectable (e.g. <code>cross-root-aria</code>, a gap in the a11y tree JS can't probe), it
       <strong>falls back to the static matrix</strong>.
     </div>
-    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #2563eb; border-radius: 6px;">
+    <div style="padding: 0.6rem 0.8rem; border: 1px solid var(--color-border); border-left: 3px solid #2563eb; border-radius: 6px; background: #fff;">
       <strong><code>edge</code></strong> — broad targets, smallest payload, <strong>cached</strong>. A
       <strong>module-as-a-service</strong> venue: capabilities ride in the component URL
       (<code>/c/droplist@1?caps=…</code>), the client signal is read <strong>server-side via Client Hints
@@ -285,7 +287,7 @@ title: Web Everything — Capabilities
   <div style="display: flex; flex-direction: column; gap: 0.4rem; margin-top: 0.75rem;">
     {% for intent in intents %}
       {% if intent.requiresCapabilities.length %}
-      <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; padding: 0.45rem 0.6rem; border: 1px solid var(--color-border); border-radius: 6px;">
+      <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.5rem; padding: 0.45rem 0.6rem; border: 1px solid var(--color-border); border-radius: 6px; background: #fff;">
         <a href="/intents/{{ intent.id }}/" style="font-weight: 600; min-width: 12rem;">{{ intent.name }}</a>
         <span style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
           {% for capId in intent.requiresCapabilities %}
@@ -297,3 +299,5 @@ title: Web Everything — Capabilities
     {% endfor %}
   </div>
 </section>
+
+</div>

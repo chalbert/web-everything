@@ -1,8 +1,10 @@
 ---
 type: idea
 workItem: epic
-status: open
+status: resolved
 dateOpened: '2026-05-30'
+dateResolved: "2026-06-11"
+graduatedTo: none
 tags:
   - validation
   - spec-versioning

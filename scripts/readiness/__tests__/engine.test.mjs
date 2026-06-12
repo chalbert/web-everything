@@ -29,7 +29,7 @@ function makeItems(specs) {
       : s.type === 'decision' ? 'B' : 'C';
     // Mirror the loader's #254 derivations so computeSelection consumes the same fields it would in prod.
     const batchable = tier === 'A'
-      && (s.workItem === 'task' || (s.workItem === 'story' && typeof s.size === 'number' && s.size <= 5));
+      && (s.workItem === 'task' || (s.workItem === 'story' && typeof s.size === 'number' && s.size <= 8));
     const batchCost = s.workItem === 'task' ? 2 : typeof s.size === 'number' ? s.size : undefined;
     return {
       id: `${s.num}-${s.slug ?? 'slug'}`, num: String(s.num), slug: s.slug ?? 'slug',
@@ -122,13 +122,13 @@ describe('selection view (#254 projection) — the skills consume this, never re
     const items = makeItems([
       { num: 1, type: 'idea', status: 'open', workItem: 'story', size: 3 },   // batchable Tier A
       { num: 2, type: 'issue', status: 'open', workItem: 'task' },            // batchable Tier A
-      { num: 3, type: 'idea', status: 'open', workItem: 'story', size: 8 },   // Tier A, NOT batchable (>5)
+      { num: 3, type: 'idea', status: 'open', workItem: 'story', size: 13 },  // Tier A, NOT batchable (>8)
       { num: 4, type: 'decision', status: 'open', workItem: 'story', size: 2 }, // Tier B
       { num: 5, type: 'review', status: 'open', workItem: 'story', size: 3 },  // Tier C
       { num: 6, type: 'idea', status: 'resolved', workItem: 'story', size: 1 },// dropped (not open)
     ]);
     const sel = computeSelection(items);
-    expect(sel.counts).toEqual({ open: 5, tierA: 3, tierB: 1, tierC: 1, batchable: 2 });
+    expect(sel.counts).toEqual({ open: 5, tierA: 3, tierB: 1, tierBPrepared: 0, tierC: 1, batchable: 2 });
     expect(sel.batchable.map((i) => i.num).sort()).toEqual(['1', '2']);
     expect(sel.tierA.every((i) => i.tier === 'A')).toBe(true);
     expect(sel.tierB.map((i) => i.num)).toEqual(['4']);
@@ -159,7 +159,7 @@ describe('computeBatchPack — points budget, not a count cap', () => {
     { num: 2, type: 'idea', status: 'open', workItem: 'story', size: 5, leverageScore: 4000 },
     { num: 3, type: 'idea', status: 'open', workItem: 'task', leverageScore: 3000 },
     { num: 4, type: 'idea', status: 'open', workItem: 'story', size: 2, leverageScore: 2000 },
-    { num: 5, type: 'idea', status: 'open', workItem: 'story', size: 8, leverageScore: 1000 }, // ≥8 → never eligible
+    { num: 5, type: 'idea', status: 'open', workItem: 'story', size: 13, leverageScore: 1000 }, // ≥13 → never eligible
     ...(extra.items ?? []),
   ])).tierA;
 
@@ -177,7 +177,7 @@ describe('computeBatchPack — points budget, not a count cap', () => {
     expect(spent).toBe(5);
   });
 
-  it('never packs a story·8 (split-candidate) even with budget to spare', () => {
+  it('never packs a story·13 (split-candidate) even with budget to spare', () => {
     const { picked } = computeBatchPack(ranked(), 999);
     expect(picked.map((i) => i.num)).not.toContain('5');
     expect(picked.map((i) => i.num)).toEqual(['1', '2', '3', '4']); // 3+5+2+2 = 12, all eligible

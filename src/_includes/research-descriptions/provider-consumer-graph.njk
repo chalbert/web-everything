@@ -1,0 +1,75 @@
+<h2>The Question</h2>
+<p>
+  <a href="/backlog/092-provider-consumer-graph-platform-manager/">#092</a> reframes
+  <a href="/backlog/089-monetization-product-ideas/">#089</a> idea&nbsp;5 ("private registry + provenance")
+  into the <strong>control plane over provider↔consumer relationships</strong> that makes Plateau an
+  <em>enterprise web platform manager</em>. Not a package registry — <strong>npm + git stay the source of
+  bytes</strong>; Plateau tracks <em>relationships</em>: who provides what, who consumes it, the contract
+  at each seam, and impact analysis ("if I change provider X, who breaks?"). This survey grounds the three
+  unsettled forks the item names: <strong>ingestion model · seam-contract representation · home</strong>.
+</p>
+
+<h2>What the survey found</h2>
+
+<h3>1 · Ingestion — the field has converged on "both, build-first"</h3>
+<ul>
+  <li><strong>Build-time / declared</strong> — the
+    <a href="https://backstage.io/docs/features/software-catalog/well-known-relations/">Backstage software
+    catalog</a>: components declare <code>spec.providesApis</code> / <code>spec.consumesApis</code> in
+    <code>catalog-info.yaml</code>; the catalog derives <code>apiProvidedBy</code> /
+    <code>apiConsumedBy</code> relations. <a href="https://cyclonedx.org/guides/sbom/generation/">CycloneDX
+    SBOM</a> is the same shape for dependencies. Complete + auditable + pre-ship, but
+    <em>"all dependency information is lost at runtime"</em> and hand-authored manifests drift.</li>
+  <li><strong>Runtime agent</strong> — the
+    <a href="https://oneuptime.com/blog/post/2026-02-06-otel-service-dependency-graphs-traces/view">OpenTelemetry
+    service-graph connector</a> aggregates client/server span pairs into a live topology.
+    <em>"The only accurate dependency map is one generated from actual production traffic"</em> — but
+    <em>"a map from last month is already wrong"</em> and uninstrumented edges are missed.</li>
+  <li><strong>Both</strong> — the explicit field recommendation: static discovery validated by runtime,
+    edges marked <em>potential</em> until trace-confirmed.</li>
+</ul>
+<p>
+  <strong>The decisive WE-specific reframe:</strong> Backstage's build-time tier is bottlenecked on
+  <em>hand-authored</em> <code>catalog-info.yaml</code>. WE has no such bottleneck — everything resolves
+  through <strong>introspectable</strong> registries, injectors, <a href="/intents/">contexts</a>, and
+  events; <strong>that introspection <em>is</em> the graph</strong>. WE can <strong>auto-derive</strong>
+  the provider/consumer manifest at build time, so the build-time tier is both complete (Backstage's
+  strength) <em>and</em> not hand-maintained (fixing its weakness) — making "build-first, runtime as
+  drift-enrichment" the natural staging, not a compromise.
+</p>
+
+<h3>2 · Seam-contract — consumer-driven contracts, reusing WE conformance contracts</h3>
+<p>
+  The mature pattern is <a href="https://pactflow.io/what-is-consumer-driven-contract-testing/">consumer-
+  driven contract testing</a> (<a href="https://docs.pact.io/">Pact</a>): the <strong>consumer declares
+  the subset it actually depends on</strong> (a lossy projection — unused provider behaviour is free to
+  change); the <strong>Pact Broker is the source of truth</strong> for whether a consumer + provider
+  version are "safe to deploy together" (exactly #092's impact-analysis question); and <strong>drift
+  detection flips reactive → proactive</strong>. WE already owns the provider half —
+  <a href="/protocols/">protocol conformance contracts + tiers</a>. The reframe: the seam-contract is the
+  <strong>protocol conformance contract recorded bidirectionally</strong> (provider declares its tier;
+  consumer declares the subset it depends on), shared with verification and drift detection — no second
+  contract format.
+</p>
+
+<h3>3 · Home — the WE / Plateau split writes itself</h3>
+<p>
+  Per the constellation (WE = open standard; Plateau = licensed product) and the npm-scope rule
+  (<code>@webeverything</code> = standard artifacts only): the <strong>graph model + seam-contract
+  definition are WE standard concerns</strong> (open, self-hostable — matching #092's "npm + git remain the
+  source" framing); the <strong>cross-repo aggregation, graph UI, and governance workflows are the Plateau
+  licensed product.</strong> Same provider-side / aggregation-side split MaaS
+  (<a href="/backlog/081-module-as-a-service-provider/">#081</a>) carries.
+</p>
+
+<h2>Forks this grounds (see <a href="/backlog/092-provider-consumer-graph-platform-manager/">#092</a>)</h2>
+<ol>
+  <li><strong>Ingestion model</strong> — build-time (auto-derived from WE introspection) · runtime agent · both, staged build-first.</li>
+  <li><strong>Seam-contract</strong> — reuse the protocol conformance contract bidirectionally vs a separate Pact-style format.</li>
+  <li><strong>Home</strong> — WE standard owns graph-model + contracts; Plateau product owns aggregation + UI + governance.</li>
+</ol>
+
+<p style="font-size:0.85em;color:var(--color-text-muted,#94a3b8);">
+  Session report: <code>reports/2026-06-12-provider-consumer-graph.md</code>. No ruling made here — the
+  decision turn is <code>/next decision</code>.
+</p>

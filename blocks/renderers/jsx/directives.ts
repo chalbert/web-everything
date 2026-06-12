@@ -54,8 +54,39 @@ export interface DirectiveDef {
 export const directiveRegistry: DirectiveDef[] = [
   { sugar: 'For', is: 'for-each', props: { each: 'items' } },
   { sugar: 'Show', is: 'if', props: { when: 'condition' } },
+  // Resource — async-data sugar (#070). Slots + resolution contract: see RESOURCE_SLOT_STATES (#337).
   { sugar: 'Resource', is: 'resource', props: { from: 'from' } },
 ];
+
+/**
+ * The `<Resource>` slot → Loader-state contract (#337, ratified #124).
+ *
+ * `<Resource>` is NOT a new async model — it is a declarative composition of the **Loader Intent**
+ * (`intents.json` id `loader`), resolved at runtime by the **Resource Loader block** (`blocks.json` id
+ * `resource-loader`, `implementsIntent: loader`, `blocks/resource-loader/ResourceLoader.ts`). The
+ * directive only declares the surfaces; all resolution — state transitions, anti-flicker, version-token
+ * stale-drop, hierarchy aggregation — stays the Loader's. Cross-referenced here, never duplicated.
+ *
+ * A resource declares its named child slots as the Loader's lifecycle fallback surfaces — TWO separate
+ * surfaces, deliberately NOT a single merged `fallback`:
+ *
+ *   <Resource from="@users">
+ *     <template slot="loading">…</template>   → Loader `pending` state
+ *     <template slot="error">…</template>     → Loader `error`   state
+ *     <ul data-bind="items"></ul>             → Loader `success` state (default / unslotted children)
+ *   </Resource>
+ *
+ * The slots are plain children, so the registry-driven desugar/sugarize already carries them through
+ * unchanged (proven by the slot round-trip test); this map is the authoritative naming of which slot
+ * drives which Loader state. The Axis-2 vdom correspondence (`use()`/`<Suspense>` + the lossy
+ * `resource-suspends-on-read` boundary) lives in `render-strategy/crossStrategy.ts`.
+ */
+export const RESOURCE_SLOT_STATES = {
+  loading: 'pending',
+  error: 'error',
+  /** Default / unslotted children render in the Loader's success state. */
+  default: 'success',
+} as const;
 
 const bySugar = new Map(directiveRegistry.map((d) => [d.sugar, d]));
 const byIs = new Map(directiveRegistry.map((d) => [d.is, d]));

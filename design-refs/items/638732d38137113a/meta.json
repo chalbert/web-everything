@@ -1,0 +1,28 @@
+{
+  "id": "638732d38137113a",
+  "contentHash": "638732d38137113af40bb789f76be559b3af0a2bf0c18ec089383272acaa1970",
+  "sourceUrl": "https://editor.swagger.io",
+  "captureMethod": "playwright",
+  "dateCollected": "2026-06-12T12:27:50.807Z",
+  "datePublished": null,
+  "app": "Swagger Editor",
+  "company": "SmartBear",
+  "category": "developer-tools",
+  "surface": null,
+  "designRegister": "enterprise-dense",
+  "theme": "light",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "dpr": 2,
+  "imageDims": {
+    "width": 2880,
+    "height": 1800
+  },
+  "bytes": 292886,
+  "tags": [],
+  "sourceCredit": "SmartBear",
+  "collectionRun": "2026-06-12T12-26-38-221Z",
+  "reviewState": "confirmed"
+}

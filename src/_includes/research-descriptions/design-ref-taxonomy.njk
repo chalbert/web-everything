@@ -1,0 +1,82 @@
+<h2>Purpose</h2>
+<p>
+  This is the prior-art grounding for the <strong>taxonomy seed</strong> of the design-reference
+  screenshot corpus (<a href="/backlog/382-design-reference-screenshot-corpus-collect-dedup-codify/">backlog
+  #382</a>, fork carried by <a href="/backlog/394-design-ref-corpus-first-run-scope-taxonomy-seed-grow-targets/">#394</a>):
+  <em>which app categories and design registers the corpus covers, how many shots each, and how the
+  <code>design-refs/targets.json</code> worklist grows.</em> The phase-1 pipeline already ships; what remained
+  open was the curatorial seed. The proof set is skewed — 12 of 16 apps are dev-tools / editors /
+  code-playgrounds — so the corpus is thin everywhere else, and the seed exists to fix that deliberately
+  rather than by taste.
+</p>
+<p>
+  The survey’s job is to borrow proven vocabulary from the established reference galleries and the
+  information-architecture literature instead of inventing a taxonomy cold. Session report:
+  <code>reports/2026-06-12-design-ref-corpus-taxonomy-seed.md</code>.
+</p>
+
+<h2>How the established galleries taxonomise UIs</h2>
+<table>
+  <thead><tr><th>Source</th><th>Organising model</th><th>What we borrow</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Mobbin</strong> (1,150+ apps, 608k+ screens)</td>
+      <td>Faceted, not a single tree: <em>app-category</em> × <em>UI-pattern/flow</em> ×
+        <em>UI-element</em> × <em>platform</em> × <em>design-trend</em>, combined freely.</td>
+      <td>The corpus is multi-axis: <code>category</code> (domain) and <code>designRegister</code> are
+        independent facets, not one hierarchy.</td>
+    </tr>
+    <tr>
+      <td><strong>Page Flows / Screenlane</strong></td>
+      <td>Lead with a <em>screen-type</em> axis: onboarding, dashboard, settings, checkout, search,
+        empty/error states, chat, pricing…</td>
+      <td>Maps to our <code>surface</code> field — a <em>per-screenshot</em> property, which is why #382
+        defers it (with refined register/theme) to the phase-3 vision pass.</td>
+    </tr>
+    <tr>
+      <td><strong>Design-style literature</strong></td>
+      <td>A named visual-aesthetic vocabulary: skeuomorphism → flat → material → minimalism → neumorphism →
+        glassmorphism → neobrutalism → claymorphism.</td>
+      <td>A distinct axis from product archetype — see “Two axes hide in one field”.</td>
+    </tr>
+    <tr>
+      <td><strong>G2 / Capterra / Crozdesk</strong></td>
+      <td>Evolving, <em>keyed</em> category taxonomies (2,000 / ~1,000 / 377 categories), each different,
+        each growing monthly.</td>
+      <td>Borrow a coarse top level, not 2,000 leaves; keep the seed keyed so re-runs diff cleanly.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Two axes hide in one field</h2>
+<p>
+  The current <code>targets.json</code> <code>designRegister</code> mixes <strong>product archetypes</strong>
+  (<code>enterprise-dense</code>, <code>modern-saas</code>, <code>utilitarian</code>) with
+  <strong>visual aesthetics</strong> (<code>minimal</code>, <code>dark-dev</code>,
+  <code>minimal-hand-drawn</code>). These vary independently — a modern-SaaS product can render flat
+  <em>or</em> glassmorphic. The survey’s recommendation is to split them into a deterministic,
+  author-supplied <code>productRegister</code> (the exercise-app program’s archetype vocabulary) and a
+  perceptual <code>visualStyle</code> (the named-aesthetic vocabulary) that the vision pass fills — which
+  also <em>reduces</em> collect-time curation.
+</p>
+
+<h2>Controlled vocabulary vs folksonomy — the resolved answer</h2>
+<p>
+  The IA literature is explicit: a closed taxonomy is consistent but rigid; a free-text folksonomy is
+  flexible but drowns in synonym/polysemy/noise and breaks retrieval. The documented resolution is a
+  <strong>faceted controlled vocabulary that grows</strong> — canonical seed values, new values allowed but
+  curated into a registry. That is exactly the shape of the repo’s own
+  <a href="/research/benchmark-corpus/">benchmark corpus</a>: a keyed list whose stable ids make a re-run a
+  clean diff rather than a rewrite. The taxonomy seed should live in the same kind of keyed, append-friendly
+  registry (<code>design-refs/taxonomy.json</code>).
+</p>
+
+<h2>What this feeds</h2>
+<p>
+  Four prepared forks in <a href="/backlog/394-design-ref-corpus-first-run-scope-taxonomy-seed-grow-targets/">#394</a>:
+  split the register axis (productRegister + visualStyle), vocabulary openness (open-growing keyed registry),
+  first-run scope (scarcity-weighted grow-targets, ~30–50 shots filling thin registers), and the category
+  vocabulary source (coarse hand-roll lightly anchored to G2/Capterra). This is internal research-corpus
+  tooling with zero project-facing lock-in — a configurable dimension with most-permissive defaults, whose
+  one real seam (deterministic target-curation vs vision-pass tagging) is the seam #382 already drew.
+</p>

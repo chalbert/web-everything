@@ -1,0 +1,66 @@
+<h2>Stepper (Wizard)</h2>
+<p>A linear, locked-progression navigation surface — the <strong>Wizard</strong> / multi-step-form flow. The Stepper realizes the third value of the <a href="/intents/navigation/">Navigation Intent</a>'s <code>structure</code> axis (<code>linear</code>), the sibling of <code>lateral</code> (<a href="/blocks/tabs/">Tabs</a>) and <code>hierarchical</code> (<a href="/blocks/router/">Router</a>). A fixed sequence of steps is presented one at a time; advancing <em>replaces</em> rather than stacks history, and leaving an in-progress flow can prompt to preserve progress.</p>
+
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">
+  <strong>Status:</strong> active — the reference runtime <code>StepperBehavior</code> ships the contract specified here (locked progression, <code>aria-current="step"</code>, the Step N of M announcement, and the step-change / step-advance-blocked / flow-complete events). First consumer: the <a href="/backlog/318-exercise-app-auto-insurance-lifecycle/">auto-insurance</a> quote wizard. Tracked in <a href="/backlog/053-linear-navigation-block/">backlog #053</a>.
+</p>
+
+<h3>Navigation Intent dimensions</h3>
+<p>The Stepper is the block that most exercises the navigation dimensions <em>in combination</em>, and the one that justifies keeping the intent's <code>session</code> persistence value (per <a href="/backlog/057-nav-persistence-grounding/">#057</a>):</p>
+<table>
+  <tr><th>Dimension</th><th>Value</th><th>Why</th></tr>
+  <tr><td><code>structure</code></td><td><code>linear</code></td><td>A fixed, ordered sequence of steps</td></tr>
+  <tr><td><code>history</code></td><td><code>replace</code></td><td>Each step overwrites the last, so Back exits the flow rather than walking step-by-step</td></tr>
+  <tr><td><code>scroll</code></td><td><code>top</code></td><td>Each new step lands at the top of its content</td></tr>
+  <tr><td><code>transition</code></td><td><code>directional</code></td><td>Forward vs. back stepping is inherently directional (animation feel defers to the <a href="/intents/motion/">Motion</a> intent)</td></tr>
+  <tr><td><code>guard</code></td><td><code>confirm</code></td><td>Leaving mid-flow prompts so progress is not silently lost</td></tr>
+  <tr><td><code>persistence</code></td><td><code>session</code></td><td>The step survives Back/Forward and refresh, but is not a fresh shareable link — the canonical Wizard behavior</td></tr>
+</table>
+
+<h3>Web Standards Alignment</h3>
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current"><code>aria-current="step"</code></a></td>
+    <td>WAI-ARIA 1.1</td>
+    <td>The active step indicator carries <code>aria-current="step"</code>; the step list is an ordered <code>&lt;ol&gt;</code>/<code>&lt;nav&gt;</code> conveying position in the sequence</td>
+  </tr>
+  <tr>
+    <td><a href="https://www.w3.org/WAI/tutorials/forms/multi-page/">Multi-page forms</a></td>
+    <td>W3C WAI Tutorial</td>
+    <td>A labelled step region, a visible progress indicator, and a status message announcing <em>"Step N of M"</em> on each change</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API">Navigation API</a></td>
+    <td>Baseline 2024 (fallback &lt;17.2)</td>
+    <td>Step advance navigates with <code>history: "replace"</code>; the resumable variant writes the step index to History state</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API">Invoker Commands</a></td>
+    <td>Baseline (progressive enhancement)</td>
+    <td>Next/Back/Go-to-step controls use the <code>commandfor</code>/<code>command</code> pattern</td>
+  </tr>
+</table>
+
+<h3>Progression model</h3>
+<p>Locked progression is what distinguishes a Wizard from Tabs, and is the safe default:</p>
+<ul>
+  <li><strong>Locked (default)</strong> — the user advances one step at a time and may jump back only to already-completed steps; advancing past an incomplete or invalid step is blocked.</li>
+  <li><strong>Free</strong> (<code>withFreeStepNavigation</code>) — any step may be selected at any time, for non-gated flows like a settings wizard.</li>
+</ul>
+
+<h3>Persistence — the configurable axis</h3>
+<p>Persistence is the one navigation dimension a linear flow legitimately varies across, so the Stepper exposes it rather than baking it:</p>
+<ul>
+  <li><code>session</code> <strong>(default)</strong> — step index in History state; survives Back/Forward and refresh, not shareable.</li>
+  <li><code>url</code> (<code>withResumableState</code>) — deep-linkable / resumable; the step is reflected in the URL. Only meaningful when arriving mid-flow is valid.</li>
+  <li><code>memory</code> — purely ephemeral; step state is lost on refresh.</li>
+</ul>
+
+<h3>Composition</h3>
+<p>The Stepper owns only the linear sequencing and the locked-progression rule; it composes the rest:</p>
+<ul>
+  <li><a href="/blocks/view/">View</a> — shows/hides the current step panel (only the current step is rendered visible).</li>
+  <li><strong>Navigation guard</strong> — intercepts leaving an in-progress flow (a <code>canDeactivate</code>-style hook) for <code>guard: confirm</code>.</li>
+  <li><a href="/blocks/form/">Form</a> validation — when <code>withStepValidation</code> is used, step validity becomes the progression gate.</li>
+</ul>

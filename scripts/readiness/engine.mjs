@@ -138,6 +138,10 @@ export function computeSelection(items) {
     num: it.num, id: it.id, title: it.title, type: it.type,
     workItem: it.workItem, size: it.size, tier: it.tier, batchable: !!it.batchable,
     batchCost: it.batchCost,
+    // A decision is PREPARED once `preparedDate` is set — its forks are researched, the research is
+    // published as a /research/ topic, and each fork states options + a bold default (the
+    // "prepared-fork shape", backlog-workflow.md). A prepared Tier-B item is ready to *ratify*, not research.
+    prepared: !!it.preparedDate, preparedDate: it.preparedDate ?? null,
     leverageScore: it.leverageScore ?? 0,
     directUnblocks: it.directUnblocks ?? 0,
     transitiveUnblocks: it.transitiveUnblocks ?? 0,
@@ -153,14 +157,20 @@ export function computeSelection(items) {
     || sizeKey(a) - sizeKey(b)
     || Number(a.num) - Number(b.num);
 
+  // Tier-B (decisions): a PREPARED decision (`preparedDate` set — forks researched, options stated)
+  // is ready to ratify, so it ranks above an un-prepared fork that still needs a research pass; within
+  // each group the usual leverage order applies. Surfacing prepared-first is the payoff of doing the
+  // fork-readiness prep ahead of the call.
+  const rankB = (a, b) => (Number(!!b.preparedDate) - Number(!!a.preparedDate)) || rank(a, b);
+
   const open = items.filter((it) => it.status === 'open');
   const tierA = open.filter((it) => it.tier === 'A').sort(rank).map(project);
-  const tierB = open.filter((it) => it.tier === 'B').sort(rank).map(project);
+  const tierB = open.filter((it) => it.tier === 'B').sort(rankB).map(project);
   const tierC = open.filter((it) => it.tier === 'C');
   const batchable = tierA.filter((it) => it.batchable);
 
   return {
-    counts: { open: open.length, tierA: tierA.length, tierB: tierB.length, tierC: tierC.length, batchable: batchable.length },
+    counts: { open: open.length, tierA: tierA.length, tierB: tierB.length, tierBPrepared: tierB.filter((it) => it.prepared).length, tierC: tierC.length, batchable: batchable.length },
     tierA, batchable, tierB,
   };
 }
@@ -169,7 +179,7 @@ export function computeSelection(items) {
  * Greedy POINTS-BUDGET pack — the suggested batch for a given points budget. Walks the already-ranked
  * Tier-A list (leverage → issue → smaller → NNN) and takes each batchable item whose `batchCost`
  * fits the remaining budget, until the budget is exhausted or the list ends. This is "take as many
- * points as possible," not "take N items": a single `size·5` joins when it fits, and the old count cap
+ * points as possible," not "take N items": a single `size·8` joins when it fits, and the old count cap
  * + ≤3 gate would have left both the points and the slot on the table. A too-large item is SKIPPED (not
  * a hard break), so a smaller, lower-ranked item still gets packed behind it — maximising points used.
  * Deterministic: ranked input + greedy walk → identical pack for identical state + budget.

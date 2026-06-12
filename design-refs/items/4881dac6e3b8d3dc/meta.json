@@ -1,0 +1,28 @@
+{
+  "id": "4881dac6e3b8d3dc",
+  "contentHash": "4881dac6e3b8d3dccf3f5ecc1c171cea54905578f849b6930d827d076aaa6252",
+  "sourceUrl": "https://www.geogebra.org/calculator",
+  "captureMethod": "playwright",
+  "dateCollected": "2026-06-12T12:27:43.031Z",
+  "datePublished": null,
+  "app": "GeoGebra",
+  "company": "GeoGebra",
+  "category": "education-tools",
+  "surface": null,
+  "designRegister": "friendly-minimal",
+  "theme": "light",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "dpr": 2,
+  "imageDims": {
+    "width": 2880,
+    "height": 1800
+  },
+  "bytes": 97502,
+  "tags": [],
+  "sourceCredit": "GeoGebra",
+  "collectionRun": "2026-06-12T12-26-38-221Z",
+  "reviewState": "confirmed"
+}

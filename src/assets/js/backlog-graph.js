@@ -236,7 +236,7 @@
         + '\nstatus: ' + n.status + (n.tier ? ' · tier ' + n.tier : '') + (n.batchable ? ' · batchable' : '')
         + '\nunblocks ' + n.direct + ' directly, ' + n.chain + ' in chain';
       link.appendChild(title);
-      // Batchable (Tier-A task / story ≤5) nodes get a detached outer ring so the batch pool stands out.
+      // Batchable (Tier-A task / story ≤8) nodes get a detached outer ring so the batch pool stands out.
       if (n.batchable) link.appendChild(make('circle', { cx: n._x, cy: n._y, r: r + 3.5, fill: 'none', stroke: '#16a34a', 'stroke-width': '1.5' }));
       link.appendChild(make('circle', { cx: n._x, cy: n._y, r: r, fill: st.fill, stroke: st.stroke, 'stroke-width': '2' }));
       var label = make('text', { x: n._x, y: n._y + 4, 'text-anchor': 'middle', 'font-size': '11', 'font-weight': '700', fill: st.text });

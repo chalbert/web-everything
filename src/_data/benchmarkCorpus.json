@@ -1,0 +1,75 @@
+{
+  "id": "benchmark-corpus",
+  "version": 1,
+  "lastSwept": "2026-06-12",
+  "description": "The canonical input to the competitive coverage gap-analysis program (backlog #315). An explicit, reproducible list of the leading design systems and UI libraries to benchmark, each with the metadata phase 2 (extraction) and phase 3 (mapping) join against. Membership is governed by the stated selectionCriteria below so a re-run lands on a comparable list. The references.json 'Reference Design Systems' set is the curated docs-surface subset of this corpus (flagged inReferences).",
+  "selectionCriteria": [
+    {
+      "id": "adoption",
+      "label": "Adoption / influence",
+      "test": "Widely used in production or widely copied by other systems (a pattern-setter, not a niche experiment)."
+    },
+    {
+      "id": "breadth",
+      "label": "Coverage breadth",
+      "test": "Spans many component and pattern categories — a full system or primitive set, not a single-widget library."
+    },
+    {
+      "id": "philosophy",
+      "label": "Distinct philosophy / axis",
+      "test": "Adds a perspective the corpus would otherwise miss (opinionated DS vs. headless behavior vs. web-component vs. enterprise-density vs. platform standard)."
+    },
+    {
+      "id": "native-alignment",
+      "label": "Native-platform alignment",
+      "test": "Tracks web platform standards, WAI-ARIA APG, and native elements closely (informs whether a capability is a real gap or already native)."
+    },
+    {
+      "id": "docs-quality",
+      "label": "Public documentation / standards quality",
+      "test": "Has browsable, citable per-component docs or guidelines — the source material the extraction phase reads."
+    },
+    {
+      "id": "currency",
+      "label": "Maintenance / currency",
+      "test": "Actively maintained — a recent release or living standard, not abandoned."
+    }
+  ],
+  "inclusionRule": "A source qualifies if it scores on at least three criteria AND occupies a category axis below. The corpus deliberately spans all axes rather than over-weighting the most popular names, so the gap sweep is not biased toward one design philosophy.",
+  "categories": [
+    { "id": "mature-design-system", "label": "Mature opinionated design system", "axis": "Full, opinionated system with tokens, components, and usage guidance." },
+    { "id": "headless-primitive", "label": "Headless / primitive / a11y-first library", "axis": "Unstyled behavior + accessibility primitives; the WAI-ARIA APG made code." },
+    { "id": "web-component-system", "label": "Web-component / framework-agnostic system", "axis": "Ships standards-based custom elements usable in any framework." },
+    { "id": "component-kit", "label": "Popular styled component kit", "axis": "Batteries-included styled components for a specific framework ecosystem." },
+    { "id": "platform-guidelines", "label": "Platform guideline / standards body", "axis": "Native-platform or standards guidance (not shipped code) — the native-first anchor." }
+  ],
+  "nativeAlignmentScale": ["high", "medium-high", "medium", "low-medium"],
+  "sources": [
+    { "id": "material-3", "name": "Material Design 3", "vendor": "Google", "category": "mature-design-system", "docsUrl": "https://m3.material.io/", "repoUrl": "https://github.com/material-components/material-web", "philosophy": "Opinionated cross-platform system; strong state, elevation, and motion specs.", "nativeAlignment": "medium", "inReferences": true, "lastChecked": "2026-06-12" },
+    { "id": "carbon", "name": "Carbon Design System", "vendor": "IBM", "category": "mature-design-system", "docsUrl": "https://carbondesignsystem.com/", "repoUrl": "https://github.com/carbon-design-system/carbon", "philosophy": "Enterprise data density, loading patterns, strict accessibility.", "nativeAlignment": "medium", "inReferences": true, "lastChecked": "2026-06-12" },
+    { "id": "fluent-2", "name": "Fluent 2", "vendor": "Microsoft", "category": "mature-design-system", "docsUrl": "https://fluent2.microsoft.design/", "repoUrl": "https://github.com/microsoft/fluentui", "philosophy": "Productivity-focused, density controls, deep keyboard interaction.", "nativeAlignment": "medium", "inReferences": true, "lastChecked": "2026-06-12" },
+    { "id": "spectrum", "name": "Spectrum", "vendor": "Adobe", "category": "mature-design-system", "docsUrl": "https://spectrum.adobe.com/", "repoUrl": "https://github.com/adobe/spectrum-css", "philosophy": "Adaptive scaling (touch/mouse), rigorous theming.", "nativeAlignment": "medium", "inReferences": true, "lastChecked": "2026-06-12" },
+    { "id": "polaris", "name": "Polaris", "vendor": "Shopify", "category": "mature-design-system", "docsUrl": "https://polaris.shopify.com/", "repoUrl": "https://github.com/Shopify/polaris", "philosophy": "Commerce-admin system; strong content/UX guidance and patterns.", "nativeAlignment": "medium", "inReferences": false, "lastChecked": "2026-06-12" },
+    { "id": "atlassian", "name": "Atlassian Design System", "vendor": "Atlassian", "category": "mature-design-system", "docsUrl": "https://atlassian.design/", "repoUrl": "https://bitbucket.org/atlassian/atlassian-frontend-mirror", "philosophy": "Productivity-app system; mature interaction and content standards.", "nativeAlignment": "medium", "inReferences": false, "lastChecked": "2026-06-12" },
+    { "id": "primer", "name": "Primer", "vendor": "GitHub", "category": "mature-design-system", "docsUrl": "https://primer.style/", "repoUrl": "https://github.com/primer", "philosophy": "Developer-tool system; ViewComponent + React + CSS, a11y-forward.", "nativeAlignment": "medium-high", "inReferences": false, "lastChecked": "2026-06-12" },
+    { "id": "lightning", "name": "Lightning Design System", "vendor": "Salesforce", "category": "mature-design-system", "docsUrl": "https://www.lightningdesignsystem.com/", "repoUrl": "https://github.com/salesforce-ux/design-system", "philosophy": "Enterprise CRM system; dense data, blueprints, strong a11y guidance.", "nativeAlignment": "medium", "inReferences": false, "lastChecked": "2026-06-12" },
+    { "id": "radix-primitives", "name": "Radix UI Primitives", "vendor": "WorkOS", "category": "headless-primitive", "docsUrl": "https://www.radix-ui.com/primitives", "repoUrl": "https://github.com/radix-ui/primitives", "philosophy": "Modern headless behavior + ARIA management; the de-facto primitive set.", "nativeAlignment": "high", "inReferences": true, "lastChecked": "2026-06-12" },
+    { "id": "react-aria", "name": "React Aria", "vendor": "Adobe", "category": "headless-primitive", "docsUrl": "https://react-spectrum.adobe.com/react-aria/", "repoUrl": "https://github.com/adobe/react-spectrum", "philosophy": "Behavior + a11y hooks distilled from APG; deep i18n and interaction coverage.", "nativeAlignment": "high", "inReferences": false, "lastChecked": "2026-06-12" },
+    { "id": "base-ui", "name": "Base UI", "vendor": "MUI", "category": "headless-primitive", "docsUrl": "https://base-ui.com/", "repoUrl": "https://github.com/mui/base-ui", "philosophy": "Unstyled accessible components from the MUI/Radix/Floating UI authors.", "nativeAlignment": "high", "inReferences": false, "lastChecked": "2026-06-12" },
+    { "id": "ark-ui", "name": "Ark UI", "vendor": "Chakra", "category": "headless-primitive", "docsUrl": "https://ark-ui.com/", "repoUrl": "https://github.com/chakra-ui/ark", "philosophy": "State-machine-driven headless components across React/Vue/Solid.", "nativeAlignment": "high", "inReferences": false, "lastChecked": "2026-06-12" },
+    { "id": "headless-ui", "name": "Headless UI", "vendor": "Tailwind Labs", "category": "headless-primitive", "docsUrl": "https://headlessui.com/", "repoUrl": "https://github.com/tailwindlabs/headlessui", "philosophy": "Minimal unstyled accessible widgets paired with Tailwind.", "nativeAlignment": "medium-high", "inReferences": false, "lastChecked": "2026-06-12" },
+    { "id": "shoelace", "name": "Shoelace / Web Awesome", "vendor": "Font Awesome", "category": "web-component-system", "docsUrl": "https://shoelace.style/", "repoUrl": "https://github.com/shoelace-style/shoelace", "philosophy": "Framework-agnostic web components with a full component set.", "nativeAlignment": "medium-high", "inReferences": false, "lastChecked": "2026-06-12" },
+    { "id": "spectrum-web-components", "name": "Spectrum Web Components", "vendor": "Adobe", "category": "web-component-system", "docsUrl": "https://opensource.adobe.com/spectrum-web-components/", "repoUrl": "https://github.com/adobe/spectrum-web-components", "philosophy": "Spectrum delivered as standards-based custom elements.", "nativeAlignment": "medium-high", "inReferences": false, "lastChecked": "2026-06-12" },
+    { "id": "fast", "name": "FAST", "vendor": "Microsoft", "category": "web-component-system", "docsUrl": "https://www.fast.design/", "repoUrl": "https://github.com/microsoft/fast", "philosophy": "Web-component primitives and tooling underpinning Fluent web components.", "nativeAlignment": "medium-high", "inReferences": false, "lastChecked": "2026-06-12" },
+    { "id": "lion", "name": "Lion", "vendor": "ING", "category": "web-component-system", "docsUrl": "https://lion-web.netlify.app/", "repoUrl": "https://github.com/ing-bank/lion", "philosophy": "White-label accessible web-component primitives meant to be extended.", "nativeAlignment": "high", "inReferences": false, "lastChecked": "2026-06-12" },
+    { "id": "mui", "name": "Material UI (MUI)", "vendor": "MUI", "category": "component-kit", "docsUrl": "https://mui.com/material-ui/", "repoUrl": "https://github.com/mui/material-ui", "philosophy": "Most-adopted React component kit; broad coverage, Material-based.", "nativeAlignment": "low-medium", "inReferences": false, "lastChecked": "2026-06-12" },
+    { "id": "ant-design", "name": "Ant Design", "vendor": "Ant Group", "category": "component-kit", "docsUrl": "https://ant.design/", "repoUrl": "https://github.com/ant-design/ant-design", "philosophy": "Enterprise React kit; very wide component + data-entry coverage.", "nativeAlignment": "low-medium", "inReferences": false, "lastChecked": "2026-06-12" },
+    { "id": "chakra-ui", "name": "Chakra UI", "vendor": "Chakra", "category": "component-kit", "docsUrl": "https://chakra-ui.com/", "repoUrl": "https://github.com/chakra-ui/chakra-ui", "philosophy": "Style-props React kit emphasizing accessibility and theming.", "nativeAlignment": "medium", "inReferences": false, "lastChecked": "2026-06-12" },
+    { "id": "mantine", "name": "Mantine", "vendor": "Mantine", "category": "component-kit", "docsUrl": "https://mantine.dev/", "repoUrl": "https://github.com/mantinedev/mantine", "philosophy": "Large React kit with rich hooks and form/data components.", "nativeAlignment": "low-medium", "inReferences": false, "lastChecked": "2026-06-12" },
+    { "id": "shadcn-ui", "name": "shadcn/ui", "vendor": "shadcn", "category": "component-kit", "docsUrl": "https://ui.shadcn.com/", "repoUrl": "https://github.com/shadcn-ui/ui", "philosophy": "Copy-in components over Radix + Tailwind; the current default React pattern.", "nativeAlignment": "medium-high", "inReferences": false, "lastChecked": "2026-06-12" },
+    { "id": "apple-hig", "name": "Human Interface Guidelines", "vendor": "Apple", "category": "platform-guidelines", "docsUrl": "https://developer.apple.com/design/human-interface-guidelines/", "repoUrl": null, "philosophy": "Defines the native-feel baseline for modal, navigation, and feedback.", "nativeAlignment": "high", "inReferences": true, "lastChecked": "2026-06-12" },
+    { "id": "gov-uk", "name": "GOV.UK Design System", "vendor": "UK Government", "category": "platform-guidelines", "docsUrl": "https://design-system.service.gov.uk/", "repoUrl": "https://github.com/alphagov/govuk-design-system", "philosophy": "Gold standard for form validation, error messaging, and progressive enhancement.", "nativeAlignment": "high", "inReferences": true, "lastChecked": "2026-06-12" },
+    { "id": "wai-aria-apg", "name": "WAI-ARIA Authoring Practices Guide", "vendor": "W3C", "category": "platform-guidelines", "docsUrl": "https://www.w3.org/WAI/ARIA/apg/", "repoUrl": "https://github.com/w3c/aria-practices", "philosophy": "The canonical accessible-widget pattern + keyboard-interaction reference.", "nativeAlignment": "high", "inReferences": false, "lastChecked": "2026-06-12" },
+    { "id": "open-ui", "name": "Open UI", "vendor": "W3C Community Group", "category": "platform-guidelines", "docsUrl": "https://open-ui.org/", "repoUrl": "https://github.com/openui/open-ui", "philosophy": "Standardizing native UI controls (selectlist/popover/etc.); the native-first frontier.", "nativeAlignment": "high", "inReferences": false, "lastChecked": "2026-06-12" }
+  ]
+}

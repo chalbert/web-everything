@@ -15,6 +15,12 @@ crossRef: { url: /adapters/, label: Rendering Adapters }
 
 A tool that **ingests a UI mockup — static (image, Figma/Sketch export, screenshot) or interactive (a clickable prototype, a live page, a recorded flow) — analyses it, and emits Web Everything standard-compliant code**: declarative components, blocks, intents, and the right adapter form, rather than a one-off framework dump. The non-negotiable design constraint is that it **must not depend on a single AI tool**. Model/vision/codegen capability is the fastest-moving part of this space, so the tool treats the AI as a *swappable provider behind a registry* — the same "don't reinvent the wheel, inject a provider" shape we already use for [render strategies](/protocols/) (`CustomRenderStrategyRegistry`) and the MaaS compiler seam (`CustomCompilerRegistry`, #081). The AI is infrastructure you plug in, not architecture you bake in.
 
+> **Split status (2026-06-10 analysis, via #259): splittable but deferred.** A *staging* split exists
+> — neutral structural-description schema (`story·5`) → analyzer registry + reference provider (`story·3`)
+> → generator wiring + quality gate (`task`s). But the foundation slice stays ≈`5` (single-item, not
+> batchable), so executing the split now is backlog churn with no batchability win. Deferred until the
+> item is picked up or its urgency rises; revisit with `/split` then.
+
 ## The two requirements, stated sharply
 
 | Requirement | What it means | Why it's the whole point |

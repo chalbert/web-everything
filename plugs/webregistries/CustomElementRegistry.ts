@@ -7,6 +7,37 @@ import CustomElement, { CustomElementOptions } from '../webcomponents/CustomElem
 const OriginalCustomElementRegistry = window.CustomElementRegistry;
 const originalCustomElements = window.customElements;
 
+// Real browsers refuse to construct a custom-element class that is not itself natively registered:
+// `new RealClass()` / `Reflect.construct(RealClass, …)` throw "Illegal constructor" because the
+// HTMLElement constructor resolves `new.target` against the native registry and finds nothing. The
+// scoped registry can't register the real class under the *user's* tag (that tag carries a no-op
+// stand-in so the browser parses `<my-el>` while the scope keeps its own definition), so the real
+// class would never be legally constructible. The fix: register the real class natively under a
+// unique *private* tag. That makes the class a registered constructor — so `new RealClass()` and
+// `Reflect.construct(RealClass, …)` are legal — without colliding with the user's tag or its
+// stand-in. We memoise per constructor (a class may be defined in several scoped registries, and a
+// constructor can only be natively registered once) and only do this for autonomous elements; the
+// customized-built-in path keeps its base-derived stand-in untouched.
+const nativeConstructionTagFor = new WeakMap<Function, string>();
+let constructionTagCounter = 0;
+
+/**
+ * Ensure `element` (an autonomous custom-element class) is legally constructible in a real browser
+ * by registering it natively under a unique private tag. Idempotent per constructor.
+ */
+function ensureNativelyConstructible(element: ImplementedElement): void {
+  if (nativeConstructionTagFor.has(element)) return;
+  const privateTag = `scoped-ctor-${++constructionTagCounter}-el`;
+  try {
+    originalCustomElements.define(privateTag, element as unknown as CustomElementConstructor);
+    nativeConstructionTagFor.set(element, privateTag);
+  } catch (error) {
+    // Already registered under another tag (e.g. a prior define of the same class), or the
+    // environment rejects it — either way construction may already be legal; record best-effort.
+    console.warn(`Failed to register private construction tag for ${privateTag}:`, error);
+  }
+}
+
 export interface CustomElementRegistryOptions {
   extends?: CustomElementRegistry[];
 }
@@ -47,6 +78,14 @@ export default class CustomElementRegistry extends HTMLRegistry<ElementDefinitio
 
   define(name: string, element: ImplementedElement, options?: ElementDefinitionOptions) {
     // TODO: Validate that no element with same name or constructor exists on this registry
+
+    // For autonomous elements, register the real class natively under a private tag first so the
+    // browser will permit constructing it (see ensureNativelyConstructible). Without this, the
+    // `new element()` below — and the `Reflect.construct(element, …)` upgrade path — throw
+    // "Illegal constructor" in a real browser. Customized built-ins keep their existing path.
+    if (!options?.extends) {
+      ensureNativelyConstructible(element);
+    }
 
     // Create a temporary instance to get instance properties (like callbacks defined with =)
     const tempInstance = new element();

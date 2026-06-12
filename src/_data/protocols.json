@@ -89,5 +89,80 @@
     "status": "concept",
     "ownedByProject": "webmanifests",
     "anchor": "protocol-changelog-manifest"
+  },
+  {
+    "id": "guard",
+    "name": "Guard",
+    "summary": "Conformance reference for guarding a region's lifecycle against a predicate. Fixes one seam — a predicate/policy attached to a region (document/route/modal/element), evaluated at a lifecycle event, resolved by a swappable CustomGuardProvider (default → project override → custom plug) — and nothing else. The provider contract is the only lock: async, server-authoritative (the front-end is a UX mirror, never enforcement), and revocable. Deny-outcomes are NOT unified — each member owns its own family (exit guard → user-mediated confirm; entry guard → hide|redirect|forbid|cloak, where the 403-vs-404 disclosure call lives behind the provider). Same registry+provider pattern as Anchor Positioning but a materially different (async/trust-crossing) contract shape. Members: exit guard (#273) and access control (#178).",
+    "status": "concept",
+    "ownedByProject": "webguards",
+    "anchor": "protocol-guard"
+  },
+  {
+    "id": "mock-contract",
+    "name": "Mock Contract",
+    "summary": "Portable, interaction-bearing mock/contract schema for the mock & service-proxy dev-service — the standard artifact, with the server as a swappable provider. Anchors the response shape on OpenAPI, then adds a WE behavior layer OpenAPI cannot express: latency, fault injection, first-that-matches conditional responses, a mock|proxy|record response-kind, and auth/fake-OAuth (stateless by default). The artifact carries consumer interactions (Pact/BDCT), not just a shape, so one contract serves two uses — drive a mock AND drift-check the real service in webcases — because schema-validation ≠ contract-verification. Data-defined so it is portable across providers: the protocol is the only lock.",
+    "status": "concept",
+    "ownedByProject": "webcases",
+    "anchor": "protocol-mock-contract"
+  },
+  {
+    "id": "lifecycle",
+    "name": "Lifecycle",
+    "summary": "Conformance reference for a domain entity's lifecycle. Fixes one seam — a declarative status set + transition map (each transition: from → to, an optional guard predicate, and the permitted actor/role), resolved by a swappable CustomLifecycleProvider registry — and nothing else. The transition map is the only lock: data-defined and portable, so a workflow engine (XState, a BPM server, a hand-rolled switch) plugs in behind the provider without touching the entity. Two concerns are explicitly NOT owned here: authorization (whether THIS actor may fire a transition is a guard predicate, delegated to the Web Guards CustomGuardProvider — async, server-authoritative, the front-end is a UX mirror) and persistence (the entity's storage is its own concern). Every transition emits an observable lifecycle event carrying { entity, from, to, actor, at } — the composition seam for audit-trail (#357) and reporting. The canonical presentation of the current state + available next transitions is the Status Indicator intent. Members stay open: a state may be terminal, a transition may be automatic (no actor) or guarded.",
+    "status": "draft",
+    "ownedByProject": "weblifecycle",
+    "realizesIntent": "status-indicator",
+    "anchor": "protocol-lifecycle"
+  },
+  {
+    "id": "audit-trail",
+    "name": "Audit Trail",
+    "summary": "Conformance reference for a domain entity's immutable operational history. Fixes one seam — a normalized AuditEvent { target, action, actor, at, before?, after?, correlationId? } appended through a swappable CustomAuditProvider registry — and nothing else. Append-only / immutability is the contract guarantee: a provider never mutates or deletes a recorded event. The before/after pair REUSES the Web States ChangeRecord shape (path/op/oldValue/newValue) rather than redefining one, and correlationId links related events or a Web Traces span. The provider is the only lock — an in-memory log, an event-sourced store, or an OSCAL-aligned backend satisfy the same `append()` / `queryByEntity()` / `subscribe?()` contract, so the audit store swaps without touching producers. Composition is the headline: an audit provider subscribes to a Web Lifecycle provider so every lifecycle transition becomes one AuditEvent automatically; permission decisions (Web Guards) and rule evaluations (decision-trace #355) feed the same log. The canonical per-entity timeline rendering + filtering is the Audit Timeline intent. NOT this protocol: Web States change-tracking (reactive, transient mutation observation) and Web Compliance's enforcement-evidence trail (the platform twin — same schema, different subject).",
+    "status": "draft",
+    "ownedByProject": "webaudit",
+    "realizesIntent": "audit-timeline",
+    "anchor": "protocol-audit-trail"
+  },
+  {
+    "id": "decision-record",
+    "name": "Decision Record",
+    "summary": "Conformance reference for an explainable, reproducible decision. Fixes one seam — the normalized DecisionRecord { subject, ruleSet {id, version}, criteria[], outcome, reasonCodes?, at? } where each DecisionCriterion is { id, label, input {name, value}, operator, threshold, outcome } — and nothing else. This is a SCHEMA-ONLY contract: the record shape IS the lock, there is no provider, because the decision ENGINE is out of scope (that is the proof-of-compliance concern, #093). Reproducibility is the contract rule: a record carries the ruleSet version it ran against, so the explanation replays. Any producer — an underwriting engine, an eligibility/pricing/moderation engine — emits the same record, so consumers interoperate: a DecisionRecord feeds audit-trail (one AuditEvent), Web Reporting (#350) as a source, and Web Compliance (#351) as evidence. The canonical criteria-table + outcome rendering and result announcement is the Decision Trace intent. NOT this protocol: the rule engine + signed-proof machinery (#093), Web Validation (form-field invalidity), and Web Traces (execution spans — a name collision only).",
+    "status": "draft",
+    "ownedByProject": "webdecisions",
+    "realizesIntent": "decision-trace",
+    "anchor": "protocol-decision-record"
+  },
+  {
+    "id": "design-tokens",
+    "name": "Design Tokens (DTCG ↔ CSS)",
+    "summary": "Conformance reference for the design-token interchange + runtime mapping. The authoring/interchange format is W3C DTCG 2025.10 (adopted, not coined — the one legitimate Protocol here): a vendor-neutral JSON of { $type, $value } nodes with {group.token} aliasing, so tokens are portable across Style Dictionary, Tokens Studio, Figma, Terrazzo. The runtime tier is native CSS: each resolved token compiles to a custom property (--<group>-<token>), typed numerics register via @property, schemes resolve through light-dark()/color-scheme, contrast through prefers-contrast, and derived accent/state scales through relative color syntax (oklch(from …)) + color-mix() — validated against WCAG/APCA per step (the contrast-validation gate; curated scales are a brand-precision override, not the accessibility net). The standard ships a COMPLETE default token set; a consuming project overrides via DTCG `extends` rather than authoring from scratch. The taxonomy is 3-tier (primitive · semantic · component); the SEMANTIC tier is NOT defined here — it is owned by the Web Intents (density, surface, typography, motion, theme-color), whose refs resolve INTO a primitive token. NOT this protocol: the semantic role vocabulary (Web Intents) and the theme-color intent authoring (#010).",
+    "status": "draft",
+    "ownedByProject": "webtheme",
+    "anchor": "protocol-design-tokens"
+  },
+  {
+    "id": "maas-versioning",
+    "name": "MaaS Served-Artifact Versioning",
+    "summary": "Conformance reference for the version identity of a Module-as-a-Service served artifact. Four parts. (1) IDENTITY INVARIANT: a served artifact's version id = a content hash over EVERY byte-determining input — authored definition + transform/compiler version + params (form/target/strategy) + folded provenance; same hash ⇒ same bytes (cache forever), any input moves ⇒ new id. Omitting an input is the one excluded (broken) option — it serves drift. (2) PIN GRAMMAR: a floating-tag → exact-semver → content-hash ladder, each rung resolving to the immutable content-addressed URL (npm's tag→version→tarball shape); a consumer pins at any rung. (3) PROVENANCE HEADER: the producing core/compiler version emitted as an X-MaaS-Producer response header beside X-MaaS-Lossy, and folded INTO the hash (so a compiler bump alone mints a new id). (4) RUNTIME COMPAT-RANGE: the artifact declares an API-contract-version range against its bare-specifier runtime dependency (e.g. @frontierui/jsx-runtime) in metadata — a consumer↔provider seam-contract; 'satisfies' = the runtime's __API_VERSION__ falls in the range. WE defines the contract (identity rule + pin grammar + header + range FORMATS); Frontier UI implements it (#390 — runtime __API_VERSION__ export + opt-in maas-check validator); the serve-path emission is deferred until a serve path exists (#087). Technical contract, not a UX preference — a Protocol, not an Intent.",
+    "status": "concept",
+    "ownedByProject": "webadapters",
+    "anchor": "protocol-maas-versioning"
+  },
+  {
+    "id": "policy-rule",
+    "name": "Policy Rule (DMN-aligned)",
+    "summary": "Conformance reference for the rule meta-schema of declarative domain policy — adopting OMG DMN as the vocabulary (standardize the meta-schema, not the rule list). A PolicyRuleSet { id, version, scope?, hitPolicy, inputs[], rules[] } expresses one decision: inputs[] name the data references (resolved against Web Contexts), each rule is a row of { when: inputEntry[], then: outputEntry[] } where an entry is a FEEL-style expression (Web Expressions evaluates it), and hitPolicy (UNIQUE/FIRST/PRIORITY/COLLECT) disambiguates multiple matches — DMN's decision-table model. Versioning is a contract rule: a ruleSet carries its version so a decision replays against the exact rules that produced it (the seam to the Decision Record / proof-of-compliance log). Scope binds a ruleSet per context/tenant. This is the AUTHORING vocabulary only: it does NOT define the proof format (the tamper-evident hash-chained decision log over Web Traces — the proof-of-compliance slice) nor the enforcement seam (the OPA PDP/PEP runtime split). The policy LANGUAGE behind a rule (DMN/FEEL vs Rego vs Cedar) is a downstream impl choice; the meta-schema is what WE fixes. NOT this protocol: Web Validation (input-field invalidity), and the engine + signed-proof machinery (#093 Forks 2–3).",
+    "status": "draft",
+    "ownedByProject": "webpolicy",
+    "anchor": "protocol-policy-rule"
+  },
+  {
+    "id": "provider-consumer-graph",
+    "name": "Provider–Consumer Graph",
+    "summary": "Conformance reference for the introspectable dependency graph over WE providers and consumers — the open, self-hostable half of #092 (@webeverything-scoped, 'nothing to lock into'). Two parts. (1) GRAPH-MODEL SCHEMA: a directed multigraph of nodes (project | provider | protocol) and edges of kind 'provides' (a provider implements a protocol at a conformance tier, read from protocols.json) or 'consumes' (a dependency edge, read from Injector.consumptionEdges() — #400); edges carry a confidence ('confirmed' for build-derived, 'potential' until a runtime trace confirms). Consumption is bidirectional by construction (answers both 'what do I depend on' and 'who depends on me' → impact analysis). Build-time auto-derived from WE introspection is the source of truth (not hand-authored like Backstage's catalog-info.yaml); a runtime drift agent is a deferred enrichment (#092 Fork 1). (2) SEAM-CONTRACT: reuses the existing protocol conformance contract (provider declares its tier) plus the NET-NEW consumer-driven projection (consumer declares the dimension/capability subset it requires); compatible ⇔ consumerRequires ⊆ what the provider's tier supplies. NOT this protocol: the cross-repo aggregator, graph UI, and governance workflows (plateau-app licensed product) — this ships the schema + contract only. Technical contract, not a UX preference — a Protocol, not an Intent.",
+    "status": "concept",
+    "ownedByProject": "webregistries",
+    "anchor": "protocol-provider-consumer-graph"
   }
 ]

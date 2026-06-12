@@ -5,6 +5,7 @@ size: 13
 parent: "150"
 status: open
 blockedBy: ["140", "150"]
+childlessReason: blocked
 dateOpened: "2026-06-09"
 tags: [protocol, architecture, component-scoping, app-model, introspection, inter-module, webcontexts, registries, blocked]
 relatedReport: reports/2026-06-07-dev-authoring-preferences-architecture-intents.md

@@ -141,6 +141,65 @@ export function validateBacklogItem(item, ctx) {
   return { errors, warnings };
 }
 
+// ── Raw-HTML-in-backlog-body lint (#290) ──────────────────────────────────────
+// An un-backticked HTML tag in a backlog markdown body is passed through verbatim by 11ty and parsed
+// by the browser as a live element. A void/unclosed interactive one (`<select>`, `<dialog>`,
+// `<textarea>`) then swallows the rest of the page body, rendering the item visibly empty — the #020
+// bug, which shipped silently because check:standards didn't look. This lint flags tag-like `<…>`
+// sequences outside code spans/fences so the author wraps them (cheap fix: backticks).
+//
+// Severity is WARNING, not error: balanced raw HTML (e.g. #028's deliberate `<h3>/<p>/<ul>` block)
+// renders fine, so banning all body HTML would red-gate a working item. The warning surfaces every
+// raw tag — including the dangerous unclosed ones — without failing on legitimate rich-HTML prose.
+//
+// Match is restricted to RECOGNISED HTML element names. Backlog/doc prose is dense with `<NNN>`,
+// `<date>`, `<slug>` placeholders that are valid tag-name syntax but are NOT elements (the browser
+// treats them as inert unknown tags); matching every `<…>` would bury the real hits under placeholder
+// noise. Every content-swallowing element is a standard one, so the recognised-element set IS the
+// danger zone — custom elements (hyphenated, inert) are intentionally excluded.
+export const HTML_ELEMENTS = new Set([
+  'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio', 'b', 'base', 'bdi', 'bdo',
+  'blockquote', 'body', 'br', 'button', 'canvas', 'caption', 'cite', 'code', 'col', 'colgroup',
+  'data', 'datalist', 'dd', 'del', 'details', 'dfn', 'dialog', 'div', 'dl', 'dt', 'em', 'embed',
+  'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head',
+  'header', 'hgroup', 'hr', 'html', 'i', 'iframe', 'img', 'input', 'ins', 'kbd', 'label', 'legend',
+  'li', 'link', 'main', 'map', 'mark', 'menu', 'meta', 'meter', 'nav', 'noscript', 'object', 'ol',
+  'optgroup', 'option', 'output', 'p', 'picture', 'pre', 'progress', 'q', 'rp', 'rt', 'ruby', 's',
+  'samp', 'script', 'section', 'select', 'slot', 'small', 'source', 'span', 'strong', 'style', 'sub',
+  'summary', 'sup', 'table', 'tbody', 'td', 'template', 'textarea', 'tfoot', 'th', 'thead', 'time',
+  'title', 'tr', 'track', 'u', 'ul', 'var', 'video', 'wbr',
+]);
+
+/**
+ * Find un-backticked HTML element tags in a markdown body. Fenced code blocks (``` / ~~~) and inline
+ * code spans (`…`) are stripped first, so a `<select>` shown as an example inside backticks is ignored
+ * and only prose-level raw HTML remains. Only tags whose name resolves in HTML_ELEMENTS are reported.
+ *
+ * Pure: takes the raw body string (the script reads the file) and returns `{ line, tag, name }` per
+ * hit, line-numbered against the original body for an actionable message.
+ */
+export function findRawHtmlInMarkdown(body) {
+  const findings = [];
+  if (typeof body !== 'string' || body === '') return findings;
+  let fenceChar = null;   // the char of the open fence (` or ~), or null when outside a fence
+  let fenceLen = 0;       // its run length — a fence closes on the same char, run length ≥ this
+  body.split('\n').forEach((line, i) => {
+    const fm = line.match(/^\s*(`{3,}|~{3,})/);
+    if (fenceChar) {
+      if (fm && fm[1][0] === fenceChar && fm[1].length >= fenceLen) { fenceChar = null; fenceLen = 0; }
+      return; // inside a fence — drop the line
+    }
+    if (fm) { fenceChar = fm[1][0]; fenceLen = fm[1].length; return; }
+    // Strip inline code spans (a backtick run, lazily, to a matching-length run) before scanning.
+    const prose = line.replace(/(`+)[\s\S]*?\1/g, ' ');
+    for (const m of prose.matchAll(/<\/?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g)) {
+      const name = m[1].toLowerCase();
+      if (HTML_ELEMENTS.has(name)) findings.push({ line: i + 1, tag: m[0], name });
+    }
+  });
+  return findings;
+}
+
 // ── Implementation-lifecycle vocabulary + descriptor plumbing (#256) ───────────
 // Shared by the script (blocks/plugs status) AND the entity validators below, so the lifecycle
 // vocabulary and the descriptor `file` pointers have a single definition. Ordered concept → draft →
@@ -428,5 +487,51 @@ export function validateViteProxyCoverage(segments, proxyKeys) {
       errors.push({ message:
         `Vite proxy is missing catalog route "/${seg}/" (from src/${file}) — it renders on 11ty :8080 ` +
         `but 404s on the Vite dev server :3000. Add "${seg}" to the proxy allowlist alternation in vite.config.mts.` });
+  return { errors, warnings: [] };
+}
+
+// ── Module-resolution exports-lock (#274, materialising #271) ──────────────────────────────────────
+// The module-resolution axis lets a project resolve a bare specifier however its toolchain does
+// (node_modules+exports, importmap, CDN URL, dev alias) — but with ONE lock: an `@frontierui/*` entry
+// in any of those native manifests must terminate at the PACKAGE's `exports`, never at WE/foreign
+// source or a raw in-repo path. "protocol is the only lock." This is the lint half of #274's three
+// deliverables (the model + reference page are the other two); the resolution itself is native, no
+// runtime code.
+
+/** The published-impl scope whose entries are locked to package-exports resolution (#239/#271). */
+export const MODULE_RESOLUTION_LOCKED_SCOPE = '@frontierui/';
+
+/**
+ * Is an importmap/alias `target` a legitimate package-exports terminus (vs a raw source path)? OK:
+ * an http(s) URL (CDN/served), a `node_modules` path, or a bare specifier (no leading `/`, `.` — node
+ * resolves it via `exports`). NOT OK: a raw in-repo/foreign source path — a leading `/` that is not a
+ * URL (e.g. `/plugs/...`), a relative `./`/`../` path, or any path reaching into a `/src/` tree.
+ */
+export function isExportsSafeTarget(target) {
+  if (typeof target !== 'string' || target.trim() === '') return false;
+  if (/^https?:\/\//.test(target)) return true; // URL override
+  if (/(^|\/)node_modules\//.test(target)) return true; // resolved package path
+  if (target.startsWith('/') || target.startsWith('./') || target.startsWith('../')) return false; // raw path
+  if (target.includes('/src/')) return false; // foreign/WE source tree
+  return true; // bare specifier → node-resolution via exports
+}
+
+/**
+ * Module-resolution exports-lock: every locked-scope (`@frontierui/*`) importmap/alias entry must
+ * resolve to the package's exports (URL, node_modules, or bare specifier), never a raw WE/foreign
+ * source path. Pure: takes the gathered `{ specifier, target, source }` entries and reports each
+ * violation. Vacuously passes when no locked entry exists (the common case until a project repoints).
+ */
+export function validateModuleResolutionLock(entries) {
+  const errors = [];
+  for (const { specifier, target, source } of entries) {
+    if (!specifier.startsWith(MODULE_RESOLUTION_LOCKED_SCOPE)) continue;
+    if (!isExportsSafeTarget(target))
+      errors.push({ message:
+        `Module-resolution lock: "${specifier}" → "${target}"${source ? ` (in ${source})` : ''} resolves to a ` +
+        `raw source path, not the package exports. An ${MODULE_RESOLUTION_LOCKED_SCOPE}* entry must terminate at ` +
+        `the published package (a bare specifier, a node_modules path, or an http(s) URL) — never WE/foreign ` +
+        `source. See the module-resolution reference (#271/#274).` });
+  }
   return { errors, warnings: [] };
 }

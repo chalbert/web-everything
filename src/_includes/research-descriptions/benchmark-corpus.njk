@@ -1,0 +1,71 @@
+<h2>Purpose</h2>
+<p>
+  This is the canonical input to the <strong>competitive coverage gap-analysis program</strong>
+  (<a href="/backlog/315-competitive-coverage-gap-analysis-program/">backlog #315</a>): an explicit,
+  <em>reproducible</em> list of the leading design systems and UI libraries to benchmark. Membership is
+  governed by the stated selection criteria below — not taste — so a re-run lands on a comparable list.
+  That reproducibility is the whole point of a corpus rather than an ad-hoc reading list.
+</p>
+<p>
+  The machine-readable corpus lives in <code>src/_data/benchmarkCorpus.json</code>; this page renders
+  from it. The <a href="/references/">references.json &ldquo;Reference Design Systems&rdquo;</a> set is the
+  curated docs-surface <em>subset</em> of this corpus (flagged <code>inReferences</code> below), not a
+  competing list. Phase&nbsp;2 (extraction, #346) and phase&nbsp;3 (mapping &amp; gap detection, #347) join
+  against this data.
+</p>
+
+<h2>Selection criteria</h2>
+<p>{{ benchmarkCorpus.inclusionRule }}</p>
+<table>
+  <thead><tr><th>Criterion</th><th>Test</th></tr></thead>
+  <tbody>
+    {% for c in benchmarkCorpus.selectionCriteria %}
+    <tr><td><strong>{{ c.label }}</strong></td><td>{{ c.test }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Category axes</h2>
+<p>
+  The corpus deliberately spans five axes so the gap sweep is not biased toward one design philosophy.
+  The <strong>platform-guidelines</strong> axis (Apple HIG, GOV.UK, WAI-ARIA APG, Open UI) is what keeps
+  the analysis <em>native-first</em>: a capability a library ships is only a real platform gap once weighed
+  against what the web platform and standards already provide.
+</p>
+<table>
+  <thead><tr><th>Axis</th><th>What it captures</th></tr></thead>
+  <tbody>
+    {% for cat in benchmarkCorpus.categories %}
+    <tr><td><strong>{{ cat.label }}</strong></td><td>{{ cat.axis }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>The corpus</h2>
+{% for cat in benchmarkCorpus.categories %}
+<h3>{{ cat.label }}</h3>
+<table>
+  <thead><tr><th>Source</th><th>Vendor</th><th>Philosophy</th><th>Native alignment</th><th>Docs</th><th>In references</th></tr></thead>
+  <tbody>
+    {% for s in benchmarkCorpus.sources %}{% if s.category == cat.id %}
+    <tr>
+      <td><strong>{{ s.name }}</strong></td>
+      <td>{{ s.vendor }}</td>
+      <td>{{ s.philosophy }}</td>
+      <td>{{ s.nativeAlignment }}</td>
+      <td><a href="{{ s.docsUrl }}">docs</a></td>
+      <td>{% if s.inReferences %}&check;{% else %}&mdash;{% endif %}</td>
+    </tr>
+    {% endif %}{% endfor %}
+  </tbody>
+</table>
+{% endfor %}
+
+<h2>Re-running this sweep</h2>
+<p>
+  Each run is a dated revision of the analysis (the <a href="/backlog/192-longitudinal-research-freshness-system/">longitudinal
+  freshness</a> model). To refresh the corpus: re-apply the selection criteria, add/remove sources, bump
+  <code>lastChecked</code> per source and <code>lastSwept</code> on the file, and record what changed. The
+  corpus is keyed by stable source <code>id</code> so a re-run produces a clean diff (sources added,
+  dropped, or re-categorised) rather than a rewritten list.
+</p>

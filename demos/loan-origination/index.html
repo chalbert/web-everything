@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loan Origination — Web Everything exercise app</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/loan-origination/app.css">
+</head>
+<body class="theme-enterprise">
+  <div class="demo-header">
+    <div class="demo-header-brand">Web Everything · Loan Origination (exercise app A)</div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+  <main id="app" class="lo-app">Loading…</main>
+  <!-- Bootstrap registers the router elements (route-view / route-outlet) + behaviors (route:link) and
+       exposes window.attributes — the supported integration surface this app consumes (router is active). -->
+  <script type="module" src="/plugs/bootstrap.ts"></script>
+  <script type="module" src="/demos/loan-origination/app.ts"></script>
+</body>
+</html>

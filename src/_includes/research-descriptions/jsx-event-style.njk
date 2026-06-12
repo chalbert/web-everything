@@ -1,0 +1,125 @@
+<h3>The Question</h3>
+<p>
+    The <a href="/adapters/jsx-adapter/">JSX adapter</a> is a reversible mirror of the canonical HTML
+    adapter, and it lets the same event handler be written two ways: the <strong>function prop</strong>
+    <code>onclick={inc}</code> (natural JSX ergonomics, type-checked) and the <strong>string
+    behavior</strong> <code>on:click="inc($event)"</code> (the canonical form that survives to HTML). The
+    renderer already accepts both. The open question — grounded for <a href="/backlog/051-jsx-event-style-toggle/">backlog&nbsp;#051</a>
+    — is which spelling authors write by default, and how a <em>display</em> sub-toggle on the source
+    toggle should switch between them given that only <strong>named</strong> handlers round-trip and
+    inline closures are one-way. This survey gathers framework prior art per design-first step&nbsp;1 so
+    the choice reuses platform vocabulary instead of coining terms.
+</p>
+
+<h3>Recommendation (proposed in #051)</h3>
+<ol>
+    <li><strong>Author function-style now</strong> (<code>onclick={inc}</code>) — it is the natural JSX
+        ergonomics and what the existing renderer's function branch already targets
+        (<code>JSXRenderer.ts</code> §event handlers). The string behavior
+        <code>on:click="inc($event)"</code> stays the <em>canonical</em> layer the reverse transform
+        emits.</li>
+    <li><strong>A string⇄function <em>display</em> sub-toggle</strong> on the source toggle, added once
+        authored HTML/JSX pairs or the live AST transform exist — the same soft-preference shape as the
+        already-shipped <code>html | react</code> naming dialect (<code>dialect.ts</code>), not a new
+        protocol.</li>
+    <li><strong>Named handlers round-trip; inline closures are one-way (lossy).</strong> The reverse
+        transform either synthesizes a stable handler name for a closure or flags it lossy — it never
+        silently drops behavior.</li>
+</ol>
+
+<h3>Finding 1 — every framework spells the same event differently; none is "the" canonical form</h3>
+<p>
+    The handler-attachment syntax is the most divergent surface across the JSX/template ecosystem, which
+    is precisely why it is a <em>spelling</em> choice rather than a semantic one:
+</p>
+<ul>
+    <li><strong>React / Preact:</strong> camelCased function prop — <code>onClick={fn}</code>. Synthetic
+        events, value is always a function reference; there is no string form.</li>
+    <li><strong>SolidJS:</strong> namespaced delegated form <code>on:click={fn}</code> plus the bound
+        <code>onClick={fn}</code> — note Solid already uses the <code>on:</code> colon namespace, but with
+        a <em>function</em> value, not a string.</li>
+    <li><strong>Vue:</strong> directive <code>@click="inc"</code> / <code>v-on:click="inc($event)"</code>
+        — a <strong>string expression</strong> in the template, the closest prior art to WE's canonical
+        string behavior (Vue's <code>$event</code> is literally WE's <code>$event</code>).</li>
+    <li><strong>Lit / Web Components:</strong> <code>@click=${fn}</code> in <code>html\`\`</code> tagged
+        templates — function value, colon-free <code>@</code> prefix.</li>
+    <li><strong>Native DOM:</strong> two distinct mechanisms — the inline content attribute
+        <code>onclick="inc()"</code> (a <strong>string</strong>, serializes to HTML) versus
+        <code>el.addEventListener('click', fn)</code> (a <strong>function</strong>, invisible to HTML
+        serialization). This split <em>is</em> the function-vs-string axis, and it predates every
+        framework.</li>
+</ul>
+<p>
+    <strong>Implication (fork&nbsp;1):</strong> the function form (React/Solid/Lit) is the ergonomic
+    majority and the natural JSX default; the string form (Vue, native inline) is the one with an HTML
+    representation. WE keeps both and picks function for authoring, string for canonicalization.
+</p>
+
+<h3>Finding 2 — only the string form has an HTML representation, so it must be canonical</h3>
+<p>
+    A raw function reference cannot be serialized into an HTML attribute — that is a hard platform fact,
+    not a WE choice. In the renderer a function value is attached via
+    <code>addEventListener</code> (<a href="/adapters/jsx-adapter/">JSXRenderer.ts</a> event-handler
+    branch) and leaves no trace in the serialized DOM; a string value is set as a content attribute and
+    survives (the explicit <code>setAttribute(key, value)</code> branch, added so a non-function on* value
+    is not silently dropped — #245). Therefore the <strong>reversible</strong> contract can only target
+    the string behavior <code>on:click="inc($event)"</code>; the function prop is a convenience spelling
+    that lowers to it.
+</p>
+
+<h3>Finding 3 — named vs inline-closure is the real round-trip boundary (grounds the lossy case)</h3>
+<ul>
+    <li><strong>Named handler</strong> <code>onclick={inc}</code> ⇄ <code>on:click="inc($event)"</code>:
+        the function's <em>name</em> is the string path the injector resolves at runtime (exactly how the
+        existing <code>declarative-spa-jsx.tsx</code> demo wires handlers through the injector context).
+        Fully reversible.</li>
+    <li><strong>Inline closure</strong> <code>onclick={() => inc()}</code>: an anonymous expression with
+        <em>no</em> string path. The reverse transform drops expression/function props because they have
+        no HTML representation (jsxToHtml's expression-prop strip rule explicitly notes this is LOSSY).
+        So a closure is <strong>one-way</strong> — the transform must either synthesize a stable handler
+        name or surface the cell as lossy, never silently lose the behavior.</li>
+</ul>
+<p>
+    <strong>Implication (fork&nbsp;2):</strong> the round-trip guarantee is scoped to <em>named</em>
+    handlers; the inline-closure escape hatch is a documented lossy edge, mirroring how the feature-map
+    report's row&nbsp;5 already classifies it.
+</p>
+
+<h3>Finding 4 — there is precedent for a soft spelling-preference toggle already in the tree</h3>
+<p>
+    WE already ships one JSX authoring dialect as a <em>soft dev preference</em>: the
+    <code>html | react</code> naming choice (<code>class</code>/<code>for</code>/<code>onclick</code> vs
+    <code>className</code>/<code>htmlFor</code>/<code>onClick</code>) governs which spelling the codegen
+    emits while <strong>both stay accepted on input</strong> (<code>dialect.ts</code>). It is explicitly
+    "a soft preference, not a protocol: violating it offends a convention, it does not break interop."
+    The string⇄function display toggle is the <strong>same shape</strong> — a second axis of the same
+    soft-preference machinery, reusing the <code>source-toggle.njk</code> / <code>mode-selector.js</code>
+    surface — not a new protocol or registry.
+</p>
+<p>
+    <strong>Implication (fork&nbsp;1, sub-toggle):</strong> the toggle is a display/codegen preference
+    layered on the existing source toggle, not a fork in the canonical contract. The canonical layer is
+    always the string behavior; the toggle only changes what the JSX pane <em>shows</em>.
+</p>
+
+<h3>Finding 5 — the React-style alternative would forfeit JSX's main ergonomic draw</h3>
+<p>
+    The held-open alternative is to make the <strong>string</strong> form canonical for authoring too
+    (write <code>on:click="inc($event)"</code> by hand). It is internally consistent — the canonical and
+    authored forms coincide, and there is never a lossy closure case because closures are simply not
+    expressible. But it sacrifices the <strong>type-checked function reference</strong> that is JSX's
+    primary reason to exist over plain HTML strings: an editor can resolve and check
+    <code>onclick={inc}</code> but treats <code>"inc($event)"</code> as opaque text. Since the function
+    form is the ergonomic majority across React/Solid/Lit and the renderer already supports it, the
+    survey grounds function-first authoring with string canonicalization underneath.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/051-jsx-event-style-toggle/">#051 — JSX adapter event-style toggle</a></li>
+    <li>Companion report: <code>reports/2026-06-03-jsx-adapter-feature-mapping.md</code> (row&nbsp;5 — the
+        contested event cell)</li>
+    <li>Adapter: <a href="/adapters/jsx-adapter/">JSX adapter</a> (the HTML-mirror dialect)</li>
+    <li>Related axis: the <code>html | react</code> naming dialect (soft dev preference, #235) — the
+        precedent toggle</li>
+</ul>

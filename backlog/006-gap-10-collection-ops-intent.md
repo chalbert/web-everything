@@ -2,8 +2,10 @@
 type: decision
 workItem: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-05-31"
+dateResolved: "2026-06-11"
+graduatedTo: intent:collection-operations
 tags: [gap-analysis, intent, collections]
 relatedReport: reports/2026-06-03-collection-operations-intent.md
 ---
@@ -31,3 +33,6 @@ Confirm intent shape and the dimensions to standardize (filter/sort/page/group).
 - The *technical* sorting strategies now live in Plateau's Technical Configurator → **Sorting Strategy** domain.
 
 **Still open (does not block authoring):** the complete per-dimension UX vocabulary; pipeline-order validity constraints; whether to recommend a canonical server serialization; the shared comparison primitive's home (technical layer).
+
+## Resolution (2026-06-11)
+**Resolved — the decision is settled and the intent ships.** `collection-operations` is authored in `intents.json` (one UX-only intent, four pipeline-stage dimensions; technical sorting lives in the Configurator's Sorting-Strategy domain). The intent-vs-project / one-intent-vs-many fork is closed per intent-UX-only. The remaining items are non-blocking refinement, not a fork: per-dimension vocabulary grows additively (intents are open-design), and "canonical server serialization" is explicitly **app-owned, out of scope for the intent** (UX-only) — so it dissolves rather than needing a ruling.

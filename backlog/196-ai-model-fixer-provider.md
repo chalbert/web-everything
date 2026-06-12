@@ -3,9 +3,12 @@ type: idea
 workItem: story
 size: 5
 parent: "097"
-status: open
+status: resolved
 blockedBy: ["095", "197"]
 dateOpened: "2026-06-08"
+dateStarted: "2026-06-11"
+dateResolved: "2026-06-11"
+graduatedTo: scripts/autofix/modelFixer.mjs — BYO-key model fixer for missing-description (content-generation) behind CustomFixerRegistry + engine create/revert-by-delete support + CLI key-gated registration
 tags: [monetization, conformance, auto-fix, agent, ai-provider, byo-key, content-generation, propose-and-verify, provider-registry, webcases]
 relatedProject: webcases
 crossRef: { url: /backlog/095-conformance-auto-fix-agent/, label: "Conformance auto-fix agent (#095)" }

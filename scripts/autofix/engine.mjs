@@ -185,6 +185,47 @@ export function failureKey(f) {
   return d ? `${d.kind}:${d.entity ?? ''}:${d.id ?? ''}:${d.field ?? ''}` : `msg:${f.message}`;
 }
 
+// ── Model-fix cost bounds (#293 deliverable 1) ───────────────────────────────────
+//
+// A model fixer (#196) does a metered API call per `fix()` — on a large failure set the loop could
+// fire one call per failure and burn the BYO key unbounded. Reference fixers are free (no model), so
+// the budget caps ONLY model-fixer invocations: by convention a model fixer's id is `model:…` (the
+// reference ones are `reference:…`). The cap is the count of model `fix()` calls the loop is allowed
+// to make in a run; once spent, remaining model-fixable failures are reported `deferred` (never
+// attempted), while free reference fixes keep flowing.
+export const isModelFixer = (fixer) => typeof fixer?.id === 'string' && fixer.id.startsWith('model:');
+
+// ── Diff surfacing (#293 deliverable 2) ──────────────────────────────────────────
+//
+// The engine already captures `before`/`after` for every patch; this renders them as a line-oriented
+// unified-ish diff so a human (CLI `--review`, the playground) can read what a model patch proposes
+// before it lands. Pure + exported so the surface and its test share one formatter.
+/** A `{ added, removed, lines }` line diff of `before` → `after` (`lines` are `{ sign, text }`). */
+export function lineDiff(before, after) {
+  const a = String(before ?? '').split('\n');
+  const b = String(after ?? '').split('\n');
+  // A minimal LCS-free diff: trim the common prefix/suffix, mark the middle removed-then-added. Good
+  // enough for human review of a focused patch (a drafted njk, a one-field rewrite) without a full
+  // Myers diff — the patch is already small and verify-gated.
+  let p = 0;
+  while (p < a.length && p < b.length && a[p] === b[p]) p++;
+  let sa = a.length, sb = b.length;
+  while (sa > p && sb > p && a[sa - 1] === b[sb - 1]) { sa--; sb--; }
+  const lines = [];
+  for (let i = 0; i < p; i++) lines.push({ sign: ' ', text: a[i] });
+  for (let i = p; i < sa; i++) lines.push({ sign: '-', text: a[i] });
+  for (let i = p; i < sb; i++) lines.push({ sign: '+', text: b[i] });
+  for (let i = sa; i < a.length; i++) lines.push({ sign: ' ', text: a[i] });
+  return { added: sb - p, removed: sa - p, lines };
+}
+
+/** Render `lineDiff` as a `--- file` / `+++ file` text block (CLI/log friendly). */
+export function formatDiff(before, after, file = '') {
+  const { lines } = lineDiff(before, after);
+  const head = file ? [`--- ${file}`, `+++ ${file}`] : [];
+  return [...head, ...lines.map(({ sign, text }) => `${sign}${text}`)].join('\n');
+}
+
 // ── Orchestrator: bounded propose → apply → verify-gate → accept/revert loop ─────
 
 /**
@@ -192,15 +233,32 @@ export function failureKey(f) {
  * @property {() => (VerifyState|Promise<VerifyState>)} verify  Re-run the suite, return its failures.
  * @property {(file: string) => string} read   Read current file content.
  * @property {(file: string, content: string) => void} write  Write file content.
+ * @property {(file: string) => boolean} [exists]  Does the file exist? Defaults to "read() doesn't throw".
+ *           Needed so a CREATING fixer (e.g. the model `missing-description` fixer, #196) can be
+ *           reverted by DELETION rather than by writing an empty file back.
+ * @property {(file: string) => void} [remove]  Delete a file. Defaults to writing `''` (degraded). The
+ *           CLI wires a real `rm`; a created-then-rejected patch is removed, not left empty.
  * @property {CustomFixerRegistry} [registry]  Defaults to the shared singleton.
  * @property {number} [maxRounds]  Loop bound (default 50) — a backstop, not the expected exit.
+ * @property {number} [maxModelFixes]  Cost bound (#293): max model-fixer `fix()` calls per run
+ *           (default Infinity). Once spent, remaining model-fixable failures are reported `deferred`
+ *           and never attempted — so a runaway loop can't burn the BYO key. Reference fixes are free
+ *           and ignore this cap.
+ * @property {(proposal: { failure: Failure, fixerId: string, file: string, before: string, after: string, summary: string }) => ('accept'|'revert'|boolean|Promise<'accept'|'revert'|boolean>)} [decide]
+ *           Human/playground review hook (#293): called for a patch that PASSED the verify gate, before
+ *           it lands. Return `revert` / `false` to reject it (the file is reverted and the patch is
+ *           recorded in `reviewed`); `accept` / `true` (the default) keeps it. Lets a human gate
+ *           model patches on the diff even though the suite accepted them.
  *
  * @typedef {Object} AutofixResult
  * @property {boolean} ok           Suite green at the end?
  * @property {Array<{ failure: Failure, fixerId: string, file: string, before: string, after: string, summary: string }>} applied
  * @property {Array<{ failure: Failure, fixerId: string|null, reason: string }>} gaveUp  Attempted but the verify gate rejected (reverted).
+ * @property {Array<{ failure: Failure, fixerId: string, file: string, before: string, after: string, summary: string }>} reviewed  Passed the gate but the `decide` reviewer reverted.
+ * @property {Array<{ failure: Failure, fixerId: string, reason: string }>} deferred  Model-fixable but the model-fix budget was spent — never attempted (no API call).
  * @property {Failure[]} skipped    Remaining failures no registered fixer handles.
  * @property {number} rounds        Verify rounds consumed.
+ * @property {number} modelFixesUsed  Model-fixer `fix()` calls made (for cost accounting).
  */
 
 /**
@@ -213,40 +271,62 @@ export function failureKey(f) {
  * @returns {Promise<AutofixResult>}
  */
 export async function autofix(opts) {
-  const { verify, read, write, registry = fixerRegistry, maxRounds = 50 } = opts;
+  const {
+    verify, read, write, registry = fixerRegistry, maxRounds = 50,
+    maxModelFixes = Infinity, decide,
+  } = opts;
+  // A CREATING fixer (#196) makes a file that didn't exist; revert must DELETE it, not blank it.
+  const exists = opts.exists ?? ((file) => { try { read(file); return true; } catch { return false; } });
+  const remove = opts.remove ?? ((file) => write(file, ''));
   const applied = [];
   const gaveUp = [];
-  const gaveUpKeys = new Set();
+  const reviewed = [];   // passed the gate but the reviewer reverted (#293 deliverable 2)
+  const deferred = [];   // model-fixable but the budget was spent (#293 deliverable 1)
+  // One "don't attempt this again" set: covers give-ups, reviewer-rejections, and budget-deferrals, so
+  // none is re-picked and the final `skipped` (no-fixer failures) excludes them all.
+  const settledKeys = new Set();
   let rounds = 0;
+  let modelFixesUsed = 0;
 
   while (rounds < maxRounds) {
     rounds++;
     const before = await verify();
     if (before.ok) break; // green — done
 
-    // Next failure we can attempt: a registered fixer handles it and we haven't already given up on it.
-    const target = before.failures.find((f) => !gaveUpKeys.has(failureKey(f)) && registry.resolve(f));
+    // Next failure we can attempt: a registered fixer handles it and we haven't already settled it.
+    const target = before.failures.find((f) => !settledKeys.has(failureKey(f)) && registry.resolve(f));
     if (!target) break; // nothing left we know how to attempt — exit, report the remainder as skipped
 
     const fixer = registry.resolve(target);
     const tKey = failureKey(target);
 
+    // Cost bound: a model fixer would make an API call — if the budget is spent, defer it WITHOUT
+    // calling fix() (no key burned). Reference fixers are free and never consume the budget.
+    if (isModelFixer(fixer) && modelFixesUsed >= maxModelFixes) {
+      deferred.push({ failure: target, fixerId: fixer.id, reason: `model-fix budget (${maxModelFixes}) exhausted` });
+      settledKeys.add(tKey);
+      continue;
+    }
+
     let patch;
     try {
+      if (isModelFixer(fixer)) modelFixesUsed++; // count the metered call we're about to make
       patch = await fixer.fix(target, { read });
     } catch (e) {
       gaveUp.push({ failure: target, fixerId: fixer.id, reason: `fixer threw: ${e.message}` });
-      gaveUpKeys.add(tKey);
+      settledKeys.add(tKey);
       continue;
     }
     if (!patch) {
       gaveUp.push({ failure: target, fixerId: fixer.id, reason: 'fixer produced no patch (could not safely fix)' });
-      gaveUpKeys.add(tKey);
+      settledKeys.add(tKey);
       continue;
     }
 
-    // Apply, re-verify — the gate. Snapshot first so a rejected patch leaves no trace.
-    const snapshot = read(patch.file);
+    // Apply, re-verify — the gate. Snapshot first so a rejected patch leaves no trace. A patch that
+    // CREATES the file (the target didn't exist) is reverted by DELETION, not by writing it back.
+    const existedBefore = exists(patch.file);
+    const snapshot = existedBefore ? read(patch.file) : null;
     write(patch.file, patch.newContent);
     const after = await verify();
 
@@ -255,19 +335,32 @@ export async function autofix(opts) {
     const newFailures = after.failures.filter((f) => !beforeKeys.has(failureKey(f)));
 
     if (targetCleared && newFailures.length === 0) {
-      applied.push({ failure: target, fixerId: fixer.id, file: patch.file, before: snapshot, after: patch.newContent, summary: patch.summary });
-      // loop continues; next round re-verifies and picks the next failure
+      const proposal = { failure: target, fixerId: fixer.id, file: patch.file, before: snapshot ?? '', after: patch.newContent, summary: patch.summary };
+      // Review hook: the patch passed the verify gate, but a human/playground may still reject it on
+      // the diff. Default (no `decide`) accepts — unchanged behaviour. `revert`/`false` reverts it.
+      const verdict = decide ? await decide(proposal) : 'accept';
+      const accepted = verdict === 'accept' || verdict === true || verdict === undefined;
+      if (accepted) {
+        applied.push(proposal);
+        // loop continues; next round re-verifies and picks the next failure
+      } else {
+        if (existedBefore) write(patch.file, snapshot); // revert — the reviewer rejected it
+        else remove(patch.file);
+        reviewed.push(proposal);
+        settledKeys.add(tKey); // don't re-propose a patch the reviewer already rejected
+      }
     } else {
-      write(patch.file, snapshot); // revert — the suite didn't accept it
+      if (existedBefore) write(patch.file, snapshot); // revert an edit — the suite didn't accept it
+      else remove(patch.file); // revert a CREATION — delete the file the rejected patch made
       const why = !targetCleared
         ? 'patch did not clear the target failure'
         : `patch introduced ${newFailures.length} new failure(s): ${newFailures.map((f) => f.message).join('; ')}`;
       gaveUp.push({ failure: target, fixerId: fixer.id, reason: why });
-      gaveUpKeys.add(tKey);
+      settledKeys.add(tKey);
     }
   }
 
   const final = await verify();
-  const skipped = final.failures.filter((f) => !registry.resolve(f) && !gaveUpKeys.has(failureKey(f)));
-  return { ok: final.ok, applied, gaveUp, skipped, rounds };
+  const skipped = final.failures.filter((f) => !registry.resolve(f) && !settledKeys.has(failureKey(f)));
+  return { ok: final.ok, applied, gaveUp, reviewed, deferred, skipped, rounds, modelFixesUsed };
 }

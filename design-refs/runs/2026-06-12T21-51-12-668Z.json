@@ -1,0 +1,90 @@
+{
+  "runId": "2026-06-12T21-51-12-668Z",
+  "startedAt": "2026-06-12T21:51:12.669Z",
+  "captured": [
+    {
+      "url": "https://www.photopea.com",
+      "id": "4c98c80ae393cf0a",
+      "bytes": 137530,
+      "reviewState": "confirmed"
+    },
+    {
+      "url": "https://www.openstreetmap.org",
+      "id": "4f5835c2e9f3d948",
+      "bytes": 254412,
+      "reviewState": "confirmed"
+    },
+    {
+      "url": "https://jsfiddle.net",
+      "id": "1a0273866ba10567",
+      "bytes": 86992,
+      "reviewState": "ungated"
+    },
+    {
+      "url": "https://codepen.io/pen/",
+      "id": "c780a2b232065f4e",
+      "bytes": 39584,
+      "reviewState": "ungated"
+    },
+    {
+      "url": "https://regex101.com",
+      "id": "73850f8cd6970056",
+      "bytes": 141738,
+      "reviewState": "ungated"
+    },
+    {
+      "url": "https://carbon.now.sh",
+      "id": "a64c3aba7f6710d5",
+      "bytes": 111654,
+      "reviewState": "confirmed"
+    },
+    {
+      "url": "https://squoosh.app",
+      "id": "44ae534ae469ef45",
+      "bytes": 116660,
+      "reviewState": "confirmed"
+    }
+  ],
+  "skipped": [],
+  "duplicates": [
+    {
+      "url": "https://excalidraw.com",
+      "id": "50badce4ea54a544"
+    },
+    {
+      "url": "https://www.tldraw.com",
+      "id": "7f7621c90218424f"
+    },
+    {
+      "url": "https://app.diagrams.net",
+      "id": "9dbdb7f79955781d"
+    },
+    {
+      "url": "https://play.grafana.org",
+      "id": "253b45a916c9cfe2"
+    },
+    {
+      "url": "https://www.desmos.com/calculator",
+      "id": "af041413afb82b9f"
+    },
+    {
+      "url": "https://www.geogebra.org/calculator",
+      "id": "4881dac6e3b8d3dc"
+    },
+    {
+      "url": "https://editor.swagger.io",
+      "id": "638732d38137113a"
+    },
+    {
+      "url": "https://mermaid.live",
+      "id": "185f8175b4461706"
+    },
+    {
+      "url": "https://play.tailwindcss.com",
+      "id": "1332e697b422af9a"
+    }
+  ],
+  "quarantined": [],
+  "failed": [],
+  "finishedAt": "2026-06-12T21:53:04.231Z"
+}

@@ -1,0 +1,108 @@
+<h3>The Question</h3>
+<p>
+    A <a href="/blocks/">Menu block</a> — the ARIA <code>menu</code>/<code>menubar</code>/<code>menuitem</code>
+    family for invoking <em>commands</em> (not committing values) — is named as a harvest candidate but has
+    no design. This survey gathers web-platform and library prior art per design-first step&nbsp;1, so the trait
+    selections for the three shapes, focus model, checkable items, submenus, and command invocation reuse
+    platform vocabulary. It grounds the forks in <a href="/backlog/173-menu-menubar-block/">backlog&nbsp;#173</a>
+    — and corrects two things the item got wrong: it claims menus <em>mandate</em> roving tabindex (APG permits
+    both), and it omits separator/group semantics and the "menu button" double-home in the droplist roster.
+</p>
+
+<h3>Recommendation (to ratify in #173)</h3>
+<ol>
+    <li><strong>Fork A — command invocation = the new <code>command</code> intent (#016), not Action.</strong>
+        A menu item invokes an action — the declarative surface of the <code>command</code> intent
+        <a href="/backlog/016-gap-9-webcommands-project/">#016</a> resolved into existence (grounded on the
+        now-Baseline <code>command</code>/<code>commandfor</code> + <code>CommandEvent</code>). The
+        <a href="/intents/action/">Action Intent</a> owns visual <em>weight</em> and stays orthogonal. This is
+        the one net-new dependency — sequence #016 before/with #173.</li>
+    <li><strong>Fork B — roving focus is the menu default, fixed.</strong> APG permits roving <em>or</em>
+        <code>aria-activedescendant</code>; WE chooses <strong>roving</strong> (the GUI-menu convention every
+        library ships), overriding the droplist family's <code>virtual</code> default, as a fixed mechanic.</li>
+    <li><strong>Fork C — one Menu block with a <code>shape</code> dimension</strong> (<code>menubar | menu |
+        context</code>), not three blocks; orientation derives from shape.</li>
+    <li><strong>Fork D — checkable items reuse <a href="/intents/selection/">Selection</a></strong> under a
+        <code>checkable</code> trait (<code>single</code>→radio, <code>multiple</code>→checkbox); plain
+        <code>menuitem</code> = <code>command</code> only.</li>
+    <li><strong>Fork E — submenu nesting reuses <a href="/intents/disclosure/">Disclosure</a>, not the
+        tree-select <code>hierarchy</code> intent</strong> — a submenu is a transient cascading popup, not a
+        navigable data hierarchy.</li>
+    <li><strong>Fork F (omitted) — separator &amp; group semantics</strong> are first-class APG roles; the Menu
+        block owns them directly.</li>
+    <li><strong>Fork G (item didn't notice) — "Menu button" is mis-filed in the droplist family</strong>
+        (<code>blocks.json:21,36</code>); #173 should claim the menu-button trigger and demote the droplist
+        entry.</li>
+</ol>
+
+<h3>Finding 1 — WAI-ARIA APG: roles, keyboard, and the focus model the item got wrong</h3>
+<p>
+    The <a href="https://www.w3.org/WAI/ARIA/apg/patterns/menubar/">APG Menu &amp; Menubar pattern</a> defines
+    <code>menubar</code>, <code>menu</code>, <code>menuitem</code>, <code>menuitemcheckbox</code>
+    (<code>aria-checked</code>), <code>menuitemradio</code> (within a <code>group</code>), <code>group</code>,
+    and <code>separator</code> (non-focusable). The keyboard model is fully specified — Down/Up within a menu,
+    Right/Left between menubar items and to open/close submenus, Enter to activate/open, Escape to close and
+    <strong>return focus to the invoker</strong>, type-ahead, and Tab to move out and close all menus.
+</p>
+<p>
+    <strong>The item's "menus mandate roving tabindex" premise is wrong.</strong> APG: <em>"The menu container
+    has <code>tabindex</code> set to <code>-1</code> or <code>0</code> and <code>aria-activedescendant</code>
+    set to the ID of the focused item…"</em> — i.e. roving tabindex <em>or</em> <code>aria-activedescendant</code>
+    are both acceptable, with <a href="https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/">no
+    menu-specific preference</a>. Roving is a library convention WE <em>chooses</em>, not a platform law
+    (Fork&nbsp;B).
+</p>
+
+<h3>Finding 2 — native substrate (~June 2026): ARIA-composed, with two native seams</h3>
+<ul>
+    <li>The <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/menu"><code>&lt;menu&gt;</code>
+        element</a> is a semantic alias for <code>&lt;ul&gt;</code> (no menu role, no keyboard); the old
+        context-menu use is removed from the spec.</li>
+    <li>Context-menu <code>type="context"</code> / the <code>contextmenu</code> attribute is
+        <strong>dead</strong> — dropped ~2017, implemented by no browser
+        (<a href="https://caniuse.com/menu">caniuse</a>). A context menu must listen for <code>contextmenu</code>
+        and render a <code>role=menu</code>.</li>
+    <li>The <strong>Popover API</strong> supplies the floating surface (Baseline; the Anchor intent composes it).</li>
+    <li>The <a href="https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API">Invoker Commands
+        API</a> (<code>command</code>/<code>commandfor</code> + <code>CommandEvent</code>) is
+        <strong>newly Baseline</strong> (Chrome&nbsp;135, Firefox&nbsp;144, Safari&nbsp;26.2). Built-ins cover
+        popover/dialog; a menu item's action is a <em>custom</em> command (<code>--</code>-prefixed value →
+        <code>CommandEvent</code>). This is the native substrate for the <code>command</code> intent (Fork&nbsp;A).</li>
+</ul>
+<p>So a WE menu is ARIA-composed, with native help only at the surface (Popover) and action-dispatch (Invoker
+   Commands) seams.</p>
+
+<h3>Finding 3 — every benchmark library separates Menu (invocation) from Select (value)</h3>
+<p>
+    Radix (<code>DropdownMenu</code>/<code>ContextMenu</code>/<code>Menubar</code>, roving tabindex), Headless UI
+    (<em>"Menu… dropdown menus; Listbox tracks a selected value"</em>), MUI (<code>MenuItem onClick</code> vs
+    <code>Select</code> value), Fluent (<code>MenuItemCheckbox</code>/<code>MenuItemRadio</code> first-class),
+    Carbon (<em>"implements the APG menu pattern"</em>), Ant (<code>Menu</code> "executes the action" vs
+    <code>Select</code> returns a value), and Shoelace (<code>sl-menu</code>, the lone line-blurrer) all keep
+    menus distinct from form selects. Headless leaders use <strong>roving</strong> (Fork&nbsp;B);
+    Fluent/Carbon/Radix make checkable items first-class (Fork&nbsp;D); Carbon/Ant parameterize one Menu by
+    trigger while Radix ships three — the platform's shared role machinery favors one-block-with-shape (Fork&nbsp;C).
+</p>
+
+<h3>Cross-cutting paradigms a menu composes</h3>
+<table>
+    <thead><tr><th>Paradigm</th><th>Reuse which WE intent</th><th>Net-new?</th></tr></thead>
+    <tbody>
+        <tr><td>Anchored surface · edge-aware placement · dismissal &amp; focus return</td><td><a href="/intents/anchor/">Anchor</a> (<code>type=menu</code>)</td><td>No</td></tr>
+        <tr><td>Focus delegation (roving, one active item)</td><td><a href="/intents/focus-delegation/">Focus Delegation</a> — override family default to <code>roving</code></td><td>No</td></tr>
+        <tr><td>Type-ahead seek</td><td><a href="/intents/type-ahead/">Type-Ahead</a></td><td>No</td></tr>
+        <tr><td>Selection (checkable items)</td><td><a href="/intents/selection/">Selection</a>, under a <code>checkable</code> trait</td><td>No</td></tr>
+        <tr><td>Submenu open/closed state</td><td><a href="/intents/disclosure/">Disclosure</a></td><td>No</td></tr>
+        <tr><td><strong>Command invocation (the action)</strong></td><td><code>command</code> intent (#016)</td><td><strong>Yes — the one net-new dependency</strong></td></tr>
+        <tr><td>Action prominence (<code>destructive</code>)</td><td><a href="/intents/action/">Action</a> — orthogonal to command</td><td>No</td></tr>
+    </tbody>
+</table>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/173-menu-menubar-block/">#173 — Menu / menubar / context-menu block</a></li>
+    <li>Net-new dependency: <a href="/backlog/016-gap-9-webcommands-project/">#016 — the <code>command</code> intent</a></li>
+    <li>Composes: <a href="/intents/anchor/">Anchor</a> · <a href="/intents/focus-delegation/">Focus Delegation</a> ·
+        <a href="/intents/type-ahead/">Type-Ahead</a> · <a href="/intents/selection/">Selection</a> ·
+        <a href="/intents/disclosure/">Disclosure</a> · <a href="/intents/action/">Action</a></li>
+</ul>

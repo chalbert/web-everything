@@ -1,0 +1,99 @@
+<h2>Menu — the composition manifest</h2>
+<p>A <strong>menu</strong> is the ARIA <code>menu</code> / <code>menubar</code> / <code>menuitem</code> surface for <strong>invoking commands</strong> — actions, not values. It is deliberately <em>not</em> a member of the <a href="/blocks/droplist/">droplist family</a>: a droplist is a <code>listbox</code>/<code>combobox</code> that commits a <strong>value</strong>; a menu is a <code>role=menu</code> of <strong>commands</strong>. Like droplist, the Menu standard does not re-specify positioning, focus, or checked-state — it <strong>composes</strong> the intents that own them and only declares which dimension values it fixes.</p>
+
+<h3>Menu vs. select — the distinction this block draws</h3>
+<p>The platform, and every surveyed library, separates three concerns a value-select does not:</p>
+<table>
+  <thead>
+    <tr><th>Concern</th><th>In a menu</th><th>Owned by</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Invocation</strong></td><td>What an item <em>does</em> — a command, not a committed value.</td><td><a href="/intents/command/">Command intent</a> (composed by every item)</td></tr>
+    <tr><td><strong>Checkable state</strong></td><td><code>aria-checked</code> on <code>menuitemcheckbox</code> / <code>menuitemradio</code>.</td><td><a href="/intents/selection/">Selection intent</a> under a <code>checkable</code> trait</td></tr>
+    <tr><td><strong>Submenu disclosure</strong></td><td><code>aria-expanded</code> + <code>aria-haspopup=menu</code> on a parent item.</td><td><a href="/intents/disclosure/">Disclosure intent</a> + <a href="/intents/anchor/">Anchor</a></td></tr>
+  </tbody>
+</table>
+
+<h3>One block, three shapes</h3>
+<p>Menubar, popup menu, and context menu share the <em>entire</em> item / role / keyboard machinery; they differ only in how they are summoned and oriented. So they are one block with a <code>shape</code> dimension, not three blocks.</p>
+<table>
+  <thead>
+    <tr><th><code>shape</code></th><th>Summoning</th><th>Orientation (derived)</th><th>Platform delta</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>menu</code> <em>(default)</em></td><td>Opened by a trigger (menu button) or as a submenu.</td><td>vertical</td><td>A <code>role=menu</code> anchored to its trigger.</td></tr>
+    <tr><td><code>menubar</code></td><td>Always visible, persistent.</td><td>horizontal</td><td>Adds <code>tabindex=0</code> on its first item; <code>role=menubar</code>.</td></tr>
+    <tr><td><code>context</code></td><td>Pointer right-click or <kbd>Shift</kbd>+<kbd>F10</kbd> at the focused element.</td><td>vertical</td><td>Binds the <code>contextmenu</code> event + <kbd>Shift</kbd>+<kbd>F10</kbd>; anchored to the pointer/element.</td></tr>
+  </tbody>
+</table>
+
+<h3>Composed intents</h3>
+<table>
+  <thead>
+    <tr><th>Intent</th><th>What it contributes to a menu</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><a href="/intents/command/">Command</a></td><td><strong>The thesis.</strong> Every <code>menuitem</code> invokes a command (a <code>--</code>-prefixed <code>CommandEvent</code> via the Invoker Commands API). Invocation, never value-commit.</td></tr>
+    <tr><td><a href="/intents/focus-delegation/">Focus Delegation</a></td><td>One tab stop; arrows move within. <strong>Fixed <code>roving</code></strong> (overriding the droplist family's <code>virtual</code> default), <code>selectionFollowsFocus = independent</code>.</td></tr>
+    <tr><td><a href="/intents/anchor/">Anchor</a></td><td>The tethered surface for popup and context shapes (and every submenu): placement, collision flip/shift, dismissal (Esc / outside-click) and focus return to the trigger.</td></tr>
+    <tr><td><a href="/intents/type-ahead/">Type-Ahead</a></td><td>Typing a prefix seeks the matching item — the same first-character navigation APG specifies for menus.</td></tr>
+    <tr><td><a href="/intents/selection/">Selection</a></td><td><em>Only</em> for checkable items, under a <code>checkable</code> trait: <code>model=single</code> → radio group, <code>model=multiple</code> → independent checkboxes. A plain <code>menuitem</code> composes no Selection.</td></tr>
+    <tr><td><a href="/intents/disclosure/">Disclosure</a></td><td>Submenu open/close state (<code>aria-expanded</code>) on a parent item; the cascade is driven by the menu keyboard model (Right opens / Left closes).</td></tr>
+    <tr><td><a href="/intents/action/">Action</a></td><td>Orthogonal visual <em>prominence</em> of an item (<code>primary</code> / <code>destructive</code>) — what it looks like, not what it does. An item composes both Command and Action.</td></tr>
+  </tbody>
+</table>
+
+<h3>Item roles &amp; trait surface</h3>
+<table>
+  <thead>
+    <tr><th>Role</th><th>Composes</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>menuitem</code></td><td>Command (+ optional Action)</td><td>Pure invocation. No checked state, no value.</td></tr>
+    <tr><td><code>menuitemcheckbox</code></td><td>Command + Selection <code>model=multiple</code></td><td>Independent on/off; <code>aria-checked</code>. The <code>checkable</code> trait.</td></tr>
+    <tr><td><code>menuitemradio</code></td><td>Command + Selection <code>model=single</code></td><td>One-of-a-group within its <code>role=group</code>.</td></tr>
+    <tr><td><code>separator</code></td><td>— (owned by the block)</td><td>Non-focusable divider; first-class APG role.</td></tr>
+    <tr><td><code>group</code></td><td>— (owned by the block)</td><td>Labelled section; may lean on Selection's <code>grouping</code> for the <code>aria-labelledby</code> heading wiring.</td></tr>
+    <tr><td>submenu parent</td><td>Disclosure + Anchor</td><td><code>aria-haspopup=menu</code> + <code>aria-expanded</code>; opens its own nested anchored Menu.</td></tr>
+  </tbody>
+</table>
+
+<h3>Why a submenu is not a tree</h3>
+<p>A submenu <em>looks</em> hierarchical but is a different paradigm from the tree-select <a href="/backlog/064-tree-select-block/">hierarchy</a> intent. Hierarchy owns flatten-to-visible-rows, <code>aria-level</code>/<code>aria-setsize</code>/<code>aria-posinset</code>, and cross-level Up/Down traversal. A submenu has <em>none</em> of these: it is a fresh anchored surface, navigated by Right (open) / Left (close), each level its own <code>role=menu</code>. So it composes Disclosure + Anchor, not hierarchy.</p>
+
+<h3>Keyboard contract</h3>
+<ul>
+  <li><kbd>↓</kbd>/<kbd>↑</kbd> move between items (roving); <kbd>Home</kbd>/<kbd>End</kbd> jump to ends. In a <code>menubar</code>, <kbd>←</kbd>/<kbd>→</kbd> move along the bar and <kbd>↓</kbd> opens a menu.</li>
+  <li><kbd>→</kbd> on a submenu parent opens it and focuses its first item; <kbd>←</kbd> closes the current submenu and returns to its parent.</li>
+  <li><kbd>Enter</kbd>/<kbd>Space</kbd> invokes the item's command (toggles a checkable item).</li>
+  <li>A printable character seeks the next item with that prefix (Type-Ahead).</li>
+  <li><kbd>Esc</kbd> closes the menu and returns focus to the trigger; a context menu is summoned by <kbd>Shift</kbd>+<kbd>F10</kbd> or right-click.</li>
+</ul>
+
+<h3>Web Standards Alignment</h3>
+<table>
+  <thead>
+    <tr><th>Standard</th><th>Role</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/menubar/">WAI-ARIA APG — Menu &amp; Menubar</a></td><td>The role/keyboard/focus model (roles, Right/Left cascade, type-ahead). APG permits roving <em>or</em> <code>aria-activedescendant</code>; WE fixes roving.</td></tr>
+    <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API">Invoker Commands API</a></td><td>The native invocation substrate each item composes via the Command intent (<code>command</code>/<code>commandfor</code> + <code>CommandEvent</code>).</td></tr>
+    <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Popover_API">Popover API</a> + CSS Anchor Positioning</td><td>The native open/dismiss + tethering the Anchor intent prefers for popup, context, and submenu surfaces.</td></tr>
+    <tr><td><code>contextmenu</code> event + <kbd>Shift</kbd>+<kbd>F10</kbd></td><td>The platform summoning the <code>context</code> shape binds.</td></tr>
+  </tbody>
+</table>
+
+<h3>Framework Research</h3>
+<table>
+  <thead>
+    <tr><th>Library</th><th>Packaging</th><th>What it confirms</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Radix / Headless UI</td><td>Separate Menu / Menubar / ContextMenu primitives</td><td>Roving focus; the C2 "three blocks" alternative WE rejects for one shared block.</td></tr>
+    <tr><td>MUI / Fluent</td><td>One Menu with variants</td><td>Roving focus; checkable items as <code>checkbox</code>/<code>radio</code> menu items (Fork D consensus).</td></tr>
+    <tr><td>Carbon / Ant</td><td>One Menu, mode/shape prop</td><td>The one-block + <code>shape</code> packaging WE adopts (Fork C).</td></tr>
+    <tr><td>Shoelace</td><td>Menu + menu-item + submenu</td><td>Submenu as a nested anchored popup, not a data tree (Fork E).</td></tr>
+  </tbody>
+</table>
+
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">Grounded in the menu / menubar / context-menu prior-art survey (<code>reports/2026-06-11-menu-menubar-block.md</code>; <a href="/research/menu-menubar-context-menu/">research topic</a>) and the seven forks ratified in <a href="/backlog/173-menu-menubar-block/">#173</a>. Composes the <a href="/intents/command/">command</a> intent (#299); the droplist "Menu button" roster demotion is the follow-on (#301). This page is the canonical standard.</p>

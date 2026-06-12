@@ -274,7 +274,7 @@
         ]
       }
     },
-    "description": "<h3>Containment vs. delegation</h3><p class=\"text-sm text-gray-600 mb-2\">This intent owns where focus is allowed to <em>go</em> while an overlay is open — trapping it inside the surface and sealing off the rest of the page. It is distinct from the <a href=\"/intents/focus-delegation/\">Focus Delegation Intent</a>, which owns how focus <em>moves between items</em> once it is inside a widget. A trapped dialog still delegates focus internally; the two compose.</p><h3>Trap</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>trap</code>: <kbd>Tab</kbd> / <kbd>Shift+Tab</kbd> cycle within the surface and never reach the page behind it. The accessibility requirement for any modal surface.</li><li><code>none</code>: Focus may leave the surface by tabbing — correct for modeless popovers, non-modal drawers, and toolbars that sit in the page flow.</li></ul><h3>Background</h3><p class=\"text-sm text-gray-600 mb-2\">How the rest of the document is treated while the surface is open. Prefer the native <code>inert</code> attribute on the background over manually juggling <code>tabindex</code>.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>inert</code>: The background is marked <code>inert</code> — unfocusable, unclickable, and hidden from assistive tech. The native mechanism behind a true modal. <code>&lt;dialog&gt;.showModal()</code> applies this automatically to everything outside the dialog.</li><li><code>interactive</code>: The background stays live and operable — a modeless surface that contains focus only while focus happens to be inside it.</li></ul><h3>Initial focus</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>first-tabbable</code>: Focus the first tabbable element inside the surface. The safe default for forms.</li><li><code>container</code>: Focus the surface container itself (it takes <code>tabindex=\"-1\"</code>) — use when there is no obvious first control, or the first control would be a destructive button.</li><li><code>explicit</code>: Focus a designated element (e.g. a Close button on a confirmation dialog, or the primary input).</li></ul><h3>Restore</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>restore</code>: Return focus to the element that opened the surface when it closes. The default — losing the user's place is disorienting.</li><li><code>none</code>: Do not move focus on close — when the trigger is gone or the next focus target is elsewhere by design.</li><li><code>explicit</code>: Send focus to a designated element on close (e.g. a newly revealed region the surface was gating).</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">A surface adopts containment when it opens. The <a href=\"/intents/modal/\">Modal Intent</a> composes this for its focus management rather than redefining trap/restore inline; the <a href=\"/intents/anchor/\">Anchor Intent</a> composes it for modal-mode popovers and menus; the <a href=\"/intents/focus-delegation/\">Focus Delegation Intent</a> governs movement <em>within</em> the contained region. Focus <em>indication</em> (<code>:focus-visible</code> styling) is a separate visual concern and is not owned here.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Trap = 'trap' | 'none';\ntype Background = 'inert' | 'interactive';\ntype InitialFocus = 'first-tabbable' | 'container' | 'explicit';\ntype Restore = 'restore' | 'none' | 'explicit';\n\ninterface FocusContainmentIntent {\n    // Confine focus to the surface?\n    trap: Trap;\n    // Seal off the rest of the page (native inert) vs. leave it live\n    background: Background;\n    // Where focus lands on open\n    initialFocus: InitialFocus;\n    // Where focus returns on close\n    restore: Restore;\n    // Selector, when initialFocus or restore is 'explicit'\n    target?: string;\n}</code></pre>",
+    "description": "<h3>Containment vs. delegation</h3><p class=\"text-sm text-gray-600 mb-2\">This intent owns where focus is allowed to <em>go</em> while an overlay is open — trapping it inside the surface and sealing off the rest of the page. It is distinct from the <a href=\"/intents/focus-delegation/\">Focus Delegation Intent</a>, which owns how focus <em>moves between items</em> once it is inside a widget. A trapped dialog still delegates focus internally; the two compose.</p><h3>Trap</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>trap</code>: <kbd>Tab</kbd> / <kbd>Shift+Tab</kbd> cycle within the surface and never reach the page behind it. The accessibility requirement for any modal surface.</li><li><code>none</code>: Focus may leave the surface by tabbing — correct for modeless popovers, non-modal drawers, and toolbars that sit in the page flow.</li></ul><h3>Background</h3><p class=\"text-sm text-gray-600 mb-2\">How the rest of the document is treated while the surface is open. Prefer the native <code>inert</code> attribute on the background over manually juggling <code>tabindex</code>.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>inert</code>: The background is marked <code>inert</code> — unfocusable, unclickable, and hidden from assistive tech. The native mechanism behind a true modal. <code>&lt;dialog&gt;.showModal()</code> applies this automatically to everything outside the dialog.</li><li><code>interactive</code>: The background stays live and operable — a modeless surface that contains focus only while focus happens to be inside it.</li></ul><h3>Initial focus</h3><p class=\"text-sm text-gray-600 mb-2\">Where focus lands when the surface opens is the <a href=\"/intents/autofocus-on-activation/\">Autofocus-on-Activation</a> landing question — Focus Containment composes that atom rather than owning a private copy of it. The values below are the <em>overlay profile</em> of that contract (the atom's <code>target</code> is this dimension's <code>explicit</code>); the atom holds the general landing vocabulary, this dimension the overlay-appropriate defaults.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>first-tabbable</code>: Focus the first tabbable element inside the surface. The safe default for forms.</li><li><code>container</code>: Focus the surface container itself (it takes <code>tabindex=\"-1\"</code>) — use when there is no obvious first control, or the first control would be a destructive button.</li><li><code>explicit</code>: Focus a designated element (e.g. a Close button on a confirmation dialog, or the primary input).</li></ul><h3>Restore</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>restore</code>: Return focus to the element that opened the surface when it closes. The default — losing the user's place is disorienting.</li><li><code>none</code>: Do not move focus on close — when the trigger is gone or the next focus target is elsewhere by design.</li><li><code>explicit</code>: Send focus to a designated element on close (e.g. a newly revealed region the surface was gating).</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">A surface adopts containment when it opens. The <a href=\"/intents/modal/\">Modal Intent</a> composes this for its focus management rather than redefining trap/restore inline; the <a href=\"/intents/anchor/\">Anchor Intent</a> composes it for modal-mode popovers and menus; the <a href=\"/intents/focus-delegation/\">Focus Delegation Intent</a> governs movement <em>within</em> the contained region. Focus <em>indication</em> (<code>:focus-visible</code> styling) is a separate visual concern and is not owned here.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Trap = 'trap' | 'none';\ntype Background = 'inert' | 'interactive';\ntype InitialFocus = 'first-tabbable' | 'container' | 'explicit';\ntype Restore = 'restore' | 'none' | 'explicit';\n\ninterface FocusContainmentIntent {\n    // Confine focus to the surface?\n    trap: Trap;\n    // Seal off the rest of the page (native inert) vs. leave it live\n    background: Background;\n    // Where focus lands on open\n    initialFocus: InitialFocus;\n    // Where focus returns on close\n    restore: Restore;\n    // Selector, when initialFocus or restore is 'explicit'\n    target?: string;\n}</code></pre>",
     "designSystemResearch": [
       {
         "system": "WAI-ARIA APG",
@@ -356,7 +356,7 @@
         ]
       }
     },
-    "description": "<h3>Rendering</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>full</code>: All items live in the DOM. Correct for short lists — simplest and most accessible.</li><li><code>windowed</code>: Only the visible window (plus a small overscan) is rendered; rows recycle as the user scrolls. Reach for it only when the item count is large enough to hurt layout/memory — not by default.</li></ul><h3>Set-Size Semantics</h3><p class=\"text-sm text-gray-600 mb-2\">Because a windowed list's DOM no longer reflects the true collection, every rendered item <strong>must</strong> carry <code>aria-setsize</code> (the full count) and <code>aria-posinset</code> (its absolute index + 1, <em>not</em> its DOM position) so assistive tech announces \"item 42 of 5000\". Never derive position from DOM order.</p><h3>Focus Persistence</h3><p class=\"text-sm text-gray-600 mb-2\">The currently focused or active item <strong>must not be unmounted</strong> when scrolled out of the window, or DOM focus and <code>aria-activedescendant</code> references break. This composes the <a href=\"/intents/focus-delegation/\">Focus Delegation Intent</a>: under <code>virtual</code> focus the active item must also be scrolled back into view on keyboard navigation.</p><h3>Item Size</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>fixed</code>: Uniform row height — scroll offsets are pure arithmetic; cheapest and most stable.</li><li><code>variable</code>: Measured/estimated heights — requires a measurement cache and can cause scroll-anchor shifts.</li></ul><h3>Data Source</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>bounded</code>: The full count is known; the window maps into a complete dataset.</li><li><code>infinite</code>: Items are fetched progressively (infinite scroll / load-more). Composes the <a href=\"/intents/loader/\">Loader Intent</a> <code>loadingMore</code> state — render an announced progress row at the list end rather than a blocking overlay.</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">This intent owns only <em>which items are realised in the DOM</em>. Selection, focus movement, and async fetching are delegated to the <a href=\"/intents/selection/\">Selection</a>, <a href=\"/intents/focus-delegation/\">Focus Delegation</a>, and <a href=\"/intents/loader/\">Loader</a> intents respectively.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Rendering = 'full' | 'windowed';\ntype ItemSize = 'fixed' | 'variable';\ntype DataSource = 'bounded' | 'infinite';\n\ninterface WindowedCollectionIntent {\n    // All items vs. visible window\n    rendering: Rendering;\n    // Known vs. measured row heights\n    itemSize?: ItemSize;\n    // Known count vs. progressive fetch\n    dataSource?: DataSource;\n    // Extra rows rendered beyond the viewport\n    overscan?: number;\n}</code></pre>",
+    "description": "<h3>Rendering</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>full</code>: All items live in the DOM. Correct for short lists — simplest and most accessible.</li><li><code>windowed</code>: Only the visible window (plus a small overscan) is rendered; rows recycle as the user scrolls. Reach for it only when the item count is large enough to hurt layout/memory — not by default.</li></ul><h3>Set-Size Semantics</h3><p class=\"text-sm text-gray-600 mb-2\">Because a windowed list's DOM no longer reflects the true collection, every rendered item <strong>must</strong> carry <code>aria-setsize</code> (the full count) and <code>aria-posinset</code> (its absolute index + 1, <em>not</em> its DOM position) so assistive tech announces \"item 42 of 5000\". Never derive position from DOM order.</p><p class=\"text-sm text-gray-600 mb-2\"><strong>Indeterminate totals (progressive load).</strong> While the full count is unknown — <code>infinite</code> data source, cursor pagination, before the last page lands — every rendered item carries <code>aria-setsize=\"-1\"</code>, the platform <em>size-unknown</em> sentinel, switching to the real count once the total is known. During batch row insertion the list container sets <code>aria-busy=\"true\"</code>, flipped to <code>false</code> on completion. This follows the WAI-ARIA APG <a href=\"https://www.w3.org/WAI/ARIA/apg/patterns/feed/\">Feed pattern</a> for indeterminate sets rather than fabricating an estimated total (which would misreport a count as fact). Ratified in #018 (Fork 4).</p><h3>Focus Persistence</h3><p class=\"text-sm text-gray-600 mb-2\">The currently focused or active item <strong>must not be unmounted</strong> when scrolled out of the window, or DOM focus and <code>aria-activedescendant</code> references break. This composes the <a href=\"/intents/focus-delegation/\">Focus Delegation Intent</a>: under <code>virtual</code> focus the active item must also be scrolled back into view on keyboard navigation.</p><h3>Item Size</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>fixed</code>: Uniform row height — scroll offsets are pure arithmetic; cheapest and most stable.</li><li><code>variable</code>: Measured/estimated heights — requires a measurement cache and can cause scroll-anchor shifts.</li></ul><h3>Data Source</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>bounded</code>: The full count is known; the window maps into a complete dataset.</li><li><code>infinite</code>: Items are fetched progressively (infinite scroll / load-more). Composes the <a href=\"/intents/loader/\">Loader Intent</a> <code>loadingMore</code> state — render an announced progress row at the list end rather than a blocking overlay.</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">This intent owns only <em>which items are realised in the DOM</em>. Selection, focus movement, and async fetching are delegated to the <a href=\"/intents/selection/\">Selection</a>, <a href=\"/intents/focus-delegation/\">Focus Delegation</a>, and <a href=\"/intents/loader/\">Loader</a> intents respectively.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Rendering = 'full' | 'windowed';\ntype ItemSize = 'fixed' | 'variable';\ntype DataSource = 'bounded' | 'infinite';\n\ninterface WindowedCollectionIntent {\n    // All items vs. visible window\n    rendering: Rendering;\n    // Known vs. measured row heights\n    itemSize?: ItemSize;\n    // Known count vs. progressive fetch\n    dataSource?: DataSource;\n    // Extra rows rendered beyond the viewport\n    overscan?: number;\n}</code></pre>",
     "events": [
       "rangechange",
       "loadmore"
@@ -1095,7 +1095,7 @@
         ]
       }
     },
-    "description": "<h3>Choice Models</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>single</code>: Mutually exclusive. Renders as <strong>Radio</strong> (Forms), <strong>Switch</strong> (Settings), or <strong>Select</strong> (Compact).</li><li><code>multiple</code>: Accumulative. Renders as <strong>Checkbox</strong> (List) or <strong>Filter Chips</strong> (Toolbar).</li></ul><h3>Immediacy Profile</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>live</code>: State changes immediately (Settings toggle).</li><li><code>buffered</code>: State changes on submission (Form field).</li></ul><h3>Grouping</h3><p class=\"text-sm text-gray-600 mb-2\">Options may be <code>flat</code> or organized into labeled <code>grouped</code> sets — the <strong>Grouping</strong> paradigm, reused by menus, command palettes, and faceted lists.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li>Native: <code>&lt;optgroup label=\"…\"&gt;</code> — the <code>label</code> is required and is what assistive tech announces as group membership; groups do not nest.</li><li>Custom (ARIA): wrap each group's options in <code>role=\"group\"</code> with <code>aria-labelledby</code> pointing at a <em>visible</em> heading; group headings are not focusable options.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type SelectionModel = 'single' | 'multiple';\ntype SelectionVariant = 'boolean' | 'item' | 'range';\n\ninterface SelectionIntent {\n    // How many can be selected\n    model: SelectionModel;\n    // When the state is committed\n    immediacy: 'live' | 'buffered';\n    // Visual metaphor\n    variant: SelectionVariant;\n    // Constraints\n    constraints?: { min?: number; max?: number };\n}</code></pre>"
+    "description": "<h3>Choice Models</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>single</code>: Mutually exclusive. Renders as <strong>Radio</strong> (Forms), <strong>Switch</strong> (Settings), or <strong>Select</strong> (Compact).</li><li><code>multiple</code>: Accumulative. Renders as <strong>Checkbox</strong> (List) or <strong>Filter Chips</strong> (Toolbar).</li></ul><h3>Immediacy Profile</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>live</code>: State changes immediately (Settings toggle).</li><li><code>buffered</code>: State changes on submission (Form field).</li></ul><h3>Grouping</h3><p class=\"text-sm text-gray-600 mb-2\">Options may be <code>flat</code> or organized into labeled <code>grouped</code> sets — the <strong>Grouping</strong> paradigm, reused by menus, command palettes, and faceted lists.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li>Native: <code>&lt;optgroup label=\"…\"&gt;</code> — the <code>label</code> is required and is what assistive tech announces as group membership; groups do not nest.</li><li>Custom (ARIA): wrap each group's options in <code>role=\"group\"</code> with <code>aria-labelledby</code> pointing at a <em>visible</em> heading; group headings are not focusable options.</li></ul><p class=\"text-sm text-gray-600 mb-2\">Grouping <em>arranges</em> options into labeled sets; it is distinct from the <strong>Compound Child</strong> paradigm, which is how a parent <em>declares</em> its options as authored children (<code>&lt;option&gt;</code>, <code>&lt;segment&gt;</code>) that map to this value model.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type SelectionModel = 'single' | 'multiple';\ntype SelectionVariant = 'boolean' | 'item' | 'range';\n\ninterface SelectionIntent {\n    // How many can be selected\n    model: SelectionModel;\n    // When the state is committed\n    immediacy: 'live' | 'buffered';\n    // Visual metaphor\n    variant: SelectionVariant;\n    // Constraints\n    constraints?: { min?: number; max?: number };\n}</code></pre>"
   },
   {
     "id": "input",
@@ -1139,7 +1139,7 @@
     "id": "navigation",
     "name": "Navigation Intent",
     "status": "draft",
-    "summary": "UX vocabulary for in-app navigation: information-architecture structure (hierarchical/lateral/linear) plus the orthogonal behaviors a view change carries — history contribution, scroll landing, transition direction, leave-guarding, and URL persistence. Composes prefetch (eagerness), motion (animation feel), and focus-delegation (focus reset).",
+    "summary": "UX vocabulary for in-app navigation: information-architecture structure (hierarchical/lateral/linear) plus the orthogonal behaviors a view change carries — history contribution, scroll landing, transition direction, leave-guarding, and URL persistence. Composes prefetch (eagerness), motion (animation feel), and the autofocus-on-activation contract (where initial focus lands after the view swaps — landing only, no trap).",
     "dimensions": {
       "structure": {
         "description": "The information-architecture model: how views are organized and how users traverse between them",
@@ -1191,7 +1191,7 @@
         ]
       }
     },
-    "description": "<p class=\"text-sm text-gray-600\">The Navigation Intent is the UX vocabulary for moving between views. <code>structure</code> declares the information-architecture shape; the remaining dimensions declare the orthogonal behaviors a single view change carries. Any structure can pair with any behavior — a <code>lateral</code> tab set may still want a deep-linkable URL, a <code>linear</code> wizard may guard against leaving mid-step.</p><h3>Structure Model</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>hierarchical</code>: Parent/child stack — manages history and back-navigation (Router). Active item marked <code>aria-current=\"page\"</code>.</li><li><code>lateral</code>: Peer switching (Tabs, Bottom Nav). Active item marked <code>aria-current=\"page\"</code>.</li><li><code>linear</code>: Sequential steps (Wizard). Locked progression; current step marked <code>aria-current=\"step\"</code>.</li></ul><p class=\"text-sm text-gray-600\">The correct <code>aria-current</code> token is <em>derived from</em> <code>structure</code> (page for hierarchical/lateral, step for linear) — it is part of the structure contract, not a separate choice.</p><h3>History Contribution</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>push</code>: New history entry — Back returns to the prior view.</li><li><code>replace</code>: Overwrite the current entry — Back skips this view (typical for wizard steps).</li><li><code>none</code>: Transient change that never enters the back stack.</li></ul><h3>Scroll Landing</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>auto</code>: Platform default — restore on back/forward, honor a URL fragment, else top.</li><li><code>top</code>: Always reset to the top on a forward navigation.</li><li><code>preserve</code>: Keep the current scroll position (correct for in-place tab/filter swaps).</li><li><code>manual</code>: The view drives scroll itself.</li></ul><h3>Transition Direction</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>directional</code>: Forward navigations animate forward, Back animates back (derived from history-traversal direction — browser-initiated Back carries no transition type).</li><li><code>fade</code>: Non-directional crossfade.</li><li><code>none</code>: No transition.</li></ul><p class=\"text-sm text-gray-600\">Direction is owned here; the <em>feel</em> of the animation (natural/immediate/reduced, honoring <code>prefers-reduced-motion</code>) is owned by the <a href=\"/intents/motion/\">Motion intent</a>.</p><h3>Leave Guard</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>free</code>: Navigation always proceeds.</li><li><code>confirm</code>: Intercept and prompt (\"unsaved changes — leave?\"); the user may proceed. The prompt UI composes with the <a href=\"/intents/modal/\">Modal intent</a>.</li><li><code>blocked</code>: Navigation is prevented until a condition clears.</li></ul><h3>URL Persistence</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>url</code>: State lives in the path/search — bookmarkable, shareable, survives refresh.</li><li><code>session</code>: State rides session history — survives traversal but not a fresh share.</li><li><code>memory</code>: In-memory only — lost on refresh or share.</li></ul><h3>Composition</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Prefetch:</strong> speculative loading of the next view is the <a href=\"/intents/prefetch/\">Prefetch intent</a>'s <code>eagerness</code> axis — Navigation composes it, does not own it.</li><li><strong>Focus reset:</strong> where focus goes after a view swap is a referenced contract (WAI-ARIA APG: move to the new view's main heading; platform <code>focusReset</code>) — the closed value set lives with <a href=\"/intents/focus-delegation/\">Focus Delegation</a>, not duplicated here.</li><li><strong>Loader:</strong> pending-state UX during a navigation defers to the <a href=\"/intents/loader/\">Loader intent</a>.</li></ul>"
+    "description": "<p class=\"text-sm text-gray-600\">The Navigation Intent is the UX vocabulary for moving between views. <code>structure</code> declares the information-architecture shape; the remaining dimensions declare the orthogonal behaviors a single view change carries. Any structure can pair with any behavior — a <code>lateral</code> tab set may still want a deep-linkable URL, a <code>linear</code> wizard may guard against leaving mid-step.</p><h3>Structure Model</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>hierarchical</code>: Parent/child stack — manages history and back-navigation (Router). Active item marked <code>aria-current=\"page\"</code>.</li><li><code>lateral</code>: Peer switching (Tabs, Bottom Nav). Active item marked <code>aria-current=\"page\"</code>.</li><li><code>linear</code>: Sequential steps (Wizard). Locked progression; current step marked <code>aria-current=\"step\"</code>.</li></ul><p class=\"text-sm text-gray-600\">The correct <code>aria-current</code> token is <em>derived from</em> <code>structure</code> (page for hierarchical/lateral, step for linear) — it is part of the structure contract, not a separate choice.</p><h3>History Contribution</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>push</code>: New history entry — Back returns to the prior view.</li><li><code>replace</code>: Overwrite the current entry — Back skips this view (typical for wizard steps).</li><li><code>none</code>: Transient change that never enters the back stack.</li></ul><h3>Scroll Landing</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>auto</code>: Platform default — restore on back/forward, honor a URL fragment, else top.</li><li><code>top</code>: Always reset to the top on a forward navigation.</li><li><code>preserve</code>: Keep the current scroll position (correct for in-place tab/filter swaps).</li><li><code>manual</code>: The view drives scroll itself.</li></ul><h3>Transition Direction</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>directional</code>: Forward navigations animate forward, Back animates back (derived from history-traversal direction — browser-initiated Back carries no transition type).</li><li><code>fade</code>: Non-directional crossfade.</li><li><code>none</code>: No transition.</li></ul><p class=\"text-sm text-gray-600\">Direction is owned here; the <em>feel</em> of the animation (natural/immediate/reduced, honoring <code>prefers-reduced-motion</code>) is owned by the <a href=\"/intents/motion/\">Motion intent</a>.</p><h3>Leave Guard</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>free</code>: Navigation always proceeds.</li><li><code>confirm</code>: Intercept and prompt (\"unsaved changes — leave?\"); the user may proceed. The prompt UI composes with the <a href=\"/intents/modal/\">Modal intent</a>.</li><li><code>blocked</code>: Navigation is prevented until a condition clears.</li></ul><h3>URL Persistence</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>url</code>: State lives in the path/search — bookmarkable, shareable, survives refresh.</li><li><code>session</code>: State rides session history — survives traversal but not a fresh share.</li><li><code>memory</code>: In-memory only — lost on refresh or share.</li></ul><h3>Composition</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Prefetch:</strong> speculative loading of the next view is the <a href=\"/intents/prefetch/\">Prefetch intent</a>'s <code>eagerness</code> axis — Navigation composes it, does not own it.</li><li><strong>Focus reset:</strong> where focus lands after a view swap is the <a href=\"/intents/autofocus-on-activation/\">Autofocus-on-Activation intent</a> — initial focus per a closed set (WAI-ARIA APG default: the new view's main heading via <code>tabindex=\"-1\"</code> + <code>.focus()</code>), borrowing the platform <code>autofocus</code> / dialog-focusing vocabulary. It is the same atom <a href=\"/intents/focus-containment/\">Focus Containment</a> names as \"where focus lands when it opens\" — Navigation composes that atom (landing only, no trap); it is <em>not</em> a Focus Delegation axis (a view swap has no delegator).</li><li><strong>Loader:</strong> pending-state UX during a navigation defers to the <a href=\"/intents/loader/\">Loader intent</a>.</li></ul>"
   },
   {
     "id": "anchor",
@@ -1620,7 +1620,7 @@
         ]
       },
       "advance": {
-        "description": "How the next slice is requested — orthogonal to pageMode. manual = an explicit user action (clicking a page link or a Load-more button); auto = the next slice fetches automatically at the scroll boundary, via the native IntersectionObserver sentinel. Default manual: auto-advance is the opt-in that turns append into infinite scroll, and it carries the documented infinite-scroll harms (unreachable footer, no stopping point), so it is never the default. paged + auto is undefined (you do not auto-replace on scroll).",
+        "description": "How the next slice is requested — orthogonal to pageMode. manual = an explicit user action (clicking a page link or a Load-more button); auto = the next slice fetches automatically at the scroll boundary, via the native IntersectionObserver sentinel. Default manual: auto-advance is the opt-in that turns append into infinite scroll, and it carries the documented infinite-scroll harms (unreachable footer, no stopping point), so it is never the default — on a full-page collection. Bounded-surface members override this: the dropdown/autocomplete family pins advance:auto as its default because a listbox popover has no footer to strand and every surveyed combobox auto-loads at the scroll boundary (autocomplete member, ratified #018 Fork 2); a clicked \"Load more\" row remains the manual opt-in and the keyboard/screen-reader fallback. paged + auto is undefined (you do not auto-replace on scroll).",
         "values": [
           "manual",
           "auto"
@@ -1876,6 +1876,394 @@
     "events": [
       "change",
       "cancel"
+    ]
+  },
+{
+    "id": "autofocus-on-activation",
+    "name": "Autofocus-on-Activation Intent",
+    "status": "concept",
+    "summary": "Where initial keyboard/AT focus lands when a surface becomes active — a route swap, tab change, or overlay open — by a closed set (heading | target | preserve | auto). The shared landing atom that Focus Containment and Navigation compose.",
+    "dimensions": {
+      "landing": {
+        "description": "Where initial keyboard/AT focus lands when the surface becomes active",
+        "values": [
+          "heading",
+          "target",
+          "preserve",
+          "auto"
+        ]
+      }
+    },
+    "description": "<h3>The landing question</h3><p class=\"text-sm text-gray-600 mb-2\">When a surface becomes active — a route swap, a tab change, a modal/overlay opening — initial keyboard/AT focus must land somewhere by a closed set. This intent owns that one question and nothing else: <em>a surface just became active, where does initial focus land?</em> It is the accessibility twin of the <a href=\"/intents/navigation/\">Navigation</a> <code>scroll</code> dimension (where the viewport lands); both are latent behaviors of rendering a new surface.</p><h3>Landing</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>heading</code> (default): the new surface's main heading, made programmatically focusable (<code>tabindex=\"-1\"</code> + <code>.focus()</code>). The WAI-ARIA APG answer and the overwhelmingly correct default.</li><li><code>target</code>: an author-named element inside the surface (e.g. the first field of a wizard step), referenced by id/ref.</li><li><code>preserve</code>: leave focus where it is — correct for in-place swaps that do not relocate the user (a filter re-render, an in-place tab panel).</li><li><code>auto</code>: platform default — honor a URL fragment or a descendant <code>autofocus</code> attribute, else fall back to <code>heading</code>, aligned with the native dialog-focusing steps so native behavior is not overridden gratuitously.</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">The same landing question fires on every surface activation, so neither composer owns a private copy of the value set:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><a href=\"/intents/focus-containment/\">Focus Containment</a> = this atom (landing) <strong>+</strong> trap <strong>+</strong> restore-on-close; its <code>initialFocus</code> dimension is the overlay profile of this landing contract.</li><li><a href=\"/intents/navigation/\">Navigation</a> composes the landing only — a forward navigation does not make the rest of the page inert.</li></ul><p class=\"text-sm text-gray-600 mb-2\">It is <em>not</em> a <a href=\"/intents/focus-delegation/\">Focus Delegation</a> axis: roving within a live widget presupposes a delegator, and a view swap has none. Ruling carried from #056 / #287.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Landing = 'heading' | 'target' | 'preserve' | 'auto';\n\ninterface AutofocusOnActivationIntent {\n    // Where initial keyboard/AT focus lands when the surface becomes active\n    landing: Landing;\n    // Element reference (id/selector), when landing is 'target'\n    target?: string;\n}</code></pre>",
+    "designSystemResearch": [
+      {
+        "system": "WAI-ARIA APG",
+        "components": [
+          "Managing focus",
+          "Dialog (Modal) pattern",
+          "Fundamental keyboard navigation"
+        ],
+        "keyInsight": "On activating a new view/surface, set focus deliberately — the APG default is the new surface's main heading made focusable (tabindex=-1 + focus()). This is the heading default this intent adopts.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/"
+      },
+      {
+        "system": "HTML / native",
+        "components": [
+          "autofocus attribute",
+          "<dialog> focusing steps",
+          "URL fragment navigation"
+        ],
+        "keyInsight": "The platform already lands focus via a descendant autofocus attribute, the dialog-focusing steps, and fragment targets — the auto value defers to these before falling back to heading (native-first).",
+        "reference": "https://html.spec.whatwg.org/multipage/interaction.html#the-autofocus-attribute"
+      },
+      {
+        "system": "React Aria / Radix",
+        "components": [
+          "FocusScope autoFocus",
+          "onMountAutoFocus"
+        ],
+        "keyInsight": "Headless libraries expose initial-focus as a standalone mount-time concern separate from trap/restore — validating landing as a composable atom rather than a property baked into the modal.",
+        "reference": "https://react-spectrum.adobe.com/react-aria/FocusScope.html"
+      }
+    ]
+  },
+{
+    "id": "data-transfer",
+    "name": "Data-Transfer Intent",
+    "status": "concept",
+    "summary": "The typed-payload + accepts contract behind the native DataTransfer object shared by clipboard and drag events: a payload (text, rich content, files, app items) entering a zone that declares what it accepts, plus the copy/cut/paste copy-out half. Drop-target and file-source compose it.",
+    "dimensions": {
+      "flow": {
+        "description": "Direction of transfer across the zone — into it, out of it, or both",
+        "values": [
+          "receive",
+          "emit",
+          "both"
+        ]
+      },
+      "payload": {
+        "description": "The typed content category the DataTransfer carries; a zone's accepts list is expressed over these",
+        "values": [
+          "text",
+          "rich",
+          "files",
+          "items"
+        ]
+      },
+      "acceptance": {
+        "description": "How a receiving zone constrains an incoming payload",
+        "values": [
+          "declared",
+          "any"
+        ]
+      }
+    },
+    "description": "<h3>One object, two surfaces</h3><p class=\"text-sm text-gray-600 mb-2\">The browser moves a payload through a single native object — <code>DataTransfer</code> — exposed as <code>event.clipboardData</code> on clipboard events and <code>event.dataTransfer</code> on drag events. This intent names the recurring contract that rides on it: a <em>typed payload</em> entering a <em>zone that declares what it accepts</em>, plus the programmatic copy-out half (<code>navigator.clipboard</code>, <code>ClipboardItem</code>). It is UX vocabulary only — the native objects and any provider sit behind it.</p><h3>Flow</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>receive</code>: payload moves <em>in</em> — a paste or a drop onto the zone.</li><li><code>emit</code>: payload moves <em>out</em> — a copy or cut from the zone (the half neither drop-target nor file-source owns).</li><li><code>both</code>: the zone accepts and offers — e.g. an editor region that pastes in and copies out.</li></ul><h3>Payload</h3><p class=\"text-sm text-gray-600 mb-2\">The typed categories a transfer carries; a zone's <code>accepts</code> list is a subset of these, mirroring the multiple MIME entries a single <code>DataTransfer</code> exposes.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>text</code>: plain string (<code>text/plain</code>).</li><li><code>rich</code>: structured/markup content (<code>text/html</code>, <code>text/uri-list</code>, and other format strings).</li><li><code>files</code>: one or more <code>File</code> objects (<code>DataTransfer.files</code> / a pasted/dropped file).</li><li><code>items</code>: application-defined data carried under a custom format string (a dragged row, a card, an app entity).</li></ul><h3>Acceptance</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>declared</code>: the zone publishes an allow-list of payload categories; a payload outside it is rejected (and the rejection is surfaced, not silently dropped). The validation contract the neighbours share.</li><li><code>any</code>: the zone takes whatever arrives and sorts it out itself.</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">This intent is composed, not used bare — it is the substrate its consumers share so the <code>accepts</code> contract is defined once:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Drop-target</strong> (the drag-and-drop trait family, #022) <em>is</em> a <code>receive</code> zone with a <code>declared</code> accepts list — it composes this rather than re-deriving payload/accepts validation.</li><li><a href=\"/intents/file-revision/\">File Revision</a>'s <code>file-source</code> paste/drop providers consume it for the clipboard-paste and drop ingestion paths.</li><li>The clipboard <code>emit</code> (copy/cut) surface rides here as the copy-out half — grounded in <code>navigator.clipboard.write</code> / <code>ClipboardItem</code> — which neither neighbour previously owned.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Flow = 'receive' | 'emit' | 'both';\ntype Payload = 'text' | 'rich' | 'files' | 'items';\ntype Acceptance = 'declared' | 'any';\n\ninterface DataTransferIntent {\n    // Into the zone (paste/drop), out of it (copy/cut), or both\n    flow: Flow;\n    // Typed categories the transfer may carry\n    payload: Payload[];\n    // Whether a receiving zone validates against a declared accepts list\n    acceptance: Acceptance;\n    // The declared allow-list, when acceptance is 'declared'\n    accepts?: Payload[];\n}</code></pre>",
+    "designSystemResearch": [
+      {
+        "system": "HTML / native",
+        "components": [
+          "DataTransfer",
+          "event.clipboardData",
+          "event.dataTransfer",
+          "DataTransferItemList"
+        ],
+        "keyInsight": "Clipboard and drag-and-drop share one DataTransfer object exposing typed entries by format string plus a files list — the single substrate this intent names, so the typed-payload + accepts contract is defined once across both surfaces.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer"
+      },
+      {
+        "system": "Async Clipboard API",
+        "components": [
+          "navigator.clipboard.read/write",
+          "ClipboardItem"
+        ],
+        "keyInsight": "The programmatic copy-out/paste-in half — ClipboardItem carries multiple typed representations, matching the payload categories — is the emit flow that drop-target and file-source do not own.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Clipboard_API"
+      },
+      {
+        "system": "HTML Drag and Drop API",
+        "components": [
+          "dragover/drop",
+          "dropEffect",
+          "effectAllowed"
+        ],
+        "keyInsight": "A drop zone signals acceptance via dragover/dropEffect against the dragged types — the receive + declared-accepts behavior, validating what it takes before the drop, that this intent factors out of the drop-target trait.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API"
+      }
+    ],
+    "events": [
+      "receive",
+      "emit",
+      "reject"
+    ]
+  },
+  {
+    "id": "exit-guard",
+    "name": "Exit Guard Intent",
+    "status": "concept",
+    "summary": "UX vocabulary for confirming before a region the user is in is torn down while it holds unsaved or in-flight work. The exit-guard member of the Guard protocol: arms on the cancelable dismissal of any region (document, route, overlay); the deny-outcome is a user-mediated confirm (stay / discard / save). The loss-of-state predicate is supplied by the guard provider, never by the intent.",
+    "dimensions": {
+      "scope": {
+        "description": "Which region's teardown is guarded — scale-invariant. document is the outermost region (the whole page leaving); route is a same-document navigation; overlay is an in-app dismissal (modal, drawer, panel).",
+        "values": [
+          "document",
+          "route",
+          "overlay"
+        ]
+      },
+      "condition": {
+        "description": "What the user is warned they would lose — the user-facing flavour of the loss-of-state predicate. unsaved = uncommitted edits (dirty form, editor); in-flight = work still running (an upload, a background task).",
+        "values": [
+          "unsaved",
+          "in-flight"
+        ]
+      },
+      "resolution": {
+        "description": "The user-mediated outcomes the confirm offers. stay cancels the dismissal and keeps the region; discard proceeds and abandons the work; save commits the work first, then proceeds.",
+        "values": [
+          "stay",
+          "discard",
+          "save"
+        ]
+      },
+      "presentation": {
+        "description": "How the confirm is shown. native = the browser's own generic, non-customizable prompt (the only option at document scope, via beforeunload); custom = an in-app dialog with bespoke copy and a save affordance (available for route and overlay scopes).",
+        "values": [
+          "native",
+          "custom"
+        ]
+      }
+    },
+    "description": "<h3>Exit Guard Contract</h3><p class=\"text-sm text-gray-600 mb-2\">When the user makes an <strong>intentful, cancelable attempt to leave or dismiss a region</strong> — closing the tab, navigating to a new route, dismissing a modal — and that region holds outstanding work, a <strong>confirm</strong> is presented before the teardown completes. The user, not the app, decides whether to proceed. Whether work is outstanding is decided by the <a href=\"/projects/webguards/#protocol-guard\">guard provider</a>; this intent only declares <em>that</em> a confirm is presented when it is, never <em>how</em> the condition is computed.</p><h3>Per-scope vocabulary</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>document</code>: the whole page is closing or reloading. The browser shows its <strong>own generic prompt</strong> (<code>beforeunload</code>) — the app cannot customize the text or offer a Save button. <code>presentation</code> is forced to <code>native</code> here.</li><li><code>route</code>: a same-document navigation away from the current view. The app intercepts the navigation and can show a <code>custom</code> dialog with bespoke copy.</li><li><code>overlay</code>: an in-app dismissal of a modal, drawer, or panel. The cancelable close action is intercepted; a <code>custom</code> dialog is shown.</li></ul><h3>Resolution</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>stay</code>: cancel the dismissal; the region and its work remain.</li><li><code>discard</code>: proceed; the outstanding work is abandoned.</li><li><code>save</code>: commit the work, then proceed (custom presentations only — the native prompt cannot offer this).</li></ul><h3>What this intent does not cover</h3><p class=\"text-sm text-gray-600 mb-2\">Only <strong>cancelable dismissal triggers</strong> are guardable — a close button, a route change, <code>beforeunload</code>. Imperative teardown that bypasses a guardable trigger (an ancestor calling <code>el.remove()</code>, a framework unmount) happens too late to confirm and is <strong>out of scope</strong>. The predicate, its provider, and the trust/enforcement boundary live in the <a href=\"/projects/webguards/#protocol-guard\">Guard protocol</a>, not here.</p><h3>Composition</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li>Built on the <strong><a href=\"/projects/webguards/#protocol-guard\">Guard protocol</a></strong> — the sibling of the entry-guard / access member (access control); both delegate their predicate to a guard provider, but the exit guard's deny-outcome is a <code>confirm</code> rather than <code>hide / redirect / forbid / cloak</code>.</li><li>The <strong>Form block</strong> and any unsaved-editor surface reference this intent rather than re-implementing a dirty-check prompt.</li><li>The <strong>Background Task Intent</strong>'s navigation-guard dimension collapses to referencing this intent for the in-flight case.</li></ul>",
+    "events": [
+      "exitattempt",
+      "exitconfirm",
+      "exitcancel"
+    ],
+    "uxResearch": [
+      {
+        "title": "Exit-guard prior art across frameworks and platforms",
+        "source": "Web Everything navigation-guard / Guard protocol research (#129, 2026-06-10)",
+        "findings": [
+          "Every major router exposes a leave-guard: Angular CanDeactivate, Vue beforeRouteLeave, React Router useBlocker, SvelteKit beforeNavigate — all gate a transition on a predicate and let the user cancel.",
+          "The browser baseline is beforeunload, which arms the document scope but can only render a generic, non-customizable prompt — no custom copy and no Save affordance.",
+          "Native platforms confirm the same pattern at overlay scope: iOS presentationControllerShouldDismiss / isModalInPresentation guard an interactive dismissal against a dirty state.",
+          "The unifying abstraction is guarding a region's teardown against a loss-of-state predicate, not 'navigation' — which is why this is the exit-guard member of the surface-agnostic Guard protocol, not a router-only feature."
+        ],
+        "keyInsight": "Routing leave-guards, beforeunload, and native modal-dismissal guards are one intent at three scopes; the only real UX divergence is that the document scope is stuck with the browser's native prompt.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event"
+      }
+    ],
+    "researchGaps": [
+      "Reconcile a custom route-scope confirm with the browser's native beforeunload prompt when a single user action triggers both (e.g. a hard reload mid-route) — the user must not see two stacked prompts.",
+      "Whether 'save' belongs in this intent's resolution vocabulary or composes from a separate Save/Action intent, given the native scope structurally cannot offer it.",
+      "How the confirm copy is sourced per condition (unsaved vs in-flight) without the intent reaching into the provider's predicate internals."
+    ]
+  },
+  {
+    "id": "hierarchy",
+    "name": "Hierarchy Intent",
+    "status": "draft",
+    "summary": "The nesting paradigm — role=tree › treeitem › role=group with aria-level/setsize/posinset, Right/Left expand-then-descend / collapse-then-ascend traversal, and the flatten-to-visible-rows projection that lets Windowed Collection virtualize a tree unchanged. Composes Disclosure for per-node expand state; delegates Selection, Focus-Delegation, and Type-Ahead. Tree-select, treegrid, and nested menus compose this one intent.",
+    "dimensions": {
+      "selectableNodes": {
+        "description": "Which nodes may be committed to the selection (default: any; leaf is an opt-in constraint)",
+        "values": [
+          "any",
+          "leaf"
+        ]
+      },
+      "cascade": {
+        "description": "Parent/child selection propagation, with indeterminate ancestors on partial selection — gated to selection.model = multiple (default: off)",
+        "values": [
+          "off",
+          "descendants",
+          "ancestors",
+          "both"
+        ]
+      },
+      "valueReporting": {
+        "description": "Which nodes a cascaded selection reports as its value (Ant showCheckedStrategy) — gated to selection.model = multiple (default: all)",
+        "values": [
+          "all",
+          "leaves",
+          "parents"
+        ]
+      }
+    },
+    "description": "<h3>What Hierarchy Is</h3><p class=\"text-sm text-gray-600 mb-2\">Hierarchy is the <strong>nesting paradigm</strong> — a tree of parent and child nodes and the rules for traversing them. It is the structure named by the <a href=\"https://www.w3.org/WAI/ARIA/apg/patterns/treeview/\">WAI-ARIA APG Tree View pattern</a>: a <code>role=tree</code> whose <code>treeitem</code>s wrap their children in a <code>role=group</code>, each item carrying <code>aria-level</code>, <code>aria-setsize</code>, and <code>aria-posinset</code>. Tree-select, and future treegrid and nested-menu surfaces, all compose this one intent rather than re-deriving nesting.</p><p class=\"text-sm text-gray-600 mb-2\">The platform separates <strong>three independent axes</strong>, and so does this intent:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Disclosure</strong> (open/closed, <code>aria-expanded</code>) — per-node expand state is the <a href=\"/intents/disclosure/\">Disclosure Intent</a>, <em>composed</em> here, not redefined. A node's expanded/collapsed state is exactly <code>&lt;details&gt;</code>-style disclosure.</li><li><strong>Hierarchy</strong> (this intent) — the nesting structure itself: levels, traversal, and the flatten-to-visible-rows projection.</li><li><strong>Selection</strong> (<code>aria-selected</code>) — which nodes are chosen is delegated to the <a href=\"/intents/selection/\">Selection Intent</a>; selection is independent of disclosure (a collapsed folder can be selected).</li></ul><h3>Traversal &amp; Keyboard</h3><p class=\"text-sm text-gray-600 mb-2\">The APG keyboard model is adopted verbatim — Right/Left carry <em>both</em> disclosure and horizontal movement, while Up/Down never change expand state:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>Right</strong> — <em>expand-then-descend</em>: a closed node opens (focus stays); an open node moves to its first child; an end node does nothing.</li><li><strong>Left</strong> — <em>collapse-then-ascend</em>: an open node closes; a child end/closed node moves to its parent; a root end node does nothing.</li><li><strong>Up / Down</strong> — move through the <em>visible</em> (focusable) set only; they never open or close.</li><li><strong>Home / End, type-ahead, <code>*</code> (expand siblings)</strong> — standard. Type-ahead is delegated to the <a href=\"/intents/type-ahead/\">Type-Ahead Intent</a>.</li></ul><h3>Windowing — Flatten to Visible Rows</h3><p class=\"text-sm text-gray-600 mb-2\">Hierarchy owns a <strong>projection</strong>: the tree is flattened to a linear array of currently-visible rows (nodes whose ancestors are all expanded), and that flat list is virtualized like any other. Hierarchy survives only as per-row metadata (level, posinset, setsize, expanded); expand/collapse just changes the array's length. So the <a href=\"/intents/windowed-collection/\">Windowed Collection Intent</a> needs <strong>zero tree-specific changes</strong> — there is no tree-specific offset math.</p><p class=\"text-sm text-gray-600 mb-2\">The load-bearing rule is focus, not offsets: focus management is delegated to <a href=\"/intents/focus-delegation/\">Focus-Delegation</a> as a DI-injectable strategy (<code>virtual</code> <code>aria-activedescendant</code> for family consistency, or <code>roving</code> tabindex for very large trees). Either way, <strong>collapsing a node moves focus to the collapsing ancestor</strong>, guaranteeing the focused node is always present in the visible projection — so a focused node can never be stranded inside a collapsed branch.</p><h3>Selectable Nodes</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>any</code>: <strong>Default</strong>. Any node may be selected, at any depth — the APG model and the cross-library consensus (a collapsed parent is selectable).</li><li><code>leaf</code>: An author opt-in constraint restricting commit to leaf nodes (Shoelace's <code>selection=\"leaf\"</code>). Never the default.</li></ul><h3>Cascade <span class=\"text-xs\">(multi-select only)</span></h3><p class=\"text-sm text-gray-600 mb-2\">When <a href=\"/intents/selection/\">Selection</a> is <code>model: multiple</code>, checking a node can propagate to related nodes, with partially-selected ancestors shown <em>indeterminate</em>. Gated to multi-select; ignored under single-select.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>off</code>: <strong>Default</strong>. Each node is selected on its own (MUI's decoupled default); no propagation.</li><li><code>descendants</code>: Checking a node selects all of its descendants.</li><li><code>ancestors</code>: Checking a node updates its ancestors' indeterminate/selected state.</li><li><code>both</code>: Full checkbox-tree cascade — descendants follow, ancestors reflect (Ant <code>treeCheckable</code>, Fluent, PrimeReact checkbox mode).</li></ul><h3>Value Reporting <span class=\"text-xs\">(multi-select only)</span></h3><p class=\"text-sm text-gray-600 mb-2\">Which nodes a cascaded selection <em>reports</em> as its value — Ant's <code>showCheckedStrategy</code>. Also gated to <code>model: multiple</code>.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>all</code>: <strong>Default</strong>. Report every selected node (<code>SHOW_ALL</code>).</li><li><code>leaves</code>: Report only fully-selected leaves, collapsing covered subtrees (<code>SHOW_CHILD</code>).</li><li><code>parents</code>: Report a fully-selected parent in place of its children (<code>SHOW_PARENT</code>).</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">Hierarchy composes the <a href=\"/intents/disclosure/\">Disclosure Intent</a> for per-node expand state (no new disclosure work), and delegates <a href=\"/intents/selection/\">Selection</a>, <a href=\"/intents/focus-delegation/\">Focus-Delegation</a>, and <a href=\"/intents/type-ahead/\">Type-Ahead</a>. There is <strong>no native tree</strong> substrate — <code>&lt;select&gt;&lt;optgroup&gt;</code> cannot nest and <code>&lt;details&gt;</code> has no selection model — so a hierarchy widget is an ARIA-composed custom element; the native-first baseline degrades to a single-level grouped <code>&lt;select&gt;</code>.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type SelectableNodes = 'any' | 'leaf';type Cascade = 'off' | 'descendants' | 'ancestors' | 'both';type ValueReporting = 'all' | 'leaves' | 'parents';interface HierarchyIntent {    // Which nodes may be committed (default: any; leaf is the opt-in constraint)    selectableNodes: SelectableNodes;    // Parent/child propagation — only meaningful when selection.model === 'multiple'    cascade: Cascade;        // default: off    // Which nodes the cascaded value reports (Ant showCheckedStrategy) — multiple only    valueReporting: ValueReporting;  // default: all    // Per-node expand state is composed from the Disclosure Intent    disclosure: DisclosureIntent;    // Selection, focus strategy, and type-ahead are delegated to their own intents    selection: SelectionIntent;    focus: FocusDelegationIntent;    // DI-injectable: virtual | roving}</code></pre>"
+  },
+  {
+    "id": "command",
+    "name": "Command Intent",
+    "status": "draft",
+    "summary": "The declarative surface for invoking an action — which commands exist, their keybindings, and command-palette behaviour. Grounded on the Baseline Invoker Commands API (command/commandfor + CommandEvent); a keybinding engine (Mousetrap, tinykeys) is an adapter, never the baseline. Orthogonal to the Action Intent (visual weight); the net-new dependency the Menu block composes.",
+    "dimensions": {
+      "binding": {
+        "description": "The keyboard shape that triggers the command (default: none)",
+        "values": [
+          "none",
+          "chord",
+          "sequence"
+        ]
+      },
+      "scope": {
+        "description": "Where the command and its binding are active (default: contextual)",
+        "values": [
+          "contextual",
+          "global"
+        ]
+      },
+      "discoverability": {
+        "description": "Whether the command appears in the command palette (default: listed)",
+        "values": [
+          "listed",
+          "hidden"
+        ]
+      }
+    },
+    "requiresCapabilities": [
+      "invokers"
+    ],
+    "description": "<h3>What Command Is</h3><p class=\"text-sm text-gray-600 mb-2\">A command is the declarative surface for <strong>invoking an action</strong> — <em>which</em> commands exist, the keyboard shortcuts that trigger them, and how they surface in a command palette. The native substrate is the <a href=\"https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API\">Invoker Commands API</a> (Baseline 2025): a control declares <code>commandfor</code> + <code>command</code>, and activating it dispatches a <code>CommandEvent</code> on the target (carrying <code>.command</code> and <code>.source</code>). Built-in commands cover popovers and dialogs; an app-defined command uses a <code>--</code>-prefixed value and handles its own <code>CommandEvent</code>.</p><p class=\"text-sm text-gray-600 mb-2\"><strong>Command is not the <a href=\"/intents/action/\">Action Intent</a>.</strong> Action is about an element's <em>visual weight</em> (<code>primary</code>/<code>destructive</code>); Command is about <em>invocation</em> (what fires, by what key, found where). They are orthogonal and compose: a destructive button can invoke a command. And a <strong>keybinding engine</strong> (Mousetrap, tinykeys, hotkeys-js) is an <em>adapter</em>, never the baseline — the platform's key handling and <code>CommandEvent</code> are native-first; an engine is the optional opt-in (settled in #016).</p><h3>Binding</h3><p class=\"text-sm text-gray-600 mb-2\">The keyboard shape that triggers the command — using the established keybinding vocabulary:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>none</code>: <strong>Default</strong>. No dedicated shortcut; the command is invoked by click, menu item, or the palette. Most commands are this.</li><li><code>chord</code>: A single simultaneous combination (e.g. <kbd>Ctrl</kbd>+<kbd>K</kbd>).</li><li><code>sequence</code>: An ordered multi-key sequence (the <kbd>g</kbd> then <kbd>i</kbd> style).</li></ul><h3>Scope</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>contextual</code>: <strong>Default</strong>. The command (and its binding) is active only while its surface or element has focus. The safe, composable default — it cannot collide app-wide.</li><li><code>global</code>: Active application-wide regardless of focus. A deliberate opt-in: a global binding claims an app-wide shortcut and can shadow other contexts, so it is never the default.</li></ul><h3>Discoverability</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>listed</code>: <strong>Default</strong>. The command appears in the command palette, so it is discoverable and searchable by name. The most permissive default — every command is findable unless deliberately hidden.</li><li><code>hidden</code>: The command is invocable (by key or programmatically) but omitted from the palette — for internal or redundant commands.</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">Command is the one net-new dependency the <a href=\"/blocks/menu/\">Menu</a> family (#173) composes — every <code>menuitem</code> <em>invokes</em> a command. A <strong>toggle command</strong> (e.g. \"Toggle Sidebar\") does not own its on/off state: it composes <a href=\"/intents/selection/\">Selection</a> or <a href=\"/intents/disclosure/\">Disclosure</a> for the state and stays a pure invocation here. Visual prominence composes the orthogonal <a href=\"/intents/action/\">Action Intent</a>; modality of the trigger composes <a href=\"/intents/interaction/\">Interaction</a>. The command palette itself is a surface that lists <code>listed</code> commands and dispatches the chosen one.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type Binding = 'none' | 'chord' | 'sequence';type Scope = 'contextual' | 'global';type Discoverability = 'listed' | 'hidden';interface CommandIntent {    // Stable command identifier (maps to the `--`-prefixed CommandEvent.command value)    id: string;    // Human label shown in menus and the palette    label: string;    // Keyboard shape that triggers it (default: none)    binding: Binding;    // Where the binding is active (default: contextual)    scope: Scope;    // Whether it appears in the command palette (default: listed)    discoverability: Discoverability;}</code></pre>",
+    "events": [
+      "command"
+    ]
+  },
+  {
+    "id": "viewport-presence",
+    "name": "Viewport Presence Intent",
+    "status": "draft",
+    "summary": "The shared in/out-of-view trigger: observe when an element enters or leaves a reference frame, owning the observe-vocabulary (reference, margin, coverage, enter/leave) — not the UX decision (fetch, prefetch, activate) that each consumer keeps.",
+    "dimensions": {
+      "reference": {
+        "description": "The frame an element's presence is measured against (the IntersectionObserver root)",
+        "values": [
+          "viewport",
+          "scroll-ancestor"
+        ]
+      },
+      "margin": {
+        "description": "How early presence flips relative to the reference edge (the IntersectionObserver rootMargin)",
+        "values": [
+          "flush",
+          "anticipatory"
+        ]
+      },
+      "coverage": {
+        "description": "How much of the element must lie within the reference to count as present (the IntersectionObserver threshold)",
+        "values": [
+          "sliver",
+          "partial",
+          "majority",
+          "full"
+        ]
+      }
+    },
+    "description": "<h3>What Viewport Presence Is</h3><p class=\"text-sm text-gray-600 mb-2\">Viewport Presence is the thin, shared <strong>in/out-of-view trigger</strong> — the answer to \"is this element currently within a reference frame?\", surfaced as <code>enter</code>/<code>leave</code> events. The native substrate is <a href=\"https://developer.mozilla.org/en-US/docs/Web/API/Intersection_Observer_API\">IntersectionObserver</a>: it owns the <em>observe-vocabulary</em> (<code>root</code>, <code>rootMargin</code>, <code>threshold</code>) and nothing about what happens next.</p><p class=\"text-sm text-gray-600 mb-2\"><strong>It owns the trigger, not the UX decision.</strong> What a consumer <em>does</em> on presence — fetch the next page, prefetch a link, activate a visibility-gated behavior — stays with that consumer. This intent exists only so the three consumers that today re-implement the same observer (<a href=\"/intents/collection-operations/\">Collection Operations</a> <code>advance:auto</code>, <a href=\"/intents/prefetch/\">Prefetch</a> <code>eagerness:viewport</code>, and the visibility-gated trait) <em>compose</em> one trigger instead of triplicating it — so a <code>rootMargin</code>-defaulting fix lands once, not three times.</p><h3>Reference</h3><p class=\"text-sm text-gray-600 mb-2\">The frame presence is measured against — the IntersectionObserver <code>root</code>.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>viewport</code>: Presence is measured against the browser viewport (<code>root: null</code>). The common case.</li><li><code>scroll-ancestor</code>: Presence is measured against a scrolling ancestor element (e.g. a scroll container or virtualized list), passed as the observer <code>root</code>.</li></ul><h3>Margin</h3><p class=\"text-sm text-gray-600 mb-2\">How early presence flips relative to the reference edge — the IntersectionObserver <code>rootMargin</code>. The exact offset is a config value the consuming surface (or the platform config it extends) sets; the dimension names the two intents.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>flush</code>: Presence flips exactly at the reference edge (zero margin) — react when the element is actually on screen.</li><li><code>anticipatory</code>: Presence flips before the edge (a positive <code>rootMargin</code>) — fire ahead of arrival so a consumer can fetch or prefetch in advance. The most-flexible, eager framing the pre-trigger consumers want.</li></ul><h3>Coverage</h3><p class=\"text-sm text-gray-600 mb-2\">How much of the element must lie within the reference to count as present — the IntersectionObserver <code>threshold</code>.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>sliver</code>: Any pixel visible counts (<code>threshold: 0</code>) — the most permissive.</li><li><code>partial</code>: A small fraction must be visible before presence flips.</li><li><code>majority</code>: More than half must be visible.</li><li><code>full</code>: The whole element must be within the reference (<code>threshold: 1</code>).</li></ul><h3>Events</h3><p class=\"text-sm text-gray-600 mb-2\">The two observable transitions every consumer composes:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>enter</code>: The element became present (crossed into the reference under the active margin + coverage).</li><li><code>leave</code>: The element became absent (crossed back out).</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">Consumers <em>compose</em> Viewport Presence rather than inline an observer: <a href=\"/intents/collection-operations/\">Collection Operations</a> keeps <code>advance:auto</code> (scroll-to-boundary &rarr; fetch the next slice) and delegates only the trigger; <a href=\"/intents/prefetch/\">Prefetch</a> keeps <code>eagerness:viewport</code> and delegates only the trigger; a visibility-gated trait activates its behavior on <code>enter</code>. The UX decision stays three; the observe-mechanism becomes one.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type PresenceReference = 'viewport' | 'scroll-ancestor';type PresenceMargin = 'flush' | 'anticipatory';type PresenceCoverage = 'sliver' | 'partial' | 'majority' | 'full';interface ViewportPresenceIntent {    // The frame presence is measured against (IntersectionObserver root)    reference: PresenceReference;    // How early presence flips vs the reference edge (IntersectionObserver rootMargin)    margin: PresenceMargin;    // How much of the element must be in-frame to count (IntersectionObserver threshold)    coverage: PresenceCoverage;}</code></pre>",
+    "events": [
+      "enter",
+      "leave"
+    ]
+  },
+  {
+    "id": "status-indicator",
+    "name": "Status Indicator Intent",
+    "status": "draft",
+    "summary": "Canonical display of a domain entity's lifecycle state — a semantic status chip/badge plus the available next transitions — so an entity's current state, and what can happen to it next, read consistently across every surface. The visual member of the Web Lifecycle protocol.",
+    "dimensions": {
+      "tone": {
+        "description": "How the current state maps to a semantic severity (drives colour/icon, never bespoke per-screen)",
+        "values": ["neutral", "info", "progress", "positive", "caution", "critical"]
+      },
+      "shape": {
+        "description": "The visual metaphor for the status token",
+        "values": ["badge", "pill", "dot", "text"]
+      },
+      "affordance": {
+        "description": "Whether the available next transitions are surfaced alongside the status",
+        "values": ["display-only", "actionable"]
+      }
+    },
+    "description": "<h3>What Status Indicator Is</h3><p class=\"text-sm text-gray-600 mb-2\">The canonical, accessible presentation of <strong>where an entity is in its lifecycle</strong> &mdash; the loan that is <code>underwriting</code>, the claim that is <code>approved</code>, the order that is <code>shipped</code>. It is the visual member of the <a href=\"/projects/weblifecycle/\">Web Lifecycle</a> protocol: it reads the same lifecycle provider and renders the current state plus, optionally, the moves available from here.</p><p class=\"text-sm text-gray-600 mb-2\"><strong>It owns the display, not the rules.</strong> Which states exist and which transitions are legal belong to the lifecycle definition; whether the actor may fire one belongs to <a href=\"/projects/webguards/\">Web Guards</a>. This intent only standardizes how the state is shown and announced &mdash; so a status stops being a hand-coloured <code>&lt;span&gt;</code> per screen.</p><h3>Tone</h3><p class=\"text-sm text-gray-600 mb-2\">A status maps to a semantic severity, not an ad-hoc colour. The tone (not the hex) is the intent; the theme resolves it.</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>neutral</code>: an inert/draft state. <code>info</code>: informational, in-system. <code>progress</code>: actively moving through the flow. <code>positive</code>: a successful terminal/near-terminal state. <code>caution</code>: needs attention (conditions, on-hold). <code>critical</code>: declined/failed/expired.</li></ul><h3>Shape</h3><p class=\"text-sm text-gray-600 mb-2\">The visual token: <code>badge</code> (boxed label), <code>pill</code> (rounded), <code>dot</code> (a coloured dot + text, for dense tables), or bare <code>text</code>.</p><h3>Affordance</h3><p class=\"text-sm text-gray-600 mb-2\"><code>display-only</code> shows the state; <code>actionable</code> also surfaces the available next transitions (from the provider) as controls. A11y: a state change is announced via <a href=\"/intents/live-region-status/\">Live Region Status</a> rather than re-defining an announcement here.</p>",
+    "events": [
+      "transition"
+    ]
+  },
+  {
+    "id": "audit-timeline",
+    "name": "Audit Timeline Intent",
+    "status": "draft",
+    "summary": "Canonical per-entity history rendering — a chronological feed of who did what, when, and before→after — with filtering. The visual member of the Web Audit protocol; it reads the same audit provider and renders the AuditEvent stream for one entity.",
+    "dimensions": {
+      "density": {
+        "description": "Vertical rhythm of the feed",
+        "values": ["compact", "comfortable"]
+      },
+      "grouping": {
+        "description": "How entries are partitioned",
+        "values": ["flat", "by-day", "by-actor"]
+      },
+      "detail": {
+        "description": "How much of each event is shown inline",
+        "values": ["summary", "expanded"]
+      }
+    },
+    "description": "<h3>What Audit Timeline Is</h3><p class=\"text-sm text-gray-600 mb-2\">The canonical presentation of <strong>an entity's immutable history</strong> &mdash; the loan's transitions, the conditions cleared, the documents accepted or rejected, the decision issued &mdash; as a chronological, filterable feed. It is the visual member of the <a href=\"/projects/webaudit/\">Web Audit</a> protocol: it reads the same audit provider (<code>queryByEntity</code>) and renders the <code>AuditEvent</code> stream; it does not own the log.</p><p class=\"text-sm text-gray-600 mb-2\"><strong>It owns the display, not the record.</strong> Append-only semantics, actor attribution, and before/after belong to the protocol; this intent standardizes only how that history is shown and scanned &mdash; so an audit log stops being a bespoke table per screen.</p><h3>Density</h3><p class=\"text-sm text-gray-600 mb-2\"><code>compact</code> for a dense side panel; <code>comfortable</code> for a full-page history.</p><h3>Grouping</h3><p class=\"text-sm text-gray-600 mb-2\"><code>flat</code> is a single stream; <code>by-day</code> partitions under date headers; <code>by-actor</code> groups consecutive events by who performed them.</p><h3>Detail</h3><p class=\"text-sm text-gray-600 mb-2\"><code>summary</code> shows actor + action + time per row; <code>expanded</code> also reveals the before&rarr;after change set (the Web States <code>ChangeRecord</code> pairs).</p>",
+    "events": [
+      "filter-change"
+    ]
+  },
+  {
+    "id": "decision-trace",
+    "name": "Decision Trace Intent",
+    "status": "draft",
+    "summary": "Canonical explanation of why a rules/criteria evaluation reached its outcome — a criteria trace table (each criterion's input, operator, threshold, contributed outcome) plus the aggregated outcome and its reason codes. The visual member of the Web Decisions protocol; it renders a DecisionRecord and composes the Status Indicator intent for the outcome.",
+    "dimensions": {
+      "layout": {
+        "description": "How the criteria are laid out",
+        "values": ["table", "list"]
+      },
+      "emphasis": {
+        "description": "Which criteria are shown",
+        "values": ["all-criteria", "deciding"]
+      },
+      "disclosure": {
+        "description": "Whether criterion detail is shown inline or behind an expander",
+        "values": ["inline", "expandable"]
+      }
+    },
+    "description": "<h3>What Decision Trace Is</h3><p class=\"text-sm text-gray-600 mb-2\">The canonical answer to <strong>\"why did the system decide this?\"</strong> &mdash; the underwriting finding, the eligibility determination, the pricing tier, the moderation call. It is the visual member of the <a href=\"/projects/webdecisions/\">Web Decisions</a> protocol: it renders a <code>DecisionRecord</code> as a criteria trace table (each criterion's input, operator, threshold, and contributed outcome) plus the aggregated outcome and reason codes.</p><p class=\"text-sm text-gray-600 mb-2\"><strong>It owns the explanation display, not the rules.</strong> Which criteria exist and how they evaluate belong to the decision engine (proof-of-compliance, <a href=\"/backlog/093-business-rule-manager-proof-of-compliance/\">#093</a>); this intent only standardizes how the result is shown and announced. The outcome (and each criterion's outcome) is shown via the <a href=\"/intents/status-indicator/\">Status Indicator</a> intent &mdash; one consistent status token, not a bespoke colour.</p><h3>Layout</h3><p class=\"text-sm text-gray-600 mb-2\"><code>table</code> is the dense five-column trace; <code>list</code> is a stacked, narrow-column form.</p><h3>Emphasis</h3><p class=\"text-sm text-gray-600 mb-2\"><code>all-criteria</code> shows every rule evaluated; <code>deciding</code> shows only the criteria that drove a non-pass outcome &mdash; the \"why not approved\" subset.</p><h3>Disclosure</h3><p class=\"text-sm text-gray-600 mb-2\"><code>inline</code> shows criterion detail in the row; <code>expandable</code> collapses it behind a per-row expander for long traces.</p>",
+    "events": [
+      "criterion-expand"
+    ]
+  },
+  {
+    "id": "master-detail",
+    "name": "Master-Detail Intent",
+    "status": "draft",
+    "summary": "Coordination between a collection (the master list) and a coupled detail region: which item is selected, how focus and announcement flow, whether the selection deep-links, and the empty/loading states. A standalone UX-coordination intent that COMPOSES existing intents — selection, layout, loader, live-region-status, focus-delegation, navigation — rather than introducing a new contract.",
+    "dimensions": {
+      "detailScope": {
+        "description": "Where the detail for the selected item lives",
+        "values": ["panel", "inline", "route"]
+      },
+      "focusFlow": {
+        "description": "On select, whether focus stays on the list or moves to the detail",
+        "values": ["retain", "advance"]
+      },
+      "selectionSync": {
+        "description": "Whether the selected item is reflected in the URL (composes the router)",
+        "values": ["none", "deep-link"]
+      },
+      "emptyState": {
+        "description": "What the detail region shows when nothing is selected",
+        "values": ["placeholder", "collapse"]
+      }
+    },
+    "description": "<h3>What Master-Detail Is</h3><p class=\"text-sm text-gray-600 mb-2\">The foundational enterprise layout where a list <strong>drives a coupled detail region</strong> &mdash; an inbox, a pipeline, an admin table. Selecting a row updates the detail, with the keyboard, focus, and a11y wiring that makes the pairing usable. It recurs everywhere, so the coordination is worth naming.</p><p class=\"text-sm text-gray-600 mb-2\"><strong>It is composition, not a new contract.</strong> Master-Detail has no provider and no schema of its own; it <em>composes</em> intents that already exist: <a href=\"/intents/selection/\">selection</a> (which item is picked), <a href=\"/intents/layout/\">layout</a> (the region), <a href=\"/intents/loader/\">loader</a> (pending detail), <a href=\"/intents/live-region-status/\">live-region-status</a> (announce the change), <a href=\"/intents/focus-delegation/\">focus-delegation</a> (the focus flow), and <a href=\"/intents/navigation/\">navigation</a> (deep-linking the selection). The reference <code>master-detail</code> block coordinates them over the shipping selection block.</p><h3>Detail scope</h3><p class=\"text-sm text-gray-600 mb-2\"><code>panel</code> couples a side/detail region; <code>inline</code> expands the detail within the list row; <code>route</code> deep-links the detail as a sub-route.</p><h3>Focus flow</h3><p class=\"text-sm text-gray-600 mb-2\"><code>retain</code> keeps focus on the list for fast keyboard scanning; <code>advance</code> moves focus into the detail (e.g. a form to act on).</p><h3>Selection sync</h3><p class=\"text-sm text-gray-600 mb-2\"><code>none</code>, or <code>deep-link</code> to reflect the selected item in the URL so it is shareable and back/forward works (composes the router).</p><h3>Empty state</h3><p class=\"text-sm text-gray-600 mb-2\"><code>placeholder</code> shows a prompt when nothing is selected; <code>collapse</code> hides the region.</p>",
+    "events": [
+      "detail-change"
     ]
   }
 ]

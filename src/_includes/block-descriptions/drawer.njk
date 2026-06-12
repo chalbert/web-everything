@@ -1,0 +1,46 @@
+<h2>Overview</h2>
+<p>
+  <strong>Drawer</strong> is the edge-anchored, sliding <em>concrete member</em> of the
+  <a href="/blocks/dialog/">dialog family</a> — a panel that enters from a viewport edge (a navigation
+  drawer, a filter panel, a detail pane). It mirrors <code>dropdown</code>'s relationship to
+  <code>droplist</code>: a concrete member, not a standalone widget and not a flag on one widget.
+</p>
+<p>
+  It <strong>extends the dialog substrate</strong> and re-implements none of its machinery —
+  focus containment, escape/outside/backdrop dismissal, scroll-lock, modal/non-modal mode, and the
+  native-first top-layer mount are all <em>inherited</em>. The drawer's whole job is to fix the
+  configuration to an edge.
+</p>
+
+<h2>What the drawer fixes (everything else is inherited)</h2>
+<table>
+  <tr><th>Aspect</th><th>Source</th></tr>
+  <tr><td>Placement — a viewport inline edge</td><td><strong>Fixed here:</strong> Modal Intent <code>placement: start | end</code> (RTL-aware). A <code>side</code> attribute picks the edge.</td></tr>
+  <tr><td>Motion — slide-in / slide-out along the edge</td><td><strong>Added here:</strong> <a href="/intents/motion/">Motion Intent</a> (the visual signature of a drawer vs. a fading modal).</td></tr>
+  <tr><td>Swipe-to-dismiss</td><td><strong>Added here:</strong> an edge-swipe gesture, layered <em>on top of</em> the inherited dismissal — never replacing the accessible keyboard/pointer baseline.</td></tr>
+  <tr><td>Focus containment, dismissal, backdrop, scroll-lock, mode, top-layer</td><td><strong>Inherited</strong> from the <a href="/blocks/dialog/">dialog substrate</a> (native <code>&lt;dialog&gt;</code> + Popover).</td></tr>
+</table>
+
+<h2>Web Standards Alignment</h2>
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr><td><a href="https://developer.mozilla.org/docs/Web/HTML/Element/dialog">&lt;dialog&gt;</a> (via the dialog substrate)</td><td>Baseline 2022</td><td>The drawer is a <code>&lt;dialog&gt;</code> positioned at an inline edge; focus-trap, backdrop, and Escape come from the substrate.</td></tr>
+  <tr><td><a href="https://developer.mozilla.org/docs/Web/CSS/CSS_logical_properties">CSS logical properties</a> (inset-inline-start/end)</td><td>Baseline</td><td>Edge placement uses logical insets so <code>start</code>/<code>end</code> mirror correctly under RTL.</td></tr>
+  <tr><td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/">WAI-ARIA APG Dialog</a></td><td>WAI-ARIA 1.2</td><td>Inherited from the substrate — a drawer is a dialog, so the same modal semantics apply.</td></tr>
+</table>
+
+<h2>Framework / Library Research</h2>
+<table>
+  <tr><th>Source</th><th>Key Patterns Adopted</th></tr>
+  <tr><td><a href="https://m3.material.io/components/navigation-drawer/overview">Material 3 Navigation Drawer</a></td><td>Standard / modal drawer split, edge anchoring, scrim, swipe.</td></tr>
+  <tr><td><a href="https://ant.design/components/drawer">Ant Drawer</a> / <a href="https://www.radix-ui.com/primitives/docs/components/dialog">Radix Dialog</a></td><td>Side/size configuration; a drawer as a positioned dialog rather than a separate primitive.</td></tr>
+  <tr><td><a href="https://vaul.emilkowal.ski/">Vaul</a></td><td>Swipe-to-dismiss + drag gesture as an enhancement over keyboard dismissal.</td></tr>
+</table>
+
+<h2>Family</h2>
+<p>
+  A concrete member of the <a href="/blocks/dialog/">dialog family</a>
+  (<code>droplist : dropdown :: dialog : drawer</code>). Its siblings are the centered <em>modal</em>
+  (<code>placement: center</code>) and the bottom <em>sheet</em> (<code>placement: bottom</code>) — distinct
+  members, distinct placements, one shared substrate.
+</p>

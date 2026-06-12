@@ -1,0 +1,161 @@
+<section class="intro-section mb-12">
+  <h3 id="mission">Mission</h3>
+  <p>
+    <strong>Web Lifecycle</strong> standardizes a <strong>domain entity's lifecycle</strong> &mdash; a
+    declared set of statuses and the guarded, role-scoped transitions between them. A loan application, an
+    insurance policy, a claim, an order, a support ticket: each is a state machine
+    (<code>draft &rarr; submitted &rarr; &hellip; &rarr; closed</code>) whose legal moves depend on
+    <em>who</em> the actor is and on guard predicates. Today every application re-invents that machine in
+    bespoke <code>if (status === &hellip;)</code> code, scattering the transition rules, the permission
+    checks, and the status badges across the app.
+  </p>
+  <p>
+    Web Lifecycle fixes one seam &mdash; a <strong>declarative transition map</strong> resolved by a
+    swappable <strong>lifecycle provider</strong> &mdash; and nothing else. The map is data, so a workflow
+    engine (XState, a BPM server, a hand-rolled reducer) plugs in behind the provider without touching the
+    entity. <strong>The transition map is the only lock.</strong>
+  </p>
+
+  <div class="comparison-block" style="background: rgba(79, 70, 229, 0.08); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #4f46e5; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #4338ca; font-size: 1rem;">Not Web States, not a region's lifecycle</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      <a href="/projects/webstates/">Web States</a> owns reactive state <em>primitives</em> (signals,
+      stores, change records) &mdash; the mechanism for observing a mutation.
+      <a href="/projects/webguards/">Web Guards</a> owns a <em>region's</em> lifecycle (may this route/modal
+      tear down or be entered). Web Lifecycle owns the <em>domain object's</em> workflow state: a typed
+      status set and the rules for moving an entity between statuses. They compose &mdash; a lifecycle's
+      transition is reactive state, and its authorization is a guard &mdash; but they are different layers.
+    </p>
+  </div>
+</section>
+
+<section id="features" class="section-card">
+  <h3 id="feature-surface">Feature Surface</h3>
+  <p>
+    What a lifecycle standard covers, and where each capability is fulfilled. <strong>Protocol</strong> =
+    fixed by the Lifecycle contract (the only lock); <strong>Provider</strong> = resolved behind the
+    swappable lifecycle provider; <strong>Compose</strong> = deferred to a neighbouring Web Everything
+    standard.
+  </p>
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 720px;">
+      <thead>
+        <tr><th>Feature</th><th>Prior art</th><th>What it does</th><th>Layer</th></tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(79,70,229,0.06);">The seam (fixed by the protocol)</td></tr>
+        <tr><td><strong>Status set</strong></td><td>TS string-literal union, DB enum</td><td>The declared, typed set of states an entity may occupy (incl. terminal states)</td><td>Protocol</td></tr>
+        <tr><td><strong>Transition map</strong></td><td>XState <code>states/on</code>, statecharts</td><td><code>from &rarr; to</code> edges; each carries an optional guard + permitted actor</td><td>Protocol</td></tr>
+        <tr><td><strong>Provider seam</strong></td><td>—</td><td>Default &rarr; project override &rarr; custom plug, resolved off the injector chain</td><td>Protocol</td></tr>
+        <tr><td><strong>Transition event</strong></td><td>Domain events, event sourcing</td><td>Each fired transition emits <code>{ entity, from, to, actor, at }</code></td><td>Protocol</td></tr>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(79,70,229,0.06);">Deferred to neighbours (composed, not owned)</td></tr>
+        <tr><td><strong>Authorization</strong></td><td>CASL, OpenFGA, server authz</td><td><em>May THIS actor fire this transition?</em> &mdash; a guard predicate</td><td>🔗 Compose &mdash; <a href="/projects/webguards/">Web Guards</a></td></tr>
+        <tr><td><strong>Audit / history</strong></td><td>Event log, temporal tables</td><td>The immutable record of who moved the entity, when, before&rarr;after</td><td>🔗 Compose &mdash; audit-trail (<a href="/backlog/357-audit-trail-standard/">#357</a>)</td></tr>
+        <tr><td><strong>Status display</strong></td><td>Status chips/badges</td><td>Canonical render of current state + available next transitions</td><td>🔗 Member &mdash; <a href="/intents/status-indicator/">Status Indicator intent</a></td></tr>
+        <tr><td><strong>Persistence</strong></td><td>ORM, repositories</td><td>Where the entity (and its current status) is stored</td><td>🔗 Compose &mdash; the entity's own storage concern</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="protocol-lifecycle" class="section-card">
+  <h3 id="how-it-works">Lifecycle Protocol</h3>
+  <p>
+    An entity never bundles its workflow rules. It declares a <strong>lifecycle definition</strong> (status
+    set + transition map), resolves the application's <strong>lifecycle provider</strong> through the
+    injector chain, and asks it to fire a transition. The provider evaluates the edge's guard (delegating
+    authorization to a guard provider), applies the move, and emits the transition event. The protocol fixes
+    only the seam &mdash; the engine behind the provider is swappable.
+  </p>
+  {% highlight "typescript" %}
+// The transition map — the ONLY lock. Data-defined, so it is portable across engines.
+interface LifecycleDefinition<S extends string> {
+  initial: S;
+  states: Record<S, { terminal?: boolean }>;
+  transitions: Array<{
+    from: S; to: S;
+    // Authorization is NOT owned here — `guard` names a Web Guards predicate the
+    // CustomGuardProvider resolves (async, server-authoritative). Omit for an unguarded move.
+    guard?: string;
+    // The role permitted to fire it (a UX hint; the guard provider is the real gate). Omit = automatic.
+    actor?: string;
+  }>;
+}
+
+// The provider seam — satisfied by the native default and every plugged engine alike.
+interface CustomLifecycleProvider<S extends string = string> {
+  // Which transitions are currently available to this actor (guards pre-evaluated).
+  available(entity: EntityRef, actor: ActorRef): Promise<S[]>;
+  // Fire one. Rejects if the edge is unknown or its guard denies. On success, emits the event.
+  transition(entity: EntityRef, to: S, actor: ActorRef): Promise<LifecycleEvent<S>>;
+}
+
+interface LifecycleEvent<S extends string> {
+  entity: EntityRef; from: S; to: S; actor: ActorRef; at: string; // ISO
+}
+
+// 1. The application registers ONE provider (native-first default; project overrides it).
+customLifecycles.define('loan', new XStateLifecycleProvider(loanDefinition));
+
+injector Application {
+  provide { lifecycle: 'loan' } to '@web-lifecycle';   // every descendant resolves this provider
+}
+
+// 2. A surface delegates — it owns neither the rules nor the authorization.
+const provider = InjectorRoot.getProviderOf(el, 'customLifecycles');
+const next = await provider.available(loan, currentUser);     // → ['underwriting', 'declined']
+const ev = await provider.transition(loan, 'underwriting', currentUser); // guard-checked + audited
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+    <li><strong>One contract:</strong> <code>CustomLifecycleProvider</code> &mdash;
+      <code>available()</code> + <code>transition()</code> &mdash; is satisfied by the default and every
+      plugged workflow engine alike.</li>
+    <li><strong>One registry:</strong> <code>CustomLifecycleRegistry</code>
+      (<code>window.customLifecycles</code>) holds the named definitions/providers; the project selects or
+      overrides via the injector chain.</li>
+    <li><strong>Authorization is delegated, never re-implemented:</strong> a transition's
+      <code>guard</code> is a <a href="/projects/webguards/">Web Guards</a> predicate resolved by the
+      <code>CustomGuardProvider</code> &mdash; async, server-authoritative, the front-end is a UX mirror.
+      Web Lifecycle owns <em>the state machine</em>; Web Guards owns <em>who may fire an edge</em>.</li>
+    <li><strong>Every transition is observable:</strong> the emitted <code>LifecycleEvent</code> is the
+      composition seam for audit-trail (<a href="/backlog/357-audit-trail-standard/">#357</a>) and reporting
+      &mdash; the standard does not own the log, only the event.</li>
+  </ul>
+</section>
+
+<section id="composition" class="section-card">
+  <h3 id="composition">Composition With Other Standards</h3>
+  <ul style="font-size: 0.9rem;">
+    <li><strong><a href="/intents/status-indicator/">Status Indicator intent</a></strong> &mdash; the UX half:
+      the canonical chip/badge for the current state plus the available next transitions. It reads the same
+      provider; it is the lifecycle's visual member.</li>
+    <li><strong><a href="/projects/webguards/">Web Guards</a></strong> &mdash; resolves each transition's
+      guard predicate (authorization / precondition). Web Lifecycle declares <em>which</em> guard an edge
+      needs; Web Guards decides it.</li>
+    <li><strong>Audit-trail (<a href="/backlog/357-audit-trail-standard/">#357</a>)</strong> &mdash; consumes
+      the transition event to build the immutable per-entity history.</li>
+    <li><strong><a href="/projects/webstates/">Web States</a></strong> &mdash; the entity's current status is
+      reactive state; a status change is a Change Record. Web Lifecycle adds the <em>legal-move</em> layer
+      on top of the primitive.</li>
+  </ul>
+</section>
+
+<section id="status" class="section-card">
+  <h3 id="status">Status</h3>
+  <p>
+    Web Lifecycle is in <strong>concept</strong> phase; the Lifecycle protocol's seam (status set +
+    transition map + provider + event) is specified here at <strong>draft</strong>. It was surfaced by the
+    loan-origination exercise app (<a href="/backlog/317-exercise-app-loan-origination/">#317</a>), whose
+    application moves through exactly this guarded, role-scoped machine. The native-first default provider
+    and a reference runtime block (to make that app conformant) are the first planned work, on top of this
+    contract.
+  </p>
+  <h4 style="margin-top: 1rem;">Open Questions</h4>
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <li>Does the definition carry side-effects (on-enter / on-exit actions), or stay purely declarative and
+      leave effects to the consumer subscribing to the event?</li>
+    <li>Parallel / nested states (statechart regions) &mdash; in scope, or explicitly flat-only for v1?</li>
+    <li>How does an <em>automatic</em> transition (no actor, fired by a condition) express its trigger &mdash;
+      a guard that returns "fire", or a separate scheduler concern?</li>
+  </ul>
+</section>

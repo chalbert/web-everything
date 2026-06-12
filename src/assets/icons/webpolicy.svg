@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- GLOBAL FILTER: Do Not Modify -->
+    <filter id="floatShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <!-- Indigo (States) -->
+    <linearGradient id="gradIndigo" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#4f46e5" />
+    </linearGradient>
+  </defs>
+
+  <!-- BASE: Rounded Container (Slate-50) -->
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc" />
+
+  <!-- CONTENT: a decision table — a header row + rule rows, one row resolving to a checked verdict -->
+  <g filter="url(#floatShadow)">
+    <!-- the table frame -->
+    <rect x="36" y="38" width="56" height="52" rx="8" fill="none" stroke="url(#gradIndigo)" stroke-width="6" />
+    <!-- header row fill -->
+    <path d="M 36 54 L 92 54" fill="none" stroke="url(#gradIndigo)" stroke-width="6" />
+    <!-- column divider -->
+    <path d="M 68 38 L 68 90" fill="none" stroke="url(#gradIndigo)" stroke-width="4" opacity="0.55" />
+    <!-- row dividers -->
+    <path d="M 36 72 L 92 72" fill="none" stroke="url(#gradIndigo)" stroke-width="4" opacity="0.55" />
+  </g>
+  <!-- the matched rule's verdict: a check badge on the lower-right cell -->
+  <g filter="url(#floatShadow)">
+    <circle cx="80" cy="81" r="12" fill="url(#gradIndigo)" />
+  </g>
+  <g fill="none" stroke="#f8fafc" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 75 81 L 79 85 L 85 77" />
+  </g>
+</svg>

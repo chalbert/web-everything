@@ -278,4 +278,53 @@ describe('Injector', () => {
       expect(parentInjector.isQuerierValid(outsideElement)).toBe(false);
     });
   });
+
+  // #400 — consumer→provider edges (the #092 graph's consumesApis-equivalent).
+  describe('consumption-edge introspection', () => {
+    afterEach(() => { Injector.trackConsumption = false; });
+
+    it('records no edges by default (opt-in, zero production cost)', async () => {
+      const registry = new TestRegistry();
+      parentInjector.set('testRegistry', registry);
+      await parentInjector.consume('testRegistry', childElement);
+      expect(parentInjector.consumptionEdges()).toEqual([]);
+    });
+
+    it('records the consumer→provider edge when tracking is enabled', async () => {
+      Injector.trackConsumption = true;
+      const registry = new TestRegistry();
+      parentInjector.set('testRegistry', registry);
+
+      await parentInjector.consume('testRegistry', childElement);
+
+      const edges = parentInjector.consumptionEdges();
+      expect(edges).toEqual([{ provider: 'testRegistry', querier: childElement }]);
+    });
+
+    it('dedups repeated consumption by the same querier', async () => {
+      Injector.trackConsumption = true;
+      parentInjector.set('testRegistry', new TestRegistry());
+      await parentInjector.consume('testRegistry', childElement);
+      await parentInjector.consume('testRegistry', childElement);
+      expect(parentInjector.consumptionEdges()).toHaveLength(1);
+    });
+
+    it('records the edge at the injector where consume() was called, even when resolved up the chain', async () => {
+      Injector.trackConsumption = true;
+      parentInjector.set('testRegistry', new TestRegistry());
+      const childInjector = new TestInjector(childElement, parentInjector);
+
+      await childInjector.consume('testRegistry', childElement);
+
+      expect(childInjector.consumptionEdges()).toEqual([{ provider: 'testRegistry', querier: childElement }]);
+    });
+
+    it('clears edges on dispose', async () => {
+      Injector.trackConsumption = true;
+      parentInjector.set('testRegistry', new TestRegistry());
+      await parentInjector.consume('testRegistry', childElement);
+      parentInjector.dispose();
+      expect(parentInjector.consumptionEdges()).toEqual([]);
+    });
+  });
 });

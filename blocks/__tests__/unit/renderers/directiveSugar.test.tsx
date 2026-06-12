@@ -22,6 +22,7 @@ import {
   isDirectiveComponent,
   For,
 } from '../../../renderers/jsx';
+import { RESOURCE_SLOT_STATES } from '../../../renderers/jsx/directives';
 import { jsxToHtml } from '../../../renderers/jsx/jsxToHtml';
 
 const norm = (s: string) => s.replace(/=""/g, '').replace(/>\s+</g, '><').replace(/\s+/g, ' ').trim();
@@ -107,5 +108,39 @@ describe('directive registry', () => {
   it('an unknown is="…" template is left untouched by sugarize', () => {
     const unknown = `<template is="mystery"><span>x</span></template>`;
     expect(sugarize(unknown)).toBe(unknown);
+  });
+});
+
+describe('Resource slot → Loader-state contract (#337)', () => {
+  // Two separate fallback surfaces, NOT a merged `fallback`: loading→pending, error→error, default→success.
+  const slotted =
+    `<Resource from="@users">` +
+    `<template slot="loading"><p>Loading…</p></template>` +
+    `<template slot="error"><p>Failed</p></template>` +
+    `<ul data-bind="items"></ul>` +
+    `</Resource>`;
+  const canonical =
+    `<template is="resource" from="@users">` +
+    `<template slot="loading"><p>Loading…</p></template>` +
+    `<template slot="error"><p>Failed</p></template>` +
+    `<ul data-bind="items"></ul>` +
+    `</template>`;
+
+  it('maps loading→pending, error→error, default→success — two surfaces, no merged fallback', () => {
+    expect(RESOURCE_SLOT_STATES).toEqual({ loading: 'pending', error: 'error', default: 'success' });
+  });
+
+  it('desugar carries the named loading/error slots through to the canonical template', () => {
+    expect(norm(desugar(slotted))).toBe(norm(canonical));
+  });
+
+  it('sugarize raises the Resource shell while leaving the inert slot templates verbatim', () => {
+    // The slot <template>s have no registered is="…", so they stay <template slot="…"> — only the
+    // outer is="resource" becomes <Resource>. Stack pairing closes the right </template> as </Resource>.
+    expect(norm(sugarize(canonical))).toBe(norm(slotted));
+  });
+
+  it('round-trips: sugarize(desugar(slotted)) == slotted', () => {
+    expect(norm(sugarize(desugar(slotted)))).toBe(norm(slotted));
   });
 });

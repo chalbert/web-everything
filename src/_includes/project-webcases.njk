@@ -1,0 +1,169 @@
+<section class="intro-section mb-12">
+  <h3 id="mission">Mission</h3>
+  <p>
+    <strong>Web Cases</strong> is the collection of isolated, machine-checkable cases that are the
+    <strong>source of truth for protocol conformity</strong> — the same artifacts that drive documentation
+    examples also verify that an implementation honours a standard. A case is data, not code: a portable
+    artifact another tool can consume, run, and check, so conformity is something you <em>prove</em>, not
+    assert.
+  </p>
+  <p>
+    Its first standard is the <strong>Mock Contract</strong> — the portable schema for the mock &amp;
+    service-proxy dev-service. The same interaction-bearing artifact that drives a development-time HTTP mock
+    is the one verified against the real service for drift, with Web Cases as the verification home. That is
+    the &ldquo;one contract, two uses&rdquo; move: <strong>schema-validation is not contract-verification</strong>,
+    so the artifact carries consumer <em>interactions</em>, not just a response shape.
+  </p>
+
+  <div class="comparison-block" style="background: rgba(5, 150, 105, 0.08); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #059669; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #047857; font-size: 1rem;">The problem it solves</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      Mock definitions and contract tests are written twice, in two incompatible dialects, and drift apart:
+      the mock says one thing, the real service does another, and nothing catches it. Web Cases makes the
+      <strong>portable artifact</strong> the single source — one document drives the mock <em>and</em> the
+      drift-check. The dev mock and the contract suite can no longer disagree because they are the same file.
+    </p>
+  </div>
+</section>
+
+<section id="features" class="section-card">
+  <h3 id="feature-surface">Mock Contract — Feature Surface</h3>
+  <p>
+    What the mock/contract schema covers, and where each capability sits. <strong>OpenAPI</strong> = borrowed
+    from the OpenAPI substrate (the response shape); <strong>Behavior</strong> = the WE behavior layer OpenAPI
+    cannot express; <strong>Interaction</strong> = the consumer-driven (Pact/BDCT) layer that makes the
+    artifact contract-bearing; <strong>Provider</strong> = a runtime concern owned by the server/console, not
+    the portable artifact.
+  </p>
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 720px;">
+      <thead>
+        <tr><th>Feature</th><th>Prior art</th><th>What it does</th><th>Layer</th></tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(5,150,105,0.06);">Response shape (anchored on OpenAPI)</td></tr>
+        <tr><td><strong>Request match</strong></td><td>OpenAPI path + operation; WireMock request match</td><td>method + path template + query/header/body predicates that select an interaction</td><td>OpenAPI</td></tr>
+        <tr><td><strong>Response shape</strong></td><td>OpenAPI <code>components/schemas</code>, JSON Schema</td><td>status + body schema (by <code>$ref</code> into the OpenAPI doc, or inline) + example payload</td><td>OpenAPI</td></tr>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(5,150,105,0.06);">Behavior layer (what OpenAPI cannot express)</td></tr>
+        <tr><td><strong>Latency injection</strong></td><td>Mockoon latency, WireMock delays</td><td>fixed delay or a distribution, per-interaction or service-wide</td><td>Behavior</td></tr>
+        <tr><td><strong>Fault injection</strong></td><td>WireMock faults, chaos rate</td><td>force a status (401/500) with a chosen body, optionally at a probability</td><td>Behavior</td></tr>
+        <tr><td><strong>Conditional responses</strong></td><td>Mockoon rules, WireMock scenarios</td><td>first-that-matches rule list: vary the response by path / query / header / body</td><td>Behavior</td></tr>
+        <tr><td><strong>Response-kind</strong></td><td>Mockoon/WireMock/Prism proxy modes</td><td><code>mock | proxy | record</code> per interaction — mock locally, forward to the real backend, or proxy-and-capture</td><td>Behavior</td></tr>
+        <tr><td><strong>Auth / fake-OAuth</strong></td><td>Mockoon OAuth helpers</td><td>fake bearer / OAuth token issuance; <strong>stateless by default</strong>, opt-in session</td><td>Behavior</td></tr>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(99,102,241,0.06);">Interaction-bearing (consumer-driven, Pact/BDCT)</td></tr>
+        <tr><td><strong>Consumer interaction</strong></td><td>Pact interactions, BDCT</td><td>each entry is a consumer expectation (request → agreed response), so the artifact <em>is</em> the contract</td><td>Interaction</td></tr>
+        <tr><td><strong>Drift-check (two uses)</strong></td><td>Pact provider verification</td><td>replay the same interactions against the real provider; a mismatch is drift — not mere shape non-conformance</td><td>Interaction</td></tr>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(148,163,184,0.12);">Runtime overrides (server/console — not in the portable artifact)</td></tr>
+        <tr><td><strong>CORS-bypass · per-service toggle · forced status</strong></td><td>Mockoon console, proxy params</td><td>console / header / query-param overrides applied by the server at request time</td><td>Provider</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="protocol-mock-contract" class="section-card">
+  <h3 id="how-it-works">Mock Contract Protocol</h3>
+  <p>
+    The standard is the <strong>schema, not the server</strong>. A Mock Contract is a portable document of
+    consumer <strong>interactions</strong>. Each interaction matches a request and pairs it with an agreed
+    response whose <em>shape</em> is anchored on OpenAPI and whose dev-time <em>behavior</em> (latency, fault,
+    conditional, response-kind, auth) lives in a behavior layer on top. The server that serves it is a
+    swappable provider; the artifact is the only lock.
+  </p>
+  {% highlight "typescript" %}
+// The portable artifact — committed to the repo, consumed by ANY conformant server or drift-checker.
+interface MockContract {
+  service: string;                 // logical service id → resolves to a base URL / proxy target
+  openapi?: string;                // optional ref to the OpenAPI doc the shapes anchor on
+  interactions: Interaction[];     // interaction-bearing: the artifact IS the contract (Pact/BDCT)
+}
+
+// One interaction = a consumer expectation: given a request, the agreed response + dev-time behavior.
+interface Interaction {
+  description: string;             // Pact-style label, e.g. "a request for an existing user"
+  request: RequestMatch;           // method + path template + query/header/body predicates
+  response: ResponseSpec;          // the agreed response — shape anchored on OpenAPI
+  behavior?: BehaviorLayer;        // what OpenAPI cannot express (omit ⇒ a plain mock)
+  kind?: 'mock' | 'proxy' | 'record';  // response-kind; default 'mock'
+}
+
+// ── Response shape: anchored on OpenAPI, never restated ─────────────────────────
+interface ResponseSpec {
+  status: number;
+  schema?: OpenAPIRef | JSONSchema;  // $ref:'#/components/schemas/User' or inline
+  example?: unknown;                 // the concrete mock body
+  headers?: Record<string, string>;
+}
+
+// ── Behavior layer: the dev-time concerns OpenAPI has no vocabulary for ─────────
+interface BehaviorLayer {
+  latencyMs?: number | LatencyDistribution;  // fixed delay or a distribution
+  fault?: FaultInjection;                    // forced error
+  conditions?: ConditionalRule[];            // first-that-matches: vary by the live request
+  auth?: AuthSpec;                           // fake bearer / OAuth; stateless unless session opted in
+}
+
+interface FaultInjection {
+  status: number;                  // e.g. 401, 500
+  body?: unknown;                  // the chosen error body
+  rate?: number;                   // 0..1 probability (chaos); default 1 (always)
+}
+
+// Conditional responses reuse the first-that-accepts pattern: rules are tried in order,
+// the first whose `when` matches the live request wins, iteration stops.
+interface ConditionalRule {
+  when: RequestMatch;
+  respond: ResponseSpec & { behavior?: BehaviorLayer };
+}
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+    <li><strong>One data-defined artifact:</strong> the contract is JSON, so a second server (or a drift-checker) consumes the same file — exactly the portability MSW-style code-defined mocks forfeit. The protocol is the only lock.</li>
+    <li><strong>OpenAPI-anchored, not OpenAPI-bounded:</strong> the response <em>shape</em> borrows OpenAPI (by <code>$ref</code> into an existing doc, or inline), and the behavior layer adds the dev-time axes — latency, fault, conditional, response-kind, auth — OpenAPI was never meant to carry.</li>
+    <li><strong>Proxy is a response-kind, not a sibling standard:</strong> <code>kind: 'proxy'</code> forwards to the real backend, <code>'record'</code> proxies-and-captures to seed mocks from live traffic, <code>'mock'</code> serves the spec. Mixed per-interaction on one service.</li>
+    <li><strong>Stateless by default:</strong> auth issues a fake bearer/OAuth token without server state; a session is an explicit opt-in, because a stateless dev mock is reproducible and parallel-safe.</li>
+    <li><strong>Runtime overrides stay out of the artifact:</strong> CORS-bypass, per-service on/off, and forced status are server/console/header/param overrides applied at request time — they tune a running provider, they are not part of the portable contract.</li>
+  </ul>
+
+  <h4 id="two-uses" style="margin-top: 1.5rem;">One contract, two uses — and why interactions, not shapes</h4>
+  <p style="font-size: 0.9rem;">
+    The same artifact drives the dev mock <em>and</em> verifies the real service for drift, with Web Cases as
+    the verification home. This only holds because each entry is a consumer <strong>interaction</strong>
+    (Pact/BDCT), not just an OpenAPI shape:
+  </p>
+  <ul style="font-size: 0.9rem;">
+    <li><strong>Schema-validation ≠ contract-verification.</strong> A shape check proves a payload is well-formed; it does <em>not</em> prove a real consumer depends on a field, nor that the provider still honours a specific interaction. Shape-only drift reports green while a real dependency silently breaks.</li>
+    <li><strong>Drift is checked at the interaction level:</strong> Web Cases replays each interaction's request against the real provider and compares the live response to the agreed one — the consumer-driven verification Pact names, generalized to BDCT (an existing OpenAPI provider contract verified against consumer interactions).</li>
+    <li><strong>Use A — mock:</strong> a conformant dev server reads the contract and serves the interactions, with the behavior layer applied.</li>
+    <li><strong>Use B — drift-check:</strong> the same interactions are verified against the live service in Web Cases; a mismatch is a contract breach, surfaced before it reaches production.</li>
+  </ul>
+</section>
+
+<section id="composition" class="section-card">
+  <h3 id="composition">Composition With Other Standards</h3>
+  <p>
+    Web Cases owns the <em>portable, checkable artifact</em> — not the server, the console, or the policy it
+    verifies. Those compose with neighbouring work:
+  </p>
+  <ul style="font-size: 0.9rem;">
+    <li><strong>Reference dev server (<a href="/backlog/332-mock-proxy-dev-server-provider/">#332</a>)</strong> — the swappable provider that reads a Mock Contract and serves mock / proxy / record; the schema is what makes it swappable.</li>
+    <li><strong>Mock console (<a href="/backlog/333-mock-proxy-console-surface/">#333</a>)</strong> — config editor + call monitor + per-service toggles; the runtime override surface, not part of the portable artifact.</li>
+    <li><strong>Drift-check (<a href="/backlog/334-mock-vs-real-drift-check-webcases/">#334</a>)</strong> — verifies the interaction-bearing artifact against the real service inside Web Cases; the second of the two uses.</li>
+    <li><strong>OpenAPI</strong> — borrowed substrate for the response shape; the Mock Contract references it rather than restating schemas.</li>
+    <li><strong>Provider/consumer graph (<a href="/backlog/092-provider-consumer-graph-platform-manager/">#092</a>)</strong> — a verified contract is one edge in the cross-team seam graph; drift-checking proves the edge still holds.</li>
+  </ul>
+</section>
+
+<section id="status" class="section-card">
+  <h3 id="status">Status</h3>
+  <p>
+    Web Cases is in <strong>concept</strong> phase. The <strong>Mock Contract</strong> schema — the portable,
+    interaction-bearing artifact — is specified here, with its three forks ratified in
+    <a href="/backlog/107-mock-proxy-dev-service/">#107</a>. The reference dev server, the console, and the
+    drift-check are the first planned builds on top of this contract.
+  </p>
+  <h4 style="margin-top: 1rem;">Open Questions</h4>
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <li>The conditional-rule predicate language — a small JSON match grammar, or a sandboxed expression?</li>
+    <li>Whether the interaction-bearing artifact reuses an existing Web Cases case format or defines a thin superset for the HTTP-interaction shape.</li>
+    <li>The latency-distribution vocabulary (fixed / uniform / normal / fixed+jitter) — borrow an existing chaos-tool grammar or define a minimal one.</li>
+  </ul>
+</section>

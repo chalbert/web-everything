@@ -1,0 +1,97 @@
+<h3>The Question</h3>
+<p>
+    <a href="/backlog/096-nl-to-technical-configurator/">Backlog&nbsp;#096</a> proposes an AI front-end to the
+    <strong>Technical Configurator</strong>: the developer describes a behavior in plain language
+    ("undo/redo with an audit trail", "locale-aware sorting that's stable") and the AI selects and wires the
+    right strategy from the registries. No design exists yet. Before building, this survey gathers prior art
+    per design-first step&nbsp;1 so the <strong>surface, the NL provider contract, the grounding mechanism, and
+    the failure mode</strong> reuse published patterns and the standard's own vocabulary instead of guessing.
+    It grounds four open forks — the surface fork the item raised (CLI vs editor command vs panel), plus three
+    the survey surfaced.
+</p>
+
+<h3>Recommendation (prepared for #096)</h3>
+<ol>
+    <li><strong>Panel-first surface</strong> — an NL box inside the existing configurator that populates the
+        requirements state exactly as clicking a preset does, then lets the developer tune. It reuses the
+        ranking, the per-axis verdict badges, and the decision-record emitter the configurator already
+        renders. CLI and editor-command remain open follow-ons on the same provider.</li>
+    <li><strong>A surface-agnostic <code>describe(nl, domain) → Requirements</code> provider</strong> — the
+        swappable NL layer returns only the closed requirement map; the deterministic compat engine picks the
+        strategy. The model translates intent and never selects the implementation.</li>
+    <li><strong>Schema-constrained generation grounded in the domain seed</strong> — a per-domain JSON schema
+        (axis ids as keys, value-id <code>enum</code>s) derived from the seed, run under native structured
+        outputs, so the model literally cannot emit an off-vocabulary axis or value.</li>
+    <li><strong>Partial fill that degrades into the panel</strong> — on ambiguous input the model fills only
+        the axes it's confident about and leaves the rest unset; the panel's existing fine-tune path completes
+        them. The NL layer's failure mode is the configurator's manual mode.</li>
+</ol>
+
+<h3>Finding 1 — NL→config is a structured-output problem, and the field converged on schema-constrained generation</h3>
+<p>
+    Across the 2024-2026 literature the consistent lesson is that prompt-only "return JSON" extraction fails
+    5-20% of the time in production, while <strong>schema- / grammar-constrained decoding</strong> only emits
+    tokens that keep the output on a valid path through the schema's state machine — a structural guarantee,
+    not a statistical one. Native structured outputs shipped across providers (OpenAI Aug&nbsp;2024; Google
+    Gemini; Anthropic structured outputs GA early&nbsp;2026 via <code>output_config.format</code> /
+    <code>messages.parse()</code>). For #096 the output is a tiny closed-vocabulary <code>Requirements</code>
+    map, the ideal shape for constrained generation — the schema is generated from the domain seed, so "the
+    configurator is the guardrail" holds at the token level, not just as post-hoc validation.
+</p>
+
+<h3>Finding 2 — "structured output" vs "tool calling" is a real fork; this case is structured output</h3>
+<p>
+    The surveyed guides draw a clean line: <strong>structured output</strong> when the model returns data in a
+    shape (extraction, classification); <strong>function/tool calling</strong> when it triggers an action or
+    picks among operations. #096's NL layer returns a <code>Requirements</code> data structure and triggers
+    nothing — the compat engine does the selecting, deterministically. That places it firmly on the
+    structured-output side. Tool-calling would only earn its keep if the model also had to <em>choose the
+    domain</em> or <em>invoke the emitter</em> — the rejected branch of fork&nbsp;2.
+</p>
+
+<h3>Finding 3 — requirement extraction is framed as NL → a fixed, gradeable slot template</h3>
+<p>
+    The requirements-engineering literature (INCOSE-style "The &lt;subject&gt; shall &lt;action&gt;
+    &lt;object&gt;…" templates; multi-agent specification-generator pipelines; CARLA-simulator NL→config-code
+    case studies) consistently maps free text onto a <strong>pre-defined slot structure</strong>, and reports
+    that explicit requirement definitions improve extraction accuracy. The configurator's capability axes
+    already <em>are</em> that slot structure, and each axis value already carries a plain-language definition
+    authored for exactly this teaching purpose — so the NL prompt is grounded in the standard's own vocabulary
+    with no coined terms, the published accuracy lever.
+</p>
+
+<h3>Finding 4 — dev-surface conventions: CLI delegates, editor command stays in-flow, panel shows the decision</h3>
+<ul>
+    <li><strong>CLI / headless</strong> — built for delegation and scripting: deterministic text in/out, exit
+        codes, composable in CI, no UI state. Best when the output is a file or code edit to commit.</li>
+    <li><strong>Editor command</strong> — near-zero workflow disruption; the result lands at the cursor. Best
+        when the output is a snippet inserted into code-in-progress.</li>
+    <li><strong>Panel / graphical</strong> — the only surface that can <em>show</em> the decision: render the
+        ranked strategies, per-axis verdicts, and compromises. Best when the value is the developer seeing and
+        tuning the choice, not just receiving it.</li>
+</ul>
+<p>
+    <strong>Implication (fork&nbsp;1):</strong> the configurator is <em>already a panel</em> that renders ranked
+    strategies and verdicts, so the panel surface reuses the most existing machinery; CLI/editor surfaces would
+    have to re-emit the verdict rendering as text. That asymmetry makes the panel the cheapest first surface,
+    with CLI and editor command as open follow-ons on the same provider.
+</p>
+
+<h3>Finding 5 — there is no native, no incumbent NL→swappable-strategy tool; the moat is the registry</h3>
+<p>
+    Generic AI codegen (Copilot-class) has no registry of <em>swappable strategies</em> to target, so it
+    guesses plausible code. The white-space #096 names is real: because the configurator encodes a formal
+    decision space with deterministic scoring, the AI here navigates rather than invents. The differentiator is
+    the registry the output is constrained to, not the model — which is why the NL layer is the variable AI
+    front and the configurator is the canonical decision space it normalizes into.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/096-nl-to-technical-configurator/">#096 — NL → Technical Configurator</a></li>
+    <li>Epic: <a href="/backlog/089-monetization-product-ideas/">#097 / #089 — monetization product concepts</a></li>
+    <li>Machinery (plateau-app): <code>technical-configurator/</code> — <code>types.ts</code> (axes,
+        <code>Requirements</code>), <code>compat.ts</code> (<code>rankStrategies</code>),
+        <code>provider.ts</code> (<code>CapabilityProvider</code> seam), <code>presets.ts</code>,
+        <code>configurator.ts</code></li>
+</ul>

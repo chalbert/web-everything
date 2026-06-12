@@ -1,0 +1,17 @@
+{
+  "app": "loan-origination",
+  "_comment": "Standards this exercise app COMMITS to conforming to (Layer 1), plus candidate standards it exhibits that have no WE standard yet (Layer 2). The benchmark validates each declared standard: resolves in the registry? available (active)? used per its real contract (evidence)? A declared standard not yet active is a GAP — the WE work this app drives. `evidence` is a regex proving the app consumes the standard's contract, not a reimplementation. See docs/agent/exercise-app-workflow.md.",
+  "standards": [
+    { "id": "data-table", "concept": "the loan pipeline table", "evidence": "data-table|DataTableBehavior|aria-sort" },
+    { "id": "pagination", "concept": "windowing the 5k pipeline", "evidence": "aria-label=[\"']pagination|PaginationBehavior" },
+    { "id": "collection-operations", "concept": "sort / filter / page the pipeline", "evidence": "data-table|DataTableBehavior|renderDataTable|applyPipeline" },
+    { "id": "selection", "concept": "selecting a loan row to inspect (now via the master-detail coordinator)", "evidence": "SelectionBehavior|MasterDetailBehavior|selection-behavior" },
+    { "id": "router", "concept": "client-side navigation between app views (module bar, detail deep-links)", "evidence": "route:link|<route-view" },
+    { "id": "lifecycle", "concept": "the loan application's guarded, role-scoped status machine", "evidence": "DefaultLifecycleProvider|CustomLifecycleProvider|LifecycleDefinition|customLifecycles" },
+    { "id": "status-indicator", "concept": "semantic status chips for state + finding", "evidence": "statusIndicatorHTML|renderStatusIndicator" },
+    { "id": "audit-trail", "concept": "the loan's immutable history; lifecycle transitions auto-log + a timeline", "evidence": "auditLifecycle|DefaultAuditProvider|\\.queryByEntity\\(" },
+    { "id": "decision-trace", "concept": "the proof-of-compliance trace as a normalized DecisionRecord", "evidence": "decisionTraceHTML|renderDecisionTrace|toDecisionRecord" },
+    { "id": "master-detail", "concept": "the pipeline row → trace detail coordination", "evidence": "MasterDetailBehavior" }
+  ],
+  "candidateStandards": []
+}

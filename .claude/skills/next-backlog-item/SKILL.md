@@ -122,8 +122,13 @@ With no item named, run the full selection flow below.
    through the same fork. *Then*, on the next turn, **skip the `AskUserQuestion` click-to-pick** and lay
    the decision out in prose (planning-as-discussion): the open fork / human judgment it needs, the
    realistic options with their tradeoffs, and your own recommendation with reasoning — keep its live +
-   md links. If the user redirects to a different item, release the claim (`active → open`) and claim
-   that one. Expect follow-up questions; treat it settled only once you've talked it through. Once the
+   md links. **First run the fork-readiness pass** (`backlog-workflow.md` → step 3a's *Fork-readiness
+   pass*): **research the fork first** (a greenfield/standard-authoring decision must run design-first.md
+   step 1 and materialize a `reports/…md` linked via `relatedReport` *before* forming any stance — don't
+   present cold), then confirm the item has a concrete example, names its options with tradeoffs, and is
+   short/concise/well-explained — and **fix the item on the spot** if it falls short, since you're
+   already reading it to present it (same fix-on-the-spot rule as the digest). If the user redirects to a
+   different item, release the claim (`active → open`) and claim that one. Expect follow-up questions; treat it settled only once you've talked it through. Once the
    call is made, close out the decision item (step 7: `active → resolved` + `dateResolved` + the
    ruling); the item's successor build then becomes agent-ready — continue the arc / re-run selection.
    (The `AskUserQuestion` fast-path in step 3 is **only** for a bounded pick among ready Tier-A items,

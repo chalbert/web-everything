@@ -1,0 +1,92 @@
+{
+  "runId": "2026-06-12T21-48-32-270Z",
+  "startedAt": "2026-06-12T21:48:32.271Z",
+  "captured": [
+    {
+      "url": "https://www.photopea.com",
+      "id": "c11bc261d5b8f775",
+      "bytes": 131344,
+      "reviewState": "confirmed"
+    },
+    {
+      "url": "https://www.openstreetmap.org",
+      "id": "c53753bb9ec9c7e0",
+      "bytes": 254384,
+      "reviewState": "confirmed"
+    },
+    {
+      "url": "https://jsfiddle.net",
+      "id": "4d175fd43cbbdeff",
+      "bytes": 82968,
+      "reviewState": "ungated"
+    },
+    {
+      "url": "https://codepen.io/pen/",
+      "id": "d584bf671233deb7",
+      "bytes": 43696,
+      "reviewState": "ungated"
+    },
+    {
+      "url": "https://regex101.com",
+      "id": "13ae4f195840fd77",
+      "bytes": 140692,
+      "reviewState": "ungated"
+    },
+    {
+      "url": "https://carbon.now.sh",
+      "id": "f5d4f4c816df6e28",
+      "bytes": 113720,
+      "reviewState": "confirmed"
+    },
+    {
+      "url": "https://squoosh.app",
+      "id": "5d883ae42bf7ab96",
+      "bytes": 119302,
+      "reviewState": "confirmed"
+    },
+    {
+      "url": "https://play.tailwindcss.com",
+      "id": "1332e697b422af9a",
+      "bytes": 307626,
+      "reviewState": "confirmed"
+    }
+  ],
+  "skipped": [],
+  "duplicates": [
+    {
+      "url": "https://excalidraw.com",
+      "id": "50badce4ea54a544"
+    },
+    {
+      "url": "https://www.tldraw.com",
+      "id": "7f7621c90218424f"
+    },
+    {
+      "url": "https://app.diagrams.net",
+      "id": "9dbdb7f79955781d"
+    },
+    {
+      "url": "https://play.grafana.org",
+      "id": "253b45a916c9cfe2"
+    },
+    {
+      "url": "https://www.desmos.com/calculator",
+      "id": "af041413afb82b9f"
+    },
+    {
+      "url": "https://www.geogebra.org/calculator",
+      "id": "4881dac6e3b8d3dc"
+    },
+    {
+      "url": "https://editor.swagger.io",
+      "id": "638732d38137113a"
+    },
+    {
+      "url": "https://mermaid.live",
+      "id": "185f8175b4461706"
+    }
+  ],
+  "quarantined": [],
+  "failed": [],
+  "finishedAt": "2026-06-12T21:50:30.850Z"
+}

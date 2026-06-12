@@ -159,15 +159,15 @@ module.exports = function backlog() {
 
     // Batchable (deterministic) — the candidate set a POINTS-BUDGETED batch may pack
     // (docs/agent/backlog-workflow.md → "Running a batch"): a Tier-A item small enough to chain — a
-    // `task` (bounded sub-work, never sized), or a `story` of `size` ≤ 5. A `story` of `size` ≥ 8 and
+    // `task` (bounded sub-work, never sized), or a `story` of `size` ≤ 8. A `story` of `size` ≥ 13 and
     // any `epic` are agent-ready but never batched. So `batchable` ⊂ `tier === 'A'`. There is no
     // separate ≤3 "core" tier: the budget packs SMALLEST-FIRST (the selection rank orders by effort),
-    // reaching a single `size·5` only when the remaining budget fits — one pool, ordered by `batchCost`.
+    // reaching a single `size·8` only when the remaining budget fits — one pool, ordered by `batchCost`.
     // The one non-structural guard the batch skill adds — no buried design fork in the body — can't be
     // decided from fields, so this flag is the size+tier gate; selection still skims the body for a fork.
     item.batchable = item.tier === 'A' && (
       item.workItem === 'task' ||
-      (item.workItem === 'story' && typeof item.size === 'number' && item.size <= 5)
+      (item.workItem === 'story' && typeof item.size === 'number' && item.size <= 8)
     );
 
     // Batch COST (deterministic) — the context-budget weight used to pack a POINTS-BUDGETED batch
@@ -227,8 +227,42 @@ module.exports = function backlog() {
     item.leverageScore = item.transitiveUnblocks * 1000 + item.directUnblocks;
   }
 
+  // Roll children up under their epic so an epic tile can list what it contains — `parent` is the
+  // grouping edge ("rolls under epic NNN"), distinct from the `blockedBy` prerequisite edge. Each child
+  // is a lightweight ref (no cyclic full objects), carrying the fields the circle chip needs (status +
+  // tier for colour, size/workItem for the tooltip). Ordered by `num` so the circles read in filing
+  // order, independent of the dateOpened sort applied to `items` below.
+  for (const item of items) {
+    item.children = items
+      .filter((c) => c.parent != null && String(c.parent) === item.num)
+      .sort((a, b) => String(a.num).localeCompare(String(b.num)))
+      .map(({ id, num, slug, title, status, workItem, size, tier }) =>
+        ({ id, num, slug, title, status, workItem, size, tier }));
+    // How many child slices are still unresolved — drives the tile's epic-state badge. An open epic with
+    // 0 open children is effectively delivered (ready to resolve); a resolved epic with >0 open children
+    // is a contradiction worth flagging.
+    item.openChildCount = item.children.filter((c) => c.status !== 'resolved').length;
+  }
+
   items.sort((a, b) =>
     String(b.dateOpened || '').localeCompare(String(a.dateOpened || '')) ||
     a.id.localeCompare(b.id));
+
+  // Burndown-point totals per readiness group, surfaced beside the item counts on the Prioritisation
+  // tab's tags (backlog.njk). Summed from `size` (tasks and most decisions/reviews carry none, so they
+  // contribute 0) — a story-point total, not item-weighted. Computed here (a live-reloading data file)
+  // rather than via a template filter, which would need a config reload to take effect.
+  const sumSize = (pred) => items.reduce((t, it) =>
+    t + (pred(it) && typeof it.size === 'number' ? it.size : 0), 0);
+  items.pointsBatch = sumSize((it) => it.batchable === true);
+  items.pointsTierA = sumSize((it) => it.tier === 'A');
+  items.pointsTierB = sumSize((it) => it.tier === 'B');
+  items.pointsTierC = sumSize((it) => it.tier === 'C');
+
+  // Prepared open decisions — a Tier-B item with `preparedDate` set has its forks researched +
+  // options stated (the "prepared-fork shape"), so it's ready to ratify rather than research. Counted
+  // here (not via a template filter, which can't test attribute presence) to surface on the Prioritisation tab.
+  items.countPreparedB = items.filter((it) => it.status === 'open' && it.tier === 'B' && it.preparedDate).length;
+
   return items;
 };

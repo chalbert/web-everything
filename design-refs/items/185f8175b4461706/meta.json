@@ -1,0 +1,28 @@
+{
+  "id": "185f8175b4461706",
+  "contentHash": "185f8175b44617062ce5a98cfe7235ef100bb9304d2903cf949ca6973addf119",
+  "sourceUrl": "https://mermaid.live",
+  "captureMethod": "playwright",
+  "dateCollected": "2026-06-12T12:27:56.840Z",
+  "datePublished": null,
+  "app": "Mermaid Live Editor",
+  "company": "Mermaid",
+  "category": "developer-tools",
+  "surface": null,
+  "designRegister": "modern-saas",
+  "theme": "light",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "dpr": 2,
+  "imageDims": {
+    "width": 2880,
+    "height": 1800
+  },
+  "bytes": 121842,
+  "tags": [],
+  "sourceCredit": "Mermaid",
+  "collectionRun": "2026-06-12T12-26-38-221Z",
+  "reviewState": "confirmed"
+}

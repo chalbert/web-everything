@@ -54,12 +54,50 @@ eleventyComputed:
                         </div>
                     </div>
                     {% endif %}
+                    {% if demo.epic %}
+                    <div style="margin-top: 1rem;">
+                        <div style="font-size: 0.875rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.8; margin-bottom: 0.5rem;">
+                            Tracked by epic
+                        </div>
+                        <a href="{{ demo.epic.url }}" class="inline-flex items-center px-2.5 py-1 rounded text-xs font-medium bg-white/20 hover:bg-white/30" style="text-decoration: none; color: white; border: 1px solid rgba(255,255,255,0.3);">
+                            {{ demo.epic.label }}
+                        </a>
+                    </div>
+                    {% endif %}
                 </div>
                 <a href="{{ demo.liveUrl }}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.875rem 1.75rem; background: white; color: #667eea; border-radius: 0.5rem; font-weight: 600; text-decoration: none; transition: transform 0.2s; flex-shrink: 0; align-self: flex-start;">
                     Open Demo
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                 </a>
             </div>
+        </div>
+        {% endif %}
+
+        {% set deps = demoBlockers[demo.id] %}
+        {% if deps and deps.requires.length > 0 %}
+        <div class="section-card">
+            <h2>Standards required{% if deps.blockers.length %} · <span style="color:#b1271b;">{{ deps.blockers.length }} blocking</span>{% else %} · <span style="color:#1a7f43;">all shipping</span>{% endif %}</h2>
+            <p style="opacity:0.8;">Web Everything surfaces this demo consumes (from its <code>conformance.json</code>). A surface that is not yet shipping — a block not <code>active</code>, or an intent with no active implementer — blocks full conformance.</p>
+            <ul style="list-style:none; padding:0;">
+                {% for r in deps.requires %}
+                <li style="padding:0.4rem 0; border-bottom:1px solid #eee;">
+                    {% if r.ready %}<span style="color:#1a7f43;">✓</span>{% else %}<span style="color:#b1271b;">⛔</span>{% endif %}
+                    <a href="{{ r.href }}"><strong>{{ r.id }}</strong></a>
+                    <span style="font-size:0.75rem; opacity:0.6; text-transform:uppercase;">{{ r.kind }}</span>
+                    — {% if r.ready %}<span style="color:#1a7f43;">ready</span>{% else %}<span style="color:#b1271b;">blocker</span>{% endif %}
+                    <span style="opacity:0.6;">({{ r.status }})</span>
+                    {% if r.concept %}<span style="opacity:0.7;"> · {{ r.concept }}</span>{% endif %}
+                </li>
+                {% endfor %}
+            </ul>
+            {% if deps.candidates.length %}
+            <h3 style="margin-top:1rem;">Missing-standard candidates this demo surfaced</h3>
+            <ul style="opacity:0.85;">
+                {% for c in deps.candidates %}
+                <li>{{ c.concept }}{% if c.backlog %} — <a href="/backlog/{{ c.backlog }}/">#{{ c.backlog }}</a>{% endif %}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
         </div>
         {% endif %}
 

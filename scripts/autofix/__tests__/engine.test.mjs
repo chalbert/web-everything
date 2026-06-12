@@ -11,7 +11,10 @@
  *   - REVERT — a patch that introduces a NEW failure is rolled back → reported as a give-up.
  */
 import { describe, it, expect } from 'vitest';
-import { CustomFixerRegistry, deprecatedStatusFixer, registerReferenceFixers, autofix } from '../engine.mjs';
+import {
+  CustomFixerRegistry, deprecatedStatusFixer, registerReferenceFixers, autofix,
+  isModelFixer, lineDiff, formatDiff,
+} from '../engine.mjs';
 
 // Mirror of check-standards' STATUS_SYNONYMS — the deprecated → canonical map.
 const SYN = { implemented: 'active', stable: 'active', done: 'active', planned: 'concept', wip: 'draft' };
@@ -191,5 +194,111 @@ describe('conformance auto-fix loop (#095)', () => {
       { read },
     );
     expect(JSON.parse(patch.newContent)).toEqual([{ id: 'foo', summary: 'uses { curly } braces', status: 'draft' }]);
+  });
+});
+
+// A MODEL-flavoured fixer (id `model:…`, so isModelFixer() is true) that does the same deprecated-
+// status rewrite the reference fixer would, but counts its invocations — a no-key stand-in for the
+// metered #196 model fixer, so the cost bound is testable without a network call.
+function makeModelFixer() {
+  let calls = 0;
+  return {
+    calls: () => calls,
+    fixer: {
+      id: 'model:test:deprecated-status',
+      handles: (f) => f.descriptor?.kind === 'deprecated-status',
+      fix: (f, ctx) => { calls += 1; return deprecatedStatusFixer.fix(f, ctx); },
+    },
+  };
+}
+
+describe('model-fix cost bounds (#293 deliverable 1)', () => {
+  it('classifies fixers by id: model:* is metered, reference:* is free', () => {
+    expect(isModelFixer({ id: 'model:anthropic:missing-description' })).toBe(true);
+    expect(isModelFixer(deprecatedStatusFixer)).toBe(false);
+    expect(isModelFixer({})).toBe(false);
+  });
+
+  it('caps model-fixer calls at maxModelFixes; the rest are deferred with no fix() call (#293)', async () => {
+    const blocks = JSON.stringify([{ id: 'foo', status: 'implemented' }, { id: 'bar', status: 'wip' }], null, 2) + '\n';
+    const { read, write, verify } = makeWorld({ 'src/_data/blocks.json': blocks });
+    const { fixer, calls } = makeModelFixer();
+    const registry = new CustomFixerRegistry().register(fixer);
+
+    const result = await autofix({ verify, read, write, registry, maxModelFixes: 1 });
+
+    expect(result.modelFixesUsed).toBe(1);
+    expect(calls()).toBe(1); // the budget actually prevented the 2nd metered call (no burned key)
+    expect(result.applied).toHaveLength(1);
+    expect(result.deferred).toHaveLength(1);
+    expect(result.deferred[0].reason).toMatch(/budget \(1\) exhausted/);
+    expect(result.ok).toBe(false); // the deferred failure is left unfixed
+  });
+
+  it('reference fixers ignore the budget — maxModelFixes: 0 still fixes everything for free (#293)', async () => {
+    const blocks = JSON.stringify([{ id: 'foo', status: 'implemented' }, { id: 'bar', status: 'wip' }], null, 2) + '\n';
+    const { read, write, verify } = makeWorld({ 'src/_data/blocks.json': blocks });
+    const registry = registerReferenceFixers(new CustomFixerRegistry());
+
+    const result = await autofix({ verify, read, write, registry, maxModelFixes: 0 });
+
+    expect(result.ok).toBe(true);
+    expect(result.modelFixesUsed).toBe(0);
+    expect(result.applied).toHaveLength(2);
+    expect(result.deferred).toEqual([]);
+  });
+});
+
+describe('review / accept-revert hook (#293 deliverable 2)', () => {
+  it('decide → revert rolls back a gate-passing patch; nothing lands, recorded in reviewed (#293)', async () => {
+    const blocks = JSON.stringify([{ id: 'foo', status: 'implemented' }], null, 2) + '\n';
+    const { fs, read, write, verify } = makeWorld({ 'src/_data/blocks.json': blocks });
+    const registry = registerReferenceFixers(new CustomFixerRegistry());
+    const before = fs['src/_data/blocks.json'];
+    const seen = [];
+
+    const result = await autofix({ verify, read, write, registry, decide: (p) => { seen.push(p); return 'revert'; } });
+
+    expect(seen).toHaveLength(1); // the reviewer saw the proposal (with before/after for a diff)
+    expect(seen[0].before).toContain('implemented');
+    expect(seen[0].after).toContain('active');
+    expect(result.applied).toEqual([]);
+    expect(result.reviewed).toHaveLength(1);
+    expect(result.ok).toBe(false);
+    expect(fs['src/_data/blocks.json']).toBe(before); // reverted — nothing landed without acceptance
+  });
+
+  it('decide → accept (or true/undefined) keeps the patch, default behaviour unchanged (#293)', async () => {
+    const blocks = JSON.stringify([{ id: 'foo', status: 'implemented' }], null, 2) + '\n';
+    const { read, write, verify } = makeWorld({ 'src/_data/blocks.json': blocks });
+    const registry = registerReferenceFixers(new CustomFixerRegistry());
+
+    const result = await autofix({ verify, read, write, registry, decide: () => 'accept' });
+
+    expect(result.ok).toBe(true);
+    expect(result.applied).toHaveLength(1);
+    expect(result.reviewed).toEqual([]);
+  });
+});
+
+describe('lineDiff / formatDiff — patch diff surfacing (#293 deliverable 2)', () => {
+  it('marks changed middle lines, keeping the common prefix/suffix as context', () => {
+    const d = lineDiff('a\nb\nc', 'a\nB\nc');
+    expect(d).toMatchObject({ added: 1, removed: 1 });
+    expect(d.lines).toEqual([
+      { sign: ' ', text: 'a' },
+      { sign: '-', text: 'b' },
+      { sign: '+', text: 'B' },
+      { sign: ' ', text: 'c' },
+    ]);
+  });
+
+  it('counts a pure append as additions only (no removals)', () => {
+    const d = lineDiff('x', 'x\ny\nz');
+    expect(d).toMatchObject({ added: 2, removed: 0 });
+  });
+
+  it('formatDiff renders --- / +++ headers and signed lines', () => {
+    expect(formatDiff('a', 'b', 'f.njk').split('\n')).toEqual(['--- f.njk', '+++ f.njk', '-a', '+b']);
   });
 });

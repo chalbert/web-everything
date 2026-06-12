@@ -1,0 +1,28 @@
+<h2>Decision Trace</h2>
+<p>The reference render for the <a href="/intents/decision-trace/">Decision Trace</a> intent — the visual
+member of the <a href="/projects/webdecisions/">Web Decisions</a> protocol.
+<code>renderDecisionTrace(record)</code> turns a normalized <code>DecisionRecord</code> into the
+"why did the system decide this?" explanation, so a decision stops being a bespoke table per screen.</p>
+
+<h3>What it renders</h3>
+<ul>
+  <li>A <strong>criteria trace table</strong> — each criterion's input, operator, threshold, and the
+    outcome it contributed.</li>
+  <li>The <strong>aggregated outcome</strong> and <strong>reason codes</strong>.</li>
+  <li>The outcome and each criterion's outcome via the <a href="/blocks/status-indicator/">status-indicator</a>
+    block — one consistent status token (a live cross-standard composition).</li>
+</ul>
+
+<h3>Dimensions</h3>
+<ul>
+  <li><code>layout</code> — <code>table | list</code>.</li>
+  <li><code>emphasis</code> — <code>all-criteria | deciding</code>: every rule, or only the criteria that
+    drove a non-pass outcome (the "why not approved" subset).</li>
+  <li><code>disclosure</code> — <code>inline | expandable</code>.</li>
+</ul>
+
+<h3>Schema-only</h3>
+<p>The block renders a <code>DecisionRecord</code> (<code>{ subject, ruleSet, criteria[], outcome,
+reasonCodes? }</code>); it owns the display, not the rules. The decision <em>engine</em> that produces the
+record is out of scope (proof-of-compliance, <a href="/backlog/093-business-rule-manager-proof-of-compliance/">#093</a>).
+Ships an element form (<code>renderDecisionTrace</code>) and a string form (<code>decisionTraceHTML</code>).</p>

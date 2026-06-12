@@ -1,0 +1,112 @@
+<h3>The Question</h3>
+<p>
+    The archived <a href="/backlog/099-evergreen-app-vision/">platform essay</a> predicted this split: the
+    standard should avoid naming specific libraries, while <em>"independent guides can be published with
+    recommendations… updated much more regularly, more subject to preferences."</em>
+    <a href="/backlog/109-development-guide-learn-pathway/">Backlog&nbsp;#109</a> turns that into a concrete
+    artifact — an opinionated <strong>development guide</strong> (how to develop on the Platform), surfaced as
+    the <strong>learn pathway</strong> of the Technical Configurator. It is deliberately neither the neutral
+    standard (Web Everything) nor the reference implementation (Frontier UI). This survey grounds the item's
+    three <strong>shape</strong> forks — scope, content model, rendering — in documentation-architecture prior
+    art, and surfaces a fourth (navigation) the item under-specified.
+</p>
+
+<h3>Recommendation (to ratify in #109)</h3>
+<ol>
+    <li><strong>One guide surface, two registers</strong> — both the decision-support learn-view (which links
+        into the configurator) and the philosophy/handbook. Stripping the philosophy leaves dry option tables
+        with no <em>why</em>.</li>
+    <li><strong>One shared knowledge base</strong> — the configurator's <code>Domain</code> type
+        (<code>domain → axes → options → rationale → recommendation</code>) <em>is</em> the single source; the
+        learn view is a read-only second view over the same <code>CapabilityProvider</code>. It already exists.</li>
+    <li><strong>Render via <code>webdocs</code></strong> (<a href="/backlog/091-web-docs-as-a-service-plateau/">#091</a>)
+        from that single source, so the guide is generated — not a hand-maintained site.</li>
+    <li><strong>Free browse is the floor; a curated prev/next path is a thin ordering layer over it</strong> —
+        not either-or (the navigation fork the item omitted).</li>
+</ol>
+
+<h3>Finding 1 — Diátaxis: the guide is Explanation+Tutorial, the configurator is How-to, the standard is Reference</h3>
+<p>
+    The dominant documentation framework, <a href="https://diataxis.fr/">Diátaxis</a>, splits docs by user need
+    into four forms — <strong>Tutorial</strong> (learning), <strong>How-to</strong> (goal-oriented work),
+    <strong>Reference</strong> (distraction-free facts), <strong>Explanation</strong> (the <em>why</em>). The
+    three-body constellation maps cleanly:
+</p>
+<ul>
+    <li><strong>Web Everything standard</strong> = <strong>Reference</strong> — neutral facts, no preference,
+        stable cadence.</li>
+    <li><strong>Technical Configurator</strong> = <strong>How-to</strong> — "I have a decision in front of me",
+        requirement-first, emits a Decision Record.</li>
+    <li><strong>Development guide / learn pathway</strong> = <strong>Explanation + Tutorial</strong> — "I want
+        to understand, no use case yet": rationale, the opinionated recommendation, browseable.</li>
+</ul>
+<p>
+    <strong>Implication (scope fork):</strong> Diátaxis keeps Explanation and How-to distinct but in one
+    cross-linked set — so the philosophy/handbook and the decision-support learn-view are <strong>two
+    registers of one guide surface</strong>, not two products.
+</p>
+
+<h3>Finding 2 — MDN's framework-docs policy is the standard-vs-guide split, stated independently</h3>
+<p>
+    <a href="https://developer.mozilla.org/en-US/docs/Learn_web_development/Core/Frameworks_libraries">MDN
+    Learn</a> deliberately does <em>not</em> exhaustively teach any specific framework — "the framework teams'
+    own docs already do that". It answers only the <em>decision/understanding</em> questions (why use a
+    framework, what to ask when choosing, do you even need one), delegating the prescriptive, fast-moving,
+    preference-laden material to each framework's own opinionated guide. That is #109's split arrived at from
+    the other direction: a neutral reference that refuses to take sides + an opinionated guide that does and
+    updates often — proving the two must be <strong>separate, cross-linked surfaces</strong>.
+</p>
+
+<h3>Finding 3 — opinionated-framework guides prove "voice as a feature" works</h3>
+<p>
+    The <a href="https://rubyonrails.org/doctrine">Rails Doctrine</a> is the canonical development guide that is
+    a <em>philosophy document</em>, not API reference ("programmer happiness over abstract perfection, sensible
+    defaults over configuration"). The <a href="https://vuejs.org/guide/introduction.html">Vue guide</a> pairs
+    a narrative path with an interactive tutorial and lets readers <em>pick the learning path that suits their
+    preference</em>. Two lessons: an opinionated handbook register is an established, trusted form (it earns
+    trust by labeling itself recommendation); and good guides offer <strong>both</strong> a linear path
+    <em>and</em> free browse — they don't pick one (this surfaces the navigation fork).
+</p>
+
+<h3>Finding 4 — learning-path UIs are a guided sequence layered OVER a free reference</h3>
+<p>
+    Across MDN Learn, web.dev Learn, and Vue, the pattern is a curated ordered path (prev/next, progress)
+    sitting <em>on top of</em> an underlying free-browse reference — the same content reachable both ways. The
+    learn pathway is a <strong>projection/ordering</strong> over the domain set, not a separate content store.
+    The configurator's data already supports this: domains have an order in the provider list and axes are
+    declared <code>ordered</code> weakest→strongest, so a guided sequence is a thin curation layer with free
+    browse as the floor.
+</p>
+
+<h3>Finding 5 — "one source, many views" is already the house pattern, and the source already exists</h3>
+<p>
+    "Author once, render two ways" is the shape WE already uses (webcases → docs + tests + badge). The content
+    model fork is therefore less <em>whether</em> to share a source than <em>confirming</em> the configurator's
+    <code>Domain</code> type <strong>is</strong> that shared source — and it is: an <code>Axis</code> carries a
+    plain-language <code>question</code>, <code>description</code>, correctness/fidelity <code>policy</code>,
+    and ordered <code>values</code> (each with a <code>definition</code>); a <code>Strategy</code> carries
+    <code>summary</code>, <code>family</code>, <code>confidence</code>, plain-language <code>compromises</code>,
+    and <code>links</code>. The learn view is a read-only second consumer of the same
+    <code>CapabilityProvider</code>, never an independently-authored body. The configurator's existing
+    no-requirements state already renders these cards browse-style (without verdict badges) — the learn
+    pathway largely promotes that fallback to a first-class wander-friendly entry point.
+</p>
+
+<h3>Finding 6 — there is no native or off-the-shelf "decision guide" surface to inherit</h3>
+<p>
+    None of the surveyed models ship a browseable <em>decision-space</em> guide tied to an interactive
+    configurator — they ship prose guides (Rails/Vue) or neutral-question docs (MDN) <em>or</em> standalone
+    interactive choosers, never one knowledge base feeding both a requirement-first chooser and a free-browse
+    learn view. So #109's "one source, two views over a decision space" is a genuine composition, assembled
+    from established parts (Diátaxis registers + learning-path curation + an opinionated voice) rather than
+    copied from a single prior product.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/109-development-guide-learn-pathway/">#109 — development guide / learn pathway</a></li>
+    <li>Siblings over one engine: <a href="/backlog/096-nl-to-technical-configurator/">#096 — NL → Configurator</a>
+        (AI front door) · <a href="/backlog/091-web-docs-as-a-service-plateau/">#091 — webdocs</a> (candidate renderer)</li>
+    <li>Source prediction: <a href="/backlog/099-evergreen-app-vision/">#099 — evergreen-app vision</a> &amp; the archived essay</li>
+    <li>Host: Technical Configurator (plateau-app)</li>
+</ul>

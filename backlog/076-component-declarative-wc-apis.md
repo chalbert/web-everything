@@ -1,7 +1,7 @@
 ---
 type: idea
 workItem: epic
-status: open
+status: parked
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-06"
 tags: [webcomponents, component, declarative, attach-internals]

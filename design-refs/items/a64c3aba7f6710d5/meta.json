@@ -1,0 +1,28 @@
+{
+  "id": "a64c3aba7f6710d5",
+  "contentHash": "a64c3aba7f6710d5c6ad81f0bb551332812eaa39e0df6a9cf4713afd56129fce",
+  "sourceUrl": "https://carbon.now.sh",
+  "captureMethod": "playwright",
+  "reviewState": "confirmed",
+  "dateCollected": "2026-06-12T21:52:50.806Z",
+  "datePublished": null,
+  "app": "Carbon",
+  "company": "Carbon",
+  "category": "developer-tools",
+  "surface": null,
+  "designRegister": "dark-dev",
+  "theme": "dark",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "dpr": 2,
+  "imageDims": {
+    "width": 2880,
+    "height": 1800
+  },
+  "bytes": 111654,
+  "tags": [],
+  "sourceCredit": "Carbon",
+  "collectionRun": "2026-06-12T21-51-12-668Z"
+}

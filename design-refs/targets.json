@@ -1,0 +1,166 @@
+{
+  "$schema": "./targets.schema.note.md",
+  "note": "Worklist for the design-reference corpus (#382). Each entry is a publicly-reachable web APPLICATION (interactive/tool-like UI), never a static/marketing/brochure page. Curated fields (app, company, category, designRegister, theme) are author-supplied deterministic metadata; per-screenshot visual tags (surface, refined register) are deferred to the phase-3 vision pass. Add entries freely across runs — collect is idempotent by sourceUrl.",
+  "targets": [
+    {
+      "url": "https://excalidraw.com",
+      "app": "Excalidraw",
+      "company": "Excalidraw",
+      "category": "whiteboard-diagramming",
+      "designRegister": "minimal-hand-drawn",
+      "theme": "light",
+      "readySelector": ".excalidraw",
+      "readyTimeout": 15000
+    },
+    {
+      "url": "https://www.tldraw.com",
+      "app": "tldraw",
+      "company": "tldraw",
+      "category": "whiteboard-diagramming",
+      "designRegister": "minimal",
+      "theme": "light",
+      "readySelector": ".tl-container",
+      "readyTimeout": 15000
+    },
+    {
+      "url": "https://www.photopea.com",
+      "app": "Photopea",
+      "company": "Photopea",
+      "category": "image-editor",
+      "designRegister": "enterprise-dense",
+      "theme": "dark",
+      "enterAction": "text=Start using Photopea",
+      "readySelector": "text=New Project",
+      "readyTimeout": 20000,
+      "settleMs": 5000
+    },
+    {
+      "url": "https://app.diagrams.net",
+      "app": "draw.io",
+      "company": "JGraph",
+      "category": "diagramming",
+      "designRegister": "enterprise-dense",
+      "theme": "light",
+      "readySelector": ".geDiagramContainer",
+      "readyTimeout": 15000
+    },
+    {
+      "url": "https://play.grafana.org",
+      "app": "Grafana",
+      "company": "Grafana Labs",
+      "category": "analytics-observability",
+      "designRegister": "enterprise-dense",
+      "theme": "dark",
+      "readySelector": "[data-testid^=\"data-testid Panel header\"]",
+      "readyTimeout": 20000,
+      "settleMs": 7000
+    },
+    {
+      "url": "https://www.openstreetmap.org",
+      "app": "OpenStreetMap",
+      "company": "OpenStreetMap Foundation",
+      "category": "maps",
+      "designRegister": "utilitarian",
+      "theme": "light",
+      "readySelector": ".leaflet-container",
+      "readyTimeout": 15000
+    },
+    {
+      "url": "https://jsfiddle.net",
+      "app": "JSFiddle",
+      "company": "JSFiddle",
+      "category": "code-playground",
+      "designRegister": "utilitarian",
+      "theme": "light"
+    },
+    {
+      "url": "https://codepen.io/pen/",
+      "app": "CodePen",
+      "company": "CodePen",
+      "category": "code-playground",
+      "designRegister": "modern-saas",
+      "theme": "dark"
+    },
+    {
+      "url": "https://www.desmos.com/calculator",
+      "app": "Desmos Graphing Calculator",
+      "company": "Desmos",
+      "category": "education-tools",
+      "designRegister": "friendly-minimal",
+      "theme": "light",
+      "readySelector": ".dcg-grapher",
+      "readyTimeout": 20000,
+      "settleMs": 5000
+    },
+    {
+      "url": "https://www.geogebra.org/calculator",
+      "app": "GeoGebra",
+      "company": "GeoGebra",
+      "category": "education-tools",
+      "designRegister": "friendly-minimal",
+      "theme": "light",
+      "readySelector": ".GeoGebraFrame",
+      "readyTimeout": 20000,
+      "settleMs": 6000
+    },
+    {
+      "url": "https://editor.swagger.io",
+      "app": "Swagger Editor",
+      "company": "SmartBear",
+      "category": "developer-tools",
+      "designRegister": "enterprise-dense",
+      "theme": "light",
+      "readySelector": "#swagger-editor",
+      "readyTimeout": 15000
+    },
+    {
+      "url": "https://mermaid.live",
+      "app": "Mermaid Live Editor",
+      "company": "Mermaid",
+      "category": "developer-tools",
+      "designRegister": "modern-saas",
+      "theme": "light",
+      "readySelector": ".monaco-editor",
+      "readyTimeout": 15000
+    },
+    {
+      "url": "https://regex101.com",
+      "app": "regex101",
+      "company": "regex101",
+      "category": "developer-tools",
+      "designRegister": "dark-dev",
+      "theme": "dark"
+    },
+    {
+      "url": "https://carbon.now.sh",
+      "app": "Carbon",
+      "company": "Carbon",
+      "category": "developer-tools",
+      "designRegister": "dark-dev",
+      "theme": "dark",
+      "readySelector": ".CodeMirror",
+      "readyTimeout": 15000
+    },
+    {
+      "url": "https://squoosh.app",
+      "app": "Squoosh",
+      "company": "Google Chrome Labs",
+      "category": "developer-tools",
+      "designRegister": "minimal",
+      "theme": "dark",
+      "readySelector": "canvas",
+      "readyTimeout": 15000,
+      "settleMs": 5000
+    },
+    {
+      "url": "https://play.tailwindcss.com",
+      "app": "Tailwind Play",
+      "company": "Tailwind Labs",
+      "category": "code-playground",
+      "designRegister": "dark-dev",
+      "theme": "dark",
+      "readySelector": ".monaco-editor",
+      "readyTimeout": 15000
+    }
+  ]
+}

@@ -2,23 +2,26 @@
 type: decision
 workItem: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-06-06"
+dateStarted: "2026-06-10"
+dateResolved: "2026-06-11"
+graduatedTo: none
 tags: [intent, navigation-guard, beforeunload, unsaved-work, async, ux, harvest]
 relatedProject: webintents
-crossRef: { url: /intents/background-task/, label: Background Task Intent }
+crossRef: { url: /backlog/272-guard-protocol-predicate-gated-transitions-and-presence-open/, label: "Guard protocol (#272)" }
 ---
 
 # Navigation guard — warn before leaving with in-flight or unsaved work (candidate intent)
 
-Harvested while authoring the [Background Task Intent](/intents/background-task/) (#113). That intent's `navigationGuard` dimension warns the user before they navigate away or close while a task is still in flight. But **"warn before you leave with work still in flight" is the same paradigm as "warn before discarding unsaved form edits"** — both arm the `beforeunload` prompt and an in-app route-leave confirm based on dirty/in-flight state.
+**Resolved 2026-06-10.** The "navigation guard" framing was too narrow. Talking it through (with a prior-art pass across Angular `CanDeactivate`, Vue `beforeRouteLeave`, React `useBlocker`, SvelteKit `beforeNavigate`/`willUnload`, the browser `beforeunload`/Navigation API, and iOS `presentationControllerShouldDismiss`/`isModalInPresentation`) showed the real abstraction is **guarding a region's teardown against a predicate** — not "navigation." And the access-control item (#178) is its mirror image. So this does not become a lone intent; it becomes one **member of an open Guard protocol**.
 
-Rather than redefine that behavior inside every intent that needs it (Background Task, Validation/forms, an editor with unsaved changes, …), pull it out as its own **composable intent**: a single contract for *guarding a navigation against loss of state*, which the others reference.
+## Ruling
 
-Candidate shape (to design):
-- The **condition** that arms the guard (dirty state, in-flight async, custom predicate).
-- The **two surfaces** it mediates: the native `beforeunload` prompt (cross-document / close) and the SPA route-leave confirm (same-document) — these are different primitives that must present as one contract.
-- Relationship to the [Background Task Intent](/intents/background-task/) (`navigationGuard` becomes a *consumer* of this) and to forms/validation.
-- Browser-standard grounding: the `beforeunload` event, the Navigation API's `navigate` event (`intercept`/cancel), and `History`/`popstate`.
+- **This is the *Exit Guard*** — a routing/transition member, captured as its successor build **#273**. "Navigation" was the wrong noun: the guard arms when the *region the user is in is torn down* (the document is the outermost region → `beforeunload`; a route, modal, or panel are inner regions), gated by a loss-of-state `shouldBlock()` predicate; deny-outcome is a user-mediated **confirm** (stay/discard). It hooks the cancelable dismissal *trigger*, never raw DOM removal.
+- **It belongs to a *Guard protocol*** (**#272**), not a one-off intent. Three tiers: the **protocol** (region + lifecycle event + predicate + provider seam + deny-outcome, surface-agnostic); a shared **guard provider** (default platform provider, project-overridable, custom-pluggable — enforcement is server-/platform-side, never in the intent); and **members grouped by interaction surface** — routing *entry/exit guards*, a rendering *access gate* (render-or-hide), open for future kinds. Vocabulary follows prior art: **Guard** = gate a transition, **Gate** = gate presence.
+- **The protocol is open**, not an entry/exit pair — future members (action-confirm, edit/read-only, concurrency-lock) join without reopening it (intents-as-open-system).
+- **#178 is the entry-guard / access-gate member** on a shared authz provider; it already independently converged on this shape (authorities + denial strategies + back-end-authoritative trust boundary).
+- **Consumers** (Background Task `navigationGuard` #113, Form block #177) reference the exit guard rather than each redefining it — the duplication this item was harvested to kill.
 
-Follow the canonical authoring method ([design-first.md](../docs/agent/design-first.md)) — research prior art, verify overlap, term-first semantics — before writing JSON.
+The agent-ready successors are **#272** (design/author the protocol + provider seam) and **#273** (author the exit-guard member on top of it). This decision is closed.

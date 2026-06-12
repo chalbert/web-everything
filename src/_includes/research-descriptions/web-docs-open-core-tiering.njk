@@ -1,0 +1,122 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+    <a href="/backlog/091-web-docs-as-a-service-plateau/">#091</a> ratified the open-core
+    <em>principle</em> — Web Docs is open-core by usage (a free tier, then paid beyond a usage threshold;
+    cancel-and-self-host always holds). It left the <strong>mechanics</strong> open, and
+    <a href="/backlog/428-web-docs-open-core-tiering-mechanics-metered-unit-threshold-/">#428</a> must
+    settle them: <strong>(1)</strong> what unit is metered, <strong>(2)</strong> where the paywall
+    threshold sits, and <strong>(3)</strong> which billing/auth surface plateau-app uses. This survey
+    gathers how comparable docs / dev-tool / hosting SaaS meter and tier, per design-first step&nbsp;1,
+    so the forks reuse the incumbents' vocabulary instead of coining a pricing model cold.
+</p>
+
+<h2>Recommendation (forks in #428)</h2>
+<ol>
+    <li><strong>Meter the conformance-verified regeneration</strong> — the Chromatic-snapshot analog.
+        Web Docs' differentiator is that the docs <em>prove conformance</em>; the unit that delivers
+        that value is the verified re-build/re-publish, not a seat or a raw byte. Reuses
+        <a href="/backlog/089-monetization-product-ideas/">#089</a> idea-1's continuous-verification
+        machinery as the meter, degrades gracefully (Chromatic pauses at the ceiling rather than cutting
+        off), and Lemon Squeezy's metered-billing API bills it directly. <em>Medium confidence — a
+        genuine business judgment.</em></li>
+    <li><strong>Treat the threshold as a principle, not a number yet</strong> — free clears the self-host
+        floor (the generator + standards stay free and self-hostable, unlimited) and onboards a real
+        solo/OSS project; paid begins at ongoing production value (continuous re-verification of a live
+        hosted site). Specific limits are tuned at the <a href="/backlog/427-plateau-app-served-web-docs-site-per-customer-conformance-re/">#427</a>
+        build against real usage. <em>Low confidence — derived from the unit; numbers deferred.</em></li>
+    <li><strong>Ratify the billing surface, don't reopen it</strong> — compose
+        <a href="/backlog/183-payments-merchant-of-record/">#183</a>'s ruling (MoR via Lemon Squeezy);
+        LS now supports usage-based/metered subscriptions, so the metered hosted model fits the chosen
+        rail. Auth is a plateau-app build detail, not a standards decision.</li>
+</ol>
+
+<h2>Finding 1 — the market meters on four distinct units, and the choice <em>is</em> the pricing identity</h2>
+<table>
+    <thead>
+        <tr><th>Unit</th><th>Who</th><th>Fit for Web Docs</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Per-seat / editor</strong></td>
+            <td><a href="https://www.mintlify.com/pricing">Mintlify</a> ($250/mo · 5 editors, +$20/seat),
+                GitBook (+$12/user/mo), Vercel (per-seat Pro)</td>
+            <td>Poor — penalizes teams; <a href="https://www.netlify.com/pricing/">Netlify</a> moved
+                <em>away</em> from it (flat, unlimited seats) because per-seat punishes teams of 5+. Docs
+                readers are unbounded, so a reader/seat unit makes no sense.</td>
+        </tr>
+        <tr>
+            <td><strong>Per-site / project</strong></td>
+            <td>GitBook ($65 → $249/site), <a href="https://readme.com/pricing">ReadMe</a> ($79 →
+                $349/project)</td>
+            <td>Simple, docs-native — the main alternative. But a flat per-site fee underprices a value
+                that scales with how often the customer re-verifies and republishes.</td>
+        </tr>
+        <tr>
+            <td><strong>Per-value-action ("snapshot")</strong></td>
+            <td><a href="https://www.chromatic.com/pricing">Chromatic</a> (snapshots — 5,000/mo free,
+                metered overage, graceful pause)</td>
+            <td><strong>Best fit.</strong> Chromatic meters the exact unit that delivers the value (a
+                visual-regression capture). The Web Docs analog is the conformance-verified regeneration —
+                the act that produces the proven-conformant site.</td>
+        </tr>
+        <tr>
+            <td><strong>Pure infra (credits / bandwidth / build-min)</strong></td>
+            <td>Netlify (credit model — deploys 15c, bandwidth 20c/GB), Vercel</td>
+            <td>Poor — commoditized, races to the bottom, captures none of the conformance differentiator.
+                This is the floor others compete on, not a moat.</td>
+        </tr>
+    </tbody>
+</table>
+
+<h2>Finding 2 — free-tier shape is consistent: "one site / one individual," commercial-use is the dividing line</h2>
+<p>
+    Mintlify Hobby (one site, free, AI excluded) and GitBook Free (individuals / open-source) converge on
+    a "one site, one person" free tier. The instructive split is commercial use: <strong>Netlify's free
+    tier permits commercial use</strong> (indie-friendly) while <strong>Vercel's Hobby bans it</strong>.
+    For an open-premise product, the free tier <em>must</em> permit self-host and commercial use — "cancel
+    and self-host always holds" is the entire pitch, so the self-host floor is unlimited and free by
+    construction; only <em>our hosting</em> is metered.
+</p>
+
+<h2>Finding 3 — graceful degradation beats a hard cutoff at the free ceiling</h2>
+<p>
+    When a Chromatic free account exhausts its snapshots, testing <em>pauses</em> until the next month and
+    auto-resumes — the product never breaks. For a docs site that must stay reachable, the same pattern
+    applies: at the free ceiling, stop re-verifying/regenerating (the last good site stays served) rather
+    than taking the site down. The metered unit and this degradation behaviour are the same mechanism seen
+    from two sides.
+</p>
+
+<h2>Finding 4 — the billing rail is already chosen and already supports metering</h2>
+<p>
+    <a href="/backlog/183-payments-merchant-of-record/">#183</a> (resolved) ruled merchant-of-record via
+    <strong>Lemon Squeezy</strong> — the global VAT/sales-tax offload is the solo-founder win, plus a
+    native license-key API. Lemon Squeezy added <a href="https://docs.lemonsqueezy.com/help/products/usage-based-billing">usage-based
+    (metered) billing</a>: report customer usage via API, billed in arrears on the renewal date. So the
+    metered hosted model needs no new rail and no reopen of #183 — it <em>composes</em> the existing one.
+    This is why the billing surface is a ratify, not an open fork.
+</p>
+
+<h2>Finding 5 — the build is deferred regardless; #428 settles only the decision shape</h2>
+<p>
+    Per <a href="/backlog/089-monetization-product-ideas/">#089</a>'s solo-founder lens ("defer any
+    live-serve solution that could break and demand instant support"), the served Web Docs product is
+    tier-2. The tiering <em>build</em> is a plateau-app slice
+    <a href="/backlog/427-plateau-app-served-web-docs-site-per-customer-conformance-re/">#427</a>'s
+    successor, itself gated on the #424 generator + #425 primitives. So #428 settles the metered-unit and
+    threshold <em>decision</em> now — unblocking that build — not the code, and it picks the unit whose
+    free tier degrades gracefully (no instant-support failure mode).
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+    <li>Decision: <a href="/backlog/428-web-docs-open-core-tiering-mechanics-metered-unit-threshold-/">#428 — Web Docs open-core tiering mechanics</a></li>
+    <li>Parent ruling: <a href="/backlog/091-web-docs-as-a-service-plateau/">#091 — Web Docs as a Service on Plateau</a> (open-core-by-usage principle)</li>
+    <li>Prior survey: <a href="/research/web-docs-as-a-service/">Web Docs as a Service</a> (ingestion / dashboard / home)</li>
+    <li>Billing rail: <a href="/backlog/183-payments-merchant-of-record/">#183 — Payments via merchant-of-record</a> (Lemon Squeezy)</li>
+    <li>Build slice: <a href="/backlog/427-plateau-app-served-web-docs-site-per-customer-conformance-re/">#427 — served Web Docs + per-customer conformance report</a></li>
+    <li>Epic: <a href="/backlog/089-monetization-product-ideas/">#089 — monetization product ideas</a> (idea 1 verification · idea 4 Web Docs · solo-founder lens)</li>
+    <li>Project: <a href="/projects/webdocs/">Web Docs</a></li>
+</ul>
+{% endraw %}

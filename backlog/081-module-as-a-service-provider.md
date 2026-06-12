@@ -2,9 +2,11 @@
 type: idea
 workItem: story
 size: 8
-status: open
+status: resolved
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-06"
+dateResolved: "2026-06-11"
+graduatedTo: module-service
 tags: [module-as-a-service, adapters, functional-component, plateau, dev-server, esm, render-strategy]
 relatedProject: webadapters
 crossRef: { url: /adapters/, label: Rendering Adapters }
@@ -44,7 +46,7 @@ The rendering adapters answer *"can this tree be spelled three ways?"* (Axis 1 �
 
 ## Progress
 
-- **Status:** open — v1 + phases 2a/2b/2c landed and verified; **non-blocking follow-ons + an open "home" decision remain**, so it's parked-open rather than in-progress. Verified 2026-06-06: `moduleService.ts`, `tools/maas/vite-plugin.ts`, `functional/functionalComponent.ts`, both demos present; `moduleService.test.ts` 16/16 + full suite 1418 passing; `check:standards` 0 errors. Re-open as `active` when picking up a follow-on (reactivity / real resolver / prod delivery) or settling the home decision.
+- **Status:** resolved 2026-06-11 (see the close-out summary at the foot of this section). v1 + phases 2a/2b/2c landed and verified; the home decision is settled (under `webadapters`) and the non-blocking follow-ons spun out as #310–#313. Verified 2026-06-06: `moduleService.ts`, `tools/maas/vite-plugin.ts`, `functional/functionalComponent.ts`, both demos present; `moduleService.test.ts` 16/16 + full suite 1418 passing; `check:standards` 0 errors.
 - **Branch:** docs/standard-authoring-workflow
 - **Done (v1 skeleton — serve one component in N forms, single-core, native):**
   - **Resolver core** `blocks/renderers/module-service/moduleService.ts` — `serve(definition, { form })` returning `{ form, code, language, lossy, diagnostics }`, plus a `FORMS` catalog (`declarative` | `wc-class` | `html` | `jsx`). It owns **no transform** — it dispatches to the existing shared modules (`declarativeComponent.parseDefinition`/`generateClassSource`, `htmlToJsx`), which is the **anti-drift guarantee**: the served form is the same transform the [/adapters/](/adapters/) demos document, not a parallel copy.
@@ -66,11 +68,10 @@ The rendering adapters answer *"can this tree be spelled three ways?"* (Axis 1 �
   - **Compiler seam extended to jsx:** `serveCompiled` keys off the form's `loader` — a `jsx` form *must* transpile to be import-able (always), a `js` form only on a non-default target. The esbuild provider passes `jsxFactory`/`jsxFragment` for the jsx loader.
   - **Shared-transform fix (benefits the whole JSX adapter):** `htmlToJsx` now emits raw-text elements (`<style>`/`<script>`) as a JSX string expression (`` <style>{`…`}</style> ``) — previously it produced unparseable JSX whenever CSS braces were present.
   - Full suite **1313 passing**; `check:standards` 0 errors; MaaS files `tsc` clean (pre-existing `src/cases/webinjectors/*` snippet errors are unrelated).
-- **Status:** MaaS v1 + phases 2a/2b/2c landed. **Home:** staying under `webadapters` (confirmed). Open follow-ons below.
-- **Open follow-ons (not blocking):**
-  - **Reactivity** — callbacks/effects/change-detection (the functional form renders once). Folds into the render-strategy Protocol (#052/#078) + a future `customChangeDetectorRegistry`.
-  - **Real resolver/registry** — v1 resolves against the component-cases fixtures; a production id→definition registry + caching is the delivery hardening.
-  - **Production runtime delivery** — in dev the import map points at `/blocks/renderers/jsx/index.ts` (Vite-served `.ts`); a real deploy serves compiled `.js` + a published bare-specifier package.
-  - **Functional-component form** — add the FU functional-component adapter as a new `FORMS` entry once it lands ([plans/functional-component-adapter.md](../plans/functional-component-adapter.md)).
-  - **Home decision** — confirm whether MaaS stays under `webadapters` or graduates to its own Plateau-side project entry before phase 2 grows it.
-- **Notes:** resolution source in v1 is the component-cases fixtures (the authored `<component>` text). A real registry/resolver (id → definition) is part of the delivery phase, not the skeleton.
+- **Status:** **resolved 2026-06-11** (`graduatedTo: module-service`) — MaaS v1 + phases 2a/2b/2c are landed and verified, and the **home decision is settled** (stays under `webadapters`). Per the 2026-06-10 split analysis (executed via #259), this is a **close-out, not an epic conversion**: v1 isn't unbuilt scope, so the four explicitly-non-blocking follow-ons were spun out as their own items rather than left as an oversized story.
+- **Spun-out follow-ons (independent, not blocking — created 2026-06-11):**
+  - **#310** — Reactivity (callbacks/effects/change-detection; the functional form renders once). Folds into the render-strategy Protocol (#052/#078) + a future `customChangeDetectorRegistry`.
+  - **#311** — Real id→definition resolver + registry + caching (v1 resolves against the component-cases fixtures; this is the delivery hardening).
+  - **#312** — Production runtime delivery (dev import map points at Vite-served `/blocks/renderers/jsx/index.ts`; a real deploy serves compiled `.js` + a published bare-specifier package; relates to module-resolution #271/#274 and importmap cleanup #285).
+  - **#313** — Add the Frontier UI functional-component adapter as a new `FORMS` entry once it lands ([plans/functional-component-adapter.md](../plans/functional-component-adapter.md)).
+- **Notes:** resolution source in v1 is the component-cases fixtures (the authored `<component>` text); the production registry/resolver is #311.

@@ -2,8 +2,10 @@
 type: decision
 workItem: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-05-31"
+dateResolved: "2026-06-11"
+graduatedTo: none
 tags: [gap-analysis, intent, theme, color]
 relatedProject: webintents
 ---
@@ -22,3 +24,6 @@ relatedProject: webintents
 ## Open call
 
 Intent-only (lean) vs full design-token project.
+
+## Resolution (2026-06-11)
+**Intent-only, per native-first + intent-UX-only.** Ship a Theme/Color *intent* (`scheme`/`contrast`/`accent`) grounded on the native stack (`color-scheme`, `light-dark()`, `prefers-color-scheme`, `prefers-contrast`); the intent stays UX-only. A full design-token *project* is **deferred** until real demand — token elaboration is the technical half, not an intent dimension. This resolves the intent-vs-project fork; authoring the intent itself is a separate `/new-standard` build.

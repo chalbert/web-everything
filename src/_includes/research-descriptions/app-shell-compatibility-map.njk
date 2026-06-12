@@ -1,0 +1,118 @@
+<h3>The Question</h3>
+<p>
+    The archived design essay asks for a thin <strong>App Shell</strong> (meta-framework, little to no
+    dependency) that loads independently-developed <strong>micro-apps</strong> as pages of one SPA — deciding
+    on navigation whether the next page loads <strong>in the same SPA</strong> (compatible) or needs a
+    <strong>hard refresh</strong> (incompatible), deduping already-loaded bundles — and a Platform-level
+    <strong>compatibility map</strong> that surfaces apps worth converting. No design exists yet. Before
+    authoring a standard, this survey gathers web-platform and industry prior art per design-first step&nbsp;1
+    so the schema reuses established vocabulary instead of coining terms. It grounds the three open forks in
+    <a href="/backlog/104-app-shell-compatibility-map/">backlog&nbsp;#104</a>: <strong>home</strong>
+    (protocol vs. Plateau product), the <strong>compatibility-chart schema</strong>, and the
+    <strong>memory-eviction model</strong>.
+</p>
+
+<h3>Recommendation (carried into #104)</h3>
+<ol>
+    <li><strong>Split the home</strong> — a thin <code>app-shell-compatibility</code> <em>protocol</em> (the
+        declared chart each micro-app authors against, owned by
+        <a href="/projects/webmanifests/">webmanifests</a> alongside <code>changelog-manifest</code>) plus the
+        live map as a <strong>Plateau dashboard</strong> view of the
+        <a href="/backlog/092-provider-consumer-graph-platform-manager/">#092</a> graph. Not either/or.</li>
+    <li><strong>Declare flat, render rich</strong> — apps declare a <em>flat requirement manifest</em>
+        (required shell range + required provider ranges + conflicting-global claims, semver ranges per
+        <code>changelog-manifest</code>); the map <em>computes</em> a browser-compat-data-style support matrix
+        as the rendered view.</li>
+    <li><strong>Borrow the Storage eviction model</strong> — best-effort / persistent classes + LRU under a
+        mounted-app budget; unmount via lifecycle and keep the bundle cached. A policy dimension (LRU default,
+        pin opt-in), not a baked mechanic.</li>
+</ol>
+
+<h3>Finding 1 — the App Shell model is established; the compatibility <em>decision</em> is the gap</h3>
+<p>
+    The App Shell architecture and its micro-frontend variants are mature.
+    <a href="https://single-spa.js.org/docs/recommended-setup/">single-spa</a> registers apps with
+    <code>activeWhen</code> route predicates and abstracts each app's <code>bootstrap/mount/unmount</code>
+    lifecycle across frameworks, resolving shared deps via <strong>import maps</strong> or SystemJS.
+    <strong>Module Federation</strong> shares build-time modules at runtime with <code>shared</code> carrying
+    semver requirements (<code>requiredVersion</code>, <code>singleton</code>, <code>strictVersion</code>).
+    But none ships a <em>declared, introspectable compatibility chart per app</em> that a Platform renders as a
+    map — that map is the novel artifact, and it sits on the relationship graph
+    (<a href="/backlog/092-provider-consumer-graph-platform-manager/">#092</a>).
+</p>
+
+<h3>Finding 2 — compatibility = version-range intersection over shared providers</h3>
+<p>
+    The same-SPA-vs-hard-refresh decision reduces to: can the new page's required provider/shell versions
+    coexist with what is already mounted? Three recurring incompatibility sources:
+</p>
+<ul>
+    <li><strong>Shell / Platform API version</strong> — the new app needs shell&nbsp;≥&nbsp;X; the running
+        shell is older (the essay's exact scenario).</li>
+    <li><strong>Shared-dependency conflict</strong> — two mounted apps demand incompatible singleton versions
+        of one provider (Module Federation's <code>strictVersion</code> failure).</li>
+    <li><strong>Conflicting globals / side effects</strong> — two apps claim the same global, custom-element
+        tag, or route.</li>
+</ul>
+<p>
+    So the chart is not a new registry — it is a <strong>declaration each app contributes to the #092
+    graph</strong> plus a resolver that computes coexistence. It is the forward-looking dual of the
+    <a href="/protocols/#protocol-changelog-manifest">changelog-manifest</a> protocol: not <em>what changed</em>
+    but <em>what I require to run here</em>.
+</p>
+
+<h3>Finding 3 — schema prior art: browser-compat-data's support-statement shape</h3>
+<p>
+    The richest battle-tested compatibility schema on the platform is
+    <a href="https://github.com/mdn/browser-compat-data/blob/main/schemas/compat-data-schema.md">MDN
+    browser-compat-data (BCD)</a>. Its <code>__compat</code> object has a <code>support</code> map keyed by
+    agent, each value a statement with <code>version_added</code> (incl. <strong>ranged</strong>
+    <code>"≤50"</code>), <code>version_removed</code>, plus <code>partial_implementation</code>,
+    <code>flags</code>, <code>prefix</code> — and a <code>status</code> object
+    (<code>experimental</code>/<code>standard_track</code>/<code>deprecated</code>). Transferable:
+</p>
+<ul>
+    <li>Model units as <strong>(provider/shell, version-range)</strong> pairs — BCD's keyed-by-agent shape maps
+        onto keyed-by-provider.</li>
+    <li>Carry <code>partial_implementation</code>-style nuance — a page can be <em>degraded-compatible</em>
+        (runs, but a flagged incompatibility), not just binary; this is the essay's "older shell, flagged on
+        the dashboard".</li>
+    <li>Carry <strong>status</strong> so the map surfaces apps pinned to dying providers; use semver ranges
+        directly (the <code>changelog-manifest</code> vocabulary).</li>
+</ul>
+<p>
+    Two altitudes: a <strong>flat requirement manifest</strong> (declared) vs. a
+    <strong>full BCD-style support matrix</strong> (computed). Declare flat; render the matrix.
+</p>
+
+<h3>Finding 4 — eviction prior art: the Storage model (best-effort/persistent + LRU)</h3>
+<p>
+    The essay flags but leaves open: "you cannot load stuff infinitely, even if conflicts are managed." The
+    platform already specifies a graceful model worth borrowing — the
+    <a href="https://developer.mozilla.org/en-US/docs/Web/API/Storage_API/Storage_quotas_and_eviction_criteria">Storage
+    API eviction model</a>: two persistence classes (<strong>best-effort</strong>, evictable, default; and
+    <strong>persistent</strong>, opt-in, skipped by eviction), with <strong>least-recently-used</strong>
+    eviction under a quota. Mapped onto the shell: a mounted micro-app has a persistence class (pin the current
+    route / keep-alive; let background pages be evictable), an LRU policy under a mounted-app budget, with
+    <strong>unmount = single-spa's <code>unmount</code> lifecycle</strong> (tear down, release global/tag
+    claims, keep the bundle cached for fast re-mount). A policy <em>dimension</em>, not a baked mechanic.
+</p>
+
+<h3>Finding 5 — there is no native app shell; adapters keep the incompatible set shrinking</h3>
+<p>
+    No native primitive loads an arbitrary independent app into your SPA — import maps + dynamic
+    <code>import()</code> are the substrate, but the lifecycle/routing/eviction frame is userland (single-spa
+    fills it). WE's distinctive lever is the essay's <strong>adapters-via-DI</strong> move: convert an old
+    setup to the new API <em>without loading the old implementation</em>, because APIs are dependency-injected
+    (the constellation's <strong>webinjectors</strong>). That shrinks the incompatible set over time and makes
+    "hard refresh" the last resort, not the first response to a version mismatch.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/104-app-shell-compatibility-map/">#104 — app shell + micro-app compatibility map</a></li>
+    <li>Parent vision: <a href="/backlog/099-evergreen-app-vision/">#099 — the evergreen app</a></li>
+    <li>Supplies the graph the map renders: <a href="/backlog/092-provider-consumer-graph-platform-manager/">#092 — provider↔consumer relationship graph</a></li>
+    <li>Vocabulary source: <a href="/protocols/#protocol-changelog-manifest">changelog-manifest protocol (#102)</a> ·
+        adapters-via-DI: <a href="/backlog/094-ai-upgrader-tools/">#094</a> · <a href="/projects/webinjectors/">webinjectors</a></li>
+</ul>

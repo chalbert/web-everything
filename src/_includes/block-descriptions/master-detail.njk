@@ -1,0 +1,27 @@
+<h2>Master-Detail</h2>
+<p>The reference coordinator for the <a href="/intents/master-detail/">master-detail</a> intent — it pairs
+a collection (the master list) with a coupled detail region, so selecting an item renders its detail with
+the focus, a11y, and empty-state wiring that makes the pairing usable.</p>
+
+<h3>What it does</h3>
+<ul>
+  <li><strong>Composes the <a href="/blocks/selection/">selection</a> block</strong> — it does not
+    reimplement selection; the coordinator owns the binding from the selected item to its detail.</li>
+  <li>On select, calls <code>renderDetail(key, detailEl)</code> (sync or async — toggling an
+    <code>md-loading</code> class while pending, the <a href="/intents/loader/">Loader</a> seam).</li>
+  <li>Wires the detail as a labelled <code>role="region"</code> and applies the focus flow
+    (<code>retain</code> keeps focus on the list; <code>advance</code> moves it to the detail).</li>
+  <li>Handles the empty state (<code>placeholder</code> | <code>collapse</code>) and emits
+    <code>detail-change</code>.</li>
+</ul>
+
+<h3>What it leaves to neighbours</h3>
+<p>URL deep-linking of the selection (the intent's <code>selectionSync: deep-link</code>) is left to the
+consumer's <a href="/blocks/router/">router</a> — compose, don't duplicate routing. The coordinator is a
+behavior, consumed directly: <code>new MasterDetailBehavior(masterEl, { itemSelector, detailEl, keyOf,
+renderDetail })</code>.</p>
+
+<h3>Not a new contract</h3>
+<p>Master-detail is a standalone <em>coordination</em> intent (no project, no protocol — see decision
+<a href="/backlog/409-decision-master-detail-intent-vs-project/">#409</a>): it composes existing intents
+rather than introducing a provider or schema.</p>

@@ -2,7 +2,6 @@
 type: idea
 workItem: story
 size: 5
-parent: "203"
 status: open
 blockedBy: ["208"]
 dateOpened: "2026-06-08"

@@ -1,0 +1,58 @@
+<h2>Overview</h2>
+<p>
+  <strong>Breadcrumb</strong> shows the user's location within a site or data hierarchy as a structured
+  trail — an ordered list of links from the root to the current page. It answers <em>"where am I?"</em>,
+  which is a different question from a navigation menu (<em>"where can I go?"</em>), tabs
+  (<em>"which panel?"</em>), or a stepper (<em>"how far through this process?"</em>).
+</p>
+<p>
+  Native-first by construction: a breadcrumb <em>is</em>
+  <code>&lt;nav aria-label="Breadcrumb"&gt;</code> wrapping an <code>&lt;ol&gt;</code> of <code>&lt;a&gt;</code>
+  links, with the current page a non-link node carrying <code>aria-current="page"</code>. The block adds
+  only what that markup cannot express alone: <strong>overflow collapse</strong> and
+  <strong>responsible label truncation</strong>. It composes the
+  <a href="/intents/navigation/">Navigation Intent</a> (it is a navigation landmark) and the
+  <a href="/intents/typography/">Typography Intent</a> (truncating a long crumb label).
+</p>
+
+<h2>Web Standards Alignment</h2>
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr><td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/breadcrumb/">WAI-ARIA APG Breadcrumb</a></td><td>WAI-ARIA 1.2</td><td><code>nav[aria-label]</code> landmark + ordered list; <code>aria-current="page"</code> on the current (non-link) crumb. The block's structure is the APG pattern verbatim.</td></tr>
+  <tr><td><a href="https://developer.mozilla.org/docs/Web/HTML/Element/nav">&lt;nav&gt;</a> + <a href="https://developer.mozilla.org/docs/Web/HTML/Element/ol">&lt;ol&gt;</a></td><td>Baseline</td><td>The zero-JS baseline — landmark and ordered-list semantics for free; the block defaults to it.</td></tr>
+  <tr><td>CSS generated content (<code>::before</code>) / <code>aria-hidden</code></td><td>Baseline</td><td>Separators are presentational only — never announced as text.</td></tr>
+</table>
+
+<h2>Framework / Library Research</h2>
+<table>
+  <tr><th>Source</th><th>Key Patterns Adopted</th></tr>
+  <tr><td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/breadcrumb/">WAI-ARIA APG</a></td><td>nav landmark, ordered list, <code>aria-current="page"</code>, presentational separators.</td></tr>
+  <tr><td><a href="https://carbondesignsystem.com/components/breadcrumb/usage/">Carbon</a> / <a href="https://design-system.service.gov.uk/components/breadcrumbs/">GOV.UK</a></td><td>Root-to-current ordering, overflow collapse behind an ellipsis, current page not a link.</td></tr>
+</table>
+
+<h2>Structure (the native baseline)</h2>
+{% highlight "html" %}
+<nav aria-label="Breadcrumb">
+  <ol>
+    <li><a href="/">Home</a></li>
+    <li><a href="/products">Products</a></li>
+    <li><a aria-current="page">Widgets</a></li>   <!-- current: non-link -->
+  </ol>
+</nav>
+<!-- separators come from CSS (li + li::before { content: "›" }), never the DOM -->
+{% endhighlight %}
+
+<h2>Behaviour the block adds</h2>
+<ul>
+  <li><strong>Overflow collapse.</strong> When the trail is wider than its container, the middle collapses behind a single disclosure (an ellipsis crumb that reveals the hidden ancestors); the root and current crumbs stay visible.</li>
+  <li><strong>Responsible truncation.</strong> A long individual crumb label truncates via the <a href="/intents/typography/">Typography Intent</a>'s shared paradigm (the same one tabs, chips, and table cells use) — with the full text recoverable.</li>
+  <li><strong>Presentational separators.</strong> The divider between crumbs is CSS-generated or <code>aria-hidden</code>, so AT reads the list as an ordered trail, not "Home slash Products slash Widgets".</li>
+</ul>
+
+<h2>Boundaries</h2>
+<p>
+  Distinct from <a href="/blocks/nav-list/">nav-list</a> (APG Disclosure Navigation menus), tabs (panel
+  switching), and <a href="/blocks/stepper/">stepper</a> (a linear process). A breadcrumb is a
+  <em>location trail</em> — it composes the Navigation Intent but is its own pattern, cross-referenced
+  rather than folded into nav-list.
+</p>

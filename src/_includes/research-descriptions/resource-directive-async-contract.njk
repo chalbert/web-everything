@@ -1,0 +1,104 @@
+<h3>The Question</h3>
+<p>
+    The JSX directive-sugar layer (<a href="/backlog/070-jsx-directive-sugar/">#070</a>) shipped
+    <code>&lt;For&gt;</code>, <code>&lt;Show&gt;</code>, and <code>&lt;Resource&gt;</code> through one registry.
+    But <code>&lt;For&gt;</code>/<code>&lt;Show&gt;</code> map to <strong>real, existing</strong> directives the
+    lowering compiler (<a href="/backlog/078-render-strategy-lowering-compiler/">#078</a>) understands, whereas
+    <code>is="resource"</code> is <strong>net-new with no defined behavior anywhere</strong> — it currently
+    round-trips as pure spelling. Before authoring its async contract, this survey gathers web-platform and
+    library prior art per design-first step&nbsp;1, so the <strong>slots/states, Loader-Intent wiring, lowering
+    target, and pagination</strong> decisions reuse platform vocabulary instead of coining a parallel async model.
+    It grounds the four open forks in <a href="/backlog/124-resource-directive-async-contract/">backlog&nbsp;#124</a>.
+</p>
+
+<h3>Recommendation (proposed in #124, status open)</h3>
+<ol>
+    <li><strong>Named-slot loading/error/success surface</strong> whose slot names <em>are</em> the Loader
+        Intent's existing lifecycle states (<code>pending</code>, <code>error</code>, <code>success</code>) —
+        mirroring the Suspense-fallback + ErrorBoundary-fallback split, not a bespoke child-directive DSL.</li>
+    <li><strong>Resolve <em>through</em> the Loader Intent</strong> and the
+        <a href="/blocks/resource-loader/">Resource Loader</a> block that implements it; the directive adds the
+        declarative trigger + slots, <em>not</em> its own state machine. Cross-reference, don't duplicate.</li>
+    <li><strong>Lower/lift to a <code>use()</code>-style suspending read</strong> with
+        <code>&lt;Suspense&gt;</code>/<code>&lt;ErrorBoundary&gt;</code> boundaries; the async read carries a
+        lossy diagnostic like the eager/reactive interpolation boundary already does.</li>
+    <li><strong>Pagination is a composition, deferred to #018</strong> — a paginated resource is the Loader's
+        existing <code>loadingMore</code> state composed with Windowed Collection, not a new directive feature.</li>
+</ol>
+
+<h3>Finding 1 — loading and error are SEPARATE composable boundaries (grounds fork&nbsp;1)</h3>
+<p>
+    Every surveyed primitive keeps the loading surface and the error surface as
+    <strong>independent, separately-nestable boundaries</strong>:
+    <a href="https://docs.solidjs.com/guides/fetching-data">SolidJS</a> pairs
+    <code>&lt;Suspense fallback&gt;</code> (the read suspends to the nearest one) with
+    <code>&lt;ErrorBoundary fallback&gt;</code> (the read throws to the nearest one);
+    <a href="https://react.dev/reference/react/Suspense">React&nbsp;19</a> does the same with
+    <code>&lt;Suspense&gt;</code> plus an error boundary. They are <em>two</em> surfaces, never two props on one
+    element. <strong>Implication:</strong> <code>&lt;Resource&gt;</code> owns named <code>loading</code> /
+    <code>error</code> slots (default children = success), not a single merged <code>fallback</code>.
+</p>
+
+<h3>Finding 2 — the resource read is the suspend point (grounds fork&nbsp;3)</h3>
+<p>
+    The load-bearing primitive is the <strong>suspend-on-read accessor</strong>:
+    <a href="https://react.dev/blog/2024/12/05/react-19">React's <code>use(promise)</code></a> and
+    <a href="https://docs.solidjs.com/reference/basic-reactivity/create-resource">SolidJS
+    <code>createResource()</code></a> both suspend the render until the promise resolves and throw on rejection.
+    That read is exactly what a <strong>vdom</strong> rendering strategy emits — so it is the lowering target the
+    declarative <code>is="resource"</code> lifts to. The current lowering compiler
+    (<code>crossStrategy.ts</code>) has rules for <code>for-each</code>↔<code>.map()</code> and
+    <code>if</code>↔<code>&amp;&amp;</code> but <strong>none for <code>resource</code></strong>, which is the gap.
+</p>
+
+<h3>Finding 3 — keeping prior content visible during refresh is first-class (grounds fork&nbsp;2)</h3>
+<p>
+    SolidJS <code>resource.latest</code>, React <code>useTransition</code>, and
+    <a href="https://tanstack.com/query/latest/docs/framework/react/comparison">TanStack Query's "lagged data"</a>
+    all keep the previous result on screen while a refresh runs. This is <em>precisely</em> WE's Loader Intent
+    <code>stale</code> state ("showing previous data while a refresh is in progress") — so the directive does not
+    need a new concept; it <strong>maps onto the Loader state machine WE already ships</strong>
+    (<code>idle | pending | success | error | stale | filtering | loadingMore</code>), implemented by the
+    <a href="/blocks/resource-loader/">Resource Loader</a> block.
+</p>
+
+<h3>Finding 4 — pagination is Loader's <code>loadingMore</code> + Windowed Collection (grounds fork&nbsp;4)</h3>
+<p>
+    <a href="https://tanstack.com/router/v1/docs/framework/react/guide/data-loading">TanStack</a>
+    <code>useInfiniteQuery</code> / route loaders model "load the next page" as a state on the same resource, not
+    a different element. WE already has that seam: the Loader Intent's <code>loadingMore</code> state
+    <em>explicitly</em> "composes the Windowed Collection Intent." So a paginated resource is a
+    <strong>composition</strong> the directive participates in — the cursor-vs-offset / "load earlier" /
+    windowing-plus-async design is <a href="/backlog/018-dropdown-async-pagination-paradigm/">#018's</a> open
+    work, and <code>&lt;Resource&gt;</code>'s contract stays single-resolve.
+</p>
+
+<h3>Finding 5 — there is NO native <code>&lt;resource&gt;</code> element</h3>
+<p>
+    HTML ships no declarative async-data element; resource resolution is a JS/ARIA-composed concern. So
+    <code>&lt;Resource&gt;</code> is necessarily the declarative <em>spelling</em> of the suspend-on-read
+    primitive, built as the inert customized built-in <code>&lt;template is="resource"&gt;</code> in the
+    declarative-static baseline, gaining runtime semantics only by wiring to the Loader Intent.
+</p>
+
+<h3>Net</h3>
+<p>
+    <code>&lt;Resource&gt;</code> becomes a <strong>declarative composition of the Loader Intent</strong>: a
+    suspend-on-read trigger (<code>from</code>) with named loading/error/success slots that <em>are</em> Loader
+    states, resolving through the existing Resource Loader orchestrator, lowering to a <code>use()</code>-style
+    read with Suspense/ErrorBoundary boundaries, and participating in (not owning) pagination via Loader's
+    <code>loadingMore</code> seam. No new state machine, no new intent.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/124-resource-directive-async-contract/">#124 — the <code>&lt;Resource&gt;</code> async contract</a></li>
+    <li>Parent / lowering / pagination:
+        <a href="/backlog/070-jsx-directive-sugar/">#070</a> ·
+        <a href="/backlog/078-render-strategy-lowering-compiler/">#078</a> ·
+        <a href="/backlog/018-dropdown-async-pagination-paradigm/">#018</a></li>
+    <li>Composes: <a href="/intents/loader/">Loader Intent</a> ·
+        <a href="/blocks/resource-loader/">Resource Loader</a> ·
+        <a href="/intents/windowed-collection/">Windowed Collection</a></li>
+    <li>Adapter: <a href="/adapters/jsx-adapter/">JSX Adapter</a></li>
+</ul>

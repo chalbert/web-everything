@@ -15,6 +15,12 @@ crossRef: { url: /backlog/099-evergreen-app-vision/, label: "Evergreen app (#099
 
 Capture an app's requirements as a **structured, machine-readable artifact** — plain language but in a BDD-like format — that the Platform AI can reason over, automatically test a growing share of, and eventually generate code from. This is the hardest and most central ingredient of the evergreen app ([#099](/backlog/099-evergreen-app-vision/)): if requirements are formal and verifiable, then auto-update, regeneration, and conformance all have a ground truth to check against. From the essay's *"The evergreen app"* section.
 
+> **Split status (2026-06-10 analysis, via #259): splittable but deferred.** The body already endorses
+> a *staging* sequence — requirement meta-schema + authoring/validation editor (`story·5`) → auto-testing
+> loop (`story·5`) → code-from-requirement (`story·5`) — an incremental A→B→C delivery. But each slice
+> stays ≈`5` (none batchable), so it stages the work without producing batchable wins. Deferred: execute
+> the staging split when slice A is actually picked up as a near-term standalone win; revisit with `/split` then.
+
 ## The three capabilities, in order of difficulty
 
 1. **Authoring + validation (nearest).** A special editor for writing requirements in a constrained natural language; the AI flags **contradictions, ambiguity, and missing requirements** as you write — like a linter for intent. Lowest risk, immediately useful, and produces the corpus everything else needs.

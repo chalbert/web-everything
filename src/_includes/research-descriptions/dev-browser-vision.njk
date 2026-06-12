@@ -1,0 +1,110 @@
+<h3>The Question</h3>
+<p>
+    The <a href="/backlog/141-dev-browser-vision/">dev-browser vision (#141)</a> proposes a Chromium-based
+    developer browser whose tooling <strong>lights up only on a standard-conformant app</strong> — depth
+    scaling with how much of the standard the app implements. The rich vision is settled and the
+    <strong>sequencing</strong> fork is ruled (extension/DevTools-panel first, browser later). What remains
+    open are four design forks: the <strong>conformance-gate contract</strong>, the <strong>AI fix-loop
+    guardrails</strong>, the <strong>commercial-license</strong> call, and the <strong>relationship to
+    plateau-app</strong>. This survey grounds those forks in market prior art and the machinery already in the
+    repo, so each rule reuses platform/precedent vocabulary instead of coining its own.
+</p>
+
+<h3>Recommendation (forks open in #141)</h3>
+<ol>
+    <li><strong>Gate on a capability manifest, degrade gracefully</strong> — the browser reads the same
+        introspectable self-description the standard already exposes (registries, intents, contexts, traces,
+        <code>capabilityMatrix</code>); each feature activates per-capability, not all-or-nothing, so a thinly
+        conformant app still lights up the slice it supports.</li>
+    <li><strong>Reuse the verify-gated autofix loop, default to PR-for-review</strong> — the AI fix loop is the
+        existing <code>conformance-autofix</code> engine generalized to running apps: propose → apply →
+        re-verify against the app's own declared rules/tests → keep only if it clears with no regression;
+        autonomy is a configured level (report-only → propose → live-verify → open-PR), and live-patching a
+        <em>deployed</em> app is session-only, revertible, and authorization-gated.</li>
+    <li><strong>Yes, carry a commercial license (deferred)</strong> — a free tier (the panel = the funnel) →
+        paid browser, per the cost-flat / open-core gradient; the browser runs locally so it never takes on
+        server cost. The exact tier split is deferred to first-sale.</li>
+    <li><strong>A distinct shell that reuses plateau-app's panels, not a fork of it</strong> — the
+        Technical/Intent Configurators and the profile system already live in plateau-app; the browser embeds
+        them as the management UI rather than re-implementing or absorbing the product.</li>
+</ol>
+
+<h3>Finding 1 — the only precedent is framework-gated; the novel move is standard-gated</h3>
+<p>
+    React / Vue / Redux DevTools <strong>detect their framework and only light up when present</strong> — but
+    compatibility means <em>one specific framework</em>, the payoff is a single debug tab, and each tool only
+    ever helps that framework's apps. Storybook/Ladle similarly light up only via authored stories. No product
+    is a browser whose tooling depth scales with how <em>standard</em>-compliant the loaded app is (market scan
+    found none). Gating on a <strong>vendor-neutral standard</strong> inverts framework lock-in into a portable
+    contract: any conformant app — any stack — surfaces the same deep tooling through one browser.
+</p>
+
+<h3>Finding 2 — the conformance gate is a capability manifest, surfaced per-feature (grounds fork 1)</h3>
+<p>
+    The standard already ships the self-description the gate needs. <code>check:standards</code> is the
+    build-time conformance suite; the runtime analogue is the introspectable registries plus the
+    <a href="/protocols/">capability matrix</a> — a <strong>3-state tier map</strong> (native-ok / polyfill-ok
+    / capability-hard) keyed off <code>capabilities.json</code>. The market parallel is a CI
+    <strong>quality gate</strong> (SonarQube) reported as a status check: pass/fail per condition, with a
+    warn-only mode before enforcement. The implication is the same here: the browser should read the app's
+    declared conformance and <strong>activate each feature per-capability</strong> (graceful degradation), not
+    treat the app as binary compatible/incompatible. Partial conformance lights up the partial surface.
+</p>
+
+<h3>Finding 3 — the AI fix loop already exists as a verify-gated engine (grounds fork 2)</h3>
+<p>
+    The repo's <code>conformance-autofix</code> agent is the exact loop the vision's analyst/QA fix story
+    needs, one altitude down: <strong>propose a patch → apply → re-run the suite → keep only if the target
+    failure cleared and no new error appeared, else revert</strong>. It is bounded (max-rounds backstop),
+    metered (cap on model-fixer calls so a runaway loop can't burn a BYO key), and has a human-review hook that
+    can revert a gate-passing patch before it lands. Generalizing it to a running app: the "suite" becomes the
+    app's own declared rules + tests, and the gate is the same verify-then-keep-or-revert moat.
+</p>
+<p>
+    Market prior art on autofix safety converges on the same shape: best practice requires
+    <strong>passing tests + a re-scan before any PR is auto-opened</strong>, an autonomy ladder (assisted →
+    semi-autonomous → autonomous) with confidence thresholds, an observation period that generates PRs without
+    auto-merge, and a safety checklist in the PR body (tests run, files touched, <strong>revert plan</strong>).
+    The riskiest capability — <strong>live-patching a deployed app</strong> — needs an explicit story:
+    session-only patches, revertible, and an authorization gate on who may apply.
+</p>
+
+<h3>Finding 4 — local + free-tier-funnel is the cost-flat, open-core shape (grounds fork 3)</h3>
+<p>
+    The monetization principle is settled: open standard/impl are free; paid products are licensed; a local
+    product <em>may</em> carry a commercial license where there's value. The dev browser is the textbook case —
+    it <strong>runs locally</strong> (no server, no uptime), yet is product-shaped enough to charge for as a
+    <strong>free tier → paid</strong> upgrade, with the extension/panel as the free funnel. The market confirms
+    the pattern: 2026 dev tools lean on free tiers as evaluation, per-seat commercial licensing for teams, and
+    open-core / BYO-key tiers (Cursor, Windsurf, Cline). The license <em>decision</em> is yes-in-principle but
+    <strong>deferred</strong> to first-sale; only the tier caveats need settling then.
+</p>
+
+<h3>Finding 5 — plateau-app already owns the panels the browser would host (grounds fork 4)</h3>
+<p>
+    plateau-app already ships a <code>technical-configurator</code>, an <code>intent-configurator</code>, and a
+    <code>profiles</code> system — the same persona/profile model the vision calls a "feature toggle map" over
+    introspection surfaces. So the browser is not a new product that re-implements these, nor a fork of
+    plateau-app: it is a <strong>distinct shell that embeds plateau-app's panels</strong> as its management UI.
+    The browser owns the chrome-level capabilities a panel can't reach (intercepting navigation to show "not
+    compatible," a full management UI outside the DevTools dock); plateau-app keeps owning the configurators
+    and profiles.
+</p>
+
+<h3>Finding 6 — the sequencing fork is resolved (carried, not re-opened)</h3>
+<p>
+    <strong>Extension / DevTools-panel first, standalone browser later, Chromium fork as last resort.</strong>
+    The panel is the cheapest proof of the "lights up on a conformant app" model <em>and</em> the free funnel;
+    the browser becomes the paid product only when a capability demands chrome-level UI an extension can't
+    reach; a fork stays a last resort (Replay.io shows a fork is heavy/ongoing). This was settled 2026-06-11 by
+    the staged path + monetization and is <strong>not</strong> re-opened by the four forks below.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/141-dev-browser-vision/">#141 — the dev-browser vision</a></li>
+    <li>Surface matrix: <a href="/backlog/140-dev-surface-product-feature-matrix/">#140 — product surface × feature matrix</a></li>
+    <li>Monetization: <a href="/backlog/089-monetization-product-ideas/">#089</a> ·
+        <a href="/backlog/098-licensing-strategy/">#098 — licensing strategy</a></li>
+    <li>Conformance substrate: <a href="/protocols/">capability matrix</a> · the introspectable registries, intents, contexts &amp; traces</li>
+</ul>

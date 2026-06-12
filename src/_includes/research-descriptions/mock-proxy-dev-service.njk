@@ -1,0 +1,104 @@
+<h3>The Question</h3>
+<p>
+    The <a href="/backlog/107-mock-proxy-dev-service/">mock &amp; service-proxy dev standard</a> is named in the
+    essay (§&nbsp;<em>Mocks</em>, §&nbsp;<em>Web Service Proxy &amp; Console</em>) with one hard rule:
+    <strong>mocks must never live in deployable code</strong> — a real local HTTP server transparently
+    mocks/proxies your APIs. Before authoring a standard, this survey gathers prior art per design-first
+    step&nbsp;1 so the three open forks — <strong>schema-as-standard vs tool-specific, self-run vs hosted
+    delivery, and the relationship to <code>webcases</code></strong> — reuse industry vocabulary instead of
+    coining terms. It surveys six reference points: MSW, Mockoon, Prism, WireMock, Pact, and the
+    OpenAPI/JSON-Schema substrate.
+</p>
+
+<h3>Recommendation (forks for #107)</h3>
+<ol>
+    <li><strong>The schema is the standard; the server is a provider.</strong> Only data-defined tools
+        (Mockoon JSON, WireMock stubs, Prism's OpenAPI) produce a portable artifact another tool can consume;
+        MSW is the warning case — best DX precisely because it is code, and non-portable for that same reason.
+        <em>Sub-decision:</em> anchor the response shape on <code>OpenAPI</code>, add a WE behavior layer for
+        latency/fault/conditional/proxy that OpenAPI cannot express.</li>
+    <li><strong>Ship the tier-1 self-run dev tool first;</strong> defer the hosted broker. Every survivor leads
+        with a self-run form (library/desktop/Docker); hosted (WireMock Cloud, PactFlow, Stoplight) is the
+        commercial upsell, not the mock itself.</li>
+    <li><strong>One contract, two uses</strong> — but the artifact must carry consumer <em>interactions</em>
+        (Pact/BDCT), not just an OpenAPI <em>shape</em>; <code>webcases</code> is the verification home.</li>
+</ol>
+
+<h3>Finding 1 — the portable artifact is the only thing that can be a standard</h3>
+<p>
+    The field splits cleanly: <strong>code-defined</strong>
+    (<a href="https://mswjs.io/docs/comparison/">MSW</a> — handlers are TypeScript, by design, because it
+    lives in the test runner) vs <strong>data-defined</strong>
+    (<a href="https://mockoon.com/compare/">Mockoon</a> JSON,
+    <a href="https://wiremock.org/docs/stubbing/">WireMock</a> stub mappings, Prism's OpenAPI). Only
+    data-defined tools yield something another tool could consume. MSW is the warning case — its best-in-class
+    DX comes <em>from</em> being code, which is exactly what makes it non-portable. So the WE standard is the
+    <strong>schema, not the server</strong>; the server is a swappable provider, just as the three JSON
+    dialects are interchangeable kinds of definition today.
+</p>
+
+<h3>Finding 2 — nobody has standardized the schema; each tool reinvented it</h3>
+<p>
+    Mockoon JSON, WireMock stub mappings, and Prism's "it's just OpenAPI" are <strong>three incompatible
+    dialects</strong> of one idea (match a request shape → produce a response, with latency/fault/conditional
+    rules). OpenAPI is the closest shared substrate, but it is provider-driven and describes the happy-path
+    <em>shape</em>, not the dev-time <em>behaviors</em> (latency injection, forced 401, per-header conditional
+    bodies) the essay's list demands. So a WE mock schema is <strong>OpenAPI-anchored for the response shape,
+    with a behavior layer on top</strong> for what OpenAPI cannot express — borrow the platform vocabulary,
+    add the missing axis.
+</p>
+
+<h3>Finding 3 — the proxy is a MODE of the same server, not a separate tool</h3>
+<p>
+    Mockoon, WireMock, and Prism all ship <strong>proxy/passthrough + record</strong> as a mode of the mock
+    server: per-route, a request can be mocked, proxied to a real backend, or recorded for replay. The essay's
+    "Web Service Proxy &amp; Console" is explicitly "integrated with the Mocks console" — the same surface. So
+    the proxy is <strong>not a sibling standard</strong>; it is the <code>mock | proxy | record</code>
+    response-kind in the one schema, and CORS-bypass + per-service on/off + forced-status are
+    console/header/param overrides on it.
+</p>
+
+<h3>Finding 4 — delivery: every survivor leads with self-run; hosted is the upsell</h3>
+<p>
+    The dominant, free, most-adopted forms are <strong>self-run</strong>: MSW (library), Mockoon (offline-first
+    desktop + CLI), WireMock (JAR/Docker), Prism (Docker). The <strong>hosted</strong> offerings (WireMock
+    Cloud, Stoplight, PactFlow) are commercial layers on top of the same open artifact — they sell
+    collaboration, history, and the contract <em>broker</em>, not the mocking. This is textbook open-core and
+    maps onto the solo-founder ranking (self-run&nbsp;&gt;&nbsp;single service&nbsp;&gt;&nbsp;hosted):
+    <strong>ship the tier-1 self-run dev tool first</strong>, defer the hosted broker — a solo founder should
+    not carry uptime/support at concept stage.
+</p>
+
+<h3>Finding 5 — "one contract, two uses" is real, and Pact names it</h3>
+<p>
+    The essay's third question — the same contract that mocks an endpoint should be verified against the real
+    service — is <strong>consumer-driven contract testing</strong>.
+    <a href="https://docs.pact.io/faq/convinceme">Pact</a> makes the consumer's expectations (the same
+    interactions you'd mock) into a <strong>pact</strong> that is verified against the provider to detect
+    drift. The industry converges on
+    <a href="https://pactflow.io/blog/schemas-can-be-contracts/"><strong>Bi-Directional Contract Testing</strong></a>:
+    an OpenAPI spec as the provider contract, verified against consumer pacts. The crucial nuance:
+    <strong>schema validation ≠ contract verification</strong> — a schema proves a payload's shape, not that a
+    real consumer depends on a field or that the provider honors an interaction. So "mock + drift-check from
+    one artifact" works only if the artifact carries <em>interactions</em>, not just a <em>shape</em>. This is
+    the seam to <a href="/projects/webcases/">webcases</a>, already the machine-checkable source of truth for
+    conformity.
+</p>
+
+<h3>Finding 6 — there is no native primitive; the Service Worker is the closest</h3>
+<p>
+    Unlike <code>&lt;select&gt;&lt;optgroup&gt;</code> for droplists, there is <strong>no</strong> web-platform
+    primitive for dev-time HTTP interception except the <strong>Service Worker</strong> (which MSW uses
+    in-browser) and the dev server itself. Native-first here means preferring a real dev HTTP server&nbsp;/&nbsp;SW
+    over <code>if (mock)</code> branches in app code (the essay's hard rule) — the "native" alignment is the
+    <em>deployment shape</em> (out-of-process, zero shippable mock logic), not an API to degrade to.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/107-mock-proxy-dev-service/">#107 — Mock &amp; service-proxy dev standard</a></li>
+    <li>Verification seam: <a href="/projects/webcases/">webcases</a> ·
+        <a href="/backlog/100-requirement-as-code/">#100 Requirement-as-code</a></li>
+    <li>Delivery lens: <a href="/backlog/089-monetization-product-ideas/">#089 Monetization</a> ·
+        <a href="/backlog/099-evergreen-app-vision/">#099 Evergreen app</a></li>
+</ul>

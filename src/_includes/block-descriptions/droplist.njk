@@ -13,7 +13,7 @@
     <tr><td><strong>Multi-dropdown</strong></td><td>Concrete member — <code>multiple</code> selection. See <a href="/blocks/multi-select-dropdown/">/blocks/multi-select-dropdown/</a>.</td></tr>
     <tr><td><strong>Autocomplete</strong></td><td>Concrete member — editable input, filterable. See <a href="/backlog/035-autocomplete-block/">backlog</a>.</td></tr>
     <tr><td><strong>Tree-select</strong></td><td>Concrete member — hierarchical selection. See <a href="/backlog/064-tree-select-block/">backlog</a>.</td></tr>
-    <tr><td><strong>Menu button</strong></td><td>Concrete member — independent activation (no persisted value). ARIA role <code>menu</code>, not <code>listbox</code>.</td></tr>
+    <tr><td><strong>Menu button</strong></td><td><em>Not a droplist member</em> — a true menu button opens a <code>role=menu</code> of <strong>commands</strong> (a value-invoker, not a value-selector), owned by the <a href="/blocks/menu/">Menu block</a>. Only its trigger shape (<code>button[aria-haspopup]</code>) is shared; demoted to trigger-only per #173 Fork G.</td></tr>
     <tr><td><strong>Native</strong></td><td>The browser-owned <code>&lt;select&gt;</code> / <code>&lt;optgroup&gt;</code> baseline. Zero composed traits — climb off it only when a requirement rules it out.</td></tr>
   </tbody>
 </table>
@@ -119,7 +119,6 @@ injector.set('customContexts:droplistIntent', {
     <tr><td><a href="/blocks/multi-select-dropdown/">Multi-dropdown</a></td><td><code>virtual</code></td><td><code>model=multiple</code>, <code>selectionFollowsFocus=false</code></td><td>optional</td><td><code>listbox[aria-multiselectable]</code></td></tr>
     <tr><td><a href="/backlog/035-autocomplete-block/">Autocomplete</a></td><td><code>virtual</code> + <code>controller=input</code></td><td><code>model=single</code>/<code>multiple</code></td><td>client or async (replaces type-ahead)</td><td><code>combobox</code> + <code>listbox</code> + <code>live-status</code></td></tr>
     <tr><td><a href="/backlog/064-tree-select-block/">Tree-select</a></td><td>TBD</td><td>TBD (hierarchical)</td><td>TBD</td><td><code>tree[aria-multiselectable]</code></td></tr>
-    <tr><td>Menu button</td><td><code>roving</code></td><td><code>independent</code> (no persisted value)</td><td>—</td><td><code>button[aria-haspopup=menu]</code> → <code>menu</code> / <code>menuitem</code></td></tr>
     <tr><td>Native baseline</td><td><code>native</code></td><td><code>model=single</code>/<code>multiple</code></td><td>—</td><td><code>&lt;select&gt;</code> / <code>&lt;optgroup&gt;</code></td></tr>
   </tbody>
 </table>

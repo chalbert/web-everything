@@ -51,6 +51,9 @@
   try { bd = JSON.parse(dataEl.textContent); } catch (e) { return; }
   if (bd.empty) return;
 
+  // Daily window tightens on small screens (less width to spread dated ticks).
+  var mqMobile = window.matchMedia('(max-width: 768px)');
+
   var W = 900, H = 360, PL = 52, PR = 18, PT = 18, PB = 58;
   var ix = PL, iw = W - PL - PR, iy = PT, ih = H - PT - PB;
   var ms = function (d) { return Date.parse(d); };
@@ -73,8 +76,12 @@
     // the projection extends so the real days fill the width instead of being
     // crushed against "today". Each visible point gets a dated tick + a dot.
     var step = gran === 'daily' ? 1 : gran === 'weekly' ? 7 : 30;
-    var histKeep = gran === 'daily' ? 21 : gran === 'weekly' ? 16 : 18;
-    var projMaxPts = 6;
+    // Daily is a tight rolling window. Desktop: 1 week before today (today + 7
+    // prior days = 8 points) plus 2 days ahead. Mobile: today + 3 prior days
+    // (= 4 points) plus 1 day ahead. Coarser grains stay wide.
+    var mob = mqMobile.matches;
+    var histKeep = gran === 'daily' ? (mob ? 4 : 8) : gran === 'weekly' ? 16 : 18;
+    var projMaxPts = gran === 'daily' ? (mob ? 1 : 2) : 6;
     var histAll = bd.series[gran] || bd.series.weekly;
     // Trim the flat leading region (this backlog was opened in a burst, so most
     // of the early timeline is near-zero) and cap to a recent window, so the
@@ -166,11 +173,15 @@
   var GRAN_KEY = 'we-backlog-burndown-gran';
   var GRANS = { daily: 1, weekly: 1, monthly: 1 };
   var granBtns = Array.prototype.slice.call(document.querySelectorAll('[data-bd-gran]'));
+  var curGran;
   function setGran(gran) {
+    curGran = gran;
     granBtns.forEach(function (x) { x.classList.toggle('is-active', x.dataset.bdGran === gran); });
     try { localStorage.setItem(GRAN_KEY, gran); } catch (e) { /* ignore */ }
     render(gran);
   }
+  // Re-render when crossing the mobile breakpoint so the daily window resizes.
+  mqMobile.addEventListener('change', function () { if (curGran) render(curGran); });
   granBtns.forEach(function (b) {
     b.addEventListener('click', function () { setGran(b.dataset.bdGran); });
   });

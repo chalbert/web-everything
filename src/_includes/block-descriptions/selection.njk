@@ -1,0 +1,23 @@
+<h2>Selection</h2>
+<p>A runtime for the <a href="/intents/selection/">Selection</a> intent — the part the draft <a href="/blocks/dropdown/">dropdown</a> / droplist blocks compose but no block had shipped. <code>SelectionBehavior</code> manages which item(s) in a host container are selected, over items matched by a CSS selector. It projects the intent's <code>model</code> (<code>single</code> keeps at most one, <code>multiple</code> toggles) and <code>variant: item</code> onto <code>aria-selected</code>, keeps a roving <code>tabindex</code>, and commits selection <strong>live</strong> (the intent's <code>immediacy</code>) on click and on <code>Arrow</code>/<code>Home</code>/<code>End</code>/<code>Enter</code>/<code>Space</code>, emitting a <code>selection-change</code> event. It <strong>consumes</strong> the intent's vocabulary — it does not reinvent it. The dropdown/droplist blocks will compose it for listbox selection.</p>
+
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">
+  <strong>Terminology:</strong> See <a href="/semantics/">Semantics &amp; Glossary</a> and the
+  <a href="/intents/selection/">Selection intent</a> for the <code>model</code> / <code>immediacy</code> /
+  <code>variant</code> / <code>grouping</code> dimensions.
+</p>
+
+<h3>Web Standards Alignment</h3>
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr>
+    <td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/listbox/">APG Listbox / roving tabindex</a></td>
+    <td>W3C WAI-ARIA APG</td>
+    <td>The active item is the sole tabbable one (<code>tabindex="0"</code>, others <code>-1</code>); arrows move it and commit selection, projecting <code>aria-selected</code> on at most one item under the <code>single</code> model.</td>
+  </tr>
+  <tr>
+    <td><a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-selected"><code>aria-selected</code></a></td>
+    <td>WAI-ARIA 1.1</td>
+    <td>The selection state projects verbatim onto <code>aria-selected</code> on each item; a <code>selection-change</code> event re-emits the model for consumers (master-detail, etc.).</td>
+  </tr>
+</table>

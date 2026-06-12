@@ -44,18 +44,20 @@
 | Adding a block/plug/intent/adapter, doc requirements, the standard-authoring method | [docs/agent/design-first.md](docs/agent/design-first.md) (Claude: `/new-standard` triggers it) |
 | Processing `plans/` → research pages, reports | [docs/agent/research-workflow.md](docs/agent/research-workflow.md) |
 | Capturing ideas/issues/decisions/reviews, report open questions → `/backlog/` (one md file per item in `backlog/`; every item needs a `workItem` story/epic/task + Fibonacci `size` on stories/unstoried-epics — feeds the `/backlog/` burndown) | [docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md) → "Agile sizing" |
-| Picking the next item to work on (dev-ready first) | [docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md) → "Selecting the next item to work on" (Claude: `/next-backlog-item` triggers it) |
+| Picking the next item to work on (dev-ready first) | [docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md) → "Selecting the next item to work on" (Claude: `/next-backlog-item` triggers it; `/next decision` surfaces the one call to make) |
+| Preparing an open decision *ahead* of the call — research + author its forks to "ready to ratify" (no human judgment yet; sets `preparedDate`) | [docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md) → "The prepared-fork shape" (Claude: `/prepare` triggers it) |
 | Building or changing a runtime demo under `demos/` | [docs/agent/demo-workflow.md](docs/agent/demo-workflow.md) |
+| Building/continuing a flagship **exercise app** (#314) — the platform-first loop (WE is primary, the app is a forcing function) | [docs/agent/exercise-app-workflow.md](docs/agent/exercise-app-workflow.md) (Claude: `/exercise-app`) |
 | Dev environment & scripts | `DEV_GUIDE.md` |
 | Canonical specs (per-entry) | `src/_data/{blocks,plugs,intents,protocols,semantics,references}.json`; backlog = `backlog/*.md` |
 
 ## Repository inventory
 <!-- AUTO-GENERATED:inventory — run `npm run gen:inventory`; do not edit by hand -->
 - **Plugs** 45 — 31 active · 12 concept · 2 experimental
-- **Blocks** 37 — 13 active · 7 concept · 17 draft
-- **Intents** 33 — 10 concept · 23 draft
-- **Glossary terms** 169 · **Research topics** 19 (19 open)
-- **Projects** 25: webadapters, webanalytics, webbehaviors, webblocks, webcases, webcomponents, webcontexts, webdirectives, webdocs, webevents, webexpressions, webinjectors, webintents, webintl, webmanifests, webplugs, webportals, webpositioning, webregistries, webreliability, webresources, webstates, webtraces, webtraits, webvalidation
+- **Blocks** 52 — 24 active · 7 concept · 21 draft
+- **Intents** 43 — 13 concept · 30 draft
+- **Glossary terms** 192 · **Research topics** 51 (48 open)
+- **Projects** 31: webadapters, webanalytics, webaudit, webbehaviors, webblocks, webcases, webcomponents, webcontexts, webdecisions, webdirectives, webdocs, webevents, webexpressions, webguards, webinjectors, webintents, webintl, weblifecycle, webmanifests, webplugs, webpolicy, webportals, webpositioning, webregistries, webreliability, webresources, webstates, webtheme, webtraces, webtraits, webvalidation
 <!-- /AUTO-GENERATED:inventory -->
 
 ## Commands
@@ -64,5 +66,6 @@ npm start                 # Vite (3000) + 11ty (8080); browse http://localhost:3
 npm test                  # unit + integration (Vitest)
 npm run test:integration  # E2E (Playwright; needs npm start)
 npm run check:standards   # consistency & convention checks — part of Definition of Done
+npm run check:app-conformance  # exercise-app platform-conformance benchmark (--app=demos/<id> [--json --strict])
 npx @11ty/eleventy        # build docs site (verify page count after adding research)
 ```

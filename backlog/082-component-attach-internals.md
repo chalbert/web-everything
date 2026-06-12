@@ -3,8 +3,10 @@ type: decision
 workItem: story
 size: 3
 parent: "076"
-status: open
+status: resolved
 dateOpened: "2026-06-06"
+dateResolved: "2026-06-11"
+graduatedTo: block:component
 tags: [webcomponents, component, declarative, attach-internals, accessibility, forms]
 relatedReport: reports/2026-06-03-declarative-component-element.md
 relatedProject: webcomponents
@@ -22,3 +24,6 @@ crossRef: { url: /blocks/component/, label: Component block }
 **Runtime note.** The generated class is the source-of-truth output for real browsers. The runtime twin (`defineFromDefinition`) **guards `attachInternals`** because some non-browser test runtimes (happy-dom) lack it — the twin no-ops there while the conformance suite asserts the *generated source*, and the playground (Chromium) exercises the real behavior.
 
 **Open edges:** whether to ever surface other `aria-*` defaults declaratively; the eventual shape of form value/validation composition with Web Validation; and reconsidering DC-14 if state seeding proves useful.
+
+## Resolution (2026-06-11)
+**Ratified by native-first (mirror the platform verbatim).** DC-12 ships as `form-associated` → `static formAssociated = true` + `attachInternals()`; DC-13 ships as `default-role="…"` → `internals.role` (instance `role=` still overrides). Both already implemented (tier 2). DC-14 (`:state()` seeding) stays **deferred** — runtime-added states have no declarative platform precedent, so inventing a surface would violate native-first; revisit when a concrete use lands. The open edges (other `aria-*` defaults, form value/validation composition) ride with Web Validation and future `<component>` work, not this decision.

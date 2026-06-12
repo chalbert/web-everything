@@ -1,0 +1,270 @@
+{
+  "id": "benchmark-coverage",
+  "version": 1,
+  "lastSwept": "2026-06-12",
+  "capabilities": "benchmark-capabilities",
+  "description": "Phase 3 of the gap-analysis program (backlog #347): each extracted capability (#346) joined to a Web Everything entity and labelled covered / partial / missing / native-covered, weighed native-first. Partial/missing rows carry the gap-# triage (nativeFirst / gap / effort / rank) and an alreadyTracked flag (deduped against the backlog). The `gaps` array — un-tracked partial/missing rows — is the direct input to phase 4 (#348), which files them as candidate backlog items.",
+  "labels": {
+    "covered": "A WE entity (or a native primitive WE defers to) fully provides the capability.",
+    "native-covered": "The web platform provides it natively and WE intentionally defers to the native primitive (native-first).",
+    "partial": "A WE entity addresses the capability but misses dimensions, states, or an implementation block.",
+    "missing": "No WE entity and no native primitive covers it."
+  },
+  "method": {
+    "join": "Each capability id resolved against blocks/intents/plugs/protocols/intents and the native platform. nativeAnchorHint from #346 promoted to the native-first weighing: a capability the platform provides natively is NOT a gap even if no WE block wraps it.",
+    "dedup": "Before a row is called a fileable gap it is reconciled against existing backlog items (open + parked). alreadyTracked records the #NNN so phase 4 does not re-open settled work.",
+    "scope": "Coverage labels reflect the first-pass capability matrix (#346); they refine as per-source extraction (#352) sharpens the matrix."
+  },
+  "summary": {
+    "total": 96,
+    "covered": 57,
+    "partial": 20,
+    "missing": 10,
+    "nativeCovered": 9,
+    "fileableGaps": 2,
+    "alreadyTracked": 9,
+    "note": "fileableGaps: 11 at phase-3 -> 7 at phase-4 file-time dedup (menu+context-menu #173/#300, command-palette #299/#016, accordion #008) -> 6 when fill-time review found range-slider already covered by block:slider's dual-thumb range variant (#361). The sweep self-corrects: dedup and fill-verification both demote false gaps."
+  },
+  "coveredHighlights": [
+    {
+      "id": "select",
+      "we": "block:dropdown / droplist (+ native select, Open UI selectlist)"
+    },
+    {
+      "id": "combobox",
+      "we": "block:autocomplete"
+    },
+    {
+      "id": "multi-select",
+      "we": "block:multi-select-dropdown"
+    },
+    {
+      "id": "tabs",
+      "we": "block:tabs"
+    },
+    {
+      "id": "dialog",
+      "we": "intent:modal + block:dialog (abstract substrate, #376) + native dialog"
+    },
+    {
+      "id": "drawer",
+      "we": "block:drawer (concrete member of the dialog family, #360)"
+    },
+    {
+      "id": "popover",
+      "we": "protocol:anchor-positioning + intent:anchor (+ native popover)"
+    },
+    {
+      "id": "tooltip",
+      "we": "block:tooltip"
+    },
+    {
+      "id": "data-table",
+      "we": "block:data-table / data-grid"
+    },
+    {
+      "id": "toast",
+      "we": "block:notification (implements feedback intent; toast is a presentation style, #358)"
+    },
+    {
+      "id": "breadcrumb",
+      "we": "block:breadcrumb (implements navigation intent, #362)"
+    },
+    {
+      "id": "pagination",
+      "we": "block:pagination"
+    },
+    {
+      "id": "slider",
+      "we": "block:slider (single-thumb native + dual-thumb range variant)"
+    },
+    {
+      "id": "range-slider",
+      "we": "block:slider (dual-thumb range — already specified; impl is Frontier UI's, #361)"
+    },
+    {
+      "id": "stepper",
+      "we": "block:stepper"
+    },
+    {
+      "id": "segmented-control",
+      "we": "block:segmented-control"
+    },
+    {
+      "id": "type-ahead",
+      "we": "block:type-ahead + intent:type-ahead"
+    },
+    {
+      "id": "virtualization",
+      "we": "intent:windowed-collection"
+    },
+    {
+      "id": "form-validation-flow",
+      "we": "protocol:validation + intent:validation"
+    },
+    {
+      "id": "live-region",
+      "we": "intent:live-region-status"
+    },
+    {
+      "id": "focus-trap",
+      "we": "intent:focus-containment"
+    },
+    {
+      "id": "focus-return",
+      "we": "intent:focus-delegation + intent:autofocus-on-activation"
+    },
+    {
+      "id": "responsive-adaptive",
+      "we": "intent:breakpoint + block:breakpoint-observer + intent:density"
+    },
+    {
+      "id": "i18n-rtl",
+      "we": "intent:locale + intent:translation + protocol:localization (webintl)"
+    },
+    {
+      "id": "disclosure",
+      "we": "intent:disclosure (+ native details)"
+    },
+    {
+      "id": "keyboard-interaction",
+      "we": "block:keyboard-shortcuts + intent:interaction"
+    },
+    {
+      "id": "motion-tokens",
+      "we": "intent:motion"
+    },
+    {
+      "id": "typography-scale",
+      "we": "intent:typography"
+    },
+    {
+      "id": "carousel",
+      "we": "block:carousel (scroll-snap + CSS carousel pseudo-elements, #363)"
+    }
+  ],
+  "alreadyTracked": [
+    {
+      "id": "file-upload",
+      "coverage": "partial",
+      "we": "intent:data-transfer + intent:file-revision",
+      "trackedBy": "028",
+      "note": "file-update component tracked in #028."
+    },
+    {
+      "id": "async-pagination",
+      "coverage": "partial",
+      "we": "intent:collection-operations",
+      "trackedBy": "018",
+      "note": "dropdown async pagination paradigm tracked in #018."
+    },
+    {
+      "id": "tree-select",
+      "coverage": "partial",
+      "we": "intent:hierarchy",
+      "trackedBy": "064",
+      "note": "tree-select block tracked in #064 / #296."
+    },
+    {
+      "id": "color-tokens",
+      "coverage": "partial",
+      "we": "(no token system)",
+      "trackedBy": "010",
+      "note": "theme/color intent tracked in #010 (gap-3)."
+    },
+    {
+      "id": "drag-and-drop",
+      "coverage": "covered",
+      "we": "intent:data-transfer + intent:reorder",
+      "trackedBy": "022",
+      "note": "DnD paradigms tracked in #022; intents cover the axis."
+    },
+    {
+      "id": "menu",
+      "coverage": "partial",
+      "we": "intent:command + block:droplist",
+      "trackedBy": "173",
+      "note": "menu/menubar block tracked in #173 + #300 (standard); context-menu in #300 too."
+    },
+    {
+      "id": "context-menu",
+      "coverage": "missing",
+      "we": null,
+      "trackedBy": "300",
+      "note": "context-menu folded into the menu/menubar/context-menu block standard #300."
+    },
+    {
+      "id": "command-palette",
+      "coverage": "partial",
+      "we": "intent:command",
+      "trackedBy": "299",
+      "note": "command intent + invocation tracked in #299 / webcommands #016."
+    },
+    {
+      "id": "accordion",
+      "coverage": "partial",
+      "we": "intent:disclosure",
+      "trackedBy": "008",
+      "note": "disclosure intent (gap-12) tracked in #008; accordion is a thin composition over it + native details."
+    }
+  ],
+  "gaps": [
+    {
+      "id": "date-picker",
+      "coverage": "partial",
+      "we": "intent:temporal",
+      "nativeAnchor": "input[type=date|time]",
+      "gapNote": "intent:temporal defines the UX, but no calendar / date / time / range picker block exists; native input[type=date] is the anchor for the simple case.",
+      "triage": {
+        "nativeFirst": "medium",
+        "gap": "medium",
+        "effort": "high",
+        "rank": 3
+      }
+    },
+    {
+      "id": "design-tokens-theming",
+      "coverage": "partial",
+      "capabilityRefs": [
+        "spacing-scale",
+        "radius",
+        "elevation",
+        "color-tokens",
+        "dark-mode"
+      ],
+      "we": "intent:typography + intent:density + intent:surface",
+      "nativeAnchor": "CSS custom properties + color-scheme",
+      "gapNote": "No unified design-token / theming system (spacing, radius, elevation, semantic color roles, light/dark). Several intents touch slices; relates to theme-color #010.",
+      "triage": {
+        "nativeFirst": "medium",
+        "gap": "medium",
+        "effort": "high",
+        "rank": 4
+      }
+    }
+  ],
+  "skippedLowValue": [
+    "split-button",
+    "fab",
+    "color-picker",
+    "rating",
+    "tags-input",
+    "pin-input",
+    "rich-text-editor",
+    "avatar",
+    "badge",
+    "tag-chip",
+    "timeline",
+    "code-block",
+    "scroll-area",
+    "resizable-splitter",
+    "card",
+    "radius",
+    "elevation",
+    "spacing-scale",
+    "touch-target",
+    "color-contrast",
+    "tree-view"
+  ],
+  "skippedReason": "Low value, a pure styling idiom, native-covered, folded into a larger filed gap (spacing/radius/elevation -> design-tokens-theming; contrast -> #010; tree-view -> #064), or composed trivially from existing entities. Logged here rather than filed so the omission is explicit, not silent."
+}

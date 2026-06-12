@@ -32,6 +32,8 @@ export type ImplementedAttribute = (new (options?: CustomAttributeOptions) => Cu
   formAssociated?: (typeof CustomAttribute)['formAssociated'];
   observedAttributes?: (typeof CustomAttribute)['observedAttributes'];
   activationSurface?: (typeof CustomAttribute)['activationSurface'];
+  activationWhen?: (typeof CustomAttribute)['activationWhen'];
+  visibilityReentry?: (typeof CustomAttribute)['visibilityReentry'];
 };
 
 /**
@@ -90,6 +92,38 @@ export default abstract class CustomAttribute<
    * `inert` is the default and `'ambient'` is the deliberate opt-out.
    */
   static activationSurface: 'interaction' | 'ambient' = 'interaction';
+
+  /**
+   * Declares this trait's **activation trigger** — *when* its behaviour first
+   * activates (the visibility gate, #221/#280). The trait-author manifest default
+   * half of the two-layer shape it shares with `delivery` (#202) and `inert`
+   * (#222); the page-author per-usage override is the reserved
+   * `<trait>-when="visible"` attribute, read from the live DOM at runtime by the
+   * registry (like `<trait>-active`, unlike build-time `<trait>-delivery`).
+   *
+   * - `'connect'` (the default) — activate the moment the host connects, the status
+   *   quo, so nothing existing changes.
+   * - `'visible'` — defer activation (and, for a lazy trait, its chunk fetch) until
+   *   the host first enters the viewport, via an `IntersectionObserver`. The
+   *   scripting analogue of `content-visibility: auto`. `when` is a general trigger
+   *   axis whose first value is `visible` (room for `idle`/media triggers later).
+   */
+  static activationWhen: 'connect' | 'visible' = 'connect';
+
+  /**
+   * Optional trait-author override of the **visibility-gate re-entry policy**
+   * (#221/#280). When a visibility-gated host scrolls back out of view:
+   *
+   * - `'recurring'` — deactivate on exit, re-activate on re-entry (pausing
+   *   off-screen is the point — a poller, a live clock).
+   * - `'once'` — activate on first view and stay (tearing down interaction wiring
+   *   on every scroll-out is janky).
+   *
+   * Left `undefined`, the policy is **derived** from {@link activationSurface}:
+   * `ambient` → `recurring`, `interaction` → `once`. Set it only where a behaviour
+   * does not fit its surface's default.
+   */
+  static visibilityReentry?: 'once' | 'recurring';
 
   /**
    * The target element this attribute is attached to

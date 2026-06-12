@@ -1,0 +1,134 @@
+<h3>The Question</h3>
+<p>
+    Gap&nbsp;#7 names a sprawling surface — <code>IntersectionObserver</code>, scroll-driven
+    animations (<code>animation-timeline</code>), CSS scroll-snap, virtualization, infinite
+    scroll, <code>content-visibility</code>, scroll restoration — and asks one structural
+    question: is <strong>Scroll / Observation</strong> a Web&nbsp;Everything <em>project</em>, a
+    new <em>intent</em>, or neither? No design exists yet, so this survey gathers the web-platform
+    prior art per design-first step&nbsp;1 and reconciles it with the
+    <strong>already-shipped <code>advance:auto</code></strong> scroll-trigger seam — so the call
+    doesn't create two homes for scroll-triggering. It grounds the open forks in
+    <a href="/backlog/014-gap-7-webscroll-project/">backlog&nbsp;#014</a>.
+</p>
+
+<h3>Recommendation (forks open in #014)</h3>
+<ol>
+    <li><strong>No <code>webscroll</code> project and no monolithic scroll intent</strong> —
+        "scroll" is a <em>substrate</em>, not a coherent standard; decompose it onto its native
+        seams, most of which already have homes.</li>
+    <li><strong>Extract one thin <code>viewport-presence</code> mechanism intent</strong> — the
+        only reusable residue — owning just the observe-vocabulary
+        (<code>root</code>/<code>rootMargin</code>/<code>threshold</code>/enter-leave) that the
+        three existing <code>IntersectionObserver</code> consumers <em>compose</em>; UX ownership
+        unchanged.</li>
+    <li><strong><code>advance:auto</code> stays a Collection Operations dimension</strong> and
+        composes that trigger — resolving the dated seam without two homes.</li>
+</ol>
+
+<h3>Finding 1 — there is no native "scroll domain"; the platform ships independent primitives</h3>
+<p>
+    The platform does not model "scroll" as one API umbrella. It ships several unrelated
+    primitives that merely share a scrollbar, each a distinct concern:
+</p>
+<ul>
+    <li><strong><code>IntersectionObserver</code></strong> — the async, off-main-thread
+        "is this in view" trigger (replaced scroll-event polling).</li>
+    <li><strong>Scroll-driven animations</strong> (<code>animation-timeline: scroll()</code> /
+        <code>view()</code>) — pure CSS, off the main thread; a <em>motion</em> concern, distinct
+        from scroll-<em>triggered</em>.</li>
+    <li><strong>CSS scroll-snap</strong> (<code>scroll-snap-type</code>, native
+        <code>scrollsnapchange</code>) — declarative carousel/pane snapping, a <em>layout</em>
+        concern.</li>
+    <li><strong><code>content-visibility: auto</code></strong> — native render-skip for
+        off-screen subtrees; the <em>virtualization</em> floor.</li>
+    <li><strong><code>History.scrollRestoration</code></strong> — back-button scroll position; a
+        <em>navigation</em> concern.</li>
+    <li><strong><code>scrollend</code></strong> — the "scroll settled" event; a raw primitive with
+        no ownership question.</li>
+</ul>
+<p>
+    <strong>Implication (fork&nbsp;1):</strong> a project is a top-level standard with one owner
+    (<a href="/projects/webpositioning/">webpositioning</a> qualified because anchoring is one
+    coherent provider-shaped problem). "Scroll" is six unrelated problems — it earns neither a
+    project nor a monolithic intent.
+</p>
+
+<h3>Finding 2 — IntersectionObserver is a SHARED MECHANISM, already used by three separate intents</h3>
+<p>
+    WE already consumes IntersectionObserver in three places, each correctly scoped to a
+    <em>different</em> UX intent — and that separation is correct, not a defect:
+</p>
+<ul>
+    <li><strong>Auto-advance / infinite scroll</strong> — Collection Operations'
+        <code>advance:auto</code> dimension fetches the next slice at a zero-height scroll
+        <em>sentinel</em> (<a href="/intents/collection-operations/">Collection Operations</a>;
+        <a href="https://developer.mozilla.org/en-US/docs/Web/API/IntersectionObserver">IntersectionObserver</a>).</li>
+    <li><strong>Viewport-eager prefetch</strong> — the
+        <a href="/intents/prefetch/">Prefetch</a> intent's <code>eagerness: viewport</code> fires
+        a speculative fetch when a link enters a <code>rootMargin</code> band.</li>
+    <li><strong>Visibility-gated trait activation</strong> — a trait can activate <em>when its
+        host enters the viewport</em> rather than on <code>connectedCallback</code>, framed
+        explicitly as the scripting analogue of <code>content-visibility: auto</code>.</li>
+</ul>
+<p>
+    <strong>Verdict (fork&nbsp;2):</strong> the trigger is a shared mechanism, so it earns
+    <em>one</em> thin <code>viewport-presence</code> intent the three consumers compose (as
+    Collection Ops composes Loader/Windowed Collection) — while the UX decision (fetch vs prefetch
+    vs activate) stays in three homes. The "two homes for scroll-triggering" risk dissolves: the
+    trigger gets one home, the intent three.
+</p>
+
+<h3>Finding 3 — scroll-driven animations are MOTION, not triggering (don't conflate)</h3>
+<p>
+    <code>animation-timeline: scroll()</code>/<code>view()</code> (2024) drives an animation's
+    <em>progress</em> from scroll position, off the main thread with no JS — it plays, pauses, and
+    reverses with the scrollbar. This is categorically different from <em>scroll-triggered</em>
+    (fire-once-on-enter, IntersectionObserver's job). It belongs with WE's motion/transition
+    vocabulary; the native CSS timeline is the default, a JS library (GSAP&nbsp;ScrollTrigger) the
+    opt-in fallback for unsupported browsers.
+</p>
+
+<h3>Finding 4 — virtualization already has a home (Windowed Collection over the native floor)</h3>
+<p>
+    <code>content-visibility: auto</code> + <code>contain-intrinsic-size</code> is native
+    "virtualization lite" — the browser skips rendering off-screen subtrees while keeping correct
+    scroll height. WE's <a href="/intents/windowed-collection/">Windowed Collection</a> intent is
+    the JS-virtualization escalation <em>above</em> that floor. A scroll project would duplicate
+    it. The two layers compose; neither belongs to a new scroll standard.
+</p>
+
+<h3>Finding 5 — scroll restoration is a NAVIGATION seam (already bound to History API)</h3>
+<p>
+    <a href="https://developer.mozilla.org/en-US/docs/Web/API/History/scrollRestoration"><code>history.scrollRestoration = 'manual'</code></a>
+    hands the app control over scroll position across history navigation — the classic
+    infinite-scroll back-button problem (the listing snaps to the bottom of a too-short page
+    before items rehydrate;
+    <a href="https://developer.chrome.com/blog/history-api-scroll-restoration">Chrome blog</a>).
+    Collection Operations already binds the related URL-state seam to the History API via its
+    <code>urlSync</code> dimension, warning <code>advance:auto</code> is "only advisable when this
+    is on, else the footer and back button break". Restoration is the Router/navigation layer's
+    job, not a new standard.
+</p>
+
+<h3>Finding 6 — the <code>advance:auto</code> seam resolves cleanly under decomposition</h3>
+<p>
+    The dated seam note (2026-06-03) on #014 asked whether <code>advance:auto</code> stays in
+    <code>collection-operations</code> or moves to this domain. Folds&nbsp;1+2 answer it: the
+    <em>intent</em> ("scroll to the boundary → fetch the next slice") is a pagination UX decision
+    and <strong>stays</strong> in Collection Operations (infinite scroll =
+    <code>append + auto</code>, a derived opt-in already correctly modeled); only the shared
+    observe-<em>mechanism</em> delegates to <code>viewport-presence</code>. No two homes — trigger
+    has one, semantics has one.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/014-gap-7-webscroll-project/">#014 — Scroll/Observation project (gap #7)</a></li>
+    <li>Seam: <a href="/backlog/062-pagination-windowed-collection-seam/">#062 pagination ↔ windowed-collection</a> + 2026-06-03 pagination research</li>
+    <li>Composes / adjacent: <a href="/intents/collection-operations/">Collection Operations</a> ·
+        <a href="/intents/windowed-collection/">Windowed Collection</a> ·
+        <a href="/intents/prefetch/">Prefetch</a> ·
+        <a href="/intents/loader/">Loader</a></li>
+    <li>Sibling gap projects: <a href="/backlog/015-gap-8-view-transitions-protocol/">#015 view-transitions</a> ·
+        <a href="/backlog/016-gap-9-webcommands-project/">#016 webcommands</a></li>
+</ul>

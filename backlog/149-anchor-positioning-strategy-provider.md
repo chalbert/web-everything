@@ -3,9 +3,12 @@ type: idea
 workItem: story
 size: 5
 parent: "136"
-status: open
+status: resolved
 blockedBy: ["136"]
 dateOpened: "2026-06-07"
+dateStarted: "2026-06-11"
+dateResolved: "2026-06-11"
+graduatedTo: frontierui/blocks/droplist/positioning (DI strategy swap) + demos/positioning-strategy-swap
 tags: [droplist, anchor, popover, positioning, provider, floating-ui, di]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -110,3 +113,24 @@ swap** (`injector.set('customContexts:positioningStrategy', …)`) are NOT yet i
 real-browser toggle). Port the strategy-toggle demo (a plugged Frontier UI demo with an injector
 root) and add an e2e that flips `data-positioning-strategy` native↔js. Tracked alongside
 [#192](/backlog/192-droplist-frontierui-migration-followups/).
+
+## Progress (acceptance closed — 2026-06-10)
+
+The remaining acceptance landed in **Frontier UI**: an injector-root demo
+(`frontierui/demos/positioning-strategy-swap.{html,ts}`) establishes a document `InjectorRoot`,
+sets the `customContexts:positioningStrategy` provider via **one injector line**
+(`documentInjector.set(POSITIONING_STRATEGY, strategy)`), and re-mounts a single `Anchored` surface
+so `resolveStrategy` re-reads the injected provider — flipping `data-positioning-strategy` between
+`native` and `js` app-wide. The initial mount injects nothing, demonstrating the feature-detected
+default.
+
+A new e2e (`frontierui/blocks/droplist/positioning/__tests__/e2e/strategy-swap.spec.ts`, 3 tests, real
+Chromium) asserts: the no-injection default resolves `native` (Chromium supports CSS Anchor
+Positioning); injecting the JS strategy swaps `anchored` to `js`; and the strategy flips back
+`native↔js` as the provider is re-set — the surface placed below its trigger and on-screen under both.
+
+This was the *open part of #149* also listed as a bullet in
+[#193](/backlog/193-droplist-frontierui-migration-followups/) — that bullet is now satisfied.
+
+Gate: 3/3 swap e2e green, 65 droplist unit tests green (incl. 15 positioning strategy tests),
+`tsc --noEmit` clean on the new files.

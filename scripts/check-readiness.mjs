@@ -22,6 +22,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { computeReadiness, computeSelection, computeBatchPack, spliceStaleEdges } from './readiness/engine.mjs';
+import { parseReservations, emptyState, foreignHolds, deprioritizeReserved } from './readiness/reservations.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -38,6 +39,21 @@ function loadCapacity() {
     return { capacityPoints: c.capacityPoints ?? 100, targetFraction: c.targetFraction ?? 0.5 };
   } catch { return { capacityPoints: 100, targetFraction: 0.5 }; }
 }
+
+// Cross-session batch reservations (#083 selection-tier soft hint). A batch soft-holds the items it
+// PLANS (backlog.mjs reserve); here we DEPRIORITIZE — never exclude — items held by ANOTHER session so
+// a second concurrent batch packs around them. Pass `--session=<my-slug>` so a batch's OWN top-up
+// `--select` doesn't deprioritize its own chain. Time-dependent (TTL) + session-aware, so it lives at
+// this CLI boundary, NEVER inside the byte-deterministic `computeSelection` core.
+const RESERVATIONS_PATH = join(ROOT, '.claude/skills/batch-backlog-items/reservations.json');
+function loadReservations() {
+  try { return parseReservations(readFileSync(RESERVATIONS_PATH, 'utf8')); }
+  catch { return emptyState(); }
+}
+const MY_SESSION = (() => {
+  const m = process.argv.find((a) => a.startsWith('--session='));
+  return m ? m.slice('--session='.length) : undefined;
+})();
 
 const APPLY = process.argv.includes('--apply');
 const JSON_MODE = process.argv.includes('--json');
@@ -58,7 +74,15 @@ const report = computeReadiness(items);
 const selection = computeSelection(items); // the deterministic ranked view (same source as the Prioritisation tab)
 const capacity = loadCapacity();
 const budget = BUDGET_OVERRIDE ?? Math.round(capacity.capacityPoints * capacity.targetFraction);
-const batchPack = computeBatchPack(selection.tierA, budget); // the suggested points-budgeted batch
+
+// Apply the soft-reservation penalty AFTER the deterministic ranking: foreign-held items sink to the
+// back so the pack fills with un-held items first (deprioritize, not exclude). `selection.*` stays the
+// pure projection; only the pack + displayed order reflect reservations.
+const reservations = loadReservations();
+const foreign = foreignHolds(reservations, Date.now(), MY_SESSION);
+const tierAforPack = deprioritizeReserved(selection.tierA, foreign);
+const batchableForView = deprioritizeReserved(selection.batchable, foreign);
+const batchPack = computeBatchPack(tierAforPack, budget); // the suggested points-budgeted batch (reservation-aware)
 
 // ── --apply: the only mechanical edit — drop stale (resolved) blockedBy edges ────
 const applied = [];
@@ -78,7 +102,12 @@ if (APPLY) {
 }
 
 if (JSON_MODE) {
-  console.log(JSON.stringify({ ...report, selection, batch: { capacity, budget, ...batchPack }, applied: APPLY ? applied : undefined, gaveUp: APPLY ? gaveUp : undefined }, null, 2));
+  const reservationsOut = {
+    ttlMinutes: reservations.ttlMinutes,
+    mySession: MY_SESSION ?? null,
+    foreign: [...foreign.entries()].map(([num, session]) => ({ num, session })),
+  };
+  console.log(JSON.stringify({ ...report, selection, batch: { capacity, budget, ...batchPack }, reservations: reservationsOut, applied: APPLY ? applied : undefined, gaveUp: APPLY ? gaveUp : undefined }, null, 2));
   process.exit(0);
 }
 
@@ -86,19 +115,23 @@ if (JSON_MODE) {
 if (SELECT) {
   const eff = (it) => `${it.workItem}${typeof it.size === 'number' ? '·' + it.size : ''}`;
   const lev = (it) => (it.leverageScore ? `${DIM}frees ${it.unblocksToReady}·gates ${it.transitiveUnblocks}${RST}` : '');
-  const line = (it, mark) => console.log(`  ${mark} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}—${RST} ${eff(it)} ${lev(it)}`);
+  // A foreign-held item carries `reservedBy` (deprioritize, not exclude — #083): tag it so the human
+  // sees it was sunk because another session planned it, not skipped.
+  const resv = (it) => (it.reservedBy ? ` ${YEL}⊘ held by ${it.reservedBy}${RST}` : '');
+  const line = (it, mark) => console.log(`  ${mark} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}—${RST} ${eff(it)} ${lev(it)}${resv(it)}`);
 
   console.log(`${DIM}check:readiness --select — deterministic ranking (same source as /backlog/ Prioritisation tab)${RST}`);
   const c = selection.counts;
-  console.log(`${BLD}${c.open} open${RST} · ${GRN}${c.tierA} Tier A${RST} · ${CYA}${c.batchable} batchable${RST} · ${YEL}${c.tierB} Tier B (decisions)${RST} · ${DIM}${c.tierC} Tier C${RST}\n`);
+  console.log(`${BLD}${c.open} open${RST} · ${GRN}${c.tierA} Tier A${RST} · ${CYA}${c.batchable} batchable${RST} · ${YEL}${c.tierB} Tier B (decisions${c.tierBPrepared ? `, ${GRN}${c.tierBPrepared} prepared${YEL}` : ''})${RST} · ${DIM}${c.tierC} Tier C${RST}\n`);
 
-  console.log(`${CYA}${BLD}Batchable — Tier-A task or story·≤5 (the batch pool) — pre-flight each body for a buried fork before chaining${RST}`);
-  if (selection.batchable.length) selection.batchable.forEach((it) => line(it, `${CYA}◆${RST}`));
+  if (foreign.size) console.log(`${DIM}${foreign.size} item(s) soft-held by another session${MY_SESSION ? ` (yours: ${MY_SESSION}, not penalized)` : ''} — deprioritized below, not excluded (#083).${RST}`);
+  console.log(`${CYA}${BLD}Batchable — Tier-A task or story·≤8 (the batch pool) — pre-flight each body for a buried fork before chaining${RST}`);
+  if (batchableForView.length) batchableForView.forEach((it) => line(it, it.reservedBy ? `${YEL}⊘${RST}` : `${CYA}◆${RST}`));
   else console.log(`${DIM}  none.${RST}`);
 
   // The suggested points-budgeted batch — "take as many points as possible up to ~half a session,"
   // not a fixed item count. Budget = capacityPoints × targetFraction (calibrated at close-out); cost
-  // sums each item's batchCost (size; a task = 2), so a size·5 joins when it fits the remaining points.
+  // sums each item's batchCost (size; a task = 2), so a size·8 joins when it fits the remaining points.
   const budgetSrc = BUDGET_OVERRIDE !== undefined ? `override; remaining at a seam` : `${capacity.capacityPoints} capacity × ${capacity.targetFraction}`;
   console.log(`\n${CYA}${BLD}Suggested batch — points budget ${budget}${RST} ${DIM}(${budgetSrc}; cost = size, task = 2)${RST}`);
   if (batchPack.picked.length) {
@@ -110,13 +143,16 @@ if (SELECT) {
     console.log(`  ${DIM}= ${batchPack.spent}/${budget} pts packed across ${batchPack.picked.length} item(s). Pre-flight each body for a buried fork; the count is whatever fills the budget.${RST}`);
   } else console.log(`${DIM}  none eligible — no Tier-A item fits the budget.${RST}`);
 
-  const restA = selection.tierA.filter((it) => !it.batchable);
-  console.log(`\n${GRN}${BLD}Other Tier-A — agent-ready, single-item (story·≥8 / epic / unsized)${RST}`);
-  if (restA.length) restA.forEach((it) => line(it, `${GRN}▲${RST}`));
+  const restA = tierAforPack.filter((it) => !it.batchable);
+  console.log(`\n${GRN}${BLD}Other Tier-A — agent-ready, single-item (story·≥13 / epic / unsized)${RST}`);
+  if (restA.length) restA.forEach((it) => line(it, it.reservedBy ? `${YEL}⊘${RST}` : `${GRN}▲${RST}`));
   else console.log(`${DIM}  none.${RST}`);
 
-  console.log(`\n${YEL}${BLD}Tier B — decisions one nod away (ranked by leverage; discuss, don't auto-build)${RST}`);
-  if (selection.tierB.length) selection.tierB.forEach((it) => line(it, `${YEL}◐${RST}`));
+  console.log(`\n${YEL}${BLD}Tier B — decisions (prepared-first, then by leverage; discuss, don't auto-build)${RST}`);
+  if (selection.tierB.length) selection.tierB.forEach((it) => {
+    const tag = it.prepared ? `${GRN}✓ ready to ratify${RST}` : `${DIM}○ needs prep${RST}`;
+    console.log(`  ${YEL}◐${RST} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}—${RST} ${eff(it)} ${tag} ${lev(it)}`);
+  });
   else console.log(`${DIM}  none.${RST}`);
 
   console.log(`\n${DIM}Ranking is a pure projection of loader fields (tier/batchable/leverage) — instant, identical to the tab, no rubric re-derived. Body-fork pre-flight (skill) is the only per-item judgment left.${RST}`);

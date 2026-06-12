@@ -1,0 +1,37 @@
+<h2>Lifecycle</h2>
+<p>The reference runtime for the <a href="/projects/weblifecycle/">Web Lifecycle</a> protocol — a domain
+entity's declared status set and the guarded, role-scoped transitions between them. A loan, a policy, a
+claim, an order, a ticket: each is a state machine
+(<code>draft → submitted → … → closed</code>) whose legal moves depend on the actor and on guard
+predicates. The block ships the protocol's seam and nothing about the engine behind it.</p>
+
+<h3>What it provides</h3>
+<ul>
+  <li><code>LifecycleDefinition</code> — the data-defined status set + transition map (each edge:
+    <code>from → to</code>, an optional <code>guard</code>, the permitted <code>actor</code>). The map is
+    the only lock — portable across engines.</li>
+  <li><code>CustomLifecycleProvider</code> — the swappable contract: <code>available(entity, actor)</code>
+    and <code>transition(entity, to, actor)</code>.</li>
+  <li><code>DefaultLifecycleProvider</code> — a native-first, in-memory reference satisfying the contract
+    (deterministic under test via an injectable clock); a workflow engine plugs in behind the same
+    interface.</li>
+  <li><code>CustomLifecycleRegistry</code> (<code>window.customLifecycles</code>) — named providers the
+    project selects or overrides via the injector chain.</li>
+</ul>
+
+<h3>What it deliberately does not own</h3>
+<ul>
+  <li><strong>Authorization</strong> — <em>whether</em> an actor may fire an edge is a guard predicate,
+    delegated to a <code>GuardResolver</code> (the <a href="/projects/webguards/">Web Guards</a> seam).
+    The default resolver is permissive (there is no native authorization primitive); a real authz
+    provider is async and server-authoritative.</li>
+  <li><strong>Persistence</strong> — where the entity (and its current status) is stored is the entity's
+    own concern.</li>
+</ul>
+
+<h3>Composition</h3>
+<p>Every applied transition emits a <code>LifecycleEvent</code> (<code>{ entity, from, to, actor, at }</code>)
+— the composition seam for audit-trail (<a href="/backlog/357-audit-trail-standard/">#357</a>) and
+reporting. The canonical display of the current state + available next moves is the
+<a href="/intents/status-indicator/">Status Indicator</a> intent. The first real consumer is the
+<a href="/backlog/317-exercise-app-loan-origination/">loan-origination exercise app</a>.</p>

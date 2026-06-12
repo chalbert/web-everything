@@ -1,10 +1,10 @@
 ---
 type: idea
 workItem: epic
-size: 13
 parent: "150"
 status: open
 dateOpened: "2026-06-09"
+dateStarted: "2026-06-11"
 tags: [dev-experience, devtools, validation, linting, adapters, normalization, technical-configurator, dev-surface, no-lock-in]
 relatedReport: reports/2026-06-07-dev-authoring-preferences-architecture-intents.md
 relatedProject: webadapters
@@ -45,3 +45,36 @@ cells are the most valuable for shopping, not the embarrassing ones.
 - Honest handling of round-trip loss on re-export (best-effort, never promise lossless).
 
 See the [adapter-as-normalization-hub] paradigm and the no-lock-in principle recorded from this decision.
+
+## Progress
+
+**`see` leg shipped (2026-06-11).** The epic was scoped to its first, genuinely-buildable leg —
+`see` — with `re-export` and `shop` spun out as children. Delivered:
+
+- **Pivot model + knowledge base** — `scripts/validation-normalize/knowledge.mjs`: tool-agnostic
+  `concerns`, a cross-tool `mappings` table graded by confidence (`exact`/`partial`/`approx`), and
+  the implicit `none` grade where a tool has *no equivalent* (the valuable shopping cells).
+- **Adapters** — `adapters/eslint.mjs` + `adapters/oxlint.mjs`, each `ingest(config)` →
+  normalized rules. They only ever read the incumbent's own config (zero lock-in).
+- **Merge engine** — `normalize.mjs` joins ingested configs against the knowledge base into a
+  comparative model (one cell per concern×tool, with `active`/`severity` from the loaded project),
+  plus a `summarize()`. Entry point `index.mjs` exposes `see(configsByTool)`.
+- **Catalog page** — `/validation-rules/` (`src/validation-rules.njk` + `src/_data/validationRules.js`)
+  auto-renders the comparative table from fixture configs, highlighting divergences and no-equivalent
+  cells. Nav entry added under Explore; Vite proxy allowlist updated.
+- **Tests + authoring note** — 9 vitest cases (`__tests__/normalize.test.mjs`) green;
+  `scripts/validation-normalize/README.md` documents the pivot model + how to add an adapter.
+
+Resolutions of the four "resolve at build time" forks (POC defaults):
+
+- **v1 tool set / first rule classes** → ESLint + Oxlint; six concerns spanning exact matches,
+  a partial (`hook-deps`), and a no-equivalent (`import-boundaries`, Oxlint side) to demonstrate the
+  comparative value.
+- **Pivot schema + confidence tagging** → concern + graded mapping (above), discovered against a
+  working `see` view rather than on paper.
+- **surface split** → devtool view for now (`see`); Configurator domain deferred to the `shop` child.
+- **round-trip loss** → not applicable to `see` (read-only); the honest-loss requirement is carried
+  into the `re-export` child.
+
+Deferred legs spun out: **#282** (re-export) and **#283** (shop, gated on the Technical
+Configurator maturing). Epic resolved down to the shipped `see` devtool.

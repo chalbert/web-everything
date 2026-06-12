@@ -3,9 +3,11 @@ type: idea
 workItem: story
 size: 5
 parent: "097"
-status: open
+status: resolved
 blockedBy: ["094"]
 dateOpened: "2026-06-08"
+dateResolved: "2026-06-11"
+graduatedTo: blocks/renderers/upgrader/analyzers/frameworkAnalyzers.ts — React/Lit/Vue deterministic input adapters behind the analyzer registry + shared framework-cases fixtures + Code Upgrader playground cards
 tags: [upgrader, input-adapter, analyzer, react, lit, vue, breadth]
 relatedProject: webadapters
 crossRef: { url: /backlog/094-ai-upgrader-tools/, label: "AI upgrader MVP (#094)" }

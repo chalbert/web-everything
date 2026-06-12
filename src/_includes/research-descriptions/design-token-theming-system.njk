@@ -1,0 +1,81 @@
+<h2>The Question</h2>
+<p>
+  Phase-3 coverage detection (<a href="/backlog/347-capability-mapping-gap-detection/">#347</a>) ranked
+  <strong>gap&nbsp;#4 <code>design-tokens-theming</code></strong> — <em>"no unified token system
+  (spacing / radius / elevation / semantic color / dark)"</em> — as a fileable miss. WE already ships
+  intents that touch <em>slices</em> (<a href="/intents/typography/">typography</a>,
+  <a href="/intents/density/">density</a>, <a href="/intents/surface/">surface</a>,
+  <a href="/intents/motion/">motion</a>), and <a href="/backlog/010-gap-3-theme-color-intent/">#010</a>
+  shipped a theme-color <em>intent</em> (<code>scheme</code>/<code>contrast</code>/<code>accent</code>)
+  on the native stack. But #010 explicitly <strong>deferred a full design-token <em>project</em></strong>
+  — <em>"token elaboration is the technical half, not an intent dimension"</em>. This survey grounds
+  <a href="/backlog/364-unified-design-token-theming-system/">#364</a>, the deferred technical half:
+  how WE structures the concrete-value layer the semantic intents resolve into. Per design-first step&nbsp;1,
+  it surveys the native substrate + the benchmark design systems so the forks reuse platform vocabulary.
+</p>
+
+<h2>What the survey found</h2>
+
+<h3>1 · The token format standardized in Oct 2025 — DTCG 2025.10</h3>
+<p>
+  The W3C <a href="https://www.designtokens.org/">Design Tokens Community Group</a> reached its
+  <a href="https://www.w3.org/community/design-tokens/2025/10/28/design-tokens-specification-reaches-first-stable-version/"><strong>first
+  stable version (Design Tokens Format Module 2025.10)</strong></a> on 2025-10-28 — a vendor-neutral JSON
+  interchange format (<code>$type</code>/<code>$value</code>, aliasing via <code>{group.token}</code>
+  references). 10+ tools implement it, with reference implementations in
+  <a href="https://styledictionary.com/info/dtcg/">Style Dictionary</a>, Tokens Studio, and Terrazzo.
+  A real swappable-vendor interop story — the strongest "adopt, don't coin" signal in the survey.
+</p>
+
+<h3>2 · The native CSS substrate is Baseline — strongly native-first</h3>
+<p>
+  Every primitive a token runtime needs is now
+  <a href="https://web.dev/articles/baseline-in-action-color-theme">Baseline-available</a>: custom
+  properties + <code>@property</code> (typed registration), <a href="https://developer.mozilla.org/en-US/docs/Web/CSS/color_value/light-dark"><code>light-dark()</code></a>
+  + <code>color-scheme</code> (scheme switching with no media query; also themes native UI), relative
+  color syntax + <code>color-mix()</code> (derive a scale from one accent in oklab/oklch), and the
+  <code>prefers-contrast</code> / <code>prefers-reduced-*</code> queries the surface/motion intents lean
+  on. The native stack covers scheme + accent-derivation at runtime with <strong>zero build step</strong>.
+</p>
+
+<h3>3 · The benchmark systems are unanimous on a 2–3 tier taxonomy</h3>
+<table>
+  <thead><tr><th>System</th><th>Tiers</th><th>Naming</th></tr></thead>
+  <tbody>
+    <tr><td><a href="https://m3.material.io/foundations/design-tokens/overview">Material Design 3</a></td><td>3</td><td><strong>reference → system → component</strong> (ref/sys/comp)</td></tr>
+    <tr><td><a href="https://spectrum.adobe.com/page/design-tokens/">Adobe Spectrum</a></td><td>3</td><td>global → alias → component</td></tr>
+    <tr><td><a href="https://fluent2.microsoft.design/design-tokens">Fluent 2</a></td><td>2 (+comp)</td><td><strong>global</strong> (raw) → <strong>alias</strong> (semantic)</td></tr>
+    <tr><td><a href="https://www.radix-ui.com/themes/docs/theme/color">Radix Themes</a></td><td>scales → aliases</td><td>12-step accent/gray scales; knobs <code>accentColor</code>/<code>radius</code>/<code>scaling</code></td></tr>
+    <tr><td><a href="https://developer.apple.com/design/human-interface-guidelines/color">Apple HIG</a></td><td>semantic</td><td>dynamic system colors named by <em>purpose</em>, auto light/dark</td></tr>
+  </tbody>
+</table>
+<p>
+  The shape is universal — <strong>primitive → semantic → component</strong>, the semantic tier always
+  purpose-named, never appearance-named. <strong>Radix is the cautionary data point</strong>: it ships
+  deliberately hand-curated 12-step scales rather than auto-deriving, because naive derivation can miss
+  WCAG contrast at specific steps. That is the one genuinely divergent call.
+</p>
+
+<h3>4 · The WE-specific reframe</h3>
+<p>
+  WE is not a from-scratch design system — it <strong>already owns the semantic tier as Intents</strong>.
+  <code>surface</code> names elevation (a <code>0-5</code> semantic scale) + texture; <code>density</code>,
+  <code>typography</code>, <code>motion</code>, and the deferred theme-color intent name the rest. These
+  intents <em>are</em> WE's "system/alias" tier in MD3 terms. So the relationship-to-#010 answers itself
+  structurally: <strong>the token project owns the primitive + component tiers and leaves the semantic
+  tier to the intents</strong> — not a second parallel vocabulary. Intents stay UX-only; tokens supply the
+  concrete values they resolve into.
+</p>
+
+<h2>Forks this grounds (see <a href="/backlog/364-unified-design-token-theming-system/">#364</a>)</h2>
+<ol>
+  <li><strong>Home / layer</strong> — a new Web Project (the deferred technical half) vs Capability vs fold-into-intent.</li>
+  <li><strong>Format</strong> — adopt DTCG 2025.10 as interchange, compiled to the native CSS substrate as runtime.</li>
+  <li><strong>Tier taxonomy + the #010 seam</strong> — 3-tier, with the semantic tier owned by existing intents.</li>
+  <li><strong>Scheme + accent-derivation</strong> — native-runtime default vs curated explicit scales (the divergent, lower-confidence call).</li>
+</ol>
+
+<p style="font-size:0.85em;color:var(--color-text-muted,#94a3b8);">
+  Session report: <code>reports/2026-06-12-design-token-theming-system.md</code>. No ruling made here —
+  the decision turn is <code>/next decision</code>.
+</p>

@@ -89,6 +89,25 @@ module.exports = function (eleventyConfig) {
     return _crossStrategy.lift(String(declarative).trim()).code;
   });
 
+  // Build-time event-handler display form (#324): rewrite the canonical string-behavior spelling
+  // (on:click="inc($event)") that htmlToJsx emits into the convenience function-prop spelling
+  // (onclick={inc}) for the source toggle's "JSX · fn" pane. Lazily esbuild-transpiles the SAME
+  // shared transform the tests exercise (blocks/renderers/jsx/eventHandlerForm.ts) — a second
+  // presentation axis, orthogonal to the html|react name dialect; the canonical pane stays the source.
+  let _eventHandlerForm;
+  eleventyConfig.addFilter("eventHandlerToFunctionProp", function(jsx) {
+    if (!_eventHandlerForm) {
+      const fs = require("fs");
+      const { transformSync } = require("esbuild");
+      const src = fs.readFileSync(__dirname + "/blocks/renderers/jsx/eventHandlerForm.ts", "utf8");
+      const { code } = transformSync(src, { loader: "ts", format: "cjs" });
+      const m = { exports: {} };
+      new Function("module", "exports", "require", code)(m, m.exports, require);
+      _eventHandlerForm = m.exports;
+    }
+    return _eventHandlerForm.toFunctionProp(String(jsx));
+  });
+
   // Flatten adapters from categories for pagination.
   // Read the file fresh each build (not `require`, which Node module-caches) so adapter additions
   // hot-reload on the watch server like blocks/projects/intents do via the data cascade — see
@@ -115,6 +134,10 @@ module.exports = function (eleventyConfig) {
   eleventyConfig.addPassthroughCopy("src/assets");
   eleventyConfig.addPassthroughCopy("demos");
   eleventyConfig.addPassthroughCopy("plugs");
+  // Design-reference corpus (#382): serve the WebP shots under the gallery page's URL, and watch
+  // design-refs so new captures (and the designRefs data loader) hot-reload on the dev server.
+  eleventyConfig.addPassthroughCopy({ "design-refs/items": "research/design-references/shots" });
+  eleventyConfig.addWatchTarget("design-refs");
 
   return {
     dir: {

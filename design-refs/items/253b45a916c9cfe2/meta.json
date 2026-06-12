@@ -1,0 +1,28 @@
+{
+  "id": "253b45a916c9cfe2",
+  "contentHash": "253b45a916c9cfe2a33850bec927838d54e320c85a1de7e1113e00695ec59168",
+  "sourceUrl": "https://play.grafana.org",
+  "captureMethod": "playwright",
+  "reviewState": "confirmed",
+  "dateCollected": "2026-06-12T12:44:12.858Z",
+  "datePublished": null,
+  "app": "Grafana",
+  "company": "Grafana Labs",
+  "category": "analytics-observability",
+  "surface": null,
+  "designRegister": "enterprise-dense",
+  "theme": "dark",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "dpr": 2,
+  "imageDims": {
+    "width": 2880,
+    "height": 1800
+  },
+  "bytes": 292254,
+  "tags": [],
+  "sourceCredit": "Grafana Labs",
+  "collectionRun": "2026-06-12T12-44-02-696Z"
+}

@@ -133,6 +133,34 @@ function lowerInterpolation(src: string, diags: Diagnostic[]): string {
 }
 
 /**
+ * `<Suspense>{use(E)}BODY</Suspense>` → `<template is="resource" from="E">BODY</template>`.
+ *
+ * LOSSY, lower-only (#337, ratified #124). The vdom `use(E)` reads the resource and SUSPENDS ON READ —
+ * it throws to the nearest `<Suspense>` via the React scheduler. The declarative `<template
+ * is="resource">` has no suspend-on-read: it is inert markup the **Resource Loader block** (id
+ * `resource-loader`, `implementsIntent: loader`) resolves through the Loader Intent's explicit
+ * `pending`/`success`/`error` state transitions (anti-flicker, version-token stale-drop and hierarchy
+ * aggregation stay the Loader's — cross-referenced, never duplicated here). So the scheduler-integrated
+ * suspension has no declarative equivalent and is dropped on the way down — flagged
+ * `resource-suspends-on-read`, never silently. (#124: `<Resource>` is a declarative composition of the
+ * Loader Intent — no new async model; suspend-on-read is the one vdom-only behavior that can't survive.)
+ */
+function lowerResource(src: string, diags: Diagnostic[]): string {
+  return src.replace(
+    /<Suspense>\s*\{\s*use\(\s*([^()]+?)\s*\)\s*\}([\s\S]*?)<\/Suspense>/g,
+    (_w, from: string, body: string) => {
+      const ref = from.trim();
+      diags.push({
+        rule: 'resource-suspends-on-read',
+        message: `use(${ref}) suspends on read (throws to <Suspense> via the scheduler); the declarative <template is="resource"> resolves through the Resource Loader's explicit pending/success/error states instead — the suspend-on-read semantics have no declarative equivalent and are dropped.`,
+        fragment: `use(${ref})`,
+      });
+      return `<template is="resource" from="${ref}">${body}</template>`;
+    }
+  );
+}
+
+/**
  * Lower vdom JSX into the declarative-static dialect.
  */
 export function lower(vdom: string): ConversionResult {
@@ -141,6 +169,8 @@ export function lower(vdom: string): ConversionResult {
   s = lowerEvents(s, diagnostics);
   s = lowerMaps(s);
   s = lowerConditionals(s);
+  // before lowerInterpolation, so the `{use(E)}` read is consumed here and not seen as a bare {expr}.
+  s = lowerResource(s, diagnostics);
   s = lowerInterpolation(s, diagnostics);
   return { code: s, lossy: diagnostics.length > 0, diagnostics };
 }
@@ -168,6 +198,29 @@ function liftConditionals(src: string): string {
   return src.replace(
     /<template\s+is="if"\s+condition="([^"]+)"\s*>([\s\S]*?)<\/template>/g,
     (_w, cond: string, body: string) => `{${cond} && ${body.trim()}}`
+  );
+}
+
+/**
+ * `<template is="resource" from="E">BODY</template>` → `<Suspense>{use(E)}BODY</Suspense>` (and the
+ * self-closing form → `<Suspense>{use(E)}</Suspense>`). The vdom spelling of the resource directive:
+ * `use()` is React's read-a-resource-and-suspend primitive, wrapped by a `<Suspense>` boundary, so the
+ * suspend-on-read is RE-INTRODUCED on the way up (not lossy upward — only `lowerResource` is). The
+ * directive's named `loading`/`error` slots inside BODY map to the Loader's `pending`/`error` fallback
+ * surfaces and its default children to `success`; that resolution is the Resource Loader block's
+ * (cross-referenced, not duplicated) — this structural pass only restores the vdom shell and carries
+ * BODY through. POC nesting limit (shared with liftForEach): a BODY containing its own `<template>`
+ * slot children is out of scope for this non-greedy structural match.
+ */
+function liftResource(src: string): string {
+  // self-closing first, so the opening rule's body capture can't swallow the trailing "/".
+  src = src.replace(
+    /<template\s+is="resource"\s+from="([^"]+)"\s*\/>/g,
+    (_w, from: string) => `<Suspense>{use(${from})}</Suspense>`
+  );
+  return src.replace(
+    /<template\s+is="resource"\s+from="([^"]+)"\s*>([\s\S]*?)<\/template>/g,
+    (_w, from: string, body: string) => `<Suspense>{use(${from})}${body}</Suspense>`
   );
 }
 
@@ -211,6 +264,9 @@ export function lift(declarative: string): ConversionResult {
   let s = declarative.trim();
   s = liftForEach(s);
   s = liftConditionals(s);
+  // after the inner for-each/if templates have lifted, so the resource shell's </template> is the
+  // one the non-greedy body match closes on.
+  s = liftResource(s);
   s = liftBindText(s, diagnostics);
   s = liftEvents(s);
   s = liftInterpolation(s);

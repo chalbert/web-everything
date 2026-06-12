@@ -1,0 +1,43 @@
+<h2>Purpose</h2>
+<p>
+  Phase 2 of the <a href="/backlog/315-competitive-coverage-gap-analysis-program/">competitive coverage
+  gap-analysis program</a> (<a href="/backlog/346-capability-extraction-normalization-schema/">#346</a>):
+  the <strong>normalized capability matrix</strong> extracted from the
+  <a href="/research/benchmark-corpus/">benchmark corpus</a>. Each row is one capability the corpus
+  exposes, deduped across sources into a stable <code>id</code> (Material &ldquo;Menu&rdquo;, Fluent
+  &ldquo;Menu&rdquo;, Radix &ldquo;Dropdown Menu&rdquo; &rarr; one <code>menu</code> capability). Phase 3
+  (<a href="/backlog/347-capability-mapping-gap-detection/">#347</a>) joins each row to a Web Everything
+  entity and labels coverage. Data: <code>src/_data/benchmarkCapabilities.json</code>; this page renders
+  from it.
+</p>
+
+<h2>Extraction method</h2>
+<p>{{ benchmarkCapabilities.method.howRead }}</p>
+<p><strong>Dedup:</strong> {{ benchmarkCapabilities.method.dedup }}</p>
+<p><strong>Scope (first pass):</strong> {{ benchmarkCapabilities.method.scope }}</p>
+<p><strong>Reproducibility:</strong> {{ benchmarkCapabilities.method.reproducibility }}</p>
+
+<h2>The matrix</h2>
+<p>
+  <code>ubiquity</code> is a coarse cross-corpus signal (universal / common / partial / rare-emerging);
+  <code>notableIn</code> flags standout implementations; <code>nativeAnchorHint</code> records the native
+  API/element a capability plausibly maps to &mdash; the input phase 3 uses to keep gap detection
+  <em>native-first</em>.
+</p>
+{% for k in benchmarkCapabilities.kinds %}
+<h3>{{ k.label }}</h3>
+<table>
+  <thead><tr><th>Capability</th><th>Family</th><th>Ubiquity</th><th>Native anchor</th><th>Summary</th></tr></thead>
+  <tbody>
+    {% for c in benchmarkCapabilities.capabilities %}{% if c.kind == k.id %}
+    <tr>
+      <td><strong>{{ c.label }}</strong></td>
+      <td>{{ c.family }}</td>
+      <td>{{ c.ubiquity }}</td>
+      <td>{% if c.nativeAnchorHint %}{{ c.nativeAnchorHint }}{% else %}&mdash; (no native anchor){% endif %}</td>
+      <td>{{ c.summary }}</td>
+    </tr>
+    {% endif %}{% endfor %}
+  </tbody>
+</table>
+{% endfor %}

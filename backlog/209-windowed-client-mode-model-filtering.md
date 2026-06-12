@@ -3,9 +3,12 @@ type: idea
 workItem: story
 size: 5
 parent: "137"
-status: open
+status: resolved
 blockedBy: ["201"]
 dateOpened: "2026-06-08"
+dateStarted: "2026-06-11"
+dateResolved: "2026-06-11"
+graduatedTo: frontierui Windowed.filterModel + Filter modelFilter hook + AutoComplete client seedItems→setModel — windowed works in filter=client (model-level filtering)
 tags: [droplist, autocomplete, windowed, virtualization, filter, client-mode]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks

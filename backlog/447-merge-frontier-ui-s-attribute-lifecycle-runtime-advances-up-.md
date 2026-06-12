@@ -1,0 +1,13 @@
+---
+type: issue
+workItem: story
+size: 5
+parent: "170"
+status: open
+dateOpened: "2026-06-12"
+tags: []
+---
+
+# Merge Frontier UI's attribute-lifecycle + runtime advances up into Web Everything
+
+Adopt FU's CustomAttributeRegistry.ts (visibility-gating + lazy fetch-on-view, #221/#280/#222/#226; FU+541/WE+11 asymmetric merge) preserving WE's 11 unique lines, and fold the FU-ahead/bidirectional reconciles across webbehaviors/index, webexpressions/* (incl. cloneHandlers), webcontexts/*, core/CustomRegistry (GetterValue / entries()), Node.injectors.patch + HTMLInjector. Makes WE the plugs runtime superset. First half of #170's consolidation (the load-bearing merge).

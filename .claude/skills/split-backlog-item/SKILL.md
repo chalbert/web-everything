@@ -1,6 +1,6 @@
 ---
 name: split-backlog-item
-description: Analyse large backlog stories (size > 5) and split each into smaller, agent-ready, independently-deliverable batchable slices — but only when it's provably safe and doesn't cost quality. Always produces a report of what could and could not be split (with the action that would unblock the latter); the on-disk split is gated on approval. Use when the user wants to "split" a big story, break a large item into smaller ones, or find which backlog items are too big to batch.
+description: Analyse large backlog stories (size > 8) and split each into smaller, agent-ready, independently-deliverable batchable slices — but only when it's provably safe and doesn't cost quality. Always produces a report of what could and could not be split (with the action that would unblock the latter); the on-disk split is gated on approval. Use when the user wants to "split" a big story, break a large item into smaller ones, or find which backlog items are too big to batch.
 ---
 
 # Split — slice large stories into batchable items, only when safe
@@ -19,11 +19,15 @@ mutation is gated on approval and only happens when it's provably safe.
 
 ## Quick path — the loop in commands
 
-1. **Build the candidate set.** Open `story` items with `size` > 5 (`8`/`13`). Unblocked ones come
-   from `npm run check:readiness -- --select` (`--json` → `selection.tierA`/`selection.tierB`, filter
-   `workItem==='story' && size>5`). **Blocked (Tier C) candidates aren't in that projection**, so do a
-   one-pass frontmatter scan of `backlog/*.md` (`workItem: story` + `size` ≥ 8 + `status` ≠ `resolved`)
-   for the complete list. `/split <NNN>` focuses one item; bare `/split` sweeps the whole set.
+1. **Build the candidate set** — two kinds: **(a) oversized stories** (`workItem: story`, `size` > 8 /
+   `13`) and **(b) unsliced epics** (`workItem: epic` with **no children** — no item names them as
+   `parent`). An epic is already decided to decompose, so it skips the should-we-split question (rubric
+   (1)) and proposes slices straight from its body. Unblocked stories come from
+   `npm run check:readiness -- --select` (`--json` → `selection.tierA`/`selection.tierB`, filter
+   `workItem==='story' && size>8`). **Blocked stories and epics aren't in that projection**, so do a
+   one-pass frontmatter scan of `backlog/*.md` (`workItem: story` + `size` ≥ 13, **or** `workItem: epic`
+   with no child referencing it, all `status` ≠ `resolved`) for the complete list. `/split <NNN>` (alias
+   `/slice <NNN>`) focuses one item; bare `/split` sweeps the whole set.
 2. **Apply the split-safety rubric to each** (all five must hold — *Splitting a large story* → *The
    split-safety rubric*): **(1)** size is volume not an unresolved decision — *you can't split away a
    fork*; **(2)** ≥2 nameable slices, each a `story` (standalone value) or `task` (sub-work under the
@@ -51,7 +55,10 @@ A single "go" authorizes the splits you presented. Per approved item, mechanical
    **remove `size`** (children carry the points now), refresh its digest to an umbrella framing, keep
    `status: open`, and **keep the `NNN`** — never renumber (*Rules*). *Edge case:* if the original
    already has a `parent`, don't nest — keep it a re-sized `story` for its core slice and add the rest
-   as **siblings under the same parent**.
+   as **siblings under the same parent**. *Already an epic (kind b):* no conversion — but still **drop any
+   residual `size`** (a mis-converted epic that kept story points double-counts once it has sized
+   children — `check:standards` errors), refresh the digest only if needed, and go straight to
+   scaffolding its child slices.
 2. **Scaffold each slice:** `node scripts/backlog.mjs scaffold --type=… --workitem=story|task
    [--size=…] --title="…" --parent=<NNN> [--blocked-by=<NNN>,…] --digest="…"`. `--parent` rolls it under
    the epic; `--blocked-by` lays the DAG edges; write a real per-slice digest (it's the loader's

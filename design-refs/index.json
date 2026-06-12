@@ -1,0 +1,450 @@
+[
+  {
+    "id": "44ae534ae469ef45",
+    "contentHash": "44ae534ae469ef4575adf2bee524a6bd37993e0851ab615c97f4984cab945ef6",
+    "sourceUrl": "https://squoosh.app",
+    "captureMethod": "playwright",
+    "reviewState": "confirmed",
+    "dateCollected": "2026-06-12T21:52:57.974Z",
+    "datePublished": null,
+    "app": "Squoosh",
+    "company": "Google Chrome Labs",
+    "category": "developer-tools",
+    "surface": null,
+    "designRegister": "minimal",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "dpr": 2,
+    "imageDims": {
+      "width": 2880,
+      "height": 1800
+    },
+    "bytes": 116660,
+    "tags": [],
+    "sourceCredit": "Google Chrome Labs",
+    "collectionRun": "2026-06-12T21-51-12-668Z"
+  },
+  {
+    "id": "a64c3aba7f6710d5",
+    "contentHash": "a64c3aba7f6710d5c6ad81f0bb551332812eaa39e0df6a9cf4713afd56129fce",
+    "sourceUrl": "https://carbon.now.sh",
+    "captureMethod": "playwright",
+    "reviewState": "confirmed",
+    "dateCollected": "2026-06-12T21:52:50.806Z",
+    "datePublished": null,
+    "app": "Carbon",
+    "company": "Carbon",
+    "category": "developer-tools",
+    "surface": null,
+    "designRegister": "dark-dev",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "dpr": 2,
+    "imageDims": {
+      "width": 2880,
+      "height": 1800
+    },
+    "bytes": 111654,
+    "tags": [],
+    "sourceCredit": "Carbon",
+    "collectionRun": "2026-06-12T21-51-12-668Z"
+  },
+  {
+    "id": "73850f8cd6970056",
+    "contentHash": "73850f8cd697005660fe80cc9237dcadac0a4484efa6aaee5a1c9d95c4a2a763",
+    "sourceUrl": "https://regex101.com",
+    "captureMethod": "playwright",
+    "reviewState": "ungated",
+    "dateCollected": "2026-06-12T21:52:44.625Z",
+    "datePublished": null,
+    "app": "regex101",
+    "company": "regex101",
+    "category": "developer-tools",
+    "surface": null,
+    "designRegister": "dark-dev",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "dpr": 2,
+    "imageDims": {
+      "width": 2880,
+      "height": 1800
+    },
+    "bytes": 141738,
+    "tags": [],
+    "sourceCredit": "regex101",
+    "collectionRun": "2026-06-12T21-51-12-668Z"
+  },
+  {
+    "id": "c780a2b232065f4e",
+    "contentHash": "c780a2b232065f4ec3020356d0b0afe1142c9c74f83f488b11b83ab4b0f058bc",
+    "sourceUrl": "https://codepen.io/pen/",
+    "captureMethod": "playwright",
+    "reviewState": "ungated",
+    "dateCollected": "2026-06-12T21:52:09.539Z",
+    "datePublished": null,
+    "app": "CodePen",
+    "company": "CodePen",
+    "category": "code-playground",
+    "surface": null,
+    "designRegister": "modern-saas",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "dpr": 2,
+    "imageDims": {
+      "width": 2880,
+      "height": 1800
+    },
+    "bytes": 39584,
+    "tags": [],
+    "sourceCredit": "CodePen",
+    "collectionRun": "2026-06-12T21-51-12-668Z"
+  },
+  {
+    "id": "1a0273866ba10567",
+    "contentHash": "1a0273866ba1056789667ba5806e2a42736e474f8592ede3bf3c4fc01cbdcbfe",
+    "sourceUrl": "https://jsfiddle.net",
+    "captureMethod": "playwright",
+    "reviewState": "ungated",
+    "dateCollected": "2026-06-12T21:52:03.107Z",
+    "datePublished": null,
+    "app": "JSFiddle",
+    "company": "JSFiddle",
+    "category": "code-playground",
+    "surface": null,
+    "designRegister": "utilitarian",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "dpr": 2,
+    "imageDims": {
+      "width": 2880,
+      "height": 1800
+    },
+    "bytes": 86992,
+    "tags": [],
+    "sourceCredit": "JSFiddle",
+    "collectionRun": "2026-06-12T21-51-12-668Z"
+  },
+  {
+    "id": "4f5835c2e9f3d948",
+    "contentHash": "4f5835c2e9f3d9486ee5c995d32b85fcbd7d74a57f3a8e36d91c253424bbce86",
+    "sourceUrl": "https://www.openstreetmap.org",
+    "captureMethod": "playwright",
+    "reviewState": "confirmed",
+    "dateCollected": "2026-06-12T21:51:56.786Z",
+    "datePublished": null,
+    "app": "OpenStreetMap",
+    "company": "OpenStreetMap Foundation",
+    "category": "maps",
+    "surface": null,
+    "designRegister": "utilitarian",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "dpr": 2,
+    "imageDims": {
+      "width": 2880,
+      "height": 1800
+    },
+    "bytes": 254412,
+    "tags": [],
+    "sourceCredit": "OpenStreetMap Foundation",
+    "collectionRun": "2026-06-12T21-51-12-668Z"
+  },
+  {
+    "id": "4c98c80ae393cf0a",
+    "contentHash": "4c98c80ae393cf0ad3db75c83540d546da3d7056635c1281b369aeebcf0ebc9b",
+    "sourceUrl": "https://www.photopea.com",
+    "captureMethod": "playwright",
+    "reviewState": "confirmed",
+    "dateCollected": "2026-06-12T21:51:33.924Z",
+    "datePublished": null,
+    "app": "Photopea",
+    "company": "Photopea",
+    "category": "image-editor",
+    "surface": null,
+    "designRegister": "enterprise-dense",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "dpr": 2,
+    "imageDims": {
+      "width": 2880,
+      "height": 1800
+    },
+    "bytes": 137530,
+    "tags": [],
+    "sourceCredit": "Photopea",
+    "collectionRun": "2026-06-12T21-51-12-668Z"
+  },
+  {
+    "id": "1332e697b422af9a",
+    "contentHash": "1332e697b422af9a6c99f1e13d222e8a5df9e4da440cf874acb21d508b267be9",
+    "sourceUrl": "https://play.tailwindcss.com",
+    "captureMethod": "playwright",
+    "reviewState": "confirmed",
+    "dateCollected": "2026-06-12T21:50:30.810Z",
+    "datePublished": null,
+    "app": "Tailwind Play",
+    "company": "Tailwind Labs",
+    "category": "code-playground",
+    "surface": null,
+    "designRegister": "dark-dev",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "dpr": 2,
+    "imageDims": {
+      "width": 2880,
+      "height": 1800
+    },
+    "bytes": 307626,
+    "tags": [],
+    "sourceCredit": "Tailwind Labs",
+    "collectionRun": "2026-06-12T21-48-32-270Z"
+  },
+  {
+    "id": "253b45a916c9cfe2",
+    "contentHash": "253b45a916c9cfe2a33850bec927838d54e320c85a1de7e1113e00695ec59168",
+    "sourceUrl": "https://play.grafana.org",
+    "captureMethod": "playwright",
+    "reviewState": "confirmed",
+    "dateCollected": "2026-06-12T12:44:12.858Z",
+    "datePublished": null,
+    "app": "Grafana",
+    "company": "Grafana Labs",
+    "category": "analytics-observability",
+    "surface": null,
+    "designRegister": "enterprise-dense",
+    "theme": "dark",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "dpr": 2,
+    "imageDims": {
+      "width": 2880,
+      "height": 1800
+    },
+    "bytes": 292254,
+    "tags": [],
+    "sourceCredit": "Grafana Labs",
+    "collectionRun": "2026-06-12T12-44-02-696Z"
+  },
+  {
+    "id": "185f8175b4461706",
+    "contentHash": "185f8175b44617062ce5a98cfe7235ef100bb9304d2903cf949ca6973addf119",
+    "sourceUrl": "https://mermaid.live",
+    "captureMethod": "playwright",
+    "dateCollected": "2026-06-12T12:27:56.840Z",
+    "datePublished": null,
+    "app": "Mermaid Live Editor",
+    "company": "Mermaid",
+    "category": "developer-tools",
+    "surface": null,
+    "designRegister": "modern-saas",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "dpr": 2,
+    "imageDims": {
+      "width": 2880,
+      "height": 1800
+    },
+    "bytes": 121842,
+    "tags": [],
+    "sourceCredit": "Mermaid",
+    "collectionRun": "2026-06-12T12-26-38-221Z",
+    "reviewState": "confirmed"
+  },
+  {
+    "id": "638732d38137113a",
+    "contentHash": "638732d38137113af40bb789f76be559b3af0a2bf0c18ec089383272acaa1970",
+    "sourceUrl": "https://editor.swagger.io",
+    "captureMethod": "playwright",
+    "dateCollected": "2026-06-12T12:27:50.807Z",
+    "datePublished": null,
+    "app": "Swagger Editor",
+    "company": "SmartBear",
+    "category": "developer-tools",
+    "surface": null,
+    "designRegister": "enterprise-dense",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "dpr": 2,
+    "imageDims": {
+      "width": 2880,
+      "height": 1800
+    },
+    "bytes": 292886,
+    "tags": [],
+    "sourceCredit": "SmartBear",
+    "collectionRun": "2026-06-12T12-26-38-221Z",
+    "reviewState": "confirmed"
+  },
+  {
+    "id": "4881dac6e3b8d3dc",
+    "contentHash": "4881dac6e3b8d3dccf3f5ecc1c171cea54905578f849b6930d827d076aaa6252",
+    "sourceUrl": "https://www.geogebra.org/calculator",
+    "captureMethod": "playwright",
+    "dateCollected": "2026-06-12T12:27:43.031Z",
+    "datePublished": null,
+    "app": "GeoGebra",
+    "company": "GeoGebra",
+    "category": "education-tools",
+    "surface": null,
+    "designRegister": "friendly-minimal",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "dpr": 2,
+    "imageDims": {
+      "width": 2880,
+      "height": 1800
+    },
+    "bytes": 97502,
+    "tags": [],
+    "sourceCredit": "GeoGebra",
+    "collectionRun": "2026-06-12T12-26-38-221Z",
+    "reviewState": "confirmed"
+  },
+  {
+    "id": "af041413afb82b9f",
+    "contentHash": "af041413afb82b9f5945335511bec41eb463df2ee5f19268e88d19fe4fd68f6e",
+    "sourceUrl": "https://www.desmos.com/calculator",
+    "captureMethod": "playwright",
+    "dateCollected": "2026-06-12T12:27:37.338Z",
+    "datePublished": null,
+    "app": "Desmos Graphing Calculator",
+    "company": "Desmos",
+    "category": "education-tools",
+    "surface": null,
+    "designRegister": "friendly-minimal",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "dpr": 2,
+    "imageDims": {
+      "width": 2880,
+      "height": 1800
+    },
+    "bytes": 50874,
+    "tags": [],
+    "sourceCredit": "Desmos",
+    "collectionRun": "2026-06-12T12-26-38-221Z",
+    "reviewState": "confirmed"
+  },
+  {
+    "id": "9dbdb7f79955781d",
+    "contentHash": "9dbdb7f79955781d763b4a09088624db31ce9b19c520e10eb67224615b608ade",
+    "sourceUrl": "https://app.diagrams.net",
+    "captureMethod": "playwright",
+    "dateCollected": "2026-06-12T12:27:04.773Z",
+    "datePublished": null,
+    "app": "draw.io",
+    "company": "JGraph",
+    "category": "diagramming",
+    "surface": null,
+    "designRegister": "enterprise-dense",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "dpr": 2,
+    "imageDims": {
+      "width": 2880,
+      "height": 1800
+    },
+    "bytes": 136700,
+    "tags": [],
+    "sourceCredit": "JGraph",
+    "collectionRun": "2026-06-12T12-26-38-221Z",
+    "reviewState": "confirmed"
+  },
+  {
+    "id": "7f7621c90218424f",
+    "contentHash": "7f7621c90218424f947adecba1ed2e77451244b3e5f77eb54e41f84a9fde216d",
+    "sourceUrl": "https://www.tldraw.com",
+    "captureMethod": "playwright",
+    "dateCollected": "2026-06-12T12:26:51.966Z",
+    "datePublished": null,
+    "app": "tldraw",
+    "company": "tldraw",
+    "category": "whiteboard-diagramming",
+    "surface": null,
+    "designRegister": "minimal",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "dpr": 2,
+    "imageDims": {
+      "width": 2880,
+      "height": 1800
+    },
+    "bytes": 31558,
+    "tags": [],
+    "sourceCredit": "tldraw",
+    "collectionRun": "2026-06-12T12-26-38-221Z",
+    "reviewState": "confirmed"
+  },
+  {
+    "id": "50badce4ea54a544",
+    "contentHash": "50badce4ea54a5443b470b9ec8e80d5440a4dcdd139a9289b26777341fd376a9",
+    "sourceUrl": "https://excalidraw.com",
+    "captureMethod": "playwright",
+    "dateCollected": "2026-06-12T12:26:45.835Z",
+    "datePublished": null,
+    "app": "Excalidraw",
+    "company": "Excalidraw",
+    "category": "whiteboard-diagramming",
+    "surface": null,
+    "designRegister": "minimal-hand-drawn",
+    "theme": "light",
+    "viewport": {
+      "width": 1440,
+      "height": 900
+    },
+    "dpr": 2,
+    "imageDims": {
+      "width": 2880,
+      "height": 1800
+    },
+    "bytes": 61474,
+    "tags": [],
+    "sourceCredit": "Excalidraw",
+    "collectionRun": "2026-06-12T12-26-38-221Z",
+    "reviewState": "confirmed"
+  }
+]

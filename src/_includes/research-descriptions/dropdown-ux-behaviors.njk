@@ -1,0 +1,39 @@
+<h3>The Question</h3>
+<p>
+    What is the best-practice UX and accessibility contract for the full <strong>dropdown family</strong> —
+    native <code>&lt;select&gt;</code>, custom listbox/select, filterable combobox/autocomplete, and
+    menu-button dropdowns — and, more importantly, which of a dropdown's hard parts are <em>not actually about
+    dropdowns</em> and should be lifted into standalone, reusable intents? This is the foundational survey
+    (<code>reports/2026-06-01-dropdown-ux-behaviors.md</code>) that the entire
+    <a href="/blocks/droplist/">droplist</a> family and its composed intents descend from.
+</p>
+
+<h3>The load-bearing finding</h3>
+<p>
+    A "dropdown" is not one component but a family, and almost none of its hard parts are <em>about</em>
+    dropdowns. <strong>Anchored positioning, edge-aware flipping, dismissal-and-focus-return, focus delegation,
+    type-ahead seek, the selection model, live-region status, windowed rendering, async lifecycle, validation,
+    clearability, truncation, and grouping</strong> are all general capabilities a dropdown merely
+    <em>composes</em> — so a "dropdown standard" becomes a thin composition manifest rather than a monolith.
+</p>
+
+<h3>What it materialized</h3>
+<p>
+    The survey extracted <strong>13 cross-cutting paradigms</strong>, all materialized as intents — 3 new
+    (<a href="/intents/focus-delegation/">focus-delegation</a>,
+    <a href="/intents/live-region-status/">live-region-status</a>,
+    <a href="/intents/windowed-collection/">windowed-collection</a>), 5 extended
+    (<a href="/intents/anchor/">anchor</a>'s dismissal axis, <a href="/intents/loader/">loader</a>'s
+    filtering/loadingMore states, typography truncation, input clear, selection grouping), and 5 already
+    existing — plus the <a href="/blocks/droplist/">droplist</a> block's <code>composesIntents</code> manifest
+    with its variant matrix and keyboard contract.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Report: <code>reports/2026-06-01-dropdown-ux-behaviors.md</code> (the historical research trail)</li>
+    <li>Family: <a href="/blocks/droplist/">droplist block</a></li>
+    <li>Spun-out open item: <a href="/research/dropdown-async-pagination/">Dropdown Async Pagination</a>
+        (<a href="/backlog/018-dropdown-async-pagination-paradigm/">#018</a>) — the one noted-but-unspecified
+        paradigm (async pagination beyond load-more)</li>
+</ul>

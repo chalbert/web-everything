@@ -1,0 +1,28 @@
+{
+  "id": "4c98c80ae393cf0a",
+  "contentHash": "4c98c80ae393cf0ad3db75c83540d546da3d7056635c1281b369aeebcf0ebc9b",
+  "sourceUrl": "https://www.photopea.com",
+  "captureMethod": "playwright",
+  "reviewState": "confirmed",
+  "dateCollected": "2026-06-12T21:51:33.924Z",
+  "datePublished": null,
+  "app": "Photopea",
+  "company": "Photopea",
+  "category": "image-editor",
+  "surface": null,
+  "designRegister": "enterprise-dense",
+  "theme": "dark",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "dpr": 2,
+  "imageDims": {
+    "width": 2880,
+    "height": 1800
+  },
+  "bytes": 137530,
+  "tags": [],
+  "sourceCredit": "Photopea",
+  "collectionRun": "2026-06-12T21-51-12-668Z"
+}

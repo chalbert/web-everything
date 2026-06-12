@@ -1,0 +1,87 @@
+<h2>Overview</h2>
+<p>
+  <strong>Notification</strong> is the runnable surface that realizes the
+  <a href="/intents/feedback/">Feedback Intent</a> — a transient, non-blocking message that appears, is
+  accessibly announced, persists for a bounded time (or until dismissed), and is removed. It captures the
+  general UX particularities every notification shares — <em>temporary, non-blocking, dismissable, queued,
+  severity-weighted, accessibly announced</em> — and leaves the <strong>presentation</strong> (a corner
+  toast, a snackbar, a banner-position notice) to the implementation. The standard defines behaviour; the
+  implementation picks the look.
+</p>
+<p>
+  It is deliberately distinct from three neighbours: the OS-level
+  <a href="https://developer.mozilla.org/docs/Web/API/Notifications_API">Web Notifications API</a>
+  (system notifications outside the tab, permission-gated — a separate capability under Web Permissions
+  <a href="/backlog/009-gap-13-webpermissions-project/">#009</a>); <a href="/blocks/background-task-surface/">background-task-surface</a>
+  (a <em>persistent</em> long-running-task surface); and inline <a href="/intents/message/">Message</a>
+  banners (<em>structural</em>, in document flow). A notification is in-page, transient, and out-of-flow.
+</p>
+
+<h2>Web Standards Alignment</h2>
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr><td><a href="https://developer.mozilla.org/docs/Web/API/Popover_API">Popover API</a> (<code>popover="manual"</code>)</td><td>Baseline 2024</td><td>The region mounts to the top layer as a manual popover — present without being light-dismissed by unrelated clicks. The native-first substrate; no <code>position:fixed</code> + z-index stack.</td></tr>
+  <tr><td><a href="https://www.w3.org/TR/wai-aria-1.2/#alert">role="alert"</a> / <a href="https://www.w3.org/TR/wai-aria-1.2/#status">role="status"</a> + <code>aria-live</code></td><td>WAI-ARIA 1.2</td><td>The region is a live region; politeness is derived from severity (status = polite, alert = assertive). Delegated to the Live-Region Status Intent.</td></tr>
+  <tr><td><a href="https://www.w3.org/WAI/WCAG22/Understanding/timing-adjustable.html">WCAG 2.2.1 Timing Adjustable</a></td><td>WCAG 2.2</td><td>Auto-timeout pauses on hover/focus and is forced indefinite when an action is present, so a reader is never raced by a timer.</td></tr>
+  <tr><td><a href="https://developer.mozilla.org/docs/Web/HTML/Element/dialog">Top layer</a> (via Web Portals fallback)</td><td>Baseline 2024</td><td>Where the Popover API is unavailable, a Web Portals top-layer mount provides the same stacking-free surface.</td></tr>
+</table>
+
+<h2>Framework / Library Research</h2>
+<table>
+  <tr><th>Source</th><th>Key Patterns Adopted</th></tr>
+  <tr><td><a href="https://www.radix-ui.com/primitives/docs/components/toast">Radix Toast</a></td><td>Provider + imperative enqueue; swipe/Escape dismissal; pause-on-hover; hotkey to focus the region.</td></tr>
+  <tr><td><a href="https://m3.material.io/components/snackbar/overview">Material 3 Snackbar</a></td><td>Single-at-a-time default (stackLimit = 1), one optional action, duration tiers, bottom placement avoiding the FAB.</td></tr>
+  <tr><td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/alert/">WAI-ARIA APG Alert</a></td><td>The announce-once live-region contract; assertive vs polite by urgency.</td></tr>
+  <tr><td><a href="https://sonner.emilkowal.ski/">Sonner</a> / <a href="https://ui.shadcn.com/docs/components/sonner">shadcn</a></td><td>Stacked FIFO presentation, promise-bound lifecycle (loading → success/error), as an implementation style — not part of the contract.</td></tr>
+</table>
+
+<h2>Contract</h2>
+<p>
+  The standard defines an injectable <strong>controller</strong> and a <strong>region element</strong> with
+  observable events. Concrete timing, animation, and presentation live in the implementation (Frontier UI),
+  not here.
+</p>
+{% highlight "typescript" %}
+// Resolved from the injector chain; app code calls it imperatively.
+interface NotificationController {
+  // Enqueue a notification; returns its id. Shape mirrors the Feedback Intent.
+  show(message: NotificationMessage): string;
+  // Dismiss one (by id) or all currently shown/queued.
+  dismiss(id?: string): void;
+}
+
+interface NotificationMessage {
+  content: string | Node;          // what the user reads
+  severity: 'info' | 'success' | 'warning' | 'error';   // shared severity vocabulary (Message Intent)
+  duration?: 'short' | 'long' | 'indefinite';            // auto-timeout tier; defaults per impl
+  action?: { label: string; intent: string };           // optional; forces duration -> indefinite
+}
+
+// The declarative top-layer host, placed once per app. Reads the Feedback Intent's
+// placement (top-end, bottom-start, …) and stackLimit (1 = replace, >1 = FIFO stack).
+// <notification-region placement="top-end" stack-limit="3"></notification-region>
+{% endhighlight %}
+
+<h3>Observable events</h3>
+<ul>
+  <li><code>notification-shown</code> — fired on the region when a notification becomes visible (detail: id, severity).</li>
+  <li><code>notification-dismissed</code> — fired when one is removed (detail: id, reason: <code>timeout</code> | <code>manual</code> | <code>action</code> | <code>replaced</code>).</li>
+</ul>
+
+<h2>Behaviour</h2>
+<ul>
+  <li><strong>Announcement (severity-mapped).</strong> The region is a live region; <code>info</code>/<code>success</code> → <code>role="status"</code> (polite), <code>warning</code>/<code>error</code> → <code>role="alert"</code> (assertive). Announced once on show; decoupled from visual persistence. Transport is the <a href="/intents/live-region-status/">Live-Region Status Intent</a>.</li>
+  <li><strong>Queue / stack.</strong> <code>stackLimit = 1</code> replaces the current message; <code>&gt; 1</code> shows a FIFO stack up to the limit, surplus queued.</li>
+  <li><strong>Timeout.</strong> <code>duration</code> drives auto-dismiss, <strong>paused</strong> while the pointer is over the region or focus is within it, and <strong>forced indefinite</strong> whenever an <code>action</code> is present.</li>
+  <li><strong>Dismissal.</strong> Every notification is manually dismissable (a close affordance) and Escape-dismissable.</li>
+</ul>
+
+<h2>Composition</h2>
+<p>
+  Implements the <a href="/intents/feedback/">Feedback Intent</a>. Composes the
+  <a href="/intents/message/">Message Intent</a> (shared severity/tone vocabulary), the
+  <a href="/intents/live-region-status/">Live-Region Status Intent</a> (announcement), the
+  <a href="/intents/surface/">Surface Intent</a> (card elevation/material), and the
+  <a href="/intents/motion/">Motion Intent</a> (enter/exit). Presentation styles such as toast and snackbar
+  are implementation choices over this contract, not dimensions of the standard.
+</p>

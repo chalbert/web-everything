@@ -5,6 +5,7 @@ size: 3
 parent: "099"
 status: open
 dateOpened: "2026-06-06"
+childlessReason: untriaged
 tags: [book, candidates, intents, blocks, standards, form-controls, notifications, responsive, logging, tracking, nomenclature, deprecation, triage]
 relatedReport: reports/2026-06-06-front-end-platform-book.md
 crossRef: { url: /backlog/099-evergreen-app-vision/, label: "Evergreen app / book map (#099)" }

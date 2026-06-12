@@ -2,8 +2,10 @@
 type: decision
 workItem: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-05-31"
+dateResolved: "2026-06-11"
+graduatedTo: none
 tags: [gap-analysis, protocol, view-transitions, motion]
 ---
 
@@ -21,3 +23,6 @@ tags: [gap-analysis, protocol, view-transitions, motion]
 ## Open call
 
 Confirm the home (motion vs navigation project) and the protocol scope.
+
+## Resolution (2026-06-11)
+**Protocol, home = the navigation project — settled by the per-fork classification pass.** Cross/same-document View Transitions is a *routing artifact* (it fires on a document/navigation transition), so it sits at the navigation seam (Q7), not the `motion` physics axis — `motion` tunes *feel*, View Transitions coordinates the *transition itself*. It is a **Protocol** (Q1/Q2: independent frameworks must conform to the same transition-coordination contract), **not its own project** and **not a `motion` dimension** — surfaced as a `protocol-{view-transitions}` section owned by the navigation project (protocol-is-first-class). Authoring the contract (same- vs cross-document scope, `::view-transition` wiring, transition type/name vocabulary, motion hand-off) is a separate greenfield build that runs the prep pass first.

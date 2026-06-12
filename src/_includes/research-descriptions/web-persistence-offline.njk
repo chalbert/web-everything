@@ -1,0 +1,124 @@
+<h3>The Question</h3>
+<p>
+    Gap&nbsp;#4 of the standards gap-analysis: <a href="/projects/webresources/">Web Resources</a> fetches data and
+    <a href="/projects/webstates/">Web States</a> holds it in memory, but <strong>nothing durably persists</strong> it
+    across reloads, sessions, or network loss. The triage proposed a <code>webpersistence</code>
+    <strong>project + protocol</strong> spanning storage abstraction, offline-first, optimistic sync, and conflict
+    resolution. Before authoring anything, this survey gathers web-platform and library prior art per design-first
+    step&nbsp;1 — so the boundary against the already-owned neighbours (the loader intent's <code>optimistic</code>
+    strategy, the change-tracking protocol's CRDT/JSON-Patch model, reliability's offline queue) is drawn deliberately,
+    and the project-vs-intent call is made on the per-fork classification rule. It grounds the open forks in
+    <a href="/backlog/011-gap-4-webpersistence-project/">backlog&nbsp;#011</a>.
+</p>
+
+<h3>Recommendation (forks for #011)</h3>
+<ol>
+    <li><strong>Persistence storage is a Protocol</strong> (a <code>CustomStorageStrategy</code> registry, IndexedDB the
+        native-first default, Dexie/RxDB/PouchDB as opt-in adapters) — but a <em>thin</em> one. The open call is whether
+        it earns a new top-level <code>webpersistence</code> project or graduates as a facet of
+        <a href="/projects/webstates/">Web States</a>.</li>
+    <li><strong>Optimistic UX stays in the <a href="/intents/loader/">Loader intent</a></strong> (its
+        <code>optimistic</code> strategy already owns showing a mutation as applied early); the only new surface is the
+        <strong>durable outbox / replay</strong> — a fixed mechanism over the storage protocol plus reliability's offline
+        queue, not a protocol and not a duplicate intent.</li>
+    <li><strong>Conflict resolution is a strategy dimension of the existing
+        <a href="/protocols/change-tracking/">Change Tracking protocol</a></strong>, gated to the sync case — not a new
+        conflict protocol.</li>
+    <li><strong>Offline response-cache leans to <a href="/projects/webresources/">Web Resources</a>; the durable state
+        store leans to <a href="/projects/webstates/">Web States</a></strong> — default to no new top-level project,
+        distributing the three layers to their natural owners.</li>
+</ol>
+
+<h3>Finding 1 — the platform separates persistence into FOUR independent layers</h3>
+<p>
+    No single native API spans "the persistence story." The platform offers four primitives that compose but stay
+    orthogonal, and every survey and library keeps them apart:
+</p>
+<ul>
+    <li><strong>Durable structured storage</strong> — IndexedDB is the queryable store;
+        <code>navigator.storage.persist()</code> requests <em>durability</em> (without it the browser may silently evict
+        under storage pressure, and Safari/ITP resets unvisited-origin IndexedDB after 7 days),
+        <code>storage.estimate()</code> reports the shared quota. The <em>storage-abstraction</em> axis.</li>
+    <li><strong>HTTP-response caching</strong> — the Cache Storage API stores <code>Request</code>›<code>Response</code>
+        pairs, driven by a <strong>Service Worker</strong> intercepting <code>fetch</code>. The <em>offline-first</em>
+        axis — which overlaps <code>webresources</code> (it caches <em>fetches</em>), not in-memory state.</li>
+    <li><strong>Deferred replay</strong> — Background Sync queues offline actions and replays them on reconnect without
+        the tab open; <strong>Safari does not support it</strong>, so a JS outbox queue is the portable fallback. The
+        <em>optimistic-sync / outbox</em> axis.</li>
+    <li><strong>Cross-tab coordination</strong> — the Web Locks API (<code>navigator.locks.request</code>) serialises
+        writes across tabs sharing one origin's store. A cross-cutting concern, not a layer of its own.</li>
+</ul>
+<p>
+    <strong>Implication (fork&nbsp;1):</strong> "persistence" is not one thing. The durable-store layer is genuinely
+    missing; the offline-cache layer arguably belongs to <code>webresources</code>; the sync/conflict layer overlaps the
+    change-tracking protocol. The project's truly <em>new</em> surface is narrower than the four-bullet triage.
+</p>
+
+<h3>Finding 2 — there IS a multi-vendor interop story for storage, so a Protocol is earned (grounds fork 1)</h3>
+<p>
+    Unlike gap&nbsp;#9 (keybindings, which resolved to an intent because no engine-swap story existed —
+    <a href="/backlog/016-gap-9-webcommands-project/">#016</a>), client storage has a real, divergent vendor landscape
+    apps want to swap behind a stable contract: <strong>Dexie.js</strong> (thinnest IndexedDB wrapper),
+    <strong>RxDB</strong> (pluggable <code>RxStorage</code> adapters + CRDT conflict handling + replication),
+    <strong>PouchDB</strong> (CouchDB-protocol replication), and <strong>TanStack Query</strong>
+    <code>persistQueryClient</code> (persists the query/mutation cache with paused-mutation dehydrate/hydrate). RxDB's own
+    pluggable-<code>RxStorage</code> design is the proof the WE protocol shape already exists in the wild:
+    engine-swappable, IndexedDB the native-first default, with graceful degradation to <code>localStorage</code>.
+    <strong>Verdict:</strong> storage is a <strong>Protocol</strong> — but the owning project may be a persistence facet
+    of <code>webstates</code> rather than a new top-level <code>webpersistence</code>.
+</p>
+
+<h3>Finding 3 — optimistic UX is ALREADY owned; only the outbox is new (grounds fork 2)</h3>
+<p>
+    The <a href="/intents/loader/">Loader intent</a> already carries <code>strategy: optimistic</code> — the UX of
+    showing a mutation as applied before the server confirms. TanStack Query's <code>onMutate</code>/<code>onError</code>
+    snapshot-and-rollback is the canonical pattern. What is <em>not</em> owned anywhere is the <strong>durable
+    outbox</strong>: persisting pending mutations so they survive a reload and replay on reconnect. That is a
+    deterministic transform with no vendor-interop story (a JS outbox over IndexedDB is the portable baseline because
+    Safari lacks Background Sync) — so it is a <strong>fixed mechanism / config</strong>, not a protocol and not a UX
+    intent. It rides the storage protocol plus reliability's existing offline-queue concern.
+</p>
+
+<h3>Finding 4 — conflict resolution is the SAME axis change-tracking already mapped (grounds fork 3)</h3>
+<p>
+    The <a href="/research/change-tracking-observability/">change-tracking</a> topic already catalogued JSON Patch
+    (RFC&nbsp;6902), JSON Merge Patch (RFC&nbsp;7386), CRDTs (Yjs/Automerge), event sourcing, and OT, and produced the
+    <a href="/protocols/change-tracking/">Change Tracking protocol</a> with a normalized Change Record and a
+    <code>CustomChangeStrategy</code> registry. Conflict resolution is the <em>merge</em> over exactly those
+    representations: <strong>last-write-wins</strong> (Firestore, Dexie Cloud — simple, silently drops the loser),
+    <strong>deterministic revision-hash winner</strong> (CouchDB/PouchDB), <strong>merge-function / CRDT</strong> (RxDB,
+    Automerge — RxDB explicitly warns CRDTs are <em>not</em> magic), and <strong>manual diff-UI</strong> (git-style).
+    <strong>Verdict:</strong> conflict resolution is a <strong>strategy dimension of the existing change-tracking
+    protocol</strong>, gated to the sync case — <code>webpersistence</code> references it, it does not redefine it.
+</p>
+
+<h3>Finding 5 — offline-cache of fetches leans to <code>webresources</code>, not a new home (grounds fork 4)</h3>
+<p>
+    Cache Storage + Service Worker is fundamentally a <em>fetch</em> concern: stale-while-revalidate, cache-first, and
+    network-first are caching policies over <a href="/projects/webresources/">Web Resources</a>' fetcher. The data the
+    app <em>holds</em> (IndexedDB records) is a <a href="/projects/webstates/">Web States</a> concern. So gap&nbsp;#4
+    cleanly bisects — <strong>response cache → webresources</strong>, <strong>durable state store → webstates</strong> —
+    and a standalone <code>webpersistence</code> project would straddle both and duplicate their ownership.
+</p>
+
+<h3>Finding 6 — there is no native persistence framework; the baseline is hand-assembled</h3>
+<p>
+    The platform gives primitives (IndexedDB, Cache, Locks, <code>persist()</code>, Background Sync) but <strong>no
+    orchestration layer</strong> — no native outbox, conflict merge, or store abstraction. Every offline-first app
+    hand-assembles these or adopts RxDB/Dexie/PouchDB. So WE's native-first baseline is "IndexedDB +
+    <code>persist()</code> + a JS outbox," and the libraries are registered adapters — the standard's value is the
+    <em>contract</em> over the primitives, not new runtime.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/011-gap-4-webpersistence-project/">#011 — Persistence/Offline project (gap&nbsp;#4)</a></li>
+    <li>Reconciles: <a href="/research/change-tracking-observability/">Change Tracking as Observability</a> +
+        <a href="/protocols/change-tracking/">Change Tracking protocol</a> ·
+        <a href="/projects/webreliability/">Web Reliability</a> offline queue ·
+        <a href="/projects/webresources/">Web Resources</a> fetcher</li>
+    <li>Neighbours: <a href="/intents/loader/">Loader intent (<code>optimistic</code>)</a> ·
+        <a href="/intents/reliability/">Reliability intent</a> ·
+        <a href="/projects/webstates/">Web States</a></li>
+    <li>Classification precedent: <a href="/backlog/016-gap-9-webcommands-project/">#016 — webcommands → intent, not project</a></li>
+</ul>

@@ -1,0 +1,122 @@
+<h3>The Question</h3>
+<p>
+    Gap&nbsp;#13 asks whether <strong>Notifications API + Push API + Permissions API</strong> should be a
+    Web&nbsp;Everything project/protocol, a single intent, or fold into the existing
+    <a href="/intents/feedback/">Feedback</a> intent (which owns in-app toasts). Before drawing that boundary,
+    this survey gathers the web-platform prior art per design-first step&nbsp;1, so the seam is cut on the
+    platform's own lines rather than on the word &ldquo;notifications.&rdquo; It grounds the open forks in
+    <a href="/backlog/009-gap-13-webpermissions-project/">backlog&nbsp;#009</a>.
+</p>
+
+<h3>Recommendation (prepared for #009)</h3>
+<ol>
+    <li><strong>A small <code>permission</code> intent</strong> owning the request/state/re-prompt
+        <em>affordance</em> vocabulary, borrowing the Permissions API's <code>granted | denied | prompt</code>
+        tri-state verbatim. Cross-cutting (camera, geolocation, clipboard&hellip;), so it does
+        <em>not</em> fold into <a href="/intents/feedback/">Feedback</a>.</li>
+    <li><strong>A distinct <code>system-notification</code> intent</strong> for the OS-surface render — sibling
+        to <a href="/intents/feedback/">Feedback</a> (in-page) and
+        <a href="/intents/background-task/">Background Task</a> (in-session persistent), reusing the shared
+        severity/action vocabulary, <em>not</em> a <code>surface</code> dimension bolted onto Feedback.</li>
+    <li><strong>A push-delivery protocol</strong> (subscription + VAPID transport + provider orchestration)
+        with a <code>CustomPushProvider</code> lock — the async, server-authoritative,
+        swappable-provider shape, owned by a (narrowed) project.</li>
+    <li><strong>Permissions-Policy noted as a future <a href="/projects/">webmanifests</a> concern</strong> — a
+        deployment gate, not UX; out of #009's scope.</li>
+</ol>
+
+<h3>Finding 1 — the Permissions API is a cross-cutting state layer, not a feature</h3>
+<p>
+    <a href="https://developer.mozilla.org/en-US/docs/Web/API/Permissions_API"><code>navigator.permissions.query()</code></a>
+    returns a tri-state <code>granted | denied | prompt</code> plus a <code>change</code> event, with one
+    uniform shape across a long name list — <code>camera</code>, <code>microphone</code>,
+    <code>geolocation</code>, <code>notifications</code>, <code>push</code>, <code>clipboard-read/write</code>,
+    <code>persistent-storage</code>, <code>background-sync</code>, and more
+    (<a href="https://www.w3.org/TR/permissions/">W3C Permissions</a>). It <em>aggregates</em> every restriction
+    — secure context, Permissions-Policy, user-activation gating, and the user's own choice — into that one
+    state. <strong>Implication (fork&nbsp;A):</strong> &ldquo;notifications permission&rdquo; is just one name
+    in a layer that spans far more than notifications, so the permission <em>state/affordance</em> is its own
+    intent — it must not collapse into a notification-render intent.
+</p>
+
+<h3>Finding 2 — Permissions-Policy is a different surface (a server-side gate)</h3>
+<p>
+    The <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Permissions_Policy">Permissions-Policy</a>
+    HTTP header (and <code>allow=</code> on iframes) declares which powerful features a document and its frames
+    may use <em>at all</em>. When policy blocks a feature, <code>query()</code> simply reports
+    <code>denied</code> and the user is never prompted. So a client-side <em>state query</em> and a server-side
+    <em>feature gate</em> are two distinct surfaces — the gate is a deployment/manifest concern, closer to
+    <a href="/projects/">webmanifests</a> than to any UX intent.
+</p>
+
+<h3>Finding 3 — Notifications is a render surface; Push is a transport (they chain but separate)</h3>
+<p>
+    The <a href="https://developer.mozilla.org/en-US/docs/Web/API/Notifications_API">Notifications API</a>
+    renders a <strong>system-level</strong> notification — OS notification center, outside the page, surviving
+    tab close. The <a href="https://developer.mozilla.org/en-US/docs/Web/API/Push_API">Push API</a>
+    (<code>PushManager.subscribe()</code> → a <code>PushSubscription</code> with an endpoint + keys; a
+    <code>push</code> event delivered to a service worker) is the <strong>wakeup transport</strong> that lets the
+    server re-engage a closed app; the worker then <em>calls Notifications</em> to render
+    (<a href="https://web.dev/articles/use-push-notifications-to-engage-users">web.dev</a>). Notifications work
+    standalone; push is what makes them re-engageable, and needs an active service worker plus a server signing
+    requests with a web-push (VAPID) library. <strong>This confirms the item's instinct, sharpened:</strong>
+    in-app toast (<a href="/intents/feedback/">Feedback</a>) &ne; system notification (Notifications) &ne; push
+    wakeup (Push) — three render/transport tiers, not one.
+</p>
+
+<h3>Finding 4 — the existing tree already has the neighbours (grounds the boundary)</h3>
+<ul>
+    <li><a href="/intents/feedback/">Feedback</a> — transient, non-blocking <em>in-app</em> toasts:
+        <code>placement</code>, <code>severity</code>, <code>duration</code>. Explicitly in-page,
+        fire-and-forget — the &ldquo;render in the page&rdquo; tier.</li>
+    <li><a href="/intents/background-task/">Background Task</a> — already models a persistent surface that
+        <strong>outlives the originating view</strong> and owns a <code>navigationGuard</code>; it even notes a
+        completed task <em>may emit a Feedback toast</em>. The closest neighbour to &ldquo;a long thing that
+        re-engages you,&rdquo; but in-session, not OS-level.</li>
+    <li><a href="/protocols/guard/">Guard protocol</a> — the canonical <strong>async, server-authoritative,
+        swappable-provider</strong> shape (&ldquo;the front-end is a UX mirror, never enforcement&rdquo;). A push
+        grant/delivery has that exact trust-crossing shape — guard is the structural precedent for a permissions
+        protocol.</li>
+</ul>
+
+<h3>Finding 5 — the library landscape splits orchestration from transport (grounds fork&nbsp;C)</h3>
+<p>
+    Server-side <strong>web-push</strong> libraries are thin VAPID transports. <strong>OneSignal</strong>
+    (<a href="https://onesignal.com/">onesignal.com</a>) is a push-first omnichannel <em>orchestration</em> hub;
+    <strong>Novu</strong>
+    (<a href="https://novu.co/blog/a-developers-guide-to-choosing-the-best-notification-platform/">novu.co</a>) is
+    open-source, vendor-neutral notification <em>infrastructure</em> treating push as one channel in a
+    multi-channel workflow. The reusable lesson: <strong>delivery/orchestration</strong> (which channel, which
+    provider, dedupe, retry) is a swappable <em>provider</em> behind a stable contract — exactly WE's
+    registry+provider pattern, not UX vocabulary. So push delivery is a <strong>protocol with a
+    <code>CustomPushProvider</code> lock</strong>, not an intent.
+</p>
+
+<h3>Finding 6 — the &ldquo;project vs intent&rdquo; question is mis-framed; it is three orthogonal forks</h3>
+<p>
+    The platform's seams force a decomposition the item collapsed:
+</p>
+<ul>
+    <li><strong>Permission state/affordance</strong> (Permissions API tri-state) → an <em>intent</em>
+        (<code>permission</code>).</li>
+    <li><strong>System-notification render</strong> (Notifications API) → an <em>intent</em>
+        (<code>system-notification</code>), sibling of Feedback.</li>
+    <li><strong>Push transport/orchestration</strong> (Push API + web-push/Novu/OneSignal) → a <em>protocol</em>
+        under a (narrowed) project.</li>
+</ul>
+<p>
+    So the project the item asked about is <strong>real but narrowed</strong>: it owns the push protocol and
+    houses the two intents' project-level config — it is not itself the UX deliverable, and nothing folds into
+    <a href="/intents/feedback/">Feedback</a>.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/009-gap-13-webpermissions-project/">#009 — webpermissions project (gap&nbsp;#13)</a></li>
+    <li>Neighbours: <a href="/intents/feedback/">Feedback</a> ·
+        <a href="/intents/background-task/">Background Task</a> ·
+        <a href="/protocols/guard/">Guard protocol</a></li>
+    <li>Platform: <a href="https://developer.mozilla.org/en-US/docs/Web/API/Permissions_API">Permissions API</a> ·
+        <a href="https://developer.mozilla.org/en-US/docs/Web/API/Notifications_API">Notifications API</a> ·
+        <a href="https://developer.mozilla.org/en-US/docs/Web/API/Push_API">Push API</a></li>
+</ul>

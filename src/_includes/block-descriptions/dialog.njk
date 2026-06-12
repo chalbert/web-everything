@@ -1,0 +1,60 @@
+<h2>Overview</h2>
+<p>
+  <strong>Dialog</strong> is the <em>abstract substrate</em> every dialog-based surface conforms to — a
+  top-layer surface that interrupts or overlays the page. Like
+  <a href="/blocks/droplist/">droplist</a>, it is <strong>not a shippable widget</strong>; it is the family
+  substrate that owns the shared <em>modal-surface machinery</em> — focus containment, escape/outside/backdrop
+  dismissal, scroll-lock, modal-vs-non-modal mode, and the native-first top-layer mount — so its concrete
+  members never re-implement any of it.
+</p>
+<p>
+  Its members are each their own block, distinct configurations of the
+  <a href="/intents/modal/">Modal Intent</a>'s <code>placement</code> dimension
+  (<code>center · top · bottom · start · end · fill</code>) over this one substrate:
+</p>
+<table>
+  <tr><th>Member</th><th>Configuration</th><th>Status</th></tr>
+  <tr><td>Centered modal</td><td><code>placement: center</code></td><td>future member</td></tr>
+  <tr><td><a href="/backlog/360-drawer-sheet-block/">Drawer</a></td><td><code>placement: start | end</code> + slide motion</td><td>#360 (blocked on this)</td></tr>
+  <tr><td>Bottom sheet</td><td><code>placement: bottom</code></td><td>future member</td></tr>
+</table>
+
+<h2>Web Standards Alignment</h2>
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr><td><a href="https://developer.mozilla.org/docs/Web/HTML/Element/dialog">&lt;dialog&gt;</a> + <code>showModal()</code></td><td>Baseline 2022</td><td>The substrate. Gives the modal focus-trap, inert background, <code>::backdrop</code>, Escape-to-cancel, and a real top-layer paint for free; the block defaults to it.</td></tr>
+  <tr><td><a href="https://developer.mozilla.org/docs/Web/API/Popover_API">Popover API</a></td><td>Baseline 2024</td><td>The non-modal mode (<code>mode=non-modal</code>) — a top-layer surface that leaves the page interactive.</td></tr>
+  <tr><td><a href="https://developer.mozilla.org/docs/Web/CSS/::backdrop">::backdrop</a> + <code>inert</code></td><td>Baseline</td><td>Backdrop and background-inerting come from the platform, not a hand-rolled overlay div.</td></tr>
+  <tr><td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/">WAI-ARIA APG Dialog (Modal)</a></td><td>WAI-ARIA 1.2</td><td>Focus placement on open, focus return on close, <code>aria-modal</code>, labelling — realized once here.</td></tr>
+</table>
+
+<h2>What the substrate owns (so members inherit it)</h2>
+<ul>
+  <li><strong>Mode</strong> — the Modal Intent's <code>mode</code>: <code>modal</code> → <code>showModal()</code> (focus-trapping, background inert, backdrop); <code>non-modal</code> → <code>show()</code> / popover (focus stays free).</li>
+  <li><strong>Dismissal</strong> — Escape, outside-click (light-dismiss), and explicit close, from the Modal Intent's <code>dismissal</code> dimension.</li>
+  <li><strong>Backdrop &amp; scroll-lock</strong> — the Modal Intent's <code>backdrop</code> and <code>scrolling</code> dimensions, realized once.</li>
+  <li><strong>Focus</strong> — initial focus on open and focus return on close, via the <a href="/intents/focus-containment/">Focus Containment Intent</a>.</li>
+  <li><strong>Top-layer mount</strong> — native <code>&lt;dialog&gt;</code> / Popover API; never <code>position:fixed</code> + z-index.</li>
+</ul>
+<p>A concrete member therefore only fixes <code>placement</code> (and any member-specific motion or gesture, e.g. a drawer's slide + swipe-to-dismiss). That is the reason a drawer <em>composes</em>, rather than re-implements, the dialog.</p>
+
+<h2>Contract</h2>
+{% highlight "typescript" %}
+// The substrate's open/close lifecycle. Concrete members extend this; they do not redefine it.
+interface DialogSurface {
+  open(): void;     // modal -> showModal(); non-modal -> show()/popover
+  close(reason?: 'escape' | 'outside' | 'explicit'): void;
+  readonly mode: 'modal' | 'non-modal';      // Modal Intent `mode`
+  readonly placement: 'center' | 'top' | 'bottom' | 'start' | 'end' | 'fill';  // Modal Intent `placement`
+}
+// Observable events: dialog-opened, dialog-closed (detail: reason).
+{% endhighlight %}
+
+<h2>Family vs. members</h2>
+<p>
+  Dialog is the abstract family (the <a href="/blocks/droplist/">droplist</a> precedent applied to dialogs:
+  <code>droplist : dropdown :: dialog : drawer</code>). The concrete members —
+  <a href="/backlog/360-drawer-sheet-block/">drawer</a> and the future centered-modal and bottom-sheet — are
+  each their own block extending this substrate, not configurations of one toggled widget. WE expresses the
+  abstract→concrete link in prose (the member's summary), following the droplist→dropdown convention.
+</p>

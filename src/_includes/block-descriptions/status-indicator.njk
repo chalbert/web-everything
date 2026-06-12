@@ -1,0 +1,37 @@
+<h2>Status Indicator</h2>
+<p>The reference render for the <a href="/intents/status-indicator/">Status Indicator</a> intent — the
+visual member of the <a href="/projects/weblifecycle/">Web Lifecycle</a> protocol.
+<code>renderStatusIndicator</code> projects an entity's current lifecycle state onto a semantic status
+token, so a status stops being a hand-coloured <code>&lt;span&gt;</code> per screen.</p>
+
+<h3>Dimensions</h3>
+<ul>
+  <li><code>tone</code> — <code>neutral | info | progress | positive | caution | critical</code>: the
+    semantic severity, which maps to a theme token (never a bespoke hex).</li>
+  <li><code>shape</code> — <code>badge | pill | dot | text</code>: the visual metaphor (<code>dot</code>
+    suits dense tables).</li>
+  <li><code>affordance</code> — <code>display-only | actionable</code>: whether the available next
+    transitions (from the lifecycle provider) are surfaced alongside the status.</li>
+</ul>
+
+<h3>Web Standards Alignment</h3>
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr>
+    <td><a href="https://www.w3.org/TR/wai-aria-1.2/#status">WAI-ARIA <code>role="status"</code></a></td>
+    <td>W3C WAI-ARIA</td>
+    <td>The standing indicator carries <code>role="status"</code>; the label text (not colour) carries the
+      meaning, so it is never colour-only. A <em>transition</em> announcement composes the
+      <a href="/intents/live-region-status/">Live Region Status</a> intent rather than re-defining one.</td>
+  </tr>
+  <tr>
+    <td><a href="https://www.w3.org/WAI/WCAG21/Understanding/use-of-color.html">WCAG 1.4.1 Use of Color</a></td>
+    <td>W3C WCAG 2.1</td>
+    <td>Tone drives an accessible token pair, but the visible label always names the state — colour is
+      reinforcement, never the sole signal.</td>
+  </tr>
+</table>
+
+<h3>Forms</h3>
+<p>Ships an element form (<code>renderStatusIndicator</code> → <code>HTMLElement</code>) and a string form
+(<code>statusIndicatorHTML</code>) for template-literal / table-cell contexts.</p>

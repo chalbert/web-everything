@@ -1,0 +1,11 @@
+{
+  "_doc": "Sample project ESLint config — stands in for 'the tools you already use'. The hub only ever reads files like this.",
+  "rules": {
+    "no-unused-vars": "error",
+    "no-console": "warn",
+    "eqeqeq": "error",
+    "no-debugger": "error",
+    "react-hooks/exhaustive-deps": "warn",
+    "import/no-restricted-paths": ["error", { "zones": [] }]
+  }
+}

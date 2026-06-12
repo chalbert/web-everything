@@ -1,0 +1,17 @@
+{
+  "runId": "2026-06-12T12-44-02-696Z",
+  "startedAt": "2026-06-12T12:44:02.697Z",
+  "captured": [
+    {
+      "url": "https://play.grafana.org",
+      "id": "253b45a916c9cfe2",
+      "bytes": 292254,
+      "reviewState": "confirmed"
+    }
+  ],
+  "skipped": [],
+  "duplicates": [],
+  "quarantined": [],
+  "failed": [],
+  "finishedAt": "2026-06-12T12:44:12.888Z"
+}
