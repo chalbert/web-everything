@@ -10,7 +10,8 @@
   "company": "Google Chrome Labs",
   "category": "developer-tools",
   "surface": null,
-  "designRegister": "minimal",
+  "productRegister": "utilitarian",
+  "visualStyle": null,
   "theme": "dark",
   "viewport": {
     "width": 1440,

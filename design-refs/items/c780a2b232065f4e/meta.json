@@ -10,7 +10,8 @@
   "company": "CodePen",
   "category": "code-playground",
   "surface": null,
-  "designRegister": "modern-saas",
+  "productRegister": "modern-saas",
+  "visualStyle": null,
   "theme": "dark",
   "viewport": {
     "width": 1440,

@@ -1,0 +1,31 @@
+{
+  "note": "Keyed, open-growing taxonomy for the design-reference corpus (#382). Ratified by the #394 ruling (forks B/C/B/A). Two orthogonal author-supplied axes: `productRegister` (the product/audience type the app serves) and `category` (the coarse functional domain). A third axis, `visualStyle`, is NOT seeded here — it is filled by the phase-3 vision pass (#475/#396), left null at collect time. The pipeline (`report`, `collect`, `harvest`) validates target/sidecar values against these lists and WARNS (never errors) on an unregistered value, so the vocab can grow without blocking a run. Add values freely; keep them coarse.",
+  "productRegister": {
+    "description": "The product / audience register an app targets — the WHO, not the look. Orthogonal to visualStyle (the vision-filled look-and-feel).",
+    "values": [
+      { "id": "enterprise", "label": "Enterprise", "note": "B2B/admin/ops tooling; dense, role-driven, governance-aware (Grafana, Swagger)." },
+      { "id": "modern-saas", "label": "Modern SaaS", "note": "Polished product-led web apps; marketing-grade UI, freemium (CodePen, Mermaid, Tailwind Play)." },
+      { "id": "consumer", "label": "Consumer", "note": "Broad-audience, approachable, low-friction (Desmos, GeoGebra)." },
+      { "id": "creative-tool", "label": "Creative tool", "note": "Canvas/maker apps for design/diagram/media work (Excalidraw, tldraw, Photopea, draw.io)." },
+      { "id": "utilitarian", "label": "Utilitarian", "note": "Function-first, unembellished single-purpose tools (regex101, Squoosh, OpenStreetMap, JSFiddle)." }
+    ]
+  },
+  "category": {
+    "description": "Coarse functional domain (~10+). Fork 4 = A: deliberately coarse, cross-referenced to G2/Capterra top-level names where they map. `at minimum` the first ten; extra coarse domains may be added to cover the corpus.",
+    "values": [
+      { "id": "developer-tools", "label": "Developer tools", "g2": "Development" },
+      { "id": "whiteboard-diagramming", "label": "Whiteboard & diagramming", "g2": "Visual Collaboration" },
+      { "id": "code-playground", "label": "Code playground", "g2": "Development" },
+      { "id": "consumer-social", "label": "Consumer & social", "g2": "Social Networking" },
+      { "id": "commerce-admin", "label": "Commerce & admin", "g2": "E-Commerce Platforms" },
+      { "id": "finance-banking", "label": "Finance & banking", "g2": "Accounting & Finance" },
+      { "id": "productivity-collaboration", "label": "Productivity & collaboration", "g2": "Collaboration & Productivity" },
+      { "id": "communication-inbox", "label": "Communication & inbox", "g2": "Email & Messaging" },
+      { "id": "content-media", "label": "Content & media", "g2": "Content Management" },
+      { "id": "analytics", "label": "Analytics & observability", "g2": "Analytics & BI" },
+      { "id": "design-creative", "label": "Design & creative", "g2": "Design" },
+      { "id": "maps-geo", "label": "Maps & geospatial", "g2": "Mapping" },
+      { "id": "education", "label": "Education & learning", "g2": "Education" }
+    ]
+  }
+}

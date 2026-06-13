@@ -7,9 +7,10 @@
   "datePublished": null,
   "app": "draw.io",
   "company": "JGraph",
-  "category": "diagramming",
+  "category": "whiteboard-diagramming",
   "surface": null,
-  "designRegister": "enterprise-dense",
+  "productRegister": "creative-tool",
+  "visualStyle": null,
   "theme": "light",
   "viewport": {
     "width": 1440,

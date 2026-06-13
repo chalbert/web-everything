@@ -8,9 +8,10 @@
   "datePublished": null,
   "app": "OpenStreetMap",
   "company": "OpenStreetMap Foundation",
-  "category": "maps",
+  "category": "maps-geo",
   "surface": null,
-  "designRegister": "utilitarian",
+  "productRegister": "utilitarian",
+  "visualStyle": null,
   "theme": "light",
   "viewport": {
     "width": 1440,

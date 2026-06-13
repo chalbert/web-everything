@@ -10,7 +10,8 @@
   "company": "Tailwind Labs",
   "category": "code-playground",
   "surface": null,
-  "designRegister": "dark-dev",
+  "productRegister": "modern-saas",
+  "visualStyle": null,
   "theme": "dark",
   "viewport": {
     "width": 1440,

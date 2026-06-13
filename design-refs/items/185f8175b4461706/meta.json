@@ -9,7 +9,8 @@
   "company": "Mermaid",
   "category": "developer-tools",
   "surface": null,
-  "designRegister": "modern-saas",
+  "productRegister": "modern-saas",
+  "visualStyle": null,
   "theme": "light",
   "viewport": {
     "width": 1440,

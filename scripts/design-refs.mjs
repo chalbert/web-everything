@@ -49,6 +49,7 @@ const QUARANTINE = join(ROOT, 'quarantine'); // archived judged-non-app frames, 
 const VERDICTS = join(ROOT, 'verdicts.json'); // vision verdict cache, keyed by contentHash (Fork 4)
 const DEFAULT_TARGETS = join(ROOT, 'targets.json');
 const DEFAULT_GALLERY = join(ROOT, 'gallery.json'); // gallery-harvest manifest (captureMethod: gallery, #397)
+const TAXONOMY = join(ROOT, 'taxonomy.json'); // keyed productRegister + category vocab (#394 ruling, #509)
 
 const REMEDIATION_CAP = 2; // obstructed → dismiss + re-shoot, at most this many times (Fork 3)
 
@@ -390,7 +391,8 @@ async function collect(args) {
             app: t.app ?? null,
             company: t.company ?? null,
             category: t.category ?? null,
-            designRegister: t.designRegister ?? null,
+            productRegister: t.productRegister ?? null,
+            visualStyle: t.visualStyle ?? null,
             theme: t.theme ?? null,
             viewport: VIEWPORT,
             dpr: DPR,
@@ -448,7 +450,8 @@ async function collect(args) {
         company: t.company ?? null,
         category: t.category ?? null,
         surface: null, // per-screenshot — filled by the phase-3 vision pass
-        designRegister: t.designRegister ?? null,
+        visualStyle: t.visualStyle ?? null, // author-empty; the phase-3 vision pass fills it (#475/#396)
+        productRegister: t.productRegister ?? null,
         theme: t.theme ?? null,
         viewport: VIEWPORT,
         dpr: DPR,
@@ -583,7 +586,7 @@ async function harvest(args) {
         const wrote = archiveQuarantinedFrame(contentHash, webpBuf, {
           contentHash, sourceUrl: e.sourceUrl ?? null, captureMethod: 'gallery', sourceCredit: e.sourceCredit,
           visionVerdict, app: e.app ?? null, company: e.company ?? null, category: e.category ?? null,
-          designRegister: e.designRegister ?? null, theme: e.theme ?? null, imageDims: { width, height },
+          productRegister: e.productRegister ?? null, visualStyle: e.visualStyle ?? null, theme: e.theme ?? null, imageDims: { width, height },
           bytes: webpBuf.length, dateCollected: new Date().toISOString(), collectionRun: runId,
         });
         if (wrote) console.log(`   🗄 archived     ${contentHash.slice(0, 16)}  (negative: ${res.verdict})`);
@@ -610,7 +613,8 @@ async function harvest(args) {
       company: e.company ?? null,
       category: e.category ?? null,
       surface: null,
-      designRegister: e.designRegister ?? null,
+      visualStyle: e.visualStyle ?? null, // author-empty; the phase-3 vision pass fills it (#475/#396)
+      productRegister: e.productRegister ?? null,
       theme: e.theme ?? null,
       viewport: null, // not a controlled-viewport capture — the gallery owns the frame geometry
       dpr: null,
@@ -876,6 +880,14 @@ function prune() {
 }
 
 // ---- report ----------------------------------------------------------------
+
+/** Load the keyed taxonomy vocab (#394/#509) → `{ productRegister:Set, category:Set }`, or null sets. */
+function loadTaxonomyVocab() {
+  const tax = readJSON(TAXONOMY, null);
+  const ids = (axis) => new Set((tax?.[axis]?.values ?? []).map((v) => v.id));
+  return { productRegister: ids('productRegister'), category: ids('category'), present: !!tax };
+}
+
 function report() {
   const items = rebuildIndex();
   const tally = (key) => {
@@ -885,9 +897,35 @@ function report() {
   };
   const totalBytes = items.reduce((s, it) => s + (it.bytes ?? 0), 0);
   console.log(`Corpus: ${items.length} screenshots, ${(totalBytes / 1024 / 1024).toFixed(1)} MB total\n`);
-  for (const key of ['category', 'designRegister', 'theme', 'reviewState', 'captureMethod', 'company']) {
+  // Group by the keyed taxonomy axes (productRegister × category) first, then the free dimensions.
+  for (const key of ['productRegister', 'category', 'visualStyle', 'theme', 'reviewState', 'captureMethod', 'company']) {
     console.log(`By ${key}:`);
     for (const [k, n] of tally(key)) console.log(`  ${String(n).padStart(3)}  ${k}`);
+    console.log('');
+  }
+
+  // Validate the corpus's keyed values against taxonomy.json — warn (never fail) on an unregistered
+  // value so the open-growing vocab (#394 fork 2 = C) can extend without blocking a run.
+  const vocab = loadTaxonomyVocab();
+  if (vocab.present) {
+    const unreg = (key) =>
+      [...new Set(items.map((it) => it[key]).filter((v) => v != null && !vocab[key].has(v)))];
+    for (const key of ['productRegister', 'category']) {
+      for (const v of unreg(key))
+        console.log(`⚠ unregistered ${key} "${v}" — add it to design-refs/taxonomy.json or re-key the item`);
+    }
+
+    // Scarcity view: thin (productRegister × category) cells — the grow-target signal (#394 fork 3 = B).
+    const cells = {};
+    for (const it of items) {
+      if (it.productRegister == null || it.category == null) continue;
+      const cell = `${it.productRegister} × ${it.category}`;
+      cells[cell] = (cells[cell] ?? 0) + 1;
+    }
+    const thin = Object.entries(cells).filter(([, n]) => n < 3).sort((a, b) => a[1] - b[1]);
+    console.log('Thin cells (productRegister × category, < 3 shots — grow-target candidates):');
+    if (thin.length === 0) console.log('  none — every covered cell has ≥3 shots');
+    for (const [cell, n] of thin) console.log(`  ${String(n).padStart(3)}  ${cell}`);
     console.log('');
   }
 }

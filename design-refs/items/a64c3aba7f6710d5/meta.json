@@ -10,7 +10,8 @@
   "company": "Carbon",
   "category": "developer-tools",
   "surface": null,
-  "designRegister": "dark-dev",
+  "productRegister": "creative-tool",
+  "visualStyle": null,
   "theme": "dark",
   "viewport": {
     "width": 1440,

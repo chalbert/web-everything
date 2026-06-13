@@ -8,9 +8,10 @@
   "datePublished": null,
   "app": "Photopea",
   "company": "Photopea",
-  "category": "image-editor",
+  "category": "design-creative",
   "surface": null,
-  "designRegister": "enterprise-dense",
+  "productRegister": "creative-tool",
+  "visualStyle": null,
   "theme": "dark",
   "viewport": {
     "width": 1440,

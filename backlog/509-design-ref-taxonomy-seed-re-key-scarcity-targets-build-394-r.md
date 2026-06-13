@@ -2,9 +2,12 @@
 type: issue
 workItem: story
 size: 3
-status: open
+status: resolved
 blockedBy: ["394"]
 dateOpened: "2026-06-13"
+dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: design-refs/taxonomy.json (keyed productRegister + category vocab); 16 targets+sidecars re-keyed designRegister→productRegister+visualStyle; 14 scarcity grow-targets; report keyed+validated
 tags: [design-reference, corpus, taxonomy, classification, tooling]
 ---
 
@@ -48,3 +51,25 @@ already supports the fields. Thin cells unreachable via public Playwright captur
   be null/empty).
 - `targets.json` has scarcity-cell entries; a `collect` run is idempotent on re-run.
 - `check:standards` green.
+
+## Progress — resolved 2026-06-13
+
+- **`design-refs/taxonomy.json`** (Fork 2 = C) — keyed open-growing registry: `productRegister`
+  (enterprise / modern-saas / consumer / creative-tool / utilitarian) + a coarse `category` list (the
+  10 ruling domains + design-creative / maps-geo / education to cover the existing corpus), each with a
+  label and a G2/Capterra cross-ref. `visualStyle` is deliberately NOT seeded — it is the vision pass's
+  home (#475/#396), null at collect time.
+- **Re-key (Fork 1 = B)** — a mechanical migration (keyed by url) re-keyed all **16 targets** and all
+  **16 per-item `meta.json` sidecars**: `designRegister` → `productRegister`, fine categories folded
+  onto the coarse vocab, `visualStyle: null` introduced. No recapture. `design-refs index` re-run so
+  `index.json` carries the new keys.
+- **Scarcity grow-targets (Fork 3 = B)** — appended **14** thin-cell worklist entries (now 30 targets,
+  the ruling's ~30–50) across consumer-social, commerce-admin, finance-banking,
+  productivity-collaboration, content-media. communication-inbox is login-gated for public capture →
+  left for #397, not forced. The live `collect` capture is a Playwright/network worklist run (idempotent
+  by sourceUrl) — these are queued for the next capture run, not forced here.
+- **Pipeline** — `collect`/`harvest` meta-writes emit `productRegister` + `visualStyle`; `report` now
+  groups by `productRegister` × `category`, warns (never errors) on a value not in `taxonomy.json`, and
+  prints a thin-cell (< 3 shots) scarcity view to drive the next grow pass.
+- **Tests** — `scripts/design-refs/__tests__/taxonomy.test.mjs` (5) locks the vocab + re-key + grow
+  invariants; harvest regression still green. `check:standards` 0 errors.

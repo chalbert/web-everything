@@ -10,7 +10,8 @@
   "company": "JSFiddle",
   "category": "code-playground",
   "surface": null,
-  "designRegister": "utilitarian",
+  "productRegister": "utilitarian",
+  "visualStyle": null,
   "theme": "light",
   "viewport": {
     "width": 1440,

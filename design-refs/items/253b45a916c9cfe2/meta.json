@@ -8,9 +8,10 @@
   "datePublished": null,
   "app": "Grafana",
   "company": "Grafana Labs",
-  "category": "analytics-observability",
+  "category": "analytics",
   "surface": null,
-  "designRegister": "enterprise-dense",
+  "productRegister": "enterprise",
+  "visualStyle": null,
   "theme": "dark",
   "viewport": {
     "width": 1440,
