@@ -1,0 +1,190 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "MaaS Served-Artifact Origin",
+    "version": "1.0.0",
+    "description": "HTTP projection of the neutral MaaS serve-path IR (backlog #505). The content-hash identity rule, pin grammar, and provenance semantics are defined by protocols.json#maas-versioning; this document carries only their HTTP-GET surface."
+  },
+  "paths": {
+    "/_maas/{spec}": {
+      "get": {
+        "operationId": "serveArtifact",
+        "summary": "Resolve and serve a content-addressed MaaS artifact (or redirect a floating pin to it).",
+        "parameters": [
+          {
+            "name": "spec",
+            "in": "path",
+            "required": true,
+            "description": "The component spec `<name>[@<pin>].js` — a name, an optional `@<pin>` (a floating tag, exact semver, or terminal `sha256-…` content hash matching `^sha256-[A-Za-z0-9_-]+$`), and the `.js` extension.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "form",
+            "in": "query",
+            "required": false,
+            "description": "The served form (e.g. wc-class). Defaults to the origin's default form. The value set is an implementation catalog, not part of the neutral contract.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "target",
+            "in": "query",
+            "required": false,
+            "description": "The transpile target passed to the transform (e.g. an ES version). Byte-determining.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "strategy",
+            "in": "query",
+            "required": false,
+            "description": "The define/delivery strategy passed to the transform. Byte-determining.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A terminal content-hash pin matching the current artifact id.",
+            "headers": {
+              "Content-Type": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Content-Type response header."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Cache-Control response header."
+              },
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "ETag response header."
+              },
+              "X-MaaS-Integrity": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "X-MaaS-Integrity response header."
+              },
+              "X-MaaS-Producer": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "X-MaaS-Producer response header."
+              }
+            },
+            "content": {
+              "text/javascript": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "302": {
+            "description": "A floating tag or exact semver — redirected to the terminal content-hash URL.",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Location response header."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Cache-Control response header."
+              },
+              "X-MaaS-Producer": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "X-MaaS-Producer response header."
+              }
+            }
+          },
+          "304": {
+            "description": "A hash-pinned request whose If-None-Match equals the current ETag.",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "ETag response header."
+              },
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "Cache-Control response header."
+              },
+              "X-MaaS-Producer": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "X-MaaS-Producer response header."
+              }
+            }
+          },
+          "400": {
+            "description": "An unknown form query value.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaaSError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such component, a non-MaaS path, or a hash pin that does not match current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaaSError"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "The injected transform threw.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaaSError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "MaaSError": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Human-readable failure reason."
+          }
+        }
+      }
+    }
+  }
+}

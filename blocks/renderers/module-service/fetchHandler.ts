@@ -36,18 +36,32 @@ import {
   type ServeResult,
 } from './moduleService';
 import type { DefinitionResolver } from './definitionRegistry';
+import {
+  CACHE_POLICY,
+  DEFAULT_BASE_PATH,
+  HASH_PIN_PATTERN,
+  HTTP_STATUS,
+  MAAS_HEADERS,
+  MEDIA_TYPES,
+} from './servePathIR';
 
-/** Content-type by served language — the over-the-wire half of the FORMS catalog. */
+// This handler is the #461 *reference implementation* of the neutral serve-path IR (`servePathIR.ts`,
+// #505), not its definition: every byte-determining constant below is imported from the IR, so when the
+// two disagree the IR wins and this file is the thing that gets fixed (the rule #463 fork b ratified).
+
+/** Content-type by served language — the over-the-wire half of the FORMS catalog, keyed to the IR media types. */
 const MIME: Record<ServeResult['language'], string> = {
-  javascript: 'text/javascript; charset=utf-8',
-  jsx: 'text/javascript; charset=utf-8',
-  html: 'text/html; charset=utf-8',
+  javascript: MEDIA_TYPES.javascript,
+  jsx: MEDIA_TYPES.javascript,
+  html: MEDIA_TYPES.html,
 };
 
 /** `immutable`, cache-forever — only a terminal content-hash pin earns this (#088 §2). */
-const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable';
+const IMMUTABLE_CACHE = CACHE_POLICY.immutable;
 /** A floating/exact pin is a revalidatable redirect, never `immutable` (#088 §2). */
-const FLOATING_CACHE = 'public, max-age=60, must-revalidate';
+const FLOATING_CACHE = CACHE_POLICY.floating;
+/** A pin matching the IR's terminal content-hash grammar. */
+const HASH_PIN_RE = new RegExp(HASH_PIN_PATTERN);
 
 // ── Content-addressed identity (#088 §1) ──────────────────────────────────────────
 //
@@ -123,7 +137,7 @@ interface ParsedRequest {
 }
 
 /** A pin that is itself a terminal content hash — served `immutable`, never redirected. */
-const isHashPin = (pin: string | null): boolean => !!pin && /^sha256-[A-Za-z0-9_-]+$/.test(pin);
+const isHashPin = (pin: string | null): boolean => !!pin && HASH_PIN_RE.test(pin);
 
 /**
  * Parse `/_maas/<name>[@<pin>].js?form=…`. The name may contain `-`/`.`; the pin (if any) is the
@@ -168,7 +182,7 @@ export interface MaaSHandlerOptions {
 const json = (status: number, body: unknown): Response =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json; charset=utf-8' },
+    headers: { 'Content-Type': MEDIA_TYPES.error },
   });
 
 /**
@@ -181,21 +195,22 @@ export function createMaaSFetchHandler(
   const resolver = options.resolver;
   const resolve = options.resolve ?? serveCompiled;
   const producer = options.producer ?? 'webadapters/0.0.0';
-  const basePath = options.basePath ?? '/_maas/';
+  const basePath = options.basePath ?? DEFAULT_BASE_PATH;
 
   return async function handle(request: Request): Promise<Response> {
     const url = new URL(request.url);
     const parsed = parseRequest(url, basePath);
-    if (!parsed) return json(404, { error: `Not a MaaS request (expected ${basePath}<name>.js).` });
+    if (!parsed)
+      return json(HTTP_STATUS.notFound, { error: `Not a MaaS request (expected ${basePath}<name>.js).` });
 
     if (!FORMS.some((f) => f.id === parsed.form))
-      return json(400, {
+      return json(HTTP_STATUS.badRequest, {
         error: `Unknown form "${parsed.form}". Known: ${FORMS.map((f) => f.id).join(', ')}.`,
       });
 
     const definition = resolver.resolve(parsed.name);
     if (definition === null)
-      return json(404, { error: `No component "${parsed.name}".` });
+      return json(HTTP_STATUS.notFound, { error: `No component "${parsed.name}".` });
 
     const serveOpts: ServeOptions = {
       form: parsed.form,
@@ -207,7 +222,7 @@ export function createMaaSFetchHandler(
     try {
       result = await resolve(definition, serveOpts);
     } catch (e) {
-      return json(500, { error: `serve failed: ${(e as Error).message}` });
+      return json(HTTP_STATUS.serverError, { error: `serve failed: ${(e as Error).message}` });
     }
 
     const identity = await computeArtifactIdentity(definition, result, serveOpts, producer);
@@ -215,10 +230,10 @@ export function createMaaSFetchHandler(
     // The diagnostic/lossy + provenance headers ride every response shape (#081 + #088 §3).
     const baseHeaders = (): Headers => {
       const h = new Headers();
-      h.set('X-MaaS-Producer', producer);
-      if (result.lossy) h.set('X-MaaS-Lossy', '1');
+      h.set(MAAS_HEADERS.producer, producer);
+      if (result.lossy) h.set(MAAS_HEADERS.lossy, '1');
       if (result.diagnostics.length)
-        h.set('X-MaaS-Diagnostic', encodeURIComponent(result.diagnostics.join(' | ')));
+        h.set(MAAS_HEADERS.diagnostic, encodeURIComponent(result.diagnostics.join(' | ')));
       return h;
     };
 
@@ -228,14 +243,14 @@ export function createMaaSFetchHandler(
       const h = baseHeaders();
       h.set('Location', immutableUrl(url, basePath, parsed.name, identity.id));
       h.set('Cache-Control', FLOATING_CACHE);
-      return new Response(null, { status: 302, headers: h });
+      return new Response(null, { status: HTTP_STATUS.redirect, headers: h });
     }
 
     // Terminal content-hash pin. If it doesn't match the current artifact's id, this origin's
     // current state can't honour it (no historical artifact store in v1 — a hosted origin (#451)
     // persists past builds). 404 rather than serve drifted bytes under `immutable`.
     if (parsed.pin !== identity.id)
-      return json(404, {
+      return json(HTTP_STATUS.notFound, {
         error: `No artifact "${parsed.name}@${parsed.pin}" — current id is ${identity.id} (this origin serves only current state).`,
       });
 
@@ -245,14 +260,14 @@ export function createMaaSFetchHandler(
       const h = baseHeaders();
       h.set('ETag', etag);
       h.set('Cache-Control', IMMUTABLE_CACHE);
-      return new Response(null, { status: 304, headers: h });
+      return new Response(null, { status: HTTP_STATUS.notModified, headers: h });
     }
 
     const h = baseHeaders();
     h.set('Content-Type', MIME[result.language] ?? 'text/plain; charset=utf-8');
     h.set('Cache-Control', IMMUTABLE_CACHE);
     h.set('ETag', etag);
-    h.set('X-MaaS-Integrity', identity.integrity);
-    return new Response(result.code, { status: 200, headers: h });
+    h.set(MAAS_HEADERS.integrity, identity.integrity);
+    return new Response(result.code, { status: HTTP_STATUS.ok, headers: h });
   };
 }
