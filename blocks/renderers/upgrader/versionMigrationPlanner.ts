@@ -28,13 +28,87 @@ import { compareSpecVersions } from '../../../capability-manifest/provider.js';
 export type Severity = 'major' | 'minor' | 'patch';
 export type ChangeType = 'added' | 'changed' | 'deprecated' | 'removed' | 'fixed' | 'security';
 
-/** The codemod linkage + trust metadata on a breaking, mechanically-applicable entry. */
-export interface MigrationRef {
+// ── Declarative change-kind vocabulary (the #191 Fork-2 held-open sub-decision, resolved) ─────────
+//
+// #191 ratified Fork 2 = **declarative-first with an imperative escape hatch** (the OpenRewrite
+// principle). What it left open is *which* change-kinds the engine interprets natively. The enumeration
+// below is fixed by one rule: a kind earns a slot only if it maps to a **mechanically distinct** markup
+// rewrite (not just distinct author intent — that lives in the changelog `summary`). Four qualify
+// against the real WE breaking-change history; anything else drops to the imperative escape hatch
+// (`ImperativeMigration`) rather than growing a fuzzy vocabulary:
+//   • rename-attr     — an attribute's NAME changed, value preserved (the most common break).
+//   • move-dimension  — a value relocates to another attribute, optionally REMAPPED through a value map
+//                       (a configurator dimension whose value-space also changed) — the value remap is
+//                       what makes it mechanically more than a rename.
+//   • retire-provider — an attribute names a registry provider id that was retired; rewrite to its
+//                       replacement, or FLAG when none exists (never silently drop).
+//   • re-namespace    — a custom-element tag *prefix* was re-namespaced (a layer/scope move surfacing
+//                       in markup as `<old-*>` → `<new-*>`).
+export type DeclarativeChangeKind = 'rename-attr' | 'move-dimension' | 'retire-provider' | 're-namespace';
+
+/** Rename an attribute's name on matching elements; the value is carried over verbatim. */
+export interface RenameAttrTransform {
+  readonly kind: 'rename-attr';
+  /** Tag to scope to (e.g. `we-select`); omit or `*` for any element bearing the attribute. */
+  readonly element?: string;
+  readonly from: string;
+  readonly to: string;
+}
+
+/** Move a value to another attribute, optionally remapping it through `valueMap` (dimension move). */
+export interface MoveDimensionTransform {
+  readonly kind: 'move-dimension';
+  readonly element?: string;
+  readonly from: string;
+  readonly to: string;
+  /** Old-value → new-value when the dimension's value-space also changed; absent ⇒ move verbatim. */
+  readonly valueMap?: Readonly<Record<string, string>>;
+}
+
+/** A retired registry-provider id referenced by an attribute: rewrite to `replacement`, else flag. */
+export interface RetireProviderTransform {
+  readonly kind: 'retire-provider';
+  readonly element?: string;
+  readonly attribute: string;
+  readonly retired: string;
+  /** The replacement provider id; omit when there is none (the interpreter flags for manual fix). */
+  readonly replacement?: string;
+}
+
+/** Re-namespace a custom-element tag prefix, e.g. `from: 'we-'`, `to: 'fui-'` (nested-safe). */
+export interface ReNamespaceTransform {
+  readonly kind: 're-namespace';
+  readonly from: string;
+  readonly to: string;
+}
+
+export type DeclarativeTransform =
+  | RenameAttrTransform
+  | MoveDimensionTransform
+  | RetireProviderTransform
+  | ReNamespaceTransform;
+
+/** Declarative-first path: the engine interprets `transform` natively — no codemod to write or trust. */
+export interface DeclarativeMigration {
+  readonly mode: 'declarative';
+  readonly transform: DeclarativeTransform;
+}
+
+/** Imperative escape hatch: a codemod reference + #102 author/integrity-hash trust metadata. */
+export interface ImperativeMigration {
+  readonly mode: 'imperative';
   readonly ref: string;
   readonly author: string;
   readonly integrity: string;
   readonly rewrites: string;
 }
+
+/**
+ * The migration linkage on a breaking, mechanically-applicable entry — declarative-first
+ * ({@link DeclarativeMigration}) with an imperative codemod escape hatch ({@link ImperativeMigration}).
+ * Discriminated by `mode`. Slice (b)'s `transformInterpreter` executes either.
+ */
+export type MigrationRef = DeclarativeMigration | ImperativeMigration;
 
 /** One per-module changelog entry. `migration` is present iff the change is breaking + mechanical. */
 export interface ChangelogEntry {

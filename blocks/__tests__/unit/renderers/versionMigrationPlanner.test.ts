@@ -9,9 +9,12 @@ import {
   MigrationPlanError,
   type ChangelogManifest,
   type MigrationRef,
+  type MigrationStep,
 } from '../../../renderers/upgrader/versionMigrationPlanner';
 
-const mig = (ref: string): MigrationRef => ({ ref, author: 'we', integrity: 'sha256-x', rewrites: 'renames attr' });
+const mig = (ref: string): MigrationRef => ({ mode: 'imperative', ref, author: 'we', integrity: 'sha256-x', rewrites: 'renames attr' });
+/** Narrow a step's linkage to its codemod ref (every fixture migration here is imperative). */
+const refOf = (s: MigrationStep): string | undefined => (s.migration.mode === 'imperative' ? s.migration.ref : undefined);
 
 const manifest = (previous: string, release: string, entries: ChangelogManifest['entries']): ChangelogManifest => ({
   manifestVersion: '1', package: 'droplist', previous, release, entries,
@@ -31,21 +34,21 @@ describe('planVersionMigration (#491)', () => {
     const plan = planVersionMigration('1.0.0', '3.0.0', chain);
     expect(plan.reachedTarget).toBe(true);
     expect(plan.spannedVersions).toEqual(['2.0.0', '3.0.0']);
-    expect(plan.steps.map((s) => s.migration.ref)).toEqual(['m-select', 'm-menu']); // patch fix excluded
+    expect(plan.steps.map((s) => refOf(s))).toEqual(['m-select', 'm-menu']); // patch fix excluded
     expect(plan.steps[0]).toMatchObject({ fromVersion: '1.0.0', toVersion: '2.0.0', module: 'select' });
   });
 
   it('is version-gated — a target short of the chain stops at it', () => {
     const plan = planVersionMigration('1.0.0', '2.0.0', chain);
     expect(plan.spannedVersions).toEqual(['2.0.0']);
-    expect(plan.steps.map((s) => s.migration.ref)).toEqual(['m-select']);
+    expect(plan.steps.map((s) => refOf(s))).toEqual(['m-select']);
     expect(plan.reachedTarget).toBe(true);
   });
 
   it('skips manifests already below the installed version', () => {
     const plan = planVersionMigration('2.0.0', '3.0.0', chain);
     expect(plan.spannedVersions).toEqual(['3.0.0']);
-    expect(plan.steps.map((s) => s.migration.ref)).toEqual(['m-menu']);
+    expect(plan.steps.map((s) => refOf(s))).toEqual(['m-menu']);
   });
 
   it('returns an empty, complete plan when installed === target', () => {
@@ -67,7 +70,7 @@ describe('planVersionMigration (#491)', () => {
     const plan = planVersionMigration('1.0.0', '3.0.0', withShortcut);
     // Must walk 1->2->3, not the 1->3 shortcut.
     expect(plan.spannedVersions).toEqual(['2.0.0', '3.0.0']);
-    expect(plan.steps.map((s) => s.migration.ref)).toEqual(['m-select', 'm-menu']);
+    expect(plan.steps.map((s) => refOf(s))).toEqual(['m-select', 'm-menu']);
   });
 
   it('throws on a downgrade', () => {
@@ -82,6 +85,6 @@ describe('planVersionMigration (#491)', () => {
   it('disambiguates a mixed set when a package is named', () => {
     const mixed = [chain[0], { ...chain[1], package: 'other' }];
     const plan = planVersionMigration('1.0.0', '2.0.0', mixed, 'droplist');
-    expect(plan.steps.map((s) => s.migration.ref)).toEqual(['m-select']);
+    expect(plan.steps.map((s) => refOf(s))).toEqual(['m-select']);
   });
 });
