@@ -2,9 +2,11 @@
 type: decision
 workItem: story
 size: 2
-status: open
+status: resolved
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: none
 preparedDate: "2026-06-13"
 tags: [collection-operations, data-table, pagination, composition, block, design-decision]
 relatedProject: webblocks
@@ -24,6 +26,34 @@ and it **reshaped the item from one fork into two**: the home question (block vs
 near-unanimous in the industry, but a second axis the item didn't name — *what shape* the standalone
 primitive takes — is where the real signal sits. **Two forks below, each with a bold recommended
 default.**
+
+## Ruling (2026-06-13) — A / A
+
+Both forks ratified to **A**; the B branches fail the fork-existence test (each is flawed, not a
+legitimate alternate end-state), so this is a crisp call, not "support both".
+
+- **Fork 1 — home: A · a standalone coordinator primitive.** The filter→sort→group→page coordination
+  is owned in one place, not hand-wired per consumer. *B rejected:* "wire it yourself" institutionalises
+  exactly the #369 footgun (sort/filter apply only to the current page) and is the one shape no surveyed
+  grid (TanStack, AG Grid, MUI) recommends.
+- **Fork 2 — shape: A · a headless `CollectionOperationsBehavior` + optional `<collection-operations>`
+  element wrapper.** Mirrors the shipped `DataTableBehavior`/`DataTableElement` + `PaginationBehavior`
+  convention and the dominant headless-instance home (TanStack "table instance", AG Grid "row model").
+  *B rejected:* a rendered block implies owned markup the coordinator doesn't have — it would either
+  duplicate the table/pagination DOM (MUI fused-monolith) or render nothing (dead scaffold), violating
+  compose-don't-merge.
+- **Sub-decision (defaulted):** ship the `<collection-operations>` element wrapper **in the same slice**
+  as the behavior, for parity with `registerDataTable`/`DataTableElement`.
+- **Non-forks upheld:** client (in-memory `applyPipeline`) vs server (params → Loader) execution is a
+  runtime strategy (Technical Configurator), both supported, default to whichever the wiring implies;
+  **page-as-terminal-stage over the whole set stays a fixed mechanic** (exposing page-then-sort just
+  re-enables #369's bug). Compose-don't-merge: the page stage stays owned by pagination's `PageState`.
+
+**Lands in** `blocks/renderers/collection-operations/` (WE reference layer; richer impl —
+virtualization, very large sets — → FUI). **Unblocks the #369 build:** subscribe to `data-table-change`
++ `pagination-change`, re-run `applyPipeline` + the page stage over the *full* set, re-window, push the
+current slice to the table and totals to pagination. No new protocol/intent — the coordinator is the
+runtime of the existing `collection-operations` intent.
 
 ## Axis framing
 

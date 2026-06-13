@@ -31,8 +31,12 @@ page stage + the event wiring + (optionally) Loader integration for server-side 
 
 ## Open questions
 
-The home fork — **coordinator as a standalone block vs. a documented composition** — is carved to
-decision **#452** (`blockedBy`; lean: a small block). Resolving #452 makes this item agent-ready.
+The home fork — **coordinator as a standalone block vs. a documented composition** — was carved to
+decision **#452**, **resolved 2026-06-13 → A / A**: build a **standalone headless
+`CollectionOperationsBehavior` + optional `<collection-operations>` element wrapper** (mirror
+`DataTableBehavior`/`DataTableElement` + `PaginationBehavior`), **not** a documented composition and
+**not** a rendered block. Lands in `blocks/renderers/collection-operations/`. Ship the element wrapper
+in the same slice as the behavior. This item is now agent-ready — see #452's *Ruling* for the full call.
 
 Not forks (supported by default, noted for the build): client-side vs. server-driven is UX-only — the
 coordinator picks the strategy at runtime (ties to the Technical Configurator), not a design call.
