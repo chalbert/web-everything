@@ -2,6 +2,7 @@
 // design-refs.mjs — design-reference screenshot corpus pipeline (backlog #382, phase 1)
 //
 //   collect  — capture screenshots for targets.json (idempotent by sourceUrl); WebP q90 via cwebp
+//   harvest  — ingest operator-curated gallery screenshots (auth-walled app interiors) → captureMethod: gallery (#397)
 //   index    — regenerate index.json from the per-item meta.json sidecars
 //   dedup    — report exact (sha256) + near-dup (dHash) clusters; --apply consolidates near-dups
 //   report   — summarise the corpus (counts by category / register / theme / method, total bytes)
@@ -29,7 +30,7 @@ import { execFileSync } from 'node:child_process';
 import {
   readFileSync, writeFileSync, readdirSync, mkdirSync, existsSync, statSync, rmSync,
 } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -47,6 +48,7 @@ const NEEDS_REVIEW = join(ROOT, 'needs-review.json');
 const QUARANTINE = join(ROOT, 'quarantine'); // archived judged-non-app frames, content-addressed (#489)
 const VERDICTS = join(ROOT, 'verdicts.json'); // vision verdict cache, keyed by contentHash (Fork 4)
 const DEFAULT_TARGETS = join(ROOT, 'targets.json');
+const DEFAULT_GALLERY = join(ROOT, 'gallery.json'); // gallery-harvest manifest (captureMethod: gallery, #397)
 
 const REMEDIATION_CAP = 2; // obstructed → dismiss + re-shoot, at most this many times (Fork 3)
 
@@ -87,6 +89,53 @@ function pngToWebp(pngBuf) {
   } finally {
     for (const f of [inPng, outWebp]) { try { rmSync(f); } catch {} }
   }
+}
+
+let __ppmTmpSeq = 0; // monotonic suffix for unique tmp files (harvest webp + perceptual ppm)
+
+// Encode an on-disk image file (png/jpg/tiff/webp — whatever cwebp accepts) to WebP q90. The
+// gallery-harvest path (#397) feeds operator-provided screenshots through this, same encoder/quality
+// as the live-capture path, so harvested + captured shots are byte-comparable in the same corpus.
+function imageFileToWebp(inputPath) {
+  const out = join(tmpdir(), `design-ref-harvest-${process.pid}-${__ppmTmpSeq++}.webp`);
+  try {
+    execFileSync('cwebp', ['-q', '90', '-quiet', inputPath, '-o', out]);
+    return readFileSync(out);
+  } finally {
+    try { rmSync(out); } catch {}
+  }
+}
+
+// Decode a WebP buffer back to PNG bytes via the system `dwebp` — used to hand the vision gate a
+// `pngBase64` (its input contract) for a harvested gallery frame, which has no source PNG on hand.
+function webpBufToPng(webpBuf) {
+  const inWebp = join(tmpdir(), `design-ref-vin-${process.pid}-${__ppmTmpSeq++}.webp`);
+  const outPng = `${inWebp}.png`;
+  try {
+    writeFileSync(inWebp, webpBuf);
+    execFileSync('dwebp', [inWebp, '-o', outPng], { stdio: 'ignore' });
+    return readFileSync(outPng);
+  } finally {
+    for (const f of [inWebp, outPng]) { try { rmSync(f); } catch {} }
+  }
+}
+
+// Read pixel dimensions straight from a WebP buffer's RIFF header (the harvest path has no source PNG
+// to measure). Handles the lossy VP8 keyframe (what cwebp -q emits) and the extended VP8X canvas form;
+// returns {0,0} for an unrecognised chunk (a non-load-bearing metadata field).
+export function webpDims(buf) {
+  if (buf.length < 30 || buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WEBP')
+    return { width: 0, height: 0 };
+  const fourcc = buf.toString('ascii', 12, 16);
+  if (fourcc === 'VP8 ') {
+    // Lossy keyframe: 14-bit width/height little-endian at offsets 26/28 (after the 0x9d 0x01 0x2a sig).
+    return { width: buf.readUInt16LE(26) & 0x3fff, height: buf.readUInt16LE(28) & 0x3fff };
+  }
+  if (fourcc === 'VP8X') {
+    // Extended: 24-bit (canvasWidth-1)/(canvasHeight-1) at offsets 24/27.
+    return { width: 1 + buf.readUIntLE(24, 3), height: 1 + buf.readUIntLE(27, 3) };
+  }
+  return { width: 0, height: 0 };
 }
 
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
@@ -438,6 +487,156 @@ async function collect(args) {
   rebuildIndex();
 }
 
+// ---- harvest (gallery captureMethod, #397) ---------------------------------
+// A second captureMethod for app interiors that live behind auth and cannot be Playwright-captured:
+// ingest operator-curated, legally-obtained screenshots from design galleries (Mobbin / Refero / Page
+// Flows / …) into the SAME content-addressed corpus. We never scrape the galleries (their ToS forbid
+// it) — the operator supplies each image file plus its attribution in a manifest (default
+// design-refs/gallery.json), and harvest encodes it (cwebp q90, same as live capture), content-
+// addresses it (id = sha256(webp).slice(0,16)), and writes the same meta shape with
+// `captureMethod: 'gallery'` + a required `sourceCredit`/attribution. Source stays open/flexible per
+// #382 Fork 1. The apps-not-marketing subject filter is preserved: when a vision provider is opted in,
+// each harvested frame is gated exactly like a live capture (no remediation — the frame is static), so
+// a marketing/error/blank shot is quarantined + archived (#489) instead of admitted.
+//
+// Manifest shape: { "entries": [ { "image": "<path, abs or relative to the manifest>", "sourceCredit":
+//   "<required attribution, e.g. 'Mobbin — Linear'>", "sourceUrl": "<original app/gallery URL>", "app",
+//   "company", "category", "designRegister", "theme", "tags": [] } ] }.
+async function harvest(args) {
+  const manifestFile = args.gallery ? String(args.gallery) : DEFAULT_GALLERY;
+  const doc = readJSON(manifestFile, null);
+  if (!doc?.entries?.length) {
+    console.error(`No entries found in ${manifestFile}`);
+    process.exit(1);
+  }
+  let entries = doc.entries;
+  if (args.only) entries = entries.filter((e) => `${e.sourceUrl ?? ''}${e.app ?? ''}${e.image ?? ''}`.includes(String(args.only)));
+  if (args.limit) entries = entries.slice(0, Number(args.limit));
+  if (!entries.length) { console.error('No entries matched.'); process.exit(1); }
+
+  const ledger = readJSON(LEDGER, {});
+  const needsReview = readJSON(NEEDS_REVIEW, {});
+  const verdictCache = readJSON(VERDICTS, {});
+
+  const provider = await resolveVisionProvider(process.env);
+  const visionOn = visionEnabled(process.env);
+  if (visionOn) console.log(`👁  vision gate   provider=${provider.name} (gallery subject-filter)`);
+
+  mkdirSync(ITEMS, { recursive: true });
+  mkdirSync(RUNS, { recursive: true });
+
+  const knownHashes = new Map();
+  for (const id of existsSync(ITEMS) ? readdirSync(ITEMS) : []) {
+    const meta = readJSON(join(ITEMS, id, 'meta.json'), null);
+    if (meta?.contentHash) knownHashes.set(meta.contentHash, id);
+  }
+
+  const runId = `harvest-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+  const run = { runId, method: 'gallery', startedAt: new Date().toISOString(), captured: [], duplicates: [], quarantined: [], failed: [] };
+
+  for (const e of entries) {
+    const ref = e.sourceCredit ?? e.app ?? e.image ?? '<entry>';
+    // Attribution is mandatory — an entry without a sourceCredit (or without an image) is rejected.
+    if (!e.image || !e.sourceCredit) {
+      console.log(`❌ failed        ${ref}  —  missing required ${!e.image ? 'image' : 'sourceCredit'}`);
+      run.failed.push({ ref, error: `missing ${!e.image ? 'image' : 'sourceCredit'}` });
+      continue;
+    }
+    const imgPath = isAbsolute(e.image) ? e.image : join(dirname(manifestFile), e.image);
+    if (!existsSync(imgPath)) {
+      console.log(`❌ failed        ${ref}  —  image not found: ${e.image}`);
+      run.failed.push({ ref, error: `image not found: ${e.image}` });
+      continue;
+    }
+
+    let webpBuf;
+    try {
+      webpBuf = imageFileToWebp(imgPath);
+    } catch (err) {
+      console.log(`❌ failed        ${ref}  —  encode: ${err.message.split('\n')[0]}`);
+      run.failed.push({ ref, error: `encode: ${err.message.split('\n')[0]}` });
+      continue;
+    }
+    const contentHash = sha256(webpBuf);
+    if (knownHashes.has(contentHash)) {
+      console.log(`♻  dup           ${ref}  →  ${knownHashes.get(contentHash)}`);
+      run.duplicates.push({ ref, id: knownHashes.get(contentHash) });
+      continue;
+    }
+    const { width, height } = webpDims(webpBuf);
+
+    // Subject filter: gate the harvested frame (apps, not marketing) when a provider is opted in. No
+    // remediation — the frame is static, there is no live page to dismiss an overlay on and re-shoot.
+    let reviewState = 'ungated';
+    let visionVerdict = null;
+    if (visionOn) {
+      const input = { url: e.sourceUrl ?? ref, pngBase64: webpBufToPng(webpBuf).toString('base64'), dims: { width, height }, selectorState: 'none', captureMethod: 'gallery' };
+      let res = verdictCache[contentHash];
+      if (!res) {
+        res = { ...(await classifyCandidate(provider, input)), at: new Date().toISOString() };
+        verdictCache[contentHash] = res;
+      }
+      visionVerdict = { verdict: res.verdict, provider: res.provider, reasons: res.reasons, at: new Date().toISOString() };
+      if (decideAdmission(res.verdict) !== 'admit') {
+        console.log(`🔍 needs-review  ${ref}  —  vision verdict: ${res.verdict}`);
+        needsReview[e.sourceUrl ?? ref] = { reason: `vision-${res.verdict}`, provider: res.provider, captureMethod: 'gallery', at: new Date().toISOString() };
+        const wrote = archiveQuarantinedFrame(contentHash, webpBuf, {
+          contentHash, sourceUrl: e.sourceUrl ?? null, captureMethod: 'gallery', sourceCredit: e.sourceCredit,
+          visionVerdict, app: e.app ?? null, company: e.company ?? null, category: e.category ?? null,
+          designRegister: e.designRegister ?? null, theme: e.theme ?? null, imageDims: { width, height },
+          bytes: webpBuf.length, dateCollected: new Date().toISOString(), collectionRun: runId,
+        });
+        if (wrote) console.log(`   🗄 archived     ${contentHash.slice(0, 16)}  (negative: ${res.verdict})`);
+        run.quarantined.push({ ref, verdict: res.verdict, archived: wrote });
+        continue;
+      }
+      reviewState = reviewStateFor(res.verdict);
+    }
+
+    const id = contentHash.slice(0, 16);
+    const itemDir = join(ITEMS, id);
+    mkdirSync(itemDir, { recursive: true });
+    writeFileSync(join(itemDir, 'screenshot.webp'), webpBuf);
+    const meta = {
+      id,
+      contentHash,
+      sourceUrl: e.sourceUrl ?? null,
+      captureMethod: 'gallery',
+      reviewState,
+      visionVerdict,
+      dateCollected: new Date().toISOString(),
+      datePublished: null,
+      app: e.app ?? null,
+      company: e.company ?? null,
+      category: e.category ?? null,
+      surface: null,
+      designRegister: e.designRegister ?? null,
+      theme: e.theme ?? null,
+      viewport: null, // not a controlled-viewport capture — the gallery owns the frame geometry
+      dpr: null,
+      imageDims: { width, height },
+      bytes: webpBuf.length,
+      tags: e.tags ?? [],
+      sourceCredit: e.sourceCredit, // REQUIRED attribution — the gallery + original app
+      collectionRun: runId,
+    };
+    writeJSON(join(itemDir, 'meta.json'), meta);
+    knownHashes.set(contentHash, id);
+    run.captured.push({ ref, id, bytes: webpBuf.length, reviewState });
+    console.log(`✅ harvested     ${ref}  →  ${id}  (${(webpBuf.length / 1024).toFixed(0)} KB, ${reviewState})`);
+  }
+
+  writeJSON(NEEDS_REVIEW, needsReview);
+  if (visionOn) writeJSON(VERDICTS, verdictCache);
+  run.finishedAt = new Date().toISOString();
+  writeJSON(join(RUNS, `${runId}.json`), run);
+  console.log(
+    `\nHarvest ${runId}: ${run.captured.length} harvested, ${run.duplicates.length} dup, ` +
+      `${run.quarantined.length} needs-review, ${run.failed.length} failed`,
+  );
+  rebuildIndex();
+}
+
 // ---- index -----------------------------------------------------------------
 function rebuildIndex() {
   const items = [];
@@ -474,8 +673,6 @@ function archiveQuarantinedFrame(contentHash, webpBuf, record, root = QUARANTINE
 // This pass fingerprints each shot with a dHash (difference hash) and clusters near-dups by Hamming
 // distance. We decode + downscale with the system `dwebp -scale` — the same system-webp-tools posture
 // as the cwebp encode (no node image dep; `sharp` stays out, consistent with pngToWebp).
-
-let __ppmTmpSeq = 0;
 
 // Parse a binary P6 PPM (`dwebp -ppm` output) into { width, height, pixels } where pixels is a
 // grayscale (Rec. 601 luma) Uint8Array of length width*height. Tolerates header comments + whitespace.
@@ -705,12 +902,14 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const cmd = args._[0];
   switch (cmd) {
     case 'collect': await collect(args); break;
+    case 'harvest': await harvest(args); break;
     case 'index': { const n = rebuildIndex().length; console.log(`index.json rebuilt — ${n} items`); break; }
     case 'dedup': dedup(args); break;
     case 'prune': prune(); break;
     case 'report': report(); break;
     default:
-      console.log('usage: design-refs.mjs <collect|index|dedup|prune|report> [--targets=path] [--only=substr] [--limit=N] [--refresh] [--vision-verify]');
+      console.log('usage: design-refs.mjs <collect|harvest|index|dedup|prune|report> [--targets=path] [--only=substr] [--limit=N] [--refresh] [--vision-verify]');
+      console.log('  harvest: [--gallery=path] ingest operator-curated gallery screenshots (auth-walled app interiors) — captureMethod: gallery');
       console.log('  dedup: [--threshold=N] near-dup Hamming cut (default 5); [--apply] consolidate near-dups into their canonical');
       console.log('  vision gate (opt-in): DESIGN_REFS_VISION_PROVIDER=<name> DESIGN_REFS_VISION_PROVIDER_MODULE=<path-to-provider.mjs>');
       process.exit(cmd ? 1 : 0);

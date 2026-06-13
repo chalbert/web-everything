@@ -1,0 +1,4 @@
+{
+  "_note": "Gallery-harvest manifest (#397) — a second captureMethod for auth-walled app interiors that cannot be Playwright-captured. The operator supplies each screenshot file (legally obtained from a design gallery such as Mobbin / Refero / Page Flows) plus its attribution; harvest never scrapes the galleries. Each entry REQUIRES `image` (a path, absolute or relative to this file) and `sourceCredit` (attribution). Run: `node scripts/design-refs.mjs harvest`. The apps-not-marketing subject filter applies when a vision provider is opted in (DESIGN_REFS_VISION_PROVIDER). Source stays open/flexible per #382 Fork 1.",
+  "entries": []
+}

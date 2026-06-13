@@ -3,8 +3,11 @@ type: idea
 workItem: story
 size: 5
 parent: "382"
-status: open
+status: resolved
 dateOpened: "2026-06-12"
+dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: none
 tags: []
 ---
 
