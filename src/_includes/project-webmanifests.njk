@@ -182,3 +182,51 @@ interface ChangelogManifest {
     </tbody>
   </table>
 </section>
+
+<section id="pattern-deprecation-lifecycle" class="section-card">
+  <h3 id="deprecation-lifecycle">Component Deprecation Lifecycle</h3>
+  <p>
+    Versioning identity answers "what makes two artifacts the same?" (<a href="/backlog/088-module-service-versioning/">#088</a>,
+    <a href="/backlog/389/">#389</a>) and the
+    <a href="#protocol-changelog-manifest">Changelog Manifest</a> records <em>what changed</em>. The
+    <strong>deprecation lifecycle</strong> is the companion <em>pattern</em> that uses both to retire a
+    component <strong>without breaking the consumers still on it</strong> — the Web Everything default
+    for "this component is going away." It composes the existing standards rather than minting a new
+    schema: a deprecation is a <code>changelog-manifest</code> entry, a migration is a
+    <a href="/backlog/191-upgrader-version-migration-codemods/">codemod (#191)</a>, and the replacement
+    is a new content-addressed version (#088). Modelled on the design-system norm (Shopify Polaris &amp;
+    GitHub Primer component lifecycles, the JSDoc <code>@deprecated</code>/<code>@deprecatedSince</code>
+    convention, the web platform's own deprecate-then-remove cadence).
+  </p>
+
+  <h4 id="lifecycle-stages">The four stages</h4>
+  <ol>
+    <li><strong>Flag</strong> — the component stays fully functional but its <code>changelog-manifest</code>
+      entry carries a <code>deprecated</code> marker: a <code>deprecatedSince</code> version, a
+      <strong>replacement pointer</strong> (the id/version that supersedes it), and an
+      <strong>announced removal milestone</strong>. Tooling surfaces a non-fatal warning at use (console /
+      build lint) — <em>flag, don't break</em>, the same stale-while-shown grace the
+      <a href="/research/research-freshness-model/">research-freshness model</a> applies to docs.</li>
+    <li><strong>New version</strong> — ship the replacement as a distinct content-addressed version
+      (#088/#389), never an in-place mutation of the deprecated one. The two coexist; the manifest entry
+      links old&nbsp;→&nbsp;new so a consumer (and the upgrader) can resolve the successor.</li>
+    <li><strong>Legacy preservation</strong> — across the grace window the old component keeps working via
+      one of two support-preserving routes, never a hard cut: a <strong>legacy bundle</strong> (the
+      deprecated implementation moved into a separate <code>legacy</code> module so the main surface sheds
+      it while call sites keep importing) or a <strong>support-preserving adapter</strong> (a shim that
+      maps the old contract onto the new implementation, so one implementation backs both). Codemods (#191)
+      supply the <em>automated</em> migration path; the legacy route is the <em>manual/graceful</em> one
+      for consumers who have not migrated yet.</li>
+    <li><strong>Removal</strong> — only after the announced milestone, and only once the changelog manifest
+      shows the migration available, is the legacy route dropped. Removal is itself a
+      <code>changelog-manifest</code> entry (a breaking severity), so it flows through the same
+      <a href="/backlog/101-auto-update-pipeline/">auto-update</a> classification as any other change.</li>
+  </ol>
+
+  <p>
+    The invariant: <strong>a consumer is never broken by surprise</strong> — every transition is
+    announced in the manifest, a migration exists before removal, and the deprecated component keeps
+    working (flagged, not hidden) until the announced removal. <em>Deprecate-don't-delete</em> is the
+    component-level analogue of the standard's <em>deprecate-don't-rename</em> identity rule.
+  </p>
+</section>
