@@ -137,6 +137,19 @@ if (SELECT) {
   // batch's "no eligible Tier-A left" stop then reads as "drained by a concurrent session, re-run
   // shortly," not "backlog empty." Derived live from `status: active`, so it's never a stale signal.
   if (selection.inFlight.length) console.log(`${DIM}${selection.inFlight.length} batch-shaped item(s) in flight (${YEL}status: active${RST}${DIM} — likely another session); if the pool below is thin, that pool is drained, not empty — re-run after they resolve (#083).${RST}`);
+
+  // Stop-the-world guard (#466/#487): an open item tagged `stop-the-world` bulk-rewrites every
+  // backlog/*.md and must run on a QUIESCENT backlog — claiming it while another session holds a
+  // status:active claim or a live reservation risks a file-level collision between its bulk rewrite and
+  // a concurrent claim/resolve splice. Warn (never block) so nobody picks it up mid-collision; the
+  // backlog is quiescent only when no foreign claim is in flight AND no reservation is held.
+  const stopTheWorld = items.filter((it) => it.status === 'open' && Array.isArray(it.tags) && it.tags.includes('stop-the-world'));
+  if (stopTheWorld.length) {
+    const quiescent = selection.inFlight.length === 0 && foreign.size === 0;
+    const names = stopTheWorld.map((it) => `#${it.num}`).join(', ');
+    if (quiescent) console.log(`${GRN}✓ backlog quiescent — stop-the-world item(s) ${names} are safe to claim (no active claims, no reservations).${RST}`);
+    else console.log(`${YEL}${BLD}⚠ stop-the-world item(s) ${names} present but the backlog is NOT quiescent${RST}${YEL} — ${selection.inFlight.length} active claim(s) + ${foreign.size} reservation(s) in flight. Don't claim a stop-the-world migration now; wait for the backlog to drain (its own run-precondition).${RST}`);
+  }
   console.log(`${CYA}${BLD}Batchable — Tier-A task or story·≤8 (the batch pool) — pre-flight each body for a buried fork before chaining${RST}`);
   if (batchableForView.length) batchableForView.forEach((it) => line(it, it.reservedBy ? `${YEL}⊘${RST}` : `${CYA}◆${RST}`));
   else console.log(`${DIM}  none.${RST}`);

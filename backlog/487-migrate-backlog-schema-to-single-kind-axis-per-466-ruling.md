@@ -5,7 +5,7 @@ size: 5
 status: open
 blockedBy: ["466"]
 dateOpened: "2026-06-13"
-tags: []
+tags: [stop-the-world]
 ---
 
 # Migrate backlog schema to single kind axis (per #466 ruling)
