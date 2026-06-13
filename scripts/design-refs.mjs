@@ -44,6 +44,7 @@ const RUNS = join(ROOT, 'runs');
 const LEDGER = join(ROOT, 'ledger.json');
 const INDEX = join(ROOT, 'index.json');
 const NEEDS_REVIEW = join(ROOT, 'needs-review.json');
+const QUARANTINE = join(ROOT, 'quarantine'); // archived judged-non-app frames, content-addressed (#489)
 const VERDICTS = join(ROOT, 'verdicts.json'); // vision verdict cache, keyed by contentHash (Fork 4)
 const DEFAULT_TARGETS = join(ROOT, 'targets.json');
 
@@ -117,16 +118,21 @@ const acHandler = new WeakMap(); // page -> current run's message handler
 async function autoconsentOptOut(page) {
   let rules, scriptSource;
   try {
-    await import('@duckduckgo/autoconsent'); // presence check — throws (caught) when absent
-    // CMP detection needs the rules bundle. Prefer the compact variant, fall back to the full one.
-    const rulesMod = await import('@duckduckgo/autoconsent/rules/compact-rules.json', { with: { type: 'json' } })
-      .catch(() => import('@duckduckgo/autoconsent/rules/rules.json', { with: { type: 'json' } }));
-    rules = rulesMod.default ?? rulesMod;
-    // The prebundled content script isn't exposed by the package's exports map, so resolve the
-    // package main and read the sibling bundle directly.
+    // We drive the CMP message protocol ourselves, so we only need autoconsent's STATIC assets — the
+    // prebundled content script + the rules bundle — not its JS API. Resolving them via createRequire
+    // (built from a runtime-joined specifier, never a string-literal `import()`) keeps the package
+    // truly OPTIONAL: a bundler/test runner can't statically pre-resolve it, and an absent package
+    // throws here (caught) → the caller falls back to heuristics. No hard dep; offline/CI unaffected.
+    const acPkg = ['@duckduckgo', 'autoconsent'].join('/');
     const require = createRequire(import.meta.url);
-    const distDir = dirname(require.resolve('@duckduckgo/autoconsent'));
+    // The content script isn't exposed by the package's exports map, so read it next to the main.
+    const distDir = dirname(require.resolve(acPkg)); // throws when the package is absent
     scriptSource = readFileSync(join(distDir, 'autoconsent.playwright.js'), 'utf8');
+    // CMP detection needs the rules bundle. Prefer the compact variant, fall back to the full one.
+    let rulesPath;
+    try { rulesPath = require.resolve(`${acPkg}/rules/compact-rules.json`); }
+    catch { rulesPath = require.resolve(`${acPkg}/rules/rules.json`); }
+    rules = JSON.parse(readFileSync(rulesPath, 'utf8'));
   } catch {
     return false; // package / rules / content-script absent → heuristics
   }
@@ -326,7 +332,26 @@ async function collect(args) {
         if (decideAdmission(res.verdict) !== 'admit') {
           console.log(`🔍 needs-review  ${url}  —  vision verdict: ${res.verdict}`);
           quarantine(url, { reason: `vision-${res.verdict}`, provider: res.provider });
-          run.quarantined.push({ url, verdict: res.verdict });
+          // Retain the judged frame as a labeled negative for the on-device classifier (#489 → #488).
+          const wrote = archiveQuarantinedFrame(contentHash, webpBuf, {
+            contentHash,
+            sourceUrl: url,
+            captureMethod: 'playwright',
+            visionVerdict, // {verdict, provider, reasons, at} — the materialised join with verdicts.json
+            app: t.app ?? null,
+            company: t.company ?? null,
+            category: t.category ?? null,
+            designRegister: t.designRegister ?? null,
+            theme: t.theme ?? null,
+            viewport: VIEWPORT,
+            dpr: DPR,
+            imageDims: { width, height },
+            bytes: webpBuf.length,
+            dateCollected: new Date().toISOString(),
+            collectionRun: runId,
+          });
+          if (wrote) console.log(`   🗄 archived     ${contentHash.slice(0, 16)}  (negative: ${res.verdict})`);
+          run.quarantined.push({ url, verdict: res.verdict, archived: wrote });
           continue;
         }
         reviewState = reviewStateFor(res.verdict); // 'confirmed' — a provider said app
@@ -425,6 +450,24 @@ function rebuildIndex() {
   return items;
 }
 
+// Persist a quarantined (judged-non-app) frame as a labeled NEGATIVE for the on-device UI-screenshot
+// classifier's distillation set (#489 → #488). The admitted corpus keeps every `app` frame; the gate
+// used to *discard* the rejects (marketing / error / blank / obstructed) — logging only their URL to
+// needs-review.json. Those are exactly the negatives the classifier needs, so we retain each judged
+// frame with its verdict here: `quarantine/<contentHash>/{screenshot.webp,meta.json}`, append-only +
+// content-addressed like the admitted corpus, but kept OFF the browse page (rebuildIndex reads ITEMS
+// only). The record carries its `visionVerdict`, so the join with verdicts.json is materialised on
+// disk exactly as admitted shots carry it. Idempotent: a frame's hash dedupes, re-runs don't churn.
+// Returns true if a new frame was written, false if the hash was already archived.
+function archiveQuarantinedFrame(contentHash, webpBuf, record, root = QUARANTINE) {
+  const dir = join(root, contentHash);
+  if (existsSync(dir)) return false; // append-only — the same frame is already archived
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'screenshot.webp'), webpBuf);
+  writeJSON(join(dir, 'meta.json'), record);
+  return true;
+}
+
 // ---- dedup (exact only; perceptual deferred to a sharp pass) ----------------
 function dedup() {
   const byHash = new Map();
@@ -493,17 +536,22 @@ function report() {
   }
 }
 
+// Exported for unit tests; the CLI dispatch below only runs when this file is executed directly.
+export { archiveQuarantinedFrame, QUARANTINE };
+
 // ---- main ------------------------------------------------------------------
-const args = parseArgs(process.argv.slice(2));
-const cmd = args._[0];
-switch (cmd) {
-  case 'collect': await collect(args); break;
-  case 'index': { const n = rebuildIndex().length; console.log(`index.json rebuilt — ${n} items`); break; }
-  case 'dedup': dedup(); break;
-  case 'prune': prune(); break;
-  case 'report': report(); break;
-  default:
-    console.log('usage: design-refs.mjs <collect|index|dedup|prune|report> [--targets=path] [--only=substr] [--limit=N] [--refresh] [--vision-verify]');
-    console.log('  vision gate (opt-in): DESIGN_REFS_VISION_PROVIDER=<name> DESIGN_REFS_VISION_PROVIDER_MODULE=<path-to-provider.mjs>');
-    process.exit(cmd ? 1 : 0);
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const args = parseArgs(process.argv.slice(2));
+  const cmd = args._[0];
+  switch (cmd) {
+    case 'collect': await collect(args); break;
+    case 'index': { const n = rebuildIndex().length; console.log(`index.json rebuilt — ${n} items`); break; }
+    case 'dedup': dedup(); break;
+    case 'prune': prune(); break;
+    case 'report': report(); break;
+    default:
+      console.log('usage: design-refs.mjs <collect|index|dedup|prune|report> [--targets=path] [--only=substr] [--limit=N] [--refresh] [--vision-verify]');
+      console.log('  vision gate (opt-in): DESIGN_REFS_VISION_PROVIDER=<name> DESIGN_REFS_VISION_PROVIDER_MODULE=<path-to-provider.mjs>');
+      process.exit(cmd ? 1 : 0);
+  }
 }
