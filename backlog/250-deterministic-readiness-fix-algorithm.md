@@ -7,6 +7,7 @@ dateOpened: "2026-06-09"
 dateStarted: "2026-06-09"
 dateResolved: "2026-06-09"
 blockedBy: ["248", "249"]
+graduatedTo: "scripts/readiness/engine.mjs + scripts/check-readiness.mjs (check:readiness / fix:readiness)"
 tags: [backlog, tooling, determinism, cli]
 ---
 

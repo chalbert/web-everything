@@ -4,7 +4,7 @@ workItem: story
 size: 8
 parent: "135"
 status: open
-blockedBy: ["128", "135"]
+blockedBy: ["128", "135", "450"]
 dateOpened: "2026-06-06"
 tags: [block, background-task, durability, background-fetch, service-worker, async, enhancement]
 relatedProject: webintents
@@ -23,9 +23,7 @@ Scope:
 - Rehydration: how a reload-surviving task reconnects to its surface entry and Loader state on the next page load (the handle that crossed the reload boundary).
 - Graceful degradation where Background Fetch is unavailable (fall back to route-only + the navigation guard).
 
-Open questions:
-- Scope beyond fetches: the intent covers "any long task", but Background Fetch only durably models transfers. What is the durable story for non-fetch work (e.g. a long client-side computation)?
-- Relationship to the navigation guard (#129): does arming `durability: reload` relax `navigationGuard: warn` (no need to warn if work survives the reload)?
+Open questions → carved to decision **#450** (`blockedBy`): (1) scope beyond fetches — transfers-only vs. a non-fetch durable path; (2) does arming `durability: reload` relax `navigationGuard: warn`? These two coupled forks gate the build; resolving #450 makes this item agent-ready.
 
 Spun off from #128 (implementing the Background Task surface as a block).
 

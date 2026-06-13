@@ -284,5 +284,41 @@
     "category": "standard",
     "icon": "/assets/icons/webpolicy.svg",
     "isSvg": true
+  },
+  {
+    "id": "webreporting",
+    "name": "Web Reporting",
+    "description": "Standard for a <strong>unified report substrate</strong> &mdash; one normalized model (sources, sections, findings, severities, scores, series) every producer targets so reports from <em>different sources</em> render through the <em>same</em> UI, with <strong>adapters</strong> that ingest (and emit) common report formats instead of bespoke viewers. Defines the <strong>report-model Protocol</strong>: multi-vendor report-format interop (SARIF, JUnit, coverage, SonarQube all exchange the same kind of artifact) is a genuine, escapable, impl-swappable contract &mdash; the normalized schema <em>is</em> the lock, and ingest/export adapters bridge each foreign format bottom-up into the pivot. A Project that owns one Protocol; an intent would be UX-only and wrong for a data-interchange contract. Distinct from a <em>catalog</em> page (which renders a registry): reporting renders <strong>findings/results over time</strong>. The output layer the conformance tooling, a future <a href=\"/projects/webcompliance/\">Web Compliance</a> project, and external sources all render through.",
+    "status": "concept",
+    "category": "standard",
+    "icon": "/assets/icons/webreporting.svg",
+    "isSvg": true
+  },
+  {
+    "id": "webcompliance",
+    "name": "Web Compliance",
+    "description": "Standard for the <strong>enforcement</strong> layer &mdash; deliberately separated from <em>conformance</em>. <strong>Conformance</strong> is <em>how aligned</em> something is to a standard (a measure on a spectrum &mdash; it reports, it doesn't block); <strong>compliance</strong> is a conformance criterion <strong>promoted to an enforced hard rule</strong> &mdash; a gate, with severity, pass/fail, expiring waivers, and an audit trail. Web Compliance owns that promotion path and its machinery. The canonical artifact is the <strong>policy/rule model</strong>: which conformance criteria are enforced, at what severity, for which scope &mdash; policy-as-code, versioned, that <strong>extends a fully-defined platform-default policy</strong> (a project policy extends/overrides the baseline, per the WE config-layer convention). No compliance-specific protocol in v1: results ride <a href=\"/projects/webreporting/\">Web Reporting</a>'s report model (an audit result is just another report source). Distinct from <a href=\"/projects/webpolicy/\">Web Policy</a> (declarative <em>domain</em> rules &mdash; whether a business action is permitted): Web Compliance gates <em>standards conformance</em>, a different subject with its own home.",
+    "status": "concept",
+    "category": "standard",
+    "icon": "/assets/icons/webcompliance.svg",
+    "isSvg": true
+  },
+  {
+    "id": "webnotifications",
+    "name": "Web Notifications",
+    "description": "Standard for the <strong>notification domain</strong> &mdash; the orchestration concern (which surface a notification targets, grouping, dedup, badging) plus the <strong>closed-app push-delivery protocol</strong>. Ratified in <a href=\"/backlog/009-gap-13-webpermissions-project/\">#009</a> (domain home) and <a href=\"/backlog/455-server-to-client-delivery-transport-home-by-purpose-vs-by-me/\">#455</a> (transport home, <em>by-purpose</em>: push lives here, the open-app realtime family gets its own home). Push delivery is a <strong>protocol</strong>, not a UX intent: subscription + VAPID + provider orchestration is async, server-authoritative, and swappable &mdash; the native anchor is the <strong>Web Push API</strong> (service worker + push service, survives tab close), with a <code>CustomPushProvider</code> seam so a multi-channel hub (FCM, OneSignal, Novu) plugs in behind the same contract. It <em>coordinates</em> the render-intent family (<code>system-notification</code>, <code>notification-marker</code>) which publish standalone in <a href=\"/projects/webintents/\">Web Intents</a> &mdash; a consuming project sees the render intents, never the transport. Distinct from <code>feedback</code> (in-app toast render) and <code>background-task</code> (in-session persistence): this owns the OS-surfaced, server-deliverable notification.",
+    "status": "concept",
+    "category": "standard",
+    "icon": "/assets/icons/webnotifications.svg",
+    "isSvg": true
+  },
+  {
+    "id": "webrealtime",
+    "name": "Web Realtime",
+    "description": "Standard for the <strong>open-app realtime transport</strong> &mdash; the live, bidirectional-or-streamed server&rarr;client delivery channel an <em>open</em> app holds (presence, live data, collaborative cursors, server-pushed updates). Defines the <strong>transport-negotiation Protocol</strong>: a <code>CustomTransportProvider</code> seam that auto-negotiates the best available channel &mdash; <strong>SSE</strong> and <strong>WebSocket</strong> native-first, <strong>WebTransport</strong> capability-gated (Chrome/Edge only, no Safari &mdash; graceful degradation), <strong>long-poll/poll</strong> as the degradation floor &mdash; so a consuming app declares <em>realtime delivery</em> and the provider picks the transport, the way Socket.IO / SignalR / Centrifugo auto-negotiate. Ratified in <a href=\"/backlog/455-server-to-client-delivery-transport-home-by-purpose-vs-by-me/\">#455</a> (Fork 2, transport home <em>by purpose</em>). Deliberately separated from <a href=\"/projects/webnotifications/\">Web Notifications</a>&rsquo; closed-app push: the two are <strong>non-fungible</strong> &mdash; a live socket and a service-worker push survive opposite lifecycles (open tab vs. closed app) and you never fall back from one to the other. Technical contract, not a UX preference &mdash; a Protocol, not an Intent.",
+    "status": "concept",
+    "category": "standard",
+    "icon": "/assets/icons/webrealtime.svg",
+    "isSvg": true
   }
 ]

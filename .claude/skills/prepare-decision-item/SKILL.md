@@ -31,9 +31,11 @@ research dump. To *make* a prepared (or un-prepared) call, that's `/next decisio
    3–5, one-line rationale + leverage each) with two links per item ([live] · [md]) and your
    recommended pick. Prep is a real token spend (a prior-art survey + a `/research/` topic + authoring),
    so get **one "go"** on which item before burning it — *not* a multiple-choice; planning-as-discussion.
-3. **Claim it.** `node scripts/backlog.mjs claim <NNN>` (race-safe `open → active` + `dateStarted`;
-   refuses if dirty or already taken). Emit the rename slug. Claiming guards against a concurrent
-   session preparing the same fork — prep is claimable work like any other.
+3. **Claim it.** `node scripts/backlog.mjs claim <NNN> --as=preparing` (race-safe `open → preparing`
+   + `dateStarted`; refuses if dirty or already taken). The `preparing` status drops it from selection
+   exactly like `active`, but reads distinctly on the `/backlog/` board — a decision being *researched*,
+   not a story mid-build (#375). Emit the rename slug. Claiming guards against a concurrent session
+   preparing the same fork — prep is claimable work like any other.
 
 ## Doing the prep — the three passes, in order
 
@@ -71,11 +73,22 @@ durable output is the rewritten body, not a message:
 
 A prepared decision is **still open** — the call hasn't been made. So:
 
-1. **Set `preparedDate: "YYYY-MM-DD"`** (today) in the item's frontmatter via an Edit — this is the
-   one flag that makes readiness rank it `✓ ready to ratify`.
+1. **Gate before stamping — every fork must actually be at DoR, *including* the one you'd rather leave
+   "for the human."** Prep's whole job is to bring the *human-judgment* fork to options + tradeoffs +
+   a **bold** recommended default the decider then ratifies or overrides — **not** to hand the human a
+   raw question. A fork you couldn't shape that way is **un-prepared, not "deferred"**: either shape it
+   (it almost always can be — even a naming/ownership/scope call gets researched options + a default;
+   see #009's "mint `webpush` vs fold the protocol into an existing project" fork), or **carve it to a
+   child** item that is *itself* prepared and rewrite the parent fork to "→ delegated to #NNN
+   (prepared)". A body still carrying a bare **"needs a human call" / "confirm X" / "TBD" / slash-name
+   (`webpush`/`webpermissions`)** fork is **not prepared** — do **not** stamp it. Walk every `## Fork N`
+   and confirm each has named options, tradeoffs, and a bold default before continuing.
+   Then **set `preparedDate: "YYYY-MM-DD"`** (today) in the item's frontmatter via an Edit — this is the
+   one flag that makes readiness rank it `✓ ready to ratify`, so stamping a half-prepared item is a
+   false "ready" the next decision turn will trust.
 2. **Gate:** `npm run check:standards` green (and the new `/research/` topic renders — confirm the
    `researchTopics.json` entry + `.njk` write-up parsed). Confirm a `relatedReport` link exists.
-3. **Release the claim:** `node scripts/backlog.mjs release <NNN>` (`active → open`; stamps untouched,
+3. **Release the claim:** `node scripts/backlog.mjs release <NNN>` (`preparing → open`; stamps untouched,
    so `preparedDate` survives). **Do not `resolve`** — resolving is the *decision* turn's job, not
    prep's.
 4. Close with a one-line net-flow note (item `#NNN` now `✓ ready to ratify`, research topic published)

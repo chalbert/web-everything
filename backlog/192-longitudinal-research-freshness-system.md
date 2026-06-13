@@ -1,11 +1,8 @@
 ---
 type: idea
 workItem: epic
-size: 8
 status: open
 dateOpened: "2026-06-08"
-childlessReason: undecided
-blockedBy: ["441"]
 tags: [research, freshness, longitudinal, versioning, reports, staleness, meta, axis-discovery]
 relatedProject: webdocs
 crossRef: { url: /research/, label: "/research/ topic index" }

@@ -129,8 +129,8 @@ export function computeReadiness(items) {
  * @param {Array<object>} items  Loader items — each carries `tier`, `batchable`, `leverageScore`,
  *   `directUnblocks`, `transitiveUnblocks`, `unblocksToReady` (all `src/_data/backlog.js` derivations).
  * @returns {{
- *   counts: { open: number, tierA: number, tierB: number, tierC: number, batchable: number },
- *   tierA: Array<object>, batchable: Array<object>, tierB: Array<object>,
+ *   counts: { open: number, tierA: number, tierB: number, tierC: number, batchable: number, inFlight: number },
+ *   tierA: Array<object>, batchable: Array<object>, tierB: Array<object>, inFlight: Array<object>,
  * }}
  */
 export function computeSelection(items) {
@@ -138,6 +138,15 @@ export function computeSelection(items) {
     num: it.num, id: it.id, title: it.title, type: it.type,
     workItem: it.workItem, size: it.size, tier: it.tier, batchable: !!it.batchable,
     batchCost: it.batchCost,
+    // Repo-locus (backlog-workflow.md → "Repo-locus"): the gate that can honestly close this item. A
+    // pack takes only its own locus; cross-locus items surface separately. Loader-derived (explicit
+    // `locus:` or inferred from tags); default `webeverything` for in-memory test fixtures.
+    locus: it.locus ?? 'webeverything', locusAuthored: !!it.locusAuthored,
+    // For a sliceable epic, which action it needs: 'unsliced' (→ /slice), 'done' (→ resolve),
+    // 'parked' (a childlessReason gates decomposition — show the reason, no slice prompt), or
+    // 'tracking' (open children, no epic-level action). Loader-derived; null for non-epics.
+    epicState: it.epicState ?? null,
+    childlessReason: it.childlessReason ?? null,
     // A decision is PREPARED once `preparedDate` is set — its forks are researched, the research is
     // published as a /research/ topic, and each fork states options + a bold default (the
     // "prepared-fork shape", backlog-workflow.md). A prepared Tier-B item is ready to *ratify*, not research.
@@ -168,10 +177,26 @@ export function computeSelection(items) {
   const tierB = open.filter((it) => it.tier === 'B').sort(rankB).map(project);
   const tierC = open.filter((it) => it.tier === 'C');
   const batchable = tierA.filter((it) => it.batchable);
+  // Ready-to-slice: a Tier-A epic. Unblocked, but an agent can't BUILD it directly — its work lives in
+  // child stories/tasks, so it's a `/slice` candidate, not buildable work. Split out of the agent-ready
+  // tally so a container epic isn't counted alongside the very slices its work lives in (mirrors the
+  // loader `sliceable` field + the Prioritisation tab's "ready to slice" bucket). Derived from
+  // `workItem` so it holds for in-memory test fixtures that don't carry the loader field.
+  const sliceable = tierA.filter((it) => it.workItem === 'epic');
+
+  // In-flight (#083 legible-stop): items another session is ACTIVELY working (`status: active`) that
+  // are batch-shaped (task or story·≤8) — i.e. the items that WOULD be in the batch pool were they
+  // still open. Surfacing these lets `--select` tell "pool drained by a concurrent batch (re-run
+  // shortly)" apart from "backlog genuinely empty" — the stop a batch hits when a sibling session has
+  // `claim`ed the open work. Byte-deterministic (a pure function of on-disk `status`), so it belongs
+  // here in the core counts, NOT at the time/session-dependent reservation boundary in the CLI.
+  const isBatchShape = (it) =>
+    it.workItem === 'task' || (it.workItem === 'story' && typeof it.size === 'number' && it.size <= 8);
+  const inFlight = items.filter((it) => it.status === 'active' && isBatchShape(it)).sort(rank).map(project);
 
   return {
-    counts: { open: open.length, tierA: tierA.length, tierB: tierB.length, tierBPrepared: tierB.filter((it) => it.prepared).length, tierC: tierC.length, batchable: batchable.length },
-    tierA, batchable, tierB,
+    counts: { open: open.length, tierA: tierA.length, agentReady: tierA.length - sliceable.length, sliceable: sliceable.length, epicActionable: sliceable.filter((it) => it.epicState === 'unsliced' || it.epicState === 'done').length, tierB: tierB.length, tierBPrepared: tierB.filter((it) => it.prepared).length, tierC: tierC.length, batchable: batchable.length, inFlight: inFlight.length },
+    tierA, batchable, sliceable, tierB, inFlight,
   };
 }
 
@@ -184,21 +209,30 @@ export function computeSelection(items) {
  * a hard break), so a smaller, lower-ranked item still gets packed behind it — maximising points used.
  * Deterministic: ranked input + greedy walk → identical pack for identical state + budget.
  *
+ * REPO-LOCUS (backlog-workflow.md → "Repo-locus"): packs only items whose `locus` matches `batchLocus`
+ * (the repo `--select` runs in, default `webeverything`). A batchable Tier-A item of a DIFFERENT locus
+ * is never packed — it can't be honestly closed by this repo's gate — and is returned in `otherLocus`
+ * so the CLI surfaces it as "needs an in-repo session". This is the fails-open guard: a cross-repo item
+ * can't slip into the WE pool and get resolved on a gate that never ran it.
+ *
  * @param {Array<object>} tierA   Ranked Tier-A projections from {@link computeSelection}.
  * @param {number} budget         The points budget to fill (sum of `batchCost`).
- * @returns {{ picked: Array<object>, spent: number, budget: number, skipped: Array<object> }}
+ * @param {string} [batchLocus]   The batch's own locus; only matching items are packable. Default `webeverything`.
+ * @returns {{ picked: Array<object>, spent: number, budget: number, skipped: Array<object>, otherLocus: Array<object> }}
  */
-export function computeBatchPack(tierA, budget) {
+export function computeBatchPack(tierA, budget, batchLocus = 'webeverything') {
   const picked = [];
   const skipped = [];
+  const otherLocus = [];
   let spent = 0;
   for (const it of tierA) {
     if (!it.batchable || typeof it.batchCost !== 'number') continue;
+    if ((it.locus ?? 'webeverything') !== batchLocus) { otherLocus.push(it); continue; } // wrong gate — never pack
     if (spent + it.batchCost > budget) { skipped.push(it); continue; } // doesn't fit — keep scanning
     picked.push(it);
     spent += it.batchCost;
   }
-  return { picked, spent, budget, skipped };
+  return { picked, spent, budget, skipped, otherLocus };
 }
 
 /**

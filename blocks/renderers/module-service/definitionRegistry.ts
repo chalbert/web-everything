@@ -139,9 +139,15 @@ export class DefinitionCache implements DefinitionResolver {
   }
 }
 
-/** The cache key for a served artifact — a serve is pure in `(id, form, transpileTarget)`. */
-function artifactKey(id: string, opts: ServeOptions): string {
-  return `${id}|${opts.form}|${opts.transpileTarget ?? 'esnext'}|${opts.strategy ?? 'declarative-static'}`;
+/**
+ * The cache key for a served artifact — a serve is pure in `(id, form, target, strategy)` AND the
+ * producing compiler/core version. The `compilerVersion` is folded in so the in-process cache keys on
+ * the *same* byte-determining inputs as the HTTP content-addressed id (#088/#461): a compiler bump
+ * invalidates this cache exactly as it mints a new content hash, so the two layers never disagree on
+ * identity (the bug this closes: a compiler bump that left the cache serving stale bytes).
+ */
+function artifactKey(id: string, opts: ServeOptions, compilerVersion: string): string {
+  return `${id}|${opts.form}|${opts.transpileTarget ?? 'esnext'}|${opts.strategy ?? 'declarative-static'}|${compilerVersion}`;
 }
 
 /**
@@ -154,18 +160,24 @@ function artifactKey(id: string, opts: ServeOptions): string {
 export class ServedArtifactCache {
   readonly #resolver: DefinitionResolver;
   readonly #serve: typeof serve;
+  readonly #compilerVersion: string;
   readonly #cache = new Map<string, ServeResult>();
   #hits = 0;
   #misses = 0;
 
-  constructor(resolver: DefinitionResolver, serveFn: typeof serve = serve) {
+  /**
+   * @param compilerVersion folded into the cache key so it tracks the same identity as the HTTP
+   *   content hash (#461). Defaults to `'esnext'` (the v1 single-compiler baseline) when unspecified.
+   */
+  constructor(resolver: DefinitionResolver, serveFn: typeof serve = serve, compilerVersion = 'esnext') {
     this.#resolver = resolver;
     this.#serve = serveFn;
+    this.#compilerVersion = compilerVersion;
   }
 
-  /** Serve `id` in the requested form, memoized by `(id, form, target, strategy)`. Null when the id is unknown. */
+  /** Serve `id` in the requested form, memoized by `(id, form, target, strategy, compilerVersion)`. Null when the id is unknown. */
   serve(id: string, opts: ServeOptions): ServeResult | null {
-    const key = artifactKey(id, opts);
+    const key = artifactKey(id, opts, this.#compilerVersion);
     const cached = this.#cache.get(key);
     if (cached) {
       this.#hits++;

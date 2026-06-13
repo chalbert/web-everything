@@ -53,19 +53,35 @@ function webEverythingPatches(): Plugin {
 }
 
 /**
- * Vite plugin that provides SPA fallback for the router demo.
- * Routes like /counter, /todos, /users/1 etc. are served the router demo HTML.
+ * Vite plugin that provides SPA history fallback for the router-backed demos.
+ *
+ * A client-side router owns paths that have no file on disk (e.g. `/counter`, or the loan-origination
+ * app's `/demos/loan-origination/pipeline`). A hard reload of such a deep link hits the dev server,
+ * which would 404 — so we rewrite the request to the demo's HTML entry and let the router re-match the
+ * path in the browser. Each demo mounted under its own base path needs an entry here.
  */
 function routerDemoFallback(): Plugin {
+  // [pathTest, htmlEntry] — first match wins. The loan-origination app is served under a base path,
+  // so its routes are base-qualified; only its real assets (app.ts/app.css) keep an extension.
+  const fallbacks: Array<[RegExp, string]> = [
+    [/^\/(counter|todos|users|admin|login)(\/|$)/, '/demos/declarative-spa-router.html'],
+    [
+      /^\/demos\/loan-origination\/(pipeline|application|processing|underwriting|admin)(\/|$)/,
+      '/demos/loan-origination/index.html',
+    ],
+    [
+      /^\/demos\/auto-insurance\/(book|quotes|underwriting|claims)(\/|$)/,
+      '/demos/auto-insurance/index.html',
+    ],
+  ];
   return {
     name: 'router-demo-fallback',
     configureServer(server) {
       // Must run before Vite's internal middleware
       server.middlewares.use((req, _res, next) => {
         const url = req.url?.split('?')[0] || '';
-        if (/^\/(counter|todos|users|admin|login)(\/|$)/.test(url)) {
-          req.url = '/demos/declarative-spa-router.html';
-        }
+        const hit = fallbacks.find(([re]) => re.test(url));
+        if (hit) req.url = hit[1];
         next();
       });
     },

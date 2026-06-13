@@ -11,7 +11,7 @@ tags: []
 
 # backlog.mjs claim dirty-guard false-positives on untracked-new items
 
-The claim verb's isDirty guard runs git status --short and die()s on ANY hit — including untracked-new files (??), which is the normal state of a freshly-scaffolded backlog item that was never committed. So claim refuses every new item until it is committed, though the guard's own comment says 'Warn (don't block)'. This forces a manual status hand-flip (open→active + dateStarted) for each, defeating the mechanical verb (hit 4× in one batch session). Fix: distinguish untracked (??) from tracked-modified ( M) in isDirty — only a tracked modification is the concurrency smell the guard targets; an untracked-new file is not — or downgrade to a warning per the comment. Adjacent to #083 (agent-file-lock-coordination), which owns the claim concurrency model.
+The claim verb's isDirty guard runs git status --short and die()s on ANY hit — including untracked-new files (??), the normal state of a freshly-scaffolded item never committed. So claim refuses every new item until committed, though the guard's own comment says 'Warn (don't block)'. This forces a manual status hand-flip (open→active + dateStarted) per item, defeating the mechanical verb (hit 4× in one session). Fix: distinguish untracked (??) from tracked-modified ( M) — only a tracked modification is the concurrency smell the guard targets — or downgrade to a warning. Adjacent to #083, which owns the claim concurrency model.
 
 ## Location & fix
 

@@ -3,9 +3,12 @@ type: idea
 workItem: story
 size: 3
 parent: "351"
-status: open
+status: resolved
 blockedBy: ["436"]
 dateOpened: "2026-06-12"
+dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: webcompliance/gate.ts
 tags: []
 ---
 

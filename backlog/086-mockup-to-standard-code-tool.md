@@ -13,7 +13,9 @@ crossRef: { url: /adapters/, label: Rendering Adapters }
 
 # Mockup-to-standard-code tool — analyse a UI mockup, emit standard-compliant code, never married to one AI
 
-A tool that **ingests a UI mockup — static (image, Figma/Sketch export, screenshot) or interactive (a clickable prototype, a live page, a recorded flow) — analyses it, and emits Web Everything standard-compliant code**: declarative components, blocks, intents, and the right adapter form, rather than a one-off framework dump. The non-negotiable design constraint is that it **must not depend on a single AI tool**. Model/vision/codegen capability is the fastest-moving part of this space, so the tool treats the AI as a *swappable provider behind a registry* — the same "don't reinvent the wheel, inject a provider" shape we already use for [render strategies](/protocols/) (`CustomRenderStrategyRegistry`) and the MaaS compiler seam (`CustomCompilerRegistry`, #081). The AI is infrastructure you plug in, not architecture you bake in.
+A tool that **ingests a UI mockup — static (image, Figma) or interactive (prototype, live page) — analyses it, and emits Web Everything standard-compliant code**: declarative components, blocks, intents, and the right adapter form, not a framework dump.
+
+ The non-negotiable constraint is that it **must not depend on a single AI tool**. Model/vision/codegen is the fastest-moving part of this space, so the tool treats the AI as a *swappable provider behind a registry* — the "inject a provider" shape we use for [render strategies](/protocols/) and the MaaS compiler seam (#081). The AI is infrastructure you plug in, not architecture you bake in.
 
 > **Split status (2026-06-10 analysis, via #259): splittable but deferred.** A *staging* split exists
 > — neutral structural-description schema (`story·5`) → analyzer registry + reference provider (`story·3`)
@@ -41,7 +43,7 @@ The neutral structural description is the **contract between the seams**: it's w
 
 Most design-to-code tools emit framework code and stop. The value here is that output lands as **Web Everything entities** — declarative components, the right intents wired in, accessibility/semantics from the standard rather than guessed — and can then be served/transformed in any form via the existing adapters and MaaS. The mockup tool is a *front door* onto the standard, not a competing codegen island. **Native-first:** generated code defaults to plain platform/WC output; a framework form is one adapter selection downstream, not the assumed target.
 
-## Open decisions (recommendations in bold)
+## Design decisions (recommended)
 
 - **Provider contract granularity.** **Two registries (analyzer + generator), not one monolith** — they move at different speeds and a single image-model upgrade shouldn't touch generation. Mirrors keeping JSX-spelling separate from reactivity-strategy.
 - **Neutral structure schema.** **Express it in the standard's own vocabulary — intents/regions/roles/states — not a bespoke IR.** Borrow platform/standard terms (ARIA roles, intent names) so the contract is reviewable and stable, and so generation is a lookup, not a translation guess.

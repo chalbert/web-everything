@@ -15,7 +15,7 @@ crossRef: { url: /backlog/099-evergreen-app-vision/, label: "Evergreen app (#099
 
 # Auto-update pipeline — keep an app on the latest deps/standards safely, with risk gates and reversion
 
-Define the **update orchestration** that lets an app stay current automatically: when a new dep or Platform standard ships, run a controlled pipeline — security analysis → cool-off buffer → auto-branch + auto-test → gates → merge/deploy → monitor → revert. This is the *change-management* engine of the evergreen app ([#099](/backlog/099-evergreen-app-vision/)); distinct from the **upgraders** (#094, which transform code) — this is the *policy + workflow* deciding when an update runs and how it's made safe. **No design exists yet.** The two forks below — where the pipeline lives, and the gate model — are grounded in a published prior-art survey ([Auto-update pipeline](/research/auto-update-pipeline/) — Dependabot/Renovate, semantic-release/changesets, progressive delivery, codemod migration delivery), each naming a recommended default in **bold**.
+Define the **update orchestration** that lets an app stay current automatically: when a new dep or Platform standard ships, run a controlled pipeline — security analysis, cool-off, auto-branch + auto-test, gates, merge/deploy, monitor, revert. This is the *change-management* engine of the evergreen app ([#099](/backlog/099-evergreen-app-vision/)); distinct from the **upgraders** (#094, which transform code) — this is the *policy + workflow* deciding when an update runs and how it's made safe. The two forks below — where the pipeline lives, and the gate model — are grounded in a published [Auto-update pipeline](/research/auto-update-pipeline/) survey, each with a **bold** default.
 
 ## Axis framing
 

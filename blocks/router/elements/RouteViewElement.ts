@@ -26,11 +26,12 @@ import {
   findErrorBoundary,
   buildNavigationTarget,
   buildRouteContext,
+  normalizePath,
 } from '../types';
 import type RouteOutletElement from './RouteOutletElement';
 
 export default class RouteViewElement extends HTMLElement {
-  static observedAttributes = ['scroll', 'base', 'transition', 'keep-alive'];
+  static observedAttributes = ['scroll', 'base', 'transition', 'keep-alive', 'entry'];
 
   #routes: RouteDefinition[] = [];
   #currentRoute: MatchedRoute | null = null;
@@ -64,6 +65,15 @@ export default class RouteViewElement extends HTMLElement {
     return this.getAttribute('base') || '';
   }
 
+  /**
+   * Default in-route-space path to land on when the load-time (entry) URL resolves to no route — e.g.
+   * the app is served at `/demos/<id>/index.html` or a mounted base path. Built-in entry normalization
+   * (#365): set `entry="/book"` instead of hand-rolling a `history.replaceState` shim before connect.
+   */
+  get entry(): string {
+    return this.getAttribute('entry') || '';
+  }
+
   /** Whether View Transitions are enabled */
   get transition(): boolean {
     return this.hasAttribute('transition');
@@ -85,13 +95,48 @@ export default class RouteViewElement extends HTMLElement {
       this.#listenHistoryAPI();
     }
 
-    // Initial route match
+    // Initial route match — normalize the entry URL into the route space first (#365).
     if (!this.#initialized) {
       this.#initialized = true;
-      const url = new URL(window.location.href);
+      const url = this.#normalizeEntryUrl();
       this.#currentAbortController = new AbortController();
       this.#handleNavigation(url, 'push', this.#currentAbortController.signal);
     }
+  }
+
+  /**
+   * Map the load-time (entry) URL into the route space so consumers stop hand-rolling a
+   * `history.replaceState` shim before `route-view` connects (#365). Native-first (History API):
+   *   1. Strip a trailing `index.html` — a hard reload of a file-served SPA entry.
+   *   2. If the (stripped) URL already resolves to a route, keep it (only `replaceState` if step 1
+   *      rewrote the path) — an explicit deep link wins over the entry default.
+   *   3. Otherwise, if `entry` is set, `replaceState` to the entry route mapped through `base`, so the
+   *      initial match lands on the app's default view instead of a blank no-match.
+   * Returns the URL the initial match should use. No-op (returns the live URL) when neither applies.
+   *
+   * Note: a hard reload of a deep link (e.g. `/application`) on a static dev server can still 404 before
+   * the SPA boots — that needs a dev-server SPA history fallback (serve index.html for unknown paths),
+   * which is a server config, not something the block can do from inside the page.
+   */
+  #normalizeEntryUrl(): URL {
+    const url = new URL(window.location.href);
+    const original = url.href;
+
+    if (url.pathname.endsWith('/index.html')) {
+      url.pathname = url.pathname.slice(0, -'index.html'.length);
+    }
+
+    if (matchRoute(url, this.#routes)) {
+      if (url.href !== original) history.replaceState(history.state, '', url.href);
+      return url;
+    }
+
+    if (this.entry) {
+      const rel = this.entry.startsWith('/') ? this.entry : `/${this.entry}`;
+      url.pathname = normalizePath(this.base + rel);
+      history.replaceState(history.state, '', url.href);
+    }
+    return url;
   }
 
   disconnectedCallback(): void {
@@ -503,8 +548,33 @@ export default class RouteViewElement extends HTMLElement {
       // Track stamped nodes
       const nodes = Array.from(fragment.childNodes);
 
-      // Append
-      stampTarget.appendChild(fragment);
+      // #423 — contract boundary: a route whose <template> body is non-empty must stamp at least
+      // one live node. A content-specific stamping defect (surfaced by the auto-insurance quote
+      // wizard: a complex multi-fieldset inline form) can clone to an empty fragment, leaving the
+      // view blank with NO console error — a silent no-op that reads as "the route is broken".
+      // Convert that into a diagnosable error naming the route, rather than failing silently.
+      // (Workaround for an affected route: author its body as an empty mount + imperative fill.)
+      if (templateDef.template.content.childNodes.length > 0 && nodes.length === 0) {
+        console.error(
+          `[Router] route "${templateDef.path}" matched a non-empty <template> but cloned to an ` +
+            `empty fragment — nothing was stamped and the view will be blank (#423). A complex ` +
+            `inline form fragment can trigger this; author the route body as an empty mount and ` +
+            `fill it imperatively, or simplify the inline markup.`,
+        );
+      }
+
+      // Append. A throw here (an invalid node in the cloned body) would otherwise propagate out of
+      // an async navigation handler as an unhandled rejection with no route context — surface it
+      // instead as a clear, route-identified error so the failure is never silent (#423).
+      try {
+        stampTarget.appendChild(fragment);
+      } catch (err) {
+        console.error(
+          `[Router] failed to stamp route "${templateDef.path}" — appending the cloned template ` +
+            `body threw: ${err instanceof Error ? err.message : String(err)} (#423).`,
+        );
+        continue;
+      }
 
       // Accumulate (don't overwrite): a single navigation may stamp more than
       // one fragment into the same target (e.g. an outlet match that falls back

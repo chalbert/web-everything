@@ -1,0 +1,85 @@
+<h3>The Question</h3>
+<p>
+    The <a href="/research/collection-operations/">collection-operations</a> intent already settles the
+    four data operations (filter / sort / group / page) as a configurable, UX-only pipeline, and both
+    halves of it have shipped reference behaviors: <a href="/blocks/data-table/">data-table</a> owns
+    filter/sort/group, <a href="/blocks/pagination/">pagination</a> owns page. But when the
+    loan-origination app (<a href="/backlog/317-exercise-app-loan-origination/">#317</a>) first composed
+    the two over a real 5k-row collection, a gap surfaced
+    (<a href="/backlog/369-collection-operations-coordinator/">#369</a>): <strong>nothing owns the whole
+    pipeline.</strong> Data-table's click-to-sort sorts only the <em>current page</em>, because the
+    consumer hand-wires page-then-render. The contract is filter → sort → group → <strong>page</strong>
+    (page last, over the entire set), but no coordinator runs it. This survey runs the owed prior-art
+    pass on the narrower question the four-op research didn't cover: <strong>where does the coordinator
+    live, and what shape is it?</strong>
+</p>
+
+<h3>Recommendation (grounds #452)</h3>
+<ol>
+    <li><strong>Home → a standalone primitive (not documented composition).</strong> The
+        filter→sort→group→page wiring is identical for every consumer; the industry owns it in one place
+        and <em>nobody</em> ships docs-only — that is precisely the footgun #369 hit.</li>
+    <li><strong>Shape → a headless coordinator <em>behavior</em>, not a rendered block.</strong> The
+        survey's reshaping finding: the dominant home is a headless <em>instance</em> (TanStack "table
+        instance", AG Grid "row model") that owns the pipeline and hands rendering to the consumer —
+        which maps exactly onto WE's existing <code>DataTableBehavior</code> / <code>PaginationBehavior</code>
+        convention. So the coordinator is a <code>CollectionOperationsBehavior</code> (working name) with
+        an optional <code>&lt;collection-operations&gt;</code> element wrapper — no markup of its own; it
+        orchestrates two blocks that have markup.</li>
+    <li><strong>Compose, never merge.</strong> The page stage stays owned by the pagination block's
+        <code>PageState</code>; the coordinator owns the <em>order</em> and the re-windowing. It is a thin
+        orchestrator, not a super-block.</li>
+    <li><strong>Client vs server is not a fork.</strong> The intent is UX-only; the coordinator picks
+        in-memory <code>applyPipeline</code> or server params → Loader at runtime (Technical
+        Configurator). Both supported by default.</li>
+</ol>
+
+<h3>Finding 1 — pagination is universally the terminal stage over the whole collection</h3>
+<p>
+    Every surveyed grid runs filter/sort/group over the full set and slices the page <em>last</em>:
+    TanStack's row-model chain ends in the pagination row model; AG Grid flattens then paginates; MUI
+    paginates after filter/sort. This <em>confirms</em> the WE split — <code>applyPipeline</code>
+    deliberately no-ops the page stage ("it is the Pagination block's job — compose, never merge") and
+    <code>PageState</code> carries the total. #369 is a wiring bug, not a contract gap.
+</p>
+
+<h3>Finding 2 — the page stage is decoupled from the transform stages</h3>
+<p>
+    AG Grid makes this explicit with a <code>PaginationProxy</code> that slices the pipeline's
+    <em>output</em> rather than living as a stage inside it. The coordinator owns filter/sort/group +
+    order; the pagination control is a thin view onto the tail. This is exactly WE's two-block split, so
+    the coordinator must <strong>not</strong> absorb the page stage back out of the pagination block —
+    the standing bias toward separation holds.
+</p>
+
+<h3>Finding 3 — the dominant home is a headless instance, not docs-only and not a rendered block</h3>
+<table>
+    <thead><tr><th>Library</th><th>Coordinator home</th><th>Pager</th></tr></thead>
+    <tbody>
+        <tr><td><a href="https://tanstack.com/table/latest/docs/guide/row-models">TanStack Table v8</a></td><td>Headless "table instance" — owns the row-model pipeline, no markup</td><td>Terminal row-model stage</td></tr>
+        <tr><td><a href="https://www.ag-grid.com/javascript-data-grid/row-models/">AG Grid</a></td><td><code>RowModel</code> instance (MVC)</td><td><code>PaginationProxy</code> over the tail</td></tr>
+        <tr><td><a href="https://mui.com/x/react-data-grid/pagination/">MUI X DataGrid</a></td><td>Fused into a monolithic component</td><td>Internal (<code>paginationModel</code>)</td></tr>
+    </tbody>
+</table>
+<p>
+    TanStack and AG Grid ship a state/instance object that owns the whole pipeline and delegates
+    rendering. <strong>Nobody recommends option B</strong> ("here is the order, wire it yourself"). MUI
+    fuses the coordinator into one component — the opposite extreme from WE's compose-don't-merge style.
+    The WE-idiomatic answer is the headless middle: a coordinator <em>behavior</em> mirroring the two
+    behaviors it already orchestrates.
+</p>
+
+<h3>Vocabulary reused (no net-new terms)</h3>
+<ul>
+    <li><strong>pipeline / stage</strong> — already in WE (<code>applyPipeline</code>, <code>config.order</code>).</li>
+    <li><strong>row model / coordinator instance</strong> — the headless-instance framing (TanStack, AG Grid).</li>
+    <li><strong><code>PageState = { pageIndex, pageSize, total }</code></strong> — WE's equivalent of MUI's
+        <code>paginationModel</code>; no new shape needed.</li>
+    <li><strong>client / server mode</strong> — one coordinator fronts an in-memory set or a server-paged
+        source (TanStack <code>manual*</code>, MUI <code>paginationMode</code>); routed via the Technical
+        Configurator, confirming it is not a design fork.</li>
+</ul>
+
+<p style="margin-top:1.5rem;font-size:0.9em;color:var(--color-text-muted,#64748b);">
+    Session report: <code>reports/2026-06-13-collection-operations-coordinator.md</code>.
+</p>

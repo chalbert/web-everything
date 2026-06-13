@@ -2,8 +2,11 @@
 type: idea
 workItem: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-06-12"
+dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: none
 tags: [backlog-tooling, workflow, agent-coordination]
 crossRef: { url: /backlog/083-agent-file-lock-coordination/, label: "Adjacent — agent claim/coordination (#083)" }
 ---

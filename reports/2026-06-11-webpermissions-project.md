@@ -157,6 +157,26 @@ Net: the item's "project vs intent vs fold-into-feedback" resolves to **all thre
 different axes** — two new intents + one protocol under a (narrowed) project, with `feedback`
 left untouched.
 
+## Addendum (2026-06-12) — transport-landscape pass for Fork D (home + name)
+
+Fork C left the protocol's *home + name* open, and `webpush` risks colliding with the W3C
+**Web Push API**. A server→client transport-landscape survey was run to ground the name + scope:
+
+- **Two distinct concerns, split on "is the app open?"** *Closed-app* delivery — **Web Push API**
+  (service worker + push service + VAPID; survives tab close) — vs *open-app* streaming —
+  **WebSocket** (bidi), **SSE/EventSource** (server→client, now the default for streams since LLM
+  token-streaming), **WebTransport** (HTTP/3/QUIC; Chrome/Edge only, no Safari), **long-poll/poll**.
+  The two sides are **non-fungible** (you don't "fall back" from a live socket to a closed-app push).
+- **Vocabulary:** the industry word **"push" means push *notifications*** — the closed-app channel,
+  modelled beside email/SMS/in-app (Novu/Knock/Courier). The *umbrella* for the live transport
+  family is **realtime / pub-sub / channels** (Ably, Pusher, PubNub, Centrifugo), **never "push."**
+- **Conclusion:** dissolve the collision by **narrowing**, not renaming — scope `webpush` to
+  *push-notification (closed-app) delivery* (Web Push API as native anchor, `CustomPushProvider`
+  for FCM/OneSignal/Novu hubs). The **open-app realtime transport family is a separate, currently
+  unowned concern** (verified: no constellation project/protocol covers it) → spin out as its own
+  `type:decision` gap (candidate `webrealtime`/`webchannels`), of which Web Push is **not** a
+  provider. So **Fork D → (A) mint `webpush`, scoped to push-notification delivery** (Med-high).
+
 ## Sources
 
 - [MDN — Permissions API](https://developer.mozilla.org/en-US/docs/Web/API/Permissions_API)
@@ -166,3 +186,8 @@ left untouched.
 - [web.dev — Use push notifications to engage users](https://web.dev/articles/use-push-notifications-to-engage-users)
 - [Novu — choosing a notification platform](https://novu.co/blog/a-developers-guide-to-choosing-the-best-notification-platform/)
 - [OneSignal](https://onesignal.com/)
+- [Ably — WebSockets vs SSE](https://ably.com/blog/websockets-vs-sse) · [Ably Pub/Sub basics](https://ably.com/docs/basics)
+- [WebSocket.org — transport comparisons](https://websocket.org/comparisons/)
+- [WebSockets vs SSE vs WebTransport (2025)](https://aptuz.com/blog/websockets-vs-sse-vs-webtransports/)
+- [Centrifugo — realtime messaging server](https://github.com/centrifugal/centrifugo)
+- [Knock — notification infrastructure platforms (2026)](https://knock.app/blog/the-top-notification-infrastructure-platforms-for-developers)

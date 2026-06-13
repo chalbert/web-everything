@@ -1,0 +1,102 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+    <a href="/backlog/094-ai-upgrader-tools/">#094</a>'s upgrader MVP built the
+    <strong>legacy&nbsp;→&nbsp;standard</strong> upgrade kind. <a href="/backlog/191-upgrader-version-migration-codemods/">#191</a>
+    is the <strong>second kind</strong> — <em>across standard / dependency versions</em>: apply
+    breaking-change codemods when a protocol, adapter, or provider contract evolves, so "upgrade to the new
+    version" doesn't mean hand-editing every call site. #191's body had deferred itself, blocked on a
+    machine-readable change/migration descriptor format. This survey re-grounds it now that the blockers are
+    resolved, asking <strong>how the version-migration mode consumes the descriptor and applies
+    transforms</strong>, per design-first step&nbsp;1.
+</p>
+
+<h2>Recommendation (forks in #191)</h2>
+<ol>
+    <li><strong>A mode of the existing engine, not a separate tool</strong> — the version-migration upgrader
+        is an <strong>input adapter + mode of <a href="/backlog/094-ai-upgrader-tools/">#094</a>'s
+        <code>upgraderEngine</code></strong> (same analyze&nbsp;→&nbsp;transform&nbsp;→&nbsp;<code>verifyUpgrade</code>
+        arc, same <code>CustomAnalyzerRegistry</code> seam), differing only in input: an already-conformant
+        source + a <code>changelog-manifest</code> delta, not legacy code. <em>Medium-high confidence.</em></li>
+    <li><strong>Declarative-first, imperative escape hatch</strong> — a migration entry describes the transform
+        declaratively for mechanical changes (renamed attribute, moved intent dimension, retired provider id),
+        and references an imperative codemod only when the change is too complex to declare. OpenRewrite's
+        ruling principle, and the most-permissive default (the migration-script reference is optional).
+        <em>Medium confidence.</em></li>
+    <li><strong>Ratify, not forks</strong> — the descriptor <em>format</em> is the resolved
+        <a href="/protocols/#protocol-changelog-manifest">changelog-manifest protocol</a> (#102); the
+        <em>safety gate</em> is #094's <code>verifyUpgrade</code>. Consume both; design neither anew.</li>
+</ol>
+
+<h2>Finding 1 — both prerequisites #191 named already shipped</h2>
+<p>
+    #191 said it needed (a) a machine-readable migration descriptor and (b) the verify gate + provider shape.
+    Both exist. The descriptor is the <strong>changelog-manifest protocol</strong>
+    (<a href="/protocols/#protocol-changelog-manifest">protocols.json</a>, <a href="/backlog/102-changelog-manifest-standard/">#102</a>,
+    resolved): per-module entries keyed to a semver severity + Keep-a-Changelog type, <strong>plus a migration
+    linkage</strong> — a breaking entry references the codemod that applies it, with author + integrity-hash
+    trust metadata so the pipeline can verify a migration before running it. It is explicitly "consumed by
+    upgraders (#094)." The engine is <strong>#094's <code>upgraderEngine</code></strong> —
+    <code>verifyUpgrade</code> (re-parse + round-trip + conformance), the <code>upgrade()</code> orchestrator,
+    and the <code>CustomAnalyzerRegistry</code> provider seam. <a href="/backlog/266-validation-capability-manifest-schema-semver-scheme-ratify-o/">#266</a>
+    added the semver/availability axis (<code>compareSpecVersions</code>, <code>featureAvailableIn</code>,
+    <code>FEATURE_SINCE</code>). So #191 is <strong>wiring plus two design calls</strong>, not greenfield.
+</p>
+
+<h2>Finding 2 — Angular <code>ng update</code> is the canonical version-gated migration runner</h2>
+<p>
+    A library ships a <a href="https://angular.love/angular-schematics-deep-dive-part-4-writing-migration-schematics-with-ng-update"><code>migrations.json</code></a>
+    (registered under <code>package.json</code> <code>ng-update.migrations</code>); each entry is
+    <code>{version, factory, description}</code>, the <code>factory</code> pointing to a transform that
+    returns a <code>Rule</code>. <code>ng update</code> runs every migration whose <code>version</code> falls
+    in <code>&gt;installedVersion, &lt;=targetVersion</code> — <strong>in order, across intermediate
+    versions</strong>. This is exactly the shape #191 needs: the <code>changelog-manifest</code> is the
+    <code>migrations.json</code> analog (per-release, per-module, migration reference); the version-gated,
+    ordered, intermediate-spanning <em>run</em> is the mode's core loop, and the range gating maps onto #266's
+    <code>compareSpecVersions</code>.
+</p>
+
+<h2>Finding 3 — OpenRewrite settles the declarative-vs-imperative axis</h2>
+<p>
+    <a href="https://docs.openrewrite.org/authoring-recipes/types-of-recipes">OpenRewrite</a> offers three
+    recipe types — declarative (YAML, compose existing recipes + light config), refaster (templates), and
+    imperative (extend <code>Recipe</code> for full AST control) — under an explicit principle: <strong>"if it
+    can be declarative, make it declarative; use imperative only when necessary."</strong> That is Fork 2's
+    recommended default verbatim. A renamed attribute or retired provider id is a declarative descriptor the
+    engine interprets; only a transform with real nuance references an imperative codemod. The
+    <code>changelog-manifest</code>'s migration-script reference being <em>optional</em> is what makes the
+    declarative-first / imperative-fallback split expressible in the existing protocol.
+</p>
+
+<h2>Finding 4 — the verify gate is WE's differentiator over the incumbents</h2>
+<p>
+    Angular schematics and <a href="https://github.com/facebook/jscodeshift">jscodeshift</a> apply transforms
+    but <strong>don't verify</strong> the result conforms — they trust the codemod. #094's
+    <code>verifyUpgrade</code> (re-parse + round-trip fidelity + intent conformance) is reused here: a migrated
+    call site is <em>offered</em> only if it still parses and conforms. This is the
+    <a href="/backlog/089-monetization-product-ideas/">#089</a> "propose-and-verify" moat applied to version
+    migration — incumbents bump versions or run codemods, but only a verifiable target turns a transform into
+    a trustworthy one. It is also why this is not Renovate/Dependabot: those bump versions; #191 applies
+    semantic breaking-change codemods gated by conformance.
+</p>
+
+<h2>Finding 5 — the item splits cleanly once ratified</h2>
+<p>
+    With both forks decided, #191 (size&nbsp;8) splits into agent-ready builds: <strong>(a)</strong> the
+    <code>changelog-manifest</code> consumption + version-gated migration planner (range select + order);
+    <strong>(b)</strong> the declarative transform interpreter + imperative-codemod escape hatch;
+    <strong>(c)</strong> the version-migration input adapter/mode on <code>upgraderEngine</code> with
+    <code>verifyUpgrade</code> wiring. These graduate via a <code>blockedBy</code> chain in that order — a
+    prepared decision yields agent-ready builds, not code itself.
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+    <li>Decision: <a href="/backlog/191-upgrader-version-migration-codemods/">#191 — Upgrader version-migration codemods</a></li>
+    <li>Descriptor format (ratified): <a href="/protocols/#protocol-changelog-manifest">Changelog Manifest protocol</a> · <a href="/backlog/102-changelog-manifest-standard/">#102</a></li>
+    <li>Engine + verify gate (reused): <a href="/backlog/094-ai-upgrader-tools/">#094 — AI upgrader tools</a></li>
+    <li>Semver/availability axis: <a href="/backlog/266-validation-capability-manifest-schema-semver-scheme-ratify-o/">#266 — capability-manifest schema + semver scheme</a></li>
+    <li>Sibling breadth work: <a href="/backlog/190-upgrader-additional-input-adapters/">#190 — additional input adapters</a></li>
+    <li>Spec-versioning epic: <a href="/backlog/005-validation-spec-versioning-adherence-tooling/">#005</a> · Moat: <a href="/backlog/089-monetization-product-ideas/">#089</a> (propose-and-verify)</li>
+</ul>
+{% endraw %}

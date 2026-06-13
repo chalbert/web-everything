@@ -89,18 +89,23 @@ export const quoteDate = (ymd) => `"${ymd}"`;
  * Returns `{ content }` on success or `{ error }` if the transition is illegal or unspliceable —
  * the CLI turns the latter into a non-zero exit, never a half-written file.
  *
+ * `claim` accepts `as: 'preparing'` (#375) — a decision being *researched* by /prepare, not built. It is
+ * a non-`open`, in-flight state (drops from selection exactly like `active`) but reads distinctly on the
+ * board; `release` returns either `active` or `preparing` to `open`.
+ *
  * @param {string} content
  * @param {'claim'|'resolve'|'release'} verb
- * @param {{ today: string, graduatedTo?: string }} opts
+ * @param {{ today: string, graduatedTo?: string, as?: 'active'|'preparing' }} opts
  * @returns {{ content: string } | { error: string }}
  */
-export function applyTransition(content, verb, { today, graduatedTo } = {}) {
+export function applyTransition(content, verb, { today, graduatedTo, as } = {}) {
   const status = readField(content, 'status');
   const DATE_ANCHORS = ['dateOpened', 'dateStarted', 'dateResolved', 'status', 'blockedBy', 'size', 'workItem', 'type'];
 
   if (verb === 'claim') {
     if (status !== 'open') return { error: `status is "${status}", expected "open" — lost the race or already claimed` };
-    let next = setFrontmatterField(content, 'status', 'active');
+    const target = as === 'preparing' ? 'preparing' : 'active';
+    let next = setFrontmatterField(content, 'status', target);
     next = setFrontmatterField(next, 'dateStarted', quoteDate(today), { after: DATE_ANCHORS });
     return next ? { content: next } : { error: 'could not splice frontmatter' };
   }
@@ -112,7 +117,7 @@ export function applyTransition(content, verb, { today, graduatedTo } = {}) {
     return next ? { content: next } : { error: 'could not splice frontmatter' };
   }
   if (verb === 'release') {
-    if (status !== 'active') return { error: `status is "${status}", expected "active" — only an active claim is released` };
+    if (status !== 'active' && status !== 'preparing') return { error: `status is "${status}", expected "active" or "preparing" — only an in-flight claim is released` };
     const next = setFrontmatterField(content, 'status', 'open');
     return next ? { content: next } : { error: 'could not splice frontmatter' };
   }

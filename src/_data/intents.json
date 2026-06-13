@@ -2265,5 +2265,112 @@
     "events": [
       "detail-change"
     ]
+  },
+  {
+    "id": "permission",
+    "name": "Permission Intent",
+    "status": "draft",
+    "summary": "Cross-cutting presentation of the W3C Permissions API tri-state (granted | denied | prompt) — the current status, its change events, and the request / re-prompt-recovery affordance — spanning camera, microphone, geolocation, clipboard, and notifications. State, not render: it standardizes how a permission state is surfaced and re-requested, never the feature it gates. Ratified in #009 Fork A.",
+    "dimensions": {
+      "state": {
+        "description": "The permission status, borrowed verbatim from the W3C Permissions API tokens (PermissionState). The intent never coins its own values.",
+        "values": [
+          "granted",
+          "denied",
+          "prompt"
+        ]
+      },
+      "affordance": {
+        "description": "How the UI lets the user act on the state. Programmatic re-prompt is blocked by browsers once a permission is denied — recovery routes the user to browser/OS settings rather than firing the prompt again.",
+        "values": [
+          "display",
+          "request",
+          "recover"
+        ]
+      },
+      "feature": {
+        "description": "Which capability the permission gates — an OPEN vocabulary keyed off the W3C PermissionName descriptors, extended as new powerful features ship. Deliberately not notification-specific.",
+        "values": [
+          "camera",
+          "microphone",
+          "geolocation",
+          "clipboard-read",
+          "clipboard-write",
+          "notifications",
+          "persistent-storage",
+          "midi"
+        ]
+      }
+    },
+    "description": "<h3>What Permission Is</h3><p class=\"text-sm text-gray-600 mb-2\">A small <strong>cross-cutting</strong> intent owning the <a href=\"https://www.w3.org/TR/permissions/\">W3C Permissions API</a> tri-state &mdash; <code>granted</code>, <code>denied</code>, <code>prompt</code> &mdash; for any powerful feature (camera, microphone, geolocation, clipboard, notifications&hellip;), not one feature in particular. It standardizes <strong>how a permission&rsquo;s state is shown, requested, and recovered</strong>, so the &ldquo;enable camera&rdquo; / &ldquo;allow notifications&rdquo; affordance stops being hand-rolled per screen.</p><h3>State, not render</h3><p class=\"text-sm text-gray-600 mb-2\">This is a <strong>state</strong> axis, explicitly <em>not</em> folded into <a href=\"/intents/feedback/\">feedback</a> (a <em>render</em> axis &mdash; transient toasts): the breadth is far wider and the concern is orthogonal. A consumer composes permission state with whatever render surface it likes.</p><h3>State</h3><p class=\"text-sm text-gray-600 mb-2\">The tri-state is borrowed <strong>verbatim</strong> from the platform; the intent coins nothing. <code>prompt</code> = not yet decided (a request may surface the browser UI); <code>granted</code> / <code>denied</code> = the user has decided.</p><h3>Affordance</h3><p class=\"text-sm text-gray-600 mb-2\"><code>display</code> reflects the current state; <code>request</code> offers to trigger the browser prompt (only meaningful from <code>prompt</code>); <code>recover</code> handles the <code>denied</code> reality &mdash; browsers <strong>block a programmatic re-prompt</strong> once denied, so recovery guides the user to browser/OS settings rather than firing the request again.</p><h3>Feature</h3><p class=\"text-sm text-gray-600 mb-2\">An <strong>open vocabulary</strong> keyed off the W3C <code>PermissionName</code> descriptors &mdash; extended as new powerful features ship, never enumerated closed.</p><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">Composed by <a href=\"/projects/webnotifications/\">Web Notifications</a> (gating the &ldquo;enable notifications&rdquo; affordance) and by any camera/geolocation/clipboard consumer. The <code>change</code> event mirrors <code>PermissionStatus.onchange</code>.</p>",
+    "events": [
+      "change"
+    ]
+  },
+  {
+    "id": "system-notification",
+    "name": "System Notification Intent",
+    "status": "draft",
+    "summary": "Protocol defining the OS-surface notification render — the platform Notifications API surface that renders OUTSIDE the page, survives the tab closing, and is gated by a notification permission. Sibling to the Feedback Intent (in-page transient toasts) and the Background Task Intent (in-session persistent surface), reusing the shared severity/title/body/action vocabulary. Explicitly NOT a surface dimension on Feedback — a distinct render target and lifecycle. Ratified in #009 Fork B; coordinated by the Web Notifications domain.",
+    "dimensions": {
+      "severity": {
+        "description": "Semantic weight of the notification — the SAME unified severity vocabulary shared with Feedback, Message, and Validation. Maps to the platform notification's icon/tone, never coined here.",
+        "values": [
+          "info",
+          "success",
+          "warning",
+          "error"
+        ]
+      },
+      "interaction": {
+        "description": "Whether the notification carries action affordances. Borrows the Notifications API `actions` shape (action buttons that route through `notificationclick`).",
+        "values": [
+          "inert",
+          "actionable"
+        ]
+      },
+      "persistence": {
+        "description": "How long the OS surface stays before auto-dismissing — the platform `requireInteraction` flag. `require-interaction` is the default when an action is present (parity with Feedback's `indefinite`-on-action accessibility rule).",
+        "values": [
+          "auto-dismiss",
+          "require-interaction"
+        ]
+      }
+    },
+    "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">The OS-surface render target: the browser/OS <a href=\"https://developer.mozilla.org/en-US/docs/Web/API/Notifications_API\">Notifications API</a> surface that appears <strong>outside the page</strong>, <strong>survives the tab (or browser) closing</strong>, and is <strong>gated by an explicit notification permission</strong>. It is the render-out-of-page sibling of the two in-app notification surfaces.</p><h3>Sibling surfaces — three distinct render targets, one vocabulary</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong><a href=\"/intents/feedback/\">Feedback</a></strong> — <em>in-page</em>, transient toasts that die with the page.</li><li><strong><a href=\"/intents/background-task/\">Background Task</a></strong> — <em>in-session</em>, a persistent surface that outlives a view but lives inside the app.</li><li><strong>System Notification</strong> — <em>out-of-page</em>, the OS surface that survives the tab closing.</li></ul><p class=\"text-sm text-gray-600 mb-2\">All three reuse the shared <code>severity</code> / title / body / action vocabulary, so a consumer can re-target the same message to a different surface without re-authoring it.</p><h3>Not a Feedback dimension</h3><p class=\"text-sm text-gray-600 mb-2\">This is deliberately <strong>not</strong> folded into Feedback as a <code>surface: os</code> value (#009 Fork B): the render target and the lifecycle differ fundamentally — an OS notification escapes the document, persists past tab close, and requires a permission grant Feedback never needs. A shared dimension would conflate two surfaces with incompatible lifecycles.</p><h3>Permission gate</h3><p class=\"text-sm text-gray-600 mb-2\">Showing an OS notification is gated by the <a href=\"/intents/permission/\">Permission Intent</a> with <code>feature: notifications</code>. This intent <strong>composes</strong> that state axis rather than re-implementing it — a <code>denied</code> permission routes to recovery, a <code>prompt</code> state offers the request affordance, and only <code>granted</code> permits a show.</p><h3>Severity</h3><p class=\"text-sm text-gray-600 mb-2\">Borrowed verbatim from the unified severity vocabulary (<code>info</code> / <code>success</code> / <code>warning</code> / <code>error</code>) shared across Feedback, Message, and Validation — mapped to the notification's icon and tone.</p><h3>Interaction &amp; Persistence</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>inert</code>: a display-only notification; clicking focuses the originating page.</li><li><code>actionable</code>: carries action buttons (the Notifications API <code>actions</code> array), routed through <code>notificationclick</code>.</li><li><code>auto-dismiss</code>: the surface clears on the platform's own timeout.</li><li><code>require-interaction</code>: stays until the user acts (the platform <code>requireInteraction</code> flag); the default when an action is present.</li></ul><h3>Composition (cross-reference, do not duplicate)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong><a href=\"/intents/permission/\">Permission</a></strong>: the gate — <code>feature: notifications</code> state, request, and recovery.</li><li><strong><a href=\"/intents/feedback/\">Feedback</a></strong> / <strong><a href=\"/intents/background-task/\">Background Task</a></strong>: sibling surfaces sharing the message vocabulary; a single event may fan out to more than one surface.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type NotificationSeverity = 'info' | 'success' | 'warning' | 'error';\ntype NotificationInteraction = 'inert' | 'actionable';\ntype NotificationPersistence = 'auto-dismiss' | 'require-interaction';\n\ninterface SystemNotificationAction {\n    label: string;            // shown as a notification action button\n    intent: string;           // dispatched on notificationclick\n}\n\ninterface SystemNotificationIntent {\n    // Shared severity vocabulary → icon/tone\n    severity: NotificationSeverity;\n    title: string;\n    body?: string;\n    // Display-only vs. action buttons\n    interaction: NotificationInteraction;\n    // Maps to the platform requireInteraction flag\n    persistence: NotificationPersistence;\n    // Optional action affordances (require interaction: 'actionable')\n    actions?: SystemNotificationAction[];\n}</code></pre>",
+    "events": [
+      "show",
+      "click",
+      "close",
+      "error"
+    ]
+  },
+  {
+    "id": "notification-marker",
+    "name": "Notification Marker Intent",
+    "status": "draft",
+    "summary": "Protocol defining the unread/attention MARKER family — the ambient count or dot shown on app chrome rather than in a message: the favicon badge, the document.title count prefix, and the OS app-icon badge (the Badging API `navigator.setAppBadge`). Models the count/clear lifecycle and per-surface graceful degradation (favicon + title everywhere; app-icon badge where supported). A marker, not a message — distinct from the Feedback / System Notification render surfaces. Spun out of #009; coordinated by the Web Notifications domain (#456) alongside system-notification.",
+    "dimensions": {
+      "surface": {
+        "description": "Which chrome surface carries the marker. An OPEN vocabulary — favicon and title work everywhere; the app-icon badge needs Badging API support and is the first to degrade. A consumer may light up several at once.",
+        "values": [
+          "favicon",
+          "title",
+          "app-badge"
+        ]
+      },
+      "marker": {
+        "description": "What the marker conveys. `count` shows a number (capped, e.g. 9+); `flag` shows a presence dot with no number — the platform `setAppBadge()` called with no argument, and a dot overlay for favicon/title.",
+        "values": [
+          "count",
+          "flag"
+        ]
+      }
+    },
+    "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">The <strong>marker</strong> family: an ambient unread/attention indicator painted on <em>app chrome</em> — not a message in a surface. Three render targets share one count/clear lifecycle:</p><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong>favicon</strong>: a numbered/dotted overlay on the tab icon.</li><li><strong>title</strong>: a count prefix on <code>document.title</code> (e.g. <code>(3) Inbox</code>).</li><li><strong>app-badge</strong>: the OS app-icon badge via the <a href=\"https://developer.mozilla.org/en-US/docs/Web/API/Badging_API\">Badging API</a> (<code>navigator.setAppBadge(n)</code> / <code>clearAppBadge()</code>), shown on the installed PWA / dock / taskbar icon.</li></ul><h3>Marker, not message</h3><p class=\"text-sm text-gray-600 mb-2\">Distinct from the <a href=\"/intents/feedback/\">Feedback</a> and <a href=\"/intents/system-notification/\">System Notification</a> surfaces: those <em>render a message</em>; this only carries a <strong>count or a dot</strong> on existing chrome. A new unread item typically updates the marker <em>and</em> may fire a system notification — two intents composed, not merged.</p><h3>Surface — graceful degradation</h3><p class=\"text-sm text-gray-600 mb-2\">An <strong>open</strong> set, ordered by reach: <code>favicon</code> and <code>title</code> work in every browser (pure DOM); <code>app-badge</code> requires <a href=\"https://developer.mozilla.org/en-US/docs/Web/API/Navigator/setAppBadge\">Badging API</a> support (and usually an installed PWA), so it is the first to degrade. The intent's contract is that a consumer declares the count once and each available surface reflects it — an unsupported surface is silently skipped, never an error.</p><h3>Marker</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>count</code>: a number, capped for display (e.g. <code>9+</code>); <code>0</code> clears the marker.</li><li><code>flag</code>: a presence dot with no number — <code>setAppBadge()</code> with no argument, a dot overlay for favicon/title. For \"something is unread\" without a precise count.</li></ul><h3>Lifecycle</h3><p class=\"text-sm text-gray-600 mb-2\">A single count/clear model drives every surface: <code>set(count)</code> paints all available surfaces; <code>clear()</code> (or <code>set(0)</code>) removes the marker everywhere. Idempotent — re-setting the same count is a no-op.</p><h3>Composition (cross-reference, do not duplicate)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><strong><a href=\"/intents/system-notification/\">System Notification</a></strong>: the sibling out-of-page surface; a new item often updates this marker AND shows a notification.</li><li><strong><a href=\"/intents/permission/\">Permission</a></strong>: favicon/title need none; the app-badge inherits the installed-PWA context but does not itself prompt.</li></ul><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type MarkerSurface = 'favicon' | 'title' | 'app-badge';\ntype MarkerKind = 'count' | 'flag';\n\ninterface NotificationMarkerIntent {\n    // Which chrome surfaces to drive (open set; unsupported ones are skipped)\n    surfaces: MarkerSurface[];\n    // Count vs. presence dot\n    marker: MarkerKind;\n}\n\ninterface NotificationMarker {\n    set(count: number): void;  // 0 clears; capped for display\n    clear(): void;             // remove the marker on every surface\n}</code></pre>",
+    "events": [
+      "set",
+      "clear"
+    ]
   }
 ]

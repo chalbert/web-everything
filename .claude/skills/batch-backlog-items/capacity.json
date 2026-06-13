@@ -1,39 +1,9 @@
 {
   "_doc": "Calibrated session capacity for POINTS-BUDGETED batches (docs/agent/backlog-workflow.md → 'Running a batch'). The batch's point budget = round(capacityPoints * targetFraction) — 'take as many points as possible up to ~half a session's worth', not a fixed item count. 'points' here = batchCost (a story's size; a task counts as 2, since tasks carry no burndown points but still consume context). `node scripts/backlog.mjs calibrate --points=<P> --context-pct=<C>` updates capacityPoints via EMA from each session's observed (points resolved ÷ context fraction); the closing-session skill runs it. Seeded from batch-2026-06-10-240-195-038-194-182 (10 items, ~25 cost-pts at ~20% context → implied ~125 capacity), haircut to 100 pending the first real calibration.",
-  "capacityPoints": 93,
+  "capacityPoints": 86,
   "targetFraction": 0.6,
   "ema": 0.3,
   "samples": [
-    {
-      "date": "2026-06-11",
-      "points": 6,
-      "contextPct": 22,
-      "impliedCapacity": 27
-    },
-    {
-      "date": "2026-06-11",
-      "points": 18,
-      "contextPct": 19,
-      "impliedCapacity": 95
-    },
-    {
-      "date": "2026-06-11",
-      "points": 3,
-      "contextPct": 11,
-      "impliedCapacity": 27
-    },
-    {
-      "date": "2026-06-11",
-      "points": 11,
-      "contextPct": 23,
-      "impliedCapacity": 48
-    },
-    {
-      "date": "2026-06-12",
-      "points": 24,
-      "contextPct": 19,
-      "impliedCapacity": 126
-    },
     {
       "date": "2026-06-12",
       "points": 19,
@@ -75,6 +45,36 @@
       "points": 29,
       "contextPct": 28,
       "impliedCapacity": 104
+    },
+    {
+      "date": "2026-06-13",
+      "points": 40,
+      "contextPct": 38,
+      "impliedCapacity": 105
+    },
+    {
+      "date": "2026-06-13",
+      "points": 35,
+      "contextPct": 32,
+      "impliedCapacity": 109
+    },
+    {
+      "date": "2026-06-13",
+      "points": 6,
+      "contextPct": 13,
+      "impliedCapacity": 46
+    },
+    {
+      "date": "2026-06-13",
+      "points": 26,
+      "contextPct": 30,
+      "impliedCapacity": 87
+    },
+    {
+      "date": "2026-06-13",
+      "points": 24,
+      "contextPct": 27,
+      "impliedCapacity": 89
     }
   ]
 }

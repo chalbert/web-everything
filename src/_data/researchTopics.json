@@ -1,5 +1,25 @@
 [
   {
+    "id": "design-ref-vision",
+    "title": "Design-reference vision pipeline — capture-time QC gate + codification (one swappable provider)",
+    "status": "open",
+    "summary": "Grounds the two vision items on the design-reference corpus (backlog #475 capture-QC gate, #396 codification) on one swappable vision provider used at two points. The phase-1 pipeline (#382) admits screenshots through a deterministic, hand-authored readySelector gate that doesn't generalise and can't tell a clean app surface from a marketing splash / modal-obstructed view / stale error panel (Photopea & Grafana slipped through). The survey of UI vision prior art finds an asymmetry that decides the architecture: coarse screen classification is a mature, reliable VLM capability (ScreenAI's element-type+location annotation, Ferret-UI's widget classification beating GPT-4V), while full screenshot→structure recovery is still hard (Design2Code NAACL-2025 SOTA: Claude-4-Sonnet 76.3, open VLMs <45, poor layout fidelity). So the cheap admit/remediate/quarantine verdict (#475) is safe to automate as a VLM-as-judge returning a structured verdict against fixed criteria, while the rich tag+paradigm-harvest pass (#396) stays human-in-the-loop with the neutral structure as the editable review surface (the #086 ruling). Both are analysis calls, so they share ONE customVisionProvider registry (the #086 customMockupAnalyzerRegistry pattern) with two methods — not two integrations; obstructed-surface remediation reuses DuckDuckGo's Playwright-native autoconsent rather than inventing overlay dismissal; verdicts cache by content hash for idempotent re-runs. Internal research-corpus tooling, zero project-facing lock-in; deterministic selectors stay a free fast-path.",
+    "dateOpened": "2026-06-13",
+    "tags": [
+      "design-reference",
+      "corpus",
+      "vision",
+      "vlm-as-judge",
+      "capture-gate",
+      "quality-control",
+      "codification",
+      "swappable-provider"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webdocs"
+  },
+  {
     "id": "custom-events",
     "title": "Custom Event Scoping & Registry",
     "status": "open",
@@ -855,6 +875,27 @@
     "relatedProject": "webdocs"
   },
   {
+    "id": "version-migration-codemods",
+    "title": "Upgrader Version-Migration Codemods",
+    "status": "open",
+    "summary": "Prior-art survey (Angular ng update / migrations.json, OpenRewrite, jscodeshift/codemod) grounding backlog #191 — applying breaking-change codemods when a protocol/adapter/provider contract evolves across versions. The key finding reshapes the decision: both prerequisites #191 named already shipped. The machine-readable migration descriptor is the resolved changelog-manifest protocol (#102) — per-module entries keyed to semver severity + a migration linkage referencing the codemod that applies a breaking change, with author/integrity trust. The transform engine + provider registry + verify gate is #094's upgraderEngine (verifyUpgrade re-parses + round-trips + conformance-checks). So #191 is wiring + two design forks, not greenfield. Fork 1: the version-migration upgrader is a mode/input-adapter of the existing engine, not a distinct tool (#094's own follow-on said shared core, different input adapter). Fork 2: migration transforms are declarative-first with an imperative escape hatch — the OpenRewrite principle (declarative if it can be, imperative only when necessary), the descriptor referencing a codemod only for the complex tail. Angular's ng update supplies the version-gated, ordered, intermediate-spanning run loop; the verifyUpgrade gate is WE's moat over schematics/jscodeshift, which apply transforms without verifying conformance.",
+    "dateOpened": "2026-06-12",
+    "tags": [
+      "upgrader",
+      "codemod",
+      "migration",
+      "version-migration",
+      "changelog-manifest",
+      "spec-versioning",
+      "ng-update",
+      "openrewrite",
+      "webadapters"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webadapters"
+  },
+  {
     "id": "development-guide-learn-pathway",
     "title": "Development Guide & Learn Pathway",
     "status": "open",
@@ -1143,5 +1184,154 @@
     "relatedBlocks": [],
     "relatedPlugs": [],
     "relatedProject": "webtooling"
+  },
+  {
+    "id": "research-freshness-model",
+    "title": "Research-freshness model — history, metadata home, staleness, review horizon",
+    "status": "open",
+    "summary": "Prior-art survey for the metadata + versioning model that keeps /research/ topics alive over time (backlog #441, foundation forks of epic #192). No design exists yet — none of lastReviewed / supersedes / reviewHorizon are in the tree. Surveys four orthogonal axes. History/supersedes: RFC (Obsoletes/Obsoleted-by), PEP (Replaces/Superseded-By + Status: Superseded), MADR and W3C TR all converge on immutable dated records + bidirectional supersedes pointers + a superseded status value, never an in-place overwrite — matching /research/'s existing dated reports/YYYY-MM-DD-{slug}.md snapshots, which only lack the pointer+status. Metadata home: per-doc frontmatter is the prevailing source of truth (Microsoft ms.date, Hugo lastmod), but because WE's report is an immutable snapshot and the topic is the living unit, the topic-level review date belongs on the registry (also the render + validator source) — and last-changed (dateModified) must stay distinct from last-reviewed, which ms.date wrongly conflates. Staleness: the norm is a reader badge + a maintainer warning, never a hard build failure (Vale fails only on error severity) — confirming badge+warning coexist by design rather than being an either/or. Review horizon (the axis the item omitted): per-document reviewBy with volatility tiers beats a single global interval, modeled on RFC 5861's freshness-lifetime + stale-while-revalidate grace window rather than a hard cliff — the one genuinely divergent call.",
+    "dateOpened": "2026-06-12",
+    "lastReviewed": "2026-06-12",
+    "reviewHorizon": "P6M",
+    "tags": [
+      "research",
+      "freshness",
+      "versioning",
+      "supersedes",
+      "staleness",
+      "review-horizon",
+      "webdocs"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webdocs"
+  },
+  {
+    "id": "collection-operations-coordinator",
+    "title": "Collection-operations coordinator — home & shape (block vs composition vs headless instance)",
+    "status": "open",
+    "summary": "Prep prior-art survey for decision #452 (unblocks build #369; surfaced by app A #317). Builds on the settled collection-operations intent: data-table already owns filter/sort/group (applyPipeline) and pagination owns page (PageState), but nothing owns the WHOLE filter→sort→group→page pipeline over one collection, so data-table's click-to-sort sorts only the current page (#369's bug). The item framed one fork — standalone block vs documented composition — but the survey reshapes it into two axes. Home: TanStack Table (row-model pipeline ending in a pagination row model), AG Grid (RowModel + a PaginationProxy slicing the tail), and MUI X DataGrid (internal pagination after filter/sort) all run page LAST over the whole set and all own coordination in ONE place; nobody ships docs-only — confirming a standalone primitive over documented composition. Shape (the reshaping finding): the dominant home is a headless INSTANCE (TanStack 'table instance', AG Grid 'row model') that owns the pipeline and delegates rendering — neither a rendered block (MUI's fused monolith is the opposite of WE's compose-don't-merge) nor docs-only. That maps onto WE's existing DataTableBehavior/PaginationBehavior convention, so the coordinator is a headless CollectionOperationsBehavior + optional <collection-operations> element wrapper, no markup of its own. Page stage stays owned by pagination's PageState (compose, never merge); client-vs-server execution is UX-only (Technical Configurator), not a fork. No net-new vocabulary.",
+    "dateOpened": "2026-06-13",
+    "tags": [
+      "collection-operations",
+      "coordinator",
+      "data-table",
+      "pagination",
+      "composition",
+      "headless",
+      "pipeline",
+      "gap-analysis"
+    ],
+    "relatedBlocks": [
+      "data-table",
+      "pagination"
+    ],
+    "relatedPlugs": [],
+    "relatedProject": "webblocks"
+  },
+  {
+    "id": "background-task-reload-durability",
+    "title": "Background Task reload-durability — durable execution vs durable state (scope & guard)",
+    "status": "open",
+    "summary": "Prep platform-substrate survey for decision #450 (unblocks the durability:reload tier build #134). The Background Task Surface ships a route-only baseline (navigationGuard arms a beforeunload + Navigation-API confirm); durability:reload is the opt-in tier that promises work surviving a full reload. Two coupled forks gate it: (1) scope beyond fetches, (2) does durability:reload relax navigationGuard:warn. The survey settles fork 1 by reshaping it: there is NO native API that runs arbitrary client-side computation in the background across a reload — Background Fetch continues only predetermined transfers while page+SW are closed (Chromium-only); service workers are event-driven and killed at ~30s idle / 5min per event; Background/Periodic Sync are best-effort network-defer; Web Locks die with their context. The only non-fetch option is checkpoint→IndexedDB→resume-on-return (classic checkpoint-restart), which is a categorically WEAKER, different guarantee: durable EXECUTION (work continues while away, Background Fetch) vs durable STATE (work pauses; only a save-point survives; the user resumes on return). Conflating both under durability:reload would overclaim. Recommendation: ship durability:reload as transfer-backed durable execution now; non-fetch compute becomes a distinct future durability:resumable (checkpointed) value, not a rival definition. Fork 2: relax navigationGuard:warn by default when durability:reload is armed, and re-arm the guard on degradation to route-only (work no longer survives). No invented jargon; durable-execution/durable-state framing + checkpoint/state-rehydration vocabulary.",
+    "dateOpened": "2026-06-13",
+    "tags": [
+      "background-task",
+      "durability",
+      "background-fetch",
+      "service-worker",
+      "navigation-guard",
+      "checkpoint-resume",
+      "platform-substrate",
+      "gap-analysis"
+    ],
+    "relatedBlocks": [
+      "background-task-surface"
+    ],
+    "relatedPlugs": [],
+    "relatedProject": "webintents"
+  },
+  {
+    "id": "maas-hosted-tier-economics",
+    "title": "MaaS hosted-tier economics — build-vs-ride and the freemium pattern",
+    "status": "open",
+    "summary": "Prep economics survey for product-decision #451 (gates phase d of MaaS distribution #087; open-core cluster #089/#091/#097). The item framed one fork — a hosted CDN-like Module-as-a-Service free for public components / paid for private / both. The survey reshapes it from free-vs-paid into BUILD-vs-RIDE. The 'free public ESM CDN for any npm package' function is already a commoditized free service: esm.sh and jsDelivr serve any published package as ESM, globally, free, with bandwidth DONATED by Cloudflare/Fastly (jsDelivr has no paid tier; its founder personally subsidizes origin). Building a free public tier rebuilds a commodity and inherits its maintenance liability — Skypack is the cautionary tale (a Cloudflare/GCP/AWS-backed smart-ESM-CDN by the Snowpack team that went unmaintained since ~2023, breaks on modern JS, recurring outages, users abandoned without notice). 'Free public + paid private' is the universal registry pattern (npm Pro $7/mo, GitHub Packages free-public + metered private $0.25/GB storage $0.50/GB egress; JSR free-only/Deno-subsidized) but the free half only works because someone else pays the bandwidth. Component-hosting businesses that survive charge for a workflow value-add not bytes (Chromatic = hosted visual testing $149/mo+, free for OSS; Bit pivoted away from component distribution to AI dev workspaces). A global 24/7 public CDN is operationally untenable for a solo operator (uncapped egress, abuse, forever maintenance liability) — squaring with the project's defer-live-serve monetization stance. Recommendation: ride existing CDNs for the public tier (publish components to npm; esm.sh/jsDelivr serve them); reserve build effort for a thin paid value-add layer needing no CDN infra (private/curated registry metered like GitHub Packages, provenance/SRI+SLA, usage analytics off jsDelivr's stats API, migration/conformance tooling) — the Chromatic playbook, open-core, deferred to plateau-app per #091. Product call: recommendation grounds it, the product owner ratifies.",
+    "dateOpened": "2026-06-13",
+    "tags": [
+      "module-as-a-service",
+      "distribution",
+      "cdn",
+      "registry",
+      "pricing",
+      "monetization",
+      "open-core",
+      "build-vs-ride",
+      "product"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webadapters"
+  },
+  {
+    "id": "polyglot-maas-origin",
+    "title": "Polyglot MaaS origin — codegen vs Wasm, source-of-truth & cross-language conformance",
+    "status": "open",
+    "summary": "Prep prior-art survey for decision #463 (blocked by #461, the canonical JS Fetch-standard origin = reference impl; parent MaaS #081). The self-hosted MaaS origin is today only a JS Fetch handler; enterprises run .NET/Java, so a JS-only origin forces a JS sidecar. #463 asks how WE projects a native origin outward via a forward/codegen adapter (the inverse of WE's ingest adapters). Three forks: (a) mechanism, (b) source of truth, (c) conformance. The survey reshapes fork (a) from three options to four. Mechanism: AWS Smithy proves the IDL→multi-language-server-codegen pattern (generates routing/serde/validation/types, leaves a business-logic seam, protocol-agnostic) but server-codegen maturity is lumpy (no off-the-shelf .NET/Go server emitter; Java GA 2026 but client-leaning); OpenAPI Generator reaches many languages and is HTTP-shaped but quality is per-generator. The FOURTH option is compile-once-to-Wasm + host bindings (WebAssembly Component Model + WIT): one binary embedded by each host (.NET componentize-dotnet/Wasmtime, JVM chicory, Go wazero) structurally eliminates cross-language drift — serious in 2026 (Wasm 3.0 ratified Sept 2025, WASI P2 stable, server-side now majority prod use) but host SDKs are preview-grade. Source of truth: every precedent authors a language-neutral contract and treats each language including the original as an output — favor the protocols.json#maas-versioning protocol (projectable to OpenAPI for the HTTP-GET shape) as authority, JS as just another target, #461 as reference impl not SoT. Conformance: a shared spec does NOT guarantee interop — only a conformance suite does (protobuf: same spec, 0 vs 1847 failures across libs; Connect/gRPC suite found 22+ bugs in Google's own gRPC v1.0); adopt golden-vectors + reference-impl + runner gating each release — the single most load-bearing decision, orthogonal to the codegen-vs-Wasm choice. Recommendation: generation-adapter codegen from a neutral SoT with a deterministic-core/HTTP-shell split, gated by a conformance suite, Wasm named as the convergence target for the core once host SDKs mature.",
+    "dateOpened": "2026-06-13",
+    "tags": [
+      "module-as-a-service",
+      "polyglot",
+      "codegen",
+      "generation-adapter",
+      "wasm-component-model",
+      "conformance",
+      "source-of-truth",
+      "dotnet",
+      "java",
+      "enterprise"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webadapters"
+  },
+  {
+    "id": "responsive-container-query-layout",
+    "title": "Responsive / container-query layout — placement against the existing breakpoint & layout intents",
+    "status": "open",
+    "summary": "Prep prior-art survey for decision #467 (parent: book-triage epic #111). The book candidate 'constraint-based / container-query responsive layout' (FlexRow-style flow, ResizeObserver, container vs media queries) reads as homeless, but the survey reshapes the fork: the concern is already substantially modeled by two existing intents — `breakpoint` (draft: adaptation strategy mobile-first/desktop-first/strict-range + semantic steps compact/medium/expanded, explicitly 'mapped to concrete media/container queries') and `layout` (concept: app-shell regions — drawer/rail/pane/dock, push/overlay/rail). So the original 'new project vs intent vs webpositioning' framing collapses: NOT a new project (no provider seam, interchange schema, or vendor-interop contract to standardize — the same 'not every gap is a project' discipline that ruled #409 master-detail to a plain intent), and NOT webpositioning (that project anchors floating elements to a reference — an orthogonal concern). Web-platform grounding (2026): CSS container size queries are Baseline since 2023 (Chrome/FF/Safari) with `container-type: inline-size` and `cqi`/`cqw` units (1% of container inline size); `@container` mirrors `@media` syntax but resolves against an element's container rather than the viewport; style queries are Chrome-family only and scroll-state queries landed Chrome Dec 2025; ResizeObserver is the imperative substrate for cases CSS can't express. Industry: Material 3 moved AWAY from rigid pixel breakpoints to semantic Window Size Classes (compact <600 / medium 600-839 / expanded 840-1199 / large / extra-large) + Canonical Layouts with repositioning — which is exactly the vocabulary the breakpoint intent already borrows. Three forks survive: (1) PLACEMENT — fold into the existing breakpoint + layout intents (extend, don't create) [default], over a new intent or project; (2) SCOPE — one `breakpoint` intent with an added `scope: viewport | container` dimension [default] vs two separate intents, since the semantic-steps model and `change` event are identical and only the reference frame differs (textbook expose-the-axis-as-a-dimension, not a split); (3) FLEXROW — a small deferred webblocks block (intrinsic auto-flow container realizing breakpoint at container scope, ResizeObserver as impl substrate, CSS @container/flex-wrap as the native-first default) [default] vs a layout-intent dimension (rejected: layout is app-shell altitude, FlexRow is content-flow) vs nothing (rejected: the semantic vocabulary + container-query wiring is the standard-worthy part, not the flex CSS). Recommendation carried into #467: no new project, no new intent — extend breakpoint with a scope dimension, leave layout as-is, and defer a FlexRow webblocks block.",
+    "dateOpened": "2026-06-13",
+    "tags": [
+      "responsive",
+      "container-queries",
+      "breakpoint-intent",
+      "layout-intent",
+      "resize-observer",
+      "material-3",
+      "layer-placement",
+      "book-candidate"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webintents"
+  },
+  {
+    "id": "portable-cross-field-rule-language",
+    "title": "Portable Cross-Field Rule Expression — CEL vs shape-only for Mode-1 validation generation",
+    "status": "open",
+    "summary": "Prep prior-art survey for decision #465 (webvalidation, under epic #085). The shipped v1 validation-generation vocabulary is shape-only — 13 closed intents (required/type/min/max/pattern/format/step/min-items/max-items/enum/custom) in validation-generation/provider.ts:39-58 — each statically emittable to every Mode-1 target (HTML, Zod, Pydantic, JSON Schema). Cross-field and conditional logic ('endDate after startDate', 'require X when Y=z') was deferred because the Mode-1 fidelities diverge: protovalidate carries portable CEL rules, JSON-Schema-codegen is shape-only, Standard Schema is interface-only. The fork: define/adopt a portable rule-expression layer so cross-field emits statically to all Mode-1 targets, or stay shape-only and treat cross-field as Mode-2-only (server-authoritative, already settled at RFC 9457 problem+json via Laravel-Precognition-style evaluation in the 2026-06-06 report). Survey findings: (1) CEL (Google Common Expression Language) is the proven multi-language portable rule layer — non-Turing-complete, linear-time, cross-field via '&&' (this.min<=this.max); official runtimes in Go/C++/Java/Python (cel-expr-python open-sourced Mar 2026) plus community JS/TS evaluators (cel-js, @marcbachmann/cel-js zero-dep + tree-shakeable). protovalidate proves it at v1.0 scale across 5 languages with NO codegen. (2) JSONLogic is a lighter JSON-AST alternative with broad language coverage but weaker typing/ecosystem and verbose syntax. (3) JSON-Schema conditionals (if/then/else, dependentRequired) survive shape-schema codegen but can't express value-comparison cross-field ('endDate > startDate') — dependentRequired only covers property-presence, and nested if/then/else under allOf gets 'very messy'. (4) CUE is config-altitude, not a per-field rule fit. Architectural crux: adopting a portable layer means CustomValidationAdapter (provider.ts:135-147) must carry an expression compiler — emit() (provider.ts:146) would translate a neutral rule into each target's idiom — whereas today the contract is shape-only and the only predicate escape hatch is the non-portable 'custom' intent (provider.ts:57). cross-field/conditional already exist as OPTIONAL capability features in the manifest (capability-manifest/provider.ts:48-50, 'absence is reportable, never a silent no-op') so the declared-compliance + flag-lossy seam is already in place. Recommendation carried into #465: keep the v1 adapter contract shape-only-required with cross-field an opt-in adapter capability; Mode-2 is the default authoritative home for cross-field now; a portable Mode-1 cross-field layer is a deferred opt-in that, IF/when built, ADOPTS CEL (reuse the proven external interop language — never mint a WE rule format, which would be lock-in for no interop gain) rather than inventing an AST or settling for JSON-Schema-conditionals-only. The transpile-to-native vs embed-a-runtime choice is an adapter implementation detail (representation-neutral contract), not a standards fork.",
+    "dateOpened": "2026-06-13",
+    "tags": [
+      "validation",
+      "cross-field",
+      "rule-language",
+      "cel",
+      "jsonlogic",
+      "json-schema",
+      "mode-1-generation",
+      "decision-prep"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webvalidation"
   }
 ]

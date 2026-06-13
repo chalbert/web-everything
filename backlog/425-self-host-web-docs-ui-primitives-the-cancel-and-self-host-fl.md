@@ -5,6 +5,7 @@ size: 5
 parent: "398"
 status: open
 dateOpened: "2026-06-12"
+dateStarted: "2026-06-12"
 tags: [webdocs, frontier-ui, primitives, self-host, product-build]
 relatedProject: webdocs
 crossRef: { url: /backlog/398-build-the-web-docs-product-fui-open-primitives-plateau-app-o/, label: "Web Docs product epic (#398)" }

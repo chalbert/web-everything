@@ -20,6 +20,7 @@ import {
   validateReportsNotHidden, findCompiledShadows, isSegmentCovered, permalinkSegment,
   validateViteProxyCoverage, deDateReport,
   isExportsSafeTarget, validateModuleResolutionLock, findRawHtmlInMarkdown,
+  findBuriedForkSections, findUnquotedColonScalars,
 } from '../check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -265,6 +266,28 @@ describe('validateViteProxyCoverage — uncovered catalog routes', () => {
   });
 });
 
+describe('findUnquotedColonScalars — frontmatter quote-fix lint (#453)', () => {
+  it('flags an unquoted scalar embedding a colon-space (the loader-skip trigger)', () => {
+    const raw = '---\ntype: idea\ngraduatedTo: a/b.json: foo\nstatus: open\n---\nbody: has colons: fine\n';
+    const hits = findUnquotedColonScalars(raw);
+    expect(hits).toEqual([{ line: 3, key: 'graduatedTo', value: 'a/b.json: foo' }]);
+  });
+  it('flags a trailing colon on an unquoted value', () => {
+    expect(findUnquotedColonScalars('---\nfoo: bar:\n---\n')).toEqual([{ line: 2, key: 'foo', value: 'bar:' }]);
+  });
+  it('exempts a quoted value, a flow mapping, and a bare URL (no colon-space)', () => {
+    expect(findUnquotedColonScalars('---\ngraduatedTo: "a/b.json: foo"\n---\n')).toEqual([]);
+    expect(findUnquotedColonScalars('---\ncrossRef: { url: /adapters/, label: Rendering Adapters }\n---\n')).toEqual([]);
+    expect(findUnquotedColonScalars('---\nhome: https://example.com/x\n---\n')).toEqual([]);
+  });
+  it('only scans the frontmatter block, never the body', () => {
+    expect(findUnquotedColonScalars('---\ntype: idea\n---\nA line: with a colon in the body.\n')).toEqual([]);
+  });
+  it('ignores content with no frontmatter fence', () => {
+    expect(findUnquotedColonScalars('no frontmatter: here\n')).toEqual([]);
+  });
+});
+
 // ── False-positive safety over the REAL data (the standing regression guards) ──
 // Each guard runs the exact pure rule the script composes over the live registries/filesystem and
 // asserts zero errors, so a future rule tightening that starts erroring on legitimate real data fails
@@ -326,6 +349,12 @@ describe('real data stays clean (per family)', () => {
     const segments = [...needed].map(([seg, file]) => ({ seg, file }));
     const { errors } = validateViteProxyCoverage(segments, proxyKeys);
     expect(errors.map((e) => e.message)).toEqual([]);
+  });
+  it('backlog frontmatter — no unquoted-colon scalars (#453)', () => {
+    const BACKLOG = join(ROOT, 'backlog');
+    const offenders = readdirSync(BACKLOG).filter((f) => f.endsWith('.md')).flatMap((f) =>
+      findUnquotedColonScalars(readFileSync(join(BACKLOG, f), 'utf8')).map((h) => ({ file: f, ...h })));
+    expect(offenders).toEqual([]);
   });
   // (Compiled-artifact shadow has no per-family real-data guard here — its live filesystem walk is the
   // production check; findCompiledShadows is exercised by the synthetic cases above. The live
@@ -419,5 +448,42 @@ describe('findRawHtmlInMarkdown — raw HTML in backlog body (#290)', () => {
   it('returns [] for an empty or non-string body', () => {
     expect(findRawHtmlInMarkdown('')).toEqual([]);
     expect(findRawHtmlInMarkdown(undefined)).toEqual([]);
+  });
+});
+
+describe('findBuriedForkSections — a fork section in a non-decision body (#441 carve rule)', () => {
+  const headings = (body) => findBuriedForkSections(body).map((f) => f.heading);
+
+  it('flags a fork-shaped section heading', () => {
+    const f = findBuriedForkSections('# Title\n\n## Open design points\n\n- A vs B, leaning A.');
+    expect(f).toEqual([{ line: 3, heading: 'Open design points' }]);
+  });
+
+  it('matches the #192 / #315 / #087 heading variants', () => {
+    expect(headings('## Open decisions\n- x')).toEqual(['Open decisions']);
+    expect(headings('## Design tensions to settle\n- x')).toEqual(['Design tensions to settle']);
+    expect(headings('### Open question — how to single-source\n- x')).toEqual(['Open question — how to single-source']);
+  });
+
+  it('SUPPRESSES a section already carved to a decision (#NNN + carve/block/resolve language)', () => {
+    // The #192 / #134 / #315 post-carve shape must stay quiet.
+    expect(headings('## Open design points\n\nForks live in their own decision items, carved to #441 (blockedBy).')).toEqual([]);
+    expect(headings('## Open questions\n\nResolved by the child stories — see #346 / #349.')).toEqual([]);
+  });
+
+  it('does NOT suppress when a number is present without carve/resolve language', () => {
+    // A bare cross-ref like "5k rows" or "#317 surfaced this" is not a settlement pointer.
+    expect(headings('## Open questions\n\nSurfaced in #317 — should the coordinator be a block or a composition?')).toEqual(['Open questions']);
+  });
+
+  it('ignores non-fork headings and bounds each section at the next heading', () => {
+    const body = '## Scope\n\n## Open decisions\n\n- live fork, no pointer\n\n## Notes\n\ncarved #99 resolved';
+    // "Notes" (with the pointer) is a separate section, so it must not suppress "Open decisions".
+    expect(headings(body)).toEqual(['Open decisions']);
+  });
+
+  it('returns [] for an empty or non-string body', () => {
+    expect(findBuriedForkSections('')).toEqual([]);
+    expect(findBuriedForkSections(undefined)).toEqual([]);
   });
 });

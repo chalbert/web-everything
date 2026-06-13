@@ -1,0 +1,89 @@
+<h2>Form</h2>
+<p>
+    The <strong>form-level state machine and lifecycle actions</strong>, sitting <em>above</em> the field-level
+    <a href="/intents/validation/">Validation Intent</a> and the Web Validation project (which own per-field rules and
+    validity). Web Validation answers &ldquo;is this field valid?&rdquo;; the Form block answers
+    <strong>&ldquo;what is the state of the whole form, and how do I reset / submit / initialize it?&rdquo;</strong>
+</p>
+<p>
+    It is a <strong>candidate (draft) composition manifest</strong> — like <a href="/blocks/droplist/">Droplist</a>, it
+    composes existing intents rather than re-specifying their behavior, and adds only the aggregate state and lifecycle
+    actions the native platform doesn't expose. No implementation ships yet; this documents the contract for review.
+</p>
+
+<h3>The contract</h3>
+<p>Grounded in the native <code>&lt;form&gt;</code> element and the Constraint Validation API:</p>
+<ul>
+    <li><strong>State</strong> — aggregate <code>valid</code>/<code>invalid</code>, <code>touched</code>/<code>untouched</code>,
+        <code>focused</code>/<code>unfocused</code>, <code>dirty</code>/<code>pristine</code> across fields.</li>
+    <li><strong>Values</strong> — <code>initialValues</code> (seed) / <code>defaultValues</code> (reset target) / current
+        <code>values</code>, kept distinct; the dirty check is current-vs-initial.</li>
+    <li><strong>Actions</strong> — <code>submit</code>, <code>reset</code> (to defaults), <code>clear</code> (to empty),
+        <code>initialize(initialValues?)</code> (re-seed and mark pristine — the new baseline).</li>
+</ul>
+
+<h3>Native-first grounding</h3>
+<p>
+    The block augments a real <code>&lt;form&gt;</code>, it never replaces it. <code>FormData</code> reads current values;
+    the Constraint Validation API supplies per-field validity; and <code>formAssociated</code> custom elements participate
+    via <code>ElementInternals</code> form-lifecycle callbacks (<code>formResetCallback</code>,
+    <code>formStateRestoreCallback</code>). The Form block adds only the aggregate state and actions the platform leaves to
+    userland — it does not re-implement field validity or submission the browser already performs.
+</p>
+
+<h3>Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/HTMLFormElement">HTMLFormElement</a></td>
+        <td>Baseline</td>
+        <td>The block binds to a real <code>&lt;form&gt;</code> — its <code>reset()</code>/<code>submit()</code> and the
+            <code>submit</code>/<code>reset</code>/<code>formdata</code> events are the substrate the actions wrap.</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/FormData">FormData</a></td>
+        <td>Baseline</td>
+        <td>Reads current <code>values</code> from the live form — no parallel value store to drift.</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Constraint_validation">Constraint Validation API</a></td>
+        <td>Baseline</td>
+        <td>Per-field <code>validity</code> comes from the platform; the block only <em>aggregates</em> it to form level.</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/ElementInternals">ElementInternals / formAssociated</a></td>
+        <td>Baseline 2026</td>
+        <td>Custom fields join the native form and respond to reset/restore via the form-lifecycle callbacks.</td>
+    </tr>
+</table>
+
+<h3>Composition (defers to owning intents)</h3>
+<table>
+    <tr><th>Concern</th><th>Owning intent</th><th>How Form composes it</th></tr>
+    <tr>
+        <td>Field → form validity merge</td>
+        <td><a href="/intents/validation/">Validation</a></td>
+        <td>Form validity merges from field validity through the swappable <code>ValidityMergeRegistry</code> (#212 / #004
+            OP-1); the Form block consumes the <code>MergedValidity</code> hand-off shape and does <strong>not</strong> bake
+            the merge math — closing the &ldquo;last-writer vs. strictest&rdquo; question by deferring to the ratified
+            strategy plane (native-first default: source-reduction over named sources).</td>
+    </tr>
+    <tr>
+        <td>Unsaved-changes guard</td>
+        <td><a href="/intents/exit-guard/">Exit Guard</a></td>
+        <td>Arms the navigation guard (#129) from <code>dirty</code> so leaving a modified, unsubmitted form prompts.</td>
+    </tr>
+    <tr>
+        <td>Submit lifecycle</td>
+        <td><a href="/intents/feedback/">Feedback</a> / <a href="/intents/reliability/">Reliability</a></td>
+        <td>In-flight / success / error of a submit are surfaced through the Feedback and Reliability intents, not a
+            bespoke form-only mechanism.</td>
+    </tr>
+</table>
+
+<h3>Provenance</h3>
+<p>
+    Surfaced as a gap — no block answers the whole-form state/lifecycle question, only field-level validity. Built fresh on
+    the native form + validation primitives. (The legacy <code>plateau</code> repo is explicitly <strong>not</strong> a model
+    and was not consulted.)
+</p>

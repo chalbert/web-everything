@@ -10,9 +10,9 @@ graduatedTo: plugs/webinjectors/declarativeInjector.ts
 tags: []
 ---
 
-# Declarative <script type="injector"> domain/Protocol binding via customScriptTypes
+# Declarative `<script type="injector">` domain/Protocol binding via customScriptTypes
 
-Pull-forward slice from #002's ruling (@domain = Protocol). Implement the runtime declarative injector form: a <script type="injector"> block, registered through the existing customScriptTypes hook, that binds a node's subtree to a Protocol (the @domain) and its impl — no build step, no resolver. Carries the id + association form from the gap analysis (script id, element injector="id" attribute, isolate to block parent inheritance). Demo-First on the conformance sandbox before any real block page. Excludes the build-time provide/consume DSL (separate, deferred).
+Pull-forward slice from #002's ruling (@domain = Protocol). Implement the runtime declarative injector form: a `<script type="injector">` block, registered through the existing customScriptTypes hook, that binds a node's subtree to a Protocol (the @domain) and its impl — no build step, no resolver. Carries the id + association form from the gap analysis (script id, element injector="id" attribute, isolate to block parent inheritance). Demo-First on the conformance sandbox before any real block page. Excludes the build-time provide/consume DSL (separate, deferred).
 
 ## Progress
 

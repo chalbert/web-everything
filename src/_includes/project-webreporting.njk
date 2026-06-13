@@ -1,0 +1,177 @@
+<section class="intro-section mb-12">
+  <h3 id="mission">Mission</h3>
+  <p>
+    <strong>Web Reporting</strong> standardizes a <strong>unified report substrate</strong> &mdash; one
+    normalized model that <em>every</em> producer targets and <em>every</em> renderer and adapter agrees
+    on. Today each report rolls its own output: <code>check:standards</code>,
+    <code>check:app-conformance</code>, <code>check:readiness</code>, the conformance burndown, and the
+    capability-manifest report each diverge in shape, styling, and export, and a future run against a
+    <em>real external app</em> would arrive in a foreign format entirely. Web Reporting fixes the shape so
+    the same view serves many producers.
+  </p>
+  <p>
+    It fixes one thing &mdash; the <strong>Report model</strong> &mdash; the normalized schema of
+    <em>sources, sections, findings, severities, scores, and series</em>. Like the
+    <a href="/projects/webdecisions/">Decision Record</a> it is a <strong>schema-only interchange
+    contract: the model shape is the lock, and there is no provider on the model itself</strong>. What earns
+    it a <strong>Protocol</strong> (not just an intent) is the multi-vendor format-interop story: SARIF,
+    JUnit, coverage, and SonarQube all exchange the same <em>kind</em> of artifact, so ingest/export
+    <strong>adapters</strong> &mdash; not bespoke viewers &mdash; bridge each foreign format bottom-up into
+    the pivot. An intent would be UX-only and wrong for a data-interchange contract.
+  </p>
+
+  <div class="comparison-block" style="background: rgba(79, 70, 229, 0.08); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #4f46e5; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #4338ca; font-size: 1rem;">Not a catalog, not the engine, not the adapters</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      A <strong>catalog</strong> page (<a href="/protocols/">/protocols/</a>, <a href="/intents/">/intents/</a>)
+      renders a <em>registry</em>; Web Reporting renders <strong>findings and results over time</strong>.
+      It does not <em>produce</em> the findings &mdash; an underwriting decision, a conformance check, a CI
+      run all do, and each emits the same model. And it is not the <a href="/projects/webadapters/">Web
+      Adapters</a> bridge itself: the ingest/export adapters that translate SARIF/JUnit/coverage are the
+      <em>swappable</em> half this protocol makes possible; this slice fixes only the schema they target.
+    </p>
+  </div>
+</section>
+
+<section id="features" class="section-card">
+  <h3 id="feature-surface">Feature Surface</h3>
+  <p>
+    What a reporting standard covers. <strong>Protocol</strong> = fixed by the Report model schema (the only
+    lock); <strong>Compose</strong> / <strong>Adapter</strong> = deferred to a neighbouring Web Everything
+    standard or to the adapter bridge.
+  </p>
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 720px;">
+      <thead>
+        <tr><th>Feature</th><th>Prior art</th><th>What it does</th><th>Layer</th></tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(79,70,229,0.06);">The pivot (fixed by the protocol — a SCHEMA, no provider)</td></tr>
+        <tr><td><strong>Report</strong></td><td>SARIF run, JUnit testsuite</td><td><code>{ id, title, sources[], sections[], generatedAt? }</code></td><td>Protocol</td></tr>
+        <tr><td><strong>ReportSource</strong></td><td>SARIF <code>tool.driver</code></td><td><code>{ id, name, kind?, at?, meta? }</code> &mdash; the producing run</td><td>Protocol</td></tr>
+        <tr><td><strong>Finding</strong></td><td>SARIF result, lint diagnostic</td><td><code>{ id, severity, title, detail?, location?, ruleId?, source }</code></td><td>Protocol</td></tr>
+        <tr><td><strong>Severity</strong></td><td>error/warning/note</td><td>Open vocabulary over a base set (<code>error/warn/info/pass</code>) producers extend</td><td>Protocol</td></tr>
+        <tr><td><strong>Score</strong></td><td>Coverage %, quality gate</td><td><code>{ id, label, value, max?, unit? }</code> &mdash; a roll-up number</td><td>Protocol</td></tr>
+        <tr><td><strong>Series</strong></td><td>Burndown, trend line</td><td><code>{ id, label, points[{ at, value }], unit? }</code> &mdash; over time</td><td>Protocol</td></tr>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(79,70,229,0.06);">Built on the model (separate slices — this item ships the schema only)</td></tr>
+        <tr><td><strong>Renderers</strong></td><td>Report viewers</td><td>Findings table + coverage matrix (v1); trend chart + score card (later) &mdash; auto-render from the model</td><td>🔗 Build &mdash; v1 renderers (<a href="/backlog/432-build-the-v1-report-renderers-findings-table-coverage-matrix/">#432</a>)</td></tr>
+        <tr><td><strong>Ingest adapters</strong></td><td>SARIF, JUnit, coverage</td><td><code>external format → Report</code> &mdash; the lossy-normalization hub, foreign format into the pivot</td><td>🔌 Adapter &mdash; ingest (<a href="/backlog/433-build-the-v1-ingest-adapters-sarif-junit-coverage/">#433</a>)</td></tr>
+        <tr><td><strong>Export adapters</strong></td><td>SARIF/JUnit out</td><td><code>Report → external format</code> &mdash; interop out to common CI consumers</td><td>🔌 Adapter &mdash; export (<a href="/backlog/434-build-the-export-adapters-report-model-to-sarif-junit/">#434</a>)</td></tr>
+        <tr><td><strong>Producer migration</strong></td><td><code>check:*</code> reporters</td><td>Point existing reporters at the model + shared renderers, incrementally</td><td>🔗 Compose &mdash; migration (<a href="/backlog/435-migrate-existing-check-reporters-onto-the-report-model-share/">#435</a>)</td></tr>
+        <tr><td><strong>Decisions as a source</strong></td><td>AUS findings</td><td>A <a href="/projects/webdecisions/">Decision Record</a> feeds a report as one finding/source</td><td>🔗 Compose &mdash; <a href="/projects/webdecisions/">Web Decisions</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="protocol-report-model" class="section-card">
+  <h3 id="how-it-works">Report Model Protocol</h3>
+  <p>
+    A producer never bundles a rendering or an export format. It emits a <strong>Report</strong> &mdash; the
+    normalized, source-attributed result of a run &mdash; and any renderer or adapter reads it. There is no
+    provider to resolve on the model itself: the schema is the entire contract, which is what lets
+    <code>check:standards</code>, a CI SARIF run, and an external conformance tool all feed the same
+    findings table, coverage matrix, and trend chart.
+  </p>
+  {% highlight "typescript" %}
+// The pivot — the ONLY lock. Schema-only, like the Decision Record: no provider on the model;
+// ingest/export ADAPTERS are the swappable bridge (separate slices).
+
+type Severity = 'error' | 'warn' | 'info' | 'pass';  // base set — producers extend with their own strings
+
+interface ReportSource {
+  id: string;                 // producer id, e.g. 'check:standards'
+  name: string;
+  kind?: string;              // 'conformance' | 'coverage' | 'lint' | 'test' | …
+  at?: string;                // ISO — when this run produced its results
+  meta?: Record<string, string>;
+}
+
+interface Finding {
+  id: string;
+  severity: Severity | string;          // open vocabulary over the base set
+  title: string;
+  detail?: string;
+  location?: { path: string; line?: number; col?: number };
+  ruleId?: string;                       // the check/rule that produced it
+  source: string;                        // → ReportSource.id
+}
+
+interface Score  { id: string; label: string; value: number; max?: number; unit?: string; }
+interface Series { id: string; label: string; points: { at: string; value: number }[]; unit?: string; }
+
+interface ReportSection {
+  id: string;
+  title: string;
+  findings?: Finding[];        // findings table
+  scores?: Score[];           // score card
+  series?: Series[];          // trend / burndown
+}
+
+interface Report {
+  id: string;
+  title: string;
+  sources: ReportSource[];     // every run that contributed
+  sections: ReportSection[];
+  generatedAt?: string;        // ISO
+}
+
+// 1. Any producer emits the SAME model — the standards checker maps its results to it.
+const report: Report = toReport(runCheckStandards());
+
+// 2. Renderers & adapters interoperate off the schema — no provider, no coupling to the producer.
+panel.append(renderFindingsTable(report));      // a v1 renderer (#432)
+const sarif = exportSarif(report);              // an export adapter (#434)
+const fromCi: Report = ingestSarif(ciSarif);    // an ingest adapter (#433)
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+    <li><strong>Schema-only on the model, swappable at the edges:</strong> there is no
+      <code>CustomReportProvider</code> &mdash; the interchange <em>is</em> the <code>Report</code>. The
+      swap seam lives in the <a href="/projects/webadapters/">adapters</a> that ingest/emit foreign formats,
+      which is exactly the multi-vendor interop a protocol exists to guarantee.</li>
+    <li><strong>Source-attributed:</strong> every finding carries its <code>source</code>, so one report can
+      fold several runs (a conformance check + a coverage run) and still trace each result to its producer.</li>
+    <li><strong>Open severity vocabulary:</strong> a named base set (<code>error/warn/info/pass</code>) keeps
+      renderers consistent, while producers extend it &mdash; the same pattern as the Decision Record
+      outcome vocabulary.</li>
+  </ul>
+</section>
+
+<section id="composition" class="section-card">
+  <h3 id="composition">Composition With Other Standards</h3>
+  <ul style="font-size: 0.9rem;">
+    <li><strong><a href="/projects/webadapters/">Web Adapters</a></strong> &mdash; the ingest/export bridge:
+      SARIF · JUnit · coverage in, SARIF/JUnit out. The lossy-normalization hub that earns the protocol.</li>
+    <li><strong><a href="/projects/webdecisions/">Web Decisions</a></strong> &mdash; a
+      <code>DecisionRecord</code> feeds a report as one finding/source.</li>
+    <li><strong>Web Compliance (<a href="/backlog/351-web-compliance-project/">#351</a>)</strong> &mdash; its
+      audit/gate results are just another report source; the report model is the shared protocol both
+      projects emit through (<a href="/backlog/439-build-the-audit-evidence-trail-emit-through-web-reporting/">#439</a> also consumes it).</li>
+    <li><strong>Conformance tooling (<a href="/backlog/314-flagship-exercise-apps/">#314</a>)</strong> &mdash;
+      the output layer <code>check:app-conformance</code> renders through.</li>
+  </ul>
+</section>
+
+<section id="status" class="section-card">
+  <h3 id="status">Status</h3>
+  <p>
+    Web Reporting is in <strong>concept</strong> phase; the Report model protocol's schema is specified here
+    at <strong>draft</strong>. It was carved from the reporting epic
+    (<a href="/backlog/350-web-reporting-project/">#350</a>) as its root slice &mdash; the canonical pivot
+    everything else consumes. The Project + Protocol shape was ratified: multi-vendor report-format interop
+    earns a protocol; an intent is UX-only and wrong for a data-interchange contract. The v1 renderers
+    (<a href="/backlog/432-build-the-v1-report-renderers-findings-table-coverage-matrix/">#432</a>), ingest adapters
+    (<a href="/backlog/433-build-the-v1-ingest-adapters-sarif-junit-coverage/">#433</a>), export adapters
+    (<a href="/backlog/434-build-the-export-adapters-report-model-to-sarif-junit/">#434</a>), and producer migration
+    (<a href="/backlog/435-migrate-existing-check-reporters-onto-the-report-model-share/">#435</a>) build on this schema.
+  </p>
+  <h4 style="margin-top: 1rem;">Open Questions</h4>
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <li>Does a finding carry a <em>raw</em> location and a <em>display</em> form, or one pre-formatted by the
+      producer (mirrors the Decision Record's raw-vs-display question)?</li>
+    <li>Is a coverage matrix a first-class section kind, or does it fall out of <code>scores[]</code> keyed
+      by a dimension axis?</li>
+    <li>Should the base severity set name a <code>pass</code>/positive tier, or stay failure-only and let a
+      score express the positive roll-up?</li>
+  </ul>
+</section>

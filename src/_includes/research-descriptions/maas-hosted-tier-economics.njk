@@ -1,0 +1,73 @@
+<h3>The Question</h3>
+<p>
+    A CDN-like hosted <a href="/backlog/081-module-as-a-service-provider/">Module-as-a-Service</a> for
+    distributing reusable web standard components could be <strong>free</strong> for public/open
+    components (a Skypack/esm.sh for WE components), <strong>paid</strong> for private components + SLAs +
+    analytics, or <strong>both</strong> (free public + paid private/pro). This is a product/business-model
+    decision (<a href="/backlog/451-maas-hosted-tier-shape-pricing-free-public-paid-private-both/">#451</a>),
+    carved out of the distribution build (<a href="/backlog/087-module-service-distribution-caching/">#087</a>)
+    so it isn't settled inside engineering scope. This survey runs the owed economics pass on how
+    comparable JS-ecosystem CDNs, registries and component hosts are actually structured and priced.
+</p>
+
+<h3>Recommendation (grounds #451)</h3>
+<ol>
+    <li><strong>The real fork is build-vs-ride, not free-vs-paid.</strong> The "free public ESM CDN for
+        any npm package" function is already a commodity — esm.sh and jsDelivr serve any published
+        package as ESM, free, globally, with bandwidth donated by Cloudflare/Fastly. Building a "free
+        public tier" rebuilds a commodity and inherits its maintenance liability.</li>
+    <li><strong>Public tier → ride existing CDNs.</strong> Publish WE/FUI standard components to npm;
+        esm.sh/jsDelivr serve them today. Do <strong>not</strong> operate a public CDN.</li>
+    <li><strong>Paid surface → a thin value-add layer needing no CDN infra</strong> (the Chromatic
+        playbook): private/curated registry (metered storage), provenance/SRI + SLA, usage analytics (off
+        jsDelivr's stats API), migration/conformance tooling. Built only when the broader open-core
+        tiering is settled; deferred to plateau-app per #091.</li>
+</ol>
+
+<h3>Finding 1 — the free public ESM CDN is already commoditized and free</h3>
+<table>
+    <thead><tr><th>Service</th><th>Status 2025-26</th><th>Funding</th></tr></thead>
+    <tbody>
+        <tr><td><a href="https://github.com/esm-dev/esm.sh">esm.sh</a></td><td>Actively maintained; public 2026 roadmap</td><td>Sponsors; CDN on Cloudflare; self-hostable</td></tr>
+        <tr><td><a href="https://www.jsdelivr.com/about">jsDelivr</a></td><td>Actively maintained; 2025 edge upgrade</td><td>100% sponsor-funded; Cloudflare + Fastly donate unlimited bandwidth; no paid tier</td></tr>
+        <tr><td><a href="https://security.snyk.io/package/npm/unpkg">unpkg</a></td><td>Maintenance inactive but operational</td><td>Cloudflare-sponsored</td></tr>
+        <tr><td><a href="https://github.com/skypackjs/skypack-cdn/issues/365">Skypack</a></td><td><strong>Abandoned</strong> — unmaintained ~2023, breaks on modern JS, no maintainer reply</td><td>Was backed by Cloudflare/GCP/AWS</td></tr>
+    </tbody>
+</table>
+<p>
+    Anyone who publishes to npm is already served free, globally, by esm.sh + jsDelivr. A new "free
+    public tier" rebuilds a commodity two well-funded incumbents give away — for zero differentiation.
+</p>
+
+<h3>Finding 2 — "free public + paid private" is the universal registry pattern, but the free half is subsidized</h3>
+<p>
+    <a href="https://www.npmjs.com/products/pro">npm</a> (Pro $7/mo, Teams $7/user/mo) and
+    <a href="https://docs.github.com/en/billing/managing-billing-for-github-packages">GitHub Packages</a>
+    (free public; metered private at $0.25/GB storage, $0.50/GB egress) both do free-public + paid-private;
+    <a href="https://jsr.io/docs/faq">JSR</a> is free-only (subsidized by Deno). The freemium split is the
+    norm — but the "free public" half only works because <strong>someone else pays the bandwidth.</strong>
+    Running the registry/CDN <em>infra</em> yourself is the expensive part.
+</p>
+
+<h3>Finding 3 — component-hosting businesses monetize workflow, not bytes</h3>
+<p>
+    <a href="https://bit.cloud">Bit</a> pivoted away from "component marketplace" to AI dev workspaces —
+    pure component distribution never became a standalone market.
+    <a href="https://www.chromatic.com/docs/billing/">Chromatic</a> (the surviving component-adjacent SaaS)
+    charges for a <strong>value-add</strong> — hosted visual testing/CI ($149/mo+, free for OSS) — not for
+    serving bytes. The pattern: charge for workflow (testing, migration, curation), never for raw hosting.
+</p>
+
+<h3>Finding 4 — running a public CDN is untenable for a solo operator (Skypack)</h3>
+<p>
+    A global 24/7 module CDN means multi-region edge, on-the-fly transpile, abuse handling, and uncapped
+    egress cost; incumbents survive only on donated bandwidth. <strong>Skypack</strong> — a backed team's
+    smart-ESM-CDN — rotted: unmaintained, breaks on modern syntax, recurring outages, users abandoned
+    without notice. A public module CDN is a forever liability; a solo operator should ride it, not own it
+    — squaring with the project's standing <em>defer live-serve</em> monetization stance.
+</p>
+
+<p style="margin-top:1.5rem;font-size:0.9em;color:var(--color-text-muted,#64748b);">
+    Session report: <code>reports/2026-06-13-maas-hosted-tier-economics.md</code>. Product decision —
+    recommendation grounds the call; the product owner ratifies (see #451).
+</p>

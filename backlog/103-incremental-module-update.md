@@ -29,7 +29,7 @@ The previous-version artifact lives in the **Cache API** (service worker); async
 
 #087 makes served artifacts **cache-friendly and immutable** (content-addressed, `Cache-Control: immutable`). This item is the *complementary* lever: immutability makes a URL cacheable forever, but a frequently-changing shared bundle still produces a *new* immutable URL each change — incremental update is how the client avoids re-downloading the unchanged 95% when it moves to that new version. The delta is computed between two content-addressed versions (#088).
 
-## Open questions
+## Design notes (recommended)
 
 - Delta format / algorithm — lean on an existing binary-diff approach rather than inventing one (native-first / don't-reinvent-the-wheel).
 - Where the patch is computed: at the MaaS origin (eager, per version pair) vs. on demand. Recommendation: on demand, cached, keyed on `(fromHash → toHash)`.

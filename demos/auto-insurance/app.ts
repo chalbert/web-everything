@@ -118,6 +118,16 @@ function renderDetail(p: Policy): string {
   </div>`;
 }
 
+/**
+ * Served under a mounted base path (`/demos/auto-insurance/`), not the origin root. Route patterns are
+ * logical (`/book`); the Router block prepends BASE via `base` and maps the entry URL via `entry` (#365).
+ * Anything that targets a URL directly — `route:link` hrefs and programmatic redirects — must carry BASE
+ * itself (the router does NOT base-qualify those). `routePath()` is the single seam, so a reload of e.g.
+ * `/demos/auto-insurance/book` resolves instead of 404-ing at `/book`. Mirror of the loan-origination app.
+ */
+const BASE = '/demos/auto-insurance';
+const routePath = (logical: string) => `${BASE}${logical}`;
+
 const MODULES = [
   { path: '/book', label: 'Book' },
   { path: '/quotes', label: 'Quotes' },
@@ -126,7 +136,7 @@ const MODULES = [
 ];
 
 function stub(title: string): string {
-  return `<div class="ai-workspace"><div class="empty-card"><h2>${title}</h2><p class="muted">Slice not built yet — see the <a route:link="/book">Book</a>.</p></div></div>`;
+  return `<div class="ai-workspace"><div class="empty-card"><h2>${title}</h2><p class="muted">Slice not built yet — see the <a route:link="${routePath('/book')}">Book</a>.</p></div></div>`;
 }
 
 // ── Quote wizard (S1) — the first consumer of the now-active Stepper block (#053) ───────────────────
@@ -401,10 +411,8 @@ function boot() {
     for (const e of c.audit) await claimAudit.append({ target: { type: 'claim', id: c.claimNumber }, action: e.action, actor: { role: e.actor }, at: e.at });
   };
 
-  if (!MODULES.some((m) => m.path === location.pathname)) history.replaceState(null, '', '/book');
-
+  // Entry-URL normalization is handled by the route-view's `entry` attribute (#365) — no hand-rolled shim.
   const templates = [
-    `<template route="/"><div class="ai-redirect" data-redirect="/book"></div></template>`,
     `<template route="/book">${bookSkeleton(book.length)}</template>`,
     `<template route="/quotes">${quoteSkeleton()}</template>`,
     `<template route="/underwriting">${uwSkeleton(referred.length)}</template>`,
@@ -416,8 +424,8 @@ function boot() {
       <div class="brand"><span class="logo">◆</span> <b>Beacon</b> <span>Auto Insurance</span></div>
       <div class="right"><span class="env">DEMO</span><span class="user"><span class="av">AG</span> R. Lindqvist · Agent</span></div>
     </div>
-    <nav class="ai-tabs">${MODULES.map((m) => `<a route:link="${m.path}">${m.label}</a>`).join('')}</nav>
-    <route-view>${templates}</route-view>
+    <nav class="ai-tabs">${MODULES.map((m) => `<a route:link="${routePath(m.path)}">${m.label}</a>`).join('')}</nav>
+    <route-view base="${BASE}" entry="/book">${templates}</route-view>
     <div class="ai-statusbar"><span>Rate set <b>2026.06.0</b></span><span class="sep">·</span><span>Exercise app B · backlog #318 · second consumer of the loan-app standards</span></div>`;
 
   const attrs = (window as unknown as { attributes?: { upgrade(root: ParentNode): void } }).attributes;
@@ -621,13 +629,14 @@ function boot() {
   };
 
   const routeView = document.querySelector('route-view');
+  // `path` is the live, base-qualified pathname; compare against base-qualified link targets. The
+  // bare-base → /book redirect is owned by the route-view `entry` attribute (#365).
   const onRoute = (path: string) => {
     document.querySelectorAll('.ai-tabs a').forEach((a) => a.classList.toggle('active', a.getAttribute('route:link') === path));
-    if (path === '/') { history.replaceState(null, '', '/book'); return; }
-    if (path === '/book') requestAnimationFrame(fillBook);
-    if (path === '/quotes') requestAnimationFrame(fillQuote);
-    if (path === '/underwriting') requestAnimationFrame(fillUnderwriting);
-    if (path === '/claims') requestAnimationFrame(fillClaims);
+    if (path === routePath('/book')) requestAnimationFrame(fillBook);
+    if (path === routePath('/quotes')) requestAnimationFrame(fillQuote);
+    if (path === routePath('/underwriting')) requestAnimationFrame(fillUnderwriting);
+    if (path === routePath('/claims')) requestAnimationFrame(fillClaims);
   };
   routeView?.addEventListener('route-change', (e) => onRoute((e as CustomEvent).detail?.to?.path ?? location.pathname));
   onRoute(location.pathname);

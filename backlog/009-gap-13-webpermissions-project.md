@@ -2,16 +2,20 @@
 type: decision
 workItem: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-05-31"
+dateStarted: "2026-06-12"
 tags: [gap-analysis, project, intent, notifications, permissions]
 relatedReport: reports/2026-06-11-webpermissions-project.md
-preparedDate: "2026-06-11"
+preparedDate: "2026-06-12"
+blockedBy: [455]
+dateResolved: "2026-06-13"
+graduatedTo: webnotifications
 ---
 
-# Decide on Notifications / Permissions project — `webpermissions` (gap #13)
+# Decide the Notifications / Permissions domain — `webnotifications` (gap #13)
 
-No design exists yet. The item's "project vs intent vs fold into `feedback`" call is under-decomposed: the platform splits this concern into three standards-track APIs with three shapes — a cross-cutting *state* layer (Permissions API), a *render* surface (Notifications API), and a *transport* (Push API). The three forks below are grounded in a prior-art survey published as the [Web Permissions / Notifications / Push](/research/web-permissions-project/) research topic; each names a recommended default in **bold**. Net: it resolves to all three at once on different axes, with `feedback` left untouched.
+The platform splits this gap into three shapes — a *state* layer (Permissions API), a *render* surface (Notifications API), and a *transport* (Push API) — so "project vs intent vs fold into `feedback`" resolves to all three at once, `feedback` untouched ([prior-art survey](/research/web-permissions-project/), extended 2026-06-12). **Forks A–C settled in prep** (permission state · system-notification render · push *is* a protocol). The live call is **Fork D — the notification *domain* home** (`webnotifications`: render surfaces + orchestration + a `notification-marker` family). The **transport home** (where push lives + the open-app realtime family) is split out to **[#455](455-server-to-client-delivery-transport-home-by-purpose-vs-by-me.md)**, which this blocks on.
 
 The concern decomposes into orthogonal axes the survey pins to the real tree: **permission state/affordance** (`granted | denied | prompt`, cross-cutting across camera/geolocation/clipboard — intent-shaped) vs `feedback`, the *in-app* toast tier ([intents.json:1022](../src/_data/intents.json#L1022)); **system-notification render** (OS surface, survives tab close) vs the in-session-persistent `background-task` neighbour that already owns a `navigationGuard` ([intents.json:1721](../src/_data/intents.json#L1721), [intents.json:1740](../src/_data/intents.json#L1740)); and **push delivery** (subscription + VAPID + orchestration), whose async / server-authoritative / swappable-provider shape matches the `guard` protocol ([protocols.json:94](../src/_data/protocols.json#L94), owned by `webguards` [projects.json:235](../src/_data/projects.json#L235)), not any UX intent. Permissions-Policy is a deployment gate that, if it lands, belongs to `webmanifests` ([projects.json:217](../src/_data/projects.json#L217)).
 
@@ -28,7 +32,8 @@ Ratify all three rows, or override just the one you'd change. **Confidence** say
 |---|---|---|---|
 | **A · permission state** | new cross-cutting `permission` intent | fold into `feedback` *(rejected)* | **High** — API is generic, not notification-specific |
 | **B · system-notification render** | new `system-notification` intent (sibling of `feedback`) | `surface` dimension on `feedback` *(rejected)* | **High** — bias toward separation; distinct surface + lifecycle |
-| **C · push delivery** | push-delivery **protocol** + `CustomPushProvider`, owned by a project | push as an intent | **Med-high** — guard-shaped; protocol is the only lock |
+| **C · push delivery** | push-delivery is a **protocol** + `CustomPushProvider` (its *home* → #455) | push as an intent *(rejected)* | **Med-high** — guard-shaped; protocol is the only lock |
+| **D · notification domain home** | mint **`webnotifications`** — render surfaces + orchestration + a `notification-marker` family | bare intents, no domain project | **Med** — domain is real (toast · OS · markers · badging); transport home delegated to #455 |
 
 ## Fork A — where does permission *state* live? (not a `feedback` fold)
 
@@ -46,23 +51,37 @@ The Notifications API renders **outside the page**, survives tab close, and carr
 
 ## Fork C — push delivery: protocol vs intent
 
-Push subscription + VAPID transport + provider orchestration (web-push thin transports; Novu/OneSignal multi-channel hubs) is **async, server-authoritative, swappable-provider** — the `guard` shape ([protocols.json:94](../src/_data/protocols.json#L94)), not UX vocabulary. A consuming project sees the render intents, never the transport.
+Push subscription + VAPID transport + provider orchestration (web-push thin transports; Novu/OneSignal multi-channel hubs) is **async, server-authoritative, swappable-provider** — the `guard` shape ([protocols.json:94](../src/_data/protocols.json#L94)), not UX vocabulary. A consuming project sees the render intents, never the transport. **Scope:** this is *closed-app push-notification* delivery (the Web Push API as native anchor — service worker + push service + VAPID, survives tab close), **not** the open-app realtime/streaming transport family (WebSocket/SSE/WebTransport/long-poll). **Where the protocol *lives* is decided in [#455](455-server-to-client-delivery-transport-home-by-purpose-vs-by-me.md)** (the transport-home split); this fork only classifies it as a protocol, not an intent.
 
-- **(A — recommended) Push-delivery protocol** with a `CustomPushProvider` lock (default → project → custom plug), owned by a (narrowed) **project** that also houses the two intents' project-level config. The project the item asked about is **real but narrowed** — protocol owner + config home, not the UX deliverable.
+- **(A — recommended) Push-delivery is a protocol** with a `CustomPushProvider` lock (default → project → custom plug). Its home — `webnotifications` (by-purpose) vs a shared transport home (by-mechanism) — is delegated to #455.
 - **(B) Push as an intent.** *Rejected* — transport/orchestration is not UX; modeling it as an intent leaks impl into the UX layer.
 
 ### Out of scope (flagged, not decided)
 
 Permissions-Policy is a server-side feature gate, not UX; if it lands it belongs to `webmanifests` ([projects.json:217](../src/_data/projects.json#L217)) as a manifest/header concern.
 
-## Open call
+## Settled by convention (not a fork)
 
-Ratify the three forks (A·`permission` intent, B·`system-notification` intent, C·push-delivery protocol under a narrowed project). Confirm: project name (`webpush` vs `webpermissions`), and whether the protocol + both intents live under one project or the intents publish standalone with the project owning only the protocol.
+The original "Open call" asked two things; an internal-convention survey collapses the second. **The two new intents publish standalone in the intent registry — no project "owns" them.** The constellation has no intent-ownership field in either direction: no project declares owned intents, and no intent references an owning project — every intent lives in `webintents` ([projects.json:114](../src/_data/projects.json#L114), "declarative profiles for UX/UI behavior"). So `permission` (Fork A) and `system-notification` (Fork B) go in the intent registry like every other intent; bundling them "under" a project would be unprecedented. A `webnotifications` project therefore **coordinates** the notification render-intent family and owns the **orchestration** concern (and, per #455, possibly the push protocol) — it does not own the intents.
 
-## Resolution (partial) — 2026-06-11
+## Fork D — the notification *domain* home: a `webnotifications` project
+
+The notification concern is bigger than render+transport: it spans **multiple render surfaces** — in-page toast (`feedback` ✓ [intents.json:1022](../src/_data/intents.json#L1022)), OS notification (`system-notification`, Fork B), and **unread markers** (favicon badge, `document.title` count, app-icon **Badging API** `setAppBadge`) — plus **orchestration** (which surface, grouping, dedup; the Novu/Knock layer). That is a *domain*, not a single standard — which is why a transport-named micro-project (`webpush`) is the wrong altitude, and why the `webpush`↔Web-Push-API name collision evaporates (push becomes a protocol *within/consumed by* the domain, never the project name).
+
+- **(A — recommended) Mint a `webnotifications` project** as the domain home — owning the notification **orchestration** concern, *coordinating* the render-intent family, and (per #455) possibly owning the push-delivery protocol. Names the concern per convention (`webguards`→`guard`); render surfaces stay standalone intents in `webintents` (the project coordinates, doesn't own them). *Not* the over-claiming trap that sank `webpermissions` — notifications genuinely **is** the domain, whereas permission-state (Fork A) is a cross-cutting intent that belongs to nothing here.
+- **(B) No domain project — bare intents only.** *Weak* — leaves orchestration, badging, and the push protocol homeless or scattered; a real domain with a coordination concern earns a home.
+- **Render decomposition:** `system-notification` (Fork B) **+ a new `notification-marker` intent family** (favicon / title / app-icon badge — unread-count indicators across surfaces). *Spin out* the marker intent (and the orchestration concern) as their own items under `webnotifications` at close-out.
+
+### Delegated — the transport home → [#455](455-server-to-client-delivery-transport-home-by-purpose-vs-by-me.md)
+
+Whether `webnotifications` **owns** the push-delivery protocol (by-purpose) or merely **consumes** it from a shared transport home (by-mechanism), plus the home + name + scope of the open-app realtime family (WebSocket / SSE / WebTransport / long-poll — *currently unowned*, verified 2026-06-12), is a separate, larger decision split out to **#455**. This item `blockedBy` #455 for the push-ownership line only; the domain shape above stands either way.
+
+## Resolution — 2026-06-11 (A/B/C) · 2026-06-13 (D)
 
 - **Fork A — new cross-cutting `permission` intent**: the Permissions API tri-state (`granted | denied | prompt` + `change`) is generic UX vocabulary spanning camera/geolocation/clipboard — a different axis (state) and far broader scope than `feedback`'s in-app toast render, so it earns its own small intent rather than folding in.
 - **Fork B — new `system-notification` intent (sibling of `feedback`)**: the OS render surface survives tab close and carries a permission gate; distinct surface + lifecycle from a transient in-page toast, so bias-toward-separation gives it a composable home alongside `feedback` (in-page) and `background-task` (in-session).
 - **Fork C — push-delivery protocol + `CustomPushProvider`**: subscription/VAPID/orchestration is async, server-authoritative, swappable-provider — the guard protocol shape, not UX vocabulary; modeling it as a protocol keeps the only lock escapable and the transport invisible to consuming projects.
 
-**Open — needs a human call:** the push-delivery protocol's home + name — a new `webpush`-style project vs folding it (plus both intents' project-level config) under `webpermissions`, and standalone-intents vs one-project — because this is an irreversible scope/naming commit that the bottom-up forks don't settle; it picks the constellation's project boundary.
+- **Fork D — mint the `webnotifications` domain home.** Notifications is a *domain* (render surfaces — toast/OS/markers — + orchestration), not a single standard, so it earns a project; this dissolved the `webpush`↔Web-Push-API name collision (push is a protocol *within* the domain, not the project name). The render surfaces publish as **standalone intents** in `webintents` (the project coordinates, doesn't own them); the project owns orchestration and — per #455's by-purpose ruling — the push-delivery protocol. Built in **[#456](456-author-the-webnotifications-project-push-delivery-protocol-n.md)**.
+
+**Graduates to builds** (composition order): [#456](456-author-the-webnotifications-project-push-delivery-protocol-n.md) `webnotifications` project + push-delivery protocol → [#459](459-author-the-system-notification-intent-os-notification-render.md) `system-notification` intent + [#460](460-author-the-notification-marker-intent-family-favicon-title-a.md) `notification-marker` intent (both blocked on #456); plus the independent [#457](457-author-the-permission-intent-cross-cutting-permissions-api-s.md) `permission` intent. The **transport home** was delegated to [#455](455-server-to-client-delivery-transport-home-by-purpose-vs-by-me.md) (resolved: push lives in `webnotifications`; the open-app realtime family → new `webrealtime`, built in [#458](458-author-the-webrealtime-project-transport-negotiation-protoco.md)).

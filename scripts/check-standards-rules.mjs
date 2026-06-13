@@ -15,8 +15,15 @@
 
 // Backlog operational axis (not the implementation lifecycle) + agile sizing — see
 // docs/agent/backlog-workflow.md. Exported so the script and the tests share one definition.
-export const BACKLOG_STATUSES = new Set(['open', 'active', 'parked', 'resolved']);
+// `preparing` (#375) — a decision being researched by /prepare: non-open + in-flight (drops from
+// selection like `active`) but distinct on the board from a story mid-build.
+export const BACKLOG_STATUSES = new Set(['open', 'active', 'preparing', 'parked', 'resolved']);
 export const BACKLOG_TYPES = new Set(['idea', 'issue', 'review', 'decision']);
+// Repo-LOCUS (backlog-workflow.md → "Repo-locus") — which repo's gate can honestly CLOSE an item, so a
+// `/batch` packs only its own locus and never resolves cross-repo work on a gate that never ran it.
+// `webeverything` is the default; the rest are cross-repo. The inferred values in src/_data/backlog.js
+// `inferLocus` (frontierui / plateau-app / exercise-app) must stay a subset of this set.
+export const LOCI = new Set(['webeverything', 'frontierui', 'plateau-app', 'exercise-app']);
 export const WORK_ITEMS = new Set(['story', 'epic', 'task']);
 export const FIB = new Set([1, 2, 3, 5, 8, 13]);
 // The digest is each item's lead paragraph (the loader's derived `summary`), surfaced for one-glance
@@ -91,6 +98,14 @@ export function validateBacklogItem(item, ctx) {
     err(`Backlog item "${item.id}" has invalid type "${item.type}" (expected ${[...BACKLOG_TYPES].join(' / ')})`);
   if (item.status && !BACKLOG_STATUSES.has(item.status))
     err(`Backlog item "${item.id}" has invalid status "${item.status}" (expected ${[...BACKLOG_STATUSES].join(' / ')})`);
+  // Repo-locus: an AUTHORED `locus:` must be a known value (a typo'd locus silently mis-routes the batch
+  // packer → hard error). An item whose tags INFERRED a cross-repo locus but never declared it gets a
+  // nudge (warning) to make the decision explicit — so the packer's fails-open guard rests on an explicit
+  // author choice, not just a tag heuristic. (Loader-derived item.locus/locusAuthored; absent on raw fixtures.)
+  if (item.locusAuthored && !LOCI.has(item.locus))
+    err(`Backlog item "${item.id}" has invalid locus "${item.locus}" (expected ${[...LOCI].join(' / ')})`);
+  else if (!item.locusAuthored && item.locus && item.locus !== 'webeverything' && item.batchable)
+    warn(`Backlog item "${item.id}" reads as locus "${item.locus}" (inferred from its tags/parent) but has no explicit \`locus:\` — a /batch holds it out of the pool; set \`locus: ${item.locus}\` to confirm, or \`locus: webeverything\` if it's actually built and gated here`);
   if (item.relatedProject && !projectById.has(item.relatedProject))
     err(`Backlog item "${item.id}" relatedProject "${item.relatedProject}" does not resolve in projects.json`,
       dUnresolvedRef('Backlog', item.id, backlogFile, 'relatedProject', item.relatedProject, 'projects.json'));
@@ -197,6 +212,107 @@ export function findRawHtmlInMarkdown(body) {
       if (HTML_ELEMENTS.has(name)) findings.push({ line: i + 1, tag: m[0], name });
     }
   });
+  return findings;
+}
+
+// ── Buried-fork lint: a fork section in a non-decision body (#441 carve rule) ──
+// A fork belongs in a `type: decision` item, never inline in an idea/epic/story body. The tell is a
+// fork-shaped SECTION HEADING ("## Open design points", "## Open decisions", "## Design tensions") in
+// a non-decision item — exactly the #192 / #315 / #087 pattern. This lint flags those so the author
+// carves the fork to a decision item that `blocks` the original (docs/agent/backlog-workflow.md → the
+// carve rule). Severity is WARNING: the heading is a strong signal but not proof (a section may list
+// forks already deferred elsewhere), so it nudges rather than red-gates.
+//
+// Suppressed when the section is already SETTLED — it names a decision item (`#NNN`) alongside
+// carve/delegate/resolve/block language — so a correctly-carved item (#192's "→ #441", #134's "carved
+// to #450", #315's "resolved by the child stories … #346") does NOT warn. The script applies it only
+// to non-`decision`, non-`resolved` items; a decision item legitimately *is* the fork, and a resolved
+// item's open-questions are historical.
+// The fork tells are "Open …", "… tension", and "… to settle" — headings that announce an UNSETTLED
+// choice. A bare "Design decisions" (esp. "(recommended)") is the opposite — a settled section — so it
+// is intentionally NOT a term (it produced false positives on resolved-inline sections).
+export const FORK_HEADING_TERMS = [
+  'open design', 'open decision', 'open question', 'open fork', 'open sub-decision',
+  'design tension', 'forks to settle', 'decisions to settle', 'tensions to settle',
+];
+// A section is "settled" (→ already carved/resolved, suppress) when it cites an item number next to
+// carve/delegate/resolve/settle/blockedBy/decision language. NB: match `blockedby`/`blocked by`, NOT
+// bare "block" — a live fork can be *about* whether to build a block (#369), which must still warn.
+const FORK_SETTLED_RX = /(carv|deleg|resolv|settl|blocked\s?by|decision)/i;
+const ITEM_REF_RX = /#\d{1,4}\b/;
+
+/**
+ * Find fork-shaped section headings in a backlog markdown body that are NOT already settled (carved to
+ * a decision). A "section" runs from its heading to the next markdown heading (any level). A heading
+ * matches when its text contains a FORK_HEADING_TERMS phrase; it is reported only when its section body
+ * lacks a decision pointer (an `#NNN` ref alongside carve/resolve/block language).
+ *
+ * Pure: takes the raw body string (frontmatter already stripped by the caller) and returns
+ * `{ line, heading }` per unsettled fork section, line-numbered against the body for an actionable
+ * message. The caller restricts this to non-decision, non-resolved items.
+ */
+export function findBuriedForkSections(body) {
+  const findings = [];
+  if (typeof body !== 'string' || body === '') return findings;
+  const lines = body.split('\n');
+  // Index every heading line first, so a section's end is the next heading (or EOF).
+  const headings = [];
+  lines.forEach((line, i) => {
+    const m = line.match(/^(#{1,6})\s+(.+?)\s*$/);
+    if (m) headings.push({ i, text: m[2] });
+  });
+  for (let h = 0; h < headings.length; h++) {
+    const { i, text } = headings[h];
+    const low = text.toLowerCase();
+    if (!FORK_HEADING_TERMS.some((t) => low.includes(t))) continue;
+    const end = h + 1 < headings.length ? headings[h + 1].i : lines.length;
+    const section = lines.slice(i, end).join('\n');
+    // Settled (already carved/resolved) → suppress.
+    if (ITEM_REF_RX.test(section) && FORK_SETTLED_RX.test(section)) continue;
+    findings.push({ line: i + 1, heading: text });
+  }
+  return findings;
+}
+
+// ── Unquoted-colon scalar lint for backlog frontmatter (#453) ──────────────────
+// The loader (#430) skips a malformed-YAML item and only warns, so a frontmatter typo slips past the
+// gate unseen. The recurring trigger is an UNQUOTED plain scalar whose value embeds a `: ` (colon +
+// space) or a trailing `:` — e.g. `graduatedTo: a/b.json: foo` — which YAML reads as a nested mapping
+// ("mapping values are not allowed here") and the parse dies. This pure helper scans the raw
+// frontmatter block (NOT the loader output — that's already dropped the broken items) and returns one
+// finding per offending line, so check:standards prompts the quote-fix at author time, in CI, before
+// the loader has to skip it. Takes the full file content; reports ABSOLUTE 1-based line numbers.
+//
+// Deliberately conservative — only a top-level `key: value` plain scalar is examined, and a value is
+// EXEMPT (skipped) when it is already quoted (`"`/`'`), a flow collection (`{`/`[` — inner colons are
+// legal there, e.g. `crossRef: { url: /x, label: Foo }`), a block scalar (`|`/`>`), a comment, or a
+// YAML anchor/alias (`&`/`*`). A bare colon WITHOUT a following space (a URL like `https://x`) is fine
+// in plain YAML and is NOT flagged — only `: ` or a trailing `:` breaks the parse.
+export function findUnquotedColonScalars(content) {
+  const findings = [];
+  if (typeof content !== 'string' || !content.startsWith('---\n')) return findings;
+  const lines = content.split('\n');
+  // The frontmatter block is lines[1 .. closing fence). Find the next bare `---`.
+  let close = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i] === '---' || lines[i] === '---\r') { close = i; break; }
+  }
+  if (close === -1) return findings; // no closing fence — not our concern here
+  for (let i = 1; i < close; i++) {
+    const line = lines[i];
+    const m = line.match(/^([A-Za-z_][\w-]*):(\s+)(.*)$/);
+    if (!m) continue;                       // not a top-level `key: value` line
+    const value = m[3].trim();
+    if (value === '') continue;             // an empty value (a nested block follows) — fine
+    const first = value[0];
+    if (first === '"' || first === "'" || first === '{' || first === '[' ||
+        first === '|' || first === '>' || first === '#' || first === '&' || first === '*') continue;
+    // Strip a trailing inline comment (` # …`) before testing the scalar itself.
+    const scalar = value.replace(/\s+#.*$/, '');
+    if (/:\s/.test(scalar) || /:$/.test(scalar)) {
+      findings.push({ line: i + 1, key: m[1], value });
+    }
+  }
   return findings;
 }
 

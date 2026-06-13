@@ -20,13 +20,11 @@ crossRef: { url: /backlog/, label: Backlog }
 
 When multiple agents work on **close features that sometimes touch the same files**, and you **don't
 know upfront which files an agent will edit**, we want agents to **negotiate temporary ownership of a
-file just-in-time** — a short-held lease acquired right before an edit and released right after — backed
-by a **queue** for contention and **safety mechanisms** against crashes and deadlock. This is the
-unpredictable-overlap residual that the cheaper rules (partition by Project, single-writer on hot files)
-don't cover. The six forks below are grounded in a prior-art survey (POSIX/BSD advisory-vs-mandatory
-locks, etcd/Redlock/Consul lease-TTL + fencing tokens, Coffman deadlock-prevention, the 2025–2026
-worktree-isolation consensus for multi-agent coding), published as the
-[Agent file-lock coordination](/research/agent-file-lock-coordination/) research topic. Each names a
+file just-in-time** — a short-held lease acquired before an edit and released after — backed by a
+**queue** for contention and **safety mechanisms** against crashes and deadlock. This is the
+unpredictable-overlap residual the cheaper rules (partition by Project, single-writer on hot files)
+don't cover. The six forks below are grounded in a prior-art survey published as the
+[Agent file-lock coordination](/research/agent-file-lock-coordination/) research topic, each naming a
 recommended default in **bold**.
 
 The repo's coordination today is **not file-level** at all — it is **item-level advisory claiming**:
@@ -182,6 +180,21 @@ already covers the predictable-overlap case by construction.
 > [docs/agent/backlog-workflow.md](../docs/agent/backlog-workflow.md) → *Cross-session reservation*. The
 > penalty deliberately lives at the CLI boundary, NOT inside the byte-deterministic `computeSelection`
 > core (reservations are time- + session-dependent), mirroring the #250/#252 quarantine discipline.
+
+> **BUILT 2026-06-13 — legible-stop follow-on.** Complements the reservation hint: it makes a *drained*
+> pool legible so a second batch's "no eligible Tier-A left" stop reads as "a concurrent session
+> `claim`ed the open work, re-run shortly," not "backlog empty." `computeSelection` now derives an
+> **in-flight** set — `status: active` items that are batch-shaped (task or story·≤8), i.e. the items
+> that would be in the pool were they still open — exposed as `counts.inFlight` + `selection.inFlight`
+> ([scripts/readiness/engine.mjs](../scripts/readiness/engine.mjs)). `--select` surfaces it: an
+> `· N in flight` header tally, an explanatory line, an "In flight" listing (shown only when non-empty,
+> so single-session runs are unchanged), and a drained-not-empty note on the empty-pack message
+> ([scripts/check-readiness.mjs](../scripts/check-readiness.mjs)); test in
+> [scripts/readiness/__tests__/engine.test.mjs](../scripts/readiness/__tests__/engine.test.mjs). Unlike
+> the reservation penalty, in-flight is **byte-deterministic** (a pure function of on-disk `status`), so
+> it lives **in** the `computeSelection` core, not at the CLI boundary. Staleness-free by construction
+> (derived live from `status: active`, never a persisted record) — the deliberate non-fix is any blocking
+> wait or hard lock, which would reintroduce the crash-staleness the (still-parked) forks 1–6 manage.
 
 A distinct, *cheaper* layer that sits **above** the file lock and even above item-claim: it operates on
 **which items a batch picks**, not on file edits. The residual it targets is wasteful, not corrupting —

@@ -35,7 +35,7 @@ all render through.
 | **4 · Export adapters** | `report model → common formats` for interop out | Lower priority than ingest; SARIF/JUnit export covers the common CI consumers. |
 | **5 · Producer migration** | existing `check:*` reporters emit the model + render through the shared renderers | `check:standards`, `check:app-conformance`, `check:readiness`, the burndown, the capability-manifest — adapt incrementally; don't gate v1 on rewriting them. |
 
-## Design tensions (leanings, not yet settled)
+## Design decisions (leaning — resolved on pickup of #431)
 
 - **Project + Protocol, or project + intent?** Multi-vendor report-format interop (SARIF, JUnit, SonarQube
   all exchange the same kind of artifact) is a genuine protocol story — an escapable, impl-swappable

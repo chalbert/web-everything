@@ -1,8 +1,10 @@
 ---
-type: review
-workItem: task
+type: issue
+workItem: story
+size: 1
 status: open
 dateOpened: '2026-06-02'
+dateStarted: "2026-06-13"
 tags:
   - browser-support
   - verification

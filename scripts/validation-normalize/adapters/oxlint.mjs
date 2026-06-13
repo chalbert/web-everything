@@ -22,3 +22,12 @@ function severityOf(setting) {
   if (level === 1 || level === 'warn') return 'warn';
   return 'off'; // 0 | 'off' | 'allow' | unrecognised
 }
+
+// Re-export (#282): the inverse of `ingest` — serialize resolved `{ rule, severity }` pairs into an
+// `.oxlintrc.json`-shaped `{ rules }` object. Oxlint mirrors ESLint's severity vocabulary, so the
+// normalized 'error' | 'warn' | 'off' values serialize directly; a missing severity defaults to 'error'.
+export function emit(rules) {
+  const out = {};
+  for (const { rule, severity } of rules) out[rule] = severity ?? 'error';
+  return { rules: out };
+}

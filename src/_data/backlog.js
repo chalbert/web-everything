@@ -31,6 +31,36 @@ const ROOT = join(__dirname, '../..');
 const toDateString = (v) =>
   v instanceof Date ? v.toISOString().slice(0, 10) : v;
 
+// Infer an item's repo-LOCUS when no explicit `locus:` is authored. Two PRECISE signals only — locus is
+// "which gate/loop honestly CLOSES the item", so the signal must indicate where it BUILDS, never mere
+// provenance. The big noise source is the `exercise-app` *tag*, which WE standards/blocks carry to mean
+// "surfaced by an exercise app" (a discovery marker), NOT "lives in the exercise app" — so exercise-app
+// locus is detected STRUCTURALLY (a descendant of the flagship-exercise-apps epic #314, immutable NNN),
+// via {@link isExerciseAppDescendant}, never the tag. The remaining tag markers are high-precision build
+// signals. Values stay a subset of check-standards-rules.mjs `LOCI`; an explicit `locus:` always wins.
+const EXERCISE_APP_ROOT = '314'; // #314 flagship-exercise-apps — its descendants run via the /exercise-app loop
+const LOCUS_TAG_MARKERS = [
+  [/frontier-?ui/i, 'frontierui'],
+  [/technical-configurator|intent-configurator|dev-browser|\bplateau-app\b/i, 'plateau-app'],
+];
+function inferLocusFromTags(tags) {
+  const joined = (Array.isArray(tags) ? tags : []).join(' ');
+  for (const [re, locus] of LOCUS_TAG_MARKERS) if (re.test(joined)) return locus;
+  return 'webeverything';
+}
+// Walk the `parent` chain (via the num→item map) looking for the exercise-app root. Cycle-guarded.
+function isExerciseAppDescendant(item, byNum) {
+  const seen = new Set();
+  let cur = item;
+  while (cur && cur.parent != null && !seen.has(String(cur.parent))) {
+    const pnum = String(cur.parent);
+    if (pnum === EXERCISE_APP_ROOT) return true;
+    seen.add(pnum);
+    cur = byNum.get(pnum);
+  }
+  return false;
+}
+
 // Strip inline markdown so a line makes a clean one-line summary.
 const stripInline = (s) => s
   .replace(/`([^`]+)`/g, '$1')
@@ -88,6 +118,12 @@ function loadReport(relPath) {
 }
 
 module.exports = function backlog() {
+  // Malformed YAML frontmatter in ONE item must not take down the whole load (#430): a single bad
+  // file (the recurring trigger is a `graduatedTo:`/scalar value with an unquoted colon, which
+  // js-yaml reads as a nested mapping and throws on) would otherwise hard-crash every consumer —
+  // Eleventy, check:readiness, check:standards. We catch per-item, skip the bad file, and collect
+  // it so the failure degrades to a reported warning, not a crash.
+  const malformed = [];
   const items = readdirSync(BACKLOG_DIR)
     .filter((f) => f.endsWith('.md'))
     .map((file) => {
@@ -97,7 +133,14 @@ module.exports = function backlog() {
       // full filename stem so it remains the route key (permalink = /backlog/<id>/).
       const num = (id.match(/^(\d+)-/) || [])[1];
       const slug = id.replace(/^\d+-/, '');
-      const { data, content } = matter(readFileSync(join(BACKLOG_DIR, file), 'utf8'));
+      let data, content;
+      try {
+        ({ data, content } = matter(readFileSync(join(BACKLOG_DIR, file), 'utf8')));
+      } catch (err) {
+        // Skip-and-report: one malformed item is a warning, never a crash.
+        malformed.push({ file, reason: err.reason || err.message });
+        return null;
+      }
       const ownBody = content.trim();
 
       // Own markdown body wins; else mirror the related report; else nothing.
@@ -122,7 +165,16 @@ module.exports = function backlog() {
         reportDate,
         details: src.details || data.details || undefined,
       };
-    });
+    })
+    .filter(Boolean); // drop items whose frontmatter failed to parse (reported below)
+
+  if (malformed.length) {
+    const lines = malformed.map((m) => `  • ${m.file} — ${m.reason}`).join('\n');
+    console.warn(
+      `[backlog] ${malformed.length} item(s) skipped — malformed YAML frontmatter ` +
+        `(fix the file; an unquoted colon in a scalar is the usual cause):\n${lines}`,
+    );
+  }
 
   // Resolve `blockedBy: ["NNN", …]` (a directional prerequisite edge — "cannot start until NNN is
   // resolved", distinct from the "see also" `crossRef` and the epic-grouping `parent`) into a
@@ -150,7 +202,7 @@ module.exports = function backlog() {
     //   B — one nod away: a `decision` (it typically already states a recommendation, but that nuance
     //                      is prose, so the structural proxy is just the type) — ratify, then build.
     //   C — needs design / not ready: everything else open — an issue/idea with an unresolved
-    //                      blocker, or a `review`.
+    //                      blocker.
     item.tier = item.status !== 'open' ? undefined
       : ((item.type === 'issue' || item.type === 'idea')
           && item.blockers.every((b) => b.status === 'resolved')) ? 'A'
@@ -170,6 +222,15 @@ module.exports = function backlog() {
       (item.workItem === 'story' && typeof item.size === 'number' && item.size <= 8)
     );
 
+    // An open, unblocked `epic` clears every prerequisite (so it's Tier A) but an agent can't BUILD it
+    // directly — its work lives in child stories/tasks. It is ready to be SLICED, not implemented. We
+    // surface that as its own readiness class so the Prioritisation tab doesn't tally a container epic
+    // as buildable work standing NEXT TO the very slices its work already lives in (a visual double-
+    // count — the complaint that drove this). `batchable` ⊂ Tier A and `sliceable` ⊂ Tier A are disjoint:
+    // an epic is never batchable, a task/story is never sliceable. A `story·≥13` stays plain agent-ready
+    // (real buildable work, just beyond the batch pool) — only epics peel off.
+    item.sliceable = item.tier === 'A' && item.workItem === 'epic';
+
     // Batch COST (deterministic) — the context-budget weight used to pack a POINTS-BUDGETED batch
     // (docs/agent/backlog-workflow.md → "Running a batch"). Distinct from burndown `size`: a `task`
     // carries no burndown points (they roll up to a parent) but still consumes a session's context, so
@@ -178,6 +239,20 @@ module.exports = function backlog() {
     item.batchCost = item.workItem === 'task' ? 2
       : typeof item.size === 'number' ? item.size
       : undefined;
+
+    // Repo-LOCUS (#447-follow / backlog-workflow.md → "Repo-locus") — which repo's gate can honestly
+    // CLOSE this item. A `/batch` packs only its OWN locus (default `webeverything`); cross-locus items
+    // surface separately so a WE batch never resolves work on a gate that never ran it. Reliability by
+    // construction: the locus is `locus:` frontmatter when AUTHORED (an explicit decision — e.g. a
+    // frontier-ui-tagged item built and gated IN WE declares `locus: webeverything`), else INFERRED
+    // from cross-repo tag markers (biasing toward EXCLUSION — wrongly deferring a workable item is the
+    // cheap failure; wrongly packing an out-of-locus one resolves on the wrong gate, the costly one),
+    // else `webeverything`. `locusAuthored` lets check:standards nudge unset-but-inferred items to
+    // declare it explicitly. Inferred values are a subset of check-standards-rules.mjs `LOCI`.
+    item.locusAuthored = typeof item.locus === 'string' && item.locus.length > 0;
+    item.locus = item.locusAuthored ? item.locus
+      : isExerciseAppDescendant(item, byNum) ? 'exercise-app'
+      : inferLocusFromTags(item.tags);
   }
 
   // Reverse dependency edges + unblock-leverage (#254) — INVERT `blockedBy` so each item knows who
@@ -242,6 +317,23 @@ module.exports = function backlog() {
     // 0 open children is effectively delivered (ready to resolve); a resolved epic with >0 open children
     // is a contradiction worth flagging.
     item.openChildCount = item.children.filter((c) => c.status !== 'resolved').length;
+
+    // For a ready-to-slice epic, WHICH action it actually needs — so the Prioritisation bucket separates
+    // the few epics that want attention from the many that are just live rollups (their work already sits
+    // in the agent-ready/batch pool as open children, so the epic itself is nothing to "do"):
+    //   'unsliced'  no child slices, NO reason recorded → ready to /slice now (cut slices, or record why)
+    //   'parked'    no child slices but a `childlessReason` IS recorded → decomposition is gated on that
+    //               reason (blocked / undecided / untriaged / program); the note IS the blocker, so it's
+    //               NOT a slice to-do — surface the reason, never prompt a slice.
+    //   'done'      every child resolved, epic open    → needs an explicit resolve (a status update)
+    //   'tracking'  open child slices remain           → NO epic-level action; progress IS the children
+    // Only 'unsliced' + 'done' are "actionable"; 'parked' + 'tracking' are not. Set only on sliceable
+    // epics (`sliceable` is assigned in the enrichment loop above, before this one).
+    if (item.sliceable) {
+      item.epicState = item.children.length > 0
+        ? (item.openChildCount === 0 ? 'done' : 'tracking')
+        : (item.childlessReason ? 'parked' : 'unsliced');
+    }
   }
 
   items.sort((a, b) =>
@@ -249,13 +341,17 @@ module.exports = function backlog() {
     a.id.localeCompare(b.id));
 
   // Burndown-point totals per readiness group, surfaced beside the item counts on the Prioritisation
-  // tab's tags (backlog.njk). Summed from `size` (tasks and most decisions/reviews carry none, so they
+  // tab's tags (backlog.njk). Summed from `size` (tasks and most decisions carry none, so they
   // contribute 0) — a story-point total, not item-weighted. Computed here (a live-reloading data file)
   // rather than via a template filter, which would need a config reload to take effect.
   const sumSize = (pred) => items.reduce((t, it) =>
     t + (pred(it) && typeof it.size === 'number' ? it.size : 0), 0);
   items.pointsBatch = sumSize((it) => it.batchable === true);
-  items.pointsTierA = sumSize((it) => it.tier === 'A');
+  // pointsTierA / countAgentReady = BUILDABLE agent-ready only (Tier A minus container epics). Epics
+  // roll into the `sliceable` tallies below so the "agent-ready" chip never double-counts an epic
+  // alongside its own slices. (Only fed to the Prioritisation chip — no other consumer, #safe-to-narrow.)
+  items.pointsTierA = sumSize((it) => it.tier === 'A' && !it.sliceable);
+  items.pointsSlice = sumSize((it) => it.sliceable === true);
   items.pointsTierB = sumSize((it) => it.tier === 'B');
   items.pointsTierC = sumSize((it) => it.tier === 'C');
 
@@ -263,6 +359,19 @@ module.exports = function backlog() {
   // options stated (the "prepared-fork shape"), so it's ready to ratify rather than research. Counted
   // here (not via a template filter, which can't test attribute presence) to surface on the Prioritisation tab.
   items.countPreparedB = items.filter((it) => it.status === 'open' && it.tier === 'B' && it.preparedDate).length;
+
+  // Buildable agent-ready (Tier A minus epics) and ready-to-slice (Tier-A epics) — split here, not via a
+  // template filter, because Nunjucks `where` can't express "tier A AND not sliceable". Drives the
+  // Prioritisation chips so a container epic is shown as slice-work, not as a buildable Tier-A item.
+  items.countAgentReady = items.filter((it) => it.tier === 'A' && !it.sliceable).length;
+  items.countSliceable = items.filter((it) => it.sliceable === true).length;
+  // Of the ready-to-slice epics, how many actually need a human/agent action (slice or resolve) versus
+  // are just tracking open children. The chip leads with this so the screen never reads as "N epic
+  // to-dos" when most are passive rollups.
+  items.countEpicUnsliced = items.filter((it) => it.epicState === 'unsliced').length;
+  items.countEpicDone = items.filter((it) => it.epicState === 'done').length;
+  items.countEpicParked = items.filter((it) => it.epicState === 'parked').length;
+  items.countEpicActionable = items.countEpicUnsliced + items.countEpicDone;
 
   return items;
 };

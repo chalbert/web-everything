@@ -1,0 +1,81 @@
+<h3>The Question</h3>
+<p>
+    The <a href="/blocks/background-task-surface/">Background Task Surface</a> ships a
+    <strong>route-only</strong> baseline: a task survives SPA route changes in-memory, but a full reload
+    or tab close loses in-flight work, and <code>navigationGuard</code> arms a beforeunload + Navigation
+    API confirm to <em>gate</em> that loss rather than recover from it. The opt-in
+    <code>durability: reload</code> tier (<a href="/backlog/134-background-task-reload-durable-tier/">#134</a>)
+    promises work that genuinely survives a reload — but two coupled forks gate the build
+    (<a href="/backlog/450-background-task-reload-durability-scope-beyond-fetches-navig/">#450</a>):
+    <strong>(1) what is the durable story for non-fetch work?</strong> (Background Fetch only models
+    transfers), and <strong>(2) does arming <code>durability: reload</code> relax
+    <code>navigationGuard: warn</code>?</strong> This survey runs the owed platform-substrate pass on
+    what the web actually guarantees for work that must survive a reload.
+</p>
+
+<h3>Recommendation (grounds #450)</h3>
+<ol>
+    <li><strong>Scope → ship the transfer-backed tier now; non-fetch is a <em>distinct token</em>, not a
+        rival definition.</strong> <code>durability: reload</code> = transfer-backed durable
+        <em>execution</em> (Background Fetch + service-worker adapter), honest to the only native
+        continue-while-closed substrate. Non-fetch compute is <strong>not</strong> folded in; if ever
+        wanted it becomes a separate <code>durability: resumable</code> value with explicit
+        checkpoint/resume (durable <em>state</em>) semantics.</li>
+    <li><strong>Guard → relax <code>navigationGuard: warn</code> by default when
+        <code>durability: reload</code> is armed</strong>, and <strong>re-arm on degradation</strong> to
+        route-only (where Background Fetch is unavailable, the work no longer survives, so the warn must
+        return).</li>
+</ol>
+
+<h3>Finding 1 — no native API runs arbitrary background compute across a reload</h3>
+<table>
+    <thead><tr><th>Primitive</th><th>Guarantee</th><th>Arbitrary compute?</th><th>While tab closed</th></tr></thead>
+    <tbody>
+        <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Background_Fetch_API">Background Fetch</a></td><td>Browser/OS owns a transfer; continues while page + SW closed</td><td>No — predetermined requests</td><td><strong>Continues</strong></td></tr>
+        <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Offline_and_background_operation">Service Worker</a></td><td>Event-driven; killed ~30s idle / 5min per event</td><td>No long-compute host</td><td>n/a</td></tr>
+        <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Background_Synchronization_API">Background / Periodic Sync</a></td><td>Defer network work; best-effort, time-capped</td><td>No</td><td>Best-effort wake</td></tr>
+        <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_Locks_API">Web Locks</a></td><td>Coordination only; lock dies with its context</td><td>n/a</td><td>No</td></tr>
+    </tbody>
+</table>
+<p>
+    Every background primitive is transfer-, network-defer-, or push-shaped — all service-worker
+    event-driven and time-capped. Web Workers die with the page; the SW is killed at ~30s idle / 5min
+    per event. So "run my long client-side computation while the user is away" is <strong>not something
+    the platform offers.</strong>
+</p>
+
+<h3>Finding 2 — checkpoint/resume is a weaker, different guarantee than Background Fetch</h3>
+<p>
+    The non-fetch option is <strong>checkpoint → IndexedDB → resume-on-return</strong> (the classic
+    <a href="https://www.sciencedirect.com/topics/computer-science/checkpoint-restart">checkpoint-restart</a>
+    pattern). Its guarantee is categorically different:
+</p>
+<table>
+    <thead><tr><th></th><th>Background Fetch</th><th>Checkpoint → resume</th></tr></thead>
+    <tbody>
+        <tr><td>While the user is away</td><td><strong>Work continues</strong> (browser owns it)</td><td><strong>Work is paused</strong> (nothing runs)</td></tr>
+        <tr><td>What survives the reload</td><td>The in-flight transfer itself</td><td>Only persisted <em>state</em> (a save-point)</td></tr>
+        <tr><td>Who resumes it</td><td>Browser, autonomously</td><td>The user, by returning</td></tr>
+        <tr><td>Net effect</td><td>Durable <strong>execution</strong></td><td>Durable <strong>state</strong> (crash recovery)</td></tr>
+    </tbody>
+</table>
+<p>
+    Labeling both <code>durability: reload</code> would let an author expect background continuation and
+    receive only crash recovery — an overclaim. Hence: ship the honest continue-while-closed tier now,
+    and give the resumable story its own honest token if it is ever built.
+</p>
+
+<h3>Vocabulary reused (no invented jargon)</h3>
+<ul>
+    <li><strong>durable execution</strong> (continues while closed) vs <strong>durable state</strong>
+        (pauses; state survives) — the framing axis.</li>
+    <li><strong><code>durability: reload</code></strong> = transfer-backed continue-while-closed
+        (Background Fetch); proposed future <strong><code>durability: resumable</code></strong> =
+        checkpointed / resume-on-return.</li>
+    <li><strong>checkpoint / checkpoint-restart</strong>, <strong>state rehydration</strong>,
+        <strong>functional event + <code>waitUntil</code></strong> (the SW re-hydration mechanism).</li>
+</ul>
+
+<p style="margin-top:1.5rem;font-size:0.9em;color:var(--color-text-muted,#64748b);">
+    Session report: <code>reports/2026-06-13-background-task-reload-durability.md</code>.
+</p>

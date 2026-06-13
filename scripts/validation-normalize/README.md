@@ -4,10 +4,12 @@ The differentiated, **zero-lock-in** answer for the lint/format/boundary overlap
 config format, but a devtool that **adapts to the validation tools you already use**. Run it once and
 stop — the project keeps no reference to it; it only ever reads the incumbents' own config files.
 
-This directory implements the **`see`** leg of backlog
-[#236](../../backlog/236-validation-normalization-shopping-devtool.md): load existing configs →
-one unified comparative list of every concern your tools cover. The `re-export` and `shop` legs are
-deferred to follow-up items.
+This directory implements two legs of backlog
+[#236](../../backlog/236-validation-normalization-shopping-devtool.md):
+- **`see`** — load existing configs → one unified comparative list of every concern your tools cover.
+- **`re-export` / `shop`** ([#282](../../backlog/282-validation-normalize-re-export-leg-emit-equivalent-config-fo.md)) —
+  the inverse: emit an equivalent config for a *different* tool, with an honest per-concern round-trip
+  loss report (`exact` / `lossy` / `dropped`). Best-effort, never lossless.
 
 ## The pivot model
 
@@ -70,9 +72,22 @@ sink the run. Discovery is exported (`discoverConfigs`, `seeLiveConfigs`) for pr
 - Live CLI: `npm run validation:see` → [`live-config.mjs`](./live-config.mjs) (real-config discovery).
 - Tests: `npm test -- scripts/validation-normalize` (vitest picks up `__tests__/*.test.mjs`).
 
-## Deferred legs (follow-up items)
+## Re-export leg (#282, shipped)
 
-- **Re-export** — emit the equivalent config for a *different* tool, with honest, best-effort
-  round-trip-loss reporting (never promise lossless).
-- **Shop** — browse which tools cover which concerns and pick by the validation you want. Gated on the
-  Technical Configurator maturing past its current POC (#236 → #150 Q6).
+[`reexport.mjs`](./reexport.mjs) — `reExport(model, targetTool)` and the one-call `shop(configs, target)`
+([`index.mjs`](./index.mjs)). Each adapter gained an `emit()` (the inverse of `ingest()`); the engine maps
+the model's enforced concerns onto the target tool's rules via the knowledge base and grades each cell:
+
+- **exact** — re-exports 1:1, no loss.
+- **lossy** — re-exported, but `partial`/`approx` (options/edge-cases/autofix differ; the note says how).
+- **dropped** — the target has *no equivalent*; the concern is reported, never faked into the config.
+
+Returns `{ tool, config, loss, summary }` — `config` carries only the expressible rules, `summary` is the
+`{ exact, lossy, dropped }` tally. Best-effort, never promises lossless — the lossiness IS the comparative
+value.
+
+## Deferred leg (follow-up)
+
+- **Shop UI** — browse which tools cover which concerns and pick by the validation you want. The
+  `shop()` engine call exists; the *interactive* surface is gated on the Technical Configurator maturing
+  past its current POC (#236 → #150 Q6).

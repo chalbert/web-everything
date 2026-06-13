@@ -15,7 +15,7 @@ crossRef: { url: /backlog/099-evergreen-app-vision/, label: "Evergreen app (#099
 
 # Mock & service-proxy dev standard — a real HTTP mock/proxy with a console, and no mock code in the app
 
-A development-time **HTTP mock + service-proxy** standard, with the essay's hard rule: **mocks must never live in deployable code** — no `if (mock)` branches anywhere shippable. Instead a real local HTTP server transparently mocks/proxies your APIs, controlled by config + a console, so production builds carry zero mock logic. From the essay's *Mocks* and *Web Service Proxy & Console* sections (report lines 786–808). **No design exists yet.** The three forks below — where the standard's line sits (schema vs server), delivery tier, and the `webcases` relationship — are grounded in the published [Mock & Service-Proxy Dev Service](/research/mock-proxy-dev-service/) survey (MSW, Mockoon, Prism, WireMock, Pact, OpenAPI/JSON-Schema). Each names a recommended default in **bold**.
+A development-time **HTTP mock + service-proxy** standard, with the essay's hard rule: **mocks must never live in deployable code** — no `if (mock)` branches anywhere shippable. Instead a real local HTTP server transparently mocks/proxies your APIs, controlled by config + a console, so production builds carry zero mock logic. From the essay's *Mocks* and *Web Service Proxy & Console* sections. **No design exists yet.** The three forks below — where the standard's line sits (schema vs server), delivery tier, and the `webcases` relationship — are grounded in the published [Mock & Service-Proxy Dev Service](/research/mock-proxy-dev-service/) survey, each naming a **bold** default.
 
 ## What the mock service must do (from the essay, preserved)
 

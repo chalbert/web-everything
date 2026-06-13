@@ -1,0 +1,45 @@
+<h2>Toggle / Switch</h2>
+<p>Native-first over <code>&lt;input type="checkbox"&gt;</code> with <code>role="switch"</code>: a boolean
+<strong>on/off</strong> control whose change takes effect <strong>immediately</strong> — distinct from a
+<a href="/blocks/checkbox/">checkbox</a>'s deferred-until-submit form value. It realizes the
+<a href="/intents/input/">input</a> boolean control. Sliced from the
+<a href="/backlog/468-form-control-block-inventory-datepicker-timepicker-input-fam/">form-control
+inventory (#468)</a>.</p>
+
+<h3>What it provides</h3>
+<ul>
+  <li>A binary on/off control: <code>&lt;input type="checkbox" role="switch"&gt;</code> with an
+    associated <code>&lt;label&gt;</code>, styled as a switch.</li>
+  <li><code>aria-checked</code> true/false reflects the on/off state — <strong>no</strong>
+    mixed/indeterminate state (a switch is strictly binary, unlike the checkbox).</li>
+  <li>Immediate effect: toggling applies the change now (e.g. enable a setting), rather than staging a
+    value for form submission.</li>
+</ul>
+
+<h3>Web Standards Alignment</h3>
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr>
+    <td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/switch/">WAI-ARIA APG Switch</a></td>
+    <td>W3C WAI-ARIA APG</td>
+    <td><code>role="switch"</code> over a native checkbox; <code>aria-checked</code> true/false;
+      <kbd>Space</kbd> toggles; an on/off accessible name via the label.</td>
+  </tr>
+  <tr>
+    <td><a href="https://html.spec.whatwg.org/multipage/input.html#checkbox-state-(type=checkbox)">HTML <code>input type=checkbox</code></a></td>
+    <td>WHATWG HTML</td>
+    <td>The substrate is the native checkbox (focusable, keyboard-operable, form-associated); the switch
+      role + immediate-apply behavior layer on top.</td>
+  </tr>
+</table>
+
+<h3>Native-first</h3>
+<p>The control IS the native element plus <code>role="switch"</code> and styling — <strong>zero
+JavaScript</strong>. A pure-action switch with no form value may instead be a
+<code>&lt;button aria-pressed&gt;</code>. The key distinction from the
+<a href="/blocks/checkbox/">checkbox</a> is timing: a switch applies its state on toggle; a checkbox is a
+deferred form value committed on submit. Same substrate, different role and timing — separate blocks,
+never a checkbox mode flag.</p>
+
+<p class="text-sm text-gray-600"><em>Status: draft standard. No reference runtime needed — the native
+element carries it; any styling/behavior is a deferred Frontier UI build.</em></p>

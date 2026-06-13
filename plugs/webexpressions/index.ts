@@ -33,6 +33,8 @@
  * @see https://github.com/chalbert/web-everything/tree/main/plugs/webexpressions
  */
 
+import { registerCloneHandlers, unregisterCloneHandlers } from './cloneHandlers';
+
 export { default as CustomTextNode } from './CustomTextNode';
 export { default as CustomTextNodeRegistry } from './CustomTextNodeRegistry';
 export { default as CustomTextNodeParser } from './CustomTextNodeParser';

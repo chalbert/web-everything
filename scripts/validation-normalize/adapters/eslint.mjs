@@ -1,9 +1,8 @@
-// ESLint adapter — ingests an ESLint config *into* the normalized model's terms.
+// ESLint adapter — ingests an ESLint config *into* the normalized model's terms, and (the #282
+// re-export leg) emits an equivalent ESLint flat-config back out from resolved rule/severity pairs.
 //
-// It only ever reads the project's own config; this `see` leg writes nothing back to
-// ESLint. (Re-export — emitting an equivalent config for a different tool — is a separate,
-// deferred leg.) Accepts both flat-config (`{ rules: {...} }` or a bare rules object) and
-// legacy eslintrc shape; severity is normalised to 'error' | 'warn' | 'off'.
+// `ingest` accepts both flat-config (`{ rules: {...} }` or a bare rules object) and legacy eslintrc
+// shape; severity is normalised to 'error' | 'warn' | 'off'. `emit` is its inverse.
 
 export const tool = 'eslint';
 
@@ -20,4 +19,13 @@ function severityOf(setting) {
   if (level === 2 || level === 'error') return 'error';
   if (level === 1 || level === 'warn') return 'warn';
   return 'off'; // 0 | 'off' | anything unrecognised
+}
+
+// Re-export (#282): the inverse of `ingest` — serialize resolved `{ rule, severity }` pairs into an
+// ESLint flat-config `{ rules }` object. ESLint accepts the string severities directly; a missing
+// severity defaults to 'error'.
+export function emit(rules) {
+  const out = {};
+  for (const { rule, severity } of rules) out[rule] = severity ?? 'error';
+  return { rules: out };
 }

@@ -1,0 +1,161 @@
+<section class="intro-section mb-12">
+  <h3 id="mission">Mission</h3>
+  <p>
+    <strong>Web Compliance</strong> standardizes the <strong>enforcement</strong> layer &mdash; deliberately
+    separated from <em>conformance</em>. The distinction is the whole point:
+  </p>
+  <ul style="font-size: 0.95rem;">
+    <li><strong>Conformance</strong> = <em>how aligned</em> something is to a standard &mdash; a
+      <strong>measure</strong> on a spectrum (the <code>check:app-conformance</code> benchmark, conformance
+      demos, <code>conformanceLevel</code>). It <em>reports</em>; it doesn't block.</li>
+    <li><strong>Compliance</strong> = a conformance criterion <strong>promoted to an enforced hard
+      rule</strong> &mdash; a gate, with severity, pass/fail, expiring waivers, and an audit trail. A team
+      <em>chooses</em> to move a measure into a hard rule; from then on it is reported as compliance.</li>
+  </ul>
+  <p>
+    Web Compliance owns that promotion path and the machinery around it. The benchmark's
+    <code>--strict</code> flag is the seed; this project generalizes it into a declared, severity-aware
+    policy. The canonical artifact is the <strong>policy/rule model</strong> &mdash; policy-as-code,
+    versioned, that <strong>extends a fully-defined platform-default policy</strong> (a baseline of gates
+    every project inherits, then extends or overrides), consistent with every other Web Everything config
+    layer.
+  </p>
+
+  <div class="comparison-block" style="background: rgba(79, 70, 229, 0.08); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #4f46e5; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #4338ca; font-size: 1rem;">Not Web Policy, not a report protocol of its own</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      <a href="/projects/webpolicy/">Web Policy</a> owns declarative <em>domain</em> rules &mdash; whether a
+      business <em>action</em> is permitted ("orders over $X need sign-off"). Web Compliance gates
+      <em>standards conformance</em> ("aria-sort must reach L2 before merge") &mdash; a different subject
+      with its own home. And it needs <strong>no compliance-specific protocol</strong>: compliance's
+      <em>results</em> (audit / gate outcomes) ride <a href="/projects/webreporting/">Web Reporting</a>'s
+      report model &mdash; an audit result is just another report source. A separate policy-interchange
+      protocol is added only if a concrete cross-vendor need appears.
+    </p>
+  </div>
+</section>
+
+<section id="features" class="section-card">
+  <h3 id="feature-surface">Feature Surface</h3>
+  <p>
+    What an enforcement standard covers. <strong>Config</strong> = fixed by the policy model (the canonical
+    artifact, extends a platform default); <strong>Compose</strong> = deferred to a neighbouring Web
+    Everything standard; <strong>Build</strong> = a later phase of this project.
+  </p>
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 720px;">
+      <thead>
+        <tr><th>Feature</th><th>Prior art</th><th>What it does</th><th>Layer</th></tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(79,70,229,0.06);">The policy model (this slice — config that extends a platform default)</td></tr>
+        <tr><td><strong>CompliancePolicy</strong></td><td>Sonar quality gate, lint config</td><td><code>{ id, version, extends?, rules[] }</code> &mdash; a versioned policy that extends the baseline</td><td>Config</td></tr>
+        <tr><td><strong>PolicyRule</strong></td><td>Quality-gate condition</td><td><code>{ id, measure, severity, scope?, threshold?, since? }</code> &mdash; one promoted criterion</td><td>Config</td></tr>
+        <tr><td><strong>Severity</strong></td><td>error/warn/off</td><td><code>block</code> (fail the gate) / <code>error</code> / <code>warn</code> / <code>off</code></td><td>Config</td></tr>
+        <tr><td><strong>Platform-default policy</strong></td><td>Recommended rule set</td><td>A fully-defined baseline of gates a project inherits, then overrides via <code>extends</code></td><td>Config</td></tr>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(79,70,229,0.06);">Built on the model (separate phases — not this slice)</td></tr>
+        <tr><td><strong>Gates</strong></td><td>CI quality gate, <code>--strict</code></td><td>Runners that fail CI / block on a policy violation</td><td>🔗 Build &mdash; gates (<a href="/backlog/437-build-the-compliance-gates-ci-runners-that-block-on-a-policy/">#437</a>)</td></tr>
+        <tr><td><strong>Waivers / exceptions</strong></td><td>Suppress with expiry</td><td>Tracked, <em>expiring</em>, audited overrides &mdash; makes a gate governable, not brittle</td><td>🔗 Build &mdash; waivers (<a href="/backlog/438-add-waivers-exceptions-tracked-expiring-audited-overrides/">#438</a>)</td></tr>
+        <tr><td><strong>Audit / evidence trail</strong></td><td>Sonar history, audit log</td><td>What was enforced, when, against which standard version, with what result</td><td>🔗 Compose &mdash; emits through <a href="/projects/webreporting/">Web Reporting</a> (<a href="/backlog/439-build-the-audit-evidence-trail-emit-through-web-reporting/">#439</a>)</td></tr>
+        <tr><td><strong>Retrofit existing gates</strong></td><td><code>check:standards</code>, readiness</td><td>Re-express today's hardcoded CI gates as declared policies extending the default</td><td>🔗 Compose &mdash; retrofit (<a href="/backlog/440-retrofit-check-standards-readiness-gates-as-declared-complia/">#440</a>)</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="policy-model" class="section-card">
+  <h3 id="how-it-works">The Policy / Rule Model</h3>
+  <p>
+    A compliance policy is <strong>config, not a protocol</strong> &mdash; a versioned set of rules, each
+    promoting a conformance <em>measure</em> to an enforced hard rule at a declared severity and scope. The
+    platform ships a <strong>fully-defined default policy</strong> (the baseline gates); a project policy
+    <code>extends</code> it and overrides only what differs, exactly as every other Web Everything config
+    layer resolves a default.
+  </p>
+  {% highlight "typescript" %}
+// The policy model — CONFIG (no protocol; results ride Web Reporting's report model).
+// A project policy EXTENDS a fully-defined platform-default baseline (config-layer convention).
+
+type Severity = 'block' | 'error' | 'warn' | 'off';   // 'block' fails the gate
+
+interface PolicyRule {
+  id: string;                  // the rule's stable id
+  measure: string;             // the conformance signal it promotes, e.g. 'app-conformance:aria-sort'
+  severity: Severity;
+  scope?: string;              // where it applies — project | path glob | app id (default: whole project)
+  threshold?: number | string; // the bar to clear, e.g. "L2" | 80  (conformanceLevel ≥ / coverage ≥)
+  since?: string;              // the policy version this criterion was promoted in
+}
+
+interface CompliancePolicy {
+  id: string;
+  version: string;             // versioned — a gate result records the policy version it ran against
+  extends?: string;            // the platform-default baseline policy id it builds on
+  rules: PolicyRule[];         // overrides/adds on top of the inherited baseline
+}
+
+// 1. The platform ships the baseline fully-defined — every project inherits these gates.
+const platformDefault: CompliancePolicy = definePlatformDefaultPolicy();
+
+// 2. A project EXTENDS it — promote one more measure, relax another, leave the rest inherited.
+const projectPolicy: CompliancePolicy = {
+  id: 'my-app', version: '3', extends: platformDefault.id,
+  rules: [
+    { id: 'aria-sort', measure: 'app-conformance:aria-sort', severity: 'block', threshold: 'L2', since: '3' },
+    { id: 'coverage',  measure: 'coverage:lines',            severity: 'warn',  threshold: 80 },
+  ],
+};
+
+// 3. Resolution = baseline ⊕ project overrides (nearest wins), the same shape as every WE config layer.
+const effective = resolvePolicy(projectPolicy);   // → the gates that actually run
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+    <li><strong>Extends a platform default:</strong> the baseline is fully defined, so a project authors only
+      its deltas &mdash; never a policy from scratch. The default <em>is</em> the recommended gate set.</li>
+    <li><strong>Versioned:</strong> a policy carries its <code>version</code>, so an audit result records the
+      exact rule set it was enforced against &mdash; the evidence replays.</li>
+    <li><strong>Config, not a protocol:</strong> there is no cross-vendor policy-interchange contract in v1.
+      The <em>results</em> are what interoperate, and they ride Web Reporting's report model.</li>
+  </ul>
+</section>
+
+<section id="composition" class="section-card">
+  <h3 id="composition">Composition With Other Standards</h3>
+  <ul style="font-size: 0.9rem;">
+    <li><strong><a href="/projects/webreporting/">Web Reporting</a></strong> &mdash; the audit/evidence
+      trail emits as a <code>Report</code>; a gate result is just another report source. The shared report
+      model is why Compliance needs no protocol of its own.</li>
+    <li><strong>Conformance tooling (<a href="/backlog/314-flagship-exercise-apps/">#314</a>)</strong> &mdash;
+      the first producer of conformance signals a compliance policy promotes (the <code>--strict</code>
+      seed).</li>
+    <li><strong><a href="/projects/webpolicy/">Web Policy</a></strong> &mdash; the sibling enforcement
+      vocabulary for <em>domain</em> rules; same "policy-as-code, versioned, extends a default" shape,
+      different subject (business actions vs. standards conformance).</li>
+  </ul>
+</section>
+
+<section id="status" class="section-card">
+  <h3 id="status">Status</h3>
+  <p>
+    Web Compliance is in <strong>concept</strong> phase; the policy/rule model is specified here as the
+    canonical first slice of the compliance epic (<a href="/backlog/351-web-compliance-project/">#351</a>).
+    The Project + policy-model shape was ratified: <strong>no compliance-specific protocol in v1</strong>
+    &mdash; results ride <a href="/projects/webreporting/">Web Reporting</a>'s report model, and a
+    policy-interchange protocol is added only if a concrete cross-vendor need appears. The gates
+    (<a href="/backlog/437-build-the-compliance-gates-ci-runners-that-block-on-a-policy/">#437</a>), waivers
+    (<a href="/backlog/438-add-waivers-exceptions-tracked-expiring-audited-overrides/">#438</a>), audit
+    trail (<a href="/backlog/439-build-the-audit-evidence-trail-emit-through-web-reporting/">#439</a>), and
+    the retrofit of <code>check:standards</code> + readiness gates as declared policies
+    (<a href="/backlog/440-retrofit-check-standards-readiness-gates-as-declared-complia/">#440</a>) build on
+    this model.
+  </p>
+  <h4 style="margin-top: 1rem;">Open Questions</h4>
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <li>Does <code>extends</code> resolve a single baseline, or a chain (platform → org → project) the way a
+      config flavor stack would?</li>
+    <li>Is <code>measure</code> a free string keyed to a producer's signal id, or does it reference a
+      registered conformance-criterion catalog so a typo is caught at author time?</li>
+    <li>Does a rule own its waiver policy inline, or is the waiver register a separate scope keyed by
+      <code>rule.id</code> (the waivers slice, <a href="/backlog/438-add-waivers-exceptions-tracked-expiring-audited-overrides/">#438</a>)?</li>
+  </ul>
+</section>

@@ -1,7 +1,6 @@
 ---
 type: idea
 workItem: epic
-size: 5
 status: open
 dateOpened: "2026-06-07"
 tags: [product-strategy, dev-experience, product-surface, dev-browser, vscode-extension, chrome-extension, saas, feature-matrix, monetization, market-landscape]
@@ -82,7 +81,7 @@ This is the [#089](/backlog/089-monetization-product-ideas/) "AI proposes, the s
 - **[#096](/backlog/096-nl-to-technical-configurator/)**, **[#094](/backlog/094-ai-upgrader-tools/)**, **[#095](/backlog/095-conformance-auto-fix-agent/)** are the AI code-tool family (the #097 MVP) — orthogonal to this surface matrix.
 - **[#141](/backlog/141-dev-browser-vision/)** is the dev-browser vision (the rightmost column, written up as its own concept).
 
-## Open decisions / next
+## Design notes / next steps
 
 - **This is a planning artifact, not a build.** The genuinely-new features with no owning item yet — **state & action explorer (6)**, **designer→PR (2)**, **in-context test status (3/4/5)**, **error replay + in-context bug report (9/10)**, **translation-strategy picker (12)** — each warrants its own backlog item when it's picked up; captured here as rows first to avoid 8 thin siblings.
 - **Surface bet:** extensions as funnel/proving-ground, dev browser (+ selective SaaS) as the monetizable product — confirm before investing.

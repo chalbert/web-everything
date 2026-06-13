@@ -1,0 +1,173 @@
+<section class="intro-section mb-12">
+  <h3 id="mission">Mission</h3>
+  <p>
+    <strong>Web Realtime</strong> is the home for the <strong>open-app realtime transport</strong> &mdash;
+    the live server&rarr;client channel an <em>open</em> app holds: presence, live data, collaborative
+    cursors, server-pushed updates. It owns a single <strong>transport-negotiation protocol</strong> that
+    auto-picks the best available channel so an app declares <em>realtime delivery</em> once and never
+    hand-wires a socket. Minted in
+    <a href="/backlog/455-server-to-client-delivery-transport-home-by-purpose-vs-by-me/">#455</a> (Fork 2),
+    which settled the transport home <strong>by purpose</strong>.
+  </p>
+  <p>
+    Transport negotiation is a <strong>Protocol, not an intent</strong>. Choosing SSE vs. WebSocket vs.
+    WebTransport vs. long-poll is async, capability-dependent, and swappable &mdash; the same shape as a
+    guard or push provider, never UX vocabulary. The native-first anchors are <strong>SSE</strong> and
+    <strong>WebSocket</strong>; <strong>WebTransport</strong> is capability-gated (Chrome/Edge only, no
+    Safari) and <strong>long-poll/poll</strong> is the degradation floor that always works. A
+    <code>CustomTransportProvider</code> seam lets a hub (Socket.IO, SignalR, Centrifugo) plug in behind
+    one contract.
+  </p>
+
+  <div class="comparison-block" style="background: rgba(8, 145, 178, 0.08); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #0891b2; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #0e7490; font-size: 1rem;">Not push — the by-purpose split</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      <a href="/projects/webnotifications/">Web Notifications</a> owns <strong>closed-app push</strong> (a
+      service worker woken by a push service after the tab is gone). Web Realtime owns the
+      <strong>open-app</strong> live channel. The two are <strong>non-fungible</strong>: you do not fall
+      back from a live socket to a closed-app push &mdash; they survive opposite lifecycles &mdash; so
+      <a href="/backlog/455-server-to-client-delivery-transport-home-by-purpose-vs-by-me/">#455</a> gave
+      each its own home rather than forcing one transport abstraction over both.
+    </p>
+  </div>
+</section>
+
+<section id="features" class="section-card">
+  <h3 id="feature-surface">Feature Surface</h3>
+  <p>
+    What a realtime-transport standard covers. <strong>Protocol</strong> = fixed by the
+    transport-negotiation contract; <strong>Config</strong> = the negotiation surface a consumer declares;
+    <strong>Compose</strong> = a concern owned by a separate home.
+  </p>
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 720px;">
+      <thead>
+        <tr><th>Feature</th><th>Prior art</th><th>What it does</th><th>Layer</th></tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(8,145,178,0.06);">The transport (fixed by the protocol — open-app delivery)</td></tr>
+        <tr><td><strong>CustomTransportProvider</strong></td><td>Socket.IO, SignalR, Centrifugo</td><td><code>connect</code> &rarr; a <code>Connection</code> (<code>send</code> / <code>onmessage</code> / lifecycle) — the swap seam; SSE+WebSocket are the defaults</td><td>Protocol</td></tr>
+        <tr><td><strong>Connection</strong></td><td>WebSocket, EventSource</td><td>Emits <code>open</code>/<code>message</code>/<code>close</code>/<code>error</code>; <code>send()</code> where the channel is bidirectional</td><td>Protocol</td></tr>
+        <tr><td><strong>Negotiation order</strong></td><td>Socket.IO upgrade</td><td>The declared preference list the provider probes top-down, falling to the floor</td><td>Config</td></tr>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(8,145,178,0.06);">The channels (negotiated, native-first → floor)</td></tr>
+        <tr><td><strong>Server-Sent Events</strong></td><td><code>EventSource</code></td><td>Native one-way server&rarr;client stream; default for push-down-only data</td><td>Protocol — native</td></tr>
+        <tr><td><strong>WebSocket</strong></td><td><code>WebSocket</code></td><td>Native bidirectional channel; default when the client also sends</td><td>Protocol — native</td></tr>
+        <tr><td><strong>WebTransport</strong></td><td>WebTransport API</td><td>HTTP/3 datagrams+streams — <strong>capability-gated</strong> (Chrome/Edge; no Safari), probed not assumed</td><td>Protocol — gated</td></tr>
+        <tr><td><strong>Long-poll / poll</strong></td><td>XHR long-poll</td><td>The degradation <strong>floor</strong> — always works, no platform feature required</td><td>Protocol — floor</td></tr>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(8,145,178,0.06);">Separate homes (composed, not owned)</td></tr>
+        <tr><td><strong>Closed-app push</strong></td><td>Web Push API</td><td>The non-fungible sibling — survives tab close</td><td>🔗 Compose — <a href="/projects/webnotifications/">Web Notifications</a></td></tr>
+        <tr><td><strong>Presence / live render</strong></td><td>Live regions</td><td>How live data is shown/announced — a render intent, not the transport</td><td>🔗 Compose — Web Intents</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="protocol-transport-negotiation" class="section-card">
+  <h3 id="how-it-works">Transport Negotiation Protocol</h3>
+  <p>
+    A producer never hard-wires a socket. It resolves a <strong>CustomTransportProvider</strong> and
+    declares a preference order; the provider probes top-down &mdash; capability-gated channels are tested,
+    never assumed &mdash; and connects on the best available, falling to the long-poll floor. The same
+    <code>Connection</code> contract drives every channel.
+  </p>
+  {% highlight "typescript" %}
+// The lock — the provider contract. SSE + WebSocket are the native defaults; a hub plugs in behind it.
+type TransportKind = 'websocket' | 'sse' | 'webtransport' | 'long-poll';
+
+interface Connection {
+  readonly kind: TransportKind;            // which channel won negotiation
+  send?(data: unknown): void;              // present only where the transport is bidirectional
+  onmessage(handler: (data: unknown) => void): void;
+  onclose(handler: (reason?: string) => void): void;
+  close(): void;
+}
+
+interface CustomTransportProvider {
+  readonly id: string;                     // 'native' (default) | 'socket-io' | 'signalr' | 'centrifugo' | …
+  // Probe `prefer` top-down; capability-gated kinds are feature-detected, never assumed.
+  connect(options: {
+    url: string;
+    prefer?: TransportKind[];              // default: ['websocket', 'sse', 'long-poll']
+  }): Promise<Connection>;
+}
+
+// 1. Default native path — negotiate the best channel, no third party.
+const provider = resolveTransportProvider();                 // nearest-scope wins; default 'native'
+const conn = await provider.connect({ url: '/live',
+  prefer: ['webtransport', 'websocket', 'sse', 'long-poll'] }); // gated kinds degrade gracefully
+conn.onmessage((msg) => render(msg));
+
+// 2. Swap to a hub WITHOUT touching the call sites — same contract.
+//    register('socket-io', new SocketIoTransportProvider(...));
+
+// 3. WebTransport is probed, not assumed — absent (Safari) → falls to websocket, then the poll floor.
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+    <li><strong>Native-first:</strong> SSE and WebSocket are the default channels; a hub provider is an
+      opt-in enhancement behind the same seam, never a requirement.</li>
+    <li><strong>Capability-gated, never assumed:</strong> WebTransport is feature-probed (Chrome/Edge
+      only); when absent the negotiation degrades to WebSocket, then the long-poll floor that always
+      works.</li>
+    <li><strong>Open-app scoped:</strong> closed-app push is the non-fungible sibling
+      (<a href="/projects/webnotifications/">Web Notifications</a>) — a separate home, never a fallback
+      target of this protocol.</li>
+  </ul>
+</section>
+
+<section id="capability-matrix" class="section-card">
+  <h3 id="capability-matrix-heading">Transport Capability Matrix</h3>
+  <p>
+    What each channel supplies behind the one contract, and where it sits in the negotiation order. A
+    consuming app declares a preference; the provider resolves to the best the platform actually serves.
+  </p>
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 640px;">
+      <thead>
+        <tr><th>Channel</th><th>Direction</th><th>Platform support</th><th>Role</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>WebSocket</td><td>Bidirectional</td><td>✅ universal</td><td>Native default (client also sends)</td></tr>
+        <tr><td>Server-Sent Events</td><td>Server&rarr;client</td><td>✅ universal</td><td>Native default (push-down only)</td></tr>
+        <tr><td>WebTransport</td><td>Bidirectional (HTTP/3)</td><td>△ Chrome/Edge — no Safari</td><td>Capability-gated upgrade, probed</td></tr>
+        <tr><td>Long-poll / poll</td><td>Server&rarr;client (emulated)</td><td>✅ everywhere</td><td>Degradation floor — always works</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="composition" class="section-card">
+  <h3 id="composition">Composition With Other Standards</h3>
+  <ul style="font-size: 0.9rem;">
+    <li><strong><a href="/projects/webnotifications/">Web Notifications</a></strong> &mdash; the
+      non-fungible sibling: closed-app push delivery. The by-purpose split (<a href="/backlog/455-server-to-client-delivery-transport-home-by-purpose-vs-by-me/">#455</a>)
+      keeps push and open-app realtime in distinct homes.</li>
+    <li><strong>Render intents (Web Intents)</strong> &mdash; how live data is presented/announced
+      (presence indicators, live-region updates) is a render concern composed on top, never owned by the
+      transport.</li>
+    <li><strong><a href="/projects/webreliability/">Web Reliability</a></strong> &mdash; reconnect /
+      backoff on a dropped connection is a recovery concern the reliability registry can own; the
+      transport surfaces <code>close</code>/<code>error</code> for it to act on.</li>
+    <li><strong><a href="/projects/webaudit/">Web Audit</a> / <a href="/projects/webreporting/">Web
+      Reporting</a></strong> &mdash; connection lifecycle events are a report/audit source.</li>
+  </ul>
+</section>
+
+<section id="status" class="section-card">
+  <h3 id="status">Status</h3>
+  <p>
+    Web Realtime is in <strong>concept</strong> phase; the transport-negotiation protocol's contract is
+    specified here. The home and the by-purpose transport split were ratified in
+    <a href="/backlog/455-server-to-client-delivery-transport-home-by-purpose-vs-by-me/">#455</a> (Fork 2).
+    Follow-ons: a native default <code>CustomTransportProvider</code> (SSE/WebSocket negotiation), the
+    WebTransport capability probe, and presence/live-data render intents in Web Intents.
+  </p>
+  <h4 style="margin-top: 1rem;">Open Questions</h4>
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <li>Does negotiation re-evaluate mid-session (a WebTransport upgrade once probed available), or is the
+      channel fixed at <code>connect</code>?</li>
+    <li>Is reconnect/backoff owned here or delegated wholesale to <a href="/projects/webreliability/">Web
+      Reliability</a>'s recovery registry?</li>
+    <li>Does the protocol standardize a message envelope (so channels are wire-compatible) or stay
+      payload-opaque like the push <code>DeliveryReceipt</code>?</li>
+  </ul>
+</section>

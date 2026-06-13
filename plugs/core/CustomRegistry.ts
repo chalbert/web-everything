@@ -75,9 +75,9 @@ export default abstract class CustomRegistry<Definition, Key extends string | sy
     return keys.values();
   }
 
-  entries(): [Key, Definition][] {
+  entries(): [Key, GetterValue][] {
     const keys = this.keys();
-    return Array.from(keys).map((key) => [key, this.get(key)] as [Key, Definition]);
+    return Array.from(keys).map((key) => [key, this.get(key)] as [Key, GetterValue]);
   }
 
   values() {

@@ -16,7 +16,9 @@ crossRef: { url: /backlog/272-guard-protocol-predicate-gated-transitions-and-pre
 
 # Access control — declarative authorization / feature-flag gate
 
-**Digest.** Grounded in a [prior-art survey](/research/access-control-authorization-gate/) (CASL isomorphic `<Can>`, Angular `CanActivate`, React Router loaders, Vue navigation guards, OPA/PDP, LaunchDarkly entitlements, the RFC 9110 403-vs-404 existence-hiding rule). The **home fork is already ruled** (entry member of the Guard protocol #272, not its own project — kept below). Four open **member-design** forks, each with a **bold** default: **A — two surfaces (routing entry guard + rendering access gate) off one authz provider**; **B — the UX names the deny family `hide|redirect|forbid|cloak`, but 403-vs-404 lives behind the provider**; **C — feature-flags are an authority *kind*, resolved through the same provider seam, not separate machinery**; **D — restate (not re-decide) the UX-mirror trust boundary**.
+## Digest
+
+Declarative authorization / feature-flag gate, grounded in a [prior-art survey](/research/access-control-authorization-gate/). The **home fork is already ruled** (entry member of the Guard protocol #272, not its own project — kept below). Four open **member-design** forks, each with a **bold** default: **A — two surfaces (routing entry guard + rendering access gate) off one authz provider**; **B — the UX names the deny family `hide|redirect|forbid|cloak`, but 403-vs-404 lives behind the provider**; **C — feature-flags are an authority *kind* resolved through the same provider seam**; **D — restate (not re-decide) the UX-mirror trust boundary**.
 
 ## Axis framing
 

@@ -372,8 +372,9 @@ export function buildRouteContext(
 
 /**
  * Normalize a path: collapse double slashes, ensure leading slash.
+ * Exported so the route-view can map an entry URL into the route space the same way patterns are built.
  */
-function normalizePath(path: string): string {
+export function normalizePath(path: string): string {
   // Collapse double slashes
   let normalized = path.replace(/\/+/g, '/');
   // Ensure leading slash

@@ -55,7 +55,12 @@ export type {
 export type {
   AttributeDefinition,
   CustomAttributeOptions as CustomAttributeRegistrationOptions,
+  LazyAttributeLoader,
+  LazyAttributeModule,
 } from './CustomAttributeRegistry';
+
+// The Map — standalone trait manifest + its bootstrap wiring
+export { registerTraits, traitManifest, type TraitManifest } from './traitManifest';
 
 // Log module load in development
 if (process.env.NODE_ENV !== 'production') {

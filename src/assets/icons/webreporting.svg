@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- GLOBAL FILTER: Do Not Modify -->
+    <filter id="floatShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <!-- Indigo (States) -->
+    <linearGradient id="gradIndigo" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#4f46e5" />
+    </linearGradient>
+  </defs>
+
+  <!-- BASE: Rounded Container (Slate-50) -->
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc" />
+
+  <!-- CONTENT: a report — a baseline with charted bars of varying height (findings/scores over a series) -->
+  <g filter="url(#floatShadow)">
+    <!-- the chart bars (the normalized series rendered through one view) -->
+    <rect x="40" y="64" width="11" height="24" rx="3" fill="url(#gradIndigo)" />
+    <rect x="58" y="50" width="11" height="38" rx="3" fill="url(#gradIndigo)" />
+    <rect x="76" y="40" width="11" height="48" rx="3" fill="url(#gradIndigo)" />
+  </g>
+  <!-- the axes (baseline + left axis) -->
+  <g filter="url(#floatShadow)" fill="none" stroke="url(#gradIndigo)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 36 36 L 36 92 L 92 92" />
+  </g>
+</svg>

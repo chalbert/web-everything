@@ -11,7 +11,7 @@ preparedDate: "2026-06-11"
 
 # Decide on Persistence/Offline project — `webpersistence` (gap #4)
 
-Completes the data story: `webresources` fetches, `webstates` holds, nothing **persists**. The triage proposed a `webpersistence` project + protocol spanning client storage abstraction, offline-first, optimistic sync, and conflict resolution, anchored on the Storage API, IndexedDB, Cache API, Background Sync, and `navigator.storage.persist()`. No design exists yet — the project-vs-intent shape, the protocol boundary, and which neighbour owns each layer must be ruled on before any standard is written. The four forks below are grounded in a prior-art survey (IndexedDB/Cache/Locks/Background-Sync platform primitives; Dexie/RxDB/PouchDB/TanStack Query persistence), published as the [Persistence & Offline](/research/web-persistence-offline/) research topic, and reconciled with the existing change-tracking and reliability work. Each names a recommended default in **bold**.
+Completes the data story: `webresources` fetches, `webstates` holds, nothing **persists**. The triage proposed a `webpersistence` project + protocol spanning client storage abstraction, offline-first, optimistic sync, and conflict resolution, anchored on the Storage API, IndexedDB, Cache API, Background Sync, and `navigator.storage.persist()`. No design exists yet — the project-vs-intent shape, the protocol boundary, and which neighbour owns each layer must be ruled on first. The four forks below are grounded in a prior-art survey published as the [Persistence & Offline](/research/web-persistence-offline/) research topic, reconciled with existing change-tracking and reliability work. Each names a recommended default in **bold**.
 
 ## Triage context (preserved)
 

@@ -1,12 +1,15 @@
-// Public entry point for the validation-normalization hub (the `see` leg of #236).
+// Public entry point for the validation-normalization hub (#236).
 //
-// `see(configsByTool)` is the whole story: hand it each incumbent tool's *own* config and
-// it returns the unified comparative model + a summary. The hub keeps no project-facing
-// artifact — you can run it once and stop; nothing references it afterwards.
+// Two legs, both one-call:
+//   `see(configsByTool)`  — the comparative view: hand it each incumbent tool's own config and get the
+//     unified model + a summary back. The hub keeps no project-facing artifact.
+//   `shop(configs, target)` — the re-export leg (#282): ingest the source config(s) and emit an
+//     equivalent config for a DIFFERENT tool, with an honest per-concern round-trip loss report.
 
 import * as eslint from './adapters/eslint.mjs';
 import * as oxlint from './adapters/oxlint.mjs';
 import { normalize, summarize } from './normalize.mjs';
+import { reExport } from './reexport.mjs';
 import { tools } from './knowledge.mjs';
 
 export const adapters = { eslint, oxlint };
@@ -22,4 +25,12 @@ export function see(configsByTool) {
   return { model, summary: summarize(model), tools };
 }
 
-export { normalize, summarize, tools };
+// The re-export leg (#282): `see` the source config(s) into the pivot model, then emit an equivalent
+// config for a DIFFERENT target tool with an honest per-concern round-trip loss report. One-call story —
+// returns `{ tool, config, loss, summary }`.
+export function shop(configsByTool, targetToolId) {
+  const { model } = see(configsByTool);
+  return reExport(model, targetToolId);
+}
+
+export { normalize, summarize, reExport, tools };

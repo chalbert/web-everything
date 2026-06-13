@@ -55,9 +55,10 @@ webcontexts/CustomContext.ts
 (Note: the related but **narrower** Spec-Explorer dev-panel Vite plugin is also copy-pasted across
 the two repos — a separate, smaller instance of the same copy-paste pattern.)
 
-## Open question — how to make the runtime single-source (recommendations in bold)
+## Consolidation strategy (resolved 2026-06-11 — see *Resolution of the strategy fork* below)
 
-This needs a design call before it's dev-ready — pick the consolidation strategy first:
+The strategy fork is **settled**: Frontier UI imports `@we/plugs/*` via path alias (resolution at the
+foot of this item). The options below are retained as the design record that led to that call:
 
 - **Recommendation: Frontier UI imports `@we/plugs/*` via path alias**, the same way plateau-app
   already composes the runtime (`@we/plugs/*`, `@we/blocks/*` per the constellation). Web Everything

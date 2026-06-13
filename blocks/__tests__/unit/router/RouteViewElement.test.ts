@@ -42,7 +42,7 @@ describe('RouteViewElement', () => {
 
     it('should have observed attributes', () => {
       expect(RouteViewElement.observedAttributes).toEqual([
-        'scroll', 'base', 'transition', 'keep-alive',
+        'scroll', 'base', 'transition', 'keep-alive', 'entry',
       ]);
     });
   });
@@ -78,6 +78,47 @@ describe('RouteViewElement', () => {
 
       el.setAttribute('keep-alive', '');
       expect(el.keepAlive).toBe(true);
+    });
+
+    it('should return entry path from attribute (#365)', () => {
+      const el = document.createElement('route-view') as RouteViewElement;
+      expect(el.entry).toBe('');
+
+      el.setAttribute('entry', '/book');
+      expect(el.entry).toBe('/book');
+    });
+  });
+
+  describe('entry-URL normalization (#365)', () => {
+    // happy-dom starts at http://localhost/ — which matches no route when only /book is defined, the
+    // exact "served at an entry path, lands on a blank no-match" case the entry option fixes.
+    it('lands on the entry route when the load-time URL resolves to no route', async () => {
+      const el = document.createElement('route-view') as RouteViewElement;
+      el.setAttribute('entry', '/book');
+      el.innerHTML = '<template route="/book"><p>Book</p></template>';
+      document.body.appendChild(el);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(el.textContent).toContain('Book');
+    });
+
+    it('replaceStates the entry route through the base', () => {
+      const spy = vi.spyOn(history, 'replaceState');
+      const el = document.createElement('route-view') as RouteViewElement;
+      el.setAttribute('base', '/app');
+      el.setAttribute('entry', '/book');
+      el.innerHTML = '<template route="/home"><p>Home</p></template>';
+      document.body.appendChild(el);
+      expect(spy).toHaveBeenCalledWith(null, '', expect.stringContaining('/app/book'));
+      spy.mockRestore();
+    });
+
+    it('does not redirect when no entry is set (stays a no-match, back-compatible)', () => {
+      const spy = vi.spyOn(history, 'replaceState');
+      const el = document.createElement('route-view') as RouteViewElement;
+      el.innerHTML = '<template route="/book"><p>Book</p></template>';
+      document.body.appendChild(el);
+      expect(spy).not.toHaveBeenCalled();
+      spy.mockRestore();
     });
   });
 

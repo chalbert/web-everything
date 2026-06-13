@@ -3,8 +3,11 @@ type: idea
 workItem: story
 size: 5
 parent: "402"
-status: open
+status: resolved
 dateOpened: "2026-06-12"
+dateStarted: "2026-06-12"
+dateResolved: "2026-06-12"
+graduatedTo: plateau-app/platform-manager
 tags: [plateau, plateau-app, dependency-graph, aggregation, platform-manager]
 relatedProject: webregistries
 crossRef: { url: /backlog/402-plateau-platform-manager-product-graph-aggregation-impact-an/, label: "Platform-manager product epic (#402)" }

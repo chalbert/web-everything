@@ -31,7 +31,7 @@ An evergreen app holds together because thin app-specific code sits on **mature,
 
 Each part already has (or is getting) its own item, but the *value* is the loop: requirements → verified code → versioned MaaS → safe auto-update → monitored in prod → still conformant. The essay's insight is that this loop is only achievable on a **standards-based, introspectable platform** — exactly what the constellation is. The evergreen app is the end state that justifies the protocols/registries existing at all. Keep this item as the durable statement of that target; the mechanism items are its children.
 
-## Open questions
+## Design notes (recommended)
 
 - Is "evergreen" a **maturity rating** an app earns (a dashboard score: how much updates without intervention), a **protocol/conformance tier**, or just a vision label? Recommendation: start as a vision + a dashboard score (#092/#104), graduate to a tier only if it proves measurable.
 - The hardest unsolved piece is **requirement-as-code → automatic verification** (#100/#095); everything else (versioning, delivery, upgraders) is comparatively tractable. Sequence the vision around closing that gap.

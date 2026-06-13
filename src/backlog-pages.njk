@@ -11,8 +11,8 @@ eleventyComputed:
 
 {% macro typeBadge(type) %}
 <span style="padding: 0.15rem 0.6rem; border-radius: 9999px; font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
-  background: {% if type == 'idea' %}#ede9fe{% elif type == 'issue' %}#fee2e2{% elif type == 'review' %}#cffafe{% elif type == 'decision' %}#e0e7ff{% else %}#f1f5f9{% endif %};
-  color: {% if type == 'idea' %}#5b21b6{% elif type == 'issue' %}#991b1b{% elif type == 'review' %}#155e75{% elif type == 'decision' %}#3730a3{% else %}#64748b{% endif %};">{{ type }}</span>
+  background: {% if type == 'idea' %}#ede9fe{% elif type == 'issue' %}#fee2e2{% elif type == 'decision' %}#e0e7ff{% else %}#f1f5f9{% endif %};
+  color: {% if type == 'idea' %}#5b21b6{% elif type == 'issue' %}#991b1b{% elif type == 'decision' %}#3730a3{% else %}#64748b{% endif %};">{{ type }}</span>
 {% endmacro %}
 
 {% macro statusBadge(status) %}
@@ -52,6 +52,16 @@ eleventyComputed:
 <a href="/backlog/{{ child.id }}/" title="#{{ child.num }} {{ child.title }} · {% if child.size %}{{ child.size }} pt{% if child.size != 1 %}s{% endif %}{% else %}{{ child.workItem }}{% endif %} · {{ child.status }}" style="display: inline-flex; align-items: center; justify-content: center; min-width: 1.7rem; height: 1.7rem; padding: 0 0.35rem; border-radius: 9999px; background: {{ bg }}; border: 1.5px solid {{ bd }}; color: {{ fg }}; font-size: 0.78em; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none;">{{ child.num }}</a>
 {% endmacro %}
 
+{# A prerequisite (`blockedBy`) drawn as a pill — IDENTICAL to backlog.njk's blockerChip so the top-of-detail
+   row reads the same as the tile: a still-open blocker is red with ⛔, a resolved one green with ✓. #}
+{% macro blockerChip(b) %}
+{% if b.status == 'resolved' %}
+<a href="/backlog/{{ b.id }}/" title="#{{ b.num }} {{ b.title }} · resolved — cleared" style="display: inline-flex; align-items: center; gap: 0.15rem; padding: 0.05rem 0.45rem; border-radius: 9999px; font-size: 0.72em; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none; background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0;">&#10003; #{{ b.num }}</a>
+{% else %}
+<a href="/backlog/{{ b.id }}/" title="#{{ b.num }} {{ b.title }} · {{ b.status }} — still blocking" style="display: inline-flex; align-items: center; gap: 0.15rem; padding: 0.05rem 0.45rem; border-radius: 9999px; font-size: 0.72em; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca;">&#9940; #{{ b.num }}</a>
+{% endif %}
+{% endmacro %}
+
 <div class="plug-detail-header">
     <div class="plug-detail-header-inner">
         <nav class="plug-breadcrumb">
@@ -84,6 +94,13 @@ eleventyComputed:
         <div class="plug-epic-children" style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; width: 100%; margin-top: 0.6rem;">
             <span style="font-size: 0.72em; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.03em; font-weight: 600;">Contains</span>
             {% for child in item.children %}{{ childCircle(child) }}{% endfor %}
+        </div>
+        {% endif %}
+        {% if item.blockers and item.blockers.length %}
+        {# Same "Blocked by" chips as the tile, at the top — open prerequisites red (⛔), cleared ones green (✓). #}
+        <div class="plug-blockers" style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; width: 100%; margin-top: 0.6rem;">
+            <span style="font-size: 0.72em; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.03em; font-weight: 600;">Blocked by</span>
+            {% for b in item.blockers %}{{ blockerChip(b) }}{% endfor %}
         </div>
         {% endif %}
     </div>

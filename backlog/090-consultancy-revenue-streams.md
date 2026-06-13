@@ -3,8 +3,11 @@ type: idea
 workItem: story
 size: 3
 parent: "089"
-status: open
+status: resolved
 dateOpened: "2026-06-06"
+dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: none
 tags: [monetization, business-model, consultancy, services, migration, adoption, accessibility, training, open-source]
 crossRef: { url: /backlog/089-monetization-product-ideas/, label: "Product ideas (#089)" }
 ---
@@ -71,3 +74,11 @@ enterprises betting an app on the standard.
 Keep the standard, suite, and tooling fully open — that is what generates the
 adoption that creates demand for all of the above. Consultancy is funded *by* the
 openness, not in tension with it.
+
+## Close-out (2026-06-13)
+
+No build and no fork — the six-engagement service catalog above *is* the deliverable: complete
+go-to-market **reference** material companion to the #089 products. Resolved as reference-complete
+(`graduatedTo: none`); the file persists (resolve-don't-delete), so it stays the browsable consultancy
+reference it was kept open to be. Revisit only when a productization (per the flywheel) graduates one of
+these engagements into a #089 product.

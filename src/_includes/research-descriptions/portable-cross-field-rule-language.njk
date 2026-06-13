@@ -1,0 +1,71 @@
+{% raw %}
+<h2>The Question</h2>
+
+<p>Web Validation's generation layer (<a href="/backlog/085-validation-adapters-multi-language/">#085</a>) shipped a v1 <strong>shape-only</strong> intent vocabulary — 13 closed intents (<code>required</code>, <code>type</code>, <code>min</code>/<code>max</code>, <code>pattern</code>, <code>format</code>, <code>min-items</code>/<code>max-items</code>, <code>enum</code>, <code>custom</code>) that each emit statically to every <strong>Mode-1</strong> target (HTML, Zod, Pydantic, JSON Schema). What it deliberately deferred is <strong>cross-field and conditional logic</strong> — <em>"endDate after startDate"</em>, <em>"require X when Y = z"</em> — because that's exactly where the Mode-1 fidelities diverge: protovalidate carries a portable rule language (CEL), JSON-Schema codegen is shape-only, Standard Schema is interface-only. The fork (<a href="/backlog/465-portable-cross-field-rule-expression-language-or-stay-shape-/">#465</a>): <strong>define/adopt a portable rule-expression layer so cross-field emits to all Mode-1 targets, or stay shape-only and treat cross-field as Mode-2-only</strong> (the server evaluates it). This decides whether every <code>CustomValidationAdapter</code> must carry an expression compiler.</p>
+
+<h2>What we found</h2>
+
+<p><strong>The decision is not the binary it first looks like.</strong> Mode-2 (server-authoritative validation-as-a-service) already gives cross-field a fully-settled home — the 2026-06-06 report fixed its wire format at RFC 9457 <code>application/problem+json</code> via Laravel-Precognition-style "run the real rules, skip the controller." So cross-field <em>works today</em> regardless of this fork. The real question is narrower: <strong>does WE additionally invest in <em>portable Mode-1</em> cross-field (static emission to every target language with no network), and if so, in what representation?</strong></p>
+
+<h2>The portable-rule-language landscape</h2>
+
+<table>
+  <thead><tr><th>Option</th><th>Cross-field?</th><th>Portability</th><th>Cost / verdict</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>CEL</strong> (Google Common Expression Language)</td>
+      <td>Yes — <code>this.min &lt;= this.max</code> via <code>&amp;&amp;</code></td>
+      <td><strong>High</strong> — official Go/C++/Java/Python runtimes (<code>cel-expr-python</code> open-sourced Mar 2026) + community JS/TS (<code>cel-js</code>, <code>@marcbachmann/cel-js</code> zero-dep, tree-shakeable)</td>
+      <td>Non-Turing-complete, linear-time, designed to embed. <strong>protovalidate</strong> proves it at v1.0 scale across 5 languages with <em>no codegen</em>. Cost: each target embeds/transpiles a CEL evaluator. <strong>The reference design.</strong></td>
+    </tr>
+    <tr>
+      <td><strong>JSONLogic</strong></td>
+      <td>Yes — JSON-AST operators</td>
+      <td>Medium — many language impls incl. JS/PHP</td>
+      <td>Lighter than CEL but weaker typing, no real spec/ecosystem, verbose nested-JSON syntax. A pragmatic fallback, not a standard.</td>
+    </tr>
+    <tr>
+      <td><strong>JSON-Schema conditionals</strong> (<code>if/then/else</code>, <code>dependentRequired</code>)</td>
+      <td>Partial — presence dependencies only</td>
+      <td>High <em>within the shape-schema world</em></td>
+      <td>Survives JSON-Schema codegen, but <strong>cannot express value-comparison cross-field</strong> (<code>endDate &gt; startDate</code>). <code>dependentRequired</code> = property-presence only; nested <code>if/then/else</code> under <code>allOf</code> gets "very messy." Covers the easy third of cross-field, not the hard two-thirds.</td>
+    </tr>
+    <tr>
+      <td><strong>CUE</strong></td>
+      <td>Yes (config altitude)</td>
+      <td>Low for this use</td>
+      <td>Configuration-language altitude, not a per-field rule fit. Out.</td>
+    </tr>
+    <tr>
+      <td><strong>Mint a WE rule AST</strong></td>
+      <td>Yes (by design)</td>
+      <td>WE-only</td>
+      <td><strong>Rejected by the minimize-lock-in rule</strong> — a project-facing expression format is the single thing WE refuses to invent when a proven external one (CEL) exists. Lock-in for no interop gain.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>How this lands on the architecture</h2>
+
+<p>Today's <code>CustomValidationAdapter</code> (<code>validation-generation/provider.ts:135-147</code>) carries a declared-compliance <code>intents[]</code> surface (<code>:144</code>) and an <code>emit()</code> that materializes a declaration into a target format (<code>:146</code>). The vocabulary is shape-only, and the <em>only</em> predicate escape hatch is the <strong>non-portable</strong> <code>custom</code> intent (<code>:57</code>) — a target-specific function, not something that emits to five languages. Adopting a portable rule layer means <code>emit()</code> must additionally translate a <em>neutral rule expression</em> into each target's idiom (CEL string + embedded runtime, or transpile to Zod <code>.refine()</code> / Pydantic <code>model_validator</code> / etc.).</p>
+
+<p>Crucially, the <strong>graceful-degradation seam already exists</strong>: <code>cross-field</code> and <code>conditional</code> are declared as <em>optional capability features</em> in the manifest (<code>capability-manifest/provider.ts:48-50</code>), under the standing rule "absence is reportable, never a silent no-op." So an adapter can already declare it does <em>not</em> support cross-field, and the manifest flags those rules lossy — they fall back to Mode-2 rather than vanishing. That <code>$vocabulary</code>-style required/optional model (grounded in the 2026-06-06 report) means <strong>portable cross-field can be a per-adapter capability, not an all-or-nothing contract requirement</strong>.</p>
+
+<h2>Recommendation carried into #465</h2>
+
+<ul>
+  <li><strong>Keep the v1 adapter contract shape-only-required.</strong> Don't force every adapter (the slices #305–#309) to carry an expression compiler. Most flexible default: cross-field is an <em>opt-in</em> adapter capability, not a baseline requirement.</li>
+  <li><strong>Mode-2 is the default authoritative home for cross-field now</strong> — already settled (RFC 9457 + precognition). Cross-field is never "missing"; it's server-evaluated unless an adapter opts into Mode-1 emission.</li>
+  <li><strong>A portable Mode-1 cross-field layer is a deferred opt-in — and IF/when built, it adopts CEL</strong>, not a minted WE format, not JSONLogic, not JSON-Schema-conditionals-only. CEL is the proven multi-language interop language; reusing it is the native-first / borrow-official-vocabulary move (same discipline as <code>Intl.Collator</code> / <code>aria-sort</code>).</li>
+  <li><strong>Transpile-to-native vs embed-a-runtime is an adapter implementation detail</strong>, not a standards fork — the contract stays representation-neutral about how an adapter realizes a rule.</li>
+</ul>
+
+<h2>Cross-references</h2>
+
+<ul>
+  <li><a href="/projects/webvalidation/">Web Validation project</a> — the standard this decision shapes.</li>
+  <li><a href="/research/validation-generation-protocol-adapters/">Validation Generation: Protocol + Adapters</a> — the parent survey that raised this as its first carried-forward open question.</li>
+  <li><a href="/backlog/085-validation-adapters-multi-language/">#085</a> — the generation epic; <a href="/backlog/304-validation-generation-foundation-intent-enumeration-customva/">#304</a> — the shipped foundation (intents + registry); <a href="/backlog/005-validation-spec-versioning-adherence-tooling/">#005</a> — the capability-manifest meta-layer the degradation seam rides on.</li>
+  <li>Session report: <code>reports/2026-06-13-portable-cross-field-rule-language.md</code>.</li>
+</ul>
+{% endraw %}

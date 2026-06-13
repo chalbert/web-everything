@@ -67,6 +67,19 @@ describe('applyTransition — legal from-status enforced', () => {
     expect(r.content).toBeUndefined();
   });
 
+  it('claim --as=preparing: open → preparing + dateStarted (#375)', () => {
+    const r = applyTransition(ITEM, 'claim', { today: '2026-06-10', as: 'preparing' });
+    expect(readField(r.content, 'status')).toBe('preparing');
+    expect(readField(r.content, 'dateStarted')).toBe('2026-06-10');
+  });
+
+  it('release: preparing → open, stamps untouched (#375)', () => {
+    const preparing = applyTransition(ITEM, 'claim', { today: '2026-06-10', as: 'preparing' }).content;
+    const r = applyTransition(preparing, 'release', {});
+    expect(readField(r.content, 'status')).toBe('open');
+    expect(readField(r.content, 'dateStarted')).toBe('2026-06-10'); // not removed
+  });
+
   it('resolve: active → resolved + dateResolved + graduatedTo', () => {
     const active = setFrontmatterField(ITEM, 'status', 'active');
     const r = applyTransition(active, 'resolve', { today: '2026-06-10', graduatedTo: 'intent:filter' });

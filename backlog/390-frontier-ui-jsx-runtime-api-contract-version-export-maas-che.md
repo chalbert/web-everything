@@ -4,6 +4,7 @@ workItem: story
 size: 3
 parent: "081"
 status: open
+locus: frontierui
 blockedBy: ["389"]
 dateOpened: "2026-06-12"
 tags: []

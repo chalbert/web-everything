@@ -52,9 +52,15 @@ const customElementHandler: CloneHandler = {
   name: 'customElement',
 
   matches(node: Node): boolean {
-    // Check if it's an element with custom options
-    // Use nodeType to avoid instanceof issues across different global contexts
-    return node.nodeType === 1 && 'options' in node;
+    // A genuine CustomElement carries `options` as an OWN data property (set in its constructor —
+    // see CustomElement). Native form controls (`<select>`, `<datalist>`) instead expose `options`
+    // as a read-only accessor *inherited* from their prototype. The old `'options' in node` test
+    // matched those too, so clone() below would assign onto a getter-only property and throw —
+    // aborting the whole cloneNode and leaving consumers (e.g. route-view template stamping) with a
+    // blank result for any template containing a <select> (#454). Require an OWN property so native
+    // controls fall through to the generic prototype-fix handler.
+    // Use nodeType to avoid instanceof issues across different global contexts.
+    return node.nodeType === 1 && Object.prototype.hasOwnProperty.call(node, 'options');
   },
 
   clone(context: CloneContext): Node {

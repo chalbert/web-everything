@@ -4,6 +4,7 @@ workItem: story
 size: 5
 status: open
 dateOpened: "2026-06-12"
+blockedBy: ["452"]
 tags: [collection-operations, data-table, pagination, composition, exercise-app-discovery]
 crossRef: { url: /backlog/317-exercise-app-loan-origination/, label: "Surfaced composing data-table + pagination in app A (#317)" }
 ---
@@ -30,8 +31,10 @@ page stage + the event wiring + (optionally) Loader integration for server-side 
 
 ## Open questions
 
-- Coordinator as a third block, or a documented composition the consumer assembles? (Likely a small block,
-  since the wiring is identical for every consumer — and #036 already scopes the collection-operations block.)
-- Client-side (in-memory pipeline) vs server-driven (params → Loader) — the intent is UX-only, so the
-  coordinator picks the strategy; ties to the Technical Configurator.
-- Relationship to #036 (collection-operations block implementation).
+The home fork — **coordinator as a standalone block vs. a documented composition** — is carved to
+decision **#452** (`blockedBy`; lean: a small block). Resolving #452 makes this item agent-ready.
+
+Not forks (supported by default, noted for the build): client-side vs. server-driven is UX-only — the
+coordinator picks the strategy at runtime (ties to the Technical Configurator), not a design call.
+#036 (resolved → the `pagination` block) realized only the page dimension and does not own this
+cross-block coordinator.

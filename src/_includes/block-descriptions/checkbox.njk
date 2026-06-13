@@ -1,0 +1,46 @@
+<h2>Checkbox</h2>
+<p>Native-first over <code>&lt;input type="checkbox"&gt;</code>: a single boolean control, a checkbox
+<strong>group</strong> (multi-select), and the <strong>indeterminate</strong> (mixed) tri-state. It
+realizes the <a href="/intents/input/">input</a> boolean control and composes
+<a href="/intents/selection/">selection</a> (<code>model: multiple</code>) for groups. Sliced from the
+<a href="/backlog/468-form-control-block-inventory-datepicker-timepicker-input-fam/">form-control
+inventory (#468)</a>.</p>
+
+<h3>What it provides</h3>
+<ul>
+  <li><strong>Single</strong>: the bare <code>&lt;input type="checkbox"&gt;</code> + <code>&lt;label&gt;</code>
+    — a boolean form value, zero JS.</li>
+  <li><strong>Group</strong>: a set of checkboxes coordinated by a parent that reflects all / none /
+    some as checked / unchecked / <code>indeterminate</code>, with an optional select-all toggle.</li>
+  <li><strong>Indeterminate</strong>: the platform mixed state — <code>el.indeterminate = true</code>
+    renders the mixed glyph; the group parent exposes <code>aria-checked="mixed"</code>.</li>
+</ul>
+
+<h3>Web Standards Alignment</h3>
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr>
+    <td><a href="https://html.spec.whatwg.org/multipage/input.html#checkbox-state-(type=checkbox)">HTML <code>input type=checkbox</code></a></td>
+    <td>WHATWG HTML</td>
+    <td>The control IS the native element — checked/unchecked is the submitted value, the
+      <code>indeterminate</code> IDL attribute is the display-only third state the platform exposes but
+      never sets itself.</td>
+  </tr>
+  <tr>
+    <td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/checkbox/">WAI-ARIA APG Checkbox</a> (tri-state)</td>
+    <td>W3C WAI-ARIA APG</td>
+    <td>A mixed group parent carries <code>aria-checked="mixed"</code>; <kbd>Space</kbd> toggles; the
+      label is associated via <code>&lt;label&gt;</code> wrapping or <code>for</code>.</td>
+  </tr>
+</table>
+
+<h3>Native-first</h3>
+<p>The standalone case needs <strong>no JavaScript</strong> — the native element is the block. A thin
+behavior is warranted only to coordinate a group's mixed-state parent (set/clear
+<code>indeterminate</code>, drive a select-all). Distinct from the
+<a href="/backlog/473-toggle-switch-block-boolean-on-off/">toggle / switch</a>: a checkbox is a deferred
+form value (committed on submit), a switch is an immediate on/off action — same substrate, different
+semantics, kept as separate blocks.</p>
+
+<p class="text-sm text-gray-600"><em>Status: draft standard. The reference runtime (group/mixed
+coordinator) is a deferred Frontier UI build; the standalone checkbox needs none.</em></p>

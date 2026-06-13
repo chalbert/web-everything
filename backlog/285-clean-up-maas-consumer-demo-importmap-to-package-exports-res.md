@@ -3,8 +3,9 @@ type: issue
 workItem: task
 parent: "081"
 status: open
-blockedBy: ["087"]
+blockedBy: ["451"]
 dateOpened: "2026-06-11"
+dateStarted: "2026-06-13"
 tags: []
 ---
 
@@ -51,3 +52,15 @@ lands"). The demo is a POC sandbox and is correctly **excluded from the gating l
 leak is non-gating in the meantime. Unblocks when #087 yields a served/published runtime URL (or the
 package is published so a consumer-style `node_modules` link is legitimate outside WE's own scope).
 Dropped from the batch; no code change made.
+
+## Re-verified 2026-06-13 (batch-2026-06-13) — still blocked; blockedBy repointed 087 → 451
+
+Re-checked after #461 (MaaS distribution origin) landed. #461 builds the framework-agnostic Fetch
+handler but it serves **WE components** (`/_maas/<name>.js` from the component-cases registry) — it does
+**not** serve the `@frontierui/jsx-runtime` *package* the demo's importmap needs. So none of the three
+exports-safe targets resolves any better than before: linking is still #239-forbidden, the package is
+still unpublished (no CDN URL), and #461's origin doesn't emit a runtime URL. Genuinely blocked-in-fact.
+`blockedBy` was `["087"]`, which is now **resolved** (it was a decision) — that left this item perpetually
+re-surfacing as "ready" and re-discovered as blocked each batch. Repointed to **`["451"]`** (the hosted
+MaaS tier — the open item that would yield a public served/published runtime URL), so the DAG reflects
+the real blocker. No code change.

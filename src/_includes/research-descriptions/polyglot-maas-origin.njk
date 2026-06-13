@@ -1,0 +1,87 @@
+<h3>The Question</h3>
+<p>
+    Today a self-hosted <a href="/backlog/081-module-as-a-service-provider/">Module-as-a-Service</a> origin
+    is only a JavaScript Fetch handler (<a href="/backlog/461-maas-distribution-origin-framework-agnostic-web-standard-fet/">#461</a>).
+    Enterprises overwhelmingly run <strong>.NET and Java</strong> on the server, so a JS-only origin forces
+    a JS sidecar into those shops — friction that caps adoption. <a href="/backlog/463-polyglot-maas-origin-generate-net-java-other-server-implemen/">#463</a>
+    asks whether/how WE projects a <strong>native</strong> origin outward — a <strong>forward/codegen
+    adapter</strong> (the inverse of WE's <em>ingest</em> adapters) that takes the internal source of truth
+    and emits ecosystem-native server code. Three forks: <strong>(a) mechanism · (b) source of truth ·
+    (c) conformance.</strong> The served contract is small and sharp — a versioned, content-addressed
+    artifact with byte-identical output, stable content-hash identity, SRI, and immutable + short-TTL-pointer
+    cache semantics.
+</p>
+
+<h3>Recommendation (grounds #463)</h3>
+<ol>
+    <li><strong>(a) Mechanism → a generation adapter that codegens from a neutral SoT, deterministic-core /
+        HTTP-shell split, gated by a conformance suite.</strong> Not hand-reimplementation (drift, forfeits
+        single-SoT leverage), not sidecar-only (caps reach). <strong>Name Wasm-component
+        (compile-once-host-many) as the convergence target</strong> for the deterministic core once
+        .NET/Java host SDKs leave preview — it dissolves fidelity drift, but its 2026 toolchains are
+        preview-grade.</li>
+    <li><strong>(b) Source of truth → a language-neutral contract; JS is just another target.</strong>
+        Elevate the <code>maas-versioning</code> protocol (+ a small serve-path IR) to the authority; #461's
+        JS origin is the <em>reference implementation</em>, not the SoT. Project to OpenAPI for the HTTP-GET
+        shape.</li>
+    <li><strong>(c) Conformance → a shared cross-language conformance suite</strong> (golden vectors =
+        content-hash fixtures + reference impl = the JS origin + a runner), gating every target's release.
+        The protobuf/gRPC model. This is the gate that makes "byte-identical" true — orthogonal to the
+        mechanism choice.</li>
+</ol>
+
+<h3>Finding 1 — codegen from one IDL is proven, but fidelity is uneven</h3>
+<p>
+    <a href="https://smithy.io/2.0/languages/typescript/ts-ssdk/introduction.html">AWS Smithy</a> is the
+    closest analog: a protocol-agnostic IDL whose <em>server generator</em> emits routing + (de)serialization
+    + validation + types and leaves a clean <strong>business-logic seam</strong>. But server-codegen maturity
+    is lumpy across languages (TS dev-preview; Java GA 2026 but client-leaning; <strong>no off-the-shelf
+    .NET/Go server emitter</strong>). <a href="https://github.com/OpenAPITools/openapi-generator">OpenAPI
+    Generator</a> reaches dozens of languages and is HTTP-shaped (good GET fit) but quality is per-generator
+    (some emit non-compiling code). Codegen gets ~80% + a seam; it does <strong>not</strong> by itself
+    guarantee byte-identical behavior.
+</p>
+
+<h3>Finding 2 — the fourth mechanism: compile-once-to-Wasm + host bindings</h3>
+<p>
+    Instead of generating per-language source, compile the serve-logic <strong>once</strong> to a Wasm
+    component with a <a href="https://component-model.bytecodealliance.org/">WIT</a> interface; each host
+    (.NET via <code>componentize-dotnet</code>/Wasmtime, JVM via <code>chicory</code>, Go via
+    <code>wazero</code>) embeds that one binary. This <strong>structurally eliminates</strong> cross-language
+    drift (one binary = one behavior). 2026 status: standards/runtime shipped (Wasm 3.0 ratified Sept 2025,
+    WASI P2 stable; server-side Wasm now majority production use), but <strong>host SDKs are preview-grade</strong>
+    (componentize-dotnet 0.7.x; JVM component-model still landing; Go awaiting WASI 0.3 async). Best scoped to
+    the deterministic core (hashing, canonical bytes, SRI) while each host owns HTTP + cache — a serious
+    future, not the first build.
+</p>
+
+<h3>Finding 3 — a shared spec doesn't guarantee interop; the conformance suite does</h3>
+<table>
+    <thead><tr><th>protobuf library</th><th>required-test failures (same spec)</th></tr></thead>
+    <tbody>
+        <tr><td>protobuf-es</td><td>0</td></tr>
+        <tr><td>ts-proto</td><td>751</td></tr>
+        <tr><td>protobuf.js</td><td>1,847</td></tr>
+    </tbody>
+</table>
+<p>
+    Protobuf ships 2,000+ conformance tests via a stdin/stdout runner; the same spec yields wildly different
+    conformance (<a href="https://github.com/bufbuild/protobuf-conformance">scoreboard</a>), and the
+    Connect/gRPC suite found <strong>22+ bugs in Google's own gRPC v1.0</strong>
+    (<a href="https://buf.build/blog/grpc-conformance-deep-dive">deep dive</a>). The model — golden vectors +
+    reference implementation + runner, gating each release — is the industry-standard way to prove
+    byte-identical/identity-stable behavior, and it is needed under <em>every</em> mechanism.
+</p>
+
+<h3>Finding 4 — source of truth: the neutral contract, never the JS source</h3>
+<p>
+    Smithy, OpenAPI, and <code>.proto</code> all author a language-neutral contract and treat each language —
+    including the original — as an output. For an HTTP-GET content-addressed artifact, OpenAPI is the most
+    shape-matched describable form, while a protocol-agnostic IDL is the better <em>authority</em> that
+    projects to OpenAPI. WE already has the seed: the <code>maas-versioning</code> protocol is the serve
+    contract elevated — the natural SoT, with #461's JS origin as its reference implementation.
+</p>
+
+<p style="margin-top:1.5rem;font-size:0.9em;color:var(--color-text-muted,#64748b);">
+    Session report: <code>reports/2026-06-13-polyglot-maas-origin.md</code>.
+</p>

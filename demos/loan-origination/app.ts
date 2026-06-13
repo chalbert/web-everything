@@ -147,6 +147,17 @@ function formatFact(name: string, value: number): string {
  * `<template route>`s. The pipeline module is the one built out; the rest are routed placeholders
  * (the WE surface under test this turn is the router, not these modules' features — backlog #317).
  */
+/**
+ * The app is served under a mounted base path (`/demos/loan-origination/`), not at the origin root.
+ * Route patterns are logical (`/pipeline`); the Router block prepends BASE to them via the `base`
+ * attribute, and maps the entry URL into that space via `entry` (#365). Anything that targets a URL
+ * directly — `route:link` hrefs and programmatic redirects — must carry BASE itself, since those do
+ * NOT inherit the base. `routePath()` is the single seam that builds a base-qualified URL, so a
+ * reload of e.g. `/demos/loan-origination/pipeline` resolves instead of 404-ing at `/pipeline`.
+ */
+const BASE = '/demos/loan-origination';
+const routePath = (logical: string) => `${BASE}${logical}`;
+
 const MODULES = [
   { path: '/pipeline', label: 'Pipeline' },
   { path: '/application', label: 'Application' },
@@ -225,13 +236,9 @@ function boot() {
     panel.innerHTML = renderTrace(app, evaluate(app), next, timeline);
   };
 
-  // Normalize the file/deep URL to a real route BEFORE the route-view connects, so it matches on first paint.
-  if (!MODULES.some((m) => m.path === location.pathname)) {
-    history.replaceState(null, '', '/pipeline');
-  }
-
+  // Entry-URL normalization is handled by the route-view's `entry` attribute (#365) — no hand-rolled
+  // `history.replaceState` shim here. Routes are authored logical; `base` qualifies them at match time.
   const templates = [
-    `<template route="/"><div class="lo-redirect" data-redirect="/pipeline"></div></template>`,
     `<template route="/pipeline">${pipelineSkeleton(pipeline.length)}</template>`,
     `<template route="/application">${stubView('Application Intake')}</template>`,
     `<template route="/processing">${stubView('Processing')}</template>`,
@@ -248,9 +255,9 @@ function boot() {
       </div>
     </div>
     <nav class="lo-tabs">
-      ${MODULES.map((m) => `<a route:link="${m.path}">${m.label}</a>`).join('')}
+      ${MODULES.map((m) => `<a route:link="${routePath(m.path)}">${m.label}</a>`).join('')}
     </nav>
-    <route-view>${templates}</route-view>
+    <route-view base="${BASE}" entry="/pipeline">${templates}</route-view>
     <div class="lo-statusbar">
       <span>Rule set <b>2026.06.0</b></span>
       <span class="sep">|</span><span>Environment: <b>DEMO</b></span>
@@ -319,13 +326,13 @@ function boot() {
   };
 
   const routeView = document.querySelector('route-view');
+  // `path` is the live, base-qualified pathname (e.g. `/demos/loan-origination/pipeline`), so compare
+  // against base-qualified link targets. The bare-base → pipeline redirect is owned by `entry` (#365).
   const onRoute = (path: string) => {
     document.querySelectorAll('.lo-tabs a').forEach((a) =>
       a.classList.toggle('active', a.getAttribute('route:link') === path),
     );
-    // A bare "/" lands on the pipeline.
-    if (path === '/') { history.replaceState(null, '', '/pipeline'); return; }
-    if (path === '/pipeline') requestAnimationFrame(fillPipeline);
+    if (path === routePath('/pipeline')) requestAnimationFrame(fillPipeline);
   };
   routeView?.addEventListener('route-change', (e) => onRoute((e as CustomEvent).detail?.to?.path ?? location.pathname));
   // Initial fill — the route-view stamps the current route on connect; route-change may not fire for it.

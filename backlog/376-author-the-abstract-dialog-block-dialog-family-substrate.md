@@ -13,7 +13,7 @@ tags: []
 
 # Author the abstract dialog block (dialog family substrate)
 
-Author the abstract dialog block — the substrate every dialog-based surface conforms to (centered modal, edge drawer, bottom sheet), owning the shared modal-surface machinery: focus containment, escape/outside/backdrop dismissal, scroll-lock, and the native-first top-layer mount (<dialog>.showModal / Popover API). Implements the Modal Intent (placement center/top/bottom/start/end/fill). The droplist-family pattern applied to dialogs (droplist:dropdown :: dialog:drawer). Resolves the finding that WE has a Modal intent + native <dialog> but no dialog block. Decided in #360. Concrete members (drawer, sheet, modal) extend it.
+Author the abstract dialog block — the substrate every dialog-based surface conforms to (centered modal, edge drawer, bottom sheet), owning the shared modal-surface machinery: focus containment, escape/outside/backdrop dismissal, scroll-lock, and the native-first top-layer mount (`<dialog>.showModal` / Popover API). Implements the Modal Intent (placement center/top/bottom/start/end/fill). The droplist-family pattern applied to dialogs (droplist:dropdown :: dialog:drawer). Resolves the finding that WE has a Modal intent + native `<dialog>` but no dialog block. Decided in #360. Concrete members (drawer, sheet, modal) extend it.
 
 ## Outcome (2026-06-12)
 

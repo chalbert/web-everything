@@ -1,0 +1,109 @@
+<h3>The Question</h3>
+<p>
+    The archived design essay lists a <strong>constraint-based / container-query responsive layout</strong>
+    standard — FlexRow-style flow, <code>ResizeObserver</code>, container vs. media queries — among its
+    un-itemized candidates. The book-triage epic
+    (<a href="/backlog/111-book-further-candidate-standards/">#111</a>) flagged it as the one candidate with
+    <em>no obvious home</em>, so <a href="/backlog/467-responsive-container-query-layout-placement-new-project-vs-i/">#467</a>
+    was opened to decide placement: <strong>a new <code>weblayout</code> project, a new intent, or fold into
+    <code>webpositioning</code></strong>. This survey runs design-first step&nbsp;1 (web-platform + industry
+    prior art) before authoring — and it <strong>reshapes the fork</strong>.
+</p>
+
+<h3>The reshaping — the concern is already mostly modeled</h3>
+<p>
+    Two intents already in <code>intents.json</code> cover most of this ground:
+</p>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+    <li><strong><code>breakpoint</code></strong> (status: <em>draft</em>) — adaptation <code>strategy</code>
+        (<code>mobile-first</code> / <code>desktop-first</code> / <code>strict-range</code>) + semantic
+        <code>steps</code> (<code>compact</code> / <code>medium</code> / <code>expanded</code>), with the
+        description already stating the steps are <em>"mapped to concrete media/container queries"</em> by the
+        implementing block. <code>change</code> event.</li>
+    <li><strong><code>layout</code></strong> (status: <em>concept</em>) — application-shell structure and region
+        mechanics: <code>shell</code> / <code>pane</code> / <code>dock</code>, region behavior
+        <code>push</code> / <code>overlay</code> / <code>rail</code>.</li>
+</ul>
+<p>
+    So the original framing collapses on two of three options before we even weigh them: it is
+    <strong>not a new project</strong> (a project earns its keep only with a provider seam, an interchange
+    schema, or a vendor-interop contract — responsive layout has none; it is pure UX composition, the same
+    <em>"not every gap is a project"</em> discipline that ruled
+    <a href="/backlog/409-decision-master-detail-intent-vs-project/">#409 master-detail</a> down to a plain
+    intent), and it is <strong>not <code>webpositioning</code></strong> (that project anchors a floating
+    element to a reference element — tooltips, popovers, menus — an orthogonal concern to how a region adapts
+    to available space).
+</p>
+
+<h3>Recommendation (carried into #467)</h3>
+<ol>
+    <li><strong>No new project, no new intent</strong> — extend the existing <code>breakpoint</code> intent and
+        leave <code>layout</code> as-is. Fold the candidate in rather than coining a third home.</li>
+    <li><strong>Add a <code>scope</code> dimension to <code>breakpoint</code></strong> —
+        <code>viewport | container</code>. The semantic-steps mental model and the <code>change</code> event
+        are identical for both; only the <em>reference frame</em> differs. That is the textbook signature of an
+        axis to expose as a dimension, not a reason to split into two intents.</li>
+    <li><strong>Defer a FlexRow-style <code>webblocks</code> block</strong> — an intrinsic auto-flow container
+        that realizes <code>breakpoint</code> at <code>scope: container</code>, with CSS
+        <code>@container</code> / <code>flex-wrap</code> as the native-first default and
+        <code>ResizeObserver</code> named as the implementation substrate (impl-is-not-a-standard), not its own
+        standard.</li>
+</ol>
+
+<h3>Finding 1 — container queries are the native primitive, and they're Baseline</h3>
+<p>
+    CSS container <em>size</em> queries have been Baseline since 2023 (Chrome, Firefox, Safari).
+    <code>container-type: inline-size</code> establishes a query container; <code>@container</code> mirrors
+    <code>@media</code> syntax but resolves against the nearest ancestor container rather than the viewport;
+    and container-query units <code>cqi</code> / <code>cqw</code> (1% of container inline size) give fluid
+    sizing scoped to the container. This is precisely the <em>"intrinsic / constraint-based"</em> behavior the
+    book asks for — a component that adapts to the space it is <em>given</em>, not to the global viewport — and
+    it is now native CSS, not a library concern. <em>Style queries</em> (querying a container's custom
+    properties) remain Chrome-family-only, and <em>scroll-state queries</em> landed in Chrome in December 2025,
+    so those stay on the <code>@supports</code>/progressive-enhancement edge. The takeaway: container-scope
+    adaptation is a <strong>reference-frame variant of the same breakpoint concept</strong>, expressible in the
+    same CSS family — supporting fold-into-<code>breakpoint</code> over a separate standard.
+</p>
+
+<h3>Finding 2 — Material 3 already validates the breakpoint intent's vocabulary</h3>
+<p>
+    Material 3 explicitly <strong>moved away from rigid pixel breakpoints</strong> to semantic
+    <em>Window Size Classes</em> — <code>compact</code> (&lt;600dp), <code>medium</code> (600–839),
+    <code>expanded</code> (840–1199), plus <code>large</code> and <code>extra-large</code> — paired with
+    <em>Canonical Layouts</em> and <em>repositioning</em> (e.g. shifting actions and navigation from a bottom
+    bar in compact to a rail/drawer in medium/expanded). That is the same model the <code>breakpoint</code>
+    intent encodes (<code>steps</code>) and the <code>layout</code> intent encodes (region <code>rail</code> /
+    <code>push</code> / <code>overlay</code>). The intents already borrowed this vocabulary; the survey confirms
+    it is the industry-canonical framing, so extending it is lower-risk than inventing a parallel one.
+</p>
+
+<h3>Finding 3 — ResizeObserver is substrate, not standard</h3>
+<p>
+    <code>ResizeObserver</code> is the imperative escape hatch for the cases declarative
+    <code>@container</code> CSS can't express (measuring to switch component <em>logic</em>, not just style;
+    reacting to size in JS-driven layouts). It is a browser primitive an implementation calls — like
+    CSS Anchor Positioning under <code>webpositioning</code> or the native <code>&lt;dialog&gt;</code> under the
+    <code>modal</code> intent. Per the <em>impl-is-not-a-standard</em> discipline it belongs inside a block's
+    implementation, registered as a resolver substrate, not as a separate protocol/intent. This keeps the
+    FlexRow primitive a thin <code>webblocks</code> block rather than a standards artifact.
+</p>
+
+<h3>Why this isn't a project (the #409 test, restated)</h3>
+<p>
+    A Web Everything <em>project</em> is warranted when there is a real contract to standardize across vendors:
+    a provider seam (<code>CustomPositioningProvider</code>), an interchange schema, or a degradation
+    guarantee. Responsive layout has none — it is UX composition over native CSS, identical wiring for every
+    consumer. That is intent-and-maybe-a-block territory, exactly as
+    <a href="/backlog/409-decision-master-detail-intent-vs-project/">#409</a> ruled for master-detail. The only
+    open judgment is whether container scope is a <em>dimension</em> of <code>breakpoint</code> or a sibling
+    intent — and the shared mental model points to a dimension.
+</p>
+
+<h3>Sources</h3>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+    <li><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Containment/Container_queries">MDN — CSS container queries</a></li>
+    <li><a href="https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Containment/Container_size_and_style_queries">MDN — Container size and style queries</a></li>
+    <li><a href="https://web.dev/articles/baseline-in-action-container-queries">web.dev — Container queries and units in action (Baseline)</a></li>
+    <li><a href="https://m3.material.io/foundations/layout/applying-layout/window-size-classes">Material Design 3 — Window Size Classes</a></li>
+    <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/ResizeObserver">MDN — ResizeObserver</a></li>
+</ul>

@@ -31,7 +31,7 @@ Capture an app's requirements as a **structured, machine-readable artifact** —
 
 The constellation already gives requirements something to bind to: **intents** (UX vocabulary), **protocols** (conformance contracts), and the **webcases** suite (the machine-checkable target). A requirement expressed in that vocabulary is verifiable by construction — generic BDD tools have no ground truth; here the standard *is* the ground truth.
 
-## Open questions
+## Design notes (recommended)
 
 - The requirement **meta-schema** — standardize the *format* (BDD-like, intent/role/state vocabulary), not a fixed requirement list (mirrors the intents "standardize the meta-schema" principle).
 - Relationship to **webcases**: is a requirement a higher-level thing that *compiles down to* cases, or a sibling? Recommendation: requirements compile to cases, so the existing suite stays the executable layer.

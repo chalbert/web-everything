@@ -14,9 +14,9 @@
  * discipline: `claim` prints the rename slug for you to copy, but the script can't (and doesn't) rename.
  *
  * Usage:
- *   node scripts/backlog.mjs claim   <NNN>                       # open    → active  + dateStarted=today; prints rename slug
+ *   node scripts/backlog.mjs claim   <NNN> [--as=preparing]      # open    → active (or preparing, for /prepare) + dateStarted=today; prints rename slug
  *   node scripts/backlog.mjs resolve <NNN> [--graduated-to=X]    # active  → resolved + dateResolved=today (+ graduatedTo)
- *   node scripts/backlog.mjs release <NNN>                       # active  → open (abandon/redirect; stamps untouched)
+ *   node scripts/backlog.mjs release <NNN>                       # active|preparing → open (abandon/redirect; stamps untouched)
  *   node scripts/backlog.mjs scaffold --type=idea --workitem=story --size=3 --title="..." [--digest="..."] [--blocked-by=NNN,NNN] [--parent=NNN]
  *   node scripts/backlog.mjs reserve   <NNN...> --session=<slug>     # soft-hold planned items (#083 cross-session deprioritize)
  *   node scripts/backlog.mjs unreserve [--session=<slug>] [<NNN...>] # release soft holds (whole session, or specific items)
@@ -25,7 +25,6 @@
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execFileSync } from 'node:child_process';
 import { applyTransition, readField } from './backlog/frontmatter.mjs';
 import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
 import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize } from './readiness/reservations.mjs';
@@ -68,27 +67,18 @@ function resolveFile(ref) {
   return matches[0];
 }
 
-/**
- * True only if the working tree has a *tracked* modification to this file — the real concurrency smell
- * (a racing agent dirties a tracked item before flipping its status). An untracked-new file (`??`) is the
- * normal state of a freshly-scaffolded item that was never committed, NOT a race — so it must pass (#422).
- * Parse the porcelain XY code per line: `??` is untracked; anything else (` M`, `MM`, `M `, `A `, …) is tracked.
- */
-function isDirty(relPath) {
-  try {
-    const out = execFileSync('git', ['status', '--short', '--', relPath], { cwd: ROOT, encoding: 'utf8' });
-    return out.split('\n').some((line) => line.trim().length > 0 && !line.startsWith('??'));
-  } catch { return false; }
-}
-
 function transition(v) {
   const file = resolveFile(positional[0]);
   const rel = `backlog/${file}`;
   const abs = join(DIR, file);
   const before = readFileSync(abs, 'utf8');
-  // Concurrency guard for claim: a racing agent often dirties the file before flipping status.
-  if (v === 'claim' && isDirty(rel)) die(`${rel} has uncommitted edits — another session may be on it; verify before claiming`);
-  const res = applyTransition(before, v, { today: today(), graduatedTo: flag('graduated-to') });
+  // No git/commit check here: concurrency is owned by the status transition itself — `claim` only
+  // succeeds from `open`, so a second claimer hits an already-`active` item and the transition errors
+  // (plus the `reserve` session soft-holds, #083). The working tree's commit state is irrelevant to
+  // ownership (a perpetually-dirty tree is the normal baseline), so claim never inspects it.
+  const as = flag('as');
+  if (v === 'claim' && as && as !== 'active' && as !== 'preparing') die(`--as="${as}" is not valid — use --as=preparing (a /prepare claim) or omit for a normal active claim`);
+  const res = applyTransition(before, v, { today: today(), graduatedTo: flag('graduated-to'), as });
   if (res.error) die(`#${file.match(/^\d+/)[0]} — ${res.error}`);
   writeFileSync(abs, res.content);
   const id = file.replace(/\.md$/, '');
@@ -99,8 +89,10 @@ function transition(v) {
     saveReservations(removeNums(loadReservations(), [file.match(/^\d+/)[0]]));
   }
   if (v === 'claim') {
-    ok({ verb: v, id, file: rel, slug, status: 'active' },
-      `${GRN}✓ claimed${RST} ${id} ${DIM}→ active (dateStarted ${today()})${RST}\n\n${DIM}Rename this chat via the tab menu to label this session — copy:${RST}\n\`\`\`\n${slug}\n\`\`\``);
+    const claimedStatus = as === 'preparing' ? 'preparing' : 'active';
+    const verbWord = claimedStatus === 'preparing' ? 'prepping' : 'claimed';
+    ok({ verb: v, id, file: rel, slug, status: claimedStatus },
+      `${GRN}✓ ${verbWord}${RST} ${id} ${DIM}→ ${claimedStatus} (dateStarted ${today()})${RST}\n\n${DIM}Rename this chat via the tab menu to label this session — copy:${RST}\n\`\`\`\n${slug}\n\`\`\``);
   }
   if (v === 'resolve') {
     const g = flag('graduated-to');
@@ -229,9 +221,9 @@ switch (verb) {
   case 'unreserve': unreserve(); break;
   default:
     console.error(`${BLD}backlog.mjs${RST} — mechanical backlog-status CLI\n` +
-      `  ${GRN}claim${RST} <NNN>                 open → active + dateStarted\n` +
+      `  ${GRN}claim${RST} <NNN> [--as=preparing]   open → active (or preparing, /prepare) + dateStarted\n` +
       `  ${GRN}resolve${RST} <NNN> [--graduated-to=X]   active → resolved + dateResolved\n` +
-      `  ${GRN}release${RST} <NNN>               active → open\n` +
+      `  ${GRN}release${RST} <NNN>               active|preparing → open\n` +
       `  ${GRN}scaffold${RST} --type= --workitem= --size= --title= [--digest=] [--blocked-by=] [--parent=]\n` +
       `  ${GRN}calibrate${RST} --points= --context-pct=   fold a session into the batch point-budget estimate\n` +
       `  ${GRN}reserve${RST} <NNN...> --session=<slug>    soft-hold planned items (deprioritize for other sessions)\n` +

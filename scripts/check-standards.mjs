@@ -18,7 +18,8 @@ import {
   dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem,
   checkStatus, validateProtocol, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, permalinkSegment, validateViteProxyCoverage,
-  validateModuleResolutionLock, findRawHtmlInMarkdown,
+  validateModuleResolutionLock, findRawHtmlInMarkdown, findBuriedForkSections,
+  findUnquotedColonScalars,
 } from './check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -69,7 +70,13 @@ const checkStatusInto = (kind, id, status) => {
   for (const e of checkStatus(kind, id, status)) err(e.message, e.descriptor);
 };
 // Research topics use a separate axis (open question vs answered), not the implementation lifecycle.
-const RESEARCH_STATUSES = new Set(['open', 'resolved', 'draft', 'closed']);
+// `superseded` (#441 Fork 1) marks a topic whose canonical report was replaced by a newer dated one.
+const RESEARCH_STATUSES = new Set(['open', 'resolved', 'draft', 'closed', 'superseded']);
+// Global review-horizon fallback (#441 Fork 4): a topic without its own `reviewHorizon` is reviewed
+// against this interval. ISO-8601 duration; staleness derivation against it is #477 (warn-only), not here.
+const RESEARCH_REVIEW_HORIZON_DEFAULT = 'P6M';
+const ISO_DURATION = /^P(?:\d+Y)?(?:\d+M)?(?:\d+W)?(?:\d+D)?$/;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 // Backlog operational axis (BACKLOG_STATUSES/BACKLOG_TYPES) and the agile sizing axis
 // (WORK_ITEMS/FIB) are imported from ./check-standards-rules.mjs — the single definition shared with
 // the backlog-rule unit tests (#251). See docs/agent/backlog-workflow.md → "Agile sizing".
@@ -123,6 +130,35 @@ for (const b of blocks) {
 for (const p of plugs) checkStatusInto('Plug', p.id, p.status);
 for (const r of research)
   if (r.status && !RESEARCH_STATUSES.has(r.status)) warn(`Research topic "${r.id}" has unusual status "${r.status}"`);
+// Research-freshness foundation schema (#441 / #476): validate the shape of the new freshness +
+// revision-chain fields when present. Staleness derivation (#477) and the supersedes-as-new-report
+// flow (#478) build on this — here we only enforce that the fields are well-formed and the
+// supersedes/supersededBy pointers are bidirectional and resolve to known topic ids.
+{
+  const researchById = new Map(research.filter((r) => r.id).map((r) => [r.id, r]));
+  const asIds = (v) => (Array.isArray(v) ? v : v == null ? [] : [v]);
+  for (const r of research) {
+    if (!r.id) continue;
+    if (r.lastReviewed && !ISO_DATE.test(r.lastReviewed))
+      err(`Research topic "${r.id}" lastReviewed must be an ISO date (YYYY-MM-DD), got "${r.lastReviewed}"`);
+    if (r.reviewHorizon && !ISO_DURATION.test(r.reviewHorizon))
+      err(`Research topic "${r.id}" reviewHorizon must be an ISO-8601 duration (e.g. ${RESEARCH_REVIEW_HORIZON_DEFAULT}), got "${r.reviewHorizon}"`);
+    for (const target of asIds(r.supersedes)) {
+      const t = researchById.get(target);
+      if (!t) err(`Research topic "${r.id}" supersedes unknown topic "${target}"`);
+      else if (!asIds(t.supersededBy).includes(r.id))
+        warn(`Research topic "${r.id}" supersedes "${target}" but "${target}".supersededBy does not point back (bidirectional pointer expected, #441 Fork 1)`);
+    }
+    for (const target of asIds(r.supersededBy)) {
+      const t = researchById.get(target);
+      if (!t) err(`Research topic "${r.id}" supersededBy unknown topic "${target}"`);
+      else if (!asIds(t.supersedes).includes(r.id))
+        warn(`Research topic "${r.id}" supersededBy "${target}" but "${target}".supersedes does not point back (bidirectional pointer expected, #441 Fork 1)`);
+    }
+    if (asIds(r.supersededBy).length && r.status !== 'superseded')
+      warn(`Research topic "${r.id}" has supersededBy but status is "${r.status}" (expected "superseded", #441 Fork 1)`);
+  }
+}
 
 // ── 4. Naming conventions (across all exports) ────────────────────────────────
 const allExports = blocks.flatMap((b) => (Array.isArray(b.exports) ? b.exports.map((e) => [b.id, e]) : []));
@@ -279,6 +315,44 @@ for (const item of backlog) {
     `tag (e.g. <select>/<script>) swallows the rest of the page. Wrap them in backticks.`);
 }
 
+// ── 6d-quater. Buried-fork lint — a fork section in a non-decision body (#441 carve rule) ──
+// A fork belongs in a `type: decision` item, never inline in an idea/epic/story (#192 / #315 / #087
+// pattern). Flag a fork-shaped section heading in a non-decision, non-resolved item so the author
+// carves it to a decision that `blocks` the original (docs/agent/backlog-workflow.md → the carve
+// rule). Warn (don't fail): the heading is a strong signal, not proof; a section already pointing at a
+// decision (`#NNN` + carve/resolve/block language) is suppressed in the rule, so a carved item is
+// quiet. A `decision` item legitimately is the fork; a resolved item's open-questions are historical.
+for (const item of backlog) {
+  if (!item.id || item.type === 'decision' || item.status === 'resolved') continue;
+  const p = join(ROOT, 'backlog', `${item.id}.md`);
+  if (!existsSync(p)) continue;
+  const body = readFileSync(p, 'utf8').replace(/^---\n[\s\S]*?\n---\n/, '');
+  const hits = findBuriedForkSections(body);
+  if (!hits.length) continue;
+  const where = hits.map((h) => `"${h.heading}" (line ${h.line})`).join(', ');
+  warn(`Backlog item "${item.id}" (${item.type}) has a fork-shaped section ${where} in a non-decision ` +
+    `body — if it's a live design fork, carve it to a type:decision item that blocks this one; if it's ` +
+    `already resolved or deferred elsewhere, reframe the heading or cite the decision (#NNN). ` +
+    `See docs/agent/backlog-workflow.md → the carve rule.`);
+}
+
+// ── 6d-quinquies. Unquoted-colon scalar in frontmatter (#453) ──
+// Scan the RAW backlog/*.md files, NOT the loader output — the loader (#430) already skips an item
+// whose frontmatter is malformed YAML and only warns, so the broken item is absent from `backlog`
+// here. An unquoted plain scalar embedding `: ` (e.g. `graduatedTo: a/b.json: foo`) is the recurring
+// trigger; YAML reads it as a nested mapping and the parse dies, silently dropping the item from the
+// board. Error (not warn): a vanished backlog item escapes every other check, so the gate must catch
+// the typo at author time and prompt the quote-fix.
+for (const file of readdirSync(join(ROOT, 'backlog')).filter((f) => f.endsWith('.md'))) {
+  const raw = readFileSync(join(ROOT, 'backlog', file), 'utf8');
+  const hits = findUnquotedColonScalars(raw);
+  for (const h of hits) {
+    err(`Backlog item "${file.replace(/\.md$/, '')}" has an unquoted colon in frontmatter — ` +
+      `\`${h.key}: ${h.value}\` (line ${h.line}). YAML reads the embedded \`: \` as a nested mapping ` +
+      `and the loader silently SKIPS the whole item. Quote the value: \`${h.key}: "${h.value}"\`.`);
+  }
+}
+
 // ── 6d-ter. blockedBy dependency edges (#248) ──
 // `blockedBy: ["NNN", …]` is a directional prerequisite edge ("this can't start until NNN is
 // resolved"), making the backlog a real DAG that a deterministic readiness function (#249/#250)
@@ -330,19 +404,56 @@ for (const item of backlog) {
     if ((colour.get(n) || WHITE) === WHITE) visit(n, [n]);
 }
 
-// Double-counting guard: an UNstoried epic (one that carries its own size) must
-// have no sized child; a sized child means its points are already counted, so
-// the epic must be storied (no size) instead.
-const sizedChildrenOf = new Map();
+// Sliced-epic guard: an epic is either UNSLICED (no children → carries its own
+// `size`) or SLICED (≥1 child of ANY kind → no `size`, a pure umbrella). There is
+// no middle state — gaining the first child (story OR task) flips it to sliced, so
+// the `size` must be dropped in that same edit. A sized child additionally double-
+// counts (its points are already on the child), so we give that the sharper message.
+const childrenOf = new Map(); // parent num -> [child item, …]
 for (const item of backlog) {
-  if (item.parent !== undefined && typeof item.size === 'number') {
+  if (item.parent !== undefined) {
     const p = String(item.parent);
-    sizedChildrenOf.set(p, (sizedChildrenOf.get(p) || 0) + 1);
+    if (!childrenOf.has(p)) childrenOf.set(p, []);
+    childrenOf.get(p).push(item);
   }
 }
 for (const item of backlog) {
-  if (item.workItem === 'epic' && typeof item.size === 'number' && sizedChildrenOf.get(item.num))
-    err(`Backlog item "${item.id}" is a sized (unstoried) epic but has ${sizedChildrenOf.get(item.num)} sized child item(s) — that double-counts. Make it storied (drop its size) or re-parent the children.`);
+  if (item.workItem !== 'epic' || typeof item.size !== 'number') continue;
+  const kids = childrenOf.get(item.num) || [];
+  const sized = kids.filter((k) => typeof k.size === 'number').length;
+  if (sized)
+    err(`Backlog item "${item.id}" is a sized epic but has ${sized} sized child item(s) — that double-counts. Make it storied (drop its size) or re-parent the children.`);
+  else if (kids.length)
+    err(`Backlog item "${item.id}" is a sized epic but has ${kids.length} child item(s) — an epic with any child is SLICED and must carry no \`size\` (its scope lives on the children). Drop the epic's size, or detach the child if the epic is genuinely an unsliced bucket.`);
+}
+
+// Epic ↔ child status coherence (docs/agent/backlog-workflow.md → "Closing out" step 4):
+// an epic's resolution state must agree with its children.
+//   B — a RESOLVED epic with an open child is the `⚠ open slice` contradiction: the
+//       umbrella was closed while work still lives under it. Reopen the epic or close the child.
+//   A — a non-resolved epic that is BLOCKED and has no open child must say WHY it's stalled
+//       (a `childlessReason`) so the tile doesn't read as abandoned.
+//   C — a storied epic whose every child is resolved is the `all slices done` review cue:
+//       reconcile it (resolve the epic, or add the next slice). Warn, don't fail — it's a nudge.
+const CHILDLESS_REASONS = new Set(['blocked', 'undecided', 'untriaged', 'program']);
+for (const item of backlog) {
+  if (item.workItem !== 'epic') continue;
+  const kids = childrenOf.get(item.num) || [];
+  if (!kids.length) continue;
+  const openKids = kids.filter((k) => k.status !== 'resolved');
+  if (item.status === 'resolved' && openKids.length)
+    err(`Backlog item "${item.id}" is a resolved epic but has ${openKids.length} open child slice(s) (${openKids.map((k) => `#${k.num}`).join(', ')}) — a closed umbrella with live work under it. Reopen the epic or resolve/re-parent the open child(ren).`);
+  else if (item.status !== 'resolved' && (item.blockedBy?.length) && !openKids.length && !CHILDLESS_REASONS.has(item.childlessReason))
+    err(`Backlog item "${item.id}" is a blocked epic with no open children and no childlessReason — set childlessReason: ${[...CHILDLESS_REASONS].join('|')} so the board shows why it's stalled, or add the next slice.`);
+  else if (item.status !== 'resolved' && !openKids.length)
+    warn(`Backlog item "${item.id}" is an epic whose every child is resolved ('all slices done') — reconcile it: resolve the epic (its scope is delivered) or scaffold the next slice.`);
+}
+
+// Date↔status coherence: dateResolved only makes sense on a resolved item (the burndown
+// plots resolutions; a stray date on an open item would mis-place it on the chart).
+for (const item of backlog) {
+  if (item.dateResolved && item.status !== 'resolved')
+    err(`Backlog item "${item.id}" has dateResolved "${item.dateResolved}" but status is "${item.status}" — clear the date or set status: resolved.`);
 }
 
 // ── 6d-bis. Old-slug redirects (#110): validate `formerSlugs` back-compat aliases ──

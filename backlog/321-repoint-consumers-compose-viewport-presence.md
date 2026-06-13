@@ -3,7 +3,7 @@ type: idea
 workItem: story
 size: 3
 status: open
-blockedBy: ["320"]
+blockedBy: ["320", "447"]
 dateOpened: "2026-06-11"
 tags: [intent, scroll, observation, intersection-observer, viewport-presence, collection-ops, prefetch, traits]
 ---
@@ -11,3 +11,24 @@ tags: [intent, scroll, observation, intersection-observer, viewport-presence, co
 # Re-point Collection Ops advance:auto, Prefetch eagerness:viewport, and the visibility-gated trait to compose viewport-presence
 
 Re-point the three current `IntersectionObserver` consumers — Collection Ops `advance:auto`, Prefetch `eagerness:viewport`, and the visibility-gated trait — to compose the new `viewport-presence` mechanism intent (#320) instead of each inlining its own observer. The UX semantics stay where they live (fetch-more, prefetch, activate); only the observe-trigger delegates to the one shared home. Ratified in #014 (Forks 2 & 3): `advance:auto` stays a Collection Operations dimension and only its trigger delegates, closing the dated pagination/scroll seam without splitting any intent across two homes. Blocked until the `viewport-presence` intent (#320) exists to compose.
+
+## Dependency correction (2026-06-13) — only one of the three consumers exists in WE today
+
+On pickup, a repo-wide audit found **exactly one** live `new IntersectionObserver` in WE —
+[RoutePrefetchBehavior.ts:73](../blocks/router/behaviors/RoutePrefetchBehavior.ts#L73) (Prefetch
+`eagerness:viewport`). The other two named consumers are **not yet present in WE to re-point**:
+
+- **Visibility-gated trait** — its observer is part of FU's `CustomAttributeRegistry` (the `when="visible"`
+  gate, #221/#280), which only arrives in WE with the **#447** merge-up (deferred). So this consumer is
+  `blockedBy #447`.
+- **Collection Ops `advance:auto`** — [renderPagination.ts](../blocks/renderers/pagination/renderPagination.ts#L112)
+  only emits a `data-role="scroll-sentinel"` div; **no observer watches it in WE yet** (the auto-advance
+  observer is unbuilt). Nothing to re-point until that observer exists.
+
+The DRY win this item exists for (#014 Fork 2 — "a `rootMargin`-defaulting fix lands once, not three
+times") **requires ≥2 consumers** sharing the extracted home; with only the prefetch consumer live, a
+shared utility built now would be a single-consumer move that #447's trait observer (and the future
+pagination observer) would reshape — premature churn. **Held `blockedBy #447`**: once that merge lands the
+visibility-gate observer (and pagination grows its observer), extract the one shared `viewport-presence`
+trigger and re-point all available consumers together. (Discovered identically to #448 — #320 authored the
+*intent* / UX vocabulary only; the runtime to compose comes from the consumers themselves.)

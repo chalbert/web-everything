@@ -1,5 +1,6 @@
 ---
 type: idea
+locus: plateau-app
 workItem: story
 size: 3
 parent: "402"

@@ -1,34 +1,70 @@
 ---
 type: idea
 workItem: epic
-size: 3
+size: 2
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-06"
-childlessReason: untriaged
-tags: [book, candidates, intents, blocks, standards, form-controls, notifications, responsive, logging, tracking, nomenclature, deprecation, triage]
+triagedDate: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: none   # triage epic — decomposed into cards #467-#470 (re-parented to #099); no entity spawned
+tags: [book, candidates, blocks, standards, form-controls, responsive, deprecation, doc-coverage, triage]
 relatedReport: reports/2026-06-06-front-end-platform-book.md
 crossRef: { url: /backlog/099-evergreen-app-vision/, label: "Evergreen app / book map (#099)" }
 ---
 
-# Book — further candidate standards not yet itemized (triage list)
+# Book — further candidate standards (triaged to real gaps)
 
-A holding item for the **remaining ideas** in the archived "Front-End Platform" essay (`reports/2026-06-06-front-end-platform-book.md`) that are plausibly worth their own standard but were *not* promoted to individual backlog items in the first mining pass (which produced #099–#107). This keeps them tracked instead of buried in the book, without prematurely creating a dozen thin items. **Triage each below: promote to its own item, fold into an existing entity, or drop.**
+Holding item for the **remaining ideas** in the archived "Front-End Platform" essay
+(`reports/2026-06-06-front-end-platform-book.md`) not promoted in the first mining pass
+(#099–#107). **Triaged 2026-06-13** against the live backlog: most candidates turned out to
+be already homed (built, drafted, or folded into a project), and the real gaps were promoted to
+their own cards. **This epic is RESOLVED** — every surviving candidate now has a tracking item
+(below). The full book inventory is kept for reference; don't re-mine it cold.
 
-## Candidates (with the book section they come from)
+## Promoted to their own cards (real gaps)
 
-| Candidate | Book section | Likely home / note |
+Each surviving gap now has a dedicated tracking item, parented under the book-map epic
+[#099](/backlog/099-evergreen-app-vision/) (not this holder, so closing it leaves no orphaned work).
+This epic carries no further work.
+
+| Gap | Card | Kind | Home |
+|---|---|---|---|
+| **Responsive / container-query layout** — FlexRow-style layout, `ResizeObserver`, container vs media queries | **#467** | decision (placement) — *being prepared* | new `weblayout` project vs responsive intent vs fold into `webpositioning` |
+| **Form-control block inventory** — datepicker, timepicker, text/number/currency/phone/mask inputs, toggle/switch, radio, checkbox | **#468** | idea / epic | `webblocks` (slice into per-control blocks) |
+| **Doc-coverage metric** — % of exports documented/extracted | **#469** | idea / story | `webdocs` follow-on (#091 resolved) |
+| **Component deprecation lifecycle** — flag → new-version → legacy-lib, support-preserving adapters | **#470** | idea / story | companion to #102 (changelog) + #191 (codemods) |
+
+## Already homed — resolved during triage (reference)
+
+Closed out by cross-referencing existing work; **not** active candidates:
+
+- **Notifications & messages** → #358 (notification block, *resolved*) + #456 (`webnotifications`) + #459 (system-notification intent) + #460 (notification-marker intent); modal/blocking messages → #376 (dialog family).
+- **Tracking / analytics** → `webanalytics` project (status: **draft**, Segment-spec vocabulary).
+- **Logging** → folded into `webtraces` project (concept); log-levels/namespace are a facet of that charter, not a separate item.
+- **Nomenclature / file-structure conventions** → folded into `webcompliance` (#436/#437). WE doesn't *mandate* naming — it ships a default vocabulary (the common language) that projects/companies customize, and compliance enforces adherence to the resolved project/company/platform settings (per *config-extends-platform-default*). Not a standalone standard; the module-manifest piece ties to MaaS (#081).
+- **App health dashboard / platform directory** → #092 (provider↔consumer graph, *resolved*) + #104 (app-shell compatibility map) + #446 (platform map) + #402 (plateau platform manager).
+
+## Original book inventory (reference — pre-triage)
+
+The first-pass mining table, preserved verbatim with a disposition column. Each row's verdict is
+recorded in the sections above; this is the raw map back to the book.
+
+| Candidate | Book section | Disposition |
 |---|---|---|
-| **Form controls inventory** — datepicker, timepicker, inputs (text/number/currency/phone/mask), toggles, radios, checkboxes; the detailed datepicker feature list | *Interactive components / Types of controls / Datepicker* | Each a candidate **block** with a ready feature inventory; datepicker is the most fleshed-out. Cross-check against existing droplist/autocomplete/multi-select blocks before adding. |
-| **Notifications & messages** — toasts/snackbar/popup; dismissable, levels, blocking vs non-blocking; modal messages | *Notifications / Messages* | Candidate **intent** (UX policy) and/or block. Pairs with the loading/waiting intent (#106). |
-| **Constraint-based / container-query responsive** — FlexRow-style layout, `ResizeObserver`, container vs media queries | *Responsive design / Responsive layout* | Candidate **intent** or `webpositioning` facet; borrow Plateau FlexRow + container-query vocabulary. |
-| **Logging standard** — log levels, namespace/scope, prefer no hierarchy | *Logging* | Likely a `webtraces` facet (aligns with the existing traces project). |
-| **Tracking / analytics standard** — navigation/interaction/goal events, reporters | *Tracking* | Maps to the existing **webanalytics** project; fold in rather than new. |
-| **Nomenclature & file-structure standards** — naming, casing, extensions (`.constants.ts`, `.actions.ts`), granular-import, private-module (`#`), module manifest | *Nomenclature / Granular Import / Private module / Module Manifest Standard* | Tooling/authoring conventions; niche. Module-manifest ties to MaaS dynamic loading (#081). |
-| **Component deprecation / versioning strategy** — flag → new-version → legacy-lib, adapters to preserve support, v2 components | *Deprecation strategy* | Cross-cuts adapters + #102 changelog manifest; candidate protocol or doc. |
-| **Doc-coverage / AI doc generation** — extract docs from code, "doc coverage" tool | *Documenting* | Partly covered by webdocs (#091); the *coverage metric* is the new bit. |
-| **App health dashboard / platform directory** — per-app health rating, standard-adherence score, status | *Platform directory / Dashboard* | Largely **#092** (relationship graph) + a health-score view; extend #092 rather than new. |
+| **Form controls inventory** — datepicker, timepicker, inputs (text/number/currency/phone/mask), toggles, radios, checkboxes; the detailed datepicker feature list | *Interactive components / Types of controls / Datepicker* | **Promoted → #468** (form-control block inventory) |
+| **Notifications & messages** — toasts/snackbar/popup; dismissable, levels, blocking vs non-blocking; modal messages | *Notifications / Messages* | **Homed** — #358, #456, #459, #460, dialog #376 |
+| **Constraint-based / container-query responsive** — FlexRow-style layout, `ResizeObserver`, container vs media queries | *Responsive design / Responsive layout* | **Promoted → #467** (placement decision) |
+| **Logging standard** — log levels, namespace/scope, prefer no hierarchy | *Logging* | **Homed** — folded into `webtraces` |
+| **Tracking / analytics standard** — navigation/interaction/goal events, reporters | *Tracking* | **Homed** — `webanalytics` (draft) |
+| **Nomenclature & file-structure standards** — naming, casing, extensions, granular-import, private-module (`#`), module manifest | *Nomenclature / Granular Import / Private module / Module Manifest* | **Homed** — folded into `webcompliance` (#436/#437) as a customizable ruleset (default vocabulary + project/company/platform overrides); not a mandate |
+| **Component deprecation / versioning strategy** — flag → new-version → legacy-lib, adapters to preserve support, v2 components | *Deprecation strategy* | **Promoted → #470** (deprecation lifecycle); versioning already homed #088/#102/#191/#389/#390 |
+| **Doc-coverage / AI doc generation** — extract docs from code, "doc coverage" tool | *Documenting* | **Promoted → #469** (coverage metric; generation = #091) |
+| **App health dashboard / platform directory** — per-app health rating, standard-adherence score, status | *Platform directory / Dashboard* | **Homed** — #092, #104, #446, #402 |
 
-## How to use this item
+## Status
 
-Don't build from here directly. When one of these becomes relevant, **promote it to its own backlog item** (dev-ready, with the book section as `relatedReport`) and strike it from this list; delete this item once the list is empty. Several already have a clear "fold into existing" answer (tracking → webanalytics, app dashboard → #092) — resolve those by cross-referencing, not by creating siblings.
+**Resolved 2026-06-13.** Triage is complete: every book candidate is either already homed in an
+existing item/project (see *Already homed*) or promoted to its own card (#467–#470). No further
+work hangs off this epic — it remains as the reference map back to the book. Work the promoted
+cards directly.

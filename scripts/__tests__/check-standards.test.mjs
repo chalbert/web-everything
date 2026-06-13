@@ -81,6 +81,31 @@ describe('validateBacklogItem — graduatedTo resolution (#247)', () => {
   });
 });
 
+describe('validateBacklogItem — repo-locus (#repo-locus)', () => {
+  it('errors on an authored locus that is not a known value', () => {
+    const res = run({ locus: 'plateu-app', locusAuthored: true });
+    expect(messages(res)).toContainEqual(expect.stringContaining('invalid locus "plateu-app"'));
+  });
+  it('accepts a known authored locus with no error/warning', () => {
+    const res = run({ locus: 'plateau-app', locusAuthored: true });
+    expect(messages(res)).not.toContainEqual(expect.stringContaining('locus'));
+    expect(res.warnings.map((w) => w.message)).not.toContainEqual(expect.stringContaining('locus'));
+  });
+  it('nudges (warning) an inferred cross-repo locus on a batchable item that was never made explicit', () => {
+    const res = run({ locus: 'plateau-app', locusAuthored: false, batchable: true });
+    expect(res.errors).toEqual([]);
+    expect(res.warnings.map((w) => w.message)).toContainEqual(expect.stringContaining("reads as locus \"plateau-app\""));
+  });
+  it('does NOT nudge a non-batchable (epic / blocked) cross-repo item — locus only matters for the pack', () => {
+    const res = run({ locus: 'plateau-app', locusAuthored: false, batchable: false });
+    expect(res.warnings.map((w) => w.message)).not.toContainEqual(expect.stringContaining('reads as locus'));
+  });
+  it('is silent for the default webeverything locus', () => {
+    const res = run({ locus: 'webeverything', locusAuthored: false });
+    expect(res.warnings.map((w) => w.message)).not.toContainEqual(expect.stringContaining('locus'));
+  });
+});
+
 describe('validateBacklogItem — sibling reference + sizing rules', () => {
   it('errors on an unresolved relatedProject', () => {
     const res = run({ relatedProject: 'nonexistent-project' });

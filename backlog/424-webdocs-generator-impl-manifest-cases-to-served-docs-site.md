@@ -3,8 +3,11 @@ type: idea
 workItem: story
 size: 5
 parent: "398"
-status: open
+status: resolved
 dateOpened: "2026-06-12"
+dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: webdocs/generator.ts
 tags: [webdocs, frontier-ui, generator, conformance, product-build]
 relatedProject: webdocs
 crossRef: { url: /backlog/398-build-the-web-docs-product-fui-open-primitives-plateau-app-o/, label: "Web Docs product epic (#398)" }

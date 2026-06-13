@@ -9,6 +9,8 @@
 - **Plugs** (`plugs/`) — core primitives that patch/extend browser APIs (CustomStore, CustomAttribute, InjectorRoot). Exposed on `window` in **plugged mode**; tree-shakeable in **unplugged mode**.
 - **Blocks** (`blocks/`) — reusable implementations built on plugs (SimpleStore, OnEventAttribute, CallParser). Imported directly.
 
+**Reach ambition:** the standards are *contracts*, not a JS lock-in. The browser/JS runtime is the first realization, not the only one — the goal extends to making contracts realizable in **any server runtime** (.NET, Java, Go…) so the standard reaches the **enterprise** tier where those stacks live. The lever is **forward (generation) adapters**: one internal source of truth projected *outward* into ecosystem-native code — the inverse of the bottom-up **ingest** adapter (incumbent → internal pivot). *Direction under exploration, not yet ratified* — see decision #463 (polyglot MaaS origin), gated on the canonical JS origin #461.
+
 [Frontier UI](../frontierui/) is the **reference implementation** of these standards. This repo is canonical for shared terminology, naming, **protocols** (conformance contracts owned by a Project, surfaced via `/protocols/`), and **intents** (UX preference vocabularies, surfaced via `/intents/`). Frontier UI points back here.
 
 > **`../plateau/` is the abandoned single-repo prototype** — superseded by this repo + Frontier UI + plateau-app. New implementation work lands in **Frontier UI**, never plateau. You *may* read plateau as a **non-authoritative reference** when nothing more recent exists (a behavioral sketch to adapt), but it is **not a model**: it predates current decisions and may contradict them, so anything taken from it must be re-derived against the live spec/conventions and called out as plateau-sourced — never copy its architecture wholesale. (`plateau-app` is a live product and is fine.)
@@ -54,10 +56,10 @@
 ## Repository inventory
 <!-- AUTO-GENERATED:inventory — run `npm run gen:inventory`; do not edit by hand -->
 - **Plugs** 45 — 31 active · 12 concept · 2 experimental
-- **Blocks** 52 — 24 active · 7 concept · 21 draft
-- **Intents** 43 — 13 concept · 30 draft
-- **Glossary terms** 192 · **Research topics** 51 (48 open)
-- **Projects** 31: webadapters, webanalytics, webaudit, webbehaviors, webblocks, webcases, webcomponents, webcontexts, webdecisions, webdirectives, webdocs, webevents, webexpressions, webguards, webinjectors, webintents, webintl, weblifecycle, webmanifests, webplugs, webpolicy, webportals, webpositioning, webregistries, webreliability, webresources, webstates, webtheme, webtraces, webtraits, webvalidation
+- **Blocks** 57 — 24 active · 7 concept · 26 draft
+- **Intents** 46 — 13 concept · 33 draft
+- **Glossary terms** 192 · **Research topics** 60 (57 open)
+- **Projects** 35: webadapters, webanalytics, webaudit, webbehaviors, webblocks, webcases, webcompliance, webcomponents, webcontexts, webdecisions, webdirectives, webdocs, webevents, webexpressions, webguards, webinjectors, webintents, webintl, weblifecycle, webmanifests, webnotifications, webplugs, webpolicy, webportals, webpositioning, webrealtime, webregistries, webreliability, webreporting, webresources, webstates, webtheme, webtraces, webtraits, webvalidation
 <!-- /AUTO-GENERATED:inventory -->
 
 ## Commands

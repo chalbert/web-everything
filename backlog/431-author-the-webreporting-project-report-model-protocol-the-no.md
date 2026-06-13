@@ -3,8 +3,11 @@ type: idea
 workItem: story
 size: 3
 parent: "350"
-status: open
+status: resolved
 dateOpened: "2026-06-12"
+dateStarted: "2026-06-12"
+dateResolved: "2026-06-12"
+graduatedTo: protocol:report-model
 tags: []
 ---
 

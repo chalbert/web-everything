@@ -2,8 +2,11 @@
 type: idea
 workItem: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-06-12"
+dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: none
 tags: [router, spa, dx, exercise-app]
 ---
 

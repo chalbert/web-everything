@@ -1,0 +1,97 @@
+<h3>The Question</h3>
+<p>
+    Research in this repo is a point-in-time snapshot — a topic is investigated once, written to a dated
+    <code>reports/YYYY-MM-DD-{slug}.md</code>, and promoted to a <code>/research/{id}/</code> topic — and
+    nothing re-evaluates it as the platform moves. <a href="/backlog/192-longitudinal-research-freshness-system/">Epic&nbsp;#192</a>
+    wants the corpus kept <em>alive</em>: refreshable, history-preserving, staleness-aware. Its four foundation
+    forks are the decision <a href="/backlog/441-settle-research-freshness-foundation-history-model-metadata-/">#441</a>,
+    and <strong>no design exists yet</strong> — none of <code>lastReviewed</code>, <code>supersedes</code>, or
+    <code>reviewHorizon</code> are in the tree. Per design-first step&nbsp;1 this survey grounds the model in how
+    established documentation- and decision-record systems already solve four orthogonal axes, so WE reuses their
+    vocabulary (<code>Supersedes</code>, <code>dateModified</code>, <code>stale-while-revalidate</code>) instead of
+    coining terms.
+</p>
+
+<h3>Recommendation (prepared for #441)</h3>
+<ol>
+    <li><strong>History:</strong> immutable dated reports under a stable topic id, with a <strong>bidirectional</strong>
+        <code>supersedes</code>/<code>supersededBy</code> pointer and a <code>superseded</code> status value — refresh
+        is always a <em>new</em> dated report, never an in-place overwrite.</li>
+    <li><strong>Metadata home:</strong> the topic-level <code>lastReviewed</code> + <code>reviewHorizon</code> live on
+        the <strong>registry</strong> (the render + validator source), kept distinct from last-<em>changed</em>.</li>
+    <li><strong>Staleness:</strong> a reader-facing badge <em>and</em> a maintainer warning (they serve two audiences —
+        not an either/or), <strong>warn-only, never a build error</strong>.</li>
+    <li><strong>Review horizon:</strong> a per-topic <code>reviewHorizon</code> with a global default fallback and a
+        grace band, borrowing RFC&nbsp;5861's freshness-lifetime + stale-while-revalidate vocabulary — volatility tiers
+        deferred. This is the one genuinely divergent call.</li>
+</ol>
+
+<h3>Finding 1 — supersede via immutable dated records + bidirectional pointers, never overwrite</h3>
+<p>
+    Every long-lived decision/spec corpus preserves the old document and points across to its replacement rather than
+    editing in place. <strong>IETF RFCs</strong> use <code>Obsoletes:</code> / <code>Obsoleted&nbsp;by:</code> for full
+    replacement and <code>Updates:</code> / <code>Updated&nbsp;by:</code> when both stay valid; the old RFC number is
+    permanent. <strong>Python PEPs</strong> use <code>Replaces:</code> on the new PEP and <code>Superseded-By:</code> on
+    the old, plus a <code>Status: Superseded</code> lifecycle value. <strong>MADR/ADRs</strong> never edit a decided
+    record — they write a new one and set <code>Status: superseded by ADR-NNNN</code> with
+    <code>Supersedes</code>/<code>SupersededBy</code> links. <strong>W3C TR</strong> splits an immutable dated
+    <em>this version</em> snapshot from a moving <em>latest version</em> pointer. The lighter alternative,
+    <strong>Keep a Changelog</strong>, keeps the trail <em>inside</em> one living file.
+</p>
+<p>
+    <strong>Implication (Fork&nbsp;1):</strong> WE's <code>/research/</code> already stores immutable dated
+    <code>reports/YYYY-MM-DD-{slug}.md</code> snapshots under a stable de-dated topic id — the exact W3C/ADR shape. The
+    only missing piece is the <strong>pointer + status</strong>, and the cross-corpus norm says make it
+    <strong>bidirectional</strong> (<code>supersedes</code> + <code>supersededBy</code>) with a <code>superseded</code>
+    status — a sharpening of the item's one-way <code>supersedes</code> default. The single-living-report alternative
+    loses the original framing the audit value depends on.
+</p>
+
+<h3>Finding 2 — frontmatter is the usual home, but the immutable-report + living-topic split inverts it here</h3>
+<p>
+    The prevailing source of truth for review dates is <em>per-document front matter</em>: Microsoft Learn's
+    <code>ms.date</code> ("last substantially edited <em>or guaranteed fresh</em>", a required field), Hugo's
+    <code>lastmod</code>/<code>date</code>, mirrored to schema.org <code>dateModified</code> and sitemap
+    <code>&lt;lastmod&gt;</code>. But two facts invert this for WE: the <strong>report is an immutable snapshot</strong>
+    (Finding&nbsp;1) so it cannot carry a moving review date, and the <strong>topic is the living unit</strong> rendered
+    from the registry <a href="/research/">src/_data/researchTopics.json</a>, which is also the validator's input. So the
+    topic-level <code>lastReviewed</code>/<code>reviewHorizon</code> belong on the <strong>registry</strong> — anywhere
+    else forces a frontmatter→registry join the renders and <code>check:standards</code> would have to resolve.
+</p>
+<p>
+    <strong>Implication (Fork&nbsp;2):</strong> registry-home for topic metadata, with one borrowed correction —
+    Microsoft's <code>ms.date</code> <em>conflates</em> last-changed and last-reviewed; keep them
+    <strong>distinct</strong> (<code>dateOpened</code> ≠ report date / last-changed ≠ <code>lastReviewed</code>).
+</p>
+
+<h3>Finding 3 — staleness is a badge + a warning, never a build break (and the two coexist)</h3>
+<p>
+    Reader-facing and maintainer-facing surfacing are <em>complementary</em>, not alternatives. <strong>Wikipedia</strong>
+    shows an <code>{{Update}}</code> banner / <code>{{As&nbsp;of}}</code> marker to readers <em>and</em> drops the page
+    into a hidden maintainer tracking category. <strong>GitHub <code>actions/stale</code></strong> labels + comments past
+    an idle window for maintainers. On severity, <strong>Vale</strong> grades <code>suggestion</code>/<code>warning</code>/<code>error</code>
+    and <strong>fails CI only on <code>error</code></strong> (default level: <code>warning</code>).
+</p>
+<p>
+    <strong>Implication (Fork&nbsp;3 collapses):</strong> a badge and a warning target two different audiences and
+    coexist by design — so this is not a fork, it's "support both." The only residue that is an actual call is the
+    severity, and the prior-art norm settles it: <strong>warn, never error</strong> (stale research is a nudge, not a
+    build break). It moves to "supported by default" with one forced invariant.
+</p>
+
+<h3>Finding 4 — review horizon: per-topic deadline + grace band beats a global interval (the real call)</h3>
+<p>
+    How "overdue" is computed is genuinely divergent across prior art — and the item never named it. The cleanest
+    vocabulary is <strong>HTTP caching (RFC&nbsp;5861/9111)</strong>: <code>max-age</code> = freshness lifetime,
+    <code>stale-while-revalidate</code> = serve-stale-but-flag grace window, <code>stale-if-error</code> = serve-stale
+    on failure — a <em>deadline</em> plus a separate <em>grace band</em>, not a hard cliff. <strong>Wikipedia
+    <code>{{Update&nbsp;after}}</code></strong> declares a per-statement future review-by date. Content-ops practice
+    favours <strong>volatility tiers</strong> (high-volatility API/pricing docs reviewed far more often than evergreen
+    ones), while coarse global "freshness bands" (&lt;30d fresh … &gt;2y stale) are the low-effort default.
+</p>
+<p>
+    <strong>Implication (Fork&nbsp;4, added by this survey):</strong> default to a <strong>per-topic
+    <code>reviewHorizon</code> with a global fallback</strong> and an RFC&nbsp;5861-style grace band (stale-but-shown,
+    flagged for re-review); defer full volatility tiers until a second tier is actually needed. This is the
+    low-confidence, judgment-bearing fork — the others are near-ratifications.
+</p>

@@ -5,6 +5,7 @@ size: 3
 status: open
 blockedBy: ["328"]
 dateOpened: "2026-06-11"
+dateStarted: "2026-06-13"
 tags: [technical-configurator, natural-language, panel, plateau, ai-agnostic]
 ---
 

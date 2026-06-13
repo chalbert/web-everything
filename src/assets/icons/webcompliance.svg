@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- GLOBAL FILTER: Do Not Modify -->
+    <filter id="floatShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <!-- Indigo (States) -->
+    <linearGradient id="gradIndigo" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#4f46e5" />
+    </linearGradient>
+  </defs>
+
+  <!-- BASE: Rounded Container (Slate-50) -->
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc" />
+
+  <!-- CONTENT: a compliance shield — an enforced gate — with a pass verdict checked inside -->
+  <g filter="url(#floatShadow)">
+    <!-- the shield: a conformance measure promoted to a hard rule -->
+    <path d="M 64 34 L 90 44 L 90 66 C 90 82 78 91 64 96 C 50 91 38 82 38 66 L 38 44 Z" fill="url(#gradIndigo)" />
+  </g>
+  <!-- the pass check in white -->
+  <g fill="none" stroke="#f8fafc" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 53 64 L 61 72 L 77 54" />
+  </g>
+</svg>

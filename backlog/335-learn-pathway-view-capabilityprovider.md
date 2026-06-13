@@ -3,7 +3,9 @@ type: idea
 workItem: story
 size: 3
 status: open
+locus: plateau-app
 dateOpened: "2026-06-11"
+dateStarted: "2026-06-13"
 tags: [development-guide, learn-pathway, capability-provider, configurator, docs, diataxis]
 ---
 

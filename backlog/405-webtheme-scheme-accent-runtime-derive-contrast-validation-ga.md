@@ -3,9 +3,12 @@ type: issue
 workItem: story
 size: 5
 parent: "364"
-status: open
+status: resolved
 blockedBy: ["404"]
 dateOpened: "2026-06-12"
+dateStarted: "2026-06-12"
+dateResolved: "2026-06-13"
+graduatedTo: webtheme/schemes.ts
 tags: []
 ---
 

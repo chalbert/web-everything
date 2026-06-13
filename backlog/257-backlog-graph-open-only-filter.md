@@ -7,6 +7,7 @@ dateOpened: "2026-06-09"
 dateStarted: "2026-06-10"
 dateResolved: "2026-06-10"
 blockedBy: ["255"]
+graduatedTo: "dependency-graph 'Open & blockers' toggle (client-side filter on the Graph tab)"
 tags: [backlog, tooling, ui, visualization]
 ---
 

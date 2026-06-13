@@ -1,0 +1,175 @@
+<section class="intro-section mb-12">
+  <h3 id="mission">Mission</h3>
+  <p>
+    <strong>Web Notifications</strong> is the <strong>notification domain home</strong> &mdash; the
+    orchestration concern (which surface a notification targets, grouping, dedup, badging) plus the
+    <strong>closed-app push-delivery protocol</strong>. It was ratified across two decisions:
+    <a href="/backlog/009-gap-13-webpermissions-project/">#009</a> minted the domain home (render surfaces +
+    orchestration + a <code>notification-marker</code> family), and
+    <a href="/backlog/455-server-to-client-delivery-transport-home-by-purpose-vs-by-me/">#455</a> settled the
+    transport home <em>by purpose</em>: <strong>push lives here</strong>; the open-app realtime family
+    (WebSocket/SSE/WebTransport) gets its own home, because the two are non-fungible &mdash; a hard
+    capability cliff separates closed-app push from a live socket.
+  </p>
+  <p>
+    Push delivery is a <strong>Protocol, not an intent</strong>. Subscription + VAPID + provider
+    orchestration is async, server-authoritative, and swappable &mdash; the same shape as a guard provider,
+    never UX vocabulary. The native anchor is the <strong>Web Push API</strong> (a service-worker
+    <code>PushSubscription</code> against a push service), and a <code>CustomPushProvider</code> seam lets a
+    multi-channel hub (web-push, FCM, OneSignal, Novu) plug in behind one contract. A consuming project sees
+    the <em>render</em> intents, never the transport.
+  </p>
+
+  <div class="comparison-block" style="background: rgba(79, 70, 229, 0.08); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #4f46e5; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #4338ca; font-size: 1rem;">Not feedback, not background-task, not the realtime transports</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      <code>feedback</code> is the <em>in-app toast</em> tier (gone when the tab closes); Web Notifications
+      owns the <strong>OS-surfaced, server-deliverable</strong> notification that survives tab close. The
+      <code>background-task</code> intent owns <em>in-session</em> persistence, a different lifecycle. And
+      push is <strong>closed-app only</strong>: the open-app realtime family (WebSocket / SSE /
+      WebTransport / long-poll) is a separate transport home (<a href="/backlog/455-server-to-client-delivery-transport-home-by-purpose-vs-by-me/">#455</a>),
+      not this protocol &mdash; you don't fall back from a live socket to a closed-app push.
+    </p>
+  </div>
+</section>
+
+<section id="features" class="section-card">
+  <h3 id="feature-surface">Feature Surface</h3>
+  <p>
+    What a notification standard covers. <strong>Protocol</strong> = fixed by the push-delivery contract;
+    <strong>Config</strong> = the orchestration surface; <strong>Member</strong> = a render intent that
+    publishes standalone in Web Intents and is coordinated here.
+  </p>
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 720px;">
+      <thead>
+        <tr><th>Feature</th><th>Prior art</th><th>What it does</th><th>Layer</th></tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(79,70,229,0.06);">The transport (fixed by the protocol — closed-app push)</td></tr>
+        <tr><td><strong>CustomPushProvider</strong></td><td>web-push, FCM, OneSignal, Novu</td><td><code>subscribe</code> / <code>send</code> / <code>unsubscribe</code> — the swap seam; native Web Push is the default</td><td>Protocol</td></tr>
+        <tr><td><strong>PushSubscription</strong></td><td>Web Push API</td><td>A service-worker subscription against a push service, VAPID-authenticated</td><td>Protocol</td></tr>
+        <tr><td><strong>Delivery receipt</strong></td><td>Provider ack</td><td>The result of a <code>send</code> — what an audit/report trail records</td><td>Protocol</td></tr>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(79,70,229,0.06);">The domain (orchestration config)</td></tr>
+        <tr><td><strong>Surface routing</strong></td><td>Notification channels</td><td>Which surface a notification targets (OS push · in-app marker · badge)</td><td>Config</td></tr>
+        <tr><td><strong>Grouping &amp; dedup</strong></td><td>Android channels, collapse keys</td><td>Coalesce related notifications; suppress duplicates by key</td><td>Config</td></tr>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(79,70,229,0.06);">Coordinated render intents (publish standalone in Web Intents)</td></tr>
+        <tr><td><strong>system-notification</strong></td><td>Notifications API</td><td>The OS-surfaced render (title/body/actions) — survives tab close</td><td>🔗 Member — render intent (forthcoming)</td></tr>
+        <tr><td><strong>notification-marker</strong></td><td>Unread dots, badges</td><td>The in-app unread/badge marker render</td><td>🔗 Member — render intent (forthcoming)</td></tr>
+        <tr><td><strong>Permission state</strong></td><td>Permissions API</td><td>The cross-cutting <code>granted/denied/prompt</code> tri-state — intent-shaped, NOT owned here</td><td>🔗 Compose — <a href="/intents/permission/">Permissions intent</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="protocol-push-delivery" class="section-card">
+  <h3 id="how-it-works">Push Delivery Protocol</h3>
+  <p>
+    A producer never bundles a push service. It resolves a <strong>CustomPushProvider</strong> &mdash;
+    native Web Push by default, a hub provider by override &mdash; and the same subscribe/send/unsubscribe
+    contract drives every backend. Closed-app only: this is the path that wakes a service worker when the
+    tab is gone.
+  </p>
+  {% highlight "typescript" %}
+// The lock — the provider contract. Native Web Push is the default; a hub plugs in behind it.
+interface PushSubscriptionInfo {
+  endpoint: string;                       // the push-service URL the provider delivers to
+  keys?: { p256dh: string; auth: string }; // Web Push encryption keys (VAPID-authenticated)
+  provider: string;                        // which CustomPushProvider owns this subscription
+}
+
+interface DeliveryReceipt {
+  target: string;                          // the subscription endpoint / provider target id
+  status: 'queued' | 'delivered' | 'failed';
+  at: string;                              // ISO — what an audit/report trail records
+  reason?: string;
+}
+
+interface CustomPushProvider {
+  readonly id: string;                     // 'web-push' (native default) | 'fcm' | 'onesignal' | …
+  subscribe(options: { vapidKey?: string }): Promise<PushSubscriptionInfo>;
+  send(target: PushSubscriptionInfo, payload: unknown): Promise<DeliveryReceipt>;
+  unsubscribe(target: PushSubscriptionInfo): Promise<void>;
+}
+
+// 1. Default native path — the browser's Web Push, no third party.
+const provider = resolvePushProvider();            // nearest-scope wins; default 'web-push'
+const sub = await provider.subscribe({ vapidKey });
+
+// 2. Swap to a hub WITHOUT touching the call sites — same contract.
+//    register('fcm', new FcmPushProvider(...));   // a project override / custom plug
+
+// 3. Send — the receipt is what Web Reporting / Web Audit record.
+const receipt = await provider.send(sub, { title: 'Build green', body: '#456 shipped' });
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+    <li><strong>Native-first:</strong> the Web Push API is the default provider; a hub is an opt-in
+      enhancement behind the same seam, never a requirement.</li>
+    <li><strong>Transport, not render:</strong> the protocol owns subscription + payload + receipt; the OS
+      render is the <code>system-notification</code> intent, and permission state is the cross-cutting
+      <a href="/intents/permission/">Permissions intent</a> &mdash; both separate homes.</li>
+    <li><strong>Closed-app scoped:</strong> the open-app realtime transports are deliberately excluded
+      (<a href="/backlog/455-server-to-client-delivery-transport-home-by-purpose-vs-by-me/">#455</a>) — they
+      can't degrade to push and earn their own home.</li>
+  </ul>
+</section>
+
+<section id="capability-matrix" class="section-card">
+  <h3 id="capability-matrix-heading">Provider Capability Matrix</h3>
+  <p>
+    What each push provider supplies behind the one contract — the native baseline vs. the hub
+    enhancements. A consuming project negotiates against this; the default needs no third party.
+  </p>
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 600px;">
+      <thead>
+        <tr><th>Capability</th><th>Web Push (native default)</th><th>Hub provider (FCM/OneSignal/Novu)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Closed-app delivery (SW wake)</td><td>✅ baseline</td><td>✅</td></tr>
+        <tr><td>VAPID auth</td><td>✅</td><td>✅ (managed)</td></tr>
+        <tr><td>Multi-channel fan-out (email/SMS/in-app)</td><td>— (push only)</td><td>✅ enhancement</td></tr>
+        <tr><td>Delivery analytics / receipts</td><td>△ endpoint status</td><td>✅ rich receipts</td></tr>
+        <tr><td>Cross-device targeting</td><td>△ per-subscription</td><td>✅ user-keyed</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="composition" class="section-card">
+  <h3 id="composition">Composition With Other Standards</h3>
+  <ul style="font-size: 0.9rem;">
+    <li><strong>Render intents (Web Intents)</strong> &mdash; <code>system-notification</code> (the OS
+      surface) and <code>notification-marker</code> (the in-app unread/badge) publish standalone and are
+      coordinated by this domain; a consumer composes them.</li>
+    <li><strong><a href="/intents/permission/">Permissions intent</a></strong> &mdash; the cross-cutting <code>granted/denied/prompt</code>
+      tri-state (camera/geolocation/clipboard too) gates the "enable notifications" affordance; not owned
+      here.</li>
+    <li><strong><a href="/projects/webreporting/">Web Reporting</a> / <a href="/projects/webaudit/">Web
+      Audit</a></strong> &mdash; a <code>DeliveryReceipt</code> is a report source / an audit event.</li>
+    <li><strong>Realtime transport home (<a href="/backlog/455-server-to-client-delivery-transport-home-by-purpose-vs-by-me/">#455</a>)</strong>
+      &mdash; the sibling open-app delivery family; the by-purpose split keeps push and realtime in
+      distinct homes.</li>
+  </ul>
+</section>
+
+<section id="status" class="section-card">
+  <h3 id="status">Status</h3>
+  <p>
+    Web Notifications is in <strong>concept</strong> phase; the push-delivery protocol's contract is
+    specified here. The domain home was ratified in
+    <a href="/backlog/009-gap-13-webpermissions-project/">#009</a> (Fork D) and the by-purpose transport
+    split in <a href="/backlog/455-server-to-client-delivery-transport-home-by-purpose-vs-by-me/">#455</a>
+    (Fork 1). Follow-ons: author the <code>system-notification</code> and <code>notification-marker</code>
+    render intents in Web Intents, and the open-app <code>webrealtime</code> transport home (#455 Fork 2).
+  </p>
+  <h4 style="margin-top: 1rem;">Open Questions</h4>
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <li>Does the orchestration config own surface-routing policy (push vs marker vs badge) declaratively, or
+      is routing a consumer decision the domain only provides primitives for?</li>
+    <li>Is the dedup/collapse key part of the protocol payload (so providers honour it uniformly) or an
+      orchestration-layer concern above the transport?</li>
+    <li>Does a <code>DeliveryReceipt</code> standardize a status vocabulary, or stay an open string the
+      provider supplies (mirroring the Report/Decision open-vocabulary pattern)?</li>
+  </ul>
+</section>

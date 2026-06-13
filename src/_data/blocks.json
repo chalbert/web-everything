@@ -3268,5 +3268,97 @@
       "Autoplay is opt-in and accessibility-gated. Autoplay is OFF by default; when enabled it must pause on hover and on keyboard focus within the carousel, must NOT auto-advance under prefers-reduced-motion, and must expose a visible pause/play control (WCAG 2.2.2 Pause, Stop, Hide). These are fixed obligations of the autoplay configuration, not author choices — an unpausable auto-rotating carousel is an accessibility failure the block forbids.",
       "Equivalent slides, not labelled panels and not paginated data — distinct from tabs and Collection Operations. A carousel rotates through peer content the user can browse (promos, images, cards); tabs switch between distinctly-labelled panels via a tablist; Collection Operations pages/filters/sorts a data set. A carousel composes Navigation for its prev/next + markers but is its own pattern, cross-referenced rather than merged."
     ]
-  }
+  },
+  {
+    "id": "checkbox",
+    "name": "Checkbox",
+    "status": "draft",
+    "type": "Component",
+    "summary": "Native-first over `<input type=\"checkbox\">`: a single boolean control, a checkbox group (multi-select), and the `indeterminate` (mixed) tri-state. Realizes the `input` boolean control and composes `selection` (model: multiple) for groups; the indeterminate state maps to `aria-checked=\"mixed\"` on a group parent. Zero JS for the single/standalone case (the native element IS the block); a thin behavior only coordinates a group's mixed-state parent. Sliced from #468 (form-control inventory).",
+    "implementsIntent": "input",
+    "composesIntents": [
+      "selection"
+    ],
+    "designDecisions": [
+      "Native-first: the standalone checkbox is the bare `<input type=\"checkbox\">` with a `<label>` — no JS, no wrapper element. The block adds value only for the GROUP case (a set of checkboxes with a select-all/mixed parent) and the programmatic `indeterminate` property the platform exposes but never sets itself.",
+      "Indeterminate is the platform tri-state, not a coined one: `el.indeterminate = true` renders the mixed glyph and the group parent exposes `aria-checked=\"mixed\"` (WAI-ARIA tri-state checkbox). It is a display/ARIA state, never a submitted value — a checkbox still submits checked/unchecked.",
+      "Distinct from toggle/switch (#473): a checkbox is a deferred form value (committed on submit, reversible before), a switch is an immediate on/off action. Same `<input type=checkbox>` substrate, different semantics and role — kept as separate blocks, not one with a mode flag."
+    ]
+  },
+  {
+    "id": "toggle-switch",
+    "name": "Toggle / Switch",
+    "status": "draft",
+    "type": "Component",
+    "summary": "Native-first over `<input type=\"checkbox\">` with `role=\"switch\"`: a boolean on/off control whose change takes effect IMMEDIATELY, distinct from a checkbox's deferred-until-submit form value. Realizes the `input` boolean control. `aria-checked` true/false reflects on/off; no mixed/indeterminate state (a switch is strictly binary). Zero JS — the native element plus `role=\"switch\"` and styling IS the block. Sliced from #468 (form-control inventory).",
+    "implementsIntent": "input",
+    "designDecisions": [
+      "Native-first: a switch is the platform `<input type=\"checkbox\" role=\"switch\">` (or a `<button aria-pressed>` for a pure action) — no custom element. The block standardizes the role + label + immediate-effect contract, not a new widget.",
+      "Immediate vs. deferred is THE distinction from checkbox (#472): a switch applies its state on toggle (e.g. enable a setting now); a checkbox is a form value committed on submit. Same `<input type=checkbox>` substrate, different role and timing — separate blocks, never a checkbox `mode` flag.",
+      "Strictly binary: a switch has no `indeterminate`/`mixed` state (unlike the checkbox). `aria-checked` is true/false only; the WAI-ARIA APG Switch pattern with `<kbd>Space</kbd>` toggle and an on/off accessible name."
+    ]
+  },
+  {
+    "id": "radio-group",
+    "name": "Radio Group",
+    "status": "draft",
+    "type": "Component",
+    "summary": "Native-first over a `<input type=\"radio\">` group sharing a `name`: single-select among mutually-exclusive choices. Realizes the `selection` intent (model: single) and composes `focus-delegation` (roving — arrow keys move AND select within the group, the group is a single Tab stop). Native exclusivity comes free from the shared `name`; a `<fieldset>` + `<legend>` names the group. Zero JS for the standard case. Sliced from #468 (form-control inventory).",
+    "implementsIntent": "selection",
+    "composesIntents": [
+      "focus-delegation"
+    ],
+    "designDecisions": [
+      "Native-first: a radio group is N `<input type=\"radio\">` sharing a `name`, wrapped in `<fieldset>`/`<legend>` — mutual exclusivity and the single submitted value are the platform's, no JS. The block standardizes the grouping + labelling contract.",
+      "Roving focus is the platform's for native radios: arrow keys move focus AND change selection, and the group is ONE Tab stop (the checked radio, or the first when none). This is exactly the focus-delegation `roving` value — the block composes that intent rather than redefining traversal.",
+      "Single-select, distinct from a checkbox group (#472): radios are mutually exclusive (pick one), a checkbox group is multi-select (pick any). Maps to selection `model: single` vs `multiple`. A radio group has no indeterminate state but can start with none selected."
+    ]
+  },
+  {
+    "id": "input-family",
+    "name": "Input Family",
+    "status": "draft",
+    "type": "Component",
+    "summary": "Native-first over the text-ish `<input>` family (text / number / currency / phone / masked): the formatting, masking, and typing affordances the bare element can't express, while keeping the native input as the substrate. Realizes the `input` intent. The platform `type` (`text`/`number`/`tel`/`email`/`url`) carries semantics, keyboard, and validation for free; the block adds a display-format layer (Intl) and an optional input mask over a raw value, never replacing the element. Zero JS for a plain typed input; the format/mask behavior is opt-in. Sliced from #468 (form-control inventory).",
+    "implementsIntent": "input",
+    "designDecisions": [
+      "Native-first: the substrate is always a native `<input>` with the most specific platform `type` (`number` for numerics, `tel` for phone, `email`/`url` where they fit) — the type gives the mobile keyboard, the constraint-validation hooks, and the submitted value for free. The block never swaps the element for a custom widget; it layers formatting/masking on top.",
+      "Display value vs. raw value are kept separate (the data-table formatter rule, #368): currency/number formatting is presentational via `Intl.NumberFormat` (and locale-aware grouping/decimals), while the form-submitted/queried value stays the unformatted raw — so `1234.5` submits as `1234.5` even when shown as `$1,234.50`. A `type=number` input can't show grouped currency, so a currency field is a `type=text inputmode=decimal` with the Intl layer, raw value mirrored to a hidden/native value.",
+      "Masking is the one affordance the platform lacks: a phone/SSN/date mask constrains and segments typing (`(555) 123-4567`) — the block standardizes a declarative mask pattern over the raw digits, never `innerHTML`, and degrades to a plain typed input when JS is off. Masks are opt-in, distinct from constraint validation (`pattern`/`maxlength`), which stays native."
+    ]
+  },
+  {
+    "id": "form",
+    "name": "Form",
+    "status": "draft",
+    "type": "Store",
+    "summary": "The form-level state machine and lifecycle actions, sitting ABOVE the field-level Validation Intent / Web Validation (which own per-field rules and validity). Web Validation answers 'is this field valid?'; the Form block answers 'what is the state of the whole form, and how do I reset / submit / initialize it?' Grounded in the native `<form>` element, `FormData`, the Constraint Validation API and `formAssociated` custom elements — it adds only the aggregate state and lifecycle actions the platform doesn't expose, and composes existing intents for everything else. Candidate standard (no implementation yet); composition manifest like Droplist.",
+    "composesIntents": [
+      "validation",
+      "exit-guard",
+      "feedback",
+      "reliability"
+    ],
+    "exports": [
+      "FormState",
+      "FormActions",
+      "FormValues"
+    ],
+    "webStandards": [
+      "HTMLFormElement",
+      "FormData",
+      "Constraint Validation API",
+      "formAssociated custom elements (ElementInternals)"
+    ],
+    "relatedProject": "webblocks",
+    "related": ["validation", "input-family", "droplist"],
+    "designDecisions": [
+      "Sits above the field layer, never duplicating it: per-field rules and validity belong to the Validation Intent / Web Validation project. The Form block owns only the form-LEVEL aggregate (valid/invalid, touched/untouched, focused/unfocused, dirty/pristine across fields) and the lifecycle actions (submit, reset, clear, initialize). Composition over redefinition, the Droplist rule.",
+      "Native-first substrate: the block augments a real `<form>` rather than replacing it. `FormData` reads the current values, the Constraint Validation API supplies per-field validity, and `formAssociated` custom elements (via `ElementInternals` form-lifecycle callbacks: formResetCallback, formStateRestoreCallback) let custom fields participate in the native form. The block adds aggregate state + actions the platform leaves to userland; it never re-implements field validity or submission the platform already does.",
+      "Form validity merges from field validity through the swappable ValidityMergeRegistry (#212 / #004 OP-1), NOT a merge rule baked into the Form block. The standard consumes the `MergedValidity` hand-off shape; HOW field results reduce to form validity (native-first default: source-reduction over named sources with declared precedence and a `pending{version}` token) is the registry's swappable concern. This closes the item's open 'last-writer vs strictest' question by deferring it to the already-ratified strategy plane.",
+      "Dirty / pristine is current-vs-initial, and `initialize(initialValues?)` re-baselines it: `initialValues` (the seed), `defaultValues` (reset target), and current `values` are kept distinct. dirty = current ≠ initial; reset → defaults; clear → empty; initialize → re-seed AND mark pristine (the new baseline). Three value sets, never one overloaded field — mirrors the three-distinct-dates discipline elsewhere.",
+      "Composes, not re-specifies, three intents for the rest: Validation Intent (field validity merges up to form validity), Exit Guard (the unsaved-changes navigation guard #129, armed from `dirty`), and Feedback/Reliability (submit lifecycle: in-flight, success, error). Each behavior defers to the owning intent, keeping the Form spec thin."
+    ],
+    "designRationale": "Surfaced as a gap: there is no block answering the whole-form state/lifecycle question, only field-level validity. Built fresh on the native form + validation primitives (the legacy plateau repo is explicitly NOT a model and was not consulted). Authored as a candidate (draft) composition manifest; a reference implementation is a follow-on once the contract is reviewed."
+    }
 ]

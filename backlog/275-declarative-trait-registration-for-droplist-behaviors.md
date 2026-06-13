@@ -4,6 +4,7 @@ workItem: story
 size: 5
 parent: "193"
 status: open
+locus: frontierui
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-11"
 tags: []
@@ -30,7 +31,7 @@ Split from [#193](/backlog/193-droplist-frontierui-migration-followups/) (bullet
 Each droplist behavior activates declaratively from its attribute (with options parsed from the value
 string) without `<auto-complete>`, covered by tests; the existing programmatic composition is unchanged.
 
-## Open design call (surfaced 2026-06-11, batch pre-flight)
+## Design decision (recommended — surfaced 2026-06-11, batch pre-flight)
 
 The 7 behaviors today are **plain classes** instantiated programmatically by `AutoComplete`
 (`new Selection()`, `new Filter()`, …) — **not** `CustomAttribute` trait mixins like

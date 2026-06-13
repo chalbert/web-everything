@@ -1,5 +1,5 @@
 ---
-type: review
+type: issue
 workItem: task
 status: resolved
 dateOpened: '2026-02-22'

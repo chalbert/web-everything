@@ -1,8 +1,11 @@
 ---
 type: idea
 workItem: epic
-status: open
+status: resolved
 dateOpened: "2026-06-06"
+dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: validation-generation/ (epic — delivered via slices #304–#309)
 tags: [validation, protocol, adapters, multi-language, codegen, validation-as-a-service, conformance, intents, native-first]
 relatedProject: webvalidation
 relatedReport: reports/2026-06-06-validation-generation-protocol-adapters.md
@@ -64,8 +67,8 @@ Full survey in [reports/2026-06-06-validation-generation-protocol-adapters.md](.
 **Actions this resolves / sharpens:**
 - ✅ **Mode-2 wire format** narrowed: default **RFC 9457 `application/problem+json`**, richer formats via `Accept` negotiation (was "plural, TBD").
 - ✅ **Compliance exposure** has a model: JSON Schema **`$vocabulary`** (required/optional intents; refuse unrecognized required) → maps onto the #005 manifest.
-- 🔲 **New candidate intent — field-error shape** (pointer + rule + message): RFC 9457 standardizes the envelope but *not* the field-level shape — a gap WE could claim. Raise as its own item if pursued.
-- 🔲 **Decide:** define a portable rule-expression language (CEL-like) for cross-field logic, or stay shape-only and treat cross-field as Mode-2-only.
+- ➡️ **New candidate intent — field-error shape** (pointer + rule + message): RFC 9457 standardizes the envelope but *not* the field-level shape — a gap WE could claim. **Carried forward as #464.**
+- ➡️ **Decide:** define a portable rule-expression language (CEL-like) for cross-field logic, or stay shape-only and treat cross-field as Mode-2-only. **Carried forward as decision #465.**
 
 ## Distinct from the existing validation items
 
@@ -109,3 +112,10 @@ Target the **schema layer, not the UI framework** (React/Vue/Svelte all consume 
 - **Mode 2** stands up: a backend serves its validation in **≥1 negotiated format**, with the format chosen by the consumer's adapter.
 - Each adapter/format **exposes its intent-compliance** (#005 manifest); an unsupported intent is **lossy-flagged with a diagnostic**, never silently dropped.
 - A fixture-driven demo shows the **same declaration** delivered both ways (per the repo's Definition of Done).
+
+## Progress
+
+- **Status:** resolved (epic delivered through its slices).
+- **Done:** all six slices resolved — #304 (intent enumeration + `CustomValidationAdapterRegistry` foundation), #305 (native-HTML), #306 (Zod), #307 (Pydantic), #308 (JSON-Schema), #309 (Mode-2 generation service + delivery format). v1 acceptance (Mode-1 ≥3 targets from one core + Mode-2 served format + per-adapter #005 compliance + lossy-flagging) is met across those slices.
+- **Carried forward:** the two parked open-decisions — field-error shape intent → **#464**; portable cross-field rule-expression language vs shape-only → decision **#465** (both `blockedBy: 304`).
+- **Notes:** no code in this epic itself; it is the umbrella. Closed out by reconciling status `active → resolved` once every slice reached `resolved`.

@@ -14,6 +14,7 @@
 import Injector from './Injector';
 import HTMLRegistry from './HTMLRegistry';
 import type { ProviderTypeMap } from './InjectorRoot';
+import type { RootNode } from '../core/types';
 
 /**
  * Valid targets for HTML injection.

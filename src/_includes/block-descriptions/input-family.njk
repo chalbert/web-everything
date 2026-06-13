@@ -1,0 +1,53 @@
+<h2>Input Family</h2>
+<p>Native-first over the text-ish <code>&lt;input&gt;</code> family — <strong>text / number / currency /
+phone / masked</strong>: the formatting, masking, and typing affordances the bare element can't express,
+while keeping the native input as the substrate. It realizes the <a href="/intents/input/">input</a>
+intent. Sliced from the
+<a href="/backlog/468-form-control-block-inventory-datepicker-timepicker-input-fam/">form-control
+inventory (#468)</a>.</p>
+
+<h3>What it provides</h3>
+<ul>
+  <li>A native <code>&lt;input&gt;</code> carrying the most specific platform <code>type</code>
+    (<code>number</code>, <code>tel</code>, <code>email</code>, <code>url</code>, or <code>text</code>) —
+    the correct mobile keyboard, constraint-validation hooks, and submitted value come for free.</li>
+  <li>A <strong>display-format layer</strong> via <code>Intl.NumberFormat</code> for currency/number
+    (locale grouping + decimals), kept separate from the raw submitted value.</li>
+  <li>An optional <strong>input mask</strong> (phone, SSN, segmented patterns) over the raw value — the
+    one typing affordance the platform doesn't provide.</li>
+</ul>
+
+<h3>Web Standards Alignment</h3>
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr>
+    <td><a href="https://html.spec.whatwg.org/multipage/input.html#the-input-element">HTML <code>&lt;input&gt;</code> types</a> + <code>inputmode</code></td>
+    <td>WHATWG HTML</td>
+    <td>The platform <code>type</code>/<code>inputmode</code> carries semantics, keyboard, and native
+      validation; the block layers formatting/masking on top rather than replacing the element.</td>
+  </tr>
+  <tr>
+    <td><a href="https://tc39.es/ecma402/#numberformat-objects"><code>Intl.NumberFormat</code></a></td>
+    <td>ECMA-402</td>
+    <td>Currency/number display is locale-aware and native — grouping, decimals, and currency symbol —
+      while the form value stays the unformatted raw number.</td>
+  </tr>
+  <tr>
+    <td><a href="https://html.spec.whatwg.org/multipage/input.html#attr-input-pattern"><code>pattern</code> / <code>maxlength</code></a></td>
+    <td>WHATWG HTML</td>
+    <td>Constraint validation stays native; the opt-in mask is a typing affordance <em>distinct</em> from
+      validation, degrading to a plain typed input when JS is off.</td>
+  </tr>
+</table>
+
+<h3>Native-first</h3>
+<p>A plain typed input is <strong>zero JavaScript</strong> — the native element with the right
+<code>type</code> is the block. The format and mask layers are <strong>opt-in</strong>: display formatting
+is presentational (the
+<a href="/blocks/data-table/">data-table formatter</a> rule — show <code>$1,234.50</code>, submit
+<code>1234.5</code>), and masking constrains typing over the raw value, never writing
+<code>innerHTML</code>. A currency field is a <code>type=text inputmode=decimal</code> with the Intl layer
+mirroring its raw value, because <code>type=number</code> can't render grouped currency.</p>
+
+<p class="text-sm text-gray-600"><em>Status: draft standard. The native element carries the standard
+case; the format/mask behavior is a deferred Frontier UI build.</em></p>

@@ -77,11 +77,19 @@ This adds one pipeline requirement: an **inclusion gate** that classifies each c
   news, portfolios, brochureware.
 - Edge: same company often has both; keep only the app screens.
 
-### Fork 2 — Classification depth ✅ *(resolved 2026-06-12)*
+### Fork 2 — Classification depth ✅ *(resolved 2026-06-12; refined by [#475](475-design-ref-vision-gated-capture-qc-candidate-surface-quality.md) 2026-06-13)*
 
 **Deterministic-only at collect time** (source, dates, app, company, viewport, hashes); **defer
 visual tagging to the phase-3 vision pass.** Collection stays cheap and fast; category / surface /
 register / theme get filled during codification.
+
+> **Refinement (2026-06-13, [#475](475-design-ref-vision-gated-capture-qc-candidate-surface-quality.md)):**
+> the "defer visual *tagging*" half still holds (→ #396), but "deterministic-*only*" is superseded.
+> The brittle hand-authored `readySelector` gate doesn't generalise and can't tell a clean app
+> surface from a marketing splash / modal-obstructed / error frame — so a **cheap vision pass now
+> runs at collect time as a quality *gate*** (admit / remediate / quarantine), with deterministic
+> selectors kept only as an optional fast-path. Full visual tagging stays deferred to #396; both
+> consume one shared swappable vision provider.
 
 ## Open decisions
 
@@ -155,8 +163,9 @@ The next stages are tracked as discrete children of this epic:
 - **#393** — Backfill `reviewState` on the 14 pre-gate shots · _task, agent-ready_
 - **#394** — First-run scope & taxonomy seed / grow `targets.json` · _decision/story_
 - **#395** — Phase 2: `sharp` perceptual near-dup consolidation · _story, agent-ready_
-- **#396** — Phase 3: vision codification of the corpus into intents · _story, needs design_
+- **#396** — Phase 3: vision codification of the corpus into intents · _decision, ✓ ready to ratify (prepared 2026-06-13)_
 - **#397** — Gallery-harvest `captureMethod` for auth-walled app interiors · _story, needs design_
+- **#475** — Vision-gated capture QC: judge candidate surface quality (app vs marketing/modal/error) at collect time · _decision, ✓ ready to ratify (prepared 2026-06-13)_ — closes the open QC gap below; defines the shared vision provider #396 widens
 
 All run against the shipped phase-1 pipeline, so none is hard-blocked — they're independently
 selectable (no `blockedBy` edges; the `parent: 382` link is the only relation).

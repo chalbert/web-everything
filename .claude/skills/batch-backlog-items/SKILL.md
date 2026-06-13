@@ -20,9 +20,13 @@ judgment call); the happy path is these commands:
    a story's `size`, a task = 2). The **count is whatever fills the budget** — not a fixed 3; a `size·8`
    joins when it fits. Skim only the packed items' bodies for a buried fork — **that's the whole
    pre-flight.** Trust the projection: it only lists items with `blockedBy` resolved, so **don't
-   re-`grep` already-resolved blockers**; a dirty-file flag means **drop or defer to `claim`**, not
-   `git diff` it; and **only look one cluster deeper for a tighter alternative if the skim actually
-   surfaces a fork** — clean pack → take it and go (full rule: *Running a batch* → *Eligibility* pre-flight note).
+   re-`grep` already-resolved blockers**; **the working tree's git/commit state is irrelevant — NEVER
+   inspect `git status`/`git diff` to decide eligibility, and never skip or drop an item because it (or
+   the tree) has uncommitted edits.** A perpetually-dirty tree is the normal baseline; `claim` does not
+   look at commit state, and concurrency is owned by the `status` transition + `reserve` holds, not git
+   (see *The stop rule* → *drop-reason classifier*). **Only look one cluster deeper for a tighter
+   alternative if the skim actually surfaces a fork** — clean pack → take it and go (full rule: *Running
+   a batch* → *Eligibility* pre-flight note).
    **When the skim shows an item is mis-flagged** (really a decision/fork, deferred/gated, or mis-sized),
    **fix the flag in place, don't just skip it** — `type: decision` (→ Tier B), `status: parked`, or bump
    `size` (to `13` to drop it from the eligible pool) — then re-run the gate. A clean pool is the
@@ -104,25 +108,41 @@ When invoked (`/batch [P]` or `/batch-next [P] [NNN-slug]`):
    top up** by re-running `--select --budget=<remaining>` to absorb any cascade-freed Tier-A items (never
    raw leftovers) — see *Running a batch* → *The loop* step 4.
 4. **Stop + hand off** per *Running a batch* → *Stopping*: the final ledger, the **stop reason**
-   (which rule fired), and the **carry-forward** block. When the stop was the **context seam**,
-   recommend starting a **fresh agent** so context resets, emitting `/batch-next <NNN-slug>` in its
-   own fenced code block.
+   (which of rules 1–4 fired), and the **carry-forward** block. When the budget was reached with
+   eligible work still queued, recommend starting a **fresh agent** so context resets, emitting
+   `/batch-next <NNN-slug>` in its own fenced code block.
 5. **Calibrate at close-out** per *Running a batch* → *Calibrating the budget*: **ask the user for the
    editor's current context-meter reading** (the agent can't see it), then run
    `node scripts/backlog.mjs calibrate --points=<cost resolved> --context-pct=<reading from user>` so the
    budget tracks what a session actually fits (closing-session does this automatically when a batch ran).
    Never estimate the context percentage; skip calibration if the user gives none.
 
-**The stop rule (solid by construction)** — the **points budget is the driver**; stop the batch at a seam
-if ANY holds (full text in *Running a batch* → *The stop rule*): **gate red** (safety stop — never batch
-past a red gate), **points budget reached** (deterministic backstop — the resolved `batchCost` sum fills
-the budget; every item costs ≥ 2 so it always terminates), **no eligible Tier-A item left**
-(`task`/`story·≤8`, *after* a seam re-pack), **a new design fork surfaced** (or an item outgrew its
-estimate), or a **context seam — but only on a countable signal** (a *planned* repo/subsystem boundary, or
-a user-reported context-meter reading near the limit), **never a felt "I've read a lot"** (you can't
-measure your own context — a batch that *feels* full has measured at ~22% used). Absent a hard stop
-(gate/fork/empty), **keep going to the budget** — don't quit early on a gut call; that was the failure this
-rule was rewritten to kill.
+**The stop rule (solid by construction)** — the **points budget is the sole driver**; stop the batch at a
+seam if (and ONLY if) ANY of these **four** holds (full text in *Running a batch* → *The stop rule*):
+**gate red** (safety stop — never batch past a red gate), **points budget reached** (deterministic
+backstop — the resolved `batchCost` sum fills the budget; every item costs ≥ 2 so it always terminates),
+**no eligible Tier-A item left** (`task`/`story·≤8`, *after* the seam re-pack **looped to exhaustion**), or
+**a new design fork surfaced** (or an item outgrew its estimate *mid-work* — never on a pre-claim "looks
+big" guess; a `story·8` that is genuinely 8 pts has **not** outgrown, the budget decides if it fits).
+**There is NO context-seam stop and NO mid-batch context check.** You cannot measure your own context, so
+**never stop on your own judgement** ("I've read a lot", "this is long", "I'm at a subsystem boundary" — a
+batch that *feels* full has measured at ~22% used), and **never interrupt the batch to ask the user for a
+context reading** to decide whether to continue — that re-introduces the judgement stop through the back
+door. The budget *already is* the context limit (it's calibrated from a real context-% reading at
+close-out). Absent one of the four hard stops, the next action is **always** to claim the next eligible
+item. A repo/subsystem boundary is a plan-time *ordering* hint only, never a stop.
+
+**The drop-reason classifier makes rule 3 honest (full table in *The stop rule* → *The drop-reason
+classifier*).** A declined item is **not** a stop: every Tier-A item the re-pack surfaces that you don't
+claim must carry exactly one hard reason — `dirty` (the `claim` tool refused it), `blocked-in-fact` (a
+needed artifact **verified** absent), `not-batchable` (`decision`/`story·≥13`/`epic`), `out-of-locus`
+(lives in a repo whose gate this batch can't run — resolving it on *this* gate would be dishonest), or
+`outgrew` (claimed-and-began, then sprawled). An eligible `task`/`story·≤8` with **none** of these **must be
+claimed** — "big / risky / load-bearing / needs a focused session / fresh agent" are the gut stops this
+kills. The closing ledger **tags every unworked item with its reason**; an untagged item (or one tagged
+"felt big") means you stopped early — go back and claim it. Quitting early on a gut call (or an unsolicited
+context-check) is the failure this rule exists to kill. (The context-% question belongs at **close-out
+only**, for calibration — never as a continue/stop gate.)
 
 Everything per item — claim-as-`active`, the `## Progress` block, the close-out gate and
 leftover-capture pass, the immutable-`NNN` rules — is **exactly** the single-item arc. Batch adds

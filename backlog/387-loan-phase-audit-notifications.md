@@ -1,5 +1,6 @@
 ---
 type: idea
+locus: exercise-app
 workItem: story
 size: 3
 status: open

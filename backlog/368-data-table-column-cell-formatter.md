@@ -25,7 +25,7 @@ sort value.
   via `Intl.NumberFormat` / `Intl.DateTimeFormat` (native-first).
 - Keep the audit/contract intact: formatting is presentational, must not affect `aria-sort` or order.
 
-## Open questions
+## Design notes (recommended)
 
 - Does rich-cell content belong to data-table, or to a future status/badge standard ([#354]) the column
   composes? (Likely: formatter returns a node produced by the status standard.)

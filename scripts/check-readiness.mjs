@@ -7,7 +7,7 @@
  * became agent-ready because their `blockedBy` prerequisites are all resolved) and pure structural
  * normalization findings — and, only with `--apply`, performs the one mechanical, reversible edit:
  * dropping stale (already-resolved) `blockedBy` edges via a frontmatter splice. Bodies are never
- * touched, and Tier C (`decision`/`review`) items are left alone.
+ * touched, and Tier C (`decision`) items are left alone.
  *
  * The cascade + readiness derivations come straight from the shared loader (`src/_data/backlog.js`,
  * via #248/#249) — we reuse its `tier`/`blockers`, we do not recompute the rubric.
@@ -67,6 +67,14 @@ const BUDGET_OVERRIDE = (() => {
   return Number.isFinite(n) && n >= 0 ? n : undefined;
 })();
 
+// --locus=<repo> sets the batch's own locus — only same-locus items are packable; cross-locus Tier-A
+// items surface in a separate "Other locus" list (a WE batch can't honestly gate a plateau-app/FUI item).
+// Default `webeverything` (the repo this runs in). See backlog-workflow.md → "Repo-locus".
+const BATCH_LOCUS = (() => {
+  const m = process.argv.find((a) => a.startsWith('--locus='));
+  return m ? m.slice('--locus='.length) : 'webeverything';
+})();
+
 const RED = '\x1b[31m', YEL = '\x1b[33m', GRN = '\x1b[32m', DIM = '\x1b[2m', CYA = '\x1b[36m', BLD = '\x1b[1m', RST = '\x1b[0m';
 
 const items = typeof loadBacklog === 'function' ? loadBacklog() : loadBacklog;
@@ -82,7 +90,7 @@ const reservations = loadReservations();
 const foreign = foreignHolds(reservations, Date.now(), MY_SESSION);
 const tierAforPack = deprioritizeReserved(selection.tierA, foreign);
 const batchableForView = deprioritizeReserved(selection.batchable, foreign);
-const batchPack = computeBatchPack(tierAforPack, budget); // the suggested points-budgeted batch (reservation-aware)
+const batchPack = computeBatchPack(tierAforPack, budget, BATCH_LOCUS); // the suggested points-budgeted batch (reservation-aware, same-locus only)
 
 // ── --apply: the only mechanical edit — drop stale (resolved) blockedBy edges ────
 const applied = [];
@@ -122,9 +130,13 @@ if (SELECT) {
 
   console.log(`${DIM}check:readiness --select — deterministic ranking (same source as /backlog/ Prioritisation tab)${RST}`);
   const c = selection.counts;
-  console.log(`${BLD}${c.open} open${RST} · ${GRN}${c.tierA} Tier A${RST} · ${CYA}${c.batchable} batchable${RST} · ${YEL}${c.tierB} Tier B (decisions${c.tierBPrepared ? `, ${GRN}${c.tierBPrepared} prepared${YEL}` : ''})${RST} · ${DIM}${c.tierC} Tier C${RST}\n`);
+  console.log(`${BLD}${c.open} open${RST} · ${GRN}${c.agentReady} agent-ready${RST} (${CYA}${c.batchable} batchable${RST})${c.sliceable ? ` · ${CYA}${c.sliceable} epics${RST}${DIM} (${c.epicActionable} need action)${RST}` : ''} · ${YEL}${c.tierB} Tier B (decisions${c.tierBPrepared ? `, ${GRN}${c.tierBPrepared} prepared${YEL}` : ''})${RST} · ${DIM}${c.tierC} Tier C${RST}${c.inFlight ? ` · ${DIM}${c.inFlight} in flight${RST}` : ''}\n`);
 
   if (foreign.size) console.log(`${DIM}${foreign.size} item(s) soft-held by another session${MY_SESSION ? ` (yours: ${MY_SESSION}, not penalized)` : ''} — deprioritized below, not excluded (#083).${RST}`);
+  // Legible-stop (#083): when the pool is thin/empty but items are in flight elsewhere, say so — a
+  // batch's "no eligible Tier-A left" stop then reads as "drained by a concurrent session, re-run
+  // shortly," not "backlog empty." Derived live from `status: active`, so it's never a stale signal.
+  if (selection.inFlight.length) console.log(`${DIM}${selection.inFlight.length} batch-shaped item(s) in flight (${YEL}status: active${RST}${DIM} — likely another session); if the pool below is thin, that pool is drained, not empty — re-run after they resolve (#083).${RST}`);
   console.log(`${CYA}${BLD}Batchable — Tier-A task or story·≤8 (the batch pool) — pre-flight each body for a buried fork before chaining${RST}`);
   if (batchableForView.length) batchableForView.forEach((it) => line(it, it.reservedBy ? `${YEL}⊘${RST}` : `${CYA}◆${RST}`));
   else console.log(`${DIM}  none.${RST}`);
@@ -141,12 +153,49 @@ if (SELECT) {
       console.log(`  ${CYA}＋${RST} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}— ${eff(it)} · cost ${it.batchCost} · running ${run}/${budget}${RST}`);
     });
     console.log(`  ${DIM}= ${batchPack.spent}/${budget} pts packed across ${batchPack.picked.length} item(s). Pre-flight each body for a buried fork; the count is whatever fills the budget.${RST}`);
-  } else console.log(`${DIM}  none eligible — no Tier-A item fits the budget.${RST}`);
+  } else console.log(`${DIM}  none eligible — no Tier-A item fits the budget${selection.inFlight.length ? `; ${selection.inFlight.length} batch-shaped item(s) are in flight (status: active) — pool likely drained by a concurrent session, re-run shortly (#083)` : ''}.${RST}`);
 
-  const restA = tierAforPack.filter((it) => !it.batchable);
-  console.log(`\n${GRN}${BLD}Other Tier-A — agent-ready, single-item (story·≥13 / epic / unsized)${RST}`);
+  // Repo-LOCUS: Tier-A batchable items of a DIFFERENT locus than this batch — they can't be honestly
+  // closed by this repo's gate, so they're held out of the pack (never packed, never a soft "decline").
+  // Surface them so they read as `out-of-locus` carry-forward (a focused in-repo session), not as work
+  // this batch skipped on judgement. See backlog-workflow.md → "Repo-locus" + "The drop-reason classifier".
+  if (batchPack.otherLocus && batchPack.otherLocus.length) {
+    console.log(`\n${YEL}${BLD}Other locus — batchable, but a different repo's gate must close them (locus ≠ ${BATCH_LOCUS})${RST}`);
+    batchPack.otherLocus.forEach((it) =>
+      console.log(`  ${YEL}⌂${RST} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}— ${eff(it)} · ${it.locus}${it.locusAuthored ? '' : ' (inferred — set locus: to confirm)'}${RST}`));
+    console.log(`  ${DIM}out-of-locus: run these in their own repo (its gate + dev server), not this batch (#083 / repo-locus).${RST}`);
+  }
+
+  // Tier-A non-batchable splits two ways: buildable-but-large (story·≥13 / unsized story) an agent can
+  // still implement, versus epics — unblocked but only ready to SLICE (work lives in child slices, not
+  // the epic). Keep them in separate sections so an epic never reads as a buildable to-do (#double-count).
+  const restA = tierAforPack.filter((it) => !it.batchable && it.workItem !== 'epic');
+  const sliceA = tierAforPack.filter((it) => it.workItem === 'epic');
+  console.log(`\n${GRN}${BLD}Other Tier-A — agent-ready, single-item (story·≥13 / unsized)${RST}`);
   if (restA.length) restA.forEach((it) => line(it, it.reservedBy ? `${YEL}⊘${RST}` : `${GRN}▲${RST}`));
   else console.log(`${DIM}  none.${RST}`);
+
+  // Epics split by what they actually need: unsliced (→ /slice) and all-children-done (→ resolve) are
+  // ACTIONABLE; the rest just track open children (no epic-level action — their work is those children,
+  // already in the pool above). Listing them apart stops a passive rollup reading as a buildable to-do.
+  const epicAction = sliceA.filter((it) => it.epicState === 'unsliced' || it.epicState === 'done');
+  // No epic-level action: 'tracking' (open children) or 'parked' (a childlessReason gates decomposition —
+  // blocked / undecided / untriaged / program). Listed compactly so a parked/tracking epic never reads
+  // as a slice to-do; a parked one shows its recorded reason (that reason IS its blocker).
+  const epicNoAction = sliceA.filter((it) => it.epicState === 'tracking' || it.epicState === 'parked');
+  const epicTag = (it) => it.epicState === 'unsliced' ? `${CYA}slice${RST}` : `${GRN}resolve${RST}`;
+  console.log(`\n${CYA}${BLD}Epics needing action — /slice the unsliced (no reason yet), resolve those whose children are all done${RST}`);
+  if (epicAction.length) epicAction.forEach((it) => line(it, it.reservedBy ? `${YEL}⊘${RST}` : `${CYA}▣ ${epicTag(it)}`));
+  else console.log(`${DIM}  none.${RST}`);
+  if (epicNoAction.length) console.log(`${DIM}  + ${epicNoAction.length} epic(s) no action — ${epicNoAction.map((it) => '#' + it.num + (it.epicState === 'parked' ? `(parked: ${it.childlessReason || 'no reason'})` : '')).join(', ')}${RST}`);
+
+  // In flight — only shown when non-empty (keeps the common single-session run unchanged). These are
+  // batch-shaped items a sibling session has `claim`ed (status:active); they're excluded from the pool
+  // above but listed here so a drained pool is legibly "in flight elsewhere," not "nothing to do."
+  if (selection.inFlight.length) {
+    console.log(`\n${DIM}${BLD}In flight — batch-shaped items being worked elsewhere (status: active)${RST}`);
+    selection.inFlight.forEach((it) => console.log(`  ${YEL}▶${RST} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}— ${eff(it)}${RST}`));
+  }
 
   console.log(`\n${YEL}${BLD}Tier B — decisions (prepared-first, then by leverage; discuss, don't auto-build)${RST}`);
   if (selection.tierB.length) selection.tierB.forEach((it) => {

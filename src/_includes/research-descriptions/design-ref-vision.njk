@@ -1,0 +1,120 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  This is the prior-art grounding for the two <strong>vision</strong> items on the
+  design-reference screenshot corpus: the <em>capture-time QC gate</em>
+  (<a href="/backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/">backlog #475</a>)
+  and the <em>codification pass</em>
+  (<a href="/backlog/396-design-ref-phase-3-vision-codification-of-the-corpus-into-in/">#396</a>). The
+  phase-1 pipeline (<a href="/backlog/382-design-reference-screenshot-corpus-collect-dedup-codify/">#382</a>)
+  already ships, but its inclusion gate is a <strong>deterministic, hand-authored</strong>
+  <code>readySelector</code> (<code>scripts/design-refs.mjs:145</code>): it only works when a human has
+  written the right CSS selector for that one target, doesn't generalise, and can't distinguish a clean
+  application surface from a marketing splash, a modal-obstructed view, or a stale error panel — the exact
+  failures the corpus saw (Photopea's splash, Grafana's error page). Session report:
+  <code>reports/2026-06-13-design-ref-vision-pipeline.md</code>.
+</p>
+
+<h2>The finding that decides the architecture</h2>
+<p>
+  Surveying UI-vision prior art surfaces an <strong>asymmetry</strong>: <em>coarse screen
+  classification is mature and reliable, while full screenshot→structure recovery is still hard.</em>
+  That asymmetry is the whole ruling — it says the cheap <em>gate</em> verdict can be automated with
+  confidence, while the rich <em>codification</em> must stay human-in-the-loop.
+</p>
+<table>
+  <thead><tr><th>Source</th><th>What it is</th><th>What we borrow</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>ScreenAI</strong> (Google, <a href="https://arxiv.org/abs/2402.04615">arXiv 2402.04615</a>)</td>
+      <td>VLM that identifies UI element <em>type + location</em>; auto-generates QA / navigation /
+        summarization from a screen-annotation task.</td>
+      <td>Coarse surface classification is a solved-ish capability — the QC verdict is a <em>cheap</em>
+        call, not a research problem.</td>
+    </tr>
+    <tr>
+      <td><strong>Ferret-UI</strong> (Apple, <a href="https://arxiv.org/pdf/2404.05719">arXiv 2404.05719</a>)</td>
+      <td>MLLM for UI: referring / grounding / reasoning, widget &amp; icon classification; beats GPT-4V
+        on elementary UI tasks.</td>
+      <td>Confirms a structured verdict over a screenshot is reliable — element/screen classification is
+        not the bottleneck.</td>
+    </tr>
+    <tr>
+      <td><strong>Design2Code</strong> (Stanford, <a href="https://aclanthology.org/2025.naacl-long.199/">NAACL 2025</a>) +
+        <strong>WebSight</strong> (2M synthetic screenshot↔HTML pairs)</td>
+      <td>Real-world screenshot→code benchmark. SOTA <strong>Claude-4-Sonnet 76.3</strong>; open VLMs
+        <strong>&lt;45</strong>; models still struggle with visual-element recall and layout fidelity.</td>
+      <td>The <em>codification</em> half is hard → <a href="/backlog/396-design-ref-phase-3-vision-codification-of-the-corpus-into-in/">#396</a>
+        stays human-in-the-loop (neutral structure as the editable surface). The <em>gate</em> half
+        (yes / no / remediate) is far easier → safe to automate.</td>
+    </tr>
+    <tr>
+      <td><strong>VLM-as-a-Judge</strong> protocol; structured-output VLM evaluation at scale</td>
+      <td>Evaluation cast as conditional multimodal classification driven by model output + user-specified
+        <em>criteria</em>; structured outputs make it scalable.</td>
+      <td>The QC gate <em>is</em> a VLM-as-judge: fixed criteria (“is this an unobstructed app surface?”)
+        → a structured verdict. Cache verdicts by content hash (mirror the <code>ledger.json</code> sha256
+        skip) so re-runs don't re-pay vision.</td>
+    </tr>
+    <tr>
+      <td><strong>autoconsent</strong> (DuckDuckGo, npm) + Consent-O-Matic rules</td>
+      <td>A rule library that navigates consent / cookie popups and <strong>runs inside a
+        Playwright-orchestrated headless browser</strong> without user input.</td>
+      <td>The <code>obstructed</code> remediation (dismiss overlay, re-shoot) reuses this — Playwright-native,
+        no bespoke overlay dismissal to build.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>One swappable provider, two call shapes</h2>
+<p>
+  The two consumers differ in <em>cost and richness</em>, not in <em>kind</em> — both are “a vision model
+  looks at a screenshot and returns structured judgement.” So they share <strong>one</strong>
+  <code>customVisionProvider</code> registry (the
+  <a href="/backlog/086-mockup-to-standard-code-tool/">#086</a> <code>customMockupAnalyzerRegistry</code>
+  pattern — vision is infrastructure you plug in, not architecture you bake in, with no provider name in
+  <code>scripts/design-refs.mjs</code> core), exposing two methods:
+</p>
+<table>
+  <thead><tr><th>Method</th><th>Consumer</th><th>Returns</th><th>Cost</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><code>classifyCandidate(frame, ctx)</code></td>
+      <td>#475 capture-QC gate (collect time)</td>
+      <td><code>{ verdict ∈ {app, obstructed, marketing, error, blank, non-app}, reasons[], remediation? }</code></td>
+      <td>cheap, per candidate</td>
+    </tr>
+    <tr>
+      <td><code>analyzeForCodification(shot, ctx)</code></td>
+      <td>#396 codification (post-admission)</td>
+      <td>surface / register / layout tags + recurring-paradigm candidates</td>
+      <td>rich, per corpus shot</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  This applies the #086 ruling correctly: #086 used <em>two</em> registries for analyzer-vs-generator
+  because they move at different speeds — but here both calls are <em>analysis</em>, so they belong on the
+  one analyzer-style seam. Splitting them would force two model integrations and two upgrade clocks for one
+  swappable point. The separate-and-decouple bias is honoured where it pays (provider vs. core, input
+  vs. output), while the provider stays singular.
+</p>
+
+<h2>Posture — internal tooling, zero lock-in</h2>
+<p>
+  This is dev/CI research-corpus tooling with <strong>no project-facing lock-in</strong> (the same posture
+  as the <a href="/research/design-ref-taxonomy/">design-ref-taxonomy</a> topic): bring-your-own model key,
+  and nothing about the corpus or its consumers depends on which model graded it. Deterministic
+  <code>readySelector</code> short-circuits stay a free fast-path — vision is the <em>general</em> gate that
+  generalises to any target, not the <em>only</em> gate.
+</p>
+
+<h2>What this feeds</h2>
+<p>
+  Forks in <a href="/backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/">#475</a>
+  (provider seam · gate placement · verdict taxonomy + remediation · deterministic short-circuit) and
+  <a href="/backlog/396-design-ref-phase-3-vision-codification-of-the-corpus-into-in/">#396</a>
+  (codification output contract · provider relationship · paradigm→candidate-intent promotion path), each
+  carrying a recommended default grounded in the table above.
+</p>
+{% endraw %}

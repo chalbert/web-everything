@@ -23,7 +23,11 @@ export function fixPrototype(original: Node, clone: Node): void {
  * @param clone - The cloned node
  */
 export function copyOptions(original: any, clone: any): void {
-  if ('options' in original) {
+  // Only copy an OWN `options` data property. A bare `'options' in original` also catches native
+  // form controls (`<select>`/`<datalist>`) whose `options` is a read-only inherited accessor —
+  // assigning that onto the clone throws and aborts the clone (#454). A real CustomElement sets
+  // `options` as an own property in its constructor, so own-property is the precise discriminator.
+  if (Object.prototype.hasOwnProperty.call(original, 'options')) {
     clone.options = original.options;
   }
 }

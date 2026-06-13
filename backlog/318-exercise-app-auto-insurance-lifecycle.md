@@ -101,10 +101,17 @@ One story per requirements module (mirrors #317's #378–#388):
   seam**; pure reuse otherwise. Surfaced the production-authz gap (Web Guards [#289]). Conformance
   **100% (12/12)**.
 
-**Next:** S4 ([#415](/backlog/415-ins-phase-bind-issue/)) bind/issue, or S7 ([#418](/backlog/418-ins-phase-fnol/))
-FNOL — the latter drives **file handling** (a new gap) and the *claim* lifecycle (a second entity machine
-on Web Lifecycle). Across both apps: 10 active blocks (8 loan-driven + stepper + tree-select), guard seam
-exercised, gaps filed (#289 permissions, #096 configurator, #015 view-transitions, #423 router bug).
+- S7 ([#418](/backlog/418-ins-phase-fnol/)) **done** — FNOL + claims workbench. WE value: the **claim
+  lifecycle is a SECOND Web Lifecycle entity machine** (fnol→…→closed) on the shared registry, proving the
+  standard generalizes beyond one entity; adjuster role-scoped guarded transitions auto-log to the claim's
+  audit. FNOL uses a native `<input type=file>` (native-first); the richer file-upload component is the gap
+  ([#028]). Conformance **100% (12/12)**.
+
+**Next:** S4 ([#415](/backlog/415-ins-phase-bind-issue/)) bind/issue, S5 endorsements, S6 renewals — more
+policy-lifecycle depth — or codify a *new* standard from the filed gaps (**#096 configurator**, **#015
+view-transitions**, **#028 file-upload block**, **#289 Web Guards provider**). Across both apps: 10 active
+blocks, two entity lifecycles on Web Lifecycle, guard seam exercised; gaps filed: #289, #096, #015, #028,
+#423 (router bug).
 
 ## WE-surface consumption slices
 

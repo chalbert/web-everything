@@ -1,0 +1,43 @@
+<h2>Radio Group</h2>
+<p>Native-first over a <code>&lt;input type="radio"&gt;</code> group sharing a <code>name</code>:
+<strong>single-select</strong> among mutually-exclusive choices. It realizes the
+<a href="/intents/selection/">selection</a> intent (<code>model: single</code>) and composes
+<a href="/intents/focus-delegation/">focus-delegation</a> (roving). Sliced from the
+<a href="/backlog/468-form-control-block-inventory-datepicker-timepicker-input-fam/">form-control
+inventory (#468)</a>.</p>
+
+<h3>What it provides</h3>
+<ul>
+  <li>A set of <code>&lt;input type="radio"&gt;</code> sharing one <code>name</code>, wrapped in a
+    <code>&lt;fieldset&gt;</code> with a <code>&lt;legend&gt;</code> naming the group.</li>
+  <li>Mutual exclusivity + a single submitted value — free from the shared <code>name</code>.</li>
+  <li>Roving focus: arrow keys move focus <em>and</em> change selection; the whole group is a single
+    <kbd>Tab</kbd> stop (the checked radio, or the first when none is selected).</li>
+</ul>
+
+<h3>Web Standards Alignment</h3>
+<table>
+  <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+  <tr>
+    <td><a href="https://html.spec.whatwg.org/multipage/input.html#radio-button-state-(type=radio)">HTML <code>input type=radio</code></a> (shared <code>name</code>)</td>
+    <td>WHATWG HTML</td>
+    <td>Exclusivity and the single value are the platform's; the block adds the
+      <code>&lt;fieldset&gt;</code>/<code>&lt;legend&gt;</code> grouping + labelling contract.</td>
+  </tr>
+  <tr>
+    <td><a href="https://www.w3.org/WAI/ARIA/apg/patterns/radio/">WAI-ARIA APG Radio Group</a></td>
+    <td>W3C WAI-ARIA APG</td>
+    <td>Native radios already implement the roving model — <kbd>↑↓←→</kbd> move + select, group is one
+      Tab stop. This is the <a href="/intents/focus-delegation/">focus-delegation</a> <code>roving</code>
+      value, composed rather than re-implemented.</td>
+  </tr>
+</table>
+
+<h3>Native-first</h3>
+<p>The standard case is <strong>zero JavaScript</strong> — native radios sharing a <code>name</code> give
+exclusivity, the single value, and the roving keyboard model for free. Distinct from a
+<a href="/blocks/checkbox/">checkbox group</a>: radios are single-select (<code>model: single</code>),
+a checkbox group is multi-select (<code>model: multiple</code>).</p>
+
+<p class="text-sm text-gray-600"><em>Status: draft standard. No reference runtime needed for the native
+case; any enhanced styling/behavior is a deferred Frontier UI build.</em></p>

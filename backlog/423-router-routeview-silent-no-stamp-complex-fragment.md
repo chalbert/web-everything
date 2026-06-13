@@ -2,8 +2,11 @@
 type: issue
 workItem: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-06-12"
+dateStarted: "2026-06-12"
+dateResolved: "2026-06-12"
+graduatedTo: none
 tags: [router, route-view, bug, stamping, exercise-app-discovery]
 crossRef: { url: /backlog/318-exercise-app-auto-insurance-lifecycle/, label: "Surfaced by auto-insurance S1 (#318)" }
 ---
@@ -41,3 +44,20 @@ underlying route-view stamping defect should be root-caused (a form fragment is 
 
 The route-view stamps a complex form fragment template body to live DOM (add a regression test with a
 multi-fieldset template), or the limitation is documented as a contract boundary with a clear error.
+
+## Progress (2026-06-12) — resolved via the contract-boundary path; root-cause carved to #454
+
+Static analysis cleared the stamping path: `#stampAllRoutes` clones content, captures `nodes` *before*
+`appendChild`, and accumulates correctly; `#unstampFrom` bookkeeping is sound; the wizard markup is valid
+HTML. The loader `try/catch` (RouteViewElement.ts:345) does **not** wrap stamping, and the report says
+*no console error* — so this is the **empty-clone** path (a matched, non-empty `<template>` clones to an
+empty fragment → blank view, silently), not a swallowed throw. Why a valid template clones empty is not
+visible statically (most likely a stamped-fragment auto-upgrade side effect — a `data-step` Stepper /
+tree-select behavior clearing its container on upgrade) and needs **live-browser forensics**.
+
+Shipped the **contract-boundary diagnostic** (the second Done-when path) in
+[RouteViewElement.ts](../blocks/router/elements/RouteViewElement.ts#L505): a matched non-empty template
+that stamps zero live nodes now logs a clear, route-identified `[Router] … (#423)` error instead of
+failing silently, and `appendChild` is wrapped so a stamp-time throw surfaces with route context rather
+than as an unhandled rejection. Full test suite green (2368). The **root-cause fix + regression test**
+(browser repro of the wizard inlined) is carved to **#454**.

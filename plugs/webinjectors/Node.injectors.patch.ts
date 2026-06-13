@@ -16,6 +16,7 @@
 
 import HTMLInjector, { HTMLInjectorTarget } from './HTMLInjector';
 import InjectorRoot from './InjectorRoot';
+import type { RootNode } from '../core/types';
 
 const baseDescriptor = { configurable: true, enumerable: true };
 
@@ -204,4 +205,17 @@ export function removeNodeInjectorsPatches(): void {
  */
 export function isNodeInjectorsPatched(): boolean {
   return 'injectors' in Node.prototype;
+}
+
+declare global {
+  interface Node {
+    /** The injector directly attached to this node, if any. */
+    getOwnInjector(): HTMLInjector | null;
+    /** Whether an injector is directly attached to this node. */
+    hasOwnInjector(): boolean;
+    /** The nearest injector in the hierarchy (own, ancestor, or creation), if any. */
+    getClosestInjector(): HTMLInjector | null;
+    /** Yields every injector up the chain, nearest first. */
+    injectors(): Generator<HTMLInjector>;
+  }
 }

@@ -35,10 +35,12 @@ function makeItems(specs) {
       id: `${s.num}-${s.slug ?? 'slug'}`, num: String(s.num), slug: s.slug ?? 'slug',
       title: s.title ?? `#${s.num}`,
       type: s.type, status: s.status, workItem: s.workItem, size: s.size,
+      epicState: s.epicState,
       dateStarted: s.dateStarted, blockedBy: s.blockedBy, blockers, tier,
       batchable, batchCost, leverageScore: s.leverageScore ?? 0,
       directUnblocks: s.directUnblocks ?? 0, transitiveUnblocks: s.transitiveUnblocks ?? 0,
       unblocksToReady: s.unblocksToReady ?? 0,
+      locus: s.locus, locusAuthored: s.locusAuthored,
     };
   });
 }
@@ -128,10 +130,49 @@ describe('selection view (#254 projection) — the skills consume this, never re
       { num: 6, type: 'idea', status: 'resolved', workItem: 'story', size: 1 },// dropped (not open)
     ]);
     const sel = computeSelection(items);
-    expect(sel.counts).toEqual({ open: 5, tierA: 3, tierB: 1, tierBPrepared: 0, tierC: 1, batchable: 2 });
+    expect(sel.counts).toEqual({ open: 5, tierA: 3, agentReady: 3, sliceable: 0, epicActionable: 0, tierB: 1, tierBPrepared: 0, tierC: 1, batchable: 2, inFlight: 0 });
     expect(sel.batchable.map((i) => i.num).sort()).toEqual(['1', '2']);
     expect(sel.tierA.every((i) => i.tier === 'A')).toBe(true);
     expect(sel.tierB.map((i) => i.num)).toEqual(['4']);
+  });
+
+  it('splits a Tier-A epic into the sliceable bucket — unblocked but not buildable, never agent-ready', () => {
+    const items = makeItems([
+      { num: 1, type: 'idea', status: 'open', workItem: 'story', size: 3 },   // batchable agent-ready
+      { num: 2, type: 'idea', status: 'open', workItem: 'epic', size: 5 },    // Tier A but a container → sliceable
+      { num: 3, type: 'idea', status: 'open', workItem: 'epic' },             // unsized epic → sliceable too
+    ]);
+    const sel = computeSelection(items);
+    expect(sel.counts.tierA).toBe(3);          // all three clear prerequisites
+    expect(sel.counts.agentReady).toBe(1);     // only the buildable story
+    expect(sel.counts.sliceable).toBe(2);      // both epics
+    expect(sel.sliceable.map((i) => i.num).sort()).toEqual(['2', '3']);
+    expect(sel.batchable.some((i) => i.workItem === 'epic')).toBe(false);  // an epic is never batchable
+  });
+
+  it('counts only actionable epics (unsliced / all-children-done) — not tracking, and not parked', () => {
+    const items = makeItems([
+      { num: 1, type: 'idea', status: 'open', workItem: 'epic', epicState: 'unsliced' }, // → /slice
+      { num: 2, type: 'idea', status: 'open', workItem: 'epic', epicState: 'done' },     // → resolve
+      { num: 3, type: 'idea', status: 'open', workItem: 'epic', epicState: 'tracking' }, // open children, no action
+      { num: 4, type: 'idea', status: 'open', workItem: 'epic', epicState: 'tracking' }, // open children, no action
+      { num: 5, type: 'idea', status: 'open', workItem: 'epic', epicState: 'parked' },   // childlessReason gates it → no action
+    ]);
+    const sel = computeSelection(items);
+    expect(sel.counts.sliceable).toBe(5);       // all five epics are Tier-A
+    expect(sel.counts.epicActionable).toBe(2);  // only the unsliced + the all-done one — parked is NOT actionable
+  });
+
+  it('reports batch-shaped active items as in flight (#083 legible-stop), excluding non-batch-shaped', () => {
+    const items = makeItems([
+      { num: 1, type: 'idea', status: 'active', workItem: 'task', dateStarted: '2026-06-13' },        // in flight (task)
+      { num: 2, type: 'idea', status: 'active', workItem: 'story', size: 5, dateStarted: '2026-06-13' }, // in flight (story·≤8)
+      { num: 3, type: 'idea', status: 'active', workItem: 'story', size: 13, dateStarted: '2026-06-13' },// active but NOT batch-shaped (>8)
+      { num: 4, type: 'idea', status: 'open', workItem: 'task' },                                       // open, not in flight
+    ]);
+    const sel = computeSelection(items);
+    expect(sel.counts.inFlight).toBe(2);
+    expect(sel.inFlight.map((i) => i.num).sort()).toEqual(['1', '2']);
   });
 
   it('ranks by leverage desc, then issue-before-idea, then smaller-first, then NNN', () => {
@@ -181,6 +222,31 @@ describe('computeBatchPack — points budget, not a count cap', () => {
     const { picked } = computeBatchPack(ranked(), 999);
     expect(picked.map((i) => i.num)).not.toContain('5');
     expect(picked.map((i) => i.num)).toEqual(['1', '2', '3', '4']); // 3+5+2+2 = 12, all eligible
+  });
+
+  describe('repo-locus filter — only the batch\'s own locus is packable', () => {
+    const mixed = () => computeSelection(makeItems([
+      { num: 1, type: 'issue', status: 'open', workItem: 'story', size: 3, leverageScore: 5000 }, // no locus → webeverything
+      { num: 2, type: 'idea', status: 'open', workItem: 'story', size: 3, leverageScore: 4000, locus: 'plateau-app', locusAuthored: true },
+      { num: 3, type: 'idea', status: 'open', workItem: 'story', size: 2, leverageScore: 3000, locus: 'frontierui', locusAuthored: false }, // inferred
+      { num: 4, type: 'idea', status: 'open', workItem: 'task', leverageScore: 2000 }, // webeverything
+    ])).tierA;
+
+    it('packs only same-locus items; cross-locus go to otherLocus (never the pack)', () => {
+      const { picked, otherLocus } = computeBatchPack(mixed(), 999, 'webeverything');
+      expect(picked.map((i) => i.num)).toEqual(['1', '4']);
+      expect(otherLocus.map((i) => i.num)).toEqual(['2', '3']);
+    });
+
+    it('a different batchLocus packs that locus instead', () => {
+      const { picked, otherLocus } = computeBatchPack(mixed(), 999, 'plateau-app');
+      expect(picked.map((i) => i.num)).toEqual(['2']);
+      expect(otherLocus.map((i) => i.num)).toEqual(['1', '3', '4']);
+    });
+
+    it('defaults batchLocus to webeverything when omitted', () => {
+      expect(computeBatchPack(mixed(), 999).picked.map((i) => i.num)).toEqual(['1', '4']);
+    });
   });
 });
 
