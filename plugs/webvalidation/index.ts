@@ -105,6 +105,19 @@ export {
   UnknownValidationAdapterError,
   createValidationAdapterRegistry,
 } from '../../validation-generation/registry.js';
+// The field-error shape (#464) — the per-field error RFC 9457 leaves undefined: a JSON-Pointer to the
+// offending field, the validation intent whose rule failed, and a human message. A data contract that
+// rides inside the RFC 9457 envelope's `errors` extension; the output counterpart of a constraint.
+export {
+  type ValidationFieldError,
+  type ValidationProblemDetails,
+  PROBLEM_JSON_MEDIA_TYPE,
+  isJsonPointer,
+  fieldError,
+  isValidationFieldError,
+  assertValidationFieldError,
+  ValidationFieldErrorContractError,
+} from '../../validation-generation/fieldError.js';
 export {
   nativeHtmlAdapter,
   zodAdapter,
