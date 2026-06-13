@@ -2,9 +2,12 @@
 type: idea
 workItem: story
 size: 3
-status: open
+status: resolved
 blockedBy: ["320", "447"]
 dateOpened: "2026-06-11"
+dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: none
 tags: [intent, scroll, observation, intersection-observer, viewport-presence, collection-ops, prefetch, traits]
 ---
 
@@ -32,3 +35,16 @@ pagination observer) would reshape — premature churn. **Held `blockedBy #447`*
 visibility-gate observer (and pagination grows its observer), extract the one shared `viewport-presence`
 trigger and re-point all available consumers together. (Discovered identically to #448 — #320 authored the
 *intent* / UX vocabulary only; the runtime to compose comes from the consumers themselves.)
+
+## Progress (2026-06-13) — resolved
+
+#447 has since merged, so the **two** live consumers now both exist: Prefetch `eagerness:viewport`
+([RoutePrefetchBehavior.ts](../blocks/router/behaviors/RoutePrefetchBehavior.ts)) and the visibility-gated
+trait observer ([CustomAttributeRegistry.ts](../plugs/webbehaviors/CustomAttributeRegistry.ts) `#getVisibilityObserver`).
+The ≥2-consumer precondition is met — extracted the shared trigger.
+
+- **Shared home** — new [plugs/webbehaviors/viewportPresence.ts](../plugs/webbehaviors/viewportPresence.ts): `createViewportPresenceObserver({ root, rootMargin, threshold, onEnter, onLeave })` owns IntersectionObserver creation + the observe-vocabulary defaulting (the `rootMargin: '0px'` native default lives here once); routes each record to `onEnter`/`onLeave` by `isIntersecting`; returns `null` when IO is unavailable so each consumer keeps its own no-IO **UX** fallback.
+- **Re-pointed prefetch** — one-shot on enter with its `rootMargin: '50px'` override + prefetch-immediately no-IO fallback, now via the trigger.
+- **Re-pointed the visibility gate** — its single shared observer is now created by the trigger; both enter and leave route to the existing `#onIntersection` (recurring traits still re-close off-screen). Behaviour preserved — registry suite 29/29 green.
+- The **third** named consumer (Collection Ops `advance:auto` pagination observer) is still **unbuilt** in WE (renderPagination only emits the sentinel div); it composes the same `createViewportPresenceObserver` when that observer is built — no work to re-point today.
+- **Tests** — 6 new cases for the trigger (option defaulting, enter/leave routing, enter-only safety, null fallback). Gate green; no new tsc errors.

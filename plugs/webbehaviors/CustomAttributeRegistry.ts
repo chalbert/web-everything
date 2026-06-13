@@ -7,6 +7,7 @@
 import HTMLRegistry, { type ConstructorDefinition } from '../core/HTMLRegistry';
 import type { RootNode } from '../core/types';
 import CustomAttribute, { type ImplementedAttribute } from './CustomAttribute';
+import { createViewportPresenceObserver } from './viewportPresence';
 
 /**
  * Suffix of the per-usage re-enable attribute: a trait `sortable` is re-enabled
@@ -841,10 +842,15 @@ export default class CustomAttributeRegistry extends HTMLRegistry<AttributeDefin
   /** Lazily create the shared visibility `IntersectionObserver` (once). */
   #getVisibilityObserver(): IntersectionObserver | undefined {
     if (this.#visibilityObserver) return this.#visibilityObserver;
-    if (typeof IntersectionObserver === 'undefined') return undefined;
-    this.#visibilityObserver = new IntersectionObserver((records) => {
-      for (const record of records) this.#onIntersection(record);
-    });
+    // Compose the shared viewport-presence trigger (#320/#321): one home owns observer creation +
+    // option defaulting. The gate keeps its own logic — `#onIntersection` handles both enter and
+    // leave (recurring traits re-close off-screen), so route both dispatches to it. Returns null
+    // when IntersectionObserver is unavailable (the #is*Gated guards already exclude that path).
+    this.#visibilityObserver =
+      createViewportPresenceObserver({
+        onEnter: (record) => this.#onIntersection(record),
+        onLeave: (record) => this.#onIntersection(record),
+      }) ?? undefined;
     return this.#visibilityObserver;
   }
 

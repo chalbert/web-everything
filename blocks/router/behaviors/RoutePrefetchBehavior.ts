@@ -13,6 +13,7 @@
  */
 
 import CustomAttribute from '../../../plugs/webbehaviors/CustomAttribute';
+import { createViewportPresenceObserver } from '../../../plugs/webbehaviors/viewportPresence';
 import InjectorRoot from '../../../plugs/webinjectors/InjectorRoot';
 import { matchRoute } from '../types';
 import type { RouteLoaderFn } from '../types';
@@ -64,24 +65,23 @@ export default class RoutePrefetchBehavior extends CustomAttribute {
     const el = this.target;
     if (!el) return;
 
-    if (!('IntersectionObserver' in window)) {
-      // Fallback: prefetch immediately if no IntersectionObserver
+    // Compose the shared viewport-presence trigger (#320/#321): it owns the IntersectionObserver +
+    // option defaulting; this consumer keeps its UX (one-shot prefetch on enter) and its no-IO
+    // fallback. `rootMargin: '50px'` pre-triggers the prefetch just before the link scrolls in.
+    this.#observer = createViewportPresenceObserver({
+      rootMargin: '50px',
+      onEnter: () => {
+        this.#doPrefetch();
+        this.#observer?.disconnect();
+        this.#observer = null;
+      },
+    });
+
+    if (!this.#observer) {
+      // No IntersectionObserver — prefetch immediately (UX fallback owned here, not by the trigger).
       this.#doPrefetch();
       return;
     }
-
-    this.#observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            this.#doPrefetch();
-            this.#observer?.disconnect();
-            this.#observer = null;
-          }
-        }
-      },
-      { rootMargin: '50px' },
-    );
 
     this.#observer.observe(el);
   }
