@@ -2,8 +2,11 @@
 type: decision
 workItem: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-05-31"
+dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: none
 tags: [gap-analysis, project, protocol, identity, auth]
 relatedReport: reports/2026-06-11-webidentity-project.md
 preparedDate: "2026-06-11"
@@ -75,4 +78,21 @@ Ratify the four defaults above (or override individually), then graduate: fork 2
 - **Fork 3 — identity produces the auth-state signal; #178's Guard gate consumes it**: signed-in/out is an authorization predicate the Guard protocol's presence-gating seam already owns (#272), so identity feeds it one predicate rather than minting a duplicate `<signed-in>`/`<signed-out>` gate.
 - **Fork 4 — one protocol with a `credentials: [passkey | federated | digital | password]` request dimension**: matches the platform's single dispatcher + union request + typed responses; most-flexible default accepts all declared families behind the shared seam, rather than fragmenting into three per-family standards.
 
-**Open — needs a human call:** timing (Fork 2) — pull the thin `mediation`/credential-request UX intent forward now (it has a concrete downstream consumer in #178) vs defer the whole protocol/project until after data/i18n/theme — because this is a roadmap/sequencing bet, not a structural one; the shape forks are settled but *when* to spend the slice is the human's prioritization call.
+## Resolution (final) — 2026-06-13
+
+**Fork 2 ratified: (A) split-timing, tightly scoped.** Pull forward *only* the thin
+`mediation` / credential-request / **auth-state-signal** UX intent now (UX-only, composes existing
+Loader/Feedback intents — excludes any provider/ceremony surface); **defer** the full `webidentity`
+project, `credential-acquisition` protocol, provider contracts, and Configurator domain until after
+data/i18n/theme.
+
+Grounding refreshed at decision time: the item's cited consumer **#178** has since resolved *into* the
+live Guard protocol (#272, resolved), so the auth-state-predicate seam is shipping, not speculative; and
+**#379** (active loan-app "identity, roles & field/action/state permission model" phase) is the concrete
+near-term consumer — deferring entirely would let #379 invent a nonstandard local auth-state shape, the
+exact drift WE exists to prevent. Pulling the thin slice forward anchors #379 and the Guard seam to the
+standard at minimal cost.
+
+**Graduated to two spin-off items:** the agent-ready thin-intent authoring build, and a deferred
+project+protocol epic (blocked on the intent). Forks 1/3/4 settled per the 2026-06-11 partial resolution
+above.
