@@ -1,8 +1,11 @@
 ---
 type: idea
 workItem: epic
-status: open
+status: resolved
 dateOpened: "2026-06-08"
+dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: none
 tags: [research, freshness, longitudinal, versioning, reports, staleness, meta, axis-discovery]
 relatedProject: webdocs
 crossRef: { url: /research/, label: "/research/ topic index" }
@@ -42,20 +45,23 @@ account for?" and **feeds the backlog** — each newly-surfaced axis or subject 
 item or a refresh trigger on an existing topic. Mechanism is open (periodic prompt, a
 checklist, an agent sweep), but the output channel is the existing tracker.
 
-## Open design points
+## Resolution (2026-06-13)
 
-The forks live in their own decision items (forks don't belong in an epic body):
+All three capabilities are delivered or homed; the umbrella resolves with `graduatedTo: none`
+(it enhanced the existing `/research/` registry + renders + validator, spawning no single new
+entity). Delivery trail:
 
-- **Foundation forks → #441** (`blockedBy`): history model, freshness-metadata home, staleness
-  enforcement, and scope-of-"research". These four land on the same surfaces
-  (`researchTopics.json` + the `/research/` renders + `check:standards`), so they resolve
-  together. Each carries a stated lean — a near-ratification pass. Resolving #441 unblocks
-  capabilities 1 and 2 (refresh-without-losing-history, freshness signals) as build slices.
-- **Axis-discovery trigger** (capability 3): manual periodic skill/command, vs. a scheduled
-  agent sweep, vs. piggy-backing on whenever a topic is touched — process vs automation. This
-  one is genuinely open and is *not* part of #441; carve it as its own decision when capability
-  3 is taken up.
-
-Build slices fall out once #441 rules (foundation → staleness + history/supersedes). The
-output of capability 3 is itself new backlog items, so this system partly maintains the
-backlog as a side effect.
+- **Foundation forks → #441** (resolved): history model, freshness-metadata home, staleness
+  enforcement, scope-of-"research" — all four ratified at their bold defaults on the shared
+  surfaces (`researchTopics.json` + the `/research/` renders + `check:standards`).
+- **Capability 1 — refresh without losing history → #478** (resolved): refresh = a new dated
+  report + bidirectional `supersedes`/`supersededBy`, prior revisions rendered as history.
+- **Capability 2 — freshness signals → #477** (resolved, on the #476 schema/badge foundation):
+  `lastReviewed` + `reviewHorizon`, derived staleness with the RFC 5861 grace band, the
+  reader badge, and the warn-only `check:standards` rule.
+- **Capability 3 — axis-discovery trigger:** carved and **decided in #349** (resolved) as the
+  shared mechanism — *manual periodic sweep first, scheduled automation deferred* — so there is
+  one refresh engine, not two. The manual build shipped as #366 (resolved); the
+  scheduled-automation half is **#367** (`blockedBy: ["192"]`), which this resolution unblocks.
+  The output of that sweep is itself new backlog items, so the system partly maintains the
+  backlog as a side effect.
