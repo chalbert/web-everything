@@ -45,3 +45,29 @@ src/_includes/research-descriptions/{id}.njk     # full research write-ups
 ```
 
 **Lead with a clear `# Title` and a one-line `**Point:**`** (or `**Goal:**`/`**Summary:**`), followed by a `---` rule. A report can be surfaced on the site as a *pointer* backlog item that **mirrors** it: the backlog loads the report's H1 as the item title, the `**Point:**` line as its summary, and the content after the `---` as the detail page (see [backlog-workflow.md](backlog-workflow.md)). A vague title or missing point makes a poor backlog entry. (`reports/` itself is not in the 11ty build; the mirror is how a report shows on the site.)
+
+## Refreshing a topic — refresh-as-new-report, never in place (#441 Fork 1 / #478)
+
+A promoted `/research/` topic stays alive over time, but its findings are an **immutable dated audit
+trail**: you never overwrite an existing write-up to "update" it. A refresh is a **new dated report +
+a new registry entry that supersedes the old one** — the same Obsoletes/Obsoleted-by model RFCs and
+PEPs use. To refresh topic `{slug}`:
+
+1. **New dated report** — write `reports/YYYY-MM-DD-{slug}.md` for the new findings (the old dated
+   report is left untouched as the frozen prior snapshot).
+2. **New registry entry** — add a fresh `researchTopics.json` entry (a new `id`, e.g. `{slug}-2` or a
+   dated suffix) for the current revision, with today's `dateOpened`/`lastReviewed` and a
+   **`supersedes: ["{old-id}"]`** pointer.
+3. **Retire the prior entry** — on the old entry set **`status: "superseded"`** and the **back-pointer
+   `supersededBy: ["{new-id}"]`**. The pointer is **bidirectional** by ruling — both directions are
+   validated by `check:standards` (a one-way pointer warns).
+4. **Write the new description** — `src/_includes/research-descriptions/{new-id}.njk` as in step 5
+   above (the superseded entry keeps its own `.njk`, frozen).
+
+Render is automatic: the `/research/` grid surfaces only the **latest as canonical** (superseded
+entries are demoted from the grid but still reachable by URL), the superseded topic page shows a
+**"Superseded revision"** banner linking the refresh, and both pages render the bidirectional
+supersedes/supersededBy chain via the `revisionHistory` macro (`src/_includes/research-freshness.njk`).
+Freshness (`lastReviewed` + `reviewHorizon`, the warn-only stale badge from `deriveResearchFreshness`,
+#477) is a *lighter* signal — "still current but due a look"; supersession is the *heavier* one — "a
+newer revision exists."

@@ -30,6 +30,18 @@ eleventyComputed:
 
 <div class="container block-detail-page">
     <div class="block-body content">
+        {# Superseded banner (#441 Fork 1 / #478): a reader landing on an old revision is told up front
+           it is no longer canonical and pointed at the refresh. The grid already demotes it; this is
+           the per-page signal. The full chain renders in the revision-history card below. #}
+        {% if topic.status == 'superseded' %}
+        {% set _newer = topic.supersededBy if topic.supersededBy and topic.supersededBy is iterable and topic.supersededBy is not string else ([topic.supersededBy] if topic.supersededBy else []) %}
+        <div class="section-card" style="border-left: 3px solid var(--color-warning-text, #b45309); background: var(--color-warning-surface, #fef3c7); color: var(--color-warning-text, #b45309);">
+            <strong>Superseded revision.</strong> A newer dated report has replaced this one.
+            {% if _newer.length %}See the current version:
+                {% for id in _newer %}{% for t in researchTopics %}{% if t.id == id %}<a href="/research/{{ t.id }}/">{{ t.title }}</a>{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}{% endfor %}.
+            {% endif %}
+        </div>
+        {% endif %}
         <div class="section-card">
             <p class="mb-4 text-slate-600" style="font-size: 1.1em; line-height: 1.6;">{{ topic.summary }}</p>
 

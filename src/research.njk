@@ -26,7 +26,12 @@ title: Research & References
     <h2 style="margin-bottom: 1rem;">Open Research Topics</h2>
     <p style="margin-bottom: 1.5rem; color: var(--color-text-muted); font-size: 0.9em;">Active investigations into design problems and architectural decisions.</p>
     <div class="project-grid">
+        {# Refresh-as-new-report (#441 Fork 1 / #478): a refreshed topic publishes a new dated report +
+           a new registry entry that supersedes the old one (which flips to status: superseded). The
+           grid surfaces the *latest as canonical* — superseded revisions are demoted from here, still
+           reachable via their own permalink and the canonical topic's revision-history chain. #}
         {% for topic in researchTopics %}
+        {% if topic.status != 'superseded' %}
         <a href="/research/{{ topic.id }}/" class="project-card" style="text-decoration: none; color: inherit;">
             <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
                 <h3 class="project-title" style="margin: 0;">{{ topic.title }}</h3>
@@ -42,6 +47,7 @@ title: Research & References
             </div>
             {% endif %}
         </a>
+        {% endif %}
         {% endfor %}
     </div>
 </section>
