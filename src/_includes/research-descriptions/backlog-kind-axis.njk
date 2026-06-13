@@ -1,0 +1,130 @@
+<h2>The Question</h2>
+
+<p>The Web Everything backlog carries <strong>two near-redundant axes</strong> on every item:
+<code>type</code> (<code>idea</code> / <code>issue</code> / <code>decision</code>) and <code>workItem</code>
+(<code>story</code> / <code>epic</code> / <code>task</code>). A buildable item states its nature
+<em>twice</em> — it is both <code>type: idea</code> <strong>and</strong> <code>workItem: story</code>.
+Decision <a href="/backlog/466-collapse-backlog-type-workitem-into-one-kind-axis-retire-the/">#466</a>
+asks: collapse the two into one <code>kind</code> axis (<code>story | epic | task | decision</code>),
+or keep two axes and accept the redundancy?</p>
+
+<p>This page surveys how mature issue trackers model the relationship between an item's
+<strong>nature</strong>, its <strong>hierarchy role</strong>, and its <strong>effort/size</strong>, to
+ground that call before it is made.</p>
+
+
+<h2>Why this is a real question (current state)</h2>
+
+<p>Tooling shows the <code>type</code> axis is mostly cosmetic, while only <code>decision</code> is
+load-bearing:</p>
+
+<ul>
+  <li><strong>Tiering treats <code>idea</code> and <code>issue</code> identically</strong> — both map to
+  Tier A in the loader (<code>src/_data/backlog.js</code>). <code>decision</code> is the only type with
+  distinct behaviour (Tier B + the fork-shape validator).</li>
+  <li><strong><code>idea</code> vs <code>issue</code> is a badge colour + a filter order</strong> — the
+  docs claim <code>issue</code> ranks above <code>idea</code> in selection, but the tooling never
+  implements that ordering (vestigial).</li>
+  <li><strong><code>workItem</code> drives real machinery</strong> — <code>story</code> requires a
+  Fibonacci <code>size</code>; <code>task</code> forbids one; <code>epic</code> rolls up children. This
+  is the agile burndown axis and is genuinely load-bearing.</li>
+  <li><strong>A fourth type (<code>review</code>) just collapsed with zero residue</strong> — a factual
+  verification became an <code>issue</code>, an open judgment a <code>decision</code>. That it named no
+  fourth nature is evidence the type axis is thin. (The enum string <code>review</code> still lingers in
+  the validator set — a cleanup the unification would absorb.)</li>
+</ul>
+
+
+<h2>How mature trackers model nature × role × size</h2>
+
+<table>
+  <thead>
+    <tr>
+      <th>Tool</th>
+      <th>Nature / role axis</th>
+      <th>Effort axis</th>
+      <th>Fix-vs-feature flavour</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><a href="https://github.blog/changelog/2025-04-09-evolving-github-issues-and-projects/">GitHub Issues</a> (issue types GA, Mar 2025)</td>
+      <td><strong>One</strong> org-level <em>issue type</em> axis (default Feature / Bug / Task)</td>
+      <td>Separate project fields; sub-issues for hierarchy</td>
+      <td>Folded <em>into</em> the type axis — GitHub explicitly told teams to <strong>migrate bug/feature labels into issue types</strong></td>
+    </tr>
+    <tr>
+      <td><a href="https://us.seibert.group/blog/Jira-Story-vs-Task-vs-Epic">Jira</a></td>
+      <td><strong>One</strong> <em>issue type</em> enum that folds hierarchy-role (Epic) and nature (Bug) together (Epic / Story / Task / Bug / Sub-task)</td>
+      <td>Story points — a <strong>fully separate</strong> estimation field</td>
+      <td>Bug is a <em>value</em> of the single type axis, not a parallel field</td>
+    </tr>
+    <tr>
+      <td>Linear</td>
+      <td>One structural item (Issue) + parent/sub-issue for hierarchy</td>
+      <td>Separate <em>estimate</em> field</td>
+      <td>Free-form <em>labels</em> (no required nature field)</td>
+    </tr>
+    <tr>
+      <td>GitLab</td>
+      <td>One <em>issue type</em> (issue / incident / task / epic)</td>
+      <td>Separate <em>weight</em></td>
+      <td>Free-form <em>labels</em></td>
+    </tr>
+    <tr>
+      <td><strong>WE today</strong></td>
+      <td><strong>Two</strong> — <code>type</code> (nature) <em>and</em> <code>workItem</code> (role), 1:1 correlated</td>
+      <td>Separate <code>size</code> (Fibonacci)</td>
+      <td><code>idea</code>/<code>issue</code> split — a required, cosmetic field</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><strong>The cross-tool invariant:</strong> every mature tracker keeps exactly <em>one</em> structural
+type/kind axis (folding nature and hierarchy-role together, as Jira does with Epic+Bug), holds
+<em>size/effort</em> as a separate orthogonal field, and demotes any residual fix-vs-feature flavour to
+an <em>optional label</em> — never a second required nature field. WE's <code>type</code> +
+<code>workItem</code> double-statement is the configuration nobody else runs, because the two axes are
+correlated, not orthogonal.</p>
+
+
+<h2>Architecture reading (classification)</h2>
+
+<ul>
+  <li><strong>Layer:</strong> internal repo tooling (the standard's own backlog), not a shipped WE
+  standard. WE never mandates conventions; this is project-management machinery, so the decision is a
+  local data-model call, not a protocol or intent.</li>
+  <li><strong>Orthogonality test (the crux):</strong> <code>type∈{idea,issue}</code> and
+  <code>workItem∈{story,task}</code> are <strong>not independent</strong> — they co-vary (an idea is a
+  buildable story; an issue is a small fix-task). Two correlated axes measuring the same thing are a
+  redundancy, so <em>merging</em> them is the honest model. The genuinely-orthogonal axis,
+  <code>size</code>, stays separate — honouring the bias toward separation exactly where it applies.</li>
+  <li><strong>Most-permissive default:</strong> the residual fix-vs-feature nuance needs no required
+  field — the existing free-form <code>tags</code> array already absorbs a <code>fix</code> /
+  <code>feature</code> tag for anyone who wants it, with zero new machinery. So the fix/feature
+  distinction is not a fork; it is "drop the required field, keep the open tag axis."</li>
+</ul>
+
+
+<h2>Recommendation</h2>
+
+<p><strong>Unify into one <code>kind</code> axis</strong> (<code>story | epic | task | decision</code>),
+keep <code>size</code> separate, and let <code>tags</code> carry any fix-vs-feature flavour. This matches
+the universal tracker model, removes the double-statement, and preserves the only load-bearing
+behaviours (sizing on <code>story</code>; Tier-B + fork-validation on <code>decision</code>). The cost is
+a one-pass migration across the backlog files and the loader / readiness / validator / scaffold / render
+/ docs — real, but mechanical once the field map is fixed.</p>
+
+<p>The survey moved the confidence on this from "lean" to "strong": no surveyed tracker validates the
+two-axis alternative, and the fix/feature sub-question dissolves into the existing tag axis rather than
+standing as its own fork.</p>
+
+
+<h2>Cross-references</h2>
+
+<ul>
+  <li>Decision: <a href="/backlog/466-collapse-backlog-type-workitem-into-one-kind-axis-retire-the/">#466 — Collapse backlog type + workItem into one kind axis</a></li>
+  <li>Sources: <a href="https://github.blog/changelog/2025-04-09-evolving-github-issues-and-projects/">Evolving GitHub Issues &amp; Projects (GA)</a> ·
+  <a href="https://github.blog/changelog/2025-01-12-evolving-github-issues-public-preview/">GitHub issue types preview</a> ·
+  <a href="https://us.seibert.group/blog/Jira-Story-vs-Task-vs-Epic">Jira Story vs Task vs Epic</a></li>
+</ul>
