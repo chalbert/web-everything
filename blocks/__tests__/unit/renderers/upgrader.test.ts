@@ -194,7 +194,7 @@ describe('orchestrator — never throws, gates on verify', () => {
     const r = await upgrade({ code: "customElements.define('x-y', class extends HTMLElement {})" }, { registry: new CustomAnalyzerRegistry() });
     expect(r.offered).toBe(false);
     expect(r.analyzerId).toBeNull();
-    expect(r.diagnostics.join(' ')).toMatch(/no analyzer registered/);
+    expect(r.diagnostics.join(' ')).toMatch(/registry has no analyzer/);
   });
 });
 

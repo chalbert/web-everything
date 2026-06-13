@@ -10,10 +10,16 @@
  *     (analyzer)         (ComponentIR)              (declarative <component> + the verify gate)
  *
  * Two design rules carried from #086/#089:
- *   1. **AI is a swappable provider, not architecture.** The analyzer (legacy code → IR) is a
- *      registry-backed provider with a stable contract — the SAME inject-a-provider shape as
- *      `CustomCompilerRegistry` (#081) and `CustomRenderStrategyRegistry` (#052). This core imports
- *      no analyzer; a deterministic reference provider OR a BYO-key model provider is registered in.
+ *   1. **AI is a swappable provider, not architecture — and this is a DEVTOOLS seam, not a runtime one.**
+ *      The analyzer (legacy code → IR) is a registry-backed provider with a stable contract, but it is
+ *      NOT the same kind of seam as the runtime standard registries `CustomCompilerRegistry` (#081) and
+ *      `CustomRenderStrategyRegistry` (#052): those are injected into so a *running app/standard* can
+ *      consult them at render time. The upgrader's analyzer is consulted *once, by a tool, at
+ *      author/migration time* — pure devtools (#191 reframe). So a devtools takes its providers as
+ *      **explicit input**, not from a global mutable singleton: `upgrade()` requires the caller to pass
+ *      the `CustomAnalyzerRegistry` it should resolve against. This core imports no analyzer; a
+ *      deterministic reference provider OR a BYO-key model provider is registered into a registry the
+ *      caller owns and hands in.
  *   2. **Generation reuses the existing core, never a parallel one.** The IR lowers to a declarative
  *      `<component>` definition — the exact text MaaS `serve()` consumes — so the upgraded output is
  *      provably the same entity the /adapters/ demos document. No second generator to drift.
@@ -65,9 +71,11 @@ export interface CustomAnalyzer {
 }
 
 /**
- * Ordered analyzer registry. Empty by default → a request with no matching provider is flagged, never
- * faked (same "don't silently pass through" discipline as `CustomCompilerRegistry`). First registered
- * provider that `handles()` the input wins, so a specialised provider can be unshifted ahead later.
+ * Ordered analyzer registry — the devtools' provider bag, constructed and owned by the **caller** and
+ * handed into `upgrade()`. Empty by default → a request with no matching provider is flagged, never
+ * faked. First registered provider that `handles()` the input wins, so a specialised provider can be
+ * unshifted ahead later. There is deliberately NO shared singleton instance of this: a devtools seam
+ * takes its providers as explicit input, so each tool/test constructs its own (see the class doc-comment).
  */
 export class CustomAnalyzerRegistry {
   #providers: CustomAnalyzer[] = [];
@@ -89,8 +97,9 @@ export class CustomAnalyzerRegistry {
   }
 }
 
-/** Pre-seeded singleton — `registerReferenceAnalyzers` (or a BYO-AI provider) registers into this. */
-export const analyzerRegistry = new CustomAnalyzerRegistry();
+// No module-global registry instance: a devtools seam injects its providers. Callers build a
+// `new CustomAnalyzerRegistry()`, `registerReferenceAnalyzers`/`registerFrameworkAnalyzers` (or a
+// BYO-AI provider) into it, and pass it as `upgrade(input, { registry })`.
 
 // ── Generator (reuse the existing core — emit the declarative form) ─────────────
 
@@ -189,8 +198,11 @@ export function verifyUpgrade(ir: ComponentIR, generated: string, opts: VerifyOp
 // ── Orchestrator (analyze → generate → verify-gate) ─────────────────────────────
 
 export interface UpgradeOptions extends VerifyOptions {
-  /** Registry to resolve the analyzer from. Defaults to the shared singleton. */
-  registry?: CustomAnalyzerRegistry;
+  /**
+   * Registry holding the analyzer providers to resolve against. **Required** — this is a devtools seam,
+   * so the caller owns and injects the providers; there is no global default to fall back to.
+   */
+  registry: CustomAnalyzerRegistry;
 }
 
 export interface UpgradeResult {
@@ -213,14 +225,14 @@ const emptyVerify = (): VerifyResult => ({ ok: false, checks: [], diagnostics: [
  * unmatched provider or an analyzer error becomes a diagnostic with `offered: false`, so callers get
  * a structured "couldn't, because…" rather than an exception.
  */
-export async function upgrade(input: SourceInput, opts: UpgradeOptions = {}): Promise<UpgradeResult> {
-  const registry = opts.registry ?? analyzerRegistry;
+export async function upgrade(input: SourceInput, opts: UpgradeOptions): Promise<UpgradeResult> {
+  const { registry } = opts;
   const analyzer = registry.resolve(input);
   if (!analyzer) {
     const known = registry.ids();
     const why = registry.has()
       ? `no registered analyzer handles language="${input.language ?? '(unset)'}" (have: ${known.join(', ')})`
-      : 'no analyzer registered — call registerReferenceAnalyzers() or register a BYO-AI provider';
+      : 'the injected registry has no analyzer — registerReferenceAnalyzers(registry) or register a BYO-AI provider before calling upgrade()';
     return { ir: null, generated: null, verify: emptyVerify(), offered: false, analyzerId: null, diagnostics: [why] };
   }
 
