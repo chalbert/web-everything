@@ -1,8 +1,10 @@
 ---
 type: idea
 workItem: epic
-status: open
+status: resolved
 dateOpened: "2026-06-12"
+dateResolved: "2026-06-13"
+graduatedTo: project:webcompliance
 tags: [project, webcompliance, conformance, governance, policy-as-code, gating, audit]
 crossRef: { url: /backlog/350-web-reporting-project/, label: "Web Reporting (#350)" }
 ---
@@ -66,3 +68,11 @@ Five independently-deliverable phases, now carved into child stories (points liv
 - **#440** retrofit `check:standards` + readiness gates as declared policies — `blockedBy 436, 437`.
 
 #436 is workable first; the gates and audit trail build on it.
+
+## Resolved 2026-06-13 — decomposition complete
+
+All five phase children have landed (`status: resolved`): #436 (policy/rule model), #437 (gates),
+#438 (waivers), #439 (audit/evidence trail, emitting through #350), #440 (retrofit
+`check:standards` + readiness as declared policies). The epic graduated to the **`webcompliance`**
+project entity (`project:webcompliance` in `projects.json`). Nothing further is owned at the epic
+level — future work attaches to the project, not here.
