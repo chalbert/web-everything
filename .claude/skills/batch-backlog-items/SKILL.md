@@ -39,11 +39,15 @@ judgment call); the happy path is these commands:
    around your items (deprioritized, not excluded — #083). Pass `--session=<batch-slug>` to every
    `--select` (opening + top-ups) so your own holds don't sink your own chain (full rule:
    *Running a batch* → *Cross-session reservation*).
-3. **Loop, per item:** **`node scripts/backlog.mjs claim <NNN>`** → work → gate (tests + `npm run
-   check:standards`) → leftovers via **`node scripts/backlog.mjs scaffold …`** → **`node scripts/backlog.mjs
-   resolve <NNN> [--graduated-to=…]`** → **commit that item's changes** (`git add <explicit paths the item
-   touched>` then `git commit` — **stage only this piece's files, never `git add -A`; never `git push`**;
-   one commit per closed item). Update the compact ledger after each (header tracks `cost <spent>/<budget>`).
+3. **Loop, per item:** **`node scripts/backlog.mjs claim <NNN>`** → work → gate in the item's **own locus**
+   (look up `LOCI[item.locus]` in `check-standards-rules.mjs`: run its `gateCommand` in `repoPath`, probe its
+   `devServerProbe` port for any render check, and do any `closeoutDiscipline` — exercise-app's GAP-tagging;
+   a WE item is just `npm run check:standards` here) → leftovers via **`node scripts/backlog.mjs scaffold …`**
+   → **`node scripts/backlog.mjs resolve <NNN> [--graduated-to=…]`** → **commit that item's changes to its
+   `commitTarget` repo** (`git add <explicit paths the item touched>` then `git commit` — **stage only this
+   piece's files, never `git add -A` across repos; never `git push`**; one commit per closed item). Update
+   the compact ledger after each (header tracks `cost <spent>/<budget>`). The `--select` pack prints a
+   per-locus gate legend (`⌂ <locus> → <gateCommand> in <repoPath>`) so a cross-locus batch is self-documenting.
 4. **At each seam, evaluate the stop rule**; on continue, re-read the next item fresh (drop it only if now
    `status: active` — i.e. another session owns it; **uncommitted edits are NOT a drop reason**). **When the planned pack runs dry but budget + context remain, top up:** re-run
    `npm run check:readiness -- --select --budget=<remaining>` (remaining = budget − resolved `cost`) and
@@ -136,9 +140,11 @@ item. A repo/subsystem boundary is a plan-time *ordering* hint only, never a sto
 **The drop-reason classifier makes rule 3 honest (full table in *The stop rule* → *The drop-reason
 classifier*).** A declined item is **not** a stop: every Tier-A item the re-pack surfaces that you don't
 claim must carry exactly one hard reason — `taken` (already `status: active` — another session owns it),
-`blocked-in-fact` (a needed artifact **verified** absent), `not-batchable` (`decision`/`story·≥13`/`epic`),
-`out-of-locus` (lives in a repo whose gate this batch can't run — resolving it on *this* gate would be
-dishonest), or `outgrew` (claimed-and-began, then sprawled). **There is NO `dirty`/uncommitted drop reason** —
+`blocked-in-fact` (a needed artifact **verified** absent, *or* a cross-locus item whose repo isn't checked
+out so its gate can't run), `not-batchable` (`decision`/`story·≥13`/`epic`), or `outgrew`
+(claimed-and-began, then sprawled). **There is NO `out-of-locus` drop reason since #500** — a batch is
+locus-agnostic and gates each item in its own locus, so a cross-repo item is claimed and closed like any
+other (full mechanic: `backlog-workflow.md` → *Repo-locus*). **There is NO `dirty`/uncommitted drop reason** —
 `claim` never inspects git, and a modified-or-untracked working tree is the normal baseline, never a reason
 to skip an item. An eligible `task`/`story·≤8` with **none** of these **must be
 claimed** — "big / risky / load-bearing / needs a focused session / fresh agent / the tree is dirty" are the gut stops this

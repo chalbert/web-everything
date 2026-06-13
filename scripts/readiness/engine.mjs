@@ -209,30 +209,27 @@ export function computeSelection(items) {
  * a hard break), so a smaller, lower-ranked item still gets packed behind it — maximising points used.
  * Deterministic: ranked input + greedy walk → identical pack for identical state + budget.
  *
- * REPO-LOCUS (backlog-workflow.md → "Repo-locus"): packs only items whose `locus` matches `batchLocus`
- * (the repo `--select` runs in, default `webeverything`). A batchable Tier-A item of a DIFFERENT locus
- * is never packed — it can't be honestly closed by this repo's gate — and is returned in `otherLocus`
- * so the CLI surfaces it as "needs an in-repo session". This is the fails-open guard: a cross-repo item
- * can't slip into the WE pool and get resolved on a gate that never ran it.
+ * REPO-LOCUS (backlog-workflow.md → "Repo-locus"): the pack is LOCUS-AGNOSTIC (#498/#500). It packs
+ * batchable items of ANY locus together; each item carries its `locus` (its gate home) so the batch
+ * loop closes it with that locus's own gate (the `LOCI` registry's `gateCommand`/`repoPath`). No item is
+ * held out for locus — the old single-locus filter (and its `otherLocus` bucket) is gone; honesty is now
+ * enforced per-item at close-out, not by excluding cross-repo work from the pool.
  *
  * @param {Array<object>} tierA   Ranked Tier-A projections from {@link computeSelection}.
  * @param {number} budget         The points budget to fill (sum of `batchCost`).
- * @param {string} [batchLocus]   The batch's own locus; only matching items are packable. Default `webeverything`.
- * @returns {{ picked: Array<object>, spent: number, budget: number, skipped: Array<object>, otherLocus: Array<object> }}
+ * @returns {{ picked: Array<object>, spent: number, budget: number, skipped: Array<object> }}
  */
-export function computeBatchPack(tierA, budget, batchLocus = 'webeverything') {
+export function computeBatchPack(tierA, budget) {
   const picked = [];
   const skipped = [];
-  const otherLocus = [];
   let spent = 0;
   for (const it of tierA) {
     if (!it.batchable || typeof it.batchCost !== 'number') continue;
-    if ((it.locus ?? 'webeverything') !== batchLocus) { otherLocus.push(it); continue; } // wrong gate — never pack
     if (spent + it.batchCost > budget) { skipped.push(it); continue; } // doesn't fit — keep scanning
     picked.push(it);
     spent += it.batchCost;
   }
-  return { picked, spent, budget, skipped, otherLocus };
+  return { picked, spent, budget, skipped };
 }
 
 /**

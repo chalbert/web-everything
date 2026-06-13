@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { computeReadiness, computeSelection, computeBatchPack, spliceStaleEdges } from './readiness/engine.mjs';
 import { parseReservations, emptyState, foreignHolds, deprioritizeReserved } from './readiness/reservations.mjs';
+import { LOCI } from './check-standards-rules.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -67,14 +68,6 @@ const BUDGET_OVERRIDE = (() => {
   return Number.isFinite(n) && n >= 0 ? n : undefined;
 })();
 
-// --locus=<repo> sets the batch's own locus — only same-locus items are packable; cross-locus Tier-A
-// items surface in a separate "Other locus" list (a WE batch can't honestly gate a plateau-app/FUI item).
-// Default `webeverything` (the repo this runs in). See backlog-workflow.md → "Repo-locus".
-const BATCH_LOCUS = (() => {
-  const m = process.argv.find((a) => a.startsWith('--locus='));
-  return m ? m.slice('--locus='.length) : 'webeverything';
-})();
-
 const RED = '\x1b[31m', YEL = '\x1b[33m', GRN = '\x1b[32m', DIM = '\x1b[2m', CYA = '\x1b[36m', BLD = '\x1b[1m', RST = '\x1b[0m';
 
 const items = typeof loadBacklog === 'function' ? loadBacklog() : loadBacklog;
@@ -90,7 +83,7 @@ const reservations = loadReservations();
 const foreign = foreignHolds(reservations, Date.now(), MY_SESSION);
 const tierAforPack = deprioritizeReserved(selection.tierA, foreign);
 const batchableForView = deprioritizeReserved(selection.batchable, foreign);
-const batchPack = computeBatchPack(tierAforPack, budget, BATCH_LOCUS); // the suggested points-budgeted batch (reservation-aware, same-locus only)
+const batchPack = computeBatchPack(tierAforPack, budget); // the suggested points-budgeted batch (reservation-aware, locus-agnostic — each item gated in its own locus)
 
 // ── --apply: the only mechanical edit — drop stale (resolved) blockedBy edges ────
 const applied = [];
@@ -161,23 +154,27 @@ if (SELECT) {
   console.log(`\n${CYA}${BLD}Suggested batch — points budget ${budget}${RST} ${DIM}(${budgetSrc}; cost = size, task = 2)${RST}`);
   if (batchPack.picked.length) {
     let run = 0;
+    const lociInPack = new Set();
     batchPack.picked.forEach((it) => {
       run += it.batchCost;
-      console.log(`  ${CYA}＋${RST} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}— ${eff(it)} · cost ${it.batchCost} · running ${run}/${budget}${RST}`);
+      const lc = it.locus ?? 'webeverything';
+      if (lc !== 'webeverything') lociInPack.add(lc);
+      // Repo-LOCUS (#498/#500): the pack is locus-agnostic; flag each cross-repo item with its gate home so
+      // close-out runs THAT locus's gate (LOCI registry), never this repo's by default. WE items stay unmarked.
+      const locusTag = lc !== 'webeverything' ? ` · ${YEL}⌂ ${lc}${RST}${DIM}` : '';
+      console.log(`  ${CYA}＋${RST} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}— ${eff(it)} · cost ${it.batchCost} · running ${run}/${budget}${locusTag}${RST}`);
     });
     console.log(`  ${DIM}= ${batchPack.spent}/${budget} pts packed across ${batchPack.picked.length} item(s). Pre-flight each body for a buried fork; the count is whatever fills the budget.${RST}`);
+    // Per-locus gate legend — for each cross-repo locus in the pack, show the gate the loop must run to
+    // honestly close its items (and where), so a cross-locus batch is self-documenting at the seam.
+    if (lociInPack.size) {
+      console.log(`  ${DIM}Cross-locus pack — close each ⌂ item with its own gate:${RST}`);
+      [...lociInPack].sort().forEach((lc) => {
+        const reg = LOCI[lc];
+        console.log(`    ${YEL}⌂ ${lc}${RST} ${DIM}→ \`${reg.gateCommand}\` in ${reg.repoPath}${reg.closeoutDiscipline ? ` · ${reg.closeoutDiscipline}` : ''} (commit → ${reg.commitTarget})${RST}`);
+      });
+    }
   } else console.log(`${DIM}  none eligible — no Tier-A item fits the budget${selection.inFlight.length ? `; ${selection.inFlight.length} batch-shaped item(s) are in flight (status: active) — pool likely drained by a concurrent session, re-run shortly (#083)` : ''}.${RST}`);
-
-  // Repo-LOCUS: Tier-A batchable items of a DIFFERENT locus than this batch — they can't be honestly
-  // closed by this repo's gate, so they're held out of the pack (never packed, never a soft "decline").
-  // Surface them so they read as `out-of-locus` carry-forward (a focused in-repo session), not as work
-  // this batch skipped on judgement. See backlog-workflow.md → "Repo-locus" + "The drop-reason classifier".
-  if (batchPack.otherLocus && batchPack.otherLocus.length) {
-    console.log(`\n${YEL}${BLD}Other locus — batchable, but a different repo's gate must close them (locus ≠ ${BATCH_LOCUS})${RST}`);
-    batchPack.otherLocus.forEach((it) =>
-      console.log(`  ${YEL}⌂${RST} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}— ${eff(it)} · ${it.locus}${it.locusAuthored ? '' : ' (inferred — set locus: to confirm)'}${RST}`));
-    console.log(`  ${DIM}out-of-locus: run these in their own repo (its gate + dev server), not this batch (#083 / repo-locus).${RST}`);
-  }
 
   // Tier-A non-batchable splits two ways: buildable-but-large (story·≥13 / unsized story) an agent can
   // still implement, versus epics — unblocked but only ready to SLICE (work lives in child slices, not

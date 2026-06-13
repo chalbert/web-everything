@@ -224,7 +224,7 @@ describe('computeBatchPack — points budget, not a count cap', () => {
     expect(picked.map((i) => i.num)).toEqual(['1', '2', '3', '4']); // 3+5+2+2 = 12, all eligible
   });
 
-  describe('repo-locus filter — only the batch\'s own locus is packable', () => {
+  describe('cross-locus pack — locus-agnostic (#498/#500); each item gated in its own locus at close-out', () => {
     const mixed = () => computeSelection(makeItems([
       { num: 1, type: 'issue', status: 'open', workItem: 'story', size: 3, leverageScore: 5000 }, // no locus → webeverything
       { num: 2, type: 'idea', status: 'open', workItem: 'story', size: 3, leverageScore: 4000, locus: 'plateau-app', locusAuthored: true },
@@ -232,20 +232,20 @@ describe('computeBatchPack — points budget, not a count cap', () => {
       { num: 4, type: 'idea', status: 'open', workItem: 'task', leverageScore: 2000 }, // webeverything
     ])).tierA;
 
-    it('packs only same-locus items; cross-locus go to otherLocus (never the pack)', () => {
-      const { picked, otherLocus } = computeBatchPack(mixed(), 999, 'webeverything');
-      expect(picked.map((i) => i.num)).toEqual(['1', '4']);
-      expect(otherLocus.map((i) => i.num)).toEqual(['2', '3']);
+    it('packs batchable items of every locus together — no item held out for locus', () => {
+      const { picked } = computeBatchPack(mixed(), 999);
+      // budget to spare → all four eligible items pack regardless of locus, in rank order.
+      expect(picked.map((i) => i.num)).toEqual(['1', '2', '3', '4']);
     });
 
-    it('a different batchLocus packs that locus instead', () => {
-      const { picked, otherLocus } = computeBatchPack(mixed(), 999, 'plateau-app');
-      expect(picked.map((i) => i.num)).toEqual(['2']);
-      expect(otherLocus.map((i) => i.num)).toEqual(['1', '3', '4']);
+    it('each packed item carries its own locus (the gate home the loop closes it with)', () => {
+      const { picked } = computeBatchPack(mixed(), 999);
+      const byNum = Object.fromEntries(picked.map((i) => [i.num, i.locus ?? 'webeverything']));
+      expect(byNum).toEqual({ 1: 'webeverything', 2: 'plateau-app', 3: 'frontierui', 4: 'webeverything' });
     });
 
-    it('defaults batchLocus to webeverything when omitted', () => {
-      expect(computeBatchPack(mixed(), 999).picked.map((i) => i.num)).toEqual(['1', '4']);
+    it('no longer returns an otherLocus bucket (the single-locus filter is gone)', () => {
+      expect(computeBatchPack(mixed(), 999)).not.toHaveProperty('otherLocus');
     });
   });
 });

@@ -19,11 +19,28 @@
 // selection like `active`) but distinct on the board from a story mid-build.
 export const BACKLOG_STATUSES = new Set(['open', 'active', 'preparing', 'parked', 'resolved']);
 export const BACKLOG_TYPES = new Set(['idea', 'issue', 'review', 'decision']);
-// Repo-LOCUS (backlog-workflow.md → "Repo-locus") — which repo's gate can honestly CLOSE an item, so a
-// `/batch` packs only its own locus and never resolves cross-repo work on a gate that never ran it.
-// `webeverything` is the default; the rest are cross-repo. The inferred values in src/_data/backlog.js
-// `inferLocus` (frontierui / plateau-app / exercise-app) must stay a subset of this set.
-export const LOCI = new Set(['webeverything', 'frontierui', 'plateau-app', 'exercise-app']);
+// Repo-LOCUS (backlog-workflow.md → "Repo-locus") — the declarative per-locus gate registry (#498/#500).
+// An item's `locus` is its **gate home**: which repo's gate can honestly CLOSE it. A cross-locus `/batch`
+// is locus-agnostic — it packs items of any locus and gates **each in its own locus** using this record:
+//   `repoPath`     — dir (relative to the WE root) to run the gate in; `.` = this repo.
+//   `gateCommand`  — the close-out gate that must be green before resolving an item of this locus.
+//   `devServerProbe` — the canonical dev port to DETECT-or-skip for a render check (never spin/kill one).
+//   `commitTarget` — the repo the per-item commit lands in (commits are per-repo, never `git add -A` across).
+//   `closeoutDiscipline?` — an extra, non-skippable close-out rule beyond the gate (exercise-app only).
+// `webeverything` is the default. The inferred values in src/_data/backlog.js `inferLocus`
+// (frontierui / plateau-app / exercise-app) must stay a subset of these keys.
+export const LOCI = {
+  webeverything: { repoPath: '.', gateCommand: 'npm run check:standards', devServerProbe: 3000, commitTarget: 'webeverything' },
+  frontierui: { repoPath: '../frontierui', gateCommand: 'npm run check:standards', devServerProbe: 3001, commitTarget: 'frontierui' },
+  'plateau-app': { repoPath: '../plateau-app', gateCommand: 'npm test', devServerProbe: 4000, commitTarget: 'plateau-app' },
+  'exercise-app': {
+    repoPath: '.',
+    gateCommand: 'npm run check:standards && npm run check:app-conformance',
+    devServerProbe: 3000,
+    commitTarget: 'webeverything',
+    closeoutDiscipline: 'platform-first build; if you must bypass a standard, tag a GAP — a required, non-skippable close-out step (see /exercise-app)',
+  },
+};
 export const WORK_ITEMS = new Set(['story', 'epic', 'task']);
 export const FIB = new Set([1, 2, 3, 5, 8, 13]);
 // The digest is each item's lead paragraph (the loader's derived `summary`), surfaced for one-glance
@@ -98,14 +115,14 @@ export function validateBacklogItem(item, ctx) {
     err(`Backlog item "${item.id}" has invalid type "${item.type}" (expected ${[...BACKLOG_TYPES].join(' / ')})`);
   if (item.status && !BACKLOG_STATUSES.has(item.status))
     err(`Backlog item "${item.id}" has invalid status "${item.status}" (expected ${[...BACKLOG_STATUSES].join(' / ')})`);
-  // Repo-locus: an AUTHORED `locus:` must be a known value (a typo'd locus silently mis-routes the batch
-  // packer → hard error). An item whose tags INFERRED a cross-repo locus but never declared it gets a
-  // nudge (warning) to make the decision explicit — so the packer's fails-open guard rests on an explicit
-  // author choice, not just a tag heuristic. (Loader-derived item.locus/locusAuthored; absent on raw fixtures.)
-  if (item.locusAuthored && !LOCI.has(item.locus))
-    err(`Backlog item "${item.id}" has invalid locus "${item.locus}" (expected ${[...LOCI].join(' / ')})`);
+  // Repo-locus: an AUTHORED `locus:` must be a known registry key (a typo'd locus → the batch runs the
+  // wrong/nonexistent gate at close-out → hard error). An item whose tags INFERRED a cross-repo locus but
+  // never declared it gets a nudge (warning) to make the gate home explicit — so which repo's gate closes
+  // it rests on an author choice, not a tag heuristic. (Loader-derived item.locus/locusAuthored; absent on raw fixtures.)
+  if (item.locusAuthored && !Object.hasOwn(LOCI, item.locus))
+    err(`Backlog item "${item.id}" has invalid locus "${item.locus}" (expected ${Object.keys(LOCI).join(' / ')})`);
   else if (!item.locusAuthored && item.locus && item.locus !== 'webeverything' && item.batchable)
-    warn(`Backlog item "${item.id}" reads as locus "${item.locus}" (inferred from its tags/parent) but has no explicit \`locus:\` — a /batch holds it out of the pool; set \`locus: ${item.locus}\` to confirm, or \`locus: webeverything\` if it's actually built and gated here`);
+    warn(`Backlog item "${item.id}" reads as locus "${item.locus}" (inferred from its tags/parent) but has no explicit \`locus:\` — a cross-locus /batch will gate it with ${item.locus}'s gate; set \`locus: ${item.locus}\` to confirm, or \`locus: webeverything\` if it's actually built and gated here`);
   if (item.relatedProject && !projectById.has(item.relatedProject))
     err(`Backlog item "${item.id}" relatedProject "${item.relatedProject}" does not resolve in projects.json`,
       dUnresolvedRef('Backlog', item.id, backlogFile, 'relatedProject', item.relatedProject, 'projects.json'));

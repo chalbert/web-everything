@@ -37,7 +37,7 @@ const toDateString = (v) =>
 // "surfaced by an exercise app" (a discovery marker), NOT "lives in the exercise app" — so exercise-app
 // locus is detected STRUCTURALLY (a descendant of the flagship-exercise-apps epic #314, immutable NNN),
 // via {@link isExerciseAppDescendant}, never the tag. The remaining tag markers are high-precision build
-// signals. Values stay a subset of check-standards-rules.mjs `LOCI`; an explicit `locus:` always wins.
+// signals. Values stay a subset of check-standards-rules.mjs `LOCI` keys; an explicit `locus:` always wins.
 const EXERCISE_APP_ROOT = '314'; // #314 flagship-exercise-apps — its descendants run via the /exercise-app loop
 const LOCUS_TAG_MARKERS = [
   [/frontier-?ui/i, 'frontierui'],
@@ -240,15 +240,16 @@ module.exports = function backlog() {
       : typeof item.size === 'number' ? item.size
       : undefined;
 
-    // Repo-LOCUS (#447-follow / backlog-workflow.md → "Repo-locus") — which repo's gate can honestly
-    // CLOSE this item. A `/batch` packs only its OWN locus (default `webeverything`); cross-locus items
-    // surface separately so a WE batch never resolves work on a gate that never ran it. Reliability by
-    // construction: the locus is `locus:` frontmatter when AUTHORED (an explicit decision — e.g. a
-    // frontier-ui-tagged item built and gated IN WE declares `locus: webeverything`), else INFERRED
-    // from cross-repo tag markers (biasing toward EXCLUSION — wrongly deferring a workable item is the
-    // cheap failure; wrongly packing an out-of-locus one resolves on the wrong gate, the costly one),
-    // else `webeverything`. `locusAuthored` lets check:standards nudge unset-but-inferred items to
-    // declare it explicitly. Inferred values are a subset of check-standards-rules.mjs `LOCI`.
+    // Repo-LOCUS (#447-follow / #498/#500 / backlog-workflow.md → "Repo-locus") — which repo's gate can
+    // honestly CLOSE this item, i.e. its **gate home**. A cross-locus `/batch` is locus-agnostic: it packs
+    // items of any locus and gates EACH in its own locus (the LOCI registry's `gateCommand`/`repoPath`), so
+    // no item is dropped for locus — but the locus must be RIGHT, since it selects which gate runs. The
+    // locus is `locus:` frontmatter when AUTHORED (an explicit decision — e.g. a frontier-ui-tagged item
+    // built and gated IN WE declares `locus: webeverything`), else INFERRED from cross-repo tag markers
+    // (biasing toward `webeverything` — a wrongly-inferred cross-repo locus would route close-out to the
+    // wrong repo's gate, so inference only fires on high-precision structural/tag markers), else
+    // `webeverything`. `locusAuthored` lets check:standards nudge unset-but-inferred items to
+    // declare it explicitly. Inferred values are a subset of check-standards-rules.mjs `LOCI` keys.
     item.locusAuthored = typeof item.locus === 'string' && item.locus.length > 0;
     item.locus = item.locusAuthored ? item.locus
       : isExerciseAppDescendant(item, byNum) ? 'exercise-app'
