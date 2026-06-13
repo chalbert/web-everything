@@ -3,7 +3,7 @@
 //
 //   collect  — capture screenshots for targets.json (idempotent by sourceUrl); WebP q90 via cwebp
 //   index    — regenerate index.json from the per-item meta.json sidecars
-//   dedup    — report exact-duplicate clusters (sha256); perceptual pass is deferred (needs sharp)
+//   dedup    — report exact (sha256) + near-dup (dHash) clusters; --apply consolidates near-dups
 //   report   — summarise the corpus (counts by category / register / theme / method, total bytes)
 //
 // Design (see backlog/382-...): append-only + content-addressed (item id = sha256(webp).slice(0,16)),
@@ -468,23 +468,182 @@ function archiveQuarantinedFrame(contentHash, webpBuf, record, root = QUARANTINE
   return true;
 }
 
-// ---- dedup (exact only; perceptual deferred to a sharp pass) ----------------
-function dedup() {
-  const byHash = new Map();
+// ---- perceptual near-dup (phase 2, #395) -----------------------------------
+// The exact sha256 pass only catches byte-identical shots; re-captures, crops, and recompressions
+// of the same surface differ by a few bytes and slip through, accumulating visually-identical shots.
+// This pass fingerprints each shot with a dHash (difference hash) and clusters near-dups by Hamming
+// distance. We decode + downscale with the system `dwebp -scale` — the same system-webp-tools posture
+// as the cwebp encode (no node image dep; `sharp` stays out, consistent with pngToWebp).
+
+let __ppmTmpSeq = 0;
+
+// Parse a binary P6 PPM (`dwebp -ppm` output) into { width, height, pixels } where pixels is a
+// grayscale (Rec. 601 luma) Uint8Array of length width*height. Tolerates header comments + whitespace.
+export function ppmToGray(buf) {
+  const isWs = (b) => b === 0x20 || b === 0x09 || b === 0x0a || b === 0x0d;
+  let pos = 0;
+  const tokens = [];
+  while (tokens.length < 4) {
+    while (pos < buf.length && isWs(buf[pos])) pos++;
+    if (buf[pos] === 0x23) { while (pos < buf.length && buf[pos] !== 0x0a) pos++; continue; } // comment
+    const start = pos;
+    while (pos < buf.length && !isWs(buf[pos])) pos++;
+    tokens.push(buf.toString('ascii', start, pos));
+  }
+  const [magic, w, h] = [tokens[0], Number(tokens[1]), Number(tokens[2])];
+  if (magic !== 'P6') throw new Error(`not a P6 PPM (got ${magic})`);
+  pos++; // the single whitespace byte after maxval, then raw RGB triples
+  const px = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const r = buf[pos + i * 3], g = buf[pos + i * 3 + 1], b = buf[pos + i * 3 + 2];
+    px[i] = (0.299 * r + 0.587 * g + 0.114 * b) | 0;
+  }
+  return { width: w, height: h, pixels: px };
+}
+
+// 64-bit dHash → 16 hex chars. Each bit asks "is this pixel brighter than its right neighbour?" over
+// a width×height grayscale matrix (default 9×8 → 8 comparisons/row × 8 rows = 64 bits).
+export function dHash(gray, width = 9, height = 8) {
+  let bits = '';
+  for (let y = 0; y < height; y++)
+    for (let x = 0; x < width - 1; x++) {
+      const i = y * width + x;
+      bits += gray[i] > gray[i + 1] ? '1' : '0';
+    }
+  let hex = '';
+  for (let i = 0; i < bits.length; i += 4) hex += parseInt(bits.slice(i, i + 4), 2).toString(16);
+  return hex;
+}
+
+// Hamming distance between two equal-length hex hashes (count of differing bits); Infinity if either
+// is missing or lengths differ (so a undecodable shot never falsely clusters).
+export function hammingHex(a, b) {
+  if (!a || !b || a.length !== b.length) return Infinity;
+  let d = 0;
+  for (let i = 0; i < a.length; i++) {
+    let x = parseInt(a[i], 16) ^ parseInt(b[i], 16);
+    while (x) { d += x & 1; x >>= 1; }
+  }
+  return d;
+}
+
+// Single-link clustering (union-find): items whose dHash is within `threshold` bits of another in the
+// group join it. Returns every cluster, singletons included.
+export function clusterByHamming(items, threshold) {
+  const parent = items.map((_, i) => i);
+  const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  for (let i = 0; i < items.length; i++)
+    for (let j = i + 1; j < items.length; j++)
+      if (hammingHex(items[i].pHash, items[j].pHash) <= threshold) parent[find(i)] = find(j);
+  const groups = new Map();
+  for (let i = 0; i < items.length; i++) {
+    const root = find(i);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(items[i]);
+  }
+  return [...groups.values()];
+}
+
+// Decode a corpus webp to its dHash via `dwebp -scale 9 8 -ppm`. Returns null when dwebp is absent or
+// the decode fails — the perceptual pass then degrades to exact-only.
+function shotDHash(webpPath) {
+  const out = join(tmpdir(), `design-ref-phash-${process.pid}-${__ppmTmpSeq++}.ppm`);
+  try {
+    execFileSync('dwebp', ['-scale', '9', '8', '-ppm', webpPath, '-o', out], { stdio: 'ignore' });
+    const { width, height, pixels } = ppmToGray(readFileSync(out));
+    if (width !== 9 || height !== 8) return null;
+    return dHash(pixels, 9, 8);
+  } catch {
+    return null;
+  } finally {
+    try { rmSync(out); } catch {}
+  }
+}
+
+// ---- dedup (exact sha256 + perceptual near-dup pass) -----------------------
+// `dedup` reports both exact-duplicate (sha256) and near-duplicate (dHash) clusters and names a
+// canonical per near-dup cluster. With `--apply` it consolidates near-dups: the non-canonical item
+// dirs are removed and their sourceUrls repointed to the canonical in the ledger (the same skip-on-
+// re-collect mechanism the exact-dup path uses), so re-runs consolidate instead of re-accumulating.
+// `--threshold=N` tunes the Hamming cut (default 5 of 64 bits — only very-near-identical frames).
+function dedup(args = { _: [] }) {
+  const apply = Boolean(args.apply);
+  const threshold = args.threshold != null ? Number(args.threshold) : 5;
+
+  const metaById = new Map();
   for (const id of existsSync(ITEMS) ? readdirSync(ITEMS) : []) {
     const meta = readJSON(join(ITEMS, id, 'meta.json'), null);
-    if (!meta) continue;
-    const arr = byHash.get(meta.contentHash) ?? [];
-    arr.push(meta.id);
-    byHash.set(meta.contentHash, arr);
+    if (meta) metaById.set(meta.id, meta);
   }
-  const clusters = [...byHash.values()].filter((a) => a.length > 1);
-  if (!clusters.length) {
-    console.log('No exact duplicates. (Perceptual/near-dup pass deferred — needs sharp.)');
+  const metas = [...metaById.values()];
+
+  // --- exact pass (sha256) ---
+  const byHash = new Map();
+  for (const m of metas) {
+    const arr = byHash.get(m.contentHash) ?? [];
+    arr.push(m.id);
+    byHash.set(m.contentHash, arr);
+  }
+  const exact = [...byHash.values()].filter((a) => a.length > 1);
+  if (exact.length) {
+    console.log(`Exact-duplicate clusters (sha256): ${exact.length}`);
+    for (const c of exact) console.log(`  ${c.join(', ')}`);
+  } else {
+    console.log('No exact duplicates (sha256).');
+  }
+
+  // --- perceptual pass (dHash near-dups) ---
+  const items = [];
+  let undecodable = 0;
+  for (const m of metas) {
+    const pHash = shotDHash(join(ITEMS, m.id, 'screenshot.webp'));
+    if (!pHash) { undecodable++; continue; }
+    items.push({ id: m.id, bytes: m.bytes ?? 0, dateCollected: m.dateCollected ?? '', pHash });
+  }
+  if (!items.length) {
+    console.log(`\nPerceptual pass skipped — no shot could be decoded (is dwebp installed? ${undecodable} undecodable).`);
     return;
   }
-  console.log(`Exact-duplicate clusters: ${clusters.length}`);
-  for (const c of clusters) console.log(`  ${c.join(', ')}`);
+  const clusters = clusterByHamming(items, threshold).filter((c) => c.length > 1);
+  if (!clusters.length) {
+    console.log(`\nNo near-duplicates (dHash, Hamming ≤ ${threshold}). ${items.length} shots fingerprinted${undecodable ? `, ${undecodable} undecodable` : ''}.`);
+    return;
+  }
+
+  console.log(`\nNear-duplicate clusters (dHash, Hamming ≤ ${threshold}): ${clusters.length}`);
+  const toRepoint = []; // { id, sourceUrl, canonical }
+  for (const c of clusters) {
+    // Canonical = highest quality (largest bytes); tiebreak earliest capture for a stable id.
+    const canonical = [...c].sort((a, b) => b.bytes - a.bytes || (a.dateCollected < b.dateCollected ? -1 : 1))[0];
+    console.log(`  canonical ${canonical.id}  ←  ${c.filter((x) => x !== canonical).map((x) => x.id).join(', ')}`);
+    for (const x of c) if (x !== canonical) toRepoint.push({ id: x.id, canonical });
+  }
+
+  if (!apply) {
+    console.log(`\n${toRepoint.length} near-dup(s) would consolidate into their canonical. Re-run with --apply to consolidate.`);
+    return;
+  }
+
+  // Consolidate: remove each non-canonical item dir and repoint its sourceUrl to the canonical in the
+  // ledger, so a non-refresh re-run skips that url (ledger hit) instead of re-admitting the near-dup.
+  const ledger = readJSON(LEDGER, {});
+  for (const { id, canonical } of toRepoint) {
+    const meta = metaById.get(id);
+    const canonicalMeta = metaById.get(canonical.id);
+    rmSync(join(ITEMS, id), { recursive: true, force: true });
+    if (meta?.sourceUrl && canonicalMeta) {
+      ledger[meta.sourceUrl] = {
+        id: canonical.id,
+        contentHash: canonicalMeta.contentHash,
+        dateCollected: new Date().toISOString(),
+        runId: 'dedup-consolidate',
+        consolidatedFrom: id,
+      };
+    }
+  }
+  writeJSON(LEDGER, ledger);
+  const n = rebuildIndex().length;
+  console.log(`\nConsolidated ${toRepoint.length} near-dup(s) into their canonical; corpus now ${n} items.`);
 }
 
 // ---- prune (consolidation) -------------------------------------------------
@@ -537,6 +696,7 @@ function report() {
 }
 
 // Exported for unit tests; the CLI dispatch below only runs when this file is executed directly.
+// (ppmToGray, dHash, hammingHex, clusterByHamming are exported inline above.)
 export { archiveQuarantinedFrame, QUARANTINE };
 
 // ---- main ------------------------------------------------------------------
@@ -546,11 +706,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   switch (cmd) {
     case 'collect': await collect(args); break;
     case 'index': { const n = rebuildIndex().length; console.log(`index.json rebuilt — ${n} items`); break; }
-    case 'dedup': dedup(); break;
+    case 'dedup': dedup(args); break;
     case 'prune': prune(); break;
     case 'report': report(); break;
     default:
       console.log('usage: design-refs.mjs <collect|index|dedup|prune|report> [--targets=path] [--only=substr] [--limit=N] [--refresh] [--vision-verify]');
+      console.log('  dedup: [--threshold=N] near-dup Hamming cut (default 5); [--apply] consolidate near-dups into their canonical');
       console.log('  vision gate (opt-in): DESIGN_REFS_VISION_PROVIDER=<name> DESIGN_REFS_VISION_PROVIDER_MODULE=<path-to-provider.mjs>');
       process.exit(cmd ? 1 : 0);
   }
