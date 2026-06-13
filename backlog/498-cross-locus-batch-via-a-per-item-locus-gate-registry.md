@@ -2,8 +2,11 @@
 type: decision
 workItem: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-06-13"
+dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: 500
 tags: [batch, repo-locus, gate, cross-repo, tooling, constellation]
 ---
 
@@ -16,6 +19,27 @@ gate isn't webeverything's? The batch is single-locus by construction; a 2026-06
 already has those repos as working dirs — the limit isn't reach, it's that the batch only knows how to
 *gate* webeverything, so it won't close work on a gate it never ran. The fork: build a `locus → gate`
 registry to lift that, safely.
+
+## Ruling (ratified 2026-06-13)
+
+All forks ratified at their defaults. The batch becomes **locus-agnostic**: a single session can claim
+and close **any** of the 44 batchable items (~220 pts) — webeverything, frontierui, plateau-app, **and**
+exercise-app — gating each in its own locus.
+
+- **Fork 1 → A.** Build the `locus → gate` registry; the batch packs and works cross-locus.
+- **Fork 2 → fixed mechanic.** Gate **per-item, in its own locus, immediately after the item** — the
+  green-at-every-seam property is preserved. End-of-batch all-gates is **rejected** (not a configurable
+  dimension).
+- **Fork 3 → A.** A declarative per-locus config `{ repoPath, gateCommand, devServerProbe, commitTarget,
+  closeoutDiscipline? }` extending the `LOCI` set; no per-locus logic baked into the loop.
+- **Fork 4 → A.** **Include exercise-app** (the 17-item / ~81-pt chunk). Its gate is the same-repo
+  `check:standards + check:app-conformance`; the `/exercise-app` forcing-function rule (build
+  platform-first, else tag a **GAP**) rides along as a required `closeoutDiscipline`, not an exclusion.
+
+**Graduates to → #500** (the build). The normative `Repo-locus` section of
+[docs/agent/backlog-workflow.md](../docs/agent/backlog-workflow.md) is rewritten **as part of #500**
+(it currently codifies the single-locus wall this ruling lifts) — not before, so the doc never describes
+unbuilt behavior.
 
 ## The fork
 
@@ -46,22 +70,39 @@ gate timing is a **fixed mechanic** (per-item, in-locus), not a configurable dim
 
 - **A — Declarative `locus → gate` config (default).** Extend the existing `LOCI` set
   (`check-standards-rules.mjs`, the inference markers at [src/_data/backlog.js:43-46](../src/_data/backlog.js#L43-L46))
-  with per-locus `{ repoPath, gateCommand, devServerProbe, commitTarget }`. The batch skill reads it; no
-  logic baked into the loop. Mirrors [config-extends-platform-default] — the registry is the platform
-  default, a project/skill config supplies the values.
+  with per-locus `{ repoPath, gateCommand, devServerProbe, commitTarget, closeoutDiscipline? }` — the
+  optional `closeoutDiscipline` carries the exercise-app GAP-tagging rule (Fork 4) as a required
+  close-out step, so a richer locus is config, not a code branch. The batch skill reads it; no logic
+  baked into the loop. Mirrors [config-extends-platform-default] — the registry is the platform default,
+  a project/skill config supplies the values.
 - **B — Imperative per-locus adapters.** Each locus ships a small script the batch shells out to. More
   flexible per repo, but reintroduces the bespoke-per-repo surface the registry is meant to remove.
 
   *Lean A* (declarative, single home), per the native-first / config-extends-default conventions.
 
-### Scope exclusion (not a fork) — the exercise-app loop stays out
+### Fork 4 — Include exercise-app as a registry locus? **(default: yes)**
 
-The 19 exercise-app items are a **different workflow**, not a different gate: they run via the
-`/exercise-app` conformance loop (gate = coverage on `check:app-conformance`, plus loop judgement on
-each gap), detected structurally as descendants of epic #314
-([src/_data/backlog.js:38-39](../src/_data/backlog.js#L38-L39)). A locus→gate registry does **not**
-pull them in — they keep their dedicated loop. Only the plain story-build loci (frontierui, plateau-app)
-are in scope here.
+The 17 exercise-app items (~81 pts — the single biggest excluded chunk, ≈37% of the batchable pool) are
+descendants of epic #314 ([src/_data/backlog.js:38-39](../src/_data/backlog.js#L38-L39)). The earlier
+instinct was to exclude them as "a different *workflow*." But that's weaker than it looks: their gate,
+`check:app-conformance`, is a **webeverything npm script** (`node scripts/check-app-conformance.mjs`) —
+*same repo, same `cd`*, just one extra check command. So they fit the `locus → gate` registry directly.
+
+- **A — Include (default).** Add `exercise-app` as a registry locus: `repoPath: webeverything`,
+  `gateCommand: check:standards + check:app-conformance`, dev server :3000. A batch can then claim a
+  loan-/ins-phase slice like any item. **Condition that makes it honest:** the close-out must keep the
+  `/exercise-app` loop's *forcing-function discipline* — build it platform-first, and where a WE standard
+  can't satisfy the gap, **tag it a GAP** ([exercise-app-conformance-loop]: active-bypass = FAIL,
+  untagged draft-bypass = FAIL, tagged = GAP). Without that rule a batch could pass `check:standards` by
+  bypassing with a non-WE lib and silently defeat the whole point of the exercise apps.
+- **B — Exclude, keep them loop-only.** They stay driven solely by `/exercise-app`, on the argument that
+  the gap-tagging *judgement* (is this a real WE gap?) is loop work a mechanical batch shouldn't make.
+
+  *Lean A* (per the goal "batch any batchable item"): the barrier is a same-repo extra gate + a close-out
+  rule, both encodable in the registry — not a genuine incompatibility. The honest risk is that the
+  forcing-function judgement degrades if a batch rushes a slice; mitigate by making the GAP-tag step a
+  required, non-skippable close-out gate for `exercise-app`-locus items, not by excluding them. This
+  makes the registry's per-locus shape carry a `closeoutDiscipline` field, not just a gate command.
 
 ---
 
