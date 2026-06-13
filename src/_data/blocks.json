@@ -2310,6 +2310,47 @@
     }
   },
   {
+    "id": "collection-operations",
+    "name": "Collection Operations Coordinator",
+    "status": "active",
+    "type": "Module",
+    "summary": "The headless coordinator that owns one collection and runs the WHOLE collection-operations pipeline — filter -> sort -> group -> **page** — over it, then hands the current page slice to the data-table for rendering and the totals to the pagination block. The two stage-owning blocks (data-table: filter/sort/group; pagination: page) each run one stage; until this existed no one ran the pipeline as a whole, so the obvious consumer wiring (page-then-render) sorted only the current page, not the whole book (surfaced by the loan-origination app, #317). This coordinator applies filter/sort/group across the entire set first (reusing the data-table's verified `applyPipeline`, whose `page` stage is a deliberate no-op), then windows the result — order is always collection-wide and the page is just the visible slice. Re-feeding the already-ordered slice back through the data-table is safe (filter/sort/group are idempotent on a processed slice). Ships a standalone `CollectionOperationsBehavior` and an optional headless `<collection-operations>` element that routes descendant `data-table-change` / `pagination-change` events and emits `collection-operations-change` — not a documented composition and not a rendered block (#452 ruling A/A).",
+    "exports": [
+      "CollectionOperationsModule",
+      "CollectionOperationsBehavior",
+      "registerCollectionOperations"
+    ],
+    "implementsIntent": "collection-operations",
+    "dependsOn": [
+      "data-table",
+      "pagination"
+    ],
+    "sourcePath": "blocks/renderers/collection-operations/",
+    "designDecisions": {
+      "wholeBookThenWindow": {
+        "description": "Run filter -> sort -> group across the ENTIRE collection, then apply the page stage (the slice) — never page-then-sort",
+        "rationale": "The intent contract is filter -> sort -> group -> page. Paging before sorting yields page-local order (the bug #317 surfaced). The coordinator owns the single collection so it can sequence the whole pipeline; pagination only windows the result."
+      },
+      "standaloneHeadlessNotComposition": {
+        "description": "A standalone headless behavior + optional element wrapper, not a documented composition and not a rendered block",
+        "rationale": "Resolved in #452 (A/A): the cross-block coordination is real machinery (event wiring + the page stage), not prose a consumer hand-wires. It renders no DOM of its own — it coordinates the data-table + pagination blocks that do."
+      },
+      "reuseApplyPipeline": {
+        "description": "Reuse the data-table's verified `applyPipeline` for filter/sort/group; add only the page stage + event wiring",
+        "rationale": "`applyPipeline`'s page stage is intentionally a no-op ('the Pagination block's job'). The coordinator supplies exactly that missing stage and the event routing, re-implementing none of the verified contract."
+      }
+    },
+    "traits": [],
+    "frameworkComparison": {
+      "react": {
+        "patterns": [
+          "TanStack Table's single getRowModel pipeline (filter -> sort -> group -> paginate)"
+        ],
+        "notes": "TanStack runs all stages over one row model in order; we split the stages across composable blocks and add a coordinator that sequences them so order stays collection-wide."
+      }
+    }
+  },
+  {
     "id": "pagination",
     "name": "Pagination",
     "status": "active",

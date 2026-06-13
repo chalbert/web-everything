@@ -2,9 +2,12 @@
 type: idea
 workItem: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-06-12"
 blockedBy: ["452"]
+dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: block:collection-operations
 tags: [collection-operations, data-table, pagination, composition, exercise-app-discovery]
 crossRef: { url: /backlog/317-exercise-app-loan-origination/, label: "Surfaced composing data-table + pagination in app A (#317)" }
 ---

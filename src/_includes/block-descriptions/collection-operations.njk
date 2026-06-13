@@ -1,0 +1,19 @@
+<h2>Collection Operations Coordinator</h2>
+<p>The headless coordinator for the <a href="/intents/collection-operations/">Collection Operations</a> intent. The two stage-owning blocks each run one stage — <a href="/blocks/data-table/">Data Table</a> does <code>filter</code> / <code>sort</code> / <code>group</code>, <a href="/blocks/pagination/">Pagination</a> does <code>page</code> — but until this existed nothing ran the pipeline <em>as a whole</em>. So the obvious consumer wiring (page-then-render) put <code>sort</code> <em>after</em> <code>page</code>: clicking a header sorted only the current page, not the whole book. The loan-origination app (<a href="/backlog/317/">#317</a>) was the first consumer to hit it.</p>
+
+<p>This coordinator owns the single collection and runs the full pipeline — <strong><code>filter &rarr; sort &rarr; group &rarr; page</code></strong> — applying filter/sort/group across the <strong>entire</strong> set first (reusing the Data Table's verified <code>applyPipeline</code>, whose <code>page</code> stage is a deliberate no-op), then windowing the result. Order is always collection-wide; the page is just the visible slice. Re-feeding the already-ordered slice back through the Data Table is safe — filter/sort/group are idempotent on a processed slice, so the table's own re-render preserves the order instead of re-deriving a page-local one.</p>
+
+<p>Per the <a href="/backlog/452/">#452</a> ruling (A/A) it ships as a standalone headless <code>CollectionOperationsBehavior</code> plus an optional <code>&lt;collection-operations&gt;</code> element — <strong>not</strong> a documented composition and <strong>not</strong> a rendered block. The element routes descendant <code>data-table-change</code> / <code>pagination-change</code> events back into the pipeline and emits a <code>collection-operations-change</code> event carrying the materialised window (page rows, windowed groups, total + page count) a consumer applies.</p>
+
+<p style="font-size: 0.9rem; color: var(--color-text-muted);">
+  <strong>Terminology:</strong> See <a href="/semantics/">Semantics &amp; Glossary</a> and the
+  <a href="/intents/collection-operations/">Collection Operations intent</a> for the pipeline stages.
+</p>
+
+<h3>What it adds</h3>
+<ul>
+  <li><strong>The page stage</strong> — the slice <code>applyPipeline</code> deliberately leaves to the pagination layer, applied over the collection-wide order.</li>
+  <li><strong>Event wiring</strong> — sort/filter events from the data-table and page events from pagination both feed the coordinator, which re-runs the pipeline and re-windows.</li>
+  <li><strong>Windowed group headers</strong> — a grouped page keeps correct group headers, with per-group summaries recomputed over the rows actually shown.</li>
+  <li><strong>Materialised totals</strong> — <code>getPageState()</code> hands the pagination block a <code>total</code> + <code>pageCount</code> reflecting the whole book, not the page.</li>
+</ul>
