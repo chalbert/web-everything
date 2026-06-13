@@ -3,9 +3,12 @@ type: idea
 workItem: story
 size: 5
 parent: "099"
-status: open
+status: resolved
 blockedBy: ["087"]
 dateOpened: "2026-06-06"
+dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: none
 tags: [module-as-a-service, incremental-update, delta, patch, service-worker, cache-api, distribution, evergreen, performance]
 relatedReport: reports/2026-06-06-front-end-platform-book.md
 relatedProject: webadapters
@@ -35,3 +38,14 @@ The previous-version artifact lives in the **Cache API** (service worker); async
 - Where the patch is computed: at the MaaS origin (eager, per version pair) vs. on demand. Recommendation: on demand, cached, keyed on `(fromHash → toHash)`.
 - Integrity: a patched result must still match the target content hash + SRI (#088) — verify after applying, fall back to full download on mismatch.
 - Sequenced **after** #087/#088 (needs immutable content-addressed versions to diff between).
+
+## Progress (2026-06-13) — resolved
+
+#087/#088 are resolved, so this built on them. New [blocks/renderers/module-service/incrementalUpdate.ts](../blocks/renderers/module-service/incrementalUpdate.ts) — the pure, framework-free delta-update orchestration core (the reference; WE is the standard, production binary-diff + service-worker/Cache-API wiring are app/FU-owned, **injected**). Each recommended default from the design notes is taken:
+
+- **Don't reinvent binary diff** — `applyPatch` is an injected `(previous, patch) => bytes` seam; WE ships no diff algorithm, only verifies the result.
+- **On-demand patch, keyed on `(fromHash → toHash)`** — `resolvePatch(fromHash, toHash) => bytes | null`; `null` (origin hasn't computed the pair) falls back to full.
+- **Integrity-then-fallback (the safety invariant)** — `applyIncrementalUpdate` verifies the patched bytes against `toHash` (the #088 content-address = SRI, via a default `sha256-<base64>` hasher matching the fetch origin) and on *any* mismatch discards the patch and full-downloads; the full path is verified too and throws `IntegrityError` if even it is corrupt. A bad patch can never install.
+- **Two delivery shapes** — `chooseDeliveryShape({fullSize, patchSize, threshold=0.5})` returns `patch` only when the patch saves enough bytes (drive `threshold` from the changelog manifest #102), else `full`; unknown full size never patches blind.
+
+10 unit tests (decision thresholds; patch success; patch-integrity-mismatch → verified full fallback; no-previous; no-patch-available; corrupt full → `IntegrityError`); gate green; type-clean (the lone tsc note is the pre-existing `tsconfig.plugs` rootDir artifact that flags every `blocks/` module-service file). The service-worker/Cache-API host that calls this — supplying the previous bytes, the patch/full transports, and the diff codec — is the app/FU integration, not a WE standard artifact.
