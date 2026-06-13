@@ -3,11 +3,13 @@ type: decision
 workItem: story
 size: 8
 parent: "097"
-status: open
+status: resolved
 dateOpened: "2026-06-08"
-dateStarted: "2026-06-12"
+dateStarted: "2026-06-13"
 preparedDate: "2026-06-12"
 blockedBy: ["266", "094", "102"]
+dateResolved: "2026-06-13"
+graduatedTo: none
 tags: [upgrader, codemod, migration, spec-versioning, breaking-change, machine-readable]
 relatedProject: webadapters
 relatedReport: reports/2026-06-12-upgrader-version-migration-codemods.md
@@ -50,7 +52,7 @@ actually needed.
 
 | Fork | Recommended default | Main alternative | Confidence |
 |---|---|---|---|
-| **1 · placement** | a **mode + input-adapter of #094's `upgraderEngine`** (already-conformant source + `changelog-manifest` delta → same `verifyUpgrade` gate) | a distinct version-migration tool | **Med-high** — anti-drift; #094's own follow-on says "shared core, different input adapter" |
+| **1 · placement** | a **mode + input-adapter of #094's `upgraderEngine`** (already-conformant source + `changelog-manifest` delta → same `verifyUpgrade` gate), with the analyzer/input seam named correctly as a **devtools provider seam** — not a runtime-registry standard like #052/#081 | a distinct version-migration tool | **Med-high** — anti-drift; #094's own follow-on says "shared core, different input adapter" |
 | **2 · transform authoring** | **declarative-first** (engine interprets the descriptor for mechanical changes) **with an imperative codemod escape hatch** for the complex tail | imperative-only (codemod module per change) | **Medium** — OpenRewrite's ruling principle; most-permissive default |
 | descriptor *format* | *(ratify)* consume the `changelog-manifest` protocol (#102) | design a new descriptor *(rejected — exists)* | **High** |
 | verify *gate* | *(ratify)* reuse #094's `verifyUpgrade` (parse + round-trip + conformance) | a new gate *(rejected — exists)* | **High** |
@@ -69,20 +71,39 @@ actually needed.
 
 ## Fork 1 — placement: a mode of the existing engine, or a distinct tool?
 
-**Crux.** #094's `upgraderEngine` is `analyze → generate → verifyUpgrade`, with a `CustomAnalyzerRegistry`
-provider seam (`upgraderEngine.ts:72`) and a neutral `ComponentIR` (:32). The version-migration kind has the
-*same arc*; it differs only in **input** — an already-conformant source plus a `changelog-manifest` delta,
-rather than legacy code. #094's own open follow-on already asked this and leaned the same way ("upgraders are
-a *mode* of the same engine … likely shared core, different input adapter").
+**Crux.** #094's `upgraderEngine` is `analyze → generate → verifyUpgrade`, with a provider-injection seam
+([upgraderEngine.ts:72](../blocks/renderers/upgrader/upgraderEngine.ts#L72)) and a neutral `ComponentIR`
+(:32). The version-migration kind has the *same arc*; it differs only in **input** — an already-conformant
+source plus a `changelog-manifest` delta, rather than legacy code. #094's own open follow-on already asked
+this and leaned the same way ("upgraders are a *mode* of the same engine … likely shared core, different
+input adapter").
+
+**Name the seam correctly — this is devtools, not a runtime registry.** The upgrader runs at
+author/migration time (a CLI/devtools invocation), never inside anyone's running app. So its analyzer seam is
+**not** the same kind of thing as the runtime standard registries it currently claims kinship with —
+`CustomRenderStrategyRegistry` (#052) and `CustomCompilerRegistry` (#081) are *runtime/app* seams the project
+injects a provider into for the *running* standard to consult, and they are lock-minimization points at the
+standard's surface. The analyzer is consulted once, by a tool. The provider-injection *need* is real and
+devtools-appropriate (swap a deterministic reference analyzer for a BYO-key model analyzer), but the
+*concept* is a **devtools provider seam**, not a runtime-registry standard — it must not drift into being
+presented as a protocol or a standard registry. The engine's own doc comment
+([upgraderEngine.ts:13-16](../blocks/renderers/upgrader/upgraderEngine.ts#L13)) markets it as "the SAME
+inject-a-provider shape as `CustomCompilerRegistry` / `CustomRenderStrategyRegistry`" — that kinship framing
+is the thing to correct. Separately, the global mutable singleton (`analyzerRegistry`, :93) is a
+runtime-registry habit a devtools doesn't need — a tool more naturally takes its providers as an explicit
+input (the engine already accepts `opts.registry`); demoting it to explicit injection is an **implementation
+cleanup to spin out as its own item at close-out** — not a fork blocker, and orthogonal to how Fork 1
+resolves (the analyzer-seam framing is wrong either way).
 
 - **(A — recommended) A mode + input-adapter of `upgraderEngine`.** Add a version-migration input adapter
-  (consumes source + changelog-manifest delta) behind the existing `CustomAnalyzerRegistry` seam, reuse the
+  (consumes source + changelog-manifest delta) behind the existing provider seam, reuse the
   `analyze → transform → verifyUpgrade` arc, and add a version-gated *planner* (select migrations in
   `>installed, <=target`, ordered, intermediate-spanning — the `ng update` loop) on top. No second engine,
-  no drift, the verify gate is inherited. Cost: the planner + a transform step that mutates existing source
-  (vs #094 generating fresh) are new surface on the engine.
+  no drift, the verify gate is inherited. The seam it joins is the devtools provider seam above — the
+  version-migration adapter is simply a second provider into the one tool. Cost: the planner + a transform
+  step that mutates existing source (vs #094 generating fresh) are new surface on the engine.
 - **(B) A distinct version-migration tool.** A standalone codemod runner separate from the legacy→standard
-  upgrader. *Rejected* — duplicates the engine, the provider registry, and the verify gate; risks the two
+  upgrader. *Rejected* — duplicates the engine, the provider seam, and the verify gate; risks the two
   upgraders drifting; contradicts #094's shared-core follow-on and the #081 anti-drift discipline. The two
   kinds are *input adapters of one engine*, not two products.
 
@@ -108,6 +129,28 @@ without changing the protocol.
 - **Sub-decision (hold open):** the exact declarative change-kind vocabulary the engine interprets natively
   (rename-attr / move-dimension / retire-provider / re-namespace …) — enumerated at build slice (b) against
   the real breaking-change history.
+
+---
+
+## Ruling (ratified 2026-06-13)
+
+Both forks ratified as their bold defaults; both ratifies confirmed.
+
+- **Fork 1 = 1A** — the version-migration upgrader is a **mode + input-adapter of #094's one
+  `upgraderEngine`**, not a distinct tool (anti-drift: one engine, one verify gate, two input adapters).
+  The analyzer/input seam is named correctly as a **devtools provider seam** (consulted once by a tool at
+  author/migration time), **not** a runtime-registry standard like #052/#081 — and must not drift into a
+  protocol/standard registry.
+- **Fork 2 = 2A** — **declarative-first transform authoring with an imperative codemod escape hatch**
+  (OpenRewrite's principle; most-permissive default). The declarative change-kind **vocabulary stays a held-open
+  sub-decision for build slice (b)**, enumerated against the real breaking-change history — *not* re-decided here.
+- **Ratifies** — descriptor = the `changelog-manifest` protocol (#102); verify gate = #094's `verifyUpgrade`.
+
+**Spawned builds (the `blockedBy` chain):**
+- [#491](/backlog/491-upgrader-version-migration-planner-changelog-manifest-consum/) — slice (a): changelog-manifest consumption + version-gated migration planner (Tier-A, ready).
+- [#492](/backlog/492-upgrader-declarative-transform-interpreter-imperative-codemo/) — slice (b): declarative transform interpreter + imperative escape hatch (carries the vocabulary sub-decision; Tier-A, ready).
+- [#493](/backlog/493-upgrader-version-migration-input-adapter-second-provider-on-/) — slice (c): version-migration input adapter/mode on `upgraderEngine` + `verifyUpgrade` wiring (`blockedBy [491, 492]`).
+- [#494](/backlog/494-upgrader-analyzer-is-a-devtools-provider-seam-demote-the-glo/) — cleanup (task): demote the analyzer global singleton to explicit injection + fix the misleading #052/#081 kinship doc comment (orthogonal — do anytime).
 
 ---
 
