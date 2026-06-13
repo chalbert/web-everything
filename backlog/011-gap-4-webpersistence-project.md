@@ -2,8 +2,11 @@
 type: decision
 workItem: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-05-31"
+dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: none
 tags: [gap-analysis, project, protocol, persistence, offline]
 relatedReport: reports/2026-06-11-webpersistence-project.md
 preparedDate: "2026-06-11"
@@ -74,3 +77,16 @@ Confirm scope and shape (project + protocol vs. distributed facets) and timing �
 - **Fork 3 — conflict resolution as a strategy dimension of the change-tracking protocol**: the merge (LWW / revision-hash winner / CRDT / manual diff) operates over exactly the change representations the change-tracking protocol already normalizes, so it's a strategy dimension gated to the sync case rather than a new protocol that would re-own those representations.
 
 **Open — needs a human call:** whether a top-level `webpersistence` project exists at all vs dissolving into facets on `webstates` (durable store), `webresources` (response cache), `webreliability` (offline queue), and change-tracking (conflict merge) — i.e. Fork 1 + Fork 4 together — because this is a net-new project-scope bet (single cross-cutting sync orchestrator vs a thin seam between existing owners) that the per-layer forks deliberately leave for human judgment.
+
+## Resolution (final) — 2026-06-13
+
+**Forks 1 + 4 ratified as Option A — no `webpersistence` project.** Gap #4 dissolves into facets on the existing owners:
+
+- **Storage abstraction** → a **thin storage Protocol graduated as a persistence facet of `webstates`** — a `CustomStorageStrategy` registry tried per-scope, IndexedDB the native-first default, `localStorage` the graceful degradation, plus `navigator.storage.persist()`/quota. Small surface, mirrors the change-tracking protocol's `CustomChangeStrategy`.
+- **Response cache** (Cache API + SW policies: stale-while-revalidate / cache-first / network-first) → a dimension of **`webresources`**.
+- **Durable outbox/replay** (Fork 2) → a fixed mechanism over the storage protocol + **`webreliability`**'s offline-queue.
+- **Conflict merge** (Fork 3) → a strategy dimension of the **change-tracking protocol**, gated to the sync case.
+
+**Why A over B (mint a project):** the only pull toward a top-level project is cross-cutting sync orchestration (cache-invalidation ↔ outbox-replay ↔ conflict-merge), and that orchestration has no concrete consumer yet — B is a speculative bet. A is reversible (the thin protocol can later *graduate* into a project if a real orchestration need appears; un-minting a project is far costlier), and three of the four layers already have unambiguous owners, so wrapping one new thin protocol + three pointers in a project is the over-projectification the constellation bias guards against. Door to B stays open as a graduation path, not a rejection.
+
+**Successor build** (the only net-new artifact): the thin storage protocol on `webstates` → carved as #503. The cache/outbox/conflict facets are dimensions on already-owned surfaces, tracked under their owners' own work.
