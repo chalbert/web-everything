@@ -97,7 +97,7 @@ Built-ins (`show-modal`, `close`, `toggle-popover`) plus custom `--my-command` v
 
 ## Support table
 
-First *stable shipping* version, approximate (knowledge cutoff Jan 2026 — verify bleeding-edge rows against caniuse). Sorted by maturity.
+First *stable shipping* version. Bleeding-edge rows verified against caniuse/MDN **2026-06-13** (#033); the once-approximate rows below are now citable. Sorted by maturity.
 
 **Legend:** ✅ shipped · 🚩 behind flag · ❌ not yet · **Baseline** = interoperable across all three engines
 
@@ -111,16 +111,17 @@ First *stable shipping* version, approximate (knowledge cutoff Jan 2026 — veri
 | Declarative Shadow DOM | 90/111 | 16.4 | 123 | ✅ '24 | tiny hydration shim |
 | **Popover API** | 114 | 17 | 125 | ✅ '24 | `@oddbird/popover-polyfill` |
 | `CustomStateSet` / `:state()` | 125¹ | 17.4 | 121 | ✅ '24 | `element-internals-polyfill` |
-| **CSS Anchor Positioning** | 125 | ❌² | 🚩 | ❌ | `@oddbird/css-anchor-positioning` |
-| `command` / `commandfor` (invokers) | 135 | 26 | 🚩 | ❌ | `invokers-polyfill` |
+| **CSS Anchor Positioning** | 125 | 26 | 147 | ✅ '26² | `@oddbird/css-anchor-positioning` |
+| `command` / `commandfor` (invokers) | 135 | 26.2 | 144 | ✅ '26² | `invokers-polyfill` |
 | `field-sizing: content` | 123 | ❌ | ❌ | ❌ | ponyfill (autosize) |
-| `<dialog closedby>` | 134 | 18.4 | 🚩 | ❌ | polyfillable (event wiring) |
+| `<dialog closedby>` | 134 | ❌⁴ | 141 | ❌ | polyfillable (event wiring) |
 | Customizable `<select>` (`appearance: base-select`) | 135 | ❌ | ❌ | ❌ | ❌ only by replacement³ |
 | Cross-root ARIA / Reference Target | 🚩 | ❌ | ❌ | ❌ | ⚠️ partial mitigation only |
 
 ¹ Chromium shipped the `internals.states` object ~90 but only under the deprecated `:--x` selector; the `:state(x)` selector is the ~125 row.
-² Safari & Firefox anchor-positioning were both in active development in early 2026 — likely closer/shipped by the time you read this.
+² **Shipped since the Jan-2026 cutoff (verified 2026-06-13, #033).** CSS Anchor Positioning reached all three engines — Safari 26.0 and Firefox 147 (Jan 2026) joined Chrome 125 — so it crossed into Baseline 2026. Invokers (`command`/`commandfor`) likewise went interoperable: Chrome 135, Safari 26.2, Firefox 144. Both rows were `❌`/`🚩` at authoring.
 ³ The `<selectlist>` era had an OpenUI polyfill, but `appearance: base-select` isn't polyfillable — you fall back to a normally-styled native `<select>`, a perfectly good baseline.
+⁴ `<dialog closedby>` is **not** yet in Safari (unsupported through Safari 27, tracked under Interop 2026); the Jan-2026 table's "Safari 18.4" was wrong — that's the `requestClose()` method, not the `closedby` attribute. Firefox shipped it in 141 (was `🚩`). Verified 2026-06-13 (#033).
 
 ---
 
