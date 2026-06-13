@@ -2,12 +2,21 @@
 type: issue
 workItem: task
 parent: "081"
-status: open
+status: parked
 blockedBy: ["451"]
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-13"
 tags: []
 ---
+
+> **Parked (2026-06-13, batch top-up).** #451 — its `blockedBy` — resolved, but #451 is the MaaS
+> hosted-tier *shape & pricing* **decision**, not the served/published `@frontierui/jsx-runtime` URL
+> this needs. As the finding below verified (same day), none of the three exports-safe targets exists
+> (linking is #239-forbidden, the package is unpublished, #461's origin serves WE components not the FU
+> package). This item keeps re-surfacing as "ready" each batch because its blockers are *decisions* that
+> resolve without producing the artifact. **Parked** until a real browser-fetchable `@frontierui/jsx-runtime`
+> URL exists (the package is published, or a hosted MaaS serves it) — then un-park and repoint `blockedBy`
+> at that artifact-producing item, not another decision.
 
 # Clean up maas-consumer-demo importmap to package-exports resolution
 
