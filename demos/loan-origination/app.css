@@ -227,3 +227,11 @@ code { background: #eef1f5; padding: 1px 5px; border-radius: 2px; font-family: u
   align-items: center; gap: 18px; padding: 0 16px; background: #dfe4ea; border-top: 1px solid var(--line-strong);
   font-size: 11px; color: var(--ink-2); }
 .lo-statusbar .sep { color: var(--line-strong); }
+
+/* ---- S9 disclosures + e-sign (#386) ---- */
+.disc-body { display: flex; flex-direction: column; gap: 10px; }
+.disc-esign { display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--surface-2, #f4f6f8);
+  border: 1px solid var(--line); border-radius: var(--radius); }
+.disc-esign-row { display: flex; gap: 8px; align-items: center; }
+.disc-esign input { flex: 1; font: inherit; font-size: 13px; padding: 6px 10px; border: 1px solid var(--line-strong);
+  border-radius: var(--radius); }

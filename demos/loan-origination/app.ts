@@ -13,7 +13,7 @@ import { generatePipeline } from './domain/seed';
 import { evaluate, type EvaluationResult } from './domain/rules';
 import { deriveFacts } from './domain/facts';
 import { getProduct } from './domain/catalog';
-import type { Application, Finding } from './domain/types';
+import type { Application, Finding, Disclosure } from './domain/types';
 import { registerDataTable, type DataTableElement } from '../../blocks/renderers/data-table/DataTableBehavior';
 import type { Row, DataTableConfig } from '../../blocks/renderers/data-table/renderDataTable';
 import { PaginationBehavior, registerPagination } from '../../blocks/renderers/pagination/PaginationBehavior';
@@ -26,6 +26,13 @@ import { DefaultAuditProvider, registerAudit, auditLifecycle } from '../../block
 import { auditTimelineHTML } from '../../blocks/renderers/audit-timeline/renderAuditTimeline';
 import { decisionTraceHTML } from '../../blocks/renderers/decision-trace/renderDecisionTrace';
 import { toDecisionRecord } from './domain/decision';
+import {
+  generateInitialDisclosures,
+  signDisclosure,
+  initialPackageSigned,
+  tridClock,
+  DISCLOSURE_LABEL,
+} from './domain/disclosures';
 
 // Web Lifecycle block (active): the loan's status machine is the data-defined LOAN_LIFECYCLE driving the
 // shipping DefaultLifecycleProvider — we no longer hand-roll transitions. The Status Indicator render
@@ -92,6 +99,58 @@ function pipelineRows(apps: Application[]): Row[] {
   }));
 }
 
+const shortDate = (iso: string) =>
+  new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+/**
+ * Phase S9 (#386) — the disclosures + e-sign + TRID-clock surface for a loan. Reuses the shipping
+ * Status Indicator block for every chip (clock state, per-disclosure state); the e-signature capture,
+ * the business-day deadline clock, and the disclosure-package generation are app-side policy with no
+ * governing WE standard yet (Layer-2 candidates — see conformance.json). The file cannot advance past
+ * submission until the borrower e-signs the initial package (the lifecycle gate this enforces).
+ */
+function renderDisclosures(app: Application): string {
+  const clock = tridClock(app, new Date());
+  const signed = initialPackageSigned(app);
+  const clockChip = !clock
+    ? ''
+    : statusIndicatorHTML(
+        signed
+          ? { label: 'Signed — TRID satisfied', tone: 'positive', shape: 'pill' }
+          : clock.overdue
+            ? { label: `TRID overdue — due ${shortDate(clock.due)}`, tone: 'critical', shape: 'pill' }
+            : { label: `${clock.businessDaysRemaining} business day(s) to sign · due ${shortDate(clock.due)}`, tone: 'caution', shape: 'pill' },
+      );
+
+  const rows = app.disclosures
+    .map((d: Disclosure) => {
+      const chip = d.signedAt
+        ? statusIndicatorHTML({ label: `Signed ${shortDate(d.signedAt)}`, tone: 'positive', shape: 'badge' })
+        : statusIndicatorHTML({ label: 'Awaiting e-signature', tone: 'caution', shape: 'badge' });
+      const signer = d.signedBy ? `<span class="muted"> · ${d.signedBy}</span>` : '';
+      return `<div class="cell"><div class="k">${DISCLOSURE_LABEL[d.type]}</div><div class="v">${chip}${signer}</div></div>`;
+    })
+    .join('');
+
+  const esign = signed
+    ? `<p class="muted">Initial package e-signed — the file may advance.</p>`
+    : `<form class="disc-esign" autocomplete="off">
+        <label class="muted" for="disc-signer">Borrower e-signature (type full legal name)</label>
+        <div class="disc-esign-row">
+          <input type="text" id="disc-signer" name="signer" placeholder="e.g. ${app.borrowers[0].firstName} ${app.borrowers[0].lastName}" required />
+          <button type="submit" class="btn primary">E-sign initial package</button>
+        </div>
+        <p class="muted">A timestamped audit record is written on signature; advance is gated until then.</p>
+      </form>`;
+
+  return `<div class="panel-hd" style="border-radius:3px 3px 0 0">Disclosures &amp; e-sign <span class="muted">· TRID</span></div>
+    <div class="trace-body disc-body">
+      <p>${clockChip}</p>
+      <div class="snapshot">${rows}</div>
+      ${esign}
+    </div>`;
+}
+
 function renderTrace(
   app: Application,
   result: EvaluationResult,
@@ -129,6 +188,7 @@ function renderTrace(
     ${decisionHTML}
     <div class="panel-hd" style="border-radius:3px 3px 0 0">Audit trail</div>
     ${historyHTML}
+    ${renderDisclosures(app)}
   </div>`;
 }
 
@@ -230,6 +290,18 @@ function boot() {
   // Render the full master-detail trace for a loan: available moves + proof trace + audit timeline.
   const showTrace = async (app: Application, panel: HTMLElement) => {
     await seedAudit(app);
+    // Phase S9 (#386): the initial disclosure package is owed on submit. We materialize it the first
+    // time the file is inspected (idempotent) and log the generation to the shipping audit trail, so
+    // the TRID clock + e-sign gate have something to render against.
+    if (!app.disclosures.some((d) => d.type === 'initial-package')) {
+      generateInitialDisclosures(app, new Date());
+      await loanAudit.append({
+        target: { type: 'loan', id: app.loanNumber },
+        action: 'disclosures.generated — initial package + Loan Estimate (TRID 3-day clock)',
+        actor: { role: 'loan-officer' },
+        at: new Date().toISOString(),
+      });
+    }
     const next = await loanLifecycle.available({ id: app.loanNumber, state: app.state }, ACTOR);
     const history = await loanAudit.queryByEntity(app.loanNumber);
     const timeline = auditTimelineHTML(history, { density: 'compact', detail: 'expanded' });
@@ -313,6 +385,27 @@ function boot() {
         const entity = { id: current.loanNumber, state: current.state };
         await loanLifecycle.transition(entity, btn.dataset.to as ApplicationState, ACTOR);
         current.state = entity.state; // reflect the applied move back onto the pipeline entity
+        await showTrace(current, panel);
+      });
+
+      // Phase S9 (#386): the borrower e-signs the initial disclosure package. On submit we stamp the
+      // signature + timestamp on every unsigned disclosure and write an actor-attributed AuditEvent to
+      // the shipping audit trail (the timestamped record the TRID flow requires), then re-render so the
+      // clock chip flips to "TRID satisfied" and the lifecycle gate opens.
+      panel.addEventListener('submit', async (e) => {
+        const form = (e.target as HTMLElement).closest<HTMLFormElement>('form.disc-esign');
+        if (!form || !current) return;
+        e.preventDefault();
+        const signer = new FormData(form).get('signer')?.toString().trim();
+        if (!signer) return;
+        const at = new Date();
+        for (const d of current.disclosures) if (!d.signedAt) signDisclosure(d, signer, at);
+        await loanAudit.append({
+          target: { type: 'loan', id: current.loanNumber },
+          action: 'disclosure.e-signed — initial package (borrower e-signature captured)',
+          actor: { role: 'borrower', id: signer },
+          at: at.toISOString(),
+        });
         await showTrace(current, panel);
       });
     }
