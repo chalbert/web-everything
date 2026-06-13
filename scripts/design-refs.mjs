@@ -8,7 +8,20 @@
 //
 // Design (see backlog/382-...): append-only + content-addressed (item id = sha256(webp).slice(0,16)),
 // so identical re-captures are skipped and changed captures become new files — git history never churns.
-// Vision tagging is deferred (phase 3); collect records only deterministic + curated-worklist metadata.
+//
+// Vision-gated capture QC (backlog #480, ruling #475): when a real vision provider is selected
+// (DESIGN_REFS_VISION_PROVIDER), `collect` classifies the final frame before admission — app → admit,
+// obstructed → dismiss-overlay + bounded re-shoot, else → quarantine. The vision client is a thin,
+// swappable, NO-LEAKAGE seam (see ./design-refs/vision.mjs): the default `manual` provider runs no
+// model, so the pipeline behaves exactly as before unless a provider is opted in. Full visual *tagging*
+// stays deferred to the codification pass (#481/#396).
+//
+// Rule-based CMP opt-out (backlog #486): the obstructed-verdict remediation drives DuckDuckGo
+// `autoconsent`'s Playwright CMP message protocol to dismiss consent/cookie walls by *rule* before
+// the bounded re-shoot, falling back to the built-in heuristics on a miss. autoconsent is an OPT-IN
+// install — `npm i @duckduckgo/autoconsent` activates it; it is dynamically imported (never a hard
+// dep), so offline/CI runs with the package absent are unaffected (the no-extra-dep posture, like the
+// deferred `sharp`). See dismissOverlays / autoconsentOptOut below.
 
 import { chromium } from 'playwright';
 import { createHash } from 'node:crypto';
@@ -18,7 +31,11 @@ import {
 } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
+import {
+  resolveVisionProvider, classifyCandidate, decideAdmission, reviewStateFor, visionEnabled,
+} from './design-refs/vision.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', 'design-refs');
@@ -27,7 +44,10 @@ const RUNS = join(ROOT, 'runs');
 const LEDGER = join(ROOT, 'ledger.json');
 const INDEX = join(ROOT, 'index.json');
 const NEEDS_REVIEW = join(ROOT, 'needs-review.json');
+const VERDICTS = join(ROOT, 'verdicts.json'); // vision verdict cache, keyed by contentHash (Fork 4)
 const DEFAULT_TARGETS = join(ROOT, 'targets.json');
+
+const REMEDIATION_CAP = 2; // obstructed → dismiss + re-shoot, at most this many times (Fork 3)
 
 const VIEWPORT = { width: 1440, height: 900 };
 const DPR = 2;
@@ -80,6 +100,101 @@ async function dismissConsent(page) {
   } catch {}
 }
 
+// One autoconsent `window.autoconsentSendMessage` binding per page (exposeFunction throws on a
+// repeat name); the bound trampoline dispatches to the *current* run's handler so re-shoots reuse it.
+const acExposed = new WeakSet();
+const acHandler = new WeakMap(); // page -> current run's message handler
+
+// Drive DuckDuckGo `autoconsent`'s CMP message protocol on the *current* page to opt out of a
+// consent/cookie wall by rule (the #475 ruling) rather than by heuristic. Mirrors autoconsent's
+// Puppeteer/Playwright integration: inject the prebundled content script, expose
+// `autoconsentSendMessage` for it to call Node, and answer `init` with the config + rules bundle and
+// `eval` by running the requested code in the page. Returns true once autoconsent reports done.
+//
+// autoconsent is an OPTIONAL dependency — every load step and the protocol are guarded, so a missing
+// package, content-script bundle, or rules file (or any protocol error) returns false and the caller
+// falls through to the built-in heuristics. No hard dep; offline/CI runs are unaffected.
+async function autoconsentOptOut(page) {
+  let rules, scriptSource;
+  try {
+    await import('@duckduckgo/autoconsent'); // presence check — throws (caught) when absent
+    // CMP detection needs the rules bundle. Prefer the compact variant, fall back to the full one.
+    const rulesMod = await import('@duckduckgo/autoconsent/rules/compact-rules.json', { with: { type: 'json' } })
+      .catch(() => import('@duckduckgo/autoconsent/rules/rules.json', { with: { type: 'json' } }));
+    rules = rulesMod.default ?? rulesMod;
+    // The prebundled content script isn't exposed by the package's exports map, so resolve the
+    // package main and read the sibling bundle directly.
+    const require = createRequire(import.meta.url);
+    const distDir = dirname(require.resolve('@duckduckgo/autoconsent'));
+    scriptSource = readFileSync(join(distDir, 'autoconsent.playwright.js'), 'utf8');
+  } catch {
+    return false; // package / rules / content-script absent → heuristics
+  }
+
+  const config = {
+    enabled: true,
+    autoAction: 'optOut',
+    enablePrehide: true,
+    enableCosmeticRules: true,
+    enableGeneratedRules: true,
+    detectRetries: 20,
+  };
+
+  try {
+    let resolveDone;
+    const done = new Promise((r) => { resolveDone = r; });
+    const send = (msg) => page.evaluate((m) => window.autoconsentReceiveMessage?.(m), msg).catch(() => {});
+
+    acHandler.set(page, async (message) => {
+      try {
+        switch (message?.type) {
+          case 'init':
+            await send({ type: 'initResp', config, rules });
+            break;
+          case 'eval': {
+            let result = false;
+            try { result = await page.evaluate(message.code); } catch { result = false; }
+            await send({ id: message.id, type: 'evalResp', result });
+            break;
+          }
+          case 'autoconsentDone':
+            resolveDone(true);
+            break;
+          case 'autoconsentError':
+          case 'autoconsentCancelled':
+            resolveDone(false);
+            break;
+        }
+      } catch { resolveDone(false); }
+    });
+
+    if (!acExposed.has(page)) {
+      await page.exposeFunction('autoconsentSendMessage', (message) => acHandler.get(page)?.(message));
+      acExposed.add(page);
+    }
+    // Run the content script in the current document (we remediate post-load, not on new documents).
+    await page.evaluate(scriptSource);
+
+    // A page with no CMP never reports done, so cap the wait before falling through.
+    return Boolean(await Promise.race([done, page.waitForTimeout(4000).then(() => false)]));
+  } catch {
+    return false;
+  }
+}
+
+// Remediation for an `obstructed` verdict (Fork 3): clear a modal/consent/overlay so a re-shoot can
+// reach the real app. Runs autoconsent's rule-based CMP opt-out first (the #475 ruling); the built-in
+// heuristics — accept-consent, dismiss/close buttons, Escape — then run as a supplement (and the sole
+// path when autoconsent is absent), catching non-CMP overlays autoconsent doesn't own.
+async function dismissOverlays(page) {
+  await autoconsentOptOut(page);
+  await dismissConsent(page);
+  const closers = /^(close|dismiss|no thanks|not now|maybe later|skip|×|✕)$/i;
+  try { await page.getByRole('button', { name: closers }).first().click({ timeout: 1500 }); } catch {}
+  try { await page.keyboard.press('Escape'); } catch {}
+  await page.waitForTimeout(400);
+}
+
 // ---- collect ---------------------------------------------------------------
 async function collect(args) {
   const targetsFile = args.targets ? String(args.targets) : DEFAULT_TARGETS;
@@ -95,9 +210,32 @@ async function collect(args) {
 
   const ledger = readJSON(LEDGER, {});
   const needsReview = readJSON(NEEDS_REVIEW, {});
+  const verdictCache = readJSON(VERDICTS, {});
   const refresh = Boolean(args.refresh);
+
+  // Vision gate (ruling #475). A real provider is opt-in via DESIGN_REFS_VISION_PROVIDER; the default
+  // `manual` provider runs no model, so behaviour is unchanged unless opted in. `--vision-verify` makes
+  // vision cross-check even a passing readySelector (the Grafana error-page override); without it a
+  // confirmed selector is a free fast-path that skips the vision call (Fork 4).
+  const provider = await resolveVisionProvider(process.env);
+  const visionOn = visionEnabled(process.env);
+  const visionVerifyDefault = Boolean(args['vision-verify']);
+  if (visionOn) console.log(`👁  vision gate   provider=${provider.name}${visionVerifyDefault ? ' (verify-selectors)' : ''}`);
+
   const runId = new Date().toISOString().replace(/[:.]/g, '-');
   const run = { runId, startedAt: new Date().toISOString(), captured: [], skipped: [], duplicates: [], quarantined: [], failed: [] };
+
+  // Classify a frame, reusing a cached verdict when the same contentHash was judged before — so
+  // idempotent re-runs (and re-shoots that land on a seen frame) never re-pay vision (Fork 4).
+  const classifyOrCached = async (contentHash, input) => {
+    if (verdictCache[contentHash]) return verdictCache[contentHash];
+    const res = await classifyCandidate(provider, input);
+    verdictCache[contentHash] = { ...res, at: new Date().toISOString() };
+    return verdictCache[contentHash];
+  };
+  const quarantine = (url, info) => {
+    needsReview[url] = { ...info, at: new Date().toISOString() };
+  };
 
   mkdirSync(ITEMS, { recursive: true });
   mkdirSync(RUNS, { recursive: true });
@@ -142,26 +280,58 @@ async function collect(args) {
       }
       await page.waitForTimeout(t.settleMs ?? SETTLE_MS);
 
-      // Inclusion gate: a readySelector asserts the app surface is present. Miss → quarantine
-      // (record in needs-review.json, write nothing to the corpus) so marketing/error states
-      // never get promoted. No selector → captured but flagged 'ungated' (visibly un-QC'd).
-      let reviewState = 'ungated';
+      // Deterministic fast-path: a readySelector asserts the app surface is present. 'confirmed' is a
+      // free pass (skips the vision call); 'missed' quarantines only when no vision gate can recover it
+      // (a real provider can re-judge a selector-miss instead of dropping it).
+      let selectorState = 'none';
       if (t.readySelector) {
         try {
           await page.waitForSelector(t.readySelector, { timeout: t.readyTimeout ?? 8000, state: 'visible' });
-          reviewState = 'confirmed';
-        } catch {
-          console.log(`🔍 needs-review  ${url}  —  readySelector not found: ${t.readySelector}`);
-          needsReview[url] = { reason: 'readySelector-miss', selector: t.readySelector, at: new Date().toISOString() };
-          run.quarantined.push({ url, selector: t.readySelector });
-          continue;
-        }
+          selectorState = 'confirmed';
+        } catch { selectorState = 'missed'; }
+      }
+      if (selectorState === 'missed' && !visionOn) {
+        console.log(`🔍 needs-review  ${url}  —  readySelector not found: ${t.readySelector}`);
+        quarantine(url, { reason: 'readySelector-miss', selector: t.readySelector });
+        run.quarantined.push({ url, selector: t.readySelector });
+        continue;
       }
 
-      const pngBuf = await page.screenshot({ type: 'png', fullPage: false });
-      const { width, height } = pngDims(pngBuf);
-      const webpBuf = pngToWebp(pngBuf);
-      const contentHash = sha256(webpBuf);
+      let pngBuf = await page.screenshot({ type: 'png', fullPage: false });
+      let { width, height } = pngDims(pngBuf);
+      let webpBuf = pngToWebp(pngBuf);
+      let contentHash = sha256(webpBuf);
+
+      // Vision gate (ruling #475). Runs when a real provider is selected, except on a confirmed selector
+      // (free fast-path) unless --vision-verify / per-target visionVerify asks vision to cross-check it.
+      let reviewState = selectorState === 'confirmed' ? 'confirmed' : 'ungated';
+      let visionVerdict = null;
+      const visionVerify = visionVerifyDefault || Boolean(t.visionVerify);
+      const doVision = visionOn && !(selectorState === 'confirmed' && !visionVerify);
+      if (doVision) {
+        const frame = () => ({ url, pngBase64: pngBuf.toString('base64'), dims: { width, height }, selectorState });
+        let res = await classifyOrCached(contentHash, frame());
+        // obstructed → dismiss the overlay and re-shoot, bounded (Fork 3).
+        for (let attempt = 0; decideAdmission(res.verdict) === 'remediate' && attempt < REMEDIATION_CAP; attempt++) {
+          console.log(`   ⟳ remediate    ${url}  —  obstructed (attempt ${attempt + 1}/${REMEDIATION_CAP})`);
+          await dismissOverlays(page);
+          await page.waitForTimeout(t.settleMs ?? SETTLE_MS);
+          pngBuf = await page.screenshot({ type: 'png', fullPage: false });
+          ({ width, height } = pngDims(pngBuf));
+          webpBuf = pngToWebp(pngBuf);
+          contentHash = sha256(webpBuf);
+          res = await classifyOrCached(contentHash, frame());
+        }
+        visionVerdict = { verdict: res.verdict, provider: res.provider, reasons: res.reasons, at: new Date().toISOString() };
+        if (decideAdmission(res.verdict) !== 'admit') {
+          console.log(`🔍 needs-review  ${url}  —  vision verdict: ${res.verdict}`);
+          quarantine(url, { reason: `vision-${res.verdict}`, provider: res.provider });
+          run.quarantined.push({ url, verdict: res.verdict });
+          continue;
+        }
+        reviewState = reviewStateFor(res.verdict); // 'confirmed' — a provider said app
+      }
+
       const id = contentHash.slice(0, 16);
 
       if (knownHashes.has(contentHash)) {
@@ -197,6 +367,7 @@ async function collect(args) {
         sourceUrl: url,
         captureMethod: 'playwright',
         reviewState,
+        visionVerdict, // {verdict, provider, reasons, at} when a vision provider gated it, else null
         dateCollected: new Date().toISOString(),
         datePublished: null,
         app: t.app ?? null,
@@ -231,6 +402,7 @@ async function collect(args) {
   await browser.close();
   writeJSON(LEDGER, ledger);
   writeJSON(NEEDS_REVIEW, needsReview);
+  if (visionOn) writeJSON(VERDICTS, verdictCache);
   run.finishedAt = new Date().toISOString();
   writeJSON(join(RUNS, `${runId}.json`), run);
 
@@ -331,6 +503,7 @@ switch (cmd) {
   case 'prune': prune(); break;
   case 'report': report(); break;
   default:
-    console.log('usage: design-refs.mjs <collect|index|dedup|prune|report> [--targets=path] [--only=substr] [--limit=N] [--refresh]');
+    console.log('usage: design-refs.mjs <collect|index|dedup|prune|report> [--targets=path] [--only=substr] [--limit=N] [--refresh] [--vision-verify]');
+    console.log('  vision gate (opt-in): DESIGN_REFS_VISION_PROVIDER=<name> DESIGN_REFS_VISION_PROVIDER_MODULE=<path-to-provider.mjs>');
     process.exit(cmd ? 1 : 0);
 }
