@@ -41,10 +41,11 @@ judgment call); the happy path is these commands:
    *Running a batch* → *Cross-session reservation*).
 3. **Loop, per item:** **`node scripts/backlog.mjs claim <NNN>`** → work → gate (tests + `npm run
    check:standards`) → leftovers via **`node scripts/backlog.mjs scaffold …`** → **`node scripts/backlog.mjs
-   resolve <NNN> [--graduated-to=…]`**. Update the compact ledger after each (header tracks `cost
-   <spent>/<budget>`).
-4. **At each seam, evaluate the stop rule**; on continue, re-read the next item fresh (drop it if now
-   `active`/dirty). **When the planned pack runs dry but budget + context remain, top up:** re-run
+   resolve <NNN> [--graduated-to=…]`** → **commit that item's changes** (`git add <explicit paths the item
+   touched>` then `git commit` — **stage only this piece's files, never `git add -A`; never `git push`**;
+   one commit per closed item). Update the compact ledger after each (header tracks `cost <spent>/<budget>`).
+4. **At each seam, evaluate the stop rule**; on continue, re-read the next item fresh (drop it only if now
+   `status: active` — i.e. another session owns it; **uncommitted edits are NOT a drop reason**). **When the planned pack runs dry but budget + context remain, top up:** re-run
    `npm run check:readiness -- --select --budget=<remaining>` (remaining = budget − resolved `cost`) and
    pack its fresh suggestion — it absorbs items the just-resolved work cascade-freed to Tier A.
    **Never** pull a close-out leftover this way (unvetted — capture and leave it). The budget is a
@@ -134,11 +135,13 @@ item. A repo/subsystem boundary is a plan-time *ordering* hint only, never a sto
 
 **The drop-reason classifier makes rule 3 honest (full table in *The stop rule* → *The drop-reason
 classifier*).** A declined item is **not** a stop: every Tier-A item the re-pack surfaces that you don't
-claim must carry exactly one hard reason — `dirty` (the `claim` tool refused it), `blocked-in-fact` (a
-needed artifact **verified** absent), `not-batchable` (`decision`/`story·≥13`/`epic`), `out-of-locus`
-(lives in a repo whose gate this batch can't run — resolving it on *this* gate would be dishonest), or
-`outgrew` (claimed-and-began, then sprawled). An eligible `task`/`story·≤8` with **none** of these **must be
-claimed** — "big / risky / load-bearing / needs a focused session / fresh agent" are the gut stops this
+claim must carry exactly one hard reason — `taken` (already `status: active` — another session owns it),
+`blocked-in-fact` (a needed artifact **verified** absent), `not-batchable` (`decision`/`story·≥13`/`epic`),
+`out-of-locus` (lives in a repo whose gate this batch can't run — resolving it on *this* gate would be
+dishonest), or `outgrew` (claimed-and-began, then sprawled). **There is NO `dirty`/uncommitted drop reason** —
+`claim` never inspects git, and a modified-or-untracked working tree is the normal baseline, never a reason
+to skip an item. An eligible `task`/`story·≤8` with **none** of these **must be
+claimed** — "big / risky / load-bearing / needs a focused session / fresh agent / the tree is dirty" are the gut stops this
 kills. The closing ledger **tags every unworked item with its reason**; an untagged item (or one tagged
 "felt big") means you stopped early — go back and claim it. Quitting early on a gut call (or an unsolicited
 context-check) is the failure this rule exists to kill. (The context-% question belongs at **close-out
