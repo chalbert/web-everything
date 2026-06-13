@@ -1,8 +1,50 @@
 [
   {
+    "id": "on-device-ui-vision",
+    "title": "On-device UI-screenshot vision — capability ceiling, runtimes, distillation (a moving target)",
+    "status": "open",
+    "summary": "Capability grounding for backlog #488 — whether Plateau backs its vision features with an OWNED on-device model (fixed cost → flat-rate-safe under the linear-cost-with-revenue rule) rather than only a metered hosted SDK. The decisive finding: the gate verdict is COARSE screen classification, not generative understanding — Enrico (a Rico subset) shows the screenshot alone classifies UI screens at ~95% AUC / 75% top-1 across 20 design topics with a LIGHTWEIGHT classifier (random=5%), and our task is only 6 classes, so a small ViT/MobileNet/ResNet-18 (≲10MB quantized) runs in-browser via WebGPU on ANY device — true zero-marginal-cost — and is distillable from the big-model verdicts the dev gate already produces (VL2Lite CVPR'25, PAND, VLM-KD are established task-specific KD methods; #489 collects the labeled set). A richer tier (tagging, element/region detection, structure) needs a small on-device VLM — SmolVLM (256M/500M/2.2B), Moondream (0.5B/1.86B), Florence-2 (0.27B), TinyClick — at the practical ≲2B device ceiling (WebGPU ~2GB GPU mem, q4/q8, flagship mobile), with structure recovery still hard (Design2Code SOTA ≈76). Architecturally it's a provider swap behind the existing #475/#480 swappable vision seam, so the no-leakage invariant holds. THREE FRAMING PRINCIPLES (author steers): (1) the AI frontier moves fast — what's out of reach today may be feasible in months — so set graduation BENCHMARKS each tier must hit to move on-device (API/BYO-key as the always-on bridge meanwhile), don't permanently reject a feature; (2) RE-ASSESS on a cadence (a recurring re-benchmark of the small-model frontier, the #192 longitudinal model); (3) CODIFY THE TRAINING as a model-agnostic, re-applicable artifact — the labeled corpus + the distillation recipe + the benchmark suite are the durable assets, so switching base model means re-running the recipe, never re-labelling from scratch (minimize-lock-in applied to the model itself).",
+    "dateOpened": "2026-06-13",
+    "tags": [
+      "on-device",
+      "vision",
+      "plateau",
+      "distillation",
+      "webgpu",
+      "linear-cost",
+      "benchmark",
+      "longitudinal"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webadapters"
+  },
+  {
+    "id": "backlog-kind-axis",
+    "title": "Backlog taxonomy — one `kind` axis vs separate `type` + `workItem`",
+    "status": "open",
+    "summary": "Grounds backlog decision #466 — whether to collapse the backlog's two near-redundant nature/sizing axes (`type`: idea/issue/decision + `workItem`: story/epic/task) into a single `kind` enum. Surveys how mature trackers separate the orthogonal concerns of nature, hierarchy-role, and effort: GitHub Issues (GA March 2025) converged on ONE org-level issue-type axis (Feature/Bug/Task) and explicitly told teams to migrate bug/feature *labels* INTO types — never a parallel required nature field; Jira runs ONE issue-type enum that folds hierarchy-role (Epic) and nature (Bug) together, with story points as a fully separate estimation field; Linear/GitLab likewise keep exactly one structural type axis plus a separate weight/estimate and free-form labels. None run WE's current double-statement (a buildable item is both `type:idea` AND `workItem:story`). The cross-tool invariant: collapse the correlated nature+role pair into one structural `kind` axis, keep the genuinely-orthogonal `size` separate, and demote any residual fix-vs-feature flavour to an optional label/tag rather than a required field. This confirms and strengthens #466's Fork-A lean (unify) from 'lean' to 'strong', and dissolves the would-be fix/feature sub-fork — the existing `tags` array already absorbs it with zero new machinery. Internal backlog tooling; no project-facing standard or lock-in.",
+    "dateOpened": "2026-06-13",
+    "lastReviewed": "2026-06-13",
+    "reviewHorizon": "P12M",
+    "tags": [
+      "backlog",
+      "taxonomy",
+      "tooling",
+      "convention",
+      "issue-tracker",
+      "data-model"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "supersedes": [
+      "design-ref-vision"
+    ]
+  },
+  {
     "id": "design-ref-vision",
     "title": "Design-reference vision pipeline — capture-time QC gate + codification (one swappable provider)",
-    "status": "open",
+    "status": "superseded",
     "summary": "Grounds the two vision items on the design-reference corpus (backlog #475 capture-QC gate, #396 codification) on one swappable vision provider used at two points. The phase-1 pipeline (#382) admits screenshots through a deterministic, hand-authored readySelector gate that doesn't generalise and can't tell a clean app surface from a marketing splash / modal-obstructed view / stale error panel (Photopea & Grafana slipped through). The survey of UI vision prior art finds an asymmetry that decides the architecture: coarse screen classification is a mature, reliable VLM capability (ScreenAI's element-type+location annotation, Ferret-UI's widget classification beating GPT-4V), while full screenshot→structure recovery is still hard (Design2Code NAACL-2025 SOTA: Claude-4-Sonnet 76.3, open VLMs <45, poor layout fidelity). So the cheap admit/remediate/quarantine verdict (#475) is safe to automate as a VLM-as-judge returning a structured verdict against fixed criteria, while the rich tag+paradigm-harvest pass (#396) stays human-in-the-loop with the neutral structure as the editable review surface (the #086 ruling). Both are analysis calls, so they share ONE customVisionProvider registry (the #086 customMockupAnalyzerRegistry pattern) with two methods — not two integrations; obstructed-surface remediation reuses DuckDuckGo's Playwright-native autoconsent rather than inventing overlay dismissal; verdicts cache by content hash for idempotent re-runs. Internal research-corpus tooling, zero project-facing lock-in; deterministic selectors stay a free fast-path.",
     "dateOpened": "2026-06-13",
     "tags": [
@@ -17,7 +59,10 @@
     ],
     "relatedBlocks": [],
     "relatedPlugs": [],
-    "relatedProject": "webdocs"
+    "relatedProject": "webdocs",
+    "supersededBy": [
+      "backlog-kind-axis"
+    ]
   },
   {
     "id": "custom-events",
@@ -569,6 +614,31 @@
     "relatedProject": "webguards"
   },
   {
+    "id": "credential-acquisition-protocol",
+    "title": "Credential-Management Protocol (build design)",
+    "status": "open",
+    "summary": "Build-design prior art for the deferred webidentity protocol (backlog #496, blocking epic #483), after #012 settled the meta-shape (one project owning one credential protocol; families as a request dimension; identity feeds Guard). #496 ratified the protocol id as credential-management (surveyed here under the working name credential-acquisition; renamed once the member set grew past get-only to the full Credential Management API surface). Two new findings ground the build forks. (1) The credential lifecycle is four CredentialsContainer methods with asymmetric per-family support: get() is universal; create()/store() exist only for passkey + password; FedCM and Digital Credentials are get-only (enrollment is off-platform at the IdP/issuer); preventSilentAccess() is an origin-global sign-out flag. So a flat single contract forces get-only families to stub create/store — the same shape Guard solved with members. (2) The provider seam is not greenfield: every WE project owns one protocol fixing one seam resolved by a swappable CustomXProvider (Guard's CustomGuardProvider, Lifecycle's CustomLifecycleProvider, Validation, Change Tracking, Localization), native-first default → project override → custom plug; identity reuses Guard's async/server-authoritative/revocable contract. Recommends: one CustomCredentialProvider registry-resolved per family with a native-passthrough default plus a mock conformance provider for server-less demoability; lifecycle modelled as request/enrollment/session-mediation members; the Configurator domain omitted (provider + config-flavors suffice) until a real authoring need appears.",
+    "dateOpened": "2026-06-13",
+    "tags": [
+      "identity",
+      "auth",
+      "credential-management",
+      "credentialscontainer",
+      "webauthn",
+      "passkeys",
+      "fedcm",
+      "digital-credentials",
+      "provider-seam",
+      "protocol",
+      "guard",
+      "lifecycle",
+      "build-design"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webguards"
+  },
+  {
     "id": "web-scroll-observation",
     "title": "Scroll / Observation",
     "status": "open",
@@ -617,7 +687,7 @@
     "id": "app-shell-compatibility-map",
     "title": "App Shell + Micro-App Compatibility Map",
     "status": "open",
-    "summary": "Web-platform and industry prior art grounding backlog #104: a thin App Shell that loads independently-developed micro-apps as pages of one SPA, deciding on navigation whether the next page loads in the same SPA or needs a hard refresh, plus a Platform compatibility map. single-spa (bootstrap/mount/unmount lifecycle, activeWhen, import maps) and Module Federation (semver-ranged shared deps) are mature, but none ships a declared, introspectable per-app compatibility chart — the novel artifact, sitting on the #092 provider/consumer graph. Recommends: split the home — a thin app-shell-compatibility protocol owned by webmanifests plus the live map as a Plateau dashboard; declare a flat requirement manifest, render a browser-compat-data-style support matrix; borrow the Storage eviction model (best-effort/persistent classes + LRU under a mounted-app budget). Adapters-via-DI (webinjectors) shrink the incompatible set so hard refresh is the last resort.",
+    "summary": "Web-platform and industry prior art grounding backlog #104: a thin App Shell that loads independently-developed micro-apps as pages of one SPA, deciding on navigation whether the next page loads in the same SPA or needs a hard refresh, plus a Platform compatibility map. Deepened 2026-06-13: Module Federation 2.0 (mf-manifest.json + DevTools dependency graph), Native Federation, Piral, qiankun, Luigi, Bit, plus the classic declared-range resolvers (npm peerDependencies/engines, OSGi, Kubernetes version-skew). Correcting the first cut: declared manifests and rendered graphs already exist — but only for the shared-library-version dimension. The genuine novelty is a declared COEXISTENCE contract that also covers the DOM dimension (custom-element tag-names, window globals, route ownership) — which no surveyed tool declares; the ones that solve it (qiankun, Luigi) use enforced isolation, never a declared+mapped contract. Recommends: split the home — a thin app-shell-compatibility protocol owned by webmanifests plus the live map as a Plateau dashboard (Zephyr Cloud is proof the product leg is viable); declare flat (npm-peerDependencies-shaped provider ranges + OSGi-namespaced globals/tag-names/routes claims) and compute a browser-compat-data-style matrix as the rendered view (BCD is curated, not declared), with three states and an asymmetric skew window; borrow the Storage eviction model (best-effort/persistent + LRU under a mounted-app budget). Adapters-via-DI (webinjectors) shrink the incompatible set so hard refresh is the last resort.",
     "dateOpened": "2026-06-11",
     "tags": [
       "app-shell",
@@ -626,7 +696,13 @@
       "compatibility-map",
       "spa",
       "module-federation",
+      "native-federation",
+      "piral",
+      "qiankun",
       "import-maps",
+      "peer-dependencies",
+      "osgi",
+      "version-skew",
       "browser-compat-data",
       "eviction",
       "evergreen"
