@@ -91,6 +91,14 @@
     "anchor": "protocol-changelog-manifest"
   },
   {
+    "id": "app-shell-compatibility",
+    "name": "App Shell Compatibility",
+    "summary": "Conformance reference for the flat coexistence manifest each micro-app authors so an app shell can decide — on navigation — whether the next page loads inside the same SPA (compatible) or needs a hard refresh (incompatible). Ruled by #104. The unit is the declared requirement, not the computed chart: a providers block (semver ranges per shared provider, npm-peerDependencies / MF-shared shaped, each singleton-vs-isolatable and mandatory-vs-optional) plus OSGi-Require-Capability-style namespaced claims for the DOM dimension no version-sharing tool models — globals (window.*), tagNames (customElements.define collisions), routes. Singleton providers force a range intersection across all active apps (OSGi uses); isolatable ones get per-app versions via import-map scopes. A second claimant on one namespaced key is a collision, detected separately from a version mismatch. Declare flat; the BCD-style 3-state support matrix and the live map are COMPUTED by the Plateau view (#502), never declared here. Gate strictness is a warn-by-default policy knob (block opt-in), per npm engine-strict / MF strictVersion. Sibling of changelog-manifest; consumed by the app shell runtime resolver and the compatibility map (#502) off one manifest — the MF2 mf-manifest.json one-seam-two-consumers lesson.",
+    "status": "concept",
+    "ownedByProject": "webmanifests",
+    "anchor": "protocol-app-shell-compatibility"
+  },
+  {
     "id": "update-policy",
     "name": "Update Policy",
     "summary": "Conformance reference for an app's declared auto-update policy — the committed, portable config that says when a new dep/standard version is adopted and how it is made safe (the WE analogue of renovate.json / dependabot.yml). The declared policy is the only lock; the orchestration runner that executes it is a swappable Plateau/reliability service (the deferred build), the same protocol-vs-runner split WE already ships in Guard and render-strategy. The gate is one graded axis, not a single mechanic: pre-merge — cool-off buffer (minimumReleaseAge) → confidence/severity classification read from the changelog-manifest's strictest-wins severity (#102) → auto-merge patch/minor-green, human-gate major + visual-diff; post-deploy — staged rollout → metric analysis → auto-rollback on regression. The 'auto low-risk-green / human major+visual' rule is the safe-default flavor a project config extends, not a baked constant. Breaking entries route through the changelog-manifest's migration linkage, run by the upgrader engine (#094); the WE-only edge is Platform-side pre-testing a version against its consumers' suites before release, via the provider-consumer graph (#092). Consumes the changelog-manifest (#102) and upgrader engine (#094); the runner is built in #497.",

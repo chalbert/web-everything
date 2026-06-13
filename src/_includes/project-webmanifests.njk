@@ -8,7 +8,9 @@
     <em>what changed and how breaking it is</em>, with the migration that mechanically applies each breaking
     change. It is the contract that makes safe <strong>auto-update</strong> possible. Its companion is the
     <a href="#protocol-update-policy">Update Policy</a> protocol — the committed config that decides
-    <em>when</em> an update runs and <em>how</em> it is gated, acting on the changes the manifest describes.
+    <em>when</em> an update runs and <em>how</em> it is gated, acting on the changes the manifest describes. A
+    third protocol, <a href="#protocol-app-shell-compatibility">App Shell Compatibility</a>, is the flat
+    coexistence manifest each micro-app declares so an app shell can decide whether two apps can run in one SPA.
   </p>
   <p>
     A human <code>CHANGELOG.md</code> cannot be acted on by a machine. The Changelog Manifest is the
@@ -226,6 +228,125 @@ interface ChangelogManifest {
     apps to pre-test. The difference between "hope the bump is safe" and "we already proved it against your
     build." No industry analogue — this is the standard's net-new edge over renovate/dependabot, which can
     only test <em>after</em> a version ships.
+  </p>
+</section>
+
+<section id="protocol-app-shell-compatibility" class="section-card">
+  <h3 id="app-shell-compatibility-protocol">App Shell Compatibility Protocol</h3>
+  <p>
+    Conformance reference for the <strong>flat coexistence manifest</strong> each micro-app authors so a
+    minimal-dependency <strong>app shell</strong> can decide, on navigation, whether the next page loads
+    <strong>inside the same SPA</strong> (compatible) or needs a <strong>hard refresh</strong> (incompatible) —
+    and avoid re-loading code already present. Ruled by
+    <a href="/backlog/104-app-shell-compatibility-map/">#104</a>. It is the forward-looking dual of the
+    <a href="#protocol-changelog-manifest">Changelog Manifest</a>: where that says <em>what changed</em>, this
+    says <em>what I require to run here</em>. The declared chart is the standards lock; the rendered
+    <strong>compatibility map</strong> is a separate <a href="/backlog/502-plateau-app-shell-compatibility-map-dashboard-computed-bcd-s/">Plateau
+    view (#502)</a> that <em>computes</em> a BCD-style support matrix over the
+    <a href="/protocols/#protocol-provider-consumer-graph">#092 provider↔consumer graph</a> — one manifest,
+    two consumers (the runtime resolver and the map), the Module Federation 2.0 <code>mf-manifest.json</code>
+    one-seam lesson.
+  </p>
+
+  <div class="comparison-block" style="background: rgba(5, 150, 105, 0.08); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #059669; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #047857; font-size: 1rem;">Declare flat, compute the matrix</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      A micro-app declares a <strong>minimal requirement manifest</strong>, never a rich support matrix — BCD
+      is curated/computed, never declared by implementers, so the declared layer stays flat and the nuance is
+      computed by the map. The standardized surface is two parts: a <code>providers</code> block
+      (semver ranges, npm-<code>peerDependencies</code> / MF-<code>shared</code> shaped) and the novel
+      <code>claims</code> block — OSGi-<code>Require-Capability</code>-style namespaced claims for the
+      <strong>DOM dimension</strong> (globals, custom-element tag names, routes) that <em>no</em>
+      version-sharing tool (Module Federation, Native Federation, single-spa) models.
+    </p>
+  </div>
+
+  <h4 id="coexistence-schema-contract">Schema Contract</h4>
+  <p>The novel, standardized surface — every conformant coexistence manifest satisfies this shape:</p>
+  {% highlight "typescript" %}
+type SemverRange = string;   // npm/semver vocabulary, verbatim — e.g. "^2.4.0", ">=18 <20"
+
+interface ProviderRequirement {
+    // The shared dependency this app needs from the shell/host (React, a design system, the shell API).
+    range: SemverRange;
+    // singleton: one instance shared across all active apps -> ranges must INTERSECT (OSGi `uses`).
+    // isolatable: each app may load its own version via an import-map scope.
+    sharing: 'singleton' | 'isolatable';
+    // mandatory: absence/mismatch fails coexistence. optional: degrade, don't fail (peerDependenciesMeta).
+    optional?: boolean;       // default false (mandatory)
+}
+
+// OSGi-Require-Capability-style namespaced claims for the DOM dimension. A second claimant on the
+// same key is a COLLISION (detected separately from a version mismatch). The namespace set is OPEN
+// and extensible — globals/tagNames/routes are the ratified floor (#104), not a closed list.
+interface CoexistenceClaims {
+    globals?: string[];       // window.* keys this app defines/owns
+    tagNames?: string[];      // customElements.define() names — collision = two apps define the same tag
+    routes?: string[];        // route prefixes this app owns
+    [namespace: string]: string[] | undefined;   // future: cssNamespaces, storageKeys, …
+}
+
+interface AppShellCompatibilityManifest {
+    manifestVersion: string;
+    app: string;                              // the micro-app id
+    // Required shell/host API range — the asymmetric skew axis (#104): shell NEWER than declared is a
+    // forward-compat zone (allow/flag); shell OLDER than required is a hard fail.
+    shell: SemverRange;
+    providers: Record<string, ProviderRequirement>;   // keyed by provider id
+    claims?: CoexistenceClaims;
+}
+  {% endhighlight %}
+
+  <h4 id="coexistence-example">A declared manifest</h4>
+  {% highlight "json" %}
+{
+  "manifestVersion": "1",
+  "app": "loan-origination",
+  "shell": "^3.0.0",
+  "providers": {
+    "react": { "range": "^18.2.0", "sharing": "singleton" },
+    "@frontierui/droplist": { "range": "^3.0.0", "sharing": "singleton" },
+    "chart-lib": { "range": "^5.0.0", "sharing": "isolatable", "optional": true }
+  },
+  "claims": {
+    "globals": ["__LOAN_FLAGS__"],
+    "tagNames": ["loan-wizard", "rate-table"],
+    "routes": ["/loan", "/underwriting"]
+  }
+}
+  {% endhighlight %}
+
+  <h4 id="coexistence-conformance">Conformance &amp; the strictness knob</h4>
+  <p>What the shell (or a build-time validator) checks a manifest set against, before two apps coexist:</p>
+  <ul style="font-size: 0.9rem;">
+    <li><strong>Singleton intersection.</strong> For every <code>singleton</code> provider, the
+      <code>range</code>s of all active apps must have a non-empty <em>intersection</em> (the OSGi
+      <code>uses</code> constraint) — one shared instance can only satisfy a version all of them accept.
+      <code>isolatable</code> providers are exempt (per-app import-map scopes).</li>
+    <li><strong>Namespace collision.</strong> Two active apps claiming the same <code>globals</code> /
+      <code>tagNames</code> / <code>routes</code> key is a collision — reported <em>separately</em> from a
+      version mismatch, because it is a different failure (a custom-element tag can only be defined once).</li>
+    <li><strong>Asymmetric shell skew.</strong> Shell <em>newer</em> than the app's declared <code>shell</code>
+      range is a forward-compat zone (allow, flag on the map); shell <em>older</em> than required is a hard
+      fail — the page needs a hard refresh onto its own shell (Kubernetes version-skew policy).</li>
+    <li><strong>Strictness is a warn-by-default policy knob.</strong> A failed check <em>warns</em> by default
+      (the app still loads, flagged), and <em>blocks</em> only when the project opts in — mirroring npm
+      <code>engine-strict</code> and MF <code>strictVersion</code>, both advisory by default. The default lives
+      in the platform config a project extends, not as a baked constant.</li>
+  </ul>
+
+  <h4 id="coexistence-authoring-note">Authoring a coexistence manifest</h4>
+  <p style="font-size: 0.9rem;">
+    Author one manifest per micro-app, committed beside it (the npm-<code>peerDependencies</code> habit). Declare
+    only what you <em>require</em> and what you <em>own</em> — never a support matrix. Mark a provider
+    <code>singleton</code> when one shared instance is mandatory (a framework runtime, a design-system registry)
+    and <code>isolatable</code> when per-app versions are tolerable; mark it <code>optional</code> when its
+    absence should degrade rather than fail. List every <code>window.*</code> global, every
+    <code>customElements.define()</code> tag, and every owned route under <code>claims</code> so the shell can
+    detect collisions before mount. The computed BCD-style matrix, the live dashboard, and the
+    <code>status</code>/Baseline surfacing of apps pinned to deprecated providers are the
+    <a href="/backlog/502-plateau-app-shell-compatibility-map-dashboard-computed-bcd-s/">Plateau map's (#502)</a>
+    job — they read this manifest, they are not authored into it.
   </p>
 </section>
 
