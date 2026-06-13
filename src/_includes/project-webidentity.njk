@@ -1,0 +1,188 @@
+<section class="intro-section mb-12">
+  <h3 id="mission">Mission</h3>
+  <p>
+    <strong>Web Identity</strong> standardizes <strong>acquiring and managing a user's credentials behind
+    one swappable provider</strong>. The browser's <a href="https://developer.mozilla.org/en-US/docs/Web/API/Credential_Management_API"><code>navigator.credentials</code></a>
+    dispatcher is the normalized contract; passkey/WebAuthn, FedCM, digital-credential, and password are
+    <em>families</em> resolved by a single <strong>credential provider</strong>. Swap a ceremony engine
+    (SimpleWebAuthn, Hanko, a FedCM IdP) and the requesting surface is untouched.
+  </p>
+  <p>
+    The provider is never baked into the surface — it is resolved through the injector chain: a native-first
+    default ships (a <code>navigator.credentials</code> passthrough), the project selects or overrides it,
+    and custom providers plug in. <strong>The provider contract is the only lock</strong>. Identity is the
+    twin of <a href="/projects/webguards/">Web Guards</a>: it reuses Guard's <em>async,
+    server-authoritative, revocable</em> contract verbatim — the browser only <em>gathers</em> a credential;
+    the server <em>verifies</em> it. Identity <em>produces</em> the auth-state predicate that Guard's
+    access-gate <em>consumes</em>.
+  </p>
+
+  <div class="comparison-block" style="background: rgba(79, 70, 229, 0.08); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #4f46e5; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #4338ca; font-size: 1rem;">The problem it solves</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      "Sign in with a passkey", "Sign in with Google", "Sign in with a saved password" look like three
+      different integrations, each with its own SDK and ceremony. They are the same machine:
+      <strong>a credential request, dispatched by family, resolved by a provider, verified on the
+      server</strong>. Today every app re-wires WebAuthn, FedCM, and password autofill by hand and couples
+      the ceremony library into the UI. Web Identity extracts the one reusable seam so a family is a
+      <em>declared request dimension</em> and the engine behind it is swappable.
+    </p>
+  </div>
+</section>
+
+<section id="features" class="section-card">
+  <h3 id="feature-surface">Feature Surface</h3>
+  <p>
+    What a credential standard covers, and how each capability is fulfilled. <strong>Protocol</strong> =
+    fixed by the Credential Management contract (the only lock); <strong>Provider</strong> = resolved behind
+    the swappable credential provider, never in the surface; <strong>Member</strong> = owned by a lifecycle
+    member; <strong>Compose</strong> = deferred to a neighbouring Web Everything standard.
+  </p>
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 720px;">
+      <thead>
+        <tr><th>Feature</th><th>Prior art</th><th>What it does</th><th>Layer</th></tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(79,70,229,0.06);">The seam (fixed by the protocol)</td></tr>
+        <tr><td><strong>Credential request</strong></td><td><code>navigator.credentials.get()</code></td><td>The normalized "give me a credential" call, dispatched by family</td><td>Protocol</td></tr>
+        <tr><td><strong>Family dimension</strong></td><td>WebAuthn, FedCM, Digital Credentials, password</td><td><code>credentials:[passkey&nbsp;|&nbsp;federated&nbsp;|&nbsp;digital&nbsp;|&nbsp;password]</code> — one request, many families</td><td>Protocol</td></tr>
+        <tr><td><strong>Provider seam</strong></td><td>—</td><td>Default &rarr; project override &rarr; custom plug, resolved off the injector chain</td><td>Protocol</td></tr>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(79,70,229,0.06);">Provider concerns (behind the seam, never in the surface)</td></tr>
+        <tr><td><strong>Trust boundary</strong></td><td>WebAuthn RP server, FedCM IdP</td><td>The server is authoritative; the front-end request is a gathering UX, never the verifier</td><td>Provider</td></tr>
+        <tr><td><strong>Ceremony engine</strong></td><td>SimpleWebAuthn, Hanko, native passkey UI</td><td>The attestation/assertion mechanics — swappable, off the contract</td><td>Provider</td></tr>
+        <tr><td><strong>Revocation / mediation</strong></td><td><code>preventSilentAccess()</code>, token expiry</td><td>A session can be revoked; silent re-auth can be suppressed</td><td>Provider</td></tr>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(99,102,241,0.06);">Members (open set — each declares its supporting families)</td></tr>
+        <tr><td><strong>Credential request</strong></td><td><code>get()</code> — all families</td><td><em>Give me a credential.</em> Passkey assertion, FedCM token, password autofill</td><td>Member — universal</td></tr>
+        <tr><td><strong>Credential enrollment</strong></td><td><code>create()</code> / <code>store()</code> — passkey + password</td><td><em>Register a new credential.</em> Passkey registration, password save</td><td>Member — passkey + password only</td></tr>
+        <tr><td><strong>Session mediation</strong></td><td><code>preventSilentAccess()</code> — origin-global</td><td><em>Sign out / suppress silent re-auth.</em> Origin-wide</td><td>Member — origin-global</td></tr>
+        <tr><td><strong>Future kinds</strong></td><td>—</td><td>step-up auth, credential rotation, device-bound attestation</td><td>Protocol stays open — member list not fixed</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="protocol-credential-management" class="section-card">
+  <h3 id="how-it-works">Credential Management Protocol</h3>
+  <p>
+    A requesting surface never bundles a ceremony. It declares the <strong>families</strong> it accepts and
+    the <strong>member</strong> it wants (request / enrollment / session-mediation), resolves the
+    application's <strong>credential provider</strong> through the injector chain, and asks it. Dispatch is
+    <strong>2-D</strong> — the protocol's dispatcher fans the request by <em>family</em> (which providers
+    are registered for the requested <code>credentials:[…]</code>) <em>and</em> by <em>member</em> (which
+    of those families support enrollment vs request vs sign-out).
+  </p>
+  {% highlight "typescript" %}
+// The seam — the ONLY lock. A credential provider answers a request for one family + member.
+type CredentialFamily = 'passkey' | 'federated' | 'digital' | 'password';
+type CredentialMember = 'credential-request' | 'credential-enrollment' | 'session-mediation';
+
+interface CustomCredentialProvider {
+  // Which families this provider serves, and which members each family supports
+  // (e.g. FedCM/digital are request-only; passkey/password also enroll).
+  readonly families: CredentialFamily[];
+  supports(family: CredentialFamily, member: CredentialMember): boolean;
+
+  // Async by default: acquiring a credential crosses a trust boundary (RP/IdP round-trip).
+  // member 'credential-request'    -> navigator.credentials.get()
+  // member 'credential-enrollment' -> navigator.credentials.create() / store()
+  // member 'session-mediation'     -> navigator.credentials.preventSilentAccess()
+  acquire(request: CredentialRequest): Promise<CredentialResult>;
+
+  // Revocable: a session can be invalidated. Optional signal to re-mediate.
+  subscribe?(onInvalidate: () => void): Cleanup;
+}
+
+interface CredentialRequest {
+  member: CredentialMember;
+  // The requesting surface lists the families it will accept; the dispatcher fans to their providers.
+  credentials: CredentialFamily[];
+  mediation?: 'silent' | 'optional' | 'conditional' | 'required';   // native enum, from the #482 intent
+}
+
+// 1. The application registers ONE provider per family (native-first default; project overrides it).
+customCredentials.define('passkey', new SimpleWebAuthnProvider(rp));
+injector Application {
+  provide { credentials: 'passkey' } to '@web-identity';   // every descendant resolves this provider
+}
+
+// 2. A surface delegates — it owns only its affordance, never the ceremony.
+const provider = InjectorRoot.getProviderOf(el, 'customCredentials');
+const result = await provider.acquire({ member: 'credential-request', credentials: ['passkey', 'password'] });
+if (result.ok) identity.signIn(result.descriptor);   // feeds the auth-state predicate Guard consumes
+  {% endhighlight %}
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+    <li><strong>One contract:</strong> <code>CustomCredentialProvider</code> — <code>acquire(request): Promise&lt;CredentialResult&gt;</code> — is satisfied by the native passthrough and every plugged ceremony engine alike.</li>
+    <li><strong>One registry:</strong> <code>CustomCredentialRegistry</code> (<code>window.customCredentials</code>) holds the named providers per family; the project selects/overrides via the injector chain (defaults live in the platform config a project extends, shipped as flavors — the tool itself carries no default).</li>
+    <li><strong>Native-first default:</strong> the default provider is a <code>navigator.credentials</code> passthrough (most-available); a <strong>mock in-memory conformance provider</strong> ships in the protocol's first slice so every downstream surface is demoable without a relying-party server.</li>
+    <li><strong>Families are a request dimension, not three standards:</strong> a surface lists <code>credentials:[passkey|federated|digital|password]</code>; the dispatcher resolves each to its registered provider. Swapping one family out leaves the others untouched — the interop story.</li>
+  </ul>
+
+  <h4 id="member-dispatch" style="margin-top: 1.5rem;">The lifecycle is an open member set, not a flat surface</h4>
+  <p style="font-size: 0.9rem;">
+    <code>CredentialsContainer</code> is <code>get</code>/<code>create</code>/<code>store</code>/<code>preventSilentAccess</code>,
+    but family support is <strong>asymmetric</strong>: <code>get</code> is universal, <code>create</code>/<code>store</code>
+    are passkey + password only, and <code>preventSilentAccess</code> is an origin-global sign-out. A flat
+    single contract would force get-only families (FedCM, digital) to stub enrollment — the exact problem
+    Guard's member structure solves. So the lifecycle is modelled as <strong>members</strong>, each declaring
+    its supporting families:
+  </p>
+  <ul style="font-size: 0.9rem;">
+    <li><strong><code>credential-request</code></strong> — <code>get()</code>, all families. The headline member.</li>
+    <li><strong><code>credential-enrollment</code></strong> — <code>create()</code> / <code>store()</code>, passkey + password only. You cannot demo a passkey sign-in without first enrolling one — so enrollment is a sibling member, not out of scope.</li>
+    <li><strong><code>session-mediation</code></strong> — <code>preventSilentAccess()</code>, origin-global sign-out / silent-access suppression.</li>
+  </ul>
+
+  <h4 id="provider-trust-boundary" style="margin-top: 1.5rem;">The credential provider is Guard's contract, not the positioning provider</h4>
+  <p style="font-size: 0.9rem;">
+    Web Identity reuses the <em>pattern</em> of <a href="/projects/webpositioning/">Anchor Positioning</a>'s
+    provider (a named registry + injector-resolved contract, native-first), but its <strong>shape is
+    Guard's</strong>: a credential request crosses a <strong>trust boundary</strong>, so the contract is —
+  </p>
+  <ul style="font-size: 0.9rem;">
+    <li><strong>Async</strong> — <code>acquire()</code> returns a <code>Promise</code>; acquisition requires an RP/IdP round-trip.</li>
+    <li><strong>Server-authoritative</strong> — the back-end verifies the assertion/token; the front-end request only <em>gathers</em> the credential. The standard is not to be mistaken for authentication.</li>
+    <li><strong>Revocable</strong> — a session can be invalidated after sign-in; the optional <code>subscribe()</code> signal lets a surface re-mediate, and <code>session-mediation</code> suppresses silent re-auth.</li>
+  </ul>
+
+  <h4 id="rulings" style="margin-top: 1.5rem;">Design rulings (<a href="/backlog/496-webidentity-build-design-credential-acquisition-protocol-co/">#496</a>)</h4>
+  <ul style="font-size: 0.9rem;">
+    <li><strong>One <code>CustomCredentialProvider</code> per family, registry-resolved</strong> (Fork 1-A) — not a monolithic family-branching provider and not per-family contracts. The mock conformance provider ships in the first slice.</li>
+    <li><strong>Lifecycle as three open members</strong> (Fork 2-A) — request / enrollment / session-mediation, each declaring supporting families; not acquisition-only (too thin) and not a flat four-method surface (stubs get-only families).</li>
+    <li><strong>Protocol renamed <code>credential-acquisition</code> &rarr; <code>credential-management</code></strong> — once the member set expanded past <code>get</code>, the protocol <em>is</em> the full Credential Management API surface; the native anchor is literally that API.</li>
+    <li><strong>Configurator domain omitted</strong> (Fork 3-A) — technical defaults ride the provider registry + config-flavors; an identity Configurator domain is carved to plateau-app as non-blocking <a href="/backlog/499-identity-ceremony-configurator-domain-plateau-app-explore-on/">#499</a>, added only on real authoring need.</li>
+  </ul>
+</section>
+
+<section id="composition" class="section-card">
+  <h3 id="composition">Composition With Other Standards</h3>
+  <p>
+    Web Identity owns <em>acquiring and managing the credential</em>, not who-may-do-what, not the browser's
+    capability permissions, and not the UX of the request surface — those compose with neighbours:
+  </p>
+  <ul style="font-size: 0.9rem;">
+    <li><strong><a href="/intents/web-identity/">Web Identity intent</a> (#482)</strong> — the thin, UX-only seam (mediation hint, request surface, auth-state signal). It declares the <em>request</em>; this protocol resolves the provider and ceremony behind it.</li>
+    <li><strong><a href="/projects/webguards/">Web Guards</a></strong> — identity <em>produces</em> the auth-state predicate; Guard's access-gate (<a href="/backlog/178-access-control-authorization-gate/">#178</a>) and presence-gate (<a href="/backlog/272-guard-protocol-predicate-gated-transitions-and-presence-open/">#272</a>) <em>consume</em> it. Authentication vs authorization — distinct concerns on one seam each.</li>
+    <li><strong>Browser Permissions (webpermissions)</strong> — the native Permissions API (camera, geolocation) is a device-capability axis, not app-level identity; do not conflate.</li>
+    <li><strong><a href="/intents/loader/">Loader</a> / <a href="/intents/feedback/">Feedback</a></strong> — a non-<code>silent</code> mediation in flight drives the Loader intent; an auth-state transition is announced through Feedback — composed via the #482 intent, not re-invented here.</li>
+  </ul>
+</section>
+
+<section id="status" class="section-card">
+  <h3 id="status">Status</h3>
+  <p>
+    Web Identity is in <strong>concept</strong> phase. The Credential Management protocol's seam (request +
+    family dimension + member set + provider) is specified here and ruled by
+    <a href="/backlog/496-webidentity-build-design-credential-acquisition-protocol-co/">#496</a>; the thin
+    UX intent shipped as <a href="/intents/web-identity/">#482</a>. The provider implementation, the mock
+    conformance provider, and the three members are the first planned work
+    (<a href="/backlog/483-webidentity-project-credential-acquisition-protocol-deferred/">#483</a>), on top
+    of this contract.
+  </p>
+  <h4 style="margin-top: 1rem;">Open Questions</h4>
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted);">
+    <li>Does <code>CredentialRequest</code> carry the RP/IdP config inline, or resolve it lazily inside the provider per origin?</li>
+    <li>How does a multi-family request whose providers disagree (one returns, one rejects) resolve — first-success, or an explicit family preference order?</li>
+    <li>Whether <code>session-mediation</code>'s origin-global scope needs a per-surface override for embedded contexts (iframes / portals).</li>
+  </ul>
+</section>

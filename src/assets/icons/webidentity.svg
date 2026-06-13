@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="idGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#4f46e5" />
+    </linearGradient>
+    <filter id="idShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#eef2ff" />
+
+  <g filter="url(#idShadow)">
+    <!-- Passkey: the credential being acquired (ring + bit) -->
+    <circle cx="52" cy="58" r="18" fill="none" stroke="url(#idGrad)" stroke-width="9" />
+    <path d="M64 58 H96 M88 58 V72 M78 58 V70"
+          stroke="url(#idGrad)" stroke-width="9"
+          stroke-linecap="round" stroke-linejoin="round" fill="none" />
+  </g>
+</svg>

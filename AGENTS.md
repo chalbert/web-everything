@@ -59,7 +59,7 @@
 - **Blocks** 58 — 25 active · 7 concept · 26 draft
 - **Intents** 48 — 15 concept · 33 draft
 - **Glossary terms** 192 · **Research topics** 63 (59 open)
-- **Projects** 35: webadapters, webanalytics, webaudit, webbehaviors, webblocks, webcases, webcompliance, webcomponents, webcontexts, webdecisions, webdirectives, webdocs, webevents, webexpressions, webguards, webinjectors, webintents, webintl, weblifecycle, webmanifests, webnotifications, webplugs, webpolicy, webportals, webpositioning, webrealtime, webregistries, webreliability, webreporting, webresources, webstates, webtheme, webtraces, webtraits, webvalidation
+- **Projects** 36: webadapters, webanalytics, webaudit, webbehaviors, webblocks, webcases, webcompliance, webcomponents, webcontexts, webdecisions, webdirectives, webdocs, webevents, webexpressions, webguards, webidentity, webinjectors, webintents, webintl, weblifecycle, webmanifests, webnotifications, webplugs, webpolicy, webportals, webpositioning, webrealtime, webregistries, webreliability, webreporting, webresources, webstates, webtheme, webtraces, webtraits, webvalidation
 <!-- /AUTO-GENERATED:inventory -->
 
 ## Commands

@@ -107,6 +107,15 @@
     "anchor": "protocol-guard"
   },
   {
+    "id": "credential-management",
+    "name": "Credential Management",
+    "summary": "Conformance reference for acquiring and managing a user's credentials behind one swappable seam — the navigator.credentials dispatcher normalized as a CustomCredentialProvider (default → project override → custom plug), with passkey/WebAuthn, FedCM, digital-credential, and password as families on one request dimension (credentials:[…]). The provider contract is the only lock: async, server-authoritative (the browser only gathers; the server verifies), and revocable — Guard's contract verbatim. Dispatch is 2-D: fan a request by family AND by member. The lifecycle is an OPEN member set, not a flat four-method surface (which would force get-only families to stub create/store): credential-request (get — all families), credential-enrollment (create/store — passkey + password), session-mediation (preventSilentAccess sign-out — origin-global). Default provider = native navigator.credentials passthrough; a mock in-memory conformance provider ships in the first slice so every downstream surface is demoable without an RP server. Ceremony libraries (SimpleWebAuthn/Hanko) are swappable plugs. Identity produces the auth-state predicate Guard's access-gate consumes (#272). Ruled by #496; built in #483.",
+    "status": "concept",
+    "ownedByProject": "webidentity",
+    "realizesIntent": "web-identity",
+    "anchor": "protocol-credential-management"
+  },
+  {
     "id": "mock-contract",
     "name": "Mock Contract",
     "summary": "Portable, interaction-bearing mock/contract schema for the mock & service-proxy dev-service — the standard artifact, with the server as a swappable provider. Anchors the response shape on OpenAPI, then adds a WE behavior layer OpenAPI cannot express: latency, fault injection, first-that-matches conditional responses, a mock|proxy|record response-kind, and auth/fake-OAuth (stateless by default). The artifact carries consumer interactions (Pact/BDCT), not just a shape, so one contract serves two uses — drive a mock AND drift-check the real service in webcases — because schema-validation ≠ contract-verification. Data-defined so it is portable across providers: the protocol is the only lock.",
