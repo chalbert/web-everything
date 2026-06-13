@@ -658,3 +658,35 @@ export function validateModuleResolutionLock(entries) {
 // bindings so the warn-only check:standards rule shares the *exact* same logic — one source of
 // truth, two module systems.
 export { RESEARCH_REVIEW_HORIZON_DEFAULT, addIsoDuration, deriveResearchFreshness } from './lib/research-freshness.cjs';
+
+// ── Benchmark capability-presence join table (#352) ──────────────────────────
+/**
+ * Validate the capability×source presence join table (`benchmarkCapabilityPresence.json`, #352): every
+ * row must reference a known capability id and a known corpus source id, `present` must be a boolean,
+ * and `provenance` one of the declared kinds. A `verified` row without a `url` warns (the deep doc link
+ * is the point of verifying); a `notable-inference` row legitimately has none yet. Pure: takes the rows
+ * + the id sets the script gathers from the sibling registries.
+ */
+export function validateCapabilityPresence(presence, { capabilityIds, sourceIds, provenanceKinds }) {
+  const errors = [];
+  const warnings = [];
+  const rows = Array.isArray(presence?.rows) ? presence.rows : [];
+  const kinds = new Set(provenanceKinds ?? ['notable-inference', 'verified']);
+  const seen = new Set();
+  for (const r of rows) {
+    const key = `${r.capabilityId}${r.sourceId}`;
+    if (seen.has(key)) errors.push({ message: `capability-presence: duplicate row for (${r.capabilityId}, ${r.sourceId})` });
+    seen.add(key);
+    if (!capabilityIds.has(r.capabilityId))
+      errors.push({ message: `capability-presence: row references unknown capability "${r.capabilityId}" (not in benchmarkCapabilities)` });
+    if (!sourceIds.has(r.sourceId))
+      errors.push({ message: `capability-presence: row references unknown corpus source "${r.sourceId}" (not in benchmarkCorpus)` });
+    if (typeof r.present !== 'boolean')
+      errors.push({ message: `capability-presence: row (${r.capabilityId}, ${r.sourceId}) "present" must be a boolean` });
+    if (!kinds.has(r.provenance))
+      errors.push({ message: `capability-presence: row (${r.capabilityId}, ${r.sourceId}) has unknown provenance "${r.provenance}"` });
+    if (r.provenance === 'verified' && !r.url)
+      warnings.push({ message: `capability-presence: verified row (${r.capabilityId}, ${r.sourceId}) has no deep doc url — the URL is the point of verifying (#352)` });
+  }
+  return { errors, warnings };
+}

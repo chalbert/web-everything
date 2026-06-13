@@ -1,0 +1,1182 @@
+{
+  "id": "benchmark-capability-presence",
+  "version": "0.1.0",
+  "generatedFrom": {
+    "capabilities": "benchmark-capabilities@1",
+    "corpus": "benchmark-corpus@1"
+  },
+  "description": "Join table: exact per-(capability x source) presence + deep doc URLs for the benchmark capability matrix (#352, child fan-out of #346/#315). Open-world: a row asserts a capability is present in a source. Seed rows are inferred from benchmarkCapabilities.notableIn (provenance notable-inference, url pending); per-source extraction slices upgrade each to provenance verified with a deep doc url, and add the sources notableIn omitted. Absence of a row = not-yet-extracted, never proven-absent.",
+  "method": "Per corpus source (benchmarkCorpus.sources[].id), walk its docs from docsUrl, and for each benchmarkCapabilities.capabilities[].id decide presence by the same kind tests the corpus uses (component/pattern/token/standard). Record a row { capabilityId, sourceId, present:true, provenance:\"verified\", sourceName:<as that vendor names it>, url:<deep link to the component/pattern doc> }. Re-runs diff cleanly: one row per verified (capability,source); never rewrite the whole file. notable-inference rows are the floor, upgraded in place to verified.",
+  "provenanceKinds": [
+    {
+      "id": "notable-inference",
+      "test": "Seeded from benchmarkCapabilities.notableIn — the capability is flagged notable in this source but the exact doc URL is not yet captured."
+    },
+    {
+      "id": "verified",
+      "test": "A per-source extraction slice confirmed presence against the source docs and recorded the deep url + sourceName."
+    }
+  ],
+  "rows": [
+    {
+      "capabilityId": "accordion",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "accordion",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "alert-dialog",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "anchored-positioning",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "anchored-positioning",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "aria-apg-adherence",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "aria-apg-adherence",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "async-pagination",
+      "sourceId": "ant-design",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "breadcrumb",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "button",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "button",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "button-group",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "button-group",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "card",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "carousel",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "code-block",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "code-block",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "color-contrast",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "color-contrast",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "color-picker",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "color-picker",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "color-tokens",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "color-tokens",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "combobox",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "combobox",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "command-palette",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "context-menu",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "controlled-uncontrolled",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "controlled-uncontrolled",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "copy-to-clipboard",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "copy-to-clipboard",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "dark-mode",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "dark-mode",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "data-table",
+      "sourceId": "ant-design",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "data-table",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "date-picker",
+      "sourceId": "ant-design",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "date-picker",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "date-range-picker",
+      "sourceId": "ant-design",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "date-range-picker",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "density",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "density",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "dialog",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "dialog",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "disclosure",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "dismissal",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "drag-and-drop",
+      "sourceId": "ant-design",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "drag-and-drop",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "drawer",
+      "sourceId": "ant-design",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "drawer",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "elevation",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "empty-state",
+      "sourceId": "ant-design",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "empty-state",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "fab",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "file-upload",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "file-upload",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "focus-return",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "focus-return",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "focus-trap",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "focus-visible-policy",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "focus-visible-policy",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "ant-design",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "form-validation-flow",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "grid-layout",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "grid-layout",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "i18n-rtl",
+      "sourceId": "ant-design",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "i18n-rtl",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "icon-button",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "inline-alert",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "inline-alert",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "keyboard-interaction",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "keyboard-interaction",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "link",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "list",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "listbox",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "listbox",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "live-region",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "live-region",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "menu",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "menu",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "motion-tokens",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "multi-select",
+      "sourceId": "ant-design",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "multi-select",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "navbar",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "navbar",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "number-input",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "number-input",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "pagination",
+      "sourceId": "ant-design",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "pagination",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "pin-input",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "pin-input",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "radio-group",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "range-slider",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "rating",
+      "sourceId": "ant-design",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "rating",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "reduced-motion",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "resizable-splitter",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "responsive-adaptive",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "responsive-adaptive",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "rich-text-editor",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "roving-tabindex",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "scroll-area",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "segmented-control",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "segmented-control",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "sidebar-nav",
+      "sourceId": "ant-design",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "sidebar-nav",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "skeleton",
+      "sourceId": "ant-design",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "skeleton",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "slider",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "slider",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "spacing-scale",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "split-button",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "split-button",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "stack-layout",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "stack-layout",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "stepper",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "stepper",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "switch",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "switch",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "tag-chip",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "tags-input",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "tags-input",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "text-field",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "text-field",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "time-picker",
+      "sourceId": "ant-design",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "timeline",
+      "sourceId": "ant-design",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "toast",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "toast",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "touch-target",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "touch-target",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "tree-select",
+      "sourceId": "ant-design",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "tree-view",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "tree-view",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "type-ahead",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "typography-scale",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "typography-scale",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "virtualization",
+      "sourceId": "ant-design",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    },
+    {
+      "capabilityId": "virtualization",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "notable-inference",
+      "sourceName": null,
+      "url": null
+    }
+  ]
+}

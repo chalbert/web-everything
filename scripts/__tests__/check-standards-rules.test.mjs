@@ -22,6 +22,7 @@ import {
   isExportsSafeTarget, validateModuleResolutionLock, findRawHtmlInMarkdown,
   findBuriedForkSections, findUnquotedColonScalars,
   deriveResearchFreshness, addIsoDuration, RESEARCH_REVIEW_HORIZON_DEFAULT,
+  validateCapabilityPresence,
 } from '../check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -528,5 +529,62 @@ describe('deriveResearchFreshness — staleness derivation (#441 Fork 4 / #477)'
     expect(addIsoDuration(new Date('2026-01-01T00:00:00Z'), 'P')).toBeNull();
     expect(addIsoDuration(new Date('2026-01-01T00:00:00Z'), '')).toBeNull();
     expect(addIsoDuration(new Date('2026-01-01T00:00:00Z'), 'P6M').toISOString().slice(0, 10)).toBe('2026-07-01');
+  });
+});
+
+describe('validateCapabilityPresence — capability×source join table (#352)', () => {
+  const ctx = {
+    capabilityIds: new Set(['button', 'menu']),
+    sourceIds: new Set(['material-3', 'carbon']),
+    provenanceKinds: ['notable-inference', 'verified'],
+  };
+  const run = (rows) => validateCapabilityPresence({ rows }, ctx);
+
+  it('stays clean for well-formed rows', () => {
+    const res = run([
+      { capabilityId: 'button', sourceId: 'material-3', present: true, provenance: 'verified', url: 'https://m3/button' },
+      { capabilityId: 'menu', sourceId: 'carbon', present: true, provenance: 'notable-inference', url: null },
+    ]);
+    expect(res.errors).toEqual([]);
+    expect(res.warnings).toEqual([]);
+  });
+
+  it('errors on an unknown capability or source id', () => {
+    const res = run([{ capabilityId: 'ghost', sourceId: 'nope', present: true, provenance: 'verified', url: 'x' }]);
+    expect(res.errors.map((e) => e.message).join(' ')).toMatch(/unknown capability "ghost".*|unknown corpus source "nope"/);
+    expect(res.errors.length).toBe(2);
+  });
+
+  it('errors on a non-boolean present and an unknown provenance', () => {
+    const res = run([{ capabilityId: 'button', sourceId: 'carbon', present: 'yes', provenance: 'guess' }]);
+    const msg = res.errors.map((e) => e.message).join(' ');
+    expect(msg).toMatch(/"present" must be a boolean/);
+    expect(msg).toMatch(/unknown provenance "guess"/);
+  });
+
+  it('errors on a duplicate (capability, source) row', () => {
+    const res = run([
+      { capabilityId: 'button', sourceId: 'carbon', present: true, provenance: 'verified', url: 'x' },
+      { capabilityId: 'button', sourceId: 'carbon', present: true, provenance: 'verified', url: 'y' },
+    ]);
+    expect(res.errors.map((e) => e.message).join(' ')).toMatch(/duplicate row for \(button, carbon\)/);
+  });
+
+  it('warns (not errors) when a verified row lacks its deep doc url', () => {
+    const res = run([{ capabilityId: 'button', sourceId: 'material-3', present: true, provenance: 'verified' }]);
+    expect(res.errors).toEqual([]);
+    expect(res.warnings.map((w) => w.message).join(' ')).toMatch(/verified row \(button, material-3\) has no deep doc url/);
+  });
+
+  it('the live seed file (notable-inference) stays clean', () => {
+    const presence = require(join(SRC, '_data/benchmarkCapabilityPresence.json'));
+    const caps = require(join(SRC, '_data/benchmarkCapabilities.json'));
+    const corpus = require(join(SRC, '_data/benchmarkCorpus.json'));
+    const res = validateCapabilityPresence(presence, {
+      capabilityIds: new Set(caps.capabilities.map((c) => c.id)),
+      sourceIds: new Set(corpus.sources.map((s) => s.id)),
+      provenanceKinds: presence.provenanceKinds.map((k) => k.id),
+    });
+    expect(res.errors).toEqual([]);
   });
 });

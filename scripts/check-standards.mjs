@@ -22,6 +22,7 @@ import {
   validateModuleResolutionLock, findRawHtmlInMarkdown, findBuriedForkSections,
   findUnquotedColonScalars,
   RESEARCH_REVIEW_HORIZON_DEFAULT, deriveResearchFreshness,
+  validateCapabilityPresence,
 } from './check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -199,6 +200,24 @@ dupCheck(blocks, 'blocks.json');
 dupCheck(plugs, 'plugs.json');
 dupCheck(research, 'researchTopics.json');
 dupCheck(protocols, 'protocols.json');
+
+// ── 6a-bis. Benchmark capability-presence join table (#352) ──────────────────
+// Each row of benchmarkCapabilityPresence.json must reference a known capability + corpus source; a
+// `verified` row should carry its deep doc URL. Pure rule, composed over the two sibling registries.
+{
+  const presence = readJson('benchmarkCapabilityPresence.json');
+  if (presence) {
+    const benchCaps = readJson('benchmarkCapabilities.json') || { capabilities: [] };
+    const benchCorpus = readJson('benchmarkCorpus.json') || { sources: [] };
+    const { errors: pe, warnings: pw } = validateCapabilityPresence(presence, {
+      capabilityIds: new Set((benchCaps.capabilities || []).map((c) => c.id)),
+      sourceIds: new Set((benchCorpus.sources || []).map((s) => s.id)),
+      provenanceKinds: (presence.provenanceKinds || []).map((k) => k.id),
+    });
+    for (const e of pe) err(e.message);
+    for (const w of pw) warn(w.message);
+  }
+}
 
 // ── 6b. Protocols (first-class entity, owned by a Project) ───────────────────
 // Per-protocol field + reference rules (incl. the project-partial anchor probe) are the pure
