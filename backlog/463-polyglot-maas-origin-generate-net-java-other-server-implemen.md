@@ -2,10 +2,12 @@
 type: decision
 workItem: story
 size: 8
-status: open
+status: resolved
 blockedBy: ["461"]
 dateOpened: "2026-06-13"
 dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: #505/#506/#507 (polyglot MaaS build program: contract+IR · conformance suite · generation-adapter)
 preparedDate: "2026-06-13"
 tags: [module-as-a-service, distribution, polyglot, dotnet, java, generation-adapter, codegen, enterprise, adapters, conformance, source-of-truth]
 parent: "081"
@@ -26,8 +28,45 @@ near-ratifications. **Three forks below, each with a bold recommended default.**
 level call (browser/JS-first → polyglot enterprise); confidence flags mark where judgment is genuinely
 needed.
 
-**Sequencing:** blocked by **#461** — the canonical JS Fetch origin + wired-in #088/#389 identity must
-exist first as the **reference implementation** any generated origin is conformance-tested against.
+**Sequencing:** was blocked by **#461** — now **resolved** (the framework-agnostic Fetch origin
+`createMaaSFetchHandler` shipped at [fetchHandler.ts](blocks/renderers/module-service/fetchHandler.ts),
+graduated to `webadapters`), so the reference implementation any generated origin is conformance-tested
+against now exists.
+
+## Decision (ratified 2026-06-13)
+
+All three forks talked through and settled. The strategic widening (browser/JS-first → polyglot
+enterprise) is **affirmed** — enacted by building a native origin rather than declining to (sidecar-only
+rejected). Spin-off builds: **#505** (fork b), **#506** (fork c), **#507** (fork a).
+
+- **Fork (b) — source of truth → ratified as written, with a sharpening.** A language-neutral contract
+  (`protocols.json#maas-versioning` + a serve-path IR, projectable to OpenAPI) is the authority; #461 is
+  the reference implementation, not the definition. **Sharpening:** "authority" means that when the
+  contract and #461 disagree, the **contract wins and #461 is fixed** — that is what keeps JS just-
+  another-target rather than the privileged source. → **#505**.
+- **Fork (c) — conformance → ratified as written.** A shared cross-language conformance suite (golden
+  vectors from #088 hash fixtures + the #461 reference impl + a runner) gates every target's release.
+  Fixed mechanic; orthogonal to the mechanism (needed under any generator). This is the load-bearing
+  call — it makes fidelity **mechanism-independent**. → **#506**.
+- **Fork (a) — mechanism → refined (not the item's original codegen-vs-handwrite framing).** A
+  **deterministic generation-adapter** is *the* mechanism: same neutral source → byte-identical generated
+  code, **no AI in the generation path**. It derives an idiomatic, best-practices-native origin per
+  language into its **own repo**, behind a **deterministic-core / HTTP-shell split**. **AI sits one level
+  up, at adapter-development time only** — it reviews the adapter's output and improves the *deterministic
+  adapter* (rules/templates, against a regression corpus) until the generated code is perfect-idiomatic
+  for the target; **every adapter change is human-reviewed** (full-AI cycle with railguards is an explicit
+  *future*, out of scope for any current plan/story). This loop is what dissolves codegen's idiomaticity
+  weakness — so deterministic codegen now wins on all three axes (deterministic + idiomatic + single-SoT)
+  and the tiny, near-frozen serve-path surface makes it tractable. Fidelity is gated by the #506 suite,
+  **not** by AI (byte-identity is mechanically checkable; AI judges idiomaticity, the suite judges
+  identity). **Wasm-component → demoted to exotic/optional packaging, not the convergence target** — the
+  adapter delivers palatable pure-native without an embedded Wasm engine's compliance/AOT/debuggability
+  friction, and AI-derivation removes the maintenance-burden that was Wasm's only remaining justification.
+  Runtime stays **AI-free pure-native**; the AI cost is amortized at adapter-dev time. → **#507**.
+
+  *Rejected:* sidecar-only (declines the widening); hand-reimplementation as the primary path (forfeits
+  single-SoT leverage). *Deferred:* Wasm-first (preview-grade host SDKs; and the adapter makes its
+  maintenance pitch moot); full-AI generation/validation cycle (revisit with railguards).
 
 ## Why it matters (project-goal level)
 
@@ -167,5 +206,7 @@ per-target divergence; the spec alone never delivers it.
 - Prior-art survey: [report](reports/2026-06-13-polyglot-maas-origin.md) ·
   [/research/ topic](/research/polyglot-maas-origin/).
 
-The per-language origin builds spin off once the mechanism + SoT + conformance gate are ratified; this
-item is the decision, not the build.
+The per-language origin builds spin off now that the mechanism + SoT + conformance gate are ratified;
+this item was the decision, not the build. Spin-offs: **#505** (neutral contract + IR, fork b) →
+**#506** (conformance suite, fork c, blocked by #505) → **#507** (deterministic generation-adapter +
+first native target, fork a, blocked by #505/#506).
