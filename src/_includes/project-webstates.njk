@@ -250,3 +250,102 @@ function observe(target: object, onChange: (r: ChangeRecord) => void): Disposabl
     </tbody>
   </table>
 </section>
+
+<section id="protocol-storage" class="section-card">
+  <h3 id="storage-protocol">Storage Protocol</h3>
+  <div class="comparison-block" style="background: rgba(251, 191, 36, 0.1); padding: 1rem 1.25rem; border-radius: 8px; border-left: 4px solid #f59e0b; margin: 0 0 1.5rem 0;">
+    <p style="margin: 0; font-size: 0.95rem;">
+      <strong>Status: concept.</strong> Ratified from <a href="/backlog/011-gap-4-webpersistence-project/">#011</a>
+      (gap&nbsp;#4, Option&nbsp;A) — the durable-persistence facet of Web States, <strong>not</strong> a separate
+      <code>webpersistence</code> project. <code>webresources</code> fetches, <code>webstates</code> holds — this
+      protocol is how what it holds <em>persists</em>.
+    </p>
+  </div>
+  <p>
+    Conformance reference for <strong>durable client persistence</strong> of the state an app holds. Web States
+    already owns the data the app holds (stores, the change-tracking protocol); durable persistence of that
+    state to disk is the same concern extended past the page session. The protocol fixes one seam — a
+    <code>CustomStorageStrategy</code> registry tried <strong>per scope</strong>, with
+    <strong>IndexedDB the native-first default</strong> and <strong>localStorage the graceful
+    degradation</strong> — and the persistence-class / quota surface
+    (<code>navigator.storage.persist()</code>/<code>estimate()</code>). It mirrors the
+    <a href="#protocol-change-tracking">change-tracking protocol</a>'s <code>CustomChangeStrategy</code> shape:
+    the strategy contract is <strong>the only lock</strong>, so Dexie, RxDB (pluggable <code>RxStorage</code>),
+    PouchDB, or a TanStack <code>persistQueryClient</code> adapter all satisfy it and swap without touching the
+    store.
+  </p>
+
+  <h4 id="storage-strategy-contract">The Strategy Contract</h4>
+  <p>
+    Every persistence engine is a <code>CustomStorageStrategy</code> over a named scope. The native default is
+    an IndexedDB-backed key-value store (zero-config, native-first); <code>localStorage</code> is the synchronous
+    degradation when IndexedDB is unavailable (private-mode quirks, disabled storage); libraries are opt-in
+    adapters behind the same contract.
+  </p>
+  {% highlight "typescript" %}
+interface CustomStorageStrategy {
+    readonly key: string;                       // e.g. 'native-indexeddb', 'local-storage', 'rxdb'
+    // Durable structured-record CRUD over one scope. Async by default — IndexedDB is async,
+    // and an async contract lets a remote/SQLite/OPFS engine satisfy it too.
+    get<T>(scope: string, id: string): Promise<T | undefined>;
+    set<T>(scope: string, id: string, value: T): Promise<void>;
+    delete(scope: string, id: string): Promise<void>;
+    keys(scope: string): Promise<string[]>;
+    // Optional bulk + change notification for engines that support them (feature-detected).
+    bulk?(scope: string, ops: Array<{ op: 'set' | 'delete'; id: string; value?: unknown }>): Promise<void>;
+    subscribe?(scope: string, onChange: (id: string) => void): Disposable;
+}
+
+// Persistence class + quota — the navigator.storage surface, normalized.
+interface StoragePersistence {
+    persist(): Promise<boolean>;                // navigator.storage.persist() — best-effort -> persistent
+    persisted(): Promise<boolean>;
+    estimate(): Promise<{ usage: number; quota: number }>;   // navigator.storage.estimate()
+}
+  {% endhighlight %}
+  <p>
+    Capability is expressed by which optional methods a strategy implements — a minimal engine supplies only
+    <code>get</code>/<code>set</code>/<code>delete</code>/<code>keys</code>; a richer one adds
+    <code>bulk</code>/<code>subscribe</code>. Consumers feature-detect rather than assume.
+  </p>
+
+  <h4 id="storage-registry">Per-Scope Selection &amp; Degradation</h4>
+  <p>
+    Strategies register in a <code>CustomStorageStrategyRegistry</code> resolved through the injector chain, so
+    the active engine is a <strong>scope decision</strong>: a large collaborative document subtree can persist
+    on an OPFS/SQLite strategy while a small settings scope persists on <code>localStorage</code> — in the same
+    app. The registry tries strategies per scope and falls back: <strong>IndexedDB → localStorage</strong> is
+    the built-in degradation chain, the same most-available-default doctrine the rest of the platform uses.
+  </p>
+  {% highlight "typescript" %}
+// A conformant store delegates persistence; it never hard-codes the engine.
+async function persist<T>(scope: string, id: string, value: T): Promise<void> {
+    const registry = /* resolve customStorageStrategy from injector chain */;
+    const strategy = registry.active();   // nearest-scope strategy wins; default = native IndexedDB
+    await strategy.set(scope, id, value); // throws -> registry degrades to the next strategy (localStorage)
+}
+  {% endhighlight %}
+
+  <h4 id="storage-scope-boundary">Scope Boundary — durable store only</h4>
+  <p>
+    Per the <a href="/backlog/011-gap-4-webpersistence-project/">#011</a> Option-A bisection, "persistence"
+    deliberately does <strong>not</strong> become one monolith. This protocol owns the durable
+    structured-record store and nothing else; the neighbouring facets stay with their natural owners:
+  </p>
+  <table>
+    <thead>
+      <tr><th>Facet</th><th>Owner</th><th>Why not here</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Durable structured store</strong> (IndexedDB + <code>persist()</code>)</td><td>✅ this protocol (<code>webstates</code>)</td><td>genuinely unowned + engine-swappable — the one earned Protocol</td></tr>
+      <tr><td><strong>Response cache</strong> (Cache Storage + SW)</td><td>🔗 <a href="/projects/webresources/">webresources</a></td><td>a caching policy over the <em>fetcher</em>, not the data the app holds</td></tr>
+      <tr><td><strong>Durable outbox / replay</strong></td><td>🔗 <a href="/projects/webreliability/">webreliability</a></td><td>a fixed mechanism over this store + the offline-queue; no swappable-vendor story</td></tr>
+      <tr><td><strong>Conflict merge</strong></td><td>🔗 <a href="#protocol-change-tracking">change-tracking</a> sync dimension</td><td>a merge over change representations that protocol already owns</td></tr>
+    </tbody>
+  </table>
+  <p style="font-size: 0.9rem; color: var(--color-text-muted);">
+    No <code>webpersistence</code> project is minted. This protocol can graduate into one only if a real
+    cross-cutting sync-orchestration consumer (cache invalidation ↔ outbox replay ↔ conflict merge under one
+    owner) ever appears — until then it stays a thin facet of Web States.
+  </p>
+</section>

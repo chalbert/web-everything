@@ -58,6 +58,14 @@
     "anchor": "protocol-change-tracking"
   },
   {
+    "id": "storage",
+    "name": "Storage",
+    "summary": "Conformance reference for durable client persistence of the state an app holds — the storage facet of webstates ratified from #011 (gap #4, Option A: no webpersistence project). Fixes one seam: a CustomStorageStrategy registry tried per-scope, with IndexedDB the native-first default and localStorage the graceful degradation, plus navigator.storage.persist()/estimate() for the persistence class + quota. Mirrors the change-tracking protocol's CustomChangeStrategy shape — the strategy contract is the only lock, so Dexie, RxDB (pluggable RxStorage), PouchDB, or a TanStack persistQueryClient adapter all satisfy the same get/set/delete/keys contract and swap without touching the store. Scope is the durable structured-record store ONLY: the response-cache facet is webresources, the durable outbox/replay is webreliability, and conflict-merge is the change-tracking protocol's sync dimension — each tracked under its own owner. Can later graduate into a webpersistence project only if a real cross-cutting sync-orchestration consumer appears.",
+    "status": "concept",
+    "ownedByProject": "webstates",
+    "anchor": "protocol-storage"
+  },
+  {
     "id": "localization",
     "name": "Localization",
     "summary": "Conformance reference for localization interop. Defines the CustomTranslationProvider contract, a provider registry with namespace + fallback-chain resolution, the MF2 message-function shape, and observable locale states — so message catalogs and locale strategies from different vendors are swappable and combinable. Native Intl is the default formatter; libraries plug in behind the registry.",
