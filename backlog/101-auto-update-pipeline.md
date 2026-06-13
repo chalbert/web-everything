@@ -3,9 +3,12 @@ type: decision
 workItem: story
 size: 5
 parent: "099"
-status: open
+status: resolved
 blockedBy: ["102", "094"]
 dateOpened: "2026-06-06"
+dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: protocol update-policy (Update Policy) — src/_data/protocols.json + src/_includes/project-webmanifests.njk anchor protocol-update-policy, status concept; webmanifests' second protocol. Declared, portable auto-update policy (renovate.json analogue) as the only lock; graded gate on one axis (pre-merge cool-off→severity→auto-merge low-risk/human-gate major+visual; post-deploy staged-rollout→auto-rollback) extended by project config; runner is a deferred Plateau service (#497). Consumes #102/#094; Platform-side pre-test edge via #092.
 preparedDate: "2026-06-11"
 tags: [auto-update, evergreen, change-management, dependencies, risk-analysis, phased-rollout, reversion, pre-test, monitoring, ci]
 relatedReport: reports/2026-06-11-auto-update-pipeline.md
@@ -74,3 +77,14 @@ A **Platform-side** update can be **pre-tested against its consumers' suites bef
 - **Fork 2 — graded configurable gate policy**: ratified. No surveyed tool hardcodes one gate; the model is one graded axis — pre-merge (cool-off buffer → confidence/severity → auto-merge patch/minor-green, human-gate major + visual-diff) plus post-deploy staged rollout (metric analysis → auto-rollback). The "auto low-risk-green / human major+visual" rule is the safe-default flavor a project config extends, not a baked constant (config-extends-platform-default + most-flexible-default + dimension-vs-fixed-mechanic). The post-deploy staged-rollout gate's vocabulary is declared now; the runner implements pre-merge first, staged rollout second.
 
 **Open — needs a human call:** Fork 1 — the home: it ratifies the config-vs-runner *split* in shape, but the concrete naming/scope commit stays open — which Plateau/reliability **service** owns the orchestration (the runner home, cf. [projects.json:159](../src/_data/projects.json#L159) / `relatedProject: webreliability`) and the thin protocol's name — plus its sequencing behind #102 (changelog-manifest) and #094 (upgrader engine), reflected in `blockedBy`. Because this is a net-new project-scope + naming commit on a shared registry and depends on the blocked items landing first, it needs a human decision rather than mechanical ratification.
+
+## Resolution (Fork 1) — 2026-06-13
+
+Both `blockedBy` items have since landed (#102 → `changelog-manifest` protocol under webmanifests; #094 → `upgraderEngine.ts`), so the sequencing concern is moot — the home call is unblocked. **Ratified:**
+
+- **Protocol home + name: the `update-policy` protocol, owned by `webmanifests`** ([protocols.json](../src/_data/protocols.json) `update-policy`, anchor `protocol-update-policy` on [project-webmanifests.njk](../src/_includes/project-webmanifests.njk)). The declared update policy is a committed, portable config — renovate.json's WE analogue — and it sits directly beside the `changelog-manifest` it *consumes*; co-homing the change-descriptor and the act-on-change policy under one project is the tight coupling. The *policy* is the lock (named `update-policy`, not `pipeline`); the pipeline is the runner.
+- **Rejected — webreliability for the artifact.** Reliability's charter is *runtime* failure-recovery handlers ("mechanism failures, not input invalidity"); build-time change-management policy is neither runtime nor failure-recovery, so homing the protocol there would blur that crisp line. The `relatedProject: webreliability` tag fairly describes the *runner's* operational flavor, not the standard artifact.
+- **Rejected — a new "Web Evergreen" project.** The whole evergreen family deliberately scatters into existing charters (#094→webadapters impl, #102→webmanifests, #088→webadapters, #092→webregistries) rather than forming one project; adding a project for #101 alone breaks that established pattern.
+- **Runner: a Plateau-app service — a deferred build, not a WE standard artifact** (constellation-layering ruling: standard→WE, runner→Plateau). Carved to **[#497](/backlog/497-auto-update-orchestration-runner-plateau-service-execute-the/)** (implements pre-merge first, staged rollout second; the concrete service name is a build-time detail deferred there). The protocol declares the full graded-gate vocabulary (incl. staged-rollout terms) now.
+
+Graduated to: the `update-policy` protocol (webmanifests).

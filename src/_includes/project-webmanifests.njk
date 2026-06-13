@@ -6,7 +6,9 @@
     changelog. Its first protocol is the
     <a href="#protocol-changelog-manifest">Changelog Manifest</a>: a per-release, per-module description of
     <em>what changed and how breaking it is</em>, with the migration that mechanically applies each breaking
-    change. It is the contract that makes safe <strong>auto-update</strong> possible.
+    change. It is the contract that makes safe <strong>auto-update</strong> possible. Its companion is the
+    <a href="#protocol-update-policy">Update Policy</a> protocol — the committed config that decides
+    <em>when</em> an update runs and <em>how</em> it is gated, acting on the changes the manifest describes.
   </p>
   <p>
     A human <code>CHANGELOG.md</code> cannot be acted on by a machine. The Changelog Manifest is the
@@ -181,6 +183,50 @@ interface ChangelogManifest {
       <tr><td><a href="/backlog/088-module-service-versioning/">MaaS versioning (#088)</a></td><td>derived release severity</td><td>content-address the version bump</td></tr>
     </tbody>
   </table>
+</section>
+
+<section id="protocol-update-policy" class="section-card">
+  <h3 id="update-policy-protocol">Update Policy Protocol</h3>
+  <p>
+    The <a href="#protocol-changelog-manifest">Changelog Manifest</a> records <em>what changed</em>; the
+    <strong>Update Policy</strong> is the committed, portable config that says <em>when a new version is
+    adopted and how it is made safe</em> — the Web Everything analogue of <code>renovate.json</code> /
+    <code>dependabot.yml</code>. It is the contract behind the
+    <a href="/backlog/101-auto-update-pipeline/">auto-update pipeline (#101)</a>: the declared policy is the
+    <strong>only lock</strong>, and the orchestration runner that executes it is a swappable
+    Plateau/reliability service (<a href="/backlog/497-auto-update-orchestration-runner-plateau-service-execute-the/">the
+    deferred build, #497</a>) — the same <em>protocol declares, provider runs</em> split WE already ships in
+    <a href="/projects/webguards/#protocol-guard">Guard</a> and
+    <a href="/protocols/#protocol-render-strategy">render-strategy</a>.
+  </p>
+
+  <h4 id="graded-gate">The gate is one graded axis, not a single mechanic</h4>
+  <p>
+    No surveyed tool hardcodes one gate; the model is one graded policy keyed to severity + signal, with two
+    legitimate poles both shipping in the wild (semantic-release is full-auto; changesets inserts a human
+    checkpoint). So the gate is a <strong>configurable dimension</strong> whose safe defaults a project config
+    extends — never a baked constant. There are two gates on one axis:
+  </p>
+  <ol>
+    <li><strong>Pre-merge.</strong> Cool-off buffer (<code>minimumReleaseAge</code>) → confidence/severity
+      classification read from the changelog-manifest's <a href="#severity-derivation">strictest-wins
+      severity</a> → auto-branch + auto-test → <strong>auto-merge patch/minor-green, human-gate major +
+      visual-diff</strong>. Breaking entries route through the manifest's migration linkage, run by the
+      <a href="/backlog/094-ai-upgrader-tools/">upgrader engine (#094)</a>.</li>
+    <li><strong>Post-deploy.</strong> Staged rollout → metric analysis → <strong>auto-rollback on
+      regression</strong> (the progressive-delivery metric gate). Its vocabulary is declared in the policy
+      now; the runner implements pre-merge first, staged rollout second.</li>
+  </ol>
+
+  <h4 id="platform-pretest">Platform-side pre-testing — the WE-only edge</h4>
+  <p>
+    A Platform-side version can be <strong>pre-tested against its consumers' suites before it is even
+    released</strong>, so compatibility is known up front — the
+    <a href="/protocols/#protocol-provider-consumer-graph">provider-consumer graph (#092)</a> supplies which
+    apps to pre-test. The difference between "hope the bump is safe" and "we already proved it against your
+    build." No industry analogue — this is the standard's net-new edge over renovate/dependabot, which can
+    only test <em>after</em> a version ships.
+  </p>
 </section>
 
 <section id="pattern-deprecation-lifecycle" class="section-card">
