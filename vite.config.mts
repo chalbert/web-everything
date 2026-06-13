@@ -152,6 +152,11 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      // The trait-enforcer (a Vite plugin) is not ported to WE yet, so `virtual:trait-manifest`
+      // has no Enforcer provider here — alias it to the empty static manifest so bootstrap's
+      // `import 'virtual:trait-manifest'` resolves. The documented non-Enforcer fallback (#116/#448);
+      // swap this for the Enforcer plugin once it lands.
+      'virtual:trait-manifest': '/plugs/webbehaviors/traitManifest',
       '@core': '/plugs/core',
       '@webregistries': '/plugs/webregistries',
       '@webinjectors': '/plugs/webinjectors',

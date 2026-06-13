@@ -53,6 +53,16 @@ import { registerForEach } from '../blocks/for-each/registerForEach';
 import { registerTypeAhead } from '../blocks/type-ahead/registerTypeAhead';
 import { registerDataGrid } from '../blocks/data-grid/registerDataGrid';
 import { registerDataGridEdit } from '../blocks/data-grid/registerDataGridEdit';
+import { registerTraits } from './webbehaviors/traitManifest';
+// The trait manifest — "The Map" (#116/#170). Static import so it resolves synchronously
+// *before* the first upgrade(): the observer's attribute filter is fixed at upgrade time, so
+// defineLazy must precede it (a dynamic import would race that). The `virtual:trait-manifest`
+// specifier resolves to: the real Enforcer-generated manifest under Vite once the trait-enforcer
+// is ported here, an ambient stub under tsc (plugs/virtual-trait-manifest.d.ts), and the empty
+// static manifest under both Vite and vitest until then (resolve.alias). WE has no trait-enforcer
+// yet, so today every leg lands on the empty manifest — the lazy path is wired, with nothing to
+// load. See backlog #116/#170/#448.
+import { traitManifest } from 'virtual:trait-manifest';
 
 // Extend Window interface
 declare global {
@@ -260,6 +270,11 @@ registerDataGrid(window.attributes);
 
 // Register data-grid editable sub-pattern behavior (grid:cell-edit)
 registerDataGridEdit(window.attributes);
+
+// Register lazily-loaded traits from The Map — the trait manifest (#116/#170/#448). Must run
+// before the first upgrade(): defineLazy seeds the observer's attribute filter, fixed at upgrade
+// time. Ships empty until the Enforcer is ported, so this is a no-op today — the wiring is the point.
+registerTraits(window.attributes, traitManifest);
 
 console.log('[Web Everything] Bootstrap complete');
 console.log('[Web Everything] Globals available: injectors, contexts, stores, attributes, customTextNodeParsers, customTextNodes');

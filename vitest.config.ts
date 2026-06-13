@@ -62,6 +62,10 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      // The trait-enforcer is a Vite plugin not loaded under vitest, so the virtual trait
+      // manifest has no provider here — alias it to the empty static manifest so bootstrap's
+      // `import 'virtual:trait-manifest'` still resolves. Documented non-Vite fallback (#116/#448).
+      'virtual:trait-manifest': '/plugs/webbehaviors/traitManifest',
       '@core': '/plugs/core',
       '@webregistries': '/plugs/webregistries',
       '@webinjectors': '/plugs/webinjectors',
