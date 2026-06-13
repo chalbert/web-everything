@@ -2061,6 +2061,63 @@
     ]
   },
   {
+    "id": "access-control",
+    "name": "Access Control Intent",
+    "status": "concept",
+    "summary": "UX vocabulary for the entry member of the Guard protocol — declarative app-level authorization. Two surfaces share one authz provider: a routing entry guard (deny -> a navigation outcome) and a rendering access gate (deny -> render or hide a subtree). The deny-outcome family is hide | redirect | forbid | cloak; the forbid(403)-vs-cloak(404) existence-disclosure call lives behind the provider, not in the UX. Feature-flags resolve as an authority kind alongside authorization / process / validity. The front end is a UX mirror; the back end is authoritative.",
+    "dimensions": {
+      "surface": {
+        "description": "Where authorization is evaluated — the two surfaces sharing one provider. route is a navigation entry guard (deny cancels/redirects the navigation); render is an element-level access gate (deny hides or replaces a subtree).",
+        "values": [
+          "route",
+          "render"
+        ]
+      },
+      "deny": {
+        "description": "What happens on a deny — the UX names the family, the provider owns the 403-vs-404 call. redirect sends elsewhere (route only); hide removes the subtree (render only); forbid acknowledges the resource but refuses (403); cloak hides its very existence (404). forbid is downgraded to cloak unless the provider reveals existence.",
+        "values": [
+          "hide",
+          "redirect",
+          "forbid",
+          "cloak"
+        ]
+      },
+      "authority": {
+        "description": "Why access is gated — the authority kind, an open set defaulting to authorization. authorization = permanent, data-scoped permission; feature-flag = temporary entitlement/rollout (same provider seam, materially different stakes); process = a workflow-state gate; validity = a data-validity precondition.",
+        "values": [
+          "authorization",
+          "feature-flag",
+          "process",
+          "validity"
+        ]
+      }
+    },
+    "description": "<h3>Access Control Contract</h3><p class=\"text-sm text-gray-600 mb-2\">The settled <strong>entry mirror</strong> of the <a href=\"/intents/exit-guard/\">exit guard</a>: when the user tries to <strong>reach</strong> a protected region — navigating to a route, or rendering a gated subtree — a <strong>guard provider</strong> decides allow/deny, and on deny the configured deny-outcome fires. Built <strong>on</strong> the <a href=\"/projects/webguards/#protocol-guard\">Guard protocol</a>'s predicate-provider seam; it is not a new enforcement contract.</p><h3>Two surfaces, one provider</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>route</code>: a navigation entry guard — deny cancels the navigation (the native substrate is the Navigation API <code>navigate</code> intercept) and applies <code>redirect</code> / <code>forbid</code> / <code>cloak</code>.</li><li><code>render</code>: an element-level access gate — deny applies <code>hide</code> / <code>forbid</code> / <code>cloak</code> to the subtree.</li></ul><p class=\"text-sm text-gray-600 mb-2\">They are not the same control; they share only the predicate — one authz provider feeds both.</p><h3>Deny-outcome family</h3><p class=\"text-sm text-gray-600 mb-2\"><code>hide | redirect | forbid | cloak</code>. The load-bearing security choice — <code>forbid</code> (403, confirms the resource exists) vs <code>cloak</code> (404, hides existence) — is <strong>decided behind the provider</strong>, not by the UX author: RFC 9110 sanctions answering 404 to hide a forbidden resource, and leaking existence enables enumeration. A requested <code>forbid</code> is concealed to <code>cloak</code> unless the provider reveals existence.</p><h3>Authority kinds</h3><p class=\"text-sm text-gray-600 mb-2\">Access is gated by an <strong>authority kind</strong> — an open set (<code>authorization</code>, <code>feature-flag</code>, <code>process</code>, <code>validity</code>), default <code>authorization</code>. <strong>Feature-flags are a first-class authority kind, not separate machinery</strong>: a flag SDK is just one guard provider and inherits the identical trust boundary.</p><h3>Trust boundary</h3><p class=\"text-sm text-gray-600 mb-2\">Every evaluation is <strong>async and back-end-authoritative</strong>; this intent is a <strong>UX mirror, never the enforcement point</strong>, and a grant is <strong>revocable</strong>. A client-side gate — including a feature-flag one — is never a sufficient control on its own. The predicate, its provider, and the enforcement boundary live in the <a href=\"/projects/webguards/#protocol-guard\">Guard protocol</a>, not here.</p>",
+    "events": [
+      "accessgrant",
+      "accessdeny",
+      "accessrevoke"
+    ],
+    "uxResearch": [
+      {
+        "title": "Access-control authorization-gate prior art across frameworks and platforms",
+        "source": "Web Everything Guard protocol research (#178, 2026-06-11)",
+        "findings": [
+          "Authorization is universally factored into two surfaces — a route guard (Angular CanActivate -> UrlTree, React Router loader throw redirect, Vue navigation guards) and an element-level render gate — fed by one shared ability/policy source.",
+          "The entry-deny outcomes collapse to redirect / block / render-a-forbidden-or-not-found view; the load-bearing one is forbid(403)-vs-cloak(404), which RFC 9110 makes a security (existence-hiding) call, not a styling one.",
+          "OPA/CASL show the structure is exactly the provider seam: the guarded surface is a Policy Enforcement Point that queries a swappable Policy Decision Point; the member consumes the verdict and bakes no policy model.",
+          "Feature-flags and authorization abstract the same gate but differ in stakes and permanence, so feature-flag is an authority kind resolved through the same provider, never a license to enforce on the client."
+        ],
+        "keyInsight": "The member is two surfaces off one authz provider; the UX names the deny family but the 403-vs-404 existence call and the enforcement both live behind the provider, server-authoritative.",
+        "reference": "https://www.rfc-editor.org/rfc/rfc9110#status.404"
+      }
+    ],
+    "researchGaps": [
+      "How a render gate's cloak (existence-hiding) interacts with SSR/streaming — concealing a subtree must not leak its existence via timing or partial markup.",
+      "Whether the authority kind should drive a default deny-outcome (e.g. feature-flag -> hide, authorization -> cloak) or stay orthogonal to it."
+    ]
+  },
+  {
     "id": "hierarchy",
     "name": "Hierarchy Intent",
     "status": "draft",
