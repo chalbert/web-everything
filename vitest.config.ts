@@ -47,6 +47,7 @@ export default defineConfig({
       'blocks/**/__tests__/**/*.test.{ts,tsx}',
       'src/**/__tests__/**/*.test.{ts,tsx}', // build-time data files (e.g. burndown accounting)
       'scripts/**/__tests__/**/*.test.mjs', // build/CI tooling (e.g. conformance auto-fix engine, #095)
+      'tools/**/__tests__/**/*.test.{ts,tsx}', // build-time Vite plugins (e.g. the trait-enforcer codegen, #484)
       'capabilities/**/__tests__/**/*.test.{ts,tsx}', // capability provider + static build-matrix (#204)
       'validity-merge/**/__tests__/**/*.test.{ts,tsx}', // validity-merge strategy plane (#212)
       'validator-resolution/**/__tests__/**/*.test.{ts,tsx}', // async validator resolution plane (#214)

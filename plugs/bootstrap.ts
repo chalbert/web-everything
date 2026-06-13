@@ -57,11 +57,11 @@ import { registerTraits } from './webbehaviors/traitManifest';
 // The trait manifest — "The Map" (#116/#170). Static import so it resolves synchronously
 // *before* the first upgrade(): the observer's attribute filter is fixed at upgrade time, so
 // defineLazy must precede it (a dynamic import would race that). The `virtual:trait-manifest`
-// specifier resolves to: the real Enforcer-generated manifest under Vite once the trait-enforcer
-// is ported here, an ambient stub under tsc (plugs/virtual-trait-manifest.d.ts), and the empty
-// static manifest under both Vite and vitest until then (resolve.alias). WE has no trait-enforcer
-// yet, so today every leg lands on the empty manifest — the lazy path is wired, with nothing to
-// load. See backlog #116/#170/#448.
+// specifier resolves to: the real Enforcer-generated manifest under Vite (the trait-enforcer plugin,
+// #484), an ambient stub under tsc (plugs/virtual-trait-manifest.d.ts), and the empty static manifest
+// under vitest (resolve.alias — the plugin is Vite-only). The Enforcer's traitMap is empty until a
+// trait is authored, so today every leg still lands on an empty manifest — the lazy path is wired,
+// with nothing to load, but the generation seam is now live. See backlog #116/#170/#448/#484.
 import { traitManifest } from 'virtual:trait-manifest';
 
 // Extend Window interface

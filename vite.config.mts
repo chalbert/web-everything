@@ -1,6 +1,7 @@
 import { defineConfig, Plugin } from 'vite';
 import { devPanel } from './tools/dev-panel/vite-plugin';
 import { moduleService } from './tools/maas/vite-plugin';
+import { traitEnforcer } from './tools/trait-enforcer/vite-plugin';
 
 /**
  * Vite plugin that automatically injects Web Everything patches into demo HTML files.
@@ -89,7 +90,19 @@ function routerDemoFallback(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [devPanel(), moduleService(), routerDemoFallback(), webEverythingPatches()],
+  plugins: [
+    devPanel(),
+    moduleService(),
+    routerDemoFallback(),
+    webEverythingPatches(),
+    // The Enforcer (#170 final leg / #484): generates the real `virtual:trait-manifest` at build
+    // time — a code-split chunk per scanned lazy trait, a hoisted static import per eager one. The
+    // traitMap is empty until a trait is authored, so today it emits an empty manifest (same as the
+    // former alias fallback) — but via real generation, so a trait dropped into the Map ships a chunk
+    // with no further wiring. Scans demos/ + src/ HTML for `<el trait>` usage. vitest keeps the
+    // empty-alias fallback (this plugin is Vite-only); tsc keeps the ambient plugs/virtual-trait-manifest.d.ts.
+    traitEnforcer({ traitMap: {} }),
+  ],
   root: './',
   server: {
     port: 3000,
@@ -152,11 +165,9 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      // The trait-enforcer (a Vite plugin) is not ported to WE yet, so `virtual:trait-manifest`
-      // has no Enforcer provider here — alias it to the empty static manifest so bootstrap's
-      // `import 'virtual:trait-manifest'` resolves. The documented non-Enforcer fallback (#116/#448);
-      // swap this for the Enforcer plugin once it lands.
-      'virtual:trait-manifest': '/plugs/webbehaviors/traitManifest',
+      // `virtual:trait-manifest` is now provided by the traitEnforcer plugin above (#484) — no alias
+      // here, since resolve.alias would shadow the plugin's resolveId and the Enforcer would never run.
+      // (vitest.config.ts keeps the empty-alias fallback: the plugin is Vite-only, absent under vitest.)
       '@core': '/plugs/core',
       '@webregistries': '/plugs/webregistries',
       '@webinjectors': '/plugs/webinjectors',
