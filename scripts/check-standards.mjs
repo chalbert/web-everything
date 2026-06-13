@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
 import { renderInventory, spliceInventory } from './gen-inventory.mjs';
+import { checkDemos } from './check-demos.mjs';
 import {
   BACKLOG_STATUSES, BACKLOG_TYPES, WORK_ITEMS, FIB, FILE,
   dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem,
@@ -20,6 +21,7 @@ import {
   validateReportsNotHidden, findCompiledShadows, permalinkSegment, validateViteProxyCoverage,
   validateModuleResolutionLock, findRawHtmlInMarkdown, findBuriedForkSections,
   findUnquotedColonScalars,
+  RESEARCH_REVIEW_HORIZON_DEFAULT, deriveResearchFreshness,
 } from './check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -73,8 +75,8 @@ const checkStatusInto = (kind, id, status) => {
 // `superseded` (#441 Fork 1) marks a topic whose canonical report was replaced by a newer dated one.
 const RESEARCH_STATUSES = new Set(['open', 'resolved', 'draft', 'closed', 'superseded']);
 // Global review-horizon fallback (#441 Fork 4): a topic without its own `reviewHorizon` is reviewed
-// against this interval. ISO-8601 duration; staleness derivation against it is #477 (warn-only), not here.
-const RESEARCH_REVIEW_HORIZON_DEFAULT = 'P6M';
+// against this interval (ISO-8601 duration). Imported from the rules module — its single home, shared
+// with the Eleventy freshness badge; staleness derivation is `deriveResearchFreshness` (#477, warn-only below).
 const ISO_DURATION = /^P(?:\d+Y)?(?:\d+M)?(?:\d+W)?(?:\d+D)?$/;
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 // Backlog operational axis (BACKLOG_STATUSES/BACKLOG_TYPES) and the agile sizing axis
@@ -157,6 +159,12 @@ for (const r of research)
     }
     if (asIds(r.supersededBy).length && r.status !== 'superseded')
       warn(`Research topic "${r.id}" has supersededBy but status is "${r.status}" (expected "superseded", #441 Fork 1)`);
+    // Staleness derivation (#441 Fork 4 / #477): once past `lastReviewed + reviewHorizon` (or the
+    // global P6M fallback) a topic is flagged for re-review. WARN-ONLY by ruling — never a CI error
+    // (stale-while-shown: the topic stays published; this only nudges a maintainer to re-review).
+    const fr = deriveResearchFreshness(r);
+    if (fr.state === 'stale')
+      warn(`Research topic "${r.id}" is stale — last reviewed ${fr.lastReviewed}, horizon ${fr.horizon} (due ${fr.dueDate}). Re-review and bump lastReviewed (warn-only, #477).`);
   }
 }
 
@@ -598,6 +606,18 @@ try {
   for (const e of me) err(e.message, e.descriptor);
 } catch (e) {
   err(`Module-resolution exports-lock check failed: ${e.message}`);
+}
+
+// ── Demos: operational-wiring gate (routing/base-path/registry/dev-fallback) ────
+// Complements check:app-conformance (which validates standard USE). The static checks live in
+// check-demos.mjs and are composed here so the everyday gate catches the base-path reload bug class
+// (loan-origination / auto-insurance #317/#318). The --live HTTP probe stays opt-in on `check:demos`.
+try {
+  const { errors: de, warnings: dw } = checkDemos();
+  for (const e of de) err(e.message, e.descriptor);
+  for (const w of dw) warn(w.message, w.descriptor);
+} catch (e) {
+  err(`Demo operational-wiring check failed: ${e.message}`);
 }
 
 // ── Report ────────────────────────────────────────────────────────────────────

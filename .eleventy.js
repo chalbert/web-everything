@@ -1,7 +1,15 @@
 const syntaxHighlight = require("@11ty/eleventy-plugin-syntaxhighlight");
 
+const { deriveResearchFreshness } = require("./scripts/lib/research-freshness.cjs");
+
 module.exports = function (eleventyConfig) {
   eleventyConfig.addPlugin(syntaxHighlight);
+
+  // Research-freshness badge derivation (#441 Fork 4 / #477): the same now-injected helper backing
+  // check:standards' warn-only rule (a CJS module so this sync Eleventy 2.x config can require it; the
+  // ESM rules module re-exports it). Returns { state: 'fresh'|'stale'|'unreviewed', dueDate, ... } so
+  // the badge styles fresh vs. stale off the exact logic the gate uses.
+  eleventyConfig.addFilter("researchFreshness", (topic) => deriveResearchFreshness(topic || {}));
 
   // Custom filter to filter plugs by project membership
   eleventyConfig.addFilter("filterByProject", function(plugs, projectId) {

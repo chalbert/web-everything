@@ -21,6 +21,7 @@ import {
   validateViteProxyCoverage, deDateReport,
   isExportsSafeTarget, validateModuleResolutionLock, findRawHtmlInMarkdown,
   findBuriedForkSections, findUnquotedColonScalars,
+  deriveResearchFreshness, addIsoDuration, RESEARCH_REVIEW_HORIZON_DEFAULT,
 } from '../check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -485,5 +486,47 @@ describe('findBuriedForkSections — a fork section in a non-decision body (#441
   it('returns [] for an empty or non-string body', () => {
     expect(findBuriedForkSections('')).toEqual([]);
     expect(findBuriedForkSections(undefined)).toEqual([]);
+  });
+});
+
+describe('deriveResearchFreshness — staleness derivation (#441 Fork 4 / #477)', () => {
+  const now = new Date('2026-06-13T00:00:00Z');
+
+  it('is unreviewed when lastReviewed is missing or malformed', () => {
+    expect(deriveResearchFreshness({}, { now }).state).toBe('unreviewed');
+    expect(deriveResearchFreshness({ lastReviewed: '' }, { now }).state).toBe('unreviewed');
+    expect(deriveResearchFreshness({ lastReviewed: 'June 2026' }, { now }).state).toBe('unreviewed');
+  });
+
+  it('is fresh within the horizon, stale once past it (P6M)', () => {
+    // reviewed 2026-05 → due 2026-11 → fresh on 2026-06-13
+    expect(deriveResearchFreshness({ lastReviewed: '2026-05-01', reviewHorizon: 'P6M' }, { now }))
+      .toMatchObject({ state: 'fresh', dueDate: '2026-11-01' });
+    // reviewed 2025-01 → due 2025-07 → stale on 2026-06-13
+    expect(deriveResearchFreshness({ lastReviewed: '2025-01-01', reviewHorizon: 'P6M' }, { now }))
+      .toMatchObject({ state: 'stale', dueDate: '2025-07-01' });
+  });
+
+  it('falls back to the global P6M horizon when the topic declares none', () => {
+    const fr = deriveResearchFreshness({ lastReviewed: '2026-05-01' }, { now });
+    expect(fr.horizon).toBe(RESEARCH_REVIEW_HORIZON_DEFAULT);
+    expect(fr.state).toBe('fresh');
+  });
+
+  it('treats the horizon boundary as still-fresh (stale only strictly past due)', () => {
+    // due exactly == now → not yet past → fresh
+    expect(deriveResearchFreshness({ lastReviewed: '2025-12-13', reviewHorizon: 'P6M' }, { now }).state).toBe('fresh');
+  });
+
+  it('honours week/day/year durations', () => {
+    expect(deriveResearchFreshness({ lastReviewed: '2026-06-01', reviewHorizon: 'P2W' }, { now }).state).toBe('fresh'); // 06-01 + 14d = 06-15 > now 06-13 → fresh
+    expect(deriveResearchFreshness({ lastReviewed: '2026-06-10', reviewHorizon: 'P1D' }, { now }).state).toBe('stale'); // due 06-11 < now → stale
+    expect(deriveResearchFreshness({ lastReviewed: '2026-01-01', reviewHorizon: 'P1Y' }, { now }).state).toBe('fresh'); // due 2027-01-01 > now → fresh
+  });
+
+  it('addIsoDuration returns null for empty / bare-P durations', () => {
+    expect(addIsoDuration(new Date('2026-01-01T00:00:00Z'), 'P')).toBeNull();
+    expect(addIsoDuration(new Date('2026-01-01T00:00:00Z'), '')).toBeNull();
+    expect(addIsoDuration(new Date('2026-01-01T00:00:00Z'), 'P6M').toISOString().slice(0, 10)).toBe('2026-07-01');
   });
 });

@@ -1,25 +1,30 @@
-{# Research-freshness badge scaffold (#441 Fork 4 / #476).
-   Foundation only: renders the review state from the registry fields. The staleness *derivation*
-   (is this past lastReviewed + reviewHorizon?) and the resulting fresh/stale styling are #477 — it
-   hangs off the data-freshness / data-review-horizon hooks below without touching this markup.
-   Global review-horizon fallback is P6M (mirrors RESEARCH_REVIEW_HORIZON_DEFAULT in check-standards.mjs). #}
+{# Research-freshness badge (#441 Fork 4 / #476 scaffold / #477 derivation).
+   The fresh/stale/unreviewed state is *derived* by the `researchFreshness` filter (the shared
+   deriveResearchFreshness helper in check-standards-rules.mjs — the same logic backing the warn-only
+   check:standards rule). RFC 5861 stale-while-shown: a `stale` topic is flagged for re-review, never
+   hidden. Global review-horizon fallback is P6M. #}
 {% macro freshnessBadge(topic) %}
+{% set fr = topic | researchFreshness %}
+{% if fr.state == 'stale' %}{% set _bg = 'var(--color-warning-surface, #fef3c7)' %}{% set _fg = 'var(--color-warning-text, #b45309)' %}
+{% elif fr.state == 'fresh' %}{% set _bg = 'var(--color-success-surface, #dcfce7)' %}{% set _fg = 'var(--color-success-text, #15803d)' %}
+{% else %}{% set _bg = 'var(--color-surface-alt, #f1f5f9)' %}{% set _fg = 'var(--color-text-muted, #64748b)' %}{% endif %}
 <span class="research-freshness"
-      data-freshness="{% if topic.lastReviewed %}reviewed{% else %}unreviewed{% endif %}"
-      data-last-reviewed="{{ topic.lastReviewed or '' }}"
-      data-review-horizon="{{ topic.reviewHorizon or 'P6M' }}"
-      style="display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.1rem 0.5rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b); font-size: 0.72em; font-weight: 600; white-space: nowrap;"
-      title="{% if topic.lastReviewed %}Last reviewed {{ topic.lastReviewed }} · review horizon {{ topic.reviewHorizon or 'P6M' }}{% else %}Not yet reviewed{% endif %}">
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="opacity: 0.7;"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-    {% if topic.lastReviewed %}Reviewed {{ topic.lastReviewed }}{% else %}Not reviewed{% endif %}
+      data-freshness="{{ fr.state }}"
+      data-last-reviewed="{{ fr.lastReviewed or '' }}"
+      data-review-horizon="{{ fr.horizon or 'P6M' }}"
+      data-review-due="{{ fr.dueDate or '' }}"
+      style="display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.1rem 0.5rem; border-radius: 9999px; background: {{ _bg }}; color: {{ _fg }}; font-size: 0.72em; font-weight: 600; white-space: nowrap;"
+      title="{% if fr.state == 'stale' %}Stale — last reviewed {{ fr.lastReviewed }}, review was due {{ fr.dueDate }} (horizon {{ fr.horizon }}). Flagged for re-review.{% elif fr.state == 'fresh' %}Reviewed {{ fr.lastReviewed }} · next review due {{ fr.dueDate }} (horizon {{ fr.horizon }}){% else %}Not yet reviewed{% endif %}">
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="opacity: 0.7;">{% if fr.state == 'stale' %}<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>{% else %}<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>{% endif %}</svg>
+    {% if fr.state == 'stale' %}Review due{% elif fr.state == 'fresh' %}Reviewed {{ fr.lastReviewed }}{% else %}Not reviewed{% endif %}
 </span>
 {% endmacro %}
 
 {# Revision-history block (#441 Fork 1): renders the bidirectional supersedes / supersededBy chain.
    Foundation scaffold — refresh-as-new-report authoring is #478. #}
 {% macro revisionHistory(topic, researchTopics) %}
-{% set supersedesList = topic.supersedes if topic.supersedes is iterable and topic.supersedes is not string else ([topic.supersedes] if topic.supersedes else []) %}
-{% set supersededByList = topic.supersededBy if topic.supersededBy is iterable and topic.supersededBy is not string else ([topic.supersededBy] if topic.supersededBy else []) %}
+{% set supersedesList = topic.supersedes if topic.supersedes and topic.supersedes is iterable and topic.supersedes is not string else ([topic.supersedes] if topic.supersedes else []) %}
+{% set supersededByList = topic.supersededBy if topic.supersededBy and topic.supersededBy is iterable and topic.supersededBy is not string else ([topic.supersededBy] if topic.supersededBy else []) %}
 {% if supersedesList.length or supersededByList.length %}
 <div class="research-revision-history">
     <h2>Revision history</h2>

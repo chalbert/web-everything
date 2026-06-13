@@ -651,3 +651,10 @@ export function validateModuleResolutionLock(entries) {
   }
   return { errors, warnings: [] };
 }
+
+// ── Research freshness derivation (#441 Fork 4 / #477) ───────────────────────
+// The derivation lives in a CommonJS module (scripts/lib/research-freshness.cjs) so the sync-only
+// Eleventy 2.x config can `require` it for the reader freshness badge; here we re-export its named
+// bindings so the warn-only check:standards rule shares the *exact* same logic — one source of
+// truth, two module systems.
+export { RESEARCH_REVIEW_HORIZON_DEFAULT, addIsoDuration, deriveResearchFreshness } from './lib/research-freshness.cjs';
