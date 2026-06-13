@@ -3,10 +3,16 @@ type: issue
 workItem: task
 parent: "170"
 status: open
+locus: frontierui
 blockedBy: ["447", "448"]
 dateOpened: "2026-06-12"
 tags: []
 ---
+
+> **Locus: frontierui (2026-06-13).** This task edits Frontier UI's path-alias config, deletes
+> `frontierui/plugs/`, and verifies "FU build + tests green" — it builds and gates in **frontierui**,
+> not webeverything. Both blockers (#447, #448) are now resolved, so it's ready — but in the FU repo
+> with its own gate. A webeverything `/batch` correctly holds it out of the pool.
 
 # Wire the @we/plugs/* alias in Frontier UI and delete the vendored plugs tree
 
