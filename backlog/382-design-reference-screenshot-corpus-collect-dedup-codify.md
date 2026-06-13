@@ -91,15 +91,17 @@ register / theme get filled during codification.
 > selectors kept only as an optional fast-path. Full visual tagging stays deferred to #396; both
 > consume one shared swappable vision provider.
 
-## Open decisions
+## Resolved decisions (cont.)
 
-### Fork 3 — First-run scope & taxonomy seed → **delegated to [#394](394-design-ref-corpus-first-run-scope-taxonomy-seed-grow-targets.md)** *(prepared 2026-06-12)*
+### Fork 3 — First-run scope & taxonomy seed → ✅ *(resolved 2026-06-13 via [#394](394-design-ref-corpus-first-run-scope-taxonomy-seed-grow-targets.md))*
 
-This epic's last open fork was carved out to **#394**, which is now at the prepared-fork shape
-(`✓ ready to ratify`): four forks — register-axis split, vocabulary openness, first-run scope, category
-vocab source — grounded in the [`design-ref-taxonomy`](/research/design-ref-taxonomy/) research topic, each
-with a bold default. With Forks 1 & 2 resolved here and Fork 3 prepared in #394, **all of 382's decidable
-content is at the Definition of Ready** — ratify #394 (via `/next decision`), then this epic resolves.
+This epic's last open fork was carved to **#394** and ratified 2026-06-13 (B / C / B / A): split
+`designRegister` → `productRegister` (deterministic) + `visualStyle` (vision-pass); open-growing
+controlled vocab in keyed `design-refs/taxonomy.json`; scarcity-weighted grow-targets (~30–50, ≥3/cell);
+coarse ~10-domain hand-rolled category seed lightly anchored to G2/Capterra. **All of 382's decidable
+content is now resolved.** The mechanical build is carved to
+[#509](509-design-ref-taxonomy-seed-re-key-scarcity-targets-build-394-r.md). The epic stays `open` only
+as the umbrella for its remaining build slices (below); it resolves when those land.
 
 _Original placeholder (superseded by #394):_ seed categories from the project's style-registers
 (enterprise, modern-saas, …) and capture ~30–50 shots to prove the pipeline end-to-end before scaling.
@@ -163,9 +165,14 @@ The next stages are tracked as discrete children of this epic:
 - **#393** — Backfill `reviewState` on the 14 pre-gate shots · _task, agent-ready_
 - **#394** — First-run scope & taxonomy seed / grow `targets.json` · _decision/story_
 - **#395** — Phase 2: `sharp` perceptual near-dup consolidation · _story, agent-ready_
-- **#396** — Phase 3: vision codification of the corpus into intents · _decision, ✓ ready to ratify (prepared 2026-06-13)_
+- **#396** — Phase 3 vision codification decision · _✅ resolved 2026-06-13, ratified in full_ — ruled: per-shot = reliable facets + loose pattern notes (no formal per-shot structure); harvest → vision proposes candidates, human ratifies; formal vocabulary lives at the reviewed promotion boundary. Build → #481 (blocked on #480).
+- **#481** — Build the codification pass (per #396 ruling) · _story, blocked on #480_ — fills facets + harvests candidate intents.
+- **#489** — Archive quarantined frames + persist `{frame,verdict}` pairs as a labeled training corpus · _story, agent-ready_ — turns the gate into the distillation-data collector for the on-device model (#488).
+
+**Related (not a child):** **#488** — On-device UI-screenshot vision model as a Plateau capability (linear-cost rule) · _decision_ — decides the *target provider* behind the #475 vision service; the dev gate (#480/#485) stays interim regardless.
 - **#397** — Gallery-harvest `captureMethod` for auth-walled app interiors · _story, needs design_
-- **#475** — Vision-gated capture QC: judge candidate surface quality (app vs marketing/modal/error) at collect time · _decision, ✓ ready to ratify (prepared 2026-06-13)_ — closes the open QC gap below; defines the shared vision provider #396 widens
+- **#475** — Vision-gated capture QC decision · _✅ resolved 2026-06-13, accepted in full_ — ruled: vision is a **Plateau service** the WE pipeline consumes as a **no-leakage client** (governing invariant); final-frame gate, 6-verdict taxonomy + autoconsent remediation, selector fast-path + hash-cached verdict. Build → #480.
+- **#480** — Build the vision-gated capture-QC client (per #475 ruling) · _story, agent-ready_ — thin swappable vision-client seam in `design-refs.mjs`; closes the open QC gap below.
 
 All run against the shipped phase-1 pipeline, so none is hard-blocked — they're independently
 selectable (no `blockedBy` edges; the `parent: 382` link is the only relation).

@@ -3,9 +3,11 @@ type: decision
 workItem: story
 size: 3
 parent: "382"
-status: open
+status: resolved
 dateOpened: "2026-06-12"
-dateStarted: "2026-06-12"
+dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: none
 preparedDate: "2026-06-12"
 relatedReport: reports/2026-06-12-design-ref-corpus-taxonomy-seed.md
 tags: [design-reference, corpus, taxonomy, classification]
@@ -22,6 +24,35 @@ research topic. **4 forks**, each grounded in that survey and carrying a **bold*
 This is **internal research-corpus tooling** (`design-refs/`) — _not_ a Web Everything standard, **zero
 project-facing lock-in** — so every default lands on the most-permissive, growable option. The eventual
 decision turn is ratification, not research.
+
+## Ruling ✅ *(ratified 2026-06-13)*
+
+All four forks ratified **as recommended — B / C / B / A**:
+
+1. **Fork 1 — Register structure → B (split).** Split the conflated `designRegister` into
+   **`productRegister`** (deterministic product archetype: enterprise / modern-saas / consumer /
+   creative-tool / utilitarian — author-supplied at target time) + **`visualStyle`** (named visual
+   aesthetic — *deferred to the phase-3 vision pass* per #382 Fork 2). Re-key the 16 existing
+   `designRegister` values → `productRegister` (mechanical, no recapture).
+2. **Fork 2 — Vocabulary openness → C (open-growing controlled vocab).** Canonical values live in a
+   keyed **`design-refs/taxonomy.json`** (the `benchmarkCorpus.json` pattern). New values allowed but
+   must be registered → clean re-run diffs, synonyms gated at add-time.
+3. **Fork 3 — First-run scope → B (scarcity-weighted grow-targets, ~30–50).** Drive toward **≥3 shots
+   per under-covered (productRegister × category) cell**, prioritising registers thin today
+   (consumer/social, commerce/admin, finance/banking, productivity/collaboration, communication/inbox,
+   content/media). The quota is a **grow-target the worklist tracks, not a hard cap**.
+   **Caveat recorded:** reachable *public* apps skew dev-tools, so the thinnest cells may be
+   unreachable via Playwright capture and depend on the **gallery-harvest method**
+   ([#397](397-design-ref-gallery-harvest-capturemethod-for-auth-walled-app.md)) for auth-walled
+   interiors. The scarcity cells are an aspirational worklist target; the first run may fall short on
+   the thinnest cells without #397, and that is acceptable (grow-target, not cap).
+4. **Fork 4 — Category vocab source → A (coarse hand-roll, lightly anchored).** A **~10-domain seed**
+   recorded in `taxonomy.json`, cross-referencing G2/Capterra top-level names where they map — without
+   inheriting their depth.
+
+**Build follow-through** (mechanical, agent-ready) carved to
+[#509](509-design-ref-taxonomy-seed-re-key-scarcity-targets-build-394-r.md). This resolves the last
+open fork of the **#382** epic, which resolves alongside.
 
 ## The axis being decided
 
