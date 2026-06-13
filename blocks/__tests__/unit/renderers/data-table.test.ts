@@ -242,3 +242,70 @@ const COLS_ROWS: Row[] = [
   { name: 'Aaron', team: 'Eng', salary: 110, location: 'Oslo' },
   { name: 'Émile', team: 'Sales', salary: 80, location: 'Lyon' },
 ];
+
+describe('Data Table per-column cell formatter (#368)', () => {
+  const rows: Row[] = [
+    { name: 'Aaron', salary: 502024 },
+    { name: 'Bianca', salary: 80500 },
+  ];
+
+  it('a string formatter renders formatted text while sort stays on the raw value', () => {
+    const usd = (v: import('../../../renderers/data-table/renderDataTable').Cell) =>
+      `$${Number(v).toLocaleString('en-US')}`;
+    const config: DataTableConfig = {
+      columns: [
+        { field: 'name', label: 'Name', sortable: true },
+        { field: 'salary', label: 'Salary', sortable: true, format: usd },
+      ],
+      sort: { keys: 'single', by: [{ field: 'salary', direction: 'ascending' }] },
+    };
+    const table = renderDataTable(rows, config);
+    const salaryCells = Array.from(table.querySelectorAll('tbody tr')).map(
+      (tr) => tr.querySelectorAll('td')[1]?.textContent,
+    );
+    // Ascending by RAW number → 80500 before 502024, even though displayed formatted.
+    expect(salaryCells).toEqual(['$80,500', '$502,024']);
+    // The audit (which recomputes the pipeline) stays green with a formatter present.
+    expect(auditDataTable(table, rows, config).ok).toBe(true);
+  });
+
+  it('a Node formatter renders a rich cell (the node is appended, not stringified)', () => {
+    const chip = (v: import('../../../renderers/data-table/renderDataTable').Cell) => {
+      const span = document.createElement('span');
+      span.className = 'chip';
+      span.textContent = String(v);
+      return span;
+    };
+    const config: DataTableConfig = {
+      columns: [
+        { field: 'name', label: 'Name' },
+        { field: 'salary', label: 'Salary', format: chip },
+      ],
+    };
+    const table = renderDataTable(rows, config);
+    const firstSalaryCell = table.querySelectorAll('tbody tr')[0].querySelectorAll('td')[1];
+    expect(firstSalaryCell.querySelector('span.chip')).not.toBeNull();
+    expect(auditDataTable(table, rows, config).ok).toBe(true);
+  });
+
+  it('a string formatter is escape-safe — HTML is set as text, never parsed', () => {
+    const evil = () => '<img src=x onerror=alert(1)>';
+    const config: DataTableConfig = {
+      columns: [
+        { field: 'name', label: 'Name' },
+        { field: 'salary', label: 'Salary', format: evil },
+      ],
+    };
+    const table = renderDataTable(rows, config);
+    const cell = table.querySelectorAll('tbody tr')[0].querySelectorAll('td')[1];
+    expect(cell.querySelector('img')).toBeNull(); // not parsed into a live element
+    expect(cell.textContent).toBe('<img src=x onerror=alert(1)>');
+  });
+
+  it('a column with no formatter renders the raw value as before (back-compat)', () => {
+    const config: DataTableConfig = { columns: [{ field: 'name', label: 'Name' }, { field: 'salary', label: 'Salary' }] };
+    const table = renderDataTable(rows, config);
+    const cell = table.querySelectorAll('tbody tr')[0].querySelectorAll('td')[1];
+    expect(cell.textContent).toBe('502024');
+  });
+});

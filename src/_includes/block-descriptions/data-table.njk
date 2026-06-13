@@ -118,7 +118,10 @@ interface SortKey {
 }
 
 interface DataTableContract {
-  columns: { field: string; label: string; sortable?: boolean }[];
+  // `format` is display-only (#368): sort/filter/group always run on the raw `field` value, so
+  // Intl.Collator order is unaffected. A string is set as textContent (escape-safe); a Node is a
+  // rich cell (e.g. a status chip from the status-indicator standard). Currency/dates via Intl.
+  columns: { field: string; label: string; sortable?: boolean; format?: (value: Cell, row: Row) => string | Node }[];
   order?: Operation[];          // default ['filter','sort','group','page']
   filter?: { match: FilterMatch; predicates: ((row: Row) => boolean)[] };
   sort?:   { by: SortKey[]; keys: 'single' | 'multiple' };

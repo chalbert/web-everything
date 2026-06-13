@@ -38,6 +38,15 @@ export interface Column {
   label: string;
   /** Sortable columns get a button-wrapped header + an `aria-sort` state (APG). Default false. */
   sortable?: boolean;
+  /**
+   * Optional **display** formatter for the cell (#368). Sorting/filtering/grouping always run on the
+   * raw `field` value (so `Intl.Collator` natural order is unaffected) — `format` only changes what is
+   * *rendered*. Return a `string` for text (currency/date via `Intl.NumberFormat`/`Intl.DateTimeFormat`,
+   * native-first) — it is set as `textContent`, never `innerHTML`, so it is escape-safe — or return a
+   * `Node` for a rich cell (a status chip from the status-indicator standard #354, a link). Presentation
+   * only: it must not affect `aria-sort` or row order.
+   */
+  format?: (value: Cell, row: Row) => string | Node;
 }
 
 export interface SortKey {
@@ -287,11 +296,30 @@ function th(column: Column, sort: DataTableConfig['sort']): HTMLTableCellElement
   return cell;
 }
 
+/**
+ * A cell's rendered content (#368): the column's `format` output if present, else the raw value as
+ * text. A `string` is escape-safe (the caller sets it as `textContent`); a `Node` is a rich cell.
+ * Sorting/order never call this — they use the raw `field` value — so formatting stays presentational.
+ */
+export function cellContent(col: Column, row: Row): string | Node {
+  return col.format ? col.format(row[col.field], row) : String(row[col.field] ?? '');
+}
+
+/** The textual projection of a cell — what `td.textContent` reads after render. Used by the audit to
+ *  compare row order/content regardless of whether a column formats to a string or a Node. */
+export function cellDisplayText(col: Column, row: Row): string {
+  const out = cellContent(col, row);
+  return typeof out === 'string' ? out : (out.textContent ?? '');
+}
+
 function dataRow(row: Row, columns: Column[]): HTMLTableRowElement {
   const tr = document.createElement('tr');
   for (const col of columns) {
     const td = document.createElement('td');
-    td.textContent = String(row[col.field] ?? '');
+    const content = cellContent(col, row);
+    // A string is assigned as textContent (never innerHTML) — escape-safe; a Node is appended as-is.
+    if (typeof content === 'string') td.textContent = content;
+    else td.append(content);
     tr.append(td);
   }
   return tr;
@@ -396,7 +424,7 @@ export function auditDataTable(root: HTMLElement, rows: Row[], config: DataTable
   add('rendered data-row count matches the filtered/grouped result', renderedRows.length === expectedRows.length);
 
   const cellText = (tr: Element) => Array.from(tr.querySelectorAll('td')).map((td) => td.textContent).join('');
-  const expectedText = expectedRows.map((row) => config.columns.map((c) => String(row[c.field] ?? '')).join(''));
+  const expectedText = expectedRows.map((row) => config.columns.map((c) => cellDisplayText(c, row)).join(''));
   const orderMatches = renderedRows.length === expectedText.length && renderedRows.every((tr, i) => cellText(tr) === expectedText[i]);
   add('rendered row order matches the configured sort pipeline', orderMatches);
 
