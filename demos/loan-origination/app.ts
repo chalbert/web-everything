@@ -18,7 +18,7 @@ import { registerDataTable, type DataTableElement } from '../../blocks/renderers
 import type { Row, DataTableConfig } from '../../blocks/renderers/data-table/renderDataTable';
 import { PaginationBehavior, registerPagination } from '../../blocks/renderers/pagination/PaginationBehavior';
 import { MasterDetailBehavior } from '../../blocks/master-detail/MasterDetailBehavior';
-import { DefaultLifecycleProvider, registerLifecycle } from '../../blocks/lifecycle/LifecycleProvider';
+import { DefaultLifecycleProvider, registerLifecycle, type GuardResolver } from '../../blocks/lifecycle/LifecycleProvider';
 import { statusIndicatorHTML } from '../../blocks/renderers/status-indicator/renderStatusIndicator';
 import type { ApplicationState } from './domain/types';
 import { LOAN_LIFECYCLE, FINDING_TONE } from './domain/lifecycle';
@@ -45,7 +45,27 @@ import type { Condition } from './domain/types';
 // Web Lifecycle block (active): the loan's status machine is the data-defined LOAN_LIFECYCLE driving the
 // shipping DefaultLifecycleProvider — we no longer hand-roll transitions. The Status Indicator render
 // (statusIndicatorHTML) owns every status chip. Registered once at boot as the 'loan' provider.
-const loanLifecycle = new DefaultLifecycleProvider<ApplicationState>(LOAN_LIFECYCLE);
+//
+// Phase S2 (#380): the named guards on the definition's edges are now REALLY evaluated against the loan's
+// domain state (not the permissive default). Authorization (whether a role may fire an edge) stays the
+// provider's actor check; these guards are the *business* preconditions, the Web Guards composition seam.
+//   - `meets-eligibility`     → the rules engine has not found the file ineligible (underwriting → approved).
+//   - `conditions-cleared`    → every PTD/PTC condition is cleared or waived (approved → clear-to-close).
+// The resolver looks the entity up by loan number through `lookupApp`, populated at boot from the pipeline.
+let lookupApp: (id: string) => Application | undefined = () => undefined;
+const loanGuards: GuardResolver<ApplicationState> = (guard, { entity }) => {
+  const app = lookupApp(entity.id);
+  if (!app) return false; // unknown entity → deny (safe: a guard never passes without its subject)
+  switch (guard) {
+    case 'meets-eligibility':
+      return evaluate(app).finding !== 'ineligible';
+    case 'conditions-cleared':
+      return app.conditions.every((c) => c.status === 'cleared' || c.status === 'waived');
+    default:
+      return false; // unknown guard → deny (the standard's guards are named; an unmapped one is a bug, not a pass)
+  }
+};
+const loanLifecycle = new DefaultLifecycleProvider<ApplicationState>(LOAN_LIFECYCLE, loanGuards);
 
 // Web Audit block (active): the entity's immutable history. The headline composition — auditLifecycle()
 // (wired at boot) — subscribes the lifecycle provider so every transition auto-appends one AuditEvent.
@@ -196,10 +216,29 @@ function renderDisclosures(app: Application): string {
     </div>`;
 }
 
+/** One available move + the role the lifecycle permits to fire it (the lifecycle is role-scoped). */
+interface Move { to: ApplicationState; actor: string; }
+
+// The moves out of the current state, across ALL permitted roles — each edge's `actor` is surfaced so
+// the demo shows WHO advances it (draft→submitted is the borrower's, processing→underwriting the
+// processor's), and firing one passes that role to the provider's actor check. Guarded edges only appear
+// when their guard passes (meets-eligibility / conditions-cleared), so the gating is visible in the UI.
+async function availableMoves(app: Application): Promise<Move[]> {
+  const entity = { id: app.loanNumber, state: app.state };
+  const roles = [...new Set(LOAN_LIFECYCLE.transitions.filter((t) => t.from === app.state).map((t) => t.actor ?? '*'))];
+  const moves: Move[] = [];
+  for (const role of roles) {
+    for (const to of await loanLifecycle.available(entity, { role })) {
+      if (!moves.some((m) => m.to === to)) moves.push({ to, actor: role });
+    }
+  }
+  return moves;
+}
+
 function renderTrace(
   app: Application,
   result: EvaluationResult,
-  available: ApplicationState[] = [],
+  available: Move[] = [],
   historyHTML = '',
 ): string {
   const facts = deriveFacts(app);
@@ -211,11 +250,12 @@ function renderTrace(
   const cell = (k: string, v: string) => `<div class="cell"><div class="k">${k}</div><div class="v">${v}</div></div>`;
   const stateMeta = loanLifecycle.meta(app.state);
   const stateChip = statusIndicatorHTML({ label: stateMeta.label ?? app.state, tone: stateMeta.tone, shape: 'badge' });
-  // The available next moves for the underwriter — actionable (status-indicator `affordance`). Firing one
-  // calls loanLifecycle.transition(); the audit provider (subscribed via auditLifecycle) auto-logs it.
+  // The available next moves, each labelled with the role the lifecycle permits to fire it (role-scoped,
+  // status-indicator `affordance`). Firing one calls loanLifecycle.transition() AS that role; the audit
+  // provider (subscribed via auditLifecycle) auto-logs it. Guarded edges only appear when their guard passes.
   const advanceActions = available.length
-    ? `<div class="lc-actions"><span class="muted">Advance (underwriter):</span> ${available
-        .map((s) => `<button type="button" class="lc-advance" data-to="${s}">${loanLifecycle.meta(s).label ?? s}</button>`).join(' ')}</div>`
+    ? `<div class="lc-actions"><span class="muted">Advance:</span> ${available
+        .map((m) => `<button type="button" class="lc-advance" data-to="${m.to}" data-actor="${m.actor}">${loanLifecycle.meta(m.to).label ?? m.to} <span class="lc-role">(${m.actor})</span></button>`).join(' ')}</div>`
     : '';
   // Phase S11 (#387): events that raise a notification to the relevant actor (condition → assignee,
   // doc rejection → borrower), each also written to the immutable audit trail with before/after.
@@ -325,6 +365,7 @@ function boot() {
 
   const allRows = pipelineRows(pipeline);                         // project the full book once
   const byLoan = new Map(pipeline.map((a) => [a.loanNumber, a])); // selection lookup across pages
+  lookupApp = (id) => byLoan.get(id);                             // S2: let the lifecycle guards read the live entity
   registerDataTable();   // active block: <data-table>
   registerPagination();  // active block: <page-nav> / PaginationBehavior
   registerLifecycle().define('loan', loanLifecycle); // active block: window.customLifecycles['loan']
@@ -353,7 +394,7 @@ function boot() {
         at: new Date().toISOString(),
       });
     }
-    const next = await loanLifecycle.available({ id: app.loanNumber, state: app.state }, ACTOR);
+    const next = await availableMoves(app);
     const history = await loanAudit.queryByEntity(app.loanNumber);
     const timeline = auditTimelineHTML(history, { density: 'compact', detail: 'expanded' });
     panel.innerHTML = renderTrace(app, evaluate(app), next, timeline);
@@ -453,7 +494,9 @@ function boot() {
         const advance = target.closest<HTMLButtonElement>('button.lc-advance');
         if (advance) {
           const entity = { id: current.loanNumber, state: current.state };
-          await loanLifecycle.transition(entity, advance.dataset.to as ApplicationState, ACTOR);
+          // Fire AS the role the lifecycle permits for this edge (role-scoped); the provider re-checks
+          // both the actor and the guard before applying — the button only existed because both passed.
+          await loanLifecycle.transition(entity, advance.dataset.to as ApplicationState, { role: advance.dataset.actor ?? ACTOR.role });
           current.state = entity.state; // reflect the applied move back onto the pipeline entity
           // Phase S11 (#387): the state change raises a notification to the actor who owns the next move
           // (the transition itself is already auto-audited with before/after via auditLifecycle).

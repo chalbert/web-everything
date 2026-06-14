@@ -165,6 +165,7 @@ table.trace thead th { background: var(--header-strip); font-size: 10.5px; text-
   border: 1px solid #c7d2e0; background: #fff; color: #2b5f9e;
 }
 .lc-advance:hover { background: #e8eef6; }
+.lc-advance .lc-role { font-weight: 400; color: #6b7a8d; } /* S2: the role permitted to fire this edge */
 
 /* Audit Timeline intent (audit-timeline block) */
 .audit-timeline { font-size: 11px; }
