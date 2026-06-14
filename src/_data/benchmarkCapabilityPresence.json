@@ -156,6 +156,14 @@
     },
     {
       "capabilityId": "alert-dialog",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Alerts",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/alerts"
+    },
+    {
+      "capabilityId": "alert-dialog",
       "sourceId": "base-ui",
       "present": true,
       "provenance": "verified",
@@ -708,6 +716,14 @@
     },
     {
       "capabilityId": "breadcrumb",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Path controls",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/path-controls"
+    },
+    {
+      "capabilityId": "breadcrumb",
       "sourceId": "atlassian",
       "present": true,
       "provenance": "verified",
@@ -825,6 +841,14 @@
       "provenance": "verified",
       "sourceName": "Button",
       "url": "https://ant.design/components/button"
+    },
+    {
+      "capabilityId": "button",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Buttons",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/buttons"
     },
     {
       "capabilityId": "button",
@@ -1105,6 +1129,14 @@
       "provenance": "verified",
       "sourceName": "Card",
       "url": "https://ant.design/components/card"
+    },
+    {
+      "capabilityId": "card",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Boxes",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/boxes"
     },
     {
       "capabilityId": "card",
@@ -1500,6 +1532,14 @@
     },
     {
       "capabilityId": "color-contrast",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accessibility",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/accessibility"
+    },
+    {
+      "capabilityId": "color-contrast",
       "sourceId": "atlassian",
       "present": true,
       "provenance": "verified",
@@ -1588,6 +1628,14 @@
     },
     {
       "capabilityId": "color-picker",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color wells",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/color-wells"
+    },
+    {
+      "capabilityId": "color-picker",
       "sourceId": "ark-ui",
       "present": true,
       "provenance": "verified",
@@ -1665,6 +1713,14 @@
       "provenance": "verified",
       "sourceName": "Seed/Map Token (color)",
       "url": "https://ant.design/docs/react/customize-theme#seedtoken"
+    },
+    {
+      "capabilityId": "color-tokens",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/color"
     },
     {
       "capabilityId": "color-tokens",
@@ -1777,6 +1833,14 @@
       "provenance": "verified",
       "sourceName": "AutoComplete",
       "url": "https://ant.design/components/auto-complete"
+    },
+    {
+      "capabilityId": "combobox",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combo boxes",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/combo-boxes"
     },
     {
       "capabilityId": "combobox",
@@ -1961,6 +2025,14 @@
       "provenance": "verified",
       "sourceName": "Dropdown (contextMenu trigger)",
       "url": "https://ant.design/components/dropdown#components-dropdown-demo-context-menu"
+    },
+    {
+      "capabilityId": "context-menu",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Context menus",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/context-menus"
     },
     {
       "capabilityId": "context-menu",
@@ -2172,6 +2244,14 @@
     },
     {
       "capabilityId": "dark-mode",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dark Mode",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/dark-mode"
+    },
+    {
+      "capabilityId": "dark-mode",
       "sourceId": "atlassian",
       "present": true,
       "provenance": "verified",
@@ -2265,6 +2345,14 @@
       "provenance": "verified",
       "sourceName": "Table",
       "url": "https://ant.design/components/table"
+    },
+    {
+      "capabilityId": "data-table",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Lists and tables",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/lists-and-tables"
     },
     {
       "capabilityId": "data-table",
@@ -2590,9 +2678,9 @@
       "capabilityId": "dialog",
       "sourceId": "apple-hig",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Sheets",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/sheets"
     },
     {
       "capabilityId": "dialog",
@@ -2753,6 +2841,14 @@
       "provenance": "verified",
       "sourceName": "Collapse",
       "url": "https://ant.design/components/collapse"
+    },
+    {
+      "capabilityId": "disclosure",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Disclosure controls",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/disclosure-controls"
     },
     {
       "capabilityId": "disclosure",
@@ -3110,9 +3206,9 @@
       "capabilityId": "drawer",
       "sourceId": "apple-hig",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Sheets",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/sheets"
     },
     {
       "capabilityId": "drawer",
@@ -4084,6 +4180,14 @@
     },
     {
       "capabilityId": "i18n-rtl",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Right to left",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/right-to-left"
+    },
+    {
+      "capabilityId": "i18n-rtl",
       "sourceId": "ark-ui",
       "present": true,
       "provenance": "verified",
@@ -4540,6 +4644,14 @@
     },
     {
       "capabilityId": "link",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Buttons",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/buttons"
+    },
+    {
+      "capabilityId": "link",
       "sourceId": "atlassian",
       "present": true,
       "provenance": "verified",
@@ -4646,9 +4758,9 @@
       "capabilityId": "list",
       "sourceId": "apple-hig",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Lists and tables",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/lists-and-tables"
     },
     {
       "capabilityId": "list",
@@ -4729,6 +4841,14 @@
       "provenance": "verified",
       "sourceName": "GridList",
       "url": "https://react-aria.adobe.com/GridList"
+    },
+    {
+      "capabilityId": "listbox",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Lists and tables",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/lists-and-tables"
     },
     {
       "capabilityId": "listbox",
@@ -4873,6 +4993,14 @@
       "provenance": "verified",
       "sourceName": "Dropdown",
       "url": "https://ant.design/components/dropdown"
+    },
+    {
+      "capabilityId": "menu",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menus",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/menus"
     },
     {
       "capabilityId": "menu",
@@ -5236,6 +5364,14 @@
     },
     {
       "capabilityId": "navbar",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Navigation bars",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/navigation-bars"
+    },
+    {
+      "capabilityId": "navbar",
       "sourceId": "atlassian",
       "present": true,
       "provenance": "verified",
@@ -5356,6 +5492,14 @@
     },
     {
       "capabilityId": "number-input",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Steppers",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/steppers"
+    },
+    {
+      "capabilityId": "number-input",
       "sourceId": "ark-ui",
       "present": true,
       "provenance": "verified",
@@ -5465,6 +5609,14 @@
       "provenance": "verified",
       "sourceName": "Pagination",
       "url": "https://ant.design/components/pagination"
+    },
+    {
+      "capabilityId": "pagination",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Page controls",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/page-controls"
     },
     {
       "capabilityId": "pagination",
@@ -5601,6 +5753,14 @@
       "provenance": "verified",
       "sourceName": "Popover",
       "url": "https://ant.design/components/popover"
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popovers",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/popovers"
     },
     {
       "capabilityId": "popover",
@@ -5761,6 +5921,14 @@
       "provenance": "verified",
       "sourceName": "Progress",
       "url": "https://ant.design/components/progress"
+    },
+    {
+      "capabilityId": "progress-linear",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress indicators",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/progress-indicators"
     },
     {
       "capabilityId": "progress-linear",
@@ -6292,6 +6460,14 @@
     },
     {
       "capabilityId": "rating",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Rating indicators",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/rating-indicators"
+    },
+    {
+      "capabilityId": "rating",
       "sourceId": "ark-ui",
       "present": true,
       "provenance": "verified",
@@ -6348,6 +6524,14 @@
     },
     {
       "capabilityId": "reduced-motion",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Motion",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/motion"
+    },
+    {
+      "capabilityId": "reduced-motion",
       "sourceId": "atlassian",
       "present": true,
       "provenance": "verified",
@@ -6385,6 +6569,14 @@
       "provenance": "verified",
       "sourceName": "Splitter",
       "url": "https://ant.design/components/splitter"
+    },
+    {
+      "capabilityId": "resizable-splitter",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Split views",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/split-views"
     },
     {
       "capabilityId": "resizable-splitter",
@@ -6580,6 +6772,14 @@
     },
     {
       "capabilityId": "scroll-area",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Scroll views",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/scroll-views"
+    },
+    {
+      "capabilityId": "scroll-area",
       "sourceId": "ark-ui",
       "present": true,
       "provenance": "verified",
@@ -6646,9 +6846,9 @@
       "capabilityId": "segmented-control",
       "sourceId": "apple-hig",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Segmented controls",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/segmented-controls"
     },
     {
       "capabilityId": "segmented-control",
@@ -6769,6 +6969,14 @@
       "provenance": "verified",
       "sourceName": "Select",
       "url": "https://ant.design/components/select"
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Pop-up buttons",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/pop-up-buttons"
     },
     {
       "capabilityId": "select",
@@ -6945,6 +7153,14 @@
       "provenance": "verified",
       "sourceName": "Layout.Sider / Menu",
       "url": "https://ant.design/components/layout#components-layout-demo-side"
+    },
+    {
+      "capabilityId": "sidebar-nav",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Sidebars",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/sidebars"
     },
     {
       "capabilityId": "sidebar-nav",
@@ -7145,6 +7361,14 @@
       "provenance": "verified",
       "sourceName": "Slider",
       "url": "https://ant.design/components/slider"
+    },
+    {
+      "capabilityId": "slider",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Sliders",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/sliders"
     },
     {
       "capabilityId": "slider",
@@ -7385,6 +7609,14 @@
       "provenance": "verified",
       "sourceName": "Spin",
       "url": "https://ant.design/components/spin"
+    },
+    {
+      "capabilityId": "spinner",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress indicators",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/progress-indicators"
     },
     {
       "capabilityId": "spinner",
@@ -7702,9 +7934,9 @@
       "capabilityId": "switch",
       "sourceId": "apple-hig",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Toggles",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/toggles"
     },
     {
       "capabilityId": "switch",
@@ -7865,6 +8097,14 @@
       "provenance": "verified",
       "sourceName": "Tabs",
       "url": "https://ant.design/components/tabs"
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tab bars",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/tab-bars"
     },
     {
       "capabilityId": "tabs",
@@ -8164,6 +8404,14 @@
     },
     {
       "capabilityId": "tags-input",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Token fields",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/token-fields"
+    },
+    {
+      "capabilityId": "tags-input",
       "sourceId": "ark-ui",
       "present": true,
       "provenance": "verified",
@@ -8281,6 +8529,14 @@
       "provenance": "verified",
       "sourceName": "Input",
       "url": "https://ant.design/components/input"
+    },
+    {
+      "capabilityId": "text-field",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Text fields",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/text-fields"
     },
     {
       "capabilityId": "text-field",
@@ -8441,6 +8697,14 @@
       "provenance": "verified",
       "sourceName": "Input.TextArea",
       "url": "https://ant.design/components/input#inputtextarea"
+    },
+    {
+      "capabilityId": "textarea",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Text views",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/text-views"
     },
     {
       "capabilityId": "textarea",
@@ -8990,9 +9254,9 @@
       "capabilityId": "touch-target",
       "sourceId": "apple-hig",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Accessibility",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/accessibility"
     },
     {
       "capabilityId": "touch-target",
@@ -9057,6 +9321,14 @@
       "provenance": "verified",
       "sourceName": "Tree",
       "url": "https://ant.design/components/tree"
+    },
+    {
+      "capabilityId": "tree-view",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Outline views",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/outline-views"
     },
     {
       "capabilityId": "tree-view",
@@ -9201,6 +9473,14 @@
       "provenance": "verified",
       "sourceName": "Font Token",
       "url": "https://ant.design/docs/react/customize-theme#maptoken"
+    },
+    {
+      "capabilityId": "typography-scale",
+      "sourceId": "apple-hig",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Typography",
+      "url": "https://developer.apple.com/design/human-interface-guidelines/typography"
     },
     {
       "capabilityId": "typography-scale",
