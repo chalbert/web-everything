@@ -2,7 +2,7 @@
 type: idea
 locus: exercise-app
 workItem: story
-size: 5
+size: 13
 status: open
 parent: "317"
 dateOpened: "2026-06-12"
@@ -16,3 +16,5 @@ officer / processor / underwriter / admin roles with **field-, action-, and stat
 (state-scoped editing, walled-off HMDA fields, action-scoped decision authority, ownership-scoped pipeline).
 See the [requirements report](/reports/2026-06-11-exercise-app-loan-origination-requirements/) (Permissions).
 Drives the unbuilt **webpermissions/webidentity** projects (#009/#012) — likely a WE-surface gap.
+
+**Re-sized 5 → 13 (2026-06-14, batch pre-flight):** this isn't a self-contained app phase — it has to stand up a field/action/state permission model *and* an identity/roles model that drive two unbuilt WE projects (webpermissions #009, webidentity #012). That cross-project scope puts it well past a batchable story; it needs `/slice` into the schema/standard surface vs. the app-side consumption before it's agent-ready.
