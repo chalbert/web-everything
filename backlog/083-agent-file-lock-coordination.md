@@ -2,8 +2,11 @@
 type: decision
 workItem: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-06-06"
+dateStarted: "2026-06-13"
+dateResolved: "2026-06-14"
+graduatedTo: none
 preparedDate: "2026-06-11"
 relatedReport: reports/2026-06-11-agent-file-lock-coordination.md
 tags: [agent-coordination, file-locking, multi-agent, hooks, dev-workflow, concurrency]
@@ -259,11 +262,29 @@ worktree lanes. This item earns its keep **only** for coincidental same-file ove
 whose file sets weren't known ahead of time. Keep it minimal — and per fork 6, parked until that
 residual is observed in practice.
 
-## Resolution (partial) — 2026-06-11
+## Resolution (final) — Fork 6 ratified 2026-06-13
 
-The five *mechanism* forks are ratified to their bold defaults — these are the high-confidence
-"how it works if built" rows and need no further human judgment. The lone *roadmap/scope* fork
-(build-at-all) stays open as the only genuine human call.
+All six forks are now ruled. The five *mechanism* forks were ratified to their bold defaults on
+2026-06-11 (high-confidence "how it works if built" rows, no further human judgment). The lone
+*roadmap/scope* fork (build-at-all) was the only genuine human call, **ratified to A (keep parked)
+on 2026-06-13**:
+
+- **Fork 6 — A: keep the JIT lock parked; build `lock.mjs` + the hook only on an observed residual
+  same-file collision.** Rationale: (1) the 2025–26 multi-agent consensus routes *around* file
+  locks — git worktrees + status-flag claims turn silent corruption into visible merge conflicts,
+  which is exactly this repo's `status: active` item-claim + the `/batch` worktree lanes; a
+  `PreToolUse` lock on *every* edit is real per-edit overhead plus a new crash-staleness surface
+  (forks 2/5 exist only to manage failure modes the lock itself introduces). (2) The residual is
+  genuinely **unobserved** — the only concurrency evidence to date is the *opposite* problem (the
+  `isDirty` guard mis-firing with false stops), not two-writer corruption. (3) A is not "do
+  nothing": the mechanism design is settled and on the shelf, ready to ship the instant a real
+  collision is seen. The cross-session **soft-reservation** layer (built 2026-06-12/13) already
+  covers the cheaper cross-session *picks-overlap* residual that sits above the lock.
+- **Spun off, independent of the lock decision:** the observed `isDirty` claim-time false-positive
+  (untracked `??` files mis-read as a concurrency signal → every brand-new item refused) is carved
+  to **#510** as a standalone cheap guard fix — not gated on the (parked) JIT-lock build.
+
+The five mechanism forks, for the record:
 
 - **Fork 1 — hook-enforced (`PreToolUse` denies/auto-acquires)**: only a harness-enforced hook is an actual lock; an advisory convention is the `flock` model where one undisciplined agent breaks the invariant.
 - **Fork 2 — lease + TTL + heartbeat, log steals (git as backstop)**: the universal distributed-lock crash-safety answer; a stale late write surfaces as a visible merge conflict, with full fencing tokens held as the escalation only on observed two-writer corruption.
@@ -271,4 +292,4 @@ The five *mechanism* forks are ratified to their bold defaults — these are the
 - **Fork 4 — file-level for per-entry files; hot files single-writer by policy**: file-level fits rare/short per-entry contention; append-from-everyone hot files stay single-writer outside the lock, matching the splice-only discipline (sub-file locking is brittle on hand-edited JSON).
 - **Fork 5 — FIFO by enqueue time + TTL on queued waiters**: fair ordering plus a waiter TTL so a stalled/dead waiter ages out instead of wedging the line (the queue-side analogue of the holder lease).
 
-**Open — needs a human call:** Fork 6 — build at all? (keep parked until an observed residual same-file collision vs. ship the JIT lock now). The item itself calls this "your call": it's a roadmap/scope bet, not a mechanism question — most of the value is already covered by partition-by-Project + single-writer + worktree lanes, so whether the residual is real enough to justify building `lock.mjs` + the hook now is a judgment about speculative machinery vs. wait-for-evidence that only a human should make.
+**Closed 2026-06-13 — Fork 6 ruled A (keep parked):** it was a roadmap/scope bet, not a mechanism question — most of the value is already covered by partition-by-Project + single-writer + worktree lanes (+ the soft-reservation hint), so the residual is not yet real enough to justify building `lock.mjs` + the hook now. The mechanism design above is the ready-to-ship spec for when an actual same-file collision is observed. See the *Resolution (final)* block for the full rationale; the `isDirty` guard fix is carved to #510.
