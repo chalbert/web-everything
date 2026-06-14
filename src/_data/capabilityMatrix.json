@@ -27,7 +27,11 @@
         "cross-root-aria": "capability-hard",
         "details": "native-ok",
         "details-name": "native-ok",
-        "hidden-until-found": "native-ok"
+        "hidden-until-found": "native-ok",
+        "contenteditable": "native-ok",
+        "editcontext": "capability-hard",
+        "sanitizer-api": "polyfill-ok",
+        "highlight-api": "polyfill-ok"
       }
     },
     {
@@ -52,7 +56,11 @@
         "cross-root-aria": "native-ok",
         "details": "native-ok",
         "details-name": "native-ok",
-        "hidden-until-found": "native-ok"
+        "hidden-until-found": "native-ok",
+        "contenteditable": "native-ok",
+        "editcontext": "native-ok",
+        "sanitizer-api": "native-ok",
+        "highlight-api": "native-ok"
       }
     }
   ]

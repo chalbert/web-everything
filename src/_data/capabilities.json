@@ -134,5 +134,37 @@
     "baseline": "2024",
     "polyfill": "polyfillable",
     "summary": "<code>hidden=\"until-found\"</code> keeps collapsed content matchable by browser find-in-page, auto-revealing it and firing <code>beforematch</code> on a hit."
+  },
+  {
+    "id": "contenteditable",
+    "label": "contentEditable",
+    "webFeaturesKey": "contenteditable",
+    "baseline": "2020",
+    "polyfill": "capability",
+    "summary": "<code>contenteditable</code> attribute — the editable-surface floor: a UA-managed editing host with native caret, selection, IME composition and undo. The engine Protocol's baseline editing surface (#590)."
+  },
+  {
+    "id": "editcontext",
+    "label": "EditContext API",
+    "webFeaturesKey": "editcontext",
+    "baseline": false,
+    "polyfill": "capability",
+    "summary": "<code>EditContext</code> decouples editing state (text, selection, IME composition) from the DOM view, giving custom editors native IME + a11y without <code>contenteditable</code>'s quirks. The editing-surface upgrade tier (#590 Fork 3)."
+  },
+  {
+    "id": "sanitizer-api",
+    "label": "Sanitizer API",
+    "webFeaturesKey": "sanitizer",
+    "baseline": false,
+    "polyfill": "polyfillable",
+    "summary": "<code>Element.setHTML()</code> + <code>Sanitizer</code> — parse-time XSS-safe HTML insertion against a configurable allow-list, native. Polyfillable via DOMPurify. Guards rich-text paste/insertion."
+  },
+  {
+    "id": "highlight-api",
+    "label": "CSS Custom Highlight API",
+    "webFeaturesKey": "custom-highlight",
+    "baseline": false,
+    "polyfill": "partial",
+    "summary": "<code>CSS.highlights</code> + <code>::highlight()</code> paint arbitrary <code>Range</code>s (find-on-page, spellcheck, collab carets) with no DOM mutation. Partial span-wrapping fallback. Used for editor decorations."
   }
 ]
