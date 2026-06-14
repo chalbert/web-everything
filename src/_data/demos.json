@@ -304,5 +304,18 @@
     "projects": [
       "webvalidation"
     ]
+  },
+  {
+    "id": "inline-emoji-picker",
+    "name": "Inline Emoji Picker (:-trigger)",
+    "summary": "The first specific picker context per #370 Fork 4 / #591: a caret-anchored :-trigger popover for inserting emoji mid-text. Composes the inline-trigger detection block (#620, triggerSet=emoji) + the picker-surface results (#588) + expressive-symbol glyphs, with the text insertion adapter committing into a plain contenteditable. Detection-only, so it needs no full rich-text editor to run — it composes #590 for token insertion when present but degrades to text insertion. Backlog #592 (parent #586).",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>The smallest concrete instance of the <a href=\"/blocks/inline-trigger/\">Inline Trigger</a> engine: type <code>:</code> mid-sentence and a small caret-anchored popover lists emoji; arrow/type to filter, Enter to insert. It is the canonical worked example named by the <a href=\"/blocks/picker-surface/\">Picker Surface</a> (<a href=\"/backlog/588-build-the-general-picker-surface-composed-browse-search/\">#588</a>) and <a href=\"/backlog/591-candidate-standard-mention-trigger-character-inline-picker/\">#591</a> as &ldquo;a <code>:</code>-trigger popover anchored to the caret&rdquo;.</p><h3>The composition (no new mechanics)</h3><ul><li><strong>Trigger</strong> — the <a href=\"/intents/inline-trigger/\">inline-trigger</a> intent with <code>triggerSet: emoji</code> (the <code>:</code> char), <code>boundaryPolicy: any-prefix</code>, <code>queryPolicy: min-length</code> (1) — detection suspends during IME composition.</li><li><strong>Results</strong> — the <a href=\"/blocks/picker-surface/\">picker surface</a> listbox, rendering <a href=\"/intents/expressive-symbol/\">expressive-symbol</a> glyphs (the picker shops them, never re-renders them); large sets virtualize via windowed-collection.</li><li><strong>Anchor</strong> — the popover tethers to the caret (a virtual element) via the <a href=\"/intents/anchor/\">anchor</a> intent; in <code>contenteditable</code> the DOM <code>Range</code> rect, in <code>&lt;input&gt;</code> a mirror-div measurement.</li><li><strong>Insert</strong> — the <strong>text</strong> reference adapter replaces the <code>:query</code> range with the glyph (works in a plain <code>contenteditable</code>/<code>&lt;textarea&gt;</code>); the <strong>token</strong> adapter composes the rich-text standard (<a href=\"/backlog/590-candidate-standard-rich-text-contenteditable-editing/\">#590</a>) where an atom node is wanted.</li></ul><h3>Accessibility</h3><p>The APG editable-combobox pattern verbatim: DOM focus stays in the editable region, the listbox is driven by <code>aria-activedescendant</code> (no roving tabindex), and match counts announce through <a href=\"/intents/live-region-status/\">live-region-status</a>. The native-first baseline degrades to a plain editable region with no inline suggestions.</p><h3>Why detection-only matters here</h3><p>Because the inline-trigger engine emits the resolved selection and owns no document model (#591 Fork 2-A), this context runs in a plain <code>contenteditable</code> <strong>today</strong> — it is composed with, not blocked on, the rich-text editing graduation (<a href=\"/backlog/618-graduate-the-rich-text-editing-standard-webediting-project-s/\">#618</a>). The runnable page is a Frontier-UI reference impl; this entry specifies the context the impl realizes.</p>",
+    "status": "draft",
+    "projects": [
+      "webblocks",
+      "webintents"
+    ],
+    "epic": "586"
   }
 ]
