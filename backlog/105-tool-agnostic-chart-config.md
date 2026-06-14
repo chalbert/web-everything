@@ -2,8 +2,11 @@
 type: decision
 workItem: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-06-06"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: none
 preparedDate: "2026-06-11"
 tags: [charts, dataviz, tool-not-lib, standard, json-schema, tool-agnostic, conformance, provider-registry, native-first]
 relatedReport: reports/2026-06-11-tool-agnostic-chart-config.md
@@ -59,7 +62,7 @@ This is the **provider/registry + conformance** pattern applied to dataviz: the 
 
 ## Progress
 
-**Status:** open — forks prepared 2026-06-11 (grounded in `relatedReport`; survey published as the [Tool-agnostic Chart Config](/research/tool-agnostic-chart-config/) research topic). Awaiting ratification of the three forks before any authoring build can start.
+**Status:** resolved 2026-06-14 — all three forks + both sub-decisions ratified (profile Vega-Lite · `CustomChartRenderer` Protocol · a11y first-class & weighted · **home = mint `webcharts` project** · **intent deferred**), with the Fork 1 semantic/theme plane split folded in. Successor build carved to **#570**. Forks were prepared 2026-06-11 (grounded in `relatedReport`; survey published as the [Tool-agnostic Chart Config](/research/tool-agnostic-chart-config/) research topic).
 
 **Prior partial ruling (2026-06-11, superseded by the prepared shape above):** an earlier note recorded "profile Vega-Lite, scope = project, a11y first-class." The prepared forks keep the Vega-Lite and a11y rulings as recommended defaults but **re-open the home decision** — the survey shows the swap layer is Protocol-shaped, and the project-vs-worked-example call is the genuine remaining fork (Fork 2's sub-decision), not pre-settled.
 
@@ -69,4 +72,21 @@ This is the **provider/registry + conformance** pattern applied to dataviz: the 
 - **Fork 2 (Protocol shape) — `CustomChartRenderer` Protocol**: ratified. The renderer-swap contract is the only escapable lock and is protocol-shaped (registry + tiered conformance suite + native-first SVG default + pluggable renderer adapters), mirroring `CustomPositioner` ([protocols.json:21](../src/_data/protocols.json#L21)) and the `CustomTranslationProvider` registry ([protocols.json:61](../src/_data/protocols.json#L61)), optionally plus a thin chart-description UX intent (bias-toward-separation — a swap contract is not intent-shaped).
 - **Fork 3 — a11y first-class spec content + weighted conformance axis**: ratified. The profile carries Vega-Lite's `description` channel, the derived data-`<table>` requirement, and WAI-ARIA Graphics roles for SVG output; the conformance suite scores each renderer's a11y output as its own weighted dimension, required at L1 with graceful degradation (most-flexible-default; a11y lives in-spec per Vega-Lite prior art).
 
-**Open — needs a human call:** Fork 2's home sub-decision — does this earn a **standalone `webcharts` project** (none exists today in [projects.json](../src/_data/projects.json) — net-new scaffolding, justified by a real schema + suite + provider contract) **or** land as a **worked example** under an existing project (webblocks/webvalidation-style conformance)? Because this is a net-new project-scope + naming commit and the survey deliberately re-opened it as the genuine remaining fork, it stays a human decision rather than mechanical ratification.
+**Fork 2 home sub-decision — RESOLVED 2026-06-14: A — mint a standalone `webcharts` project** (category `standard`, status `concept`). Charts is not a lone-protocol rider; it groups 5–6 standard artifacts (semantic schema + `CustomChartRenderer` protocol + tiered conformance suite + renderer-adapter set + webtheme integration seam + optional later intent), which is exactly the umbrella a project tile exists to express — the `webpositioning`/`webintl`/`webvalidation` shape, all of which got tiles. No existing project is a natural parent (webblocks = component modules, not data→encoding specs; any host would dilute its identity and mis-file charts). The essay's deliverable — the renderer **comparison layer** (feature × renderer × size × a11y, now two scoring axes per the Fork 1 refinement) — needs a domain landing surface that `/protocols/` cannot host; the project page is that surface. The webtheme dependency edge also needs charts to be a node to draw cleanly. Cost is negligible and asymmetric: a `concept` projects.json entry is ~8 lines + icon (the expensive schema/suite/contract authoring is identical under either home), trivially reversible, vs. B's structural costs (orphaned artifacts, mis-filing, no comparison home, undrawable cross-project edge).
+
+**Intent sub-decision — RESOLVED 2026-06-14: defer the intent.** Ship protocol-only first (schema + `CustomChartRenderer` protocol + conformance suite + a11y axis + semantic/theme split); the thin chart-description UX intent is additive later, not gating L1 (POC pragmatism — minimal first cut; bias-toward-separation keeps it independently addable).
+
+All three forks + both sub-decisions are now ratified; #105 is fully resolved. The successor build is carved to **#570** (scaffold the `webcharts` project + Vega-Lite L1 profile + `CustomChartRenderer` protocol + conformance suite, with the semantic/theme plane split and a11y axis baked in).
+
+The sharper frame: a project tile is not 1:1 with a protocol — there are ~30 protocols but fewer paired tiles (`storage`/`mock-contract`/`audit-trail` ride [/protocols/](../src/_data/protocols.json) with no tile; `validation`/`anchor-positioning`/`localization` *do* have `webvalidation`/`webpositioning`/`webintl`). A tile exists when a domain groups **several** standard artifacts under one umbrella. Charts spans ≥3 — semantic schema + `CustomChartRenderer` protocol + conformance suite + renderer adapters + a webtheme integration seam (see Fork 1 refinement below) — with no natural existing parent, which is the case for **A (mint `webcharts`)**.
+
+### Fork 1 refinement (2026-06-14) — separate the semantic plane from the presentation/theme plane
+
+A chart description splits into two composable planes, and the profile must keep them apart (bias-toward-separation; intent-UX-only-vs-configurator — meaning ≠ appearance):
+
+- **Semantic plane ("what the chart represents")** — `data` → `transform` → `mark` → `encoding` (which field drives which channel) + scale/axis *structure*. Brand-neutral, portable, carries no hex or easing. **This is the plane the a11y data-`<table>` + ARIA description derive from** (Fork 3) — so the separation directly reinforces the ratified a11y axis. Maps to Vega-Lite's `encoding`.
+- **Presentation/theme plane ("how it looks")** — concrete palettes, alignment, animation/transitions, typography, spacing, density. Swappable without touching the semantic plane; **consumes [webtheme](../src/_data/projects.json) tokens rather than reinventing theming**. Maps to Vega-Lite's `config`/mark-props.
+
+The non-trivial line: **color (and size) split across both planes** — *encoding* color (color **by** category, data-driven) is semantic and stays as a scale *reference*; the concrete *palette* it resolves to is theme. The profile separates the mapping from the resolved values, not "color → theme" wholesale.
+
+Consequence for the conformance suite: renderers score on **two independent axes** — semantic fidelity (correct encoding) and theme application (honors token set / animates per spec). A renderer can pass one and fail the other; collapsing them would hide the very comparison the essay asks for. This also adds a **webtheme integration seam** to webcharts' artifact set, strengthening the project-tile (Option A) case above.
