@@ -183,3 +183,18 @@ tbody tr.selected { background: var(--accent-soft); }
 .fnol-form label.wide { grid-column: 1 / -1; }
 .fnol-form input, .fnol-form select { padding: 8px 10px; border: 1px solid #d6dae6; border-radius: 8px; font: inherit; }
 .fnol-form .btn-primary { grid-column: 1 / -1; justify-self: start; }
+
+/* ---- S4 bind / pay / issue (#415) ---- */
+.bind-body { display: flex; flex-direction: column; gap: 10px; }
+.bind-pay { display: flex; gap: 8px; align-items: center; }
+.bind-pay select { font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line-strong);
+  border-radius: var(--radius); background: var(--surface, #fff); }
+.dec-page { white-space: pre-wrap; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: #f4f6f8; border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; margin: 0; }
+.id-cards { display: flex; flex-wrap: wrap; gap: 10px; }
+.id-card { flex: 1 1 200px; border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden;
+  background: var(--surface, #fff); font-size: 12px; }
+.id-card-hd { background: var(--brand, #1f3a5f); color: #fff; font-weight: 700; padding: 5px 10px; font-size: 11px;
+  letter-spacing: .04em; text-transform: uppercase; }
+.id-card-row { padding: 3px 10px; }
+.id-card-row:last-child { padding-bottom: 8px; }

@@ -94,6 +94,33 @@ export interface AuditEntry {
   action: string;
 }
 
+// ── Binding, payment & issuance (S4, #415) ──────────────────────────────────────────
+export type PaymentMethod = 'card' | 'ach' | 'check';
+
+export interface PremiumPayment {
+  method: PaymentMethod;
+  amount: number;
+  collectedAt: string; // ISO
+  reference: string;   // mock confirmation/auth number
+}
+
+/** A mock auto ID card — one per insured vehicle on an issued policy. */
+export interface IdCard {
+  vehicle: string; // "2021 Toyota Camry"
+  vin: string;
+  policyNumber: string;
+  effective: string;
+  expires: string;
+}
+
+/** The artifacts produced at issuance: a declarations page + an ID card per vehicle (mock). */
+export interface IssuedDocuments {
+  policyNumber: string;
+  declarationsPage: string; // mock declarations-page body text
+  idCards: IdCard[];
+  issuedAt: string;
+}
+
 export type LossType = 'collision' | 'comprehensive' | 'liability' | 'theft' | 'glass';
 
 export interface Claim {
@@ -119,4 +146,6 @@ export interface Policy {
   priorLapse: boolean;    // lapse in prior coverage
   term: { start: string; months: number };
   audit: AuditEntry[];
+  payment?: PremiumPayment;   // S4 (#415): set when premium is collected — the payment-received guard input
+  issued?: IssuedDocuments;   // S4 (#415): set at issuance (bound → in-force)
 }

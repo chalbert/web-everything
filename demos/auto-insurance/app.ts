@@ -23,22 +23,25 @@ import { TreeSelectBehavior, type TreeNode } from '../../blocks/tree-select/Tree
 import { generateBook } from './domain/seed';
 import { generateClaims } from './domain/claims';
 import { rate, FINDING_LABEL, FINDING_TONE } from './domain/rating';
-import type { Policy, PolicyState, UwFinding, Claim, ClaimState } from './domain/types';
+import type { Policy, PolicyState, UwFinding, Claim, ClaimState, PaymentMethod } from './domain/types';
 import { POLICY_LIFECYCLE, CLAIM_LIFECYCLE } from './domain/lifecycle';
 import { toDecisionRecord } from './domain/decision';
+import { collectPayment, paymentReceived, issuePolicyDocuments } from './domain/binding';
 
 // The underwriting business guards (S3) — passed to the lifecycle as its GuardResolver, the first real
 // exercise of the weblifecycle authorization-delegation seam. Role-scoping is enforced by the lifecycle
 // itself (each edge's `actor` must match); these guards add the business rule on top. In production this
 // resolver would delegate to the Web Guards CustomGuardProvider (server-authoritative) — PLATFORM-GAP: #289.
 const policyFinding = new Map<string, string>(); // policyNumber → UW finding (populated at boot)
+const policyRegistry = new Map<string, Policy>(); // policyNumber → Policy, for guards that read entity state (S4 #415)
 const uwGuard: GuardResolver<PolicyState> = (guard, ctx) => {
   const finding = policyFinding.get(ctx.entity.id);
   switch (guard) {
     case 'uw-approve': return finding !== 'decline';                    // UW may clear unless a hard decline
     case 'uw-clean': return finding === 'preferred' || finding === 'accept';
     case 'uw-refer': return finding === 'refer' || finding === 'decline';
-    default: return true;                                              // payment / cancel-reason / reinstate
+    case 'payment-received': return paymentReceived(policyRegistry.get(ctx.entity.id)); // S4 (#415): bind gate
+    default: return true;                                              // cancel-reason / reinstate
   }
 };
 const policyLifecycle = new DefaultLifecycleProvider<PolicyState>(POLICY_LIFECYCLE, uwGuard);
@@ -113,9 +116,61 @@ function renderDetail(p: Policy): string {
     </table>
     <div class="panel-hd">Underwriting decision</div>
     ${decision}
+    ${renderBinding(p, r.premium)}
     <div class="panel-hd">Audit trail</div>
     <div id="md-audit"></div>
   </div>`;
+}
+
+/**
+ * Phase S4 (#415) — the bind / pay / issue surface for a policy, state-driven:
+ *   quoted → collect payment + bind (the payment-received guard gates quoted→bound)
+ *   bound  → issue (bound→in-force, generating the declarations page + ID cards)
+ *   in-force → show the issued documents.
+ * Status chips reuse the Status Indicator block; the guarded transitions are Web Lifecycle.
+ */
+function renderBinding(p: Policy, premium: number): string {
+  if (p.state === 'quoted') {
+    return `<div class="panel-hd">Bind &amp; issue</div>
+      <div class="detail-body bind-body">
+        <p class="muted">Collect the 6-month premium (${money(premium)}) to satisfy the <code>payment-received</code> guard and bind.</p>
+        <form class="bind-pay">
+          <select name="method" aria-label="Payment method">
+            <option value="card">Credit card</option>
+            <option value="ach">ACH transfer</option>
+            <option value="check">Check</option>
+          </select>
+          <button type="submit" class="btn primary">Collect ${money(premium)} &amp; bind</button>
+        </form>
+      </div>`;
+  }
+  if (p.state === 'bound') {
+    const pay = p.payment
+      ? statusIndicatorHTML({ label: `Paid ${money(p.payment.amount)} · ${p.payment.method.toUpperCase()} · ${p.payment.reference}`, tone: 'positive', shape: 'badge' })
+      : '';
+    return `<div class="panel-hd">Bind &amp; issue</div>
+      <div class="detail-body bind-body">
+        <p>${pay}</p>
+        <p class="muted">Premium received — issue the policy to generate the declarations page and ID card(s).</p>
+        <button type="button" class="btn primary bind-issue">Issue policy</button>
+      </div>`;
+  }
+  if ((p.state === 'in-force' || p.state === 'lapsed' || p.state === 'cancelled' || p.state === 'expired') && p.issued) {
+    const cards = p.issued.idCards
+      .map((c) => `<div class="id-card"><div class="id-card-hd">Auto ID Card</div>
+        <div class="id-card-row"><b>${c.vehicle}</b></div>
+        <div class="id-card-row muted">VIN ${c.vin}</div>
+        <div class="id-card-row">Policy ${c.policyNumber}</div>
+        <div class="id-card-row muted">${c.effective} – ${c.expires}</div></div>`)
+      .join('');
+    return `<div class="panel-hd">Issued documents</div>
+      <div class="detail-body bind-body">
+        <p class="muted">Issued ${new Date(p.issued.issuedAt).toLocaleString()}.</p>
+        <pre class="dec-page">${p.issued.declarationsPage}</pre>
+        <div class="id-cards">${cards}</div>
+      </div>`;
+  }
+  return '';
 }
 
 /**
@@ -383,7 +438,7 @@ function boot() {
   console.time('generate+rate book');
   const book = generateBook(4000);
   const dist = distribution(book);
-  book.forEach((p) => policyFinding.set(p.policyNumber, rate(p).finding)); // for the UW GuardResolver
+  book.forEach((p) => { policyFinding.set(p.policyNumber, rate(p).finding); policyRegistry.set(p.policyNumber, p); }); // for the UW + payment GuardResolver
   console.timeEnd('generate+rate book');
 
   const allRows = bookRows(book);
@@ -446,7 +501,15 @@ function boot() {
     showPage(0);
 
     // Master-detail block coordinates row → detail; it composes the selection block. On select we render
-    // the policy detail (premium + UW decision-trace + status) and the audit timeline.
+    // the policy detail (premium + UW decision-trace + status), the bind/issue surface, and the audit timeline.
+    let current: Policy | undefined;
+    const showPolicy = async (p: Policy, el: HTMLElement) => {
+      current = p;
+      el.innerHTML = renderDetail(p);
+      await seedAudit(p);
+      const audit = el.querySelector('#md-audit');
+      if (audit) audit.innerHTML = auditTimelineHTML(await bookAudit.queryByEntity(p.policyNumber), { density: 'compact', detail: 'expanded' });
+    };
     md = new MasterDetailBehavior(table, {
       itemSelector: 'tbody tr',
       detailEl: panel,
@@ -454,13 +517,40 @@ function boot() {
       keyOf: (row) => row.querySelector('td')?.textContent,
       renderDetail: async (policyNumber, el) => {
         const p = byPolicy.get(policyNumber);
-        if (!p) return;
-        el.innerHTML = renderDetail(p);
-        await seedAudit(p);
-        const audit = el.querySelector('#md-audit');
-        if (audit) audit.innerHTML = auditTimelineHTML(await bookAudit.queryByEntity(p.policyNumber), { density: 'compact', detail: 'expanded' });
+        if (p) await showPolicy(p, el);
       },
     });
+
+    // Phase S4 (#415): bind / pay / issue. Collecting payment then firing the guarded quoted→bound
+    // transition (the payment-received guard now passes), and issuing fires bound→in-force and generates
+    // the declarations page + ID cards. Both transitions auto-audit via auditLifecycle; we add the
+    // payment + issuance events. Guard against double-binding on a re-stamped panel.
+    if (!panel.dataset.biWired) {
+      panel.dataset.biWired = '1';
+      const at = () => new Date().toISOString();
+      panel.addEventListener('submit', async (e) => {
+        const form = (e.target as HTMLElement).closest<HTMLFormElement>('form.bind-pay');
+        if (!form || !current) return;
+        e.preventDefault();
+        const method = (new FormData(form).get('method') as PaymentMethod) ?? 'card';
+        const premium = rate(current).premium;
+        const payment = collectPayment(current, method, premium, at());
+        await bookAudit.append({ target: { type: 'policy', id: current.policyNumber }, action: `payment.collected — ${money(payment.amount)} (${method})`, actor: ACTOR, at: payment.collectedAt });
+        const entity = { id: current.policyNumber, state: current.state };
+        await policyLifecycle.transition(entity, 'bound', ACTOR); // guard now satisfied
+        current.state = entity.state;
+        await showPolicy(current, panel);
+      });
+      panel.addEventListener('click', async (e) => {
+        if (!(e.target as HTMLElement).closest('button.bind-issue') || !current) return;
+        const entity = { id: current.policyNumber, state: current.state };
+        await policyLifecycle.transition(entity, 'in-force', ACTOR);
+        current.state = entity.state;
+        const docs = issuePolicyDocuments(current, rate(current).premium, at());
+        await bookAudit.append({ target: { type: 'policy', id: current.policyNumber }, action: `policy.issued — declarations + ${docs.idCards.length} ID card(s)`, actor: ACTOR, at: docs.issuedAt });
+        await showPolicy(current, panel);
+      });
+    }
 
     new PaginationBehavior(pager, {
       state: { pageIndex: 0, pageSize: PAGE_SIZE, total: allRows.length },
