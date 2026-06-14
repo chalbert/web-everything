@@ -6513,6 +6513,270 @@
       "provenance": "verified",
       "sourceName": "Close Button",
       "url": "https://opensource.adobe.com/spectrum-web-components/components/close-button/"
+    },
+    {
+      "capabilityId": "button",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button",
+      "url": "https://lion-web.netlify.app/components/button/"
+    },
+    {
+      "capabilityId": "icon-button",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Icon",
+      "url": "https://lion-web.netlify.app/components/icon/"
+    },
+    {
+      "capabilityId": "text-field",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Input",
+      "url": "https://lion-web.netlify.app/components/input/"
+    },
+    {
+      "capabilityId": "textarea",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Textarea",
+      "url": "https://lion-web.netlify.app/components/textarea/"
+    },
+    {
+      "capabilityId": "number-input",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Input Stepper",
+      "url": "https://lion-web.netlify.app/components/input-stepper/"
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Select",
+      "url": "https://lion-web.netlify.app/components/select/"
+    },
+    {
+      "capabilityId": "combobox",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox",
+      "url": "https://lion-web.netlify.app/components/combobox/overview/"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox Group",
+      "url": "https://lion-web.netlify.app/components/checkbox-group/"
+    },
+    {
+      "capabilityId": "radio-group",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio Group",
+      "url": "https://lion-web.netlify.app/components/radio-group/"
+    },
+    {
+      "capabilityId": "switch",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Switch",
+      "url": "https://lion-web.netlify.app/components/switch/"
+    },
+    {
+      "capabilityId": "range-slider",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Input Range",
+      "url": "https://lion-web.netlify.app/components/input-range/"
+    },
+    {
+      "capabilityId": "date-picker",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Input Datepicker",
+      "url": "https://lion-web.netlify.app/components/input-datepicker/"
+    },
+    {
+      "capabilityId": "file-upload",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Input File",
+      "url": "https://lion-web.netlify.app/components/input-file/"
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Form",
+      "url": "https://lion-web.netlify.app/components/form/"
+    },
+    {
+      "capabilityId": "accordion",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accordion",
+      "url": "https://lion-web.netlify.app/components/accordion/"
+    },
+    {
+      "capabilityId": "disclosure",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Collapsible",
+      "url": "https://lion-web.netlify.app/components/collapsible/"
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tabs",
+      "url": "https://lion-web.netlify.app/components/tabs/"
+    },
+    {
+      "capabilityId": "listbox",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Listbox",
+      "url": "https://lion-web.netlify.app/components/listbox/"
+    },
+    {
+      "capabilityId": "pagination",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Pagination",
+      "url": "https://lion-web.netlify.app/components/pagination/"
+    },
+    {
+      "capabilityId": "stepper",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Steps",
+      "url": "https://lion-web.netlify.app/components/steps/"
+    },
+    {
+      "capabilityId": "dialog",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog",
+      "url": "https://lion-web.netlify.app/components/dialog/overview/"
+    },
+    {
+      "capabilityId": "alert-dialog",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Overlay (isAlertDialog)",
+      "url": "https://lion-web.netlify.app/fundamentals/systems/overlays/configuration/"
+    },
+    {
+      "capabilityId": "drawer",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Drawer",
+      "url": "https://lion-web.netlify.app/components/drawer/"
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tooltip",
+      "url": "https://lion-web.netlify.app/components/tooltip/overview/"
+    },
+    {
+      "capabilityId": "progress-linear",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress Indicator",
+      "url": "https://lion-web.netlify.app/components/progress-indicator/"
+    },
+    {
+      "capabilityId": "anchored-positioning",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Overlay (popperConfig)",
+      "url": "https://lion-web.netlify.app/components/tooltip/overview/"
+    },
+    {
+      "capabilityId": "focus-trap",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Overlay (trapsKeyboardFocus)",
+      "url": "https://lion-web.netlify.app/fundamentals/systems/overlays/configuration/"
+    },
+    {
+      "capabilityId": "focus-return",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Overlay (elementToFocusAfterHide)",
+      "url": "https://lion-web.netlify.app/fundamentals/systems/overlays/configuration/"
+    },
+    {
+      "capabilityId": "type-ahead",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox autocomplete",
+      "url": "https://lion-web.netlify.app/components/combobox/overview/"
+    },
+    {
+      "capabilityId": "dismissal",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Overlay (hidesOnEsc)",
+      "url": "https://lion-web.netlify.app/fundamentals/systems/overlays/configuration/"
+    },
+    {
+      "capabilityId": "form-validation-flow",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Form Validate system",
+      "url": "https://lion-web.netlify.app/fundamentals/systems/form/validate/"
+    },
+    {
+      "capabilityId": "aria-apg-adherence",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox WAI-ARIA pattern",
+      "url": "https://lion-web.netlify.app/components/combobox/overview/"
+    },
+    {
+      "capabilityId": "i18n-rtl",
+      "sourceId": "lion",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Localize system",
+      "url": "https://lion-web.netlify.app/fundamentals/systems/localize/overview/"
     }
   ]
 }
