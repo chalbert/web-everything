@@ -28,3 +28,13 @@ Author the new expressive-symbol intent (sibling to icon, per #370 Fork 2) in in
   carries the TS interface (ExpressiveSymbolIntent + ExpressiveSymbolRenderConfig). Page renders at
   /intents/expressive-symbol/ (11ty build smoke: 1539 pages, clean). Substrate for the #586 picker +
   reaction consumers.
+
+## Migration note — accessible-name graduates to the cross-cutting intent (#605)
+
+The interim **accessibleName** dimension above (meaningful | decorative, owned inline here) graduates to
+**composing the cross-cutting `accessible-name` intent** now that it is minted (`/intents/accessible-name/`,
+[#605](605-mint-the-accessible-name-cross-cutting-intent.md), ratified by #596). The cross-cutting intent
+owns the naming policy (naming + labelSource axes, derived-fallback default, AccName 1.2 deferral);
+`expressive-symbol` should reference it rather than redefining naming, with the emoji CLDR-short-name /
+sticker-requires-label specifics expressed as this intent's contribution to the shared `derived-fallback`
+rule. A follow-up cleanup, not a reopen — the shipped dimension stays correct in the interim.

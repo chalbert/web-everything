@@ -2,9 +2,12 @@
 type: issue
 workItem: story
 size: 3
-status: open
+status: resolved
 blockedBy: ["596"]
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: "intent:accessible-name"
 tags: []
 ---
 
