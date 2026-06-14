@@ -1,0 +1,36 @@
+<!--
+  WEB CASE 4: Accessibility — WAI-ARIA Graphics roles on SVG output (required at L1, graceful degradation)
+  The accessibility axis also covers structured navigation of the drawn chart. An SVG-rendering conformant
+  L1 renderer annotates output with the WAI-ARIA Graphics module roles so assistive tech can traverse the
+  structure: `graphics-document` on the root <svg>, `graphics-object` per series/group, `graphics-symbol`
+  per datum mark, each with an `aria-label` derived from the datum's encoding. Where AT lacks Graphics-role
+  support, each role degrades to its implicit fallback (img / group) — never to nothing.
+-->
+<script type="application/vnd.webcharts+json">
+{
+  "data": { "values": [
+    { "quarter": "Q1", "revenue": 120 },
+    { "quarter": "Q2", "revenue": 200 }
+  ]},
+  "mark": "bar",
+  "encoding": {
+    "x": { "field": "quarter", "type": "nominal" },
+    "y": { "field": "revenue", "type": "quantitative" }
+  }
+}
+</script>
+
+<!--
+  EXPECTED SVG skeleton (Graphics roles REQUIRED at L1; labels derived from the spec's encodings):
+-->
+<svg role="graphics-document" aria-label="Revenue by quarter" aria-roledescription="bar chart">
+  <g role="graphics-object" aria-label="Revenue">
+    <rect role="graphics-symbol" aria-label="Q1: 120" x="0"  width="40" height="120" y="80"/>
+    <rect role="graphics-symbol" aria-label="Q2: 200" x="60" width="40" height="200" y="0"/>
+  </g>
+</svg>
+<!--
+  Degradation: an AT without ARIA-Graphics support sees graphics-document → img, graphics-object → group,
+  graphics-symbol → img, so the structure is still announced. A renderer emitting a bare unlabeled <svg>
+  (no roles, no labels) fails the accessibility axis even if its semantic fidelity is perfect.
+-->

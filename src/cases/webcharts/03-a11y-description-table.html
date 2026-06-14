@@ -1,0 +1,40 @@
+<!--
+  WEB CASE 3: Accessibility — description channel + data-<table> fallback (required at L1)
+  Accessibility is a FIRST-CLASS axis, not an afterthought. A conformant L1 renderer derives, FROM THE SPEC
+  ITSELF: (a) a text description (the Vega-Lite `description` channel), and (b) a data-<table> fallback built
+  from the spec's data + encodings — so the chart is perceivable with zero custom authoring and degrades to
+  a real table when SVG/graphics are unavailable.
+-->
+<script type="application/vnd.webcharts+json">
+{
+  "description": "Quarterly revenue, rising from Q1 to Q2 then dipping in Q3.",
+  "data": { "values": [
+    { "quarter": "Q1", "revenue": 120 },
+    { "quarter": "Q2", "revenue": 200 },
+    { "quarter": "Q3", "revenue": 150 }
+  ]},
+  "mark": "line",
+  "encoding": {
+    "x": { "field": "quarter", "type": "ordinal",      "axis": { "title": "Quarter" } },
+    "y": { "field": "revenue", "type": "quantitative", "axis": { "title": "Revenue ($k)" } }
+  }
+}
+</script>
+
+<!--
+  EXPECTED accessible fallback, derived mechanically from the spec (encodings → columns in x,y order;
+  data rows → table rows; `description` → caption + label). No hand-authoring:
+-->
+<figure role="group" aria-label="Quarterly revenue, rising from Q1 to Q2 then dipping in Q3.">
+  <table>
+    <caption>Quarterly revenue, rising from Q1 to Q2 then dipping in Q3.</caption>
+    <thead>
+      <tr><th scope="col">Quarter</th><th scope="col">Revenue ($k)</th></tr>
+    </thead>
+    <tbody>
+      <tr><th scope="row">Q1</th><td>120</td></tr>
+      <tr><th scope="row">Q2</th><td>200</td></tr>
+      <tr><th scope="row">Q3</th><td>150</td></tr>
+    </tbody>
+  </table>
+</figure>

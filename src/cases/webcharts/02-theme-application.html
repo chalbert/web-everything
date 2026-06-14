@@ -1,0 +1,29 @@
+<!--
+  WEB CASE 2: Theme Application (semantic encoding, themed presentation)
+  The second conformance axis. `color` is a SEMANTIC encoding — "encode region by hue" — never a literal
+  hex. A conformant renderer resolves the concrete palette from webtheme tokens, so the SAME spec re-themes
+  with zero edits. Theme application scores on "honours the resolved token set": palette order, and any
+  spec-declared animation/alignment, all sourced from webtheme — not hardcoded.
+-->
+<script type="application/vnd.webcharts+json">
+{
+  "data": { "values": [
+    { "region": "North", "sales": 40 },
+    { "region": "South", "sales": 60 },
+    { "region": "East",  "sales": 30 }
+  ]},
+  "mark": "bar",
+  "encoding": {
+    "x":     { "field": "region", "type": "nominal" },
+    "y":     { "field": "sales",  "type": "quantitative" },
+    "color": { "field": "region", "type": "nominal", "legend": { "title": "Region" } }
+  }
+}
+</script>
+
+<!--
+  EXPECTED (theme-application axis): three bars filled from the webtheme CATEGORICAL palette in token order
+  (North → token[0], South → token[1], East → token[2]) — never an inline hex from the spec, which carries
+  no colour literal. Swapping the active webtheme re-colours the chart without touching this spec. A
+  renderer that bakes its own palette (ignoring webtheme tokens) fails this axis.
+-->

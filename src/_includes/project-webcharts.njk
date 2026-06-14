@@ -167,3 +167,45 @@ interface ChartHandle {
         <li><strong>Protocol, not intent:</strong> this fixes the renderer contract, the tier declaration, and the conformance axes — it owns no chart schema (that is the Vega-Lite L1 profile) and no picker/legend UX.</li>
     </ul>
 </section>
+
+<section id="conformance" class="section-card">
+    <h3 id="conformance-suite">Conformance</h3>
+    <p>
+        A renderer either conforms or is told exactly where it falls short. The suite scores a
+        <a href="#protocol-custom-chart-renderer"><code>CustomChartRenderer</code></a> on three independent
+        axes against a <a href="#vega-lite-l1">Vega-Lite L1 <code>ChartSpec</code></a> — and accessibility is
+        a first-class axis, not an afterthought. The suite is authored as self-contained cases under
+        <code>src/cases/webcharts/</code> (precedent: the Resource Loader + For-Each suites).
+    </p>
+    <div class="standards-grid">
+        <div class="standard-card flex flex-col">
+            <h4 id="axis-semantic-fidelity" class="text-lg font-bold m-0 text-gray-900">Semantic fidelity</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                Does the output draw what the spec <em>means</em> — every datum a mark at the encoded
+                position and scale? (case 01)
+            </p>
+        </div>
+        <div class="standard-card flex flex-col">
+            <h4 id="axis-theme-application" class="text-lg font-bold m-0 text-gray-900">Theme application</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                Does it resolve the presentation from <a href="/projects/webtheme/">Web Theme</a> tokens
+                (palette order, animation) rather than baking literals, so one spec re-themes? (case 02)
+            </p>
+        </div>
+        <div class="standard-card flex flex-col">
+            <h4 id="axis-accessibility" class="text-lg font-bold m-0 text-gray-900">Accessibility (first-class)</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                A description channel + a data-<code>&lt;table&gt;</code> fallback derived from the spec
+                (case 03), and WAI-ARIA Graphics roles on SVG output with graceful degradation (case 04) —
+                required at L1.
+            </p>
+        </div>
+    </div>
+    <p style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+        Each case declares a <code>ChartSpec</code> and the expected conformant output for its axis, so the
+        suite is scoreable against any renderer (the native SVG default first). This completes the webcharts
+        scaffold (epic <a href="/backlog/570-scaffold-the-webcharts-project-vega-lite-l1-profile-customch/">#570</a>:
+        project &rarr; profile &rarr; protocol &rarr; conformance); renderer adapters and a chart-description
+        intent are deferred follow-ons per <a href="/backlog/105-data-visualization-charts/">#105</a>.
+    </p>
+</section>

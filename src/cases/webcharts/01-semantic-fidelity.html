@@ -1,0 +1,27 @@
+<!--
+  WEB CASE 1: Semantic Fidelity (data → encoding)
+  The first conformance axis. A conformant renderer must draw what the ChartSpec MEANS: every datum maps
+  to a mark at the position its encoding dictates. This bar chart encodes quarter (nominal) on x and
+  revenue (quantitative) on y — semantic fidelity scores on "every row → one mark, at the encoded position
+  and scale". A renderer that drops a row, mis-orders, or mis-scales the value fails this axis.
+-->
+<script type="application/vnd.webcharts+json">
+{
+  "data": { "values": [
+    { "quarter": "Q1", "revenue": 120 },
+    { "quarter": "Q2", "revenue": 200 },
+    { "quarter": "Q3", "revenue": 150 }
+  ]},
+  "mark": "bar",
+  "encoding": {
+    "x": { "field": "quarter", "type": "nominal",      "axis": { "title": "Quarter" } },
+    "y": { "field": "revenue", "type": "quantitative", "axis": { "title": "Revenue ($k)", "grid": true } }
+  }
+}
+</script>
+
+<!--
+  EXPECTED (semantic-fidelity axis): exactly three bar marks, one per data row, heights proportional to
+  revenue (120, 200, 150), positioned along x by quarter in data order. The mapping is semantic only — the
+  bar colour/width is NOT asserted here (that is the theme-application axis, case 2).
+-->
