@@ -79,6 +79,31 @@ export function setFrontmatterField(content, key, rendered, { after = [] } = {})
 export const quoteDate = (ymd) => `"${ymd}"`;
 
 /**
+ * Render a free-text scalar as a safe frontmatter value, double-quoting it **iff** it carries a
+ * YAML-significant character that would make an unquoted (plain) scalar misparse — a colon (the
+ * `key: value` separator), a `#` (comment intro), a leading YAML indicator char
+ * (`-?:[]{}#&*!|>%@\`"'` or surrounding whitespace), or a newline. Without this, a `graduatedTo`
+ * value like `the gap-sweep: skill` or `#492 ruling` silently breaks the YAML loader, dropping the
+ * whole item from the projection and every dependent's `blockedBy` resolution (#603, hit 3× in one
+ * batch). Quoting is always semantically safe; we skip it only to keep simple slugs diff-quiet.
+ * An already-quoted value (matching outer `"…"` or `'…'`) is passed through untouched.
+ * @param {string} value
+ * @returns {string} the value text ready to splice after `key: `
+ */
+export function quoteScalar(value) {
+  const v = String(value);
+  if (v === '') return '""';
+  if (/^".*"$/s.test(v) || /^'.*'$/s.test(v)) return v; // author already quoted it
+  const needsQuote =
+    /[:#]/.test(v) ||                          // colon (key/value sep) or hash (comment intro) anywhere
+    /^[\s\-?:[\]{}#&*!|>%@`"']/.test(v) ||      // leading YAML indicator char or whitespace
+    /\s$/.test(v) ||                            // trailing whitespace
+    /[\n\r]/.test(v);                           // a newline can't live in a plain scalar
+  if (!needsQuote) return v;
+  return `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+/**
  * Apply a status transition + its stamps in one splice pass. Pure: caller supplies `today`.
  *
  *   claim:   open    → active    + dateStarted
@@ -113,7 +138,7 @@ export function applyTransition(content, verb, { today, graduatedTo, as } = {}) 
     if (status !== 'active' && status !== 'open') return { error: `status is "${status}", expected "active" — only an in-flight item is resolved` };
     let next = setFrontmatterField(content, 'status', 'resolved');
     next = setFrontmatterField(next, 'dateResolved', quoteDate(today), { after: DATE_ANCHORS });
-    if (graduatedTo) next = setFrontmatterField(next, 'graduatedTo', graduatedTo, { after: ['dateResolved', ...DATE_ANCHORS] });
+    if (graduatedTo) next = setFrontmatterField(next, 'graduatedTo', quoteScalar(graduatedTo), { after: ['dateResolved', ...DATE_ANCHORS] });
     return next ? { content: next } : { error: 'could not splice frontmatter' };
   }
   if (verb === 'release') {

@@ -4,7 +4,7 @@
  * never touched, illegal transitions are refused, and stamps land next to their anchors.
  */
 import { describe, it, expect } from 'vitest';
-import { setFrontmatterField, readField, applyTransition } from '../frontmatter.mjs';
+import { setFrontmatterField, readField, applyTransition, quoteScalar } from '../frontmatter.mjs';
 import { nextNum, slugify, renderItem } from '../scaffold.mjs';
 
 const ITEM = [
@@ -88,6 +88,14 @@ describe('applyTransition — legal from-status enforced', () => {
     expect(readField(r.content, 'graduatedTo')).toBe('intent:filter');
   });
 
+  it('resolve: a graduatedTo with YAML-significant chars is quoted so the loader re-parses it (#603)', () => {
+    const active = setFrontmatterField(ITEM, 'status', 'active');
+    const value = 'the gap-sweep-rerun skill + /gap-sweep + #366 ruling';
+    const r = applyTransition(active, 'resolve', { today: '2026-06-10', graduatedTo: value });
+    expect(r.content).toContain(`graduatedTo: "${value}"`); // wrapped, not bare
+    expect(readField(r.content, 'graduatedTo')).toBe(value); // and round-trips back to the raw value
+  });
+
   it('release: active → open, stamps untouched', () => {
     const active = applyTransition(ITEM, 'claim', { today: '2026-06-10' }).content;
     const r = applyTransition(active, 'release', {});
@@ -103,6 +111,34 @@ describe('applyTransition — legal from-status enforced', () => {
     const a = applyTransition(ITEM, 'claim', { today: '2026-06-10' }).content;
     const b = applyTransition(ITEM, 'claim', { today: '2026-06-10' }).content;
     expect(a).toBe(b);
+  });
+});
+
+describe('quoteScalar — quotes iff a YAML-significant char is present (#603)', () => {
+  it('leaves a plain slug untouched (diff-quiet)', () => {
+    expect(quoteScalar('intent-filter')).toBe('intent-filter');
+    expect(quoteScalar('/research/source-awareness-substrate/')).toBe('/research/source-awareness-substrate/');
+    expect(quoteScalar('the gap-sweep-rerun skill and skill')).toBe('the gap-sweep-rerun skill and skill');
+  });
+
+  it('quotes a colon (the key/value separator) and a hash (comment intro)', () => {
+    expect(quoteScalar('foo: bar')).toBe('"foo: bar"');
+    expect(quoteScalar('see #492')).toBe('"see #492"');
+  });
+
+  it('quotes a leading YAML indicator char (@, *, !, [, {, -)', () => {
+    expect(quoteScalar('@frontierui/plugs')).toBe('"@frontierui/plugs"');
+    expect(quoteScalar('[a, b]')).toBe('"[a, b]"');
+    expect(quoteScalar('- leading dash')).toBe('"- leading dash"');
+  });
+
+  it('escapes embedded double-quotes and passes an already-quoted value through', () => {
+    expect(quoteScalar('a "quoted" word: x')).toBe('"a \\"quoted\\" word: x"');
+    expect(quoteScalar('"already"')).toBe('"already"');
+  });
+
+  it('renders the empty string as explicit empty quotes', () => {
+    expect(quoteScalar('')).toBe('""');
   });
 });
 
