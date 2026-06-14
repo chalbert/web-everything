@@ -2,9 +2,13 @@
 type: issue
 workItem: story
 size: 5
-status: open
+status: resolved
 crossRef: { url: /backlog/578-fix-loop-git-integration-bot-pr-mechanics-flow-forge-auth-ag/, label: "#578 — the ruling that motivated this sweep" }
+relatedReport: reports/2026-06-14-fork-existence-test-sweep.md
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: none
 tags: [standards-hygiene, fork-existence-test, support-all-coherent]
 ---
 
@@ -54,3 +58,10 @@ For every place the standard *fixes a single answer*, ask the codified questions
 - **File each real violation as its own fix item** (per *Closing out*), `blockedBy` this sweep where the fix
   is a reshape. A clean sweep (no leaks) is a valid, reportable outcome — say so explicitly.
 - This is a **finder + classifier**, not the fixer: the reshapes are separate prioritized builds.
+
+## Progress
+
+- Swept `src/_data/*.json` registries (intents/protocols/adapters/capabilityMatrix/blocks/plugs + render-strategy) and the authored `project-*.njk` standard docs / SSR-contract mandate language.
+- **Result: clean sweep — 0 genuine leaks, 3 legitimate invariants confirmed.** No mandated single solution wrongly excludes a coherent alternative; every single-valued mandate is either a proven-external-standard adoption, a broken-alternative invariant (test #4), or already an open provider seam / config-extends-platform-default flavor.
+- Findings report: [reports/2026-06-14-fork-existence-test-sweep.md](/reports/2026-06-14-fork-existence-test-sweep.md) — the 3 confirmed invariants (`webcomponents` autonomous-only / Safari, `webtheme` native-CSS-only runtime, `webanalytics` fixed Segment-Spec vocabulary) at verified `file:line`, plus the verified open-provider patterns.
+- **No fix items filed** — a clean sweep is an explicitly valid outcome (per Deliverable).
