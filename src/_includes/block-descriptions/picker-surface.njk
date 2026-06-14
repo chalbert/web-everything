@@ -1,0 +1,69 @@
+<h2>Picker Surface</h2>
+<p>The <strong>one general browse↔search picker surface</strong> from
+<a href="/backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke/">decision #370</a>
+(Fork&nbsp;4 — <em>compose, don't reinvent</em>): a <code>popover</code> container plus the search
+<a href="/intents/input/">input</a> intent plus a 2-D category grid, reusing the
+<a href="/blocks/droplist/">droplist</a> / <a href="/blocks/autocomplete/">autocomplete</a> substrate
+rather than a bespoke emoji-picker block. It owns exactly one thing — the load-bearing
+<strong>APG Grid ↔ Combobox focus hand-off</strong> — and defers everything else to the intent that
+owns it.</p>
+
+<h3>Not a droplist member</h3>
+<p>The <a href="/blocks/droplist/">droplist</a> family members (Dropdown, Multi-dropdown, Autocomplete,
+Tree-select) are <strong>1-D value-selector listboxes</strong>. The picker is a <strong>2-D browse grid
+that hands off to a 1-D search listbox</strong> — a genuinely different shape, not a trait selection over
+the same substrate. So it composes the family's intents but is its own surface.</p>
+
+<h3>The load-bearing transform — Grid ↔ Combobox hand-off</h3>
+<ul>
+  <li><strong>Browse</strong> — a <code>role=grid</code> of categories navigated in 2-D
+    (<a href="/intents/focus-delegation/">focus-delegation</a> <code>strategy=roving|virtual</code>,
+    <code>orientation=both</code>): Up/Down/Left/Right across ragged emoji rows, Home/End per row.</li>
+  <li><strong>Search</strong> — a <code>role=listbox</code> navigated in 1-D
+    (<code>strategy=virtual</code>, <code>orientation=vertical</code>,
+    <code>controller=&lt;search-input&gt;</code>), with <code>aria-activedescendant</code> on the input.</li>
+  <li><strong>The hand-off is query-driven:</strong> DOM focus stays on the search input throughout.
+    An empty query makes the <em>grid</em> the active surface; a non-empty query makes the <em>listbox</em>
+    the active surface; <kbd>Esc</kbd> / clear returns to the grid. This swap — which surface owns the
+    active descendant, plus the grid↔listbox role and dimensionality change — is the single piece of logic
+    this block owns.</li>
+</ul>
+
+<h3>Why a thin block, not a documented composition (the promotion trigger)</h3>
+<p>Fork&nbsp;4 pinned a testable condition: <em>promote to a thin block only if the hand-off cannot be
+expressed as configuration over the existing droplist/autocomplete</em>. It cannot.
+<a href="/blocks/autocomplete/">Autocomplete</a> is the 1-D combobox half only and has <strong>no
+browse-grid mode</strong>, so the picker is not a configuration of autocomplete but a composition of its
+search half with a 2-D grid plus a mode switch. Each half <em>is</em> individually a focus-delegation
+config — so the block re-specifies no focus mechanics and stays genuinely thin — but coordinating the
+<strong>query-driven swap between two focus-delegation profiles on two surfaces</strong> is bespoke
+focus-coordination logic no intent owns. Reinforcing this, focus-delegation's own open question already
+flags that <em>"2-D grid mechanics (row/column wrap, cell vs. widget focus, ragged rows) need a deeper
+contract than <code>orientation:both</code> currently implies"</em> — the ragged final emoji row is exactly
+that gap. The block therefore owns <strong>only</strong> the hand-off; everything else is deferred.</p>
+
+<h3>One general surface, many specific contexts</h3>
+<p>What this block ratifies is the reusable composition, <strong>not</strong> a single widget. It is
+instantiated by several specific picker contexts — each its own later story, because trigger, density, and
+container differ:</p>
+<ul>
+  <li><strong>Full-page filtered collection</strong> — a design/dev browses the whole catalog with facets;
+    this is the Web Docs "shop" consumer (<a href="/backlog/398-build-the-web-docs-product-fui-open-primitives-plateau-app-o/">#398</a>).</li>
+  <li><strong>In-editor inline / tooltip picker</strong> — a <code>:</code>-trigger popover anchored to the
+    caret, blocked on the not-yet-existing rich-text/<code>contenteditable</code> + mention-trigger
+    standards.</li>
+  <li><strong>Reaction quick-picker</strong> — the small popover the <a href="/blocks/reaction/">reaction</a>
+    bar opens for <code>allowAllEmojis</code> (#370 Fork&nbsp;6).</li>
+</ul>
+<p>Two consumers already justify compose over a bespoke block: a <strong>runtime</strong> end user picking a
+symbol to react/insert, and an <strong>authoring-time</strong> dev/designer shopping the
+icon+emoji+sticker catalog inside Web Docs (the same <em>see</em>/<em>shop</em> paradigm as #236/#283).</p>
+
+<h3>Accessibility is composed, not baked</h3>
+<p>Result-count announcements on filter settle ("7 results available" / "No results found") and the active
+option on each move ("grinning face, 2 of 84") go through
+<a href="/intents/live-region-status/">live-region-status</a> — one shared announcer, two callers (filter
+counts + active-descendant moves), exactly as autocomplete already wires it. Large emoji sets are
+virtualized via <a href="/intents/windowed-collection/">windowed-collection</a>; the rendered glyphs are
+deferred to the <a href="/intents/expressive-symbol/">expressive-symbol</a> intent — the picker shops them,
+never re-renders them.</p>
