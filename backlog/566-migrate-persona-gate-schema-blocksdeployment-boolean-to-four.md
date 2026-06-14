@@ -2,8 +2,11 @@
 type: issue
 workItem: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: schema.ts GateType enum (advisory|validating|blocking|escalating); 28 gates migrated; /profiles renders gate type
 locus: plateau-app
 tags: [personas, profiles, governance, gates, plateau, schema]
 crossRef: { url: /backlog/166-governance-persona-roster-charter-schema/, label: "Governance-persona decision (#166)" }
@@ -23,3 +26,13 @@ Graduated from [#166](/backlog/166-governance-persona-roster-charter-schema/) (F
 ## Note
 
 Independent of the data-home extraction ([#565](/backlog/565-extract-governance-persona-roster-to-a-shared-data-home/)) but touches the same roster file — sequence to avoid churn if both are in flight.
+
+## Progress
+
+Resolved 2026-06-14 (batch). Schema widened, no enforcement change:
+- `schema.ts` — replaced `blocksDeployment: boolean` on `Gate` with `gateType: GateType`, a new `'advisory' | 'validating' | 'blocking' | 'escalating'` union (with doc-comment defining each + noting CI enforcement is the follow-on #568).
+- `roster.ts` — migrated all 28 gates: baseline `true → blocking` (22), `false → advisory` (6), then 7 charter-implied promotions → final distribution **5 advisory / 3 validating / 16 blocking / 4 escalating**. Promotions: `green-ci`/`critical-rule-uncovered`/`a11y-regression` → validating (objective checks); `critical-cve`/`coordinated-go-nogo`/`risky-experiment`/`standard-exception` → escalating.
+- `profiles-page.ts` — renders the gate type via a `GATE_TYPE_LABELS` map + per-type badge class; "blocking" dashboard count now = blocking + escalating.
+- `profiles.css` — added `--validating` / `--escalating` badge styles.
+
+Pure widening (the enum strictly subsumes the boolean); 61 plateau-app tests green, profiles type-clean. Enforcement is the follow-on #568.
