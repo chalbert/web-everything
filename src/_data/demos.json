@@ -317,5 +317,18 @@
       "webintents"
     ],
     "epic": "586"
+  },
+  {
+    "id": "expressive-asset-shop",
+    "name": "Expressive-Asset Shop (full-page catalog picker)",
+    "summary": "The Fork-4 authoring consumer (#593): a dev/designer browses & shops the icon + emoji + sticker catalog inside Web Docs (#398) via a full-page filtered-collection instance of the picker surface (#588). The shop surface and the inline :-emoji picker (demo:inline-emoji-picker) are the two specific contexts of the one general picker — same surface, different density/trigger/container. Reads the open asset catalog (src/_data/expressiveAssets.json). Backlog #593 (parent #586).",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>The <strong>authoring-time</strong> sibling of the inline <a href=\"/demos/inline-emoji-picker/\">:-emoji picker</a>: where the inline context is a small caret-anchored popover for a runtime end-user, the <em>shop</em> is a <strong>full-page filtered collection</strong> a dev/designer browses inside <a href=\"/backlog/398-build-the-web-docs-product-fui-open-primitives-plateau-app-o/\">Web Docs</a> to find and copy an asset. Both are instances of the one <a href=\"/blocks/picker-surface/\">Picker Surface</a> (<a href=\"/backlog/588-build-the-general-picker-surface-composed-browse-search/\">#588</a>) — the same browse&harr;search composition at a different density, the see/shop paradigm of #236/#283.</p><h3>The asset catalog (what this also defines)</h3><p>The shop reads the <strong>expressive-asset catalog</strong> — <code>src/_data/expressiveAssets.json</code> — the open registry of asset <em>sets</em> (<code>icon-set</code> / <code>emoji-set</code> / <code>sticker-pack</code>) that exist for an author to shop: Material Symbols, Lucide, Heroicons (icons), Unicode emoji, and a reference sticker pack. It closes the gap that the <a href=\"/intents/icon/\">icon</a> intent carried a bare <code>name: string</code> with no catalog to resolve against. It is an <strong>open config registry</strong> (Config-Extends-Platform-Default): WE ships this reference vocabulary, a project extends it — no single set is mandated. Each set declares its own variant axes (Material Symbols' weight/fill/grade/optical-size, emoji's skin-tone/presentation) which map onto the <a href=\"/intents/icon/\">icon</a> and <a href=\"/intents/expressive-symbol/\">expressive-symbol</a> intent dimensions.</p><h3>The composition (no new mechanics)</h3><ul><li><strong>Surface</strong> — the picker-surface 2-D browse grid &harr; 1-D search listbox hand-off, full-page; large sets virtualize via windowed-collection.</li><li><strong>Filter</strong> — search narrows across the chosen set(s); category facets (kind, set) scope the grid.</li><li><strong>Render</strong> — glyphs are rendered by the <a href=\"/intents/expressive-symbol/\">expressive-symbol</a> intent (the shop shops them, never re-renders them); icons by the icon intent.</li><li><strong>Shop action</strong> — selecting copies the resolved reference (set + name, or the sticker asset) for the author to paste — an authoring concern, not a runtime insertion.</li></ul><h3>Status</h3><p>The catalog data + this context spec land here (#593); the rendered full-page Web-Docs surface and its runnable page are <a href=\"/backlog/398-build-the-web-docs-product-fui-open-primitives-plateau-app-o/\">#398</a> / Frontier-UI impl concerns (status <code>draft</code>, no <code>liveUrl</code> yet).</p>",
+    "status": "draft",
+    "projects": [
+      "webblocks",
+      "webintents"
+    ],
+    "epic": "586"
   }
 ]

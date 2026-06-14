@@ -1,0 +1,57 @@
+[
+  {
+    "_comment": "Expressive-asset catalog (#593, parent #586). The open registry of asset SETS an author can browse & shop in the full-page picker context (demo:expressive-asset-shop) — the catalog the icon intent's `name` and the expressive-symbol intent resolve a glyph within. It is an OPEN config registry: WE ships this reference vocabulary, a project EXTENDS it (Config-Extends-Platform-Default); it mandates no single set. `kind` ∈ icon-set | emoji-set | sticker-pack. Rendered by Web Docs (#398); not gate-validated.",
+    "id": "_schema",
+    "kind": "meta"
+  },
+  {
+    "id": "material-symbols",
+    "kind": "icon-set",
+    "label": "Material Symbols",
+    "provider": "Google",
+    "license": "Apache-2.0",
+    "approxCount": 3700,
+    "axes": ["weight", "fill", "grade", "optical-size"],
+    "summary": "Google's variable icon font — the icon intent's size/weight/style dimensions map directly onto its font-variation axes. A name (e.g. `home`, `search`) resolves to one glyph within this set."
+  },
+  {
+    "id": "lucide",
+    "kind": "icon-set",
+    "label": "Lucide",
+    "provider": "Lucide community",
+    "license": "ISC",
+    "approxCount": 1500,
+    "axes": ["stroke-width"],
+    "summary": "An MIT-spirited community fork of Feather — consistent 24px stroke icons, SVG-per-glyph, tree-shakeable. A common most-permissive default icon set for an open project."
+  },
+  {
+    "id": "heroicons",
+    "kind": "icon-set",
+    "label": "Heroicons",
+    "provider": "Tailwind Labs",
+    "license": "MIT",
+    "approxCount": 300,
+    "axes": ["style:outline|solid|mini"],
+    "summary": "A small, opinionated set shipped in outline / solid / mini styles — illustrates that an icon set may carry its own style variants the icon intent's `style` dimension selects."
+  },
+  {
+    "id": "unicode-emoji",
+    "kind": "emoji-set",
+    "label": "Unicode Emoji",
+    "provider": "Unicode Consortium",
+    "license": "Unicode (data)",
+    "approxCount": 3800,
+    "axes": ["skin-tone", "presentation:emoji|text"],
+    "summary": "The standard emoji set — its skin-tone and emoji/text presentation variants are exactly the expressive-symbol intent's skinTone + presentation dimensions. The :-trigger picker (demo:inline-emoji-picker) shops this set; rendering is the platform emoji font (renderStrategy)."
+  },
+  {
+    "id": "reference-stickers",
+    "kind": "sticker-pack",
+    "label": "Reference Sticker Pack",
+    "provider": "Web Everything (reference)",
+    "license": "CC0",
+    "approxCount": 12,
+    "axes": [],
+    "summary": "A reference custom-image sticker pack illustrating the expressive-symbol `mode: sticker` path (a sticker is a custom image, not a Unicode glyph) — the proof a project extends the catalog with its own non-Unicode asset set."
+  }
+]
