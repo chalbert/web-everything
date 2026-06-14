@@ -30,7 +30,8 @@
     "fix:readiness": "node scripts/check-readiness.mjs --apply",
     "propose:readiness": "node scripts/propose-readiness.mjs",
     "autofix": "node scripts/conformance-autofix.mjs",
-    "design-refs": "node scripts/design-refs.mjs"
+    "design-refs": "node scripts/design-refs.mjs",
+    "gen:maas-origin": "node scripts/gen-maas-origin.mjs"
   },
   "devDependencies": {
     "@11ty/eleventy": "^2.0.1",
