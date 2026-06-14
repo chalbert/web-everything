@@ -2,9 +2,12 @@
 type: issue
 workItem: story
 size: 5
-status: open
+status: resolved
 blockedBy: ["566", "178"]
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: plateau-app/src/profiles/gate-enforcement.ts — GateEnforcer (per-gateType blocking semantics, sign-off/check/waiver flow, permission-checked override, audit trail, DeployVerdict) + DeployGateGuard CI seam (throwingDeployGuard)
 locus: plateau-app
 tags: [personas, profiles, governance, gates, ci, enforcement, plateau]
 crossRef: { url: /backlog/166-governance-persona-roster-charter-schema/, label: "Governance-persona decision (#166)" }
