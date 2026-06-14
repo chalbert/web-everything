@@ -1,0 +1,58 @@
+<h3>The Question</h3>
+<p>
+    How do leading sites build <strong>top-level reveal navigation</strong> — the dropdown / mega-menu /
+    hover-disclosure bar — in <em>both</em> states: the collapsed bar and the opened panel? This is prior-art
+    grounding for the reveal-nav candidate standard
+    <a href="/backlog/609-candidate-standard-reveal-navigation-menus-mega-menu-hover-d/">#609</a>, whose forks
+    can't reach &ldquo;ready to ratify&rdquo; without it. The interesting behaviour is dynamic and invisible to a
+    screenshot corpus, so the sweep <strong>drove a real headless browser</strong> (Playwright + Chromium) to 8
+    public, logged-out sites — Stripe, Vercel, GitHub, MDN, Apple, USWDS, GOV.UK, AWS — capturing closed + open
+    states and each trigger's a11y facts plus the <em>measured</em> reveal method (hover vs click, by which
+    interaction flipped <code>aria-expanded</code> to <code>true</code>). Full matrix in the session report
+    <code>reports/2026-06-14-design-sweep-navigation-menus.md</code>.
+</p>
+
+<h3>Recurring invariants (to fix in #609)</h3>
+<ol>
+    <li><strong>Disclosure, not an ARIA menu.</strong> Every captured trigger is a
+        <code>&lt;button aria-expanded&gt;</code> toggling a panel of ordinary links — <em>none</em> use
+        <code>role="menu"</code>/<code>menuitem</code>, matching
+        <a href="https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/">WAI-ARIA APG</a> (reserve the menu role for
+        application menus; site nav is a disclosure).</li>
+    <li><strong>The revealing top-level item is a <code>&lt;button&gt;</code>, not a link</strong> — real
+        navigation targets live inside the panel; the trigger only toggles.</li>
+    <li><strong>Overlay, no reflow</strong> — the open panel floats above content; the header neither grows nor
+        pushes the page, preserving layout stability.</li>
+    <li><strong><code>aria-controls</code> links trigger&nbsp;&rarr;&nbsp;panel</strong> on the more accessible
+        implementations (Vercel, MDN, Apple, USWDS).</li>
+    <li><strong>Esc + outside-click dismissal</strong> is universal; focus returns to the trigger.</li>
+</ol>
+
+<h3>Finding — the central fork is hover vs click</h3>
+<p>
+    Stripe and Vercel open on <strong>hover</strong> (with hover-intent delay + a safe-triangle); GitHub, MDN,
+    Apple and USWDS open on <strong>click</strong>. Both are coherent end-states (hover = faster desktop browsing;
+    click = touch-parity + intentional open), so by the support-all-coherent and most-flexible-default rules this
+    is <strong>not</strong> a winner-pick but a <strong>configurable dimension</strong>: <strong>click is the
+    most-permissive default</strong> (works on touch unchanged) and <strong>hover is an author opt-in that must
+    carry a tap-to-toggle fallback</strong> (first tap opens, does not navigate). GOV.UK is the data point for
+    &ldquo;no hover mega at all&rdquo; on desktop.
+</p>
+
+<h3>Finding — panel scale &amp; density are open config, not forks</h3>
+<p>
+    Full-width mega (Stripe, Apple) vs trigger-anchored dropdown (MDN, Vercel) is a panel-width / anchor choice
+    (anchor-positioning), and single-column vs multi-section is a content-density choice — both legitimate, so
+    each is an open configuration axis rather than a single mandate. AWS's deep mega is the cautionary
+    custom-JS outlier with the weakest a11y surface; <strong>USWDS is the accessible-disclosure reference</strong>
+    to conform against.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Grounds: <a href="/backlog/609-candidate-standard-reveal-navigation-menus-mega-menu-hover-d/">#609 — reveal-nav candidate standard</a></li>
+    <li>This sweep: <a href="/backlog/610-design-sweep-navigation-menus-closed-open-states-live-naviga/">#610</a>
+        (session report <code>reports/2026-06-14-design-sweep-navigation-menus.md</code>)</li>
+    <li>Logged-in capture variant: <a href="/backlog/611-app-screenshot-access-system-managed-email-inbox-for-logged-/">#611</a></li>
+    <li>Related blocks: <a href="/blocks/nav-list/">nav-list</a> · <a href="/blocks/menu/">menu</a></li>
+</ul>

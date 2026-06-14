@@ -1,5 +1,142 @@
 [
   {
+    "id": "webdocs-feature-derivation",
+    "title": "Web Docs feature derivation — placing the workbench surface against WE standards",
+    "status": "open",
+    "summary": "Prep research for decision #626 (stage 3 of the Web Docs feature-pipeline epic #623): classify each of the 20 features in the #625 matrix (src/_data/workbenchFeatures.json) against the live registry — reuse / extend / mint, and at what layer. Applying the fork-existence test (mandate nothing; a fork is real only when branches are mutually-exclusive end-states) collapses the surface to ~11 ratify-as-classified reuse/extend/out-of-scope placements, a small block-mint set (props-table / story-canvas / code-view, forced by 'runnable code → Block'), and just TWO genuine forks. Fork 1 — the component-metadata interchange: adopt Custom Elements Manifest (CEM; custom-elements.json, schema 2.1.0, consumed by api-viewer + Storybook + VS Code custom-data + linters off one manifest) as a new WE PROTOCOL [recommended — it is a manifest many independent vendors interoperate on, WE's exact litmus for a protocol (classification Q2), and WE already hosts this shape in the changelog-manifest protocol (protocols.json:94); reuses platform vocabulary, inherits the consumer ecosystem] vs mint a bespoke WE manifest format vs tooling-only with no registered entity. Note: WE has NO formats registry, so the matrix's format:* refs are dangling — the entity-kind is a real open call. Fork 2 — docs examples ↔ webcases: docs 'examples/stories' (and interaction-tests) ARE the webcases fixture artifact [recommended — one fixture serves conformance + docs, and the #426 ingestion adapters already land CSF stories in the webcases pivot WebCase={id,title,description,code}] vs a sibling docs-only 'examples' concept (honours separation bias but duplicates the fixture). Research reshaped the matrix: api-viewer proves component-isolation + autodocs + args are ONE capability fed by one CEM (not three new builds); Pagefind (static WASM build-time index, no SaaS) reframes 'search' from a mint to reuse-input-blocks + a build step; long-form docs reuse the 11ty/markdown pipeline + a block-embed directive, NOT the unregistered webediting project. Full grounding in reports/2026-06-14-webdocs-feature-derivation.md.",
+    "dateOpened": "2026-06-14",
+    "lastReviewed": "2026-06-14",
+    "reviewHorizon": "P12M",
+    "tags": [
+      "webdocs",
+      "derivation",
+      "placement",
+      "custom-elements-manifest",
+      "webcases",
+      "protocol",
+      "decision-prep"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webdocs"
+  },
+  {
+    "id": "workbench-feature-surface",
+    "title": "Workbench feature surface — capability × tool matrix for Web Docs",
+    "status": "open",
+    "summary": "The cross-tabbed feature surface (capability × tool) over the workbench/docs-tool landscape from #624 — stage 2 of the Web Docs feature-pipeline epic #623, raw material the derivation decision #626 classifies. Registry: src/_data/workbenchFeatures.json (20 features in 7 groups: render, authoring, controls, testing, theming, discovery, distribution). Each feature records which landscape tools ship it, ubiquity (table-stakes→niche), a one-line 'what a WE-native version would need', and the load-bearing weStatus column that pre-classifies it for #626: reuse-existing / extend-existing / new-surface / out-of-scope. The decisive finding: roughly two thirds of the surface already maps to standards WE has. REUSE-EXISTING — viewport→breakpoint intent, theming + token-tables→webtheme(+data-table), a11y panel→webcompliance, navigation/IA→nav-list/tree-select/breadcrumb, i18n→webintl, analytics→webanalytics, access-control/metered→access-control+web-identity (this is what powers #398 open-core tiering), extensibility→webplugs/webregistries. EXTEND-EXISTING — args/controls→Technical Configurator fed by CEM, stories/states + interaction-tests→webcases overlap, long-form docs→webediting authoring, doc versioning→upgrader/webadapters. GENUINELY NEW surface (the small core #626 must actually design) — the component-isolation renderer, CEM-driven autodocs (the #624 emit prior; api-viewer is the zero-build proof), full-text search index, source/code view. OUT-OF-SCOPE for the standard — visual regression (a CI/hosted service → #398 hosted tier, Chromatic-paid vs Lost-Pixel-OSS) and the Figma design↔code bridge (design-tool integration; its fully-hosted form, Backlight, already failed). Net: #626 is mostly a dedupe-and-compose exercise, not a greenfield mint. Full grounding in reports/2026-06-14-component-workbench-landscape.md (landscape) + this matrix.",
+    "dateOpened": "2026-06-14",
+    "lastReviewed": "2026-06-14",
+    "reviewHorizon": "P12M",
+    "tags": [
+      "webdocs",
+      "feature-inventory",
+      "matrix",
+      "capabilities",
+      "storybook",
+      "custom-elements-manifest",
+      "open-core",
+      "decision-prep"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webdocs"
+  },
+  {
+    "id": "component-workbench-landscape",
+    "title": "Component-workbench / docs-tool landscape — Storybook and its peers",
+    "status": "open",
+    "summary": "The consolidated inventory of Storybook-like tools that document component libraries (backlog #624, first stage of the Web Docs feature-pipeline epic #623). Until now only Storybook + Mintlify were named (as ingest targets in #426); this enumerates the whole landscape across five axes so the feature-surface sweep (#625) and the derive-to-WE-standards decision (#626) have a complete, reproducible source list. The five axes: (1) local OSS workbenches — Storybook (category anchor; v9 folded test/a11y/visual into core), Histoire (Vite-native, pre-v1 one-maintainer caution), Ladle (reads CSF directly), React Styleguidist + Pattern Lab (both retiring; their ideas — docs-from-source, Atomic Design taxonomy — survive the tools). (2) docs platforms — Docusaurus, Nextra, Starlight (native-first, near-zero JS — the philosophical model for a WE-native surface) vs hosted Mintlify, GitBook, ReadMe. (3) hosted design-system catalogs — Zeroheight, Supernova, Knapsack, Bit; Backlight RETIRED (divRIOTS shut it 1 Jun 2025 — signal that the fully-hosted browser design-system-IDE model did not endure). (4) visual-test/publish — Chromatic, Percy, Applitools vs OSS self-hostable Lost Pixel. (5) machine-readable inventory formats — Custom Elements Manifest (CEM), CSF3, web-types, api-viewer, react-docgen. Two load-bearing priors handed to #626: (a) CEM is the format Web Docs should EMIT — web-component-native declarative JSON already consumed by Storybook-for-web-components, api-viewer (a single zero-build web component that renders CEM as live docs+playground — the closest analog to a WE-native docs element), and IDEs; CSF3/react-docgen are ingest sources, not emit targets; (b) the open-core seam is market-validated — every commercial tier (Chromatic, Zeroheight, Mintlify-hosted) has an OSS/self-hostable counterpart (Lost Pixel, Docusaurus/Starlight, Storybook), exactly the free-OSS-workbench + paid-hosted-conveniences shape #398 plans. This corpus is complementary to benchmarkCorpus.json: that is the design systems Web Docs renders, this is the tools Web Docs competes with and ingests from. Registry in src/_data/workbenchTools.json; full grounding in reports/2026-06-14-component-workbench-landscape.md.",
+    "dateOpened": "2026-06-14",
+    "lastReviewed": "2026-06-14",
+    "reviewHorizon": "P12M",
+    "tags": [
+      "webdocs",
+      "storybook",
+      "inventory",
+      "landscape",
+      "benchmark",
+      "registry",
+      "custom-elements-manifest",
+      "open-core"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webdocs"
+  },
+  {
+    "id": "reveal-navigation-menus",
+    "title": "Reveal navigation menus — the disclosure-panel paradigm (mega-menu / hover-disclosure)",
+    "status": "open",
+    "summary": "Grounds decision #609: top-level nav whose sections disclose a panel of links on hover/focus (dropdown nav, mega-menus, the WE header). The survey is decisive that this is the WAI-ARIA APG *Disclosure Navigation* pattern (native list/anchor semantics + aria-expanded + aria-controls) composed with the existing Anchor intent (placement/collision/strategy/dismissal) — NOT the menu/menubar role (composite-widget roving focus + first-character type-ahead, for application command menus like Google Docs), and NOT a new widget. The base already exists as the nav-list block (blocks.json:2082, APG Disclosure Navigation, nav:section toggle). After research only TWO genuine forks survive. Fork 1 (home): a composition recipe (nav-list section + disclosure + anchor strategy=escape popover), no new block — DEFAULT, vs a named composition block matching the menu/drawer house-style precedent (both are 'composition manifests'); the mega-menu multi-column shape is demoted to support-all (panel layout, not a standard). Fork 2 (hover-intent home): the open/close-delay + safe-area corridor that fixes the diagonal problem (origin Tognazzini/Batson Apple HID, the 'Amazon triangle') recurs across reveal-nav, menu submenus, and hovercards — so per the separation bias mint a small standalone hover-intent behavioral concern they compose (DEFAULT) vs fold a hoverIntent dimension into the anchor intent; the MECHANIC (delay-only à la Radix/Headless · CSS safe-area bridge à la the WE dogfood · JS pointer-direction polygon à la jQuery-menu-aim/safe-triangle — unsettled across libraries, Radix ships delay-only with open polygon requests #1549/#2437) is a Technical Configurator setting, not a UX dimension or WE mandate. DISSOLVED by research: 'no-reflow' is the existing anchor.strategy=inline|escape axis (in-flow sidebar accordion reflows fine; header popover must not), not a new dimension; i18n label-growth (no English-keyed fixed widths, no truncation) and native-first CSS-disclosure-baseline-plus-JS-enhancement are forced invariants; disclosure-not-menu is a forced invariant (ratify). The dogfood WE header (base.njk:32-69, style.css:241-276) is the conform-to-standard reference and is NOT yet APG-conformant (heads are aria-hidden spans, no aria-expanded/controls, hover/:focus-within-only with no Esc/outside-click) — conforming it is a graduation build, not a fork. Both forks confidence: med. Full grounding in reports/2026-06-14-reveal-navigation-disclosure-pattern.md.",
+    "dateOpened": "2026-06-14",
+    "lastReviewed": "2026-06-14",
+    "reviewHorizon": "P12M",
+    "tags": [
+      "navigation",
+      "disclosure",
+      "mega-menu",
+      "hover-intent",
+      "safe-triangle",
+      "anchor",
+      "accessibility",
+      "apg",
+      "candidate-standard",
+      "decision-prep"
+    ],
+    "relatedBlocks": [
+      "nav-list",
+      "menu",
+      "drawer"
+    ],
+    "relatedPlugs": [],
+    "relatedProject": "webintents"
+  },
+  {
+    "id": "spec-reference-runtime-boundary",
+    "title": "Spec vs. reference runtime vs. polyfill — who owns the executable substrate of a standard",
+    "status": "open",
+    "summary": "Grounds decision #606: does the `plugs/` runtime (registries + browser-API patches that make WE standards runnable — `plugs/webregistries/`, `plugs/webinjectors/`, `plugs/bootstrap.ts`) belong in the standard layer (Web Everything), the impl layer (Frontier UI), or its own published package? The prior-art survey reduces the call to ONE archetype question: which of three real ecosystem patterns is `plugs/`? (1) POLYFILL — spec != runtime, the runtime lives OUTSIDE the spec: Web Components polyfills ship as @webcomponents/webcomponentsjs in a separate repo, core-js is a third-party ECMAScript polyfill TC39 does NOT publish (TC39 ships the spec + the test262 conformance suite, tests not runtime) -> pushes plugs out of WE. (2) REFERENCE IMPLEMENTATION — a canonical executable embodiment kept WITH the spec to make it demonstrable/testable: CommonMark ships the spec AND cmark under one org; dart-sass is the canonical Sass impl; CPython is the reference PEPs realize against -> keeps the runtime with the standard. (3) SHARED SUBSTRATE PACKAGE — a primitive factored into its own package consumed by MANY higher layers: React's scheduler/react-reconciler shared by react-dom/react-native; @lit/reactive-element under LitElement -> earned by PLURALITY of consumers. The two are not mutually exclusive (TC39 ships tests-not-runtime; CommonMark ships both), so 'specs ship no runtime' is a tendency of mature multi-vendor standards, not a law binding a young standard whose reference runtime IS its demonstration vehicle. Load-bearing classification: WE's plugs are a REFERENCE IMPLEMENTATION (the runtime that makes the standard runnable in a browser; demos exercise the standard itself) — Frontier UI's blocks/ are the application implementations on top, correctly outside the standard. The #239 reading in the item was incomplete: #239 re-scoped jsx-runtime to @frontierui DESPITE no @frontierui import, purely because 'it IS implementation' — so #239's principle is standard-artifact-vs-implementation, NOT published-vs-unpublished; the unpublished-alias argument is a red herring, and a reference impl is a standard artifact #239 does not push out. Recommendation: A (WE owns the reference runtime) on the corrected reference-impl justification; C (carve a standalone webplugs package) is the named escape hatch the separation bias triggers the moment a SECOND independent impl consumes plugs (today FU is the only impl consumer; plateau-app consumes the same alias as a product, not an impl, so the split is not yet earned); B (FU owns it) rejected — no archetype supports the impl layer owning the standard's own reference runtime, and it inverts the demo model. One fork at DoR, confidence med-high. Full grounding in reports/2026-06-14-plugs-runtime-ownership-boundary.md.",
+    "dateOpened": "2026-06-14",
+    "lastReviewed": "2026-06-14",
+    "reviewHorizon": "P12M",
+    "tags": [
+      "plugs",
+      "runtime",
+      "polyfill",
+      "reference-implementation",
+      "standard-vs-impl",
+      "constellation",
+      "packaging",
+      "architecture",
+      "decision-prep"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webregistries"
+  },
+  {
+    "id": "reference-retirement-convention",
+    "title": "General reference-retirement convention — generalize the corpus `retired` shape across all reference homes",
+    "status": "open",
+    "summary": "Grounds decision #584 (under epic #583, the reference-health dogfood layer): generalize #546's corpus `retired`/`retiredDate`/`retiredReason` (keep-not-delete) shape across every place the project cites an EXTERNAL reference. Inventory finds two clusters — structured JSON homes with external URLs that are the convention's real target (benchmarkCorpus.json `docsUrl`/`repoUrl`, the only home that already has `retired`; references.json `links[].url`; blocks.json/intents.json `designSystemResearch[].reference`; benchmarkCapabilityPresence.json `rows[].url`) and freeform prose homes (reports/*.md, research-descriptions/*.njk) where no field-set is enforceable. researchTopics.json already carries the REPLACEMENT half of the model (`supersededBy` + `lastReviewed`/`reviewHorizon`, #192/#441/#477/#478); crossRef cites only internal links; adapters/protocols cite no external URLs yet. Validation today is one rule (warn on a `verified` presence row lacking `url`, check-standards-rules.mjs:740); no JSON Schema files exist — validation is imperative. Prior-art survey is decisive on two points: (1) the retirement vocabulary is document-type-agnostic — W3C applies the same lifecycle states to a REC, a Note, a decision; IETF the same headers to every RFC — so homes differ in CONTAINER not in the retirement CONCEPT (argues uniform shape over per-home). (2) Death and supersession are distinct, linkable states, not one axis — W3C separates superseded (newer recommended, old still valid) from obsolete (no longer used) from rescinded (withdrawn); IETF mirrors with bidirectional Obsoletes:/Updates: headers PLUS a separate Historic status; PEP `Superseded-By:`, ADR `Supersedes/SupersededBy` carry only the replacement pointer; JSON Schema/OpenAPI `deprecated:true` is the minimal keep-not-delete annotation. This dissolves the original 'how does it mesh with #192's supersedes chain?' fork into a concrete choice: two orthogonal markers (a `retired` triplet for death + reuse #192's `supersededBy` pointer for replacement — a ref can be both, as FAST is) vs one richer W3C-style `status` enum. Classification: data governance not a WE standard (the platform setting is #583 layer 2); 7-question layer pass N/A; binding principles are native-first vocabulary reuse, reproducibility under #192 (keep-not-delete), bias-toward-separation (orthogonal markers), most-permissive default (opt-in metadata). Four forks at DoR: uniform shape; one documented convention + one shared validator helper; two orthogonal markers reusing supersededBy; structured homes now with freeform extraction deferred to #597. Full grounding in reports/2026-06-14-reference-retirement-convention.md.",
+    "dateOpened": "2026-06-14",
+    "lastReviewed": "2026-06-14",
+    "reviewHorizon": "P12M",
+    "tags": [
+      "references",
+      "retirement",
+      "convention",
+      "monitoring",
+      "freshness",
+      "data-governance",
+      "decision-prep"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webdocs"
+  },
+  {
     "id": "webdocs-incumbent-ingestion-adapters",
     "title": "Web Docs incumbent-ingestion adapters — Storybook (CSF) & Mintlify to the webcases pivot",
     "status": "open",
@@ -1597,5 +1734,173 @@
       "webinjectors"
     ],
     "relatedProject": "webeverything"
+  },
+  {
+    "id": "inline-trigger-mention-pattern",
+    "title": "Mention / trigger-character inline picker — the @/:/#// surface that opens a picker mid-text",
+    "status": "open",
+    "summary": "Prior-art survey grounding decision #591 (whitespace surfaced by #370 Fork 4): WE has input/autocomplete/type-ahead (inputs + whole-field search-listbox) but no mention / trigger-character pattern — the surface that watches an editable region, detects a boundary-anchored trigger char (@/:/#//), extracts the query, anchors a popover to the CARET, routes results through a listbox, and on selection inserts back into the text (the in-editor :-emoji picker #592 is one instance). Two genuine forks; the rest collapses to support-all. Home & shape → a new BLOCK + INTENT (not a mode of autocomplete, not intent-only): every surveyed system ships the trigger-detection engine as runnable code (ProseMirror/Tiptap Suggestion utility — char/allowSpaces/startOfLine/allowedPrefixes/minQueryLength; GitHub <text-expander> keys + text-expander-change/value events; Lexical useBasicTypeaheadTriggerMatch minLength/maxLength), composing the general picker surface #588 for results. Scope (the divergent fork) → DETECTION-ONLY / insertion-agnostic: emit the resolved selection {key, query, range, item} and let the consumer commit it — the GitHub <text-expander> model — vs ProseMirror's Suggestion.command which couples insertion into the editor doc. Detection-only decouples it from any document model, so it works in input/textarea/contenteditable uniformly and composes the rich-text standard #590 for atom/token insertion WITHOUT being blocked on it. Everything else is supported by default: open trigger-set config registry (@/:/#// are conventions, project extends); boundary/query dimensions with most-permissive defaults; caret anchoring composes the anchor intent via a virtual element (virtual-elements topic; Range.getBoundingClientRect in contenteditable, mirror-div in input/textarea). Invariants: virtual focus (aria-activedescendant, DOM focus stays in text — APG editable-combobox-with-list-autocomplete; roving tabindex is broken), suspend detection during IME composition, not a protocol (no vendor-swap interop). No native HTML primitive (datalist is whole-field; combobox role is the closest vocabulary). Report: reports/2026-06-14-inline-trigger-mention-pattern.md.",
+    "dateOpened": "2026-06-14",
+    "tags": [
+      "mention",
+      "trigger-character",
+      "autocomplete",
+      "combobox",
+      "contenteditable",
+      "anchor",
+      "accessibility",
+      "candidate-standard"
+    ],
+    "relatedBlocks": [
+      "autocomplete",
+      "type-ahead"
+    ],
+    "relatedPlugs": [],
+    "relatedProject": "webcomponents"
+  },
+  {
+    "id": "accessible-name-intent",
+    "title": "Cross-cutting accessible-name intent — one naming policy across glyphs, icons, media, images",
+    "status": "open",
+    "summary": "Prior-art survey grounding decision #596 (surfaced by #370 Fork 3): WE has one a11y intent — live-region-status — but it owns ANNOUNCEMENT (aria-live), not NAMING; there is no accessible-name intent (no reusable role=img/aria-label/aria-labelledby policy). Should naming be a CROSS-CUTTING intent composed across icon/expressive-symbol/media/image/avatar, or stay a PER-INTENT dimension each owns itself (the way #587 currently owns its accessible-name axis and validation owns aria-invalid/aria-describedby)? Two findings reshape it. (1) Name COMPUTATION is already a platform standard: W3C AccName 1.2 defines a fixed precedence aria-labelledby > aria-label > native (img alt/label/text) > title; the accessible name is read-only computed state — you provide inputs, the browser computes — so there is NO swappable-vendor runtime behavior and the concern is NOT a protocol (re-minting AccName = lock-in for zero interop gain; native-first). (2) The only cross-cutting naming primitive in the prior art is a thin wrapper — Radix AccessibleIcon (label + visually-hidden text + aria-hidden on the glyph); Material 3 / Carbon / Fluent use per-component label props. So the concern genuinely recurs AND its field solution is a thin policy, not a mechanism. Recommendation: MINT a cross-cutting accessible-name intent (Fork 1, med-high — separate-and-decouple: the policy recurs unchanged across icon/glyph/media/image/avatar) that OWNS only the declarative policy axes — naming (meaningful|decorative) + labelSource (explicit|referenced|derived-fallback, never empty: CLDR short name for emoji, alt for images, never raw codepoint/filename; sticker/custom-image has no fallback so label is required) — and DEFERS name computation to the platform AccName algorithm (Fork 2, high). Most-permissive default: meaningful + derived fallback, decorative is opt-in (matches #587). Everything else is support-all: orthogonal to live-region-status (naming != announcement); #587 keeps its interim dimension and graduates to COMPOSING this intent once minted (migration note, not a blocker); WCAG 2.5.3 Label-in-Name constrains the policy. Report: reports/2026-06-14-cross-cutting-accessible-name-intent.md.",
+    "dateOpened": "2026-06-14",
+    "tags": [
+      "accessibility",
+      "accessible-name",
+      "accname",
+      "aria-label",
+      "aria-labelledby",
+      "intent",
+      "icon",
+      "candidate-standard"
+    ],
+    "relatedBlocks": [
+      "icon"
+    ],
+    "relatedPlugs": [],
+    "relatedProject": "webcomponents"
+  },
+  {
+    "id": "rich-text-editing",
+    "title": "Rich-text / contenteditable editing — decompose the editor; the document model is the only Protocol",
+    "status": "open",
+    "summary": "Prior-art survey grounding decision #590 (whitespace surfaced by #370 Fork 4): WE has no rich-text/contenteditable/WYSIWYG editing standard — only the input intent and type-ahead cover single-line text + search. The load-bearing finding: the web ships NO monolithic editor — it ships orthogonal primitives (the editing SURFACE: contenteditable Baseline 2015 + EditContext Chromium-only 2024; the OPERATION VOCABULARY: InputEvent.inputType formatBold/insertOrderedList/… verbatim, with execCommand deprecated; SANITIZATION: HTML Sanitizer setHTML, emerging; DECORATIONS: CSS Custom Highlight API) and leaves the DOCUMENT MODEL to incompatible vendor engines (ProseMirror schema · Lexical nodes · Slate tree · Quill Delta/Parchment · ADF · roosterjs). Every serious library is layered (headless engine vs UI); no general design system (MD3/Carbon/Fluent) ships a first-class editor at all. So WE standardizes rich-text editing as SEPARATE composable standards along a substrate→engine→formatting→serialization seam (separation bias; the #370 provider→consumer precedent) — NOT one component. Layer map: editing surface → Capability (contenteditable floor + EditContext capability-upgrade, auto-negotiated like webrealtime transport); document model → Protocol + adapters (CustomEditorEngine contract + registry, native-first contenteditable+InputEvent default, library adapters — the ONLY axis with a genuine swappable-vendor story, so the only one that earns a Protocol; mirrors CustomPositioningRegistry); editor → Block; formatting toolbar → Intent (text-formatting, composes droplist/popover); operation vocabulary → reuse InputEvent.inputType (native-first, no new vocab); serialization → Config-extends-platform-default registry (CustomSerializerRegistry, default-less core, HTML flavor default); paste/sanitization → standalone Plug (CustomSanitizerRegistry: native setHTML + DOMPurify adapter, composed on paste); decorations → CSS Custom Highlight API by default; collaboration → out of scope, cross-ref webrealtime (non-fungible, like #370 cross-ref'd sync-transport). 7 forks, near-ratification except Fork 2 (document-model Protocol, med) and the internal pivot model shape (tree vs flat-Delta, low/divergent — the #64-Fork-4 analogue). Report: reports/2026-06-14-rich-text-editing.md.",
+    "dateOpened": "2026-06-14",
+    "tags": [
+      "rich-text",
+      "contenteditable",
+      "editcontext",
+      "wysiwyg",
+      "document-model",
+      "prosemirror",
+      "lexical",
+      "input-events",
+      "sanitizer",
+      "protocol",
+      "intent",
+      "capability",
+      "candidate-standard"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webcomponents"
+  },
+  {
+    "id": "domain-entity-lifecycle",
+    "title": "Domain-entity lifecycle — the transition map is a portable interchange, so the placement is Project + Protocol",
+    "status": "open",
+    "summary": "Grounds decision #616 (G3 governance finding from the #607 audit, slip->drift): retroactively ratify the placement #353 minted inline — a new WE project (weblifecycle, projects.json:253) owning a draft protocol (lifecycle, protocols.json:143) — which #353's own body left as an open question ('Project + Protocol, or an intent?') and which shipped ungoverned because the carve-rule landed in the same commit. Ratify-shipped-code, not greenfield. The placement test is internal precedent, codified verbatim by #409 (master-detail): the four exercise-app standards each became a Project+Protocol 'because each had a real contract — a provider seam (CustomLifecycleProvider, CustomAuditProvider) or an interchange schema (DecisionRecord)'; master-detail had none, so it stayed a plain intent ('not every gap is a project'). #467 applied the same lens to responsive layout. Run against lifecycle, the test passes on BOTH disjuncts: a swappable CustomLifecycleProvider registry AND a portable, data-defined transition map (status set + each transition: from->to + optional guard predicate + permitted actor/role) that an engine plugs in behind without touching the entity; every transition emits an observable { entity, from, to, actor, at } event — the composition seam for audit-trail (#357) and reporting. #409 already NAMED lifecycle as a legitimate Project+Protocol; #616 only supplies the missing explicit ratification. Prior-art survey confirms (does not reshape) the design: (1) a transition map IS a recognized interchange — W3C standardized statechart serialization as SCXML (2015): an engine parses the structure and 'lets the calling code decide what guards mean and what actions do', exactly the protocol's transition-map-is-the-only-lock split, portable across engines (Apache Commons SCXML/Java, SCION/web); (2) the swappable-engine premise is real — XState adheres to SCXML, BPM servers and hand-rolled switches are the other end of the swap; (3) the domain-entity framing is the textbook FSM use case ('the lifecycle of one thing in response to events' — permit application, claim, contract); (4) actor/role-on-transition is standard practice; (5) the boundary against process orchestration is principled — an FSM is in one state at a time while BPMN allows many, so a single-status domain lifecycle is a narrower, distinct concern. Classification: technical contract -> Protocol owned by a Project (UX half is the separate status-indicator intent, realizesIntent); CustomLifecycleProvider is a runtime-DI seam; authorization -> Web Guards, persistence -> entity's own concern, audit -> composes via the event (bias-to-separation honoured); separate from webstates (reactive primitives, projects.json:58 — a different altitude with a distinct contract shape). Two forks at DoR, both defaulting to ratify-as-shipped: (1) standalone project vs fold into webstates -> standalone (high); (2) Protocol vs intent for the contract -> Protocol (high). No reversal of #353. Full grounding in reports/2026-06-14-domain-entity-lifecycle-placement.md.",
+    "dateOpened": "2026-06-14",
+    "tags": [
+      "lifecycle",
+      "state-machine",
+      "statechart",
+      "scxml",
+      "xstate",
+      "workflow",
+      "transition-map",
+      "domain-entity",
+      "protocol",
+      "placement",
+      "candidate-standard"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "weblifecycle"
+  },
+  {
+    "id": "workflow-meta-intent",
+    "title": "Workflow as a meta-intent — process orchestration is the sibling weblifecycle deliberately excluded; placement is Project + Protocol + Intent",
+    "status": "open",
+    "summary": "Grounds decision #634 — should WE recognize a workflow (a 'meta-intent'): smaller UX intents arranged in directed progression toward one goal (checkout = collect-address -> pay -> confirm), with threaded state, a completion criterion, and a current position? Greenfield call, no workflow concept exists today. The survey establishes: (1) a workflow is a missing THIRD composition mode beyond block-owned simultaneous (composesIntents) and cross-cutting (accessible-name) — directed/temporal composition whose atoms are intents; (2) the coherence invariant that distinguishes a workflow from co-located steps recurs across every system surveyed — threaded state + directed progression + a single completion criterion + one current position — mechanical enough to gate on; (3) the platform has NO native multi-step primitive: <form> is single-step, the WAI-ARIA APG has no wizard pattern, only aria-current='step' is native step vocabulary, so a flow is hand-assembled from Navigation API + View Transitions + form-associated CEs today; (4) the strongest meta-schema is the statechart (XState <-> W3C SCXML, the same engine family #616 cited) whose 7-operator kernel (sequence, branch/guard, nest, parallel, completion/final, threaded context, current-position) maps one-to-one onto a workflow, and whose serialized graph is a portable interchange — the transition-map-is-the-only-lock split that classifies the orchestration machinery as a Protocol; (5) workflow is the deliberate SIBLING of #616's domain-entity lifecycle, not its twin — #616's own survey drew the boundary ('an FSM is in one state at a time, whereas BPMN allows a workflow to be in many ... weblifecycle should not absorb a process-engine scope'), and they differ in subject (persisted entity vs ephemeral user traversal), cardinality (one state vs many), event (audit trail vs back/undo over a session) and persistence — so siblings over a shared SCXML transition-map form, per bias-to-separation; (6) the 'several valid ways' (wizard/stepper, single-page, conversational, board) are all coherent, so they are a configurable REGISTER dimension, not a fork — market keeps state-threading (RHF FormProvider, Formik) and visual sequencing (MUI Stepper, Ant Steps, Carbon ProgressIndicator) as separate seams, with Ant's wait/process/finish/error the cleanest status enum (avoid the name 'stepper' — collides with the numeric NumberField); (7) cross-system operator universality (statecharts/BPMN/GitHub Actions/Temporal/UI steppers) tiers cleanly — Tier 1 core (sequence, branch, nest, context, completion, position), Tier 2 common (parallel fork/join, back/undo, gate/wait-for-event), Tier 3 niche (fan-out, history, retry, compensation/saga, inclusive-OR). Classification by the #409 placement test: workflow passes on BOTH disjuncts (a swappable CustomWorkflowEngine registry AND a portable orchestration graph), so it decomposes like lifecycle — orchestration machinery = Protocol owned by a Project, UX (position/status/register) = Intent (UX-only, reusing navigation's structure:linear/guard/history), concrete wizard = Block composing step-intents. Two forks at DoR: (1) Placement -> Project+Protocol+Intent decomposition (high); (2) Operator scope -> Tier-1 core + Tier-2 optional, defer Tier-3, open meta-schema (med-high). Both follow the #085 'standardize the meta-schema, not the list' posture. Full grounding in reports/2026-06-14-workflow-meta-intent.md.",
+    "dateOpened": "2026-06-14",
+    "tags": [
+      "workflow",
+      "meta-intent",
+      "composition",
+      "intent",
+      "protocol",
+      "statechart",
+      "scxml",
+      "xstate",
+      "bpmn",
+      "orchestration",
+      "wizard",
+      "stepper",
+      "placement",
+      "candidate-standard"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "weblifecycle"
+  },
+  {
+    "id": "block-protocol-contract",
+    "title": "What is a block protocol — the runtime-agnostic contract for a UI block, decoupled from its implementation",
+    "status": "open",
+    "summary": "Grounds decision #641 (the blocks analogue of the #606 plugs ruling). WE's top-level blocks/ are byte-identical vendored copies of frontierui/blocks/ (e.g. navigation/NavListBehavior.ts diff-clean) — the same copy-paste hazard #170 flagged for plugs. #606 already settled the impl-home axis: implementation -> @frontierui (FUI owns the canonical code), WE keeps the CONTRACTS and consumes the impl as a #604 client; #606 explicitly names 'block protocols' among the contracts WE keeps. So #641's novel question is narrowly: WHAT IS a block protocol — what artifact in WE expresses a block's contract? Prior-art survey of how the ecosystem expresses a component/block contract decoupled from impl: (1) Custom Elements Manifest (CEM, custom-elements.json, community schema v2.1.0) — machine-readable JSON describing attributes/properties/events/slots/CSS-parts/custom-props/methods, the STRUCTURAL API contract, with a live analyzer + LSP + MCP + broad consumer ecosystem (IDEs, docs, catalogs, wrapper generators); shipped by Shoelace/Web Awesome, Carbon, Spectrum, Fluent. (2) Open UI (W3C CG) + WAI-ARIA APG — the BEHAVIORAL contract: anatomy -> parts -> states -> behaviors + role/state/keyboard tables + conformance tests, impl-independent and the platform's own way of specifying controls. (3) TS interface / .d.ts — weakest standards-alignment, language-specific, treated by the ecosystem as an INPUT the CEM analyzer reads, not the portable contract. The W3C UI Specification Schema CG (chartered Aug 2025 to define an implementation-agnostic JSON meta-model aligned to Open UI vocabulary) is direct evidence the JSON-meta-model target is recognized — but it CLOSED 21 May 2026, a cautionary signal about standing up a brand-new schema vs extending CEM. WE already has the contract surface today: src/_data/blocks.json entries (implementsIntent, exports, events, traits, sourcePath, webStandards, designDecisions) + src/_includes/block-descriptions/{id}.njk prose — a JSON descriptor + behavioral spec pair that maps cleanly onto (1)+(2). Load-bearing finding: a block protocol = the existing blocks.json entry (formalized as a CEM-aligned structural contract) + its block-description (the Open UI/APG behavioral spec), with sourcePath repointed from WE-owned vendored code to the canonical @frontierui/blocks impl. Three forks at DoR: (1) what the contract artifact IS, (2) impl-home + dedup mechanics (direct #606 analogue), (3) may a block protocol exist without a FUI impl (the WE-only families wrinkle). Full grounding in reports/2026-06-14-block-protocol-impl-boundary.md.",
+    "dateOpened": "2026-06-14",
+    "lastReviewed": "2026-06-14",
+    "reviewHorizon": "P12M",
+    "tags": [
+      "blocks",
+      "block-protocol",
+      "custom-elements-manifest",
+      "open-ui",
+      "aria-apg",
+      "standard-vs-impl",
+      "constellation",
+      "contract",
+      "decision-prep"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "frontierui"
+  },
+  {
+    "id": "design-sweep-navigation-menus",
+    "title": "Reveal navigation menus — how leading sites do top-level dropdown / mega-menu / hover-disclosure (closed & open states)",
+    "status": "open",
+    "summary": "Live-navigation competitive sweep grounding the reveal-nav candidate standard #609. Drove headless Chromium to 8 public sites (Stripe, Vercel, GitHub, MDN, Apple, USWDS, GOV.UK, AWS), capturing the closed bar + opened panel and each trigger's a11y facts + reveal method. Recurring invariants: disclosure semantics (every trigger is a <button aria-expanded> toggling a panel of plain links — none use role=menu, per WAI-ARIA APG), overlay-no-reflow, aria-controls trigger->panel, Esc/outside-click dismissal + focus-return, sectioned mega columns. The central genuine fork handed to #609 is reveal trigger HOVER vs CLICK: both coherent, so a configurable dimension with click as the most-permissive default (touch-safe) and hover an author opt-in that MUST carry a tap-to-toggle fallback; panel width/anchor (full-width mega vs trigger-anchored dropdown) and density are open config dimensions, not forks. USWDS is the accessible-disclosure reference baseline; GOV.UK deliberately ships no desktop hover mega. Full matrix + handoff in reports/2026-06-14-design-sweep-navigation-menus.md.",
+    "dateOpened": "2026-06-14",
+    "lastReviewed": "2026-06-14",
+    "reviewHorizon": "P6M",
+    "tags": [
+      "navigation",
+      "reveal-nav",
+      "mega-menu",
+      "disclosure",
+      "hover-intent",
+      "aria-apg",
+      "prior-art",
+      "design-sweep",
+      "decision-prep"
+    ],
+    "relatedBlocks": [
+      "nav-list",
+      "menu"
+    ],
+    "relatedPlugs": [],
+    "relatedProject": "webblocks"
   }
 ]

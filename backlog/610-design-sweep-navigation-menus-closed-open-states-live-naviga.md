@@ -2,8 +2,11 @@
 type: issue
 workItem: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: reports/2026-06-14-design-sweep-navigation-menus.md
 tags: [design-sweep, navigation, disclosure, prior-art]
 crossRef: { url: /backlog/609-candidate-standard-reveal-navigation-menus-mega-menu-hover-d/, label: "Feeds — reveal-nav candidate standard (#609)" }
 ---
@@ -58,4 +61,16 @@ hover-intent), and the divergences that are genuine forks — handed to #609 to 
 - **Status:** OPEN — card for later. Created 2026-06-14 while iterating the WE header menu.
 - **Note:** establishes the **live-navigation capture** method (drive public sites, capture
   closed + open + interaction), as opposed to a passive screenshot corpus.
-</content>
+
+## Done (2026-06-14)
+
+- Ran the live sweep: headless Chromium (Playwright) drove 8 public logged-out targets — Stripe, Vercel,
+  GitHub, MDN, Apple, USWDS, GOV.UK, AWS — capturing closed + open states and extracting each trigger's a11y
+  facts (`<button>` vs `<a>`, `aria-expanded`/`aria-controls`/`role`) + the **measured reveal method**
+  (hover vs click, by which interaction flipped `aria-expanded`).
+- Materialized: research topic [`/research/design-sweep-navigation-menus/`](/research/design-sweep-navigation-menus/)
+  + report [reports/2026-06-14-design-sweep-navigation-menus.md](/reports/2026-06-14-design-sweep-navigation-menus.md).
+- **Handoff to #609:** invariants (disclosure-not-menu, overlay-no-reflow, Esc/outside-click + focus-return);
+  the central **fork = hover vs click** (configurable; click is the touch-safe most-permissive default, hover
+  an opt-in with mandatory tap-to-toggle fallback); panel width/anchor + density are open config dimensions.
+  USWDS = the accessible-disclosure reference baseline.
