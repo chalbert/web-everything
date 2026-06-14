@@ -17,13 +17,16 @@ import { SERVE_PATH } from '../../../../renderers/module-service/servePathIR';
 import {
   generateOrigin,
   javascriptBackend,
+  csharpBackend,
   NonDeterministicBackendError,
   type LanguageBackend,
 } from '../../../../renderers/module-service/generation';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const goldenDir = join(here, '../../../../renderers/module-service/generation/__goldens__/javascript');
+const genDir = join(here, '../../../../renderers/module-service/generation/__goldens__');
+const goldenDir = join(genDir, 'javascript');
 const readGolden = (name: string): string => readFileSync(join(goldenDir, name), 'utf8');
+const readCsGolden = (name: string): string => readFileSync(join(genDir, 'csharp', name), 'utf8');
 
 describe('generation engine — determinism enforcement', () => {
   it('emits the JS origin byte-identically across two runs', () => {
@@ -75,6 +78,32 @@ describe('JS backend — IR fidelity (generated core re-exposes the contract)', 
     expect(mod.isHashPin('sha256-abc')).toBe(true);
     expect(mod.isHashPin('1.4.2')).toBe(false);
     expect(mod.isHashPin(null)).toBe(false);
+  });
+});
+
+describe('C# backend (#548) — the first foreign target proves the interface generalizes', () => {
+  it('emits the .NET origin deterministically and matches the committed goldens', () => {
+    const a = generateOrigin(csharpBackend);
+    const b = generateOrigin(csharpBackend);
+    expect(a.core.source).toBe(b.core.source);
+    expect(a.shell.source).toBe(b.shell.source);
+    expect(a.core.source).toBe(readCsGolden('OriginCore.cs'));
+    expect(a.shell.source).toBe(readCsGolden('GeneratedMaaSOrigin.cs'));
+  });
+
+  it('renders the SAME IR contract into idiomatic C# (string-match — execution conformance is #549)', () => {
+    const { core } = generateOrigin(csharpBackend);
+    // Same byte-determining values as the IR, in C# syntax.
+    expect(core.source).toContain(`public const string BasePath = "${SERVE_PATH.basePath}";`);
+    expect(core.source).toContain(`public const string HashPinPattern = "${SERVE_PATH.hashPinPattern}";`);
+    expect(core.source).toContain('public const int Ok = 200;');
+    expect(core.source).toContain('public const int ServerError = 500;');
+    expect(core.source).toContain('public const string Producer = "X-MaaS-Producer";');
+    // One Params entry per IR param, one Responses entry per IR response.
+    for (const p of SERVE_PATH.params) expect(core.source).toContain(`new ServePathParam("${p.name}",`);
+    expect((core.source.match(/new ServePathResponse\(/g) ?? []).length).toBe(SERVE_PATH.responses.length);
+    expect(core.language).toBe('csharp');
+    expect(core.filename).toBe('OriginCore.cs');
   });
 });
 

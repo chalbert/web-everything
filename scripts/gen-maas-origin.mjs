@@ -44,7 +44,7 @@ async function loadGeneration() {
 /** All backends whose origin is committed as a golden. */
 export async function generateAllOrigins() {
   const gen = await loadGeneration();
-  return [gen.javascriptBackend].map((b) => gen.generateOrigin(b));
+  return [gen.javascriptBackend, gen.csharpBackend].map((b) => gen.generateOrigin(b));
 }
 
 // Run as a script: write each backend's core + shell golden. Imported (by the test): expose the helper.

@@ -6,3 +6,4 @@
 export { generateOrigin, generateOrigins, NonDeterministicBackendError } from './generate';
 export type { GeneratedModule, GeneratedOrigin, LanguageBackend } from './languageBackend';
 export { javascriptBackend } from './backends/javascript';
+export { csharpBackend } from './backends/csharp';
