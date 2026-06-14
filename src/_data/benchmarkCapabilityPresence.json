@@ -5521,6 +5521,198 @@
       "provenance": "verified",
       "sourceName": "Date Picker locale",
       "url": "https://ark-ui.com/react/docs/components/date-picker"
+    },
+    {
+      "capabilityId": "button",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button",
+      "url": "https://headlessui.com/react/button"
+    },
+    {
+      "capabilityId": "textarea",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Textarea",
+      "url": "https://headlessui.com/react/textarea"
+    },
+    {
+      "capabilityId": "text-field",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Input",
+      "url": "https://headlessui.com/react/input"
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Select",
+      "url": "https://headlessui.com/react/select"
+    },
+    {
+      "capabilityId": "multi-select",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Listbox (multiple)",
+      "url": "https://headlessui.com/react/listbox"
+    },
+    {
+      "capabilityId": "combobox",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox",
+      "url": "https://headlessui.com/react/combobox"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://headlessui.com/react/checkbox"
+    },
+    {
+      "capabilityId": "radio-group",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio Group",
+      "url": "https://headlessui.com/react/radio-group"
+    },
+    {
+      "capabilityId": "switch",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Switch",
+      "url": "https://headlessui.com/react/switch"
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Fieldset",
+      "url": "https://headlessui.com/react/fieldset"
+    },
+    {
+      "capabilityId": "disclosure",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Disclosure",
+      "url": "https://headlessui.com/react/disclosure"
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tabs",
+      "url": "https://headlessui.com/react/tabs"
+    },
+    {
+      "capabilityId": "menu",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menu",
+      "url": "https://headlessui.com/react/menu"
+    },
+    {
+      "capabilityId": "listbox",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Listbox",
+      "url": "https://headlessui.com/react/listbox"
+    },
+    {
+      "capabilityId": "dialog",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog",
+      "url": "https://headlessui.com/react/dialog"
+    },
+    {
+      "capabilityId": "alert-dialog",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog (alertdialog)",
+      "url": "https://headlessui.com/react/dialog"
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popover",
+      "url": "https://headlessui.com/react/popover"
+    },
+    {
+      "capabilityId": "anchored-positioning",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "anchor prop",
+      "url": "https://headlessui.com/react/combobox"
+    },
+    {
+      "capabilityId": "focus-trap",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog focus trap",
+      "url": "https://headlessui.com/react/dialog"
+    },
+    {
+      "capabilityId": "type-ahead",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menu keyboard matching",
+      "url": "https://headlessui.com/react/menu"
+    },
+    {
+      "capabilityId": "dismissal",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog onClose",
+      "url": "https://headlessui.com/react/dialog"
+    },
+    {
+      "capabilityId": "virtualization",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox virtual",
+      "url": "https://headlessui.com/react/combobox"
+    },
+    {
+      "capabilityId": "controlled-uncontrolled",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Listbox controlled/uncontrolled",
+      "url": "https://headlessui.com/react/listbox"
+    },
+    {
+      "capabilityId": "keyboard-interaction",
+      "sourceId": "headless-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menu keyboard interaction",
+      "url": "https://headlessui.com/react/menu"
     }
   ]
 }
