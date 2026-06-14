@@ -57,8 +57,11 @@ judgment call); the happy path is these commands:
    soft holds** (`node scripts/backlog.mjs unreserve --session=<batch-slug>` — un-worked reserved items
    flow back; `claim` already dropped the ones you worked) → final ledger + stop reason + carry-forward.
 5. **At close-out, calibrate:** **`node scripts/backlog.mjs calibrate --points=<cost resolved>
-   --context-pct=<context the user reports>`** folds the session into the budget estimate (the closing-session
-   skill runs this for you; do it by hand if you stop without /close). **The agent can't read the context
+   --context-pct=<context the user reports> --stop-reason=<which of the 4 stops fired>`** folds the session
+   into the budget estimate (the closing-session skill runs this for you; do it by hand if you stop without
+   /close). Pass the **stop reason** so the estimate stays honest: only a capacity-bound stop (`budget` /
+   `context`) trains it; a work-bound stop (`empty-pool` / `fork` / `gate`) is recorded but **excluded**, so
+   a batch that ran dry early doesn't drag the budget down (#553). **The agent can't read the context
    meter — ASK the user for the current reading and use it verbatim; never estimate it. No reading → skip
    calibration** (a guessed value silently skews every future batch's budget).
 
@@ -118,8 +121,9 @@ When invoked (`/batch [P]` or `/batch-next [P] [NNN-slug]`):
    `/batch-next <NNN-slug>` in its own fenced code block.
 5. **Calibrate at close-out** per *Running a batch* → *Calibrating the budget*: **ask the user for the
    editor's current context-meter reading** (the agent can't see it), then run
-   `node scripts/backlog.mjs calibrate --points=<cost resolved> --context-pct=<reading from user>` so the
-   budget tracks what a session actually fits (closing-session does this automatically when a batch ran).
+   `node scripts/backlog.mjs calibrate --points=<cost resolved> --context-pct=<reading from user> --stop-reason=<which stop fired>`
+   so the budget tracks what a session actually fits — only a capacity-bound stop (`budget`/`context`) trains
+   it; a work-bound stop (`empty-pool`/`fork`/`gate`) is excluded (#553) (closing-session does this automatically when a batch ran).
    Never estimate the context percentage; skip calibration if the user gives none.
 
 **The stop rule (solid by construction)** — the **points budget is the sole driver**; stop the batch at a

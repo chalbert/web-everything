@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { applyTransition, readField } from './backlog/frontmatter.mjs';
 import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
 import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize } from './readiness/reservations.mjs';
+import { trainsEstimate, capacityFromSamples } from './backlog/capacity.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = join(ROOT, 'backlog');
@@ -186,21 +187,24 @@ function scaffold() {
  * session-capacity estimate that sizes a points-budgeted batch (capacity.json). This is the close-out
  * feedback loop: the count cap is gone, so the budget must stay honest about what a session actually
  * fits. `--points` = cost-points resolved (sum of each item's batchCost: a story's size, a task = 2);
- * `--context-pct` = the share of the window consumed at close (the editor's context meter, 1–100).
+ * `--context-pct` = the share of the window consumed at close (the editor's context meter, 1–100);
+ * `--stop-reason` (optional) = why the batch stopped — only **capacity-bound** stops (`budget`/`context`)
+ * train the estimate; a work-bound stop (`empty-pool`/`fork`/`gate`/`manual`) is recorded for audit but
+ * `excluded` from the mean (it measured nothing about how much a session fits). See backlog/capacity.mjs.
  *
- * Estimator = a CONTEXT-WEIGHTED MEAN over the retained 12-sample window, NOT a fixed-α EMA. A fixed-α
- * blend perpetually tracks the last few sessions and never tightens — more samples don't shrink the
- * error, they just slide the window (it can't get more accurate with time). A weighted mean over the
- * stored history converges as samples accumulate AND finally *uses* that history. Each sample's implied
- * capacity is trusted in proportion to how much of a window it exercised: a 53%-context reading is a
- * strong measurement; a ~13% one (usually an early non-budget stop — empty pool / fork / gate, whose
- * `points ÷ tiny-fraction` extrapolation is near-noise and biased low by fixed startup overhead) barely
- * counts. The 12-sample window still ages out old sessions, so it stays adaptive to a real regime change
- * (e.g. a new model). Weighting by context-fraction is the natural "fraction of a session observed" trust.
+ * Estimator = a CONTEXT-WEIGHTED MEAN over the training samples in the retained 12-sample window, NOT a
+ * fixed-α EMA. A fixed-α blend perpetually tracks the last few sessions and never tightens — more samples
+ * don't shrink the error, they just slide the window. A weighted mean over the stored history converges
+ * as samples accumulate AND finally *uses* that history. Each sample's implied capacity is trusted in
+ * proportion to how much of a window it exercised (a 53%-context reading >> a 13% one); and a work-bound
+ * session is dropped entirely (#553), since its early cutoff makes `points ÷ fraction` an extrapolation
+ * from noise, biased low by fixed startup overhead. The 12-sample window ages out old sessions, so it
+ * stays adaptive to a real regime change (e.g. a new model).
  */
 function calibrate() {
   const points = Number(flag('points'));
   const ctxPct = Number(flag('context-pct'));
+  const stopReason = flag('stop-reason'); // optional; capacity-bound stops train, work-bound are excluded
   if (!Number.isFinite(points) || points <= 0) die('calibrate needs --points=<cost-points resolved this session>');
   if (!Number.isFinite(ctxPct) || ctxPct <= 0 || ctxPct > 100) die('calibrate needs --context-pct=<1–100, context consumed at close>');
 
@@ -210,23 +214,25 @@ function calibrate() {
 
   const implied = Math.round(points / (ctxPct / 100)); // what a full session would have fit at this rate
   const prev = Number.isFinite(cap.capacityPoints) ? cap.capacityPoints : implied;
+  const trains = trainsEstimate(stopReason);
 
-  const samples = [...(Array.isArray(cap.samples) ? cap.samples : []),
-    { date: today(), points, contextPct: ctxPct, impliedCapacity: implied }].slice(-12);
-  // Context-weighted mean over the window: Σ(impliedᵢ · ctxᵢ) / Σ(ctxᵢ).
-  const wsum = samples.reduce((s, x) => s + (Number(x.contextPct) || 0), 0);
-  const next = wsum > 0
-    ? Math.round(samples.reduce((s, x) => s + (Number(x.impliedCapacity) || 0) * (Number(x.contextPct) || 0), 0) / wsum)
-    : implied;
+  const sample = { date: today(), points, contextPct: ctxPct, impliedCapacity: implied };
+  if (stopReason) sample.stopReason = stopReason;
+  if (!trains) sample.excluded = true; // recorded for audit, but does not train the estimate (#553)
+  const samples = [...(Array.isArray(cap.samples) ? cap.samples : []), sample].slice(-12);
+  // Context-weighted mean over the TRAINING (non-excluded) samples; fall back to prev when none train.
+  const next = capacityFromSamples(samples) ?? prev;
 
   cap.capacityPoints = next;
   cap.samples = samples;
   delete cap.ema; // legacy fixed-α weight — no longer used (the estimator is now a weighted window mean)
   writeFileSync(CAPACITY_PATH, JSON.stringify(cap, null, 2) + '\n');
 
+  const trained = samples.filter((s) => !s.excluded).length;
+  const note = trains ? `context-weighted mean of ${trained}` : `not trained (${stopReason} = work-bound stop); mean of ${trained}`;
   const budget = Math.round(next * (cap.targetFraction ?? 0.5));
-  ok({ verb: 'calibrate', points, contextPct: ctxPct, impliedCapacity: implied, capacityPoints: next, budget },
-    `${GRN}✓ calibrated${RST} ${DIM}— ${points} pts at ${ctxPct}% → implied ${implied}; capacity ${prev} → ${BLD}${next}${RST}${DIM} (context-weighted mean of ${samples.length}); next batch budget ≈ ${RST}${BLD}${budget} pts${RST}`);
+  ok({ verb: 'calibrate', points, contextPct: ctxPct, stopReason: stopReason ?? null, trained: trains, impliedCapacity: implied, capacityPoints: next, budget },
+    `${GRN}✓ calibrated${RST} ${DIM}— ${points} pts at ${ctxPct}% → implied ${implied}; capacity ${prev} → ${BLD}${next}${RST}${DIM} (${note}); next batch budget ≈ ${RST}${BLD}${budget} pts${RST}`);
 }
 
 switch (verb) {
@@ -241,7 +247,7 @@ switch (verb) {
       `  ${GRN}resolve${RST} <NNN> [--graduated-to=X]   active → resolved + dateResolved\n` +
       `  ${GRN}release${RST} <NNN>               active|preparing → open\n` +
       `  ${GRN}scaffold${RST} --type= --workitem= --size= --title= [--digest=] [--blocked-by=] [--parent=]\n` +
-      `  ${GRN}calibrate${RST} --points= --context-pct=   fold a session into the batch point-budget estimate\n` +
+      `  ${GRN}calibrate${RST} --points= --context-pct= [--stop-reason=budget|context|empty-pool|fork|gate]   fold a session into the batch point-budget estimate\n` +
       `  ${GRN}reserve${RST} <NNN...> --session=<slug>    soft-hold planned items (deprioritize for other sessions)\n` +
       `  ${GRN}unreserve${RST} [--session=<slug>] [<NNN...>]  release soft holds (clear a session, or specific items)\n` +
       `  (add --json for machine output)`);
