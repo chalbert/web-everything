@@ -52,6 +52,14 @@
     },
     {
       "capabilityId": "accordion",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accordion",
+      "url": "https://chakra-ui.com/docs/components/accordion"
+    },
+    {
+      "capabilityId": "accordion",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -444,6 +452,14 @@
     },
     {
       "capabilityId": "avatar",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Avatar",
+      "url": "https://chakra-ui.com/docs/components/avatar"
+    },
+    {
+      "capabilityId": "avatar",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -529,6 +545,14 @@
       "provenance": "verified",
       "sourceName": "Badge",
       "url": "https://atlassian.design/components/badge"
+    },
+    {
+      "capabilityId": "badge",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Badge",
+      "url": "https://chakra-ui.com/docs/components/badge"
     },
     {
       "capabilityId": "badge",
@@ -625,6 +649,14 @@
       "provenance": "verified",
       "sourceName": "Breadcrumb",
       "url": "https://carbondesignsystem.com/components/breadcrumb/usage/"
+    },
+    {
+      "capabilityId": "breadcrumb",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Breadcrumb",
+      "url": "https://chakra-ui.com/docs/components/breadcrumb"
     },
     {
       "capabilityId": "breadcrumb",
@@ -729,6 +761,14 @@
       "provenance": "verified",
       "sourceName": "Button",
       "url": "https://carbondesignsystem.com/components/button/usage/"
+    },
+    {
+      "capabilityId": "button",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button",
+      "url": "https://chakra-ui.com/docs/components/button"
     },
     {
       "capabilityId": "button",
@@ -852,6 +892,14 @@
     },
     {
       "capabilityId": "button-group",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Group",
+      "url": "https://chakra-ui.com/docs/components/group"
+    },
+    {
+      "capabilityId": "button-group",
       "sourceId": "lightning",
       "present": true,
       "provenance": "verified",
@@ -948,6 +996,14 @@
     },
     {
       "capabilityId": "card",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Card",
+      "url": "https://chakra-ui.com/docs/components/card"
+    },
+    {
+      "capabilityId": "card",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -1036,6 +1092,14 @@
     },
     {
       "capabilityId": "carousel",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Carousel",
+      "url": "https://chakra-ui.com/docs/components/carousel"
+    },
+    {
+      "capabilityId": "carousel",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -1113,6 +1177,14 @@
       "provenance": "verified",
       "sourceName": "Checkbox",
       "url": "https://carbondesignsystem.com/components/checkbox/usage/"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://chakra-ui.com/docs/components/checkbox"
     },
     {
       "capabilityId": "checkbox",
@@ -1236,6 +1308,14 @@
     },
     {
       "capabilityId": "code-block",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Code Block",
+      "url": "https://chakra-ui.com/docs/components/code-block"
+    },
+    {
+      "capabilityId": "code-block",
       "sourceId": "primer",
       "present": true,
       "provenance": "notable-inference",
@@ -1340,6 +1420,14 @@
     },
     {
       "capabilityId": "color-picker",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color Picker",
+      "url": "https://chakra-ui.com/docs/components/color-picker"
+    },
+    {
+      "capabilityId": "color-picker",
       "sourceId": "lightning",
       "present": true,
       "provenance": "verified",
@@ -1417,6 +1505,14 @@
       "provenance": "verified",
       "sourceName": "Color tokens",
       "url": "https://carbondesignsystem.com/elements/color/overview/"
+    },
+    {
+      "capabilityId": "color-tokens",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Colors",
+      "url": "https://chakra-ui.com/docs/theming/colors"
     },
     {
       "capabilityId": "color-tokens",
@@ -1524,6 +1620,14 @@
     },
     {
       "capabilityId": "combobox",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox",
+      "url": "https://chakra-ui.com/docs/components/combobox"
+    },
+    {
+      "capabilityId": "combobox",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -1609,6 +1713,14 @@
       "provenance": "notable-inference",
       "sourceName": null,
       "url": null
+    },
+    {
+      "capabilityId": "command-palette",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Command",
+      "url": "https://chakra-ui.com/docs/components/combobox"
     },
     {
       "capabilityId": "command-palette",
@@ -1716,6 +1828,14 @@
     },
     {
       "capabilityId": "controlled-uncontrolled",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Controlled and Uncontrolled",
+      "url": "https://chakra-ui.com/docs/components/concepts/composition"
+    },
+    {
+      "capabilityId": "controlled-uncontrolled",
       "sourceId": "headless-ui",
       "present": true,
       "provenance": "verified",
@@ -1780,6 +1900,14 @@
     },
     {
       "capabilityId": "copy-to-clipboard",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Clipboard",
+      "url": "https://chakra-ui.com/docs/components/clipboard"
+    },
+    {
+      "capabilityId": "copy-to-clipboard",
       "sourceId": "primer",
       "present": true,
       "provenance": "notable-inference",
@@ -1817,6 +1945,14 @@
       "provenance": "verified",
       "sourceName": "Themes (Gray 90/100)",
       "url": "https://carbondesignsystem.com/elements/themes/overview/"
+    },
+    {
+      "capabilityId": "dark-mode",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dark Mode",
+      "url": "https://chakra-ui.com/docs/styling/dark-mode"
     },
     {
       "capabilityId": "dark-mode",
@@ -1889,6 +2025,14 @@
       "provenance": "verified",
       "sourceName": "Data table",
       "url": "https://carbondesignsystem.com/components/data-table/usage/"
+    },
+    {
+      "capabilityId": "data-table",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Table",
+      "url": "https://chakra-ui.com/docs/components/table"
     },
     {
       "capabilityId": "data-table",
@@ -1985,6 +2129,14 @@
       "provenance": "verified",
       "sourceName": "Date picker",
       "url": "https://carbondesignsystem.com/components/date-picker/usage/"
+    },
+    {
+      "capabilityId": "date-picker",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Date Picker",
+      "url": "https://chakra-ui.com/docs/components/date-picker"
     },
     {
       "capabilityId": "date-picker",
@@ -2188,6 +2340,14 @@
     },
     {
       "capabilityId": "dialog",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog",
+      "url": "https://chakra-ui.com/docs/components/dialog"
+    },
+    {
+      "capabilityId": "dialog",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -2313,6 +2473,14 @@
       "provenance": "verified",
       "sourceName": "Disclosures pattern",
       "url": "https://carbondesignsystem.com/patterns/disclosures-pattern/"
+    },
+    {
+      "capabilityId": "disclosure",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Collapsible",
+      "url": "https://chakra-ui.com/docs/components/collapsible"
     },
     {
       "capabilityId": "disclosure",
@@ -2468,6 +2636,14 @@
     },
     {
       "capabilityId": "divider",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Separator",
+      "url": "https://chakra-ui.com/docs/components/separator"
+    },
+    {
+      "capabilityId": "divider",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -2620,6 +2796,14 @@
     },
     {
       "capabilityId": "drawer",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Drawer",
+      "url": "https://chakra-ui.com/docs/components/drawer"
+    },
+    {
+      "capabilityId": "drawer",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -2708,6 +2892,14 @@
     },
     {
       "capabilityId": "elevation",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Shadows",
+      "url": "https://chakra-ui.com/docs/theming/shadows"
+    },
+    {
+      "capabilityId": "elevation",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -2777,6 +2969,14 @@
       "provenance": "verified",
       "sourceName": "Empty states pattern",
       "url": "https://carbondesignsystem.com/patterns/empty-states-pattern/"
+    },
+    {
+      "capabilityId": "empty-state",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Empty State",
+      "url": "https://chakra-ui.com/docs/components/empty-state"
     },
     {
       "capabilityId": "empty-state",
@@ -2857,6 +3057,14 @@
       "provenance": "verified",
       "sourceName": "File uploader",
       "url": "https://carbondesignsystem.com/components/file-uploader/usage/"
+    },
+    {
+      "capabilityId": "file-upload",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "File Upload",
+      "url": "https://chakra-ui.com/docs/components/file-upload"
     },
     {
       "capabilityId": "file-upload",
@@ -3092,6 +3300,14 @@
     },
     {
       "capabilityId": "focus-visible-policy",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Focus Ring",
+      "url": "https://chakra-ui.com/docs/styling/focus-ring"
+    },
+    {
+      "capabilityId": "focus-visible-policy",
       "sourceId": "gov-uk",
       "present": true,
       "provenance": "notable-inference",
@@ -3153,6 +3369,14 @@
       "provenance": "verified",
       "sourceName": "Form",
       "url": "https://carbondesignsystem.com/components/form/usage/"
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Field",
+      "url": "https://chakra-ui.com/docs/components/field"
     },
     {
       "capabilityId": "form-layout",
@@ -3356,6 +3580,14 @@
     },
     {
       "capabilityId": "grid-layout",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Grid",
+      "url": "https://chakra-ui.com/docs/components/grid"
+    },
+    {
+      "capabilityId": "grid-layout",
       "sourceId": "material-3",
       "present": true,
       "provenance": "notable-inference",
@@ -3425,6 +3657,14 @@
       "provenance": "verified",
       "sourceName": "Direction Provider",
       "url": "https://base-ui.com/react/utils/direction-provider"
+    },
+    {
+      "capabilityId": "i18n-rtl",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "RTL Support",
+      "url": "https://chakra-ui.com/guides/overview-rtl-support"
     },
     {
       "capabilityId": "i18n-rtl",
@@ -3513,6 +3753,14 @@
       "provenance": "verified",
       "sourceName": "Icon button",
       "url": "https://atlassian.design/components/button"
+    },
+    {
+      "capabilityId": "icon-button",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Icon Button",
+      "url": "https://chakra-ui.com/docs/components/icon-button"
     },
     {
       "capabilityId": "icon-button",
@@ -3609,6 +3857,14 @@
       "provenance": "verified",
       "sourceName": "Notification (inline)",
       "url": "https://carbondesignsystem.com/components/notification/usage/"
+    },
+    {
+      "capabilityId": "inline-alert",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Alert",
+      "url": "https://chakra-ui.com/docs/components/alert"
     },
     {
       "capabilityId": "inline-alert",
@@ -3812,6 +4068,14 @@
     },
     {
       "capabilityId": "link",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Link",
+      "url": "https://chakra-ui.com/docs/components/link"
+    },
+    {
+      "capabilityId": "link",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -3900,6 +4164,14 @@
     },
     {
       "capabilityId": "list",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "List",
+      "url": "https://chakra-ui.com/docs/components/list"
+    },
+    {
+      "capabilityId": "list",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -3961,6 +4233,14 @@
       "provenance": "verified",
       "sourceName": "Listbox",
       "url": "https://ark-ui.com/react/docs/components/listbox"
+    },
+    {
+      "capabilityId": "listbox",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Listbox",
+      "url": "https://chakra-ui.com/docs/components/listbox"
     },
     {
       "capabilityId": "listbox",
@@ -4124,6 +4404,14 @@
     },
     {
       "capabilityId": "menu",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menu",
+      "url": "https://chakra-ui.com/docs/components/menu"
+    },
+    {
+      "capabilityId": "menu",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -4252,6 +4540,14 @@
     },
     {
       "capabilityId": "motion-tokens",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Animations",
+      "url": "https://chakra-ui.com/docs/theming/animations"
+    },
+    {
+      "capabilityId": "motion-tokens",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -4329,6 +4625,14 @@
       "provenance": "verified",
       "sourceName": "Multiselect",
       "url": "https://carbondesignsystem.com/components/dropdown/usage/"
+    },
+    {
+      "capabilityId": "multi-select",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Select (multiple)",
+      "url": "https://chakra-ui.com/docs/components/select"
     },
     {
       "capabilityId": "multi-select",
@@ -4524,6 +4828,14 @@
     },
     {
       "capabilityId": "number-input",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Number Input",
+      "url": "https://chakra-ui.com/docs/components/number-input"
+    },
+    {
+      "capabilityId": "number-input",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -4620,6 +4932,14 @@
     },
     {
       "capabilityId": "pagination",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Pagination",
+      "url": "https://chakra-ui.com/docs/components/pagination"
+    },
+    {
+      "capabilityId": "pagination",
       "sourceId": "lion",
       "present": true,
       "provenance": "verified",
@@ -4665,6 +4985,14 @@
       "provenance": "verified",
       "sourceName": "OTP Field",
       "url": "https://base-ui.com/react/components/otp-field"
+    },
+    {
+      "capabilityId": "pin-input",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Pin Input",
+      "url": "https://chakra-ui.com/docs/components/pin-input"
     },
     {
       "capabilityId": "pin-input",
@@ -4721,6 +5049,14 @@
       "provenance": "verified",
       "sourceName": "Popover",
       "url": "https://carbondesignsystem.com/components/popover/usage/"
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popover",
+      "url": "https://chakra-ui.com/docs/components/popover"
     },
     {
       "capabilityId": "popover",
@@ -4860,6 +5196,14 @@
     },
     {
       "capabilityId": "progress-linear",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress",
+      "url": "https://chakra-ui.com/docs/components/progress"
+    },
+    {
+      "capabilityId": "progress-linear",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -4996,6 +5340,14 @@
     },
     {
       "capabilityId": "radio-group",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio",
+      "url": "https://chakra-ui.com/docs/components/radio"
+    },
+    {
+      "capabilityId": "radio-group",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -5121,6 +5473,14 @@
       "provenance": "verified",
       "sourceName": "Radius",
       "url": "https://atlassian.design/foundations/radius"
+    },
+    {
+      "capabilityId": "radius",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radii",
+      "url": "https://chakra-ui.com/docs/theming/radii"
     },
     {
       "capabilityId": "radius",
@@ -5284,6 +5644,14 @@
     },
     {
       "capabilityId": "rating",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Rating",
+      "url": "https://chakra-ui.com/docs/components/rating"
+    },
+    {
+      "capabilityId": "rating",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -5364,6 +5732,14 @@
     },
     {
       "capabilityId": "resizable-splitter",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Splitter",
+      "url": "https://chakra-ui.com/docs/components/splitter"
+    },
+    {
+      "capabilityId": "resizable-splitter",
       "sourceId": "primer",
       "present": true,
       "provenance": "verified",
@@ -5420,6 +5796,14 @@
     },
     {
       "capabilityId": "responsive-adaptive",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Responsive Design",
+      "url": "https://chakra-ui.com/docs/styling/responsive-design"
+    },
+    {
+      "capabilityId": "responsive-adaptive",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -5468,6 +5852,14 @@
     },
     {
       "capabilityId": "rich-text-editor",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Rich Text Editor",
+      "url": "https://chakra-ui.com/docs/components/rich-text-editor"
+    },
+    {
+      "capabilityId": "rich-text-editor",
       "sourceId": "lightning",
       "present": true,
       "provenance": "verified",
@@ -5513,6 +5905,14 @@
       "provenance": "verified",
       "sourceName": "Scroll Area",
       "url": "https://base-ui.com/react/components/scroll-area"
+    },
+    {
+      "capabilityId": "scroll-area",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Scroll Area",
+      "url": "https://chakra-ui.com/docs/components/scroll-area"
     },
     {
       "capabilityId": "scroll-area",
@@ -5574,9 +5974,9 @@
       "capabilityId": "segmented-control",
       "sourceId": "chakra-ui",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Segmented Control",
+      "url": "https://chakra-ui.com/docs/components/segmented-control"
     },
     {
       "capabilityId": "segmented-control",
@@ -5681,6 +6081,14 @@
       "provenance": "verified",
       "sourceName": "Dropdown",
       "url": "https://carbondesignsystem.com/components/dropdown/usage/"
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Select",
+      "url": "https://chakra-ui.com/docs/components/select"
     },
     {
       "capabilityId": "select",
@@ -5916,6 +6324,14 @@
     },
     {
       "capabilityId": "skeleton",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Skeleton",
+      "url": "https://chakra-ui.com/docs/components/skeleton"
+    },
+    {
+      "capabilityId": "skeleton",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -5993,6 +6409,14 @@
       "provenance": "verified",
       "sourceName": "Slider",
       "url": "https://carbondesignsystem.com/components/slider/usage/"
+    },
+    {
+      "capabilityId": "slider",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider",
+      "url": "https://chakra-ui.com/docs/components/slider"
     },
     {
       "capabilityId": "slider",
@@ -6092,6 +6516,14 @@
     },
     {
       "capabilityId": "spacing-scale",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spacing",
+      "url": "https://chakra-ui.com/docs/theming/spacing"
+    },
+    {
+      "capabilityId": "spacing-scale",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -6177,6 +6609,14 @@
       "provenance": "verified",
       "sourceName": "Loading",
       "url": "https://carbondesignsystem.com/components/loading/usage/"
+    },
+    {
+      "capabilityId": "spinner",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spinner",
+      "url": "https://chakra-ui.com/docs/components/spinner"
     },
     {
       "capabilityId": "spinner",
@@ -6326,9 +6766,9 @@
       "capabilityId": "stack-layout",
       "sourceId": "chakra-ui",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Stack",
+      "url": "https://chakra-ui.com/docs/components/stack"
     },
     {
       "capabilityId": "stack-layout",
@@ -6385,6 +6825,14 @@
       "provenance": "verified",
       "sourceName": "Progress indicator",
       "url": "https://carbondesignsystem.com/components/progress-indicator/usage/"
+    },
+    {
+      "capabilityId": "stepper",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Steps",
+      "url": "https://chakra-ui.com/docs/components/steps"
     },
     {
       "capabilityId": "stepper",
@@ -6465,6 +6913,14 @@
       "provenance": "verified",
       "sourceName": "Toggle",
       "url": "https://carbondesignsystem.com/components/toggle/usage/"
+    },
+    {
+      "capabilityId": "switch",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Switch",
+      "url": "https://chakra-ui.com/docs/components/switch"
     },
     {
       "capabilityId": "switch",
@@ -6604,6 +7060,14 @@
     },
     {
       "capabilityId": "tabs",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tabs",
+      "url": "https://chakra-ui.com/docs/components/tabs"
+    },
+    {
+      "capabilityId": "tabs",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -6740,6 +7204,14 @@
     },
     {
       "capabilityId": "tag-chip",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tag",
+      "url": "https://chakra-ui.com/docs/components/tag"
+    },
+    {
+      "capabilityId": "tag-chip",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -6852,6 +7324,14 @@
     },
     {
       "capabilityId": "tags-input",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tags Input",
+      "url": "https://chakra-ui.com/docs/components/tags-input"
+    },
+    {
+      "capabilityId": "tags-input",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -6961,6 +7441,14 @@
       "provenance": "verified",
       "sourceName": "Text input",
       "url": "https://carbondesignsystem.com/components/text-input/usage/"
+    },
+    {
+      "capabilityId": "text-field",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Input",
+      "url": "https://chakra-ui.com/docs/components/input"
     },
     {
       "capabilityId": "text-field",
@@ -7089,6 +7577,14 @@
       "provenance": "verified",
       "sourceName": "Text area",
       "url": "https://atlassian.design/components/textarea"
+    },
+    {
+      "capabilityId": "textarea",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Textarea",
+      "url": "https://chakra-ui.com/docs/components/textarea"
     },
     {
       "capabilityId": "textarea",
@@ -7236,6 +7732,14 @@
     },
     {
       "capabilityId": "timeline",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Timeline",
+      "url": "https://chakra-ui.com/docs/components/timeline"
+    },
+    {
+      "capabilityId": "timeline",
       "sourceId": "lightning",
       "present": true,
       "provenance": "verified",
@@ -7297,6 +7801,14 @@
       "provenance": "verified",
       "sourceName": "Notification (toast)",
       "url": "https://carbondesignsystem.com/components/notification/usage/"
+    },
+    {
+      "capabilityId": "toast",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toast",
+      "url": "https://chakra-ui.com/docs/components/toast"
     },
     {
       "capabilityId": "toast",
@@ -7417,6 +7929,14 @@
       "provenance": "verified",
       "sourceName": "Tooltip",
       "url": "https://carbondesignsystem.com/components/tooltip/usage/"
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tooltip",
+      "url": "https://chakra-ui.com/docs/components/tooltip"
     },
     {
       "capabilityId": "tooltip",
@@ -7612,6 +8132,14 @@
     },
     {
       "capabilityId": "tree-view",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "TreeView",
+      "url": "https://chakra-ui.com/docs/components/tree-view"
+    },
+    {
+      "capabilityId": "tree-view",
       "sourceId": "fluent-2",
       "present": true,
       "provenance": "verified",
@@ -7729,6 +8257,14 @@
       "provenance": "verified",
       "sourceName": "Type sets",
       "url": "https://carbondesignsystem.com/elements/typography/overview/"
+    },
+    {
+      "capabilityId": "typography-scale",
+      "sourceId": "chakra-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Typography",
+      "url": "https://chakra-ui.com/docs/theming/typography"
     },
     {
       "capabilityId": "typography-scale",
