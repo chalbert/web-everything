@@ -1,5 +1,111 @@
 {
   "_doc": "Cross-session batch reservations (backlog #083 selection-tier soft hint). A batch stamps the items it PLANS here at plan-approval (`backlog.mjs reserve <NNN...> --session=<batch-slug>`); `check:readiness --select` DEPRIORITIZES (never excludes) items held by ANOTHER session, so a second concurrent batch packs around them. Advisory only — the real lock is the status:open→active flip at `claim`. Entries older than ttlMinutes are ignored (a crashed session cannot depress priority forever) and pruned on the next write. A batch clears its own holds on stop via `backlog.mjs unreserve --session=<slug>`, and `claim` auto-drops an item it hard-claims.",
   "ttlMinutes": 120,
-  "held": []
+  "held": [
+    {
+      "num": "380",
+      "session": "batch-2026-06-13-543-512-380-421",
+      "at": "2026-06-14T01:08:05.343Z"
+    },
+    {
+      "num": "421",
+      "session": "batch-2026-06-13-543-512-380-421",
+      "at": "2026-06-14T01:08:05.343Z"
+    },
+    {
+      "num": "512",
+      "session": "batch-2026-06-13-543-512-380-421",
+      "at": "2026-06-14T01:08:05.343Z"
+    },
+    {
+      "num": "516",
+      "session": "batch-2026-06-13",
+      "at": "2026-06-14T00:55:45.412Z"
+    },
+    {
+      "num": "517",
+      "session": "batch-2026-06-13",
+      "at": "2026-06-14T00:55:45.412Z"
+    },
+    {
+      "num": "518",
+      "session": "batch-2026-06-13",
+      "at": "2026-06-14T00:55:45.412Z"
+    },
+    {
+      "num": "519",
+      "session": "batch-2026-06-13",
+      "at": "2026-06-14T00:55:45.412Z"
+    },
+    {
+      "num": "520",
+      "session": "batch-2026-06-13",
+      "at": "2026-06-14T00:55:45.412Z"
+    },
+    {
+      "num": "521",
+      "session": "batch-2026-06-13",
+      "at": "2026-06-14T00:55:45.412Z"
+    },
+    {
+      "num": "522",
+      "session": "batch-2026-06-13",
+      "at": "2026-06-14T00:55:45.412Z"
+    },
+    {
+      "num": "523",
+      "session": "batch-2026-06-13",
+      "at": "2026-06-14T00:55:45.412Z"
+    },
+    {
+      "num": "524",
+      "session": "batch-2026-06-13",
+      "at": "2026-06-14T00:55:45.412Z"
+    },
+    {
+      "num": "525",
+      "session": "batch-2026-06-13",
+      "at": "2026-06-14T00:55:45.412Z"
+    },
+    {
+      "num": "526",
+      "session": "batch-2026-06-13",
+      "at": "2026-06-14T00:55:45.412Z"
+    },
+    {
+      "num": "527",
+      "session": "batch-2026-06-13",
+      "at": "2026-06-14T00:55:45.412Z"
+    },
+    {
+      "num": "528",
+      "session": "batch-2026-06-13",
+      "at": "2026-06-14T00:55:45.412Z"
+    },
+    {
+      "num": "529",
+      "session": "batch-2026-06-13",
+      "at": "2026-06-14T00:55:45.412Z"
+    },
+    {
+      "num": "530",
+      "session": "batch-2026-06-13",
+      "at": "2026-06-14T00:55:45.412Z"
+    },
+    {
+      "num": "531",
+      "session": "batch-2026-06-13",
+      "at": "2026-06-14T00:55:45.412Z"
+    },
+    {
+      "num": "532",
+      "session": "batch-2026-06-13",
+      "at": "2026-06-14T00:55:45.412Z"
+    },
+    {
+      "num": "533",
+      "session": "batch-2026-06-13",
+      "at": "2026-06-14T00:55:45.412Z"
+    }
+  ]
 }

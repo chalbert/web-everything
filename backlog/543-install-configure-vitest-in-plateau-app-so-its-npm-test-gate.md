@@ -3,8 +3,10 @@ type: issue
 locus: plateau-app
 workItem: story
 size: 2
-status: open
+status: resolved
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
 tags: [plateau-app, tooling, vitest, test-infra, gate]
 ---
 
@@ -37,3 +39,13 @@ runs, as #502/#339 were). Make the declared gate real.
 Surfaced at the close-out of `batch-2026-06-13` (#502 + #339), where the plateau-app locus gate could not
 run and correctness was verified via `tsc --noEmit` + esbuild-bundled engine runs instead. Distinct from
 the resolved #168 (legacy `plateau` repo e2e harness) and #277 (porting droplist tests to Frontier UI).
+
+## Progress (resolved 2026-06-14)
+
+- Added `vitest@4` + `happy-dom@20` to plateau-app devDependencies (`npm install`).
+- Added `vitest.config.ts`: `environment: 'happy-dom'` (platform-manager modules under test touch the DOM),
+  `include: ['src/**/*.test.ts']`, the `@we/plugs` + `@we/blocks` aliases mirrored from `vite.config.mts`,
+  and the same JSX esbuild settings so `@we/blocks/renderers/jsx`-injected modules transform under test.
+  CSS imports left unprocessed (vitest default → empty module), which is correct for unit tests.
+- `npm test` (`vitest run`) now green: **7 files / 61 tests passing**. The plateau-app `/batch` close-out
+  gate runs for real — no more tsc+esbuild out-of-band verification.
