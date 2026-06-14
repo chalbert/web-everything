@@ -70,9 +70,9 @@
       "capabilityId": "accordion",
       "sourceId": "gov-uk",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Accordion",
+      "url": "https://design-system.service.gov.uk/components/accordion/"
     },
     {
       "capabilityId": "accordion",
@@ -758,9 +758,9 @@
       "capabilityId": "breadcrumb",
       "sourceId": "gov-uk",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Breadcrumbs",
+      "url": "https://design-system.service.gov.uk/components/breadcrumbs/"
     },
     {
       "capabilityId": "breadcrumb",
@@ -889,6 +889,14 @@
       "provenance": "verified",
       "sourceName": "Button",
       "url": "https://fluent2.microsoft.design/components/web/react/core/button/usage"
+    },
+    {
+      "capabilityId": "button",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button",
+      "url": "https://design-system.service.gov.uk/components/button/"
     },
     {
       "capabilityId": "button",
@@ -1372,6 +1380,14 @@
     },
     {
       "capabilityId": "checkbox",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkboxes",
+      "url": "https://design-system.service.gov.uk/components/checkboxes/"
+    },
+    {
+      "capabilityId": "checkbox",
       "sourceId": "headless-ui",
       "present": true,
       "provenance": "verified",
@@ -1566,9 +1582,9 @@
       "capabilityId": "color-contrast",
       "sourceId": "gov-uk",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Colour",
+      "url": "https://design-system.service.gov.uk/styles/colour/"
     },
     {
       "capabilityId": "color-contrast",
@@ -1753,6 +1769,14 @@
       "provenance": "verified",
       "sourceName": "Color tokens",
       "url": "https://fluent2.microsoft.design/design-tokens"
+    },
+    {
+      "capabilityId": "color-tokens",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Colour",
+      "url": "https://design-system.service.gov.uk/styles/colour/"
     },
     {
       "capabilityId": "color-tokens",
@@ -2388,6 +2412,14 @@
     },
     {
       "capabilityId": "data-table",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Table",
+      "url": "https://design-system.service.gov.uk/components/table/"
+    },
+    {
+      "capabilityId": "data-table",
       "sourceId": "lightning",
       "present": true,
       "provenance": "verified",
@@ -2884,6 +2916,14 @@
     },
     {
       "capabilityId": "disclosure",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Details",
+      "url": "https://design-system.service.gov.uk/components/details/"
+    },
+    {
+      "capabilityId": "disclosure",
       "sourceId": "headless-ui",
       "present": true,
       "provenance": "verified",
@@ -3073,6 +3113,14 @@
       "provenance": "verified",
       "sourceName": "Divider",
       "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "divider",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Section break",
+      "url": "https://design-system.service.gov.uk/styles/section-break/"
     },
     {
       "capabilityId": "divider",
@@ -3540,6 +3588,14 @@
     },
     {
       "capabilityId": "file-upload",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "File upload",
+      "url": "https://design-system.service.gov.uk/components/file-upload/"
+    },
+    {
+      "capabilityId": "file-upload",
       "sourceId": "lightning",
       "present": true,
       "provenance": "verified",
@@ -3806,9 +3862,9 @@
       "capabilityId": "focus-visible-policy",
       "sourceId": "gov-uk",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Understanding focus state styles",
+      "url": "https://design-system.service.gov.uk/get-started/focus-states/"
     },
     {
       "capabilityId": "focus-visible-policy",
@@ -3889,6 +3945,14 @@
       "provenance": "verified",
       "sourceName": "Field",
       "url": "https://fluent2.microsoft.design/components/web/react/core/field/usage"
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Fieldset",
+      "url": "https://design-system.service.gov.uk/components/fieldset/"
     },
     {
       "capabilityId": "form-layout",
@@ -4030,9 +4094,9 @@
       "capabilityId": "form-validation-flow",
       "sourceId": "gov-uk",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Recover from validation errors",
+      "url": "https://design-system.service.gov.uk/patterns/validation/"
     },
     {
       "capabilityId": "form-validation-flow",
@@ -4113,6 +4177,14 @@
       "provenance": "verified",
       "sourceName": "Grid",
       "url": "https://chakra-ui.com/docs/components/grid"
+    },
+    {
+      "capabilityId": "grid-layout",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Layout",
+      "url": "https://design-system.service.gov.uk/styles/layout/"
     },
     {
       "capabilityId": "grid-layout",
@@ -4446,9 +4518,9 @@
       "capabilityId": "inline-alert",
       "sourceId": "gov-uk",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Notification banner",
+      "url": "https://design-system.service.gov.uk/components/notification-banner/"
     },
     {
       "capabilityId": "inline-alert",
@@ -4686,9 +4758,9 @@
       "capabilityId": "link",
       "sourceId": "gov-uk",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Links",
+      "url": "https://design-system.service.gov.uk/styles/links/"
     },
     {
       "capabilityId": "link",
@@ -4785,6 +4857,14 @@
       "provenance": "verified",
       "sourceName": "List",
       "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "list",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Lists",
+      "url": "https://design-system.service.gov.uk/styles/lists/"
     },
     {
       "capabilityId": "list",
@@ -5404,6 +5484,14 @@
     },
     {
       "capabilityId": "navbar",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Service navigation",
+      "url": "https://design-system.service.gov.uk/components/service-navigation/"
+    },
+    {
+      "capabilityId": "navbar",
       "sourceId": "lightning",
       "present": true,
       "provenance": "verified",
@@ -5649,6 +5737,14 @@
       "provenance": "verified",
       "sourceName": "Pagination",
       "url": "https://chakra-ui.com/docs/components/pagination"
+    },
+    {
+      "capabilityId": "pagination",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Pagination",
+      "url": "https://design-system.service.gov.uk/components/pagination/"
     },
     {
       "capabilityId": "pagination",
@@ -6142,9 +6238,9 @@
       "capabilityId": "radio-group",
       "sourceId": "gov-uk",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Radios",
+      "url": "https://design-system.service.gov.uk/components/radios/"
     },
     {
       "capabilityId": "radio-group",
@@ -7028,6 +7124,14 @@
     },
     {
       "capabilityId": "select",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Select",
+      "url": "https://design-system.service.gov.uk/components/select/"
+    },
+    {
+      "capabilityId": "select",
       "sourceId": "headless-ui",
       "present": true,
       "provenance": "verified",
@@ -7540,6 +7644,14 @@
     },
     {
       "capabilityId": "spacing-scale",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spacing",
+      "url": "https://design-system.service.gov.uk/styles/spacing/"
+    },
+    {
+      "capabilityId": "spacing-scale",
       "sourceId": "lightning",
       "present": true,
       "provenance": "verified",
@@ -7884,6 +7996,14 @@
     },
     {
       "capabilityId": "stepper",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Step by step navigation",
+      "url": "https://design-system.service.gov.uk/patterns/step-by-step-navigation/"
+    },
+    {
+      "capabilityId": "stepper",
       "sourceId": "lightning",
       "present": true,
       "provenance": "verified",
@@ -8156,6 +8276,14 @@
     },
     {
       "capabilityId": "tabs",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tabs",
+      "url": "https://design-system.service.gov.uk/components/tabs/"
+    },
+    {
+      "capabilityId": "tabs",
       "sourceId": "headless-ui",
       "present": true,
       "provenance": "verified",
@@ -8313,6 +8441,14 @@
       "provenance": "verified",
       "sourceName": "Tag",
       "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "tag-chip",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tag",
+      "url": "https://design-system.service.gov.uk/components/tag/"
     },
     {
       "capabilityId": "tag-chip",
@@ -8582,9 +8718,9 @@
       "capabilityId": "text-field",
       "sourceId": "gov-uk",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Text input",
+      "url": "https://design-system.service.gov.uk/components/text-input/"
     },
     {
       "capabilityId": "text-field",
@@ -8737,6 +8873,14 @@
       "provenance": "verified",
       "sourceName": "Textarea",
       "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "textarea",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Textarea",
+      "url": "https://design-system.service.gov.uk/components/textarea/"
     },
     {
       "capabilityId": "textarea",
@@ -9513,6 +9657,14 @@
       "provenance": "verified",
       "sourceName": "Typography tokens",
       "url": "https://fluent2.microsoft.design/typography"
+    },
+    {
+      "capabilityId": "typography-scale",
+      "sourceId": "gov-uk",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Type scale",
+      "url": "https://design-system.service.gov.uk/styles/type-scale/"
     },
     {
       "capabilityId": "typography-scale",
