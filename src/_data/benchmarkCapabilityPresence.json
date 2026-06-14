@@ -102,17 +102,17 @@
       "capabilityId": "button",
       "sourceId": "material-3",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Buttons",
+      "url": "https://m3.material.io/components/buttons/overview"
     },
     {
       "capabilityId": "button-group",
       "sourceId": "material-3",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Button groups",
+      "url": "https://m3.material.io/components/button-groups/guidelines"
     },
     {
       "capabilityId": "button-group",
@@ -126,9 +126,9 @@
       "capabilityId": "card",
       "sourceId": "material-3",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Cards",
+      "url": "https://m3.material.io/components/cards/overview"
     },
     {
       "capabilityId": "carousel",
@@ -190,9 +190,9 @@
       "capabilityId": "color-tokens",
       "sourceId": "material-3",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Color roles",
+      "url": "https://m3.material.io/styles/color/roles"
     },
     {
       "capabilityId": "color-tokens",
@@ -270,9 +270,9 @@
       "capabilityId": "dark-mode",
       "sourceId": "material-3",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Color scheme (light & dark)",
+      "url": "https://m3.material.io/styles/color/choosing-a-scheme"
     },
     {
       "capabilityId": "dark-mode",
@@ -414,9 +414,9 @@
       "capabilityId": "elevation",
       "sourceId": "material-3",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Elevation",
+      "url": "https://m3.material.io/styles/elevation/overview"
     },
     {
       "capabilityId": "empty-state",
@@ -438,9 +438,9 @@
       "capabilityId": "fab",
       "sourceId": "material-3",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Floating action buttons (FABs)",
+      "url": "https://m3.material.io/components/floating-action-button/overview"
     },
     {
       "capabilityId": "file-upload",
@@ -662,9 +662,9 @@
       "capabilityId": "motion-tokens",
       "sourceId": "material-3",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Easing and duration tokens",
+      "url": "https://m3.material.io/styles/motion/easing-and-duration/tokens-specs"
     },
     {
       "capabilityId": "multi-select",
@@ -814,9 +814,9 @@
       "capabilityId": "responsive-adaptive",
       "sourceId": "material-3",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Adaptive design",
+      "url": "https://m3.material.io/foundations/adaptive-design"
     },
     {
       "capabilityId": "responsive-adaptive",
@@ -918,9 +918,9 @@
       "capabilityId": "slider",
       "sourceId": "material-3",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Sliders",
+      "url": "https://m3.material.io/components/sliders/guidelines"
     },
     {
       "capabilityId": "slider",
@@ -998,9 +998,9 @@
       "capabilityId": "switch",
       "sourceId": "material-3",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Switch",
+      "url": "https://m3.material.io/components/switch/guidelines"
     },
     {
       "capabilityId": "tabs",
@@ -1014,9 +1014,9 @@
       "capabilityId": "tag-chip",
       "sourceId": "material-3",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Chips",
+      "url": "https://m3.material.io/components/chips"
     },
     {
       "capabilityId": "tags-input",
@@ -1046,9 +1046,9 @@
       "capabilityId": "text-field",
       "sourceId": "material-3",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Text fields",
+      "url": "https://m3.material.io/components/text-fields/guidelines"
     },
     {
       "capabilityId": "time-picker",
@@ -1070,9 +1070,9 @@
       "capabilityId": "toast",
       "sourceId": "material-3",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Snackbar",
+      "url": "https://m3.material.io/components/snackbar"
     },
     {
       "capabilityId": "toast",
@@ -1158,9 +1158,9 @@
       "capabilityId": "typography-scale",
       "sourceId": "material-3",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Type scale tokens",
+      "url": "https://m3.material.io/styles/typography/type-scale-tokens"
     },
     {
       "capabilityId": "virtualization",
@@ -1177,6 +1177,246 @@
       "provenance": "notable-inference",
       "sourceName": null,
       "url": null
+    },
+    {
+      "capabilityId": "icon-button",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Icon buttons",
+      "url": "https://m3.material.io/components/icon-buttons/overview"
+    },
+    {
+      "capabilityId": "split-button",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Split button",
+      "url": "https://m3.material.io/components/split-button/overview"
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menus (exposed dropdown menu)",
+      "url": "https://m3.material.io/components/menus"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://m3.material.io/components/checkbox/guidelines"
+    },
+    {
+      "capabilityId": "radio-group",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio button",
+      "url": "https://m3.material.io/components/radio-button/guidelines"
+    },
+    {
+      "capabilityId": "range-slider",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Sliders (range selection)",
+      "url": "https://m3.material.io/components/sliders/guidelines"
+    },
+    {
+      "capabilityId": "date-picker",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Date pickers",
+      "url": "https://m3.material.io/components/date-pickers/guidelines"
+    },
+    {
+      "capabilityId": "date-range-picker",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Date pickers (date range)",
+      "url": "https://m3.material.io/components/date-pickers/guidelines"
+    },
+    {
+      "capabilityId": "time-picker",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Time pickers",
+      "url": "https://m3.material.io/components/time-pickers/specs"
+    },
+    {
+      "capabilityId": "tags-input",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Chips (input chips)",
+      "url": "https://m3.material.io/components/chips"
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tabs",
+      "url": "https://m3.material.io/components/tabs"
+    },
+    {
+      "capabilityId": "menu",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menus",
+      "url": "https://m3.material.io/components/menus"
+    },
+    {
+      "capabilityId": "segmented-control",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Segmented button",
+      "url": "https://m3.material.io/components/segmented-buttons/overview"
+    },
+    {
+      "capabilityId": "navbar",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Top app bar",
+      "url": "https://m3.material.io/components/app-bars/overview"
+    },
+    {
+      "capabilityId": "sidebar-nav",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Navigation drawer / Navigation rail",
+      "url": "https://m3.material.io/components/navigation-drawer/overview"
+    },
+    {
+      "capabilityId": "dialog",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialogs",
+      "url": "https://m3.material.io/components/dialogs/guidelines"
+    },
+    {
+      "capabilityId": "drawer",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Bottom sheets / Side sheets",
+      "url": "https://m3.material.io/components/bottom-sheets/overview"
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tooltips",
+      "url": "https://m3.material.io/components/tooltips"
+    },
+    {
+      "capabilityId": "list",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Lists",
+      "url": "https://m3.material.io/components/lists/guidelines"
+    },
+    {
+      "capabilityId": "badge",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Badge",
+      "url": "https://m3.material.io/components/badges/guidelines"
+    },
+    {
+      "capabilityId": "carousel",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Carousel",
+      "url": "https://m3.material.io/components/carousel/accessibility"
+    },
+    {
+      "capabilityId": "progress-linear",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress indicators (linear)",
+      "url": "https://m3.material.io/components/progress-indicators/overview"
+    },
+    {
+      "capabilityId": "spinner",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Loading indicator",
+      "url": "https://m3.material.io/components/loading-indicator/guidelines"
+    },
+    {
+      "capabilityId": "divider",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Divider",
+      "url": "https://m3.material.io/components/divider/overview"
+    },
+    {
+      "capabilityId": "spacing-scale",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spacing",
+      "url": "https://m3.material.io/styles/spacing/overview"
+    },
+    {
+      "capabilityId": "radius",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Shape scale",
+      "url": "https://m3.material.io/styles/shape/overview-principles"
+    },
+    {
+      "capabilityId": "density",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Density / design tokens",
+      "url": "https://m3.material.io/foundations/design-tokens"
+    },
+    {
+      "capabilityId": "keyboard-interaction",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accessibility – inputs",
+      "url": "https://m3.material.io/foundations/interaction/inputs"
+    },
+    {
+      "capabilityId": "color-contrast",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color contrast",
+      "url": "https://m3.material.io/foundations/designing/color-contrast"
+    },
+    {
+      "capabilityId": "i18n-rtl",
+      "sourceId": "material-3",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Bidirectionality & RTL",
+      "url": "https://m3.material.io/foundations/layout/bidirectionality-rtl"
     }
   ]
 }
