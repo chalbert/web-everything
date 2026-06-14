@@ -5713,6 +5713,398 @@
       "provenance": "verified",
       "sourceName": "Menu keyboard interaction",
       "url": "https://headlessui.com/react/menu"
+    },
+    {
+      "capabilityId": "button",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button",
+      "url": "https://shoelace.style/components/button"
+    },
+    {
+      "capabilityId": "icon-button",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Icon Button",
+      "url": "https://shoelace.style/components/icon-button"
+    },
+    {
+      "capabilityId": "button-group",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button Group",
+      "url": "https://shoelace.style/components/button-group"
+    },
+    {
+      "capabilityId": "text-field",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Input",
+      "url": "https://shoelace.style/components/input"
+    },
+    {
+      "capabilityId": "textarea",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Textarea",
+      "url": "https://shoelace.style/components/textarea"
+    },
+    {
+      "capabilityId": "number-input",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Input (number)",
+      "url": "https://shoelace.style/components/input"
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Select",
+      "url": "https://shoelace.style/components/select"
+    },
+    {
+      "capabilityId": "multi-select",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Select (multiple)",
+      "url": "https://shoelace.style/components/select"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://shoelace.style/components/checkbox"
+    },
+    {
+      "capabilityId": "radio-group",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio Group",
+      "url": "https://shoelace.style/components/radio-group"
+    },
+    {
+      "capabilityId": "switch",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Switch",
+      "url": "https://shoelace.style/components/switch"
+    },
+    {
+      "capabilityId": "slider",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Range",
+      "url": "https://shoelace.style/components/range"
+    },
+    {
+      "capabilityId": "color-picker",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color Picker",
+      "url": "https://shoelace.style/components/color-picker"
+    },
+    {
+      "capabilityId": "rating",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Rating",
+      "url": "https://shoelace.style/components/rating"
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Form Controls",
+      "url": "https://shoelace.style/getting-started/form-controls"
+    },
+    {
+      "capabilityId": "disclosure",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Details",
+      "url": "https://shoelace.style/components/details"
+    },
+    {
+      "capabilityId": "accordion",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Details",
+      "url": "https://shoelace.style/components/details"
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tab Group",
+      "url": "https://shoelace.style/components/tab-group"
+    },
+    {
+      "capabilityId": "menu",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menu",
+      "url": "https://shoelace.style/components/menu"
+    },
+    {
+      "capabilityId": "listbox",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menu",
+      "url": "https://shoelace.style/components/menu"
+    },
+    {
+      "capabilityId": "tree-view",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tree",
+      "url": "https://shoelace.style/components/tree"
+    },
+    {
+      "capabilityId": "breadcrumb",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Breadcrumb",
+      "url": "https://shoelace.style/components/breadcrumb"
+    },
+    {
+      "capabilityId": "dialog",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog",
+      "url": "https://shoelace.style/components/dialog"
+    },
+    {
+      "capabilityId": "drawer",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Drawer",
+      "url": "https://shoelace.style/components/drawer"
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popup",
+      "url": "https://shoelace.style/components/popup"
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tooltip",
+      "url": "https://shoelace.style/components/tooltip"
+    },
+    {
+      "capabilityId": "toast",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Alert (toast)",
+      "url": "https://shoelace.style/components/alert"
+    },
+    {
+      "capabilityId": "inline-alert",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Alert",
+      "url": "https://shoelace.style/components/alert"
+    },
+    {
+      "capabilityId": "card",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Card",
+      "url": "https://shoelace.style/components/card"
+    },
+    {
+      "capabilityId": "avatar",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Avatar",
+      "url": "https://shoelace.style/components/avatar"
+    },
+    {
+      "capabilityId": "badge",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Badge",
+      "url": "https://shoelace.style/components/badge"
+    },
+    {
+      "capabilityId": "tag-chip",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tag",
+      "url": "https://shoelace.style/components/tag"
+    },
+    {
+      "capabilityId": "carousel",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Carousel",
+      "url": "https://shoelace.style/components/carousel"
+    },
+    {
+      "capabilityId": "progress-linear",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress Bar",
+      "url": "https://shoelace.style/components/progress-bar"
+    },
+    {
+      "capabilityId": "spinner",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spinner",
+      "url": "https://shoelace.style/components/spinner"
+    },
+    {
+      "capabilityId": "skeleton",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Skeleton",
+      "url": "https://shoelace.style/components/skeleton"
+    },
+    {
+      "capabilityId": "divider",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Divider",
+      "url": "https://shoelace.style/components/divider"
+    },
+    {
+      "capabilityId": "resizable-splitter",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Split Panel",
+      "url": "https://shoelace.style/components/split-panel"
+    },
+    {
+      "capabilityId": "anchored-positioning",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popup",
+      "url": "https://shoelace.style/components/popup"
+    },
+    {
+      "capabilityId": "copy-to-clipboard",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Copy Button",
+      "url": "https://shoelace.style/components/copy-button"
+    },
+    {
+      "capabilityId": "color-tokens",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color Tokens",
+      "url": "https://shoelace.style/tokens/color"
+    },
+    {
+      "capabilityId": "typography-scale",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Typography Tokens",
+      "url": "https://shoelace.style/tokens/typography"
+    },
+    {
+      "capabilityId": "spacing-scale",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spacing Tokens",
+      "url": "https://shoelace.style/tokens/spacing"
+    },
+    {
+      "capabilityId": "elevation",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Elevation Tokens",
+      "url": "https://shoelace.style/tokens/elevation"
+    },
+    {
+      "capabilityId": "radius",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Border Radius Tokens",
+      "url": "https://shoelace.style/tokens/border-radius"
+    },
+    {
+      "capabilityId": "motion-tokens",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Transition Tokens",
+      "url": "https://shoelace.style/tokens/transition"
+    },
+    {
+      "capabilityId": "dark-mode",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Themes (dark)",
+      "url": "https://shoelace.style/getting-started/themes"
+    },
+    {
+      "capabilityId": "i18n-rtl",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Localization",
+      "url": "https://shoelace.style/getting-started/localization"
+    },
+    {
+      "capabilityId": "controlled-uncontrolled",
+      "sourceId": "shoelace",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Form Controls",
+      "url": "https://shoelace.style/getting-started/form-controls"
     }
   ]
 }
