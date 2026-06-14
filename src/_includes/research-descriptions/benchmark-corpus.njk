@@ -47,7 +47,7 @@
 <table>
   <thead><tr><th>Source</th><th>Vendor</th><th>Philosophy</th><th>Native alignment</th><th>Docs</th><th>In references</th></tr></thead>
   <tbody>
-    {% for s in benchmarkCorpus.sources %}{% if s.category == cat.id %}
+    {% for s in benchmarkCorpus.sources %}{% if s.category == cat.id and not s.retired %}
     <tr>
       <td><strong>{{ s.name }}</strong></td>
       <td>{{ s.vendor }}</td>
@@ -60,6 +60,32 @@
   </tbody>
 </table>
 {% endfor %}
+
+{% set retiredSources = benchmarkCorpus.sources | selectattr("retired") | list %}
+{% if retiredSources | length %}
+<h2>Retired sources</h2>
+<p>
+  Sources that once qualified but have since been dropped &mdash; kept here, not deleted, so the
+  longitudinal record shows <em>why</em> a source left and a future re-run won&rsquo;t naïvely re-add it
+  and re-hit the same dead docs (the <a href="/backlog/192-longitudinal-research-freshness-system/">longitudinal
+  freshness</a> / reproducibility model). The retirement convention itself is being generalised beyond this
+  corpus under the <strong>external reference health monitoring</strong> epic.
+</p>
+<table>
+  <thead><tr><th>Source</th><th>Vendor</th><th>Axis</th><th>Retired</th><th>Why retired</th></tr></thead>
+  <tbody>
+    {% for s in retiredSources %}
+    <tr>
+      <td><strong>{{ s.name }}</strong></td>
+      <td>{{ s.vendor }}</td>
+      <td>{{ s.category }}</td>
+      <td>{{ s.retiredDate }}</td>
+      <td>{{ s.retiredReason }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 
 <h2>Re-running this sweep</h2>
 <p>

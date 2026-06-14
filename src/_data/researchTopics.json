@@ -1127,7 +1127,7 @@
     "id": "benchmark-corpus",
     "title": "Benchmark corpus — design systems & UI libraries for competitive coverage analysis",
     "status": "open",
-    "summary": "The canonical input to the competitive coverage gap-analysis program (backlog #315): an explicit, reproducible list of the leading design systems and UI libraries to benchmark, governed by stated selection criteria so a re-run lands on a comparable list. Spans five category axes — mature opinionated design systems (Material 3, Carbon, Fluent, Spectrum, Polaris, Atlassian, Primer, Lightning), headless/a11y-first primitives (Radix, React Aria, Base UI, Ark, Headless UI), web-component systems (Shoelace, Spectrum Web Components, FAST, Lion), popular component kits (MUI, Ant, Chakra, Mantine, shadcn/ui), and platform/standards guidance (Apple HIG, GOV.UK, WAI-ARIA APG, Open UI) — deliberately so the gap sweep is not biased toward one design philosophy. The corpus data lives in src/_data/benchmarkCorpus.json; the references.json 'Reference Design Systems' set is its curated docs-surface subset. Phase 2 (extraction, #346) and phase 3 (mapping & gap detection, #347) join against it.",
+    "summary": "The canonical input to the competitive coverage gap-analysis program (backlog #315): an explicit, reproducible list of the leading design systems and UI libraries to benchmark, governed by stated selection criteria so a re-run lands on a comparable list. Spans five category axes — mature opinionated design systems (Material 3, Carbon, Fluent, Spectrum, Polaris, Atlassian, Primer, Lightning), headless/a11y-first primitives (Radix, React Aria, Base UI, Ark, Headless UI), web-component systems (Shoelace, Spectrum Web Components, Lion; FAST retired), popular component kits (MUI, Ant, Chakra, Mantine, shadcn/ui), and platform/standards guidance (Apple HIG, GOV.UK, WAI-ARIA APG, Open UI) — deliberately so the gap sweep is not biased toward one design philosophy. The corpus data lives in src/_data/benchmarkCorpus.json; the references.json 'Reference Design Systems' set is its curated docs-surface subset. Phase 2 (extraction, #346) and phase 3 (mapping & gap detection, #347) join against it.",
     "dateOpened": "2026-06-12",
     "tags": [
       "gap-analysis",
@@ -1571,5 +1571,31 @@
     "relatedBlocks": [],
     "relatedPlugs": [],
     "relatedProject": "plateau"
+  },
+  {
+    "id": "registry-generic-type-architecture",
+    "title": "Registry Generic Type-Architecture: Class-`Key` vs Method-`get<Key>`",
+    "status": "open",
+    "summary": "Prior-art grounding backlog #582: the FU and WE plugs trees shipped mutually-incompatible public type contracts on three core registry surfaces (CustomContext, CustomTextNodeRegistry, CustomElementRegistry); #580 converges them into one shared runtime, which can carry only one form. The real divergence is in CustomContext.ts (the base class implementing Registry) — CustomContextRegistry.ts is byte-identical between repos. WE puts a class-level Key type param on CustomContext (defaulted to keyof ContextValue, and never overridden by any consumer in the workspace — it is dead) and mistypes the Registry Definition slot as the whole record, omitting values()/entries() and returning void from delete(); FU uses a single ContextValue param with a method-level get<Key extends keyof ContextValue>, conforms to Registry<value, string> correctly, and implements the full Map-shaped surface (values/entries/delete:boolean). The platform Map<K,V> + iterator protocol is the vocabulary the codebase's own Registry interface mirrors. Default A: adopt FU's method-level-generic string-keyed Map-shaped form — native-first, the only Registry-conformant side, and zero-consumer-cost. Riders: adopt FU's typings (ImplementedTextNode<any>; concrete upgrade(root:Node); options? optional) and port WE's ensureNativelyConstructible runtime up as additive (not a fork).",
+    "dateOpened": "2026-06-14",
+    "tags": [
+      "plugs",
+      "registry",
+      "typescript",
+      "generics",
+      "custom-context",
+      "custom-element",
+      "convergence",
+      "native-first",
+      "map"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [
+      "webcontexts",
+      "webexpressions",
+      "webregistries",
+      "webinjectors"
+    ],
+    "relatedProject": "webeverything"
   }
 ]
