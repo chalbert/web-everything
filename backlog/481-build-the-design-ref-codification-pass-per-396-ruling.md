@@ -4,7 +4,7 @@ workItem: story
 size: 8
 parent: "382"
 status: open
-blockedBy: []
+blockedBy: ["480"]
 dateOpened: "2026-06-13"
 relatedReport: reports/2026-06-13-design-ref-vision-pipeline.md
 tags: [design-reference, corpus, vision, codification, paradigm-harvest]

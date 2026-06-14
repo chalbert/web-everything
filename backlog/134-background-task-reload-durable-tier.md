@@ -35,20 +35,19 @@ Spun off from #128 (implementing the Background Task surface as a block).
 
 ## Pre-flight note (2026-06-10 — deferred from a batch, resized 5 → 8)
 
-Claimed during a batch, then released on a closer read. Two reasons it is **not** a clean agent-ready
-slice:
+Claimed during a batch, then released on a closer read. The first reason has since been resolved;
+one build concern remains:
 
-1. **Unresolved design fork (no lean).** "What is the durable story for non-fetch work?" (open
-   question 1) genuinely changes the end-state of the durable tier — Background Fetch only models
-   transfers, so a long *client-side computation* has no native durable home. This needs a decision
-   (split it, or bound the tier to transfers) before building. Open question 2 (does `durability:
-   reload` relax `navigationGuard: warn`?) is a smaller dimension call but also unresolved.
+1. ~~**Unresolved design fork (no lean).**~~ **Resolved by decision #450 (2026-06-13)** — the
+   non-fetch fork is closed: the durable tier is bounded to transfers (Background Fetch), the enum
+   stays `route | reload`, and the re-arm must feature-detect Background Fetch at arm-time (see the
+   rulings block above). No design fork remains.
 2. **Core claim is unverifiable in this harness.** The headline value — work that *actually* survives a
    full reload/close — rides on a service worker + the Background Fetch API, which neither the vitest
    (happy-dom) nor the Playwright setup here exercises. Only the trait/config/feature-detection/
    graceful-degradation layer is in-harness testable; shipping the durability adapter as "done" without
    a real-browser/SW verification path would overclaim.
 
-To make it batchable: (a) resolve the non-fetch fork (likely split it out), and (b) define a
-real-browser/SW verification strategy for the durability claim. The trait + `durability` config
+To make it batchable: define a real-browser/SW verification strategy for the durability claim (the
+non-fetch fork is already resolved by #450). The trait + `durability` config
 dimension + degradation-to-route-only is the verifiable sub-slice if a smaller item is wanted.

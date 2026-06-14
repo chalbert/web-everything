@@ -328,6 +328,16 @@ const nonCanonGrad = backlog
 if (nonCanonGrad.length)
   warn(`${nonCanonGrad.length} resolved items have a non-canonical graduatedTo (prose/narrative instead of a leading entity ref) — run \`npm run normalize:graduated\` to auto-fix the safe ones; bulk narrative→body cleanup tracked in #619. Items: ${nonCanonGrad.slice(0, 10).join(', ')}${nonCanonGrad.length > 10 ? `, …+${nonCanonGrad.length - 10}` : ''}`);
 
+// #608 — D3-readiness surfacing (forward conformance gate). The loader demotes an open build out of
+// Tier A when its `relatedProject` is a `concept` project with no shipped surface ("the standard must
+// exist first") — these items are NOT batchable even with a clean frontmatter. check:standards never
+// gated on this (it gates mechanics); surface it as one aggregate nudge so the forward gate is visible
+// in the standing /check, alongside the deterministic `npm run check:health` (decision-governance + ref
+// drift) and the judgment pre-flight documented in backlog-workflow.md → "principle-conformance pre-flight".
+const projectPending = backlog.filter((it) => it.projectPending).map((it) => `#${it.num ?? it.id} (${it.relatedProject})`);
+if (projectPending.length)
+  warn(`${projectPending.length} open build(s) held by D3-readiness — relatedProject is a \`concept\` project with no shipped surface, so the standard must exist first (loader demotes them out of Tier A; not a \`blockedBy\` edge). Either ship/graduate the project or re-home the item. Items: ${projectPending.join(', ')}`);
+
 // ── 6d-bis. Raw-HTML-in-body lint (#290) ──
 // An un-backticked HTML tag in a backlog body is passed through by 11ty and parsed by the browser; a
 // void/unclosed interactive one (`<select>`, `<dialog>`) swallows the rest of the page, rendering the

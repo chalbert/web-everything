@@ -35,5 +35,5 @@ The constellation already gives requirements something to bind to: **intents** (
 
 - The requirement **meta-schema** — standardize the *format* (BDD-like, intent/role/state vocabulary), not a fixed requirement list (mirrors the intents "standardize the meta-schema" principle).
 - Relationship to **webcases**: is a requirement a higher-level thing that *compiles down to* cases, or a sibling? Recommendation: requirements compile to cases, so the existing suite stays the executable layer.
-- The AI is a **swappable provider** behind a registry (same shape as #086/#094/#095) — the contradiction/ambiguity checker and the test-generator are providers, not baked-in.
+- The AI is a **swappable provider** behind a registry (same shape as #086/#094/#095) — the contradiction/ambiguity checker and the test-generator are providers, not baked-in. **Placement (no-leakage, per [#475](/backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/)):** these AI *impl capabilities* are Plateau-served services the tool consumes as a no-leakage client; the WE-resident artifacts are the requirement **meta-schema** and the **webcases** they compile to — only those reach the standard.
 - This is the gating dependency for the strong form of the evergreen vision; sequence the authoring+validation slice first as a standalone win.

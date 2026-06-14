@@ -28,6 +28,7 @@
     "check:validation-adherence": "vitest run capability-manifest/__tests__/check.test.ts",
     "validation:see": "node scripts/validation-normalize/live-config.mjs",
     "check:readiness": "node scripts/check-readiness.mjs",
+    "check:health": "node scripts/audit-backlog-health.mjs",
     "fix:readiness": "node scripts/check-readiness.mjs --apply",
     "propose:readiness": "node scripts/propose-readiness.mjs",
     "normalize:graduated": "node scripts/normalize-graduated.mjs",

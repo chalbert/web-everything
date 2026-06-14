@@ -74,3 +74,9 @@ emit *plausible framework code*; this emits **verifiably standard-conformant**
 output gated by `check:standards`. Paired with the AI **upgrader tools**
 ([#094](/backlog/094-ai-upgrader-tools/)), which apply the same swappable-AI shape
 to *existing* code.
+
+**Placement (no-leakage, per [#475](/backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/)):** the AI/vision
+*impl capability* (the analyzer + generator behind the registry) is a **Plateau-served service the
+tool consumes as a no-leakage client** — never WE-resident architecture. Only the **neutral-structure
+contract** and the **generated standard-conformant output** are WE artifacts. The swappable-provider
+shape is correct; this just names *where* the capability lives (BYO-key is a tier, not the floor).

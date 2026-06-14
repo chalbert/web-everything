@@ -4,6 +4,7 @@ workItem: story
 size: 1
 parent: "586"
 status: open
+locus: plateau-app
 blockedBy: ["589"]
 dateOpened: "2026-06-14"
 tags: []

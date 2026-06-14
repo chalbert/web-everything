@@ -183,6 +183,30 @@ module.exports = function backlog() {
   // cyclic refs. The validator (check-standards.mjs) guards unresolvable / self / cyclic edges;
   // here we simply drop any NNN that doesn't resolve so a page never renders a dead link.
   const byNum = new Map(items.map((it) => [it.num, it]));
+
+  // D3-READINESS (#608) — a build can't be agent-ready if the STANDARD it builds into doesn't exist
+  // yet. `check:standards` gates on mechanics (tier + size + resolved `blockedBy`); it never asks
+  // whether the item's `relatedProject` is a real, shipped project. So an open issue/idea whose
+  // `relatedProject` is still `status: concept` AND has NO shipped surface is "project-pending": the
+  // project must exist first, so the item is NOT truly batchable however clean its frontmatter looks.
+  //
+  // Precision mirrors the audit's D3 fix (#613): a `concept` project with substantial SHIPPED work is
+  // data-drift (the status lags reality — see #617), NOT a pending project, so its dependents stay
+  // ready. The deterministic shipped-surface proxy is "has ≥1 resolved item filed against it" — webplugs
+  // (0 resolved, pending the #606 ownership ruling) is pending; webblocks/webdocs (many resolved,
+  // mislabeled concept) are not. We never demote on a `concept` label alone.
+  let projectStatus = new Map();
+  try {
+    const projects = JSON.parse(readFileSync(join(ROOT, 'src/_data/projects.json'), 'utf8'));
+    projectStatus = new Map(projects.map((p) => [p.id, p.status]));
+  } catch { /* missing/malformed projects.json → no D3-readiness demotion (degrade, don't crash) */ }
+  const resolvedByProject = new Map();
+  for (const it of items) {
+    if (it.status === 'resolved' && typeof it.relatedProject === 'string') {
+      resolvedByProject.set(it.relatedProject, (resolvedByProject.get(it.relatedProject) || 0) + 1);
+    }
+  }
+
   for (const item of items) {
     const edges = Array.isArray(item.blockedBy) ? item.blockedBy : [];
     item.blockers = edges
@@ -203,9 +227,23 @@ module.exports = function backlog() {
     //                      is prose, so the structural proxy is just the type) — ratify, then build.
     //   C — needs design / not ready: everything else open — an issue/idea with an unresolved
     //                      blocker.
+    // D3-readiness (#608): the build's standard must exist first. `projectPending` ⇒ the
+    // `relatedProject` is a `concept` project with zero shipped (resolved) surface — not mere
+    // status-drift (a concept label over real work, see #617), but a project that genuinely isn't
+    // built yet. Such a build is NOT agent-ready even with every `blockedBy` resolved, so it is
+    // demoted out of Tier A (it falls to C, alongside structurally-blocked work). Exposed as its own
+    // field so the detail page, check:standards, and the audit can name the reason precisely.
+    item.relatedProjectStatus = typeof item.relatedProject === 'string'
+      ? (projectStatus.get(item.relatedProject) ?? 'unknown') : undefined;
+    item.projectPending = item.status === 'open'
+      && (item.type === 'issue' || item.type === 'idea')
+      && item.relatedProjectStatus === 'concept'
+      && !(resolvedByProject.get(item.relatedProject) > 0);
+
     item.tier = item.status !== 'open' ? undefined
       : ((item.type === 'issue' || item.type === 'idea')
-          && item.blockers.every((b) => b.status === 'resolved')) ? 'A'
+          && item.blockers.every((b) => b.status === 'resolved')
+          && !item.projectPending) ? 'A'
       : item.type === 'decision' ? 'B'
       : 'C';
 

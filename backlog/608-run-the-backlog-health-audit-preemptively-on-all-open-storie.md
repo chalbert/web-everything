@@ -2,9 +2,12 @@
 type: issue
 workItem: story
 size: 5
-status: open
+status: resolved
 blockedBy: ["607", "612", "613"]
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: none
 tags: []
 ---
 
@@ -54,3 +57,23 @@ design call (that is exactly the failure #607 exists to catch).
   not-truly-ready (the project must exist first).
 
 Blocked on #607 (the audit must be hardened on resolved items before it gates live work).
+
+## Progress
+
+- **Status:** resolved 2026-06-14. All three acceptance criteria met.
+- **Forward sweep over the open pool** — deterministic (`check:health`) + judgment fan-out (7 subagents
+  over the 37 batchable Tier-A items + 5 Tier-B decisions, clustered by subsystem) against catalog A–E +
+  DoR. Result: **9 pure-agent remediations applied** (#595, #611, #481, #487, #513, #504, #134, #086,
+  #100); **10 exercise-app phase edges cleared on verification** (loop-managed convention — every resolved
+  sibling is `blockedBy`-free, so lifting them would be a quiet design call); **zero genuine new forks**.
+  Ledger: [`audits/608-remediation-ledger.md`](../audits/608-remediation-ledger.md).
+- **Standing forward gate** — D3-readiness is now automatic in the loader (`src/_data/backlog.js`:
+  `projectPending` demotes open builds behind a no-surface `concept` project out of Tier A; holds #604/#170
+  on `webplugs`); `npm run check:health` added; surfaced in `check:readiness --select` (*"Held — project
+  pending"*) and `check:standards` (aggregate warning); documented in
+  [backlog-workflow.md](../docs/agent/backlog-workflow.md) → *Principle-conformance pre-flight* (the
+  three-layer gate + remediate-don't-escalate flow) and cross-ref'd from the batch skill.
+- **Residual escalation** — only the 3 soft nods already inside prepared decisions (#606 timing, #564 F2,
+  #584 F3); they ratify through the normal decision path, unchanged.
+- **Gate:** `check:standards` 0 errors; 183 backlog/readiness unit tests pass; 11ty build smoke clean.
+- **Leftover filed:** #621 (regression test for the D3-readiness loader rule).

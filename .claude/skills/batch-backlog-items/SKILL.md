@@ -30,7 +30,13 @@ judgment call); the happy path is these commands:
    **When the skim shows an item is mis-flagged** (really a decision/fork, deferred/gated, or mis-sized),
    **fix the flag in place, don't just skip it** — `type: decision` (→ Tier B), `status: parked`, or bump
    `size` (to `13` to drop it from the eligible pool) — then re-run the gate. A clean pool is the
-   batch's own input (full rule: *Eligibility* → reclassification note). **If the eligible pool can't fill
+   batch's own input (full rule: *Eligibility* → reclassification note). **The body skim is principle
+   conformance, not just a fork check (#608):** also catch a stale `file:line` ref, a false premise, or a
+   missing placement note, and **remediate it in place** (pure-agent fixes only — never quietly make a
+   design call to force batchability); escalate only an irreducible fork as a ready-to-ratify nod. D3-readiness
+   (an item whose `relatedProject` is a `concept` project with no shipped surface) is already demoted by the
+   loader, so it won't reach the pool — but `npm run check:health` surfaces the deterministic governance/ref
+   flags worth a glance before a long run (full rule: *Selecting* → *Principle-conformance pre-flight*). **If the eligible pool can't fill
    the budget**, the batch is simply shorter (stop rule 3) — don't pad it with `≥13`/`epic` work; those stay
    single-item (the *Other Tier-A* list), surfaced separately.
 2. **Present the ordered plan, get one "go"**, and emit the single `batch-<date>-<NNN>-<NNN>…` rename

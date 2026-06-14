@@ -214,6 +214,15 @@ if (SELECT) {
   });
   else console.log(`${DIM}  none.${RST}`);
 
+  // D3-READINESS (#608) — open builds the loader DEMOTED out of Tier A because their `relatedProject` is
+  // a `concept` project with no shipped surface yet (the standard must exist first). Surfaced so the human
+  // sees WHY they're held — it's not a `blockedBy` edge, so they'd otherwise look mysteriously absent.
+  const pending = items.filter((it) => it.projectPending);
+  if (pending.length) {
+    console.log(`\n${YEL}${BLD}Held — project pending (D3-readiness): the relatedProject is \`concept\` with no shipped surface; the standard must exist first${RST}`);
+    pending.forEach((it) => console.log(`  ${YEL}⊗${RST} #${it.num} ${it.id.replace(/^\d+-/, '')} ${DIM}— relatedProject \`${it.relatedProject}\` (${it.relatedProjectStatus}); demoted to Tier C until the project ships${RST}`));
+  }
+
   console.log(`\n${DIM}Ranking is a pure projection of loader fields (tier/batchable/leverage) — instant, identical to the tab, no rubric re-derived. Body-fork pre-flight (skill) is the only per-item judgment left.${RST}`);
   process.exit(0);
 }
