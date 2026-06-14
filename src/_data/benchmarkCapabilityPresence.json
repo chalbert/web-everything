@@ -278,9 +278,9 @@
       "capabilityId": "dark-mode",
       "sourceId": "primer",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Color modes & themes",
+      "url": "https://primer.style/product/primitives/"
     },
     {
       "capabilityId": "data-table",
@@ -494,9 +494,9 @@
       "capabilityId": "focus-visible-policy",
       "sourceId": "primer",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Focus management (focus-visible)",
+      "url": "https://primer.style/accessibility/design-guidance/focus-management/"
     },
     {
       "capabilityId": "form-layout",
@@ -966,9 +966,9 @@
       "capabilityId": "stack-layout",
       "sourceId": "primer",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Stack",
+      "url": "https://primer.style/product/components/stack/"
     },
     {
       "capabilityId": "stepper",
@@ -3457,6 +3457,414 @@
       "provenance": "verified",
       "sourceName": "Responsive (primitive)",
       "url": "https://atlassian.design/components/primitives"
+    },
+    {
+      "capabilityId": "button",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button",
+      "url": "https://primer.style/product/components/button/"
+    },
+    {
+      "capabilityId": "icon-button",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "IconButton",
+      "url": "https://primer.style/product/components/icon-button/"
+    },
+    {
+      "capabilityId": "button-group",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "ButtonGroup",
+      "url": "https://primer.style/product/components/button-group/"
+    },
+    {
+      "capabilityId": "link",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Link",
+      "url": "https://primer.style/product/components/link/"
+    },
+    {
+      "capabilityId": "text-field",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "TextInput",
+      "url": "https://primer.style/product/components/text-input/"
+    },
+    {
+      "capabilityId": "textarea",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Textarea",
+      "url": "https://primer.style/product/components/textarea/"
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Select",
+      "url": "https://primer.style/product/components/select/"
+    },
+    {
+      "capabilityId": "multi-select",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "SelectPanel",
+      "url": "https://primer.style/product/components/select-panel/"
+    },
+    {
+      "capabilityId": "combobox",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Autocomplete",
+      "url": "https://primer.style/product/components/autocomplete/"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://primer.style/product/components/checkbox/"
+    },
+    {
+      "capabilityId": "radio-group",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "RadioGroup",
+      "url": "https://primer.style/product/components/radio-group/"
+    },
+    {
+      "capabilityId": "switch",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "ToggleSwitch",
+      "url": "https://primer.style/product/components/toggle-switch/"
+    },
+    {
+      "capabilityId": "tags-input",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "TextInputWithTokens",
+      "url": "https://primer.style/product/components/text-input-with-tokens/"
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "FormControl",
+      "url": "https://primer.style/product/components/form-control/"
+    },
+    {
+      "capabilityId": "disclosure",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Details",
+      "url": "https://primer.style/product/components/details/"
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "UnderlinePanels",
+      "url": "https://primer.style/product/components/underline-panels/"
+    },
+    {
+      "capabilityId": "menu",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "ActionMenu",
+      "url": "https://primer.style/product/components/action-menu/"
+    },
+    {
+      "capabilityId": "listbox",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "ActionList",
+      "url": "https://primer.style/product/components/action-list/"
+    },
+    {
+      "capabilityId": "tree-view",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "TreeView",
+      "url": "https://primer.style/product/components/tree-view/"
+    },
+    {
+      "capabilityId": "segmented-control",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "SegmentedControl",
+      "url": "https://primer.style/product/components/segmented-control/"
+    },
+    {
+      "capabilityId": "breadcrumb",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Breadcrumbs",
+      "url": "https://primer.style/product/components/breadcrumbs/"
+    },
+    {
+      "capabilityId": "pagination",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Pagination",
+      "url": "https://primer.style/product/components/pagination/"
+    },
+    {
+      "capabilityId": "sidebar-nav",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "NavList",
+      "url": "https://primer.style/product/components/nav-list/"
+    },
+    {
+      "capabilityId": "navbar",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "UnderlineNav",
+      "url": "https://primer.style/product/components/underline-nav/"
+    },
+    {
+      "capabilityId": "dialog",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog",
+      "url": "https://primer.style/product/components/dialog/"
+    },
+    {
+      "capabilityId": "alert-dialog",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "ConfirmationDialog",
+      "url": "https://primer.style/product/components/confirmation-dialog/"
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popover",
+      "url": "https://primer.style/product/components/popover/"
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tooltip",
+      "url": "https://primer.style/product/components/tooltip/"
+    },
+    {
+      "capabilityId": "inline-alert",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "InlineMessage",
+      "url": "https://primer.style/product/components/inline-message/"
+    },
+    {
+      "capabilityId": "data-table",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "DataTable",
+      "url": "https://primer.style/product/components/data-table/"
+    },
+    {
+      "capabilityId": "list",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "ActionList",
+      "url": "https://primer.style/product/components/action-list/"
+    },
+    {
+      "capabilityId": "card",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Card",
+      "url": "https://primer.style/product/components/card/"
+    },
+    {
+      "capabilityId": "avatar",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Avatar",
+      "url": "https://primer.style/product/components/avatar/"
+    },
+    {
+      "capabilityId": "badge",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "CounterLabel",
+      "url": "https://primer.style/product/components/counter-label/"
+    },
+    {
+      "capabilityId": "tag-chip",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Label",
+      "url": "https://primer.style/product/components/label/"
+    },
+    {
+      "capabilityId": "timeline",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Timeline",
+      "url": "https://primer.style/product/components/timeline/"
+    },
+    {
+      "capabilityId": "progress-linear",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "ProgressBar",
+      "url": "https://primer.style/product/components/progress-bar/"
+    },
+    {
+      "capabilityId": "spinner",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spinner",
+      "url": "https://primer.style/product/components/spinner/"
+    },
+    {
+      "capabilityId": "skeleton",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "SkeletonBox",
+      "url": "https://primer.style/product/components/skeleton-box/"
+    },
+    {
+      "capabilityId": "empty-state",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Blankslate",
+      "url": "https://primer.style/product/components/blankslate/"
+    },
+    {
+      "capabilityId": "grid-layout",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "PageLayout",
+      "url": "https://primer.style/product/components/page-layout/"
+    },
+    {
+      "capabilityId": "resizable-splitter",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "SplitPageLayout",
+      "url": "https://primer.style/product/components/split-page-layout/"
+    },
+    {
+      "capabilityId": "anchored-positioning",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "AnchoredOverlay",
+      "url": "https://primer.style/product/components/anchored-overlay/"
+    },
+    {
+      "capabilityId": "focus-trap",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Focus management",
+      "url": "https://primer.style/accessibility/design-guidance/focus-management/"
+    },
+    {
+      "capabilityId": "focus-return",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Focus management",
+      "url": "https://primer.style/accessibility/design-guidance/focus-management/"
+    },
+    {
+      "capabilityId": "color-tokens",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color primitives",
+      "url": "https://primer.style/product/primitives/color/"
+    },
+    {
+      "capabilityId": "typography-scale",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Typography primitives",
+      "url": "https://primer.style/product/primitives/typography/"
+    },
+    {
+      "capabilityId": "spacing-scale",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Size/spacing primitives",
+      "url": "https://primer.style/product/primitives/size/"
+    },
+    {
+      "capabilityId": "keyboard-interaction",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Focus management (keyboard)",
+      "url": "https://primer.style/accessibility/design-guidance/focus-management/"
+    },
+    {
+      "capabilityId": "color-contrast",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color considerations",
+      "url": "https://primer.style/accessibility/design-guidance/color-considerations/"
+    },
+    {
+      "capabilityId": "aria-apg-adherence",
+      "sourceId": "primer",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Semantic HTML and ARIA",
+      "url": "https://primer.style/accessibility/design-guidance/semantic-html-and-aria/"
     }
   ]
 }
