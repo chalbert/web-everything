@@ -1,5 +1,25 @@
 [
   {
+    "id": "webdocs-incumbent-ingestion-adapters",
+    "title": "Web Docs incumbent-ingestion adapters — Storybook (CSF) & Mintlify to the webcases pivot",
+    "status": "open",
+    "summary": "Prior-art survey + architecture prep for decision #426 (the adapter home/import fork that governs every webdocs ingestion adapter — #426 Storybook, #429 Mintlify, future Docusaurus), under epic #398 (Web Docs product). A webdocs ingestion adapter is a bottom-up normalization-hub shim (the #150 lossy-pivot direction): read an existing component-docs source and emit the webcases pivot the #424 generator consumes — WebCase = {id,title,description,code}, WebCases = Record<blockId, WebCase[]> (webdocs/generator.ts:27-46). Storybook (CSF 3): one Meta default export + N named Story exports per *.stories.* module; id ← story export key / @storybook/csf toId(); title ← story name or startCase(exportKey); description ← JSDoc above the story / parameters.docs.description.story; code ← verbatim story source or parameters.docs.source.code (the runtime 'dynamic' snippet is framework-specific, post-render — prefer the literal). Lossy/no-equivalent: args/argTypes control matrices, play interaction tests, decorators (so code isn't self-contained), multi-framework renderings. Reuse @storybook/csf-tools (readCsf/loadCsf → CsfFile.parse(), Storybook's own indexer) + @storybook/csf (toId, storyNameFromExport); .mdx docs via @mdx-js/mdx + remark-mdx. Mintlify: docs.json nav config + *.mdx pages with YAML frontmatter; id ← MDX path/slug, group ← navigation.groups[].group; title/description ← frontmatter; code ← fenced blocks / <CodeGroup> / <RequestExample>. Lossy: interactive OpenAPI playground, component embeds (<Card>/<Tabs>/<Steps>), nav hierarchy, multi-language CodeGroup sets, prose body. Reuse gray-matter + @mdx-js/mdx + remark + unist-util-visit; JSON.parse for docs.json. Cross-cutting: both sources are page/module-grained not case-grained (CSF fans out one-case-per-story naturally; Mintlify needs a per-page-vs-per-snippet granularity choice); the lossy cells ARE the normalization-hub's comparative value — flag, never silently drop. Two forks brought to DoR: (Fork 1, adapter home) co-locate in webeverything/webdocs/adapters/ next to the pivot [recommended — matches the in-repo ingest precedent scripts/validation-normalize/adapters/eslint.mjs, both adapter families live in webeverything, FUI has no @we/webdocs reach: tsconfig.json:20-26 / vite.config.mts:126-132] vs adapters in FUI which first requires exposing the pivot [honors the literal 'adapters→FUI' line of the #091 layering ruling but splits the generator's input-shim across a repo boundary]; (Fork 2, contract shape) a plain per-source provider module {source, ingest} → WebCases [recommended — author-time devtools provider seam per the runtime-DI-vs-provider rule, NOT a CustomXRegistry] vs a CustomWebcasesAdapterRegistry [cargo-cult: no runtime consultation]. Full grounding in reports/2026-06-13-webdocs-ingestion-adapter-home.md.",
+    "dateOpened": "2026-06-13",
+    "tags": [
+      "webdocs",
+      "frontier-ui",
+      "adapters",
+      "ingestion",
+      "storybook",
+      "mintlify",
+      "normalization-hub",
+      "decision-prep"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webdocs"
+  },
+  {
     "id": "on-device-ui-vision",
     "title": "On-device UI-screenshot vision — capability ceiling, runtimes, distillation (a moving target)",
     "status": "open",
@@ -1409,5 +1429,25 @@
     "relatedBlocks": [],
     "relatedPlugs": [],
     "relatedProject": "webvalidation"
+  },
+  {
+    "id": "webdocs-primitive-form",
+    "title": "Web Docs self-host primitive form — rendering contract, islands, FUI authoring path",
+    "status": "open",
+    "summary": "Form grounding for backlog #425 (the FUI self-host Web Docs primitives, under the #091/#398 Web Docs product line). #091/#398 settled the home (FUI ships the primitives) and the what, not the form. Reading the tree corrects the stale 'block vs JSX vs package' framing: @frontierui/jsx-runtime is an HTML-mirror JSX factory that builds light DOM and IS FUI's content path — but it has no server render-to-string anywhere, while a docs product's load-bearing need is static HTML (host-anywhere, SEO, no-JS readable). So the real axis is the RENDERING CONTRACT. Prior art names the answer: islands architecture (server-render static HTML by default, hydrate only interactive islands — Astro/Fresh/Qwik; docs sites are its canonical zero-JS use case), with Declarative Shadow DOM as the native server-render mechanism for custom elements. FUI's behavior blocks (droplist/tabs/navigation/for-each) are already light-DOM islands by construction, and jsx-runtime builds light DOM, so the static skeleton needs NO DSD. Recommendation: author primitives as JSX on jsx-runtime + a new server string-emit (the only real gap — carve as a separable FUI-core prerequisite build), compose existing behavior blocks as light-DOM islands (hydrate-optional, degrades to static HTML), packaged as a single published @frontierui/webdocs-ui. Rejected: client-runtime SPA (weak self-host floor) and a Nunjucks/server-template form (second paradigm + engine lock-in). One open judgment call: hydrate-optional vs pure-static for interactive panels — defaulted to hydrate-optional, confidence medium.",
+    "dateOpened": "2026-06-14",
+    "tags": [
+      "webdocs",
+      "frontier-ui",
+      "primitives",
+      "islands",
+      "ssr",
+      "static-first",
+      "self-host",
+      "decision-prep"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webdocs"
   }
 ]

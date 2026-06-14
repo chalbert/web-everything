@@ -1,0 +1,54 @@
+<h3>The Question</h3>
+<p>
+    Decisions <a href="/backlog/091-web-docs-as-a-service-plateau/">#091</a> /
+    <a href="/backlog/398-build-the-web-docs-product-fui-open-primitives-plateau-app-o/">#398</a> settled the
+    <em>home</em> (Frontier UI ships the self-host Web Docs primitives) and the <em>what</em> ("enough free,
+    composable parts to assemble a self-hosted Web Docs UI — the cancel-and-self-host floor") but
+    <strong>not the form</strong>. This survey, per design-first step&nbsp;1, grounds the form fork in
+    <a href="/backlog/425-self-host-web-docs-ui-primitives-the-cancel-and-self-host-fl/">#425</a>.
+</p>
+
+<h3>The framing was stale — the real axis is the rendering contract</h3>
+<p>
+    The item's batch pre-flight note framed the call as "custom-element block vs JSX component vs new
+    package" and claimed FUI has "no content precedent" and that <code>jsx-runtime</code> is "unused for
+    content." Reading the tree corrects this: <code>@frontierui/jsx-runtime</code> is an
+    <em>HTML-mirror-dialect JSX factory that builds real (light) DOM</em>, and it <strong>is</strong> FUI's
+    content-authoring path (used by <code>blocks/renderers/</code> and the <code>declarative-spa-jsx</code>
+    demo). The genuine tension is not "block vs JSX" — it is the <strong>rendering contract</strong>: a docs
+    product's load-bearing requirement is <strong>static HTML</strong> (host-anywhere, SEO, readable with JS
+    off), yet every FUI content path is <strong>client-runtime DOM</strong> (no <code>renderToString</code>
+    anywhere), while WE's reference <code>/protocols/</code> impl is the opposite — server-rendered Nunjucks.
+</p>
+
+<h3>Prior art — islands architecture</h3>
+<p>
+    The established pattern for a mostly-static content page with small interactive regions is
+    <strong>islands architecture</strong>: server-render HTML by default, ship JS and hydrate only the
+    interactive islands, independently
+    (<a href="https://docs.astro.build/en/concepts/islands/">Astro</a>,
+    <a href="https://www.patterns.dev/vanilla/islands-architecture/">patterns.dev</a>; docs sites are its
+    canonical zero-JS-by-default use case). The native-platform mechanism for server-rendering a custom
+    element is <strong>Declarative Shadow DOM</strong> (<code>&lt;template shadowrootmode&gt;</code> attaches
+    a shadow root with no JS; hydration optional —
+    <a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_shadow_DOM">MDN</a>,
+    <a href="https://lit.dev/docs/ssr/client-usage/">Lit&nbsp;SSR</a>), though DSD hydration is a known
+    footgun. <strong>FUI's behavior blocks</strong> (<code>droplist</code>, <code>tabs</code>,
+    <code>navigation</code>, <code>for-each</code>) are <em>light-DOM custom elements that enhance markup in
+    place</em> — i.e. already islands by construction — and jsx-runtime builds light DOM, so the static
+    skeleton needs <strong>no DSD</strong>: server-rendered HTML + light-DOM behavior-block islands is the
+    simplest correct composition.
+</p>
+
+<h3>Recommendation (for #425)</h3>
+<p>
+    A static-first islands form: author primitives as <strong>JSX on <code>@frontierui/jsx-runtime</code></strong>
+    with a new <strong>server render-to-string emit</strong> (the only real gap — carve as a separable
+    FUI-core prerequisite build), compose the <strong>existing behavior blocks as light-DOM islands</strong>
+    (hydrate-optional, degrades to static HTML), packaged as a single published
+    <strong><code>@frontierui/webdocs-ui</code></strong>. Rejected: a client-runtime SPA (weak self-host
+    floor), and a Nunjucks/server-template form (invents a second FUI paradigm + engine lock-in). The one
+    open judgment call is hydrate-optional vs pure-static for the interactive panels — defaulted to
+    hydrate-optional, confidence medium. Full grounding in
+    <a href="https://github.com/">reports/2026-06-14-webdocs-primitive-form.md</a>.
+</p>

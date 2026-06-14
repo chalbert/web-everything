@@ -4,7 +4,7 @@ workItem: story
 size: 5
 parent: "398"
 status: open
-blockedBy: ["424", "425"]
+blockedBy: ["424", "545"]
 dateOpened: "2026-06-12"
 tags: [webdocs, plateau, plateau-app, conformance, open-core, product-build]
 relatedProject: webdocs
