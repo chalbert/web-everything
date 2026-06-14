@@ -5,9 +5,9 @@ size: 5
 parent: "170"
 status: open
 locus: frontierui
-blockedBy: ["447", "448"]
+blockedBy: ["447", "448", "580"]
 dateOpened: "2026-06-12"
-dateStarted: "2026-06-13"
+dateStarted: "2026-06-14"
 tags: []
 ---
 
@@ -32,3 +32,20 @@ Reclassified during a batch. "Point FU at @we/plugs/* and delete frontierui/plug
 - High blast radius (a tree 52 files depend on) -> acceptance "FU build + tests green" needs a full build + vitest (+ e2e) cycle.
 
 No design fork on its *home* (clearly frontierui, plateau-app precedent at `tsconfig.json:16` + `vite.config.mts:119`) — only mis-sized + one test-relocation sub-decision. Work whole via `/next 449` in a focused FU session.
+
+## Outgrew + blocked (2026-06-14 batch) — the "WE superset" premise is false
+
+Claimed in a batch and surveyed before any edit. The premise this item rests on — "after #447 + #448, WE is
+the runtime superset; WE-ahead files reach FU through the alias automatically, **no copy-down**" — does not
+hold. A tree diff of `frontierui/plugs/` vs `webeverything/plugs/` finds, beyond the 8 expected FU-only files,
+**16 common files whose content diverges**, with **FU ahead in some** (`webcontexts/CustomContext.ts`: 24
+lines present in FU, absent in WE — whole `get`/`set`/`has`/`keys`/`values`/`entries` methods). Deleting
+`frontierui/plugs/` and aliasing to WE would therefore **silently lose FU runtime code** — not a mechanical
+alias + delete.
+
+This is a verified outgrow (evidence-backed, not a "looks big" guess): the item is now gated on a
+reconciliation precursor, **[#580](/backlog/580-reconcile-the-16-divergent-fu-we-plugs-files-so-we-is-a-true/)**
+(`blockedBy` added), which converges the two trees so WE is a true superset (porting FU-ahead files up first).
+Once #580 lands, #449 is the mechanical alias + delete it was scoped as. Released back to `open` unworked; the
+batch stopped here (stop rule 4). The earlier test-relocation sub-decision still stands (relocate the 7 FU-only
+tests to `frontierui/__tests__/` importing via `@we/plugs`) and folds into #580/#449.
