@@ -3,10 +3,12 @@ type: idea
 workItem: story
 size: 5
 parent: "193"
-status: open
+status: resolved
 locus: frontierui
 dateOpened: "2026-06-11"
-dateStarted: "2026-06-11"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: frontierui/blocks/droplist/parseOptions.ts
 tags: []
 ---
 
@@ -51,3 +53,26 @@ parsing + tests) **plus reconstructing the dropped `@withOptions`/`FieldValue` p
 (it did not survive the plateau → Frontier UI port; nothing equivalent exists in the tree today). Re-point
 to 8, or split into "value-string parser + 1 reference behavior" then "remaining 6 behaviors", before
 batching. (Released from an in-flight batch for this reason — it's a focused refactor, not a quick task.)
+
+## Resolution (2026-06-14, batch) — split per the sizing note's recommendation
+
+Took the split path. **The wrap/refactor fork is moot**: all 7 behaviors already extend
+`CustomAttribute` (the tree was refactored after the design-decision note above was written), so no
+adapter layer is needed — the real and only gap was value-string → options parsing.
+
+Delivered (locus **frontierui**):
+- `blocks/droplist/parseOptions.ts` — the reconstructed `@withOptions`/`FieldValue` value-string parser:
+  a spec-driven grammar (`;`-separated positional + bare boolean flags + `key=value` with type coercion,
+  forward-compatible ignores of unknown keys).
+- **Anchored** as the reference behavior — a static `optionSpec` + a guarded
+  `Object.assign(this.options, parseOptions(this.value, …))` in `connectedCallback`. The guard (a no-op
+  on empty `value`) keeps the programmatic `<auto-complete>` composition unchanged — the Acceptance
+  invariant, asserted by a test.
+- `anchored` registered in the `vite.config` `traitEnforcer` map, so `<ul anchored="bottom-start;flip">`
+  activates declaratively without `<auto-complete>`.
+- Tests: `blocks/droplist/__tests__/declarativeOptions.test.ts` (10 — parser grammar + Anchored
+  declarative activation + programmatic-unchanged guard + static-spec). Existing droplist suites
+  (behaviors, AutoComplete) still green.
+
+The remaining 6 behaviors (Anchor, Clearable, Filter, FocusDelegation, LiveStatus, Selection) are
+mechanical replication of this pattern → carved to **#542** (`blockedBy: 275`).
