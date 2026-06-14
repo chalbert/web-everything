@@ -1,17 +1,23 @@
 ---
 type: issue
-workItem: story
-size: 8
+workItem: epic
 parent: "315"
 status: open
 dateOpened: "2026-06-13"
 tags: [gap-analysis, capability-extraction, benchmark, presence, fan-out]
-blockedBy: ["352"]
 ---
 
 # Exhaustive per-source capability presence + deep doc URLs (fan-out over the join table)
 
-The exhaustive fill of the capability×source presence join table whose **foundation** #352 built ([src/_data/benchmarkCapabilityPresence.json](../src/_data/benchmarkCapabilityPresence.json)). #352 seeded the table from `benchmarkCapabilities.notableIn` (provenance `notable-inference`, no URL) and wrote the extraction method + validator. This item does the actual per-source web extraction — **one batchable slice per corpus source** (26 sources in `benchmarkCorpus.sources`, or small groups): walk each source's docs from its `docsUrl`, confirm presence for each of the 96 capabilities, and upgrade/insert rows to provenance `verified` with the deep doc URL and the vendor's `sourceName`. Genuinely a fan-out — **/slice this per source** before working; each source is an independent, diffable slice. Improves citation quality for the gap→backlog step (#348) and the diffability of re-runs.
+**Umbrella epic for the per-source exhaustive fill** of the capability×source presence join table built
+by **foundation** #352 ([benchmarkCapabilityPresence.json](../src/_data/benchmarkCapabilityPresence.json)).
+#352 settled the extraction method, schema, and validator and seeded `notable-inference` rows; only the
+per-source web extraction remains. **Sliced per corpus source (2026-06-13):** one `task` child per
+`sourceId` in [benchmarkCorpus.sources](../src/_data/benchmarkCorpus.json) (26 sources). Each child walks
+its source's `docsUrl`, confirms presence for the 96 capabilities, and **splices** rows to provenance
+`verified` (deep doc URL + `sourceName`) — never rewriting the whole file, so re-runs diff cleanly.
+Children are fully independent (disjoint `sourceId` rows) and immediately batchable; they raise citation
+quality for the gap→backlog step (#348).
 
 ## Method (from #352)
 
