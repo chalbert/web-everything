@@ -430,9 +430,9 @@
       "capabilityId": "empty-state",
       "sourceId": "polaris",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Empty state",
+      "url": "https://polaris-react.shopify.com/components/layout-and-structure/empty-state"
     },
     {
       "capabilityId": "fab",
@@ -2545,6 +2545,462 @@
       "provenance": "verified",
       "sourceName": "Form errors",
       "url": "https://spectrum.adobe.com/page/form-errors/"
+    },
+    {
+      "capabilityId": "button",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button",
+      "url": "https://polaris-react.shopify.com/components/actions/button"
+    },
+    {
+      "capabilityId": "button-group",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button group",
+      "url": "https://polaris-react.shopify.com/components/actions/button-group"
+    },
+    {
+      "capabilityId": "link",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Link",
+      "url": "https://polaris-react.shopify.com/components/navigation/link"
+    },
+    {
+      "capabilityId": "text-field",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Text field",
+      "url": "https://polaris-react.shopify.com/components/selection-and-input/text-field"
+    },
+    {
+      "capabilityId": "number-input",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Text field (number)",
+      "url": "https://polaris-react.shopify.com/components/selection-and-input/text-field"
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Select",
+      "url": "https://polaris-react.shopify.com/components/selection-and-input/select"
+    },
+    {
+      "capabilityId": "multi-select",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Choice list",
+      "url": "https://polaris-react.shopify.com/components/selection-and-input/choice-list"
+    },
+    {
+      "capabilityId": "combobox",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Autocomplete",
+      "url": "https://polaris-react.shopify.com/components/selection-and-input/autocomplete"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://polaris-react.shopify.com/components/selection-and-input/checkbox"
+    },
+    {
+      "capabilityId": "radio-group",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio button",
+      "url": "https://polaris-react.shopify.com/components/selection-and-input/radio-button"
+    },
+    {
+      "capabilityId": "range-slider",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Range slider",
+      "url": "https://polaris-react.shopify.com/components/selection-and-input/range-slider"
+    },
+    {
+      "capabilityId": "date-picker",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Date picker",
+      "url": "https://polaris-react.shopify.com/components/selection-and-input/date-picker"
+    },
+    {
+      "capabilityId": "color-picker",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color picker",
+      "url": "https://polaris-react.shopify.com/components/selection-and-input/color-picker"
+    },
+    {
+      "capabilityId": "file-upload",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Drop zone",
+      "url": "https://polaris-react.shopify.com/components/selection-and-input/drop-zone"
+    },
+    {
+      "capabilityId": "tags-input",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tag",
+      "url": "https://polaris-react.shopify.com/components/selection-and-input/tag"
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Form layout",
+      "url": "https://polaris-react.shopify.com/components/layout-and-structure/form-layout"
+    },
+    {
+      "capabilityId": "disclosure",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Collapsible",
+      "url": "https://polaris-react.shopify.com/components/utilities/collapsible"
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tabs",
+      "url": "https://polaris-react.shopify.com/components/navigation/tabs"
+    },
+    {
+      "capabilityId": "menu",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Action list",
+      "url": "https://polaris-react.shopify.com/components/lists/action-list"
+    },
+    {
+      "capabilityId": "listbox",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Listbox",
+      "url": "https://polaris-react.shopify.com/components/lists/listbox"
+    },
+    {
+      "capabilityId": "segmented-control",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button group (segmented)",
+      "url": "https://polaris-react.shopify.com/components/actions/button-group"
+    },
+    {
+      "capabilityId": "pagination",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Pagination",
+      "url": "https://polaris-react.shopify.com/components/navigation/pagination"
+    },
+    {
+      "capabilityId": "navbar",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Top bar",
+      "url": "https://polaris-react.shopify.com/components/deprecated/top-bar"
+    },
+    {
+      "capabilityId": "sidebar-nav",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Navigation",
+      "url": "https://polaris-react.shopify.com/components/deprecated/navigation"
+    },
+    {
+      "capabilityId": "dialog",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Modal",
+      "url": "https://polaris-react.shopify.com/components/deprecated/modal"
+    },
+    {
+      "capabilityId": "drawer",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Sheet",
+      "url": "https://polaris-react.shopify.com/components/deprecated/sheet"
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popover",
+      "url": "https://polaris-react.shopify.com/components/overlays/popover"
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tooltip",
+      "url": "https://polaris-react.shopify.com/components/overlays/tooltip"
+    },
+    {
+      "capabilityId": "toast",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toast",
+      "url": "https://polaris-react.shopify.com/components/deprecated/toast"
+    },
+    {
+      "capabilityId": "inline-alert",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Banner",
+      "url": "https://polaris-react.shopify.com/components/feedback-indicators/banner"
+    },
+    {
+      "capabilityId": "data-table",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Data table",
+      "url": "https://polaris-react.shopify.com/components/tables/data-table"
+    },
+    {
+      "capabilityId": "list",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "List",
+      "url": "https://polaris-react.shopify.com/components/lists/list"
+    },
+    {
+      "capabilityId": "card",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Card",
+      "url": "https://polaris-react.shopify.com/components/layout-and-structure/card"
+    },
+    {
+      "capabilityId": "avatar",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Avatar",
+      "url": "https://polaris-react.shopify.com/components/images-and-icons/avatar"
+    },
+    {
+      "capabilityId": "badge",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Badge",
+      "url": "https://polaris-react.shopify.com/components/feedback-indicators/badge"
+    },
+    {
+      "capabilityId": "tag-chip",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tag",
+      "url": "https://polaris-react.shopify.com/components/selection-and-input/tag"
+    },
+    {
+      "capabilityId": "progress-linear",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress bar",
+      "url": "https://polaris-react.shopify.com/components/feedback-indicators/progress-bar"
+    },
+    {
+      "capabilityId": "spinner",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spinner",
+      "url": "https://polaris-react.shopify.com/components/feedback-indicators/spinner"
+    },
+    {
+      "capabilityId": "skeleton",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Skeleton",
+      "url": "https://polaris-react.shopify.com/components/feedback-indicators/skeleton-body-text"
+    },
+    {
+      "capabilityId": "stack-layout",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Block stack / Inline stack",
+      "url": "https://polaris-react.shopify.com/components/layout-and-structure/block-stack"
+    },
+    {
+      "capabilityId": "grid-layout",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Grid",
+      "url": "https://polaris-react.shopify.com/components/layout-and-structure/grid"
+    },
+    {
+      "capabilityId": "divider",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Divider",
+      "url": "https://polaris-react.shopify.com/components/layout-and-structure/divider"
+    },
+    {
+      "capabilityId": "scroll-area",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Scrollable",
+      "url": "https://polaris-react.shopify.com/components/utilities/scrollable"
+    },
+    {
+      "capabilityId": "focus-trap",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Modal focus management",
+      "url": "https://polaris-react.shopify.com/components/deprecated/modal"
+    },
+    {
+      "capabilityId": "focus-return",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Modal activator focus return",
+      "url": "https://polaris-react.shopify.com/components/deprecated/modal"
+    },
+    {
+      "capabilityId": "dismissal",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Modal dismissal",
+      "url": "https://polaris-react.shopify.com/components/deprecated/modal"
+    },
+    {
+      "capabilityId": "async-pagination",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Autocomplete lazy loading",
+      "url": "https://polaris-react.shopify.com/components/selection-and-input/autocomplete"
+    },
+    {
+      "capabilityId": "form-validation-flow",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Inline error",
+      "url": "https://polaris-react.shopify.com/components/selection-and-input/inline-error"
+    },
+    {
+      "capabilityId": "responsive-adaptive",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Breakpoints tokens",
+      "url": "https://polaris-react.shopify.com/tokens/breakpoints"
+    },
+    {
+      "capabilityId": "color-tokens",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color tokens",
+      "url": "https://polaris-react.shopify.com/tokens/color"
+    },
+    {
+      "capabilityId": "typography-scale",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Font tokens",
+      "url": "https://polaris-react.shopify.com/tokens/font"
+    },
+    {
+      "capabilityId": "spacing-scale",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Space tokens",
+      "url": "https://polaris-react.shopify.com/tokens/space"
+    },
+    {
+      "capabilityId": "elevation",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Shadow tokens",
+      "url": "https://polaris-react.shopify.com/tokens/shadow"
+    },
+    {
+      "capabilityId": "radius",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Border tokens",
+      "url": "https://polaris-react.shopify.com/tokens/border"
+    },
+    {
+      "capabilityId": "motion-tokens",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Motion tokens",
+      "url": "https://polaris-react.shopify.com/tokens/motion"
+    },
+    {
+      "capabilityId": "keyboard-interaction",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accessibility (keyboard)",
+      "url": "https://polaris-react.shopify.com/foundations/accessibility"
+    },
+    {
+      "capabilityId": "aria-apg-adherence",
+      "sourceId": "polaris",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accessibility (WAI-ARIA, WCAG)",
+      "url": "https://polaris-react.shopify.com/foundations/accessibility"
     }
   ]
 }
