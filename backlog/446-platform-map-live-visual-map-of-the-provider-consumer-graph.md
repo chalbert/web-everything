@@ -4,9 +4,12 @@ locus: plateau-app
 workItem: story
 size: 3
 parent: "402"
-status: open
+status: resolved
 blockedBy: ["442"]
 dateOpened: "2026-06-12"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: plateau-app/src/platform-manager/platform-map.ts
 tags: [plateau, plateau-app, platform-map, visualization, dependency-graph]
 relatedProject: webregistries
 crossRef: { url: /backlog/402-plateau-platform-manager-product-graph-aggregation-impact-an/, label: "Platform-manager product epic (#402)" }
