@@ -2,9 +2,12 @@
 type: issue
 workItem: story
 size: 8
-status: open
+status: resolved
 blockedBy: ["544"]
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: @frontierui/webdocs-ui
 tags: []
 ---
 
