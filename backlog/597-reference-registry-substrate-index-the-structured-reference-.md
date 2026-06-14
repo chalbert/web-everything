@@ -4,8 +4,11 @@ workItem: story
 size: 3
 parent: "583"
 blockedBy: []
-status: open
+status: resolved
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: "scripts/gen-reference-index.mjs + src/_data/referenceIndex.json (npm run gen:reference-index)"
 relatedProject: webdocs
 relatedReport: reports/2026-06-14-backlog-split-analysis.md
 tags: [monitoring, references, registry, substrate, link-rot]
@@ -51,3 +54,16 @@ index file.
 
 No buried fork: the index schema and canonical-URL dedup are mechanical; the heterogeneous-home
 retirement shape is #584's decision, not this build's.
+
+## Progress
+
+- **Resolved 2026-06-14.** Built `scripts/gen-reference-index.mjs` (`npm run gen:reference-index`) —
+  a deterministic walk of the five structured homes that emits the deduped index to
+  `src/_data/referenceIndex.json`. **1182 unique URLs from 1460 occurrences** (corpus 51, references
+  28, blocks 93, capability 1266, intents 22 — matching the scope table). Dedup is by canonical URL
+  (lowercase proto/host, strip trailing slash; query + fragment kept so deep-link demos stay
+  distinct); each row is `{ url, home, sourceId, label, homes[], occurrences }` — `homes[]` records
+  every home a URL appears in (e.g. Carbon → corpus + references), keeping provenance lossless. The
+  file carries a `summary.byHome` count block (the count-by-home demoable render) and **no timestamp**,
+  so it's a no-op diff on re-run (verified idempotent). Freeform/internal homes left out of scope per
+  the body; liveness (#585) and retirement shape (#584) remain their own slices.
