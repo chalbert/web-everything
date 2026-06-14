@@ -2247,9 +2247,9 @@
         "rationale": "Reads naturally as the thing you author. The name attribute + the define-here children disambiguate it from Vue's instantiate-here <component :is>. Alternatives kept open: <define-element>, <custom-element>, the WICG <definition>."
       },
       "shadowAttribute": {
-        "description": "shadow=\"open|closed|none\" selects the shadow mode; none means a light-DOM component. (Open point DC-2.)",
+        "description": "shadow=\"open|closed|none\" selects the shadow mode; none means a light-DOM component. The native DSD spelling shadowrootmode=\"open|closed\" is a recognized alias (1:1 with the open|closed sub-axis); shadow= is the default because only it adds the light-DOM 'none' case DSD has no word for. (Open point DC-2.)",
         "openPoint": "DC-2",
-        "rationale": "Shorter than native shadowrootmode and adds the light-DOM case DSD has no word for. Documented as mapping onto attachShadow / Declarative Shadow DOM."
+        "rationale": "Shorter than native shadowrootmode and adds the light-DOM case DSD has no word for, so shadow= is the default — but per most-flexible-default + the #046 precedent (default tag + recognized alias), the native shadowrootmode spelling is an accepted alias, not withheld: shadowrootmode=\"open|closed\" desugars identically to shadow=\"open|closed\". Authoring vocabulary only; no behavior change (#045/#615). Documented as mapping onto attachShadow / Declarative Shadow DOM."
       },
       "registrationTiming": {
         "description": "<component> is an autonomous element that registers its definition in connectedCallback, then removes itself from the DOM. (Open point DC-3.)",
