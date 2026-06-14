@@ -198,3 +198,22 @@ tbody tr.selected { background: var(--accent-soft); }
   letter-spacing: .04em; text-transform: uppercase; }
 .id-card-row { padding: 3px 10px; }
 .id-card-row:last-child { padding-bottom: 8px; }
+
+/* ---- S10 notifications (#421) — hand-rolled stand-in for the draft notification block (#358) ---- */
+.notif { position: relative; display: inline-flex; }
+.notif-bell { position: relative; font-size: 15px; background: transparent; border: none; cursor: pointer;
+  padding: 2px 6px; line-height: 1; color: inherit; }
+.notif-badge { position: absolute; top: -2px; right: -2px; min-width: 15px; height: 15px; padding: 0 3px;
+  border-radius: 8px; background: #c0392b; color: #fff; font-size: 10px; font-weight: 700; line-height: 15px;
+  text-align: center; }
+.notif-panel { position: absolute; top: 28px; right: 0; width: 320px; max-height: 380px; overflow: auto;
+  background: var(--surface, #fff); border: 1px solid var(--line-strong); border-radius: var(--radius);
+  box-shadow: 0 8px 28px rgba(0,0,0,.18); z-index: 50; text-align: left; }
+.notif-hd { padding: 8px 12px; font-weight: 600; font-size: 12px; border-bottom: 1px solid var(--line);
+  background: var(--accent-soft, #dfe4ea); }
+.notif-list { list-style: none; margin: 0; padding: 0; }
+.notif-item { padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 12px; }
+.notif-item.unread { background: #eef5ff; }
+.notif-msg { color: var(--ink-1, #1a1a1a); }
+.notif-meta { margin-top: 3px; font-size: 11px; }
+.notif-empty { padding: 14px 12px; font-size: 12px; }

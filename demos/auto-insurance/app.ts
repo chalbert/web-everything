@@ -27,6 +27,9 @@ import type { Policy, PolicyState, UwFinding, Claim, ClaimState, PaymentMethod }
 import { POLICY_LIFECYCLE, CLAIM_LIFECYCLE } from './domain/lifecycle';
 import { toDecisionRecord } from './domain/decision';
 import { collectPayment, paymentReceived, issuePolicyDocuments } from './domain/binding';
+import {
+  NotificationStore, policyStateNotification, claimStateNotification, type AppNotification,
+} from './domain/notifications';
 
 // The underwriting business guards (S3) — passed to the lifecycle as its GuardResolver, the first real
 // exercise of the weblifecycle authorization-delegation seam. Role-scoping is enforced by the lifecycle
@@ -55,6 +58,38 @@ const claimLifecycle = new DefaultLifecycleProvider<ClaimState>(CLAIM_LIFECYCLE,
 const claimAudit = new DefaultAuditProvider();
 const ADJUSTER = { role: 'adjuster' as const };
 let claimSeq = 0;
+
+// Phase S10 (#421): event-driven notifications. PLATFORM-GAP: #358 — the `notification` standard is still
+// draft (no shipping runtime), so this in-memory store + the topbar bell below hand-roll the surface,
+// tagged as the WE gap this app drives (the second consumer after loan app A's S11). Policy lifecycle
+// changes (bound / referred / …) and claim status changes each raise a notification to the relevant actor.
+const notifications = new NotificationStore();
+let notifOpen = false; // dropdown visibility, honored across re-renders
+
+const NOTIF_TONE: Record<AppNotification['severity'], 'info' | 'positive' | 'caution' | 'critical'> = {
+  info: 'info', success: 'positive', warning: 'caution', error: 'critical',
+};
+
+/** The topbar notification bell + dropdown — a hand-rolled stand-in for the draft notification block (#358). */
+function renderNotifications(): string {
+  const items = notifications.list();
+  const unread = notifications.unreadCount();
+  const rows = items.length
+    ? items.map((n) => {
+        const chip = statusIndicatorHTML({ label: n.to, tone: NOTIF_TONE[n.severity], shape: 'badge' });
+        return `<li class="notif-item${n.read ? '' : ' unread'}"><div class="notif-msg">${n.message}</div><div class="notif-meta">${chip} <span class="muted">· ${new Date(n.at).toLocaleTimeString()}</span></div></li>`;
+      }).join('')
+    : `<li class="notif-empty muted">No notifications yet — bind a policy, refer to underwriting, or advance a claim.</li>`;
+  return `<div class="notif" data-open="${notifOpen}">
+    <button type="button" class="notif-bell" aria-haspopup="true" aria-expanded="${notifOpen}" aria-label="Notifications">
+      🔔${unread ? `<span class="notif-badge">${unread}</span>` : ''}
+    </button>
+    <div class="notif-panel" role="region" aria-label="Notifications"${notifOpen ? '' : ' hidden'}>
+      <div class="notif-hd">Notifications</div>
+      <ul class="notif-list">${rows}</ul>
+    </div>
+  </div>`;
+}
 
 const money = (n: number) => n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
 const FINDINGS: UwFinding[] = ['preferred', 'accept', 'refer', 'decline'];
@@ -477,7 +512,7 @@ function boot() {
   root.innerHTML = `
     <div class="ai-topbar">
       <div class="brand"><span class="logo">◆</span> <b>Beacon</b> <span>Auto Insurance</span></div>
-      <div class="right"><span class="env">DEMO</span><span class="user"><span class="av">AG</span> R. Lindqvist · Agent</span></div>
+      <div class="right"><span class="env">DEMO</span><span id="ai-notif"></span><span class="user"><span class="av">AG</span> R. Lindqvist · Agent</span></div>
     </div>
     <nav class="ai-tabs">${MODULES.map((m) => `<a route:link="${routePath(m.path)}">${m.label}</a>`).join('')}</nav>
     <route-view base="${BASE}" entry="/book">${templates}</route-view>
@@ -485,6 +520,20 @@ function boot() {
 
   const attrs = (window as unknown as { attributes?: { upgrade(root: ParentNode): void } }).attributes;
   attrs?.upgrade(document.body);
+
+  // S10 (#421): keep the topbar bell in sync, and toggle the dropdown (marking read on open).
+  const notifMount = document.getElementById('ai-notif');
+  const refreshNotif = () => { if (notifMount) notifMount.innerHTML = renderNotifications(); };
+  notifications.subscribe(refreshNotif);
+  refreshNotif();
+  notifMount?.addEventListener('click', (e) => {
+    if (!(e.target as HTMLElement).closest('.notif-bell')) return;
+    notifOpen = !notifOpen;
+    if (notifOpen) notifications.markAllRead();
+    refreshNotif();
+  });
+  const notify = (kind: 'policy' | 'claim', ref: string, draft: ReturnType<typeof policyStateNotification>) =>
+    notifications.push(kind, ref, draft, new Date().toISOString());
 
   const fillBook = () => {
     const summary = document.getElementById('book-summary');
@@ -539,6 +588,7 @@ function boot() {
         const entity = { id: current.policyNumber, state: current.state };
         await policyLifecycle.transition(entity, 'bound', ACTOR); // guard now satisfied
         current.state = entity.state;
+        notify('policy', current.policyNumber, policyStateNotification(current.policyNumber, 'bound')); // S10 (#421)
         await showPolicy(current, panel);
       });
       panel.addEventListener('click', async (e) => {
@@ -548,6 +598,7 @@ function boot() {
         current.state = entity.state;
         const docs = issuePolicyDocuments(current, rate(current).premium, at());
         await bookAudit.append({ target: { type: 'policy', id: current.policyNumber }, action: `policy.issued — declarations + ${docs.idCards.length} ID card(s)`, actor: ACTOR, at: docs.issuedAt });
+        notify('policy', current.policyNumber, policyStateNotification(current.policyNumber, 'in-force')); // S10 (#421)
         await showPolicy(current, panel);
       });
     }
@@ -595,6 +646,7 @@ function boot() {
         if (!btn || !current) return;
         await policyLifecycle.transition({ id: current.policyNumber, state: current.state }, btn.dataset.to as PolicyState, UW);
         current.state = btn.dataset.to as PolicyState; // reflect the decision
+        notify('policy', current.policyNumber, policyStateNotification(current.policyNumber, current.state)); // S10 (#421)
         await renderInto(current, panel);
       });
     }
@@ -644,6 +696,7 @@ function boot() {
         if (!btn || !current) return;
         await claimLifecycle.transition({ id: current.claimNumber, state: current.state }, btn.dataset.to as ClaimState, ADJUSTER);
         current.state = btn.dataset.to as ClaimState;
+        notify('claim', current.claimNumber, claimStateNotification(current.claimNumber, current.state)); // S10 (#421)
         await renderInto(current, panel);
       });
     }

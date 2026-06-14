@@ -13,7 +13,8 @@
     { "id": "decision-trace", "concept": "the underwriting decision as a DecisionRecord", "evidence": "decisionTraceHTML|toDecisionRecord" },
     { "id": "audit-trail", "concept": "per-policy immutable history; transitions auto-log + timeline", "evidence": "auditLifecycle|DefaultAuditProvider|\\.queryByEntity\\(" },
     { "id": "stepper", "concept": "the multi-step quote wizard (locked progression + per-step gate)", "evidence": "StepperBehavior" },
-    { "id": "tree-select", "concept": "the coverage hierarchy builder (role=tree, cascade selection)", "evidence": "TreeSelectBehavior" }
+    { "id": "tree-select", "concept": "the coverage hierarchy builder (role=tree, cascade selection)", "evidence": "TreeSelectBehavior" },
+    { "id": "notification", "concept": "event-driven notifications to the relevant actor (policy bound/referred, claim status) — S10 (#421)", "evidence": "NotificationStore|policyStateNotification|claimStateNotification" }
   ],
   "candidateStandards": [
     { "concept": "permissions / authorization (Web Guards CustomGuardProvider — server-authoritative; the UW workbench uses the in-app lifecycle GuardResolver as a stand-in)", "backlog": "289" },
