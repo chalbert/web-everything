@@ -6,8 +6,8 @@
 
 ## Mental model
 **Web Everything** defines browser-aligned standards to unify the web ecosystem. Two layers:
-- **Plugs** (`plugs/`) — core primitives that patch/extend browser APIs (CustomStore, CustomAttribute, InjectorRoot). Exposed on `window` in **plugged mode**; tree-shakeable in **unplugged mode**.
-- **Blocks** (`blocks/`) — reusable implementations built on plugs (SimpleStore, OnEventAttribute, CallParser). Imported directly.
+- **Plugs** — core primitives that patch/extend browser APIs (CustomStore, CustomAttribute, InjectorRoot), usable on `window` in **plugged mode** or tree-shakeable in **unplugged mode**. The plugs **runtime is implementation owned by Frontier UI** (`@frontierui/plugs`, ruling [#606](backlog/606-where-does-the-plugs-platform-layer-runtime-live-web-everyth.md)); **WE owns only the plug *contracts*** (`src/_data/plugs.json`) and consumes the runtime as a client in its demos. (The `plugs/` tree here is the vendored copy pending the [#170](backlog/170-plugs-duplicated-across-webeverything-frontierui.md) re-point.)
+- **Blocks** — reusable implementations built on plugs (SimpleStore, OnEventAttribute, CallParser), likewise implementation owned by Frontier UI; WE keeps the **block protocols** (the per-block contracts). Imported directly.
 
 **Reach ambition:** the standards are *contracts*, not a JS lock-in. The browser/JS runtime is the first realization, not the only one — the goal extends to making contracts realizable in **any server runtime** (.NET, Java, Go…) so the standard reaches the **enterprise** tier where those stacks live. The lever is **forward (generation) adapters**: one internal source of truth projected *outward* into ecosystem-native code — the inverse of the bottom-up **ingest** adapter (incumbent → internal pivot). *Direction under exploration, not yet ratified* — see decision #463 (polyglot MaaS origin), gated on the canonical JS origin #461.
 
@@ -61,7 +61,7 @@
 - **Blocks** 61 — 25 active · 9 concept · 27 draft
 - **Intents** 53 — 15 concept · 38 draft
 - **Glossary terms** 194 · **Research topics** 85 (81 open)
-- **Projects** 38: webadapters, webanalytics, webaudit, webbehaviors, webblocks, webcases, webcharts, webcompliance, webcomponents, webcontexts, webdecisions, webdirectives, webdocs, webediting, webevents, webexpressions, webguards, webidentity, webinjectors, webintents, webintl, weblifecycle, webmanifests, webnotifications, webplugs, webpolicy, webportals, webpositioning, webrealtime, webregistries, webreliability, webreporting, webresources, webstates, webtheme, webtraces, webtraits, webvalidation
+- **Projects** 39: webadapters, webanalytics, webaudit, webbehaviors, webblocks, webcases, webcharts, webcompliance, webcomponents, webcontexts, webdecisions, webdirectives, webdocs, webediting, webevents, webexpressions, webguards, webidentity, webinjectors, webintents, webintl, weblifecycle, webmanifests, webnotifications, webplugs, webpolicy, webportals, webpositioning, webrealtime, webregistries, webreliability, webreporting, webresources, webstates, webtheme, webtraces, webtraits, webvalidation, webworkflows
 <!-- /AUTO-GENERATED:inventory -->
 
 ## Commands

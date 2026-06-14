@@ -13,14 +13,17 @@
 
 ## Plugs vs Blocks
 
-| Layer | Purpose | Location | Window global | Examples |
-|-------|---------|----------|---------------|----------|
-| **plugs** | Core primitives, patches, registries | `plugs/` | Yes (via bootstrap) | CustomStore, CustomAttribute, InjectorRoot |
-| **blocks** | Reusable implementations | `blocks/` | No (import directly) | SimpleStore, OnEventAttribute, CallParser |
+**Ownership (ruling [#606](../../backlog/606-where-does-the-plugs-platform-layer-runtime-live-web-everyth.md)):** the plugs/blocks **runtime is implementation owned by Frontier UI** (`@frontierui/plugs`, `@frontierui/blocks`). **WE owns the *contracts*** — the plug list (`src/_data/plugs.json`), block protocols, intents, and protocols — and consumes the FUI runtime as a client in its demos. The `plugs/` and `blocks/` trees in this repo are **vendored copies pending the [#170](../../backlog/170-plugs-duplicated-across-webeverything-frontierui.md) re-point** to the canonical `@frontierui/*` packages.
+
+| Layer | Purpose | Canonical home | Window global | Examples |
+|-------|---------|----------------|---------------|----------|
+| **plugs** | Core primitives, patches, registries (implementation) | `@frontierui/plugs` (vendored at `plugs/` pending #170) | Yes (via bootstrap) | CustomStore, CustomAttribute, InjectorRoot |
+| **blocks** | Reusable implementations | `@frontierui/blocks` (vendored at `blocks/` pending #170) | No (import directly) | SimpleStore, OnEventAttribute, CallParser |
+| **plug / block contracts** | The standard's plug list + block protocols (what WE owns) | `src/_data/plugs.json`, `src/_data/blocks.json` + `block-descriptions/*` | No (no runnable code) | CustomPositioner, CustomEditorEngine |
 | **protocols** | Conformance contracts owned by a Project (interfaces, registry shapes, observable states/events) | `src/_data/protocols.json` + body in `project-*.njk` | No (no runnable code) | Validation, Error Recovery, Anchor Positioning |
 
 - **Plugged mode**: bootstrap applies patches, exposes globals on `window`.
-- **Unplugged mode**: direct imports, no patches, tree-shakeable.
+- **Unplugged mode**: direct imports, no patches, tree-shakeable. (The unplugged, non-invasive library is the real product surface — #606.)
 
 ## Key patterns
 
