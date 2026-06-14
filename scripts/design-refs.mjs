@@ -38,6 +38,7 @@ import {
   resolveVisionProvider, classifyCandidate, decideAdmission, reviewStateFor, visionEnabled,
   VERDICTS as VISION_VERDICTS,
 } from './design-refs/vision.mjs';
+import { runBenchmark } from './design-refs/benchmark.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', 'design-refs');
@@ -1017,6 +1018,46 @@ function exportTrainingCorpus() {
   if (c.total === 0) console.log('  (empty corpus — run `collect`/`harvest` with a vision provider to accumulate labeled frames)');
 }
 
+// ---- verdict benchmark harness (#512, epic #490 slice B) -------------------
+// Run the selected vision provider over the training manifest's held-out split and report
+// verdict-agreement + per-class quarantine-recall against the recipe's graduation floors. Reads slice A's
+// (#511) manifest; the scorer lives in ./design-refs/benchmark.mjs (pure, fixture-tested). With the default
+// `manual` provider (no model) every prediction is `ungated`, so this scores 0 against real labels — run
+// with a real DESIGN_REFS_VISION_PROVIDER to measure the hosted model before any on-device student exists.
+async function benchmark() {
+  const recipe = readJSON(RECIPE, null);
+  if (!recipe) { console.error(`✗ no distillation recipe at ${RECIPE}`); process.exit(1); }
+  const manifest = readJSON(TRAINING_MANIFEST, null);
+  if (!manifest) { console.error(`✗ no training manifest at ${TRAINING_MANIFEST} — run \`design-refs.mjs export\` first`); process.exit(1); }
+
+  const provider = await resolveVisionProvider();
+  // Load a held-out frame as provider input. Frames are content-addressed WebP under design-refs/.
+  const loadFrame = (r) => {
+    const abs = join(ROOT, r.frame);
+    if (!existsSync(abs)) return null; // frame absent (e.g. a consolidated dup) → unpredicted miss
+    const buf = readFileSync(abs);
+    return { url: r.frame, pngBase64: buf.toString('base64'), dims: webpDims(buf), selectorState: null };
+  };
+
+  const result = await runBenchmark({ provider, records: manifest.records, recipe, loadFrame });
+  const pct = (f) => (f == null ? ' n/a' : `${(f * 100).toFixed(1)}%`);
+  const mark = (p) => (p === true ? '✓ pass' : p === false ? '✗ fail' : '— (no floor)');
+
+  console.log(`verdict benchmark — provider \`${result.provider}\`, ${result.total} held-out frame(s)${result.skipped ? `, ${result.skipped} unloadable` : ''}`);
+  if (result.total === 0) {
+    console.log('  (empty held-out split — accumulate gated frames via `collect`/`harvest` with a vision provider, then `export`)');
+    return;
+  }
+  const ga = result.graduation.verdictAgreement;
+  const gq = result.graduation.quarantineRecall;
+  console.log(`  verdict-agreement     ${pct(result.agreement.fraction)} (${result.agreement.matched}/${result.agreement.total})  floor ${ga.floor == null ? 'unset' : pct(ga.floor)}  ${mark(ga.pass)}`);
+  console.log(`  quarantine-recall     ${pct(result.quarantineRecall.overall.fraction)} (${result.quarantineRecall.overall.recalled}/${result.quarantineRecall.overall.total})  floor ${gq.floor == null ? 'unset' : pct(gq.floor)}  ${mark(gq.pass)}`);
+  for (const [cls, c] of Object.entries(result.quarantineRecall.byClass).sort()) {
+    console.log(`    ${cls.padEnd(12)} ${pct(c.fraction)} (${c.recalled}/${c.total})`);
+  }
+  console.log(`  graduation: ${result.graduation.pass ? '✓ READY — promote the API bridge to the bundled on-device default (#485/#488)' : '✗ not yet — both floors must pass'}`);
+}
+
 // Exported for unit tests; the CLI dispatch below only runs when this file is executed directly.
 // (ppmToGray, dHash, hammingHex, clusterByHamming are exported inline above.)
 export { archiveQuarantinedFrame, QUARANTINE };
@@ -1033,9 +1074,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     case 'prune': prune(); break;
     case 'report': report(); break;
     case 'export': exportTrainingCorpus(); break;
+    case 'benchmark': await benchmark(); break;
     default:
-      console.log('usage: design-refs.mjs <collect|harvest|index|dedup|prune|report|export> [--targets=path] [--only=substr] [--limit=N] [--refresh] [--vision-verify]');
+      console.log('usage: design-refs.mjs <collect|harvest|index|dedup|prune|report|export|benchmark> [--targets=path] [--only=substr] [--limit=N] [--refresh] [--vision-verify]');
       console.log('  export: emit training-manifest.json — {frame,verdict} labeled pairs (admitted + quarantine) with a deterministic held-out split, stamped with the distillation-recipe version (#490 slice A)');
+      console.log('  benchmark: run the selected vision provider over the manifest held-out split — verdict-agreement + per-class quarantine-recall vs the recipe graduation floors (#490 slice B)');
       console.log('  harvest: [--gallery=path] ingest operator-curated gallery screenshots (auth-walled app interiors) — captureMethod: gallery');
       console.log('  dedup: [--threshold=N] near-dup Hamming cut (default 5); [--apply] consolidate near-dups into their canonical');
       console.log('  vision gate (opt-in): DESIGN_REFS_VISION_PROVIDER=<name> DESIGN_REFS_VISION_PROVIDER_MODULE=<path-to-provider.mjs>');

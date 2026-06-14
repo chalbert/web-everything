@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "task": "6-verdict UI-screenshot classification (app | obstructed | marketing | error | blank | non-app)",
   "labelSpace": ["app", "obstructed", "marketing", "error", "blank", "non-app"],
   "rationale": "Versioned, model-agnostic distillation recipe for the on-device verdict classifier (#488 ruling, epic #490). The labels are the hosted-model verdicts already cached in the design-ref corpus (#489) — a base-model switch re-runs THIS recipe against the same labeled corpus rather than re-labelling. Keep it reproducible: bump `version`, append a dated `revisions` entry, re-run `design-refs.mjs export`, re-train.",
@@ -23,14 +23,20 @@
   "splitStrategy": "deterministic-by-contentHash",
   "graduationBenchmark": {
     "verdictAgreement": ">=0.95 vs hosted model on the held-out split",
-    "quarantineRecallFloor": "TBD — set by the benchmark harness (epic #490 slice B)",
-    "note": "Meeting this promotes the student from the API bridge (#485) to the bundled on-device default; the API stays as the premium upgrade (#488 F1/F4)."
+    "quarantineRecallFloor": ">=0.98 vs hosted model on the held-out split",
+    "metric": "quarantine-recall = of held-out frames whose TRUE verdict is a quarantine-class (decideAdmission → quarantine: marketing/error/blank/non-app), the fraction the student ALSO routes to quarantine. Measured by `design-refs.mjs benchmark` (epic #490 slice B).",
+    "note": "Two independent floors. verdict-agreement (0.95) is the overall fidelity gate; quarantine-recall carries a HIGHER floor (0.98) because a quarantine miss admits junk into the corpus — a costlier, asymmetric error than a plain agreement miss. Meeting BOTH promotes the student from the API bridge (#485) to the bundled on-device default; the API stays as the premium upgrade (#488 F1/F4). The 0.98 floor is a defensible engineering default to be re-confirmed once a labeled holdout slice exists (today the corpus is all-ungated)."
   },
   "revisions": [
     {
       "version": 1,
       "date": "2026-06-13",
       "note": "Initial recipe — codified from the #488 ruling (all five forks). Pairs with the design-refs.mjs `export` step (epic #490 slice A); benchmark floors finalized in slice B."
+    },
+    {
+      "version": 2,
+      "date": "2026-06-14",
+      "note": "Slice B (#512): finalized the TBD quarantineRecallFloor at >=0.98 (asymmetric-error rationale above) and added the verdict benchmark harness (`design-refs.mjs benchmark` + design-refs/benchmark.mjs) that measures verdict-agreement + per-class quarantine-recall over the manifest held-out split. No re-train/re-label trigger — thresholds-only change."
     }
   ]
 }
