@@ -2,11 +2,13 @@
 type: idea
 workItem: story
 size: 5
-status: open
+status: resolved
 locus: frontierui
 blockedBy: ["332"]
 dateOpened: "2026-06-11"
-dateStarted: "2026-06-13"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: frontierui/tools/mock-server/console.ts — MockConsole façade (config editor for per-service mode/latency/fault overrides) + CallMonitor live monitor + BehaviorOverrideController; server.ts gains onCall/overrides/clock hooks + applyBehaviorOverride
 tags: [mock, proxy, dev-service, console, self-run-tool]
 ---
 
