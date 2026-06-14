@@ -147,6 +147,14 @@
       "url": "https://opensource.adobe.com/spectrum-web-components/components/accordion/"
     },
     {
+      "capabilityId": "accordion",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accordion Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/accordion/"
+    },
+    {
       "capabilityId": "alert-dialog",
       "sourceId": "ant-design",
       "present": true,
@@ -241,6 +249,14 @@
       "provenance": "verified",
       "sourceName": "Alert Dialog",
       "url": "https://opensource.adobe.com/spectrum-web-components/components/alert-dialog/"
+    },
+    {
+      "capabilityId": "alert-dialog",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Alert and Message Dialogs Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/alertdialog/"
     },
     {
       "capabilityId": "anchored-positioning",
@@ -438,9 +454,9 @@
       "capabilityId": "aria-apg-adherence",
       "sourceId": "wai-aria-apg",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "ARIA Authoring Practices Guide (APG)",
+      "url": "https://www.w3.org/WAI/ARIA/apg/"
     },
     {
       "capabilityId": "async-pagination",
@@ -465,6 +481,14 @@
       "provenance": "verified",
       "sourceName": "Autocomplete lazy loading",
       "url": "https://polaris-react.shopify.com/components/selection-and-input/autocomplete"
+    },
+    {
+      "capabilityId": "async-pagination",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Feed Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/feed/"
     },
     {
       "capabilityId": "avatar",
@@ -835,6 +859,14 @@
       "url": "https://opensource.adobe.com/spectrum-web-components/components/breadcrumbs/"
     },
     {
+      "capabilityId": "breadcrumb",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Breadcrumb Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/breadcrumb/"
+    },
+    {
       "capabilityId": "button",
       "sourceId": "ant-design",
       "present": true,
@@ -1003,6 +1035,14 @@
       "url": "https://opensource.adobe.com/spectrum-web-components/components/button/"
     },
     {
+      "capabilityId": "button",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/button/"
+    },
+    {
       "capabilityId": "button-group",
       "sourceId": "ant-design",
       "present": true,
@@ -1129,6 +1169,14 @@
       "provenance": "verified",
       "sourceName": "Action Group",
       "url": "https://opensource.adobe.com/spectrum-web-components/components/action-group/"
+    },
+    {
+      "capabilityId": "button-group",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toolbar Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/toolbar/"
     },
     {
       "capabilityId": "card",
@@ -1318,9 +1366,9 @@
       "capabilityId": "carousel",
       "sourceId": "wai-aria-apg",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Carousel (Slide Show or Image Rotator) Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/carousel/"
     },
     {
       "capabilityId": "checkbox",
@@ -1497,6 +1545,14 @@
       "provenance": "verified",
       "sourceName": "Checkbox",
       "url": "https://opensource.adobe.com/spectrum-web-components/components/checkbox/"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/checkbox/"
     },
     {
       "capabilityId": "code-block",
@@ -2006,9 +2062,9 @@
       "capabilityId": "combobox",
       "sourceId": "wai-aria-apg",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Combobox Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/combobox/"
     },
     {
       "capabilityId": "command-palette",
@@ -2121,6 +2177,14 @@
       "provenance": "verified",
       "sourceName": "Action Menu",
       "url": "https://opensource.adobe.com/spectrum-web-components/components/action-menu/"
+    },
+    {
+      "capabilityId": "context-menu",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menu and Menubar Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/menubar/"
     },
     {
       "capabilityId": "controlled-uncontrolled",
@@ -2481,6 +2545,14 @@
       "provenance": "verified",
       "sourceName": "Table",
       "url": "https://opensource.adobe.com/spectrum-web-components/components/table/"
+    },
+    {
+      "capabilityId": "data-table",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Grid (Interactive Tabular Data and Layout Containers) Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/grid/"
     },
     {
       "capabilityId": "date-picker",
@@ -2867,6 +2939,14 @@
       "url": "https://opensource.adobe.com/spectrum-web-components/components/dialog/"
     },
     {
+      "capabilityId": "dialog",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog (Modal) Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/"
+    },
+    {
       "capabilityId": "disclosure",
       "sourceId": "ant-design",
       "present": true,
@@ -3001,6 +3081,14 @@
       "provenance": "verified",
       "sourceName": "Details",
       "url": "https://shoelace.style/components/details"
+    },
+    {
+      "capabilityId": "disclosure",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Disclosure (Show/Hide) Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/"
     },
     {
       "capabilityId": "dismissal",
@@ -3379,6 +3467,14 @@
       "url": "https://opensource.adobe.com/spectrum-web-components/components/tray/"
     },
     {
+      "capabilityId": "drawer",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog (Modal) Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/"
+    },
+    {
       "capabilityId": "elevation",
       "sourceId": "ant-design",
       "present": true,
@@ -3734,9 +3830,9 @@
       "capabilityId": "focus-return",
       "sourceId": "wai-aria-apg",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Dialog (Modal) Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/"
     },
     {
       "capabilityId": "focus-trap",
@@ -3841,6 +3937,14 @@
       "provenance": "verified",
       "sourceName": "Overlay focus management",
       "url": "https://opensource.adobe.com/spectrum-web-components/components/overlay/"
+    },
+    {
+      "capabilityId": "focus-trap",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog (Modal) Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/"
     },
     {
       "capabilityId": "focus-visible-policy",
@@ -4475,6 +4579,14 @@
       "url": "https://opensource.adobe.com/spectrum-web-components/components/action-button/"
     },
     {
+      "capabilityId": "icon-button",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/button/"
+    },
+    {
       "capabilityId": "inline-alert",
       "sourceId": "ant-design",
       "present": true,
@@ -4595,6 +4707,14 @@
       "url": "https://opensource.adobe.com/spectrum-web-components/components/alert-banner/"
     },
     {
+      "capabilityId": "inline-alert",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Alert Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/alert/"
+    },
+    {
       "capabilityId": "keyboard-interaction",
       "sourceId": "ark-ui",
       "present": true,
@@ -4702,9 +4822,9 @@
       "capabilityId": "keyboard-interaction",
       "sourceId": "wai-aria-apg",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Developing a Keyboard Interface",
+      "url": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/"
     },
     {
       "capabilityId": "link",
@@ -4817,6 +4937,14 @@
       "provenance": "verified",
       "sourceName": "Link",
       "url": "https://opensource.adobe.com/spectrum-web-components/components/link/"
+    },
+    {
+      "capabilityId": "link",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Link Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/link/"
     },
     {
       "capabilityId": "list",
@@ -5014,9 +5142,9 @@
       "capabilityId": "listbox",
       "sourceId": "wai-aria-apg",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Listbox Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/listbox/"
     },
     {
       "capabilityId": "live-region",
@@ -5065,6 +5193,14 @@
       "provenance": "notable-inference",
       "sourceName": null,
       "url": null
+    },
+    {
+      "capabilityId": "live-region",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Alert Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/alert/"
     },
     {
       "capabilityId": "menu",
@@ -5238,9 +5374,9 @@
       "capabilityId": "menu",
       "sourceId": "wai-aria-apg",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Menu and Menubar Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/menubar/"
     },
     {
       "capabilityId": "motion-tokens",
@@ -5435,6 +5571,14 @@
       "url": "https://shoelace.style/components/select"
     },
     {
+      "capabilityId": "multi-select",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Listbox Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/listbox/"
+    },
+    {
       "capabilityId": "navbar",
       "sourceId": "ant-design",
       "present": true,
@@ -5571,6 +5715,14 @@
       "url": "https://opensource.adobe.com/spectrum-web-components/components/top-nav/"
     },
     {
+      "capabilityId": "navbar",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Landmarks",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/landmarks/"
+    },
+    {
       "capabilityId": "number-input",
       "sourceId": "ant-design",
       "present": true,
@@ -5689,6 +5841,14 @@
       "provenance": "verified",
       "sourceName": "Number Field",
       "url": "https://opensource.adobe.com/spectrum-web-components/components/number-field/"
+    },
+    {
+      "capabilityId": "number-input",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spinbutton Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/spinbutton/"
     },
     {
       "capabilityId": "pagination",
@@ -6355,6 +6515,14 @@
       "url": "https://opensource.adobe.com/spectrum-web-components/components/radio-group/"
     },
     {
+      "capabilityId": "radio-group",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio Group Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/radio/"
+    },
+    {
       "capabilityId": "radius",
       "sourceId": "ant-design",
       "present": true,
@@ -6545,6 +6713,14 @@
       "provenance": "verified",
       "sourceName": "Slider (range)",
       "url": "https://opensource.adobe.com/spectrum-web-components/components/slider/"
+    },
+    {
+      "capabilityId": "range-slider",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider (Multi-Thumb) Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/slider-multithumb/"
     },
     {
       "capabilityId": "rating",
@@ -6739,6 +6915,14 @@
       "url": "https://opensource.adobe.com/spectrum-web-components/components/split-view/"
     },
     {
+      "capabilityId": "resizable-splitter",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Window Splitter Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/windowsplitter/"
+    },
+    {
       "capabilityId": "responsive-adaptive",
       "sourceId": "ant-design",
       "present": true,
@@ -6862,9 +7046,9 @@
       "capabilityId": "roving-tabindex",
       "sourceId": "wai-aria-apg",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Developing a Keyboard Interface",
+      "url": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/"
     },
     {
       "capabilityId": "scroll-area",
@@ -7371,6 +7555,14 @@
       "url": "https://opensource.adobe.com/spectrum-web-components/components/sidenav/"
     },
     {
+      "capabilityId": "sidebar-nav",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Landmarks",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/landmarks/"
+    },
+    {
       "capabilityId": "skeleton",
       "sourceId": "ant-design",
       "present": true,
@@ -7601,6 +7793,14 @@
       "provenance": "verified",
       "sourceName": "Slider",
       "url": "https://opensource.adobe.com/spectrum-web-components/components/slider/"
+    },
+    {
+      "capabilityId": "slider",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/slider/"
     },
     {
       "capabilityId": "spacing-scale",
@@ -8211,6 +8411,14 @@
       "url": "https://opensource.adobe.com/spectrum-web-components/components/switch/"
     },
     {
+      "capabilityId": "switch",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Switch Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/switch/"
+    },
+    {
       "capabilityId": "tabs",
       "sourceId": "ant-design",
       "present": true,
@@ -8398,9 +8606,9 @@
       "capabilityId": "tabs",
       "sourceId": "wai-aria-apg",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Tabs Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/tabs/"
     },
     {
       "capabilityId": "tag-chip",
@@ -9227,6 +9435,14 @@
       "url": "https://opensource.adobe.com/spectrum-web-components/components/toast/"
     },
     {
+      "capabilityId": "toast",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Alert Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/alert/"
+    },
+    {
       "capabilityId": "tooltip",
       "sourceId": "ant-design",
       "present": true,
@@ -9390,9 +9606,9 @@
       "capabilityId": "tooltip",
       "sourceId": "wai-aria-apg",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Tooltip Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/tooltip/"
     },
     {
       "capabilityId": "touch-target",
@@ -9571,6 +9787,14 @@
       "url": "https://spectrum.adobe.com/page/tree-view/"
     },
     {
+      "capabilityId": "tree-view",
+      "sourceId": "wai-aria-apg",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tree View Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/treeview/"
+    },
+    {
       "capabilityId": "type-ahead",
       "sourceId": "ark-ui",
       "present": true,
@@ -9606,9 +9830,9 @@
       "capabilityId": "type-ahead",
       "sourceId": "wai-aria-apg",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Listbox Pattern",
+      "url": "https://www.w3.org/WAI/ARIA/apg/patterns/listbox/"
     },
     {
       "capabilityId": "typography-scale",
