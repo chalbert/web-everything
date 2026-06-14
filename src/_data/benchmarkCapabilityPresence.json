@@ -62,9 +62,9 @@
       "capabilityId": "aria-apg-adherence",
       "sourceId": "react-aria",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Accessibility (WAI-ARIA APG)",
+      "url": "https://react-aria.adobe.com/quality"
     },
     {
       "capabilityId": "aria-apg-adherence",
@@ -182,9 +182,9 @@
       "capabilityId": "color-picker",
       "sourceId": "react-aria",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "ColorPicker",
+      "url": "https://react-aria.adobe.com/ColorPicker"
     },
     {
       "capabilityId": "color-tokens",
@@ -206,9 +206,9 @@
       "capabilityId": "combobox",
       "sourceId": "react-aria",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "ComboBox",
+      "url": "https://react-aria.adobe.com/ComboBox"
     },
     {
       "capabilityId": "combobox",
@@ -310,9 +310,9 @@
       "capabilityId": "date-picker",
       "sourceId": "react-aria",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "DatePicker",
+      "url": "https://react-aria.adobe.com/DatePicker"
     },
     {
       "capabilityId": "date-range-picker",
@@ -326,9 +326,9 @@
       "capabilityId": "date-range-picker",
       "sourceId": "react-aria",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "DateRangePicker",
+      "url": "https://react-aria.adobe.com/DateRangePicker"
     },
     {
       "capabilityId": "density",
@@ -390,9 +390,9 @@
       "capabilityId": "drag-and-drop",
       "sourceId": "react-aria",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Drag and Drop",
+      "url": "https://react-aria.adobe.com/dnd"
     },
     {
       "capabilityId": "drawer",
@@ -462,9 +462,9 @@
       "capabilityId": "focus-return",
       "sourceId": "react-aria",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "FocusScope (restoreFocus)",
+      "url": "https://react-aria.adobe.com/FocusScope"
     },
     {
       "capabilityId": "focus-return",
@@ -478,9 +478,9 @@
       "capabilityId": "focus-trap",
       "sourceId": "react-aria",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "FocusScope",
+      "url": "https://react-aria.adobe.com/FocusScope"
     },
     {
       "capabilityId": "focus-visible-policy",
@@ -550,9 +550,9 @@
       "capabilityId": "i18n-rtl",
       "sourceId": "react-aria",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Internationalization",
+      "url": "https://react-aria.adobe.com/useLocale"
     },
     {
       "capabilityId": "icon-button",
@@ -614,9 +614,9 @@
       "capabilityId": "listbox",
       "sourceId": "react-aria",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "ListBox",
+      "url": "https://react-aria.adobe.com/ListBox"
     },
     {
       "capabilityId": "listbox",
@@ -710,9 +710,9 @@
       "capabilityId": "number-input",
       "sourceId": "react-aria",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "NumberField",
+      "url": "https://react-aria.adobe.com/NumberField"
     },
     {
       "capabilityId": "pagination",
@@ -774,9 +774,9 @@
       "capabilityId": "range-slider",
       "sourceId": "react-aria",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Slider (range)",
+      "url": "https://react-aria.adobe.com/Slider"
     },
     {
       "capabilityId": "rating",
@@ -926,9 +926,9 @@
       "capabilityId": "slider",
       "sourceId": "react-aria",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Slider",
+      "url": "https://react-aria.adobe.com/Slider"
     },
     {
       "capabilityId": "spacing-scale",
@@ -1086,9 +1086,9 @@
       "capabilityId": "tooltip",
       "sourceId": "react-aria",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Tooltip",
+      "url": "https://react-aria.adobe.com/Tooltip"
     },
     {
       "capabilityId": "tooltip",
@@ -1134,9 +1134,9 @@
       "capabilityId": "tree-view",
       "sourceId": "react-aria",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Tree",
+      "url": "https://react-aria.adobe.com/Tree"
     },
     {
       "capabilityId": "type-ahead",
@@ -4569,6 +4569,294 @@
       "provenance": "verified",
       "sourceName": "Direction Provider",
       "url": "https://www.radix-ui.com/primitives/docs/utilities/direction-provider"
+    },
+    {
+      "capabilityId": "button",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button",
+      "url": "https://react-aria.adobe.com/Button"
+    },
+    {
+      "capabilityId": "split-button",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "MenuTrigger",
+      "url": "https://react-aria.adobe.com/Menu"
+    },
+    {
+      "capabilityId": "button-group",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "ToggleButtonGroup",
+      "url": "https://react-aria.adobe.com/ToggleButtonGroup"
+    },
+    {
+      "capabilityId": "segmented-control",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "ToggleButtonGroup",
+      "url": "https://react-aria.adobe.com/ToggleButtonGroup"
+    },
+    {
+      "capabilityId": "link",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Link",
+      "url": "https://react-aria.adobe.com/Link"
+    },
+    {
+      "capabilityId": "text-field",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "TextField",
+      "url": "https://react-aria.adobe.com/TextField"
+    },
+    {
+      "capabilityId": "textarea",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "TextArea",
+      "url": "https://react-aria.adobe.com/TextField"
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Select",
+      "url": "https://react-aria.adobe.com/Select"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://react-aria.adobe.com/Checkbox"
+    },
+    {
+      "capabilityId": "radio-group",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "RadioGroup",
+      "url": "https://react-aria.adobe.com/RadioGroup"
+    },
+    {
+      "capabilityId": "switch",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Switch",
+      "url": "https://react-aria.adobe.com/Switch"
+    },
+    {
+      "capabilityId": "time-picker",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "TimeField",
+      "url": "https://react-aria.adobe.com/TimeField"
+    },
+    {
+      "capabilityId": "file-upload",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "FileTrigger",
+      "url": "https://react-aria.adobe.com/FileTrigger"
+    },
+    {
+      "capabilityId": "tags-input",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "TagGroup",
+      "url": "https://react-aria.adobe.com/TagGroup"
+    },
+    {
+      "capabilityId": "tag-chip",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "TagGroup",
+      "url": "https://react-aria.adobe.com/TagGroup"
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Form",
+      "url": "https://react-aria.adobe.com/Form"
+    },
+    {
+      "capabilityId": "accordion",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "DisclosureGroup",
+      "url": "https://react-aria.adobe.com/DisclosureGroup"
+    },
+    {
+      "capabilityId": "disclosure",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Disclosure",
+      "url": "https://react-aria.adobe.com/Disclosure"
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tabs",
+      "url": "https://react-aria.adobe.com/Tabs"
+    },
+    {
+      "capabilityId": "menu",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menu",
+      "url": "https://react-aria.adobe.com/Menu"
+    },
+    {
+      "capabilityId": "context-menu",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "MenuTrigger",
+      "url": "https://react-aria.adobe.com/Menu"
+    },
+    {
+      "capabilityId": "command-palette",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Autocomplete",
+      "url": "https://react-aria.adobe.com/Autocomplete"
+    },
+    {
+      "capabilityId": "breadcrumb",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Breadcrumbs",
+      "url": "https://react-aria.adobe.com/Breadcrumbs"
+    },
+    {
+      "capabilityId": "dialog",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Modal",
+      "url": "https://react-aria.adobe.com/Modal"
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popover",
+      "url": "https://react-aria.adobe.com/Popover"
+    },
+    {
+      "capabilityId": "toast",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toast",
+      "url": "https://react-aria.adobe.com/Toast"
+    },
+    {
+      "capabilityId": "data-table",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Table",
+      "url": "https://react-aria.adobe.com/Table"
+    },
+    {
+      "capabilityId": "list",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "GridList",
+      "url": "https://react-aria.adobe.com/GridList"
+    },
+    {
+      "capabilityId": "progress-linear",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "ProgressBar",
+      "url": "https://react-aria.adobe.com/ProgressBar"
+    },
+    {
+      "capabilityId": "divider",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Separator",
+      "url": "https://react-aria.adobe.com/Separator"
+    },
+    {
+      "capabilityId": "anchored-positioning",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popover positioning",
+      "url": "https://react-aria.adobe.com/Popover"
+    },
+    {
+      "capabilityId": "virtualization",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Virtualizer",
+      "url": "https://react-aria.adobe.com/Virtualizer"
+    },
+    {
+      "capabilityId": "form-validation-flow",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Forms (validation)",
+      "url": "https://react-aria.adobe.com/forms"
+    },
+    {
+      "capabilityId": "color-contrast",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color contrast (Quality)",
+      "url": "https://react-aria.adobe.com/quality"
+    },
+    {
+      "capabilityId": "touch-target",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Hit target sizes (Quality)",
+      "url": "https://react-aria.adobe.com/quality"
+    },
+    {
+      "capabilityId": "focus-visible-policy",
+      "sourceId": "react-aria",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Focus rings (Quality)",
+      "url": "https://react-aria.adobe.com/quality"
     }
   ]
 }
