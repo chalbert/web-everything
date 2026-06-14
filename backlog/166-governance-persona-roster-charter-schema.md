@@ -2,8 +2,11 @@
 type: decision
 workItem: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-06-07"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: none
 preparedDate: "2026-06-11"
 relatedReport: reports/2026-06-11-governance-persona-charter-schema.md
 tags: [personas, profiles, governance, plateau, dev-browser, review-approve-manage, dev-experience, vision]
@@ -19,6 +22,8 @@ The platform's stakeholder **personas** (developer, designer, manager, translato
 ## Axis-framing
 
 The charter is **not greenfield** — it is implemented and rendering. The schema is `Profile` ([profiles.ts:85](../../plateau-app/src/profiles/profiles.ts#L85)) → `ReviewArea` ([profiles.ts:17](../../plateau-app/src/profiles/profiles.ts#L17)) pinned to a real platform domain via `platformArea` ([profiles.ts:22](../../plateau-app/src/profiles/profiles.ts#L22)) → `Gate` ([profiles.ts:34](../../plateau-app/src/profiles/profiles.ts#L34)) carrying `blocksDeployment: boolean` ([profiles.ts:39](../../plateau-app/src/profiles/profiles.ts#L39)), and the roster is a hand-authored array `export const profiles` ([profiles.ts:941](../../plateau-app/src/profiles/profiles.ts#L941)) with all seven personas inline. Two on-disk facts are load-bearing: `blocksDeployment` is already a boolean on ~30 gates but is **purely descriptive** (nothing reads it), and the roster is a static TypeScript array **compiled into plateau-app** (the dev-browser cannot import it without coupling). The four forks decide how this existing lens is **customized, tiered, homed, and enforced** — they reshape it, they do not redesign it. The personas are a *decision-rights / governance* family (RACI: who reviews and approves), **not** an authorization family (RBAC: who may act) — conflating the two would be a category error.
+
+**Framing (2026-06-14): a persona is a *preset*, not a closed group.** A persona is a front-facing label over broader composable concepts — a named preset bundling *preferences* + *which surfaces light up* (the lens sense, consistent with the RACI-not-RBAC line above). This is why Fork 1·A (clone-to-derive) is natural: a new persona is just a new preset, and a *local* custom persona is client-side config with no server cost (informs Fork 2's free/paid line). Whether personas are a first-class platform concept that this governance roster is merely one instance of is carried as its own investigation in [#564](/backlog/564-personas-as-a-first-class-agile-concept/) — does not block this item.
 
 ### Recommended path at a glance
 
@@ -101,15 +106,17 @@ All seven are implemented as full charters in `plateau-app/src/profiles/profiles
 
 - ✅ Schema defined; all seven personas implemented and rendering at plateau-app `/profiles`.
 - ✅ Four open questions reshaped into bold-defaulted forks (2026-06-11, prepared) — see report `reports/2026-06-11-governance-persona-charter-schema.md`.
-- ⬜ Ratify the four fork defaults (or override per row).
-- ⬜ On ratification, graduate to builds: the clone-to-derive extension mechanism (Fork 1·A, paid — Fork 2·A), the shared roster data home (Fork 3·A), and the gate-type enum migration (Fork 4·A), with CI enforcement as a follow-on aligned with #178.
+- ✅ All four forks ratified (Forks 1/3/4 on 2026-06-11; Fork 2 on 2026-06-14).
+- ✅ Graduated to builds: shared roster data home → [#565](/backlog/565-extract-governance-persona-roster-to-a-shared-data-home/); gate-type enum migration → [#566](/backlog/566-migrate-persona-gate-schema-blocksdeployment-boolean-to-four/); clone-to-derive + tiering → [#567](/backlog/567-clone-to-derive-custom-personas-with-local-free-share-paid-t/); CI enforcement follow-on → [#568](/backlog/568-enforce-blocking-persona-gates-in-ci-deploy-gate-enforcement/). Persona-as-concept investigation → [#564](/backlog/564-personas-as-a-first-class-agile-concept/).
 
-## Resolution (partial) — 2026-06-11
+## Resolution (complete) — 2026-06-14
 
-The three model/shape/enforcement forks are ratified to their bold defaults. The one *pricing/monetization* fork (tiering) stays open as the only genuine human call.
+All four forks ratified. The three model/shape/enforcement forks landed 2026-06-11; the pricing/monetization fork (tiering) landed 2026-06-14 (refined, see below). Graduated builds: [#565](/backlog/565-extract-governance-persona-roster-to-a-shared-data-home/) · [#566](/backlog/566-migrate-persona-gate-schema-blocksdeployment-boolean-to-four/) · [#567](/backlog/567-clone-to-derive-custom-personas-with-local-free-share-paid-t/) · [#568](/backlog/568-enforce-blocking-persona-gates-in-ci-deploy-gate-enforcement/).
+
+- **Fork 2 — tiering (ratified 2026-06-14, refined to A-refined):** built-ins free; **local** custom personas (clone-to-derive) **free**; only the **share/sync/team-template plane** (publish, distribute, sync an org roster) is **paid**. The refinement over the prepared default: the line falls on *server cost*, not on "is it a premium-sounding feature." Local clone-to-derive is client-side config with zero marginal server cost, so it stays free (the cost-flat rule, [[project_linear_cost_revenue_on_device]]); paywalling it would be prioritization-in-fork's-clothing ([[feedback_fork_not_a_prioritization_tool]]). The paid affordance is precisely the server-shaped capability, on the #141 boundary. Builds to [#567](/backlog/567-clone-to-derive-custom-personas-with-local-free-share-paid-t/). Also confirmed: a persona is a **preset, lens sense** (preferences + surfaces lit up), not RBAC permissions — the persona-as-first-class-concept question is carried to [#564](/backlog/564-personas-as-a-first-class-agile-concept/).
+
+### Forks 1 / 3 / 4 — ratified 2026-06-11
 
 - **Fork 1 — canonical built-ins + clone-to-derive custom personas**: the SaaS RBAC template guardrail gives the most-flexible default that stays governed — a custom persona is a derivation of the same `Profile` schema, so both lenses keep working and free-form taxonomy drift is prevented.
 - **Fork 3 — shared data home both lenses read (plateau-app owned, NOT a WE standard entity)**: personas are governance/product data with no conformance/interop story, so per the constellation layering they live in the product; extracting the roster to a shared data file resolves the dev-browser coupling while keeping one source of truth.
 - **Fork 4 — descriptive now; widen `blocksDeployment` boolean → the four-type gate enum (advisory/validating/blocking/escalating)**: a schema change with no enforcement change — the richer enum strictly subsumes the boolean and is forward-compatible, so CI enforcement (a separate large build aligned with #178) can land later without a breaking migration.
-
-**Open — needs a human call:** Fork 2 — tiering (built-ins-free vs custom/shareable personas paid). This is a monetization/pricing decision, not a model question: it sets which capability falls on which side of the #141 free/paid line and ties directly into the open-core commercialization strategy, so the business owner — not an agent ratifying technical defaults — should make the call.
