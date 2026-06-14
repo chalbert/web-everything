@@ -8,7 +8,7 @@ parent: "317"
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
-graduatedTo: loan demo S9: domain/disclosures.ts (TRID clock + e-sign gate) + trace-panel disclosures/e-sign surface; reuses audit/lifecycle/status-indicator; 3 candidate standards tagged (e-signature, deadline-clock, doc-generation)
+graduatedTo: "loan demo S9: domain/disclosures.ts (TRID clock + e-sign gate) + trace-panel disclosures/e-sign surface; reuses audit/lifecycle/status-indicator; 3 candidate standards tagged (e-signature, deadline-clock, doc-generation)"
 tags: [exercise-app, loan-origination, disclosures, e-sign, phase]
 ---
 

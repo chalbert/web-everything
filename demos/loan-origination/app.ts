@@ -33,6 +33,14 @@ import {
   tridClock,
   DISCLOSURE_LABEL,
 } from './domain/disclosures';
+import {
+  NotificationStore,
+  stateChangeNotification,
+  conditionAddedNotification,
+  docRejectedNotification,
+  type AppNotification,
+} from './domain/notifications';
+import type { Condition } from './domain/types';
 
 // Web Lifecycle block (active): the loan's status machine is the data-defined LOAN_LIFECYCLE driving the
 // shipping DefaultLifecycleProvider — we no longer hand-roll transitions. The Status Indicator render
@@ -44,6 +52,43 @@ const loanLifecycle = new DefaultLifecycleProvider<ApplicationState>(LOAN_LIFECY
 // The audit-timeline render owns the history panel. Registered once at boot as the 'loan' provider.
 const loanAudit = new DefaultAuditProvider();
 const ACTOR = { role: 'underwriter' as const }; // the signed-in user (D. Okafor)
+
+// Phase S11 (#387): event-driven notifications. PLATFORM-GAP: #358 — the `notification` standard is
+// still draft (no shipping runtime), so this in-memory store + the topbar region below hand-roll the
+// surface, tagged as the WE gap this app drives. Every state change / condition / doc-rejection routes
+// a notification to the relevant actor.
+const loanNotifications = new NotificationStore();
+let notifOpen = false; // dropdown visibility, honored by renderNotifications across re-renders
+
+const NOTIF_TONE: Record<AppNotification['severity'], 'info' | 'positive' | 'caution' | 'critical'> = {
+  info: 'info',
+  success: 'positive',
+  warning: 'caution',
+  error: 'critical',
+};
+
+/** The topbar notification bell + dropdown — a hand-rolled stand-in for the draft notification block (#358). */
+function renderNotifications(): string {
+  const items = loanNotifications.list();
+  const unread = loanNotifications.unreadCount();
+  const rows = items.length
+    ? items
+        .map((n) => {
+          const chip = statusIndicatorHTML({ label: n.to, tone: NOTIF_TONE[n.severity], shape: 'badge' });
+          return `<li class="notif-item${n.read ? '' : ' unread'}"><div class="notif-msg">${n.message}</div><div class="notif-meta">${chip} <span class="muted">· ${new Date(n.at).toLocaleTimeString()}</span></div></li>`;
+        })
+        .join('')
+    : `<li class="notif-empty muted">No notifications yet — advance a loan, add a condition, or reject a document.</li>`;
+  return `<div class="notif" data-open="${notifOpen}">
+    <button type="button" class="notif-bell" aria-haspopup="true" aria-expanded="${notifOpen}" aria-label="Notifications">
+      🔔${unread ? `<span class="notif-badge">${unread}</span>` : ''}
+    </button>
+    <div class="notif-panel" role="region" aria-label="Notifications"${notifOpen ? '' : ' hidden'}>
+      <div class="notif-hd">Notifications</div>
+      <ul class="notif-list">${rows}</ul>
+    </div>
+  </div>`;
+}
 
 const FINDING_LABEL: Record<Finding, string> = {
   'approve-eligible': 'Approve / Eligible',
@@ -168,10 +213,16 @@ function renderTrace(
   const stateChip = statusIndicatorHTML({ label: stateMeta.label ?? app.state, tone: stateMeta.tone, shape: 'badge' });
   // The available next moves for the underwriter — actionable (status-indicator `affordance`). Firing one
   // calls loanLifecycle.transition(); the audit provider (subscribed via auditLifecycle) auto-logs it.
-  const nextActions = available.length
+  const advanceActions = available.length
     ? `<div class="lc-actions"><span class="muted">Advance (underwriter):</span> ${available
         .map((s) => `<button type="button" class="lc-advance" data-to="${s}">${loanLifecycle.meta(s).label ?? s}</button>`).join(' ')}</div>`
     : '';
+  // Phase S11 (#387): events that raise a notification to the relevant actor (condition → assignee,
+  // doc rejection → borrower), each also written to the immutable audit trail with before/after.
+  const eventActions = `<div class="lc-actions"><span class="muted">Raise event:</span>
+    <button type="button" class="act-add-condition">Add PTD condition</button>
+    <button type="button" class="act-reject-doc">Reject a document</button></div>`;
+  const nextActions = `${advanceActions}${eventActions}`;
   return `<div class="trace-body">
     <h3>${app.loanNumber} &middot; ${b.firstName} ${b.lastName}</h3>
     <p class="muted">${stateChip} &middot; rule set ${result.ruleSetVersion}</p>
@@ -322,6 +373,7 @@ function boot() {
     <div class="lo-topbar">
       <div class="brand"><b>MERIDIAN</b><span>Loan Origination System</span></div>
       <div class="right">
+        <span id="notif-host"></span>
         <span class="env-badge">DEMO</span>
         <span class="user-chip"><span class="av">UW</span> D. Okafor · Underwriter</span>
       </div>
@@ -339,6 +391,21 @@ function boot() {
   // Activate the route:link behaviors (the route-view custom element self-upgrades on insertion).
   const attrs = (window as unknown as { attributes?: { upgrade(root: ParentNode): void } }).attributes;
   attrs?.upgrade(document.body);
+
+  // Phase S11 (#387): mount the notification region and keep it in sync. The store re-renders the bell
+  // (badge count) whenever a notification lands; opening the dropdown marks all read.
+  const refreshNotifications = () => {
+    const host = document.getElementById('notif-host');
+    if (host) host.innerHTML = renderNotifications();
+  };
+  loanNotifications.subscribe(refreshNotifications);
+  refreshNotifications();
+  document.querySelector('.lo-topbar')?.addEventListener('click', (e) => {
+    if (!(e.target as HTMLElement).closest('.notif-bell')) return;
+    notifOpen = !notifOpen;
+    if (notifOpen) loanNotifications.markAllRead(); // also triggers refresh
+    refreshNotifications();
+  });
 
   // Fill the Applications table + wire master-detail selection — re-run on every entry into /pipeline,
   // since the route-view re-stamps the template each navigation.
@@ -380,12 +447,53 @@ function boot() {
     if (!panel.dataset.lcWired) {
       panel.dataset.lcWired = '1';
       panel.addEventListener('click', async (e) => {
-        const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button.lc-advance');
-        if (!btn || !current) return;
-        const entity = { id: current.loanNumber, state: current.state };
-        await loanLifecycle.transition(entity, btn.dataset.to as ApplicationState, ACTOR);
-        current.state = entity.state; // reflect the applied move back onto the pipeline entity
-        await showTrace(current, panel);
+        const target = e.target as HTMLElement;
+        if (!current) return;
+
+        const advance = target.closest<HTMLButtonElement>('button.lc-advance');
+        if (advance) {
+          const entity = { id: current.loanNumber, state: current.state };
+          await loanLifecycle.transition(entity, advance.dataset.to as ApplicationState, ACTOR);
+          current.state = entity.state; // reflect the applied move back onto the pipeline entity
+          // Phase S11 (#387): the state change raises a notification to the actor who owns the next move
+          // (the transition itself is already auto-audited with before/after via auditLifecycle).
+          loanNotifications.push(current.loanNumber, stateChangeNotification(current.loanNumber, current.state), new Date().toISOString());
+          await showTrace(current, panel);
+          return;
+        }
+
+        // Phase S11 (#387): add an underwriting condition → notify the assignee + audit (before/after).
+        if (target.closest('button.act-add-condition')) {
+          const n = current.conditions.length + 1;
+          const condition: Condition = { id: `c${n}`, type: 'PTD', description: `Verify updated income docs (#${n})`, assignedTo: 'processor', status: 'open' };
+          current.conditions.push(condition);
+          const at = new Date().toISOString();
+          await loanAudit.append({
+            target: { type: 'loan', id: current.loanNumber }, action: `condition.added — ${condition.type}`, actor: ACTOR, at,
+            after: [{ path: `/conditions/${condition.id}`, op: 'add', newValue: condition.description }],
+          });
+          loanNotifications.push(current.loanNumber, conditionAddedNotification(current.loanNumber, condition), at);
+          await showTrace(current, panel);
+          return;
+        }
+
+        // Phase S11 (#387): reject a document → notify the borrower to re-upload + audit (before/after).
+        if (target.closest('button.act-reject-doc')) {
+          const doc = current.documents.find((d) => d.state !== 'rejected');
+          if (!doc) return;
+          const before = doc.state;
+          doc.state = 'rejected';
+          doc.rejectionReason = 'Illegible scan — please re-upload a clear copy';
+          const at = new Date().toISOString();
+          await loanAudit.append({
+            target: { type: 'loan', id: current.loanNumber }, action: `document.rejected — ${doc.label}`, actor: ACTOR, at,
+            before: [{ path: `/documents/${doc.id}/state`, op: 'replace', oldValue: before }],
+            after: [{ path: `/documents/${doc.id}/state`, op: 'replace', newValue: 'rejected' }],
+          });
+          loanNotifications.push(current.loanNumber, docRejectedNotification(current.loanNumber, doc), at);
+          await showTrace(current, panel);
+          return;
+        }
       });
 
       // Phase S9 (#386): the borrower e-signs the initial disclosure package. On submit we stamp the
