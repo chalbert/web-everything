@@ -3,10 +3,14 @@ type: idea
 locus: exercise-app
 workItem: story
 size: 5
-status: open
+status: resolved
 parent: "314"
 dateOpened: "2026-06-11"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: reports/2026-06-14-exercise-app-telecom-cpq-requirements.md (scoped + sliced; build = follow-on phase cards under #319)
 tags: [exercise-app, telecom, cpq, configurator, requirements]
+relatedReport: reports/2026-06-14-exercise-app-telecom-cpq-requirements.md
 crossRef: { url: /backlog/314-flagship-exercise-apps/, label: "Flagship exercise apps (#314)" }
 ---
 
@@ -43,3 +47,19 @@ synthesize the constraint graph; complexity comes from the dependencies, not rea
 
 A requirements doc exists (catalog & constraint model, pricing rules, quote/order flow, role map)
 detailed enough to break the build into agent-ready slices.
+
+## Progress
+
+Resolved 2026-06-14 (batch). Derived the full telecom service-plan CPQ requirement
+set as `reports/2026-06-14-exercise-app-telecom-cpq-requirements.md` (matching the
+loan/insurance PRD format), wired via `relatedReport`. Covers: a synthesized mobile-carrier
+catalog; the **dependency-constraint model** (requires/excludes/implies/cardinality/eligibility)
+as the headline Technical-Configurator + NL-to-config exercise; a configuration-derived pricing
+engine (decision-trace); quote (persistence) and order (two lifecycles) capture; rep-assist
+bounded overrides (permissions/audit); a role × resource permission model; a platform-surface
+map; settled decisions (proposed telco-commerce visual register); and 8 proposed build slices
+(S0–S7) that become the follow-on functional-phase cards.
+
+Requirements-derivation only — no app code, no standard bypassed (nothing to GAP-tag). Story
+ends at a scoped, sliced requirement set per its own acceptance. check:standards green;
+app-conformance compliant (the lone GAP is the pre-existing `notification` draft). Per #314 candidate G.
