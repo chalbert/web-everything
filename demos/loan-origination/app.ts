@@ -41,6 +41,16 @@ import {
   type AppNotification,
 } from './domain/notifications';
 import type { Condition } from './domain/types';
+import {
+  requiredDocuments,
+  uploadDocument,
+  acceptDocument,
+  rejectDocument,
+  openGaps,
+  validateUpload,
+  DEFAULT_UPLOAD_CONSTRAINTS,
+} from './domain/documents';
+import type { LoanDocument } from './domain/types';
 
 // Web Lifecycle block (active): the loan's status machine is the data-defined LOAN_LIFECYCLE driving the
 // shipping DefaultLifecycleProvider — we no longer hand-roll transitions. The Status Indicator render
@@ -235,12 +245,72 @@ async function availableMoves(app: Application): Promise<Move[]> {
   return moves;
 }
 
+// Phase S5 (#383): the document checklist is RULES-DRIVEN — derived from the application shape
+// (wage-earner → paystub/W-2; self-employed → business returns/P&L; per asset account → a statement;
+// gift → gift letter; purchase → purchase agreement). Reconcile each loan's documents to the derived
+// set once, lazily, so the seed's placeholder docs are replaced by the rules output.
+const docsReconciled = new WeakSet<Application>();
+function ensureChecklist(app: Application): void {
+  if (docsReconciled.has(app)) return;
+  app.documents = requiredDocuments(app);
+  docsReconciled.add(app);
+}
+
+const DOC_TONE = {
+  requested: 'neutral', uploaded: 'info', accepted: 'positive', rejected: 'critical',
+} as const;
+
+const escHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+
+/** The rules-driven document checklist panel: per-item state chip, blocking flag, upload, accept/reject. */
+function renderDocumentChecklist(app: Application): string {
+  const gaps = openGaps(app.documents);
+  const rows = app.documents
+    .map(
+      (d) => `
+    <div class="doc-row" data-doc="${d.id}">
+      <div class="doc-meta">
+        <span class="doc-label">${escHtml(d.label)}</span>
+        <span class="doc-flag doc-flag--${d.blocking ? 'blocking' : 'optional'}">${d.blocking ? 'blocking' : 'optional'}</span>
+        ${statusIndicatorHTML({ label: d.state, tone: DOC_TONE[d.state], shape: 'pill' })}
+        ${d.fileNames.length ? `<span class="doc-files">${d.fileNames.map(escHtml).join(', ')}</span>` : ''}
+        ${d.rejectionReason ? `<span class="doc-reason">${escHtml(d.rejectionReason)}</span>` : ''}
+      </div>
+      <div class="doc-actions">
+        ${
+          d.state === 'requested' || d.state === 'rejected'
+            ? `<label class="doc-upload-btn">Upload…<input type="file" multiple hidden class="doc-file-input" data-doc="${d.id}"></label>`
+            : ''
+        }
+        ${
+          d.state === 'uploaded'
+            ? `<button type="button" class="doc-accept" data-doc="${d.id}">Accept</button><button type="button" class="doc-reject" data-doc="${d.id}">Reject</button>`
+            : ''
+        }
+      </div>
+    </div>`,
+    )
+    .join('');
+  // PLATFORM-GAP: #647 — the WE data-transfer intent (clipboard/DnD/files) has no active runtime block,
+  // so this drop-zone hand-rolls the native DataTransfer dragover/drop/paste handlers (wired in the panel
+  // listeners below) per the intent's accepts/payload contract. The WE work this S5 phase drives.
+  const accept = DEFAULT_UPLOAD_CONSTRAINTS.accept?.join(', ');
+  const maxMb = (DEFAULT_UPLOAD_CONSTRAINTS.maxBytes! / 1024 / 1024).toFixed(0);
+  const dropzone = `<div class="doc-dropzone" tabindex="0" aria-label="Upload documents — drag and drop, or paste from clipboard">
+      Drag &amp; drop files here, or focus this zone and paste from clipboard, to upload to the first open item
+      <span class="muted">accepts ${accept} · ≤ ${maxMb} MB</span>
+    </div>`;
+  return `<div class="panel-hd" style="border-radius:3px 3px 0 0">Document checklist (rules-driven) · ${gaps.blocking} blocking · ${gaps.nonBlocking} optional gaps</div>
+    <div class="doc-checklist">${rows}${dropzone}</div>`;
+}
+
 function renderTrace(
   app: Application,
   result: EvaluationResult,
   available: Move[] = [],
   historyHTML = '',
 ): string {
+  ensureChecklist(app);
   const facts = deriveFacts(app);
   const b = app.borrowers[0];
   // The proof-of-compliance trace is now the decision-trace block (active): the rules-engine result is
@@ -277,6 +347,7 @@ function renderTrace(
     </div>
     <div class="panel-hd" style="border-radius:3px 3px 0 0">Proof-of-compliance trace</div>
     ${decisionHTML}
+    ${renderDocumentChecklist(app)}
     <div class="panel-hd" style="border-radius:3px 3px 0 0">Audit trail</div>
     ${historyHTML}
     ${renderDisclosures(app)}
@@ -536,6 +607,79 @@ function boot() {
           loanNotifications.push(current.loanNumber, docRejectedNotification(current.loanNumber, doc), at);
           await showTrace(current, panel);
           return;
+        }
+
+        // Phase S5 (#383): accept a checklist document → clears its gap.
+        const acceptBtn = target.closest<HTMLButtonElement>('button.doc-accept');
+        if (acceptBtn) {
+          current.documents = acceptDocument(current.documents, acceptBtn.dataset.doc!);
+          await showTrace(current, panel);
+          return;
+        }
+
+        // Phase S5 (#383): reject a checklist document with a reason → re-opens the request + audits + notifies.
+        const rejectBtn = target.closest<HTMLButtonElement>('button.doc-reject');
+        if (rejectBtn) {
+          const docId = rejectBtn.dataset.doc!;
+          current.documents = rejectDocument(current.documents, docId, 'Illegible or incomplete — please re-upload');
+          const rd = current.documents.find((d) => d.id === docId);
+          if (rd) {
+            const at = new Date().toISOString();
+            await loanAudit.append({
+              target: { type: 'loan', id: current.loanNumber }, action: `document.rejected — ${rd.label}`, actor: ACTOR, at,
+              after: [{ path: `/documents/${rd.id}/state`, op: 'replace', newValue: 'rejected' }],
+            });
+            loanNotifications.push(current.loanNumber, docRejectedNotification(current.loanNumber, rd), at);
+          }
+          await showTrace(current, panel);
+          return;
+        }
+      });
+
+      // Phase S5 (#383): the document upload surface. PLATFORM-GAP: #647 — the WE data-transfer intent
+      // (clipboard/DnD/files) has no active runtime block yet, so we hand-roll the native DataTransfer
+      // handlers (file-input change, drag-and-drop, clipboard paste) per the intent's accepts/payload
+      // contract. validateUpload() enforces the `acceptance` dimension (type/size) client-side.
+      const ingestFiles = async (docId: string, files: ReadonlyArray<{ name: string; size: number }>) => {
+        if (!current) return;
+        const { accepted, rejected } = validateUpload(files);
+        if (accepted.length) current.documents = uploadDocument(current.documents, docId, accepted);
+        if (rejected.length) {
+          current.documents = current.documents.map((d) =>
+            d.id === docId && d.state !== 'uploaded'
+              ? { ...d, rejectionReason: rejected.map((r) => `${r.fileName}: ${r.reason}`).join('; ') }
+              : d);
+        }
+        await showTrace(current, panel);
+      };
+      const firstOpenDocId = (): string | undefined =>
+        current?.documents.find((d) => d.state === 'requested' || d.state === 'rejected')?.id;
+
+      panel.addEventListener('change', async (e) => {
+        const input = (e.target as HTMLElement).closest<HTMLInputElement>('input.doc-file-input');
+        if (!input || !input.files) return;
+        await ingestFiles(input.dataset.doc!, [...input.files]);
+      });
+      panel.addEventListener('dragover', (e) => {
+        if (!(e.target as HTMLElement).closest('.doc-dropzone')) return;
+        e.preventDefault();
+        const dt = (e as DragEvent).dataTransfer;
+        if (dt) dt.dropEffect = 'copy';
+      });
+      panel.addEventListener('drop', async (e) => {
+        if (!(e.target as HTMLElement).closest('.doc-dropzone')) return;
+        e.preventDefault();
+        const docId = firstOpenDocId();
+        const dt = (e as DragEvent).dataTransfer;
+        if (dt && docId) await ingestFiles(docId, [...dt.files]);
+      });
+      panel.addEventListener('paste', async (e) => {
+        if (!(e.target as HTMLElement).closest('.doc-dropzone')) return;
+        const data = (e as ClipboardEvent).clipboardData;
+        const docId = firstOpenDocId();
+        if (data && data.files.length && docId) {
+          e.preventDefault();
+          await ingestFiles(docId, [...data.files]);
         }
       });
 

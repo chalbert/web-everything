@@ -255,3 +255,23 @@ code { background: #eef1f5; padding: 1px 5px; border-radius: 2px; font-family: u
 .notif-msg { color: var(--ink-1, #1a1a1a); }
 .notif-meta { margin-top: 3px; font-size: 11px; }
 .notif-empty { padding: 14px 12px; font-size: 12px; }
+
+/* Phase S5 (#383) — rules-driven document checklist + upload */
+.doc-checklist { border: 1px solid var(--line, #e2e2e2); border-top: none; border-radius: 0 0 3px 3px; }
+.doc-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-top: 1px solid var(--line, #eee); }
+.doc-row:first-child { border-top: none; }
+.doc-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.doc-label { font-weight: 600; color: var(--ink-1, #1a1a1a); }
+.doc-flag { font-size: 10px; text-transform: uppercase; letter-spacing: .04em; padding: 1px 6px; border-radius: 8px; }
+.doc-flag--blocking { background: #fde8e8; color: #9b1c1c; }
+.doc-flag--optional { background: #eef2f6; color: #556; }
+.doc-files { color: var(--ink-2, #556); font-style: italic; }
+.doc-reason { color: #9b1c1c; }
+.doc-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.doc-actions button, .doc-upload-btn { font-size: 11px; padding: 3px 9px; border: 1px solid var(--line, #ccc); border-radius: 4px; background: #fff; cursor: pointer; }
+.doc-upload-btn { display: inline-flex; align-items: center; }
+.doc-accept { border-color: #137333; color: #137333; }
+.doc-reject { border-color: #9b1c1c; color: #9b1c1c; }
+.doc-dropzone { margin: 8px 12px 12px; padding: 14px; border: 1.5px dashed var(--line, #cbd5e1); border-radius: 6px; text-align: center; font-size: 12px; color: var(--ink-2, #667); display: flex; flex-direction: column; gap: 3px; }
+.doc-dropzone:focus { outline: 2px solid #4338ca; outline-offset: 2px; }
+.doc-dropzone .muted { font-size: 11px; }
