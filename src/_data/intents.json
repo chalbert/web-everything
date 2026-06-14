@@ -2484,5 +2484,53 @@
       "request",
       "statechange"
     ]
+  },
+  {
+    "id": "expressive-symbol",
+    "name": "Expressive Symbol Intent",
+    "status": "draft",
+    "summary": "A content/meaningful glyph (emoji or custom-image sticker) distinct from the UI-affordance icon — owns its accessible-name dimension, carries the Unicode skin-tone/presentation dimensions, and a default-less render-strategy platform config. Substrate for the picker + reaction consumers (#370).",
+    "dimensions": {
+      "mode": {
+        "description": "Symbol source — a Unicode emoji glyph or a custom-image sticker (label required).",
+        "values": [
+          "emoji",
+          "sticker"
+        ]
+      },
+      "accessibleName": {
+        "description": "Whether the symbol is part of the message (role=img + accessible name) or purely decorative (opt-in suppression). Default meaningful.",
+        "values": [
+          "meaningful",
+          "decorative"
+        ]
+      },
+      "skinTone": {
+        "description": "Unicode emoji modifier (Fitzpatrick) for an emoji-modifier-base glyph — emoji mode only.",
+        "values": [
+          "default",
+          "light",
+          "medium-light",
+          "medium",
+          "medium-dark",
+          "dark"
+        ]
+      },
+      "presentation": {
+        "description": "Variation selector: text (VS15 U+FE0E, monochrome) vs emoji (VS16 U+FE0F, color) — emoji mode only.",
+        "values": [
+          "text",
+          "emoji"
+        ]
+      },
+      "renderStrategy": {
+        "description": "Platform-config paint strategy (default-less, inherited from the platform flavor): native emoji font vs a vendored image set.",
+        "values": [
+          "native-font",
+          "image-set"
+        ]
+      }
+    },
+    "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">A <strong>content/meaningful glyph</strong> — an emoji or sticker that <em>is</em> part of the message, as distinct from the <a href=\"/intents/icon/\">Icon</a> intent's UI-affordance glyph. Sibling of Icon, graduated from decision <a href=\"/backlog/370\">#370</a> Fork 2. The substrate the general picker surface and the reaction block both compose.</p><h3>Modes</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>emoji</code>: a Unicode emoji glyph. Carries the skin-tone and presentation Unicode dimensions; an accessible name can fall back to the CLDR short name.</li><li><code>sticker</code>: a custom image (project-supplied asset). A <strong>label is required</strong> — there is no CLDR fallback for a non-Unicode glyph; an unlabeled meaningful sticker is invalid.</li></ul><h3>Accessible name (owned dimension)</h3><p class=\"text-sm text-gray-600 mb-2\">This intent <strong>owns its accessible-name concern</strong> rather than borrowing it: a <code>meaningful</code> symbol renders as <code>role=\"img\"</code> with an accessible name (emoji → CLDR short-name fallback; sticker → the required explicit label), while a <code>decorative</code> symbol is the opt-in case (<code>aria-hidden</code> / empty name). Default is <code>meaningful</code> — the most descriptive value; suppression is the author's deliberate opt-in.</p><h3>Unicode dimensions (emoji mode)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>skinTone</code>: the Unicode <a href=\"https://www.unicode.org/reports/tr51/\">emoji modifier</a> (Fitzpatrick EMOJI MODIFIER FITZPATRICK TYPE 1-2 … 6) applied to an emoji-modifier-base glyph.</li><li><code>presentation</code>: the variation selector — <code>text</code> (VS15, U+FE0E) or <code>emoji</code> (VS16, U+FE0F) — selecting monochrome text vs full-color emoji rendering.</li></ul><h3>Render strategy (platform config — default-less)</h3><p class=\"text-sm text-gray-600 mb-2\">How a symbol is painted is a <strong>platform-configuration</strong> dimension, not a per-use prop: <code>native-font</code> (the OS/browser emoji font) or <code>image-set</code> (a vendored emoji-image set — e.g. Twemoji/Noto — identified by a <code>vendor</code>). Per <a href=\"/backlog/370\">#370</a> Web Everything <strong>mandates no default</strong>: <code>renderStrategy</code> is inherited from the active platform flavor and extended by the project config, never hard-coded by the intent.</p><h3>Interface Protocol</h3><pre><code class=\"language-typescript\">type SymbolMode = 'emoji' | 'sticker';type AccessibleName = 'meaningful' | 'decorative';type SkinTone = 'default' | 'light' | 'medium-light' | 'medium' | 'medium-dark' | 'dark';type Presentation = 'text' | 'emoji';type RenderStrategy = 'native-font' | 'image-set';interface ExpressiveSymbolIntent {    // Symbol source: a Unicode emoji or a custom-image sticker    mode: SymbolMode;    // The glyph identifier (emoji code point sequence) or the sticker asset id    symbol: string;    // Required when mode === 'sticker'; the CLDR short name backs the emoji case    label?: string;    // Meaningful (role=img + name) vs decorative (aria-hidden). Default 'meaningful'    accessibleName?: AccessibleName;    // Unicode dimensions — emoji mode only    skinTone?: SkinTone;    presentation?: Presentation;}// Platform config (default-less, inherited from the platform flavor) — NOT a per-use propinterface ExpressiveSymbolRenderConfig {    renderStrategy: RenderStrategy;    // Required when renderStrategy === 'image-set' (e.g. 'twemoji', 'noto')    vendor?: string;}</code></pre>"
   }
 ]
