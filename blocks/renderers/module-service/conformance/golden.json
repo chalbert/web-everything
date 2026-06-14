@@ -1,0 +1,336 @@
+[
+  {
+    "name": "floating-unpinned-redirects",
+    "description": "An unpinned (floating) request 302-redirects to the terminal content-hash URL, never immutable.",
+    "fixture": {
+      "component": "user-card",
+      "definition": "<component name=\"user-card\"><span>{{label}}</span></component>",
+      "producer": "webadapters/1.2.3; esbuild/0.21.5",
+      "transform": {
+        "code": "export class UserCard extends HTMLElement { connectedCallback() { this.textContent = \"card\"; } }",
+        "language": "javascript",
+        "lossy": false,
+        "diagnostics": []
+      }
+    },
+    "request": {
+      "url": "/_maas/user-card.js?form=wc-class",
+      "method": "GET",
+      "headers": {}
+    },
+    "expect": {
+      "status": 302,
+      "headers": {
+        "Cache-Control": "public, max-age=60, must-revalidate",
+        "Location": "/_maas/user-card@sha256-sHtOV2gg18GmudX6wOO0jM14gG6_CxO1bNXwbXiVjKY.js?form=wc-class",
+        "X-MaaS-Producer": "webadapters/1.2.3; esbuild/0.21.5"
+      },
+      "body": "",
+      "bodyHash": "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
+    }
+  },
+  {
+    "name": "tag-latest-redirects",
+    "description": "A floating @latest tag 302-redirects to the same terminal content-hash URL.",
+    "fixture": {
+      "component": "user-card",
+      "definition": "<component name=\"user-card\"><span>{{label}}</span></component>",
+      "producer": "webadapters/1.2.3; esbuild/0.21.5",
+      "transform": {
+        "code": "export class UserCard extends HTMLElement { connectedCallback() { this.textContent = \"card\"; } }",
+        "language": "javascript",
+        "lossy": false,
+        "diagnostics": []
+      }
+    },
+    "request": {
+      "url": "/_maas/user-card@latest.js?form=wc-class",
+      "method": "GET",
+      "headers": {}
+    },
+    "expect": {
+      "status": 302,
+      "headers": {
+        "Cache-Control": "public, max-age=60, must-revalidate",
+        "Location": "/_maas/user-card@sha256-sHtOV2gg18GmudX6wOO0jM14gG6_CxO1bNXwbXiVjKY.js?form=wc-class",
+        "X-MaaS-Producer": "webadapters/1.2.3; esbuild/0.21.5"
+      },
+      "body": "",
+      "bodyHash": "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
+    }
+  },
+  {
+    "name": "exact-semver-redirects",
+    "description": "An exact semver pin 302-redirects to the terminal content-hash URL (the pin ladder).",
+    "fixture": {
+      "component": "user-card",
+      "definition": "<component name=\"user-card\"><span>{{label}}</span></component>",
+      "producer": "webadapters/1.2.3; esbuild/0.21.5",
+      "transform": {
+        "code": "export class UserCard extends HTMLElement { connectedCallback() { this.textContent = \"card\"; } }",
+        "language": "javascript",
+        "lossy": false,
+        "diagnostics": []
+      }
+    },
+    "request": {
+      "url": "/_maas/user-card@1.4.2.js?form=wc-class",
+      "method": "GET",
+      "headers": {}
+    },
+    "expect": {
+      "status": 302,
+      "headers": {
+        "Cache-Control": "public, max-age=60, must-revalidate",
+        "Location": "/_maas/user-card@sha256-sHtOV2gg18GmudX6wOO0jM14gG6_CxO1bNXwbXiVjKY.js?form=wc-class",
+        "X-MaaS-Producer": "webadapters/1.2.3; esbuild/0.21.5"
+      },
+      "body": "",
+      "bodyHash": "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
+    }
+  },
+  {
+    "name": "hash-pin-served-immutable",
+    "description": "A terminal content-hash pin is served directly: 200, body bytes, immutable cache, ETag, SRI integrity.",
+    "fixture": {
+      "component": "user-card",
+      "definition": "<component name=\"user-card\"><span>{{label}}</span></component>",
+      "producer": "webadapters/1.2.3; esbuild/0.21.5",
+      "transform": {
+        "code": "export class UserCard extends HTMLElement { connectedCallback() { this.textContent = \"card\"; } }",
+        "language": "javascript",
+        "lossy": false,
+        "diagnostics": []
+      }
+    },
+    "request": {
+      "url": "/_maas/user-card@sha256-sHtOV2gg18GmudX6wOO0jM14gG6_CxO1bNXwbXiVjKY.js?form=wc-class",
+      "method": "GET",
+      "headers": {}
+    },
+    "expect": {
+      "status": 200,
+      "headers": {
+        "Content-Type": "text/javascript; charset=utf-8",
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "ETag": "\"sha256-sHtOV2gg18GmudX6wOO0jM14gG6_CxO1bNXwbXiVjKY\"",
+        "X-MaaS-Producer": "webadapters/1.2.3; esbuild/0.21.5",
+        "X-MaaS-Integrity": "sha256-b/fQIixHDJBIW1hpgiYkETIz462UDzZTwpoZks8Dawc="
+      },
+      "body": "export class UserCard extends HTMLElement { connectedCallback() { this.textContent = \"card\"; } }",
+      "bodyHash": "sha256-b/fQIixHDJBIW1hpgiYkETIz462UDzZTwpoZks8Dawc="
+    }
+  },
+  {
+    "name": "conditional-if-none-match-304",
+    "description": "A hash-pinned request whose If-None-Match equals the ETag returns 304 with no body.",
+    "fixture": {
+      "component": "user-card",
+      "definition": "<component name=\"user-card\"><span>{{label}}</span></component>",
+      "producer": "webadapters/1.2.3; esbuild/0.21.5",
+      "transform": {
+        "code": "export class UserCard extends HTMLElement { connectedCallback() { this.textContent = \"card\"; } }",
+        "language": "javascript",
+        "lossy": false,
+        "diagnostics": []
+      }
+    },
+    "request": {
+      "url": "/_maas/user-card@sha256-sHtOV2gg18GmudX6wOO0jM14gG6_CxO1bNXwbXiVjKY.js?form=wc-class",
+      "method": "GET",
+      "headers": {
+        "If-None-Match": "\"sha256-sHtOV2gg18GmudX6wOO0jM14gG6_CxO1bNXwbXiVjKY\""
+      }
+    },
+    "expect": {
+      "status": 304,
+      "headers": {
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "ETag": "\"sha256-sHtOV2gg18GmudX6wOO0jM14gG6_CxO1bNXwbXiVjKY\"",
+        "X-MaaS-Producer": "webadapters/1.2.3; esbuild/0.21.5"
+      },
+      "body": "",
+      "bodyHash": "sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="
+    }
+  },
+  {
+    "name": "param-target-changes-id",
+    "description": "A byte-determining param (target) mints a different id; the artifact still serves 200 at its own pin.",
+    "fixture": {
+      "component": "user-card",
+      "definition": "<component name=\"user-card\"><span>{{label}}</span></component>",
+      "producer": "webadapters/1.2.3; esbuild/0.21.5",
+      "transform": {
+        "code": "export class UserCard extends HTMLElement { connectedCallback() { this.textContent = \"card\"; } }",
+        "language": "javascript",
+        "lossy": false,
+        "diagnostics": []
+      }
+    },
+    "request": {
+      "url": "/_maas/user-card@sha256-rYX-0Jgesw3NIoROiNgBZkRfQi24AbgQeiNCZOZwu8A.js?form=wc-class&target=es2017",
+      "method": "GET",
+      "headers": {}
+    },
+    "expect": {
+      "status": 200,
+      "headers": {
+        "Content-Type": "text/javascript; charset=utf-8",
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "ETag": "\"sha256-rYX-0Jgesw3NIoROiNgBZkRfQi24AbgQeiNCZOZwu8A\"",
+        "X-MaaS-Producer": "webadapters/1.2.3; esbuild/0.21.5",
+        "X-MaaS-Integrity": "sha256-b/fQIixHDJBIW1hpgiYkETIz462UDzZTwpoZks8Dawc="
+      },
+      "body": "export class UserCard extends HTMLElement { connectedCallback() { this.textContent = \"card\"; } }",
+      "bodyHash": "sha256-b/fQIixHDJBIW1hpgiYkETIz462UDzZTwpoZks8Dawc="
+    }
+  },
+  {
+    "name": "lossy-diagnostic-headers",
+    "description": "A lossy form surfaces X-MaaS-Lossy + a url-encoded X-MaaS-Diagnostic over the wire (#081).",
+    "fixture": {
+      "component": "user-card",
+      "definition": "<component name=\"user-card\"><span>{{label}}</span></component>",
+      "producer": "webadapters/1.2.3; esbuild/0.21.5",
+      "transform": {
+        "code": "export class UserCard extends HTMLElement { connectedCallback() { this.textContent = \"card\"; } }",
+        "language": "javascript",
+        "lossy": true,
+        "diagnostics": [
+          "target — ignored by this form"
+        ]
+      }
+    },
+    "request": {
+      "url": "/_maas/user-card@sha256-sHtOV2gg18GmudX6wOO0jM14gG6_CxO1bNXwbXiVjKY.js?form=wc-class",
+      "method": "GET",
+      "headers": {}
+    },
+    "expect": {
+      "status": 200,
+      "headers": {
+        "Content-Type": "text/javascript; charset=utf-8",
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "ETag": "\"sha256-sHtOV2gg18GmudX6wOO0jM14gG6_CxO1bNXwbXiVjKY\"",
+        "X-MaaS-Producer": "webadapters/1.2.3; esbuild/0.21.5",
+        "X-MaaS-Integrity": "sha256-b/fQIixHDJBIW1hpgiYkETIz462UDzZTwpoZks8Dawc=",
+        "X-MaaS-Lossy": "1",
+        "X-MaaS-Diagnostic": "target%20%E2%80%94%20ignored%20by%20this%20form"
+      },
+      "body": "export class UserCard extends HTMLElement { connectedCallback() { this.textContent = \"card\"; } }",
+      "bodyHash": "sha256-b/fQIixHDJBIW1hpgiYkETIz462UDzZTwpoZks8Dawc="
+    }
+  },
+  {
+    "name": "unknown-form-400",
+    "description": "An unknown form query value is a 400 with the structured JSON error body.",
+    "fixture": {
+      "component": "user-card",
+      "definition": "<component name=\"user-card\"><span>{{label}}</span></component>",
+      "producer": "webadapters/1.2.3; esbuild/0.21.5",
+      "transform": {
+        "code": "export class UserCard extends HTMLElement { connectedCallback() { this.textContent = \"card\"; } }",
+        "language": "javascript",
+        "lossy": false,
+        "diagnostics": []
+      }
+    },
+    "request": {
+      "url": "/_maas/user-card.js?form=bogus",
+      "method": "GET",
+      "headers": {}
+    },
+    "expect": {
+      "status": 400,
+      "headers": {
+        "Content-Type": "application/json; charset=utf-8"
+      },
+      "body": "{\"error\":\"Unknown form \\\"bogus\\\". Known: declarative, wc-class, html, jsx, functional.\"}",
+      "bodyHash": "sha256-0I+IoWRFoeyCBypT0E2tAxm5VLp1UnS99BKB6IA4Vfo="
+    }
+  },
+  {
+    "name": "unknown-component-404",
+    "description": "A request for a component the resolver does not know is a 404.",
+    "fixture": {
+      "component": "user-card",
+      "definition": "<component name=\"user-card\"><span>{{label}}</span></component>",
+      "producer": "webadapters/1.2.3; esbuild/0.21.5",
+      "transform": {
+        "code": "export class UserCard extends HTMLElement { connectedCallback() { this.textContent = \"card\"; } }",
+        "language": "javascript",
+        "lossy": false,
+        "diagnostics": []
+      }
+    },
+    "request": {
+      "url": "/_maas/ghost.js?form=wc-class",
+      "method": "GET",
+      "headers": {}
+    },
+    "expect": {
+      "status": 404,
+      "headers": {
+        "Content-Type": "application/json; charset=utf-8"
+      },
+      "body": "{\"error\":\"No component \\\"ghost\\\".\"}",
+      "bodyHash": "sha256-UXgwaM8Uw3hbycQQx3TakCBjL/dec/vDmjrjF4Qpc4k="
+    }
+  },
+  {
+    "name": "non-maas-path-404",
+    "description": "A path outside the MaaS base path is a 404 (not this origin).",
+    "fixture": {
+      "component": "user-card",
+      "definition": "<component name=\"user-card\"><span>{{label}}</span></component>",
+      "producer": "webadapters/1.2.3; esbuild/0.21.5",
+      "transform": {
+        "code": "export class UserCard extends HTMLElement { connectedCallback() { this.textContent = \"card\"; } }",
+        "language": "javascript",
+        "lossy": false,
+        "diagnostics": []
+      }
+    },
+    "request": {
+      "url": "/elsewhere.js",
+      "method": "GET",
+      "headers": {}
+    },
+    "expect": {
+      "status": 404,
+      "headers": {
+        "Content-Type": "application/json; charset=utf-8"
+      },
+      "body": "{\"error\":\"Not a MaaS request (expected /_maas/<name>.js).\"}",
+      "bodyHash": "sha256-JsRf19mBgWYbwiDWsD/YRwOPW+os+FfSc4D/8XOLGlM="
+    }
+  },
+  {
+    "name": "stale-hash-pin-404",
+    "description": "A terminal hash pin that does not match current state is a 404 (no historical store in v1).",
+    "fixture": {
+      "component": "user-card",
+      "definition": "<component name=\"user-card\"><span>{{label}}</span></component>",
+      "producer": "webadapters/1.2.3; esbuild/0.21.5",
+      "transform": {
+        "code": "export class UserCard extends HTMLElement { connectedCallback() { this.textContent = \"card\"; } }",
+        "language": "javascript",
+        "lossy": false,
+        "diagnostics": []
+      }
+    },
+    "request": {
+      "url": "/_maas/user-card@sha256-0000000000000000000000000000000000000000000.js?form=wc-class",
+      "method": "GET",
+      "headers": {}
+    },
+    "expect": {
+      "status": 404,
+      "headers": {
+        "Content-Type": "application/json; charset=utf-8"
+      },
+      "body": "{\"error\":\"No artifact \\\"user-card@sha256-0000000000000000000000000000000000000000000\\\" — current id is sha256-sHtOV2gg18GmudX6wOO0jM14gG6_CxO1bNXwbXiVjKY (this origin serves only current state).\"}",
+      "bodyHash": "sha256-/Afs0LvdUXoHOqgbSWkb4OcXGPDyQSOIOw/8VaI3xcw="
+    }
+  }
+]

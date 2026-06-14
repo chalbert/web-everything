@@ -3,9 +3,12 @@ type: issue
 workItem: story
 size: 8
 parent: "081"
-status: open
+status: resolved
 blockedBy: ["505"]
 dateOpened: "2026-06-13"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: blocks/renderers/module-service/conformance
 tags: []
 ---
 
