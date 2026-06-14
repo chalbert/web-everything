@@ -58,7 +58,6 @@ export default defineConfig({
       'webtheme/**/__tests__/**/*.test.{ts,tsx}', // webtheme token model + DTCG→CSS compile (#404)
       'webpolicy/**/__tests__/**/*.test.{ts,tsx}', // webpolicy proof-of-compliance hash chain (#407) + enforcement seam (#408)
       'webcompliance/**/__tests__/**/*.test.{ts,tsx}', // webcompliance gate runner over the policy model (#437)
-      'webdocs/**/__tests__/**/*.test.{ts,tsx}', // webdocs serve-time generator over the webcases pivot (#424)
       'webcases/**/__tests__/**/*.test.{ts,tsx}', // webcases mock-vs-real drift check (#334)
     ],
   },
