@@ -108,6 +108,14 @@
     },
     {
       "capabilityId": "accordion",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accordion",
+      "url": "https://open-ui.org/components/accordion.explainer/"
+    },
+    {
+      "capabilityId": "accordion",
       "sourceId": "radix-primitives",
       "present": true,
       "provenance": "verified",
@@ -310,9 +318,9 @@
       "capabilityId": "anchored-positioning",
       "sourceId": "open-ui",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Anchoring (Popover API Explainer)",
+      "url": "https://open-ui.org/components/popover.research.explainer/#anchoring"
     },
     {
       "capabilityId": "anchored-positioning",
@@ -564,6 +572,14 @@
     },
     {
       "capabilityId": "avatar",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Avatar",
+      "url": "https://open-ui.org/components/avatar.research/"
+    },
+    {
+      "capabilityId": "avatar",
       "sourceId": "polaris",
       "present": true,
       "provenance": "verified",
@@ -681,6 +697,14 @@
       "provenance": "verified",
       "sourceName": "Badge",
       "url": "https://mui.com/material-ui/react-badge/"
+    },
+    {
+      "capabilityId": "badge",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Badge",
+      "url": "https://open-ui.org/components/badge.research/"
     },
     {
       "capabilityId": "badge",
@@ -809,6 +833,14 @@
       "provenance": "verified",
       "sourceName": "Breadcrumbs",
       "url": "https://mui.com/material-ui/react-breadcrumbs/"
+    },
+    {
+      "capabilityId": "breadcrumb",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Breadcrumb",
+      "url": "https://open-ui.org/components/breadcrumb.research/"
     },
     {
       "capabilityId": "breadcrumb",
@@ -977,6 +1009,14 @@
       "provenance": "verified",
       "sourceName": "Button",
       "url": "https://mui.com/material-ui/react-button/"
+    },
+    {
+      "capabilityId": "button",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button",
+      "url": "https://open-ui.org/components/button/"
     },
     {
       "capabilityId": "button",
@@ -1252,6 +1292,14 @@
     },
     {
       "capabilityId": "card",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Card",
+      "url": "https://open-ui.org/components/card.research/"
+    },
+    {
+      "capabilityId": "card",
       "sourceId": "polaris",
       "present": true,
       "provenance": "verified",
@@ -1345,6 +1393,14 @@
       "provenance": "verified",
       "sourceName": "Carousel",
       "url": "https://m3.material.io/components/carousel/accessibility"
+    },
+    {
+      "capabilityId": "carousel",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Carousel",
+      "url": "https://open-ui.org/components/carousel.research/"
     },
     {
       "capabilityId": "carousel",
@@ -1481,6 +1537,14 @@
       "provenance": "verified",
       "sourceName": "Checkbox",
       "url": "https://mui.com/material-ui/react-checkbox/"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://open-ui.org/components/checkbox/"
     },
     {
       "capabilityId": "checkbox",
@@ -2012,6 +2076,14 @@
     },
     {
       "capabilityId": "combobox",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox",
+      "url": "https://open-ui.org/components/combobox.explainer/"
+    },
+    {
+      "capabilityId": "combobox",
       "sourceId": "polaris",
       "present": true,
       "provenance": "verified",
@@ -2500,6 +2572,14 @@
     },
     {
       "capabilityId": "data-table",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Table",
+      "url": "https://open-ui.org/components/table.research/"
+    },
+    {
+      "capabilityId": "data-table",
       "sourceId": "polaris",
       "present": true,
       "provenance": "verified",
@@ -2633,6 +2713,14 @@
       "provenance": "verified",
       "sourceName": "Date Picker",
       "url": "https://mui.com/x/react-date-pickers/date-picker/"
+    },
+    {
+      "capabilityId": "date-picker",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Datepicker",
+      "url": "https://open-ui.org/components/datepicker.research/"
     },
     {
       "capabilityId": "date-picker",
@@ -2881,6 +2969,14 @@
       "provenance": "verified",
       "sourceName": "Dialog",
       "url": "https://mui.com/material-ui/react-dialog/"
+    },
+    {
+      "capabilityId": "dialog",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog",
+      "url": "https://open-ui.org/components/dialog.research/"
     },
     {
       "capabilityId": "dialog",
@@ -3713,6 +3809,14 @@
       "provenance": "verified",
       "sourceName": "FileInput",
       "url": "https://mantine.dev/core/file-input/"
+    },
+    {
+      "capabilityId": "file-upload",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "File",
+      "url": "https://open-ui.org/components/file/"
     },
     {
       "capabilityId": "file-upload",
@@ -4660,6 +4764,14 @@
     },
     {
       "capabilityId": "inline-alert",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Alert",
+      "url": "https://open-ui.org/components/alert.research/"
+    },
+    {
+      "capabilityId": "inline-alert",
       "sourceId": "polaris",
       "present": true,
       "provenance": "verified",
@@ -5028,6 +5140,14 @@
     },
     {
       "capabilityId": "list",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "List",
+      "url": "https://open-ui.org/components/list.research/"
+    },
+    {
+      "capabilityId": "list",
       "sourceId": "polaris",
       "present": true,
       "provenance": "verified",
@@ -5305,6 +5425,14 @@
       "provenance": "verified",
       "sourceName": "Menu",
       "url": "https://mui.com/material-ui/react-menu/"
+    },
+    {
+      "capabilityId": "menu",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menu",
+      "url": "https://open-ui.org/components/menu.explainer/"
     },
     {
       "capabilityId": "menu",
@@ -5668,6 +5796,14 @@
     },
     {
       "capabilityId": "navbar",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Navigation Bar",
+      "url": "https://open-ui.org/components/navigation-bar.explainer/"
+    },
+    {
+      "capabilityId": "navbar",
       "sourceId": "polaris",
       "present": true,
       "provenance": "verified",
@@ -5809,6 +5945,14 @@
       "provenance": "verified",
       "sourceName": "Number Field",
       "url": "https://mui.com/material-ui/react-number-field/"
+    },
+    {
+      "capabilityId": "number-input",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Input Number",
+      "url": "https://open-ui.org/components/inputnumber.research/"
     },
     {
       "capabilityId": "number-input",
@@ -6102,9 +6246,9 @@
       "capabilityId": "popover",
       "sourceId": "open-ui",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Popover API",
+      "url": "https://open-ui.org/components/popover.research.explainer/"
     },
     {
       "capabilityId": "popover",
@@ -6452,6 +6596,14 @@
     },
     {
       "capabilityId": "radio-group",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio Button",
+      "url": "https://open-ui.org/components/radio-button.research/"
+    },
+    {
+      "capabilityId": "radio-group",
       "sourceId": "polaris",
       "present": true,
       "provenance": "verified",
@@ -6681,6 +6833,14 @@
       "provenance": "verified",
       "sourceName": "Slider (range)",
       "url": "https://mui.com/material-ui/react-slider/"
+    },
+    {
+      "capabilityId": "range-slider",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Enhanced Range Input",
+      "url": "https://open-ui.org/components/enhanced-range-input.explainer/"
     },
     {
       "capabilityId": "range-slider",
@@ -7035,6 +7195,22 @@
       "url": "https://mantine.dev/x/tiptap/"
     },
     {
+      "capabilityId": "rich-text-editor",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Richer Text Fields",
+      "url": "https://open-ui.org/components/richer-text-fields.explainer/"
+    },
+    {
+      "capabilityId": "roving-tabindex",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Focusgroup",
+      "url": "https://open-ui.org/components/scoped-focusgroup.explainer/"
+    },
+    {
       "capabilityId": "roving-tabindex",
       "sourceId": "radix-primitives",
       "present": true,
@@ -7366,9 +7542,9 @@
       "capabilityId": "select",
       "sourceId": "open-ui",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Customizable Select",
+      "url": "https://open-ui.org/components/customizable-select.explainer/"
     },
     {
       "capabilityId": "select",
@@ -7620,6 +7796,14 @@
     },
     {
       "capabilityId": "skeleton",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Skeleton",
+      "url": "https://open-ui.org/components/skeleton.research/"
+    },
+    {
+      "capabilityId": "skeleton",
       "sourceId": "polaris",
       "present": true,
       "provenance": "verified",
@@ -7745,6 +7929,14 @@
       "provenance": "verified",
       "sourceName": "Slider",
       "url": "https://mui.com/material-ui/react-slider/"
+    },
+    {
+      "capabilityId": "slider",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider",
+      "url": "https://open-ui.org/components/slider.research/"
     },
     {
       "capabilityId": "slider",
@@ -8140,6 +8332,14 @@
     },
     {
       "capabilityId": "stack-layout",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Flex",
+      "url": "https://open-ui.org/components/flex.research/"
+    },
+    {
+      "capabilityId": "stack-layout",
       "sourceId": "polaris",
       "present": true,
       "provenance": "verified",
@@ -8356,6 +8556,14 @@
     },
     {
       "capabilityId": "switch",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Switch",
+      "url": "https://open-ui.org/components/switch/"
+    },
+    {
+      "capabilityId": "switch",
       "sourceId": "primer",
       "present": true,
       "provenance": "verified",
@@ -8540,6 +8748,14 @@
     },
     {
       "capabilityId": "tabs",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tabs",
+      "url": "https://open-ui.org/components/tabs/"
+    },
+    {
+      "capabilityId": "tabs",
       "sourceId": "polaris",
       "present": true,
       "provenance": "verified",
@@ -8689,6 +8905,14 @@
       "provenance": "verified",
       "sourceName": "Chip",
       "url": "https://mui.com/material-ui/react-chip/"
+    },
+    {
+      "capabilityId": "tag-chip",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tag",
+      "url": "https://open-ui.org/components/tag/"
     },
     {
       "capabilityId": "tag-chip",
@@ -8977,6 +9201,14 @@
       "provenance": "verified",
       "sourceName": "Text Field",
       "url": "https://mui.com/material-ui/react-text-field/"
+    },
+    {
+      "capabilityId": "text-field",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Input Text",
+      "url": "https://open-ui.org/components/inputtext.research/"
     },
     {
       "capabilityId": "text-field",
@@ -9380,6 +9612,14 @@
     },
     {
       "capabilityId": "toast",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toast",
+      "url": "https://open-ui.org/components/toast.research/"
+    },
+    {
+      "capabilityId": "toast",
       "sourceId": "polaris",
       "present": true,
       "provenance": "verified",
@@ -9537,6 +9777,14 @@
       "provenance": "verified",
       "sourceName": "Tooltip",
       "url": "https://mui.com/material-ui/react-tooltip/"
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "open-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tooltip",
+      "url": "https://open-ui.org/components/tooltip.research/"
     },
     {
       "capabilityId": "tooltip",
