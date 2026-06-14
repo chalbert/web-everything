@@ -17,7 +17,7 @@ relatedProject: webintents
 ## Triage context
 
 - **Kind**: Intent
-- **Native anchor**: `color-scheme`, `light-dark()`, `prefers-color-scheme`, `prefers-contrast`
+- **Native grounding**: `color-scheme`, `light-dark()`, `prefers-color-scheme`, `prefers-contrast`
 - **Native-first**: ▲ high · **Gap**: ▲ high · **Effort**: ▽ low
 - **Rank**: 3 — next (now the lead item after #1 webintl and #2 locale shipped)
 

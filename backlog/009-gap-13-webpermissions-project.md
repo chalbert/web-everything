@@ -21,7 +21,7 @@ The concern decomposes into orthogonal axes the survey pins to the real tree: **
 
 ### Triage context
 
-- **Kind**: Project and/or Intent · **Native anchor**: Permissions API, Notifications API, Push API
+- **Kind**: Project and/or Intent · **Native grounding**: Permissions API, Notifications API, Push API
 - **Native-first**: ▽ low · **Gap**: ◆ medium · **Effort**: ◆ medium · **Rank**: 13
 
 ### Recommended path at a glance

@@ -17,7 +17,7 @@ Focus-trap, roving tabindex, `inert`, and live-region announcements live **scatt
 ## Triage context
 
 - **Kind**: Intent and/or Protocol
-- **Native anchor**: `inert`, `aria-live`, roving tabindex, focus management
+- **Native grounding**: `inert`, `aria-live`, roving tabindex, focus management
 - **Native-first**: ◆ medium · **Gap**: ◆ medium · **Effort**: ◆ medium
 - **Rank**: 6
 

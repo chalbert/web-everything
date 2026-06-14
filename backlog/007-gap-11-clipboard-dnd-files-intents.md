@@ -27,7 +27,7 @@ surface both compose it) or stays decomposed across the neighbours. Intent, not 
 ## Triage context
 
 - **Kind**: Intent(s)
-- **Native anchor**: Clipboard API, Drag & Drop, File System Access
+- **Native grounding**: Clipboard API, Drag & Drop, File System Access
 - **Native-first**: ▽ low · **Gap**: ◆ medium · **Effort**: ▽ low
 - **Rank**: 11
 

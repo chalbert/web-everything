@@ -17,7 +17,7 @@ Accordion / collapse / expand. Native: `<details>`, `beforetoggle`/`toggle`, `hi
 ## Triage context
 
 - **Kind**: Intent
-- **Native anchor**: `<details>`, `beforetoggle`/`toggle`, `hidden=until-found`
+- **Native grounding**: `<details>`, `beforetoggle`/`toggle`, `hidden=until-found`
 - **Native-first**: ◆ medium · **Gap**: ▽ low · **Effort**: ▽ low
 - **Rank**: 12
 

@@ -16,7 +16,7 @@ tags: [gap-analysis, protocol, view-transitions, motion]
 ## Triage context
 
 - **Kind**: Protocol
-- **Native anchor**: View Transitions API (same- & cross-document)
+- **Native grounding**: View Transitions API (same- & cross-document)
 - **Native-first**: ▲ high · **Gap**: ◆ medium · **Effort**: ◆ medium
 - **Rank**: 8 — under motion/nav
 

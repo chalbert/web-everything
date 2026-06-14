@@ -16,7 +16,7 @@ Keyboard shortcuts + command palette. The Mousetrap adapter is already hinted at
 ## Triage context
 
 - **Kind**: Project and/or Intent
-- **Native anchor**: `keydown`, `CommandEvent`/`command` attr, Mousetrap adapter
+- **Native grounding**: `keydown`, `CommandEvent`/`command` attr, Mousetrap adapter
 - **Native-first**: ◆ medium · **Gap**: ▽ low · **Effort**: ◆ medium
 - **Rank**: 9
 

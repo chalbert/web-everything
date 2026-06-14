@@ -2,14 +2,28 @@
 type: decision
 workItem: story
 size: 2
-status: open
+status: resolved
 dateOpened: "2026-06-03"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: none
 preparedDate: "2026-06-12"
 tags: [terminology, gap-analysis, docs]
 crossRef: { url: /research/collection-operations/, label: collection-operations research (local fix applied) }
 ---
 
 # Decide whether to rename the "Native anchor" gap-analysis field repo-wide
+
+**RATIFIED 2026-06-14 → A (rename repo-wide to `Native grounding`).** The discussion confirmed the
+crux: "anchor" has one canonical owner — the **Anchor Intent** is literally CSS Anchor Positioning
+(`anchor-positioning`, tethered tooltips/popovers/menus), the platform's own term, so renaming *it*
+would coin away from the platform. The triage label was the metaphorical squatter ("the native API a
+standard grounds in"). Freed the canonical owner by renaming the label. Executed as a mechanical prose
+edit: `**Native anchor**` → `**Native grounding**` across the 10 gap files (006–013, 015, 016) plus
+358's inline `Native anchor:`. Scope refinement vs. the original framing: 360 has no triage field (its
+"anchor" uses are "edge-anchored", unrelated) and was left untouched; the camelCase `nativeAnchor` JSON
+key is independent and untouched. This item retains its `**Native anchor**` mentions below as the
+historical record of the old term.
 
 **Prepared decision — ready to ratify.** A single binary terminology fork over existing repo state (no
 greenfield design, so no web survey — the prepared shape here is the concrete-refs check). The

@@ -19,7 +19,7 @@ No auth, session, authorization, or credential story anywhere in the constellati
 ## Triage context (preserved)
 
 - **Kind**: Project + Protocol (original guess — fork 1 re-tests it)
-- **Native anchor**: Credential Management, WebAuthn/Passkeys, FedCM, Digital Credentials, Permissions API
+- **Native grounding**: Credential Management, WebAuthn/Passkeys, FedCM, Digital Credentials, Permissions API
 - **Native-first**: ▲ high · **Gap**: ▲ high · **Effort**: ▲ high
 - **Rank**: 5 — later (original; fork 2 re-tests the defer call)
 

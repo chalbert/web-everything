@@ -17,7 +17,7 @@ Filtering / sorting / pagination / grouping of data collections (grids, lists). 
 ## Triage context
 
 - **Kind**: Intent
-- **Native anchor**: no native *operation* API — but sort's *semantics* are anchored (`aria-sort`, `Intl.Collator`, stable `Array.prototype.sort`); filter/page/group are pure vocabulary. See research page.
+- **Native grounding**: no native *operation* API — but sort's *semantics* are anchored (`aria-sort`, `Intl.Collator`, stable `Array.prototype.sort`); filter/page/group are pure vocabulary. See research page.
 - **Native-first**: ◆ medium · **Gap**: ◆ medium · **Effort**: ◆ medium
 - **Rank**: 10
 

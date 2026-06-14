@@ -13,7 +13,7 @@ tags: [gap-analysis, block, toast, notification, live-region]
 
 # Toast / notification block
 
-Toast / notification block — transient, non-blocking notifications with queueing, timeout, stacking, an optional action, and aria-live announcement. Gap from the competitive coverage analysis (#347, /research/benchmark-coverage/): intent:feedback + intent:message + intent:live-region-status cover the UX and announcement axes, but no block implements the toast/snackbar surface. Distinct from background-task-surface (#135), which is for long-running task status. Native anchor: role=status / aria-live. Ranked top of the un-tracked gaps. Candidate from the gap sweep — groom before building.
+Toast / notification block — transient, non-blocking notifications with queueing, timeout, stacking, an optional action, and aria-live announcement. Gap from the competitive coverage analysis (#347, /research/benchmark-coverage/): intent:feedback + intent:message + intent:live-region-status cover the UX and announcement axes, but no block implements the toast/snackbar surface. Distinct from background-task-surface (#135), which is for long-running task status. Native grounding: role=status / aria-live. Ranked top of the un-tracked gaps. Candidate from the gap sweep — groom before building.
 
 ## Outcome (2026-06-12)
 

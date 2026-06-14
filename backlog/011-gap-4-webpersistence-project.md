@@ -19,7 +19,7 @@ Completes the data story: `webresources` fetches, `webstates` holds, nothing **p
 ## Triage context (preserved)
 
 - **Kind**: Project + Protocol
-- **Native anchor**: Storage API, IndexedDB, Cache API, Background Sync, `navigator.storage.persist()`
+- **Native grounding**: Storage API, IndexedDB, Cache API, Background Sync, `navigator.storage.persist()`
 - **Native-first**: ◆ medium · **Gap**: ▲ high · **Effort**: ▲ high
 - **Rank**: 4 — soon (the next full project after #3 Theme/Color intent). Recommended as the next project after the Theme/Color intent lands.
 
