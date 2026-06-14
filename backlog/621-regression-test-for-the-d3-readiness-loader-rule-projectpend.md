@@ -1,9 +1,11 @@
 ---
 type: issue
 workItem: task
-status: open
+status: resolved
 blockedBy: ["608"]
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
 tags: []
 ---
 

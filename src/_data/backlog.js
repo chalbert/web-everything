@@ -61,6 +61,34 @@ function isExerciseAppDescendant(item, byNum) {
   return false;
 }
 
+// D3-READINESS (#608/#621) — the pure derivation of `projectPending` + `relatedProjectStatus`, factored
+// out of the loader so it can be regression-tested over synthetic items (mirrors how `engine.test.mjs`
+// exercises `computeSelection`). Given the items and a `relatedProject → status` map, it computes the
+// shipped-surface proxy internally (≥1 resolved item filed against a project ⇒ it has shipped) and
+// returns, aligned by index, `{ relatedProjectStatus, projectPending }` for each item:
+//   • relatedProjectStatus — the status of the item's `relatedProject` (`'unknown'` if not in the map,
+//     `undefined` if the item has no `relatedProject`);
+//   • projectPending — true ⇔ an OPEN issue/idea whose `relatedProject` is a `concept` project with
+//     ZERO resolved surface. A `concept` project that already has resolved work is status-DRIFT (#617),
+//     not a pending project, so its dependents are NOT demoted. We never demote on a `concept` label alone.
+function deriveProjectReadiness(items, projectStatus) {
+  const resolvedByProject = new Map();
+  for (const it of items) {
+    if (it.status === 'resolved' && typeof it.relatedProject === 'string') {
+      resolvedByProject.set(it.relatedProject, (resolvedByProject.get(it.relatedProject) || 0) + 1);
+    }
+  }
+  return items.map((item) => {
+    const relatedProjectStatus = typeof item.relatedProject === 'string'
+      ? (projectStatus.get(item.relatedProject) ?? 'unknown') : undefined;
+    const projectPending = item.status === 'open'
+      && (item.type === 'issue' || item.type === 'idea')
+      && relatedProjectStatus === 'concept'
+      && !(resolvedByProject.get(item.relatedProject) > 0);
+    return { relatedProjectStatus, projectPending };
+  });
+}
+
 // Strip inline markdown so a line makes a clean one-line summary.
 const stripInline = (s) => s
   .replace(/`([^`]+)`/g, '$1')
@@ -200,14 +228,11 @@ module.exports = function backlog() {
     const projects = JSON.parse(readFileSync(join(ROOT, 'src/_data/projects.json'), 'utf8'));
     projectStatus = new Map(projects.map((p) => [p.id, p.status]));
   } catch { /* missing/malformed projects.json → no D3-readiness demotion (degrade, don't crash) */ }
-  const resolvedByProject = new Map();
-  for (const it of items) {
-    if (it.status === 'resolved' && typeof it.relatedProject === 'string') {
-      resolvedByProject.set(it.relatedProject, (resolvedByProject.get(it.relatedProject) || 0) + 1);
-    }
-  }
+  // D3-readiness fields (#608/#621), derived by the pure helper so the loader and its regression test
+  // share one source of truth. Aligned by index with `items`.
+  const projectReadiness = deriveProjectReadiness(items, projectStatus);
 
-  for (const item of items) {
+  items.forEach((item, idx) => {
     const edges = Array.isArray(item.blockedBy) ? item.blockedBy : [];
     item.blockers = edges
       .map((n) => byNum.get(String(n)))
@@ -233,12 +258,8 @@ module.exports = function backlog() {
     // built yet. Such a build is NOT agent-ready even with every `blockedBy` resolved, so it is
     // demoted out of Tier A (it falls to C, alongside structurally-blocked work). Exposed as its own
     // field so the detail page, check:standards, and the audit can name the reason precisely.
-    item.relatedProjectStatus = typeof item.relatedProject === 'string'
-      ? (projectStatus.get(item.relatedProject) ?? 'unknown') : undefined;
-    item.projectPending = item.status === 'open'
-      && (item.type === 'issue' || item.type === 'idea')
-      && item.relatedProjectStatus === 'concept'
-      && !(resolvedByProject.get(item.relatedProject) > 0);
+    item.relatedProjectStatus = projectReadiness[idx].relatedProjectStatus;
+    item.projectPending = projectReadiness[idx].projectPending;
 
     item.tier = item.status !== 'open' ? undefined
       : ((item.type === 'issue' || item.type === 'idea')
@@ -292,7 +313,7 @@ module.exports = function backlog() {
     item.locus = item.locusAuthored ? item.locus
       : isExerciseAppDescendant(item, byNum) ? 'exercise-app'
       : inferLocusFromTags(item.tags);
-  }
+  });
 
   // Reverse dependency edges + unblock-leverage (#254) — INVERT `blockedBy` so each item knows who
   // depends on it, then score how much work resolving it would free. A pure, deterministic function of
@@ -414,3 +435,7 @@ module.exports = function backlog() {
 
   return items;
 };
+
+// Named export of the pure D3-readiness derivation (#621) for direct regression testing — Eleventy only
+// ever invokes the default function export, so attaching this property is inert to the build.
+module.exports.deriveProjectReadiness = deriveProjectReadiness;
