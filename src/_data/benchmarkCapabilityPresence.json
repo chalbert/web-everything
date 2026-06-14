@@ -30,17 +30,17 @@
       "capabilityId": "accordion",
       "sourceId": "radix-primitives",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Accordion",
+      "url": "https://www.radix-ui.com/primitives/docs/components/accordion"
     },
     {
       "capabilityId": "alert-dialog",
       "sourceId": "radix-primitives",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Alert Dialog",
+      "url": "https://www.radix-ui.com/primitives/docs/components/alert-dialog"
     },
     {
       "capabilityId": "anchored-positioning",
@@ -54,9 +54,9 @@
       "capabilityId": "anchored-positioning",
       "sourceId": "radix-primitives",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Popover positioning",
+      "url": "https://www.radix-ui.com/primitives/docs/components/popover"
     },
     {
       "capabilityId": "aria-apg-adherence",
@@ -118,9 +118,9 @@
       "capabilityId": "button-group",
       "sourceId": "radix-primitives",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Toggle Group",
+      "url": "https://www.radix-ui.com/primitives/docs/components/toggle-group"
     },
     {
       "capabilityId": "card",
@@ -230,17 +230,17 @@
       "capabilityId": "context-menu",
       "sourceId": "radix-primitives",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Context Menu",
+      "url": "https://www.radix-ui.com/primitives/docs/components/context-menu"
     },
     {
       "capabilityId": "controlled-uncontrolled",
       "sourceId": "radix-primitives",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Controlled or uncontrolled",
+      "url": "https://www.radix-ui.com/primitives/docs/components/select"
     },
     {
       "capabilityId": "controlled-uncontrolled",
@@ -358,25 +358,25 @@
       "capabilityId": "dialog",
       "sourceId": "radix-primitives",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Dialog",
+      "url": "https://www.radix-ui.com/primitives/docs/components/dialog"
     },
     {
       "capabilityId": "disclosure",
       "sourceId": "radix-primitives",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Collapsible",
+      "url": "https://www.radix-ui.com/primitives/docs/components/collapsible"
     },
     {
       "capabilityId": "dismissal",
       "sourceId": "radix-primitives",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Popover dismissal",
+      "url": "https://www.radix-ui.com/primitives/docs/components/popover"
     },
     {
       "capabilityId": "drag-and-drop",
@@ -646,9 +646,9 @@
       "capabilityId": "menu",
       "sourceId": "radix-primitives",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Dropdown Menu",
+      "url": "https://www.radix-ui.com/primitives/docs/components/dropdown-menu"
     },
     {
       "capabilityId": "menu",
@@ -758,9 +758,9 @@
       "capabilityId": "popover",
       "sourceId": "radix-primitives",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Popover",
+      "url": "https://www.radix-ui.com/primitives/docs/components/popover"
     },
     {
       "capabilityId": "radio-group",
@@ -846,9 +846,9 @@
       "capabilityId": "scroll-area",
       "sourceId": "radix-primitives",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Scroll Area",
+      "url": "https://www.radix-ui.com/primitives/docs/components/scroll-area"
     },
     {
       "capabilityId": "segmented-control",
@@ -1078,9 +1078,9 @@
       "capabilityId": "toast",
       "sourceId": "radix-primitives",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Toast",
+      "url": "https://www.radix-ui.com/primitives/docs/components/toast"
     },
     {
       "capabilityId": "tooltip",
@@ -4369,6 +4369,206 @@
       "provenance": "verified",
       "sourceName": "Localization",
       "url": "https://v1.lightningdesignsystem.com/guidelines/localization/"
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Select",
+      "url": "https://www.radix-ui.com/primitives/docs/components/select"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://www.radix-ui.com/primitives/docs/components/checkbox"
+    },
+    {
+      "capabilityId": "radio-group",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio Group",
+      "url": "https://www.radix-ui.com/primitives/docs/components/radio-group"
+    },
+    {
+      "capabilityId": "switch",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Switch",
+      "url": "https://www.radix-ui.com/primitives/docs/components/switch"
+    },
+    {
+      "capabilityId": "slider",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider",
+      "url": "https://www.radix-ui.com/primitives/docs/components/slider"
+    },
+    {
+      "capabilityId": "range-slider",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider (multiple thumbs)",
+      "url": "https://www.radix-ui.com/primitives/docs/components/slider"
+    },
+    {
+      "capabilityId": "pin-input",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "One-Time Password Field",
+      "url": "https://www.radix-ui.com/primitives/docs/components/one-time-password-field"
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Form",
+      "url": "https://www.radix-ui.com/primitives/docs/components/form"
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tabs",
+      "url": "https://www.radix-ui.com/primitives/docs/components/tabs"
+    },
+    {
+      "capabilityId": "segmented-control",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toggle Group",
+      "url": "https://www.radix-ui.com/primitives/docs/components/toggle-group"
+    },
+    {
+      "capabilityId": "navbar",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Navigation Menu",
+      "url": "https://www.radix-ui.com/primitives/docs/components/navigation-menu"
+    },
+    {
+      "capabilityId": "sidebar-nav",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Navigation Menu",
+      "url": "https://www.radix-ui.com/primitives/docs/components/navigation-menu"
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tooltip",
+      "url": "https://www.radix-ui.com/primitives/docs/components/tooltip"
+    },
+    {
+      "capabilityId": "avatar",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Avatar",
+      "url": "https://www.radix-ui.com/primitives/docs/components/avatar"
+    },
+    {
+      "capabilityId": "progress-linear",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress",
+      "url": "https://www.radix-ui.com/primitives/docs/components/progress"
+    },
+    {
+      "capabilityId": "divider",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Separator",
+      "url": "https://www.radix-ui.com/primitives/docs/components/separator"
+    },
+    {
+      "capabilityId": "focus-trap",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog focus trap",
+      "url": "https://www.radix-ui.com/primitives/docs/components/dialog"
+    },
+    {
+      "capabilityId": "focus-return",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog focus return",
+      "url": "https://www.radix-ui.com/primitives/docs/components/dialog"
+    },
+    {
+      "capabilityId": "roving-tabindex",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio Group roving tabindex",
+      "url": "https://www.radix-ui.com/primitives/docs/components/radio-group"
+    },
+    {
+      "capabilityId": "type-ahead",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dropdown Menu typeahead",
+      "url": "https://www.radix-ui.com/primitives/docs/components/dropdown-menu"
+    },
+    {
+      "capabilityId": "live-region",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toast aria-live",
+      "url": "https://www.radix-ui.com/primitives/docs/components/toast"
+    },
+    {
+      "capabilityId": "form-validation-flow",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Form validation messages",
+      "url": "https://www.radix-ui.com/primitives/docs/components/form"
+    },
+    {
+      "capabilityId": "aria-apg-adherence",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accessibility (WAI-ARIA APG)",
+      "url": "https://www.radix-ui.com/primitives/docs/overview/accessibility"
+    },
+    {
+      "capabilityId": "keyboard-interaction",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Keyboard Interactions",
+      "url": "https://www.radix-ui.com/primitives/docs/overview/accessibility"
+    },
+    {
+      "capabilityId": "i18n-rtl",
+      "sourceId": "radix-primitives",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Direction Provider",
+      "url": "https://www.radix-ui.com/primitives/docs/utilities/direction-provider"
     }
   ]
 }
