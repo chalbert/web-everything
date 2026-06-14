@@ -3865,6 +3865,510 @@
       "provenance": "verified",
       "sourceName": "Semantic HTML and ARIA",
       "url": "https://primer.style/accessibility/design-guidance/semantic-html-and-aria/"
+    },
+    {
+      "capabilityId": "button",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Buttons",
+      "url": "https://v1.lightningdesignsystem.com/components/buttons/"
+    },
+    {
+      "capabilityId": "icon-button",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button Icons",
+      "url": "https://v1.lightningdesignsystem.com/components/button-icons/"
+    },
+    {
+      "capabilityId": "button-group",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button Groups",
+      "url": "https://v1.lightningdesignsystem.com/components/button-groups/"
+    },
+    {
+      "capabilityId": "text-field",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Input",
+      "url": "https://v1.lightningdesignsystem.com/components/input/"
+    },
+    {
+      "capabilityId": "textarea",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Textarea",
+      "url": "https://v1.lightningdesignsystem.com/components/textarea/"
+    },
+    {
+      "capabilityId": "number-input",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Counter",
+      "url": "https://v1.lightningdesignsystem.com/components/counter/"
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Select",
+      "url": "https://v1.lightningdesignsystem.com/components/select/"
+    },
+    {
+      "capabilityId": "multi-select",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dueling Picklist",
+      "url": "https://v1.lightningdesignsystem.com/components/dueling-picklist/"
+    },
+    {
+      "capabilityId": "combobox",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox",
+      "url": "https://v1.lightningdesignsystem.com/components/combobox/"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://v1.lightningdesignsystem.com/components/checkbox/"
+    },
+    {
+      "capabilityId": "radio-group",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio Group",
+      "url": "https://v1.lightningdesignsystem.com/components/radio-group/"
+    },
+    {
+      "capabilityId": "switch",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox Toggle",
+      "url": "https://v1.lightningdesignsystem.com/components/checkbox-toggle/"
+    },
+    {
+      "capabilityId": "slider",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider",
+      "url": "https://v1.lightningdesignsystem.com/components/slider/"
+    },
+    {
+      "capabilityId": "date-picker",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Datepickers",
+      "url": "https://v1.lightningdesignsystem.com/components/datepickers/"
+    },
+    {
+      "capabilityId": "date-range-picker",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Datetime Picker",
+      "url": "https://v1.lightningdesignsystem.com/components/datetime-picker/"
+    },
+    {
+      "capabilityId": "time-picker",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Timepicker",
+      "url": "https://v1.lightningdesignsystem.com/components/timepicker/"
+    },
+    {
+      "capabilityId": "color-picker",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color Picker",
+      "url": "https://v1.lightningdesignsystem.com/components/color-picker/"
+    },
+    {
+      "capabilityId": "file-upload",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "File Selector",
+      "url": "https://v1.lightningdesignsystem.com/components/file-selector/"
+    },
+    {
+      "capabilityId": "tags-input",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Pills",
+      "url": "https://v1.lightningdesignsystem.com/components/pills/"
+    },
+    {
+      "capabilityId": "rich-text-editor",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Rich Text Editor",
+      "url": "https://v1.lightningdesignsystem.com/components/rich-text-editor/"
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Form Element",
+      "url": "https://v1.lightningdesignsystem.com/components/form-element/"
+    },
+    {
+      "capabilityId": "accordion",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accordion",
+      "url": "https://v1.lightningdesignsystem.com/components/accordion/"
+    },
+    {
+      "capabilityId": "disclosure",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Expandable Section",
+      "url": "https://v1.lightningdesignsystem.com/components/expandable-section/"
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tabs",
+      "url": "https://v1.lightningdesignsystem.com/components/tabs/"
+    },
+    {
+      "capabilityId": "menu",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menus",
+      "url": "https://v1.lightningdesignsystem.com/components/menus/"
+    },
+    {
+      "capabilityId": "listbox",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox (listbox)",
+      "url": "https://v1.lightningdesignsystem.com/components/combobox/"
+    },
+    {
+      "capabilityId": "tree-view",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Trees",
+      "url": "https://v1.lightningdesignsystem.com/components/trees/"
+    },
+    {
+      "capabilityId": "tree-select",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tree Grid",
+      "url": "https://v1.lightningdesignsystem.com/components/tree-grid/"
+    },
+    {
+      "capabilityId": "breadcrumb",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Breadcrumbs",
+      "url": "https://v1.lightningdesignsystem.com/components/breadcrumbs/"
+    },
+    {
+      "capabilityId": "stepper",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Path",
+      "url": "https://v1.lightningdesignsystem.com/components/path/"
+    },
+    {
+      "capabilityId": "navbar",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Global Navigation",
+      "url": "https://v1.lightningdesignsystem.com/components/global-navigation/"
+    },
+    {
+      "capabilityId": "sidebar-nav",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Vertical Navigation",
+      "url": "https://v1.lightningdesignsystem.com/components/vertical-navigation/"
+    },
+    {
+      "capabilityId": "dialog",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Modals",
+      "url": "https://v1.lightningdesignsystem.com/components/modals/"
+    },
+    {
+      "capabilityId": "drawer",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Panels",
+      "url": "https://v1.lightningdesignsystem.com/components/panels/"
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popovers",
+      "url": "https://v1.lightningdesignsystem.com/components/popovers/"
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tooltips",
+      "url": "https://v1.lightningdesignsystem.com/components/tooltips/"
+    },
+    {
+      "capabilityId": "toast",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toast",
+      "url": "https://v1.lightningdesignsystem.com/components/toast/"
+    },
+    {
+      "capabilityId": "inline-alert",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Alert",
+      "url": "https://v1.lightningdesignsystem.com/components/alert/"
+    },
+    {
+      "capabilityId": "data-table",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Data Tables",
+      "url": "https://v1.lightningdesignsystem.com/components/data-tables/"
+    },
+    {
+      "capabilityId": "list",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tiles",
+      "url": "https://v1.lightningdesignsystem.com/components/tiles/"
+    },
+    {
+      "capabilityId": "card",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Cards",
+      "url": "https://v1.lightningdesignsystem.com/components/cards/"
+    },
+    {
+      "capabilityId": "avatar",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Avatar",
+      "url": "https://v1.lightningdesignsystem.com/components/avatar/"
+    },
+    {
+      "capabilityId": "badge",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Badges",
+      "url": "https://v1.lightningdesignsystem.com/components/badges/"
+    },
+    {
+      "capabilityId": "tag-chip",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Pills",
+      "url": "https://v1.lightningdesignsystem.com/components/pills/"
+    },
+    {
+      "capabilityId": "carousel",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Carousel",
+      "url": "https://v1.lightningdesignsystem.com/components/carousel/"
+    },
+    {
+      "capabilityId": "timeline",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Activity Timeline",
+      "url": "https://v1.lightningdesignsystem.com/components/activity-timeline/"
+    },
+    {
+      "capabilityId": "progress-linear",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress Bar",
+      "url": "https://v1.lightningdesignsystem.com/components/progress-bar/"
+    },
+    {
+      "capabilityId": "spinner",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spinners",
+      "url": "https://v1.lightningdesignsystem.com/components/spinners/"
+    },
+    {
+      "capabilityId": "empty-state",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Illustration",
+      "url": "https://v1.lightningdesignsystem.com/components/illustration/"
+    },
+    {
+      "capabilityId": "drag-and-drop",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Drop Zone",
+      "url": "https://v1.lightningdesignsystem.com/components/drop-zone/"
+    },
+    {
+      "capabilityId": "color-tokens",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color (design tokens)",
+      "url": "https://v1.lightningdesignsystem.com/design-tokens/"
+    },
+    {
+      "capabilityId": "typography-scale",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Font Size (design tokens)",
+      "url": "https://v1.lightningdesignsystem.com/design-tokens/"
+    },
+    {
+      "capabilityId": "spacing-scale",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spacing (design tokens)",
+      "url": "https://v1.lightningdesignsystem.com/design-tokens/"
+    },
+    {
+      "capabilityId": "elevation",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Shadow (design tokens)",
+      "url": "https://v1.lightningdesignsystem.com/design-tokens/"
+    },
+    {
+      "capabilityId": "radius",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radius (design tokens)",
+      "url": "https://v1.lightningdesignsystem.com/design-tokens/"
+    },
+    {
+      "capabilityId": "motion-tokens",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Time (design tokens)",
+      "url": "https://v1.lightningdesignsystem.com/design-tokens/"
+    },
+    {
+      "capabilityId": "touch-target",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Touch (design tokens)",
+      "url": "https://v1.lightningdesignsystem.com/design-tokens/"
+    },
+    {
+      "capabilityId": "responsive-adaptive",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Media Query (design tokens)",
+      "url": "https://v1.lightningdesignsystem.com/design-tokens/"
+    },
+    {
+      "capabilityId": "aria-apg-adherence",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "ARIA Authoring Practices",
+      "url": "https://v1.lightningdesignsystem.com/accessibility/overview/"
+    },
+    {
+      "capabilityId": "keyboard-interaction",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Keyboard Interaction",
+      "url": "https://v1.lightningdesignsystem.com/accessibility/overview/"
+    },
+    {
+      "capabilityId": "color-contrast",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color Contrast (WCAG AA)",
+      "url": "https://v1.lightningdesignsystem.com/accessibility/overview/"
+    },
+    {
+      "capabilityId": "live-region",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Notifications",
+      "url": "https://v1.lightningdesignsystem.com/components/notifications/"
+    },
+    {
+      "capabilityId": "i18n-rtl",
+      "sourceId": "lightning",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Localization",
+      "url": "https://v1.lightningdesignsystem.com/guidelines/localization/"
     }
   ]
 }
