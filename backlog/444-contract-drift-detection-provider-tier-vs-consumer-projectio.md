@@ -4,9 +4,12 @@ locus: plateau-app
 workItem: story
 size: 3
 parent: "402"
-status: open
+status: resolved
 blockedBy: ["442"]
 dateOpened: "2026-06-12"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: plateau-app/src/platform-manager/contract-drift.ts
 tags: [plateau, plateau-app, contract-drift, conformance, seam-contract, platform-manager]
 relatedProject: webregistries
 crossRef: { url: /backlog/402-plateau-platform-manager-product-graph-aggregation-impact-an/, label: "Platform-manager product epic (#402)" }
