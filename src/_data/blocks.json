@@ -3446,5 +3446,28 @@
       "Accessibility is composed, not baked: result-count announcements on filter settle ('7 results available' / 'No results found') and the active option on each move ('grinning face, 2 of 84') go through live-region-status — one shared announcer, two callers (filter counts + active-descendant moves), exactly as autocomplete already wires it. Large emoji sets are virtualized via windowed-collection; the rendered glyphs are deferred to the expressive-symbol intent (the picker shops them, never re-renders them)."
     ],
     "relatedReport": "reports/2026-06-12-expressive-symbols-reactions.md"
+  },
+  {
+    "id": "inline-trigger",
+    "name": "Inline Trigger",
+    "status": "draft",
+    "type": "Component",
+    "summary": "The runnable trigger-detection engine ratified in #591 (Fork 1-C): an editable region that detects a boundary-anchored trigger char (@/:/#//), slices the query, anchors a popover to the caret (virtual element via the anchor intent), and routes results through the picker surface / autocomplete listbox. Detection-only per Fork 2-A — emits the resolved selection {key, query, range, item} and lets the consumer commit, owning no document model, so it works uniformly in <input>/<textarea>/contenteditable and composes the rich-text standard (#590) for token insertion without being blocked on it. Ships reference text + token insertion adapters but owns neither commit. Forced invariants: APG editable-combobox virtual focus (DOM focus stays in the text, aria-activedescendant drives the listbox), IME-composition suspension, not-a-protocol.",
+    "implementsIntent": "inline-trigger",
+    "composesIntents": [
+      "input",
+      "anchor",
+      "focus-delegation",
+      "live-region-status",
+      "selection"
+    ],
+    "designDecisions": [
+      "Detection-only / insertion-agnostic (Fork 2-A, the divergent ruling): the block emits the resolved selection {key, query, range, item} and stops; the consumer commits. This is the GitHub <text-expander> model (text-expander-value hands you the replacement), NOT the ProseMirror Suggestion.command model (which couples insertion into the editor doc). Owning no document model is exactly what lets one engine run unchanged in <input>, <textarea>, and contenteditable, and compose the rich-text standard (#590) for token insertion WITHOUT being blocked on it. The items-source (results provider) and the committer are consumer-supplied behaviors, never hardcoded.",
+      "New block + intent, not a mode of autocomplete (Fork 1-C): the trigger-detection engine (boundary-anchored char match -> query slice -> caret anchor -> result routing) is runnable behavior every prior-art system ships as code (ProseMirror/Tiptap Suggestion, GitHub <text-expander>, Lexical useBasicTypeaheadTriggerMatch); folding it into the autocomplete block (A) or shipping intent-only (B) both under-specify the engine. The declarative dimensions (trigger set, boundary policy, query policy, insertion mode) are the paired intent. Not a protocol — a deterministic transform with no swappable-vendor interop story.",
+      "Caret anchoring is the one genuinely new mechanic, and it composes existing intents: the popover tethers to the caret — a virtual element, not a stable DOM node — composing the anchor intent (placement/collision/flip) over a caret rect. In contenteditable the DOM Range.getBoundingClientRect() gives the rect; in <input>/<textarea> a mirror-div caret-coordinate measurement is needed. Off-screen-near-edge bugs in the prior art (Lexical #3834) confirm collision handling is load-bearing, so the block defers it to anchor rather than re-implementing positioning.",
+      "Accessibility is the APG editable combobox, verbatim (forced invariant): DOM focus stays on the editable region (virtual focus); the listbox is navigated via aria-activedescendant with the active option scrolled into view by JS (browsers don't manage visibility for aria-activedescendant). The textbox carries aria-expanded/aria-controls/aria-autocomplete. A roving tabindex would steal focus from the text and is broken. Detection suspends during IME composition (composing a trigger char in a CJK IME must not fire the picker). Match counts announce through live-region-status. No dedicated 'mention' APG pattern exists — everyone reuses the combobox pattern; the native-first baseline degrades to a plain textbox with no inline suggestions.",
+      "Reference insertion adapters, owning neither commit: ships text (default — replaces the query range with a string, works in a plain <textarea>) and token (composes #590's atom/token insertion). Both are reference adapters the standard provides for the two insertion modes the intent exposes; the consumer selects or supplies one. This keeps #591 decoupled from #590 — composed, not blocked — exactly as the Fork 2-A ruling requires."
+    ],
+    "relatedReport": "reports/2026-06-14-inline-trigger-mention-pattern.md"
   }
 ]

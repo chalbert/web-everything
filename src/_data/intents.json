@@ -2615,5 +2615,49 @@
       }
     },
     "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">The <strong>reaction interaction</strong> — affix a symbol to content, toggle your own, aggregate a count, and show a who-reacted roster. The consumer end of the provider→consumer seam (decision <a href=\"/backlog/370\">#370</a> Fork 5): it <em>composes</em> the <a href=\"/intents/expressive-symbol/\">expressive-symbol</a> glyph, it never re-renders it.</p><h3>The contract — <code>ReactionSummary</code> (baseline)</h3><p class=\"text-sm text-gray-600 mb-2\">Adopts Atlassian's <code>ReactionSummary</code> as the contract baseline: <code>count</code> (the aggregate) · <code>users[]</code> (the who-reacted roster, with a display limit) · <code>reacted</code> (toggle-your-own) · <code>optimisticallyUpdated</code>. <strong>Not a protocol</strong> — a data contract with no swappable-vendor/engine-interop story (minimize lock-in). <strong>Multi-user sync is composed, never baked in</strong>: \"others see your reaction\" is a separate real-time concern driven through <a href=\"/intents/live-region-status/\">live-region-status</a> + a webrealtime protocol.</p><h3>Dimensions</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>reactionSet</code>: which symbols are offerable — <code>sentiment</code> (the convergent default set), a project <code>named-set</code>, or <code>all-emojis</code> (the full-picker escape). Default-less core; <code>sentiment</code> is the flavor default (Fork 6).</li><li><code>roster</code>: how the who-reacted list surfaces — <code>count-only</code> (just the aggregate) or <code>names</code> (a keyboard-reachable roster, display-limited).</li><li><code>optimistic</code>: whether your own toggle updates immediately (<code>on</code>) before the round-trip confirms, or waits (<code>off</code>).</li></ul><h3>Accessibility (load-bearing)</h3><p class=\"text-sm text-gray-600 mb-2\">Each reaction is an <code>aria-pressed</code> toggle with a <strong>composed accessible name</strong> — emoji name + count + your-reacted-state (\"thumbs up, 5 reactions, you reacted, activate to remove\"), not a bare glyph. Announce <strong>your local toggle only</strong> via live-region-status — never every remote tick (which would be a screen-reader flood). The roster is keyboard-reachable.</p><h3>vs. the status badge</h3><p class=\"text-sm text-gray-600 mb-2\">A reaction count chip resembles the <code>surface</code>-tokened badge of <a href=\"/backlog/354\">#354</a>, but means \"N people reacted,\" not \"this state\" — they <strong>compose, they do not merge</strong>.</p>"
+  },
+  {
+    "id": "inline-trigger",
+    "name": "Inline Trigger Intent",
+    "requiresCapabilities": [],
+    "status": "draft",
+    "summary": "The declarative dimensions of the inline trigger-character picker (#591): an open trigger-set registry plus boundary, query, and insertion-mode axes, all most-permissive by default. Pairs with the inline-trigger block (the runnable detection engine). UX-only — names what the author configures, not how detection is implemented.",
+    "dimensions": {
+      "triggerSet": {
+        "description": "Which trigger characters open the picker — an open config registry the project extends (@/:/#// are conventions, never a fixed enum); each maps to a results provider",
+        "values": [
+          "mention",
+          "emoji",
+          "reference",
+          "command",
+          "custom"
+        ]
+      },
+      "boundaryPolicy": {
+        "description": "What anchors a valid trigger; most-permissive default is any-prefix anywhere, the restriction is the author's opt-in (startOfLine / allowedPrefixes)",
+        "values": [
+          "any-prefix",
+          "start-of-line",
+          "allowed-prefixes-only"
+        ]
+      },
+      "queryPolicy": {
+        "description": "How the query slice after the trigger is bounded; default is unbounded, the author opts into limits (minQueryLength / maxLength / allowSpaces)",
+        "values": [
+          "unbounded",
+          "min-length",
+          "max-length",
+          "no-spaces"
+        ]
+      },
+      "insertionMode": {
+        "description": "Which reference insertion adapter commits the resolved selection {key, query, range, item} — detection-only, so the standard owns neither commit (Fork 2-A)",
+        "values": [
+          "text",
+          "token"
+        ]
+      }
+    },
+    "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">The declarative dimensions of the inline trigger-character picker ratified in <a href=\"/backlog/591-candidate-standard-mention-trigger-character-inline-picker/\">#591</a> — the surface that watches an editable region, detects a boundary-anchored trigger char (<code>@</code>/<code>:</code>/<code>#</code>/<code>/</code>), slices the query, anchors a popover to the <strong>caret</strong>, and routes results through a listbox. Pairs with the <a href=\"/blocks/inline-trigger/\">Inline Trigger block</a> (the runnable detection engine). <strong>UX-only</strong>: it names what an author configures, never how detection is implemented.</p><h3>Dimensions</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>triggerSet</code>: which trigger chars are live — an <strong>open config registry</strong> the project extends (<code>@</code> people, <code>:</code> emoji, <code>#</code> reference, <code>/</code> command are conventions, never a hardcoded enum), each bound to a results provider.</li><li><code>boundaryPolicy</code>: what anchors a valid trigger — <code>any-prefix</code> (the most-permissive default), <code>start-of-line</code>, or <code>allowed-prefixes-only</code>. The restriction is the author's opt-in.</li><li><code>queryPolicy</code>: how the query slice is bounded — <code>unbounded</code> by default; <code>min-length</code> / <code>max-length</code> / <code>no-spaces</code> are opt-in limits.</li><li><code>insertionMode</code>: which reference adapter commits the resolved selection — <code>text</code> (default; replaces the query range with a string) or <code>token</code> (composes the rich-text standard <a href=\"/backlog/590-candidate-standard-rich-text-contenteditable-editing/\">#590</a>). Detection-only (Fork 2-A): the standard emits <code>{key, query, range, item}</code> and owns neither commit.</li></ul><h3>Forced invariants (not dimensions)</h3><p class=\"text-sm text-gray-600 mb-2\"><strong>Virtual focus</strong> — DOM focus stays on the editable region while the listbox is navigated via <code>aria-activedescendant</code> (WAI-ARIA APG editable combobox); a roving tabindex would steal focus from the text and is broken. <strong>IME-composition suspension</strong> — detection pauses while a CJK IME is composing. <strong>Not a protocol</strong> — a deterministic transform with no swappable-vendor interop story.</p><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">Caret anchoring composes the <a href=\"/intents/anchor/\">anchor</a> intent over a <em>virtual</em> caret element; results compose the <a href=\"/blocks/picker-surface/\">picker surface</a> / <a href=\"/blocks/autocomplete/\">autocomplete</a>; match counts announce through <a href=\"/intents/live-region-status/\">live-region-status</a>. The native-first baseline degrades to a plain textbox with no inline suggestions.</p>"
   }
 ]

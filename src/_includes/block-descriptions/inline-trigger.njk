@@ -1,0 +1,79 @@
+<h3>What This Is</h3>
+<p>
+    The runnable <strong>trigger-detection engine</strong> ratified in
+    <a href="/backlog/591-candidate-standard-mention-trigger-character-inline-picker/">#591</a>: an editable region
+    that watches for a boundary-anchored <strong>trigger character</strong> (<code>@</code> people, <code>:</code>
+    emoji, <code>#</code> reference, <code>/</code> command), slices the query that follows, anchors a popover to the
+    <strong>caret</strong>, and routes results through a listbox. The same engine with a different trigger char and
+    result set is every <code>@</code>-mention, <code>:</code>-emoji
+    (<a href="/backlog/592-in-editor-inline-tooltip-emoji-picker-trigger/">#592</a>), <code>/</code>-command and
+    <code>#</code>-reference field. It pairs with the <a href="/intents/inline-trigger/">Inline Trigger intent</a>
+    (the declarative dimensions) and composes the <a href="/blocks/picker-surface/">Picker Surface</a> /
+    <a href="/blocks/autocomplete/">Autocomplete</a> for results — it reinvents none of them.
+</p>
+
+<h3>Detection-only — the load-bearing scope (Fork 2-A)</h3>
+<p>
+    The block emits the <strong>resolved selection</strong> <code>{ key, query, range, item }</code> and
+    <strong>stops</strong>; the consumer commits it. It owns no document model — the GitHub
+    <code>&lt;text-expander&gt;</code> stance (<code>text-expander-value</code> hands you the replacement), not the
+    ProseMirror <code>Suggestion.command</code> stance (which couples insertion into the editor doc). This is what
+    lets one engine work uniformly in <code>&lt;input&gt;</code>, <code>&lt;textarea&gt;</code> and
+    <code>contenteditable</code>, and <strong>compose</strong> the rich-text standard
+    (<a href="/backlog/590-candidate-standard-rich-text-contenteditable-editing/">#590</a>) for token insertion
+    <em>without being blocked on it</em>. The block ships two reference insertion adapters — <code>text</code>
+    (default; replaces the query range with a string) and <code>token</code> (composes #590's atom/token insertion)
+    — but owns neither commit; the items-source and the committer are consumer-supplied behaviors.
+</p>
+
+<h3>Anatomy — the pipeline this block owns</h3>
+<ol>
+    <li><strong>Detect</strong> — on input, test for a trigger char at a valid boundary (per the intent's
+        <code>boundaryPolicy</code>); detection <strong>suspends during IME composition</strong> (a forced
+        invariant — composing <code>:</code> in a CJK IME must not fire the picker).</li>
+    <li><strong>Slice</strong> — extract the query text from the trigger to the caret, bounded by the intent's
+        <code>queryPolicy</code> (<code>minQueryLength</code> / <code>maxLength</code> / <code>allowSpaces</code>).</li>
+    <li><strong>Anchor</strong> — tether the popover to the caret, a <em>virtual element</em> (not a stable DOM
+        node), composing the <a href="/intents/anchor/">Anchor intent</a> over a caret rect: in
+        <code>contenteditable</code> the DOM <code>Range.getBoundingClientRect()</code>; in
+        <code>&lt;input&gt;</code>/<code>&lt;textarea&gt;</code> a mirror-div caret measurement. Collision handling
+        (flip/shift near the viewport edge) is load-bearing.</li>
+    <li><strong>Route</strong> — render results through the <a href="/blocks/picker-surface/">picker surface</a> /
+        autocomplete listbox; on selection, emit the resolved <code>{ key, query, range, item }</code> and return.</li>
+</ol>
+
+<h3>Accessibility — the APG editable combobox, verbatim (forced invariant)</h3>
+<p>
+    <strong>Virtual focus:</strong> DOM focus stays on the editable region; the listbox is navigated via
+    <code>aria-activedescendant</code> with the active option scrolled into view by JS (browsers do not manage
+    visibility for <code>aria-activedescendant</code>). The textbox carries <code>aria-expanded</code> /
+    <code>aria-controls</code> / <code>aria-autocomplete</code>. A roving <code>tabindex</code> would steal focus
+    from the text and is broken — this matches the WAI-ARIA APG
+    <a href="https://www.w3.org/WAI/ARIA/apg/patterns/combobox/examples/combobox-autocomplete-list/">editable
+    combobox with list autocomplete</a>; there is no dedicated &ldquo;mention&rdquo; pattern. Match counts announce
+    through <a href="/intents/live-region-status/">live-region-status</a>. The native-first baseline degrades to a
+    plain textbox with no inline suggestions.
+</p>
+
+<h3>Not a protocol</h3>
+<p>
+    A deterministic transform (trigger&nbsp;&rarr;&nbsp;query&nbsp;&rarr;&nbsp;anchor&nbsp;&rarr;&nbsp;route) with no
+    swappable-vendor interop story — making it a protocol would be lock-in for no gain. The declarative axes (trigger
+    set, boundary policy, query policy, insertion mode) live in the <a href="/intents/inline-trigger/">intent</a>;
+    everything is supported by default with most-permissive defaults (open trigger registry, any-prefix boundary,
+    no min query length), the restriction being the author's opt-in.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Ratified by: <a href="/backlog/591-candidate-standard-mention-trigger-character-inline-picker/">#591</a>
+        (survey: <code>reports/2026-06-14-inline-trigger-mention-pattern.md</code> ·
+        <a href="/research/inline-trigger-mention-pattern/">/research/inline-trigger-mention-pattern/</a>)</li>
+    <li>Pairs with: <a href="/intents/inline-trigger/">Inline Trigger intent</a></li>
+    <li>Composes: <a href="/blocks/picker-surface/">Picker Surface</a>
+        (<a href="/backlog/588-build-the-general-picker-surface-composed-browse-search/">#588</a>) ·
+        <a href="/intents/anchor/">Anchor</a> · <a href="/intents/input/">Input</a> ·
+        <a href="/intents/focus-delegation/">Focus Delegation</a></li>
+    <li>Instance: <a href="/backlog/592-in-editor-inline-tooltip-emoji-picker-trigger/">#592 — in-editor <code>:</code>-emoji picker</a></li>
+    <li>Token-insertion adapter composes: <a href="/backlog/590-candidate-standard-rich-text-contenteditable-editing/">#590 rich-text</a></li>
+</ul>
