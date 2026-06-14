@@ -8,9 +8,12 @@
  * is done by reading agents on top of these flags.
  *
  * Checks (per backlog item):
- *   G1  edge-gap            prose prereq ("per #N", "ruled by #N", "gated on #N", …)
- *                           that is NOT in blockedBy. Severity↑ if #N is a decision,
- *                           highest if that decision is still open.
+ *   G1  edge-gap            a real prose prerequisite ("gated on #N", "depends on #N",
+ *                           "requires #N", "builds on #N", guarded "blocked on/by #N")
+ *                           that is NOT in blockedBy. Lineage ("per"/"ruled by") and
+ *                           temporal ("after"/"once") verbs are excluded — they aren't
+ *                           gates. Severity↑ if #N is a decision, highest if that decision
+ *                           is still open; both-ends-resolved demotes to INFO.
  *   G2  ruling-after-build  a resolved idea/issue GATED ON (blockedBy) a `type: decision`
  *                           that resolved AFTER this item — built ahead of its ruling.
  *                           Build order is read from git (the commit flipping
@@ -23,9 +26,14 @@
  *                           parent/blockedBy lineage (an epic-hop up) nor cited in its
  *                           prose (a `#N` resolving to a resolved `type: decision`). The
  *                           plugs class: an architectural call with no governing decision.
- *   D1  dead-file-ref       a backticked code path (…/x.ts[:NN]) that doesn't exist.
+ *   D1  dead-file-ref       a backticked code path (…/x.ts[:NN]) that doesn't exist — after
+ *                           resolving slash-joined enumerations + bare suffixes against a dir
+ *                           named in the same section, and suppressing paths prose marks as
+ *                           absent ("no `x`"), planned ("a page at `x`"), or generated ("writes `x`").
  *   D2  dangling-item-ref   a #N referenced in the body with no backlog/N-*.md.
- *   D3  stale-project       relatedProject absent from projects.json, or `concept`.
+ *   D3  stale-project       PER PROJECT: a relatedProject absent from projects.json, or one still
+ *                           `concept` despite substantial shipped work (intentionally-pending
+ *                           concept projects with little resolved work are excluded).
  *
  * Usage: node scripts/audit-backlog-health.mjs [--json]
  */
@@ -64,21 +72,21 @@ for (const f of files) {
 }
 
 // ---- ref extractors ------------------------------------------------------
-const PROSE_PREREQ = /\b(?:per|ruled by|gated on|blocked on|blocked by|depends on|after|once|needs|requires|premise[d]? on|consumed via|builds on)\s+#?(\d{1,3})\b/gi;
+// Keep only verbs that assert a real build prerequisite. Dropped (per #613): `per`/`ruled by`
+// (lineage citation, not a gate) and `after`/`once` (temporal/prioritization ordering, not a
+// dependency). `blocked on/by` is kept but guarded below (an adjacent #M to its left = an
+// enumeration/citation, not a fresh edge). Group 1 is the verb (for the guard), group 2 the id.
+const PROSE_PREREQ = /\b(gated on|blocked on|blocked by|depends on|needs|requires|premise[d]? on|consumed via|builds on)\s+#?(\d{1,3})\b/gi;
 const ANY_REF = /(?:#|\/backlog\/)(\d{1,3})\b/g;
 const BACKTICK = /`([^`]+)`/g;
 
 // shorthand prefixes cards use for SoT include dirs
 const SHORTHAND = ['block-descriptions/', 'plug-descriptions/', 'intent-descriptions/', 'adapter-descriptions/', 'research-descriptions/', 'protocol-descriptions/'];
-function fileRefs(body) {
-  const out = new Set();
-  for (const [, tok] of body.matchAll(BACKTICK)) {
-    const t = tok.trim().split(/\s+/)[0];
-    if (!t.includes('/') || !CODE_EXT.test(t)) continue;
-    if (t.includes('{') || t.includes('}') || t.includes('*') || t.includes('<')) continue; // placeholders/globs
-    out.add(t);
-  }
-  return [...out];
+// a backticked token that looks like a usable code path (has a dir + known extension, no glob/placeholder)
+function isPathToken(t) {
+  if (!t.includes('/') || !CODE_EXT.test(t)) return false;
+  if (t.includes('{') || t.includes('}') || t.includes('*') || t.includes('<')) return false;
+  return true;
 }
 function resolveRef(p) {
   const path = p.replace(/:\d+$/, '');
@@ -92,6 +100,78 @@ function resolveRef(p) {
   return tries.some(existsSync);
 }
 const isDecision = id => items.get(id)?.type === 'decision';
+
+// ---- D1 precision (per #613): resolution gaps + prose suppression ---------
+// A backticked path that doesn't resolve verbatim is only a *dead* ref if it also (a) isn't a
+// slash-joined enumeration of real files, (b) isn't a bare suffix of a dir named in its own
+// section, and (c) isn't governed by prose that marks it absent / planned / generated.
+
+// (resolution gap 1) a slash-joined name enumeration — `blocks/intents/plugs/protocols/projects.json`
+// is five real `src/_data/*.json`, not one path. True only if every segment names an existing file.
+function resolvesAsEnumeration(p) {
+  const segs = p.replace(/:\d+$/, '').split('/');
+  if (segs.length < 3) return false;                       // need a real enumeration, not a 2-deep path
+  const last = segs[segs.length - 1];
+  const dot = last.lastIndexOf('.'); if (dot < 0) return false;
+  const ext = last.slice(dot);                             // ".json"
+  const names = [...segs.slice(0, -1), last.slice(0, dot)];
+  if (names.some(n => !/^[a-z][\w-]*$/i.test(n))) return false;   // each segment a bare identifier
+  return names.every(n => existsSync(join(ROOT, 'src/_data', n + ext)));
+}
+// (resolution gap 2) a bare suffix resolved against a directory named in the same section —
+// `adapters/eslint.mjs` under a section that says `scripts/validation-normalize/knowledge.mjs`.
+function resolvesAgainstDir(p, dirSet) {
+  for (const d of dirSet) {
+    if (p.startsWith(d)) continue;                         // already rooted there → no synthetic join
+    if (resolveRef(d + p)) return true;
+  }
+  return false;
+}
+// directory prefixes named (as backticked paths or bare `dir/` tokens) inside a chunk of prose
+function dirsIn(text) {
+  const out = new Set();
+  for (const [, tok] of text.matchAll(BACKTICK)) {
+    let t = tok.trim().split(/\s+/)[0].replace(/^\.\//, '');
+    if (t.includes('{') || t.includes('*') || t.includes('<')) continue;
+    if (/\/$/.test(t)) { out.add(t); continue; }           // bare dir token, e.g. `frontierui/plugs/`
+    if (t.includes('/') && CODE_EXT.test(t)) { const dir = t.replace(/[^/]+$/, ''); if (dir) out.add(dir); }
+  }
+  return out;
+}
+// split the body into heading-delimited sections, each carrying the dir prefixes named within it
+function sectionRanges(body) {
+  const heads = [0];
+  for (const m of body.matchAll(/^#{1,6}\s.*$/gm)) heads.push(m.index);
+  heads.push(body.length);
+  const bounds = [...new Set(heads)].sort((a, b) => a - b);
+  const out = [];
+  for (let i = 0; i < bounds.length - 1; i++)
+    out.push({ start: bounds[i], end: bounds[i + 1], dirs: dirsIn(body.slice(bounds[i], bounds[i + 1])) });
+  return out;
+}
+const dirsAtOffset = (ranges, idx) => (ranges.find(r => idx >= r.start && idx < r.end) || { dirs: new Set() }).dirs;
+// prose immediately to the left of the path governs it as absent / planned / generated, not claimed-existing
+function suppressionReason(lead) {
+  const t = lead.toLowerCase().replace(/[^\w]+$/, '');     // drop trailing whitespace/emphasis (`**`, etc.)
+  if (/(?:^|\W)(?:no|not|never|without|absent|lacks?|missing|none)$/.test(t)) return 'absence';
+  if (/(?:^|\W)(?:writes?|wrote|written|emits?|emitted|generates?|generated|produces?|produced|outputs?|output|renders?|rendered|dumps?)$/.test(t)) return 'generated';
+  if (/(?:^|\W)(?:page|file|module|script|demo|playground|report|stylesheet|template|doc|fixture|entry|component|route)s?\s+(?:at|in|under)$/.test(t)) return 'planned';
+  if (/(?:^|\W)(?:creates?|authors?|scaffolds?|builds?|adds?|introduces?|stands? up|lives? at)$/.test(t)) return 'planned';
+  return null;
+}
+// the dead backticked code refs in an item's body, after resolution gaps + prose suppression
+function deadFileRefs(it) {
+  const ranges = sectionRanges(it.body);
+  const dead = new Set();
+  for (const m of it.body.matchAll(BACKTICK)) {
+    const t = m[1].trim().split(/\s+/)[0];
+    if (!isPathToken(t)) continue;
+    if (resolveRef(t) || resolvesAsEnumeration(t) || resolvesAgainstDir(t, dirsAtOffset(ranges, m.index))) continue;
+    if (suppressionReason(it.body.slice(Math.max(0, m.index - 60), m.index))) continue;
+    dead.add(t);
+  }
+  return [...dead];
+}
 
 // ---- git-derived resolution dates (G2 must not trust backfilled frontmatter) ----
 // `dateResolved` is hand-stamped and was bulk-backfilled for early-era items, so two
@@ -158,13 +238,19 @@ for (const it of items.values()) {
   const blocked = new Set((it.fm.blockedBy || []).map(norm));
   const isExec = it.type === 'idea' || it.type === 'issue';
 
-  // G1 edge-gap
-  const prereqs = new Set([...it.body.matchAll(PROSE_PREREQ)].map(m => norm(m[1])));
-  for (const p of prereqs) {
-    if (p === it.id || blocked.has(p) || !items.has(p)) continue;
+  // G1 edge-gap — a real prose prerequisite (filtered verb set) not lifted into blockedBy.
+  const g1seen = new Set();
+  for (const m of it.body.matchAll(PROSE_PREREQ)) {
+    const kw = m[1].toLowerCase(), p = norm(m[2]);
+    if (p === it.id || blocked.has(p) || !items.has(p) || g1seen.has(p)) continue;
+    // `blocked on/by` guard: another #M within ~40 chars to its left = a citation/enumeration
+    // ("blocked by #M, #N"), already-anchored — not a fresh ungoverned edge.
+    if (kw.startsWith('blocked') && /#\d{1,3}\b/.test(it.body.slice(Math.max(0, m.index - 40), m.index))) continue;
+    g1seen.add(p);
     const dec = isDecision(p), open = items.get(p)?.status !== 'resolved';
-    flags.G1.push({ id: it.id, ref: p, decision: dec, refOpen: open,
-      sev: dec && open ? 'HIGH' : dec ? 'med' : 'low', title: title(it) });
+    // both ends resolved → historical lineage, not a live gap: demote to INFO (suppressed from the count).
+    const sev = (it.status === 'resolved' && !open) ? 'INFO' : dec && open ? 'HIGH' : dec ? 'med' : 'low';
+    flags.G1.push({ id: it.id, ref: p, decision: dec, refOpen: open, sev, title: title(it) });
   }
   // G2 ruling-after-build — a resolved build GATED ON (blockedBy) a decision that resolved
   // after it. `parent` is epic membership, not a gating edge, so it is excluded. Build order
@@ -185,18 +271,37 @@ for (const it of items.values()) {
   if (isExec && it.status === 'resolved' && it.fm.graduatedTo && it.fm.graduatedTo !== 'none'
       && ![...transitiveLineage(it)].some(isDecision) && !citesResolvedDecision(it))
     flags.G3.push({ id: it.id, graduatedTo: it.fm.graduatedTo, title: title(it) });
-  // D1 dead-file-ref — OPEN items only (resolved items' refs are historical by design)
+  // D1 dead-file-ref — OPEN items only (resolved items' refs are historical by design).
+  // deadFileRefs applies the #613 resolution gaps + prose suppression (absence / planned / generated).
   if (it.status !== 'resolved')
-    for (const r of fileRefs(it.body)) if (!resolveRef(r)) flags.D1.push({ id: it.id, ref: r, title: title(it) });
+    for (const r of deadFileRefs(it)) flags.D1.push({ id: it.id, ref: r, title: title(it) });
   // D2 dangling-item-ref — OPEN items only
   if (it.status !== 'resolved')
     for (const [, p] of it.body.matchAll(ANY_REF)) if (!items.has(norm(p))) { flags.D2.push({ id: it.id, ref: norm(p), title: title(it) }); break; }
-  // D3 stale-project
-  if (it.fm.relatedProject) {
-    const st = projects.get(it.fm.relatedProject);
-    if (st === undefined) flags.D3.push({ id: it.id, project: it.fm.relatedProject, why: 'not in projects.json', title: title(it) });
-    else if (st === 'concept' && it.status !== 'resolved') flags.D3.push({ id: it.id, project: it.fm.relatedProject, why: 'project still `concept`', title: title(it) });
-  }
+  // D3 is aggregated PER PROJECT after the loop (per #613), not per item.
+}
+
+// D3 stale-project — aggregated PER PROJECT, not per item (per #613). A `relatedProject` that is
+// absent from projects.json is a dangling ref; a project still `status: concept` despite substantial
+// shipped work (≥ STALE_RESOLVED_MIN resolved items) is stale drift whose status should advance. A
+// concept project with little/no resolved work is *intentionally pending* (e.g. `webplugs` pending
+// the #606 ruling, `webcases` too thin to graduate) and is NOT flagged — the false-positive class the
+// old per-item check produced 18 of.
+const STALE_RESOLVED_MIN = 5;
+const projAgg = new Map();              // relatedProject -> {resolved, graduated, total}
+for (const it of items.values()) {
+  const rp = it.fm.relatedProject; if (!rp) continue;
+  const a = projAgg.get(rp) || { resolved: 0, graduated: 0, total: 0 };
+  a.total++;
+  if (it.status === 'resolved') a.resolved++;
+  if (it.fm.graduatedTo && it.fm.graduatedTo !== 'none') a.graduated++;
+  projAgg.set(rp, a);
+}
+for (const [rp, a] of [...projAgg].sort((x, y) => y[1].resolved - x[1].resolved)) {
+  const st = projects.get(rp);
+  if (st === undefined) { flags.D3.push({ project: rp, why: 'not in projects.json (dangling project ref)', resolved: a.resolved, graduated: a.graduated }); continue; }
+  if (st === 'concept' && a.resolved >= STALE_RESOLVED_MIN)
+    flags.D3.push({ project: rp, why: `\`concept\` but ${a.resolved} resolved / ${a.graduated} graduated — shipped work warrants a status bump`, resolved: a.resolved, graduated: a.graduated });
 }
 function title(it) { return (it.body.match(/^#\s+(.+)$/m) || [, it.file])[1].slice(0, 70); }
 
@@ -206,16 +311,21 @@ const L = [];
 L.push('# Backlog health audit — deterministic sweep', '');
 L.push(`> Generated by \`scripts/audit-backlog-health.mjs\` (read-only). ${items.size} items (${open} open). The judgment layer (guiding-principle conformance) reads on top of these flags.`, '');
 L.push('## Summary', '', '| Check | What it catches | Hits |', '|---|---|---|');
-const desc = { G1: 'prose prereq not lifted into `blockedBy`', G2: 'resolved build gated on a decision that was open/later (git-dated)', G3: 'graduated entity with no governing decision (transitive lineage + prose)', D1: 'backticked code path that no longer exists', D2: 'referenced #N item that does not exist', D3: 'relatedProject missing or still `concept`' };
-for (const k of Object.keys(flags)) L.push(`| **${k}** | ${desc[k]} | ${flags[k].length} |`);
+const desc = { G1: 'prose prereq not lifted into `blockedBy` (INFO = both ends resolved)', G2: 'resolved build gated on a decision that was open/later (git-dated)', G3: 'graduated entity with no governing decision (transitive lineage + prose)', D1: 'backticked code path that no longer exists', D2: 'referenced #N item that does not exist', D3: 'project missing from projects.json, or `concept` despite shipped work' };
+const G1_INFO = flags.G1.filter(f => f.sev === 'INFO').length;
+for (const k of Object.keys(flags)) {
+  const n = flags[k].length, note = k === 'G1' && G1_INFO ? ` (${n - G1_INFO} active + ${G1_INFO} INFO)` : '';
+  L.push(`| **${k}** | ${desc[k]} | ${n}${note} |`);
+}
 L.push('');
 const HI = flags.G1.filter(f => f.sev === 'HIGH');
 L.push(`**Highest-priority (G1 HIGH — build references an _open decision_ with no edge): ${HI.length}**`, '');
 
+const SEV = { HIGH: 0, med: 1, low: 2, INFO: 3 };           // INFO sinks to the bottom
 function section(k, head, fmt) {
   L.push(`## ${k} — ${head} (${flags[k].length})`, '');
   if (!flags[k].length) { L.push('_none._', ''); return; }
-  for (const f of flags[k].sort((a, b) => (a.sev === 'HIGH' ? -1 : 1) - (b.sev === 'HIGH' ? -1 : 1)).slice(0, 200))
+  for (const f of flags[k].slice().sort((a, b) => (SEV[a.sev] ?? 1) - (SEV[b.sev] ?? 1)).slice(0, 200))
     L.push(`- ${fmt(f)}`);
   if (flags[k].length > 200) L.push(`- …and ${flags[k].length - 200} more`);
   L.push('');
@@ -225,10 +335,10 @@ section('G2', 'Built ahead of its ruling (gated on a later-ruled decision, git-d
 section('G3', 'Graduated with no governing decision (transitive lineage + prose checked)', f => `**#${f.id}** → \`${f.graduatedTo}\` — ${f.title}`);
 section('D1', 'Dead file references', f => `**#${f.id}** \`${f.ref}\` — ${f.title}`);
 section('D2', 'Dangling item references', f => `**#${f.id}** → #${f.ref} (no such item) — ${f.title}`);
-section('D3', 'Stale project references', f => `**#${f.id}** \`${f.project}\` — ${f.why} — ${f.title}`);
+section('D3', 'Stale project references (per project)', f => `**\`${f.project}\`** — ${f.why}`);
 
 writeFileSync(REPORT, L.join('\n'));
 if (process.argv.includes('--json')) console.log(JSON.stringify(flags, null, 2));
 const tot = Object.values(flags).reduce((a, b) => a + b.length, 0);
-console.log(`audit: ${items.size} items, ${tot} flags (G1=${flags.G1.length} [${HI.length} HIGH], G2=${flags.G2.length}, G3=${flags.G3.length}, D1=${flags.D1.length}, D2=${flags.D2.length}, D3=${flags.D3.length})`);
+console.log(`audit: ${items.size} items, ${tot} flags (G1=${flags.G1.length} [${HI.length} HIGH, ${G1_INFO} INFO], G2=${flags.G2.length}, G3=${flags.G3.length}, D1=${flags.D1.length}, D2=${flags.D2.length}, D3=${flags.D3.length})`);
 console.log(`report → ${REPORT.replace(ROOT + '/', '')}`);
