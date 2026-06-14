@@ -1,0 +1,74 @@
+<h2>Purpose</h2>
+<p>
+  The cross-tabbed <strong>feature surface</strong> (capability × tool) over the workbench/docs-tool
+  landscape from <a href="/backlog/624-inventory-the-component-workbench-docs-tool-landscape-storyb/">#624</a> —
+  stage 2 of the Web Docs feature-pipeline epic
+  (<a href="/backlog/623-web-docs-feature-pipeline-inventory-workbench-tools-derive-i/">#623</a>). It is the
+  union of capabilities a Web-Everything-native docs surface must cover or consciously omit, and the raw
+  material the derivation decision
+  (<a href="/backlog/626-map-workbench-features-to-we-standards-which-intents-blocks-/">#626</a>) classifies.
+</p>
+<p>
+  The machine-readable matrix lives in <code>src/_data/workbenchFeatures.json</code> (tool ids reference the
+  <a href="/research/component-workbench-landscape/">workbench-tools registry</a>); this page renders from it.
+  The load-bearing column is <strong>WE status</strong>: it pre-classifies each feature as reuse / extend an
+  existing WE standard, genuinely new surface, or out-of-scope — so #626 is mostly a dedupe-and-compose
+  exercise, not a greenfield mint.
+</p>
+
+<h2>The headline finding</h2>
+<p>
+  Roughly two thirds of the surface already maps to standards WE has. The genuinely-new core #626 must
+  actually design is small: the <strong>component-isolation renderer</strong>, <strong>CEM-driven
+  autodocs</strong> (the #624 emit prior — api-viewer is the zero-build proof), a <strong>search
+  index</strong>, and a <strong>source/code view</strong>. Two features are out-of-scope for the standard
+  layer (visual regression → a CI/hosted tier of the served product #398; the Figma design↔code bridge → a
+  design-tool integration whose fully-hosted form, Backlight, already failed).
+</p>
+
+<h2>WE status legend</h2>
+<table>
+  <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+  <tbody>
+    {% for s in workbenchFeatures.weStatusScale %}
+    <tr><td><strong>{{ s.label }}</strong></td><td>{{ s.test }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>The feature surface</h2>
+{% for g in workbenchFeatures.featureGroups %}
+<h3>{{ g.label }}</h3>
+<table>
+  <thead><tr><th>Feature</th><th>Ubiquity</th><th>WE status</th><th>Maps to</th><th>What a WE-native version needs</th></tr></thead>
+  <tbody>
+    {% for f in workbenchFeatures.features %}{% if f.group == g.id %}
+    <tr>
+      <td><strong>{{ f.label }}</strong></td>
+      <td>{{ f.ubiquity }}</td>
+      <td>{{ f.weStatus }}</td>
+      <td>{{ f.weStandards | join(", ") }}</td>
+      <td>{{ f.weNativeNeed }}</td>
+    </tr>
+    {% endif %}{% endfor %}
+  </tbody>
+</table>
+{% endfor %}
+
+<h2>Tool coverage per feature</h2>
+<p>The cross-tab — which landscape tools ship each capability (tool ids from the workbench-tools registry).</p>
+<table>
+  <thead><tr><th>Feature</th><th>Tools that ship it</th></tr></thead>
+  <tbody>
+    {% for f in workbenchFeatures.features %}
+    <tr><td><strong>{{ f.label }}</strong></td><td>{{ f.tools | join(", ") }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Re-running this sweep</h2>
+<p>
+  Keyed by stable feature <code>id</code> and tool <code>id</code> so a re-run produces a clean diff. To
+  refresh: re-walk each tool for the feature set, add any new capability axis that clears into the landscape,
+  re-check the <code>weStatus</code> mapping against the current WE registry, and bump <code>lastSwept</code>.
+</p>
