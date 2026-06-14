@@ -51,3 +51,71 @@
         the following slices.
     </div>
 </section>
+
+<section id="vega-lite-l1" class="section-card">
+    <h3 id="profile-schema">Vega-Lite L1 Profile</h3>
+    <p>
+        The portable webcharts artifact is a <strong>Vega-Lite L1 profile</strong> — a thin, semantic core.
+        It declares <em>what the data means</em> (data &rarr; mark &rarr; encoding) and nothing about
+        <em>how it is drawn</em>: concrete palettes, animation, and alignment are the presentation/theme
+        plane, resolved separately from <a href="/projects/webtheme/">Web Theme</a> tokens. <code>color</code>
+        and <code>size</code> are <strong>semantic</strong> encodings — they say <em>"encode this field by
+        hue/magnitude"</em>, never <code>#3b82f6</code>; the resolved value is theme. L1 is deliberately
+        small; selections, transforms, and view composition are additive <strong>L2+ tiers</strong>, never
+        required to render a basic chart.
+    </p>
+    {% highlight "typescript" %}
+// The portable webcharts artifact — a Vega-Lite L1 profile. SEMANTIC plane ONLY: what the data
+// means. The presentation/theme plane (concrete palettes, animation, alignment) is resolved from
+// webtheme tokens and never appears here. Borrows Vega-Lite's vocabulary; standardizes the L1 subset.
+interface ChartSpec {
+  data: DataSource;            // the rows, or a named dataset
+  mark: Mark;                  // the geometric primitive the data becomes
+  encoding: Encoding;          // data field → visual channel (the semantic mapping)
+}
+
+// L1 marks — the basic primitives. Layered/composite marks are L2+.
+type Mark = 'bar' | 'line' | 'point' | 'area' | 'arc';
+
+interface DataSource {
+  values?: Record<string, unknown>[];   // inline rows
+  name?: string;                        // a named dataset (resolved by the host)
+}
+
+// Each channel binds a data field to a meaning. color/size are SEMANTIC: which field drives the
+// channel — the concrete hue/scale is resolved from webtheme, so the same spec re-themes for free.
+interface Encoding {
+  x?: PositionChannel;
+  y?: PositionChannel;
+  color?: FieldChannel;        // semantic: which field drives hue; resolved palette = theme
+  size?: FieldChannel;         // semantic: which field drives magnitude; resolved range = theme
+  // tooltip / selection / facet / detail are L2+ tiers (additive), not part of L1.
+}
+
+interface PositionChannel {
+  field: string;
+  type: MeasurementType;       // drives the default scale + the a11y-derivable axis label
+  scale?: Scale;               // L1 scales only
+  axis?: Axis;                 // title / grid — the labels a screen-reader description derives from
+}
+
+interface FieldChannel {
+  field: string;
+  type: MeasurementType;
+  legend?: Legend;             // title — also a11y-derivable
+}
+
+// The four Vega-Lite measurement types — the semantic kind of a field, NOT its presentation.
+type MeasurementType = 'quantitative' | 'temporal' | 'ordinal' | 'nominal';
+
+interface Scale { type: 'linear' | 'log' | 'time' | 'band' | 'point'; }  // L1 scales; more are L2+
+interface Axis { title?: string; grid?: boolean; }
+interface Legend { title?: string; }
+    {% endhighlight %}
+    <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+        <li><strong>Semantic plane, kept separate:</strong> the spec carries meaning (field &rarr; channel, measurement type), never concrete pixels. A renderer + <a href="/projects/webtheme/">Web Theme</a> resolve the presentation, so one spec re-themes without edits.</li>
+        <li><strong>Color/size are semantic, resolved values are theme:</strong> <code>color: { field: 'category' }</code> says <em>encode category by hue</em>; the palette is a theme token, not a literal in the artifact.</li>
+        <li><strong>Thin L1 core, additive tiers:</strong> data/mark/encoding + scales/axes/legends is all L1 requires. Selections, transforms, and composition are L2+ — a conformant L1 renderer ignores them gracefully.</li>
+        <li><strong>Accessibility is derivable:</strong> axis/legend titles + measurement types let an a11y description be generated from the semantic spec — the conformance suite (slice d) scores it as a first-class axis.</li>
+    </ul>
+</section>

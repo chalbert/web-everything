@@ -47,7 +47,7 @@ the **policy-declaration-vs-swappable-runner** protocol shape #101 ratified:
 
 ## Candidate slices (brainstorm — un-carved; carve as they become ready)
 
-Two are already carved as children (#584, #585). The rest are captured here for later:
+Three are now carved as children (#584, #585, #597). The rest are captured here for later:
 
 1. **General retirement convention** → **#584** (carved). Generalize #546's `retired` shape beyond the corpus.
 2. **Active liveness sweep** → **#585** (carved). Fetch every reference; don't wait to trip over a 404.
@@ -60,9 +60,10 @@ Two are already carved as children (#584, #585). The rest are captured here for 
    the URL's death (the rejected #546 Fork-1-B path, done right: at citation time, not retroactively).
 6. **Axis-vacancy alerting.** When a retirement drops a corpus category below N live sources, flag "find a
    replacement" (feeds the backlog like #192's new-axis sweep). #546 does this check *manually* today.
-7. **Reference-registry substrate.** One index of "external references this project depends on" (corpus
-   `docsUrl`s + report/`/research/` citations + `crossRef`s + adapter/protocol spec links). The foundation
-   #585 stands on — likely the first slice to build.
+7. **Reference-registry substrate** → **#597** (carved). One index of "external references this project
+   depends on," over the five structured homes (corpus `docsUrl`/`repoUrl`, `references.json`,
+   `blocks.json` web-standard refs, `benchmarkCapabilityPresence.json` rows, `intents.json`). The
+   foundation #585 stands on — built first; freeform reports/research-prose extraction deferred.
 8. **Cadence / trigger.** On-demand / scheduled / pre-merge gate — reuse #101/#558's orchestrator
    philosophy, don't build a new runner.
 9. **Platform-strategy setting.** Layer 2 above — the configurable policy as a protocol.

@@ -217,3 +217,95 @@ None. All five rubric conditions hold for #570.
   **c** `--blocked-by=<a>`, **d** `--blocked-by=<b>,<c>`.
 - Net flow: **+4** (epic·13 → epic + 4 tasks). Gate on `check:standards`. Then `/batch` chains
   a → (b ∥ c) → d.
+
+---
+
+# Backlog split analysis — 2026-06-14 (run 4)
+
+Focused run: `/slice 583`.
+
+## Candidate
+
+**#583 — External reference health monitoring (liveness, retirement, replacement)**
+`workItem: epic` · no `size` · `status: open` · **already has two children** (#584 decision·5, #585
+story·8). Eight further candidate slices sit un-carved in its body ("carve as they become ready").
+
+This is not the kind-(b) "unsliced epic" case (it already has children), so the run does **not** re-ask
+"should #583 decompose." It asks: **which un-carved candidates are build-ready to carve as batchable
+children *now*** — verified against the real reference surfaces, not the body's framing.
+
+### Work-investigation pass — real reference homes (file:line)
+
+A registry/sweep slice is a claim about where references actually live. Mapped every external-reference
+home:
+
+| Home | File | URLs | Structured? | `retired` shape? |
+|---|---|---|---|---|
+| Corpus sources | `src/_data/benchmarkCorpus.json` (sources ~L48-73) | 51 (`docsUrl`+`repoUrl`, 26 sources) | ✅ JSON | ✅ #546 seed (`retired`/`retiredDate`/`retiredReason`) |
+| Design reference library | `src/_data/references.json` (`links[].url`) | 28 ext | ✅ JSON | ❌ |
+| Web-standard refs | `src/_data/blocks.json` (`webStandards.*.reference`) | 94 ext | ✅ JSON (nested) | ❌ |
+| Capability-presence rows | `src/_data/benchmarkCapabilityPresence.json` (`rows[].url`) | 1,266 ext | ✅ JSON | ❌ |
+| Intent docs | `src/_data/intents.json` (URLs in HTML `description`) | 70 | ⚠️ embedded HTML | ❌ |
+| Report citations | `reports/*.md` | ~375 md links / ~550 bare | ❌ freeform md | ❌ |
+| Research topics | `src/_data/researchTopics.json` | 0 structured (prose) | ❌ | ❌ |
+| Backlog crossRefs | `backlog/*.md` frontmatter | 263 — **all internal** | ✅ but internal → out of scope | n/a |
+| adapters / protocols | `src/_data/adapters.json`, `protocols.json` | 0 | — | — |
+
+**No URL-liveness validator exists** (`scripts/` has no fetch/http/link/404/liveness utility). The
+reference registry **does not exist** — built from scratch.
+
+Decisive consequence: the five **structured** homes (corpus + references + blocks + capability-presence +
+intents ≈ **1,500 URLs via deterministic JSON walks**) are indexable *now* with no fork. The freeform
+homes (reports md, research prose) are lossy and separable. And the registry is exactly what the epic
+calls "the foundation #585 stands on — likely the first slice to build," which **#585 today buries** as
+an internal "prerequisite, detailed in the body."
+
+## Could split (carve now — one slice)
+
+| Epic candidate | Proposed new child | workItem · size | Files (file-citable) | Batchable? |
+|---|---|---|---|---|
+| **7** reference-registry substrate | **Reference-registry substrate — index the structured reference homes** | story · **3** | `benchmarkCorpus.json`, `references.json`, `blocks.json`, `benchmarkCapabilityPresence.json`, `intents.json`; new extractor `scripts/*` + a generated index data file | ✅ |
+
+Scope: a deterministic extractor that walks the five **structured** homes and emits one deduped index
+(`{ url, home, sourceId, label }`) — the substrate #585's sweep and #584's convention both stand on.
+**Excludes** the lossy freeform homes (reports md, research prose) and **excludes** deciding the
+retirement shape (that's #584). No buried fork — schema + canonical-URL dedup are mechanical.
+
+### Resulting DAG under #583
+
+```
+#583 (epic)
+├── NEW reference-registry substrate (story·3)   ← build first; foundational, no real blocker
+├── #585 liveness sweep (story, re-est 8→5)       ← blocked-by NEW (needs the index)
+└── #584 retirement convention (decision·5)       ← parallel; unchanged
+```
+
+- **Independence + incremental delivery:** the registry ships standalone value (a queryable/rendered
+  index of "every external reference this project depends on") before any sweep exists. ✓
+- **Demoable state:** the generated index file / a count-by-home render. ✓
+- Mutation also **re-points `#585.blockedBy` → the new slice** and **re-estimates #585 8→5** (the registry
+  was part of its size-8).
+
+## Could not split (carve deferred) — with unblocking action
+
+| Epic candidate | Failing rubric condition | Unblocking action |
+|---|---|---|
+| **3** multi-modal classification | Not separate — already folded into #585's scope | none (stays in #585) |
+| **4** remediation routing | (4) DAG — needs detection (#585) *and* convention (#584) both landed before anything routes | land #585 + resolve #584, then carve |
+| **5** archive-on-cite | (3) buries a real fork — which archive service, when the snapshot fires, where pins live (#546's rejected Fork-1-B "done right") | file a `type:decision` card, then carve the build |
+| **6** axis-vacancy alerting | (4) DAG — needs retirement detection (#585) + corpus category structure; done manually by #546 today | land #585, then carve |
+| **8** cadence / trigger | (4) DAG — nothing to schedule until the sweep (#585) exists; reuses #101/#558 orchestrator | land #585, then carve |
+| **9** platform-strategy setting (L2) | (1) volume-vs-fork — a protocol-shape *decision* (gate-strict vs advisory, archive-on-cite on/off, horizons), not a task; premature pre-dogfood | land L1 dogfood, then open as `type:decision` |
+| **10** Plateau SaaS offering (L3) | (1)+(5) — explicitly "later"; no demoable WE-side state; gated by Plateau linear-cost rule | defer until L2 setting ratified |
+
+The epic body's "carve as they become ready" disposition is correct for 4/5/6/8/9/10 — none is
+build-ready today. Only slice 7 is carve-safe now.
+
+## Proposed mutation (gated on go)
+
+- **#583 already an epic** — no conversion, no `size` to drop (it never carried one).
+- Scaffold **1 child** under `--parent=583`: the reference-registry substrate (`story·3`, **no
+  `blockedBy`** — foundational, build now).
+- **Re-point #585** `blockedBy: ["583"]` → `["583", "<new-NNN>"]` and **re-estimate #585 `size: 8 → 5`**.
+- Net flow: **+1** child; no resolves, no deletes. Gate on `check:standards`. Then `/batch` can pick up
+  the registry slice immediately (it's unblocked).

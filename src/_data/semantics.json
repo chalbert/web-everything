@@ -957,5 +957,15 @@
     "term": "Consumer-Driven Projection",
     "definition": "The net-new, consumer side of a provider↔consumer seam-contract: the consumer declares the subset of a protocol's dimensions/capabilities it actually depends on (<code>consumerRequires</code>), rather than the whole protocol. The provider side is <em>reused</em> from the existing protocol conformance contract (the provider declares its tier). Compatible ⇔ the consumer's required subset is contained in what the provider's tier supplies; a drift is any change removing a required member.",
     "usage": "Part 2 of the <a href=\"/projects/webregistries/#protocol-provider-consumer-graph\">Provider–Consumer Graph Protocol</a> (#401, #092 Fork 2). The only new schema at the seam — it deliberately reuses <a href=\"/protocols/\">protocols.json</a> rather than coining a parallel Pact-style format. Feeds drift detection, impact analysis, and continuous verification on one definition."
+  },
+  {
+    "term": "Vega-Lite L1 Profile",
+    "definition": "The thin semantic core of the <a href=\"/projects/webcharts/\">Web Charts</a> standard: a chart declared as <code>data &rarr; mark &rarr; encoding</code> (Vega-Lite's vocabulary, borrowed) restricted to a minimal L1 subset — basic marks, position/color/size channels, and scales/axes/legends. Selections, transforms, and view composition are additive L2+ tiers a conformant L1 renderer may ignore. It describes <em>what the data means</em>, never how it is drawn.",
+    "usage": "Standardized by Web Charts (#105, scaffolded under #570). The semantic plane is kept strictly separate from the presentation/theme plane (which consumes <a href=\"/projects/webtheme/\">Web Theme</a> tokens), so one spec re-themes without edits. Authored as a profile schema on the <a href=\"/projects/webcharts/#vega-lite-l1\">webcharts project page</a> (#572)."
+  },
+  {
+    "term": "Chart Encoding (semantic plane)",
+    "definition": "The mapping from a data field to a visual channel in a <a href=\"/projects/webcharts/#vega-lite-l1\">Vega-Lite L1</a> chart — e.g. <code>color: { field: 'category' }</code> means <em>encode category by hue</em>, not <code>#3b82f6</code>. The encoding is semantic; the concrete palette, scale range, and animation are the presentation/theme plane, resolved separately. A field's <em>measurement type</em> (quantitative / temporal / ordinal / nominal) drives the default scale and the accessibility-derivable axis/legend labels.",
+    "usage": "The core distinction in the Web Charts semantic/presentation split (#572). Because color/size are semantic, the same chart spec re-themes for free and an a11y description is derivable from the encoding + measurement types — the conformance suite scores accessibility as a first-class axis (#570 slice d)."
   }
 ]
