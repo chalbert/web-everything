@@ -31,6 +31,7 @@
     "propose:readiness": "node scripts/propose-readiness.mjs",
     "autofix": "node scripts/conformance-autofix.mjs",
     "design-refs": "node scripts/design-refs.mjs",
+    "design-refs:frontier": "node scripts/design-refs/frontier.mjs",
     "gen:maas-origin": "node scripts/gen-maas-origin.mjs"
   },
   "devDependencies": {
