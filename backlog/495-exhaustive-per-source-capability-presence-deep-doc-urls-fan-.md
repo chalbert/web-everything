@@ -2,8 +2,11 @@
 type: issue
 workItem: epic
 parent: "315"
-status: open
+status: resolved
 dateOpened: "2026-06-13"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: none
 tags: [gap-analysis, capability-extraction, benchmark, presence, fan-out]
 ---
 
@@ -32,3 +35,14 @@ is the first such case: it carries 0 presence rows and FAST's former coverage is
 `fluent-2`. So the fan-out is over the corpus's **non-retired** sources. The general convention for
 detecting and retiring dead sources/references is being lifted out of this epic into the **external
 reference health monitoring** epic.
+
+## Resolution (2026-06-14)
+
+All 26 source slices are closed: 25 non-retired sources filled + `fast` (#531) confirmed retired (#546).
+The join table [benchmarkCapabilityPresence.json](../src/_data/benchmarkCapabilityPresence.json) now
+carries **1266 `verified` rows** across 25 sources, **0 `verified`-without-`url`** (every verified row
+has a deep doc link + `sourceName`), and **13 residual `notable-inference` rows** the slices could not
+upgrade to verified from the live docs (primer ×2, react-aria ×4, fluent-2 ×2, material-3 ×4, carbon ×1) —
+these stay as honest inference rather than being forced to verified. The per-source fan-out is complete;
+citation quality is now in place for the gap→backlog step (#348). `graduatedTo: none` — this epic filled
+the existing data file built by foundation #352; it spawned no new entity.
