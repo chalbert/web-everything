@@ -29,7 +29,7 @@ axes** to **one forced invariant + one genuine on-merit fork**; the other six ar
 ruled its provider registries. The invariant (generated code is **not privileged** — identical gates, no
 bypass) is a **ratify**. The sole fork — **the PR evidence payload (standard contract vs. Plateau
 markdown)** — carries a **bold** default. **Forge auth / bot identity** was raised as a fork but
-**dissolved on the fork-existence test** (RESOLVED 2026-06-14): A-vs-B aren't competing end-states — they
+**dissolved on the fork-existence test** (RATIFIED 2026-06-14): A-vs-B aren't competing end-states — they
 co-exist as a credential-source *provider seam* selected by runtime context, the literal twin of the forge
 provider registry already demoted here. Ratification, not research.
 
@@ -107,7 +107,7 @@ policy dials above the divider are *not* forks — they're support-all-coherent.
 |---|---|---|---|
 | **PR evidence payload** | standard-owned conformance-evidence manifest (app emits, Plateau renders) — built thin-first (B's markdown rendering ships ahead of the full contract) | freeform Plateau PR markdown only | **Med** — minting a standard here is a genuine judgment |
 
-## ~~Fork 1~~ — Forge auth, bot identity & commit signing *(DISSOLVED → support-all provider seam, 2026-06-14)*
+## ~~Fork 1~~ — Forge auth, bot identity & commit signing *(DISSOLVED → support-all provider seam, ratified 2026-06-14)*
 
 **Dissolution.** Raised as a fork, but it **fails the fork-existence test**: A (reuse the IDE-bridge's git
 auth) and B (GitHub-App backend broker) are **not competing end-states** — the item's own default was "A for
@@ -193,7 +193,7 @@ brought it to DoR.
 - **Git-flow / PR-strategy** — author/project conventions. Per the conventions-fold-into-compliance ruling
   (#436/#437) WE never mandates them; defaults live in a project config extending the **platform default**
   (#579), compliance-enforced, bot-consumed. Not a decision — a vocabulary the bot *reads*.
-- **Forge auth (raised as Fork 1, DISSOLVED 2026-06-14)** — a privileged forge-write action, but **not a
+- **Forge auth (raised as Fork 1, DISSOLVED on ratification 2026-06-14)** — a privileged forge-write action, but **not a
   winner-pick**: A (bridge auth) and B (App broker) co-exist as a **credential-source provider seam**
   selected by runtime context (twin of the forge provider registry). Demoted to "Supported by default." The
   security invariant (no long-lived browser credential → C fallback-only) and the per-context default are
@@ -226,7 +226,7 @@ is only reachable after every gate is green — the autonomy dial (#141/#410) *i
   conformance-evidence manifest contract (WE standard) + its Plateau renderer — sequenced after the v1
   fix-loop and bridge exist.
 
-## Ruling (RESOLVED 2026-06-14)
+## Ruling (RATIFIED 2026-06-14)
 
 1. **Invariant — ratified as written.** Generated code is **not privileged**: a bot fix runs the identical
    review + code-compliance gates as a human PR (lint, tests, type-check, quality gate, branch protection,
@@ -252,3 +252,7 @@ credential-source provider seam (Plateau, A-first/B-hosted, compliance-read defa
 [#599](599-conformance-evidence-manifest-standard-owned-contract-for-bo.md) conformance-evidence manifest
 contract (WE standard; ⟵ #575); **(d)** [#601](601-pr-body-renderer-render-the-conformance-evidence-manifest-in.md)
 its Plateau PR-body renderer, thin markdown first (⟵ #599, #598).
+
+**Hygiene follow-on:** because this ruling exercised the **fork-existence test** in anger (a false fork
+dissolved into a provider seam), [#602](602-fork-existence-test-sweep-find-single-solution-mandates-that.md)
+sweeps the rest of the standard for single-solution mandates the same test would reject.
