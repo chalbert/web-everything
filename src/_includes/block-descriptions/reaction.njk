@@ -1,0 +1,46 @@
+<h2>Reaction</h2>
+<p>Affix a symbol to a piece of content, toggle your own, aggregate a count, and show a who-reacted
+roster. The <strong>consumer</strong> end of the provider→consumer seam from
+<a href="/backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke/">decision #370</a>
+(Fork&nbsp;5): each reaction is an <code>aria-pressed</code> toggle backed by the
+<a href="/intents/reaction/">Reaction intent</a>, and it <strong>composes</strong> the
+<a href="/intents/expressive-symbol/">expressive-symbol</a> glyph — it never re-renders it. The only
+first-class precedent, Atlassian's <code>@atlaskit/reactions</code>, is exactly this block + intent shape.</p>
+
+<h3>What it provides</h3>
+<ul>
+  <li>A reaction bar where each entry is a <code>&lt;button aria-pressed&gt;</code> toggle — press to
+    react, press again to remove (toggle-your-own).</li>
+  <li>An aggregate <strong>count</strong> per reaction and an optional <strong>who-reacted roster</strong>
+    (<code>users[]</code>, with a display limit), driven by the <code>roster</code> dimension.</li>
+  <li>Optimistic toggling (<code>optimistic</code> dimension): your own press reflects immediately, before
+    the round-trip confirms.</li>
+  <li>An open, config-driven <strong>reaction set</strong>: the convergent <code>sentiment</code> default,
+    a project <code>named-set</code>, or the <code>all-emojis</code> full-picker escape.</li>
+</ul>
+
+<h3>The contract — <code>ReactionSummary</code></h3>
+<p>Adopts Atlassian's <code>ReactionSummary</code> as the contract baseline: <code>count</code> (the
+aggregate) · <code>users[]</code> (the roster, display-limited) · <code>reacted</code> (toggle-your-own)
+· <code>optimisticallyUpdated</code>. It is a <strong>data contract, not a protocol</strong> — there is no
+swappable-vendor or engine-interop story, so making it a protocol would be lock-in for no interop gain.</p>
+
+<h3>Sync is composed, never baked in</h3>
+<p>The multi-user "others see your reaction" concern is a <strong>separate real-time protocol</strong>
+(webrealtime) the reaction block composes — the reaction contract itself stays sync-agnostic. Count changes
+are announced through <a href="/intents/live-region-status/">live-region-status</a>.</p>
+
+<h3>Accessibility (load-bearing)</h3>
+<ul>
+  <li><strong>Composed accessible name</strong> per toggle — emoji name + count + your-reacted-state
+    ("thumbs up, 5 reactions, you reacted, activate to remove"), <strong>not</strong> a bare
+    <code>aria-pressed</code> glyph (which reads only the CLDR name + "pressed").</li>
+  <li>Announce <strong>your local toggle only</strong> — never every remote tick, which would flood a
+    screen reader.</li>
+  <li>The who-reacted roster is keyboard-reachable.</li>
+</ul>
+
+<h3>Relationship to the status badge (#354)</h3>
+<p>A reaction count chip resembles the <code>surface</code>-tokened badge of
+<a href="/backlog/354-status-indicator-badge-intent/">#354</a>, but means "N people reacted," not "this
+state" — they <strong>compose, they do not merge</strong>.</p>

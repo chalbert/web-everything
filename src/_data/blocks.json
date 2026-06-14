@@ -3401,5 +3401,25 @@
       "Composes, not re-specifies, three intents for the rest: Validation Intent (field validity merges up to form validity), Exit Guard (the unsaved-changes navigation guard #129, armed from `dirty`), and Feedback/Reliability (submit lifecycle: in-flight, success, error). Each behavior defers to the owning intent, keeping the Form spec thin."
     ],
     "designRationale": "Surfaced as a gap: there is no block answering the whole-form state/lifecycle question, only field-level validity. Built fresh on the native form + validation primitives (the legacy plateau repo is explicitly NOT a model and was not consulted). Authored as a candidate (draft) composition manifest; a reference implementation is a follow-on once the contract is reviewed."
-    }
+    },
+  {
+    "id": "reaction",
+    "name": "Reaction",
+    "status": "concept",
+    "type": "Component",
+    "summary": "Affix-a-symbol-to-content interaction: each reaction is an `aria-pressed` toggle backed by the Reaction Intent. Composes the expressive-symbol glyph (never re-renders it) and adopts Atlassian ReactionSummary as the contract baseline (count · users[] · reacted · optimisticallyUpdated). The only first-class precedent (Atlassian @atlaskit/reactions) is exactly this block+intent shape. Per #370 Fork 5.",
+    "composesIntents": [
+      "reaction",
+      "expressive-symbol"
+    ],
+    "designDecisions": [
+      "Block + intent (#370 Fork 5): reaction IS runnable behavior (toggle-your-own, aggregate, optimistic update), so the standard owns the mechanics once instead of leaving every consumer to re-implement them — an intent alone would under-specify the very thing that makes a reaction a reaction.",
+      "Contract baseline = Atlassian `ReactionSummary`: `count` (aggregate) · `users[]` (who-reacted roster, display-limited) · `reacted` (toggle-your-own) · `optimisticallyUpdated`. Classified a DATA CONTRACT, NOT a protocol — no swappable-vendor/engine-interop story, so a protocol would be lock-in for no interop gain.",
+      "Multi-user sync is COMPOSED, never baked in: the \"others see your reaction\" concern is a separate real-time protocol (webrealtime); the reaction contract stays sync-agnostic. Count changes announce through `live-region-status`.",
+      "Accessibility (load-bearing): each reaction is an `aria-pressed` toggle with a COMPOSED accessible name (emoji name + count + your-reacted-state — \"thumbs up, 5 reactions, you reacted, activate to remove\"), not a bare glyph. Announce YOUR LOCAL toggle only — never every remote tick. The roster is keyboard-reachable.",
+      "Reaction set is an open, config-driven named-set registry (#370 Fork 6): default-less core, convergent `sentiment` default, `allowAllEmojis` escape to the full picker. Composes the expressive-symbol render strategy for the glyphs.",
+      "vs #354 status badge: a reaction count chip resembles a `surface`-tokened badge but means \"N people reacted,\" not \"this state\" — they compose, they do not merge."
+    ],
+    "relatedReport": "reports/2026-06-12-expressive-symbols-reactions.md"
+  }
 ]
