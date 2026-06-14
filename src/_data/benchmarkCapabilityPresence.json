@@ -92,6 +92,14 @@
     },
     {
       "capabilityId": "accordion",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accordion",
+      "url": "https://mantine.dev/core/accordion/"
+    },
+    {
+      "capabilityId": "accordion",
       "sourceId": "mui",
       "present": true,
       "provenance": "verified",
@@ -244,6 +252,14 @@
     },
     {
       "capabilityId": "anchored-positioning",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popover position (Floating UI)",
+      "url": "https://mantine.dev/core/popover/"
+    },
+    {
+      "capabilityId": "anchored-positioning",
       "sourceId": "mui",
       "present": true,
       "provenance": "verified",
@@ -345,6 +361,14 @@
       "provenance": "verified",
       "sourceName": "Combobox WAI-ARIA pattern",
       "url": "https://lion-web.netlify.app/components/combobox/overview/"
+    },
+    {
+      "capabilityId": "aria-apg-adherence",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accessibility (WAI-ARIA)",
+      "url": "https://help.mantine.dev/q/are-mantine-components-accessible"
     },
     {
       "capabilityId": "aria-apg-adherence",
@@ -476,6 +500,14 @@
     },
     {
       "capabilityId": "avatar",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Avatar",
+      "url": "https://mantine.dev/core/avatar/"
+    },
+    {
+      "capabilityId": "avatar",
       "sourceId": "mui",
       "present": true,
       "provenance": "verified",
@@ -569,6 +601,14 @@
       "provenance": "verified",
       "sourceName": "Badges",
       "url": "https://v1.lightningdesignsystem.com/components/badges/"
+    },
+    {
+      "capabilityId": "badge",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Badge",
+      "url": "https://mantine.dev/core/badge/"
     },
     {
       "capabilityId": "badge",
@@ -681,6 +721,14 @@
       "provenance": "verified",
       "sourceName": "Breadcrumbs",
       "url": "https://v1.lightningdesignsystem.com/components/breadcrumbs/"
+    },
+    {
+      "capabilityId": "breadcrumb",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Breadcrumbs",
+      "url": "https://mantine.dev/core/breadcrumbs/"
     },
     {
       "capabilityId": "breadcrumb",
@@ -804,6 +852,14 @@
     },
     {
       "capabilityId": "button",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button",
+      "url": "https://mantine.dev/core/button/"
+    },
+    {
+      "capabilityId": "button",
       "sourceId": "material-3",
       "present": true,
       "provenance": "verified",
@@ -905,6 +961,14 @@
       "provenance": "verified",
       "sourceName": "Button Groups",
       "url": "https://v1.lightningdesignsystem.com/components/button-groups/"
+    },
+    {
+      "capabilityId": "button-group",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button.Group",
+      "url": "https://mantine.dev/core/button/"
     },
     {
       "capabilityId": "button-group",
@@ -1017,6 +1081,14 @@
       "provenance": "verified",
       "sourceName": "Cards",
       "url": "https://v1.lightningdesignsystem.com/components/cards/"
+    },
+    {
+      "capabilityId": "card",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Card",
+      "url": "https://mantine.dev/core/card/"
     },
     {
       "capabilityId": "card",
@@ -1220,6 +1292,14 @@
     },
     {
       "capabilityId": "checkbox",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://mantine.dev/core/checkbox/"
+    },
+    {
+      "capabilityId": "checkbox",
       "sourceId": "material-3",
       "present": true,
       "provenance": "verified",
@@ -1316,6 +1396,14 @@
     },
     {
       "capabilityId": "code-block",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Code",
+      "url": "https://mantine.dev/core/code/"
+    },
+    {
+      "capabilityId": "code-block",
       "sourceId": "primer",
       "present": true,
       "provenance": "notable-inference",
@@ -1369,6 +1457,14 @@
       "provenance": "verified",
       "sourceName": "Color Contrast (WCAG AA)",
       "url": "https://v1.lightningdesignsystem.com/accessibility/overview/"
+    },
+    {
+      "capabilityId": "color-contrast",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "autoContrast",
+      "url": "https://mantine.dev/theming/theme-object/"
     },
     {
       "capabilityId": "color-contrast",
@@ -1438,9 +1534,9 @@
       "capabilityId": "color-picker",
       "sourceId": "mantine",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "ColorPicker",
+      "url": "https://mantine.dev/core/color-picker/"
     },
     {
       "capabilityId": "color-picker",
@@ -1529,6 +1625,14 @@
       "provenance": "verified",
       "sourceName": "Color (design tokens)",
       "url": "https://v1.lightningdesignsystem.com/design-tokens/"
+    },
+    {
+      "capabilityId": "color-tokens",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Colors / CSS variables",
+      "url": "https://mantine.dev/theming/colors/"
     },
     {
       "capabilityId": "color-tokens",
@@ -1660,6 +1764,14 @@
     },
     {
       "capabilityId": "combobox",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox",
+      "url": "https://mantine.dev/core/combobox/"
+    },
+    {
+      "capabilityId": "combobox",
       "sourceId": "mui",
       "present": true,
       "provenance": "verified",
@@ -1721,6 +1833,14 @@
       "provenance": "verified",
       "sourceName": "Command",
       "url": "https://chakra-ui.com/docs/components/combobox"
+    },
+    {
+      "capabilityId": "command-palette",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spotlight",
+      "url": "https://mantine.dev/x/spotlight/"
     },
     {
       "capabilityId": "command-palette",
@@ -1844,6 +1964,14 @@
     },
     {
       "capabilityId": "controlled-uncontrolled",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "use-uncontrolled",
+      "url": "https://mantine.dev/hooks/use-uncontrolled/"
+    },
+    {
+      "capabilityId": "controlled-uncontrolled",
       "sourceId": "mui",
       "present": true,
       "provenance": "verified",
@@ -1908,6 +2036,14 @@
     },
     {
       "capabilityId": "copy-to-clipboard",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "CopyButton",
+      "url": "https://mantine.dev/core/copy-button/"
+    },
+    {
+      "capabilityId": "copy-to-clipboard",
       "sourceId": "primer",
       "present": true,
       "provenance": "notable-inference",
@@ -1961,6 +2097,14 @@
       "provenance": "verified",
       "sourceName": "Light/dark/high-contrast theming",
       "url": "https://fluent2.microsoft.design/design-tokens"
+    },
+    {
+      "capabilityId": "dark-mode",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color schemes",
+      "url": "https://mantine.dev/theming/color-schemes/"
     },
     {
       "capabilityId": "dark-mode",
@@ -2156,6 +2300,14 @@
     },
     {
       "capabilityId": "date-picker",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "DatePicker",
+      "url": "https://mantine.dev/dates/date-picker/"
+    },
+    {
+      "capabilityId": "date-picker",
       "sourceId": "material-3",
       "present": true,
       "provenance": "verified",
@@ -2225,6 +2377,14 @@
       "provenance": "verified",
       "sourceName": "Datetime Picker",
       "url": "https://v1.lightningdesignsystem.com/components/datetime-picker/"
+    },
+    {
+      "capabilityId": "date-range-picker",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "DatePicker (type=\"range\")",
+      "url": "https://mantine.dev/dates/date-picker/"
     },
     {
       "capabilityId": "date-range-picker",
@@ -2380,6 +2540,14 @@
     },
     {
       "capabilityId": "dialog",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Modal",
+      "url": "https://mantine.dev/core/modal/"
+    },
+    {
+      "capabilityId": "dialog",
       "sourceId": "material-3",
       "present": true,
       "provenance": "verified",
@@ -2508,6 +2676,14 @@
     },
     {
       "capabilityId": "disclosure",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Collapse",
+      "url": "https://mantine.dev/core/collapse/"
+    },
+    {
+      "capabilityId": "disclosure",
       "sourceId": "polaris",
       "present": true,
       "provenance": "verified",
@@ -2588,6 +2764,14 @@
     },
     {
       "capabilityId": "dismissal",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "closeOnClickOutside / closeOnEscape",
+      "url": "https://mantine.dev/core/popover/"
+    },
+    {
+      "capabilityId": "dismissal",
       "sourceId": "mui",
       "present": true,
       "provenance": "verified",
@@ -2649,6 +2833,14 @@
       "provenance": "verified",
       "sourceName": "Divider",
       "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "divider",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Divider",
+      "url": "https://mantine.dev/core/divider/"
     },
     {
       "capabilityId": "divider",
@@ -2828,6 +3020,14 @@
     },
     {
       "capabilityId": "drawer",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Drawer",
+      "url": "https://mantine.dev/core/drawer/"
+    },
+    {
+      "capabilityId": "drawer",
       "sourceId": "material-3",
       "present": true,
       "provenance": "verified",
@@ -2913,6 +3113,14 @@
       "provenance": "verified",
       "sourceName": "Shadow (design tokens)",
       "url": "https://v1.lightningdesignsystem.com/design-tokens/"
+    },
+    {
+      "capabilityId": "elevation",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Shadows",
+      "url": "https://mantine.dev/styles/css-variables-list/"
     },
     {
       "capabilityId": "elevation",
@@ -3084,6 +3292,14 @@
     },
     {
       "capabilityId": "file-upload",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "FileInput",
+      "url": "https://mantine.dev/core/file-input/"
+    },
+    {
+      "capabilityId": "file-upload",
       "sourceId": "polaris",
       "present": true,
       "provenance": "verified",
@@ -3137,6 +3353,14 @@
       "provenance": "verified",
       "sourceName": "Overlay (elementToFocusAfterHide)",
       "url": "https://lion-web.netlify.app/fundamentals/systems/overlays/configuration/"
+    },
+    {
+      "capabilityId": "focus-return",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "use-focus-return",
+      "url": "https://mantine.dev/hooks/use-focus-return/"
     },
     {
       "capabilityId": "focus-return",
@@ -3244,6 +3468,14 @@
     },
     {
       "capabilityId": "focus-trap",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "FocusTrap",
+      "url": "https://mantine.dev/core/focus-trap/"
+    },
+    {
+      "capabilityId": "focus-trap",
       "sourceId": "mui",
       "present": true,
       "provenance": "verified",
@@ -3313,6 +3545,14 @@
       "provenance": "notable-inference",
       "sourceName": null,
       "url": null
+    },
+    {
+      "capabilityId": "focus-visible-policy",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "theme.focusRing",
+      "url": "https://mantine.dev/theming/theme-object/"
     },
     {
       "capabilityId": "focus-visible-policy",
@@ -3409,6 +3649,14 @@
       "provenance": "verified",
       "sourceName": "Form",
       "url": "https://lion-web.netlify.app/components/form/"
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Fieldset",
+      "url": "https://mantine.dev/core/fieldset/"
     },
     {
       "capabilityId": "form-layout",
@@ -3524,6 +3772,14 @@
     },
     {
       "capabilityId": "form-validation-flow",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Form validation",
+      "url": "https://mantine.dev/form/validation/"
+    },
+    {
+      "capabilityId": "form-validation-flow",
       "sourceId": "polaris",
       "present": true,
       "provenance": "verified",
@@ -3585,6 +3841,14 @@
       "provenance": "verified",
       "sourceName": "Grid",
       "url": "https://chakra-ui.com/docs/components/grid"
+    },
+    {
+      "capabilityId": "grid-layout",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Grid",
+      "url": "https://mantine.dev/core/grid/"
     },
     {
       "capabilityId": "grid-layout",
@@ -3692,6 +3956,14 @@
     },
     {
       "capabilityId": "i18n-rtl",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "RTL (DirectionProvider)",
+      "url": "https://mantine.dev/styles/rtl/"
+    },
+    {
+      "capabilityId": "i18n-rtl",
       "sourceId": "material-3",
       "present": true,
       "provenance": "verified",
@@ -3785,6 +4057,14 @@
       "provenance": "verified",
       "sourceName": "Icon",
       "url": "https://lion-web.netlify.app/components/icon/"
+    },
+    {
+      "capabilityId": "icon-button",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "ActionIcon",
+      "url": "https://mantine.dev/core/action-icon/"
     },
     {
       "capabilityId": "icon-button",
@@ -3892,6 +4172,14 @@
     },
     {
       "capabilityId": "inline-alert",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Alert",
+      "url": "https://mantine.dev/core/alert/"
+    },
+    {
+      "capabilityId": "inline-alert",
       "sourceId": "mui",
       "present": true,
       "provenance": "verified",
@@ -3996,6 +4284,14 @@
     },
     {
       "capabilityId": "keyboard-interaction",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Keyboard support",
+      "url": "https://help.mantine.dev/q/are-mantine-components-accessible"
+    },
+    {
+      "capabilityId": "keyboard-interaction",
       "sourceId": "material-3",
       "present": true,
       "provenance": "verified",
@@ -4092,6 +4388,14 @@
     },
     {
       "capabilityId": "link",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Anchor",
+      "url": "https://mantine.dev/core/anchor/"
+    },
+    {
+      "capabilityId": "link",
       "sourceId": "mui",
       "present": true,
       "provenance": "verified",
@@ -4185,6 +4489,14 @@
       "provenance": "verified",
       "sourceName": "Tiles",
       "url": "https://v1.lightningdesignsystem.com/components/tiles/"
+    },
+    {
+      "capabilityId": "list",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "List",
+      "url": "https://mantine.dev/core/list/"
     },
     {
       "capabilityId": "list",
@@ -4436,6 +4748,14 @@
     },
     {
       "capabilityId": "menu",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menu",
+      "url": "https://mantine.dev/core/menu/"
+    },
+    {
+      "capabilityId": "menu",
       "sourceId": "material-3",
       "present": true,
       "provenance": "verified",
@@ -4652,6 +4972,14 @@
     },
     {
       "capabilityId": "multi-select",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "MultiSelect",
+      "url": "https://mantine.dev/core/multi-select/"
+    },
+    {
+      "capabilityId": "multi-select",
       "sourceId": "mui",
       "present": true,
       "provenance": "verified",
@@ -4737,6 +5065,14 @@
       "provenance": "verified",
       "sourceName": "Global Navigation",
       "url": "https://v1.lightningdesignsystem.com/components/global-navigation/"
+    },
+    {
+      "capabilityId": "navbar",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "AppShell",
+      "url": "https://mantine.dev/core/app-shell/"
     },
     {
       "capabilityId": "navbar",
@@ -4860,6 +5196,14 @@
     },
     {
       "capabilityId": "number-input",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "NumberInput",
+      "url": "https://mantine.dev/core/number-input/"
+    },
+    {
+      "capabilityId": "number-input",
       "sourceId": "mui",
       "present": true,
       "provenance": "verified",
@@ -4948,6 +5292,14 @@
     },
     {
       "capabilityId": "pagination",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Pagination",
+      "url": "https://mantine.dev/core/pagination/"
+    },
+    {
+      "capabilityId": "pagination",
       "sourceId": "mui",
       "present": true,
       "provenance": "verified",
@@ -4993,6 +5345,14 @@
       "provenance": "verified",
       "sourceName": "Pin Input",
       "url": "https://chakra-ui.com/docs/components/pin-input"
+    },
+    {
+      "capabilityId": "pin-input",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "PinInput",
+      "url": "https://mantine.dev/core/pin-input/"
     },
     {
       "capabilityId": "pin-input",
@@ -5081,6 +5441,14 @@
       "provenance": "verified",
       "sourceName": "Popovers",
       "url": "https://v1.lightningdesignsystem.com/components/popovers/"
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popover",
+      "url": "https://mantine.dev/core/popover/"
     },
     {
       "capabilityId": "popover",
@@ -5225,6 +5593,14 @@
       "provenance": "verified",
       "sourceName": "Progress Indicator",
       "url": "https://lion-web.netlify.app/components/progress-indicator/"
+    },
+    {
+      "capabilityId": "progress-linear",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress",
+      "url": "https://mantine.dev/core/progress/"
     },
     {
       "capabilityId": "progress-linear",
@@ -5388,6 +5764,14 @@
     },
     {
       "capabilityId": "radio-group",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio.Group",
+      "url": "https://mantine.dev/core/radio/"
+    },
+    {
+      "capabilityId": "radio-group",
       "sourceId": "material-3",
       "present": true,
       "provenance": "verified",
@@ -5500,6 +5884,14 @@
     },
     {
       "capabilityId": "radius",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radius",
+      "url": "https://mantine.dev/styles/css-variables-list/"
+    },
+    {
+      "capabilityId": "radius",
       "sourceId": "material-3",
       "present": true,
       "provenance": "verified",
@@ -5577,6 +5969,14 @@
       "provenance": "verified",
       "sourceName": "Input Range",
       "url": "https://lion-web.netlify.app/components/input-range/"
+    },
+    {
+      "capabilityId": "range-slider",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "RangeSlider",
+      "url": "https://mantine.dev/core/range-slider/"
     },
     {
       "capabilityId": "range-slider",
@@ -5662,9 +6062,9 @@
       "capabilityId": "rating",
       "sourceId": "mantine",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Rating",
+      "url": "https://mantine.dev/core/rating/"
     },
     {
       "capabilityId": "rating",
@@ -5697,6 +6097,14 @@
       "provenance": "verified",
       "sourceName": "Motion (reduced motion)",
       "url": "https://atlassian.design/foundations/motion"
+    },
+    {
+      "capabilityId": "reduced-motion",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "respectReducedMotion / use-reduced-motion",
+      "url": "https://mantine.dev/hooks/use-reduced-motion/"
     },
     {
       "capabilityId": "reduced-motion",
@@ -5737,6 +6145,14 @@
       "provenance": "verified",
       "sourceName": "Splitter",
       "url": "https://chakra-ui.com/docs/components/splitter"
+    },
+    {
+      "capabilityId": "resizable-splitter",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Splitter",
+      "url": "https://mantine.dev/core/splitter/"
     },
     {
       "capabilityId": "resizable-splitter",
@@ -5820,6 +6236,14 @@
     },
     {
       "capabilityId": "responsive-adaptive",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Responsive styles",
+      "url": "https://mantine.dev/styles/responsive/"
+    },
+    {
+      "capabilityId": "responsive-adaptive",
       "sourceId": "material-3",
       "present": true,
       "provenance": "verified",
@@ -5870,9 +6294,9 @@
       "capabilityId": "rich-text-editor",
       "sourceId": "mantine",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Rich text editor (Tiptap)",
+      "url": "https://mantine.dev/x/tiptap/"
     },
     {
       "capabilityId": "roving-tabindex",
@@ -5913,6 +6337,14 @@
       "provenance": "verified",
       "sourceName": "Scroll Area",
       "url": "https://chakra-ui.com/docs/components/scroll-area"
+    },
+    {
+      "capabilityId": "scroll-area",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "ScrollArea",
+      "url": "https://mantine.dev/core/scroll-area/"
     },
     {
       "capabilityId": "scroll-area",
@@ -5977,6 +6409,14 @@
       "provenance": "verified",
       "sourceName": "Segmented Control",
       "url": "https://chakra-ui.com/docs/components/segmented-control"
+    },
+    {
+      "capabilityId": "segmented-control",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "SegmentedControl",
+      "url": "https://mantine.dev/core/segmented-control/"
     },
     {
       "capabilityId": "segmented-control",
@@ -6124,6 +6564,14 @@
     },
     {
       "capabilityId": "select",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Select",
+      "url": "https://mantine.dev/core/select/"
+    },
+    {
+      "capabilityId": "select",
       "sourceId": "material-3",
       "present": true,
       "provenance": "verified",
@@ -6244,6 +6692,14 @@
     },
     {
       "capabilityId": "sidebar-nav",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "NavLink",
+      "url": "https://mantine.dev/core/nav-link/"
+    },
+    {
+      "capabilityId": "sidebar-nav",
       "sourceId": "material-3",
       "present": true,
       "provenance": "verified",
@@ -6340,6 +6796,14 @@
     },
     {
       "capabilityId": "skeleton",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Skeleton",
+      "url": "https://mantine.dev/core/skeleton/"
+    },
+    {
+      "capabilityId": "skeleton",
       "sourceId": "mui",
       "present": true,
       "provenance": "verified",
@@ -6433,6 +6897,14 @@
       "provenance": "verified",
       "sourceName": "Slider",
       "url": "https://v1.lightningdesignsystem.com/components/slider/"
+    },
+    {
+      "capabilityId": "slider",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider",
+      "url": "https://mantine.dev/core/slider/"
     },
     {
       "capabilityId": "slider",
@@ -6540,6 +7012,14 @@
     },
     {
       "capabilityId": "spacing-scale",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spacing scale",
+      "url": "https://mantine.dev/styles/css-variables-list/"
+    },
+    {
+      "capabilityId": "spacing-scale",
       "sourceId": "material-3",
       "present": true,
       "provenance": "verified",
@@ -6633,6 +7113,14 @@
       "provenance": "verified",
       "sourceName": "Spinners",
       "url": "https://v1.lightningdesignsystem.com/components/spinners/"
+    },
+    {
+      "capabilityId": "spinner",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Loader",
+      "url": "https://mantine.dev/core/loader/"
     },
     {
       "capabilityId": "spinner",
@@ -6772,6 +7260,14 @@
     },
     {
       "capabilityId": "stack-layout",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Stack",
+      "url": "https://mantine.dev/core/stack/"
+    },
+    {
+      "capabilityId": "stack-layout",
       "sourceId": "mui",
       "present": true,
       "provenance": "verified",
@@ -6849,6 +7345,14 @@
       "provenance": "verified",
       "sourceName": "Steps",
       "url": "https://lion-web.netlify.app/components/steps/"
+    },
+    {
+      "capabilityId": "stepper",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Stepper",
+      "url": "https://mantine.dev/core/stepper/"
     },
     {
       "capabilityId": "stepper",
@@ -6953,6 +7457,14 @@
       "provenance": "verified",
       "sourceName": "Switch",
       "url": "https://lion-web.netlify.app/components/switch/"
+    },
+    {
+      "capabilityId": "switch",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Switch",
+      "url": "https://mantine.dev/core/switch/"
     },
     {
       "capabilityId": "switch",
@@ -7100,6 +7612,14 @@
     },
     {
       "capabilityId": "tabs",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tabs",
+      "url": "https://mantine.dev/core/tabs/"
+    },
+    {
+      "capabilityId": "tabs",
       "sourceId": "material-3",
       "present": true,
       "provenance": "verified",
@@ -7228,6 +7748,14 @@
     },
     {
       "capabilityId": "tag-chip",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Chip",
+      "url": "https://mantine.dev/core/chip/"
+    },
+    {
+      "capabilityId": "tag-chip",
       "sourceId": "material-3",
       "present": true,
       "provenance": "verified",
@@ -7350,9 +7878,9 @@
       "capabilityId": "tags-input",
       "sourceId": "mantine",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "TagsInput",
+      "url": "https://mantine.dev/core/tags-input/"
     },
     {
       "capabilityId": "tags-input",
@@ -7492,6 +8020,14 @@
     },
     {
       "capabilityId": "text-field",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "TextInput",
+      "url": "https://mantine.dev/core/text-input/"
+    },
+    {
+      "capabilityId": "text-field",
       "sourceId": "material-3",
       "present": true,
       "provenance": "verified",
@@ -7620,6 +8156,14 @@
     },
     {
       "capabilityId": "textarea",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Textarea",
+      "url": "https://mantine.dev/core/textarea/"
+    },
+    {
+      "capabilityId": "textarea",
       "sourceId": "mui",
       "present": true,
       "provenance": "verified",
@@ -7700,6 +8244,14 @@
     },
     {
       "capabilityId": "time-picker",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "TimePicker",
+      "url": "https://mantine.dev/dates/time-picker/"
+    },
+    {
+      "capabilityId": "time-picker",
       "sourceId": "material-3",
       "present": true,
       "provenance": "verified",
@@ -7745,6 +8297,14 @@
       "provenance": "verified",
       "sourceName": "Activity Timeline",
       "url": "https://v1.lightningdesignsystem.com/components/activity-timeline/"
+    },
+    {
+      "capabilityId": "timeline",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Timeline",
+      "url": "https://mantine.dev/core/timeline/"
     },
     {
       "capabilityId": "timeline",
@@ -7825,6 +8385,14 @@
       "provenance": "verified",
       "sourceName": "Toast",
       "url": "https://v1.lightningdesignsystem.com/components/toast/"
+    },
+    {
+      "capabilityId": "toast",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Notifications",
+      "url": "https://mantine.dev/x/notifications/"
     },
     {
       "capabilityId": "toast",
@@ -7964,6 +8532,14 @@
     },
     {
       "capabilityId": "tooltip",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tooltip",
+      "url": "https://mantine.dev/core/tooltip/"
+    },
+    {
+      "capabilityId": "tooltip",
       "sourceId": "material-3",
       "present": true,
       "provenance": "verified",
@@ -8099,6 +8675,14 @@
       "url": "https://v1.lightningdesignsystem.com/components/tree-grid/"
     },
     {
+      "capabilityId": "tree-select",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "TreeSelect",
+      "url": "https://mantine.dev/core/tree-select/"
+    },
+    {
       "capabilityId": "tree-view",
       "sourceId": "ant-design",
       "present": true,
@@ -8153,6 +8737,14 @@
       "provenance": "verified",
       "sourceName": "Trees",
       "url": "https://v1.lightningdesignsystem.com/components/trees/"
+    },
+    {
+      "capabilityId": "tree-view",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tree",
+      "url": "https://mantine.dev/core/tree/"
     },
     {
       "capabilityId": "tree-view",
@@ -8281,6 +8873,14 @@
       "provenance": "verified",
       "sourceName": "Font Size (design tokens)",
       "url": "https://v1.lightningdesignsystem.com/design-tokens/"
+    },
+    {
+      "capabilityId": "typography-scale",
+      "sourceId": "mantine",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Font sizes / Typography",
+      "url": "https://mantine.dev/styles/css-variables-list/"
     },
     {
       "capabilityId": "typography-scale",
