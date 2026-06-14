@@ -11,11 +11,18 @@
  *   G1  edge-gap            prose prereq ("per #N", "ruled by #N", "gated on #N", …)
  *                           that is NOT in blockedBy. Severity↑ if #N is a decision,
  *                           highest if that decision is still open.
- *   G2  ruling-after-build  a resolved idea/issue cites a `type: decision` #N that
- *                           resolved AFTER this item — built ahead of its ruling.
- *   G3  ungoverned-arch     a resolved idea/issue that graduated to an entity but
- *                           has no decision anywhere in its lineage (the plugs class:
- *                           an architectural call with no governing decision).
+ *   G2  ruling-after-build  a resolved idea/issue GATED ON (blockedBy) a `type: decision`
+ *                           that resolved AFTER this item — built ahead of its ruling.
+ *                           Build order is read from git (the commit flipping
+ *                           `status: resolved`), NOT the backfillable `dateResolved`
+ *                           frontmatter; items born resolved at their import commit are
+ *                           undatable and skipped. `parent` (epic membership) is NOT a
+ *                           gating edge, so it does not count here.
+ *   G3  ungoverned-arch     a resolved idea/issue that graduated to an entity but has no
+ *                           governing decision reachable — neither in its TRANSITIVE
+ *                           parent/blockedBy lineage (an epic-hop up) nor cited in its
+ *                           prose (a `#N` resolving to a resolved `type: decision`). The
+ *                           plugs class: an architectural call with no governing decision.
  *   D1  dead-file-ref       a backticked code path (…/x.ts[:NN]) that doesn't exist.
  *   D2  dangling-item-ref   a #N referenced in the body with no backlog/N-*.md.
  *   D3  stale-project       relatedProject absent from projects.json, or `concept`.
@@ -25,6 +32,7 @@
 import { readFileSync, readdirSync, existsSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BL = join(ROOT, 'backlog');
@@ -84,7 +92,57 @@ function resolveRef(p) {
   return tries.some(existsSync);
 }
 const isDecision = id => items.get(id)?.type === 'decision';
-const resolvedBefore = (a, b) => a?.fm?.dateResolved && b?.fm?.dateResolved && a.fm.dateResolved <= b.fm.dateResolved;
+
+// ---- git-derived resolution dates (G2 must not trust backfilled frontmatter) ----
+// `dateResolved` is hand-stamped and was bulk-backfilled for early-era items, so two
+// such dates can't establish build order. Instead read *when* an item actually flipped
+// to `status: resolved` from git, and treat items that were born resolved (added already
+// resolved — no flip commit distinct from the add) as undatable: their date is an import
+// artifact, never a real ruling timeline.
+let REPO_FIRST_COMMIT = null;
+try { REPO_FIRST_COMMIT = execFileSync('git', ['rev-list', '--max-parents=0', 'HEAD'], { cwd: ROOT }).toString().trim().split('\n').pop(); } catch { /* no git */ }
+const gitCache = new Map();
+function gitResolvedAt(file) {            // -> { date: ISO|null, undatable: bool }
+  if (gitCache.has(file)) return gitCache.get(file);
+  let res = { date: null, undatable: true };
+  try {
+    const rel = `backlog/${file}`;
+    const flip = execFileSync('git', ['log', '-1', '--format=%H|%cI', '-G', '^status:.*resolved', '--', rel], { cwd: ROOT }).toString().trim();
+    const addLog = execFileSync('git', ['log', '--diff-filter=A', '--format=%H', '--', rel], { cwd: ROOT }).toString().trim().split('\n').filter(Boolean);
+    const add = addLog.pop();            // earliest add commit
+    if (flip) {
+      const [hash, iso] = flip.split('|');
+      const bornResolved = hash === add;             // added already resolved → no real flip
+      const imported = add && add === REPO_FIRST_COMMIT;
+      res = { date: iso, undatable: bornResolved || imported };
+    }
+  } catch { /* leave undatable */ }
+  gitCache.set(file, res);
+  return res;
+}
+
+// G3: the full governing lineage is the transitive closure over parent + blockedBy edges
+// (a decision may sit an epic-hop up), not just the item's own two fields.
+function transitiveLineage(it) {
+  const seen = new Set();
+  const stack = [...(it.fm.blockedBy || []).map(norm), norm(it.fm.parent)].filter(Boolean);
+  while (stack.length) {
+    const id = stack.pop();
+    if (!id || seen.has(id) || !items.has(id)) continue;
+    seen.add(id);
+    const anc = items.get(id);
+    for (const e of [...(anc.fm.blockedBy || []).map(norm), norm(anc.fm.parent)]) if (e) stack.push(e);
+  }
+  return seen;
+}
+// a body `#N` / `/backlog/N` that resolves to a *resolved* type:decision = a governing ruling cited in prose
+function citesResolvedDecision(it) {
+  for (const [, p] of it.body.matchAll(ANY_REF)) {
+    const d = items.get(norm(p));
+    if (d && d.type === 'decision' && d.status === 'resolved' && norm(p) !== it.id) return true;
+  }
+  return false;
+}
 
 // ---- project liveness ----------------------------------------------------
 let projects = new Map();
@@ -108,18 +166,24 @@ for (const it of items.values()) {
     flags.G1.push({ id: it.id, ref: p, decision: dec, refOpen: open,
       sev: dec && open ? 'HIGH' : dec ? 'med' : 'low', title: title(it) });
   }
-  // G2 ruling-after-build — only decisions in the GOVERNING lineage (blockedBy/parent), not passing mentions
-  const lineage = [...new Set([...(it.fm.blockedBy || []).map(norm), norm(it.fm.parent)].filter(Boolean))];
+  // G2 ruling-after-build — a resolved build GATED ON (blockedBy) a decision that resolved
+  // after it. `parent` is epic membership, not a gating edge, so it is excluded. Build order
+  // comes from git (the resolve-flip commit), and undatable (import-born) endpoints are skipped.
+  const gatingEdges = [...new Set((it.fm.blockedBy || []).map(norm).filter(Boolean))];
   if (isExec && it.status === 'resolved') {
-    for (const p of lineage) {
+    for (const p of gatingEdges) {
       if (!isDecision(p)) continue;
       const d = items.get(p);
-      if (d.status !== 'resolved') flags.G2.push({ id: it.id, ref: p, why: 'governing decision still open', title: title(it) });
-      else if (!resolvedBefore(d, it)) flags.G2.push({ id: it.id, ref: p, why: `decision resolved ${d.fm.dateResolved} > item ${it.fm.dateResolved}`, title: title(it) });
+      if (d.status !== 'resolved') { flags.G2.push({ id: it.id, ref: p, why: 'governing decision still open', title: title(it) }); continue; }
+      const di = gitResolvedAt(d.file), ii = gitResolvedAt(it.file);
+      if (di.undatable || ii.undatable) continue;                  // import artifact — order unknowable
+      if (di.date > ii.date) flags.G2.push({ id: it.id, ref: p, why: `decision resolved ${di.date.slice(0, 10)} (git) > item ${ii.date.slice(0, 10)}`, title: title(it) });
     }
   }
-  // G3 ungoverned-arch — CANDIDATE POOL (judgment confirms): graduated build with no decision in lineage
-  if (isExec && it.status === 'resolved' && it.fm.graduatedTo && it.fm.graduatedTo !== 'none' && !lineage.some(isDecision))
+  // G3 ungoverned-arch — CANDIDATE POOL (judgment confirms): graduated build with no governing
+  // decision reachable transitively (parent/blockedBy closure) AND none cited in its prose.
+  if (isExec && it.status === 'resolved' && it.fm.graduatedTo && it.fm.graduatedTo !== 'none'
+      && ![...transitiveLineage(it)].some(isDecision) && !citesResolvedDecision(it))
     flags.G3.push({ id: it.id, graduatedTo: it.fm.graduatedTo, title: title(it) });
   // D1 dead-file-ref — OPEN items only (resolved items' refs are historical by design)
   if (it.status !== 'resolved')
@@ -142,7 +206,7 @@ const L = [];
 L.push('# Backlog health audit — deterministic sweep', '');
 L.push(`> Generated by \`scripts/audit-backlog-health.mjs\` (read-only). ${items.size} items (${open} open). The judgment layer (guiding-principle conformance) reads on top of these flags.`, '');
 L.push('## Summary', '', '| Check | What it catches | Hits |', '|---|---|---|');
-const desc = { G1: 'prose prereq not lifted into `blockedBy`', G2: 'resolved build cites a decision that was open/later', G3: 'graduated entity with no governing decision in lineage', D1: 'backticked code path that no longer exists', D2: 'referenced #N item that does not exist', D3: 'relatedProject missing or still `concept`' };
+const desc = { G1: 'prose prereq not lifted into `blockedBy`', G2: 'resolved build gated on a decision that was open/later (git-dated)', G3: 'graduated entity with no governing decision (transitive lineage + prose)', D1: 'backticked code path that no longer exists', D2: 'referenced #N item that does not exist', D3: 'relatedProject missing or still `concept`' };
 for (const k of Object.keys(flags)) L.push(`| **${k}** | ${desc[k]} | ${flags[k].length} |`);
 L.push('');
 const HI = flags.G1.filter(f => f.sev === 'HIGH');
@@ -157,8 +221,8 @@ function section(k, head, fmt) {
   L.push('');
 }
 section('G1', 'Edge-gaps (prose prereq not in blockedBy)', f => `**#${f.id}** → #${f.ref} ${f.decision ? `(decision${f.refOpen ? ', **OPEN**' : ''})` : ''} \`${f.sev}\` — ${f.title}`);
-section('G2', 'Built ahead of its ruling', f => `**#${f.id}** cites decision #${f.ref} — ${f.why} — ${f.title}`);
-section('G3', 'Graduated with no governing decision', f => `**#${f.id}** → \`${f.graduatedTo}\` — ${f.title}`);
+section('G2', 'Built ahead of its ruling (gated on a later-ruled decision, git-dated)', f => `**#${f.id}** gated on decision #${f.ref} — ${f.why} — ${f.title}`);
+section('G3', 'Graduated with no governing decision (transitive lineage + prose checked)', f => `**#${f.id}** → \`${f.graduatedTo}\` — ${f.title}`);
 section('D1', 'Dead file references', f => `**#${f.id}** \`${f.ref}\` — ${f.title}`);
 section('D2', 'Dangling item references', f => `**#${f.id}** → #${f.ref} (no such item) — ${f.title}`);
 section('D3', 'Stale project references', f => `**#${f.id}** \`${f.project}\` — ${f.why} — ${f.title}`);
