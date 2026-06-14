@@ -20,11 +20,12 @@ crossRef: { url: /backlog/091-web-docs-as-a-service-plateau/, label: "Web Docs r
 > Pricing a *hosted/metered* Web Docs offering presupposes we run a deployed SaaS — which cuts
 > against the current solo-founder commercial strategy of shipping **non-deployed** solutions first
 > ([[project_monetization_strategy]]: self-run tool > single service > enterprise-custom; **defer
-> live-serve**). The eventual home for a metered hosted Web Docs is **inside a larger Plateau SaaS
-> app** — where several Plateau products (custom browser, etc.) are offered alongside it — not a
-> standalone Web Docs subscription. Deciding the metered unit / threshold now would price a product
-> we've intentionally deferred building, against zero usage data. **Unpark when** the Plateau hosted
-> SaaS is actually on the roadmap (i.e. the defer-live-serve guard is lifted) — the prior-art survey
+> live-serve**). The eventual home for a metered hosted Web Docs is **inside the larger Plateau SaaS
+> product-suite shell ([#554](/backlog/554-plateau-hosted-saas-product-suite-shell-multi-product-accoun/))**
+> — where several Plateau products (custom browser, etc.) are offered alongside it — not a standalone
+> Web Docs subscription. Deciding the metered unit / threshold now would price a product
+> we've intentionally deferred building, against zero usage data. **Unpark when** #554 is actually on
+> the roadmap (i.e. the defer-live-serve guard is lifted) — the prior-art survey
 > + fork framing below stay valid and ready to ratify at that point. No prep is wasted; only the
 > *timing* changed. The free-tier/self-host floor invariant ([#091](/backlog/091-web-docs-as-a-service-plateau/))
 > is unaffected — self-host stays the always-available, non-deployed path.
