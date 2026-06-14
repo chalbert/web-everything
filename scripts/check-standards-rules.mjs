@@ -18,7 +18,7 @@
 // `preparing` (#375) — a decision being researched by /prepare: non-open + in-flight (drops from
 // selection like `active`) but distinct on the board from a story mid-build.
 export const BACKLOG_STATUSES = new Set(['open', 'active', 'preparing', 'parked', 'resolved']);
-export const BACKLOG_TYPES = new Set(['idea', 'issue', 'review', 'decision']);
+export const BACKLOG_TYPES = new Set(['idea', 'issue', 'decision']);
 // Repo-LOCUS (backlog-workflow.md → "Repo-locus") — the declarative per-locus gate registry (#498/#500).
 // An item's `locus` is its **gate home**: which repo's gate can honestly CLOSE it. A cross-locus `/batch`
 // is locus-agnostic — it packs items of any locus and gates **each in its own locus** using this record:
@@ -150,9 +150,9 @@ export function validateBacklogItem(item, ctx) {
   if (item.crossRef && (!item.crossRef.url || !item.crossRef.label))
     err(`Backlog item "${item.id}" crossRef must have both "url" and "label"`);
   // graduatedTo records the entity a resolved item became. It doesn't apply to outcomes that aren't a
-  // new entity: an `issue`/`review` (a fix/audit) or a `decision` (a ruling). A resolved `idea` that
+  // new entity: an `issue` (a fix/audit) or a `decision` (a ruling). A resolved `idea` that
   // produced no entity sets the sentinel `graduatedTo: none`; any present value silences this nudge.
-  if (item.status === 'resolved' && !item.graduatedTo && !['issue', 'review', 'decision'].includes(item.type))
+  if (item.status === 'resolved' && !item.graduatedTo && !['issue', 'decision'].includes(item.type))
     warn(`Backlog item "${item.id}" is resolved but has no graduatedTo — record what it became`);
   // #247 — resolve the value, not just its presence. A compact `kind:slug` ref must have a known kind
   // and a resolving slug; the `none` sentinel and every free-form value don't match GRADUATED_REF and

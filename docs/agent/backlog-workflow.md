@@ -420,7 +420,7 @@ Rule 3 is the one a tired batch abuses: it *feels* done long before the budget, 
 |---|---|
 | `taken` | `node scripts/backlog.mjs claim <NNN>` **refused** it because it is already `status: active` — another session owns it. The tool decided on the *status*, not you. (It does **not** look at git/commit state.) |
 | `blocked-in-fact` | A dependency or artifact the item *needs* is **verified absent** — you checked and it isn't there (a function/file/served URL the body names doesn't exist), not "I assume it's blocked." Often means a `blockedBy` edge is missing → add it (*Keep the blocker DAG honest*). Also covers a cross-locus item whose **repo isn't checked out** in this session, so its `LOCI` gate literally cannot run. |
-| `not-batchable` | It's a `decision`/`review`, a `story·≥13`, or an `epic` — excluded by the eligibility gate by definition (→ the *Other Tier-A* / Tier-B lists, never the pack). |
+| `not-batchable` | It's a `decision`, a `story·≥13`, or an `epic` — excluded by the eligibility gate by definition (→ the *Other Tier-A* / Tier-B lists, never the pack). |
 | `outgrew` | You **claimed and began** it and hit stop-rule-4 sprawl. (Pre-claim, this reason is not available.) |
 
 *(There is no `out-of-locus` drop-reason since #500: a batch is locus-agnostic and gates each item in its own locus — see *Repo-locus*. A cross-repo item is claimed and closed like any other, not skipped.)*

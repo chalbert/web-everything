@@ -2,6 +2,35 @@
 
 > Tier-1 reference. Read when writing or changing tests.
 
+## Proof-based verification — observe before you claim
+
+The first rule of verifying anything here is **observe the real running system; don't reason about
+what it probably does.** A diagnosis is a *finding* backed by output, not a plausible hunch. This
+applies to every "does it work / why is it broken" moment, not just to written test files.
+
+**The discipline:**
+- **Reproduce against the live system first.** Probe what the user actually sees: `curl` the served
+  HTML, drive a real browser (Playwright — `node` a throwaway script *from the repo root* so
+  `playwright` resolves), run the gate, `grep` the real output. Let the result name the cause.
+- **The render layer is not the server output.** A page can be in the DOM yet invisible because of
+  client-side JS (a filter adding `is-filtered-out`, `display:none`) or persisted `localStorage`
+  state. `curl` proves what the server *sent*; only a real browser proves what the user *sees*. If
+  the claim is about visibility/interaction, the browser is the only valid probe.
+- **"Cache / stale tab / hard-reload / it's just uncommitted" are hypotheses, never diagnoses.**
+  They are the convenient explanations that *feel* right without a test. Rule each in or out by
+  observation before you offer it. (Eleventy renders from disk regardless of git state — uncommitted
+  is almost never why something is "missing"; the real cause is usually a render/wiring bug. The
+  `/backlog/` type-filter once hid every `type: review` item this exact way — a one-`curl` find that
+  three untested guesses missed.)
+- **A probe can lie too.** If you guessed a selector, storage key, port, or fixture, the run may be
+  inconclusive (it tested the wrong thing and "passed"). Say so — an inconclusive run is not proof,
+  and presenting it as one repeats the original sin one level down.
+- **When you fix a class of bug, add a gate guard and prove the guard fires** — reintroduce the bug,
+  watch it error, restore. An untested guard is itself an untested claim. (Worked example: the
+  type-filter-coverage guard in `scripts/check-standards.mjs` §10.) Note `check:standards` does **not**
+  run the 11ty build, so render-layer bugs stay green-invisible — smoke template changes with a real
+  build/probe too.
+
 ## Pyramid
 
 | Tier | Pattern | Runner | Env | Purpose |

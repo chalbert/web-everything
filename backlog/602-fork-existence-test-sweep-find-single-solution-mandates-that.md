@@ -1,5 +1,5 @@
 ---
-type: review
+type: issue
 workItem: story
 size: 5
 status: open
