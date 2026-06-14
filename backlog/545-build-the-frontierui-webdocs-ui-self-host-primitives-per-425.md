@@ -7,7 +7,7 @@ blockedBy: ["544"]
 dateOpened: "2026-06-14"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
-graduatedTo: @frontierui/webdocs-ui
+graduatedTo: "@frontierui/webdocs-ui"
 tags: []
 ---
 
