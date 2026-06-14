@@ -3001,6 +3001,462 @@
       "provenance": "verified",
       "sourceName": "Accessibility (WAI-ARIA, WCAG)",
       "url": "https://polaris-react.shopify.com/foundations/accessibility"
+    },
+    {
+      "capabilityId": "button",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button",
+      "url": "https://atlassian.design/components/button"
+    },
+    {
+      "capabilityId": "icon-button",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Icon button",
+      "url": "https://atlassian.design/components/button"
+    },
+    {
+      "capabilityId": "link",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Link",
+      "url": "https://atlassian.design/components/link"
+    },
+    {
+      "capabilityId": "text-field",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Text field",
+      "url": "https://atlassian.design/components/textfield"
+    },
+    {
+      "capabilityId": "textarea",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Text area",
+      "url": "https://atlassian.design/components/textarea"
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Select",
+      "url": "https://atlassian.design/components/select"
+    },
+    {
+      "capabilityId": "combobox",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Select (autocomplete)",
+      "url": "https://atlassian.design/components/select"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://atlassian.design/components/checkbox"
+    },
+    {
+      "capabilityId": "radio-group",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio",
+      "url": "https://atlassian.design/components/radio"
+    },
+    {
+      "capabilityId": "switch",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toggle",
+      "url": "https://atlassian.design/components/toggle"
+    },
+    {
+      "capabilityId": "range-slider",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Range",
+      "url": "https://atlassian.design/components/range"
+    },
+    {
+      "capabilityId": "slider",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Range",
+      "url": "https://atlassian.design/components/range"
+    },
+    {
+      "capabilityId": "date-picker",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Date picker",
+      "url": "https://atlassian.design/components/datetime-picker"
+    },
+    {
+      "capabilityId": "time-picker",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Time picker",
+      "url": "https://atlassian.design/components/datetime-picker"
+    },
+    {
+      "capabilityId": "date-range-picker",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Date time picker",
+      "url": "https://atlassian.design/components/datetime-picker"
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Form",
+      "url": "https://atlassian.design/components/form"
+    },
+    {
+      "capabilityId": "inline-alert",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Inline message",
+      "url": "https://atlassian.design/components/inline-message"
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tabs",
+      "url": "https://atlassian.design/components/tabs"
+    },
+    {
+      "capabilityId": "menu",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dropdown menu",
+      "url": "https://atlassian.design/components/dropdown-menu"
+    },
+    {
+      "capabilityId": "tree-view",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Table tree",
+      "url": "https://atlassian.design/components/table-tree"
+    },
+    {
+      "capabilityId": "stepper",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress tracker",
+      "url": "https://atlassian.design/components/progress-tracker"
+    },
+    {
+      "capabilityId": "breadcrumb",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Breadcrumbs",
+      "url": "https://atlassian.design/components/breadcrumbs"
+    },
+    {
+      "capabilityId": "pagination",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Pagination",
+      "url": "https://atlassian.design/components/pagination"
+    },
+    {
+      "capabilityId": "navbar",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Navigation system",
+      "url": "https://atlassian.design/components/navigation-system"
+    },
+    {
+      "capabilityId": "sidebar-nav",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Navigation system",
+      "url": "https://atlassian.design/components/navigation-system"
+    },
+    {
+      "capabilityId": "dialog",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Modal dialog",
+      "url": "https://atlassian.design/components/modal-dialog"
+    },
+    {
+      "capabilityId": "drawer",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Drawer",
+      "url": "https://atlassian.design/components/drawer"
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popup",
+      "url": "https://atlassian.design/components/popup"
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tooltip",
+      "url": "https://atlassian.design/components/tooltip"
+    },
+    {
+      "capabilityId": "toast",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Flag",
+      "url": "https://atlassian.design/components/flag"
+    },
+    {
+      "capabilityId": "data-table",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dynamic table",
+      "url": "https://atlassian.design/components/dynamic-table"
+    },
+    {
+      "capabilityId": "avatar",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Avatar",
+      "url": "https://atlassian.design/components/avatar"
+    },
+    {
+      "capabilityId": "badge",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Badge",
+      "url": "https://atlassian.design/components/badge"
+    },
+    {
+      "capabilityId": "tag-chip",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tag / Lozenge",
+      "url": "https://atlassian.design/components/tag"
+    },
+    {
+      "capabilityId": "code-block",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Code",
+      "url": "https://atlassian.design/components/code"
+    },
+    {
+      "capabilityId": "progress-linear",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress bar",
+      "url": "https://atlassian.design/components/progress-bar"
+    },
+    {
+      "capabilityId": "spinner",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spinner",
+      "url": "https://atlassian.design/components/spinner"
+    },
+    {
+      "capabilityId": "skeleton",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Skeleton",
+      "url": "https://atlassian.design/components/skeleton"
+    },
+    {
+      "capabilityId": "empty-state",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Empty state",
+      "url": "https://atlassian.design/components/empty-state"
+    },
+    {
+      "capabilityId": "stack-layout",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Stack / Flex",
+      "url": "https://atlassian.design/components/primitives"
+    },
+    {
+      "capabilityId": "grid-layout",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Grid",
+      "url": "https://atlassian.design/components/primitives"
+    },
+    {
+      "capabilityId": "focus-visible-policy",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Focus ring",
+      "url": "https://atlassian.design/components/focus-ring"
+    },
+    {
+      "capabilityId": "tags-input",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tag group",
+      "url": "https://atlassian.design/components/tag-group"
+    },
+    {
+      "capabilityId": "drag-and-drop",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Pragmatic drag and drop",
+      "url": "https://atlassian.design/components/pragmatic-drag-and-drop"
+    },
+    {
+      "capabilityId": "color-tokens",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color",
+      "url": "https://atlassian.design/foundations/color"
+    },
+    {
+      "capabilityId": "typography-scale",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Typography",
+      "url": "https://atlassian.design/foundations/typography"
+    },
+    {
+      "capabilityId": "spacing-scale",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spacing",
+      "url": "https://atlassian.design/foundations/spacing"
+    },
+    {
+      "capabilityId": "elevation",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Elevation",
+      "url": "https://atlassian.design/foundations/elevation"
+    },
+    {
+      "capabilityId": "radius",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radius",
+      "url": "https://atlassian.design/foundations/radius"
+    },
+    {
+      "capabilityId": "motion-tokens",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Motion",
+      "url": "https://atlassian.design/foundations/motion"
+    },
+    {
+      "capabilityId": "dark-mode",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Light & dark themes",
+      "url": "https://atlassian.design/foundations/color"
+    },
+    {
+      "capabilityId": "reduced-motion",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Motion (reduced motion)",
+      "url": "https://atlassian.design/foundations/motion"
+    },
+    {
+      "capabilityId": "color-contrast",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accessibility (contrast)",
+      "url": "https://atlassian.design/foundations/accessibility"
+    },
+    {
+      "capabilityId": "keyboard-interaction",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accessibility (keyboard)",
+      "url": "https://atlassian.design/foundations/accessibility"
+    },
+    {
+      "capabilityId": "aria-apg-adherence",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accessibility (ARIA)",
+      "url": "https://atlassian.design/foundations/accessibility"
+    },
+    {
+      "capabilityId": "touch-target",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accessibility (target size)",
+      "url": "https://atlassian.design/foundations/accessibility"
+    },
+    {
+      "capabilityId": "responsive-adaptive",
+      "sourceId": "atlassian",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Responsive (primitive)",
+      "url": "https://atlassian.design/components/primitives"
     }
   ]
 }
