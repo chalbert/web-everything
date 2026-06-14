@@ -870,9 +870,9 @@
       "capabilityId": "select",
       "sourceId": "base-ui",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Select",
+      "url": "https://base-ui.com/react/components/select"
     },
     {
       "capabilityId": "select",
@@ -4857,6 +4857,310 @@
       "provenance": "verified",
       "sourceName": "Focus rings (Quality)",
       "url": "https://react-aria.adobe.com/quality"
+    },
+    {
+      "capabilityId": "button",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button",
+      "url": "https://base-ui.com/react/components/button"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://base-ui.com/react/components/checkbox"
+    },
+    {
+      "capabilityId": "radio-group",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio",
+      "url": "https://base-ui.com/react/components/radio"
+    },
+    {
+      "capabilityId": "switch",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Switch",
+      "url": "https://base-ui.com/react/components/switch"
+    },
+    {
+      "capabilityId": "slider",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider",
+      "url": "https://base-ui.com/react/components/slider"
+    },
+    {
+      "capabilityId": "range-slider",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider (range)",
+      "url": "https://base-ui.com/react/components/slider"
+    },
+    {
+      "capabilityId": "combobox",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox",
+      "url": "https://base-ui.com/react/components/combobox"
+    },
+    {
+      "capabilityId": "number-input",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Number Field",
+      "url": "https://base-ui.com/react/components/number-field"
+    },
+    {
+      "capabilityId": "text-field",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Input",
+      "url": "https://base-ui.com/react/components/input"
+    },
+    {
+      "capabilityId": "pin-input",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "OTP Field",
+      "url": "https://base-ui.com/react/components/otp-field"
+    },
+    {
+      "capabilityId": "avatar",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Avatar",
+      "url": "https://base-ui.com/react/components/avatar"
+    },
+    {
+      "capabilityId": "accordion",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accordion",
+      "url": "https://base-ui.com/react/components/accordion"
+    },
+    {
+      "capabilityId": "disclosure",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Collapsible",
+      "url": "https://base-ui.com/react/components/collapsible"
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tabs",
+      "url": "https://base-ui.com/react/components/tabs"
+    },
+    {
+      "capabilityId": "menu",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menu",
+      "url": "https://base-ui.com/react/components/menu"
+    },
+    {
+      "capabilityId": "context-menu",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Context Menu",
+      "url": "https://base-ui.com/react/components/context-menu"
+    },
+    {
+      "capabilityId": "navbar",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Navigation Menu",
+      "url": "https://base-ui.com/react/components/navigation-menu"
+    },
+    {
+      "capabilityId": "dialog",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog",
+      "url": "https://base-ui.com/react/components/dialog"
+    },
+    {
+      "capabilityId": "alert-dialog",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Alert Dialog",
+      "url": "https://base-ui.com/react/components/alert-dialog"
+    },
+    {
+      "capabilityId": "drawer",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Drawer",
+      "url": "https://base-ui.com/react/components/drawer"
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popover",
+      "url": "https://base-ui.com/react/components/popover"
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tooltip",
+      "url": "https://base-ui.com/react/components/tooltip"
+    },
+    {
+      "capabilityId": "toast",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toast",
+      "url": "https://base-ui.com/react/components/toast"
+    },
+    {
+      "capabilityId": "progress-linear",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress",
+      "url": "https://base-ui.com/react/components/progress"
+    },
+    {
+      "capabilityId": "scroll-area",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Scroll Area",
+      "url": "https://base-ui.com/react/components/scroll-area"
+    },
+    {
+      "capabilityId": "divider",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Separator",
+      "url": "https://base-ui.com/react/components/separator"
+    },
+    {
+      "capabilityId": "segmented-control",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toggle Group",
+      "url": "https://base-ui.com/react/components/toggle-group"
+    },
+    {
+      "capabilityId": "button-group",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toggle Group",
+      "url": "https://base-ui.com/react/components/toggle-group"
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Field",
+      "url": "https://base-ui.com/react/components/field"
+    },
+    {
+      "capabilityId": "form-validation-flow",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Field",
+      "url": "https://base-ui.com/react/components/field"
+    },
+    {
+      "capabilityId": "controlled-uncontrolled",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Controlled & uncontrolled",
+      "url": "https://base-ui.com/react/components/slider"
+    },
+    {
+      "capabilityId": "anchored-positioning",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Positioner",
+      "url": "https://base-ui.com/react/components/popover"
+    },
+    {
+      "capabilityId": "focus-trap",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Focus management",
+      "url": "https://base-ui.com/react/overview/accessibility"
+    },
+    {
+      "capabilityId": "focus-return",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Focus management",
+      "url": "https://base-ui.com/react/overview/accessibility"
+    },
+    {
+      "capabilityId": "aria-apg-adherence",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "WAI-ARIA Authoring Practices",
+      "url": "https://base-ui.com/react/overview/accessibility"
+    },
+    {
+      "capabilityId": "keyboard-interaction",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Keyboard accessibility",
+      "url": "https://base-ui.com/react/overview/accessibility"
+    },
+    {
+      "capabilityId": "live-region",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toast announcements",
+      "url": "https://base-ui.com/react/components/toast"
+    },
+    {
+      "capabilityId": "i18n-rtl",
+      "sourceId": "base-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Direction Provider",
+      "url": "https://base-ui.com/react/utils/direction-provider"
     }
   ]
 }
