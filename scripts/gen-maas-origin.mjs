@@ -20,8 +20,10 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const SRC = join(ROOT, 'blocks/renderers/module-service/generation/index.ts');
-const GOLDEN_DIR = join(ROOT, 'blocks/renderers/module-service/generation/__goldens__');
+const GEN = 'blocks/renderers/module-service/generation';
+const SRC = join(ROOT, `${GEN}/index.ts`);
+const GOLDEN_DIR = join(ROOT, `${GEN}/__goldens__`);
+const CORPUS_SNAPSHOT = join(ROOT, `${GEN}/corpus/__snapshots__/corpus.snapshot.json`);
 
 /** Bundle the generation module (TS + its IR import) to a temp ESM and import it. */
 async function loadGeneration() {
@@ -42,9 +44,17 @@ async function loadGeneration() {
 }
 
 /** All backends whose origin is committed as a golden. */
+const BACKENDS = (gen) => [gen.javascriptBackend, gen.csharpBackend];
+
 export async function generateAllOrigins() {
   const gen = await loadGeneration();
-  return [gen.javascriptBackend, gen.csharpBackend].map((b) => gen.generateOrigin(b));
+  return BACKENDS(gen).map((b) => gen.generateOrigin(b));
+}
+
+/** The regression-corpus snapshot (#551): every backend over every corpus fixture, flattened + serialized. */
+export async function generateCorpusSnapshot() {
+  const gen = await loadGeneration();
+  return gen.serializeSnapshot(gen.runCorpus(BACKENDS(gen)));
 }
 
 // Run as a script: write each backend's core + shell golden. Imported (by the test): expose the helper.
@@ -66,5 +76,16 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       writeFileSync(out, mod.source);
     }
   }
-  console.log(changed === 0 ? '✓ MaaS origin goldens up to date' : `✓ wrote ${changed} MaaS origin golden file(s)`);
+  // The #551 regression-corpus snapshot: all backends × all fixtures, locked for drift review.
+  const snapshot = await generateCorpusSnapshot();
+  mkdirSync(dirname(CORPUS_SNAPSHOT), { recursive: true });
+  let prevSnap = '';
+  try {
+    prevSnap = readFileSync(CORPUS_SNAPSHOT, 'utf8');
+  } catch {
+    /* first run */
+  }
+  if (prevSnap !== snapshot) changed++;
+  writeFileSync(CORPUS_SNAPSHOT, snapshot);
+  console.log(changed === 0 ? '✓ MaaS origin goldens + corpus up to date' : `✓ wrote ${changed} MaaS generation artifact(s)`);
 }

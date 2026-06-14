@@ -7,3 +7,5 @@ export { generateOrigin, generateOrigins, NonDeterministicBackendError } from '.
 export type { GeneratedModule, GeneratedOrigin, LanguageBackend } from './languageBackend';
 export { javascriptBackend } from './backends/javascript';
 export { csharpBackend } from './backends/csharp';
+export { CORPUS, type CorpusFixture } from './corpus/fixtures';
+export { runCorpus, serializeSnapshot, type CorpusSnapshot } from './corpus/snapshot';
