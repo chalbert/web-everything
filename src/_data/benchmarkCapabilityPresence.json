@@ -1174,9 +1174,9 @@
       "capabilityId": "virtualization",
       "sourceId": "mui",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Data Grid Virtualization",
+      "url": "https://mui.com/x/react-data-grid/virtualization/"
     },
     {
       "capabilityId": "icon-button",
@@ -6777,6 +6777,598 @@
       "provenance": "verified",
       "sourceName": "Localize system",
       "url": "https://lion-web.netlify.app/fundamentals/systems/localize/overview/"
+    },
+    {
+      "capabilityId": "button",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button",
+      "url": "https://mui.com/material-ui/react-button/"
+    },
+    {
+      "capabilityId": "icon-button",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Icon Button",
+      "url": "https://mui.com/material-ui/react-button/"
+    },
+    {
+      "capabilityId": "button-group",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button Group",
+      "url": "https://mui.com/material-ui/react-button-group/"
+    },
+    {
+      "capabilityId": "split-button",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Split Button",
+      "url": "https://mui.com/material-ui/react-button-group/"
+    },
+    {
+      "capabilityId": "fab",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Floating Action Button",
+      "url": "https://mui.com/material-ui/react-floating-action-button/"
+    },
+    {
+      "capabilityId": "link",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Link",
+      "url": "https://mui.com/material-ui/react-link/"
+    },
+    {
+      "capabilityId": "text-field",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Text Field",
+      "url": "https://mui.com/material-ui/react-text-field/"
+    },
+    {
+      "capabilityId": "textarea",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Textarea Autosize",
+      "url": "https://mui.com/material-ui/react-textarea-autosize/"
+    },
+    {
+      "capabilityId": "number-input",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Number Field",
+      "url": "https://mui.com/material-ui/react-number-field/"
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Select",
+      "url": "https://mui.com/material-ui/react-select/"
+    },
+    {
+      "capabilityId": "multi-select",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Autocomplete (multiple)",
+      "url": "https://mui.com/material-ui/react-autocomplete/"
+    },
+    {
+      "capabilityId": "combobox",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Autocomplete",
+      "url": "https://mui.com/material-ui/react-autocomplete/"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://mui.com/material-ui/react-checkbox/"
+    },
+    {
+      "capabilityId": "radio-group",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio Group",
+      "url": "https://mui.com/material-ui/react-radio-button/"
+    },
+    {
+      "capabilityId": "switch",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Switch",
+      "url": "https://mui.com/material-ui/react-switch/"
+    },
+    {
+      "capabilityId": "slider",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider",
+      "url": "https://mui.com/material-ui/react-slider/"
+    },
+    {
+      "capabilityId": "range-slider",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider (range)",
+      "url": "https://mui.com/material-ui/react-slider/"
+    },
+    {
+      "capabilityId": "date-picker",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Date Picker",
+      "url": "https://mui.com/x/react-date-pickers/date-picker/"
+    },
+    {
+      "capabilityId": "date-range-picker",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Date Range Picker",
+      "url": "https://mui.com/x/react-date-pickers/date-range-picker/"
+    },
+    {
+      "capabilityId": "time-picker",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Time Picker",
+      "url": "https://mui.com/x/react-date-pickers/time-picker/"
+    },
+    {
+      "capabilityId": "rating",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Rating",
+      "url": "https://mui.com/material-ui/react-rating/"
+    },
+    {
+      "capabilityId": "tags-input",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Autocomplete (tags)",
+      "url": "https://mui.com/material-ui/react-autocomplete/"
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Text Field",
+      "url": "https://mui.com/material-ui/react-text-field/"
+    },
+    {
+      "capabilityId": "accordion",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accordion",
+      "url": "https://mui.com/material-ui/react-accordion/"
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tabs",
+      "url": "https://mui.com/material-ui/react-tabs/"
+    },
+    {
+      "capabilityId": "menu",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menu",
+      "url": "https://mui.com/material-ui/react-menu/"
+    },
+    {
+      "capabilityId": "context-menu",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menu (context)",
+      "url": "https://mui.com/material-ui/react-menu/"
+    },
+    {
+      "capabilityId": "tree-view",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tree View",
+      "url": "https://mui.com/x/react-tree-view/"
+    },
+    {
+      "capabilityId": "segmented-control",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toggle Button",
+      "url": "https://mui.com/material-ui/react-toggle-button/"
+    },
+    {
+      "capabilityId": "breadcrumb",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Breadcrumbs",
+      "url": "https://mui.com/material-ui/react-breadcrumbs/"
+    },
+    {
+      "capabilityId": "pagination",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Pagination",
+      "url": "https://mui.com/material-ui/react-pagination/"
+    },
+    {
+      "capabilityId": "stepper",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Stepper",
+      "url": "https://mui.com/material-ui/react-stepper/"
+    },
+    {
+      "capabilityId": "navbar",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "App Bar",
+      "url": "https://mui.com/material-ui/react-app-bar/"
+    },
+    {
+      "capabilityId": "sidebar-nav",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Drawer",
+      "url": "https://mui.com/material-ui/react-drawer/"
+    },
+    {
+      "capabilityId": "dialog",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog",
+      "url": "https://mui.com/material-ui/react-dialog/"
+    },
+    {
+      "capabilityId": "alert-dialog",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog (alertdialog)",
+      "url": "https://mui.com/material-ui/react-dialog/"
+    },
+    {
+      "capabilityId": "drawer",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Drawer",
+      "url": "https://mui.com/material-ui/react-drawer/"
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popover",
+      "url": "https://mui.com/material-ui/react-popover/"
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tooltip",
+      "url": "https://mui.com/material-ui/react-tooltip/"
+    },
+    {
+      "capabilityId": "toast",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Snackbar",
+      "url": "https://mui.com/material-ui/react-snackbar/"
+    },
+    {
+      "capabilityId": "inline-alert",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Alert",
+      "url": "https://mui.com/material-ui/react-alert/"
+    },
+    {
+      "capabilityId": "data-table",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Data Grid",
+      "url": "https://mui.com/x/react-data-grid/"
+    },
+    {
+      "capabilityId": "list",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "List",
+      "url": "https://mui.com/material-ui/react-list/"
+    },
+    {
+      "capabilityId": "card",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Card",
+      "url": "https://mui.com/material-ui/react-card/"
+    },
+    {
+      "capabilityId": "avatar",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Avatar",
+      "url": "https://mui.com/material-ui/react-avatar/"
+    },
+    {
+      "capabilityId": "badge",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Badge",
+      "url": "https://mui.com/material-ui/react-badge/"
+    },
+    {
+      "capabilityId": "tag-chip",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Chip",
+      "url": "https://mui.com/material-ui/react-chip/"
+    },
+    {
+      "capabilityId": "timeline",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Timeline",
+      "url": "https://mui.com/material-ui/react-timeline/"
+    },
+    {
+      "capabilityId": "progress-linear",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Linear Progress",
+      "url": "https://mui.com/material-ui/react-progress/"
+    },
+    {
+      "capabilityId": "spinner",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Circular Progress",
+      "url": "https://mui.com/material-ui/react-progress/"
+    },
+    {
+      "capabilityId": "skeleton",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Skeleton",
+      "url": "https://mui.com/material-ui/react-skeleton/"
+    },
+    {
+      "capabilityId": "stack-layout",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Stack",
+      "url": "https://mui.com/material-ui/react-stack/"
+    },
+    {
+      "capabilityId": "grid-layout",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Grid",
+      "url": "https://mui.com/material-ui/react-grid/"
+    },
+    {
+      "capabilityId": "divider",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Divider",
+      "url": "https://mui.com/material-ui/react-divider/"
+    },
+    {
+      "capabilityId": "anchored-positioning",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popper",
+      "url": "https://mui.com/material-ui/react-popper/"
+    },
+    {
+      "capabilityId": "focus-trap",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Modal (focus trap)",
+      "url": "https://mui.com/material-ui/react-modal/"
+    },
+    {
+      "capabilityId": "focus-return",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Modal (focus management)",
+      "url": "https://mui.com/material-ui/react-modal/"
+    },
+    {
+      "capabilityId": "dismissal",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Click-Away Listener",
+      "url": "https://mui.com/material-ui/react-click-away-listener/"
+    },
+    {
+      "capabilityId": "async-pagination",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Data Grid Pagination",
+      "url": "https://mui.com/x/react-data-grid/pagination/"
+    },
+    {
+      "capabilityId": "controlled-uncontrolled",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Autocomplete (controlled)",
+      "url": "https://mui.com/material-ui/react-autocomplete/"
+    },
+    {
+      "capabilityId": "live-region",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Snackbar (role=alert)",
+      "url": "https://mui.com/material-ui/react-snackbar/"
+    },
+    {
+      "capabilityId": "responsive-adaptive",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Breakpoints",
+      "url": "https://mui.com/material-ui/customization/breakpoints/"
+    },
+    {
+      "capabilityId": "color-tokens",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Palette",
+      "url": "https://mui.com/material-ui/customization/palette/"
+    },
+    {
+      "capabilityId": "typography-scale",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Typography",
+      "url": "https://mui.com/material-ui/customization/typography/"
+    },
+    {
+      "capabilityId": "spacing-scale",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spacing",
+      "url": "https://mui.com/material-ui/customization/spacing/"
+    },
+    {
+      "capabilityId": "elevation",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Paper elevation",
+      "url": "https://mui.com/material-ui/react-paper/"
+    },
+    {
+      "capabilityId": "radius",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Shape",
+      "url": "https://mui.com/material-ui/customization/shape/"
+    },
+    {
+      "capabilityId": "motion-tokens",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Transitions",
+      "url": "https://mui.com/material-ui/customization/transitions/"
+    },
+    {
+      "capabilityId": "dark-mode",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dark mode",
+      "url": "https://mui.com/material-ui/customization/dark-mode/"
+    },
+    {
+      "capabilityId": "density",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Density",
+      "url": "https://mui.com/material-ui/customization/density/"
+    },
+    {
+      "capabilityId": "aria-apg-adherence",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Data Grid Accessibility",
+      "url": "https://mui.com/x/react-data-grid/accessibility/"
+    },
+    {
+      "capabilityId": "keyboard-interaction",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Data Grid Accessibility (keyboard)",
+      "url": "https://mui.com/x/react-data-grid/accessibility/"
+    },
+    {
+      "capabilityId": "reduced-motion",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Transitions (reducedMotion)",
+      "url": "https://mui.com/material-ui/customization/transitions/"
+    },
+    {
+      "capabilityId": "i18n-rtl",
+      "sourceId": "mui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Right-to-left",
+      "url": "https://mui.com/material-ui/customization/right-to-left/"
     }
   ]
 }
