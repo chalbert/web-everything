@@ -446,9 +446,9 @@
       "capabilityId": "file-upload",
       "sourceId": "ark-ui",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "File Upload",
+      "url": "https://ark-ui.com/react/docs/components/file-upload"
     },
     {
       "capabilityId": "file-upload",
@@ -702,9 +702,9 @@
       "capabilityId": "number-input",
       "sourceId": "ark-ui",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Number Input",
+      "url": "https://ark-ui.com/react/docs/components/number-input"
     },
     {
       "capabilityId": "number-input",
@@ -734,9 +734,9 @@
       "capabilityId": "pin-input",
       "sourceId": "ark-ui",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Pin Input",
+      "url": "https://ark-ui.com/react/docs/components/pin-input"
     },
     {
       "capabilityId": "pin-input",
@@ -1022,9 +1022,9 @@
       "capabilityId": "tags-input",
       "sourceId": "ark-ui",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Tags Input",
+      "url": "https://ark-ui.com/react/docs/components/tags-input"
     },
     {
       "capabilityId": "tags-input",
@@ -5161,6 +5161,366 @@
       "provenance": "verified",
       "sourceName": "Direction Provider",
       "url": "https://base-ui.com/react/utils/direction-provider"
+    },
+    {
+      "capabilityId": "button-group",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toggle Group",
+      "url": "https://ark-ui.com/react/docs/components/toggle-group"
+    },
+    {
+      "capabilityId": "segmented-control",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Segment Group",
+      "url": "https://ark-ui.com/react/docs/components/segment-group"
+    },
+    {
+      "capabilityId": "textarea",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Editable",
+      "url": "https://ark-ui.com/react/docs/components/editable"
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Select",
+      "url": "https://ark-ui.com/react/docs/components/select"
+    },
+    {
+      "capabilityId": "multi-select",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox (multiple)",
+      "url": "https://ark-ui.com/react/docs/components/combobox"
+    },
+    {
+      "capabilityId": "combobox",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox",
+      "url": "https://ark-ui.com/react/docs/components/combobox"
+    },
+    {
+      "capabilityId": "type-ahead",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox inline autocomplete",
+      "url": "https://ark-ui.com/react/docs/components/combobox"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://ark-ui.com/react/docs/components/checkbox"
+    },
+    {
+      "capabilityId": "radio-group",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio Group",
+      "url": "https://ark-ui.com/react/docs/components/radio-group"
+    },
+    {
+      "capabilityId": "switch",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Switch",
+      "url": "https://ark-ui.com/react/docs/components/switch"
+    },
+    {
+      "capabilityId": "slider",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider",
+      "url": "https://ark-ui.com/react/docs/components/slider"
+    },
+    {
+      "capabilityId": "range-slider",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider (range)",
+      "url": "https://ark-ui.com/react/docs/components/slider"
+    },
+    {
+      "capabilityId": "date-picker",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Date Picker",
+      "url": "https://ark-ui.com/react/docs/components/date-picker"
+    },
+    {
+      "capabilityId": "date-range-picker",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Date Picker (range)",
+      "url": "https://ark-ui.com/react/docs/components/date-picker"
+    },
+    {
+      "capabilityId": "time-picker",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Date Picker (with time)",
+      "url": "https://ark-ui.com/react/docs/components/date-picker"
+    },
+    {
+      "capabilityId": "color-picker",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color Picker",
+      "url": "https://ark-ui.com/react/docs/components/color-picker"
+    },
+    {
+      "capabilityId": "rating",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Rating Group",
+      "url": "https://ark-ui.com/react/docs/components/rating-group"
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Field",
+      "url": "https://ark-ui.com/react/docs/components/field"
+    },
+    {
+      "capabilityId": "form-validation-flow",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Field",
+      "url": "https://ark-ui.com/react/docs/components/field"
+    },
+    {
+      "capabilityId": "accordion",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accordion",
+      "url": "https://ark-ui.com/react/docs/components/accordion"
+    },
+    {
+      "capabilityId": "disclosure",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Collapsible",
+      "url": "https://ark-ui.com/react/docs/components/collapsible"
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tabs",
+      "url": "https://ark-ui.com/react/docs/components/tabs"
+    },
+    {
+      "capabilityId": "menu",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menu",
+      "url": "https://ark-ui.com/react/docs/components/menu"
+    },
+    {
+      "capabilityId": "context-menu",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menu",
+      "url": "https://ark-ui.com/react/docs/components/menu"
+    },
+    {
+      "capabilityId": "listbox",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Listbox",
+      "url": "https://ark-ui.com/react/docs/components/listbox"
+    },
+    {
+      "capabilityId": "tree-view",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tree View",
+      "url": "https://ark-ui.com/react/docs/components/tree-view"
+    },
+    {
+      "capabilityId": "pagination",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Pagination",
+      "url": "https://ark-ui.com/react/docs/components/pagination"
+    },
+    {
+      "capabilityId": "stepper",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Steps",
+      "url": "https://ark-ui.com/react/docs/components/steps"
+    },
+    {
+      "capabilityId": "dialog",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog",
+      "url": "https://ark-ui.com/react/docs/components/dialog"
+    },
+    {
+      "capabilityId": "drawer",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Drawer",
+      "url": "https://ark-ui.com/react/docs/components/drawer"
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popover",
+      "url": "https://ark-ui.com/react/docs/components/popover"
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tooltip",
+      "url": "https://ark-ui.com/react/docs/components/tooltip"
+    },
+    {
+      "capabilityId": "toast",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toast",
+      "url": "https://ark-ui.com/react/docs/components/toast"
+    },
+    {
+      "capabilityId": "avatar",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Avatar",
+      "url": "https://ark-ui.com/react/docs/components/avatar"
+    },
+    {
+      "capabilityId": "carousel",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Carousel",
+      "url": "https://ark-ui.com/react/docs/components/carousel"
+    },
+    {
+      "capabilityId": "progress-linear",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress - Linear",
+      "url": "https://ark-ui.com/react/docs/components/progress-linear"
+    },
+    {
+      "capabilityId": "scroll-area",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Scroll Area",
+      "url": "https://ark-ui.com/react/docs/components/scroll-area"
+    },
+    {
+      "capabilityId": "resizable-splitter",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Splitter",
+      "url": "https://ark-ui.com/react/docs/components/splitter"
+    },
+    {
+      "capabilityId": "focus-trap",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog (trapFocus)",
+      "url": "https://ark-ui.com/react/docs/components/dialog"
+    },
+    {
+      "capabilityId": "focus-return",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog (restoreFocus)",
+      "url": "https://ark-ui.com/react/docs/components/dialog"
+    },
+    {
+      "capabilityId": "dismissal",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog (closeOnEscape)",
+      "url": "https://ark-ui.com/react/docs/components/dialog"
+    },
+    {
+      "capabilityId": "controlled-uncontrolled",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox (value/defaultValue)",
+      "url": "https://ark-ui.com/react/docs/components/combobox"
+    },
+    {
+      "capabilityId": "keyboard-interaction",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox keyboard support",
+      "url": "https://ark-ui.com/react/docs/components/combobox"
+    },
+    {
+      "capabilityId": "copy-to-clipboard",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Clipboard",
+      "url": "https://ark-ui.com/react/docs/components/clipboard"
+    },
+    {
+      "capabilityId": "i18n-rtl",
+      "sourceId": "ark-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Date Picker locale",
+      "url": "https://ark-ui.com/react/docs/components/date-picker"
     }
   ]
 }
