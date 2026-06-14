@@ -582,9 +582,9 @@
       "capabilityId": "keyboard-interaction",
       "sourceId": "fluent-2",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Keyboard navigation",
+      "url": "https://fluent2.microsoft.design/accessibility"
     },
     {
       "capabilityId": "keyboard-interaction",
@@ -694,9 +694,9 @@
       "capabilityId": "navbar",
       "sourceId": "fluent-2",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Nav",
+      "url": "https://fluent2.microsoft.design/components/web/react"
     },
     {
       "capabilityId": "number-input",
@@ -950,9 +950,9 @@
       "capabilityId": "split-button",
       "sourceId": "fluent-2",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Split button",
+      "url": "https://fluent2.microsoft.design/components/web/react/core/button/usage"
     },
     {
       "capabilityId": "stack-layout",
@@ -1126,9 +1126,9 @@
       "capabilityId": "tree-view",
       "sourceId": "fluent-2",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Tree",
+      "url": "https://fluent2.microsoft.design/components/web/react"
     },
     {
       "capabilityId": "tree-view",
@@ -1729,6 +1729,430 @@
       "provenance": "verified",
       "sourceName": "Accessibility overview",
       "url": "https://carbondesignsystem.com/guidelines/accessibility/overview/"
+    },
+    {
+      "capabilityId": "button",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button",
+      "url": "https://fluent2.microsoft.design/components/web/react/core/button/usage"
+    },
+    {
+      "capabilityId": "link",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Link",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "text-field",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Input",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "textarea",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Textarea",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "number-input",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spin button",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dropdown",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "combobox",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "radio-group",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio group",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "switch",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Switch",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "slider",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider",
+      "url": "https://fluent2.microsoft.design/components/web/react/core/slider/usage"
+    },
+    {
+      "capabilityId": "rating",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Rating",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "tags-input",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tag picker",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Field",
+      "url": "https://fluent2.microsoft.design/components/web/react/core/field/usage"
+    },
+    {
+      "capabilityId": "accordion",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accordion",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tablist",
+      "url": "https://fluent2.microsoft.design/components/web/react/core/tablist/usage"
+    },
+    {
+      "capabilityId": "menu",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menu",
+      "url": "https://fluent2.microsoft.design/components/web/react/core/menu/usage"
+    },
+    {
+      "capabilityId": "listbox",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dropdown",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "breadcrumb",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Breadcrumb",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "sidebar-nav",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Nav",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "dialog",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog",
+      "url": "https://fluent2.microsoft.design/components/web/react/core/dialog/usage"
+    },
+    {
+      "capabilityId": "alert-dialog",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Alert dialog",
+      "url": "https://fluent2.microsoft.design/components/web/react/core/dialog/usage"
+    },
+    {
+      "capabilityId": "drawer",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Drawer",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popover",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tooltip",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "toast",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toast",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "inline-alert",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Message bar",
+      "url": "https://fluent2.microsoft.design/components/web/react/core/messagebar/usage"
+    },
+    {
+      "capabilityId": "data-table",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "DataGrid",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "list",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "List",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "card",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Card",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "avatar",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Avatar / Persona",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "badge",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Badge",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "tag-chip",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tag",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "carousel",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Carousel",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "progress-linear",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress bar",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "spinner",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spinner",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "skeleton",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Skeleton",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "divider",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Divider",
+      "url": "https://fluent2.microsoft.design/components/web/react"
+    },
+    {
+      "capabilityId": "focus-trap",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog focus trap",
+      "url": "https://fluent2.microsoft.design/components/web/react/core/dialog/usage"
+    },
+    {
+      "capabilityId": "focus-return",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog focus management",
+      "url": "https://fluent2.microsoft.design/components/web/react/core/dialog/usage"
+    },
+    {
+      "capabilityId": "dismissal",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog dismiss",
+      "url": "https://fluent2.microsoft.design/components/web/react/core/dialog/usage"
+    },
+    {
+      "capabilityId": "form-validation-flow",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Field validation states",
+      "url": "https://fluent2.microsoft.design/components/web/react/core/field/usage"
+    },
+    {
+      "capabilityId": "color-tokens",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color tokens",
+      "url": "https://fluent2.microsoft.design/design-tokens"
+    },
+    {
+      "capabilityId": "typography-scale",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Typography tokens",
+      "url": "https://fluent2.microsoft.design/typography"
+    },
+    {
+      "capabilityId": "spacing-scale",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spacing tokens",
+      "url": "https://fluent2.microsoft.design/design-tokens"
+    },
+    {
+      "capabilityId": "elevation",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Shadow tokens",
+      "url": "https://fluent2.microsoft.design/design-tokens"
+    },
+    {
+      "capabilityId": "radius",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Border radius tokens",
+      "url": "https://fluent2.microsoft.design/design-tokens"
+    },
+    {
+      "capabilityId": "motion-tokens",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Animation tokens",
+      "url": "https://fluent2.microsoft.design/design-tokens"
+    },
+    {
+      "capabilityId": "dark-mode",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Light/dark/high-contrast theming",
+      "url": "https://fluent2.microsoft.design/design-tokens"
+    },
+    {
+      "capabilityId": "aria-apg-adherence",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "WAI-ARIA authoring practices",
+      "url": "https://fluent2.microsoft.design/accessibility"
+    },
+    {
+      "capabilityId": "color-contrast",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "WCAG 2.1 AA contrast",
+      "url": "https://fluent2.microsoft.design/accessibility"
+    },
+    {
+      "capabilityId": "responsive-adaptive",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Reflow",
+      "url": "https://fluent2.microsoft.design/accessibility"
+    },
+    {
+      "capabilityId": "i18n-rtl",
+      "sourceId": "fluent-2",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "RTL right-alignment",
+      "url": "https://fluent2.microsoft.design/typography"
     }
   ]
 }
