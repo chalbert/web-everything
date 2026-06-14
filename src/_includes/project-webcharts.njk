@@ -119,3 +119,51 @@ interface Legend { title?: string; }
         <li><strong>Accessibility is derivable:</strong> axis/legend titles + measurement types let an a11y description be generated from the semantic spec — the conformance suite (slice d) scores it as a first-class axis.</li>
     </ul>
 </section>
+
+<section id="protocol-custom-chart-renderer" class="section-card">
+    <h3 id="renderer-protocol">CustomChartRenderer Protocol</h3>
+    <p>
+        The standard is the <strong>spec, not the renderer</strong>. <code>CustomChartRenderer</code> is the
+        renderer-swap contract: any drawing engine renders a <a href="#vega-lite-l1">Vega-Lite L1
+        <code>ChartSpec</code></a> behind one interface, taking the semantic spec plus resolved
+        <a href="/projects/webtheme/">Web Theme</a> tokens and producing output. The <strong>native-first
+        default</strong> is an SVG renderer that ships with the standard; adapters (Vega, Plotly, ECharts)
+        register as alternative impls — the same impl-swap shape as
+        <a href="/projects/webpositioning/#protocol-anchor-positioning">CustomPositioner</a> and
+        <a href="/projects/webrealtime/#protocol-transport-negotiation">CustomTransportProvider</a>.
+    </p>
+    {% highlight "typescript" %}
+// The renderer-swap contract — the only lock. A renderer consumes the SEMANTIC spec + resolved
+// theme tokens; swapping the SVG default for a Vega/Plotly/ECharts adapter never touches the ChartSpec.
+interface CustomChartRenderer {
+  // Which profile tier this renderer supports. L1 is required; L2+ is additive (selections/
+  // transforms/composition) — an L1 renderer ignores higher-tier fields gracefully.
+  readonly tier: 'L1' | 'L2' | 'L3';
+
+  // Draw a semantic spec into `target`, resolving presentation from theme tokens. The renderer
+  // never reads literal palettes from the spec — color/size are semantic, the values are theme.
+  render(spec: ChartSpec, theme: ResolvedTheme, target: Element): ChartHandle;
+}
+
+// webtheme tokens already resolved for this chart — the presentation plane the spec defers to.
+interface ResolvedTheme {
+  palette: string[];                 // categorical hues, in order
+  scaleRange?: [number, number];     // size/magnitude range
+  // typography / spacing / animation tokens flow through here too (webtheme).
+}
+
+interface ChartHandle {
+  update(spec: ChartSpec): void;     // re-render on data/encoding change
+  destroy(): void;
+  // The a11y description derivable from the spec's encodings + measurement types — the
+  // conformance suite scores accessibility as a first-class axis (slice d).
+  describe(): string;
+}
+    {% endhighlight %}
+    <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+        <li><strong>Native-first default:</strong> an SVG renderer ships with the standard, so a chart draws with zero adapters. Vega/Plotly/ECharts are opt-in impls registered behind the same contract — the standard is engine-agnostic.</li>
+        <li><strong>The spec is the only lock:</strong> a renderer reads the semantic <code>ChartSpec</code> + theme tokens and never the reverse, so swapping engines leaves the artifact untouched.</li>
+        <li><strong>Tiered conformance:</strong> a renderer declares the L-tier it supports (L1 required, L2+ additive) and is scored on <em>semantic fidelity</em> + <em>theme application</em>, with <em>accessibility</em> a first-class axis (a description derivable from the spec).</li>
+        <li><strong>Protocol, not intent:</strong> this fixes the renderer contract, the tier declaration, and the conformance axes — it owns no chart schema (that is the Vega-Lite L1 profile) and no picker/legend UX.</li>
+    </ul>
+</section>

@@ -221,5 +221,13 @@
     "status": "concept",
     "ownedByProject": "webrealtime",
     "anchor": "protocol-transport-negotiation"
+  },
+  {
+    "id": "custom-chart-renderer",
+    "name": "CustomChartRenderer",
+    "summary": "Conformance reference for the renderer-swap contract of the Web Charts standard — the lock that lets any drawing engine render a Vega-Lite L1 ChartSpec behind one interface. A CustomChartRenderer takes a (semantic) ChartSpec + resolved webtheme tokens and produces output; the NATIVE-FIRST DEFAULT is an SVG renderer that ships with the standard, with pluggable adapters (Vega, Plotly, ECharts) registered as alternative impls — the same impl-swap shape as CustomPositioner / CustomTransportProvider. The spec is the only lock: swapping the SVG default for a Vega adapter leaves the ChartSpec untouched, because the renderer consumes the semantic plane and resolves presentation from theme tokens, never the reverse. Conformance is TIERED: a renderer declares which L-tier of the profile it supports (L1 core required; L2+ selections/transforms/composition additive) and is scored on two axes — semantic fidelity (does it draw what the spec means) and theme application (does it honour webtheme tokens) — plus accessibility as a first-class axis (an a11y description derivable from the spec's encodings + measurement types). The protocol fixes the renderer contract + the tier-declaration + the conformance axes; it does NOT own the chart's semantic schema (that is the Vega-Lite L1 profile) nor any picker/legend UX intent. Technical contract, not a UX preference — a Protocol, not an Intent.",
+    "status": "concept",
+    "ownedByProject": "webcharts",
+    "anchor": "protocol-custom-chart-renderer"
   }
 ]
