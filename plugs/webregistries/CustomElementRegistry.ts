@@ -42,7 +42,7 @@ export interface CustomElementRegistryOptions {
   extends?: CustomElementRegistry[];
 }
 
-export type ImplementedElement = (new (options: CustomElementOptions) => CustomElement) & {
+export type ImplementedElement = (new (options?: CustomElementOptions) => CustomElement) & {
   formAssociated?: (typeof CustomElement)['formAssociated'],
   observedAttributes?: (typeof CustomElement)['observedAttributes'],
 };
@@ -125,8 +125,10 @@ export default class CustomElementRegistry extends HTMLRegistry<ElementDefinitio
     }
   }
 
-  upgrade(...args: Parameters<typeof OriginalCustomElementRegistry.prototype.upgrade>) {
-    OriginalCustomElementRegistry.prototype.upgrade.apply(this, args);
+  // Concrete native signature — not `Parameters<typeof OriginalCustomElementRegistry…>`,
+  // which would be self-referential here (this class is assigned to window.CustomElementRegistry).
+  upgrade(root: Node): void {
+    OriginalCustomElementRegistry.prototype.upgrade.apply(this, [root]);
   }
 
   downgrade() {

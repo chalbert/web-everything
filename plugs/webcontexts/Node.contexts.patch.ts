@@ -6,6 +6,7 @@
 
 import InjectorRoot from '../webinjectors/InjectorRoot';
 import HTMLInjector from '../webinjectors/HTMLInjector';
+import type { HTMLInjectorTarget } from '../webinjectors/HTMLInjector';
 import type CustomContext from './CustomContext';
 
 // Store original methods
@@ -97,8 +98,12 @@ export function applyNodeContextsPatch(): void {
       if (existingContext) {
         return existingContext;
       }
-      const newContext: CustomContext<any> = this.createContext(contextType);
-      newContext.attach(this);
+      const newContext = this.createContext(contextType);
+      if (!newContext) {
+        throw new Error(`Cannot ensure context "${contextType}": no such context type is registered.`);
+      }
+      // Node.prototype patch: at runtime `this` is always a valid injector target.
+      newContext.attach(this as HTMLInjectorTarget);
       return newContext;
     },
   });
@@ -109,7 +114,7 @@ export function applyNodeContextsPatch(): void {
     value(this: Node, contextType: string): CustomContext<any> | null {
       const injectorRoot = InjectorRoot.getInjectorRootOf(this);
       if (injectorRoot) {
-        const injector = injectorRoot.ensureInjector(this);
+        const injector = injectorRoot.ensureInjector(this as HTMLInjectorTarget);
         if (injector) {
           const context = injector.get(`customContexts:${contextType}`);
           return context || null;
@@ -133,7 +138,7 @@ export function applyNodeContextsPatch(): void {
     value(this: Node, contextType: string): boolean {
       const injectorRoot = InjectorRoot.getInjectorRootOf(this);
       if (injectorRoot) {
-        const injector = injectorRoot.ensureInjector(this);
+        const injector = injectorRoot.ensureInjector(this as HTMLInjectorTarget);
         if (injector) {
           const context = injector.get(`customContexts:${contextType}`);
           return Boolean(context);

@@ -2,11 +2,13 @@
 type: idea
 workItem: story
 size: 5
-locus: frontierui
-status: open
+locus: webeverything
+status: resolved
 dateOpened: "2026-06-14"
 blockedBy: ["582"]
 dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: "none (convergence build — webeverything/plugs now superset of frontierui/plugs per #582 A/A; unblocks #449)"
 tags: [plugs, frontier-ui, webeverything, superset, reconciliation, refactor]
 crossRef: { url: /backlog/449-wire-the-we-plugs-alias-in-frontier-ui-and-delete-the-vendor/, label: "Blocks #449 (alias + delete vendored plugs)" }
 ---
@@ -77,3 +79,28 @@ core registries, and that divergence is a real decision, not a one-directional p
 **Test files (FU-ahead lines, reconcile after the code lands):** `__tests__/e2e/webcomponents.spec.ts` (FU+148/WE+162 — both moved substantially), `core/__tests__/pathInsertionMethods.extended.test.ts`, `webcomponents/__tests__/unit/Element.insertion.patch.test.ts`.
 
 **Next:** ratify [#582](582-customcontext-and-customtextnode-customelement-registry-type.md) (the canonical registry generic form), then this item becomes one-directional: port FU's iteration methods + the Node.contexts.patch robustness up into WE under the chosen form, reconcile the 3 test files, and confirm `WE ⊇ FU`. Released to `open` (blocked on #582) — the mechanical 11/16 are settled above.
+
+## Progress
+
+- **Resolved 2026-06-14.** Converged `webeverything/plugs/` one-directionally onto the #582 A/A ruling so
+  it is a **true superset** of `frontierui/plugs/` — verified by a per-file diff of all 16.
+  - **Incomplete vs diverged → DIVERGED.** #447/#448 were complete (WE genuinely ahead in 11/16); FU had
+    *diverged* on the type architecture of three core registries — that was the one real decision (#582),
+    now ratified A/A and applied here.
+  - **Converged (adopt FU typings, keep WE runtime):** `CustomContext.ts` + `Node.contexts.patch.ts` +
+    `CustomTextNodeRegistry.ts` now byte-identical to FU (method-level `get<Key>`, string-keyed Map-shaped
+    context with `values()`/`entries()`/`delete(): boolean`; FU's `ImplementedTextNode<any>` + the
+    previously-**unimported** `RootNode` type — porting FU's import also *fixed* a latent WE error;
+    `Node.contexts` null-check + `HTMLInjectorTarget` casts). `CustomElementRegistry.ts` took FU's typings
+    (`options?` optional, concrete `upgrade(root: Node)`) **while keeping WE's `ensureNativelyConstructible`
+    runtime** (#582 Axis 3, unconditional — without it `new RealClass()` throws "Illegal constructor").
+  - **Kept WE (already ⊇ FU):** the 11 mechanical files — every remaining FU-only line is older code WE has
+    superseded (#454 `hasOwnProperty('options')` clone fix, #320/#321 `createViewportPresenceObserver`
+    refactor, bootstrap comment/import-order, and the e2e spec where **WE's assertions are strictly
+    stronger** than FU's coarser ones), the #582-ruled `parserName` null/undefined equivalence, or
+    whitespace. **No FU runtime behaviour and no FU test coverage is lost.**
+  - **Verified:** 216 affected WE plug tests pass (webcontexts/webexpressions/webregistries/webcomponents);
+    WE `check:standards` green; FU `check:standards` green (FU untouched). **Unblocks #449** (the
+    alias + delete is now a safe, mechanical step).
+  - **Note:** `locus` corrected `frontierui → webeverything` — the build edits land in `webeverything/plugs`
+    (WE is upstream per the constellation), so the gate + commit are WE; FU was only verified, not modified.

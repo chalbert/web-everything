@@ -7,12 +7,16 @@
 import HTMLRegistry, { type BaseDefinition } from '../core/HTMLRegistry';
 import CustomTextNode, { type ImplementedTextNode } from './CustomTextNode';
 import InjectorRoot from '../webinjectors/InjectorRoot';
+import type { RootNode } from '../core/types';
 
 /**
  * Definition for a registered custom text node
  */
 export interface TextNodeDefinition extends BaseDefinition {
-  constructor: typeof CustomTextNode;
+  // Any CustomTextNode subclass — the registry is heterogeneous, so each entry
+  // may extend the options shape (e.g. InterpolationTextNodeOptions). `<any>` is
+  // the right altitude at this boundary; nodes keep their precise options internally.
+  constructor: ImplementedTextNode<any>;
   textChangedCallback?: (oldValue: string | null, newValue: string | null) => void;
 }
 
@@ -56,7 +60,7 @@ export default class CustomTextNodeRegistry extends HTMLRegistry<TextNodeDefinit
    * @param name - The text node type name to register
    * @param TextNode - The CustomTextNode class
    */
-  define(name: string, TextNode: ImplementedTextNode): void {
+  define(name: string, TextNode: ImplementedTextNode<any>): void {
     const definition: TextNodeDefinition = {
       constructor: TextNode,
       connectedCallback: TextNode.prototype.connectedCallback,

@@ -39,7 +39,7 @@ export interface CustomExpressionParser {
 /**
  * Constructor definition type for implemented contexts
  */
-export type ImplementedContext<ContextValue> = (new (initialValue?: ContextValue) => CustomContext<ContextValue>) & {
+export type ImplementedContext<ContextValue extends Record<string, unknown>> = (new (initialValue?: ContextValue) => CustomContext<ContextValue>) & {
   observedContexts?: typeof CustomContext['observedContexts'];
 };
 
@@ -61,9 +61,8 @@ export interface ConstructorDefinition<T> {
  * - Track and notify consumers on changes
  */
 export default abstract class CustomContext<
-  ContextValue extends Record<Key, unknown>,
-  Key extends keyof ContextValue = keyof ContextValue
-> implements Registry<ContextValue, keyof ContextValue> {
+  ContextValue extends Record<string, unknown>
+> implements Registry<ContextValue[keyof ContextValue], string> {
   static observedContexts: string[] = [];
   static observedEvents: string[] = [];
 
@@ -136,7 +135,7 @@ export default abstract class CustomContext<
   /**
    * Get a value from the context state
    */
-  get(key: Key): ContextValue[Key] | undefined {
+  get<Key extends keyof ContextValue>(key: Key): ContextValue[Key] | undefined {
     if (this.#store) {
       return this.#store.getItem(key);
     }
@@ -147,7 +146,7 @@ export default abstract class CustomContext<
   /**
    * Set a value in the context state and notify queries
    */
-  set(key: Key, value: ContextValue[Key]): void {
+  set<Key extends keyof ContextValue>(key: Key, value: ContextValue[Key]): void {
     if (this.#store) {
       this.#store.setItem(key, value);
     } else {
@@ -174,19 +173,35 @@ export default abstract class CustomContext<
   /**
    * Check if a key exists in the context state
    */
-  has(key: Key): boolean {
+  has(key: keyof ContextValue): boolean {
     return Boolean(this.get(key));
   }
 
   /**
    * Get all keys in the context state
    */
-  keys(): IterableIterator<keyof ContextValue> {
+  keys(): IterableIterator<string> {
     if (this.#store) {
       return Object.keys(this.#store.state).values();
     }
 
     return Object.keys(this.value).values();
+  }
+
+  /**
+   * Get all values in the context state
+   */
+  values(): IterableIterator<ContextValue[keyof ContextValue]> {
+    const state = this.#store ? this.#store.state : this.value;
+    return Object.values(state).values() as IterableIterator<ContextValue[keyof ContextValue]>;
+  }
+
+  /**
+   * Get all [key, value] pairs in the context state
+   */
+  entries(): IterableIterator<[string, ContextValue[keyof ContextValue]]> {
+    const state = this.#store ? this.#store.state : this.value;
+    return Object.entries(state).values() as IterableIterator<[string, ContextValue[keyof ContextValue]]>;
   }
 
   /**
@@ -203,7 +218,7 @@ export default abstract class CustomContext<
   /**
    * Delete not implemented for contexts
    */
-  delete(): void {
+  delete(_key: string): boolean {
     throw new Error('Method not implemented.');
   }
 
