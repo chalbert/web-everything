@@ -3,9 +3,10 @@ type: decision
 workItem: story
 size: 3
 parent: "089"
-status: open
+status: parked
 dateOpened: "2026-06-12"
-dateStarted: "2026-06-12"
+dateStarted: "2026-06-14"
+dateParked: "2026-06-14"
 preparedDate: "2026-06-12"
 tags: [webdocs, monetization, open-core, business-model, plateau, decision]
 relatedProject: webdocs
@@ -14,6 +15,19 @@ crossRef: { url: /backlog/091-web-docs-as-a-service-plateau/, label: "Web Docs r
 ---
 
 # Web Docs open-core tiering mechanics — metered unit, threshold, billing surface
+
+> **PARKED 2026-06-14 — too early to settle the economics; deferred behind the live-serve strategy.**
+> Pricing a *hosted/metered* Web Docs offering presupposes we run a deployed SaaS — which cuts
+> against the current solo-founder commercial strategy of shipping **non-deployed** solutions first
+> ([[project_monetization_strategy]]: self-run tool > single service > enterprise-custom; **defer
+> live-serve**). The eventual home for a metered hosted Web Docs is **inside a larger Plateau SaaS
+> app** — where several Plateau products (custom browser, etc.) are offered alongside it — not a
+> standalone Web Docs subscription. Deciding the metered unit / threshold now would price a product
+> we've intentionally deferred building, against zero usage data. **Unpark when** the Plateau hosted
+> SaaS is actually on the roadmap (i.e. the defer-live-serve guard is lifted) — the prior-art survey
+> + fork framing below stay valid and ready to ratify at that point. No prep is wasted; only the
+> *timing* changed. The free-tier/self-host floor invariant ([#091](/backlog/091-web-docs-as-a-service-plateau/))
+> is unaffected — self-host stays the always-available, non-deployed path.
 
 Grounded in the [Web Docs open-core tiering prior-art survey](/research/web-docs-open-core-tiering/)
 ([report](../reports/2026-06-12-web-docs-tiering-mechanics.md)) — how comparable docs / dev-tool /
