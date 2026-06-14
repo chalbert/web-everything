@@ -94,9 +94,9 @@
       "capabilityId": "button",
       "sourceId": "carbon",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Button",
+      "url": "https://carbondesignsystem.com/components/button/usage/"
     },
     {
       "capabilityId": "button",
@@ -142,9 +142,9 @@
       "capabilityId": "code-block",
       "sourceId": "carbon",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Code snippet",
+      "url": "https://carbondesignsystem.com/components/code-snippet/usage/"
     },
     {
       "capabilityId": "code-block",
@@ -158,9 +158,9 @@
       "capabilityId": "color-contrast",
       "sourceId": "carbon",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Accessibility color",
+      "url": "https://carbondesignsystem.com/guidelines/accessibility/color/"
     },
     {
       "capabilityId": "color-contrast",
@@ -254,9 +254,9 @@
       "capabilityId": "copy-to-clipboard",
       "sourceId": "carbon",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Copy button",
+      "url": "https://carbondesignsystem.com/components/code-snippet/usage/"
     },
     {
       "capabilityId": "copy-to-clipboard",
@@ -294,9 +294,9 @@
       "capabilityId": "data-table",
       "sourceId": "carbon",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Data table",
+      "url": "https://carbondesignsystem.com/components/data-table/usage/"
     },
     {
       "capabilityId": "date-picker",
@@ -454,9 +454,9 @@
       "capabilityId": "file-upload",
       "sourceId": "carbon",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "File uploader",
+      "url": "https://carbondesignsystem.com/components/file-uploader/usage/"
     },
     {
       "capabilityId": "focus-return",
@@ -510,9 +510,9 @@
       "capabilityId": "form-layout",
       "sourceId": "carbon",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Form",
+      "url": "https://carbondesignsystem.com/components/form/usage/"
     },
     {
       "capabilityId": "form-validation-flow",
@@ -526,9 +526,9 @@
       "capabilityId": "grid-layout",
       "sourceId": "carbon",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "2x Grid",
+      "url": "https://carbondesignsystem.com/elements/2x-grid/overview/"
     },
     {
       "capabilityId": "grid-layout",
@@ -566,9 +566,9 @@
       "capabilityId": "inline-alert",
       "sourceId": "carbon",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Notification (inline)",
+      "url": "https://carbondesignsystem.com/components/notification/usage/"
     },
     {
       "capabilityId": "inline-alert",
@@ -686,9 +686,9 @@
       "capabilityId": "navbar",
       "sourceId": "carbon",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "UI shell header",
+      "url": "https://carbondesignsystem.com/components/UI-shell-header/usage/"
     },
     {
       "capabilityId": "navbar",
@@ -726,9 +726,9 @@
       "capabilityId": "pagination",
       "sourceId": "carbon",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Pagination",
+      "url": "https://carbondesignsystem.com/components/pagination/usage/"
     },
     {
       "capabilityId": "pin-input",
@@ -894,9 +894,9 @@
       "capabilityId": "sidebar-nav",
       "sourceId": "carbon",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "UI shell left panel",
+      "url": "https://carbondesignsystem.com/components/UI-shell-left-panel/usage/"
     },
     {
       "capabilityId": "skeleton",
@@ -910,9 +910,9 @@
       "capabilityId": "skeleton",
       "sourceId": "carbon",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Skeleton states",
+      "url": "https://carbondesignsystem.com/components/loading/usage/"
     },
     {
       "capabilityId": "slider",
@@ -934,17 +934,17 @@
       "capabilityId": "spacing-scale",
       "sourceId": "carbon",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Spacing tokens",
+      "url": "https://carbondesignsystem.com/elements/spacing/overview/"
     },
     {
       "capabilityId": "split-button",
       "sourceId": "carbon",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Menu buttons",
+      "url": "https://carbondesignsystem.com/components/menu-buttons/usage/"
     },
     {
       "capabilityId": "split-button",
@@ -974,9 +974,9 @@
       "capabilityId": "stepper",
       "sourceId": "carbon",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Progress indicator",
+      "url": "https://carbondesignsystem.com/components/progress-indicator/usage/"
     },
     {
       "capabilityId": "stepper",
@@ -1150,9 +1150,9 @@
       "capabilityId": "typography-scale",
       "sourceId": "carbon",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Type sets",
+      "url": "https://carbondesignsystem.com/elements/typography/overview/"
     },
     {
       "capabilityId": "typography-scale",
@@ -1417,6 +1417,318 @@
       "provenance": "verified",
       "sourceName": "Bidirectionality & RTL",
       "url": "https://m3.material.io/foundations/layout/bidirectionality-rtl"
+    },
+    {
+      "capabilityId": "link",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Link",
+      "url": "https://carbondesignsystem.com/components/link/usage/"
+    },
+    {
+      "capabilityId": "text-field",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Text input",
+      "url": "https://carbondesignsystem.com/components/text-input/usage/"
+    },
+    {
+      "capabilityId": "number-input",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Number input",
+      "url": "https://carbondesignsystem.com/components/number-input/usage/"
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dropdown",
+      "url": "https://carbondesignsystem.com/components/dropdown/usage/"
+    },
+    {
+      "capabilityId": "multi-select",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Multiselect",
+      "url": "https://carbondesignsystem.com/components/dropdown/usage/"
+    },
+    {
+      "capabilityId": "combobox",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combo box",
+      "url": "https://carbondesignsystem.com/components/dropdown/usage/"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://carbondesignsystem.com/components/checkbox/usage/"
+    },
+    {
+      "capabilityId": "radio-group",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio button",
+      "url": "https://carbondesignsystem.com/components/radio-button/usage/"
+    },
+    {
+      "capabilityId": "switch",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toggle",
+      "url": "https://carbondesignsystem.com/components/toggle/usage/"
+    },
+    {
+      "capabilityId": "slider",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider",
+      "url": "https://carbondesignsystem.com/components/slider/usage/"
+    },
+    {
+      "capabilityId": "date-picker",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Date picker",
+      "url": "https://carbondesignsystem.com/components/date-picker/usage/"
+    },
+    {
+      "capabilityId": "date-range-picker",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Date picker (range)",
+      "url": "https://carbondesignsystem.com/components/date-picker/usage/"
+    },
+    {
+      "capabilityId": "tags-input",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tag",
+      "url": "https://carbondesignsystem.com/components/tag/usage/"
+    },
+    {
+      "capabilityId": "accordion",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accordion",
+      "url": "https://carbondesignsystem.com/components/accordion/usage/"
+    },
+    {
+      "capabilityId": "disclosure",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Disclosures pattern",
+      "url": "https://carbondesignsystem.com/patterns/disclosures-pattern/"
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tabs",
+      "url": "https://carbondesignsystem.com/components/tabs/usage/"
+    },
+    {
+      "capabilityId": "menu",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menu",
+      "url": "https://carbondesignsystem.com/components/menu/usage/"
+    },
+    {
+      "capabilityId": "segmented-control",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Content switcher",
+      "url": "https://carbondesignsystem.com/components/content-switcher/usage/"
+    },
+    {
+      "capabilityId": "breadcrumb",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Breadcrumb",
+      "url": "https://carbondesignsystem.com/components/breadcrumb/usage/"
+    },
+    {
+      "capabilityId": "dialog",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Modal",
+      "url": "https://carbondesignsystem.com/components/modal/usage/"
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popover",
+      "url": "https://carbondesignsystem.com/components/popover/usage/"
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tooltip",
+      "url": "https://carbondesignsystem.com/components/tooltip/usage/"
+    },
+    {
+      "capabilityId": "toast",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Notification (toast)",
+      "url": "https://carbondesignsystem.com/components/notification/usage/"
+    },
+    {
+      "capabilityId": "list",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "List",
+      "url": "https://carbondesignsystem.com/components/list/usage/"
+    },
+    {
+      "capabilityId": "card",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tile",
+      "url": "https://carbondesignsystem.com/components/tile/usage/"
+    },
+    {
+      "capabilityId": "tag-chip",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tag",
+      "url": "https://carbondesignsystem.com/components/tag/usage/"
+    },
+    {
+      "capabilityId": "progress-linear",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress bar",
+      "url": "https://carbondesignsystem.com/components/progress-bar/usage/"
+    },
+    {
+      "capabilityId": "spinner",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Loading",
+      "url": "https://carbondesignsystem.com/components/loading/usage/"
+    },
+    {
+      "capabilityId": "empty-state",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Empty states pattern",
+      "url": "https://carbondesignsystem.com/patterns/empty-states-pattern/"
+    },
+    {
+      "capabilityId": "tree-view",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tree view",
+      "url": "https://carbondesignsystem.com/components/tree-view/usage/"
+    },
+    {
+      "capabilityId": "focus-trap",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Modal focus",
+      "url": "https://carbondesignsystem.com/components/modal/usage/"
+    },
+    {
+      "capabilityId": "dismissal",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dismissing a modal",
+      "url": "https://carbondesignsystem.com/components/modal/usage/"
+    },
+    {
+      "capabilityId": "anchored-positioning",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popover alignment",
+      "url": "https://carbondesignsystem.com/components/popover/usage/"
+    },
+    {
+      "capabilityId": "responsive-adaptive",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "2x Grid breakpoints",
+      "url": "https://carbondesignsystem.com/elements/2x-grid/overview/"
+    },
+    {
+      "capabilityId": "color-tokens",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color tokens",
+      "url": "https://carbondesignsystem.com/elements/color/overview/"
+    },
+    {
+      "capabilityId": "motion-tokens",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Motion",
+      "url": "https://carbondesignsystem.com/elements/motion/overview/"
+    },
+    {
+      "capabilityId": "dark-mode",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Themes (Gray 90/100)",
+      "url": "https://carbondesignsystem.com/elements/themes/overview/"
+    },
+    {
+      "capabilityId": "keyboard-interaction",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Keyboard accessibility",
+      "url": "https://carbondesignsystem.com/guidelines/accessibility/keyboard/"
+    },
+    {
+      "capabilityId": "aria-apg-adherence",
+      "sourceId": "carbon",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accessibility overview",
+      "url": "https://carbondesignsystem.com/guidelines/accessibility/overview/"
     }
   ]
 }
