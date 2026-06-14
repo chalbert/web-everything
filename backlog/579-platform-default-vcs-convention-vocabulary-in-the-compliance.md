@@ -2,9 +2,12 @@
 type: idea
 workItem: story
 size: 3
-status: open
+status: resolved
 blockedBy: ["562"]
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: webcompliance/conventions/vcs.ts — VcsConventionVocabulary + platformDefaultVcsConventions + resolveVcsConventions (config-extends) + checkBranchName/checkCommitMessage/checkPullRequest validators
 locus: webeverything
 tags: [dev-browser, fix-loop, conventions, compliance, webcompliance, platform-default]
 ---
