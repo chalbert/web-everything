@@ -51,6 +51,7 @@
 | Preparing an open decision *ahead* of the call — research + author its forks to "ready to ratify" (no human judgment yet; sets `preparedDate`) | [docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md) → "The prepared-fork shape" (Claude: `/prepare` triggers it) |
 | Building or changing a runtime demo under `demos/` | [docs/agent/demo-workflow.md](docs/agent/demo-workflow.md) |
 | Building/continuing a flagship **exercise app** (#314) — the platform-first loop (WE is primary, the app is a forcing function) | [docs/agent/exercise-app-workflow.md](docs/agent/exercise-app-workflow.md) (Claude: `/exercise-app`) |
+| Marking an external reference dead/replaced, or adding a structured reference home | [docs/agent/reference-retirement.md](docs/agent/reference-retirement.md) |
 | Dev environment & scripts | `DEV_GUIDE.md` |
 | Canonical specs (per-entry) | `src/_data/{blocks,plugs,intents,protocols,semantics,references}.json`; backlog = `backlog/*.md` |
 

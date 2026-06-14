@@ -22,7 +22,7 @@ import {
   isExportsSafeTarget, validateModuleResolutionLock, findRawHtmlInMarkdown,
   findBuriedForkSections, findUnquotedColonScalars, findBadBodyLinks,
   deriveResearchFreshness, addIsoDuration, RESEARCH_REVIEW_HORIZON_DEFAULT,
-  validateCapabilityPresence,
+  validateCapabilityPresence, validateRetirementShape,
 } from '../check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -623,5 +623,59 @@ describe('validateCapabilityPresence — capability×source join table (#352)', 
       provenanceKinds: presence.provenanceKinds.map((k) => k.id),
     });
     expect(res.errors).toEqual([]);
+  });
+});
+
+describe('validateRetirementShape — general reference-retirement convention (#584)', () => {
+  const run = (entry, opts) => validateRetirementShape(entry, { label: 'ref', ...opts });
+
+  it('passes vacuously when no retirement markers are present (most-permissive default)', () => {
+    expect(run({ title: 'MDN', url: 'https://mdn' }).errors).toEqual([]);
+  });
+
+  it('accepts a complete death triplet', () => {
+    const res = run({ retired: true, retiredDate: '2026-06-14', retiredReason: 'docs 404; folded into Fluent' });
+    expect(res.errors).toEqual([]);
+  });
+
+  it('errors when retired:true lacks a reason or a date', () => {
+    const msg = run({ retired: true }).errors.map((e) => e.message).join(' ');
+    expect(msg).toMatch(/requires a retiredReason/);
+    expect(msg).toMatch(/requires a retiredDate/);
+  });
+
+  it('errors on a non-ISO retiredDate', () => {
+    expect(run({ retired: true, retiredReason: 'x', retiredDate: 'June 2026' }).errors
+      .map((e) => e.message).join(' ')).toMatch(/retiredDate must be an ISO date/);
+  });
+
+  it('errors on death fields without retired:true (all-or-nothing triplet)', () => {
+    expect(run({ retiredDate: '2026-06-14', retiredReason: 'x' }).errors
+      .map((e) => e.message).join(' ')).toMatch(/without retired:true/);
+  });
+
+  it('errors on a non-boolean retired', () => {
+    expect(run({ retired: 'yes' }).errors.map((e) => e.message).join(' ')).toMatch(/"retired" must be a boolean/);
+  });
+
+  it('treats death and supersession as orthogonal — both can co-exist (state 4)', () => {
+    const res = run(
+      { retired: true, retiredDate: '2026-06-14', retiredReason: 'docs dead', supersededBy: 'fluent-2' },
+      { resolveSupersededBy: (t) => t === 'fluent-2' },
+    );
+    expect(res.errors).toEqual([]);
+  });
+
+  it('errors when supersededBy does not resolve (only where a resolver is supplied)', () => {
+    expect(run({ supersededBy: 'ghost' }, { resolveSupersededBy: () => false }).errors
+      .map((e) => e.message).join(' ')).toMatch(/supersededBy "ghost" does not resolve/);
+    // No resolver → pointer is not resolution-checked (homes without an id space).
+    expect(run({ supersededBy: 'https://newer' }).errors).toEqual([]);
+  });
+
+  it('the live corpus retired source (#546 FAST) stays clean', () => {
+    const corpus = require(join(SRC, '_data/benchmarkCorpus.json'));
+    const fast = corpus.sources.find((s) => s.id === 'fast');
+    expect(validateRetirementShape(fast, { label: 'fast' }).errors).toEqual([]);
   });
 });

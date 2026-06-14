@@ -22,7 +22,7 @@ import {
   validateModuleResolutionLock, findRawHtmlInMarkdown, findBuriedForkSections,
   findUnquotedColonScalars, findBadBodyLinks,
   RESEARCH_REVIEW_HORIZON_DEFAULT, deriveResearchFreshness,
-  validateCapabilityPresence,
+  validateCapabilityPresence, validateRetirementShape,
 } from './check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -217,6 +217,41 @@ dupCheck(protocols, 'protocols.json');
     for (const e of pe) err(e.message);
     for (const w of pw) warn(w.message);
   }
+}
+
+// ── 6a-ter. Reference-retirement convention (#584) ───────────────────────────
+// One uniform retirement field-set — the #546 death triplet + the #192 supersededBy pointer — checked
+// by a single shared helper across every structured reference home. The markers are opt-in
+// (most-permissive), so a home with no retired/superseded entry passes vacuously. The supersededBy
+// pointer resolves only where the home has an id space (the corpus). researchTopics.json keeps its own
+// bidirectional supersedes/supersededBy rule above (§3) — its pointer space is topic ids, not refs.
+// See docs/agent/reference-retirement.md.
+{
+  const benchCorpus = readJson('benchmarkCorpus.json') || { sources: [] };
+  const corpusSourceIds = new Set((benchCorpus.sources || []).map((s) => s.id));
+  const inCorpus = (t) => corpusSourceIds.has(t);
+  const runShape = (entry, label, opts) => {
+    const { errors: re, warnings: rw } = validateRetirementShape(entry, { label, ...opts });
+    for (const e of re) err(e.message);
+    for (const w of rw) warn(w.message);
+  };
+  // 1) Corpus sources — the seed home (#546); supersededBy resolves to a sibling source id.
+  for (const s of benchCorpus.sources || [])
+    runShape(s, `benchmarkCorpus source "${s.id}"`, { resolveSupersededBy: inCorpus });
+  // 2) references.json links.
+  for (const group of readJson('references.json') || [])
+    for (const link of group.links || [])
+      runShape(link, `references.json link "${link.title || link.url}"`);
+  // 3) designSystemResearch refs on blocks + intents.
+  for (const [home, list] of [['block', blocks], ['intent', intents]])
+    for (const item of list || [])
+      for (const dsr of item.designSystemResearch || [])
+        runShape(dsr, `${home} "${item.id}" designSystemResearch "${dsr.system || dsr.reference || ''}"`);
+  // 4) capability-presence rows — supersededBy (a moved source) resolves to a corpus source id.
+  const presenceRows = readJson('benchmarkCapabilityPresence.json');
+  if (presenceRows)
+    for (const row of presenceRows.rows || [])
+      runShape(row, `capability-presence (${row.capabilityId}, ${row.sourceId})`, { resolveSupersededBy: inCorpus });
 }
 
 // ── 6b. Protocols (first-class entity, owned by a Project) ───────────────────

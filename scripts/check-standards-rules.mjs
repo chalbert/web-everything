@@ -760,3 +760,46 @@ export function validateCapabilityPresence(presence, { capabilityIds, sourceIds,
   }
   return { errors, warnings };
 }
+
+// ── General reference-retirement convention (#584) ───────────────────────────
+const RETIREMENT_ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+/**
+ * Shared validator for the general reference-retirement convention (#584 ruling): ONE uniform
+ * field-set applied to every structured reference home (corpus sources, `references.json` links,
+ * `designSystemResearch` refs, capability-presence rows) — the homes differ in container, not in the
+ * retirement concept, so the shape reads identically everywhere. Two orthogonal, independently-optional
+ * markers (Fork 3-A — death and supersession are distinct facts a single enum can't both hold):
+ *   • the #546 death triplet — `retired:true` + `retiredDate` (ISO) + `retiredReason` (keep-not-delete);
+ *   • the #192 supersession pointer — `supersededBy` ("a newer canonical replaces this").
+ * Pure: takes one entry object + a `label` and an optional `resolveSupersededBy(target)` predicate
+ * (supplied only by homes with an id space, e.g. the corpus, where the pointer is a sibling id).
+ * Vacuously passes when an entry carries no retirement markers — the common, most-permissive case
+ * (the metadata is always opt-in, never required). See docs/agent/reference-retirement.md.
+ */
+export function validateRetirementShape(entry, { label = 'entry', resolveSupersededBy } = {}) {
+  const errors = [];
+  const warnings = [];
+  if (!entry || typeof entry !== 'object') return { errors, warnings };
+  const present = (k) => entry[k] != null && entry[k] !== '';
+  // Death triplet — all-or-nothing: retired:true requires a reason + ISO date; neither field stands alone.
+  if ('retired' in entry && typeof entry.retired !== 'boolean')
+    errors.push({ message: `${label}: "retired" must be a boolean (#584)` });
+  if (entry.retired === true) {
+    if (!present('retiredReason'))
+      errors.push({ message: `${label}: retired:true requires a retiredReason — keep-not-delete: record why it left (#584)` });
+    if (!present('retiredDate'))
+      errors.push({ message: `${label}: retired:true requires a retiredDate (#584)` });
+    else if (!RETIREMENT_ISO_DATE.test(entry.retiredDate))
+      errors.push({ message: `${label}: retiredDate must be an ISO date (YYYY-MM-DD), got "${entry.retiredDate}" (#584)` });
+  } else if (present('retiredDate') || present('retiredReason')) {
+    errors.push({ message: `${label}: retiredDate/retiredReason present without retired:true — the death triplet is all-or-nothing (#584)` });
+  }
+  // Supersession pointer — orthogonal to death; resolved only where the home has an id space.
+  if (present('supersededBy') && typeof resolveSupersededBy === 'function') {
+    const targets = Array.isArray(entry.supersededBy) ? entry.supersededBy : [entry.supersededBy];
+    for (const t of targets)
+      if (!resolveSupersededBy(t))
+        errors.push({ message: `${label}: supersededBy "${t}" does not resolve to a known entry (#584)` });
+  }
+  return { errors, warnings };
+}
