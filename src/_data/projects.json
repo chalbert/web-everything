@@ -96,7 +96,7 @@
     "id": "webblocks",
     "name": "Web Blocks",
     "description": "Standard protocols for interoperable modules (components, behaviors) ensuring consistent UX and accessibility across libraries.",
-    "status": "concept",
+    "status": "draft",
     "category": "utility",
     "icon": "/assets/icons/webblocks.svg",
     "isSvg": true
@@ -114,7 +114,7 @@
     "id": "webintents",
     "name": "Web Intents",
     "description": "Declarative profiles for application-wide UX/UI behavior (e.g., density, motion, interaction models) that components automatically adhere to.",
-    "status": "concept",
+    "status": "draft",
     "category": "ecosystem",
     "icon": "/assets/icons/webintents.svg",
     "isSvg": true
@@ -168,7 +168,7 @@
     "id": "webvalidation",
     "name": "Web Validation",
     "description": "Standard for <strong>input invalidity</strong> across form controls, groups, forms, and nested wizards. Defines the Validation protocol — observable states/events per level, merged validity from independent sources, commitment strategies, async resolution registries — so implementations from different vendors are swappable and combinable. Distinct from reliability: validation handles user data; reliability handles mechanism failure.",
-    "status": "concept",
+    "status": "poc",
     "category": "standard",
     "icon": "/assets/icons/webvalidation.svg",
     "isSvg": true,
@@ -199,7 +199,7 @@
     "id": "webadapters",
     "name": "Web Adapters",
     "description": "Bridges and syntactic sugars connecting external libraries or languages to Web Everything protocols.",
-    "status": "concept",
+    "status": "draft",
     "category": "utility",
     "icon": "/assets/icons/webadapters.svg",
     "isSvg": true
