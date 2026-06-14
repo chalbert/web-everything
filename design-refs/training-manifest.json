@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "recipeVersion": 1,
+  "labelSpace": [
+    "app",
+    "obstructed",
+    "marketing",
+    "error",
+    "blank",
+    "non-app"
+  ],
+  "holdoutFraction": 0.15,
+  "splitStrategy": "deterministic-by-contentHash",
+  "counts": {
+    "total": 0,
+    "unlabeled": 16,
+    "train": 0,
+    "holdout": 0,
+    "byVerdict": {},
+    "byProvenance": {}
+  },
+  "records": [],
+  "generatedAt": "2026-06-14T00:59:35.056Z",
+  "recipeRevisions": [
+    {
+      "version": 1,
+      "date": "2026-06-13",
+      "note": "Initial recipe — codified from the #488 ruling (all five forks). Pairs with the design-refs.mjs `export` step (epic #490 slice A); benchmark floors finalized in slice B."
+    }
+  ]
+}

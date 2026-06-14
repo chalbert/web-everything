@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "task": "6-verdict UI-screenshot classification (app | obstructed | marketing | error | blank | non-app)",
+  "labelSpace": ["app", "obstructed", "marketing", "error", "blank", "non-app"],
+  "rationale": "Versioned, model-agnostic distillation recipe for the on-device verdict classifier (#488 ruling, epic #490). The labels are the hosted-model verdicts already cached in the design-ref corpus (#489) — a base-model switch re-runs THIS recipe against the same labeled corpus rather than re-labelling. Keep it reproducible: bump `version`, append a dated `revisions` entry, re-run `design-refs.mjs export`, re-train.",
+  "student": {
+    "family": "MobileNet/ViT",
+    "maxQuantizedSizeMB": 10,
+    "note": "≲10 MB-quantized student per #488 F1/F2 — a classifier, not a VLM (the separate Tier-2 build)."
+  },
+  "distillation": {
+    "method": "task-specific knowledge distillation",
+    "candidateApproaches": ["VL2Lite", "PAND", "VLM-KD"],
+    "teacher": "hosted vision model verdicts cached in verdicts.json / per-item visionVerdict (#489)",
+    "note": "Distil from the big-model labels; the recipe is teacher-agnostic — the teacher identity lives in each frame's visionVerdict.provider, not here (no-leakage boundary, #475)."
+  },
+  "preprocess": {
+    "resize": { "width": 224, "height": 224, "fit": "contain" },
+    "colorSpace": "sRGB",
+    "normalize": "imagenet-mean-std"
+  },
+  "holdoutFraction": 0.15,
+  "splitStrategy": "deterministic-by-contentHash",
+  "graduationBenchmark": {
+    "verdictAgreement": ">=0.95 vs hosted model on the held-out split",
+    "quarantineRecallFloor": "TBD — set by the benchmark harness (epic #490 slice B)",
+    "note": "Meeting this promotes the student from the API bridge (#485) to the bundled on-device default; the API stays as the premium upgrade (#488 F1/F4)."
+  },
+  "revisions": [
+    {
+      "version": 1,
+      "date": "2026-06-13",
+      "note": "Initial recipe — codified from the #488 ruling (all five forks). Pairs with the design-refs.mjs `export` step (epic #490 slice A); benchmark floors finalized in slice B."
+    }
+  ]
+}
