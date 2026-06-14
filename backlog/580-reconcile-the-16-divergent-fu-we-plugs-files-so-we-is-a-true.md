@@ -5,7 +5,8 @@ size: 5
 locus: frontierui
 status: open
 dateOpened: "2026-06-14"
-blockedBy: []
+blockedBy: ["582"]
+dateStarted: "2026-06-14"
 tags: [plugs, frontier-ui, webeverything, superset, reconciliation, refactor]
 crossRef: { url: /backlog/449-wire-the-we-plugs-alias-in-frontier-ui-and-delete-the-vendor/, label: "Blocks #449 (alias + delete vendored plugs)" }
 ---
@@ -50,3 +51,29 @@ becomes the mechanical alias + delete it was always meant to be.
 
 `npm run check:standards` in `../frontierui`; a per-file diff of the two trees shows WE ⊇ FU (no FU-only
 runtime lines remain) before #449 is unblocked.
+
+## Reconciliation findings (2026-06-14 batch claim) — answers "incomplete vs diverged"
+
+A per-file `diff webeverything/plugs/<f> frontierui/plugs/<f>` over all 16. **The verdict: #447/#448 were
+mostly *complete* — WE is genuinely ahead in 11 of 16 — but FU *diverged* on the type architecture of three
+core registries, and that divergence is a real decision, not a one-directional port.** So this item is
+**not** purely mechanical; it is blocked on a type-architecture call ([#582](582-customcontext-and-customtextnode-customelement-registry-type.md)).
+
+**WE already ⊇ FU — these *prove* the superset, no action (adopt WE; FU loses nothing under #449):**
+- `webinjectors/Injector.ts`, `webinjectors/index.ts`, `webinjectors/__tests__/unit/Injector.test.ts` — WE-only lines, FU+0.
+- `bootstrap.ts` — WE carries webvalidation (#215/#224), webguards (#289), data-grid, type-ahead registrations FU entirely lacks; FU's "+14" is only older comment wording + import order.
+- `core/cloneUtils.ts`, `webcomponents/cloneHandlers.ts` — WE has the #454 `hasOwnProperty('options')` fix (native `<select>`/`<datalist>` clone); FU has the old `'options' in node`.
+- `webbehaviors/CustomAttributeRegistry.ts` — WE has the #320/#321 `createViewportPresenceObserver` refactor; FU has the older inline `new IntersectionObserver`.
+
+**Style/representation divergence — pick WE, no runtime loss:**
+- `webexpressions/CustomTextNodeParser.ts` + `UndeterminedTextNode.ts` — `parserName: string | null` (WE) vs `parserName?: string` (FU). Equivalent; keep WE for consistency.
+
+**FU-ahead / mutually-incompatible — the blocking decision ([#582](582-customcontext-and-customtextnode-customelement-registry-type.md)):**
+- `webcontexts/CustomContext.ts` — **the crux.** WE: `Key`-parameterized `Registry<ContextValue, keyof ContextValue>`. FU: `string`-keyed `Registry` with method-level `get<Key>`, **plus genuinely FU-ahead runtime** WE lacks — `values()`, `entries()`, and a `delete(_key): boolean` signature (WE has `delete(): void`). Not a superset either direction; the converged tree must choose ONE public form.
+- `webexpressions/CustomTextNodeRegistry.ts` — FU made `ImplementedTextNode` generic (`<any>`) + imports `RootNode`. Same "which generic form" question.
+- `webregistries/CustomElementRegistry.ts` — both have `upgrade()`; FU types it with a concrete signature + an `ImplementedElement` type, WE uses `Parameters<typeof …upgrade>`. Same type-form family.
+- `webcontexts/Node.contexts.patch.ts` — FU-ahead robustness (a null-check throwing on an unregistered context + `HTMLInjectorTarget` casts). One-directional-portable, but entangled with CustomContext's resolution.
+
+**Test files (FU-ahead lines, reconcile after the code lands):** `__tests__/e2e/webcomponents.spec.ts` (FU+148/WE+162 — both moved substantially), `core/__tests__/pathInsertionMethods.extended.test.ts`, `webcomponents/__tests__/unit/Element.insertion.patch.test.ts`.
+
+**Next:** ratify [#582](582-customcontext-and-customtextnode-customelement-registry-type.md) (the canonical registry generic form), then this item becomes one-directional: port FU's iteration methods + the Node.contexts.patch robustness up into WE under the chosen form, reconcile the 3 test files, and confirm `WE ⊇ FU`. Released to `open` (blocked on #582) — the mechanical 11/16 are settled above.

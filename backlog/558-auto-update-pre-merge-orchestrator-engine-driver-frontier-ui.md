@@ -8,7 +8,7 @@ status: resolved
 dateOpened: "2026-06-14"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
-graduatedTo: frontierui/packages/auto-update-orchestrator — @frontierui/auto-update-orchestrator: pre-merge gate eval (strictest-wins severity #102, migration routing #094) + swappable EngineDriver + emitRenovateConfig binding
+graduatedTo: "frontierui/packages/auto-update-orchestrator — @frontierui/auto-update-orchestrator: pre-merge gate eval (strictest-wins severity #102, migration routing #094) + swappable EngineDriver + emitRenovateConfig binding"
 tags: [auto-update, runner, orchestrator, pre-merge, frontier-ui, renovate, update-policy]
 ---
 
