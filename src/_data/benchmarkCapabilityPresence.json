@@ -198,9 +198,9 @@
       "capabilityId": "color-tokens",
       "sourceId": "spectrum",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Color tokens",
+      "url": "https://spectrum.adobe.com/page/design-tokens/"
     },
     {
       "capabilityId": "combobox",
@@ -342,9 +342,9 @@
       "capabilityId": "density",
       "sourceId": "spectrum",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Platform scale",
+      "url": "https://spectrum.adobe.com/page/platform-scale/"
     },
     {
       "capabilityId": "dialog",
@@ -822,9 +822,9 @@
       "capabilityId": "responsive-adaptive",
       "sourceId": "spectrum",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Responsive grid",
+      "url": "https://spectrum.adobe.com/page/responsive-grid/"
     },
     {
       "capabilityId": "rich-text-editor",
@@ -2153,6 +2153,398 @@
       "provenance": "verified",
       "sourceName": "RTL right-alignment",
       "url": "https://fluent2.microsoft.design/typography"
+    },
+    {
+      "capabilityId": "button",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button",
+      "url": "https://spectrum.adobe.com/page/button/"
+    },
+    {
+      "capabilityId": "icon-button",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Action button",
+      "url": "https://spectrum.adobe.com/page/action-button/"
+    },
+    {
+      "capabilityId": "button-group",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button group",
+      "url": "https://spectrum.adobe.com/page/button-group/"
+    },
+    {
+      "capabilityId": "split-button",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Action group",
+      "url": "https://spectrum.adobe.com/page/action-group/"
+    },
+    {
+      "capabilityId": "link",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Link",
+      "url": "https://spectrum.adobe.com/page/link/"
+    },
+    {
+      "capabilityId": "text-field",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Text field",
+      "url": "https://spectrum.adobe.com/page/text-field/"
+    },
+    {
+      "capabilityId": "textarea",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Text area",
+      "url": "https://spectrum.adobe.com/page/text-area/"
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Picker",
+      "url": "https://spectrum.adobe.com/page/picker/"
+    },
+    {
+      "capabilityId": "combobox",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combo box",
+      "url": "https://spectrum.adobe.com/page/combo-box/"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://spectrum.adobe.com/page/checkbox/"
+    },
+    {
+      "capabilityId": "radio-group",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio group",
+      "url": "https://spectrum.adobe.com/page/radio-group/"
+    },
+    {
+      "capabilityId": "switch",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Switch",
+      "url": "https://spectrum.adobe.com/page/switch/"
+    },
+    {
+      "capabilityId": "slider",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider",
+      "url": "https://spectrum.adobe.com/page/slider/"
+    },
+    {
+      "capabilityId": "color-picker",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color area",
+      "url": "https://spectrum.adobe.com/page/color-area/"
+    },
+    {
+      "capabilityId": "rating",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Rating",
+      "url": "https://spectrum.adobe.com/page/rating/"
+    },
+    {
+      "capabilityId": "tags-input",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tag",
+      "url": "https://spectrum.adobe.com/page/tag/"
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Field label",
+      "url": "https://spectrum.adobe.com/page/field-label/"
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tabs",
+      "url": "https://spectrum.adobe.com/page/tabs/"
+    },
+    {
+      "capabilityId": "menu",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menu",
+      "url": "https://spectrum.adobe.com/page/menu/"
+    },
+    {
+      "capabilityId": "context-menu",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Quick actions",
+      "url": "https://spectrum.adobe.com/page/quick-actions/"
+    },
+    {
+      "capabilityId": "tree-view",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tree view",
+      "url": "https://spectrum.adobe.com/page/tree-view/"
+    },
+    {
+      "capabilityId": "segmented-control",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Action group",
+      "url": "https://spectrum.adobe.com/page/action-group/"
+    },
+    {
+      "capabilityId": "breadcrumb",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Breadcrumbs",
+      "url": "https://spectrum.adobe.com/page/breadcrumbs/"
+    },
+    {
+      "capabilityId": "navbar",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Application frame",
+      "url": "https://spectrum.adobe.com/page/application-frame/"
+    },
+    {
+      "capabilityId": "sidebar-nav",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Side navigation",
+      "url": "https://spectrum.adobe.com/page/side-navigation/"
+    },
+    {
+      "capabilityId": "alert-dialog",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Alert dialog",
+      "url": "https://spectrum.adobe.com/page/alert-dialog/"
+    },
+    {
+      "capabilityId": "drawer",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tray",
+      "url": "https://spectrum.adobe.com/page/tray/"
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popover",
+      "url": "https://spectrum.adobe.com/page/popover/"
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tooltip",
+      "url": "https://spectrum.adobe.com/page/tooltip/"
+    },
+    {
+      "capabilityId": "toast",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toast",
+      "url": "https://spectrum.adobe.com/page/toast/"
+    },
+    {
+      "capabilityId": "inline-alert",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "In-line alert",
+      "url": "https://spectrum.adobe.com/page/in-line-alert/"
+    },
+    {
+      "capabilityId": "data-table",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Table",
+      "url": "https://spectrum.adobe.com/page/table/"
+    },
+    {
+      "capabilityId": "card",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Cards",
+      "url": "https://spectrum.adobe.com/page/cards/"
+    },
+    {
+      "capabilityId": "avatar",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Avatar",
+      "url": "https://spectrum.adobe.com/page/avatar/"
+    },
+    {
+      "capabilityId": "badge",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Badge",
+      "url": "https://spectrum.adobe.com/page/badge/"
+    },
+    {
+      "capabilityId": "tag-chip",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tag",
+      "url": "https://spectrum.adobe.com/page/tag/"
+    },
+    {
+      "capabilityId": "code-block",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Code",
+      "url": "https://spectrum.adobe.com/page/code/"
+    },
+    {
+      "capabilityId": "progress-linear",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress bar",
+      "url": "https://spectrum.adobe.com/page/progress-bar/"
+    },
+    {
+      "capabilityId": "spinner",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress circle",
+      "url": "https://spectrum.adobe.com/page/progress-circle/"
+    },
+    {
+      "capabilityId": "grid-layout",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Responsive grid",
+      "url": "https://spectrum.adobe.com/page/responsive-grid/"
+    },
+    {
+      "capabilityId": "divider",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Divider",
+      "url": "https://spectrum.adobe.com/page/divider/"
+    },
+    {
+      "capabilityId": "typography-scale",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Typography",
+      "url": "https://spectrum.adobe.com/page/typography/"
+    },
+    {
+      "capabilityId": "spacing-scale",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spacing",
+      "url": "https://spectrum.adobe.com/page/spacing/"
+    },
+    {
+      "capabilityId": "radius",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Corner-radius tokens",
+      "url": "https://spectrum.adobe.com/page/design-tokens/"
+    },
+    {
+      "capabilityId": "motion-tokens",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Motion",
+      "url": "https://spectrum.adobe.com/page/motion/"
+    },
+    {
+      "capabilityId": "dark-mode",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color themes",
+      "url": "https://spectrum.adobe.com/page/color-fundamentals/"
+    },
+    {
+      "capabilityId": "color-contrast",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color (WCAG)",
+      "url": "https://spectrum.adobe.com/page/color-fundamentals/"
+    },
+    {
+      "capabilityId": "i18n-rtl",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Bi-directionality",
+      "url": "https://spectrum.adobe.com/page/bi-directionality/"
+    },
+    {
+      "capabilityId": "form-validation-flow",
+      "sourceId": "spectrum",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Form errors",
+      "url": "https://spectrum.adobe.com/page/form-errors/"
     }
   ]
 }
