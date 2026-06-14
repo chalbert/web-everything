@@ -124,6 +124,14 @@
     },
     {
       "capabilityId": "accordion",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accordion",
+      "url": "https://ui.shadcn.com/docs/components/accordion"
+    },
+    {
+      "capabilityId": "accordion",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -201,6 +209,14 @@
       "provenance": "verified",
       "sourceName": "Alert Dialog",
       "url": "https://www.radix-ui.com/primitives/docs/components/alert-dialog"
+    },
+    {
+      "capabilityId": "alert-dialog",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Alert Dialog",
+      "url": "https://ui.shadcn.com/docs/components/alert-dialog"
     },
     {
       "capabilityId": "alert-dialog",
@@ -540,6 +556,14 @@
     },
     {
       "capabilityId": "avatar",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Avatar",
+      "url": "https://ui.shadcn.com/docs/components/avatar"
+    },
+    {
+      "capabilityId": "avatar",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -641,6 +665,14 @@
       "provenance": "verified",
       "sourceName": "CounterLabel",
       "url": "https://primer.style/product/components/counter-label/"
+    },
+    {
+      "capabilityId": "badge",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Badge",
+      "url": "https://ui.shadcn.com/docs/components/badge"
     },
     {
       "capabilityId": "badge",
@@ -753,6 +785,14 @@
       "provenance": "verified",
       "sourceName": "Breadcrumbs",
       "url": "https://react-aria.adobe.com/Breadcrumbs"
+    },
+    {
+      "capabilityId": "breadcrumb",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Breadcrumb",
+      "url": "https://ui.shadcn.com/docs/components/breadcrumb"
     },
     {
       "capabilityId": "breadcrumb",
@@ -900,6 +940,14 @@
     },
     {
       "capabilityId": "button",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button",
+      "url": "https://ui.shadcn.com/docs/components/button"
+    },
+    {
+      "capabilityId": "button",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -1020,6 +1068,14 @@
     },
     {
       "capabilityId": "button-group",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button Group",
+      "url": "https://ui.shadcn.com/docs/components/button-group"
+    },
+    {
+      "capabilityId": "button-group",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -1124,6 +1180,14 @@
     },
     {
       "capabilityId": "card",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Card",
+      "url": "https://ui.shadcn.com/docs/components/card"
+    },
+    {
+      "capabilityId": "card",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -1193,6 +1257,14 @@
       "provenance": "verified",
       "sourceName": "Carousel",
       "url": "https://m3.material.io/components/carousel/accessibility"
+    },
+    {
+      "capabilityId": "carousel",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Carousel",
+      "url": "https://ui.shadcn.com/docs/components/carousel"
     },
     {
       "capabilityId": "carousel",
@@ -1345,6 +1417,14 @@
       "provenance": "verified",
       "sourceName": "Checkbox",
       "url": "https://react-aria.adobe.com/Checkbox"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://ui.shadcn.com/docs/components/checkbox"
     },
     {
       "capabilityId": "checkbox",
@@ -1668,6 +1748,14 @@
     },
     {
       "capabilityId": "color-tokens",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Theming (CSS Variables)",
+      "url": "https://ui.shadcn.com/docs/theming"
+    },
+    {
+      "capabilityId": "color-tokens",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -1804,6 +1892,14 @@
     },
     {
       "capabilityId": "combobox",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox",
+      "url": "https://ui.shadcn.com/docs/components/combobox"
+    },
+    {
+      "capabilityId": "combobox",
       "sourceId": "spectrum",
       "present": true,
       "provenance": "verified",
@@ -1854,9 +1950,9 @@
       "capabilityId": "command-palette",
       "sourceId": "shadcn-ui",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Command",
+      "url": "https://ui.shadcn.com/docs/components/command"
     },
     {
       "capabilityId": "context-menu",
@@ -1905,6 +2001,14 @@
       "provenance": "verified",
       "sourceName": "MenuTrigger",
       "url": "https://react-aria.adobe.com/Menu"
+    },
+    {
+      "capabilityId": "context-menu",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Context Menu",
+      "url": "https://ui.shadcn.com/docs/components/context-menu"
     },
     {
       "capabilityId": "context-menu",
@@ -2132,6 +2236,14 @@
     },
     {
       "capabilityId": "dark-mode",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dark Mode",
+      "url": "https://ui.shadcn.com/docs/dark-mode"
+    },
+    {
+      "capabilityId": "dark-mode",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -2225,6 +2337,14 @@
       "provenance": "verified",
       "sourceName": "Table",
       "url": "https://react-aria.adobe.com/Table"
+    },
+    {
+      "capabilityId": "data-table",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Data Table",
+      "url": "https://ui.shadcn.com/docs/components/data-table"
     },
     {
       "capabilityId": "data-table",
@@ -2337,6 +2457,14 @@
       "provenance": "verified",
       "sourceName": "DatePicker",
       "url": "https://react-aria.adobe.com/DatePicker"
+    },
+    {
+      "capabilityId": "date-picker",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Date Picker",
+      "url": "https://ui.shadcn.com/docs/components/date-picker"
     },
     {
       "capabilityId": "date-range-picker",
@@ -2596,6 +2724,14 @@
     },
     {
       "capabilityId": "dialog",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog",
+      "url": "https://ui.shadcn.com/docs/components/dialog"
+    },
+    {
+      "capabilityId": "dialog",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -2713,6 +2849,14 @@
       "provenance": "verified",
       "sourceName": "Disclosure",
       "url": "https://react-aria.adobe.com/Disclosure"
+    },
+    {
+      "capabilityId": "disclosure",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Collapsible",
+      "url": "https://ui.shadcn.com/docs/components/collapsible"
     },
     {
       "capabilityId": "disclosure",
@@ -2884,6 +3028,14 @@
     },
     {
       "capabilityId": "divider",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Separator",
+      "url": "https://ui.shadcn.com/docs/components/separator"
+    },
+    {
+      "capabilityId": "divider",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -3052,6 +3204,14 @@
     },
     {
       "capabilityId": "drawer",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Sheet",
+      "url": "https://ui.shadcn.com/docs/components/sheet"
+    },
+    {
+      "capabilityId": "drawer",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -3209,6 +3369,14 @@
       "provenance": "verified",
       "sourceName": "Blankslate",
       "url": "https://primer.style/product/components/blankslate/"
+    },
+    {
+      "capabilityId": "empty-state",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Empty",
+      "url": "https://ui.shadcn.com/docs/components/empty"
     },
     {
       "capabilityId": "empty-state",
@@ -3700,6 +3868,14 @@
     },
     {
       "capabilityId": "form-layout",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Field",
+      "url": "https://ui.shadcn.com/docs/components/field"
+    },
+    {
+      "capabilityId": "form-layout",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -3996,6 +4172,14 @@
     },
     {
       "capabilityId": "i18n-rtl",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Direction (DirectionProvider)",
+      "url": "https://ui.shadcn.com/docs/components/direction"
+    },
+    {
+      "capabilityId": "i18n-rtl",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -4201,6 +4385,14 @@
       "provenance": "verified",
       "sourceName": "InlineMessage",
       "url": "https://primer.style/product/components/inline-message/"
+    },
+    {
+      "capabilityId": "inline-alert",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Alert",
+      "url": "https://ui.shadcn.com/docs/components/alert"
     },
     {
       "capabilityId": "inline-alert",
@@ -4804,6 +4996,14 @@
     },
     {
       "capabilityId": "menu",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dropdown Menu",
+      "url": "https://ui.shadcn.com/docs/components/dropdown-menu"
+    },
+    {
+      "capabilityId": "menu",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -5012,6 +5212,14 @@
     },
     {
       "capabilityId": "multi-select",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox (Multiple Selection)",
+      "url": "https://ui.shadcn.com/docs/components/combobox"
+    },
+    {
+      "capabilityId": "multi-select",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -5113,6 +5321,14 @@
       "provenance": "verified",
       "sourceName": "Navigation Menu",
       "url": "https://www.radix-ui.com/primitives/docs/components/navigation-menu"
+    },
+    {
+      "capabilityId": "navbar",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Navigation Menu",
+      "url": "https://ui.shadcn.com/docs/components/navigation-menu"
     },
     {
       "capabilityId": "navbar",
@@ -5323,6 +5539,14 @@
       "url": "https://primer.style/product/components/pagination/"
     },
     {
+      "capabilityId": "pagination",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Pagination",
+      "url": "https://ui.shadcn.com/docs/components/pagination"
+    },
+    {
       "capabilityId": "pin-input",
       "sourceId": "ark-ui",
       "present": true,
@@ -5366,9 +5590,9 @@
       "capabilityId": "pin-input",
       "sourceId": "shadcn-ui",
       "present": true,
-      "provenance": "notable-inference",
-      "sourceName": null,
-      "url": null
+      "provenance": "verified",
+      "sourceName": "Input OTP",
+      "url": "https://ui.shadcn.com/docs/components/input-otp"
     },
     {
       "capabilityId": "popover",
@@ -5497,6 +5721,14 @@
       "provenance": "verified",
       "sourceName": "Popover",
       "url": "https://react-aria.adobe.com/Popover"
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popover",
+      "url": "https://ui.shadcn.com/docs/components/popover"
     },
     {
       "capabilityId": "popover",
@@ -5649,6 +5881,14 @@
       "provenance": "verified",
       "sourceName": "ProgressBar",
       "url": "https://react-aria.adobe.com/ProgressBar"
+    },
+    {
+      "capabilityId": "progress-linear",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress",
+      "url": "https://ui.shadcn.com/docs/components/progress"
     },
     {
       "capabilityId": "progress-linear",
@@ -5820,6 +6060,14 @@
     },
     {
       "capabilityId": "radio-group",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio Group",
+      "url": "https://ui.shadcn.com/docs/components/radio-group"
+    },
+    {
+      "capabilityId": "radio-group",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -5913,6 +6161,14 @@
       "provenance": "verified",
       "sourceName": "Border tokens",
       "url": "https://polaris-react.shopify.com/tokens/border"
+    },
+    {
+      "capabilityId": "radius",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Theming (radius scale)",
+      "url": "https://ui.shadcn.com/docs/theming"
     },
     {
       "capabilityId": "radius",
@@ -6172,6 +6428,14 @@
     },
     {
       "capabilityId": "resizable-splitter",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Resizable",
+      "url": "https://ui.shadcn.com/docs/components/resizable"
+    },
+    {
+      "capabilityId": "resizable-splitter",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -6363,6 +6627,14 @@
       "url": "https://www.radix-ui.com/primitives/docs/components/scroll-area"
     },
     {
+      "capabilityId": "scroll-area",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Scroll Area",
+      "url": "https://ui.shadcn.com/docs/components/scroll-area"
+    },
+    {
       "capabilityId": "segmented-control",
       "sourceId": "ant-design",
       "present": true,
@@ -6465,6 +6737,14 @@
       "provenance": "verified",
       "sourceName": "ToggleButtonGroup",
       "url": "https://react-aria.adobe.com/ToggleButtonGroup"
+    },
+    {
+      "capabilityId": "segmented-control",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toggle Group",
+      "url": "https://ui.shadcn.com/docs/components/toggle-group"
     },
     {
       "capabilityId": "segmented-control",
@@ -6628,6 +6908,14 @@
     },
     {
       "capabilityId": "select",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Select",
+      "url": "https://ui.shadcn.com/docs/components/select"
+    },
+    {
+      "capabilityId": "select",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -6740,6 +7028,14 @@
     },
     {
       "capabilityId": "sidebar-nav",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Sidebar",
+      "url": "https://ui.shadcn.com/docs/components/sidebar"
+    },
+    {
+      "capabilityId": "sidebar-nav",
       "sourceId": "spectrum",
       "present": true,
       "provenance": "verified",
@@ -6825,6 +7121,14 @@
       "provenance": "verified",
       "sourceName": "SkeletonBox",
       "url": "https://primer.style/product/components/skeleton-box/"
+    },
+    {
+      "capabilityId": "skeleton",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Skeleton",
+      "url": "https://ui.shadcn.com/docs/components/skeleton"
     },
     {
       "capabilityId": "skeleton",
@@ -6937,6 +7241,14 @@
       "provenance": "verified",
       "sourceName": "Slider",
       "url": "https://react-aria.adobe.com/Slider"
+    },
+    {
+      "capabilityId": "slider",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider",
+      "url": "https://ui.shadcn.com/docs/components/slider"
     },
     {
       "capabilityId": "slider",
@@ -7153,6 +7465,14 @@
       "provenance": "verified",
       "sourceName": "Spinner",
       "url": "https://primer.style/product/components/spinner/"
+    },
+    {
+      "capabilityId": "spinner",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Spinner",
+      "url": "https://ui.shadcn.com/docs/components/spinner"
     },
     {
       "capabilityId": "spinner",
@@ -7508,6 +7828,14 @@
     },
     {
       "capabilityId": "switch",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Switch",
+      "url": "https://ui.shadcn.com/docs/components/switch"
+    },
+    {
+      "capabilityId": "switch",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -7665,6 +7993,14 @@
       "provenance": "verified",
       "sourceName": "Tabs",
       "url": "https://react-aria.adobe.com/Tabs"
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tabs",
+      "url": "https://ui.shadcn.com/docs/components/tabs"
     },
     {
       "capabilityId": "tabs",
@@ -8068,6 +8404,14 @@
     },
     {
       "capabilityId": "text-field",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Input",
+      "url": "https://ui.shadcn.com/docs/components/input"
+    },
+    {
+      "capabilityId": "text-field",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -8185,6 +8529,14 @@
       "provenance": "verified",
       "sourceName": "TextArea",
       "url": "https://react-aria.adobe.com/TextField"
+    },
+    {
+      "capabilityId": "textarea",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Textarea",
+      "url": "https://ui.shadcn.com/docs/components/textarea"
     },
     {
       "capabilityId": "textarea",
@@ -8436,6 +8788,14 @@
     },
     {
       "capabilityId": "toast",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Sonner",
+      "url": "https://ui.shadcn.com/docs/components/sonner"
+    },
+    {
+      "capabilityId": "toast",
       "sourceId": "shoelace",
       "present": true,
       "provenance": "verified",
@@ -8585,6 +8945,14 @@
       "provenance": "verified",
       "sourceName": "Tooltip",
       "url": "https://react-aria.adobe.com/Tooltip"
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tooltip",
+      "url": "https://ui.shadcn.com/docs/components/tooltip"
     },
     {
       "capabilityId": "tooltip",
@@ -8913,6 +9281,14 @@
       "provenance": "verified",
       "sourceName": "Typography primitives",
       "url": "https://primer.style/product/primitives/typography/"
+    },
+    {
+      "capabilityId": "typography-scale",
+      "sourceId": "shadcn-ui",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Typography",
+      "url": "https://ui.shadcn.com/docs/components/typography"
     },
     {
       "capabilityId": "typography-scale",
