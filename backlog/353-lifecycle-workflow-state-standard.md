@@ -5,7 +5,7 @@ size: 8
 status: resolved
 dateOpened: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: weblifecycle
+graduatedTo: "project:weblifecycle"
 tags: [candidate-standard, exercise-app-discovery, lifecycle, workflow, state-machine]
 crossRef: { url: /backlog/314-flagship-exercise-apps/, label: "Surfaced by exercise-app work (#314)" }
 ---

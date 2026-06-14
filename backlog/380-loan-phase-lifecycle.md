@@ -8,7 +8,7 @@ parent: "317"
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
-graduatedTo: lifecycle
+graduatedTo: "block:lifecycle"
 tags: [exercise-app, loan-origination, lifecycle, phase]
 ---
 

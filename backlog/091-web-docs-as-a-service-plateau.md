@@ -7,7 +7,7 @@ status: resolved
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: webdocs
+graduatedTo: "project:webdocs"
 preparedDate: "2026-06-11"
 relatedReport: reports/2026-06-11-web-docs-as-a-service.md
 tags: [monetization, business-model, webdocs, plateau, hosting, conformance, design-system, documentation]

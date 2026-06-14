@@ -6,7 +6,7 @@ status: resolved
 parent: "317"
 dateOpened: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: lifecycle
+graduatedTo: "block:lifecycle"
 blockedBy: []
 tags: [exercise-app, loan-origination, weblifecycle, lifecycle, block, conformance]
 crossRef: { url: /backlog/353-lifecycle-workflow-state-standard/, label: "Lifecycle standard (#353, codified)" }

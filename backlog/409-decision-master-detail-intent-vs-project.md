@@ -5,7 +5,7 @@ size: 3
 status: resolved
 dateOpened: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: master-detail
+graduatedTo: "intent:master-detail"
 parent: "356"
 tags: [decision, master-detail, intent, layer-placement, exercise-app-discovery]
 crossRef: { url: /backlog/356-master-detail-coordination-standard/, label: "Candidate standard (#356)" }

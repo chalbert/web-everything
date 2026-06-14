@@ -14,7 +14,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
-import { buildGraduatedKinds, validateBacklogItem } from '../check-standards-rules.mjs';
+import { buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated } from '../check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -72,6 +72,31 @@ describe('validateBacklogItem — graduatedTo resolution (#247)', () => {
       const res = run({ status: 'resolved', dateResolved: '2026-06-09', graduatedTo });
       expect(res.errors, `graduatedTo: ${graduatedTo}`).toEqual([]);
     }
+  });
+});
+
+describe('isCanonicalGraduated — graduatedTo leading-token canonicality (#614)', () => {
+  it('treats none / resolving typed-id / repo-path / file#anchor as canonical', () => {
+    for (const v of ['none', 'intent:motion', 'block:data-grid', 'capabilities/resolver.ts', 'blocks/renderers/x.ts', 'a/b/c.mjs'])
+      expect(isCanonicalGraduated(v, FIXTURE_KINDS), v).toBe(true);
+  });
+  it('treats a leading typed-id or repo-path with a trailing annotation as canonical (entity still leads)', () => {
+    for (const v of ['intent:motion — the announcer contract', 'capabilities/resolver.ts (resolveSlot / native-first)'])
+      expect(isCanonicalGraduated(v, FIXTURE_KINDS), v).toBe(true);
+  });
+  it('treats a bare id resolvable in a registry as canonical (the normalizer will prefix it)', () => {
+    expect(isCanonicalGraduated('motion', FIXTURE_KINDS)).toBe(true);          // bare intent id
+    expect(isCanonicalGraduated('data-grid', FIXTURE_KINDS)).toBe(true);       // bare block id
+  });
+  it('strips a YAML end-of-line comment before judging', () => {
+    expect(isCanonicalGraduated('none   # triage epic — decomposed', FIXTURE_KINDS)).toBe(true);
+  });
+  it('flags pure prose / an unresolvable lead / an item-id split as non-canonical', () => {
+    for (const v of ['Protocol', 'enhanced the existing validation engine', '575, 576, 577', 'plateau: getStandInElement.ts (tag-keyed rehydration)'])
+      expect(isCanonicalGraduated(v, FIXTURE_KINDS), v).toBe(false);
+  });
+  it('leaves the object (crossRef) form alone — not this rule\'s subject', () => {
+    expect(isCanonicalGraduated({ url: '/blocks/x/', label: 'X' }, FIXTURE_KINDS)).toBe(true);
   });
 
   it('nudges a resolved idea that records no graduatedTo (warning, not error)', () => {

@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: conformance-autofix-demo
+graduatedTo: "demo:conformance-autofix-demo"
 tags: []
 ---
 

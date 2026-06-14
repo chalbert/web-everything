@@ -6,7 +6,7 @@ status: resolved
 blockedBy: ["295"]
 dateOpened: "2026-06-11"
 dateResolved: "2026-06-12"
-graduatedTo: tree-select
+graduatedTo: "block:tree-select"
 tags: []
 ---
 

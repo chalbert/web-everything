@@ -5,7 +5,7 @@ size: 5
 status: resolved
 dateOpened: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: webdecisions
+graduatedTo: "project:webdecisions"
 tags: [candidate-standard, exercise-app-discovery, explainability, decision-trace, audit]
 crossRef: { url: /backlog/093-business-rule-manager-proof-of-compliance/, label: "Related: business-rule / proof-of-compliance (#093)" }
 ---

@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-05-31"
 dateStarted: "2026-06-10"
 dateResolved: "2026-06-10"
-graduatedTo: disclosure
+graduatedTo: "intent:disclosure"
 tags: [gap-analysis, intent, disclosure]
 ---
 

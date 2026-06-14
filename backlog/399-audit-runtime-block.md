@@ -6,7 +6,7 @@ status: resolved
 parent: "317"
 dateOpened: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: audit-trail
+graduatedTo: "block:audit-trail"
 blockedBy: []
 tags: [exercise-app, loan-origination, webaudit, audit-trail, block, conformance]
 crossRef: { url: /backlog/357-audit-trail-standard/, label: "Audit Trail standard (#357, codified)" }

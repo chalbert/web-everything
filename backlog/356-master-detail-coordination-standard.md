@@ -5,7 +5,7 @@ size: 3
 status: resolved
 dateOpened: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: master-detail
+graduatedTo: "intent:master-detail"
 tags: [candidate-standard, exercise-app-discovery, master-detail, layout, selection]
 crossRef: { url: /backlog/409-decision-master-detail-intent-vs-project/, label: "Layer decision (#409)" }
 ---

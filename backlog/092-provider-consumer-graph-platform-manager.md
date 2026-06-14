@@ -7,7 +7,7 @@ status: resolved
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: webregistries
+graduatedTo: "project:webregistries"
 preparedDate: "2026-06-12"
 relatedReport: reports/2026-06-12-provider-consumer-graph.md
 tags: [monetization, business-model, plateau, platform-manager, governance, dependency-graph, registries, injectors, contexts, enterprise]

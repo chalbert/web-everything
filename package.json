@@ -30,6 +30,7 @@
     "check:readiness": "node scripts/check-readiness.mjs",
     "fix:readiness": "node scripts/check-readiness.mjs --apply",
     "propose:readiness": "node scripts/propose-readiness.mjs",
+    "normalize:graduated": "node scripts/normalize-graduated.mjs",
     "autofix": "node scripts/conformance-autofix.mjs",
     "design-refs": "node scripts/design-refs.mjs",
     "design-refs:frontier": "node scripts/design-refs/frontier.mjs",

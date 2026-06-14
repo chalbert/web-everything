@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"
-graduatedTo: webtraits
+graduatedTo: "project:webtraits"
 tags: [webtraits, webbehaviors, activation-lifecycle, visibility, intersection-observer, native-first]
 relatedProject: webtraits
 relatedReport: reports/2026-06-02-lazy-traits-loading.md

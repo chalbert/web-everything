@@ -7,7 +7,7 @@ status: resolved
 dateOpened: "2026-06-13"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
-graduatedTo: app-shell-compatibility
+graduatedTo: "protocol:app-shell-compatibility"
 tags: []
 ---
 

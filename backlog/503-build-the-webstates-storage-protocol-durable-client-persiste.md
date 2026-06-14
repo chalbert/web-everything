@@ -7,7 +7,7 @@ blockedBy: ["011"]
 dateOpened: "2026-06-13"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
-graduatedTo: storage
+graduatedTo: "protocol:storage"
 tags: []
 ---
 

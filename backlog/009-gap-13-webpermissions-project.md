@@ -10,7 +10,7 @@ relatedReport: reports/2026-06-11-webpermissions-project.md
 preparedDate: "2026-06-12"
 blockedBy: [455]
 dateResolved: "2026-06-13"
-graduatedTo: webnotifications
+graduatedTo: "project:webnotifications"
 ---
 
 # Decide the Notifications / Permissions domain — `webnotifications` (gap #13)

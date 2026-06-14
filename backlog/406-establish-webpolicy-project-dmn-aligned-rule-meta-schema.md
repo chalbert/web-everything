@@ -7,7 +7,7 @@ status: resolved
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: webpolicy
+graduatedTo: "project:webpolicy"
 tags: []
 ---
 

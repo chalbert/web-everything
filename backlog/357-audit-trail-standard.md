@@ -5,7 +5,7 @@ size: 5
 status: resolved
 dateOpened: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: webaudit
+graduatedTo: "project:webaudit"
 tags: [candidate-standard, exercise-app-discovery, audit-trail, governance, compliance]
 crossRef: { url: /backlog/351-web-compliance-project/, label: "Related: Web Compliance evidence trail (#351)" }
 ---

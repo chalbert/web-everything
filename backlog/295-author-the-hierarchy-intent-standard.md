@@ -7,7 +7,7 @@ blockedBy: []
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"
-graduatedTo: hierarchy
+graduatedTo: "intent:hierarchy"
 tags: []
 ---
 

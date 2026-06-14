@@ -8,7 +8,7 @@ parent: "318"
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
-graduatedTo: notification
+graduatedTo: "block:notification"
 tags: [exercise-app, auto-insurance, documents, notifications, audit, phase]
 ---
 

@@ -6,7 +6,7 @@ status: resolved
 parent: "317"
 dateOpened: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: selection
+graduatedTo: "block:selection"
 tags: [exercise-app, loan-origination, selection, master-detail, consumption-slice]
 ---
 

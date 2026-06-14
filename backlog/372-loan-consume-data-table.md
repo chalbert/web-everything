@@ -6,7 +6,7 @@ status: resolved
 parent: "317"
 dateOpened: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: data-table
+graduatedTo: "block:data-table"
 tags: [exercise-app, loan-origination, data-table, collection-operations, consumption-slice]
 ---
 

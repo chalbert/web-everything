@@ -6,7 +6,7 @@ status: resolved
 parent: "317"
 dateOpened: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: router
+graduatedTo: "block:router"
 tags: [exercise-app, loan-origination, router, consumption-slice]
 ---
 

@@ -7,7 +7,7 @@ blockedBy: ["057"]
 dateOpened: "2026-06-03"
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"
-graduatedTo: stepper
+graduatedTo: "block:stepper"
 tags: [navigation, intent, wizard, stepper, linear, block, gap]
 relatedReport: reports/2026-06-03-navigation-intent-vocabulary.md
 relatedProject: webblocks

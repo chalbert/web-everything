@@ -5,7 +5,7 @@ size: 3
 status: resolved
 dateOpened: "2026-06-06"
 dateResolved: "2026-06-07"
-graduatedTo: "blocks.json#background-task-surface"
+graduatedTo: "block:background-task-surface"
 tags: [block, background-task, status-bar, async, layout, surface, ux]
 relatedProject: webintents
 crossRef: { url: /intents/background-task/, label: Background Task Intent }

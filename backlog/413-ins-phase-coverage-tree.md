@@ -6,7 +6,7 @@ status: resolved
 parent: "318"
 dateOpened: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: tree-select
+graduatedTo: "block:tree-select"
 tags: [exercise-app, auto-insurance, coverage, tree-select, constraints, phase]
 ---
 

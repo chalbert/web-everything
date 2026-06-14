@@ -63,6 +63,24 @@ export const dUnresolvedRef = (entity, id, file, field, value, refRegistry) =>
 // free-form (the sanctioned alternative, left untouched).
 export const GRADUATED_REF = /^([a-z][a-z]*):([A-Za-z0-9_-]+)$/;
 
+// #614 — graduatedTo canonical form. The field must lead with a resolvable entity reference so the
+// audit's G3 lineage walk and entity-graph joins can read it: `none`, a resolving `<kind>:<id>`, a repo
+// path, or a bare id resolvable in a registry (which `normalize-graduated.mjs` upgrades to `<kind>:<id>`).
+// A trailing annotation after that leading token is tolerated; pure prose where the entity is buried mid-
+// sentence (or absent) is NOT canonical — it belongs in the body. Returns true for the object (crossRef)
+// form, which is a different legacy shape this rule doesn't police.
+const GRAD_REPO_PATH_LEAD = /^[A-Za-z0-9_.@-]+\/[A-Za-z0-9_.@{}-]+/;   // leading token carries a path separator
+export function isCanonicalGraduated(value, graduatedKinds) {
+  if (typeof value !== 'string') return true;
+  const v = value.replace(/\s+#\s.*$/, '').trim();                     // strip a YAML end-of-line comment
+  if (v === '' || v === 'none') return true;
+  const lead = v.split(/\s+/)[0].replace(/[.,;]+$/, '');
+  const typed = /^([a-z]+):([A-Za-z0-9_-]+)$/.exec(lead);
+  if (typed) { const reg = graduatedKinds[typed[1]]; return !!reg && reg.ids.has(typed[2]); }
+  if (GRAD_REPO_PATH_LEAD.test(lead)) return true;
+  return Object.values(graduatedKinds).some((r) => r.ids.has(lead));   // bare id resolvable in some registry
+}
+
 /**
  * Build the graduatedTo `kind → { ids, file }` resolution table from the loaded registries. A
  * graduatedTo written in the compact `kind:slug` form is resolved against the matching registry, so a

@@ -6,7 +6,7 @@ status: resolved
 parent: "318"
 dateOpened: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: stepper
+graduatedTo: "block:stepper"
 tags: [exercise-app, auto-insurance, configurator, questionnaire, view-transitions, phase]
 ---
 

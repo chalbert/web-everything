@@ -5,7 +5,7 @@ size: 3
 status: resolved
 dateOpened: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: status-indicator
+graduatedTo: "intent:status-indicator"
 tags: [candidate-standard, exercise-app-discovery, intent, status, badge]
 crossRef: { url: /backlog/314-flagship-exercise-apps/, label: "Surfaced by exercise-app work (#314)" }
 ---

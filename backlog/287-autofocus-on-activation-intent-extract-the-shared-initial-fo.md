@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"
-graduatedTo: autofocus-on-activation
+graduatedTo: "intent:autofocus-on-activation"
 tags: [navigation, focus, accessibility, intent, composition]
 relatedReport: reports/2026-06-03-navigation-intent-vocabulary.md
 relatedProject: webintents

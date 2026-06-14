@@ -7,7 +7,7 @@ blockedBy: ["288"]
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"
-graduatedTo: guard
+graduatedTo: "protocol:guard"
 tags: []
 ---
 

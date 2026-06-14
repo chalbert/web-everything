@@ -16,7 +16,7 @@ import { renderInventory, spliceInventory } from './gen-inventory.mjs';
 import { checkDemos } from './check-demos.mjs';
 import {
   BACKLOG_STATUSES, BACKLOG_TYPES, WORK_ITEMS, FIB, FILE,
-  dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem,
+  dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated,
   checkStatus, validateProtocol, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, permalinkSegment, validateViteProxyCoverage,
   validateModuleResolutionLock, findRawHtmlInMarkdown, findBuriedForkSections,
@@ -297,10 +297,11 @@ for (const item of backlog) {
 // graduatedTo value resolution (#247): the kind → {registry id-set, source file} table. A graduatedTo
 // written in the compact `kind:slug` ref form is resolved against the matching registry, so a typo'd
 // kind (`intnet:droplist`) or a stale slug is an ERROR — not silently accepted like a correct one.
-// Everything NOT in that compact shape (free-form prose describing what was built, a URL or file path,
-// a {url,label} crossRef object, or the `none` sentinel) is the sanctioned alternative and is left
-// untouched. Adapters live nested under adapters.json `items[]`. (Table + rule body live in
-// check-standards-rules.mjs so they're unit-tested with fixtures — #251.)
+// #614 tightened the rest: the field must LEAD with a resolvable entity reference (`none`, `kind:slug`,
+// a repo path, or a bare registry id) so entity-graph joins + the G3 lineage walk can read it; pure prose
+// where the entity is buried is non-canonical and surfaced as one aggregated nudge below (not per-item).
+// Adapters live nested under adapters.json `items[]`. (Table + rule body live in check-standards-rules.mjs
+// so they're unit-tested with fixtures — #251.)
 const graduatedKinds = buildGraduatedKinds({ blocks, intents, protocols, projects, plugs, capabilityIds, adapters, demos });
 
 // ── 6d. Backlog (single source of truth for ideas/issues/reviews/decisions) ──
@@ -319,6 +320,13 @@ for (const item of backlog) {
   for (const e of itemErrors) err(e.message, e.descriptor);
   for (const w of itemWarnings) warn(w.message, w.descriptor);
 }
+// #614 — aggregated non-canonical graduatedTo nudge. Per-item would flood (≈90 resolved items still
+// carry narrative); one summary line points at the normalizer + the tracking item instead.
+const nonCanonGrad = backlog
+  .filter((it) => it.status === 'resolved' && typeof it.graduatedTo === 'string' && !isCanonicalGraduated(it.graduatedTo, graduatedKinds))
+  .map((it) => `#${it.num ?? it.id}`);
+if (nonCanonGrad.length)
+  warn(`${nonCanonGrad.length} resolved items have a non-canonical graduatedTo (prose/narrative instead of a leading entity ref) — run \`npm run normalize:graduated\` to auto-fix the safe ones; bulk narrative→body cleanup tracked in #619. Items: ${nonCanonGrad.slice(0, 10).join(', ')}${nonCanonGrad.length > 10 ? `, …+${nonCanonGrad.length - 10}` : ''}`);
 
 // ── 6d-bis. Raw-HTML-in-body lint (#290) ──
 // An un-backticked HTML tag in a backlog body is passed through by 11ty and parsed by the browser; a
@@ -666,6 +674,35 @@ try {
   for (const w of dw) warn(w.message, w.descriptor);
 } catch (e) {
   err(`Demo operational-wiring check failed: ${e.message}`);
+}
+
+// ── 10. Backlog type-filter UI must cover every BACKLOG_TYPE ───────────────────
+// The /backlog/ board hides any card whose `data-type` is not an *active filter chip*
+// (src/assets/js/home-display.js → `failType`). The chip set is built from hard-coded type
+// lists in src/backlog.njk (the "Tracked work" facet + the "Prioritisation" table facet). When a
+// new type is added to BACKLOG_TYPES (the SoT in check-standards-rules.mjs) but a UI list is not
+// updated, EVERY item of that type renders into the DOM yet is permanently invisible — there is no
+// chip to re-enable it. That is exactly how `type: review` items (#602/#610) vanished from the board
+// while passing every other check. Assert each hard-coded list covers the full type vocabulary so
+// the drift fails the gate instead of silently swallowing a whole class of items.
+try {
+  const njk = readFileSync(join(ROOT, 'src/backlog.njk'), 'utf8');
+  // Both facets declare their order as a bracketed string-array literal of type tokens. Match every
+  // `[ "idea", "issue", … ]` whose members are all known types — that uniquely identifies the two
+  // type-filter lists without coupling to surrounding template syntax.
+  const TYPE_TOKENS = [...BACKLOG_TYPES];
+  const listLiterals = [...njk.matchAll(/\[((?:\s*["'][a-z]+["']\s*,?)+)\]/g)]
+    .map((m) => m[1].match(/["']([a-z]+)["']/g).map((q) => q.replace(/["']/g, '')))
+    .filter((toks) => toks.every((t) => BACKLOG_TYPES.has(t)) && toks.includes('decision'));
+  if (!listLiterals.length)
+    err('Backlog type-filter check: could not find any type-list literal in src/backlog.njk (template shape changed — update check-standards.mjs §10)');
+  for (const toks of listLiterals) {
+    const missing = TYPE_TOKENS.filter((t) => !toks.includes(t));
+    if (missing.length)
+      err(`src/backlog.njk type-filter list [${toks.join(', ')}] omits backlog type(s) ${missing.map((t) => `"${t}"`).join(', ')} — those items render but are permanently hidden (no filter chip). Add them to every type list in backlog.njk.`);
+  }
+} catch (e) {
+  err(`Backlog type-filter coverage check failed: ${e.message}`);
 }
 
 // ── Report ────────────────────────────────────────────────────────────────────

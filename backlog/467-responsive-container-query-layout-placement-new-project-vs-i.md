@@ -7,7 +7,7 @@ status: resolved
 dateOpened: "2026-06-13"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
-graduatedTo: breakpoint
+graduatedTo: "intent:breakpoint"
 preparedDate: "2026-06-13"
 tags: [decision, responsive, container-queries, breakpoint-intent, layout-intent, layer-placement, book-candidate]
 relatedReport: reports/2026-06-13-responsive-container-query-layout.md
