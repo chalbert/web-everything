@@ -1,0 +1,40 @@
+<h3 id="overview">Overview</h3>
+<p>
+    <code>CustomEditorEngineRegistry</code> exposes <code>window.customEditorEngine</code> for registering named
+    editing-engine providers, so any editable surface delegates to one shared engine resolved through the
+    injector chain rather than hard-coding an editor. The standard registers the
+    <a href="/plugs/customeditorengine/">native-first default</a>; library adapters (ProseMirror, Lexical,
+    Slate, Quill) register on top, with <strong>precedence + graceful degradation</strong> the only rules —
+    the same impl-swap shape as <a href="/plugs/custompositioningregistry/">CustomPositioningRegistry</a>. It
+    backs the <a href="/projects/webediting/#protocol-editor-engine">Editor Engine Protocol</a>.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td>Native default</td>
+        <td>Baseline</td>
+        <td>The <code>contenteditable</code>+<code>InputEvent</code> engine is registered as the lowest-precedence always-available provider.</td>
+    </tr>
+    <tr>
+        <td>Injector chain (config-extends-platform-default)</td>
+        <td>WE</td>
+        <td>A project registers/overrides the engine once; every editable surface resolves it through the chain.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+interface CustomEditorEngineRegistry {
+    /** Register a named engine provider (precedence-ordered; last-wins per id). */
+    register(id: string, engine: CustomEditorEngine, precedence?: number): void;
+    /** Resolve the highest-precedence available engine for a host (or the native default). */
+    resolve(host: HTMLElement): CustomEditorEngine;
+}
+
+// Ambient global, resolved through the injector chain:
+declare global {
+    interface Window { customEditorEngine: CustomEditorEngineRegistry }
+}
+{% endhighlight %}

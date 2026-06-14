@@ -368,5 +368,21 @@
     "type": "Global",
     "summary": "Base contract an async-resolution strategy implements — startValidation(fieldId, input) opening a generation handle, shouldApplyResult(handle, result) deciding whether a freshly-arrived answer is still current (the heart of stale-drop), and onInputChange(fieldId, newInput) superseding/aborting an in-flight check. The only constraint is that results feed the same pending{version} → valid|invalid SourceResult #212 consumes. Satisfied alike by the versioning default, cancellation, and custom strategies.",
     "projects": ["webvalidation"]
+  },
+  {
+    "id": "customeditorengineregistry",
+    "name": "CustomEditorEngineRegistry",
+    "status": "concept",
+    "type": "Global",
+    "summary": "Exposes window.customEditorEngine for registering named editing-engine providers (native contenteditable+InputEvent, ProseMirror, Lexical, Slate, Quill) so any editing surface delegates to one shared engine resolved through the injector chain. The native-first default is registered by the standard; library adapters register on top, precedence + graceful degradation the only rules.",
+    "projects": ["webediting"]
+  },
+  {
+    "id": "customeditorengine",
+    "name": "CustomEditorEngine",
+    "status": "concept",
+    "type": "Global",
+    "summary": "Base contract an editing-engine provider implements — attach(host, options) wiring an editable surface over the structured-node-tree pivot and returning a cleanup, emitting normalized InputEvent-shaped changes and negotiating the available editing-surface capability tier (contenteditable floor, editcontext upgrade). Satisfied alike by the native-first contenteditable default and by every library adapter.",
+    "projects": ["webediting"]
   }
 ]

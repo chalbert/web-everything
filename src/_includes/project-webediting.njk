@@ -1,0 +1,65 @@
+<section class="intro-section mb-12">
+  <h3 id="mission">Mission</h3>
+  <p>
+    <strong>Web Editing</strong> standardizes <strong>rich-text / structured editing</strong> — how an
+    editable surface captures input and mutates a document, with the <em>editing engine</em> kept swappable
+    behind one contract. It defines the <a href="#protocol-editor-engine">Editor Engine Protocol</a> that
+    conformant engines satisfy, so a native <code>contenteditable</code> surface, ProseMirror, Lexical, Slate,
+    or Quill are <strong>interchangeable</strong> without rewriting the document model.
+  </p>
+  <p>
+    Editing is delivered through a pluggable registry —
+    <a href="/plugs/customeditorengineregistry/"><code>CustomEditorEngineRegistry</code></a> over the
+    <a href="/plugs/customeditorengine/"><code>CustomEditorEngine</code></a> base contract — so an app
+    configures the engine once and every editable surface delegates through the injector chain. The editing
+    surface itself is negotiated from the <a href="/capabilities/">editing-surface capabilities</a>
+    (<code>contenteditable</code> floor, <code>editcontext</code> upgrade, <code>sanitizer-api</code>,
+    <code>highlight-api</code>) minted in <a href="/backlog/628-webediting-capabilities-contenteditable-editcontext-sanitize/">#628</a>.
+  </p>
+
+  <div class="comparison-block" style="background: rgba(99, 102, 241, 0.08); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #6366f1; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #4338ca; font-size: 1rem;">Engine, not editor UX</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      Web Editing owns the <em>engine</em> — capturing input over a structured-node-tree pivot. The
+      <strong>formatting controls</strong> (bold/italic/lists — the
+      <a href="/backlog/630-webediting-intents-text-formatting-controls-axis-rich-text-e/">#630</a> intent) and
+      the <strong>serializer registry</strong>
+      (<a href="/backlog/631-webediting-plugs-customserializerregistry-html-default-cus/">#631</a>) are
+      separate, composable concerns — never folded into the engine.
+    </p>
+  </div>
+</section>
+
+<section id="protocol-editor-engine" class="section-card">
+  <h3 id="editor-engine-protocol">Editor Engine Protocol</h3>
+  <p>
+    Interop contract for the rich-text editing engine: an engine <strong>attaches</strong> to a host element,
+    exposes the editable surface over a <strong>structured-node-tree internal pivot</strong>, and emits
+    normalized <code>InputEvent</code>-shaped changes. Conformant engines from different vendors become
+    <strong>swappable</strong> — swap the native default for a ProseMirror adapter and the document model is
+    untouched, because the engine reads and writes the structured pivot, never a vendor document format.
+  </p>
+
+  <h4 id="native-first-default">Native-first default</h4>
+  <p>
+    The default engine that ships with the standard is <strong>native</strong>: a
+    <code>contenteditable</code> host driven by the <code>InputEvent</code> /
+    <a href="https://developer.mozilla.org/en-US/docs/Web/API/InputEvent/getTargetRanges">getTargetRanges</a>
+    contract, upgrading to <code>EditContext</code> where available (the <a href="/capabilities/">editing-surface
+    capability</a> tiers). Library adapters (ProseMirror, Lexical, Slate, Quill) register as alternative impls
+    behind the same contract; precedence + graceful degradation are the only rules, exactly as for
+    <a href="/plugs/custompositioner/"><code>CustomPositioner</code></a> and the
+    <a href="/projects/webcharts/#protocol-custom-chart-renderer"><code>CustomChartRenderer</code></a> engine-swap.
+  </p>
+
+  <h4 id="boundaries">What the protocol does not own</h4>
+  <p>
+    The protocol fixes the engine contract + the editing-surface capability negotiation. It does <strong>not</strong>
+    own the formatting/toolbar UX (the text-formatting intent, #630), the serializer registry (HTML default +
+    custom serializers, #631), or the inline-trigger / mention surface
+    (<a href="/blocks/inline-trigger/">Inline Trigger block</a>, #620) — those compose the engine rather than
+    extend it. Graduated from
+    <a href="/backlog/590-candidate-standard-rich-text-contenteditable-editing/">#590</a> Fork 2 (ratified),
+    epic <a href="/backlog/618-graduate-the-rich-text-editing-standard-webediting-project-s/">#618</a>.
+  </p>
+</section>

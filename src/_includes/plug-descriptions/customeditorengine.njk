@@ -1,0 +1,47 @@
+<h3 id="overview">Overview</h3>
+<p>
+    <code>CustomEditorEngine</code> is the single contract every editing-engine provider implements. Its
+    <code>attach()</code> method wires an editable surface over a structured-node-tree pivot and returns a
+    <em>cleanup</em> function; the engine emits normalized <code>InputEvent</code>-shaped changes and negotiates
+    which <a href="/capabilities/">editing-surface capability</a> tier is available
+    (<code>contenteditable</code> floor, <code>editcontext</code> upgrade). The native-first default provider and
+    every library adapter (ProseMirror, Lexical, Slate, Quill) satisfy this same interface, which is what lets
+    <a href="/plugs/customeditorengineregistry/">the registry</a> treat them interchangeably. It realizes the
+    <a href="/projects/webediting/#protocol-editor-engine">Editor Engine Protocol</a>.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/HTMLElement/contentEditable">contenteditable</a></td>
+        <td>Baseline</td>
+        <td>The native-first default engine is a <code>contenteditable</code> host — the editing-surface floor.</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/InputEvent">InputEvent / getTargetRanges</a></td>
+        <td>Baseline</td>
+        <td>Mutations are captured as <code>beforeinput</code>/<code>input</code> with target ranges — the normalized change shape every engine emits.</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/EditContext">EditContext</a></td>
+        <td>Progressive</td>
+        <td>Where supported, the default engine upgrades to <code>EditContext</code> for IME-correct editing without contenteditable quirks.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+interface CustomEditorEngine {
+    /** Wire an editable surface over the structured-node-tree pivot; returns a cleanup. */
+    attach(host: HTMLElement, options?: EditorEngineOptions): EditorEngineHandle;
+}
+
+interface EditorEngineHandle {
+    /** Normalized, InputEvent-shaped change stream (engine-agnostic). */
+    onChange(listener: (change: EditorChange) => void): () => void;
+    /** The capability tier the engine resolved (contenteditable | editcontext). */
+    readonly surface: 'contenteditable' | 'editcontext';
+    destroy(): void;
+}
+{% endhighlight %}
