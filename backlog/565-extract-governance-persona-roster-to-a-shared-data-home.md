@@ -2,8 +2,11 @@
 type: issue
 workItem: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: src/profiles/roster.ts (shared data home) + src/profiles/schema.ts; profiles.ts now a barrel
 locus: plateau-app
 tags: [personas, profiles, governance, plateau, dev-browser, refactor]
 crossRef: { url: /backlog/166-governance-persona-roster-charter-schema/, label: "Governance-persona decision (#166)" }
@@ -23,3 +26,12 @@ Graduated from [#166](/backlog/166-governance-persona-roster-charter-schema/) (F
 ## Foundational
 
 Blocks the clone-to-derive mechanism ([#567](/backlog/567-clone-to-derive-custom-personas-with-local-free-share-paid-t/)) — custom personas need a data home to live in.
+
+## Progress
+
+Resolved 2026-06-14 (batch). Split `plateau-app/src/profiles/profiles.ts` into:
+- `schema.ts` — the `Profile`/`ReviewArea`/`Gate`/`Signal`/`PlatformArea` interfaces + `PLATFORM_AREA_LABELS` (unchanged schema).
+- `roster.ts` — the seven persona objects + `export const profiles`, importing only `type { Profile }` from `./schema` (no app imports) — the shared data home both lenses read.
+- `profiles.ts` — now a barrel re-exporting both + `getProfile`, so every existing `./profiles` import path is unchanged.
+
+The dev-browser toggle-map (#141) imports `roster.ts` (data) + `schema.ts` (types), not the SaaS app internals. No schema change (that is #566); no visual/behavior change — `/profiles` renders from the same data, 61 plateau-app tests green, profiles type-clean. Unblocks the clone-to-derive data home (#567).
