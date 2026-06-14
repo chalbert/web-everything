@@ -6105,6 +6105,414 @@
       "provenance": "verified",
       "sourceName": "Form Controls",
       "url": "https://shoelace.style/getting-started/form-controls"
+    },
+    {
+      "capabilityId": "button",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Button",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/button/"
+    },
+    {
+      "capabilityId": "icon-button",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Action Button",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/action-button/"
+    },
+    {
+      "capabilityId": "button-group",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Action Group",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/action-group/"
+    },
+    {
+      "capabilityId": "split-button",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Split Button",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/split-button/"
+    },
+    {
+      "capabilityId": "link",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Link",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/link/"
+    },
+    {
+      "capabilityId": "text-field",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Textfield",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/textfield/"
+    },
+    {
+      "capabilityId": "textarea",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Textarea",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/textarea/"
+    },
+    {
+      "capabilityId": "number-input",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Number Field",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/number-field/"
+    },
+    {
+      "capabilityId": "select",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Picker",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/picker/"
+    },
+    {
+      "capabilityId": "combobox",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Combobox",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/combobox/"
+    },
+    {
+      "capabilityId": "checkbox",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Checkbox",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/checkbox/"
+    },
+    {
+      "capabilityId": "radio-group",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Radio Group",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/radio-group/"
+    },
+    {
+      "capabilityId": "switch",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Switch",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/switch/"
+    },
+    {
+      "capabilityId": "slider",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/slider/"
+    },
+    {
+      "capabilityId": "range-slider",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Slider (range)",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/slider/"
+    },
+    {
+      "capabilityId": "color-picker",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Color Area",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/color-area/"
+    },
+    {
+      "capabilityId": "file-upload",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dropzone",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/dropzone/"
+    },
+    {
+      "capabilityId": "tags-input",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tags",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/tags/"
+    },
+    {
+      "capabilityId": "form-layout",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Field Group",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/field-group/"
+    },
+    {
+      "capabilityId": "accordion",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Accordion",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/accordion/"
+    },
+    {
+      "capabilityId": "tabs",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tabs",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/tabs/"
+    },
+    {
+      "capabilityId": "menu",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Menu",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/menu/"
+    },
+    {
+      "capabilityId": "context-menu",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Action Menu",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/action-menu/"
+    },
+    {
+      "capabilityId": "segmented-control",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Action Group",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/action-group/"
+    },
+    {
+      "capabilityId": "breadcrumb",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Breadcrumbs",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/breadcrumbs/"
+    },
+    {
+      "capabilityId": "navbar",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Top Nav",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/top-nav/"
+    },
+    {
+      "capabilityId": "sidebar-nav",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Sidenav",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/sidenav/"
+    },
+    {
+      "capabilityId": "dialog",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dialog",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/dialog/"
+    },
+    {
+      "capabilityId": "alert-dialog",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Alert Dialog",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/alert-dialog/"
+    },
+    {
+      "capabilityId": "drawer",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tray",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/tray/"
+    },
+    {
+      "capabilityId": "popover",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Popover",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/popover/"
+    },
+    {
+      "capabilityId": "tooltip",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tooltip",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/tooltip/"
+    },
+    {
+      "capabilityId": "toast",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Toast",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/toast/"
+    },
+    {
+      "capabilityId": "inline-alert",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Alert Banner",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/alert-banner/"
+    },
+    {
+      "capabilityId": "data-table",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Table",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/table/"
+    },
+    {
+      "capabilityId": "card",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Card",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/card/"
+    },
+    {
+      "capabilityId": "avatar",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Avatar",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/avatar/"
+    },
+    {
+      "capabilityId": "badge",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Badge",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/badge/"
+    },
+    {
+      "capabilityId": "tag-chip",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Tag",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/tag/"
+    },
+    {
+      "capabilityId": "progress-linear",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress Bar",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/progress-bar/"
+    },
+    {
+      "capabilityId": "spinner",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Progress Circle",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/progress-circle/"
+    },
+    {
+      "capabilityId": "empty-state",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Illustrated Message",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/illustrated-message/"
+    },
+    {
+      "capabilityId": "grid-layout",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Grid",
+      "url": "https://opensource.adobe.com/spectrum-web-components/tools/grid/"
+    },
+    {
+      "capabilityId": "divider",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Divider",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/divider/"
+    },
+    {
+      "capabilityId": "resizable-splitter",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Split View",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/split-view/"
+    },
+    {
+      "capabilityId": "anchored-positioning",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Overlay",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/overlay/"
+    },
+    {
+      "capabilityId": "focus-trap",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Overlay focus management",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/overlay/"
+    },
+    {
+      "capabilityId": "focus-return",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Overlay focus restoration",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/overlay/"
+    },
+    {
+      "capabilityId": "virtualization",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Table (virtualised)",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/table/"
+    },
+    {
+      "capabilityId": "drag-and-drop",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Dropzone",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/dropzone/"
+    },
+    {
+      "capabilityId": "dismissal",
+      "sourceId": "spectrum-web-components",
+      "present": true,
+      "provenance": "verified",
+      "sourceName": "Close Button",
+      "url": "https://opensource.adobe.com/spectrum-web-components/components/close-button/"
     }
   ]
 }
