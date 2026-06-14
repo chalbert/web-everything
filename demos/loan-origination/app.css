@@ -275,3 +275,21 @@ code { background: #eef1f5; padding: 1px 5px; border-radius: 2px; font-family: u
 .doc-dropzone { margin: 8px 12px 12px; padding: 14px; border: 1.5px dashed var(--line, #cbd5e1); border-radius: 6px; text-align: center; font-size: 12px; color: var(--ink-2, #667); display: flex; flex-direction: column; gap: 3px; }
 .doc-dropzone:focus { outline: 2px solid #4338ca; outline-offset: 2px; }
 .doc-dropzone .muted { font-size: 11px; }
+
+/* Phase S8 (#385) — underwriter workbench */
+.uw-body { border: 1px solid var(--line, #e2e2e2); border-top: none; border-radius: 0 0 3px 3px; padding: 4px 0; }
+.cond-row { display: flex; align-items: center; gap: 10px; padding: 7px 12px; border-top: 1px solid var(--line, #eee); font-size: 12px; }
+.cond-row:first-child { border-top: none; }
+.cond-type { font-weight: 700; font-size: 10px; letter-spacing: .04em; padding: 1px 6px; border-radius: 4px; background: #eef2f6; color: #445; }
+.cond-desc { flex: 1; color: var(--ink-1, #1a1a1a); }
+.cond-actions { display: flex; gap: 6px; }
+.cond-actions button, .uw-issue { font-size: 11px; padding: 3px 9px; border: 1px solid var(--line, #ccc); border-radius: 4px; background: #fff; cursor: pointer; }
+.cond-clear { border-color: #137333; color: #137333; }
+.cond-waive { border-color: #92600a; color: #92600a; }
+.uw-decision { padding: 10px 12px; border-top: 1px solid var(--line, #eee); }
+.uw-decide { display: flex; align-items: flex-end; gap: 10px; flex-wrap: wrap; font-size: 12px; }
+.uw-decide label { display: flex; flex-direction: column; gap: 3px; }
+.uw-decide select, .uw-decide input { padding: 4px 6px; border: 1px solid var(--line, #ccc); border-radius: 4px; font-size: 12px; }
+.uw-issue { border-color: #4338ca; color: #4338ca; align-self: flex-end; }
+.uw-decided { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; }
+.uw-reasons { color: #9b1c1c; flex-basis: 100%; }

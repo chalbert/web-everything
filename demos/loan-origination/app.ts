@@ -51,6 +51,14 @@ import {
   DEFAULT_UPLOAD_CONSTRAINTS,
 } from './domain/documents';
 import type { LoanDocument } from './domain/types';
+import {
+  clearCondition,
+  waiveCondition,
+  openConditionCounts,
+  DECISION_OUTCOMES,
+  suggestedReasonCodes,
+  issueDecision,
+} from './domain/underwriting';
 
 // Web Lifecycle block (active): the loan's status machine is the data-defined LOAN_LIFECYCLE driving the
 // shipping DefaultLifecycleProvider — we no longer hand-roll transitions. The Status Indicator render
@@ -304,6 +312,55 @@ function renderDocumentChecklist(app: Application): string {
     <div class="doc-checklist">${rows}${dropzone}</div>`;
 }
 
+// Phase S8 (#385): the underwriter workbench — condition management + formal decisioning, consuming the
+// active status-indicator / decision-trace / audit-trail standards (no new gap).
+const COND_TONE = { open: 'caution', submitted: 'info', cleared: 'positive', waived: 'neutral' } as const;
+const DECISION_TONE = { 'approve-with-conditions': 'positive', suspend: 'caution', decline: 'critical' } as const;
+const DECISION_LABEL: Record<'approve-with-conditions' | 'suspend' | 'decline', string> = {
+  'approve-with-conditions': 'Approve w/ conditions', suspend: 'Suspend', decline: 'Decline',
+};
+
+function renderUnderwriterWorkbench(app: Application, result: EvaluationResult): string {
+  const counts = openConditionCounts(app.conditions);
+  const openSummary = Object.entries(counts).map(([t, n]) => `${n} ${t}`).join(' · ') || 'none open';
+  const condRows = app.conditions.length
+    ? app.conditions
+        .map(
+          (c) => `
+      <div class="cond-row" data-cond="${c.id}">
+        <span class="cond-type">${c.type}</span>
+        <span class="cond-desc">${escHtml(c.description)}</span>
+        ${statusIndicatorHTML({ label: c.status, tone: COND_TONE[c.status], shape: 'pill' })}
+        ${
+          c.status === 'open' || c.status === 'submitted'
+            ? `<span class="cond-actions"><button type="button" class="cond-clear" data-cond="${c.id}">Clear</button><button type="button" class="cond-waive" data-cond="${c.id}">Waive</button></span>`
+            : ''
+        }
+      </div>`,
+        )
+        .join('')
+    : '<div class="muted" style="padding:8px 12px">No conditions added.</div>';
+
+  const decided = app.decision;
+  const decisionPanel = decided
+    ? `<div class="uw-decided">
+        ${statusIndicatorHTML({ label: DECISION_LABEL[decided.outcome], tone: DECISION_TONE[decided.outcome], shape: 'badge' })}
+        <span class="muted">by ${escHtml(decided.decidedBy)} · ${decided.decidedAt.slice(0, 10)} · rule set ${decided.ruleSetVersion}</span>
+        ${decided.reasonCodes.length ? `<div class="uw-reasons">Reason codes: ${decided.reasonCodes.map(escHtml).join(', ')}</div>` : ''}
+      </div>`
+    : `<form class="uw-decide">
+        <label>Decision <select name="outcome" class="uw-outcome">${DECISION_OUTCOMES.map((o) => `<option value="${o}">${DECISION_LABEL[o]}</option>`).join('')}</select></label>
+        <label>Reason codes <input name="reasons" placeholder="auto from finding for suspend/decline"></label>
+        <button type="submit" class="uw-issue">Issue decision</button>
+      </form>`;
+
+  return `<div class="panel-hd" style="border-radius:3px 3px 0 0">Underwriter workbench · finding ${FINDING_LABEL[result.finding]} · conditions: ${openSummary}</div>
+    <div class="uw-body">
+      <div class="cond-list">${condRows}</div>
+      <div class="uw-decision">${decisionPanel}</div>
+    </div>`;
+}
+
 function renderTrace(
   app: Application,
   result: EvaluationResult,
@@ -348,6 +405,7 @@ function renderTrace(
     <div class="panel-hd" style="border-radius:3px 3px 0 0">Proof-of-compliance trace</div>
     ${decisionHTML}
     ${renderDocumentChecklist(app)}
+    ${renderUnderwriterWorkbench(app, result)}
     <div class="panel-hd" style="border-radius:3px 3px 0 0">Audit trail</div>
     ${historyHTML}
     ${renderDisclosures(app)}
@@ -634,6 +692,24 @@ function boot() {
           await showTrace(current, panel);
           return;
         }
+
+        // Phase S8 (#385): clear / waive an underwriting condition → audit (before/after).
+        const condBtn = target.closest<HTMLButtonElement>('button.cond-clear, button.cond-waive');
+        if (condBtn) {
+          const condId = condBtn.dataset.cond!;
+          const waive = condBtn.classList.contains('cond-waive');
+          const before = current.conditions.find((c) => c.id === condId)?.status;
+          current.conditions = waive ? waiveCondition(current.conditions, condId) : clearCondition(current.conditions, condId);
+          const after = waive ? 'waived' : 'cleared';
+          await loanAudit.append({
+            target: { type: 'loan', id: current.loanNumber }, action: `condition.${after} — ${condId}`, actor: ACTOR,
+            at: new Date().toISOString(),
+            before: [{ path: `/conditions/${condId}/status`, op: 'replace', oldValue: before }],
+            after: [{ path: `/conditions/${condId}/status`, op: 'replace', newValue: after }],
+          });
+          await showTrace(current, panel);
+          return;
+        }
       });
 
       // Phase S5 (#383): the document upload surface. PLATFORM-GAP: #647 — the WE data-transfer intent
@@ -688,8 +764,37 @@ function boot() {
       // the shipping audit trail (the timestamped record the TRID flow requires), then re-render so the
       // clock chip flips to "TRID satisfied" and the lifecycle gate opens.
       panel.addEventListener('submit', async (e) => {
+        if (!current) return;
+
+        // Phase S8 (#385): the underwriter issues a formal decision → set app.decision (normalized to the
+        // active decision-trace standard's record), audit it, and notify. Reason codes auto-seed from the
+        // rules-engine finding for a suspend/decline; the underwriter may override in the field.
+        const decideForm = (e.target as HTMLElement).closest<HTMLFormElement>('form.uw-decide');
+        if (decideForm) {
+          e.preventDefault();
+          const fd = new FormData(decideForm);
+          const outcome = fd.get('outcome')?.toString() as (typeof DECISION_OUTCOMES)[number];
+          const result = evaluate(current);
+          const typed = (fd.get('reasons')?.toString() ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+          const reasonCodes = typed.length ? typed : suggestedReasonCodes(outcome, result);
+          const at = new Date();
+          current.decision = issueDecision({
+            outcome, finding: result.finding, reasonCodes,
+            ruleSetVersion: result.ruleSetVersion, decidedBy: ACTOR.id ?? ACTOR.role, decidedAt: at.toISOString(),
+          });
+          await loanAudit.append({
+            target: { type: 'loan', id: current.loanNumber },
+            action: `decision.issued — ${outcome}${current.decision.reasonCodes.length ? ` (${current.decision.reasonCodes.join(', ')})` : ''}`,
+            actor: ACTOR, at: at.toISOString(),
+            after: [{ path: '/decision/outcome', op: 'add', newValue: outcome }],
+          });
+          loanNotifications.push(current.loanNumber, stateChangeNotification(current.loanNumber, current.state), at.toISOString());
+          await showTrace(current, panel);
+          return;
+        }
+
         const form = (e.target as HTMLElement).closest<HTMLFormElement>('form.disc-esign');
-        if (!form || !current) return;
+        if (!form) return;
         e.preventDefault();
         const signer = new FormData(form).get('signer')?.toString().trim();
         if (!signer) return;
