@@ -59,6 +59,7 @@ import {
   suggestedReasonCodes,
   issueDecision,
 } from './domain/underwriting';
+import { snapshotDraft, applyDraft, reconcile, coEditMessage, type DraftSnapshot } from './domain/drafts';
 
 // Web Lifecycle block (active): the loan's status machine is the data-defined LOAN_LIFECYCLE driving the
 // shipping DefaultLifecycleProvider — we no longer hand-roll transitions. The Status Indicator render
@@ -269,6 +270,29 @@ const DOC_TONE = {
 } as const;
 
 const escHtml = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
+
+// Phase S4 (#388): save-and-resume drafts + last-writer-wins co-edit. PLATFORM-GAP: #648 — WE has no
+// durable-persistence runtime (per #011 it's an unbuilt facet of webstates), so this is a thin hand-rolled
+// localStorage adapter per that future contract. Each tab gets a stable editor token; the loan's working
+// state autosaves on every render and resumes on open; a concurrent tab is detected via the storage event.
+const EDITOR_TOKEN = Math.random().toString(36).slice(2, 10);
+const DRAFT_KEY = (loanNumber: string) => `lo-draft:${loanNumber}`;
+function loadDraft(loanNumber: string): DraftSnapshot | undefined {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY(loanNumber));
+    return raw ? (JSON.parse(raw) as DraftSnapshot) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+function saveDraft(snap: DraftSnapshot): void {
+  try {
+    localStorage.setItem(DRAFT_KEY(snap.loanNumber), JSON.stringify(snap));
+  } catch {
+    /* storage quota / disabled — a demo concern only */
+  }
+}
+const draftResumed = new WeakSet<Application>();
 
 /** The rules-driven document checklist panel: per-item state chip, blocking flag, upload, accept/reject. */
 function renderDocumentChecklist(app: Application): string {
@@ -511,6 +535,15 @@ function boot() {
   // Render the full master-detail trace for a loan: available moves + proof trace + audit timeline.
   const showTrace = async (app: Application, panel: HTMLElement) => {
     await seedAudit(app);
+    // Phase S4 (#388): resume once — restore the exact saved working state (documents / conditions /
+    // decision) from a prior session, overriding the freshly-derived checklist. Then autosave below.
+    let resumedFrom = '';
+    if (!draftResumed.has(app)) {
+      ensureChecklist(app); // derive the rules-driven checklist first…
+      const saved = loadDraft(app.loanNumber);
+      if (saved) { applyDraft(app, saved); resumedFrom = saved.savedAt; } // …a saved draft then overrides
+      draftResumed.add(app);
+    }
     // Phase S9 (#386): the initial disclosure package is owed on submit. We materialize it the first
     // time the file is inspected (idempotent) and log the generation to the shipping audit trail, so
     // the TRID clock + e-sign gate have something to render against.
@@ -526,7 +559,15 @@ function boot() {
     const next = await availableMoves(app);
     const history = await loanAudit.queryByEntity(app.loanNumber);
     const timeline = auditTimelineHTML(history, { density: 'compact', detail: 'expanded' });
-    panel.innerHTML = renderTrace(app, evaluate(app), next, timeline);
+    // Phase S4 (#388): the draft banner — a "resumed from…" note and/or an "X also editing" co-edit warning
+    // (computed from the stored draft vs this tab's editor token, last-writer-wins).
+    const stored = loadDraft(app.loanNumber);
+    const here = snapshotDraft(app, EDITOR_TOKEN, new Date().toISOString());
+    const coEdit = coEditMessage(here, stored);
+    const banner = `${resumedFrom ? `<div class="draft-resumed">Resumed your saved draft (${resumedFrom.slice(0, 16).replace('T', ' ')}).</div>` : ''}${coEdit ? `<div class="draft-coedit">${escHtml(coEdit)}</div>` : ''}`;
+    panel.innerHTML = banner + renderTrace(app, evaluate(app), next, timeline);
+    // Autosave the current working state — this tab becomes the last writer (last-writer-wins).
+    saveDraft(here);
   };
 
   // Entry-URL normalization is handled by the route-view's `entry` attribute (#365) — no hand-rolled
@@ -616,6 +657,20 @@ function boot() {
     // Guard against double-binding — fillPipeline can run more than once on the same stamped panel.
     if (!panel.dataset.lcWired) {
       panel.dataset.lcWired = '1';
+
+      // Phase S4 (#388): live co-edit — another tab saving this loan's draft fires a `storage` event here.
+      // Reconcile last-writer-wins: if the incoming snapshot is newer than ours, adopt it and re-render
+      // (the "X also editing" banner shows on the next render). PLATFORM-GAP: #648 (no webstates runtime).
+      window.addEventListener('storage', (e) => {
+        if (!current || e.key !== DRAFT_KEY(current.loanNumber) || !e.newValue) return;
+        const incoming = (() => { try { return JSON.parse(e.newValue!) as DraftSnapshot; } catch { return undefined; } })();
+        if (!incoming) return;
+        const local = snapshotDraft(current, EDITOR_TOKEN, new Date().toISOString());
+        if (reconcile(local, incoming).action === 'adopt') {
+          applyDraft(current, incoming);
+          void showTrace(current, panel);
+        }
+      });
       panel.addEventListener('click', async (e) => {
         const target = e.target as HTMLElement;
         if (!current) return;

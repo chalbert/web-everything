@@ -293,3 +293,8 @@ code { background: #eef1f5; padding: 1px 5px; border-radius: 2px; font-family: u
 .uw-issue { border-color: #4338ca; color: #4338ca; align-self: flex-end; }
 .uw-decided { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; }
 .uw-reasons { color: #9b1c1c; flex-basis: 100%; }
+
+/* Phase S4 (#388) — save-and-resume drafts + co-edit banners */
+.draft-resumed, .draft-coedit { font-size: 11.5px; padding: 6px 12px; border-radius: 4px; margin-bottom: 8px; }
+.draft-resumed { background: #eef6f0; color: #137333; border: 1px solid #cde9d6; }
+.draft-coedit { background: #fef6e7; color: #92600a; border: 1px solid #f6e2b8; }

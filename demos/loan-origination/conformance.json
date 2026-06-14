@@ -18,6 +18,7 @@
   "candidateStandards": [
     { "concept": "e-signature capture", "exhibitedBy": "Phase S9 disclosures e-sign (#386) — typed borrower signature + timestamp + audit record", "note": "No WE e-signature standard yet; the app hand-rolls a typed-signature form. A reusable surface (typed/drawn signature, timestamp, signer identity, immutable record) — proactive /new-standard feed." },
     { "concept": "regulatory deadline clock (business-day)", "exhibitedBy": "Phase S9 TRID 3-business-day clock (#386) — addBusinessDays / businessDaysRemaining in domain/disclosures.ts", "note": "No WE deadline/SLA-clock standard; business-day math + due/overdue evaluation is app-side. Candidate for a reusable deadline-clock standard." },
-    { "concept": "disclosure / document-package generation", "exhibitedBy": "Phase S9 generateInitialDisclosures (#386) — package envelope + Loan Estimate", "note": "No WE document-generation standard; the package is assembled app-side. Candidate Layer-2 surface." }
+    { "concept": "disclosure / document-package generation", "exhibitedBy": "Phase S9 generateInitialDisclosures (#386) — package envelope + Loan Estimate", "note": "No WE document-generation standard; the package is assembled app-side. Candidate Layer-2 surface." },
+    { "concept": "durable draft persistence (save-and-resume) + last-writer-wins co-edit", "exhibitedBy": "Phase S4 drafts (#388) — domain/drafts.ts snapshot/restore + reconcile; app.ts localStorage adapter + storage-event co-edit banner", "note": "No WE persistence runtime — #011 ruled the durable store an unbuilt facet of webstates + co-edit a change-tracking strategy. The app hand-rolls localStorage behind PLATFORM-GAP #648 (the build this drives)." }
   ]
 }
