@@ -49,8 +49,11 @@ instant support**. Rank delivery shapes by operational burden:
 **Tool-form before service-form.** Most ideas below have *both* a tool form (runs
 on the customer's machine/CI — tier 1) and a service form (we host it — tier 2+).
 **Ship the tool form first**; treat the hosted/live-serve version as a later phase
-once there's a reason to take on uptime. This pairs with "open source = free, paid
-product = license": a licensed self-run tool is the lowest-burden way to charge.
+once there's a reason to take on uptime — **parked, not forbidden**: its concrete home
+is [#554](/backlog/554-plateau-hosted-saas-product-suite-shell-multi-product-accoun/)
+(the hosted SaaS-suite shell), under which per-product hosted economics park. This pairs
+with "open source = free, paid product = license": a licensed self-run tool is the
+lowest-burden way to charge.
 
 ## The ideas (ranked by fit)
 
