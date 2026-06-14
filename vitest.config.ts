@@ -55,6 +55,7 @@ export default defineConfig({
       'validation-generation/**/__tests__/**/*.test.{ts,tsx}', // validation-generation intents + adapter registry (#304)
       'module-resolution/**/__tests__/**/*.test.{ts,tsx}', // module-resolution axis model + materializer (#274)
       'source-resolution/**/__tests__/**/*.test.{ts,tsx}', // source-anchor contract + resolver chain (#575)
+      'conformance-evidence/**/__tests__/**/*.test.{ts,tsx}', // conformance-evidence manifest contract (#599)
       'guard/**/__tests__/**/*.test.{ts,tsx}', // guard protocol provider+predicate seam (#288/#289)
       'webtheme/**/__tests__/**/*.test.{ts,tsx}', // webtheme token model + DTCG→CSS compile (#404)
       'webpolicy/**/__tests__/**/*.test.{ts,tsx}', // webpolicy proof-of-compliance hash chain (#407) + enforcement seam (#408)
