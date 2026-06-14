@@ -103,6 +103,12 @@ Forks 1, 3, 6 are near-ratification (High); 2 and 5 carry a real but well-leanin
 
 **Recommended: C — quick-set + `allowAllEmojis` escape hatch.** Honours most-flexible-default (the restriction is the author's opt-in, the full set is always reachable) while matching real usage. *Rejected:* A (no escape hatch — the restriction becomes the ceiling); B as a *default* (no system ships it; it's the opt-in extreme, not the default).
 
+*Whose set — authority vs convention (the default's membership, sharpened):*
+- **Emoji have an authority — the Unicode Consortium** (UTS #51; the **RGI** "Recommended for General Interchange" set; CLDR names + emoji-ordering) — the same body Fork 3 defers to. The quick-set's members must therefore be **RGI fully-qualified emoji** (so they render cross-platform), named via CLDR — one a11y path shared with Fork 3.
+- **No body standardizes a *reaction* set** — reactions are a UX *convention*, and it has **converged**: a small sentiment-spanning set (👍 ❤️ 😂 😮 😢 😡, ± 👎/🎉) recurs across Facebook (7 reactions), Teams/Slack (~6), LinkedIn. So the shipped default is **that convergent set, not GitHub's 8 chosen arbitrarily** — and it lives in the **platform config** (overridable per *Config-Extends-Platform-Default*), never hardcoded in the block.
+- **Mobile convention validates C directly:** **iOS 18 Tapbacks** ship exactly model C — a fixed small set surfaced first **plus** any-emoji expansion.
+- **Distinct concern:** a "frequently/recently used" row is **picker personalization (Fork 4)** — a per-user signal — not the reaction default-set definition; keep them separate.
+
 ## On resolution
 
 Each fork gains a dated ruling; the item then graduates to a **`blockedBy` chain in composition order** — glyph-rendering intent first (the substrate), then the picker (composed) and reaction (block + intent) as consumers, with sticker as a mode of the glyph intent. A prepared decision yields agent-ready builds, not code.
@@ -115,6 +121,6 @@ Each fork gains a dated ruling; the item then graduates to a **`blockedBy` chain
 
 - **Status:** active — six rulings + spin-outs amended into the item; **awaiting ratification** before resolve + graduation.
 - **Branch:** docs/standard-authoring-workflow
-- **Done:** a11y mechanics sharpened (Forks 2 sticker / 3 glyph / 5 reaction); Web Docs "shop" dual-consumer relationship folded into Fork 4; spin-outs recorded under *On resolution*. **Effort/cost stripped from fork tradeoffs** (Forks 1/2/3/5 — "more to build / a second entry / more entries / lighter / maintenance cost" were prioritization smuggled into the merit column; now merit-only per [backlog-workflow.md:244](../docs/agent/backlog-workflow.md#L244), which was extended to forbid the in-fork leak). Directions unchanged (1·B, 2·B, 3·meaningful+native-font, 4·compose, 5·block+intent, 6·C).
+- **Done:** a11y mechanics sharpened (Forks 2 sticker / 3 glyph / 5 reaction); Web Docs "shop" dual-consumer relationship folded into Fork 4; spin-outs recorded under *On resolution*. **Effort/cost stripped from fork tradeoffs** (Forks 1/2/3/5 — "more to build / a second entry / more entries / lighter / maintenance cost" were prioritization smuggled into the merit column; now merit-only per [backlog-workflow.md:244](../docs/agent/backlog-workflow.md#L244), which was extended to forbid the in-fork leak). **Fork 6 default-set membership grounded** — Unicode RGI + CLDR for emoji authority; reaction quick-set = the convergent cross-platform sentiment set (no org standardizes reactions), in platform config not hardcoded; iOS 18 Tapbacks cited as model-C precedent. Directions unchanged (1·B, 2·B, 3·meaningful+native-font, 4·compose, 5·block+intent, 6·C).
 - **Next:** on the user's nod — resolve (`active → resolved` + `dateResolved`, ruling per fork), then author the `blockedBy` build chain (intent → picker + reaction) and the two spin-out items.
 - **Notes:** no fork direction moved; amendments are a11y-mechanics + the authoring/shop consumer only.

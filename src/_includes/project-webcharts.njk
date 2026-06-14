@@ -1,0 +1,53 @@
+<section class="intro-section mb-12">
+    <h3 id="mission">Mission</h3>
+    <p>
+        <strong>Web Charts</strong> brings the chart / data-visualization domain into the platform on the
+        same terms as every other Web Everything standard: a chart is declared by its <em>semantic intent</em>
+        &mdash; what the data is and what it means &mdash; kept strictly separate from its <em>presentation</em>,
+        which is drawn natively and themed through <a href="/projects/webtheme/">Web Theme</a> tokens. A consuming
+        app describes the chart it wants; the platform renders it, swaps the renderer behind one contract, and
+        proves it accessible.
+    </p>
+</section>
+
+<section id="scope" class="section-card">
+    <h3 id="scope-heading">Scope</h3>
+    <p>
+        The standard adopts a thin <strong>Vega-Lite L1 profile</strong> as its semantic core (higher tiers are
+        additive, never required), and defines a renderer-swap <strong>Protocol</strong> with a native-first SVG
+        default so incumbent engines plug in behind it rather than leaking into the spec. Ratified in
+        <a href="/backlog/105-data-visualization-charts/">#105</a> and scaffolded under epic
+        <a href="/backlog/570-scaffold-the-webcharts-project-vega-lite-l1-profile-customch/">#570</a>.
+    </p>
+    <div class="standards-grid">
+        <div class="standard-card flex flex-col">
+            <h4 id="scope-semantic" class="text-lg font-bold m-0 text-gray-900">Semantic plane</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                A Vega-Lite L1 profile schema describes the chart's meaning &mdash; marks, encodings, and data
+                &mdash; with no presentation coupling. Kept deliberately separate from the theme plane.
+            </p>
+        </div>
+        <div class="standard-card flex flex-col">
+            <h4 id="scope-presentation" class="text-lg font-bold m-0 text-gray-900">Presentation plane</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                Drawing consumes <a href="/projects/webtheme/">Web Theme</a> tokens, with a native-first SVG
+                renderer as the default. A <code>CustomChartRenderer</code> Protocol lets Vega / Plotly / ECharts
+                adapters swap in behind one contract <span class="text-gray-400">(authored in a later slice)</span>.
+            </p>
+        </div>
+        <div class="standard-card flex flex-col">
+            <h4 id="scope-conformance" class="text-lg font-bold m-0 text-gray-900">Conformance</h4>
+            <p class="text-gray-600 text-sm leading-relaxed mb-0">
+                A suite scores three axes &mdash; semantic fidelity, theme application, and
+                <strong>accessibility</strong> as a first-class axis &mdash; so a renderer either conforms or
+                is told exactly where it falls short.
+            </p>
+        </div>
+    </div>
+    <div class="bg-blue-50 border-l-4 border-blue-400 p-3 mt-6 text-xs text-blue-800">
+        <strong>Status:</strong> concept &mdash; this is the project skeleton (slice a of
+        <a href="/backlog/570-scaffold-the-webcharts-project-vega-lite-l1-profile-customch/">#570</a>). The
+        Vega-Lite L1 schema, the <code>CustomChartRenderer</code> protocol, and the conformance suite land in
+        the following slices.
+    </div>
+</section>
