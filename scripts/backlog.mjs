@@ -182,12 +182,21 @@ function scaffold() {
 }
 
 /**
- * calibrate — fold one session's observed (points resolved ÷ context fraction) into the rolling
+ * calibrate — fold one session's observed (points resolved ÷ context fraction) into the
  * session-capacity estimate that sizes a points-budgeted batch (capacity.json). This is the close-out
  * feedback loop: the count cap is gone, so the budget must stay honest about what a session actually
- * fits. EMA-blend so a single odd session can't swing the target, and keep the last 12 raw samples for
- * audit. `--points` = cost-points resolved (sum of each item's batchCost: a story's size, a task = 2);
+ * fits. `--points` = cost-points resolved (sum of each item's batchCost: a story's size, a task = 2);
  * `--context-pct` = the share of the window consumed at close (the editor's context meter, 1–100).
+ *
+ * Estimator = a CONTEXT-WEIGHTED MEAN over the retained 12-sample window, NOT a fixed-α EMA. A fixed-α
+ * blend perpetually tracks the last few sessions and never tightens — more samples don't shrink the
+ * error, they just slide the window (it can't get more accurate with time). A weighted mean over the
+ * stored history converges as samples accumulate AND finally *uses* that history. Each sample's implied
+ * capacity is trusted in proportion to how much of a window it exercised: a 53%-context reading is a
+ * strong measurement; a ~13% one (usually an early non-budget stop — empty pool / fork / gate, whose
+ * `points ÷ tiny-fraction` extrapolation is near-noise and biased low by fixed startup overhead) barely
+ * counts. The 12-sample window still ages out old sessions, so it stays adaptive to a real regime change
+ * (e.g. a new model). Weighting by context-fraction is the natural "fraction of a session observed" trust.
  */
 function calibrate() {
   const points = Number(flag('points'));
@@ -200,17 +209,24 @@ function calibrate() {
   catch { die(`cannot read ${CAPACITY_PATH} — run a batch in this repo first (the file ships seeded)`); }
 
   const implied = Math.round(points / (ctxPct / 100)); // what a full session would have fit at this rate
-  const alpha = Number.isFinite(cap.ema) ? cap.ema : 0.3;
   const prev = Number.isFinite(cap.capacityPoints) ? cap.capacityPoints : implied;
-  const next = Math.round(alpha * implied + (1 - alpha) * prev);
+
+  const samples = [...(Array.isArray(cap.samples) ? cap.samples : []),
+    { date: today(), points, contextPct: ctxPct, impliedCapacity: implied }].slice(-12);
+  // Context-weighted mean over the window: Σ(impliedᵢ · ctxᵢ) / Σ(ctxᵢ).
+  const wsum = samples.reduce((s, x) => s + (Number(x.contextPct) || 0), 0);
+  const next = wsum > 0
+    ? Math.round(samples.reduce((s, x) => s + (Number(x.impliedCapacity) || 0) * (Number(x.contextPct) || 0), 0) / wsum)
+    : implied;
 
   cap.capacityPoints = next;
-  cap.samples = [...(Array.isArray(cap.samples) ? cap.samples : []), { date: today(), points, contextPct: ctxPct, impliedCapacity: implied }].slice(-12);
+  cap.samples = samples;
+  delete cap.ema; // legacy fixed-α weight — no longer used (the estimator is now a weighted window mean)
   writeFileSync(CAPACITY_PATH, JSON.stringify(cap, null, 2) + '\n');
 
   const budget = Math.round(next * (cap.targetFraction ?? 0.5));
   ok({ verb: 'calibrate', points, contextPct: ctxPct, impliedCapacity: implied, capacityPoints: next, budget },
-    `${GRN}✓ calibrated${RST} ${DIM}— ${points} pts at ${ctxPct}% → implied ${implied}; capacity ${prev} → ${BLD}${next}${RST}${DIM}; next batch budget ≈ ${RST}${BLD}${budget} pts${RST}`);
+    `${GRN}✓ calibrated${RST} ${DIM}— ${points} pts at ${ctxPct}% → implied ${implied}; capacity ${prev} → ${BLD}${next}${RST}${DIM} (context-weighted mean of ${samples.length}); next batch budget ≈ ${RST}${BLD}${budget} pts${RST}`);
 }
 
 switch (verb) {

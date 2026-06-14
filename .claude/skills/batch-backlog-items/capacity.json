@@ -1,51 +1,8 @@
 {
-  "_doc": "Calibrated session capacity for POINTS-BUDGETED batches (docs/agent/backlog-workflow.md → 'Running a batch'). The batch's point budget = round(capacityPoints * targetFraction) — 'take as many points as possible up to ~half a session's worth', not a fixed item count. 'points' here = batchCost (a story's size; a task counts as 2, since tasks carry no burndown points but still consume context). `node scripts/backlog.mjs calibrate --points=<P> --context-pct=<C>` updates capacityPoints via EMA from each session's observed (points resolved ÷ context fraction); the closing-session skill runs it. Seeded from batch-2026-06-10-240-195-038-194-182 (10 items, ~25 cost-pts at ~20% context → implied ~125 capacity), haircut to 100 pending the first real calibration.",
-  "capacityPoints": 86,
+  "_doc": "Calibrated session capacity for POINTS-BUDGETED batches (docs/agent/backlog-workflow.md -> 'Running a batch'). The batch's point budget = round(capacityPoints * targetFraction). 'points' = batchCost (a story's size; a task = 2). `node scripts/backlog.mjs calibrate --points=<P> --context-pct=<C>` folds a session into capacityPoints as a CONTEXT-WEIGHTED MEAN over the last 12 samples: each session's implied capacity (points / context-fraction) is weighted by its contextPct, so a high-context session counts far more than an early low-context stop (whose extrapolation is near-noise and biased low by fixed startup overhead). Unlike the previous fixed-alpha EMA this converges as samples accumulate and actually uses the stored history, while the 12-sample window keeps it adaptive to a regime change (e.g. a new model).",
+  "capacityPoints": 89,
   "targetFraction": 0.6,
-  "ema": 0.3,
   "samples": [
-    {
-      "date": "2026-06-12",
-      "points": 19,
-      "contextPct": 25,
-      "impliedCapacity": 76
-    },
-    {
-      "date": "2026-06-12",
-      "points": 8,
-      "contextPct": 22,
-      "impliedCapacity": 36
-    },
-    {
-      "date": "2026-06-12",
-      "points": 10,
-      "contextPct": 17,
-      "impliedCapacity": 59
-    },
-    {
-      "date": "2026-06-12",
-      "points": 12,
-      "contextPct": 19,
-      "impliedCapacity": 63
-    },
-    {
-      "date": "2026-06-12",
-      "points": 19,
-      "contextPct": 22,
-      "impliedCapacity": 86
-    },
-    {
-      "date": "2026-06-12",
-      "points": 29,
-      "contextPct": 22,
-      "impliedCapacity": 132
-    },
-    {
-      "date": "2026-06-12",
-      "points": 29,
-      "contextPct": 28,
-      "impliedCapacity": 104
-    },
     {
       "date": "2026-06-13",
       "points": 40,
@@ -75,6 +32,48 @@
       "points": 24,
       "contextPct": 27,
       "impliedCapacity": 89
+    },
+    {
+      "date": "2026-06-13",
+      "points": 49,
+      "contextPct": 53,
+      "impliedCapacity": 92
+    },
+    {
+      "date": "2026-06-13",
+      "points": 28,
+      "contextPct": 30,
+      "impliedCapacity": 93
+    },
+    {
+      "date": "2026-06-13",
+      "points": 10,
+      "contextPct": 17,
+      "impliedCapacity": 59
+    },
+    {
+      "date": "2026-06-14",
+      "points": 28,
+      "contextPct": 41,
+      "impliedCapacity": 68
+    },
+    {
+      "date": "2026-06-14",
+      "points": 22,
+      "contextPct": 28,
+      "impliedCapacity": 79
+    },
+    {
+      "date": "2026-06-14",
+      "points": 46,
+      "contextPct": 31,
+      "impliedCapacity": 148
+    },
+    {
+      "date": "2026-06-14",
+      "points": 11,
+      "contextPct": 23,
+      "impliedCapacity": 48
     }
   ]
 }
