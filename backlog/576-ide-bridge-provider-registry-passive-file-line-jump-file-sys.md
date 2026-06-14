@@ -2,9 +2,12 @@
 type: idea
 workItem: story
 size: 5
-status: open
+status: resolved
 blockedBy: ["562"]
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: plateau-app/src/dev-browser/ide-bridge — IdeBridgeRegistry (runtime-DI provider registry) + vscode://file passive-jump provider + File System Access patch-write provider (Chromium-only, degrades to jump); VS Code extension slot reserved for #577
 locus: plateau-app
 tags: [dev-browser, ide-bridge, file-system-access, plateau, provider-registry]
 ---
