@@ -2,9 +2,12 @@
 type: issue
 workItem: story
 size: 5
-status: open
+status: resolved
 blockedBy: ["565"]
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: "plateau-app/src/profiles/clone-to-derive.ts — deriveProfile (RBAC template guardrail: clone-a-built-in + override, no free-form taxonomy) + CustomPersonaStore (FREE local plane) + SharePlane (PAID share/sync boundary, deferred per THE PHASE RULE)"
 locus: plateau-app
 tags: [personas, profiles, governance, monetization, tiering, plateau, presets]
 crossRef: { url: /backlog/166-governance-persona-roster-charter-schema/, label: "Governance-persona decision (#166)" }
