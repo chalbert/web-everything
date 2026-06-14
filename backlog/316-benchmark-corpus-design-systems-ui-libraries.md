@@ -16,7 +16,7 @@ crossRef: { url: /research/, label: "/research/ topic index" }
 
 # Define the benchmark corpus — the exhaustive, maintainable list of design systems & UI libraries to analyse
 
-Produce the canonical input to the [competitive coverage gap-analysis program](backlog/315-competitive-coverage-gap-analysis-program.md): an **explicit, reproducible list** of the leading design systems and UI libraries to benchmark, each with the metadata later phases consume (docs URL, source repo, philosophy/axis, native-alignment posture, last-checked date). "Leading" must be defined by **stated selection criteria**, not taste, so the next re-run lands on a comparable list — that reproducibility is the whole point of having a corpus instead of an ad-hoc reading list.
+Produce the canonical input to the [competitive coverage gap-analysis program](/backlog/315-competitive-coverage-gap-analysis-program/): an **explicit, reproducible list** of the leading design systems and UI libraries to benchmark, each with the metadata later phases consume (docs URL, source repo, philosophy/axis, native-alignment posture, last-checked date). "Leading" must be defined by **stated selection criteria**, not taste, so the next re-run lands on a comparable list — that reproducibility is the whole point of having a corpus instead of an ad-hoc reading list.
 
 This phase is *just the list + criteria*. Extraction of each source's components/docs/standards is phase 2 (a separate child story); this story is what that phase iterates over.
 
@@ -31,7 +31,7 @@ This phase is *just the list + criteria*. Extraction of each source's components
   - (Final membership is the deliverable — this is the starting palette to refine against the criteria.)
 - **Write the selection criteria** as the first artifact: the explicit, weigh-able signals that qualify a source — adoption/influence, breadth of component+pattern coverage, distinct design philosophy, native-platform alignment, quality of public docs/standards. The criteria are what make a *re-run* reproducible.
 - **Per-source metadata schema:** `id`, `name`, `vendor`, `category` (one of the axes above), `docsUrl`, `repoUrl` (if open), `philosophy` (one line), `nativeAlignment` (how native-first it is), `lastChecked` date. This is the row each later phase joins against.
-- **Publish as a `/research/` topic** (per design-first step 1 / research-workflow) backed by the corpus data file, with the session `reports/{date}-benchmark-corpus.md` linked via `relatedReport` — so the corpus is browsable *as research* and the next run is a dated revision (the [#192](backlog/192-longitudinal-research-freshness-system.md) chain model).
+- **Publish as a `/research/` topic** (per design-first step 1 / research-workflow) backed by the corpus data file, with the session `reports/{date}-benchmark-corpus.md` linked via `relatedReport` — so the corpus is browsable *as research* and the next run is a dated revision (the [#192](/backlog/192-longitudinal-research-freshness-system/) chain model).
 
 ## Acceptance
 

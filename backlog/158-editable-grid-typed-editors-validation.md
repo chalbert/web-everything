@@ -60,6 +60,6 @@ select-with-options) and a commit can be **rejected**:
   `apgEditableGrid` adoption, `withEditableCells` trait). `check:standards` 0 errors.
 
 **Decision:** kept the editor declaration **DOM-driven** (`data-editor*` on the cell) rather than a
-JS column-config object — same rationale as [[159-editable-grid-cell-editability-aria]] (the grid reads
+JS column-config object — same rationale as [#159](/backlog/159-editable-grid-cell-editability-aria/) (the grid reads
 structure from the live DOM). Validation is **two-tier**: native constraint validation for the common
 cases, plus a host `reject()` seam for custom rules — persistence itself stays the Frontier UI seam.

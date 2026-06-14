@@ -1,0 +1,70 @@
+<h2>Purpose</h2>
+<p>
+  Grounds decision <a href="/backlog/546-corpus-source-fast-has-a-dead-docsurl-fast-docs-decommission/">#546</a>:
+  the <a href="/research/benchmark-corpus/">benchmark corpus</a> source <code>fast</code> went un-walkable
+  during <a href="/backlog/531-verify-capability-presence-fast-fast/">#531</a> — every FAST component doc
+  page returned HTTP&nbsp;404. The framed question was narrow (<em>repoint the URL to an archive snapshot, or
+  drop the source?</em>); the research below widened it into a near-forced retirement plus a reusable
+  convention for the corpus's first dead source.
+</p>
+
+<h2>What the research found</h2>
+<ol>
+  <li>
+    <strong>The docs site is genuinely gone, not moved.</strong>
+    <code>fast.design/docs/&lt;1.x|2.x|3.x&gt;/components/*</code> 404; the historical working path
+    <code>/docs/components/&lt;name&gt;/</code> 404s; and even the path the <em>live repo README points at</em>
+    — <code>fast.design/docs/2.x/</code> — 404s. This is not a path-pattern fix.
+  </li>
+  <li>
+    <strong>FAST removed its component library.</strong> <code>github.com/microsoft/fast</code> is
+    <em>not</em> archived (pushed 2026-06-12, ~9.6k&#9733;), but <code>packages/</code> now holds only
+    <code>fast-element</code>, <code>fast-html</code>, <code>fast-router</code>, <code>fast-build</code>,
+    <code>fast-test-harness</code> — no <code>fast-foundation</code>/<code>fast-components</code>. FAST is now
+    a low-level web-component <em>authoring toolkit</em> (an element base class + templating + a router), and
+    ships none of the 96 benchmarked component/pattern/token capabilities.
+  </li>
+  <li>
+    <strong>FAST's former components are Fluent's.</strong> They were folded into Fluent UI Web Components
+    (<code>github.com/microsoft/fluentui</code>) — the corpus's existing <a href="/research/benchmark-corpus/"><code>fluent-2</code></a>
+    source. Re-benchmarking FAST would double-count Fluent.
+  </li>
+</ol>
+<p>
+  An archive walk is technically possible — Wayback has a complete <code>2024-01-28</code> snapshot of
+  <code>/docs/components/&lt;name&gt;/</code> (HTTP&nbsp;200, via the CDX API) — but those URLs are frozen
+  2024 state for a component set FAST has since deleted, so citing them as current presence violates the
+  corpus's <strong>currency</strong> criterion.
+</p>
+
+<h2>Against the corpus's own rules</h2>
+<p>
+  <code>benchmarkCorpus.json</code>'s <code>inclusionRule</code> requires a source to score on ≥3 selection
+  criteria <em>and</em> occupy a category axis. As a component-benchmark source, <code>fast</code> now fails
+  <strong>docs-quality</strong> (docs decommissioned) and <strong>currency</strong> (the component set was
+  removed), and no longer meaningfully occupies the <strong>web-component-system</strong> axis (it ships the
+  toolkit you build elements <em>with</em>, not the elements). That axis stays covered after retirement by
+  <strong>shoelace</strong>, <strong>spectrum-web-components</strong>, and <strong>lion</strong>.
+  <code>fast</code> has <strong>0</strong> rows in <code>benchmarkCapabilityPresence.json</code>, so
+  retirement breaks no presence-row reference (the only corpus-source validator,
+  <code>check-standards-rules.mjs</code>, is satisfied either way).
+</p>
+
+<h2>Classification — corpus data governance, not a standards artifact</h2>
+<p>
+  The 7-question layer sequence (Block / Intent / Protocol / Capability) is N/A: #546 governs the
+  <em>input data</em> of the gap-analysis program, not a WE standard. The governing principles are honest
+  provenance (the #495/#352 method: never fabricate presence) and reproducibility under the
+  <a href="/backlog/192-longitudinal-research-freshness-system/">#192 longitudinal-freshness</a> model — a
+  re-run must be able to see <em>why</em> a source left the corpus, which argues for recording a retirement
+  rather than silently erasing the row.
+</p>
+
+<h2>Recommendation</h2>
+<ul>
+  <li><strong>Retire <code>fast</code></strong> — not repoint-to-archive (frozen URLs + deleted product +
+    Fluent double-count), not keep-as-tooling (a permanent zero-row source that no longer occupies its axis).</li>
+  <li><strong>Mark it retired with a reason</strong> (a <code>retired</code> / <code>retiredDate</code> /
+    <code>retiredReason</code> shape, excluded from sweeps) rather than delete the entry — preserving the
+    audit trail and establishing the corpus's first source-retirement convention.</li>
+</ul>

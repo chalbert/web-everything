@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- Reuse colors from other icons to ensure consistency -->
+    <linearGradient id="chartBarSky" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#0284c7" /> <!-- From Registries/Behaviors -->
+      <stop offset="100%" stop-color="#38bdf8" />
+    </linearGradient>
+    <linearGradient id="chartBarIndigo" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#4f46e5" /> <!-- From Blocks/Contexts -->
+      <stop offset="100%" stop-color="#818cf8" />
+    </linearGradient>
+    <linearGradient id="chartBarPink" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#be185d" /> <!-- From Candies -->
+      <stop offset="100%" stop-color="#ec4899" />
+    </linearGradient>
+
+    <filter id="floatShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc" />
+
+  <!-- Metaphor: a plotted chart — axes, bars, and a trend line over them -->
+  <g filter="url(#floatShadow)">
+      <!-- Plot panel (clean slate) -->
+      <rect x="32" y="30" width="64" height="68" rx="6" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="2" />
+
+      <!-- Axes -->
+      <path d="M44 42 V86 H88" fill="none" stroke="#94a3b8" stroke-width="2.5" stroke-linecap="round" />
+
+      <!-- Bars (semantic data) -->
+      <rect x="50" y="64" width="10" height="22" rx="2" fill="url(#chartBarSky)" />
+      <rect x="64" y="54" width="10" height="32" rx="2" fill="url(#chartBarIndigo)" />
+      <rect x="78" y="48" width="10" height="38" rx="2" fill="url(#chartBarPink)" />
+
+      <!-- Trend line + points (presentation plane over the data) -->
+      <polyline points="55,60 69,50 83,44" fill="none" stroke="#0f172a" stroke-width="2.5"
+                stroke-linecap="round" stroke-linejoin="round" stroke-opacity="0.55" />
+      <circle cx="55" cy="60" r="3" fill="white" stroke="#0f172a" stroke-width="2" />
+      <circle cx="69" cy="50" r="3" fill="white" stroke="#0f172a" stroke-width="2" />
+      <circle cx="83" cy="44" r="3" fill="white" stroke="#0f172a" stroke-width="2" />
+  </g>
+</svg>

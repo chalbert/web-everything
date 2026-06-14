@@ -25,7 +25,7 @@ No auth, session, authorization, or credential story anywhere in the constellati
 
 ## Axis framing
 
-The survey's load-bearing finding is that the platform **already factored identity** into one normalized seam plus N swappable mechanisms: `navigator.credentials.get({ password, publicKey, identity, digital })` is a single browser-mediated **dispatcher** returning a typed credential (`PasswordCredential` / `PublicKeyCredential` / `IdentityCredential` / `DigitalCredential`) under one `mediation` model. That is structurally a **protocol with a provider/predicate seam** — the exact shape WE minted for the Guard protocol ([protocols.json:94](../src/_data/protocols.json#L94)), whose summary already states the trust boundary identity shares: enforcement is server-side, the front-end is a UX mirror ([protocols.json:96](../src/_data/protocols.json#L96)). The four forks are orthogonal: **standard kind** (project/protocol vs intent vs heavy-project), **timing** (defer vs pull-forward the thin UX slice), **access-gate home** (own vs feed #178), and **surface shape** (one protocol vs per-family). The thin UX slice is small and composes existing Loader and Feedback intents ([intents.json:1022](../src/_data/intents.json#L1022)); the access-gate concern lands on the Guard protocol, not here, because #178 is already its member ([backlog/178:38](../backlog/178-access-control-authorization-gate.md#L38)) and identity is #178's *upstream* (identity → authorization). The Permissions-API gap is **#009** and is explicitly a different concern ([backlog/178:14](../backlog/178-access-control-authorization-gate.md#L14)).
+The survey's load-bearing finding is that the platform **already factored identity** into one normalized seam plus N swappable mechanisms: `navigator.credentials.get({ password, publicKey, identity, digital })` is a single browser-mediated **dispatcher** returning a typed credential (`PasswordCredential` / `PublicKeyCredential` / `IdentityCredential` / `DigitalCredential`) under one `mediation` model. That is structurally a **protocol with a provider/predicate seam** — the exact shape WE minted for the Guard protocol ([protocols.json:94](../src/_data/protocols.json#L94)), whose summary already states the trust boundary identity shares: enforcement is server-side, the front-end is a UX mirror ([protocols.json:96](../src/_data/protocols.json#L96)). The four forks are orthogonal: **standard kind** (project/protocol vs intent vs heavy-project), **timing** (defer vs pull-forward the thin UX slice), **access-gate home** (own vs feed #178), and **surface shape** (one protocol vs per-family). The thin UX slice is small and composes existing Loader and Feedback intents ([intents.json:1022](../src/_data/intents.json#L1022)); the access-gate concern lands on the Guard protocol, not here, because #178 is already its member ([backlog/178:38](/backlog/178-access-control-authorization-gate/)) and identity is #178's *upstream* (identity → authorization). The Permissions-API gap is **#009** and is explicitly a different concern ([backlog/178:14](/backlog/178-access-control-authorization-gate/)).
 
 ### Recommended path at a glance
 
@@ -44,7 +44,7 @@ The triage said "Project + Protocol." The survey shows the platform already fact
 
 - **(A — recommended) A `webidentity` project that owns one `credential-acquisition` protocol.** The `navigator.credentials.get` dispatcher + mediation model is the normalized seam; WebAuthn / FedCM / Digital Credentials / password are swappable providers behind a `CustomCredentialProvider` contract. Mirrors `webvalidation`→Validation and `webguards`→Guard ([projects.json:168](../src/_data/projects.json#L168); [protocols.json:94](../src/_data/protocols.json#L94)). Project = home, protocol = lock, ceremony libs = providers.
 - **(B) A bare intent, no project.** Too small — discards the swappable-mechanism interop story that is the whole point of the platform's dispatcher design. *Rejected.*
-- **(C) A heavy "auth project" with a baked method + session/token management.** Crosses into security/enforcement WE must not own; maximizes lock-in. *Rejected* per [[feedback_minimize_lock_in_protocol_only_lock]].
+- **(C) A heavy "auth project" with a baked method + session/token management.** Crosses into security/enforcement WE must not own; maximizes lock-in. *Rejected*.
 
 ## Fork 2 — defer the whole thing, or pull forward the thin UX slice?
 
@@ -58,14 +58,14 @@ The triage ranked it #5 "later" because it looked heavy. The protocol+ceremony *
 
 "Signed-in / signed-out" is both an *identity* state and an *authorization* predicate — risk of two homes both gating presence.
 
-- **(A — recommended) Identity produces an auth-state signal; #178's Guard access-gate consumes it.** No new gate in `webidentity`. The Guard protocol's predicate/provider seam already gates presence ([protocols.json:96](../src/_data/protocols.json#L96)); auth-state is one predicate feeding it. Per [[feedback_bias_separation_decoupling]].
+- **(A — recommended) Identity produces an auth-state signal; #178's Guard access-gate consumes it.** No new gate in `webidentity`. The Guard protocol's predicate/provider seam already gates presence ([protocols.json:96](../src/_data/protocols.json#L96)); auth-state is one predicate feeding it. Bias toward separation/decoupling.
 - **(B) `webidentity` ships its own `<signed-in>`/`<signed-out>` gate element.** Duplicates Guard's machinery; React's `SignInGate` is exactly the case #272 folded into its access-gate member. *Rejected.*
 
 ## Fork 4 — one credential surface, or per-family standards?
 
 WebAuthn, FedCM, and Digital Credentials are distinct specs with distinct payloads. One surface or three?
 
-- **(A — recommended) One `credential-acquisition` protocol with a `credentials: [passkey | federated | digital | password]` request dimension; each family is a provider behind the shared seam.** Matches the platform: one `navigator.credentials.get` call, a union request object, typed responses. Most-flexible default = accept all declared families, per [[feedback_most_flexible_default]].
+- **(A — recommended) One `credential-acquisition` protocol with a `credentials: [passkey | federated | digital | password]` request dimension; each family is a provider behind the shared seam.** Matches the platform: one `navigator.credentials.get` call, a union request object, typed responses. Most-flexible default = accept all declared families.
 - **(B) Three separate standards (`webpasskey`, `webfedcm`, `webwallet`).** Fragments what the platform deliberately unified behind one dispatcher; triples the surface. *Rejected.*
 
 ## Open call

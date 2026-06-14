@@ -3,9 +3,11 @@ type: decision
 workItem: story
 size: 8
 parent: "382"
-status: active
+status: resolved
 dateOpened: "2026-06-13"
 dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: none
 preparedDate: "2026-06-13"
 relatedReport: reports/2026-06-13-design-ref-vision-pipeline.md
 tags: [design-reference, corpus, vision, vlm-as-judge, capture-gate, quality-control, swappable-provider, candidate-selection]
@@ -25,9 +27,11 @@ standard; see invariant below). The load-bearing survey finding: *coarse classif
 reliable, full structure recovery is hard* — so the cheap admit/quarantine verdict is safe to
 automate.
 
-> **Decision status (under review):** Fork 1 (provider seam) **ruled** — Plateau-service client,
-> no-leakage. Forks 2 (gate placement) & 3 (verdict + remediation) **open**, awaiting the author's
-> call; Fork 4 ratified as written.
+> **Decision status: RESOLVED — accepted in full (2026-06-13).** All four forks ruled at their
+> recommended defaults (F1 Plateau-service client + no-leakage; F2 final-frame admission, pre-capture
+> probe deferred; F3 6-verdict taxonomy + autoconsent remediation in v1; F4 selector fast-path +
+> vision override + hash-cached verdict). The implementation is carried as the agent-ready build
+> **#480**.
 
 ## Governing invariant — vision is a service, never a standard (ruling 2026-06-13)
 
@@ -69,9 +73,9 @@ The concern decomposes into four orthogonal axes, each pinned to the real pipeli
 | Fork | Recommended default | Main alternative | Confidence |
 |---|---|---|---|
 | 1 · Provider seam | **✅ RULED: Plateau vision service; WE pipeline = no-leakage client (interim thin seam → repoint)** | Local registry in scripts | High |
-| 2 · Gate placement | **Final-frame admission verdict first; pre-capture probe deferred as an opt-in optimisation** | Probe + final (two calls) now | Med-High |
-| 3 · Verdict + remediation | **6-verdict taxonomy; `obstructed` → autoconsent dismiss + bounded re-shoot (cap 2) → else quarantine** | Binary app/not-app, no remediation | Med |
-| 4 · Coexistence + idempotency | **Keep `readySelector` as a fast-path; vision is the general gate and overrides a selector-pass that's actually an error page; cache verdict by `contentHash`** | Vision replaces selectors entirely | High |
+| 2 · Gate placement | **✅ RULED: Final-frame admission verdict first; pre-capture probe deferred as an opt-in optimisation** | Probe + final (two calls) now | Med-High |
+| 3 · Verdict + remediation | **✅ RULED: 6-verdict taxonomy; `obstructed` → autoconsent dismiss + bounded re-shoot (cap 2) → else quarantine** | Binary app/not-app, no remediation | Med |
+| 4 · Coexistence + idempotency | **✅ RULED: Keep `readySelector` as a fast-path; vision is the general gate and overrides a selector-pass that's actually an error page; cache verdict by `contentHash`** | Vision replaces selectors entirely | High |
 
 ## Fork 1 — Where the vision capability lives (the provider seam) ✅ *ruled 2026-06-13*
 
@@ -97,7 +101,7 @@ behind the service; the capability stays singular because all consumers want the
 **no-leakage invariant is the governing lock boundary.** *(Sub-decision, build-time: exact contract
 field names — `verdict`/`reasons`/`remediation` — settle when the first client is wired.)*
 
-## Fork 2 — Gate placement
+## Fork 2 — Gate placement ✅ *ruled 2026-06-13*
 
 **Crux.** A pre-capture probe can reject a marketing homepage *before* paying for a full high-res
 capture, but it doubles vision calls. Where does the verdict run?
@@ -113,9 +117,10 @@ capture, but it doubles vision calls. Where does the verdict run?
   can't reliably catch a modal that only appears on the settled full render; the admission verdict
   must see what actually gets committed.
 
-**Default: A.**
+**Ruling: A (accepted 2026-06-13).** The corpus is tens of targets, not millions — full-capture cost
+is trivial, so the simpler one-call gate wins; promote the pre-capture probe only if spend ever bites.
 
-## Fork 3 — Verdict taxonomy + obstructed remediation
+## Fork 3 — Verdict taxonomy + obstructed remediation ✅ *ruled 2026-06-13*
 
 **Crux.** Today's `reviewState` is binary (`confirmed`/`ungated`, `:148-152`). A vision gate wants
 to distinguish *why* a surface failed — and an *obstructed* app (cookie/consent/modal over a real
@@ -132,10 +137,11 @@ UI) is recoverable, unlike marketing.
   surfaces (a dismissible cookie banner would quarantine a perfectly good app) and loses the
   *reason* that makes `needsReview` actionable.
 
-**Default: A.** *(Sub-decision: the re-shoot cap (2) and per-attempt timeout are build-tunable;
-keep them config, not constants.)*
+**Ruling: A (accepted 2026-06-13).** Remediation ships in v1 — recovering a real app behind a
+dismissible consent banner is worth the loop. *(Sub-decision: the re-shoot cap (2) and per-attempt
+timeout are build-tunable; keep them config, not constants.)*
 
-## Fork 4 — Coexistence with the deterministic gate + idempotency
+## Fork 4 — Coexistence with the deterministic gate + idempotency ✅ *ruled 2026-06-13*
 
 **Crux.** Do hand-authored `readySelector`s survive, and how do we avoid re-paying vision on every
 re-run when capture is already idempotent (`ledger[url]` skip `:126`, `sha256` dedupe `:164-167`)?
@@ -151,14 +157,14 @@ re-run when capture is already idempotent (`ledger[url]` skip `:126`, `sha256` d
   signal where an author already encoded it, and pays vision on every target including ones already
   perfectly gated.
 
-**Default: A.**
+**Ruling: A (accepted 2026-06-13).**
 
 ## What this unblocks
 
-Settling these four lets the gate be built against the shipped phase-1 pipeline (no hard
-`blockedBy`), and **defines the shared vision provider that #396 then widens** — so codification
-starts from a clean corpus instead of analysing marketing splashes. Make the call via
-`/next decision`; the build is then a fast follow.
+All four forks ruled (accepted in full). The ruling **defines the shared Plateau vision capability
+that #396 then consumes as a second client** — so codification starts from a clean corpus instead
+of analysing marketing splashes. The implementation is now agent-ready against the shipped phase-1
+pipeline (no hard `blockedBy`), tracked as **#480**.
 
 ## Relationships
 

@@ -2,7 +2,7 @@
 type: issue
 workItem: story
 size: 3
-status: open
+status: parked
 dateOpened: "2026-06-13"
 tags: [webblocks, breakpoint, container-queries, layout, resize-observer, deferred, book-candidate]
 relatedReport: reports/2026-06-13-responsive-container-query-layout.md

@@ -15,7 +15,7 @@ The deferred home for offering multiple Plateau products (custom browser, Web Do
 > **PARKED at creation 2026-06-14 — placeholder home, not active work.** This epic is intentionally a
 > *concept anchor*, not a build queue: it gives the recurring "larger Plateau SaaS app" idea a citable
 > `#NNN` so deferred hosted items reference a number instead of a phrase. It stays parked behind the
-> defer-live-serve guard ([[project_monetization_strategy]]). **Unpark when** running a deployed
+> defer-live-serve guard. **Unpark when** running a deployed
 > Plateau SaaS is actually on the roadmap.
 
 ## Why this exists separately from the per-product epics

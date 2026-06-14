@@ -1,20 +1,8 @@
 {
   "_doc": "Calibrated session capacity for POINTS-BUDGETED batches (docs/agent/backlog-workflow.md -> 'Running a batch'). The batch's point budget = round(capacityPoints * targetFraction). 'points' = batchCost (a story's size; a task = 2). `node scripts/backlog.mjs calibrate --points=<P> --context-pct=<C>` folds a session into capacityPoints as a CONTEXT-WEIGHTED MEAN over the last 12 samples: each session's implied capacity (points / context-fraction) is weighted by its contextPct, so a high-context session counts far more than an early low-context stop (whose extrapolation is near-noise and biased low by fixed startup overhead). Unlike the previous fixed-alpha EMA this converges as samples accumulate and actually uses the stored history, while the 12-sample window keeps it adaptive to a regime change (e.g. a new model).",
-  "capacityPoints": 89,
+  "capacityPoints": 88,
   "targetFraction": 0.6,
   "samples": [
-    {
-      "date": "2026-06-13",
-      "points": 40,
-      "contextPct": 38,
-      "impliedCapacity": 105
-    },
-    {
-      "date": "2026-06-13",
-      "points": 35,
-      "contextPct": 32,
-      "impliedCapacity": 109
-    },
     {
       "date": "2026-06-13",
       "points": 6,
@@ -74,6 +62,20 @@
       "points": 11,
       "contextPct": 23,
       "impliedCapacity": 48
+    },
+    {
+      "date": "2026-06-14",
+      "points": 36,
+      "contextPct": 33,
+      "impliedCapacity": 109
+    },
+    {
+      "date": "2026-06-14",
+      "points": 24,
+      "contextPct": 23,
+      "impliedCapacity": 104,
+      "stopReason": "fork",
+      "excluded": true
     }
   ]
 }

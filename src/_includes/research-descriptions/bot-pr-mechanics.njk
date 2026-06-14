@@ -1,0 +1,151 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Prior-art grounding for decision
+  <a href="/backlog/578-fix-loop-git-integration-bot-pr-mechanics-flow-forge-auth-ag/">backlog #578</a>
+  (Cluster A of <a href="/backlog/562-dev-browser-source-awareness-ide-bridge-map-deployed-dom-bac/">#562</a>):
+  the VCS-interaction surface the <a href="/backlog/141-dev-browser-vision/">#141 fix-loop</a>'s last
+  step — <em>report → propose → verify → <strong>open a PR against the source repo</strong></em> — quietly
+  assumes. #562 surfaced eight axes; this survey asks which are <em>genuine decisions</em> and which are
+  <em>support-all-coherent</em>. Session report: <code>reports/2026-06-14-bot-pr-mechanics.md</code>.
+</p>
+
+<h2>The central finding — one invariant, two forks, the rest support-all</h2>
+<p>
+  Established bot-PR practice (Dependabot, Renovate, GitHub's Copilot coding agent) is a <em>settled
+  mechanical pattern</em>: create a branch → commit → open a PR/MR, with draft-vs-ready, branch naming, and
+  grouping all as <em>configuration</em>. So most of #578's eight axes collapse the same way #562's
+  registries did — to <strong>support-all-coherent policy dials</strong> (read from the compliance layer) or
+  <strong>mechanics derived from the resolver</strong>. What survives as a real call is narrow: a
+  <strong>forced invariant</strong> (generated code is not privileged) and <strong>two on-merit forks</strong>
+  (how the browser authenticates to the forge; whether WE mints a standard contract for the PR's evidence
+  payload).
+</p>
+
+<h2>The forced invariant — generated code is NOT privileged</h2>
+<p>
+  A generated fix runs the <em>identical</em> review + code-compliance gates as a human PR: lint, tests,
+  type-check, static analysis / quality gate, branch protection, required human review — <strong>no bypass
+  path</strong>. The autofix verify gate (<code>scripts/autofix/engine.mjs:229-247</code>) is
+  <em>necessary but not sufficient</em> — it proves the fix cleared the failure locally; the org's CI +
+  review still gate the merge. Auto-merge (the #141/#410 autonomy ladder) is reachable only after every gate
+  is green. This is not an open call — 2025 agent-PR consensus converges on exactly it (GitHub's Copilot
+  coding agent opens PRs that run the same branch-protection + required-checks gates; best practice separates
+  "analysis" from "execution" with a human approval gate). It is a <strong>ratify</strong>, the anchor the
+  rest hangs on.
+</p>
+
+<h2>Fork 1 — Forge auth, bot identity &amp; commit signing</h2>
+<p>
+  The industry-recommended pattern for unattended PR automation is a <strong>GitHub App</strong>: short-lived
+  installation tokens (~1h), fine-grained permissions, org-owned (survives employee churn), a built-in bot
+  identity, and API-made commits that are <em>automatically signed and verified</em> — strictly better than a
+  long-lived, user-tied Personal Access Token. The catch for the dev-browser is that a
+  <strong>browser/extension is a poor place to hold an App private key</strong>. So the genuine either/or is
+  the <em>credential source</em>, not "App vs. PAT" in the abstract:
+</p>
+<table>
+  <thead><tr><th>Option</th><th>Mechanism</th><th>Identity / signing</th><th>Cost</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>A — reuse the IDE-bridge's git auth</strong> <em>(default, v1)</em></td>
+      <td>Open the PR through the already-authenticated #576/#577 bridge (the extension / git CLI is
+        authenticated); no new credential surface.</td>
+      <td>User identity; user's existing git signing config.</td>
+      <td>Tied to a present, authenticated bridge; no unattended/headless story.</td>
+    </tr>
+    <tr>
+      <td><strong>B — GitHub-App backend broker</strong> <em>(hosted/org-bot tier)</em></td>
+      <td>Plateau backend holds the App, mints short-lived installation tokens, opens the PR.</td>
+      <td>Bot identity; API commits auto-signed/verified.</td>
+      <td>Needs a backend + per-org App install; the hosted-SaaS posture (couples to #555/#556).</td>
+    </tr>
+    <tr>
+      <td>C — user OAuth/PAT in the browser <em>(rejected as primary)</em></td>
+      <td>User pastes a token into the browser to call the forge API directly.</td>
+      <td>User identity; manual signing.</td>
+      <td>Long-lived credential in the browser = exposure surface. Fallback only.</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  <strong>Recommendation: A for v1/local, B as the hosted tier; C a fallback.</strong> Identity and signing
+  <em>ride</em> the auth choice — they are not a separate fork. Couples to #410's authorization dial (a
+  forge write is a privileged action) and reuses the bridge precedence/degradation model from #562.
+</p>
+
+<h2>Fork 2 — PR evidence payload: a standard-owned manifest vs. Plateau markdown</h2>
+<p>
+  The autofix gate already produces the conformance failure + the verify before/after
+  (<code>scripts/autofix/engine.mjs</code>), and <a href="/backlog/410-dev-browser-deployed-app-live-patch-gated-capability-safety-/">#410</a>
+  Fork 4-A already rules that an <em>audit record</em> rides the PR. The open call is whether WE
+  <strong>mints a standard contract</strong> for the <em>machine-readable conformance evidence</em> the PR
+  carries:
+</p>
+<ul>
+  <li><strong>A — mint a conformance-evidence manifest (recommended).</strong> A standard-owned contract,
+    emitted by the app's introspectable self-description / trace substrate (reusing the capability-manifest
+    vocabulary, <code>src/_data/capabilityMatrix.json:1</code>) — the same <em>app-emits / tool-consumes</em>
+    shape #575's source-anchor contract took. Plateau <em>renders</em> it into the PR body. Because the
+    manifest is runtime-agnostic, an enterprise/polyglot fix-loop (a .NET/Java conformance runner) emits the
+    same manifest — the forward-adapter reach. Classification: a self-description extension <em>contract</em>,
+    <strong>not</strong> a Protocol (no swappable-vendor interop beyond emit/consume) — minimize lock-in.</li>
+  <li><strong>B — freeform Plateau PR markdown only.</strong> Simplest, no new standard. But re-invents the
+    payload per implementation and loses the interop / forward-adapter reach.</li>
+</ul>
+<p>
+  <strong>Recommendation: A</strong>, composing with (not duplicating) #410-4A's audit record — the audit
+  record is <em>who/when/diff/revert</em>; the evidence manifest is <em>which gates ran + the verify
+  before/after + the autonomy level</em>. Med confidence: minting a standard here is a real judgment.
+</p>
+
+<h2>Supported by default — not decisions</h2>
+<table>
+  <thead><tr><th>Axis</th><th>Why it's support-all</th><th>Prior art</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Forge-agnosticism = a forge provider registry</strong></td>
+      <td>"Open a PR" abstracted behind a per-forge provider (GitHub/GitLab/Gitea/Forgejo/Bitbucket); every
+        provider used, precedence + degradation the only rules — exactly how #562 ruled its bridge registry.
+        v1 ships the GitHub provider first (<em>prioritization, not a fork</em>).</td>
+      <td>Renovate <code>Platform</code> (<code>lib/modules/platform/types.ts</code>), Woodpecker
+        <code>forge.Forge</code>, git-pkgs/forge, go-git-providers.</td>
+    </tr>
+    <tr>
+      <td><strong>Git-flow / PR-strategy</strong></td>
+      <td>Draft-vs-ready, target branch, one-fix-per-PR vs. batched, rebase/squash/merge, auto-merge — every
+        value coherent → per-project policy dials; <em>defaults</em> live in the compliance layer (#579),
+        read by the bot, never invented by it.</td>
+      <td>Renovate/Dependabot branch + grouping config is pure configuration.</td>
+    </tr>
+    <tr>
+      <td><strong>Conflict &amp; concurrency</strong></td>
+      <td>Rebase-on-stale-base, detect-and-skip racing fixes — mechanics; the local-edit conflict is #577's
+        concern.</td>
+      <td>Standard bot rebase behaviour (Renovate auto-rebase).</td>
+    </tr>
+    <tr>
+      <td><strong>Revert / rollback</strong></td>
+      <td>A merged-bad fix is backed out by the same loop opening a <em>normal revert PR</em> through the same
+        gates (no special privilege); autonomy gated per #410's revertibility ruling.</td>
+      <td>—</td>
+    </tr>
+    <tr>
+      <td><strong>Monorepo / multi-repo targeting</strong></td>
+      <td>Derived from the resolver — the repo is wherever the resolved <code>file:line</code> lives;
+        cross-repo → independent PR per repo (atomic cross-repo merge rejected — forges don't support it).</td>
+      <td>—</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/research/source-awareness-substrate/">Source-Awareness Substrate &amp; IDE Bridge</a> — the
+    upstream survey (#562) whose Cluster A this prepares; the forge registry mirrors its bridge registry.</li>
+  <li><a href="/research/deployed-live-patch-safety/">Deployed Live-Patch Safety</a> (#410) — the authorization
+    dial Fork 1 couples to and the audit record Fork 2 composes with.</li>
+  <li><a href="/backlog/579-platform-default-vcs-convention-vocabulary-in-the-compliance/">#579</a> — Cluster B:
+    the platform-default VCS convention vocabulary the bot <em>reads</em> from the compliance layer.</li>
+</ul>
+{% endraw %}

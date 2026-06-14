@@ -17,7 +17,7 @@ crossRef: { url: /backlog/, label: Backlog index }
 
 # Gap → backlog — turn the ranked missing/partial capabilities into deduped candidate stories
 
-Phase 4 of the [gap-analysis program](backlog/315-competitive-coverage-gap-analysis-program.md): take the labelled, ranked matrix from [#347](backlog/347-capability-mapping-gap-detection.md) and turn each `missing`/`partial` capability that is **not already tracked** into a candidate backlog item in the **`gap-#` shape** the earlier manual sweep used ([#006](backlog/006-gap-10-collection-ops-intent.md)…[#016](backlog/016-gap-9-webcommands-project.md)). This is the "once the inventory is complete, we create stories to fill the gaps" step — it produces the gap-fill children of #315, but only as *candidates surfaced for triage*, never auto-claimed work.
+Phase 4 of the [gap-analysis program](/backlog/315-competitive-coverage-gap-analysis-program/): take the labelled, ranked matrix from [#347](/backlog/347-capability-mapping-gap-detection/) and turn each `missing`/`partial` capability that is **not already tracked** into a candidate backlog item in the **`gap-#` shape** the earlier manual sweep used ([#006](/backlog/006-gap-10-collection-ops-intent/)…[#016](/backlog/016-gap-9-webcommands-project/)). This is the "once the inventory is complete, we create stories to fill the gaps" step — it produces the gap-fill children of #315, but only as *candidates surfaced for triage*, never auto-claimed work.
 
 Blocked by #347 — there are no gaps to file until the matrix is labelled and ranked.
 

@@ -31,7 +31,7 @@ default model so the default-strategy selection lives in config, never in the to
   - A project picks one by extending it; per-scope override via the inheritance chain.
 - **Open extension hook** — authors register a custom `AutoDefineStrategy` (e.g. server-driven,
   convention-URL) that coexists conflict-free. Standardize the contract + resolution rules, not the
-  list (`[[project_intents_open_design]]`).
+  list.
 - **Scope token** — reserve a `RegistryScope` token for the Scoped Custom Element Registries proposal
   (per-shadow-root); default `global`. Thin, like `RenderScope` is today.
 

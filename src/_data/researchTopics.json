@@ -820,6 +820,26 @@
     "relatedProject": "webreliability"
   },
   {
+    "id": "auto-update-runner-topology",
+    "title": "Auto-update runner execution topology — build a runner vs. compose existing engines",
+    "status": "open",
+    "summary": "Prior-art survey + architecture prep for decision #497 (the runner that executes the already-shipped update-policy protocol from #101). Distinct ground from the #101 auto-update-pipeline survey: that covered the policy + gate model; this covers HOW the runner is built and WHERE it executes. Four findings reshape the pre-flight's 'no build home' framing. (1) The ecosystem has converged on CI-native execution, not a bespoke vendor-operated service: Dependabot consolidated its compute onto GitHub Actions (GitHub/self-hosted runners + Kubernetes ARC, GA 2025-05); Renovate ships the same runner three ways from one codebase (Mend-hosted app, self-hosted app, self-hosted GitHub Action) off one renovate.json — so the runner is a portable package + committed CI templates that run in the consumer's own CI, with a hosted convenience tier layered on, needing no new repo and mapping onto open-core-by-usage + the solo-founder self-run>service ranking. (2) Pre-merge and post-deploy execute in DIFFERENT homes by nature — pre-merge is a CI-time concern (Renovate/Dependabot), post-deploy staged rollout is a deploy-time in-cluster controller (Argo Rollouts CRD-driven metric promotion/rollback; Flagger webhook hooks) — so 'where the runner lives' was never one answer. (3) The commoditized core (trigger/scan/cool-off/test/auto-merge/metric-rollback) is off-the-shelf; the one net-new WE edge no incumbent offers is pre-testing a provider version against its CONSUMERS' suites before release via the #092 provider-consumer graph. (4) A pure compile-to-renovate.json adapter is lossy — it drops the WE-specific semantics (changelog-manifest strictest-wins severity #102, migration linkage via the upgrader engine #094, the unified pre+post gate axis, the #092 pre-test). Synthesis: a thin WE orchestrator that OWNS the update-policy gate evaluation + the #092 pre-test edge, and DRIVES incumbent engines (Renovate/Dependabot pre-merge, Argo/Flagger post-deploy) as swappable execution primitives — compose for the solved parts, own the WE-specific parts. Constellation layering ratifies by precedent (#091/#092 Fork 3): protocol→WE (shipped), reusable orchestration→FUI, operated surface→plateau-app, no-leakage held. Report: reports/2026-06-13-auto-update-runner-execution-topology.md.",
+    "dateOpened": "2026-06-13",
+    "tags": [
+      "auto-update",
+      "evergreen",
+      "runner",
+      "execution-topology",
+      "native-first",
+      "ci",
+      "progressive-delivery",
+      "decision-prep"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webreliability"
+  },
+  {
     "id": "jsx-event-style",
     "title": "JSX Event-Style — Function Prop vs String Behavior",
     "status": "open",
@@ -1117,6 +1137,26 @@
       "corpus",
       "benchmark",
       "native-first"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webdocs"
+  },
+  {
+    "id": "benchmark-corpus-source-currency",
+    "title": "Benchmark-corpus source currency — the FAST decommission & how the corpus retires a dead source",
+    "status": "open",
+    "summary": "Grounds decision #546 — the corpus source `fast` whose docsUrl went dead during #531. Research turned a 'fix the URL vs drop it' framing into a near-forced retirement plus a reusable convention. Three findings: (1) fast.design's per-component docs are genuinely gone, not moved — /docs/<1.x|2.x|3.x>/components/* 404, the historical /docs/components/<name>/ 404s, and even the path the live repo README points at (/docs/2.x/) 404s; (2) the FAST GitHub repo is NOT archived (pushed 2026-06-12, ~9.6k★) but packages/ now holds only fast-element, fast-html, fast-router, fast-build, fast-test-harness — the fast-foundation/fast-components library was REMOVED, so FAST is now a low-level web-component authoring toolkit (an element base class + templating + router), shipping none of the 96 benchmarked component/pattern/token capabilities; (3) FAST's former components were folded into Fluent UI Web Components (microsoft/fluentui) = the corpus's existing `fluent-2` source, so re-benchmarking FAST would double-count Fluent. Wayback has a complete 2024-01-28 snapshot of /docs/components/<name>/, so an archive walk is technically possible but would cite frozen URLs for a deleted component set (violates the corpus currency criterion). Under benchmarkCorpus.json's own inclusionRule, `fast` now fails docs-quality + currency-as-a-component-set and no longer occupies the web-component axis (which stays covered by shoelace/spectrum-web-components/lion). `fast` has 0 rows in benchmarkCapabilityPresence.json, so retirement breaks no presence-row reference. Recommends: retire `fast` (not repoint-to-archive, not keep-as-tooling), and mark it retired with a reason (retired/retiredDate/retiredReason) rather than delete the entry — preserving the audit trail under the #192 longitudinal-freshness model and establishing the corpus's first source-retirement convention.",
+    "dateOpened": "2026-06-14",
+    "tags": [
+      "gap-analysis",
+      "benchmark",
+      "corpus",
+      "currency",
+      "fast",
+      "web-components",
+      "longitudinal",
+      "decision-prep"
     ],
     "relatedBlocks": [],
     "relatedPlugs": [],
@@ -1449,5 +1489,87 @@
     "relatedBlocks": [],
     "relatedPlugs": [],
     "relatedProject": "webdocs"
+  },
+  {
+    "id": "source-awareness-substrate",
+    "title": "Source-Awareness Substrate & IDE Bridge",
+    "status": "open",
+    "summary": "Prior-art survey grounding backlog #562 — how a dev browser maps a rendered DOM node back to the source construct that produced it, on a DEPLOYED (possibly minified, source-maps-stripped) app, then acts on the repo (jump to file:line, open a PR, drive the IDE). The central finding: the substrate is two orthogonal provider chains, not one mechanism — a node→source RESOLVER chain and an IDE-BRIDGE chain — and any resolver composes with any bridge. Resolver precedence: build-emitted string-literal data-* source anchor (Sentry's @sentry/babel-plugin-component-annotate is the live precedent — the ONLY family that survives a stripped prod build; least-leaky variant is an opaque-id + sidecar manifest, a design sweet spot no shipped product occupies) → framework debug metadata (__source/_debugSource, LocatorJS, click-to-react-component — dev-only, and React 19 removed _debugSource) → source maps (ECMA-426; JS-position granularity, usually stripped). Bridge precedence: VS Code extension with a localhost server (true two-way: WorkspaceEdit patches + active-project enumeration, needs install) → File System Access API (zero-install/zero-server deployed-tab patch-write, Chromium-only) → vscode://file deep link (jump-only, universal) → dev-server launch-editor (localhost dev only). Cold-deployed degrades to inert without a build-emitted anchor — so the anchor is the keystone. WE reframe: WE apps are already introspectable, so the anchor is a self-description extension contract the app emits and the dev-browser consumes (no-leakage seam) — standard owns the contract, Plateau dev-browser owns the resolver/bridge.",
+    "dateOpened": "2026-06-14",
+    "tags": [
+      "dev-browser",
+      "source-awareness",
+      "source-map",
+      "ide-bridge",
+      "file-system-access",
+      "deployed-app",
+      "introspection",
+      "decision-prep"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": []
+  },
+  {
+    "id": "bot-pr-mechanics",
+    "title": "Bot-PR mechanics — how the fix-loop opens a pull request",
+    "status": "open",
+    "summary": "Prior-art survey grounding decision #578 (Cluster A of #562) — the VCS-interaction surface the #141 fix-loop's last step (report → propose → verify → OPEN A PR) assumes. #562 surfaced eight axes; this survey collapses them to ONE forced invariant + TWO genuine on-merit forks, the rest support-all-coherent (same shape #562 used for its provider registries). Invariant (ratify, not weigh): generated code is NOT privileged — a generated fix runs the identical review + code-compliance gates as a human PR (lint, tests, type-check, static analysis/quality gate, branch protection, required review), no bypass; the autofix verify gate (scripts/autofix/engine.mjs:229-247) is necessary-but-not-sufficient; auto-merge reachable only after every gate is green (the #141/#410 autonomy ladder). 2025 agent-PR consensus (GitHub Copilot coding agent runs the same branch-protection + required-checks gates; separate analysis from execution with a human approval gate) confirms it as a ratify. Fork 1 — forge auth, bot identity & commit signing: GitHub Apps beat PATs for unattended automation (short-lived ~1h installation tokens, fine-grained perms, org-owned, built-in bot identity, API commits auto-signed), but a browser/extension can't safely hold an App private key, so the genuine either/or is the CREDENTIAL SOURCE: (A) reuse the IDE-bridge's existing git auth [default v1 — the #576/#577 bridge is already authenticated, zero new credential surface, user identity] · (B) a GitHub-App backend broker [hosted/org-bot tier — Plateau backend mints short-lived tokens, bot identity, auto-signed] · (C) user OAuth/PAT in the browser [rejected as primary — long-lived credential exposure]. Identity+signing RIDE the auth choice (not a separate fork); couples to #410's authorization dial. Fork 2 — PR evidence payload: mint a STANDARD-OWNED conformance-evidence manifest (emitted by the app's self-description/trace substrate, reusing capabilityMatrix.json:1 vocabulary — the same app-emits/tool-consumes shape as #575's anchor contract; Plateau renders it into the PR; runtime-agnostic so polyglot fix-loops emit the same manifest = forward-adapter reach; a CONTRACT not a Protocol — no swappable-vendor interop) [recommended] vs freeform Plateau PR markdown only [no contract, re-invented per impl]; composes with (not duplicates) #410 Fork 4-A's audit record. Support-all-coherent (NOT decisions): forge-agnosticism = a forge provider registry (open-PR abstracted per forge — GitHub/GitLab/Gitea/Forgejo/Bitbucket; every provider used, precedence+degradation only — exactly #562's bridge-registry ruling; prior art: Renovate Platform interface lib/modules/platform/types.ts, Woodpecker forge.Forge, git-pkgs/forge, go-git-providers; v1 ships GitHub first = prioritization not a fork); git-flow/PR-strategy policy dials (draft-vs-ready, target branch, one-per-PR vs batched, rebase/squash/merge, auto-merge — defaults live in the compliance layer #579, read not invented by the bot); conflict/concurrency (rebase-on-stale, detect-and-skip racing fixes), revert/rollback (normal revert PR via the same gates, autonomy-gated per #410), monorepo/multi-repo targeting (derived from the resolver — repo is wherever the resolved file:line lives; cross-repo → independent PR per repo, atomic cross-repo merge rejected).",
+    "dateOpened": "2026-06-14",
+    "tags": [
+      "dev-browser",
+      "fix-loop",
+      "git-integration",
+      "pull-request",
+      "forge",
+      "github-app",
+      "conformance-evidence",
+      "decision-prep"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webcompliance"
+  },
+  {
+    "id": "maas-conformance-gate-policy",
+    "title": "MaaS execution-conformance gate policy — fold-into-default vs optional-toolchain suite",
+    "status": "open",
+    "summary": "Prep prior-art survey for decision #549 (slice 3 of epic #507; ratified parent #463 fork a/c). #506 ships a deterministic, language-neutral conformance runner (runner.ts) that drives any origin — a ConformanceTarget = (vector) => Promise<ActualResponse> — against frozen golden vectors and asserts byte-identical fidelity. #548 added the first FOREIGN target: a byte-locked C# origin (GeneratedMaaSOrigin.cs), drift-gated today only by a string-match snapshot, not by compiling + running it. #549 closes that gap: wire the C# origin as a live subprocess ConformanceTarget (dotnet-hosted) so divergence in EXECUTED behaviour is caught. The transport is already settled in code (runner.ts pre-commits a subprocess target reading the same golden.json); the only open dimension is GATE POLICY — running the C# target needs a dotnet toolchain (compile + execute), heavy and not universally present. Fork: (A) fold into the default gate — every dev/CI run compiles + drives the C# target (max drift safety, hard dotnet dependency everywhere, slow), or (B) a separate opt-in check:maas-conformance suite that detects dotnet and skips-with-notice otherwise (portable/fast default; drift can land if unrun). Prior art is unambiguous: every mature cross-language conformance suite (Protobuf conformance over a sub-process pipe; connectrpc/conformance = a standalone connectconformance binary driving the target over stdin/stdout, integrated as a SEPARATE CI workflow not each library’s default unit suite; OpenXR CTS; IPFS gateway-conformance) runs the foreign target as a separate, toolchain-gated job — never folded into the host library’s fast unit gate. Local precedent agrees: test:integration (Playwright, heavy toolchain) is already a separate script from test:unit (vitest run), and check:standards doesn’t run vitest at all. dotnet exists locally at /usr/local/share/dotnet/dotnet but is NOT on PATH, so even locally a default-gate fold needs explicit toolchain discovery. Recommendation: default to the opt-in suite (B) — matches the canonical protobuf/Connect pattern and the repo Playwright precedent, keeps the inner loop portable; keep A available as a CI posture layered on B (promote the suite into a required gate where the toolchain is guaranteed), not a separate impl; the free byte-level source snapshot stays in the default vitest run regardless.",
+    "dateOpened": "2026-06-14",
+    "tags": [
+      "module-as-a-service",
+      "polyglot",
+      "conformance",
+      "dotnet",
+      "csharp",
+      "ci-gate",
+      "toolchain",
+      "generation-adapter",
+      "subprocess-target"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webadapters"
+  },
+  {
+    "id": "persona-preset-primitive",
+    "title": "Persona as a First-Class Preset Primitive",
+    "status": "open",
+    "summary": "Prior-art grounding backlog #564: is persona a single first-class primitive of which the governance roster (#166) and the agile-role operating model (#563) are both projections? A persona is a named preset over composable concepts (preferences + surfaces-lit-up), not a closed RBAC group. VS Code Profiles is the mainstream preset-over-composables pattern (clone-to-derive, temporary, shareable); CrewAI role/goal/backstory agent personas are the agile-role lens, already named in industry — but both are patterns, not a shared schema. Even Persona-Based Access Control (PBAC) keeps a persona a lens mapped onto permissions, never authorization itself. The on-disk Profile (schema.ts:101) is a governance charter with no preferences/surfaces field, so unifying would be a costly refactor against a second lens that has no runtime. Defaults: name the shared pattern not a unified schema (bias toward separation); lens-only forever (access stays #178); name the role-switching primitive as a #563 methodology concept.",
+    "dateOpened": "2026-06-14",
+    "tags": [
+      "personas",
+      "preset",
+      "profiles",
+      "agile",
+      "methodology",
+      "rbac",
+      "pbac",
+      "governance",
+      "plateau",
+      "vision"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "plateau"
   }
 ]

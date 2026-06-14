@@ -1,0 +1,102 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Capability grounding for <a href="/backlog/488-on-device-ui-screenshot-vision-model-as-a-plateau-capability/">backlog #488</a>:
+  whether Plateau should back its vision-dependent features with an <strong>owned on-device model</strong>
+  (fixed cost, so it can sit inside flat-rate pricing under the <em>linear-cost-with-revenue</em> rule)
+  rather than only a metered hosted SDK. The sub-question with no prior analysis — <em>what can an
+  on-device UI-vision model actually do, and is it feasible now?</em> — is answered here. Session report:
+  <code>reports/2026-06-13-on-device-ui-vision-capability.md</code>.
+</p>
+
+<h2>The decisive finding — the gate verdict is coarse classification, not understanding</h2>
+<p>
+  The capture-QC verdict (app / obstructed / marketing / error / blank / non-app — six classes) is a
+  <strong>screen-classification</strong> task, not generative understanding. That makes it small.
+</p>
+<table>
+  <thead><tr><th>Source</th><th>What it shows</th><th>What we take</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Enrico</strong> (a Rico subset, Leiva et al.)</td>
+      <td>1,460 UIs × 20 design topics; the <em>screenshot alone</em> classifies screens at
+        <strong>~95% AUC / 75% top-1</strong> with a lightweight classifier (random = 5%).</td>
+      <td>UI screen classification is a solved, lightweight task. Our <strong>6-class</strong> verdict is
+        strictly easier — a small ViT / MobileNet / ResNet-18 suffices; <strong>no VLM needed for the
+        gate floor.</strong></td>
+    </tr>
+    <tr>
+      <td><strong>VL2Lite</strong> (CVPR 2025), <strong>PAND</strong>, <strong>VLM-KD</strong></td>
+      <td>Task-specific knowledge distillation from a large VLM into MobileNet-V2 / ResNet-18 students.</td>
+      <td>The on-device classifier is <strong>distilled from the big-model verdicts</strong> — exactly the
+        (frame, verdict) pairs <a href="/backlog/489-archive-quarantined-frames-persist-frame-verdict-pairs-as-a-/">#489</a>
+        collects. The dev gate <em>is</em> the data pipeline.</td>
+    </tr>
+    <tr>
+      <td><strong>SmolVLM</strong> (256M/500M/2.2B), <strong>Moondream</strong> (0.5B/1.86B),
+        <strong>Florence-2</strong> (0.27B, 768px), <strong>TinyClick</strong></td>
+      <td>Small VLMs for UI/screenshot understanding; Moondream-0.5B is an explicit edge distillation target.</td>
+      <td>The <em>richer</em> tier (tagging, element/region detection) is feasible on-device at the small
+        end — a heavier build than the classifier floor.</td>
+    </tr>
+    <tr>
+      <td><strong>transformers.js</strong> on <strong>ONNX Runtime Web + WebGPU</strong></td>
+      <td>In-browser inference; quantized models <strong>&lt;2 GB run at interactive speed</strong> (&lt;1B
+        trivial); dtype q4/q8; the larger end needs a flagship (iPhone 15 Pro / 8 GB Android).</td>
+      <td>In-browser is the truest "on-device, no install, no hosting" home. A ≲10 MB classifier runs
+        <em>everywhere</em>; a ≲2B VLM runs on capable devices only.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Two tiers — build the cheap one first</h2>
+<ol>
+  <li><strong>Verdict floor — a lightweight task-specific classifier (feasible now).</strong> ≲10 MB
+    quantized, runs in-browser on any device, distilled from the dev-gate verdicts. This is the
+    fixed-cost floor that makes the verdict-gated features flat-rate-safe.</li>
+  <li><strong>Richer tier — a small on-device VLM (heavier, later).</strong> For tagging / element
+    detection / structure; ≲2B device ceiling; structure recovery stays hard (Design2Code SOTA ≈76 —
+    see <a href="/research/design-ref-vision/">design-ref-vision</a>).</li>
+</ol>
+
+<h2>Three framing principles (author steers) — targets, not rejections</h2>
+<p>
+  AI capability moves fast, so this decision is deliberately framed as a <em>moving target</em>, not a
+  one-shot model pick:
+</p>
+<ul>
+  <li><strong>Benchmark to reach, don't reject.</strong> What's out of reach today may be feasible in
+    months. Each tier gets a <em>graduation benchmark</em> (a metric + threshold it must hit to move
+    on-device); until a tier clears it, the hosted-API / bring-your-own-key provider is the
+    <strong>always-on bridge</strong> that ships the feature now. A feature is never "rejected" — it's
+    "below threshold, on the API bridge."</li>
+  <li><strong>Re-assess on a cadence.</strong> A recurring re-benchmark of the small-model frontier
+    against the graduation targets (the <a href="/backlog/192-longitudinal-research-freshness-system/">#192</a>
+    longitudinal / dated-revision model, same shape as the gap-sweep re-run) flips a tier on-device the
+    moment it clears.</li>
+  <li><strong>Codify the training as a model-agnostic, re-applicable artifact.</strong> The durable
+    assets are the <em>labeled corpus</em> (#489) + the <em>distillation recipe</em> + the
+    <em>benchmark suite</em> — not any one trained model. Switching base model means
+    <strong>re-running the recipe, never re-labelling from scratch</strong>. This is
+    <a href="/research/">minimize-lock-in</a> applied to the model itself: the model is the swappable
+    part, the training pipeline is the kept part.</li>
+</ul>
+
+<h2>Architecture fit — a provider swap, not new plumbing</h2>
+<p>
+  The on-device model is an <strong>implementation behind the existing swappable vision-provider seam</strong>
+  (<code>scripts/design-refs/vision.mjs</code> → <code>registerVisionProvider</code>), the same seam
+  <a href="/backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/">#475</a> ruled and
+  #480/#485 built. Adding an on-device tier is registering another provider; the WE standard never imports
+  it, so the <strong>no-leakage invariant holds</strong> (only verdicts/outputs flow on). Per the #091
+  managed-offering layering, the served capability is a Plateau/impl concern, not a WE-standard artifact.
+</p>
+
+<h2>What this feeds</h2>
+<p>
+  Five prepared forks in <a href="/backlog/488-on-device-ui-screenshot-vision-model-as-a-plateau-capability/">#488</a>:
+  the two capability tiers + their graduation benchmarks, the build method (distil-from-corpus), the
+  runtime home (in-browser WebGPU), the pricing tiering (on-device floor + API bridge/upgrade, never
+  per-usage-only-forever), and the re-assessment cadence + codified-training artifact.
+</p>
+{% endraw %}

@@ -2,10 +2,11 @@
 type: decision
 workItem: story
 size: 5
-status: open
+status: resolved
 blockedBy: ["304"]
 dateOpened: "2026-06-13"
 dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
 preparedDate: "2026-06-13"
 tags: [validation, decision, intents, cross-field, rule-language, cel]
 relatedProject: webvalidation
@@ -13,53 +14,55 @@ relatedReport: reports/2026-06-13-portable-cross-field-rule-language.md
 crossRef: { url: /projects/webvalidation/, label: Web Validation project }
 ---
 
-# Portable cross-field rule-expression language, or stay shape-only
+# Cross-field rule representation — single CEL pivot, boundary-open adapters
 
-Prepared — no design exists yet; the two forks below are grounded in the published [`portable-cross-field-rule-language`](/research/portable-cross-field-rule-language/) research topic (report via `relatedReport`), each carrying a **bold** default. The survey **reshaped the item**: the original binary ("portable rule-language vs shape-only") split into a *scope* fork and a *representation* fork once it surfaced that Mode-2 already settles cross-field — so it is never "missing," and the real call is whether to *also* invest in portable *Mode-1* cross-field, and in what form.
+The prepared binary ("portable rule-language **vs** stay shape-only") **dissolved in discussion** (2026-06-13). Two collapses: (1) shape-only-vs-compiler-bearing was a **cost asymmetry**, and *cost is prioritization, not a fork branch* — so the portable Mode-1 build is a separately-prioritized spin-off ([#504](/backlog/504-build-portable-mode-1-cross-field-layer-cel-pivot-boundary-o/)), codified in [backlog-workflow.md](../docs/agent/backlog-workflow.md) → *"a fork is not a prioritization tool"*; (2) a contract needs **one canonical internal form**, so the single-pivot is a forced invariant and the only weigh is *which* pivot. Grounded in the [research topic](/research/portable-cross-field-rule-language/) (report via `relatedReport`).
 
-## Framing — three orthogonal axes
+## Ruling at a glance
 
-The shipped v1 generation vocabulary is **shape-only**: 13 closed intents in [validation-generation/provider.ts:39-58](validation-generation/provider.ts#L39-L58), each statically emittable to every Mode-1 target. The concern decomposes into three orthogonal axes: **(1) scope** — is cross-field in-scope for static Mode-1 emission at all, or Mode-2-only (server-authoritative)? The Mode-2 home is already settled (RFC 9457 `problem+json` + precognition, per the 2026-06-06 report). **(2) representation** — *if* portable Mode-1 cross-field is pursued, what neutral form carries the rule? The only predicate escape hatch today is the **non-portable** `custom` intent ([provider.ts:57](validation-generation/provider.ts#L57)). **(3) contract impact** — adopting a portable layer means `CustomValidationAdapter` ([provider.ts:135-147](validation-generation/provider.ts#L135-L147)) gains an expression compiler: `emit()` ([provider.ts:146](validation-generation/provider.ts#L146)) must translate a neutral rule into each target's idiom. The graceful-degradation seam is **already in place** — `cross-field`/`conditional` are *optional* capability features in [capability-manifest/provider.ts:48-50](capability-manifest/provider.ts#L48-L50) ("absence is reportable, never a silent no-op"), so support can be per-adapter and flag-lossy, not an all-or-nothing contract requirement.
+| Element | Disposition |
+|---|---|
+| Mode-2 (server) cross-field | **Forced invariant** — authoritative home, available now |
+| Mode-1 cross-field in the v1 contract | **Optional, advertised, flag-lossy** capability — never mandated |
+| Internal rule representation | **Forced single canonical pivot** — a contract needs one form |
+| *Which* pivot | **CEL** — the one genuine on-merit pick |
+| Ingest / emit (boundary) formats | **Open** — adapters normalize in/out of the CEL pivot |
+| Portable Mode-1 build | Ratified **end-state**; a spin-off whose *priority* is burndown ordering, **not** a fork |
 
-## Recommended path at a glance
+## Why the prepared binary dissolved
 
-| Fork | Recommended default | Main alternative | Confidence |
-|---|---|---|---|
-| **1 — Mode-1 cross-field scope** | **Stay shape-only-required in the v1 contract; cross-field is an opt-in adapter capability, server-evaluated (Mode-2) by default; portable Mode-1 cross-field is a deferred opt-in layer** | Build portable cross-field into the v1 adapter contract now (every adapter carries a compiler) | High |
-| **2 — Representation (for the deferred layer)** | **Adopt CEL** — reuse the proven multi-language interop language | Mint a minimal WE rule AST · JSONLogic · JSON-Schema-conditionals-only | Med-high |
+The prepared item framed two forks; discussion collapsed both into invariants + one choice:
 
-## Supported by default / forced invariants (not forks)
+- **Old Fork 1 (shape-only contract vs compiler-bearing contract) — dissolved.** A fork decides the *best end-state on merit*; the gap between the two branches was **cost** (a compiler in every adapter slice now, vs later), and cost is a **prioritization** input applied at *what-do-we-work-on-next* time, never a branch inside a design decision. Both sides agree portable Mode-1 cross-field is the desirable end-state — so there is no design either/or, only a **ruling (build it) + a backlog ordering (when)**. The "Option B" of *mandating* cross-field on every adapter is separately rejected on principle (below), not on cost.
+- **Old Fork 2 (which representation) — narrowed, not "support all".** A WE-compliant component must carry **one** canonical internal form for the rule (otherwise nothing's comparable and there's no single lock), so the single-pivot is a **forced invariant**, and the only genuine weigh is *which* pivot. Project-facing **boundary** formats stay open — that openness lives at the edges, not the spine.
 
-- **Mode-2 is the authoritative home for cross-field, always available.** Settled in the 2026-06-06 report (RFC 9457 + precognition). Cross-field is never absent from the platform — at worst it is server-evaluated. This is a **ratify**, not a weigh.
-- **Unsupported cross-field is flagged-lossy, never silently dropped.** The `$vocabulary`-style required/optional manifest ([capability-manifest/provider.ts:48-50](capability-manifest/provider.ts#L48-L50)) already governs this. Forced invariant.
-- **Transpile-to-native vs embed-a-runtime is the adapter's choice.** Whether an adapter inlines a CEL evaluator or transpiles the rule to `.refine()`/`model_validator` is an implementation detail; the contract stays representation-neutral. Support both — not a decision.
+## Forced invariants (ratify, not weigh)
 
-## Fork 1 — Mode-1 cross-field scope: shape-only contract, or compiler-bearing contract?
+- **Mode-2 is the authoritative home for cross-field, always available.** Settled in the 2026-06-06 report (RFC 9457 `problem+json` + precognition). Cross-field is never absent from the platform — at worst it is server-evaluated.
+- **Mode-1 cross-field is an optional, advertised, flag-lossy capability — never mandated.** `cross-field`/`conditional` are already *optional* features in the manifest ([capability-manifest/provider.ts:48-50](../capability-manifest/provider.ts#L48-L50), "absence is reportable, never a silent no-op"); Plateau tooling routes on the advertisement. *Mandating* it on every adapter contradicts the advertise-partial-compliance-and-select model — that's why "compiler in the v1 contract for all adapters" is rejected on **principle**, independent of cost.
+- **The contract carries one canonical internal representation.** A neutral pivot is required for the cross-field rule the component holds and that capability-advertising compares against. Single pivot = forced; *which* pivot is the one real choice below.
+- **Boundaries are open.** What a project authors in / a tool generates / a forward adapter emits to is **unconstrained**: an **ingest** adapter normalizes any source format *into* the pivot (adapter-as-normalization-hub); a **forward** adapter transpiles the pivot *out* to each target idiom (`.refine()`, `model_validator`, HTML + inline JS). Any-format at the edges, one form on the spine. (most-permissive-default.)
+- **Transpile-to-native vs embed-an-evaluator is the adapter's choice.** Whether an adapter inlines a CEL evaluator or transpiles the rule at emit time is an implementation detail; the contract stays representation-neutral. Support both.
 
-**Crux.** Today every adapter declares an `intents[]` compliance surface ([provider.ts:144](validation-generation/provider.ts#L144)) over a shape-only vocabulary. Putting *portable cross-field* into the v1 contract means each of the generation slices (#305–#309) must carry an expression compiler now. The alternative keeps the contract lean and routes cross-field to Mode-2 until/unless a portable layer is added later. Both branches are coherent and they are mutually exclusive *for v1 scope* — a genuine either/or with a real cost asymmetry.
+## The one genuine choice — which internal pivot?
 
-- **Option A — shape-only-required core; cross-field opt-in + Mode-2 default (recommended).** The v1 `CustomValidationAdapter` contract requires only shape intents; cross-field is an *optional* per-adapter capability (the manifest seam already supports declaring it). Cross-field that no adapter emits statically is server-evaluated via Mode-2. *Tradeoff:* offline/no-network static cross-field isn't available until the deferred layer ships — acceptable, because the most common cross-field needs (confirm-password, date-order) are low-stakes client-side niceties whose authoritative check is server-side anyway. Aligns with native-first (Mode-2/server is the default), most-permissive-default (the standard imposes no compiler requirement), and minimize-lock-in.
-- **Option B — compiler-bearing contract now.** Bake a portable rule layer into the v1 contract so cross-field emits statically to all Mode-1 targets immediately (protovalidate-style parity). *Tradeoff:* imposes an expression-compiler burden on every adapter slice up front, raises the bar for "be a conforming adapter," and front-loads the heaviest part of the design before any consumer demands offline cross-field. Higher fidelity, higher cost, earlier lock-in to a representation.
+**Default: CEL.** The pivot must be a single canonical form; the weigh is purely which one — and the bar is higher for an *internal pivot* than for a boundary format, because the component may **run** it and forward adapters must **transpile** it predictably.
 
-**Default: Option A.** *Rejected — Option B:* over-builds the contract ahead of demand and makes static cross-field a baseline obligation when Mode-2 already covers the need; revisit only if a concrete consumer needs offline value-comparison cross-field.
+- **Option A — CEL (recommended).** Google's Common Expression Language: non-Turing-complete, linear-time, cross-field via `&&` (`this.start <= this.end`). Official Go/C++/Java/Python runtimes (`cel-expr-python` open-sourced Mar 2026) + community JS/TS evaluators (`cel-js`, `@marcbachmann/cel-js` zero-dep, tree-shakeable). protovalidate proves it across 5 languages at v1.0 with **no codegen**. Best fit for a *pivot* specifically: (a) a real **evaluable** expression language (the component can run it client-side), (b) backed by **cross-language runtimes** (forward adapters transpile predictably), (c) **non-Turing-complete** (safe to embed and analyze). Borrow-official-vocabulary discipline (`Intl.Collator`/`aria-sort`), and the **single escapable lock** (transpile out, or degrade to Mode-2). *Tradeoff:* each JS target embeds or transpiles a CEL evaluator (bundle cost); browser CEL libs are community-maintained, not yet a single blessed runtime.
+- **Option B — mint a minimal WE rule AST.** *Rejected:* a private format that **still** needs an evaluator written per language — strictly worse than reusing CEL; lock-in for no interop gain.
+- **Option C — JSONLogic.** *Rejected as the pivot (fine as a boundary format):* portable JSON-AST with broad coverage, but weaker typing, no real spec/ecosystem, verbose nested JSON. Keep as a pragmatic ingest/emit target normalized into CEL — not the canonical form.
+- **Option D — JSON-Schema conditionals only.** *Rejected for the headline case:* `if/then/else` + `dependentRequired` express only *presence* dependencies, not value-comparison (`endDate > startDate`). A lossy optimization where a target is JSON-Schema-shaped, not the pivot.
 
-## Fork 2 — Representation of the (deferred) portable rule layer
-
-**Crux.** *If/when* portable Mode-1 cross-field is built (the deferred layer in Fork 1-A, or immediately under 1-B), the rule needs a neutral representation that `emit()` can translate to each target. Pre-settling this keeps the deferred build agent-ready. The survey ([research topic](/research/portable-cross-field-rule-language/)) makes the choice fairly clear, with some residual divergence on how far it reaches.
-
-- **Option A — adopt CEL (recommended).** Google's Common Expression Language: non-Turing-complete, linear-time, cross-field via `&&` (`this.start <= this.end`). Official Go/C++/Java/Python runtimes (`cel-expr-python` open-sourced Mar 2026) + community JS/TS evaluators (`cel-js`, `@marcbachmann/cel-js` zero-dep, tree-shakeable). protovalidate proves it across 5 languages at v1.0 with no codegen. Reusing it is the borrow-official-vocabulary discipline (`Intl.Collator`/`aria-sort`). *Tradeoff:* each JS target embeds or transpiles a CEL evaluator (bundle cost); browser CEL libs are community-maintained, not yet a single blessed runtime.
-- **Option B — mint a minimal WE rule AST.** *Rejected:* a project-facing expression format is exactly the lock-in WE refuses when a proven external standard exists — lock-in for no interop gain.
-- **Option C — JSONLogic.** *Rejected as the standard (viable fallback):* portable JSON-AST with broad language coverage, but weaker typing, no real spec/ecosystem, and verbose nested-JSON syntax. Keep as a pragmatic emit target, not the neutral source-of-truth.
-- **Option D — JSON-Schema-conditionals-only.** *Rejected for the headline case:* `if/then/else` + `dependentRequired` survive shape-schema codegen but only express *presence* dependencies — they cannot do value-comparison cross-field (`endDate > startDate`). Use them where a target is JSON-Schema-shaped and the rule happens to be presence-only, as a lossy optimization under CEL, not the representation.
-
-**Default: Option A — adopt CEL.** Confidence med-high: CEL is clearly the right external standard; the residual judgment is how aggressively to lean on still-maturing browser CEL runtimes vs transpiling CEL → native idioms at emit time (an adapter-implementation choice, see Context).
+**Default: Option A — CEL.** Confidence high for the choice of pivot; the residual (how hard to lean on community browser CEL runtimes vs transpiling CEL → native idioms at emit) is an **adapter-implementation** detail, not a contract clause.
 
 ---
 
+## On resolution
+
+Ratifying records: the v1 `CustomValidationAdapter` contract requires **shape intents only**; cross-field is an **optional, advertised** capability defaulting to **Mode-2**; the portable Mode-1 layer's **canonical internal representation = CEL**, with **boundary formats open** (ingest/forward adapters normalize in/out). It spawns a **spin-off build** (CEL pivot + ingest/forward cross-field adapters) `blockedBy` this decision — a *wanted end-state* whose **priority is normal burndown ordering, not a gate**.
+
 ## Context
 
-**Where this sits.** Decision under epic [#085](/backlog/085-validation-adapters-multi-language/) (validation generation — protocol + adapters); foundation shipped in [#304](/backlog/304-validation-generation-foundation-intent-enumeration-customva/) (intent enumeration + `CustomValidationAdapterRegistry`, the resolved blocker). The degradation/compliance seam rides on the [#005](/backlog/005-validation-spec-versioning-adherence-tooling/) capability-manifest meta-layer. The sibling field-error-shape intent is [#464](/backlog/464-validation-field-error-shape-intent-pointer-rule-message/). Validity-model semantics (merge strategy, etc.) are owned by [#004](/backlog/004-validation-engine-open-design-points/) and orthogonal to this fork.
-
-**On resolution.** Ratifying Fork 1-A leaves the portable layer as a deferred build to be scaffolded when demanded (a `blockedBy` spin-off off this decision); ratifying Fork 2-A pins that build's representation to CEL up front, so the spin-off is agent-ready. Ratifying 1-B would instead spawn the compiler-bearing-contract build immediately.
+**Where this sits.** Decision under epic [#085](/backlog/085-validation-adapters-multi-language/) (validation generation — protocol + adapters); foundation shipped in [#304](/backlog/304-validation-generation-foundation-intent-enumeration-customva/) (intent enumeration + `CustomValidationAdapterRegistry`, the resolved blocker). The shipped v1 vocabulary is **shape-only**: 13 closed intents in [validation-generation/provider.ts:39-58](../validation-generation/provider.ts#L39-L58), each statically emittable to every Mode-1 target; the only predicate escape hatch today is the **non-portable** `custom` intent ([provider.ts:57](../validation-generation/provider.ts#L57)). The adapter contract (`intents[]` + `emit()`) is [provider.ts:135-147](../validation-generation/provider.ts#L135-L147). The degradation/compliance seam rides on the [#005](/backlog/005-validation-spec-versioning-adherence-tooling/) capability-manifest meta-layer. The sibling field-error-shape intent is [#464](/backlog/464-validation-field-error-shape-intent-pointer-rule-message/). Validity-model semantics (merge strategy, etc.) are owned by [#004](/backlog/004-validation-engine-open-design-points/) and orthogonal.
 
 **Prior art (full detail in the [research topic](/research/portable-cross-field-rule-language/)).** CEL/protovalidate (portable rule language, 5-language parity, no codegen); Laravel Precognition + RFC 9457 (Mode-2, settled); JSON Schema `if/then/else`/`dependentRequired` (presence-only, can't compare values); JSONLogic (portable but weak); Standard Schema (TS interface, not a rule language); CUE (config altitude, out).

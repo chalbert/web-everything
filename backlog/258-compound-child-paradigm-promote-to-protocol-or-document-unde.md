@@ -20,7 +20,7 @@ The `Compound Child` glossary term is already seeded in `semantics.json`, and th
 
 ## The fork
 
-- **Document under Selection (recommended).** Treat "compound child → option" as a named paradigm — a protocol/semantics contract cross-referenced by the Selection Intent and Tabs — without minting a new intent. Rationale: it has no UX dimensions of its own (it is an authoring + lowering convention), so per the taxonomy it is closer to a Protocol/semantics term than an Intent. Lowest surface area; matches [[feedback_dimension_vs_fixed_mechanic]] (not a configurable dimension, a fixed mechanic).
+- **Document under Selection (recommended).** Treat "compound child → option" as a named paradigm — a protocol/semantics contract cross-referenced by the Selection Intent and Tabs — without minting a new intent. Rationale: it has no UX dimensions of its own (it is an authoring + lowering convention), so per the taxonomy it is closer to a Protocol/semantics term than an Intent. Lowest surface area: not a configurable dimension, a fixed mechanic.
 - **Promote to its own protocol.** A first-class `compound-child` protocol owned by Web Blocks, with a conformance contract (how children map to the value model, how the adapter lowers them). Warranted only if multiple independent vendors need to interoperate on the child-authoring shape — verify that demand first.
 - **Do nothing structural.** Leave each block to document its own children ad hoc. Rejected: that is the status quo the harvest flagged as a gap (the pattern is real and shared).
 
@@ -38,7 +38,7 @@ Two pre-decision findings shaped the call:
 - **Selection's `grouping` is a different concern.** [`intents.json`](../src/_data/intents.json) `grouping` (`flat`/`grouped`, `<optgroup>`/`role=group`) *arranges* options into labeled sets; it does not *declare* options. So "document under Selection's grouping" was a mismatched home — Compound Child is a **sibling** of grouping, not subordinate to it.
 - **The cross-standard shape is less uniform than claimed.** Only `<segment>` (Segmented Control) and native `<option>` are the strict positional compound-child form. Tabs binds via `tab-trigger`/`tab-panel` **attributes** on arbitrary elements ([`TabGroupBehavior.ts`](../blocks/tabs/TabGroupBehavior.ts)), so it is a related-but-distinct variant, not a third instance.
 
-Rejected **promote-to-protocol** *for now*: the item's own bar — proven multi-vendor interop demand — is unmet, and a protocol is the one real lock-in ([[feedback_minimize_lock_in_protocol_only_lock]]). It has no UX dimensions, so it is not an intent ([[feedback_intent_ux_only_technical_to_configurator]]) and is a fixed mechanic, not a configurable dimension ([[feedback_dimension_vs_fixed_mechanic]]). Rejected **do-nothing**: the harvest flagged the ad-hoc status quo as the gap.
+Rejected **promote-to-protocol** *for now*: the item's own bar — proven multi-vendor interop demand — is unmet, and a protocol is the one real lock-in. It has no UX dimensions, so it is not an intent and is a fixed mechanic, not a configurable dimension. Rejected **do-nothing**: the harvest flagged the ad-hoc status quo as the gap.
 
 The one real conformance contract — how authored children lower to an `options` array under the JSX adapter — is **unspecified anywhere** today. It is the latent protocol seed and is tracked standalone as **#281** (its natural owner is the render-strategy / component-compiler path, not Selection); a future protocol would crystallize there if interop demand appears.
 

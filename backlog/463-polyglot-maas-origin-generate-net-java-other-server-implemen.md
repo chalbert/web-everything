@@ -19,8 +19,7 @@ relatedReport: reports/2026-06-13-polyglot-maas-origin.md
 
 **Grounding.** Enterprises run .NET and Java; a self-hosted MaaS origin that is only a JS Fetch handler
 (#461) forces a JS sidecar into those shops. #463 decides whether/how WE projects a **native** origin
-outward via a **forward/codegen adapter** — the inverse of WE's *ingest* adapters
-([[adapter_normalization_hub]]). The owed prior-art pass is published at
+outward via a **forward/codegen adapter** — the inverse of WE's *ingest* adapters. The owed prior-art pass is published at
 [/research/polyglot-maas-origin](/research/polyglot-maas-origin/) (report:
 [2026-06-13-polyglot-maas-origin.md](reports/2026-06-13-polyglot-maas-origin.md)), and **it reshaped
 fork (a) from three options to four** (adding compile-once-to-Wasm) and turned (b) and (c) into
@@ -179,10 +178,10 @@ per-target divergence; the spec alone never delivers it.
 
 1. **Layer:** generation adapter + neutral SoT + conformance suite = WE standard/tooling (`webadapters`,
    a forward adapter); generated origins = ecosystem impl artifacts; the served *enterprise product* →
-   plateau-app per [[project_managed_offering_constellation_layering]] (#091). Decomposes, no single home.
+   plateau-app (#091). Decomposes, no single home.
 2. **Protocol or new entity?** Not a new protocol — it **projects the existing `maas-versioning`
    protocol outward**; the forward adapter is an adapter-registry entry (codegen direction), the inverse
-   of ingest ([[adapter_normalization_hub]]).
+   of ingest.
 3. **Expose the whole axis?** Target languages are an **open, extensible target registry**, not a fixed
    list — most-flexible.
 4. **Fixed mechanic vs dimension?** **Conformance-gating is a fixed mechanic** (no target ships without
@@ -190,19 +189,19 @@ per-target divergence; the spec alone never delivers it.
 5. **DI-injectable?** Generation targets are plug-in adapters (registry); injectable.
 6. **Most-permissive default?** Neutral SoT (privileges no language); open target set.
 7. **Seam:** forward (codegen) vs ingest (normalization) are **two directions of one adapter concept,
-   kept distinct** ([[feedback_bias_separation_decoupling]]).
+   kept distinct**.
 
 ## Concrete refs
 
-- Blocker / reference impl: [461-maas-distribution-origin-framework-agnostic-web-standard-fet.md](backlog/461-maas-distribution-origin-framework-agnostic-web-standard-fet.md)
+- Blocker / reference impl: [461-maas-distribution-origin-framework-agnostic-web-standard-fet.md](/backlog/461-maas-distribution-origin-framework-agnostic-web-standard-fet/)
   (the JS Fetch origin + #088/#389 identity; explicitly names this as the "single source of truth a
   generation-adapter would project").
 - Serve core: [moduleService.ts](blocks/renderers/module-service/moduleService.ts)
   (`serve()`/`serveCompiled()`), cache key
   [definitionRegistry.ts](blocks/renderers/module-service/definitionRegistry.ts).
 - SoT authority seed: `protocols.json#maas-versioning` (MaaS Served-Artifact Versioning).
-- Adapter philosophy (inverse direction): [[adapter_normalization_hub]]; parent MaaS
-  [#081](backlog/081-module-as-a-service-provider.md).
+- Adapter philosophy (inverse direction): the adapter-as-normalization-hub pattern (ingest incumbents into a lossy internal pivot); parent MaaS
+  [#081](/backlog/081-module-as-a-service-provider/).
 - Prior-art survey: [report](reports/2026-06-13-polyglot-maas-origin.md) ·
   [/research/ topic](/research/polyglot-maas-origin/).
 

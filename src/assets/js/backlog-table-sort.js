@@ -112,8 +112,12 @@
     var q = ((search && search.value) || '').trim().toLowerCase();
     var shown = 0;
     rows.forEach(function (r) {
-      var ok = (!reads || reads[r.getAttribute('data-readiness')])
-            && (!types || types[r.getAttribute('data-type')])
+      // A pinned row (an in-flight decision being actively made) ignores the readiness/type chip filters
+      // so the call in progress never disappears from the decision-ready view; a free-text search still
+      // narrows it, since search is an explicit lookup.
+      var pinned = r.getAttribute('data-pinned') === 'true';
+      var ok = (pinned || !reads || reads[r.getAttribute('data-readiness')])
+            && (pinned || !types || types[r.getAttribute('data-type')])
             && (!q || (r.getAttribute('data-search') || '').indexOf(q) >= 0);
       r.style.display = ok ? '' : 'none';
       if (ok) shown++;

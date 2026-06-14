@@ -16,7 +16,7 @@ Once the #410 deployed live-patch overlay exists, a hosted SaaS turns the single
 
 #410's overlay viewed in your own tab is a dev convenience (open primitive). The moment a patch can be
 **shared, approved, and governed across a team**, it's a product — which is exactly the open-core boundary
-([[project_monetization_strategy]]) and the constellation layering ([[project_managed_offering_constellation_layering]]):
+ and the constellation layering:
 the local overlay graduates to WE/FUI; this collaborative surface is served from the Plateau hosted product
 (#554). All features here presuppose the overlay never mutates the deployed artifact (#410 Fork 1-A) — they
 collaborate over a *view*, so the blast radius stays one-session-per-viewer even when shared.

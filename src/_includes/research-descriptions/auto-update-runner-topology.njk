@@ -1,0 +1,118 @@
+<h3>The Question</h3>
+<p>
+    The <a href="/backlog/101-auto-update-pipeline/">auto-update pipeline</a> already resolved — its
+    <strong>update-policy protocol</strong> (the committed, portable policy that is the only lock) is
+    shipped, and it explicitly left <em>"the orchestration runner that executes it"</em> as the deferred
+    build, <a href="/backlog/497-auto-update-orchestration-runner-plateau-service-execute-the/">#497</a>.
+    The <a href="/research/auto-update-pipeline/">#101 survey</a> covered the policy and the gate model;
+    this one covers the part it did not — <strong>how the runner is built and where it executes</strong>:
+    a bespoke end-to-end runner vs. composing the engines the ecosystem already commoditized. It grounds
+    the single genuine fork in #497.
+</p>
+
+<h3>Recommendation (prepared for #497)</h3>
+<ol>
+    <li><strong>A thin WE orchestrator that owns the <code>update-policy</code> gate semantics and drives
+        incumbent engines as swappable execution primitives</strong> — Renovate / Dependabot for
+        pre-merge fetch+test+PR, Argo Rollouts / Flagger for post-deploy rollout — authoring only the
+        WE-net-new policy evaluation (changelog-manifest severity, migration routing) and the
+        cross-consumer pre-test edge. <em>Not</em> a from-scratch runner that re-implements commoditized
+        infra; <em>not</em> a pure config emitter that drops the WE-specific semantics.</li>
+    <li><strong>Constellation layering ratifies by precedent</strong> — no "home" decision and no new
+        repo: protocol → WE (shipped), reusable orchestration → Frontier UI, operated surface →
+        plateau-app (open-core by usage), with the no-leakage invariant held throughout.</li>
+</ol>
+
+<h3>Finding 1 — the ecosystem converged on CI-native execution; the bespoke central service is the legacy shape</h3>
+<p>
+    The pre-flight that opened #497 worried there was "no build home" for the runner because it is
+    "disposable infra, not a WE artifact" and plateau-app (a browser SPA) cannot run scheduled CI/CD
+    orchestration. But the premise — that a runner must be a standalone vendor-operated service — is
+    outdated. Both dominant runners now execute <em>inside the consumer's CI</em>:
+</p>
+<ul>
+    <li><strong>Dependabot consolidated its compute platform onto GitHub Actions.</strong> PR-generating
+        jobs run as Actions workflows on GitHub-hosted <em>or</em> self-hosted runners (incl. Kubernetes
+        via the Actions Runner Controller, GA May&nbsp;2025) — the move was explicitly <em>away</em> from
+        the old bespoke compute that "wasn't able to access on-premises resources… wasn't as flexible."</li>
+    <li><strong>Renovate ships one runner three ways from one codebase</strong> — the Mend-hosted GitHub
+        App (convenience), a self-hosted stateful app, and a <strong>self-hosted GitHub Action</strong>
+        ("little configuration, no additional resources, runs on a schedule") — all reading the same
+        <code>renovate.json</code>. The runner is swappable infrastructure; the policy is the lock.</li>
+</ul>
+<p>
+    <strong>Implication:</strong> the modern shape is a <strong>portable orchestration package + committed
+    CI workflow templates that run in the consumer's own CI</strong>, with a hosted convenience tier
+    layered on from the <em>same</em> package. That needs <strong>no new repo</strong>, maps onto
+    open-core-by-usage (self-run floor free, hosted tier paid), and matches the solo-founder operational
+    ranking (self-run tool &gt; operated service). The "no home" blocker dissolves.
+</p>
+
+<h3>Finding 2 — pre-merge and post-deploy execute in different homes by nature</h3>
+<p>
+    The runner's two gate stages do not share an execution environment, so "where does the runner live"
+    has no single answer because there is no single runner:
+</p>
+<ul>
+    <li><strong>Pre-merge</strong> (trigger → scan → cool-off → test → severity → merge) is a
+        <strong>CI-time</strong> concern — exactly where Renovate/Dependabot live.</li>
+    <li><strong>Post-deploy staged rollout</strong> (metrics → auto-rollback) is a <strong>deploy-time,
+        in-cluster</strong> concern, solved by progressive-delivery <em>controllers</em>: Argo Rollouts
+        (a controller + <code>Rollout</code> CRD that queries metric providers to drive automated
+        promotion/rollback) and Flagger (wraps existing Deployments with pre/post/during webhook hooks).
+        These run in the runtime cluster, not in CI.</li>
+</ul>
+<p>
+    <strong>Implication:</strong> WE should declare the policy for both stages and <strong>emit config
+    into each existing substrate</strong>, not build either one.
+</p>
+
+<h3>Finding 3 — the commoditized core is solved; the net-new WE edge is the cross-consumer pre-test</h3>
+<p>
+    Triggering, cool-off, security scan, test-in-branch, auto-merge boundaries, and metric-gated rollback
+    are all off-the-shelf. The one capability <strong>no incumbent offers</strong> is the WE-specific edge
+    #101 named: <strong>pre-testing a new provider version against its <em>consumers'</em> suites before
+    release</strong>, using the <a href="/backlog/092-provider-consumer-graph-platform-manager/">provider↔consumer
+    graph (#092)</a>. That needs cross-repo knowledge a single-repo CI runner lacks — a provider-side,
+    graph-aware step, the genuinely novel orchestration WE would author. A from-scratch runner would
+    re-implement a large pile of commoditized infra just to reach the one part that is actually new.
+</p>
+
+<h3>Finding 4 — a pure compile-to-<code>renovate.json</code> adapter is lossy</h3>
+<p>
+    The <code>update-policy</code> protocol carries semantics incumbents don't model: severity read from
+    the <a href="/protocols/">changelog-manifest</a> with strictest-wins derivation (#102), migration
+    linkage run by the upgrader engine (#094), a <em>unified</em> gate axis spanning pre-merge
+    <em>and</em> post-deploy, and the #092 pre-test edge. Renovate's <code>minimumReleaseAge</code> +
+    Merge Confidence cover the cool-off + auto-merge-boundary slice, but not the manifest-driven severity,
+    the migration linkage, or the cross-consumer pre-test. A <em>thin</em> adapter that only compiles
+    <code>update-policy</code> → <code>renovate.json</code> would silently drop the WE-specific half — the
+    normalization-hub lossiness pattern, but here the lost cells <em>are</em> the standard's whole value.
+</p>
+<p>
+    <strong>Synthesis (the recommended default):</strong> the runner can't be only a config emitter. It is
+    a thin WE orchestrator that <strong>owns the <code>update-policy</code> gate evaluation</strong>
+    (manifest severity, migration routing, the #092 pre-test) and <strong>drives incumbent engines as
+    swappable execution primitives</strong> for the commoditized mechanics — compose for the solved parts,
+    own the WE-specific parts. Native-first and minimize-lock-in both point here.
+</p>
+
+<h3>Mapping to WE architecture</h3>
+<p>
+    The runner decomposes across the constellation exactly like every other managed offering
+    (constellation-layering precedent, #091 / #092 Fork&nbsp;3) — so there is no fresh "home" call:
+</p>
+<ul>
+    <li><strong>update-policy protocol</strong> (the lock) → WE — <em>already shipped</em>.</li>
+    <li><strong>Pre-merge orchestration</strong> (gate eval + drive engine) → Frontier UI package, next to
+        the upgrader engine (<code>blocks/renderers/upgrader/upgraderEngine.ts</code>).</li>
+    <li><strong>Engine / rollout execution</strong> → composed incumbents: Renovate/Dependabot in the
+        consumer's CI; Argo/Flagger in the deploy cluster.</li>
+    <li><strong>Cross-consumer pre-test edge</strong> → Frontier UI, reading the #092 graph
+        (<code>webregistries</code>).</li>
+    <li><strong>Operated runner + dashboard</strong> (paid tier) → plateau-app, open-core by usage.</li>
+</ul>
+<p>
+    The <strong>no-leakage invariant</strong> holds: no published <code>@webeverything</code> artifact
+    imports the runner; the standard ships only the protocols and the runner consumes them.
+</p>

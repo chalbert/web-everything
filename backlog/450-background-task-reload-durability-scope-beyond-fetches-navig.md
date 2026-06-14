@@ -2,9 +2,11 @@
 type: decision
 workItem: story
 size: 2
-status: open
+status: resolved
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-13"
+dateResolved: "2026-06-13"
+graduatedTo: none
 preparedDate: "2026-06-13"
 tags: [block, background-task, durability, background-fetch, navigation-guard, design-decision]
 relatedProject: webintents
@@ -13,6 +15,30 @@ crossRef: { url: /blocks/background-task-surface/, label: Background Task Surfac
 ---
 
 # Background Task reload-durability: scope beyond fetches + navigation-guard interaction
+
+## Ruling (2026-06-13)
+
+Both recommended defaults ratified, with two refinements:
+
+- **Fork 1 → A.** `durability: reload` is defined **only** as transfer-backed durable *execution*
+  (Background Fetch + SW adapter). Non-fetch long tasks stay route-only + the navigation guard. Durable
+  *state* (checkpoint/resume) is a **distinct future guarantee**, not a redefinition of `reload`.
+  - *Amendment 1 — reserve the term, don't ship a dead enum value.* `durability: resumable` is
+    **reserved in the design/docs** as the future home for durable-state, but the **shipped config enum
+    stays `route | reload`**. Declaring a config value the runtime can't yet satisfy would let authors
+    set it and get nothing; the reservation alone is enough to stop `reload` from being later redefined.
+- **Fork 2 → relax by default + mandatory degradation re-arm.** Arming `durability: reload` suppresses
+  `navigationGuard: warn` for that task (author may force it back on). Where Background Fetch is
+  unavailable and the tier degrades to route-only, the guard **re-arms** — a fixed mechanic, independent
+  of the default polarity. `durability` and `navigationGuard` stay **independent dimensions**; durability
+  only *derives* the guard's default, it does not merge with it.
+  - *Amendment 2 — make the derivation observable, build-side.* Because the re-arm depends on a runtime
+    feature-detect (is Background Fetch available at arm-time?), #134 must **feature-detect Background
+    Fetch at arm-time** and make the re-arm **observable** (the guard visibly re-engages on the
+    route-only fallback path). Not a fork — a build constraint this ruling creates.
+
+**Unblocks #134** (clears its `450` blocker edge). Recorded above; the dimension graduates to the
+standard when #134 builds it (`graduatedTo: none` on this decision item — the ruling is the artifact).
 
 **Grounding.** Carved off **#134** (the `durability: reload` tier); #134 can't be built while these two
 forks sit in its body (its 2026-06-10 pre-flight note released it from a batch for exactly this reason:
@@ -80,7 +106,7 @@ tier after it is honest and verifiable. The broader ambition isn't forfeited —
 buildable; reserves the honest term).
 
 *Rejected — B:* folding two guarantees into one token is the overclaim the native-first stance forbids
-([[feedback_native_first_default]]); a different guarantee deserves a different name, not a redefinition.
+; a different guarantee deserves a different name, not a redefinition.
 
 ## Fork 2 — does `durability: reload` relax `navigationGuard: warn`?
 
@@ -103,7 +129,7 @@ the warn is still needed.
 
 *Coupling note (bias toward separation upheld):* `durability` and `navigationGuard` stay **independent
 dimensions** — durability only *derives the guard's default*, it does not merge with it
-([[feedback_bias_separation_decoupling]]). The author retains override of both.
+. The author retains override of both.
 
 ## Per-fork classification (the 7-question pass)
 
@@ -115,7 +141,7 @@ Applied to the `durability: reload` tier (full detail in the
    impl) → Frontier UI.
 2. **Protocol/intent dimension:** a **dimension** (`durability: route → reload → future resumable`).
    The Background-Fetch substrate is an **implementation** satisfying the tier, registered as a
-   capability resolver impl — *not* a new protocol ([[feedback_impl_is_not_a_standard]]).
+   capability resolver impl — *not* a new protocol.
 3. **Expose the whole axis:** yes — `durability`'s values are each legitimate end-states, so it stays a
    configurable dimension.
 4. **Fixed mechanic vs dimension:** `durability` is a dimension; **graceful degradation to route-only
@@ -124,20 +150,20 @@ Applied to the `durability: reload` tier (full detail in the
    degrades to route-only.
 6. **Most-permissive default:** **native-first overrides** here — `durability` defaults to `route`
    (baseline) and `reload` is the author's opt-in enhancement, not a baseline dependency
-   ([[feedback_native_first_default]]). Within the guard sub-axis, the least-noisy choice (relax) wins.
+  . Within the guard sub-axis, the least-noisy choice (relax) wins.
 7. **Seam between intents:** background-task (`durability`) × navigation-guard (#129) × loader
    (rehydrated state). Fork 2 *is* that seam — resolved by default-derivation, not a merge.
 
 ## Concrete refs
 
-- Parent tier: [134-background-task-reload-durable-tier.md](backlog/134-background-task-reload-durable-tier.md)
+- Parent tier: [134-background-task-reload-durable-tier.md](/backlog/134-background-task-reload-durable-tier/)
   (open questions, lines 26-28; pre-flight fork note, lines 35-48; `blockedBy: ["128","135","450"]`).
 - Baseline config (no `durability` key) + guard boolean:
   [types.ts:114-139](blocks/background-task-surface/types.ts#L114).
 - Route-only guard impl (beforeunload + Navigation-API confirm):
   [BackgroundTasksElement.ts:327-359](blocks/background-task-surface/BackgroundTasksElement.ts#L327).
-- Baseline & guard items: [#128](backlog/128-background-task-status-bar-block.md) (route-only baseline),
-  [#129](backlog/129-navigation-guard-intent.md) (`navigationGuard: warn` → navigation-guard intent).
+- Baseline & guard items: [#128](/backlog/128-background-task-status-bar-block/) (route-only baseline),
+  [#129](/backlog/129-navigation-guard-intent/) (`navigationGuard: warn` → navigation-guard intent).
 - Prior-art survey: [report](reports/2026-06-13-background-task-reload-durability.md) ·
   [/research/ topic](/research/background-task-reload-durability/).
 

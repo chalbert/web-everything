@@ -73,10 +73,9 @@ expressed — not pick a single mechanism.
 ## Open extension point — hook for custom strategies
 
 The built-in strategy list above must **not** be a closed enum. Following the intents-open-design
-philosophy (standardize the meta-schema, not the list — `[[project_intents_open_design]]`), the axis
+philosophy (standardize the meta-schema, not the list), the axis
 needs a **registry hook so authors can register their own auto-define strategy** that coexists
-conflict-free with the built-ins (same registry+adapter shape WE uses elsewhere —
-`[[feedback_authoring_standard_workflow]]`). The standard defines the strategy *contract* (the
+conflict-free with the built-ins (same registry+adapter shape WE uses elsewhere). The standard defines the strategy *contract* (the
 interface a strategy implements: trigger, tag→module resolution, how it performs the define / scope)
 and the resolution rules; the concrete strategies — built-in or custom — are plugged in. So a team
 can add e.g. a bespoke server-driven or convention-based strategy without forking WE.
@@ -141,8 +140,8 @@ Rulings:
 2. **No tool-baked default.** The native baseline is *explicit* registration (the platform has no
    auto-registration). The default-strategy selection is a value in the **platform config a project
    extends**, shipped in flavors (`strict-explicit` → explicit; `lazy-dom` → on-first-use;
-   `build-parsed` → build-time). Codified as a cross-cutting rule in
-   `[[feedback_config_extends_platform_default]]` — applies to ALL strategy axes, not just this one.
+   `build-parsed` → build-time). Codified as a cross-cutting rule —
+   defaults live in a project config that extends the platform default — applies to ALL strategy axes, not just this one.
 3. **Contract** `AutoDefineStrategy`: `key`, `trigger`, optional `resolve(tag)→module`,
    `define(tag, ctor, scope?)`. Inferring strategies (lazy-dom, build-parsed, manifest, convention,
    server) are opt-in; the explicit baseline needs no strategy object.

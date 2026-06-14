@@ -1,7 +1,7 @@
 ---
 type: idea
 workItem: task
-status: open
+status: parked
 blockedBy: ["483"]
 dateOpened: "2026-06-13"
 tags: []

@@ -61,7 +61,7 @@ because the ruling reframes them:
    authoring.
 2. **The `forbid`(403)/`cloak`(404) deny enum likely belongs *behind the provider*, not in the
    member intent** — it's a server/security decision and intents are UX-only
-   ([[intent_ux_only_technical_to_configurator]]). Resolve where the enum lives when defining the
+  . Resolve where the enum lives when defining the
    provider contract.
 3. **#149's provider shape under-specs the authz case.** Anchor-positioning is pure client-side
    strategy; an authz provider crosses a trust boundary (async, server round-trip, revocable,

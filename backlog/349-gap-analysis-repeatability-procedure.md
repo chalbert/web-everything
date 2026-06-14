@@ -16,7 +16,7 @@ crossRef: { url: /research/, label: "/research/ topic index" }
 
 # Repeatability — define how the gap sweep re-runs over time and produces a comparable, diffable result
 
-Phase 5 of the [gap-analysis program](backlog/315-competitive-coverage-gap-analysis-program.md): make the whole pipeline (corpus → extraction → mapping → gap→backlog) **re-runnable on a cadence so a later pass produces a comparable, diffable result** — the same corpus yields the same matrix shape, surfacing only what *changed*. This is the "run it again from time to time with a similar result" requirement, and it is the **component-coverage instance of [#192](backlog/192-longitudinal-research-freshness-system.md)** (longitudinal research freshness) — so the decision is largely *how to reuse #192's machinery*, not invent a parallel one.
+Phase 5 of the [gap-analysis program](/backlog/315-competitive-coverage-gap-analysis-program/): make the whole pipeline (corpus → extraction → mapping → gap→backlog) **re-runnable on a cadence so a later pass produces a comparable, diffable result** — the same corpus yields the same matrix shape, surfacing only what *changed*. This is the "run it again from time to time with a similar result" requirement, and it is the **component-coverage instance of [#192](/backlog/192-longitudinal-research-freshness-system/)** (longitudinal research freshness) — so the decision is largely *how to reuse #192's machinery*, not invent a parallel one.
 
 Blocked by #346 — there's no run to repeat until the extraction method + schema exist; the repeatability rules wrap that method.
 

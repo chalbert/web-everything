@@ -48,5 +48,5 @@ Make editability **declared and announced**, not implicit:
 
 **Decision:** kept editability **DOM-driven** (authored `aria-readonly`), not a per-column config object
 — consistent with the rest of the grid reading structure from the live DOM, and it leaves per-column
-*editor kind* to [[158-editable-grid-typed-editors-validation]]. Did not auto-stamp every editable cell
+*editor kind* to [#158](/backlog/158-editable-grid-typed-editors-validation/). Did not auto-stamp every editable cell
 with `aria-readonly="false"`: authoring stays authoritative, the behavior honors what's declared.

@@ -1,9 +1,10 @@
 ---
-type: issue
+type: decision
 workItem: task
 parent: "495"
-status: open
+status: preparing
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-14"
 tags: []
 ---
 

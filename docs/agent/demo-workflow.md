@@ -105,10 +105,52 @@ To show the same element as HTML and JSX on a block/adapter page (`source-toggle
 - **Build integrity** → `npx @11ty/eleventy` must build with no template error (a missing njk import
   aborts the *whole* build).
 
-## 6. Verify checklist
-- [ ] `demos/{id}.{html,tsx,css}` created; `demos.json` entry added (valid JSON).
-- [ ] `npx @11ty/eleventy` builds; `/demos/{id}/` page appears.
-- [ ] Vite serves `/demos/{id}.html` (200) and transforms the `.tsx` (no errors).
+## 6. Routed folder demos (mounted under a base path)
+
+A multi-view app (the flagship exercise apps) is a **folder demo**: `demos/{id}/{index.html, app.ts,
+app.css, conformance.json}`, served at the **base path `/demos/{id}/`** — *not* the origin root. Its
+client-side router therefore lives in **base-qualified URL space**, and getting that wrong is a
+recurring, easy-to-miss bug: the app boots fine but a **hard reload of a deep route 404s** because a
+redirect/link dropped the base (and the dev server had no SPA fallback for it).
+
+The Router block already ships the mechanism — **use it, don't hand-roll a `replaceState` shim**:
+
+- **`<route-view base="/demos/{id}" entry="/home">`** — `base` prepends to every `route="/x"` pattern
+  (matching), and `entry` (#365) maps the load-time URL into route space (replaces the boot shim).
+- **`base` does NOT apply to `route:link` hrefs or programmatic redirects** — those navigate to their
+  raw value. Route them through a single seam: `const routePath = (p) => \`/demos/{id}${p}\`;` and use
+  `route:link="${routePath('/x')}"`. Never emit an origin-root-absolute `route:link="/x"` or
+  `history.replaceState(null, '', '/x')`.
+- **Add a `routerDemoFallback` entry in `vite.config.mts`** mapping `/demos/{id}/<route>` →
+  `/demos/{id}/index.html`, so a hard reload of a deep route is served the SPA entry instead of 404ing
+  (the dev-server half the block can't do from inside the page).
+
+This wiring is gated automatically — see below. (Both `loan-origination` and `auto-insurance` are
+reference implementations.)
+
+## 7. Quality gates for demos — `check:demos`
+
+Two complementary, **shared** validators guard every demo (don't hand-roll per-demo checks):
+
+- **`npm run check:app-conformance -- --app=demos/{id}`** — does the app *use* the standards it declares
+  in `conformance.json` (vs reimplement)? (See [exercise-app-workflow.md](exercise-app-workflow.md).)
+- **`npm run check:demos`** — **operational wiring**, folded into `check:standards` so it runs every
+  time: every folder demo is registered; every routed folder demo sets `base`+`entry`, carries no
+  origin-root-absolute link/redirect literal, and has a `routerDemoFallback` entry. Add **`--live`** to
+  probe a running dev server (entry + every deep route reload return 200 — the exact regression).
+
+**The manual checklist is generated, not hand-copied.** `npm run check:demos -- --write-checklist`
+(re)writes `demos/{id}/CHECKLIST.md` from `demos.json` + `conformance.json` + parsed routes. Everything
+above the `## Demo-specific` marker is regenerated; hand-authored notes below it are preserved. Edit
+metadata, not the generated sections.
+
+## 8. Verify checklist
+- [ ] Single-file: `demos/{id}.{html,tsx,css}` created. Folder: `demos/{id}/{index.html,app.ts,app.css,conformance.json}`.
+- [ ] `demos.json` entry added (valid JSON); `npx @11ty/eleventy` builds; `/demos/{id}/` page appears.
+- [ ] Vite serves the entry (200) and transforms the source (no errors).
+- [ ] **Routed folder demo**: `<route-view base/entry>` set; links/redirects base-qualified via a seam;
+      `routerDemoFallback` entry added. **`npm run check:demos` passes** (it's in `check:standards`).
+- [ ] `npm run check:demos -- --write-checklist` run; `CHECKLIST.md` reviewed (`## Demo-specific` filled).
 - [ ] Logic covered by unit tests over a shared fixture module.
 - [ ] E2E spec added; `npm run test:integration` green with the dev server up.
 - [ ] `status` starts `draft`; description states the POC/tier scope.

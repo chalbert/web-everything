@@ -75,6 +75,12 @@ highest-leverage blocker"** directly, even if Tier-A items exist:
 - **If the user redirects** to a different decision (you claimed by leverage, not by their explicit
   pick), **release the claim** — flip `active → open` — and claim the one they want instead. A
   briefly-misplaced claim is cheap; an unclaimed discussion is the race.
+- **The item is the source of truth — capture clear findings in it *before* asking to ratify.** As the
+  discussion exposes a clear new element that affects the call (a finding, a reframed fork, a dissolved
+  option, a changed recommendation), **write it into the decision item first** — update by default, no
+  permission needed — then ratify against the item; never ask the user to ratify anything that lives
+  only in chat. Pause to ask before writing **only** when the conclusion is genuinely ambiguous. See
+  `backlog-workflow.md` → *"The decision item is the source of truth"*.
 - Once it's talked through and **the call is made, close out the decision item itself** per step 7:
   flip `active → resolved`, add `dateResolved`, and record the ruling (and `graduatedTo` if it became
   an entity). The gated work then turns agent-ready — continue the arc or re-run normal selection. If

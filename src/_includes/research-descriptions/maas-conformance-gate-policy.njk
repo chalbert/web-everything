@@ -1,0 +1,70 @@
+<h3>The Question</h3>
+<p>
+    <a href="/backlog/549-conformance-gate-the-generated-net-target-through-506/">#549</a> is slice 3 of the
+    polyglot-MaaS epic (<a href="/backlog/507-maas-deterministic-generation-adapter-derive-idiomatic-nativ/">#507</a>,
+    ratified parent <a href="/backlog/463-polyglot-maas-origin-generate-net-java-other-server-implemen/">#463</a> forks
+    a/c): wire the generated <strong>C# origin</strong> (<a href="/backlog/548-first-foreign-native-target-the-net-backend/">#548</a>)
+    as a live target the <a href="/backlog/506-maas-cross-language-conformance-suite-golden-vectors-referen/">#506</a>
+    conformance runner drives, so divergence in <em>executed behaviour</em> — not just source bytes — is caught.
+    The transport is already settled in code (a subprocess <code>ConformanceTarget</code> reading the same
+    <code>golden.json</code>). The single open dimension is <strong>gate policy</strong>: running the C# target needs a
+    <code>dotnet</code> toolchain (compile + execute), which is heavy and not universally present. Fold it into the
+    default gate, or run it as an opt-in suite that skips-with-notice when the toolchain is absent? This survey gathers
+    cross-language-conformance prior art per design-first step&nbsp;1 so the fork reuses the incumbents' pattern.
+</p>
+
+<h3>Recommendation (Fork 1 in #549)</h3>
+<ol>
+    <li><strong>Default to the opt-in suite (option B)</strong> — a <code>check:maas-conformance</code>-style target
+        (or a tagged vitest project excluded from the default run) that detects <code>dotnet</code>, drives the C#
+        target through the #506 runner when present, and <strong>skips with an explicit notice</strong> otherwise. This
+        is the canonical protobuf/Connect pattern <em>and</em> the repo's own Playwright precedent; it keeps the fast
+        inner loop portable and <code>dotnet</code>-free.</li>
+    <li><strong>Keep option A as a CI posture layered on B, not the default</strong> — a project whose CI guarantees the
+        toolchain can promote the same suite into its required gate (the strongest anti-drift guarantee). That is a
+        config choice on top of B's runner, not a separate implementation, so B is the substrate either way.</li>
+    <li><strong>The free byte-level source snapshot stays in the default vitest run regardless</strong> — the existing
+        C# string-match drift gate needs no toolchain and catches the common case; #549 only adds the
+        executed-behaviour layer on top.</li>
+</ol>
+
+<h3>Finding 1 — every mature cross-language conformance suite runs the foreign target as a separate, toolchain-gated job</h3>
+<p>
+    The pattern is unambiguous and consistent. <strong>Protocol Buffers conformance</strong> drives each implementation
+    as a <a href="https://github.com/protocolbuffers/protobuf/blob/main/conformance/conformance.proto">sub-process over a
+    pipe</a> (<code>ConformanceRequest</code> → <code>ConformanceResponse</code>), as a standalone runner gated
+    per-implementation — the source of the lesson, already cited in our <code>runner.ts</code> header, that a shared
+    spec guarantees nothing without a shared <em>executable</em> suite (same spec, 0 vs 1,847 failures across
+    libraries). <strong>Connect / gRPC / gRPC-Web conformance</strong>
+    (<a href="https://github.com/connectrpc/conformance">connectrpc/conformance</a>) ships
+    <code>connectconformance</code>, a standalone binary that orchestrates the target as a subprocess over
+    <code>stdin</code>/<code>stdout</code> with all test data embedded, integrated as a <strong>separate CI
+    workflow</strong> — explicitly not by modifying each library's default test suite. OpenXR's CTS and the IPFS
+    gateway-conformance suite follow the same shape. None fold the foreign-target run into the host library's fast unit
+    gate, because the foreign runtime is heavy and absent from the inner loop.
+</p>
+
+<h3>Finding 2 — this repo already expresses "heavy toolchain ⇒ its own script"</h3>
+<p>
+    <code>test:integration</code> (Playwright — a heavy browser toolchain) is already a separate npm script from
+    <code>test:unit</code> (<code>vitest run</code>), not folded into the default fast gate; and
+    <code>check:standards</code> is a pure structural linter that does not run vitest at all. So option&nbsp;B is not a
+    new convention — it is the convention this repo already uses for optional/heavy toolchains, applied to
+    <code>dotnet</code>.
+</p>
+
+<h3>Finding 3 — the toolchain is non-trivial even locally, so skip-with-notice is load-bearing</h3>
+<p>
+    <code>dotnet</code> exists locally at <code>/usr/local/share/dotnet/dotnet</code> but is <strong>not on
+    <code>PATH</code></strong>. So even on the author's machine, a default-gate fold (option A) would need explicit
+    toolchain discovery, and a naive <code>dotnet</code> invocation would fail. The skip-with-notice detection
+    of option B is therefore needed even here, not just in foreign CI — which is itself an argument against making A the
+    default.
+</p>
+
+<h3>Sources</h3>
+<ul>
+    <li><a href="https://github.com/protocolbuffers/protobuf/blob/main/conformance/conformance.proto">Protocol Buffers conformance suite</a> · <a href="https://github.com/bufbuild/protobuf-conformance">bufbuild/protobuf-conformance</a> · <a href="https://buf.build/blog/protobuf-conformance">Protobuf-ES conformance writeup</a></li>
+    <li><a href="https://github.com/connectrpc/conformance">connectrpc/conformance</a> — standalone subprocess runner, separate CI workflow</li>
+    <li><a href="https://registry.khronos.org/OpenXR/conformance/cts_usage.html">OpenXR CTS usage guide</a> · <a href="https://github.com/galargh/gateway-conformance">IPFS gateway-conformance</a></li>
+</ul>

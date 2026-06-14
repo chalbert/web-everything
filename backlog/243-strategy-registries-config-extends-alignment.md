@@ -15,8 +15,7 @@ crossRef: { url: /projects/webcomponents/#protocol-render-strategy, label: Rende
 
 # Align strategy registries to the config-extends-platform default model
 
-Close-out leftover from #227. The ruling there established the canonical rule
-(`[[feedback_config_extends_platform_default]]`): **the tool carries no default — the
+Close-out leftover from #227. The ruling there established the canonical rule: **the tool carries no default — the
 default-strategy selection comes from a platform config the project extends**, via the core
 `CustomRegistry` inheritance chain.
 

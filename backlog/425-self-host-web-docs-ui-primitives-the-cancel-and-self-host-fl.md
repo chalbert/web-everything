@@ -71,7 +71,7 @@ into four orthogonal axes, each pinned to concrete code:
   place**, i.e. already islands by construction. Whether the panels reuse them (and hydrate) or stay
   pure-static is **Fork 3**.
 - **Packaging.** No `@frontierui/*-ui` content package exists yet; impl publishes under `@frontierui`
-  ([[project_npm_scope_mirrors_layer]]). One package vs split is **Fork 4**.
+ . One package vs split is **Fork 4**.
 
 ## Recommended path at a glance
 
@@ -121,7 +121,7 @@ string-emit; WE's reference is Nunjucks.
   primitive that explicitly wants encapsulation.
 - *Rejected — C — Server-template form (generalize WE's Nunjucks).* Invents a **second FUI paradigm**
   (FUI has zero server-template precedent) and adds template-**engine lock-in**
-  ([[feedback_minimize_lock_in_protocol_only_lock]]). Worse than extending the primitive FUI already has.
+ . Worse than extending the primitive FUI already has.
 
 ## Fork 3 — Interactivity: reuse behavior-block islands (hydrate-optional) or pure-static?
 
@@ -132,7 +132,7 @@ their behavior come from, and must JS be present? This is the **one axis with re
   confidence medium)*. The static JSX skeleton (Fork 2) is the page; `blocks/tabs/`, `blocks/navigation/`,
   `blocks/droplist/`, `blocks/for-each/` enhance it in place where interaction is wanted. Static HTML
   works JS-off; islands hydrate as the self-hoster's opt-in. Reuse, not reinvent; native-first graceful
-  degradation ([[feedback_native_first_default]]).
+  degradation.
 - *Rejected — B — Pure-static panels (no JS at all).* Plain `<details>`/anchors, zero islands. Simplest
   and the absolute strongest floor, but **loses the tabbed/filterable conformance matrix** WE's own
   capabilityMatrix has — a real capability regression. (This is the override the decider may pick if a
@@ -147,7 +147,7 @@ their behavior come from, and must JS be present? This is the **one axis with re
 - **A — Single published `@frontierui/webdocs-ui`** *(recommended)*. Depends on jsx-runtime (+ its new SSR
   entry) and the behavior blocks it composes. One cohesive docs-UI kit, one consumer (plateau-app served
   product + self-hosters); `npm i @frontierui/webdocs-ui` + assemble the shell *is* the cancel-and-self-host
-  floor. Naming mirrors the layer ([[project_npm_scope_mirrors_layer]]).
+  floor. Naming mirrors the layer.
 - *Rejected (for now) — B — Split packages* (e.g. `-shell` vs `-panels`). Our standing bias is separation
-  ([[feedback_bias_separation_decoupling]]), but these primitives are one product surface with one
+ , but these primitives are one product surface with one
   consumer; splitting is premature abstraction. Cheap to split later if a second consumer wants only part.

@@ -19,7 +19,7 @@ crossRef: { url: /backlog/091-web-docs-as-a-service-plateau/, label: "Web Docs r
 > **PARKED 2026-06-14 — too early to settle the economics; deferred behind the live-serve strategy.**
 > Pricing a *hosted/metered* Web Docs offering presupposes we run a deployed SaaS — which cuts
 > against the current solo-founder commercial strategy of shipping **non-deployed** solutions first
-> ([[project_monetization_strategy]]: self-run tool > single service > enterprise-custom; **defer
+> (the open-core monetization strategy: self-run tool > single service > enterprise-custom; **defer
 > live-serve**). The eventual home for a metered hosted Web Docs is **inside the larger Plateau SaaS
 > product-suite shell ([#554](/backlog/554-plateau-hosted-saas-product-suite-shell-multi-product-accoun/))**
 > — where several Plateau products (custom browser, etc.) are offered alongside it — not a standalone

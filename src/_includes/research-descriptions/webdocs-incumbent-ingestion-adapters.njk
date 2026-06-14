@@ -1,0 +1,78 @@
+<h3>The Question</h3>
+<p>
+    Decision <a href="/backlog/426-incumbent-ingestion-adapters-storybook-mintlify-to-the-webca/">#426</a>
+    asks where a <strong>webdocs ingestion adapter</strong> lives and what shape it takes. The adapter is a
+    bottom-up <em>normalization-hub</em> shim (the <a href="/backlog/150-dev-authoring-preferences-architecture-intents/">#150</a>
+    lossy-pivot direction): read a customer's existing component docs and emit the
+    <strong>webcases pivot</strong> the <a href="/backlog/424-webdocs-generator-impl-manifest-cases-to-served-docs-site/">#424</a>
+    generator consumes — <code>WebCase = {id, title, description, code}</code>,
+    <code>WebCases = Record&lt;blockId, WebCase[]&gt;</code> (<code>webdocs/generator.ts:27-46</code>). One call
+    governs <em>every</em> webdocs ingestion adapter — Storybook (#426), Mintlify (#429), future Docusaurus —
+    so this survey gathers the format prior art for the first two and reconciles the home with the
+    constellation-layering ruling. No adapter exists yet, so this is design-first step&nbsp;1.
+</p>
+
+<h3>Storybook — Component Story Format (CSF 3)</h3>
+<p>
+    A <code>*.stories.*</code> module is one <code>Meta</code> default export plus N named Story exports.
+    Mapping to the pivot: <code>id</code>&nbsp;← story export key / <code>@storybook/csf</code>
+    <code>toId(meta.title, name)</code>; group&nbsp;id&nbsp;← <code>meta.title</code>/component;
+    <code>title</code>&nbsp;← story <code>name</code> field, else <code>startCase(exportKey)</code>;
+    <code>description</code>&nbsp;← JSDoc comment above the story / <code>parameters.docs.description.story</code>;
+    <code>code</code>&nbsp;← the verbatim story source or <code>parameters.docs.source.code</code> (the runtime
+    "dynamic" snippet is framework-specific and post-render, so prefer the literal). <code>.mdx</code> docs
+    pages are a second input (<code>Meta</code>/<code>Story</code>/<code>Canvas</code> doc blocks + prose).
+</p>
+<p>
+    <strong>Lossy / no equivalent</strong> — the comparative value of a normalization hub:
+    <code>args</code>/<code>argTypes</code> control matrices, <code>play</code> interaction tests,
+    <code>decorators</code> (without which <code>code</code> isn't self-contained), multi-framework
+    renderings, <code>parameters</code>/<code>tags</code>. <strong>Reuse:</strong>
+    <code>@storybook/csf-tools</code> (<code>readCsf</code>/<code>loadCsf</code> → <code>CsfFile.parse()</code>,
+    Storybook's own indexer), <code>@storybook/csf</code> (<code>toId</code>, <code>storyNameFromExport</code>);
+    MDX via <code>@mdx-js/mdx</code> + <code>remark-mdx</code>.
+</p>
+
+<h3>Mintlify</h3>
+<p>
+    A <code>docs.json</code> navigation config plus <code>*.mdx</code> pages with YAML frontmatter.
+    <code>id</code>&nbsp;← MDX path/slug; group&nbsp;id&nbsp;← enclosing <code>navigation.groups[].group</code>;
+    <code>title</code>&nbsp;← frontmatter <code>title</code> (fallback <code>sidebarTitle</code>);
+    <code>description</code>&nbsp;← frontmatter <code>description</code>; <code>code</code>&nbsp;← fenced code
+    blocks / <code>&lt;CodeGroup&gt;</code> / <code>&lt;RequestExample&gt;</code> in the body.
+    <strong>Lossy:</strong> the interactive OpenAPI playground, component embeds
+    (<code>&lt;Card&gt;</code>/<code>&lt;Tabs&gt;</code>/<code>&lt;Steps&gt;</code>), nav hierarchy beyond one
+    group level, multi-language <code>&lt;CodeGroup&gt;</code> sets, prose body. <strong>Reuse:</strong>
+    <code>gray-matter</code> (frontmatter), <code>@mdx-js/mdx</code> + <code>remark</code> +
+    <code>unist-util-visit</code> (code/JSX nodes), <code>JSON.parse</code> for <code>docs.json</code>.
+</p>
+<p>
+    Cross-cutting: both sources are <strong>page/module-grained, not case-grained</strong> — CSF fans out
+    naturally to one case per story; Mintlify forces a per-page-vs-per-snippet granularity choice. The lossy
+    cells are flagged with a confidence/coverage level, never silently dropped.
+</p>
+
+<h3>Recommendation (forks open in #426)</h3>
+<ol>
+    <li><strong>Fork 1 — adapter home: co-locate in <code>webeverything/webdocs/adapters/</code></strong>
+        next to the pivot it imports (medium confidence). The only in-repo ingest-adapter precedent
+        (<code>scripts/validation-normalize/adapters/eslint.mjs</code>) and the generation adapters both live
+        in webeverything; FUI has no <code>@we</code>/webdocs alias at all
+        (<code>frontierui/tsconfig.json:20-26</code>, <code>vite.config.mts:126-132</code>). Honoring the
+        literal "adapters&nbsp;→&nbsp;FUI" line of the
+        <a href="/backlog/091-web-docs-as-a-service-plateau/">#091</a> layering ruling would split the
+        generator's own input-shim across a repo boundary — a worse end-state on merit, not just more work.
+        The purest layering would move the <em>whole</em> webdocs cluster (generator + adapters) to FUI, but
+        the generator's home was settled by #424; that's out of #426's scope.</li>
+    <li><strong>Fork 2 — contract shape: a plain per-source provider module
+        <code>{ source, ingest }</code> → <code>WebCases</code></strong> (high confidence), matching
+        <code>eslint.mjs</code>. Ingestion runs once at customer onboard time, consulted by a tool — an
+        author-time devtools provider seam, <em>not</em> a runtime <code>CustomXRegistry</code>. The adapter
+        maps the source's own metadata to <code>{id,title,description,code}</code> and emits
+        <code>WebCases</code> directly, bypassing <code>parseWebCase</code>'s WE-specific
+        <code>&lt;!-- WEB CASE --&gt;</code> convention (<code>generator.ts:54-67</code>).</li>
+</ol>
+<p>
+    Both defaults make #426 an agent-ready build and let #429 (Mintlify) follow the same home and contract.
+    Full grounding in <code>reports/2026-06-13-webdocs-ingestion-adapter-home.md</code>.
+</p>

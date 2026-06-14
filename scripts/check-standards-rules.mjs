@@ -291,6 +291,41 @@ export function findBuriedForkSections(body) {
   return findings;
 }
 
+// ── Bad-body-link lint: leaked authoring syntax in a backlog body ──────────────
+// A backlog body is rendered at `/backlog/<id>/` on the 11ty site, so a link that only resolves in the
+// repo/editor (or not at all) renders as dead text or a 404 for a reader. Three recurring leaks:
+//   • `[[wiki-link]]` — MEMORY-files-only syntax (`[[feedback_*]]`/`[[project_*]]`); markdown renders it
+//     literally and the slug has no page anywhere. ERROR — there is no valid use in a backlog body.
+//   • `localhost` / absolute-`/Users/` / `file://` links — dead for any reader. WARN.
+//   • a link to ANOTHER backlog item's `.md` file (`](…/backlog/NNN-x.md)`) — 404s on the live site;
+//     the correct form is the rendered URL `/backlog/NNN-slug/`. WARN. (Links to reports/ or docs/agent/
+//     `.md`, which are deliberately NOT on the site, are the sanctioned agent-facing ref and NOT flagged.)
+// Skips fenced + inline code (an array literal `[[1,2]]` or a sample path in a code span is legitimate),
+// mirroring findRawHtmlInMarkdown. Returns `{ line, kind, text }`; the caller groups per item + severity.
+export function findBadBodyLinks(body) {
+  const findings = [];
+  if (typeof body !== 'string' || body === '') return findings;
+  let fenceChar = null, fenceLen = 0;
+  body.split('\n').forEach((line, i) => {
+    const fm = line.match(/^\s*(`{3,}|~{3,})/);
+    if (fenceChar) {
+      if (fm && fm[1][0] === fenceChar && fm[1].length >= fenceLen) { fenceChar = null; fenceLen = 0; }
+      return; // inside a fence
+    }
+    if (fm) { fenceChar = fm[1][0]; fenceLen = fm[1].length; return; }
+    const prose = line.replace(/(`+)[\s\S]*?\1/g, ' '); // strip inline code spans
+    const ln = i + 1;
+    for (const m of prose.matchAll(/\[\[[^\]]*\]\]/g)) findings.push({ line: ln, kind: 'wikilink', text: m[0] });
+    for (const m of prose.matchAll(/\]\(([^)\s]+)/g)) {
+      const tgt = m[1];
+      if (/^(https?:\/\/)?localhost\b/i.test(tgt)) findings.push({ line: ln, kind: 'localhost', text: tgt });
+      else if (/^(\/Users\/|file:\/\/)/i.test(tgt)) findings.push({ line: ln, kind: 'absfile', text: tgt });
+      else if (/(^|\/)backlog\/[^)]*\.md([)#]|$)/.test(`${tgt})`)) findings.push({ line: ln, kind: 'backlog-md', text: tgt });
+    }
+  });
+  return findings;
+}
+
 // ── Unquoted-colon scalar lint for backlog frontmatter (#453) ──────────────────
 // The loader (#430) skips a malformed-YAML item and only warns, so a frontmatter typo slips past the
 // gate unseen. The recurring trigger is an UNQUOTED plain scalar whose value embeds a `: ` (colon +

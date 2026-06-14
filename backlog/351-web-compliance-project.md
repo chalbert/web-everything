@@ -27,7 +27,7 @@ the seed of this layer; the project generalizes it.
 
 | Phase | Produces | Notes |
 |---|---|---|
-| **1 · Policy / rule model** | which conformance criteria are enforced, at what **severity**, for which scope — policy-as-code, versioned, **extends a platform-default policy** | The canonical artifact; natural first slice. [[feedback_config_extends_platform_default]] — a platform-default baseline policy + a per-project extension. |
+| **1 · Policy / rule model** | which conformance criteria are enforced, at what **severity**, for which scope — policy-as-code, versioned, **extends a platform-default policy** | The canonical artifact; natural first slice. Defaults live in a project config that extends the platform default — a platform-default baseline policy + a per-project extension. |
 | **2 · Gates** | runners that fail CI / block on a policy violation — the escalation of a conformance score to a hard rule | Generalizes the benchmark's `--strict` seed into a declared, severity-aware gate. |
 | **3 · Waivers / exceptions** | tracked, **expiring**, audited overrides | Makes a gate governable, not brittle. |
 | **4 · Audit / evidence trail** | what was enforced, when, against which standard version, with what result — the defensible record | Mirrors the loan app's proof-of-compliance at the platform level. **Emits through Web Reporting ([#350]) — an audit result is just another report source.** |
@@ -46,14 +46,14 @@ the seed of this layer; the project generalizes it.
   declared, severity-tagged policy extending the platform default, so the gate set is *data*, not scattered
   scripts.
 - **Per-project policy extends a platform default?** **Yes** — consistent with every other WE config layer
-  ([[feedback_config_extends_platform_default]]): a fully-defined platform-default policy (the baseline
+ : a fully-defined platform-default policy (the baseline
   gates) + a project policy that extends/overrides it.
 
 ## Relationships
 
 - Builds **on** conformance (the measure) — never replaces it; a rule is a conformance signal with teeth.
 - Emits through **Web Reporting** ([#350]) — audit/gate results are just another report source.
-- The exercise-app benchmark ([[project_exercise_app_conformance_loop]]) is the first producer of
+- The exercise-app benchmark is the first producer of
   conformance signals a compliance policy could promote.
 
 ## Why an epic (storied) — sliced 2026-06-12

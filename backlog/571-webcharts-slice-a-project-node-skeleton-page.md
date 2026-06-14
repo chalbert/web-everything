@@ -2,8 +2,9 @@
 type: issue
 workItem: task
 parent: "570"
-status: open
+status: active
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-14"
 tags: []
 ---
 

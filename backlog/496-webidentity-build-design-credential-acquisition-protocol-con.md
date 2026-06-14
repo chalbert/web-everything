@@ -66,7 +66,7 @@ The remaining concern decomposes into three orthogonal build axes. **(1) The pro
 
 **Crux:** #012-Fork-2 lumped "Configurator domain" into the deferral, but it is a plateau-app concern and config-flavors already carry technical defaults ([protocols.json auto-define](../src/_data/protocols.json)).
 
-- **(A — recommended) Omit the Configurator domain from this build; technical defaults ride the provider registry + config-flavors.** Add an identity Configurator domain to plateau-app **only if** a real ceremony-authoring need emerges, carved then as a plateau-app item. Honours bias-toward-separation + constellation layering [[feedback_bias_separation_decoupling]].
+- **(A — recommended) Omit the Configurator domain from this build; technical defaults ride the provider registry + config-flavors.** Add an identity Configurator domain to plateau-app **only if** a real ceremony-authoring need emerges, carved then as a plateau-app item. Honours bias-toward-separation/decoupling + constellation layering.
 - **(B) Include a Configurator domain in this epic.** Couples a plateau-app product surface into a standard-layer build; heavier; premature. *Rejected for now.*
 
 **Default: A.**

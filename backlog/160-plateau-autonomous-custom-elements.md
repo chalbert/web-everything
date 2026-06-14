@@ -27,7 +27,7 @@ stand-in's lifecycle wrappers resolve back to themselves and the real class's `c
 plateau's bootstrap does not connect; `<auto-complete>` stays an empty shell.
 
 Consequence for #138: `<auto-complete>` is correct, portable, standards-only custom-element code and
-runs perfectly in a native registry — its [conformance demo](http://localhost:3011/auto-complete-demo.html)
+runs perfectly in a native registry — its conformance demo (`auto-complete-demo.html`, frontierui dev server)
 boots **natively** (no plateau bootstrap) and the full "par → arrow → enter" trace + diacritic match
 pass. But it cannot yet run inside plateau's full runtime. The demo documents this and stubs the one
 runtime hook the composed behaviors need (`node.injectors()`).

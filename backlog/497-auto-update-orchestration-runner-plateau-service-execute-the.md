@@ -65,7 +65,7 @@ Ratify the row, or override it. The ratify-cluster below it is settled by preced
 
 **Ratify-cluster (settled by precedent — not separate forks):**
 
-- **Constellation layering — no "home" decision, no new repo** (per [[managed_offering_constellation_layering]],
+- **Constellation layering — no "home" decision, no new repo** (managed offerings decompose across the constellation, no single home;
   same answer as [#092](/backlog/092-provider-consumer-graph-platform-manager/) Fork 3): protocol → WE
   (shipped); reusable orchestration → Frontier UI (next to the upgrader engine); operated runner +
   dashboard → plateau-app (open-core by usage) **as a parked later phase** (plateau-app Phase 2/3, #554) —
@@ -76,7 +76,7 @@ Ratify the row, or override it. The ratify-cluster below it is settled by preced
   the operated/hosted tier is out-of-phase, not forbidden — it parks under #554 behind defer-live-serve.
 - **Post-deploy rollout — delegated to existing progressive-delivery controllers** (Argo/Flagger), not
   built (native-first / impl-is-not-a-standard).
-- **No-leakage invariant** (per [[project_vision_is_plateau_service_no_leakage]]): no published
+- **No-leakage invariant** (vision is a Plateau service the WE project consumes; only outputs reach the standard): no published
   `@webeverything` artifact imports the runner; the standard ships only the protocols, the runner consumes
   them.
 
@@ -91,7 +91,7 @@ the *mechanics* it gates — fetch, cool-off, test-in-branch, auto-merge, metric
 
 - **(A — recommended) Thin orchestrator (built in Frontier UI) + composed engines.** *Home: a Frontier UI
   package next to the upgrader engine — **not** webeverything; WE ships only the `update-policy` protocol
-  (no-leakage invariant, [[npm_scope_mirrors_layer]]). "WE" here means "the WE standard it serves," never
+  (no-leakage invariant, npm scope mirrors the layer: @webeverything = standard artifacts, @frontierui = implementation). "WE" here means "the WE standard it serves," never
   its repo.* The runner owns *only* the WE-standard-specific
   policy evaluation (manifest severity, migration routing) and the net-new #092 pre-test edge; it drives
   Renovate/Dependabot as the pre-merge execution primitive and emits Argo/Flagger config for post-deploy.
@@ -125,7 +125,7 @@ WE-standard-specific half that *is* the value — so A is the surviving option o
 **Separation reaffirmed (the one wording risk caught at ratification):** the orchestrator is **not** in
 webeverything. "WE orchestrator" = *WE-standard-aware*, never *in-WE*. WE ships only the `update-policy`
 protocol (already shipped, #101); the orchestrator is an `@frontierui` package, the operated/hosted tier is
-plateau-app — per the no-leakage invariant and [[npm_scope_mirrors_layer]] / [[managed_offering_constellation_layering]].
+plateau-app — per the no-leakage invariant, npm scope mirrors the layer (@webeverything = standard artifacts, @frontierui = implementation), and managed offerings decomposing across the constellation (no single home).
 
 **Sharpening recorded:** C is not a different mechanism from A — it is *A with the owned gate-evaluation
 layer amputated*; A still emits engine config for the commoditized mechanics exactly as C would. So the

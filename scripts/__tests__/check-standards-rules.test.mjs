@@ -20,7 +20,7 @@ import {
   validateReportsNotHidden, findCompiledShadows, isSegmentCovered, permalinkSegment,
   validateViteProxyCoverage, deDateReport,
   isExportsSafeTarget, validateModuleResolutionLock, findRawHtmlInMarkdown,
-  findBuriedForkSections, findUnquotedColonScalars,
+  findBuriedForkSections, findUnquotedColonScalars, findBadBodyLinks,
   deriveResearchFreshness, addIsoDuration, RESEARCH_REVIEW_HORIZON_DEFAULT,
   validateCapabilityPresence,
 } from '../check-standards-rules.mjs';
@@ -450,6 +450,43 @@ describe('findRawHtmlInMarkdown — raw HTML in backlog body (#290)', () => {
   it('returns [] for an empty or non-string body', () => {
     expect(findRawHtmlInMarkdown('')).toEqual([]);
     expect(findRawHtmlInMarkdown(undefined)).toEqual([]);
+  });
+});
+
+describe('findBadBodyLinks — leaked authoring syntax in a backlog body', () => {
+  const kinds = (body) => findBadBodyLinks(body).map((f) => f.kind);
+
+  it('flags a [[wiki-link]] as a wikilink (memory-only syntax)', () => {
+    const f = findBadBodyLinks('Per [[feedback_bias_separation_decoupling]] this splits.');
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ line: 1, kind: 'wikilink' });
+  });
+
+  it('flags localhost, absolute /Users/, and file:// links as dead', () => {
+    expect(kinds('see [x](http://localhost:3000/y)')).toEqual(['localhost']);
+    expect(kinds('see [x](/Users/me/repo/src/a.ts)')).toEqual(['absfile']);
+    expect(kinds('see [x](file:///tmp/a.html)')).toEqual(['absfile']);
+  });
+
+  it('flags a link to another backlog item .md file (should be /backlog/NNN-slug/)', () => {
+    expect(kinds('see [#178](../backlog/178-access-control.md#L14)')).toEqual(['backlog-md']);
+    expect(kinds('see [#016](backlog/016-gap-9.md)')).toEqual(['backlog-md']);
+  });
+
+  it('does NOT flag the correct rendered URL or reports/docs .md refs', () => {
+    expect(kinds('see [#178](/backlog/178-access-control/)')).toEqual([]);
+    expect(kinds('report [r](../reports/2026-06-14-x.md) and [d](docs/agent/backlog-workflow.md)')).toEqual([]);
+    expect(kinds('source [s](src/_data/intents.json#L899)')).toEqual([]);
+  });
+
+  it('ignores [[ ]] / [[...]] inside code (template-interpolation examples)', () => {
+    expect(kinds('reactive `{{ }}`/`[[ ]]` interpolation stays manual')).toEqual([]);
+    expect(kinds('before\n```\nrender([[1,2],[3,4]])\n```\nafter')).toEqual([]);
+  });
+
+  it('returns [] for an empty or non-string body', () => {
+    expect(findBadBodyLinks('')).toEqual([]);
+    expect(findBadBodyLinks(undefined)).toEqual([]);
   });
 });
 

@@ -1,0 +1,136 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+    The <a href="/backlog/141-dev-browser-vision/">dev-browser fix-loop (#141)</a> and
+    <a href="/backlog/410-dev-browser-deployed-app-live-patch-gated-capability-safety-/">#410's deployed
+    live-patch</a> both assume one capability the items never named: given a rendered DOM node — on a
+    <strong>deployed</strong> URL, not just localhost — the browser can map it back to the
+    <strong>source construct that produced it</strong>, then act on the repo (jump to <code>file:line</code>,
+    open a PR, drive the IDE). On a deployed, minified app where source maps may be stripped this is
+    materially harder than static analysis of a site. This survey grounds <a href="/backlog/562-dev-browser-source-awareness-ide-bridge-map-deployed-dom-bac/">backlog #562</a>:
+    what mechanisms exist to resolve <em>node → source</em> and to <em>bridge</em> the browser to the editor,
+    which of them survive a deployed/minified build, and how they compose into a degrading provider set.
+</p>
+
+<h2>The central finding — two independent provider chains, and a cold-deployed cliff</h2>
+<p>
+    The substrate is not one mechanism but <strong>two orthogonal provider chains</strong>, each tried in
+    precedence order and degrading gracefully:
+</p>
+<ol>
+    <li><strong>A resolver chain</strong> — given a DOM node, yield <code>file:line:col</code>.</li>
+    <li><strong>An IDE-bridge chain</strong> — given <code>file:line</code> + an optional patch, act on the
+        repo (open the editor, write the file, apply a <code>WorkspaceEdit</code>).</li>
+</ol>
+<p>
+    Any resolver composes with any bridge — they are separable axes, which is why #562 should not pick "one
+    mechanism." The hard constraint is the <strong>cold deployed/minified</strong> case: almost everything
+    the convenient dev tooling relies on is <em>dev-build-injected and stripped in production</em>. Exactly
+    one resolver family survives a stripped prod build, and that fact is the keystone of the design.
+</p>
+
+<h2>Resolver chain — DOM node → source</h2>
+<table>
+  <thead><tr><th>Mechanism</th><th>How it works</th><th>Deployed/minified?</th><th>Key tradeoff</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Build-emitted source anchor</strong> (string-literal <code>data-*</code>)</td>
+      <td>A build step injects a stable DOM attribute (a path, or an opaque id) that a minifier won't rename — minifiers rename JS identifiers, not emitted markup strings. Sentry's <code>@sentry/babel-plugin-component-annotate</code> (<code>data-sentry-component</code>, <code>data-sentry-source-file</code>) is the live precedent, intended to ship in prod.</td>
+      <td><strong>Yes — the only one</strong></td>
+      <td>Information disclosure: raw <code>file:line</code> in public DOM. The least-leaky variant is an <strong>opaque id + sidecar manifest</strong> (id → file:line shipped separately), a design sweet spot no shipped product currently occupies.</td>
+    </tr>
+    <tr>
+      <td><strong>Framework debug metadata</strong> (<code>__source</code>/<code>_debugSource</code>, LocatorJS)</td>
+      <td>React's <code>@babel/plugin-transform-react-jsx-source</code> injects <code>fileName</code>/<code>lineNumber</code>; tools (click-to-react-component, react-dev-inspector, vite-plugin-vue-inspector, LocatorJS) read it to resolve the node.</td>
+      <td>No — dev-only, stripped in prod</td>
+      <td>Best UX, zero prod reach. <strong>React 19 removed <code>_debugSource</code></strong> (PR #28265), breaking ~8 tools — don't build on framework internals.</td>
+    </tr>
+    <tr>
+      <td><strong>Source maps</strong> (ECMA-426, <code>sourceMappingURL</code>, <code>debugId</code>)</td>
+      <td>Maps minified <em>JS positions</em> back to source via VLQ mappings; <code>debugId</code> (TC39-TG4 Stage 2) keys a private symbol server.</td>
+      <td>Rarely — stripped by default; maps JS, not DOM nodes</td>
+      <td>Wrong granularity (JS-position, not DOM-node) and usually absent/authorized-only on deployed builds.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>IDE-bridge chain — act on the repo</h2>
+<table>
+  <thead><tr><th>Mechanism</th><th>How it works</th><th>Deployed tab?</th><th>Key tradeoff</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>VS Code extension</strong> (localhost HTTP/WS server in the extension host)</td>
+      <td>The extension runs a local server the tab talks to: apply patches via <code>WorkspaceEdit</code>/<code>workspace.applyEdit</code>, enumerate open projects (<code>workspace.workspaceFolders</code>), push editor→browser. <code>window.registerUriHandler</code> routes <code>vscode://publisher.ext/…</code> deep links. Precedent: Stagewise (Express+WS in the extension host).</td>
+      <td>Yes (deployed tab → localhost)</td>
+      <td>Richest (true two-way: patches + active-project awareness) but needs a user-installed extension; per-window host means cross-window "active project" needs each window to self-report.</td>
+    </tr>
+    <tr>
+      <td><strong>File System Access API</strong> (<code>showDirectoryPicker()</code>)</td>
+      <td>User picks the checkout folder once; the tab holds a <code>FileSystemDirectoryHandle</code>, resolves node→file, and writes the patch via <code>createWritable()</code>. Persisted permission (Chrome 122+). vscode.dev is the production proof.</td>
+      <td><strong>Yes — zero-install, zero-server</strong></td>
+      <td><strong>Chromium-only</strong> (Firefox declined; Safari ships only sandboxed OPFS) — ~30%+ of users get no local-folder access, so it needs a fallback. The only zero-install deployed-tab patch-write path.</td>
+    </tr>
+    <tr>
+      <td><strong>Editor-open URL scheme</strong> (<code>vscode://file/{abspath}:{line}:{col}</code>)</td>
+      <td>Browser hands the URL to the OS; the installed editor opens at the location. Fully client-side. <code>cursor://</code>, JetBrains Toolbox <code>jetbrains://…/navigate/reference</code> are analogues.</td>
+      <td>Yes (jump-only)</td>
+      <td>Zero-infra but one-way (no patching), brittle absolute paths, a browser prompt, Linux registration gaps.</td>
+    </tr>
+    <tr>
+      <td><strong>Dev-server <code>launch-editor</code> endpoint</strong></td>
+      <td>Browser hits a localhost endpoint (react-dev-utils <code>/__open-stack-frame-in-editor</code>, Evan You's <code>launch-editor-middleware</code>); Node shells out via <code>$EDITOR</code> (<code>code --goto file:line:col</code>).</td>
+      <td>No — localhost dev only</td>
+      <td>Editor-agnostic but needs a live local dev server; doesn't help the deployed case.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Recommended provider sets &amp; precedence</h2>
+<p><strong>Resolver chain, in precedence order:</strong> build-time source anchor (the only cold-deployed
+option; prefer opaque-id + sidecar to avoid leaking paths) → framework debug metadata (dev, zero-config,
+React-19-fragile) → source maps (weak, JS-position granularity). <strong>Degradation:</strong> with a stripped
+prod build and no injected anchors the resolver is <em>inert</em> — which is precisely the gap a build-emitted
+manifest exists to close, so it is the keystone, not an afterthought.</p>
+<p><strong>IDE-bridge chain, in precedence order:</strong> VS Code extension (full two-way, if installed) →
+File System Access API (zero-install deployed-tab patch-write, Chromium) → <code>vscode://file</code> deep
+link (jump-only, universal) → dev-server <code>launch-editor</code> (localhost dev only).
+<strong>Degradation:</strong> with no extension and a non-Chromium browser, fall to a <code>vscode://file</code>
+jump computed from whatever source the resolver yielded — open-at-location only, no patching.</p>
+
+<h2>Web-standards alignment &amp; the WE-specific reframe</h2>
+<p>
+    The bridge primitives are platform standards: the <strong>File System Access API</strong> (WICG) is the
+    native "tab holds a folder" capability; <strong>source maps</strong> are ECMA-426; the editor URL scheme is
+    an OS protocol handler. The resolver's cold-deployed anchor is the WE-specific move: WE apps are
+    <em>already</em> introspectable (registries, intents, contexts, traces — the
+    <a href="/research/dev-browser-vision/">dev-browser vision</a>'s gate), so the node→source anchor is a
+    <strong>natural extension of the app's self-description</strong> rather than a bolt-on. That makes the
+    anchor a <strong>contract the conformant app emits and the dev-browser consumes</strong> — a no-leakage
+    seam (only the anchor reaches the browser, never the toolchain), mirroring the
+    <a href="/research/deployed-live-patch-safety/">live-patch</a> client/standard split: the
+    <em>anchor contract</em> is the WE standard; the <em>resolver + bridge that consume it</em> live in the
+    dev-browser product (Plateau).
+</p>
+
+<h2>Classification proposal (for #562)</h2>
+<ul>
+    <li><strong>Resolver registry &amp; bridge registry</strong> — provider-set / runtime-DI seams (the
+        "registry of source-awareness providers" the item names). Support-all-coherent: every provider that's
+        present is used; precedence + degradation are the only rules. Not a winner-pick.</li>
+    <li><strong>Cold-deployed anchor representation</strong> — the genuine on-merit fork (opaque-id sidecar
+        vs raw <code>data-*</code> vs source-map-only). A security/disclosure tradeoff, so the usual
+        most-permissive default <strong>inverts</strong> toward least-leaky (as #410 inverted to
+        most-restrictive-safe). The anchor itself is a <strong>self-description extension contract</strong>
+        owned by the WE standard, reusing the capability-manifest vocabulary.</li>
+    <li><strong>IDE-interaction depth</strong> — separation bias: passive jump + FS-Access write is the
+        must-have substrate; the rich two-way VS Code extension that "emits active projects and coordinates
+        work" is a richer optional layer that plausibly carves to its own story.</li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+    <li>Decision: <a href="/backlog/562-dev-browser-source-awareness-ide-bridge-map-deployed-dom-bac/">#562 — source-awareness &amp; IDE bridge</a></li>
+    <li>Foundational to: <a href="/backlog/141-dev-browser-vision/">#141 dev-browser fix-loop</a>, <a href="/backlog/410-dev-browser-deployed-app-live-patch-gated-capability-safety-/">#410 deployed live-patch</a></li>
+    <li>Related research: <a href="/research/dev-browser-vision/">Dev-browser Vision</a>, <a href="/research/deployed-live-patch-safety/">Deployed live-patch safety</a></li>
+</ul>
+{% endraw %}

@@ -21,17 +21,17 @@ snag on any page mentioning both. One fork, **bold** default below.
 
 The label is a **markdown-convention triage field**, not a parsed data key. It appears as `**Native
 anchor**` in **12 backlog files**: the gap-* set —
-[006](backlog/006-gap-10-collection-ops-intent.md),
-[007](backlog/007-gap-11-clipboard-dnd-files-intents.md),
-[008](backlog/008-gap-12-disclosure-intent.md),
-[009](backlog/009-gap-13-webpermissions-project.md),
-[010](backlog/010-gap-3-theme-color-intent.md),
-[011](backlog/011-gap-4-webpersistence-project.md),
-[012](backlog/012-gap-5-webidentity-project.md),
-[013](backlog/013-gap-6-focus-announcements.md),
-[015](backlog/015-gap-8-view-transitions-protocol.md),
-[016](backlog/016-gap-9-webcommands-project.md) — plus the newer gap-derived blocks
-[358](backlog/358-toast-notification-block.md) and [360](backlog/360-drawer-sheet-block.md).
+[006](/backlog/006-gap-10-collection-ops-intent/),
+[007](/backlog/007-gap-11-clipboard-dnd-files-intents/),
+[008](/backlog/008-gap-12-disclosure-intent/),
+[009](/backlog/009-gap-13-webpermissions-project/),
+[010](/backlog/010-gap-3-theme-color-intent/),
+[011](/backlog/011-gap-4-webpersistence-project/),
+[012](/backlog/012-gap-5-webidentity-project/),
+[013](/backlog/013-gap-6-focus-announcements/),
+[015](/backlog/015-gap-8-view-transitions-protocol/),
+[016](/backlog/016-gap-9-webcommands-project/) — plus the newer gap-derived blocks
+[358](/backlog/358-toast-notification-block/) and [360](/backlog/360-drawer-sheet-block/).
 
 **Key concrete finding (sharpens the call):** a repo-wide `grep` of `scripts/` shows **no tooling parses
 the literal `Native anchor` string** — it is prose, not a field a generator/validator reads. The separate

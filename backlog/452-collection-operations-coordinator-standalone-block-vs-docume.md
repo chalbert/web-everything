@@ -90,7 +90,7 @@ The concern decomposes into two orthogonal axes plus one already-settled non-for
 
 **Crux.** Where does the coordinator that runs filter → sort → group → **page** over the *whole*
 collection live? Today the consumer hand-wires page-then-render, so sort/filter apply only to the
-current page ([#369](backlog/369-collection-operations-coordinator.md), lines 14-21).
+current page ([#369](/backlog/369-collection-operations-coordinator/), lines 14-21).
 
 - **A — a standalone coordinator primitive (default).** Own the pipeline once: consume
   `data-table-change` (sort/filter) + `pagination-change` (page) events, re-run `applyPipeline` + the
@@ -103,7 +103,7 @@ current page ([#369](backlog/369-collection-operations-coordinator.md), lines 14
   same wiring and can get the stage order wrong — *the exact bug #369 reports*.
 
 **Default: A.** The recurring, identical wiring is precisely what earns its own home
-([[feedback_bias_separation_decoupling]] — a concept that recurs the same way for everyone), and the
+(bias toward separation/decoupling — a concept that recurs the same way for everyone), and the
 industry is unanimous that this coordination is owned, not hand-wired.
 
 *Rejected — B:* it institutionalizes the #369 footgun; "wire it yourself" is the one approach no
@@ -112,7 +112,7 @@ leading library recommends.
 *Note — not a reopening of #036:* #036 (resolved → the `pagination` block,
 `graduatedTo: block:pagination`) realized only the **page** dimension; it does **not** own this
 cross-block coordinator. A is a *new* primitive, not a reopening
-([036-collection-operations-block-implementation.md](backlog/036-collection-operations-block-implementation.md)).
+([036-collection-operations-block-implementation.md](/backlog/036-collection-operations-block-implementation/)).
 
 ## Fork 2 — shape: headless behavior vs rendered block
 
@@ -176,9 +176,9 @@ Applied to the coordinator primitive (full detail in the
 
 ## Concrete refs
 
-- [369-collection-operations-coordinator.md](backlog/369-collection-operations-coordinator.md) — the
+- [369-collection-operations-coordinator.md](/backlog/369-collection-operations-coordinator/) — the
   gap + open questions (lines 31-37); `blockedBy: ["452"]`.
-- [036-collection-operations-block-implementation.md](backlog/036-collection-operations-block-implementation.md)
+- [036-collection-operations-block-implementation.md](/backlog/036-collection-operations-block-implementation/)
   — resolved; graduated to the `pagination` block (page dimension only), `graduatedTo: block:pagination`.
 - `applyPipeline` (page stage no-op by design):
   [blocks/renderers/data-table/renderDataTable.ts:143-196](blocks/renderers/data-table/renderDataTable.ts#L143).

@@ -20,7 +20,7 @@ import {
   checkStatus, validateProtocol, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, permalinkSegment, validateViteProxyCoverage,
   validateModuleResolutionLock, findRawHtmlInMarkdown, findBuriedForkSections,
-  findUnquotedColonScalars,
+  findUnquotedColonScalars, findBadBodyLinks,
   RESEARCH_REVIEW_HORIZON_DEFAULT, deriveResearchFreshness,
   validateCapabilityPresence,
 } from './check-standards-rules.mjs';
@@ -361,6 +361,35 @@ for (const item of backlog) {
     `body — if it's a live design fork, carve it to a type:decision item that blocks this one; if it's ` +
     `already resolved or deferred elsewhere, reframe the heading or cite the decision (#NNN). ` +
     `See docs/agent/backlog-workflow.md → the carve rule.`);
+}
+
+// ── 6d-sexies. Bad-body-link lint — leaked authoring syntax in a rendered body ──
+// A backlog body renders at /backlog/<id>/, so editor-only or dead links read as 404s/garbage there.
+// `[[wikilink]]` is MEMORY-only syntax with no page → ERROR; localhost/abs-file links and backlog→backlog
+// `.md` links (should be /backlog/NNN-slug/) → WARN. Reports/docs `.md` refs are the sanctioned
+// agent-facing convention and are not flagged. One message per item per kind so output stays scannable.
+for (const item of backlog) {
+  if (!item.id) continue;
+  const p = join(ROOT, 'backlog', `${item.id}.md`);
+  if (!existsSync(p)) continue;
+  const body = readFileSync(p, 'utf8').replace(/^---\n[\s\S]*?\n---\n/, '');
+  const hits = findBadBodyLinks(body);
+  if (!hits.length) continue;
+  const byKind = (k) => hits.filter((h) => h.kind === k);
+  const lines = (k) => [...new Set(byKind(k).map((h) => h.line))].join(', ');
+  if (byKind('wikilink').length) {
+    err(`Backlog item "${item.id}" uses [[wiki-link]] syntax at body line(s) ${lines('wikilink')} — ` +
+      `that is MEMORY-files-only; markdown renders it literally and the slug has no page. In a backlog ` +
+      `body, link another item as /backlog/NNN-slug/ or drop to plain prose.`);
+  }
+  const deadKinds = ['localhost', 'absfile', 'backlog-md'].filter((k) => byKind(k).length);
+  if (deadKinds.length) {
+    const detail = deadKinds.map((k) => `${k === 'backlog-md' ? 'backlog→.md (use /backlog/NNN-slug/)' :
+      k === 'absfile' ? 'absolute /Users//file:// link' : 'localhost link'} @ line(s) ${lines(k)}`).join('; ');
+    warn(`Backlog item "${item.id}" has a body link that is dead on the live site — ${detail}. ` +
+      `Use the rendered /backlog/NNN-slug/ URL (or a site-relative path); editor-only refs to ` +
+      `reports/ and docs/agent/ are fine, item-to-item .md links are not.`);
+  }
 }
 
 // ── 6d-quinquies. Unquoted-colon scalar in frontmatter (#453) ──

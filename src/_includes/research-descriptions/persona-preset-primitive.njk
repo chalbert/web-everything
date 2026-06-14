@@ -1,0 +1,98 @@
+<h3>The Question</h3>
+<p>
+    The platform talks about <strong>personas</strong> in two places that look like the same idea wearing
+    different clothes: the governance roster (<a href="/backlog/166-governance-persona-roster-charter-schema/">#166</a>,
+    resolved) — the seven stakeholder charters at plateau-app <code>/profiles</code>, a preset selecting
+    <em>what a role reviews</em> and <em>which surfaces light up</em> — and the agile operating model
+    (<a href="/backlog/563-ai-driven-agile-methodology-as-a-shareable-approach/">#563</a>) — the modes one
+    operator multiplexes through (PO&nbsp;→&nbsp;BA&nbsp;→&nbsp;dev&nbsp;→&nbsp;QA) while running the delivery
+    loop with agents. <a href="/backlog/564-personas-as-a-first-class-agile-concept/">#564</a> asks whether
+    these are projections of <strong>one</strong> primitive: a persona = a named <em>preset</em> over composable
+    concepts (preferences + surfaces-lit-up), <strong>not</strong> a closed group (RBAC). This survey adds the
+    two angles the governance-lens survey didn't need — the <strong>preset/profile primitive</strong> pattern
+    and the <strong>agentic role-persona</strong> pattern — plus the <strong>persona-vs-access-control</strong>
+    boundary. It complements, and does not repeat,
+    <a href="/research/governance-persona-charter-schema/">the governance-persona survey</a>.
+</p>
+
+<h3>Recommendation (forks prepared for #564)</h3>
+<ol>
+    <li><strong>Unification depth → name the shared <em>pattern</em>, not a unified runtime schema.</strong>
+        Make "persona = preset over composable concepts" a first-class platform <em>vocabulary</em>, but keep the
+        two lenses in <strong>separate homes</strong> (governance = plateau-app data per #166·Fork&nbsp;3;
+        agile-role = a methodology concept per #563). Bias toward separation: they recur independently and share
+        no runtime, so a unified schema is coupling for no interop gain. #564's value is <em>naming the
+        primitive</em>, not merging the code.</li>
+    <li><strong>Permission boundary → lens-only, forever.</strong> A persona is a decision-rights + preference
+        lens (RACI), never authorization (RBAC). If access ever follows a persona it is a <em>separate</em>
+        RBAC/PBAC mapping the persona <em>references</em> — never authorization folded into the persona. Access
+        control stays owned by <a href="/backlog/178-access-control-authorization-gate/">#178</a>.</li>
+    <li><strong>Agile-role lens → name it as a methodology concept, not a built schema.</strong> Name
+        "persona/preset" as #563's explicit role-switching primitive (the operator <em>switches persona</em>),
+        documented in the playbook — consistent with #563 being a knowledge artifact, not a product.</li>
+</ol>
+
+<h3>Finding 1 — VS Code Profiles: the "preset over composable concepts" pattern, already mainstream</h3>
+<p>
+    VS Code <strong>Profiles</strong> (Feb 2023, v1.76 — "one of the all-time most requested features") is the
+    cleanest instance of #564's exact reframe. A profile is a <strong>named bundle</strong> of settings +
+    extensions + UI layout (which views/actions are visible, keybindings) — i.e. <em>preferences + which surfaces
+    light up</em>, the precise pairing #564 names. It is a <em>preset over composables</em> (it selects and
+    bundles existing settings, it doesn't define them); it supports <strong>clone-to-derive</strong> (the same
+    guardrail #166·Fork&nbsp;1 ratified); it has <strong>temporary, session-scoped</strong> profiles (the "switch
+    into a mode for a task" shape of agile-role multiplexing); and it is <strong>shareable</strong> (exported as a
+    file or gist — the team-templated plane #166·Fork&nbsp;2 put on the paid side). So "persona = preset" is not a
+    coined term; and the pattern's defining trait — a thin label that <em>bundles</em> independently-owned
+    concepts — argues for a thin lens, not a fat unified schema.
+</p>
+
+<h3>Finding 2 — CrewAI agent personas: the agile-role lens is real, and a pattern not a shared schema</h3>
+<p>
+    The multi-agent field (CrewAI, AutoGen, LangGraph) models each agent as a <strong>"configured LLM
+    persona"</strong> with <code>role</code>&nbsp;+&nbsp;<code>goal</code>&nbsp;+&nbsp;<code>backstory</code>;
+    CrewAI "treats agents as characters with identities," where a role like Researcher/Writer/Manager is a
+    behavioral preset, not a label. That is exactly #563's operator multiplexing PO/BA/dev/QA via agents — the
+    agile-role lens has direct, mainstream prior art, so naming it (Recommendation&nbsp;3) is well-grounded and
+    makes agent role-handoff legible. But a CrewAI role-preset is a <em>prompt-shaping preset</em>, with no
+    relationship to a governance charter's data model. The kinship between the two lenses is at the
+    <strong>pattern</strong> level (named role-presets), not a merged schema — there is no industry precedent for
+    fusing an agent-role persona and a governance-charter persona (supports Recommendation&nbsp;1).
+</p>
+
+<h3>Finding 3 — Persona vs RBAC: even PBAC keeps the persona a lens mapped onto access, never access itself</h3>
+<p>
+    The access-control literature separates <strong>RBAC</strong> (static job roles → permissions) from
+    <strong>Persona-Based Access Control (PBAC)</strong> (context-aware authorization keyed off a user's
+    persona). Decisively, even where personas touch access (TrustBuilder), the persona is mapped <em>onto</em>
+    permission-roles via an <code>entitlements</code> attribute — it "feeds RBAC when needed," it does not
+    <em>become</em> RBAC; the canonical example is a <em>lens switch</em> (a worker uses the <code>staff</code>
+    persona, then <strong>switches to</strong> <code>operator</code> to manage settings). So #564·Fork&nbsp;2
+    resolves cleanly: a persona stays a lens; if access ever follows it, that is a separate mapping it references,
+    preserving #166's RACI-not-RBAC line and leaving authorization owned by
+    <a href="/backlog/178-access-control-authorization-gate/">#178</a>. Folding permissions <em>into</em> the
+    persona model would be the category error #166 already named.
+</p>
+
+<h3>Finding 4 — the on-disk schema is a governance charter, not a generic preset (the unification cost)</h3>
+<p>
+    The implemented <code>Profile</code> (<code>plateau-app/src/profiles/schema.ts:101</code>) carries
+    <code>mission</code>, <code>signals[]</code>, <code>reviewAreas[]</code> (each pinned to a
+    <code>platformArea</code>, <code>schema.ts:22</code>), <code>artifactsOwned[]</code>, <code>escalation</code>,
+    and <code>gates</code> with a four-type <code>GateType</code> (<code>schema.ts:48</code>, post-#566). It has
+    <strong>no</strong> <code>preferences</code> or <code>surfaces</code>/<code>toggleMap</code> field — it is a
+    <em>governance</em> charter, not the generic "preferences + surfaces" preset #564 abstracts; and the
+    dev-browser "feature toggle map" lens (<a href="/backlog/141-dev-browser-vision/">#141</a>) is not yet built.
+    So "unify into one schema" would mean widening shipping, resolved code (or rebuilding it as a projection of a
+    new primitive) against a second lens that is a methodology concept with no runtime at all — a refactor whose
+    burden of proof (bias toward separation) isn't met. Name the pattern; keep the homes separate.
+</p>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision being prepared: <a href="/backlog/564-personas-as-a-first-class-agile-concept/">#564 — personas as a first-class agile concept</a></li>
+    <li>Governance lens (resolved): <a href="/backlog/166-governance-persona-roster-charter-schema/">#166</a> · <a href="/research/governance-persona-charter-schema/">its prior-art survey</a></li>
+    <li>Agile-role lens (open epic): <a href="/backlog/563-ai-driven-agile-methodology-as-a-shareable-approach/">#563 — AI-driven agile methodology</a></li>
+    <li>Toggle-map lens: <a href="/backlog/141-dev-browser-vision/">#141 — dev-browser vision</a></li>
+    <li>Access control (separate concern): <a href="/backlog/178-access-control-authorization-gate/">#178 — authorization gate</a></li>
+    <li>Substrate: <code>plateau-app/src/profiles/schema.ts</code> (the implemented charter schema)</li>
+</ul>
