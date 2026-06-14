@@ -1,0 +1,107 @@
+<h2>Purpose</h2>
+<p>
+  The consolidated inventory of <strong>Storybook-like tools</strong> that document component libraries
+  (<a href="/backlog/624-inventory-the-component-workbench-docs-tool-landscape-storyb/">backlog #624</a>), the
+  first stage of the Web Docs feature-pipeline epic
+  (<a href="/backlog/623-web-docs-feature-pipeline-inventory-workbench-tools-derive-i/">#623</a>). Until now
+  only Storybook + Mintlify had ever been named (as ingest targets in
+  <a href="/backlog/426-incumbent-ingestion-adapters-storybook-mintlify-to-the-webca/">#426</a>); this
+  enumerates the whole landscape so the feature-surface sweep
+  (<a href="/backlog/625-inventory-the-full-feature-surface-across-workbench-tools/">#625</a>) and the
+  derive-to-WE-standards decision
+  (<a href="/backlog/626-map-workbench-features-to-we-standards-which-intents-blocks-/">#626</a>) have a
+  complete, reproducible source list.
+</p>
+<p>
+  The machine-readable registry lives in <code>src/_data/workbenchTools.json</code>; this page renders from
+  it. It is <em>complementary</em> to the <a href="/research/benchmark-corpus/">benchmark corpus</a>: that is
+  the set of design systems Web Docs would render and benchmark; this is the set of tools that
+  <em>document</em> design systems — what Web Docs competes with as a product and ingests from as adapters.
+  One is the content, the other the container. Full grounding in
+  <code>reports/2026-06-14-component-workbench-landscape.md</code>.
+</p>
+
+<h2>Selection criteria</h2>
+<p>{{ workbenchTools.inclusionRule }}</p>
+<table>
+  <thead><tr><th>Criterion</th><th>Test</th></tr></thead>
+  <tbody>
+    {% for c in workbenchTools.selectionCriteria %}
+    <tr><td><strong>{{ c.label }}</strong></td><td>{{ c.test }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Category axes</h2>
+<p>
+  The landscape only makes sense categorized — the tools answer different questions and have different
+  business models. The <strong>inventory-format</strong> axis is the load-bearing one for Web Everything: a
+  workbench is a renderer over a format, and WE's web-component-native nature makes the
+  <strong>Custom Elements Manifest (CEM)</strong> the strongest format to <em>emit</em>.
+</p>
+<table>
+  <thead><tr><th>Axis</th><th>What it captures</th></tr></thead>
+  <tbody>
+    {% for cat in workbenchTools.categories %}
+    <tr><td><strong>{{ cat.label }}</strong></td><td>{{ cat.axis }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>The landscape</h2>
+{% for cat in workbenchTools.categories %}
+<h3>{{ cat.label }}</h3>
+<table>
+  <thead><tr><th>Tool</th><th>Vendor</th><th>Model</th><th>License</th><th>Status</th><th>WE role</th><th>Docs</th></tr></thead>
+  <tbody>
+    {% for s in workbenchTools.sources %}{% if s.category == cat.id %}
+    <tr>
+      <td><strong>{{ s.name }}</strong></td>
+      <td>{{ s.vendor }}</td>
+      <td>{{ s.model }}</td>
+      <td>{{ s.license }}</td>
+      <td>{{ s.status }}</td>
+      <td>{{ s.weRoles | join(", ") }}</td>
+      <td><a href="{{ s.docsUrl }}">docs</a></td>
+    </tr>
+    {% endif %}{% endfor %}
+  </tbody>
+</table>
+{% endfor %}
+
+<h2>Two load-bearing priors handed to #626</h2>
+<ul>
+  <li>
+    <strong>CEM is the format to emit.</strong> Web-component-native declarative JSON (tags, attributes,
+    properties, slots, events, CSS parts/vars), already consumed by Storybook-for-web-components, api-viewer,
+    and IDEs. <code>api-viewer</code> is the zero-build proof: a single web component that renders CEM as live
+    docs + a props playground — the closest existing analog to a WE-native docs element. CSF3 and react-docgen
+    are <em>ingest</em> sources, not emit targets.
+  </li>
+  <li>
+    <strong>The open-core seam is market-validated.</strong> Every commercial tier (Chromatic, Zeroheight,
+    Mintlify-hosted) has an OSS or self-hostable counterpart (Lost Pixel, Docusaurus/Starlight, Storybook) —
+    exactly the free-OSS-workbench + paid-hosted-conveniences shape
+    <a href="/backlog/398-build-the-web-docs-product-fui-open-primitives-plateau-app-o/">#398</a> plans.
+  </li>
+</ul>
+
+<h2>Currency signals</h2>
+<p>
+  Some tool statuses are themselves findings. <strong>Backlight is retired</strong> (divRIOTS shut it
+  1&nbsp;Jun&nbsp;2025) — the fully-hosted browser design-system-IDE model did not endure, a signal for #626
+  about where WE should <em>not</em> invest. <strong>React Styleguidist and Pattern Lab are retiring</strong>
+  (superseded), but their ideas — docs-from-source and the Atomic Design taxonomy — survive the tools.
+  <strong>Histoire</strong> is pre-v1 with effectively one maintainer (a dependency caution). Storybook
+  itself remains the anchor: <strong>v9 (Jun 2025)</strong> folded interaction tests, a11y, visual testing,
+  and coverage into core.
+</p>
+
+<h2>Re-running this sweep</h2>
+<p>
+  Membership is governed by the selection criteria above so a re-run lands on a comparable list. To refresh:
+  re-apply the criteria, add/remove tools, re-check each <code>status</code>/<code>lastChecked</code> and bump
+  <code>lastSwept</code> on the file, and record what changed. Retired/retiring tools are deliberately kept —
+  their decline is evidence about which models endure. The registry is keyed by stable <code>id</code> so a
+  re-run produces a clean diff rather than a rewritten list.
+</p>
