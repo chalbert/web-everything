@@ -9,6 +9,7 @@
  * collection operations + pagination) replace this harness incrementally — see backlog #317.
  */
 
+import { applicationWizardSkeleton, mountApplicationWizard } from './wizard/applicationWizardView';
 import { generatePipeline } from './domain/seed';
 import { evaluate, type EvaluationResult } from './domain/rules';
 import { deriveFacts } from './domain/facts';
@@ -574,7 +575,7 @@ function boot() {
   // `history.replaceState` shim here. Routes are authored logical; `base` qualifies them at match time.
   const templates = [
     `<template route="/pipeline">${pipelineSkeleton(pipeline.length)}</template>`,
-    `<template route="/application">${stubView('Application Intake')}</template>`,
+    `<template route="/application">${applicationWizardSkeleton()}</template>`,
     `<template route="/processing">${stubView('Processing')}</template>`,
     `<template route="/underwriting">${stubView('Underwriting')}</template>`,
     `<template route="/admin">${stubView('Admin')}</template>`,
@@ -881,6 +882,14 @@ function boot() {
       a.classList.toggle('active', a.getAttribute('route:link') === path),
     );
     if (path === routePath('/pipeline')) requestAnimationFrame(fillPipeline);
+    // Phase S3 (#381): the 1003 application wizard — mount on entry (the route-view re-stamps the
+    // template each navigation, so the StepperBehavior + field bindings re-wire here).
+    if (path === routePath('/application')) {
+      requestAnimationFrame(() => {
+        const ws = document.querySelector<HTMLElement>('.lo-workspace');
+        if (ws) mountApplicationWizard(ws);
+      });
+    }
   };
   routeView?.addEventListener('route-change', (e) => onRoute((e as CustomEvent).detail?.to?.path ?? location.pathname));
   // Initial fill — the route-view stamps the current route on connect; route-change may not fire for it.
