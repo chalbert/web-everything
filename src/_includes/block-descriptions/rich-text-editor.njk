@@ -1,0 +1,52 @@
+<h2>Rich Text Editor</h2>
+<p>
+    The rich-text editing <strong>Block</strong> of the <a href="/projects/webediting/">Web Editing</a> standard
+    (<a href="/backlog/618-graduate-the-rich-text-editing-standard-webediting-project-s/">#618</a>). It implements the
+    <a href="/intents/rich-text/">rich-text</a> intent and composes the
+    <a href="/intents/text-formatting/">text-formatting</a> intent
+    (<a href="/backlog/630-webediting-intents-rich-text-text-formatting/">#630</a>) for the formatting surface.
+</p>
+
+<h3>Swappable engine (native-first)</h3>
+<p>
+    The editor resolves the swappable <code>CustomEditorEngineRegistry</code> (the
+    <a href="/protocols/">editor-engine protocol</a>,
+    <a href="/backlog/629-webediting-editor-engine-protocol-customeditorengineregistry/">#629</a>). The
+    <strong>native-first default</strong> drives a <code>contenteditable</code> region through the
+    <a href="https://developer.mozilla.org/en-US/docs/Web/API/InputEvent">InputEvent API</a>
+    (<code>beforeinput</code>/<code>input</code>, reading <code>inputType</code>); where available it upgrades to the
+    <a href="https://developer.mozilla.org/en-US/docs/Web/API/EditContext">EditContext API</a> for robust IME
+    composition (the editing-surface capability tier,
+    <a href="/backlog/628-webediting-editing-surface-capability-contenteditable-editcon/">#628</a>). ProseMirror,
+    Lexical, Slate and Quill register as <strong>alternative engine impls</strong> behind the same interface.
+</p>
+<div class="bg-blue-50 border-l-4 border-blue-400 p-3 mb-4 text-xs text-blue-800">
+    <strong>The spec is the only lock:</strong> swapping the native engine for a ProseMirror adapter leaves the
+    document model untouched, because the engine reads/writes the structured pivot — never a vendor doc format.
+</div>
+
+<h3>Paste is sanitized</h3>
+<p>
+    Pasted external HTML passes through the <code>CustomSanitizerRegistry</code> plug
+    (<a href="/backlog/631-webediting-sanitizer-plug-customsanitizerregistry/">#631</a>) before it enters the document
+    model. Untrusted paste is the primary injection vector for a rich-text surface; routing it through the shared,
+    swappable sanitizer keeps the policy consistent rather than re-implemented per editor.
+</p>
+
+<h3>Decorations via the platform</h3>
+<p>
+    Active-format ranges, find marks and spellcheck decorations paint via the
+    <a href="https://developer.mozilla.org/en-US/docs/Web/API/CSS_Custom_Highlight_API">CSS Custom Highlight API</a>
+    by default, so the editable text node stays clean — decorations never corrupt the document model with
+    <code>&lt;span&gt;</code> soup.
+</p>
+
+<h3>Contract</h3>
+<ul>
+    <li><strong>Engine seam:</strong> resolves <code>CustomEditorEngineRegistry</code>; default is
+        contenteditable + InputEvent, EditContext upgrade.</li>
+    <li><strong>Composes:</strong> the <code>text-formatting</code> intent (toolbar/formatting UX), the sanitizer
+        plug on paste.</li>
+    <li><strong>Exports:</strong> <code>RichTextEditorElement</code>, <code>registerRichTextEditor</code>.</li>
+    <li>Renders in the <a href="/blocks/">blocks catalog</a>.</li>
+</ul>
