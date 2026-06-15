@@ -2,8 +2,10 @@
 type: idea
 workItem: epic
 parent: "089"
-status: open
+status: resolved
 dateOpened: "2026-06-12"
+dateResolved: "2026-06-15"
+graduatedTo: none
 tags: [monetization, webdocs, plateau, frontier-ui, open-core, conformance, product-build]
 relatedProject: webdocs
 relatedReport: reports/2026-06-12-backlog-split-analysis.md
