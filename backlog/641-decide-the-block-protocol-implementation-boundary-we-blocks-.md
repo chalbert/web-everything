@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-14"
 dateStarted: "2026-06-15"
 dateResolved: "2026-06-15"
-graduatedTo: "none (ruling A/A/A: WE blocks = protocols [blocks.json+block-descriptions], FUI owns @frontierui/blocks impl; #606 analogue; spun off #657-#659)"
+graduatedTo: none
 preparedDate: "2026-06-14"
 relatedReport: reports/2026-06-14-block-protocol-impl-boundary.md
 tags: [blocks, block-protocol, constellation, standard-vs-impl, architecture]
@@ -166,3 +166,5 @@ those 9 real impls unless they migrate first — and separately, a *contract wit
   [#239](/backlog/239-adapter-packages-self-contained-publish/) (npm scope — supports A on both 1 and 2).
 - **Ancestor ruling:** [#606](/backlog/606-where-does-the-plugs-platform-layer-runtime-live-web-everyth/) — this
   item must stay consistent with it (and is, by construction).
+
+**Graduated to** `none` — ruling A/A/A: WE blocks = protocols [blocks.json + block-descriptions], FUI owns @frontierui/blocks impl; #606 analogue; spun off #657–#659.

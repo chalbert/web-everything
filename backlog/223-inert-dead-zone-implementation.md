@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-09"
 dateStarted: "2026-06-09"
 dateResolved: "2026-06-09"
-graduatedTo: "Activation lifecycle (activatedCallback/deactivatedCallback/isActivated/activationSurface on CustomAttribute) + inert dead-zone in frontierui CustomAttributeRegistry + Polling trait + inert-dead-zone demo/e2e + traits.json spec"
+graduatedTo: frontierui/plugs/webbehaviors/CustomAttributeRegistry.ts
 tags: [webtraits, webbehaviors, activation-lifecycle, accessibility, inert, dead-zone, native-first]
 relatedReport: reports/2026-06-02-lazy-traits-loading.md
 relatedProject: webtraits
@@ -131,3 +131,5 @@ spec page renders.
 **Next:** none — the shared activation lifecycle is now available for
 [#221](/backlog/221-behaviour-activation-gated-on-visibility/) (visibility gate) to consume.
 Follow-up [#226](/backlog/226-trait-active-runtime-reevaluation/).
+
+**Graduated to** `frontierui/plugs/webbehaviors/CustomAttributeRegistry.ts` — activation lifecycle (activatedCallback/deactivatedCallback/isActivated/activationSurface) + inert dead-zone + Polling trait + inert-dead-zone demo/e2e + traits.json spec.

@@ -8,7 +8,7 @@ dateOpened: "2026-06-09"
 blockedBy: ["125"]
 dateStarted: "2026-06-09"
 dateResolved: "2026-06-09"
-graduatedTo: "frontierui/compiler/src/component-transform/{compile,surfaces,plugins}.ts — surface-aware `compile()` + Vite/esbuild pre-transform wrappers, configurable strategy axes"
+graduatedTo: frontierui/compiler/src/component-transform/compile.ts
 tags: [component, adapters, compiler, build-tooling, strategy-axis, native-first, plugin-options]
 relatedReport: reports/2026-06-06-adapter-real-project-integration.md
 relatedProject: webadapters
@@ -84,3 +84,5 @@ home tracked by #150.
   passes the option — documented in `STRATEGY-AXES.md`, not a separate gap.
 - **Leftover spun out → #234:** baseline Rollup/webpack/Babel pre-transform wrappers (the remaining bundlers
   from #127's list; "same few lines over `compile()`"). Distinct from #232's native-depth opt-ins.
+
+**Graduated to** `frontierui/compiler/src/component-transform/compile.ts` — surface-aware compile() + Vite/esbuild pre-transform wrappers (surfaces.ts, plugins.ts), configurable strategy axes.

@@ -8,7 +8,7 @@ blockedBy: ["201"]
 dateOpened: "2026-06-08"
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"
-graduatedTo: frontierui Windowed.filterModel + Filter modelFilter hook + AutoComplete client seedItems→setModel — windowed works in filter=client (model-level filtering)
+graduatedTo: frontierui/blocks/droplist/Windowed.ts
 tags: [droplist, autocomplete, windowed, virtualization, filter, client-mode]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -42,3 +42,5 @@ window, typing filters against the **full** model (not just the mounted window),
 option stays mounted while arrowing (the #023 invariant) — proven by a unit test and an e2e. Likely
 shape: `filter` filters `windowed`'s model (a new model-aware client path) rather than toggling
 `hidden` on descendants, and `windowed` windows the filtered result.
+
+**Graduated to** `frontierui/blocks/droplist/Windowed.ts` — Windowed.filterModel + Filter modelFilter hook + AutoComplete client seedItems→setModel — windowed works in filter=client (model-level filtering).

@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-09"
 dateStarted: "2026-06-09"
 dateResolved: "2026-06-09"
-graduatedTo: "Runtime `<name>-active` re-evaluation in frontierui CustomAttributeRegistry (#observe filter widened with the `-active` suffix; #onActiveChanged + #isActiveOverride; 3 inert-suite unit tests)"
+graduatedTo: frontierui/plugs/webbehaviors/CustomAttributeRegistry.ts
 tags: [webtraits, webbehaviors, activation-lifecycle, inert, dead-zone, mutationobserver]
 relatedReport: reports/2026-06-02-lazy-traits-loading.md
 relatedProject: webtraits
@@ -57,3 +57,5 @@ already exist; this only widens *when* they re-run. Harvested from the #223 clos
 
 **Verified:** 96/96 webbehaviors unit tests pass; `tsc --noEmit` clean for the file;
 `check:standards` 0 errors.
+
+**Graduated to** `frontierui/plugs/webbehaviors/CustomAttributeRegistry.ts` — runtime <name>-active re-evaluation (#observe widened with -active suffix; #onActiveChanged + #isActiveOverride; 3 inert-suite unit tests).

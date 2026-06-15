@@ -9,7 +9,7 @@ blockedBy: ["389"]
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
-graduatedTo: frontierui — jsx-runtime __API_VERSION__ export (apiVersion.ts) + new @frontierui/maas-check package (satisfiesCompatRange/parseRange/assertCompat/guardCompat/runMaasCheck, header-read + injected fetch); 12 vitest green, tsc + check:standards clean
+graduatedTo: frontierui/packages/maas-check/
 tags: []
 ---
 
@@ -41,3 +41,5 @@ Built in **frontierui** (locus frontierui):
   forms, assert/guard, header read, injected-fetch, the aggregated-throw + missing-range paths, and a
   cross-leg check that `__API_VERSION__` is a usable positive integer.
 - Gates: `tsc` clean (jsx-runtime + maas-check), `vitest` 12/12, frontierui `check:standards` 0 errors.
+
+**Graduated to** `frontierui/packages/maas-check/` — new @frontierui/maas-check package (satisfiesCompatRange/parseRange/assertCompat/guardCompat/runMaasCheck, header-read + injected fetch) + jsx-runtime __API_VERSION__ export (packages/jsx-runtime/src/apiVersion.ts); 12 vitest green.

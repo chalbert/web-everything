@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-08"
 dateStarted: "2026-06-08"
 dateResolved: "2026-06-08"
-graduatedTo: "Per-usage `<trait>-delivery=eager` preload override — frontierui trait-enforcer + traitManifest.ts + CustomAttributeRegistry.preload + traits.json spec + Revealable.ts demo"
+graduatedTo: frontierui/plugs/webbehaviors/CustomAttributeRegistry.ts
 tags: [webtraits, lazy-loading, delivery, page-author, override]
 relatedReport: reports/2026-06-02-lazy-traits-loading.md
 relatedProject: webtraits
@@ -140,3 +140,5 @@ scan + codegen; (3) unit tests; (4) `lazy-traits-preload` demo + e2e; (5) spec s
 **Notes:** harvest at close-out — a *visibility/interaction-gated lazy* capability (defer in-DOM-but-
 hidden traits until visible/opened; the observer currently loads them at bootstrap regardless) is a
 genuine future item, distinct from the dropped eager→lazy.
+
+**Graduated to** `frontierui/plugs/webbehaviors/CustomAttributeRegistry.ts` — per-usage <trait>-delivery=eager preload override — trait-enforcer + traitManifest.ts + CustomAttributeRegistry.preload + traits.json spec + Revealable.ts demo.

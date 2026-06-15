@@ -7,7 +7,7 @@ status: resolved
 dateStarted: "2026-06-12"
 dateOpened: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: already covered by block:slider (dual-thumb range variant) — impl pending in Frontier UI
+graduatedTo: "block:slider"
 tags: []
 ---
 
@@ -28,3 +28,5 @@ The #347 coverage assessment was too coarse (labelled range-slider "partial / si
 the slider spec closely). Corrected `benchmarkCoverage.json`: range-slider moved from `gaps` to covered
 (fileableGaps 7 → 6, partial 23, covered 53). This is the sweep self-correcting at fill time — the same
 discipline as #348's dedup catching already-tracked items.
+
+**Graduated to** `block:slider` — dual-thumb range variant of slider; impl pending in Frontier UI.

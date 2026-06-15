@@ -7,7 +7,7 @@ status: resolved
 dateOpened: "2026-06-08"
 dateStarted: "2026-06-08"
 dateResolved: "2026-06-08"
-graduatedTo: "frontierui AutoComplete.ts — `windowed` opt-in wired into `<auto-complete>` (attached before FocusDelegation) + e2e"
+graduatedTo: frontierui/blocks/droplist/AutoComplete.ts
 tags: [droplist, autocomplete, windowed, virtualization, custom-element, behavior]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -65,3 +65,5 @@ real layout exists — coordinate with the scroll/height-driven path in #145).
     `check:standards` clean in both repos.
 - **Leftover captured:** [#209](/backlog/209-windowed-client-mode-model-filtering/) — windowing in
   `filter="client"` mode (model-level filtering).
+
+**Graduated to** `frontierui/blocks/droplist/AutoComplete.ts` — windowed opt-in wired into <auto-complete> (attached before FocusDelegation) + e2e.

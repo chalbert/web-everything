@@ -8,12 +8,16 @@ dateOpened: "2026-06-14"
 blockedBy: ["582"]
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
-graduatedTo: "none (convergence build — webeverything/plugs now superset of frontierui/plugs per #582 A/A; unblocks #449)"
+graduatedTo: none
 tags: [plugs, frontier-ui, webeverything, superset, reconciliation, refactor]
 crossRef: { url: /backlog/449-wire-the-we-plugs-alias-in-frontier-ui-and-delete-the-vendor/, label: "Blocks #449 (alias + delete vendored plugs)" }
 ---
 
 # Reconcile the 16 divergent FU↔WE plugs files so WE is a true runtime superset (precursor to #449)
+
+> **Note (#606, 2026-06-14):** resolved — the reconciled superset stands. #606 reversed the canonical
+> *home*: it now relocates to **`frontierui/plugs` (`@frontierui/plugs`)** as canonical, with WE
+> deleting its `plugs/` and consuming the package. No re-open; informational for the #170/#449 migration.
 
 Surfaced 2026-06-14 (batch claim on #449). #449's premise — "after #447 + #448 WE is the runtime superset;
 files reach FU via the alias, no copy-down" — is **false**. A diff of `frontierui/plugs/` vs
@@ -104,3 +108,5 @@ core registries, and that divergence is a real decision, not a one-directional p
     alias + delete is now a safe, mechanical step).
   - **Note:** `locus` corrected `frontierui → webeverything` — the build edits land in `webeverything/plugs`
     (WE is upstream per the constellation), so the gate + commit are WE; FU was only verified, not modified.
+
+**Graduated to** `none` — convergence build — webeverything/plugs now superset of frontierui/plugs per #582 A/A; unblocks #449.

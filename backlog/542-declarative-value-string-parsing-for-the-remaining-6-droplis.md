@@ -9,7 +9,7 @@ blockedBy: ["275"]
 dateOpened: "2026-06-14"
 dateStarted: "2026-06-15"
 dateResolved: "2026-06-15"
-graduatedTo: frontierui/blocks/droplist/{Anchor,Clearable,Filter,FocusDelegation,LiveStatus,Selection}.ts static optionSpec + parseOptions merge; frontierui/vite.config.mts traitMap; declarativeOptions.test.ts
+graduatedTo: frontierui/blocks/droplist/
 tags: []
 ---
 
@@ -44,3 +44,5 @@ For each of Anchor, Clearable, Filter, FocusDelegation, LiveStatus, Selection:
 The #275 "wrap vs refactor" fork is **moot**: all 7 behaviors already extend `CustomAttribute` (the tree
 was refactored after that note was written). No adapter layer is needed — the only gap is value-string →
 options parsing, which #275's mechanism already solves. This is mechanical replication across 6 files.
+
+**Graduated to** `frontierui/blocks/droplist/` — static optionSpec + parseOptions merge across {Anchor,Clearable,Filter,FocusDelegation,LiveStatus,Selection}.ts + vite.config.mts traitMap; declarativeOptions.test.ts.
