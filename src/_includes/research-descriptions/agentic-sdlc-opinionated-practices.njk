@@ -1,0 +1,119 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds the <strong>composable / configurable</strong> thesis of the self-driven-project methodology
+  (<a href="/backlog/690-is-the-self-driven-project-methodology-a-first-class-constel/">#690</a>,
+  <a href="/backlog/672-self-driven-project-tool-agnostic-artefact-contract-everythi/">#672</a>,
+  <a href="/backlog/703-survey-agentic-sdlc-approaches-and-expose-every-opinionated-/">#703</a>): survey
+  how the field runs agentic / autonomous software delivery, then <strong>extract every opinionated
+  practice and classify each</strong> as a configurable <em>dimension</em> carrying a default, a fixed
+  <em>invariant</em>, or a recipe-level <em>house-style knob</em> — never a forced mechanic where both
+  states are coherent. The motivating example: <a href="https://asdlc.io/practices/micro-commits/">ASDLC.io</a>
+  prescribes <strong>micro-commits</strong>. A good practice — but a <em>preference</em>, not something a
+  standard should <em>force</em>; so it becomes a knob with a sensible default a project can override.
+</p>
+<p>
+  This is the WE positioning made concrete: every opinionated rival practice shows up as a dial, the
+  meta-schemas stay open (the Web Intents lesson — standardize the <em>shape</em>, not the list), and
+  nothing coherent is mandated. The survey verifies the <a href="/backlog/665-self-driven-project-ratify-the-framing-autonomy-taxonomy-mas/">#665</a>
+  invariant and feeds #672 Layer 1's <strong>autonomy-level registry</strong> and <strong>value/risk-ODD
+  dimension registry</strong>, plus the <strong>default recipe</strong> knob values.
+</p>
+
+<h2>Method &amp; provenance (no silent over-claiming)</h2>
+<p>
+  The four named tool/vendor classes (<a href="https://asdlc.io/">ASDLC.io</a> micro-commits + merge-to-main
+  governance boundary; <a href="https://tessl.io/blog/tessl-launches-spec-driven-framework-and-registry/">Tessl</a>
+  spec-centric framework + Spec Registry; <a href="https://docs.coderabbit.ai/">CodeRabbit</a> AI-review-in-loop
+  with YAML custom rules; <a href="https://www.swarmia.com/product/engineering-metrics/">Swarmia</a> DORA/SPACE
+  metrics + working agreements) and the lead academic framing
+  (<a href="https://arxiv.org/abs/2509.06216">arXiv 2509.06216</a> — Hassan et&nbsp;al., "Agentic Software
+  Engineering: Foundational Pillars and a Research Roadmap" / SE&nbsp;3.0) were <strong>web-verified</strong> in
+  this pass. The everything-as-code governance prior art (GitOps / OpenGitOps, OSCAL, SPDX), the
+  beyond-code framing (<a href="https://arxiv.org/abs/2510.19692">arXiv 2510.19692</a>), the
+  software-factory writeups (Forrester / HCLTech / PwC) and the observability/assistant tools (Dash0,
+  Augment) are summarized from prior knowledge with spot-verification; treat their specific knob values
+  as <em>candidate</em> until a refresh deep-fetches them. None of the classifications below is a blocking
+  fork — they are defaults to ratify in #672.
+</p>
+
+<h2>The classification rule (per practice)</h2>
+<p>Apply the WE fork-existence + dimension-vs-fixed-mechanic tests:</p>
+<ol>
+  <li><strong>Both states legitimate end-states</strong> &rarr; a <strong>configurable dimension</strong>,
+    default = the <em>most permissive / most-flexible</em> value; the restriction is the project's opt-in.</li>
+  <li><strong>Exactly one correct branch</strong> (the other is flawed / won't-work) &rarr; <strong>bake it
+    as a fixed invariant</strong> (don't expose a fake knob).</li>
+  <li><strong>Legit but house style</strong> &rarr; a <strong>recipe-level preference</strong> (a knob with a
+    default in the reference recipe), not a meta-schema dimension.</li>
+</ol>
+<p>
+  And the structural finding the survey kept hitting: most field-mandated practices are <em>not</em> new
+  dimensions at all — they <strong>map onto one of WE's two existing axes</strong> (per #690's two layers):
+  the <strong>autonomy-level ladder</strong> (<a href="/backlog/141-dev-browser-autonomy-toggle-map/">#141</a> /
+  #690) or a <strong>value/risk-ODD tolerance</strong>. The survey maps each onto those axes rather than
+  inventing a parallel dimension.
+</p>
+
+<h2>The catalog — every opinionated practice, classified</h2>
+<table>
+  <thead>
+    <tr><th>Practice (source)</th><th>Classification</th><th>Default lean / mapping</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Micro-commits (ASDLC.io)</td><td>dimension — commit granularity</td><td>loose; project opts into strict (LLM-rollback "save points" is the strict-side rationale)</td></tr>
+    <tr><td>Merge-to-main = human-accountability boundary (ASDLC.io)</td><td>maps to the <strong>autonomy-level ladder</strong>, not a new dimension</td><td>per autonomy ceiling — the human-sign-off rung; agent micro-commits below it, human sign-off at the boundary</td></tr>
+    <tr><td>Spec-centric / spec-before-code (Tessl)</td><td>recipe knob — spec/test timing — composing <a href="/backlog/100-requirement-as-code/">#100 requirement-as-code</a> as the SoT</td><td>not forced; the gate checks the <em>outcome</em>, not authoring order. "Vibe-spec" vs hand-spec is itself a knob</td></tr>
+    <tr><td>Spec Registry (Tessl)</td><td>convergent prior art for the <strong>everything-as-code artefact contract</strong> itself (#672 Layer 1)</td><td>n/a — validates the thesis (a versioned, declarative spec store), not a knob</td></tr>
+    <tr><td>AI-review-in-loop; YAML custom rules; learns-from-feedback (CodeRabbit)</td><td>dimension — review gate present? + the gate-def is everything-as-code</td><td>most-flexible (AI review optional); gate-defs are project-authored (the YAML-rules shape → #672 gate-def schema)</td></tr>
+    <tr><td>DORA / SPACE metrics; require-reviews; prefer-small-PRs; working agreements (Swarmia)</td><td>recipe knobs + value/risk-ODD tolerances</td><td>"require reviews" couples to the autonomy ceiling; "small PRs" ≈ the micro-commits dimension; metrics = an ODD tolerance in the default flavor</td></tr>
+    <tr><td>SE-for-Humans vs SE-for-Agents duality; ACE/AEE; Merge-Readiness Packs / Consultation Request Packs (arXiv 2509.06216)</td><td>validates the <strong>artefact contract</strong> + <strong>autonomy ladder</strong></td><td>MRP ≈ the gate's run-evidence bundle (#672 run-evidence schema); CRP ≈ an autonomy escalation/consultation rung</td></tr>
+    <tr><td>Beyond-code artefacts (arXiv 2510.19692)</td><td>design constraint on the schema, not a knob</td><td>keep the artefact schema <strong>domain-general</strong> (no hard-coded "code"/"web"), per #672 scope note</td></tr>
+    <tr><td>Trunk-based vs branch-per-task</td><td>dimension — branching model</td><td>most-flexible (allow both)</td></tr>
+    <tr><td>PR required vs direct-to-main</td><td>recipe knob, couples to autonomy level</td><td>per-recipe; WE's own recipe allows direct-to-main (solo)</td></tr>
+    <tr><td>Test-first / TDD</td><td>dimension — test timing</td><td>not forced; the gate checks outcome, not authoring order</td></tr>
+    <tr><td>Conventional commits / commit-msg format</td><td>recipe knob</td><td>a default convention, project-overridable</td></tr>
+    <tr><td>Squash vs merge commits</td><td>dimension</td><td>most-flexible</td></tr>
+    <tr><td>Mandatory human review</td><td>dimension — coupled to the autonomy-level ladder (#141/#690)</td><td>per autonomy ceiling</td></tr>
+    <tr><td>Coverage / quality thresholds</td><td>dimension — a value/risk-ODD tolerance</td><td>default flavor (ISO 25010-anchored, per #665)</td></tr>
+    <tr><td>GitOps / OpenGitOps — declarative, versioned, pulled, continuously-reconciled</td><td>the foundation is an <strong>invariant</strong>; reconciliation mode is a knob</td><td>invariant: artefacts are declarative + version-controlled (OpenGitOps principles 1–2); pull-vs-push reconcile = recipe knob</td></tr>
+    <tr><td>OSCAL — NIST controls as machine-readable catalogs</td><td>prior art informing the <strong>gate-def / control-as-code</strong> schema</td><td>n/a — shape reference for per-step gate definitions</td></tr>
+    <tr><td>SPDX — machine-readable provenance / SBOM</td><td>prior art informing the <strong>run-evidence</strong> provenance schema</td><td>n/a — shape reference for run evidence</td></tr>
+  </tbody>
+</table>
+
+<h2>Finding — the thesis holds, and the axes are already drawn</h2>
+<ul>
+  <li><strong>Almost nothing is a fixed invariant.</strong> Only two things resist a knob: the
+    everything-as-code <em>foundation</em> (declarative + version-controlled artefacts — the OpenGitOps
+    floor) and the <em>gate-checks-outcome-not-authoring-order</em> principle. Everything else a rival
+    framework <em>mandates</em> is, in WE's model, a dial.</li>
+  <li><strong>Most "practices" collapse onto the two existing axes.</strong> Merge-to-main boundaries,
+    mandatory review, consultation packs, PR-vs-direct — all are <strong>autonomy-ladder rungs</strong>
+    (#141/#690). Coverage thresholds, quality gates, metrics targets — all are <strong>value/risk-ODD
+    tolerances</strong>. The survey did <em>not</em> need to invent parallel dimensions for them; this is
+    the strongest confirmation of #690's two-layer framing.</li>
+  <li><strong>The genuinely-new dimensions are few and small:</strong> commit-granularity, branching-model,
+    test-timing, squash/merge — each with a most-flexible default. House-style items (commit-msg format,
+    conventional commits) are recipe knobs, not meta-schema dimensions.</li>
+  <li><strong>The artefact-contract prior art is real and convergent:</strong> Tessl's Spec Registry,
+    GitOps's declarative store, OSCAL's control-as-code, SPDX's provenance, and SE&nbsp;3.0's MRP/CRP packs
+    are all instances of "methodology + evidence as versioned, machine-readable artefacts" — the white
+    space WE occupies is the <em>open, no-lock-in, composable</em> contract over them (report §7.4), not a
+    new vendor silo.</li>
+</ul>
+
+<h2>What this feeds</h2>
+<ul>
+  <li><strong>#672 Layer 1</strong> — the autonomy-level registry (the rungs surfaced above) and the
+    value/risk-ODD dimension registry (the tolerances), each with the default flavor named here, plus the
+    default recipe's knob values (commit granularity = loose, branching = any, review = per-autonomy,
+    direct-to-main allowed for solo).</li>
+  <li><strong>#690 / #665</strong> — empirical backing for "composable, configurable methodology on a
+    strong standard," and the explicit map of which rival mandates are autonomy rungs vs ODD tolerances vs
+    genuine dimensions.</li>
+  <li><strong>Refresh trigger</strong> — deep-fetch the candidate-only sources (software-factory writeups,
+    Dash0/Augment, the OSCAL/SPDX schemas) and re-classify if any surfaces a practice that is neither a
+    knob, an autonomy rung, nor an ODD tolerance.</li>
+</ul>
+{% endraw %}
