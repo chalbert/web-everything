@@ -22,33 +22,58 @@
                 <svg class="nav-toggle-open" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
                 <svg class="nav-toggle-close" xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
-            <nav id="site-nav" class="site-nav">
-                <!-- Catalogs: browse the standards -->
-                <div class="nav-group">
-                    <span class="nav-group-label">Standards</span>
-                    <div class="nav-group-links">
-                        <a href="/intents/" class="nav-link">Intents</a>
-                        <a href="/capabilities/" class="nav-link">Capabilities</a>
-                        <a href="/protocols/" class="nav-link">Protocols</a>
-                        <a href="/semantics/" class="nav-link">Semantics</a>
+            <nav id="site-nav" class="site-nav" aria-label="Main">
+                <!-- W3C APG Disclosure Navigation (#645, conform-to ref for #644).
+                     Each section head is a real <button aria-expanded aria-controls>
+                     disclosing its own link panel. Baseline (no JS): :hover/:focus-within
+                     reveals the panel via CSS. Enhanced (reveal-nav.js): click toggles
+                     aria-expanded, Esc + outside-click dismiss, focus returns to the head.
+                     The in-panel group-label is redundant (the head button stands in) and
+                     stays hidden; on mobile the sections render as an inline accordion. -->
+                <div class="nav-menu">
+                    <!-- Catalogs: browse the standards -->
+                    <div class="nav-menu-section">
+                        <button type="button" class="nav-menu-head" aria-expanded="false" aria-controls="nav-panel-standards">Standards</button>
+                        <div class="nav-menu-panel" id="nav-panel-standards">
+                            <div class="nav-group">
+                                <span class="nav-group-label">Standards</span>
+                                <div class="nav-group-links">
+                                    <a href="/intents/" class="nav-link">Intents</a>
+                                    <a href="/capabilities/" class="nav-link">Capabilities</a>
+                                    <a href="/protocols/" class="nav-link">Protocols</a>
+                                    <a href="/semantics/" class="nav-link">Semantics</a>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                </div>
-                <!-- Evidence: explore the standards in action -->
-                <div class="nav-group">
-                    <span class="nav-group-label">Explore</span>
-                    <div class="nav-group-links">
-                        <a href="/demos/" class="nav-link">Demos</a>
-                        <a href="/validation-rules/" class="nav-link">Validation</a>
-                        <a href="/research/" class="nav-link">Research</a>
-                        <a href="/backlog/" class="nav-link">Backlog</a>
+                    <!-- Evidence: explore the standards in action -->
+                    <div class="nav-menu-section">
+                        <button type="button" class="nav-menu-head" aria-expanded="false" aria-controls="nav-panel-explore">Explore</button>
+                        <div class="nav-menu-panel" id="nav-panel-explore">
+                            <div class="nav-group">
+                                <span class="nav-group-label">Explore</span>
+                                <div class="nav-group-links">
+                                    <a href="/demos/" class="nav-link">Demos</a>
+                                    <a href="/validation-rules/" class="nav-link">Validation</a>
+                                    <a href="/research/" class="nav-link">Research</a>
+                                    <a href="/backlog/" class="nav-link">Backlog</a>
+                                </div>
+                            </div>
+                        </div>
                     </div>
-                </div>
-                <!-- About the project -->
-                <div class="nav-group">
-                    <span class="nav-group-label">About</span>
-                    <div class="nav-group-links">
-                        <a href="/mission/" class="nav-link">Mission</a>
-                        <a href="/author/" class="nav-link">Author</a>
+                    <!-- About the project -->
+                    <div class="nav-menu-section">
+                        <button type="button" class="nav-menu-head" aria-expanded="false" aria-controls="nav-panel-about">About</button>
+                        <div class="nav-menu-panel" id="nav-panel-about">
+                            <div class="nav-group">
+                                <span class="nav-group-label">About</span>
+                                <div class="nav-group-links">
+                                    <a href="/mission/" class="nav-link">Mission</a>
+                                    <a href="/governance/" class="nav-link">Governance</a>
+                                    <a href="/author/" class="nav-link">Author</a>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </nav>
@@ -71,6 +96,7 @@
     <script src="/assets/js/copy-code.js"></script>
     <script src="/assets/js/mode-selector.js"></script>
     <script src="/assets/js/format-selector.js"></script>
+    <script src="/assets/js/reveal-nav.js"></script>
     </footer>
 
     <!-- Mobile nav toggle (no effect on desktop — toggle is hidden there) -->
