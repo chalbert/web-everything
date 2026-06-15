@@ -1,0 +1,62 @@
+{% from "source-toggle.njk" import autoToggle %}
+<h2>Workflow Engine</h2>
+<p>
+    The <strong>native-first runtime</strong> behind the <a href="/protocols/workflow/">Workflow Protocol</a>'s swappable
+    <code>CustomWorkflowEngine</code> provider seam (graduated from
+    <a href="/backlog/634-meta-intent-workflow-as-composable-intent/">#634</a>, owned by
+    <a href="/projects/webworkflows/">Web Workflows</a>). A workflow is step-intents in <em>directed progression toward
+    one goal</em> with threaded state, one completion criterion, and one current position. This engine is a
+    <strong>dependency-free interpreter</strong> of the portable, data-defined SCXML-style orchestration graph.
+</p>
+
+<h3>The graph is the only lock</h3>
+<p>
+    The <code>WorkflowGraph</code> — steps + transitions + guards + parallel/fork-join + completion — is portable data, so a
+    workflow engine (the native default, <a href="https://stately.ai/docs/xstate">XState</a>,
+    <a href="https://github.com/jbeard4/SCION">SCION</a>, a hand-rolled switch) plugs in behind the provider without
+    touching the step-intents. Every transition emits an observable <code>{ flow, from, to, context, at }</code>
+    step-transition event — the composition seam for the <a href="/intents/flow-progress/">Flow Progress</a> UX and for
+    audit/reporting.
+</p>
+
+<h3>Tiered operators (the #085 compliance posture)</h3>
+<p>The standardized operator set is tiered and stays an open meta-schema — an engine declares which operators it honors:</p>
+<table>
+    <thead><tr><th>Tier</th><th>Operators</th><th>Native engine</th></tr></thead>
+    <tbody>
+        <tr><td>TIER-1 core (mandatory)</td><td><code>sequence</code>, <code>branch</code>/guard, <code>nest</code> (sub-workflow), threaded <code>context</code>, <code>completion</code>, <code>current-position</code></td><td>✓</td></tr>
+        <tr><td>TIER-2 common (optional)</td><td><code>parallel</code> fork/join, <code>back</code>/undo, <code>gate</code>/wait-for-event</td><td>✓</td></tr>
+        <tr><td>TIER-3 deferred</td><td>history/resume, retry, compensation/saga</td><td>backend concern — behind the provider, not the contract</td></tr>
+    </tbody>
+</table>
+
+<h3>Example</h3>
+<pre><code class="language-typescript">import { customWorkflowEngine } from 'blocks/workflow-engine';
+
+const checkout = {
+  id: 'checkout', initial: 'address', context: { paid: false },
+  steps: {
+    address: { on: { NEXT: { target: 'pay' } } },
+    pay:     { on: { SUBMIT: { target: 'confirm', assign: () =&gt; ({ paid: true }) } } },
+    confirm: { type: 'final' },
+  },
+};
+
+const wf = customWorkflowEngine.resolve().start(checkout);   // native-first default
+wf.onTransition(({ from, to }) =&gt; render(to));
+wf.send('NEXT');           // → pay
+wf.send('SUBMIT');         // → confirm (final); wf.done === true</code></pre>
+
+<h3>Swapping the engine</h3>
+<pre><code class="language-typescript">import * as xstate from 'xstate';
+import { XStateWorkflowAdapter, customWorkflowEngine } from 'blocks/workflow-engine';
+
+customWorkflowEngine.define(new XStateWorkflowAdapter(xstate));   // reference adapter
+customWorkflowEngine.setDefault('xstate');                        // same contract, library behind it</code></pre>
+
+<p class="text-sm text-gray-600 mt-4">
+    Distinct from <a href="/protocols/lifecycle/">Lifecycle</a>: same SCXML transition-map <em>form</em>, different subject
+    — a workflow is the user's ephemeral traversal (may occupy many states), not a persisted entity's status. Authorization
+    on a transition delegates to <a href="/projects/webguards/">Web Guards</a>; the per-step UX is the
+    <a href="/intents/flow-progress/">Flow Progress intent</a>.
+</p>

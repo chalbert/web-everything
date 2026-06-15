@@ -3674,5 +3674,97 @@
         "rationale": "Keeps the LWW decision and each store unit-testable without IndexedDB or multiple tabs."
       }
     }
+  },
+  {
+    "id": "workflow-engine",
+    "name": "Workflow Engine",
+    "status": "active",
+    "type": "Module",
+    "summary": "The native-first runtime behind the Workflow Protocol's swappable CustomWorkflowEngine provider seam (#634, webworkflows): a dependency-free interpreter of the portable SCXML-style orchestration graph (steps + transitions + guards + parallel/fork-join + completion) that threads context, tracks the current position, and emits a { flow, from, to, context, at } step-transition event. Honors TIER-1 core + TIER-2 common operators and declares its supported set (the #085 compliance posture). Ships a CustomWorkflowEngineRegistry and a reference XState adapter as an alternative impl.",
+    "sourcePath": "blocks/workflow-engine/NativeWorkflowEngine.ts",
+    "dependsOn": [],
+    "exports": [
+      "NativeWorkflowEngine",
+      "CustomWorkflowEngineRegistry",
+      "customWorkflowEngine",
+      "XStateWorkflowAdapter",
+      "toXStateConfig",
+      "WorkflowGraph",
+      "WorkflowStep",
+      "Transition",
+      "Guard",
+      "Assign",
+      "WorkflowEvent",
+      "WorkflowContext",
+      "WorkflowInstance",
+      "CustomWorkflowEngine",
+      "WorkflowOperator",
+      "StepTransitionDetail",
+      "TIER1_OPERATORS",
+      "TIER2_OPERATORS",
+      "STEP_TRANSITION_EVENT",
+      "WORKFLOW_COMPLETE_EVENT"
+    ],
+    "webStandards": {
+      "scxml": {
+        "status": "W3C Recommendation",
+        "pattern": "SCXML state-chart transition model (states + transitions + guards + parallel + final)",
+        "adoption": "The portable WorkflowGraph is a data-defined SCXML-style interchange; the native engine interprets it directly, and the XState/SCION adapters map onto it.",
+        "reference": "https://www.w3.org/TR/scxml/"
+      },
+      "customEvent": {
+        "status": "Baseline",
+        "pattern": "An observable step-transition event as the composition seam",
+        "adoption": "Every transition emits { flow, from, to, context, at } for the Flow Progress UX and for audit/reporting.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/CustomEvent"
+      }
+    },
+    "events": {
+      "step-transition": {
+        "description": "Fired on every workflow transition — the composition seam for UX + audit",
+        "taxonomy": "notification",
+        "detail": {
+          "flow": "string",
+          "from": "string",
+          "to": "string",
+          "context": "WorkflowContext",
+          "at": "number"
+        },
+        "bubbles": true,
+        "cancelable": false
+      },
+      "workflow-complete": {
+        "description": "Fired when the workflow reaches a final step",
+        "taxonomy": "notification",
+        "detail": {
+          "flow": "string",
+          "context": "WorkflowContext"
+        },
+        "bubbles": true,
+        "cancelable": false
+      }
+    },
+    "designDecisions": {
+      "nativeFirstDefault": {
+        "description": "A dependency-free interpreter is the default engine; libraries are opt-in adapters",
+        "rationale": "Native-first default — most workflows never need a library; XState/SCION plug in behind the same CustomWorkflowEngine contract when an app wants them."
+      },
+      "portableGraphIsTheLock": {
+        "description": "The data-defined SCXML-style WorkflowGraph is the only lock; the engine is swappable behind it",
+        "rationale": "#634 / Workflow Protocol: the transition graph is portable, so step-intents compose into a flow unaware of which engine runs it."
+      },
+      "tieredOperators": {
+        "description": "TIER-1 core (mandatory) + TIER-2 common (optional); engines declare their supported set",
+        "rationale": "The #085 compliance-matrix posture keeps the operator set an open meta-schema — an engine advertises what it honors rather than all-or-nothing."
+      },
+      "transitionEventSeam": {
+        "description": "Every move emits { flow, from, to, context, at }",
+        "rationale": "The UX (Flow Progress intent) and audit/reporting subscribe to one observable seam rather than polling engine internals."
+      },
+      "durableExecutionIsBackend": {
+        "description": "History/resume, retry, compensation/saga are engine-backend concerns, not the contract",
+        "rationale": "TIER-3 per the protocol: these are durable-execution backends behind the provider, never the portable graph contract."
+      }
+    }
   }
 ]
