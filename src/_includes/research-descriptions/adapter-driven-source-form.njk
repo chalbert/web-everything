@@ -1,0 +1,57 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+  The assembler / Module-as-a-Service generation origin today treats HTML (the declarative
+  <code>&lt;component&gt;</code> source) as <em>the</em> source form — but that only fits plain web
+  components. <a href="/backlog/663-adapter-driven-source-form-a-framework-adapter-emits-its-nat/">#663</a>
+  (under the generation-adapter epic
+  <a href="/backlog/507-generation-adapter-deterministic-neutral-contract-conformanc/">#507</a>) reframes
+  source form as an <strong>adapter capability</strong>: each registered framework adapter declares the
+  native authoring dialect it emits — plain WC → HTML, React → TSX, Vue → SFC — so the emit dialect is
+  <em>resolved by the active adapter</em>, not a fixed HTML default.
+</p>
+
+<h2>Recommendation (at a glance)</h2>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>Source form is adapter-driven, not a fixed default.</strong> The MaaS
+    <code>FORMS</code> catalog (<code>declarative / wc-class / html / jsx / functional</code>) becomes the
+    <em>open</em>, multi-dialect set framework adapters resolve — not a closed enum privileging
+    <code>html</code>. <em>(intents-open-design: standardize the meta-schema, not the list.)</em></li>
+  <li><strong>Native-first default.</strong> With no framework adapter selected, the form stays plain
+    WC → HTML (the web-platform-standard dialect). A framework dialect is the adapter author's opt-in,
+    never the floor.</li>
+  <li><strong>Multi-dialect, not single-dialect</strong> — the one open dimension, resolved per the
+    most-flexible-default rule: one component can be served in <em>multiple</em> dialects with the active
+    adapter supplying the transform per dialect (the serve path already does this off one definition).
+    Exposing the whole axis is the most permissive end-state; a single-dialect restriction is the author's
+    opt-in.</li>
+  <li><strong>Feeds #652.</strong> The assembler emit format
+    (<a href="/backlog/652-assembler-emit-format-its-relationship-to-the-623-626-workbe/">#652</a>) should
+    treat the emitted recipe's dialect as adapter-resolved, not bake HTML/JSX.</li>
+</ul>
+
+<h2>Why this is sound, not a new fork</h2>
+<p>
+  Two already-settled WE principles force the framing rather than open a choice. <strong>Native-first</strong>
+  fixes the no-adapter default to the platform-standard dialect (plain WC → HTML).
+  <strong>Adapter-as-normalization-hub</strong> puts the per-dialect transform inside the adapter — the same
+  forward-adapter shape WE uses to reach React/Vue/.NET. The MaaS resolver already owns no transform of its
+  own; it dispatches to shared transform modules per requested form. So the change is a <em>reframe of an
+  existing seam</em> (HTML is one dialect among many that adapters resolve), codified in the
+  <code>ServeForm</code> doc-comment in
+  <code>blocks/renderers/module-service/moduleService.ts</code>, not a new protocol or
+  <code>adapters.json</code> entry. The concrete build it informs is #652's emit-format decision.
+</p>
+
+<h2>Cross-references</h2>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li>Codifies: <a href="/backlog/663-adapter-driven-source-form-a-framework-adapter-emits-its-nat/">#663</a>,
+    under the generation-adapter epic
+    <a href="/backlog/507-generation-adapter-deterministic-neutral-contract-conformanc/">#507</a>.</li>
+  <li>Informs the emit-format decision
+    <a href="/backlog/652-assembler-emit-format-its-relationship-to-the-623-626-workbe/">#652</a> and the
+    composition assembler
+    <a href="/backlog/646-devtools-composition-assembler-build-your-own-component-for-/">#646</a>.</li>
+  <li>Seam: the <code>FORMS</code> catalog / <code>ServeForm</code> type in the Module-as-a-Service resolver.</li>
+</ul>
+{% endraw %}

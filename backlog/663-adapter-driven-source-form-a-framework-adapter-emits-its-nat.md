@@ -3,9 +3,12 @@ type: idea
 workItem: story
 size: 3
 parent: "507"
-status: open
+status: resolved
 blockedBy: []
 dateOpened: "2026-06-15"
+dateStarted: "2026-06-15"
+dateResolved: "2026-06-15"
+graduatedTo: src/_includes/research-descriptions/adapter-driven-source-form.njk + adapter-driven-source-form research topic + ServeForm seam note in blocks/renderers/module-service/moduleService.ts
 relatedProject: webdocs
 crossRef: { url: /backlog/646-devtools-composition-assembler-build-your-own-component-for-/, label: "Generalizes the assembler emit-format axis — informs #652" }
 tags: [generation-adapter, framework-adapter, assembler, source-form, react, tsx, native-first, adapter-as-normalization-hub]
@@ -28,6 +31,20 @@ Today the assembler/generation adapter treats HTML (declarative `<component>` so
   #652 is settling its emit format. This card says that format is *not one fixed dialect* but whatever the
   active framework adapter resolves — so #652 should treat the emit dialect as adapter-driven rather than
   baking HTML/JSX. Likely a dimension to fold into that decision, or a follow-on once #652 lands.
-- **Open dimension (to settle when worked):** does the adapter emit a *single* canonical dialect, or can
-  one component be served in *multiple* dialects (the MaaS multi-form serve path) with the adapter
-  supplying the transform per dialect? The latter is the more-flexible framing (expose the whole axis).
+- **Dimension settled (multi-dialect).** Does the adapter emit a *single* canonical dialect, or can one
+  component be served in *multiple* dialects (the MaaS multi-form serve path) with the adapter supplying
+  the transform per dialect? **Resolved → multi-dialect**, per the most-flexible-default rule: the serve
+  path already serves many forms off one definition, so exposing the whole axis is the most permissive
+  end-state; a single-dialect restriction is the adapter author's opt-in, never the floor.
+
+## Progress
+
+- **2026-06-15 — codified (design story, materialized).** Seam codified in
+  [`blocks/renderers/module-service/moduleService.ts`](../blocks/renderers/module-service/moduleService.ts)
+  — the `ServeForm` doc-comment now states source form is adapter-driven (open multi-dialect set, not a
+  closed HTML-privileged enum), native-first default (plain WC → HTML), and that the assembler emit
+  format (#652) inherits the adapter-resolved dialect. Design rationale published as the
+  `adapter-driven-source-form` research topic (`src/_data/researchTopics.json`). Open dimension resolved
+  toward multi-dialect (most-flexible-default). No standards-protocol/adapters.json change — this is a
+  framing/codification under the open generation-adapter epic #507; the concrete build it informs is
+  #652's emit-format decision. graduatedTo: the research topic + the moduleService.ts seam note.

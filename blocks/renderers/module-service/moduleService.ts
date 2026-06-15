@@ -18,7 +18,18 @@ import { parseDefinition, generateClassSource } from '../component/declarativeCo
 import { htmlToJsx } from '../jsx/htmlToJsx';
 import { generateFunctionalSource } from '../functional/functionalComponent';
 
-/** The output shapes a single `<component>` definition can be served as. Open-ended by design. */
+/**
+ * The output shapes a single `<component>` definition can be served as. Open-ended by design.
+ *
+ * Source form is ADAPTER-DRIVEN (#663): HTML/declarative is NOT privileged as "the source." Each
+ * registered framework adapter declares the native authoring dialect it emits — plain WC → HTML,
+ * React → TSX, Vue → SFC — so this catalog is the open, multi-dialect set those adapters resolve,
+ * not a closed enum. Native-first default: with no framework adapter selected, the form stays plain
+ * WC → HTML (the web-platform-standard dialect); a framework dialect is the adapter author's opt-in,
+ * never the floor. The serve path is deliberately multi-dialect (one component, many forms — the
+ * most-flexible framing), with the active adapter supplying the transform per dialect. The assembler
+ * emit format (#652) inherits this: the emitted recipe's dialect is adapter-resolved, not baked.
+ */
 export type ServeForm = 'declarative' | 'wc-class' | 'html' | 'jsx' | 'functional';
 
 export interface FormDescriptor {

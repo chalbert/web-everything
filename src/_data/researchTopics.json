@@ -1902,5 +1902,81 @@
     ],
     "relatedPlugs": [],
     "relatedProject": "webblocks"
+  },
+  {
+    "id": "ejectable-composition-recipes",
+    "title": "Ejectable composition recipes — what a build-your-own-component assembler emits, and where it lives",
+    "status": "open",
+    "summary": "Prior-art survey grounding the assembler-shape decision #652 (under epic #646), the ergonomic home #609 named for pure-composition meta-components (nav-list + disclosure + anchor + hover-intent wired together, which earn no block). The question: what format a preset emits on eject, and where the tool sits relative to the #623-627 Web Docs catalog pipeline. The decisive precedent is shadcn/ui's distribution model — 'not a component library, a code-distribution platform': you copy plain source INTO your repo and own it (no runtime dependency), and a thin registry-item.json wrapper ({name, type:'registry:block', files:[{path,content}], registryDependencies}) is merely the CLI transport that CARRIES the code, never a replacement for it. Webstudio/Webflow/Builder.io corroborate (visual builders that export clean, host-anywhere HTML/CSS/JS to dodge lock-in); Lit/Web Components reinforce the no-runtime-framework invariant. The load-bearing reshaping: #652 Fork 1's framing of 'plain markup vs CEM-aligned descriptor vs bespoke recipe JSON' is a FALSE trichotomy — those three live on three orthogonal layers that COEXIST, not rival payloads. (1) The ejectable payload (what the author owns) = plain markup + WE declarative wiring — forced invariant under #609's constraints, the only option that is literally 'the standard, ejected'. (2) The API descriptor (optional export of the result) = CEM, already ratified-recommended as WE's component-API-metadata protocol by #626 — it describes the composed meta-component's API surface, never its internal wiring. (3) The distribution wrapper (how presets are stored/shared, the INPUT side) = a registry-item-shaped manifest carrying the payload — the same artifact that answers Fork 2's shared-registry question. So Fork 1 collapses to a forced invariant (plain markup+wiring) + support-all additional emit targets; the only genuinely rejected branch is a bespoke project-facing recipe JSON handed to the author INSTEAD of markup (the lock-in minimize-lock-in refuses, and shadcn shows it is unnecessary). Classification: the assembler is devtools (author-time tool, not a running-app seam) so zero lock-in / no protocol; the preset store is a registry it reads, sibling to workbenchFeatures.json/workbenchTools.json (one-capability-many-consumers); bias-toward-separation keeps the authoring tool distinct from the catalog/served-product surface (#627). Full grounding in reports/2026-06-15-assembler-recipe-emit-prior-art.md.",
+    "dateOpened": "2026-06-15",
+    "lastReviewed": "2026-06-15",
+    "reviewHorizon": "P12M",
+    "tags": [
+      "webdocs",
+      "devtools",
+      "composition",
+      "assembler",
+      "eject",
+      "shadcn",
+      "custom-elements-manifest",
+      "zero-lock-in",
+      "prior-art",
+      "decision-prep"
+    ],
+    "relatedBlocks": [
+      "nav-list"
+    ],
+    "relatedPlugs": [],
+    "relatedProject": "webdocs"
+  },
+  {
+    "id": "self-driven-project",
+    "title": "Self-Driven Project — SAE-style autonomy levels for the whole SDLC, the value/risk-as-ODD dial, and tool-agnostic everything-as-code",
+    "status": "open",
+    "summary": "Prior-art survey grounding the framing decision #665 (epic #666): the self-driving-car model applied to the whole software lifecycle — a human sets the goal + a tolerance/risk envelope, the system drives the steps gated/transparent/reversible, escalating only on tolerance breach. THREE findings reshape the forks. (1) SAE-levels-for-the-SDLC is ALREADY published convergently — ASDLC.io (L1 Assistive→L5 Full, borrowing SAE's own 'Conditional/High/Full' names), Dash0's six levels (with an explicit L3.5 'Selective Auto-Merge'), Tessl, and arXiv 2509.06216 which explicitly calls for 'a hierarchical framework analogous to the SAE Levels'. So the mapping is legitimate prior art to CITE, not originate; the ASDLC/Dash0 ladders number by a review/merge-gating axis (propose→human-review→auto-review→auto-merge→live) that lines up with the repo's own dev-browser ladder (#141: report-only→propose→live-verify→open-PR), whereas Swarmia numbers by agent-topology (single→swarm) and is NOT comparable. Notably NONE of the published ladders has an L0 'report-only' floor — that is a genuine addition. (2) The GENUINELY NOVEL contribution (not found in any surveyed standard/framework): partitioning EVERY lifecycle activity into value-creation vs risk-mitigation and using the risk side — described by named quality dimensions — as the per-activity AI-autonomy DIAL (the dimensions act as the SAE Operational Design Domain / tolerance envelope governing how far the AI drives each step). The substrate it stands on is precedented and citable: the dimensions map to ISO/IEC 25010:2023 (revised 8→9 characteristics, adding 'safety'; usability→interaction-capability, portability→flexibility; ISO calls them 'quality requirements', not NFRs), and the dimension list is best modeled as an OPEN, extensible registry with a default flavor (Config-Extends-Platform-Default) — strong precedent in FURPS+ (the '+' is literally an extension slot), SEI/ATAM (open quality-attribute scenarios, a set that grows edition to edition) and arc42 (a 184-quality default catalog tailored into a per-project quality tree); ISO's top level is fixed-per-revision but applied by selection/tailoring. (3) The methodology must be codified SEPARATELY from any tool we ship, as tool-agnostic everything-as-code, so a third-party project-management/CI tool could read and drive the SAME artefacts (no lock-in; our tools are non-blocking consumers). This is well-precedented as a pattern — GitOps names it ('declarative desired state in Git', OpenGitOps Principles v1.0.0: declarative/versioned-immutable/pulled/continuously-reconciled), and per-category neutral schemas prove the play (SARIF/OASIS for findings, SPDX/ISO-5962 & CycloneDX/OWASP for SBOM, OpenTelemetry/OPA/CloudEvents/CNCF, OSCAL/NIST for compliance-as-code) — but work-tracking/project-management data is a genuine WHITE SPACE: there is no adopted open work-item interchange standard (portability is lossy CSV, non-portable even GitLab CE↔EE), and the repo's own backlog-as-version-controlled-Markdown is docs-as-code applied to that gap. Naming caveats: 'self-driving' is strongly Oracle's (self-driving database) so lean on 'self-driven' and avoid 'self-driving database/infra/SDLC'; 'agentic SDLC' is the crowded generic category; and 'Project' already names a WE standard entity (projects.json), so the brand overloads an existing term — a sub-decision in #665 Fork 3. Classification rulings the survey settles: the autonomy ladder is a configured level (already ratified for the dev-loop in #141, default open-PR) not a new fork; the tool-agnostic artefact contract legitimately IS a Protocol (the one place a third-party tool must swap in — minimize-lock-in's single escapable lock); the dimensions are an open registry not a closed five; the non-technical control plane is plateau-app product. Full grounding in reports/2026-06-15-self-driven-project-prior-art.md.",
+    "dateOpened": "2026-06-15",
+    "lastReviewed": "2026-06-15",
+    "reviewHorizon": "P12M",
+    "tags": [
+      "self-driven-project",
+      "autonomy",
+      "sae-levels",
+      "agentic-sdlc",
+      "coding-by-intention",
+      "everything-as-code",
+      "gitops",
+      "iso-25010",
+      "value-risk",
+      "no-lock-in",
+      "methodology",
+      "prior-art",
+      "decision-prep"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "none"
+  },
+  {
+    "id": "adapter-driven-source-form",
+    "title": "Adapter-driven source form — a framework adapter emits its native dialect",
+    "status": "open",
+    "summary": "Codifies #663 (under the generation-adapter epic #507): the assembler/MaaS generation origin must NOT privilege HTML/declarative as THE source form — emitted source dialect is a capability the active framework adapter resolves. A plain-WC adapter emits HTML (declarative `<component>`), a React adapter emits TSX, a Vue adapter emits SFC; the MaaS FORMS catalog (blocks/renderers/module-service/moduleService.ts — declarative/wc-class/html/jsx/functional) becomes the open, multi-dialect set those adapters resolve rather than a closed enum that treats `html` as the privileged source. Two settled principles ground it: native-first (no framework adapter selected ⇒ plain WC → HTML, the web-platform-standard form; a framework dialect is the adapter author's opt-in, never the floor) and adapter-as-normalization-hub (the adapter owns the per-dialect transform). The card's one open dimension — a single canonical dialect per adapter vs one component served in MULTIPLE dialects with the adapter supplying the transform per dialect — resolves toward the MULTI-dialect framing per the most-flexible-default rule: the serve path already serves many forms off one definition, so exposing the whole axis (one component, many adapter-resolved dialects) is the most permissive end-state and the restriction would be the author's opt-in, not the floor. This feeds the assembler emit-format decision (#652/#646): #652 should treat the emitted recipe's dialect as adapter-driven, not bake HTML/JSX. Seam codified in the ServeForm doc-comment in moduleService.ts.",
+    "dateOpened": "2026-06-15",
+    "lastReviewed": "2026-06-15",
+    "reviewHorizon": "P12M",
+    "tags": [
+      "generation-adapter",
+      "framework-adapter",
+      "assembler",
+      "source-form",
+      "react",
+      "tsx",
+      "native-first",
+      "adapter-as-normalization-hub",
+      "most-flexible-default"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": "webdocs"
   }
 ]
