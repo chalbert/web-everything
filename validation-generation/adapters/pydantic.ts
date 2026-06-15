@@ -13,8 +13,10 @@ import {
   type ValidationConstraint,
   type ValidationDeclaration,
   type ValidationIntentId,
+  type GeneratedCrossField,
   unsupportedIntents,
 } from '../provider.js';
+import { transpileRules, PY_DIALECT } from '../cel.js';
 
 const SUPPORTED: readonly ValidationIntentId[] = [
   'validation.intent.required',
@@ -103,5 +105,19 @@ export const pydanticAdapter: CustomValidationAdapter = {
       code: `${declaration.field}: ${annotation}${rhs}`,
       unsupported: unsupportedIntents(pydanticAdapter, declaration),
     };
+  },
+
+  // Cross-field (#504): CEL → a Pydantic v2 `@model_validator(mode='after')` method that raises on each
+  // failing rule. Model-scoped (`self.<field>`), the idiomatic home for a multi-field constraint.
+  emitCrossField(declaration: ValidationDeclaration): GeneratedCrossField {
+    const rules = declaration.crossField ?? [];
+    const { transpiled, unsupported } = transpileRules(rules, PY_DIALECT);
+    const checks = transpiled
+      .map((t) => `        if not ${t.code}:\n            raise ValueError(${JSON.stringify(t.message ?? `cross-field rule failed: ${t.rule}`)})`)
+      .join('\n');
+    const code = transpiled.length
+      ? `    @model_validator(mode='after')\n    def _cross_field(self):\n${checks}\n        return self`
+      : `    # no cross-field rules emitted for "${declaration.field}"`;
+    return { format: 'pydantic', language: 'python', code, unsupportedRules: unsupported };
   },
 };

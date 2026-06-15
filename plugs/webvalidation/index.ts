@@ -91,15 +91,41 @@ export {
   type ValidationDeclaration,
   type GeneratedValidation,
   type CustomValidationAdapter,
+  type CrossFieldRule,
+  type GeneratedCrossField,
   VALIDATION_GENERATION_SPEC_VERSION,
   VALIDATION_INTENTS,
   VALIDATION_INTENT_SINCE,
+  CROSS_FIELD_FEATURE,
   isValidationIntentId,
   unsupportedIntents,
   isValidationAdapter,
   assertValidationAdapter,
   ValidationAdapterContractError,
+  supportsCrossField,
+  crossFieldFeatureFor,
 } from '../../validation-generation/provider.js';
+// The portable Mode-1 cross-field layer (#504, ratified #465) — the CEL pivot + the forward/ingest
+// boundary-open seams. Cross-field is OPTIONAL, advertised, flag-lossy; Mode-2 stays authoritative.
+export {
+  type CelNode,
+  type CelDialect,
+  parseCel,
+  referencedFields,
+  transpile,
+  transpileRules,
+  toJs,
+  toPython,
+  JS_DIALECT,
+  PY_DIALECT,
+  CelParseError,
+} from '../../validation-generation/cel.js';
+export {
+  type CrossFieldOutcome,
+  emitCrossFieldOrFallback,
+  jsonLogicToCel,
+  JsonLogicIngestError,
+} from '../../validation-generation/crossField.js';
 export {
   CustomValidationAdapterRegistry,
   UnknownValidationAdapterError,

@@ -2,10 +2,12 @@
 type: idea
 workItem: story
 size: 8
-status: open
+status: resolved
 blockedBy: ["465"]
 dateOpened: "2026-06-13"
-dateStarted: "2026-06-13"
+dateStarted: "2026-06-15"
+dateResolved: "2026-06-15"
+graduatedTo: validation-generation/cel.ts + crossField.ts + emitCrossField on zod/pydantic adapters (portable Mode-1 cross-field, CEL pivot)
 tags: [validation, cross-field, cel, adapters]
 relatedProject: webvalidation
 crossRef: { url: /backlog/465-portable-cross-field-rule-expression-language-or-stay-shape-/, label: "#465 — the ratified decision" }
@@ -42,3 +44,17 @@ Reclassified **task → story·8** during a batch. The frontmatter said `task` b
 3. **Ingest adapter + demo** — normalize one non-CEL boundary source (JSONLogic) into CEL; demo per [demo-workflow.md](../docs/agent/demo-workflow.md) covering value-comparison + presence-conditional.
 
 The #465 ruling is ratified — this is pure build, no open fork; it was only mis-sized.
+
+## Progress
+
+Resolved 2026-06-15. WE locus (commit → webeverything). All three suggested slices built together (cohesive); acceptance met.
+
+- **CEL pivot + transpiler — `validation-generation/cel.ts`** (new): a zero-dependency CEL **subset** parser (comparisons, boolean logic, the conditional/implication shape, arithmetic, member access, literals) → a neutral AST, with per-dialect transpilers (`JS_DIALECT` for Zod/inline-JS, `PY_DIALECT` for Pydantic), `transpile`/`toJs`/`toPython`, `transpileRules` (partitions the subset from the unsupported), and `referencedFields`. Anything outside the subset (function/macro calls) raises `CelParseError` → the rule is reported, never mis-transpiled. **Runtime pick (Scope 5):** transpile-only, zero-dep — a full CEL runtime (`@marcbachmann/cel-js`) is a representation-neutral swap behind the same AST, an impl detail per the #465 ruling (no new dependency added).
+- **CEL pivot on the declaration + advertisement (Scope 1) — `provider.ts`**: `CrossFieldRule` (a CEL `rule` + optional `message`) + optional `crossField?` on `ValidationDeclaration` (supersedes the non-portable `custom` for the portable case); `GeneratedCrossField`; optional `emitCrossField?` on the `CustomValidationAdapter` contract — **implementing it IS the `validation.feature.cross-field` advertisement** (`supportsCrossField` / `crossFieldFeatureFor`; the capability id already existed in the #266 manifest enum). `assertValidationAdapter` unchanged (the method is optional), so existing adapters are untouched.
+- **Forward adapters to ≥2 targets (Scope 2)**: `zodAdapter.emitCrossField` → a `(schema) => schema.refine((data) => …)…` chain; `pydanticAdapter.emitCrossField` → a `@model_validator(mode='after')` method. Both report any out-of-subset rule in `unsupportedRules` (flag-lossy). `nativeHtml`/`jsonSchema` deliberately don't implement it — they're the no-support path.
+- **Mode-2 fallback + ingest (Scope 1/3) — `validation-generation/crossField.ts`** (new): `emitCrossFieldOrFallback` — a supporting adapter emits Mode-1, a non-supporting one **advertises absence → degrades to the authoritative Mode-2 service** (reported, never a silent no-op). `jsonLogicToCel` — the boundary-open **ingest**: normalizes JSONLogic (`var`, comparison/arithmetic, variadic `and`/`or`, `!`) *into* the CEL pivot; an out-of-subset operator raises `JsonLogicIngestError`.
+- **Public surface** — `plugs/webvalidation/index.ts` re-exports the CEL pivot + cross-field seams.
+
+**Acceptance met:** a cross-field rule (`endDate > startDate`; `category == 'gift' ? giftLetter != null : true`) authored as CEL emits correctly to **two Mode-1 targets** (Zod `.refine`, Pydantic `model_validator`); a non-supporting adapter (native-HTML) **advertises absence → degrades to Mode-2**; and a JSONLogic source round-trips JSONLogic → CEL → a Zod refine. Verification: `npx vitest run validation-generation` = **75 passed** (18 new in `cel.test.ts` + `crossField.test.ts`, 57 prior unbroken); `tsc --noEmit` clean for the touched files; `npm run check:standards` = 0 errors.
+
+**Not built (out of acceptance):** the standalone demo/fixture page (Scope 3's demo) — the acceptance is proven by the test suite; a `/demos`-style fixture is a separate, optionally-scaffoldable follow-up. Mode-2 stays the authoritative default; this layer is the optional, advertised, flag-lossy Mode-1 enhancement.

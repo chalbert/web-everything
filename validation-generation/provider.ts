@@ -110,10 +110,44 @@ export interface ValidationConstraint {
   readonly message?: string;
 }
 
+/**
+ * A cross-field rule — a constraint that spans more than one field, carried as a **CEL** expression (the
+ * single canonical pivot, #504 / ratified #465). The expression references sibling fields by name
+ * (`endDate > startDate`; `category == 'gift' ? giftLetter != null : true`). CEL supersedes the
+ * non-portable `custom` escape hatch for the portable case — a forward adapter transpiles it to the
+ * target idiom, or reports it unsupported and the rule degrades to the Mode-2 service.
+ */
+export interface CrossFieldRule {
+  /** The rule as a CEL expression (the canonical, portable representation). */
+  readonly rule: string;
+  /** Optional author message surfaced when the rule fails. */
+  readonly message?: string;
+}
+
 /** The validation declared for one field/property — the neutral input an adapter materializes. */
 export interface ValidationDeclaration {
   readonly field: string;
   readonly constraints: readonly ValidationConstraint[];
+  /**
+   * Optional object-scoped cross-field rules (CEL), anchored on this declaration. An OPTIONAL,
+   * advertised, flag-lossy capability (#504): only adapters that declare `validation.feature.cross-field`
+   * (i.e. implement {@link CustomValidationAdapter.emitCrossField}) materialize these; otherwise they are
+   * reported and fall back to the authoritative Mode-2 service.
+   */
+  readonly crossField?: readonly CrossFieldRule[];
+}
+
+/**
+ * The artifact a cross-field-capable adapter emits for a declaration's `crossField` rules — separate from
+ * the per-field `GeneratedValidation` because cross-field lowers to an object-scoped construct
+ * (`.refine()` for Zod, `model_validator` for Pydantic). `unsupportedRules` lists any CEL rule the adapter
+ * could not transpile (outside the CEL subset) — reported, never silently dropped (the #085 lossy rule).
+ */
+export interface GeneratedCrossField {
+  readonly format: string;
+  readonly language?: string;
+  readonly code: string;
+  readonly unsupportedRules: readonly string[];
 }
 
 /**
@@ -144,6 +178,26 @@ export interface CustomValidationAdapter {
   readonly intents: readonly ValidationIntentId[];
   /** Materialize a declaration into the target format. */
   emit(declaration: ValidationDeclaration): GeneratedValidation;
+  /**
+   * OPTIONAL — materialize a declaration's cross-field rules (CEL) into the target idiom. Implementing
+   * this method IS the adapter's declaration of `validation.feature.cross-field` compliance (#504): an
+   * adapter without it does not support cross-field, and the rules degrade to the Mode-2 service. See
+   * {@link supportsCrossField} / {@link crossFieldFeatureFor}.
+   */
+  emitCrossField?(declaration: ValidationDeclaration): GeneratedCrossField;
+}
+
+/** The capability-manifest feature id a cross-field-capable adapter advertises (#266 / #504). */
+export const CROSS_FIELD_FEATURE = 'validation.feature.cross-field';
+
+/** True when `adapter` advertises cross-field support (i.e. implements {@link CustomValidationAdapter.emitCrossField}). */
+export function supportsCrossField(adapter: CustomValidationAdapter): boolean {
+  return typeof adapter.emitCrossField === 'function';
+}
+
+/** The cross-field feature id when `adapter` supports it, else `null` — the manifest advertisement (absence is reportable). */
+export function crossFieldFeatureFor(adapter: CustomValidationAdapter): typeof CROSS_FIELD_FEATURE | null {
+  return supportsCrossField(adapter) ? CROSS_FIELD_FEATURE : null;
 }
 
 /** The intents present in `declaration` that `adapter` does not declare compliance with. */

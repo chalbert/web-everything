@@ -12,8 +12,10 @@ import {
   type ValidationConstraint,
   type ValidationDeclaration,
   type ValidationIntentId,
+  type GeneratedCrossField,
   unsupportedIntents,
 } from '../provider.js';
+import { transpileRules, JS_DIALECT } from '../cel.js';
 
 const SUPPORTED: readonly ValidationIntentId[] = [
   'validation.intent.required',
@@ -120,5 +122,19 @@ export const zodAdapter: CustomValidationAdapter = {
       code: `const ${declaration.field} = ${expr};`,
       unsupported: unsupportedIntents(zodAdapter, declaration),
     };
+  },
+
+  // Cross-field (#504): CEL → a chain of `.refine()` calls applied to a `z.object` schema. Zod's refine
+  // is object-scoped, so this emits a `(schema) => schema.refine(...)…` applier the consumer composes.
+  emitCrossField(declaration: ValidationDeclaration): GeneratedCrossField {
+    const rules = declaration.crossField ?? [];
+    const { transpiled, unsupported } = transpileRules(rules, JS_DIALECT);
+    const refines = transpiled
+      .map((t) => `  .refine((data) => ${t.code}${t.message ? `, { message: ${JSON.stringify(t.message)} }` : ''})`)
+      .join('\n');
+    const code = transpiled.length
+      ? `const ${declaration.field}CrossField = (schema) => schema\n${refines};`
+      : `// no cross-field rules emitted for "${declaration.field}"`;
+    return { format: 'zod', language: 'typescript', code, unsupportedRules: unsupported };
   },
 };
