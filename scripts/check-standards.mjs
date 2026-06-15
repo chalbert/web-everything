@@ -14,6 +14,7 @@ import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
 import { renderInventory, spliceInventory } from './gen-inventory.mjs';
 import { checkDemos } from './check-demos.mjs';
+import { buildReport, source as reportSource, finding as reportFinding, section as reportSection } from './lib/buildReport.mjs';
 import {
   BACKLOG_STATUSES, BACKLOG_TYPES, WORK_ITEMS, FIB, FILE,
   dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated,
@@ -821,7 +822,31 @@ if (JSON_MODE) {
   // Single JSON object on stdout — the auto-fix agent's failure feed (#095). Exit code
   // still signals pass/fail, so `check:standards --json` is both pipeable and CI-usable.
   const shape = (list) => list.map((x) => (x.descriptor ? { message: x.message, descriptor: x.descriptor } : { message: x.message }));
-  console.log(JSON.stringify({ ok: errors.length === 0, summary, errors: shape(errors), warnings: shape(warnings) }, null, 2));
+  // Map a check-standards `{message, descriptor?}` entry onto a report-model Finding (#431). The
+  // descriptor's `kind` becomes the `ruleId` and its `file` the location, so the structured failure
+  // class survives into SARIF/JUnit; the terminal/ANSI path below stays bespoke (only `--json` migrates).
+  const toFinding = (severity) => (e, i) => reportFinding({
+    id: `check-standards/${severity}/${i}`,
+    severity,
+    title: e.message,
+    ruleId: e.descriptor?.kind,
+    location: e.descriptor?.file ? { path: e.descriptor.file } : undefined,
+    detail: e.descriptor ? JSON.stringify(e.descriptor) : undefined,
+    source: 'check-standards',
+  });
+  const report = buildReport({
+    id: 'check-standards',
+    title: 'Web Everything — check:standards',
+    sources: [reportSource({ id: 'check-standards', name: 'check:standards', kind: 'validator' })],
+    sections: [reportSection({
+      id: 'findings',
+      title: 'Standards conformance findings',
+      findings: [...errors.map(toFinding('error')), ...warnings.map(toFinding('warn'))],
+    })],
+  });
+  // `report` is the #431 model-valid view (pipes through the #432 renderers + #434 SARIF/JUnit adapters);
+  // `errors`/`warnings` stay for the existing #196 auto-fix feed that targets descriptors directly.
+  console.log(JSON.stringify({ ok: errors.length === 0, summary, report, errors: shape(errors), warnings: shape(warnings) }, null, 2));
 } else {
   const RED = '\x1b[31m', YEL = '\x1b[33m', GRN = '\x1b[32m', DIM = '\x1b[2m', RST = '\x1b[0m';
   console.log(`${DIM}check-standards — Web Everything${RST}`);
