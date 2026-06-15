@@ -31,6 +31,35 @@ applies to every "does it work / why is it broken" moment, not just to written t
   run the 11ty build, so render-layer bugs stay green-invisible — smoke template changes with a real
   build/probe too.
 
+### Hard rule — every verification must be agent-runnable; if it needs a real runtime, the harness is a dependency
+
+A verification item is only *real* if an agent can **reproduce its proof mechanically** — run a
+command, observe the result. "Verify end-to-end in a real browser / a real extension host / a real
+device" is **not** a finished verification when no harness exists to drive that runtime headlessly;
+it's a claim waiting on a human, and "I eyeballed it / I reasoned it works" is exactly the untested
+guess the discipline above forbids.
+
+So, as a **hard rule**:
+
+- **If a verification's proof needs a runtime the standard tiers can't reach** — a real service worker
+  / Background Fetch / push (happy-dom has none), a real VS Code Extension Development Host (Vitest
+  never loads one), a real device sensor, a GPU, a secure-context-only API — then **the test harness
+  that makes that runtime agent-runnable is its own backlog item, and the verification item carries a
+  `blockedBy` edge to it.** Build the harness first; verify against it second.
+- **Never claim a real-runtime verification you did not mechanically observe.** If part of a claim
+  genuinely cannot be driven even with the harness (e.g. a network transfer that only survives in a
+  flagged real profile), say so explicitly and file that residual — an inconclusive run is not proof
+  (see "A probe can lie too").
+- **The harness card's own DoD is a green sample** in that runtime (a trivial spec going green via the
+  lane's command), so the harness itself is proven before anything depends on it.
+
+This is why a card whose only remaining step is "verify in a real X" is **not agent-ready** until its
+harness exists: at batch/selection pre-flight it reads as `blocked-in-fact` (a needed gate verified
+absent) and the remediation is to scaffold the harness card and add the `blockedBy` edge — not to skip
+the item, and never to mark it done off an un-run claim. Worked example: #675 (real SW + Background
+Fetch) `blockedBy` #684 (the real-Chromium SW E2E lane); #676 (real extension host) `blockedBy` #685
+(the `@vscode/test-electron` host harness).
+
 ## Pyramid
 
 | Tier | Pattern | Runner | Env | Purpose |
