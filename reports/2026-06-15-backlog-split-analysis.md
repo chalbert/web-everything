@@ -556,3 +556,73 @@ inline un-tracked fork.
 3. Gate on `npm run check:standards`; confirm backlog count rose by 5.
 
 Net flow on approval: **+5** (658 → epic). S1/S2a/S2b/S2c are immediately `/batch`-able; S3 waits on #604.
+
+---
+---
+
+# Focused `/split 479` (edge venue — live serving)
+
+**Scope:** Focused run, `/split 479`. #479 is `story · size 13`, `blockedBy: ["219"]` (resolved),
+`status: open`. Its body already surfaced a two-piece seam at batch pre-flight; this run verified each
+piece against the real tree before drawing any slice.
+
+**Verdict: #479 splits (partial)** — 1 batchable slice carved + 1 blocking fork filed as a `type:decision`
+card; the live-serve runtime build correctly stays unsliced pending that decision.
+
+## Work-investigation pass (read before slicing)
+
+Every claim in #479's body confirmed against the real tree:
+
+| Claim | Verified |
+|-------|----------|
+| `EdgeChunkCache.serve` returns a `Resolution`, not bytes | ✓ [edge.ts:169](../capabilities/edge.ts#L169) builds `EdgeChunk = { resolution: Resolution, caps }`; no HTTP server / bundler in the package |
+| `BaselineLookup` is an injected seam | ✓ [edge-io.ts:69](../capabilities/edge-io.ts#L69) `(brand: UaBrand, platform?) => number \| undefined`; production impl already named at [edge-io.ts:20](../capabilities/edge-io.ts#L20) (web-features / Baseline data); seam unit-tested with a fake at [edge-io.test.ts:47](../capabilities/__tests__/edge-io.test.ts#L47) |
+| `web-features` npm package is absent | ✓ no mention in `package.json`; no `node_modules/web-features` |
+| #219 delivered the I/O + caching shell and defers live serving here | ✓ [#219](../backlog/219-edge-venue-i-o-caching-shell-client-hints-parsing-baseline-l.md) `resolved`, `graduatedTo: capabilities/edge-io.ts (… live serving → #479)` |
+
+The body's framing holds: one **pure-build** piece (BaselineLookup) settled on direction, and one piece
+(live serve runtime) that carries an unresolved **placement** decision. They cleave along the
+agent-ready / needs-a-decision line — not one clean slice.
+
+## Could split — #479
+
+Convert **#479** `story · 13` → **storied epic** "Edge venue — live serving" (drop `size`, umbrella
+digest, keep NNN, keep `status: open` + `blockedBy: ["219"]`) and scaffold:
+
+| Slice | type / workItem / size | What | blockedBy | Batchable now? |
+|-------|------------------------|------|-----------|----------------|
+| **A — web-features-backed `BaselineLookup`** | idea · **story** · **2** | NEW `capabilities/edge-baseline.ts` impl of [edge-io.ts:69](../capabilities/edge-io.ts#L69) `BaselineLookup`; add `web-features` to `package.json`; map its Baseline epochs to a `(brand, platform?) => year`; unit test against the injection seam (mirror [edge-io.test.ts:47](../capabilities/__tests__/edge-io.test.ts#L47)). Data-only dep, no runtime lock-in, **no fork**. | — | ✅ yes |
+| **Decision — live-serve runtime placement** | decision · story · **parked** | De-buries #479's inline "Open decision" into its own `type:decision` card, **parked** under defer-live-serve: **A (default)** WE emits a pure-logic build-plan, plateau-app serves (honours defer-live-serve + no-leakage layering) · **B** WE hosts a reference esbuild server in-repo as a throwaway demo. | — | n/a (ratify-when-worked) |
+
+**DAG:** Slice A and the decision card are independent roots; the serve-runtime build (below) waits on
+the decision.
+
+```
+#479 (epic — edge venue live serving)
+├── Slice A: web-features BaselineLookup ........ story·2, batchable NOW, no deps
+├── Decision: serve-runtime placement (A vs B) .. parked (defer-live-serve)
+└── [serve-runtime build slices] ................ NOT scaffolded — see Could not split
+```
+
+**Rubric (Slice A):** (1) volume not a fork — impl direction settled (web-features is the named,
+#204-aligned source) ✓ · (2) nameable, real home (`capabilities/`) ✓ · (3) re-estimates **size 2**, named
+files, no buried fork ✓ · (4) independent of the decision card — real DAG independence ✓ · (5) demoable —
+a unit test resolving a real browser+version → Baseline year through the injected lookup ✓.
+
+## Could not split (further) — the live serve runtime
+
+| Piece | Which condition failed | Unblocking action |
+|-------|------------------------|-------------------|
+| **Live edge SERVE runtime** (bundle + serve built module bytes over HTTP at `componentUrl`) | **(1) size is volume, not a fork** — this piece *is* the unresolved placement decision (A: plateau-app product + WE emit-plan · B: WE reference server+bundler demo); you can't split away a fork. Also collides with the standing defer-live-serve / no-leakage stance ([[project_monetization_strategy]], [[reference_repo_constellation]]). | **Resolve the decision card**, then re-`/slice`. Under branch A it carves into a WE pure-logic *emit-build-plan* slice + a plateau-app *serve-consumer* slice; under B a single in-repo reference-server demo. Those seams are **unknowable until the decision lands** — scaffolding now would guess seams, so deliberately deferred. The decision card (not an inline fork) is the tracked unblocker. |
+
+## Recommended mutation — #479 (gated on one "go")
+
+1. Convert **#479** `story · 13` → **storied epic** (drop `size`, umbrella digest, keep NNN + `status:
+   open` + `blockedBy: ["219"]`). Replace the inline "Open decision" block in the body with a pointer to
+   the decision card.
+2. Scaffold **Slice A**: `--type=idea --workitem=story --size=2 --parent=479 --digest="…"` — web-features-backed BaselineLookup.
+3. Scaffold the **decision card**: `--type=decision --workitem=story --parent=479 --digest="…"`, then edit `status: open → parked` (defer-live-serve).
+4. Gate on `npm run check:standards`; confirm backlog count rose by 2.
+
+Net flow on approval: **+2** (479 → epic; Slice A + decision card). Slice A is immediately `/batch`-able;
+the serve-runtime build waits on the decision.
