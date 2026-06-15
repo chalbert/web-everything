@@ -803,3 +803,41 @@ export function validateRetirementShape(entry, { label = 'entry', resolveSuperse
   }
   return { errors, warnings };
 }
+
+// ── Plug dual-mode conformance (#636, enforcing the #606 invariants) ───────────
+// #606 ruled: every plug ships passing automated tests for BOTH the unplugged
+// (non-invasive) and plugged modes, and NO plug may require plugged mode — the
+// unplugged form is mandatory and is the real-app surface; plugged is POC/demo.
+// A passing *unplugged-mode* test is the automated proof a plug doesn't require
+// plugged mode, so the dual-mode test coverage IS the enforcement mechanism.
+//
+// This rule is pure: `domains` is the pre-collected metadata (the fs walk lives in
+// check-standards.mjs). Each domain = { name, hasSource, hasPluggedTest, hasUnpluggedTest }.
+//
+// Staging (per #636, "defines the test shape the backfill fills"): the #635 audit
+// found all 10 domains have an unplugged FORM but only webbehaviors has an
+// unplugged-mode TEST. The #649 backfill fills the rest. So the unplugged-mode
+// requirement is a WARN until that backfill lands, then it promotes to ERROR
+// (flip PLUG_UNPLUGGED_TEST_ENFORCED to true) so "missing either mode's tests"
+// fully fails the gate. The plugged-mode + no-untested-plug invariants are ERROR now.
+export const PLUG_UNPLUGGED_TEST_ENFORCED = false;
+
+export function validatePlugDualMode(domains) {
+  const errors = [];
+  const warnings = [];
+  for (const d of domains) {
+    if (!d.hasSource) continue; // not a plug domain (no implementation files)
+    // ERROR — a plug with no plugged-mode test (the global-patched / real-DOM path).
+    if (!d.hasPluggedTest)
+      errors.push({
+        message: `Plug domain "${d.name}" ships no plugged-mode test — every plug needs passing tests for BOTH modes (#606/#636).`,
+      });
+    // The unplugged-mode test is the proof the plug does not REQUIRE plugged mode.
+    if (!d.hasUnpluggedTest) {
+      const msg = `Plug domain "${d.name}" ships no unplugged-mode (non-invasive) test — a plug may not require plugged mode; the unplugged form is mandatory (#606). #649 backfill target.`;
+      if (PLUG_UNPLUGGED_TEST_ENFORCED) errors.push({ message: msg });
+      else warnings.push({ message: msg });
+    }
+  }
+  return { errors, warnings };
+}

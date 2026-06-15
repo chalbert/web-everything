@@ -23,6 +23,7 @@ import {
   findBuriedForkSections, findUnquotedColonScalars, findBadBodyLinks,
   deriveResearchFreshness, addIsoDuration, RESEARCH_REVIEW_HORIZON_DEFAULT,
   validateCapabilityPresence, validateRetirementShape,
+  validatePlugDualMode, PLUG_UNPLUGGED_TEST_ENFORCED,
 } from '../check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -677,5 +678,41 @@ describe('validateRetirementShape — general reference-retirement convention (#
     const corpus = require(join(SRC, '_data/benchmarkCorpus.json'));
     const fast = corpus.sources.find((s) => s.id === 'fast');
     expect(validateRetirementShape(fast, { label: 'fast' }).errors).toEqual([]);
+  });
+});
+
+describe('validatePlugDualMode — #606 dual-mode plug conformance (#636)', () => {
+  it('passes a domain with both an unplugged-mode and plugged-mode test', () => {
+    const res = validatePlugDualMode([
+      { name: 'webbehaviors', hasSource: true, hasUnpluggedTest: true, hasPluggedTest: true },
+    ]);
+    expect(res.errors).toEqual([]);
+    expect(res.warnings).toEqual([]);
+  });
+
+  it('ERRORs a domain that ships no plugged-mode test (missing a mode)', () => {
+    const res = validatePlugDualMode([
+      { name: 'webfoo', hasSource: true, hasUnpluggedTest: true, hasPluggedTest: false },
+    ]);
+    expect(res.errors.map((e) => e.message).join(' ')).toMatch(/webfoo.*no plugged-mode test/);
+  });
+
+  it('flags a missing unplugged-mode test as the #649 backfill target (warn until enforced)', () => {
+    const res = validatePlugDualMode([
+      { name: 'webbar', hasSource: true, hasUnpluggedTest: false, hasPluggedTest: true },
+    ]);
+    const bucket = PLUG_UNPLUGGED_TEST_ENFORCED ? res.errors : res.warnings;
+    expect(bucket.map((e) => e.message).join(' ')).toMatch(/webbar.*no unplugged-mode.*#649/);
+    // The opposite bucket carries nothing about the unplugged gap.
+    const other = PLUG_UNPLUGGED_TEST_ENFORCED ? res.warnings : res.errors;
+    expect(other.map((e) => e.message).join(' ')).not.toMatch(/unplugged-mode/);
+  });
+
+  it('skips a non-plug directory (no source files)', () => {
+    const res = validatePlugDualMode([
+      { name: 'webempty', hasSource: false, hasUnpluggedTest: false, hasPluggedTest: false },
+    ]);
+    expect(res.errors).toEqual([]);
+    expect(res.warnings).toEqual([]);
   });
 });

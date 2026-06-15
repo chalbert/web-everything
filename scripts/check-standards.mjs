@@ -23,6 +23,7 @@ import {
   findUnquotedColonScalars, findBadBodyLinks,
   RESEARCH_REVIEW_HORIZON_DEFAULT, deriveResearchFreshness,
   validateCapabilityPresence, validateRetirementShape,
+  validatePlugDualMode,
 } from './check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -642,6 +643,46 @@ const allCompileFiles = COMPILE_ROOTS.flatMap((r) => walk(r));
 {
   const { errors: se } = findCompiledShadows(allCompileFiles, (f) => f.replace(ROOT + '/', ''));
   for (const e of se) err(e.message, e.descriptor);
+}
+
+// ── 8b. Plug runtime dual-mode conformance (#636, enforcing the #606 invariants) ─
+// Every plug domain must ship passing tests for BOTH the unplugged (non-invasive)
+// and plugged modes, and none may require plugged mode (the unplugged form is the
+// mandatory real-app surface; plugged is POC). The fs walk lives here; the pure
+// rule is `validatePlugDualMode`. Skip silently when the plug runtime isn't checked
+// out here — #606 makes Frontier UI the canonical home, so a WE tree without plugs/
+// (post-#449) is expected, not a failure.
+{
+  const plugsRoot = join(ROOT, 'plugs');
+  if (existsSync(plugsRoot)) {
+    const sharedTestsDir = join(plugsRoot, '__tests__');
+    const sharedTests = existsSync(sharedTestsDir)
+      ? walk(sharedTestsDir).filter((f) => /\.(test|spec)\.[tj]sx?$/.test(f))
+      : [];
+    const sharedTestBlobs = sharedTests.map((f) => ({ f, c: readFileSync(f, 'utf8') }));
+    const domains = readdirSync(plugsRoot, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && /^web/.test(e.name))
+      .map((e) => {
+        const dir = join(plugsRoot, e.name);
+        const files = walk(dir);
+        const isTest = (f) => /\.(test|spec)\.[tj]sx?$/.test(f);
+        const hasSource = files.some((f) => /\.tsx?$/.test(f) && !isTest(f) && !f.includes('/__tests__/'));
+        const localTests = files.filter(isTest).map((f) => ({ f, c: readFileSync(f, 'utf8') }));
+        const allTests = [...localTests, ...sharedTestBlobs];
+        // unplugged-mode test = imports the non-invasive `unplugged` API AND touches this domain.
+        const hasUnpluggedTest = allTests.some(
+          ({ f, c }) => /unplugged/.test(c) && (c.includes(`/${e.name}/`) || f.includes(e.name)),
+        );
+        // plugged-mode test = the domain's own tests (register + upgrade in real DOM) or a shared
+        // e2e/integration spec exercising it via the global-patched path.
+        const hasPluggedTest =
+          localTests.length > 0 || sharedTestBlobs.some(({ f, c }) => f.includes(e.name) || c.includes(`/${e.name}/`));
+        return { name: e.name, hasSource, hasUnpluggedTest, hasPluggedTest };
+      });
+    const { errors: pe, warnings: pw } = validatePlugDualMode(domains);
+    for (const e of pe) err(e.message, e.descriptor);
+    for (const w of pw) warn(w.message, w.descriptor);
+  }
 }
 
 // ── 9. Vite dev-proxy allowlist must cover every 11ty catalog route ────────────
