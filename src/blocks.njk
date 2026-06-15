@@ -1,0 +1,118 @@
+---
+layout: base.njk
+title: Web Everything — Blocks
+---
+
+<section class="intro">
+  <h1>Blocks</h1>
+  <p>
+    The component catalog — the <strong>Storybook-equivalent</strong> browse surface for every Web Everything
+    <strong>Block</strong>. A block ships <em>code</em> that realizes one or more intents; this index enumerates
+    them by <strong>trait surface</strong> (Component / Behavior / Provider…) and the <strong>intent</strong>
+    each implements. Each card opens the block's spec page. Sibling of <a href="/intents/">Intents</a> +
+    <a href="/protocols/">Protocols</a>.
+  </p>
+  <p style="color: var(--color-text-muted); font-size: 0.9em;">
+    This is the catalog skeleton (<a href="/backlog/627-assemble-the-web-docs-component-catalog-surface-from-the-der/">#627</a>,
+    quick-win slice). Live-rendered FUI block demos + per-component props/token/a11y panels land on top of it via
+    the Web Docs pipeline (<a href="/backlog/623-web-docs-feature-pipeline-inventory-workbench-tools-derive-i/">#623</a>/<a href="/backlog/626-map-workbench-features-to-we-standards-which-intents-blocks-/">#626</a>)
+    and the FUI demo embed (<a href="/backlog/701-fui-demo-iframe-embed/">#701</a>).
+  </p>
+</section>
+
+<section style="margin: 1.5rem 0 2rem;">
+  <div style="display: flex; flex-wrap: wrap; gap: 2rem; align-items: flex-start;">
+    <div style="flex: 1 1 16rem; min-width: 14rem;">
+      <h3 style="margin: 0 0 0.5rem; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted);">Search</h3>
+      <input type="search" id="block-search" placeholder="name, summary, or intent…" autocomplete="off"
+             style="width: 100%; padding: 0.4rem 0.6rem; border: 1px solid var(--color-border); border-radius: 6px; font-size: 0.9em;">
+    </div>
+    <div>
+      <h3 style="margin: 0 0 0.5rem; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted);">Trait surface</h3>
+      <div id="filter-type" style="display: flex; flex-wrap: wrap; gap: 0.4rem;">
+        {# The block `type` vocabulary (the trait surface). Mirrors the distinct values in blocks.json;
+           a `hit` guard hides a chip for a type no block currently carries, like the Status filter. #}
+        {% for type in ['Component', 'Module', 'Behavior', 'Directive', 'Parser', 'Store'] %}
+          {% set hit = false %}
+          {% for block in blocks %}{% if block.type == type %}{% set hit = true %}{% endif %}{% endfor %}
+          {% if hit %}
+          <label style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.6rem; border: 1px solid var(--color-border); border-radius: 9999px; font-size: 0.85em; cursor: pointer; background: var(--color-surface, #fff);">
+            <input type="checkbox" data-filter="type" value="{{ type }}" checked style="margin: 0;">
+            {{ type }}
+          </label>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+    <div>
+      <h3 style="margin: 0 0 0.5rem; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted);">Status</h3>
+      <div id="filter-status" style="display: flex; flex-wrap: wrap; gap: 0.4rem;">
+        {% for status in ['active', 'draft', 'concept'] %}
+          {% set hit = false %}
+          {% for block in blocks %}{% if block.status == status %}{% set hit = true %}{% endif %}{% endfor %}
+          {% if hit %}
+          <label style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.6rem; border: 1px solid var(--color-border); border-radius: 9999px; font-size: 0.85em; cursor: pointer; background: var(--color-surface, #fff);">
+            <input type="checkbox" data-filter="status" value="{{ status }}" checked style="margin: 0;">
+            {{ status | title }}
+          </label>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="project-grid" id="block-grid">
+  {% for block in blocks %}
+    <a href="/blocks/{{ block.id }}/"
+       class="project-card block-card"
+       data-type="{{ block.type }}"
+       data-status="{{ block.status }}"
+       data-search="{{ (block.name + ' ' + block.summary + ' ' + (block.implementsIntent or '') + ' ' + (block.composesIntents | join(' ') if block.composesIntents else '')) | lower }}"
+       style="text-decoration: none; color: inherit; display: block;">
+      <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
+        <h3 class="project-title" style="margin: 0;">{{ block.name }}</h3>
+        <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if block.status == 'concept' %}#fef3c7{% elif block.status == 'draft' %}#dbeafe{% elif block.status == 'active' %}#dcfce7{% else %}#f1f5f9{% endif %}; color: {% if block.status == 'concept' %}#92400e{% elif block.status == 'draft' %}#1e40af{% elif block.status == 'active' %}#166534{% else %}#64748b{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ block.status | title }}</span>
+      </div>
+      <p style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ block.summary | truncate(180) }}</p>
+      <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center;">
+        {% if block.type %}
+        <span style="display: inline-block; padding: 0.15rem 0.55rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b); font-size: 0.75em;">{{ block.type }}</span>
+        {% endif %}
+        {% if block.implementsIntent %}
+        <span style="display: inline-block; padding: 0.15rem 0.55rem; border-radius: 9999px; background: rgba(99,102,241,0.08); color: #4338ca; font-size: 0.75em;">Intent: {{ block.implementsIntent }}</span>
+        {% endif %}
+      </div>
+    </a>
+  {% endfor %}
+</div>
+
+<p id="block-empty" style="display: none; text-align: center; color: var(--color-text-muted); margin: 2rem 0;">No blocks match the selected filters.</p>
+
+<script>
+(function () {
+  var grid = document.getElementById('block-grid');
+  var empty = document.getElementById('block-empty');
+  var search = document.getElementById('block-search');
+  var cards = Array.prototype.slice.call(grid.querySelectorAll('.block-card'));
+  var checkboxes = Array.prototype.slice.call(document.querySelectorAll('input[type="checkbox"][data-filter]'));
+
+  function apply() {
+    var types = checkboxes.filter(function (c) { return c.dataset.filter === 'type' && c.checked; }).map(function (c) { return c.value; });
+    var statuses = checkboxes.filter(function (c) { return c.dataset.filter === 'status' && c.checked; }).map(function (c) { return c.value; });
+    var q = (search.value || '').trim().toLowerCase();
+    var visible = 0;
+    cards.forEach(function (card) {
+      var ok = types.indexOf(card.dataset.type) !== -1
+        && statuses.indexOf(card.dataset.status) !== -1
+        && (q === '' || card.dataset.search.indexOf(q) !== -1);
+      card.style.display = ok ? '' : 'none';
+      if (ok) visible++;
+    });
+    empty.style.display = visible === 0 ? '' : 'none';
+  }
+
+  checkboxes.forEach(function (c) { c.addEventListener('change', apply); });
+  search.addEventListener('input', apply);
+})();
+</script>

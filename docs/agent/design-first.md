@@ -154,6 +154,14 @@ Intents are **JSON-only** — there is no `intent-descriptions/` njk dir; the sp
 
 > **Catalog auto-renders.** The `/intents/` tile catalog reads `intents.json` directly — no extra registry file to maintain. Tiles show name, status badge, summary, and the intent's dimension keys as chips; search filters across name/summary/dimension keys. Keep `summary` scannable (one line, vocabulary-rich) so search hits it. Prefer reusing established `dimensions` key names across related intents where it makes sense (e.g. `level`, `modality`, `mode`, `strategy`, `placement`) so the catalog stays coherent — but introduce a new key freely when the UX axis is genuinely new.
 
+> **Block catalog auto-renders too (`/blocks/`, #627).** The `/blocks/` tile catalog (`src/blocks.njk`, the
+> Storybook-equivalent browse surface) reads `blocks.json` directly — sibling of `/intents/` + `/protocols/`,
+> no extra registry. Cards show name, status badge, truncated summary, the `type` (trait surface) chip, and the
+> `implementsIntent` chip, linking to the block's `/blocks/{id}/` page. Filters: **trait surface** (`type`) +
+> **status** checkboxes + a text search over name/summary/intent. So a new block needs nothing beyond its
+> `blocks.json` entry to appear. The richer per-component surface (live FUI demos via #701, props/token/a11y
+> panels) lands on top of this skeleton through the Web Docs pipeline (#623/#626) — this slice is the index only.
+
 > **Authoring a capability (the platform layer beneath intents).** A capability is a platform feature
 > an intent depends on, tiered per implementation — *not* a UX preference (that's an intent). Add it to
 > `capabilities.json` with an id that **borrows the Baseline / `web-features` key** (so the vocabulary
