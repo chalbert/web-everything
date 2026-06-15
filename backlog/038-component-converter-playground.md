@@ -3,9 +3,12 @@ type: idea
 workItem: story
 size: 3
 parent: "049"
-status: open
+status: resolved
 blockedBy: []
 dateOpened: '2026-06-03'
+dateStarted: "2026-06-15"
+dateResolved: "2026-06-15"
+graduatedTo: frontierui/demos/component-converter.html
 tags:
   - webcomponents
   - component
@@ -40,6 +43,22 @@ reader.
 
 **Demoable state:** `/component-converter` on :3001 — pick a fixture, see its lowered class output and any
 named-rule errors.
+
+## Progress
+
+- **2026-06-15 — built + verified.** `frontierui/demos/component-converter.{html,ts}`: fixture picker over
+  the three sibling `x-empty` / `user-card` / `x-shadow-closed` fixtures (imported with Vite `?raw` so the
+  page can't drift from the passing corpus), a source pane + lowered-class output pane, and an inline
+  named-rule error list bound to the transform's structured `errors`.
+- **Module-boundary fix (mechanical, not a fork).** Importing the barrel `transform` into a browser failed:
+  the barrel re-exports `plugins.ts` (`node:fs`) and `parseImperative` (`typescript`), neither browser-safe
+  — contradicting this slice's explicit *"No TS-in-browser, zero heavy deps."* Extracted the pure string
+  builder `emitImperative` (+ `toTemplateLiteral`) into a new typescript-free leaf
+  `compiler/src/component-transform/emit-imperative.ts`; `imperative.ts` re-exports it so `index.ts` /
+  `surfaces.ts` are unchanged. The demo composes `parseDeclarative` + `emitImperative` (exactly what
+  `transform(src,'toImperative')` runs internally) with zero heavy deps.
+- **Verified:** all 3 fixtures lower correctly in a headless browser (no page errors, error panel hidden);
+  `component-transform` vitest 32/32 green; `tsc --noEmit` clean.
 
 Sliced from the original `story·13` via [`/split 038`](../reports/2026-06-15-backlog-split-analysis.md)
 (post-#700 re-run). #038 already had `parent: 049`, so it was re-scoped in place to slice A (no nested
