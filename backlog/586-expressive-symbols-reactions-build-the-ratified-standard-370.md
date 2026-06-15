@@ -1,8 +1,10 @@
 ---
 type: idea
 workItem: epic
-status: open
+status: resolved
 dateOpened: "2026-06-14"
+dateResolved: "2026-06-15"
+graduatedTo: none
 tags: []
 ---
 
