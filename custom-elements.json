@@ -244,6 +244,36 @@
           "kind": "class",
           "name": "BackgroundTaskSurface",
           "description": "The persistent app-shell surface that hosts long-running work after it goes async — the receiving end of a Loader's escalation:async handoff. Renders one entry per registered task with per-task progress (the Loader's own state machine, hosted off-view), per-task retry delegating to Reliability, and arms the navigation-away / before-unload guard while any task is in flight. Distinct from the Feedback Intent (transient toasts) and the Loader Intent (in-view pending state that dies with its view).",
+          "events": [
+            {
+              "name": "background-task-register",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "The handoff IN. A Loader (or any producer) dispatches this when work goes async; the nearest ancestor surface adopts the carried task handle and begins rendering its entry. This is the block's registration mechanism."
+            },
+            {
+              "name": "background-task-state-change",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "Re-emitted by the surface as a task entry moves through the intent lifecycle. Surfaces the Background Task Intent's registered → active → success → error → dismissed states as a single observable event."
+            },
+            {
+              "name": "background-task-retry",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "Fired when the user activates retry on a failed entry. The surface only exposes the affordance; recovery policy is delegated to the Reliability Intent. Cancelable so a host can intercept and run its own recovery."
+            },
+            {
+              "name": "background-task-dismiss",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "Fired when an entry is removed — by the user, or by auto-clear for a transient entry that resolved successfully. Cancelable to allow a host to keep a sticky entry."
+            }
+          ],
           "x-webeverything": {
             "implementsIntent": "background-task",
             "composesIntents": [
@@ -864,6 +894,29 @@
           "kind": "class",
           "name": "DataTransferZoneElement",
           "description": "A drop-zone runtime that collapses the three native sources of a DataTransfer payload — drag-and-drop, clipboard paste, and <input type=file> — into one normalized `receive` event under a declared `accepts` contract (type/size), dispatching `reject` for anything that fails, with a keyboard/a11y file-picker affordance, the copy-vs-move flow as the drag dropEffect, and a copy-out (`emit`) half.",
+          "events": [
+            {
+              "name": "receive",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "An accepted, normalized payload entered the zone (from drop, paste, or the file input)"
+            },
+            {
+              "name": "reject",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "An incoming payload failed the declared accepts contract (kind, type, or size)"
+            },
+            {
+              "name": "emit",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "The zone wrote a typed payload onto an outgoing drag or copy (the emit flow)"
+            }
+          ],
           "x-webeverything": {
             "implementsIntent": "data-transfer",
             "webStandards": {
@@ -1172,6 +1225,22 @@
           "kind": "class",
           "name": "DraftPersistence",
           "description": "Durable save-and-resume of an entity's working state (the #011 storage facet of webstates): autosave-on-change snapshots restored to the exact field state across sessions, behind a pluggable CustomStorageStrategy (IndexedDB native-first, localStorage degradation, in-memory test fallback), plus the last-writer-wins co-edit primitive (per-editor token + savedAt compare + an \"also editing\" presence signal over BroadcastChannel/storage).",
+          "events": [
+            {
+              "name": "coedit-presence",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "A peer editor on the same entity was seen (joined/left) — the \"X also editing\" signal"
+            },
+            {
+              "name": "coedit-conflict",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "A peer saved the same entity — compare savedAt and reconcile by last-writer-wins"
+            }
+          ],
           "x-webeverything": {
             "webStandards": {
               "indexedDB": {
@@ -2362,6 +2431,36 @@
           "kind": "class",
           "name": "reduceReorder",
           "description": "A list whose item order is user-mutable by pointer drag and by keyboard, with live-region announcement and a pluggable commit strategy. Relocates items with atomic Element.moveBefore() so an item keeps its focus/animation/connection state across a move. Manual order — not Collection Operations' computed sort.",
+          "events": [
+            {
+              "name": "reorder-start",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "Fired when an item is grabbed (pointer down on the grab affordance, or keyboard grab key)"
+            },
+            {
+              "name": "reorder-move",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "Fired as the grabbed item passes a new candidate position during a drag"
+            },
+            {
+              "name": "reorder-commit",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "Fired when a move is committed (dropped). Cancelable — preventDefault to reject the new order (e.g. server validation); the commit strategy listens here to persist"
+            },
+            {
+              "name": "reorder-cancel",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "Fired when a grab is abandoned (Esc, or pointer released outside a valid target); order is unchanged"
+            }
+          ],
           "x-webeverything": {
             "implementsIntent": "reorder",
             "composesIntents": [
@@ -2492,6 +2591,42 @@
           "kind": "class",
           "name": "ResourceActionDirective",
           "description": "Manages async mutation lifecycle (POST/PUT/DELETE) — busy state on triggers, double-submit prevention, optimistic updates with automatic rollback on error.",
+          "events": [
+            {
+              "name": "resource-action-start",
+              "type": {
+                "text": "ResourceActionStartEvent"
+              },
+              "description": "Fired when a mutation begins"
+            },
+            {
+              "name": "resource-action-end",
+              "type": {
+                "text": "ResourceActionEndEvent"
+              },
+              "description": "Fired when a mutation completes successfully"
+            },
+            {
+              "name": "resource-action-error",
+              "type": {
+                "text": "ResourceActionErrorEvent"
+              },
+              "description": "Fired when a mutation fails"
+            },
+            {
+              "name": "resource-action-revert",
+              "type": {
+                "text": "ResourceActionRevertEvent"
+              },
+              "description": "Fired when an optimistic update is rolled back due to error"
+            },
+            {
+              "name": "rationale",
+              "type": {
+                "text": "CustomEvent"
+              }
+            }
+          ],
           "x-webeverything": {
             "implementsIntent": "action",
             "traits": [
@@ -2611,6 +2746,42 @@
           "kind": "class",
           "name": "ResourceLoader",
           "description": "Trait-based async state management orchestrator handling loading lifecycle with timing, abort, and composable UI traits.",
+          "events": [
+            {
+              "name": "resource-load-start",
+              "type": {
+                "text": "ResourceLoadStartEvent"
+              },
+              "description": "Fired when an async loading operation begins"
+            },
+            {
+              "name": "resource-load-end",
+              "type": {
+                "text": "ResourceLoadEndEvent"
+              },
+              "description": "Fired when an async loading operation completes successfully"
+            },
+            {
+              "name": "resource-load-error",
+              "type": {
+                "text": "ResourceLoadErrorEvent"
+              },
+              "description": "Fired when an async loading operation fails"
+            },
+            {
+              "name": "resource-state-change",
+              "type": {
+                "text": "ResourceStateChangeEvent"
+              },
+              "description": "Fired on any state machine transition (idle, pending, loading, success, empty, error, stale)"
+            },
+            {
+              "name": "rationale",
+              "type": {
+                "text": "CustomEvent"
+              }
+            }
+          ],
           "x-webeverything": {
             "implementsIntent": "loader",
             "traits": [
@@ -3627,6 +3798,29 @@
           "kind": "class",
           "name": "TypeAheadBehavior",
           "description": "Keyboard type-ahead navigation for listboxes, menus, selects, and trees: buffer typed characters, move focus to the matching item, then reset after an idle timeout. Moves focus — never filters.",
+          "events": [
+            {
+              "name": "typeahead-match",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "Fired when the buffer matches an item and focus moves to it"
+            },
+            {
+              "name": "typeahead-nomatch",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "Fired when the buffer matches no item (focus is unchanged)"
+            },
+            {
+              "name": "typeahead-reset",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "Fired when the character buffer is cleared after the idle timeout"
+            }
+          ],
           "x-webeverything": {
             "implementsIntent": "type-ahead",
             "traits": [
@@ -4087,6 +4281,22 @@
           "kind": "class",
           "name": "NativeWorkflowEngine",
           "description": "The native-first runtime behind the Workflow Protocol's swappable CustomWorkflowEngine provider seam (#634, webworkflows): a dependency-free interpreter of the portable SCXML-style orchestration graph (steps + transitions + guards + parallel/fork-join + completion) that threads context, tracks the current position, and emits a { flow, from, to, context, at } step-transition event. Honors TIER-1 core + TIER-2 common operators and declares its supported set (the #085 compliance posture). Ships a CustomWorkflowEngineRegistry and a reference XState adapter as an alternative impl.",
+          "events": [
+            {
+              "name": "step-transition",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "Fired on every workflow transition — the composition seam for UX + audit"
+            },
+            {
+              "name": "workflow-complete",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "Fired when the workflow reaches a final step"
+            }
+          ],
           "x-webeverything": {
             "webStandards": {
               "scxml": {

@@ -35,10 +35,19 @@ const SCHEMA_VERSION = '2.1.0';
 
 const blocks = JSON.parse(readFileSync(join(DATA, 'blocks.json'), 'utf8'));
 
-/** Map a block's `events` array to CEM event descriptors. */
+/**
+ * Map a block's `events` to CEM event descriptors. blocks.json carries events in two
+ * shapes: an ARRAY of `{ name, class, detail, ... }` and an OBJECT keyed by event name
+ * `{ name: { class?, detail, ... } }`. Normalize both to the same CEM event list.
+ */
+const eventEntries = (events) => {
+  if (!events) return [];
+  if (Array.isArray(events)) return events.map((e) => [e.name, e]);
+  return Object.entries(events);
+};
 const cemEvents = (events) =>
-  (events || []).map((e) => ({
-    name: e.name,
+  eventEntries(events).map(([name, e]) => ({
+    name,
     type: { text: e.class || 'CustomEvent' },
     ...(e.description ? { description: e.description } : {}),
   }));
@@ -66,7 +75,7 @@ const cemModule = (b) => {
     name: declName,
     ...(b.summary ? { description: b.summary } : {}),
     ...(isCustomElement ? { customElement: true, tagName: b.tagName } : {}),
-    ...(b.events && b.events.length ? { events: cemEvents(b.events) } : {}),
+    ...(cemEvents(b.events).length ? { events: cemEvents(b.events) } : {}),
     ...weExtension(b),
   };
 
