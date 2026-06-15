@@ -1,0 +1,52 @@
+{% from "mode-selector.njk" import pluggedContent, unpluggedContent, comparisonContent, endContent %}
+
+<h3 id="overview">Overview</h3>
+<p>
+    Exposes <code>window.customSanitizer</code> for registering named <strong>sanitizer providers</strong> that strip
+    untrusted markup to an allowed schema. The <strong>native <code>Element.setHTML()</code></strong> is the default —
+    the platform floor — with a <strong>DOMPurify adapter</strong> as the production floor for engines that lack it
+    (<a href="/backlog/590-graduate-rich-text-editing-the-webediting-project/">#590</a> Fork 7). The editor composes it
+    on the <code>insertFromPaste</code> path so pasted content can never inject script. Sanitizer ownership is
+    <a href="/projects/webvalidation/">Web Validation</a> (ratified default); Web Editing consumes it as a
+    no-leakage client.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Element/setHTML">Element.setHTML() / Sanitizer API</a></td>
+        <td>Progressive</td>
+        <td>The default provider is the native sanitizer — zero-dependency, browser-maintained allow-list.</td>
+    </tr>
+    <tr>
+        <td><a href="https://github.com/cure53/DOMPurify">DOMPurify</a></td>
+        <td>Library</td>
+        <td>The adapter is the production floor where <code>setHTML</code> is unavailable; same contract, opt-in.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+interface CustomSanitizerRegistry extends CustomRegistry<CustomSanitizer> {
+    readonly localName = 'customSanitizer';
+
+    // Register a named provider (e.g. 'set-html', 'dompurify')
+    define(name: string, provider: CustomSanitizer): void;
+
+    // The sanitizer an element should use, resolved via the injector chain.
+    resolve(forElement: Element): CustomSanitizer;
+}
+{% endhighlight %}
+
+<h3 id="design-decisions">Design Decisions</h3>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+    <li><strong>Native-first default.</strong> <code>Element.setHTML()</code> is the baseline; DOMPurify is an opt-in adapter, not the floor.</li>
+    <li><strong>Owned by validation, consumed by editing.</strong> Sanitization is input-invalidity territory (Web Validation); the editor is a no-leakage client (only safe HTML crosses the boundary).</li>
+    <li><strong>Composed on paste.</strong> The editor calls the resolved sanitizer on the <code>insertFromPaste</code> path; it is not a standalone editing concern.</li>
+</ul>
+
+<p class="text-sm text-gray-600 mt-4">
+    Providers satisfy the <a href="/plugs/customsanitizer/"><code>CustomSanitizer</code></a> contract.
+    See <a href="/projects/webvalidation/">Web Validation</a> for ownership and the full feature surface.
+</p>

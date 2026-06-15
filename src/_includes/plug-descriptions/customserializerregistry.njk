@@ -1,0 +1,54 @@
+{% from "mode-selector.njk" import pluggedContent, unpluggedContent, comparisonContent, endContent %}
+
+<h3 id="overview">Overview</h3>
+<p>
+    Exposes <code>window.customSerializer</code> for registering named <strong>serializer providers</strong> that
+    round-trip the structured content model to and from a wire format. The core registry is
+    <strong>default-less</strong>: it ships no opinion of its own. Instead a project config selects the platform
+    default — the <strong>HTML flavor</strong> — following the
+    <a href="/projects/webediting/">Config-Extends-Platform-Default</a> shape (<a href="/backlog/590-graduate-rich-text-editing-the-webediting-project/">#590</a> Fork 6).
+    Any editor delegates serialization through the injector chain, so a page ships <strong>one</strong> shared,
+    swappable serializer rather than baking a format into the editing surface.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/HTML">HTML serialization</a></td>
+        <td>Baseline</td>
+        <td>The platform-default flavor serializes the model to sanitized HTML and parses it back to the structured pivot.</td>
+    </tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/DOMParser">DOMParser / XMLSerializer</a></td>
+        <td>Baseline</td>
+        <td>The HTML provider leans on native parse/serialize rather than a hand-rolled tokenizer.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+interface CustomSerializerRegistry extends CustomRegistry<CustomSerializer> {
+    readonly localName = 'customSerializer';
+
+    // Register a named flavor (e.g. 'html', 'markdown', 'json-node-tree')
+    define(name: string, provider: CustomSerializer): void;
+
+    // The flavor an element should use, resolved via the injector chain.
+    // No core default — a project config extends the platform default ('html').
+    resolve(forElement: Element): CustomSerializer;
+}
+{% endhighlight %}
+
+<h3 id="design-decisions">Design Decisions</h3>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+    <li><strong>Default-less core, platform default in config.</strong> The registry ships no flavor; the project config extends the fully-defined platform default (HTML), per Config-Extends-Platform-Default.</li>
+    <li><strong>Registry, not a hard dependency.</strong> Swapping HTML for Markdown or a JSON node-tree is a one-line registration change with zero editor edits.</li>
+    <li><strong>Round-trip is the contract.</strong> A flavor must <code>serialize</code> and <code>deserialize</code> losslessly enough to survive an edit cycle.</li>
+</ul>
+
+<p class="text-sm text-gray-600 mt-4">
+    Realizes the <a href="/intents/rich-text/">rich-text</a> surface intent. Providers satisfy the
+    <a href="/plugs/customserializer/"><code>CustomSerializer</code></a> contract.
+    See <a href="/projects/webediting/">Web Editing</a> for the full feature surface.
+</p>

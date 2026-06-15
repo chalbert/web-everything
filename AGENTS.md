@@ -57,7 +57,7 @@
 
 ## Repository inventory
 <!-- AUTO-GENERATED:inventory — run `npm run gen:inventory`; do not edit by hand -->
-- **Plugs** 47 — 31 active · 14 concept · 2 experimental
+- **Plugs** 51 — 31 active · 18 concept · 2 experimental
 - **Blocks** 61 — 25 active · 9 concept · 27 draft
 - **Intents** 56 — 15 concept · 41 draft
 - **Glossary terms** 194 · **Research topics** 85 (81 open)

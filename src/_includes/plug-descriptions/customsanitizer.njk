@@ -1,0 +1,32 @@
+<h3 id="overview">Overview</h3>
+<p>
+    <code>CustomSanitizer</code> is the single contract every sanitizer provider implements:
+    <code>sanitize(html, config)</code> &rarr; safe-html, narrowing untrusted markup to an allowed element/attribute
+    schema. The native <code>Element.setHTML()</code> default and the DOMPurify production-floor adapter satisfy this
+    same interface, which is what lets <a href="/plugs/customsanitizerregistry/">the registry</a> treat them
+    interchangeably.
+</p>
+
+<h3 id="standards">Web Standards Alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How We Adopt It</th></tr>
+    <tr>
+        <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Sanitizer">Sanitizer API</a></td>
+        <td>Progressive</td>
+        <td>The default provider wraps the native sanitizer's allow-list configuration.</td>
+    </tr>
+</table>
+
+<h3 id="interface">Interface</h3>
+{% highlight "typescript" %}
+interface CustomSanitizer {
+    /** Narrow untrusted markup to an allowed element/attribute schema. */
+    sanitize(html: string, config?: SanitizerConfig): string;
+}
+{% endhighlight %}
+
+<p class="text-sm text-gray-600 mt-4">
+    Satisfied alike by the native <code>Element.setHTML()</code> default and the DOMPurify adapter registered through
+    the <a href="/plugs/customsanitizerregistry/"><code>CustomSanitizerRegistry</code></a>.
+    See <a href="/projects/webvalidation/">Web Validation</a>.
+</p>
