@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Durable-tier verification (#708 — A′)</title>
+    <style>
+      body { font: 15px/1.5 system-ui, sans-serif; margin: 2rem; max-width: 60rem; }
+      h1 { font-size: 1.3rem; }
+      code { background: #f3f3f3; padding: 0 .2em; border-radius: 3px; }
+      #log { font-family: ui-monospace, monospace; font-size: 13px; color: #333; }
+      background-tasks[data-durability-fallback] { outline: 2px solid #c50; }
+    </style>
+  </head>
+  <body>
+    <h1>Durable-tier verification — real <code>reloadDurabilityAdapter</code> (A′, #708)</h1>
+    <p>
+      A SW-registered page that drives the <strong>real</strong> Background-Task durable-tier adapter under
+      the <code>chromium-sw</code> Playwright lane. Only the <code>getRegistration().backgroundFetch</code>
+      manager is doubled (backed by the real service worker, which outlives the page); every other primitive
+      is real. The true Background-Fetch network transfer surviving reload is the documented manual residual.
+    </p>
+
+    <!-- The real <background-tasks> element in the durable tier; degrades to route-only + re-arms the
+         navigation guard when Background Fetch is unavailable (its data-durability-fallback observable). -->
+    <background-tasks id="surface" durability="reload" aria-label="Background tasks"></background-tasks>
+
+    <h2>Run log</h2>
+    <ul id="log"></ul>
+
+    <script type="module" src="./durable-tier-verification.ts"></script>
+  </body>
+</html>

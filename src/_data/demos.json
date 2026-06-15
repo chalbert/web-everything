@@ -1,5 +1,18 @@
 [
   {
+    "id": "durable-tier-verification",
+    "name": "Durable-Tier Verification (A′)",
+    "summary": "The A′ end-to-end verification of the Background-Task durable tier (#708, ratified from #675): a SW-registered page that drives the REAL reloadDurabilityAdapter under the chromium-sw Playwright lane. registerDurableTransfer → hard-reload → rehydrateDurableTasks proves reload-survival as a reproducible green, plus the forced-unavailable navigation-guard re-arm. Only the getRegistration().backgroundFetch manager is doubled (backed by the real service worker, which outlives the page); every other primitive — SW registration, navigator.serviceWorker.ready, the real isBackgroundFetchAvailable prototype check — is real. The true Background-Fetch network transfer surviving reload stays the documented manual residual.",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>Closes the durability claim the unit harness (happy-dom) deliberately could not assert: that transfer-backed work survives a full reload. Per the <a href=\"/backlog/675-background-task-durable-tier-live-browser-sw-end-to-end-verif/\">#675</a> A′ ruling, the real <a href=\"/blocks/background-task-surface/\">durable-tier adapter</a> is the unit under test on a Vite origin under the real-Chromium service-worker lane (<code>serviceWorkers: 'allow'</code>).</p><h3>What is real vs doubled</h3><p><strong>Real:</strong> service-worker registration, <code>navigator.serviceWorker.ready</code>, <code>isBackgroundFetchAvailable()</code> against the real <code>ServiceWorkerRegistration.prototype</code>, and the forced-unavailable fallback re-arm via the real <code>&lt;background-tasks&gt;</code> element. <strong>Doubled (only):</strong> the <code>getRegistration().backgroundFetch</code> manager, backed by the registered service worker so a durable transfer survives the hard reload deterministically.</p><h3>Manual residual</h3><p>A real Background-Fetch <em>network</em> transfer surviving reload is non-deterministic in automation, so it stays the documented manual residual — not asserted by the spec.</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/durable-tier-verification/index.html",
+    "projects": [
+      "webintents",
+      "webblocks"
+    ]
+  },
+  {
     "id": "auto-insurance",
     "name": "Auto Insurance (exercise app B)",
     "summary": "A full, complex personal-auto insurance app — the second flagship exercise app (#314/#318), in a modern-SaaS register. Slice S0 (foundation) is live: a 4,000-policy seeded book is rated + underwritten client-side (a per-policy premium breakdown and an underwriting decision-trace), rendered through the SAME shipped blocks the loan app drove — data-table, pagination, master-detail, decision-trace, status-indicator, lifecycle, audit, router — making insurance their second consumer (a cross-app conformance check). The quote wizard, coverage tree, and claims follow.",
