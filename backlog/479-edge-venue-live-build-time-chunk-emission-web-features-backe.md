@@ -30,12 +30,11 @@ Claimed in a batch and scoped against the real tree (`capabilities/edge.ts` `Edg
   This stands up an HTTP server + a bundler/build step that emits and serves real module bytes at
   `componentUrl`. That is a **live-serve product surface**, and the project has a standing position that
   **collides with putting it in the WE standard repo**:
-  - **Monetization stance** [[project_monetization_strategy]]: *defer live-serve*; the operational ranking
-    favours self-run tooling over a hosted service.
-  - **Constellation layering** [[project_managed_offering_constellation_layering]] + no-leakage
-    [[project_vision_is_plateau_service_no_leakage]]: a *served* product decomposes to **plateau-app**, not
-    the WE standard. WE owns the resolution **contract** (delivered by #219); the running server that
-    serves bytes is a consumer/product concern.
+  - **Monetization stance** (open-core, defer live-serve): the operational ranking favours self-run
+    tooling over a hosted service, so a live-serve runtime is explicitly deferred.
+  - **Constellation layering + no-leakage**: a *served* product decomposes to **plateau-app**, not the WE
+    standard. WE owns the resolution **contract** (delivered by #219); the running server that serves bytes
+    is a consumer/product concern.
 
   **Open decision — where does the live edge serve runtime live, and does the WE repo take the HTTP-server +
   bundler deps?**
