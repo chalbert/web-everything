@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>SW rehydration fixture (#684)</title>
+  </head>
+  <body>
+    <h1>Durable-tier rehydration fixture</h1>
+    <ul id="tasks"></ul>
+    <script type="module">
+      const out = document.getElementById('tasks');
+
+      // Feature-detect Background Fetch. The harness's fallback context forces this
+      // off via `window.__forceNoBgFetch` (an addInitScript), so the degraded path
+      // can be exercised deterministically regardless of the engine's real support.
+      const bgFetchSupported =
+        !window.__forceNoBgFetch &&
+        typeof ServiceWorkerRegistration !== 'undefined' &&
+        'backgroundFetch' in ServiceWorkerRegistration.prototype;
+
+      function sendToSW(message) {
+        return new Promise((resolve, reject) => {
+          const sw = navigator.serviceWorker.controller;
+          if (!sw) return reject(new Error('no service-worker controller'));
+          const channel = new MessageChannel();
+          channel.port1.onmessage = (e) => resolve(e.data);
+          sw.postMessage(message, [channel.port2]);
+        });
+      }
+
+      async function controllerReady() {
+        if (navigator.serviceWorker.controller) return;
+        await new Promise((resolve) =>
+          navigator.serviceWorker.addEventListener('controllerchange', resolve, { once: true }),
+        );
+      }
+
+      let lastRehydrated = [];
+      async function rehydrate() {
+        const res = await sendToSW({ type: 'GET_TASKS' });
+        lastRehydrated = res.tasks || [];
+        out.replaceChildren(
+          ...lastRehydrated.map((t) => {
+            const li = document.createElement('li');
+            li.className = 'task';
+            li.dataset.taskId = t.id;
+            li.textContent = `${t.label || t.id} ${t.bgFetch ? '(bg-fetch)' : '(fallback)'}`;
+            return li;
+          }),
+        );
+      }
+
+      // The durable-tier contract the harness drives (see rehydrate-helper.ts). Any
+      // durable-tier page can implement this same shape to get one-call reload-survival
+      // assertions from the helper.
+      window.__durable = {
+        ready: false,
+        bgFetchSupported,
+        async arm(task) {
+          await sendToSW({ type: 'ARM_TASK', task, bgFetch: bgFetchSupported });
+          await rehydrate();
+        },
+        rehydrated: () => lastRehydrated,
+      };
+
+      async function main() {
+        await navigator.serviceWorker.register('/sw.js');
+        await navigator.serviceWorker.ready;
+        await controllerReady();
+        await rehydrate(); // re-hydrate any in-flight tasks the worker still holds
+        window.__durable.ready = true;
+      }
+      main();
+    </script>
+  </body>
+</html>

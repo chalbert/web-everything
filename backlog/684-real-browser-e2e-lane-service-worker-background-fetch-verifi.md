@@ -2,8 +2,11 @@
 type: issue
 workItem: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-06-15"
+dateStarted: "2026-06-15"
+dateResolved: "2026-06-15"
+graduatedTo: plugs/__tests__/e2e/sw-fixtures/ + chromium-sw Playwright project (real-browser SW rehydration lane)
 relatedProject: webintents
 tags: [testing, e2e, service-worker, background-fetch, harness, verification]
 ---
@@ -26,3 +29,18 @@ Establish the real-Chromium E2E lane that SW/Background-Fetch verification items
 ## DoD
 
 A sample SW-registered spec (register → arm → hard-reload → rehydrate, plus the fallback assertion) goes **green in a real browser** via `npm run test:integration`. The residual that genuinely needs a flagged/real profile (a true Background Fetch network transfer surviving reload) is documented as the one manual step, if it can't be driven headlessly even with `--headless=new`.
+
+## Progress
+
+Resolved 2026-06-15. WE locus (commit → webeverything). All four scope points delivered; the lane is green in real Chromium.
+
+- **Real-Chromium context** — new `chromium-sw` Playwright project ([playwright.config.ts](../playwright.config.ts)) with `serviceWorkers: 'allow'`, `baseURL: http://localhost:3210`, matching only `**/*.sw.spec.ts`. The default `chromium` project now `testIgnore`s `*.sw.spec.ts`, so the lanes don't overlap (verified via `--list`: `sw.spec` → 2 tests under `chromium-sw` only; `chromium` = 251, unchanged).
+- **Static fixture server** — `plugs/__tests__/e2e/sw-fixtures/serve.mjs`, a **zero-dependency** Node `http` server (no new package, no Vite transform) serving `sw-fixtures/public/` on :3210 with `Service-Worker-Allowed: /` + `Cache-Control: no-store`. Added as a second `webServer` entry (array form), `reuseExistingServer` locally.
+- **Fixture SW + page** — `public/sw.js` (in-flight task registry, MessageChannel replies, `skipWaiting`/`clients.claim`) + `public/index.html` (registers the SW, re-hydrates held tasks on load, exposes the `window.__durable` contract).
+- **Rehydration helper** — `sw-fixtures/rehydrate-helper.ts`: `assertSurvivesHardReload(page, task)` = ready → arm → `page.reload()` → ready → assert the worker re-hydrated. One call, drives any page implementing the `window.__durable` contract.
+- **Fallback context** — the second spec opens a context that sets `window.__forceNoBgFetch` via `addInitScript`, asserts the page's feature-detect reports Background Fetch absent, and asserts the degraded (navigation-guard re-arm) path still survives a hard reload with the task marked `bgFetch:false`.
+- **Wiring + docs** — registered under `plugs/__tests__/e2e/` (so `npm run test:integration` includes it via the project) and documented the real-browser requirement + the manual residual in [docs/agent/testing.md](../docs/agent/testing.md)'s pyramid.
+
+**DoD met:** `npx playwright test --project=chromium-sw` → **2 passed (1.7s)** in real Chromium (register→arm→hard-reload→rehydrate + the Background-Fetch-absent fallback). `npm run check:standards` = 0 errors (28 pre-existing warnings, none mine). **Manual residual** (per DoD): a true Background-Fetch *network* transfer surviving reload may need a flagged/real Chromium profile — the harness drives the SW-state reload-survival headlessly; the network-transfer branch is the documented one manual check.
+
+**Unblocks #675** (`blockedBy: ["684"]`) — the durable-tier verification can now assert reload-survival against this lane.
