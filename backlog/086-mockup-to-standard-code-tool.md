@@ -1,7 +1,7 @@
 ---
 type: idea
 workItem: story
-size: 8
+size: 13
 parent: "097"
 status: open
 blockedBy: ["052"]
@@ -22,6 +22,9 @@ A tool that **ingests a UI mockup — static (image, Figma) or interactive (prot
 > → generator wiring + quality gate (`task`s). But the foundation slice stays ≈`5` (single-item, not
 > batchable), so executing the split now is backlog churn with no batchability win. Deferred until the
 > item is picked up or its urgency rises; revisit with `/split` then.
+>
+> **Sized 8 → 13 (2026-06-15, batch pre-flight):** the foundation slice is single-item/not-batchable
+> and the design decisions below are recommended-not-ratified — dropped from the batch pool.
 
 ## The two requirements, stated sharply
 

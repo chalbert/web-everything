@@ -1,7 +1,7 @@
 ---
 type: idea
 workItem: story
-size: 8
+size: 13
 parent: "099"
 status: open
 dateOpened: "2026-06-06"
@@ -20,6 +20,9 @@ Capture an app's requirements as a **structured, machine-readable artifact** —
 > loop (`story·5`) → code-from-requirement (`story·5`) — an incremental A→B→C delivery. But each slice
 > stays ≈`5` (none batchable), so it stages the work without producing batchable wins. Deferred: execute
 > the staging split when slice A is actually picked up as a near-term standalone win; revisit with `/split` then.
+>
+> **Sized 8 → 13 (2026-06-15, batch pre-flight):** each staging slice is single-item/not-batchable
+> and the meta-schema design notes are recommended-not-ratified — dropped from the batch pool.
 
 ## The three capabilities, in order of difficulty
 

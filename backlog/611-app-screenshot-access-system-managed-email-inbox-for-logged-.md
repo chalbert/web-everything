@@ -1,7 +1,7 @@
 ---
 type: idea
 workItem: story
-size: 8
+size: 13
 status: open
 dateOpened: "2026-06-14"
 tags: [tooling, screenshot, exercise-app, conformance, infra]
@@ -57,3 +57,6 @@ controls end-to-end.
 
 - **Status:** OPEN — idea collected 2026-06-14 (raised during the nav-menu work). Not scoped to a
   build yet; needs the build-vs-buy + boundary research above.
+- **Sized 8 → 13 (2026-06-15, batch pre-flight):** not a build yet (research idea) and the boundary
+  question (Plateau-consumed service vs. repo-local devtooling, a #475-class call) is unresolved —
+  dropped from the batch pool until scoped.

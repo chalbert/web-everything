@@ -1,10 +1,10 @@
 ---
-type: issue
-workItem: task
+type: decision
+workItem: story
+size: 2
 status: open
 blockedBy: ["134", "684"]
 dateOpened: "2026-06-15"
-dateStarted: "2026-06-15"
 relatedProject: webintents
 tags: [background-task, durability, background-fetch, service-worker, verification, demo]
 ---
