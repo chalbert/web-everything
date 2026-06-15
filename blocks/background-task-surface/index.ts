@@ -15,6 +15,19 @@ export { withStickyEntries } from './traits/withStickyEntries';
 export { withNavigationGuard } from './traits/withNavigationGuard';
 export { withCompletionToast } from './traits/withCompletionToast';
 export { withPerTaskRetry } from './traits/withPerTaskRetry';
+export { withReloadDurability } from './traits/withReloadDurability';
+
+// Reload-durability adapter (#134) — the Background Fetch + service-worker durable tier.
+export {
+  isBackgroundFetchAvailable,
+  registerDurableTransfer,
+  rehydrateDurableTasks,
+} from './reloadDurabilityAdapter';
+export type {
+  DurableTransfer,
+  RegisterDurableResult,
+  RehydratedTransfer,
+} from './reloadDurabilityAdapter';
 
 // Types
 export type {

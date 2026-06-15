@@ -127,6 +127,19 @@ export interface BackgroundTasksConfig {
   completionToast: boolean;
   /** Expose a retry affordance on failed entries (recovery delegated out). */
   retry: boolean;
+  /**
+   * Durability of in-flight work across a full reload / tab close (#134, #450).
+   *
+   * - `route` (default, baseline) — in-memory: a task survives SPA route changes
+   *   but a reload/close loses it; `navigationGuard` is the author's opt-in safety net.
+   * - `reload` — opt-in durable *execution* tier: transfer-backed work delegated to a
+   *   Background Fetch + service-worker adapter that survives reload/close and re-hydrates
+   *   on the next load. Scope is bounded to transfers (#450 ruling 1); the enum stays
+   *   `route | reload` (a future `resumable` checkpoint/resume term is reserved in docs,
+   *   not shipped). `durability` and `navigationGuard` stay independent dimensions —
+   *   `durability` *derives* the guard default (#450 ruling 2), never merges with it.
+   */
+  durability: 'route' | 'reload';
 }
 
 /** Default config — the route-only, single, transient baseline. */
@@ -136,6 +149,7 @@ export const DEFAULT_CONFIG: BackgroundTasksConfig = {
   navigationGuard: false,
   completionToast: false,
   retry: false,
+  durability: 'route',
 };
 
 /**

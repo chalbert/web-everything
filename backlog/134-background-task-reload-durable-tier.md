@@ -3,9 +3,12 @@ type: idea
 workItem: story
 size: 8
 parent: "135"
-status: open
+status: resolved
 blockedBy: ["128", "135"]
 dateOpened: "2026-06-06"
+dateStarted: "2026-06-15"
+dateResolved: "2026-06-15"
+graduatedTo: "blocks/background-task-surface durability:reload tier — durability config dimension (types.ts) + withReloadDurability trait + reloadDurabilityAdapter.ts (Background Fetch + SW register/rehydrate) + observable guard re-arm in BackgroundTasksElement.ts; live-browser verification → #675"
 tags: [block, background-task, durability, background-fetch, service-worker, async, enhancement]
 relatedProject: webintents
 crossRef: { url: /blocks/background-task-surface/, label: Background Task Surface }
@@ -32,6 +35,38 @@ Open questions → **resolved by decision [#450](/backlog/450-background-task-re
 Still owed before this is fully agent-ready: a real-browser/SW **verification strategy** for the durability claim (pre-flight point 2 below) — a build-harness concern, not a fork.
 
 Spun off from #128 (implementing the Background Task surface as a block).
+
+## Progress
+
+- **2026-06-15 — built (in-harness slice) + adapter coded.** Shipped on the
+  [Background Task Surface](/blocks/background-task-surface/) block (webintents):
+  - **`durability` config dimension** (`route | reload`, default `route`) on `BackgroundTasksConfig` +
+    `DEFAULT_CONFIG` ([types.ts](../blocks/background-task-surface/types.ts)); enum stays `route | reload`
+    (`resumable` reserved in docs only, per #450 ruling 1). Read from the `durability` attribute; unknown
+    values fall back to `route`.
+  - **`withReloadDurability` trait** ([traits/withReloadDurability.ts](../blocks/background-task-surface/traits/withReloadDurability.ts))
+    wiring `route → reload`, with cleanup reverting to baseline.
+  - **Guard derivation + observable fallback re-arm** in
+    [BackgroundTasksElement.ts](../blocks/background-task-surface/BackgroundTasksElement.ts): `durability`
+    *derives* the navigation-guard default (relaxed when durable + available; author may force on) and the
+    tier **feature-detects Background Fetch at arm-time** (#450 ruling 3), degrading to route-only and
+    **re-arming the guard observably** (`data-durability-fallback`) when unavailable.
+  - **Background Fetch + service-worker adapter**
+    ([reloadDurabilityAdapter.ts](../blocks/background-task-surface/reloadDurabilityAdapter.ts)):
+    `isBackgroundFetchAvailable`, `registerDurableTransfer` (registers a Background Fetch transfer),
+    `rehydrateDurableTasks` (recovers in-progress transfers on the next load and maps each to a surface
+    register detail — the reconnect-to-surface-entry seam). All paths degrade gracefully (never throw on
+    an unsupported browser).
+  - **Tests:** 12 new in-harness tests
+    ([reloadDurability.test.ts](../blocks/__tests__/unit/background-task-surface/reloadDurability.test.ts)) —
+    config dimension, trait, feature detection, the durability-derived guard + observable fallback, and
+    adapter degradation/registration/rehydration with stubbed Background Fetch. 30/30 block tests green.
+  - **Verification strategy (pre-flight point 2).** The trait/config/feature-detection/graceful-degradation
+    layer is fully unit-verified here. The headline claim — work that *actually* survives a real reload —
+    rides on a registered service worker + Background Fetch that neither vitest (happy-dom) nor the
+    Playwright setup exercises; end-to-end durability is verified by a SW-registered live-browser demo,
+    scaffolded as a follow-up (see below). Shipping the adapter without that path would overclaim, so it is
+    explicitly carried, not asserted done.
 
 ## Pre-flight note (2026-06-10 — deferred from a batch, resized 5 → 8)
 

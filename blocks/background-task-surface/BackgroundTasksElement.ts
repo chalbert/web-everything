@@ -8,8 +8,10 @@
  * resolution), adopts the carried live Loader state handle, and renders one entry
  * per task — subscribing to the Loader's own state machine off-view rather than
  * reimplementing progress. A polite `role="status"` live region announces off-view
- * completion/failure. Behaviour is the route-only baseline; the reload-durable tier
- * is the separate #134 adapter.
+ * completion/failure. The default behaviour is the route-only baseline; the opt-in
+ * `durability: reload` tier (#134) derives the navigation-guard default and degrades
+ * observably to route-only when Background Fetch is unavailable, with the durable
+ * transfer registration + rehydration delegated to `reloadDurabilityAdapter`.
  *
  * Default tag name: background-tasks
  */
@@ -28,6 +30,7 @@ import type {
   TraitHandle,
 } from './types';
 import { DEFAULT_CONFIG, FEEDBACK_TOAST_EVENT } from './types';
+import { isBackgroundFetchAvailable } from './reloadDurabilityAdapter';
 
 interface TaskEntry {
   id: string;
@@ -48,6 +51,7 @@ export default class BackgroundTasksElement extends HTMLElement {
     'navigation-guard',
     'completion-toast',
     'retry',
+    'durability',
   ];
 
   /** Delay before a transient success auto-clears. Settable for deterministic tests. */
@@ -153,6 +157,7 @@ export default class BackgroundTasksElement extends HTMLElement {
       navigationGuard: this.hasAttribute('navigation-guard'),
       completionToast: this.hasAttribute('completion-toast'),
       retry: this.hasAttribute('retry'),
+      durability: this.getAttribute('durability') === 'reload' ? 'reload' : 'route',
     };
   }
 
@@ -329,8 +334,22 @@ export default class BackgroundTasksElement extends HTMLElement {
   // being harvested as the navigation-guard intent (#129); once that contract
   // lands this should delegate to it rather than arm the primitives inline.
 
+  // `durability` derives the guard default, never merges with it (#450 ruling 2):
+  //
+  // - `route` baseline → guard is the author's explicit `navigation-guard` opt-in.
+  // - `reload` + Background Fetch available → the durable tier means a reload won't lose
+  //   work, so the warn is *relaxed* by default; the author may still force it on (the
+  //   explicit attribute is honoured).
+  // - `reload` but Background Fetch unavailable → the tier degrades to route-only, so the
+  //   guard *re-arms* (fixed mechanic). The re-arm is feature-detected at arm-time (#450
+  //   ruling 3) and made observable via `data-durability-fallback`.
   #syncGuard(): void {
-    const shouldArm = this.#config.navigationGuard && this.hasActiveTasks();
+    const degraded = this.#config.durability === 'reload' && !isBackgroundFetchAvailable();
+    if (degraded) this.setAttribute('data-durability-fallback', '');
+    else this.removeAttribute('data-durability-fallback');
+
+    const guardWanted = degraded ? true : this.#config.navigationGuard;
+    const shouldArm = guardWanted && this.hasActiveTasks();
     if (shouldArm && !this.#guardArmed) this.#armGuard();
     else if (!shouldArm && this.#guardArmed) this.#disarmGuard();
   }
