@@ -135,6 +135,36 @@ export interface Claim {
   audit: AuditEntry[];
 }
 
+// ── Endorsements (S5, #416) — mid-term change + prorated re-rate ─────────────────
+/** The mid-term changes an in-force policy can take (add/remove vehicle or driver, change coverage or address). */
+export type EndorsementChangeId =
+  | 'add-collision' | 'remove-collision'
+  | 'add-comprehensive' | 'remove-comprehensive'
+  | 'move-territory'
+  | 'add-driver' | 'remove-driver';
+
+/** An applicable change offered for the current policy (drives the endorsement picker). */
+export interface EndorsementChange {
+  id: EndorsementChangeId;
+  label: string;
+}
+
+/** The immutable record produced by an endorsement — the audited deliverable. */
+export interface Endorsement {
+  endorsementNumber: string;
+  policyNumber: string;
+  changeId: EndorsementChangeId;
+  description: string;
+  effective: string;        // ISO — the mid-term effective date
+  oldPremium: number;       // 6-month term premium before the change
+  newPremium: number;       // 6-month term premium after the change
+  proratedDelta: number;    // charge (+) or credit (−) for the unexpired term only
+  remainingFraction: number; // unexpired share of the term the delta is prorated over
+  finding: UwFinding;       // re-rated UW finding (a coverage/driver change can re-tier)
+  at: string;
+  actor: string;
+}
+
 export interface Policy {
   policyNumber: string;
   state: PolicyState;
@@ -148,4 +178,5 @@ export interface Policy {
   audit: AuditEntry[];
   payment?: PremiumPayment;   // S4 (#415): set when premium is collected — the payment-received guard input
   issued?: IssuedDocuments;   // S4 (#415): set at issuance (bound → in-force)
+  endorsements?: Endorsement[]; // S5 (#416): mid-term changes applied in force
 }

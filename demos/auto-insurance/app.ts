@@ -23,10 +23,11 @@ import { TreeSelectBehavior, type TreeNode } from '../../blocks/tree-select/Tree
 import { generateBook } from './domain/seed';
 import { generateClaims } from './domain/claims';
 import { rate, FINDING_LABEL, FINDING_TONE } from './domain/rating';
-import type { Policy, PolicyState, UwFinding, Claim, ClaimState, PaymentMethod } from './domain/types';
+import type { Policy, PolicyState, UwFinding, Claim, ClaimState, PaymentMethod, EndorsementChangeId } from './domain/types';
 import { POLICY_LIFECYCLE, CLAIM_LIFECYCLE } from './domain/lifecycle';
 import { toDecisionRecord } from './domain/decision';
 import { collectPayment, paymentReceived, issuePolicyDocuments } from './domain/binding';
+import { availableEndorsements, previewEndorsement, applyEndorsement } from './domain/endorsement';
 import {
   NotificationStore, policyStateNotification, claimStateNotification, type AppNotification,
 } from './domain/notifications';
@@ -152,9 +153,39 @@ function renderDetail(p: Policy): string {
     <div class="panel-hd">Underwriting decision</div>
     ${decision}
     ${renderBinding(p, r.premium)}
+    ${renderEndorsement(p)}
     <div class="panel-hd">Audit trail</div>
     <div id="md-audit"></div>
   </div>`;
+}
+
+/**
+ * Phase S5 (#416) — the endorsement (mid-term change) surface for an in-force policy. Each offered change
+ * is labelled with its prorated premium impact (re-rated remaining term); applying it records an immutable
+ * Endorsement, re-issues the documents, and audits the change. The policy state stays in-force — an
+ * endorsement is a within-state sub-flow, not a lifecycle transition.
+ */
+function renderEndorsement(p: Policy): string {
+  if (p.state !== 'in-force') return '';
+  const now = new Date().toISOString();
+  const opts = availableEndorsements(p).map((c) => {
+    const pv = previewEndorsement(p, c.id, now);
+    const sign = pv.proratedDelta >= 0 ? '+' : '−';
+    return `<option value="${c.id}">${c.label} (${sign}${money(Math.abs(pv.proratedDelta))} prorated)</option>`;
+  }).join('');
+  const history = (p.endorsements ?? []).map((e) => {
+    const sign = e.proratedDelta >= 0 ? '+' : '−';
+    return `<li><b>${e.endorsementNumber}</b> — ${e.description} · <span class="num">${sign}${money(Math.abs(e.proratedDelta))}</span> <span class="muted">(${Math.round(e.remainingFraction * 100)}% term remaining · new premium ${money(e.newPremium)} · ${FINDING_LABEL[e.finding]})</span></li>`;
+  }).join('');
+  return `<div class="panel-hd">Endorsements (mid-term change)</div>
+    <div class="detail-body endorse-body">
+      <p class="muted">Apply a mid-term change (coverage, driver, or garaging address); the remaining term is re-rated and the difference prorated over the unexpired days.</p>
+      <form class="endorse-form">
+        <select name="changeId" aria-label="Endorsement change">${opts}</select>
+        <button type="submit" class="btn primary">Apply endorsement</button>
+      </form>
+      ${history ? `<div class="panel-hd">Endorsement history</div><ul class="endorse-history">${history}</ul>` : ''}
+    </div>`;
 }
 
 /**
@@ -578,7 +609,20 @@ function boot() {
       panel.dataset.biWired = '1';
       const at = () => new Date().toISOString();
       panel.addEventListener('submit', async (e) => {
-        const form = (e.target as HTMLElement).closest<HTMLFormElement>('form.bind-pay');
+        const target = e.target as HTMLElement;
+        // S5 (#416): apply a mid-term endorsement on an in-force policy — re-rate + prorate, record, re-issue.
+        const endorseForm = target.closest<HTMLFormElement>('form.endorse-form');
+        if (endorseForm && current) {
+          e.preventDefault();
+          const changeId = new FormData(endorseForm).get('changeId') as EndorsementChangeId | null;
+          if (!changeId) return;
+          const endorsement = applyEndorsement(current, changeId, at(), ACTOR.role);
+          const sign = endorsement.proratedDelta >= 0 ? '+' : '−';
+          await bookAudit.append({ target: { type: 'policy', id: current.policyNumber }, action: `endorsement.applied — ${endorsement.endorsementNumber}: ${endorsement.description} (${sign}${money(Math.abs(endorsement.proratedDelta))} prorated)`, actor: ACTOR, at: endorsement.at });
+          await showPolicy(current, panel);
+          return;
+        }
+        const form = target.closest<HTMLFormElement>('form.bind-pay');
         if (!form || !current) return;
         e.preventDefault();
         const method = (new FormData(form).get('method') as PaymentMethod) ?? 'card';

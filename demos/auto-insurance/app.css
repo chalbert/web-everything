@@ -199,6 +199,15 @@ tbody tr.selected { background: var(--accent-soft); }
 .id-card-row { padding: 3px 10px; }
 .id-card-row:last-child { padding-bottom: 8px; }
 
+/* ---- S5 endorsements (#416) — mid-term change + prorated re-rate ---- */
+.endorse-body { display: flex; flex-direction: column; gap: 10px; }
+.endorse-form { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.endorse-form select { font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line-strong);
+  border-radius: var(--radius); background: var(--surface, #fff); flex: 1 1 18rem; }
+.endorse-history { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.endorse-history li { font-size: 12px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--surface, #fff); }
+
 /* ---- S10 notifications (#421) — hand-rolled stand-in for the draft notification block (#358) ---- */
 .notif { position: relative; display: inline-flex; }
 .notif-bell { position: relative; font-size: 15px; background: transparent; border: none; cursor: pointer;

@@ -1,17 +1,18 @@
 ---
 type: issue
 workItem: epic
-size: 13
-status: open
+status: resolved
 blockedBy: ["590"]
 dateOpened: "2026-06-14"
+dateResolved: "2026-06-15"
+graduatedTo: "webediting standard — all 6 slices resolved (#628 capabilities, #629 project+engine protocol, #630 intents, #631 plugs, #632 editor block, #633 configurator cards)"
 tags: [candidate-standard, rich-text, contenteditable, editing, webediting, graduation, epic]
 crossRef: { url: /backlog/590-candidate-standard-rich-text-contenteditable-editing/, label: "Ruling — #590 ratified all seven forks" }
 ---
 
 # Graduate the rich-text editing standard (webediting project: surface capabilities, engine Protocol, blocks, intents, plugs)
 
-Materialize the seven ratified forks from #590 into standards, in composition order. Stand up a new `webediting` project owning the engine Protocol; add contenteditable/editcontext/sanitizer-api/highlight-api capability ids (+ capabilityMatrix tiers); define the `CustomEditorEngine` Protocol + registry (native-first contenteditable+InputEvent default, structured-node-tree pivot); add the editor Block; the `text-formatting` + `rich-text` intents; and the `CustomSerializerRegistry` (HTML flavor default) + `CustomSanitizerRegistry` (native setHTML + DOMPurify) plugs. Command vocabulary reuses `InputEvent.inputType`; collaboration is out of scope (cross-ref webrealtime). Decomposes into child stories per layer (the chain below).
+Umbrella epic materializing the seven ratified forks from #590 into standards, in composition order. Sliced (2026-06-14, `/slice 618`, [report](/reports/2026-06-14-backlog-split-analysis/)) into **six child stories**, one per ratified layer: editing capabilities → `webediting` project + engine Protocol → `text-formatting`/`rich-text` intents → serializer/sanitizer plugs → editor Block → Technical Configurator cards. After the capabilities slice lands, intents / project+protocol / plugs fan out in parallel. Command vocabulary reuses `InputEvent.inputType`; collaboration is out of scope (cross-ref webrealtime). See the children for per-layer scope; the composition order below is the carved DAG.
 
 ## Composition order (the `blockedBy` chain to carve into child stories)
 
