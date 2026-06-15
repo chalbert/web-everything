@@ -72,9 +72,9 @@ public sealed class GeneratedMaaSOrigin
         if (name.Length == 0) return JsonError(OriginCore.Status.NotFound, "Missing component name.");
 
         var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
-        var form = query.TryGetValue("form", out var _form) ? _form : null;
-        var target = query.TryGetValue("target", out var _target) ? _target : null;
-        var strategy = query.TryGetValue("strategy", out var _strategy) ? _strategy : null;
+        var form = query["form"];
+        var target = query["target"];
+        var strategy = query["strategy"];
 
         var definition = _resolveDefinition(name);
         if (definition == null) return JsonError(OriginCore.Status.NotFound, $"No component \"{name}\".");

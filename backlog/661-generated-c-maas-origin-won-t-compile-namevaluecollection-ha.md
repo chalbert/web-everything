@@ -2,9 +2,12 @@
 type: issue
 workItem: task
 parent: "507"
-status: open
+status: resolved
 blockedBy: []
 dateOpened: "2026-06-15"
+dateStarted: "2026-06-15"
+dateResolved: "2026-06-15"
+graduatedTo: blocks/renderers/module-service/generation/backends/csharp.ts (emit query[name] indexer; goldens regenerated, drift test green)
 tags: [module-as-a-service, polyglot, dotnet, csharp, generation-adapter, conformance]
 ---
 

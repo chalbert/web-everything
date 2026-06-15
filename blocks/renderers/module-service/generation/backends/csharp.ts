@@ -127,7 +127,9 @@ function emitShell(ir: ServePathIR): string {
   const paramReads = ir.params
     .map(
       (p) =>
-        `        var ${p.name} = query.TryGetValue(${cs(p.name)}, out var _${p.name}) ? _${p.name} : null;`,
+        // NameValueCollection (HttpUtility.ParseQueryString) has no TryGetValue; its indexer
+        // returns string? (null when the key is absent) — exactly the nullable read we want (#661).
+        `        var ${p.name} = query[${cs(p.name)}];`,
     )
     .join('\n');
   const paramDict =
