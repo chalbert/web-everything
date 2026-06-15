@@ -6,7 +6,7 @@ parent: "130"
 status: resolved
 dateOpened: '2026-06-07'
 dateResolved: "2026-06-07"
-graduatedTo: { url: /blocks/reorderable-list/, label: "Reorderable List block — withCrossListReorder (cross-list scope)" }
+graduatedTo: "block:reorderable-list"
 tags:
   - reorder
   - drag-and-drop
@@ -64,3 +64,5 @@ Tier 2) and the within-list implementation in `blocks/renderers/reorderable-list
   - Playground: appended a cross-list section + live board to `demos/reorderable-list-demo.ts` (+ CSS for the group layout, list label via `attr(aria-label)`); updated demo HTML intro and `demos.json` description.
 - **Verified:** 50 unit tests pass (28 within-list + 22 cross-list); `check:standards` 0 errors; browser (Playwright on the live :3000) shows 18/18 conformant, keyboard cross-list move + commit announce correctly, pointer cross-list drag relocates a card into a sibling list, no console errors.
 - **Notes:** RECONCILE point honored — move-semantics-within-the-app, composes with a future `drag-source`/`drop-target` (#007), not OS `DataTransfer`. Keyboard model: vertical arrows move within a list, Left/Right move across sibling lists (Kanban-column convention). Engine handles empty lists but fixtures don't cover them yet → spun out as **#151**. Did not touch the within-list renderer/test/njk — a concurrent agent (#147 drop-position-indicator) is editing those.
+
+**Graduated to** `block:reorderable-list` — withCrossListReorder (cross-list scope).

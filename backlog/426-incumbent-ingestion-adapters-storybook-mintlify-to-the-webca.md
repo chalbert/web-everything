@@ -8,7 +8,7 @@ status: resolved
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
-graduatedTo: webdocs ingestion adapter ruling → #550 (cluster migration to FUI) + #552 (Storybook adapter build); #429 (Mintlify) re-pointed to #550
+graduatedTo: "project:webdocs"
 preparedDate: "2026-06-13"
 tags: [webdocs, frontier-ui, adapters, ingestion, storybook]
 relatedProject: webdocs
@@ -119,3 +119,5 @@ export function ingest(raw: StorybookCSF): WebCases {
 - The corrective cluster migration `webdocs/` → FUI — the chain head (nothing blocks it).
 - The Storybook ingestion adapter build — `blockedBy` the migration.
 - #429 (Mintlify) re-pointed: `blockedBy` the migration (was `["424","426"]` — both now resolved).
+
+**Graduated to** `project:webdocs` — ingestion-adapter ruling → built by #550 (cluster migration to FUI) + #552 (Storybook adapter); #429 (Mintlify) re-pointed to #550.

@@ -7,7 +7,7 @@ status: resolved
 dateOpened: "2026-06-13"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
-graduatedTo: webblocks (blocks.json#radio-group)
+graduatedTo: "block:radio-group"
 tags: []
 ---
 

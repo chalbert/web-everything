@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-07"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
-graduatedTo: blocks.json#form (+ block-descriptions/form.njk)
+graduatedTo: "block:form"
 tags: [block, form, form-state, validation, dirty, submit, candidate, harvest]
 relatedProject: webblocks
 ---
@@ -46,3 +46,5 @@ Authored the **Form** block as a candidate (draft) composition-manifest standard
 **Verification:** `check:standards` green (0 errors; the new 57th block triggered + was fixed by `gen:inventory` for AGENTS.md), blocks.json parses. The live `/blocks/form/` route 404s **only** on the already-running dev server — eleventy doesn't emit a newly-added pagination permalink without a restart (not done, per the leave-the-server-running rule); existing block routes render and the entry matches the rendering template's fields, so it renders on the next full build.
 
 **Follow-on (not this slice):** a reference implementation of the Form Store + the `formAssociated` wiring, once the contract is reviewed (candidate → active).
+
+**Graduated to** `block:form` — also ships block-descriptions/form.njk.

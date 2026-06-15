@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-14"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
-graduatedTo: weblifecycle
+graduatedTo: "project:weblifecycle"
 preparedDate: "2026-06-14"
 relatedReport: reports/2026-06-14-domain-entity-lifecycle-placement.md
 crossRef: { url: /research/domain-entity-lifecycle/, label: "Prep survey — domain-entity lifecycle placement" }

@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: autocomplete block (collection-operations.advance wiring)
+graduatedTo: "block:autocomplete"
 tags: [autocomplete, dropdown, collection-ops, pagination, async, infinite-scroll]
 ---
 
@@ -22,3 +22,5 @@ Wire Collection Operations' existing `advance: manual | auto` dimension onto the
 - **`src/_data/intents.json`** — extended the Collection Operations `advance` dimension description so the "never the default" rule is scoped to full-page collections, with the bounded-surface exception (dropdown/autocomplete family pins `auto`) noted inline — keeps the registry self-consistent with the block-level override.
 
 Implementation layer (Filter + Windowed + Loader in Frontier UI's `blocks/droplist/`) already has the pieces; this exposes the dimension that was architecturally ready. Gate: `check:standards` 0 errors; standards-validation vitest suites green (77 tests).
+
+**Graduated to** `block:autocomplete` — via collection-operations.advance wiring.

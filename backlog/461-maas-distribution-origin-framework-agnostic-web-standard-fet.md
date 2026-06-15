@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-13"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
-graduatedTo: "webadapters (serve path: blocks/renderers/module-service/fetchHandler.ts)"
+graduatedTo: blocks/renderers/module-service/fetchHandler.ts
 tags: [module-as-a-service, distribution, fetch-handler, cache, etag, sri, content-hash, self-hosted, edge]
 parent: "081"
 relatedProject: webadapters
@@ -70,3 +70,5 @@ Protocol (#088/#389) on the serve path.
 
 **Unblocks #103, #285** (their `blockedBy: 087` is satisfied; this delivers the serve path they
 reference — note both still want a *hosted/persisted* origin (#451) for a true published CDN URL).
+
+**Graduated to** `blocks/renderers/module-service/fetchHandler.ts` — MaaS distribution origin serve path (webadapters).

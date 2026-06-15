@@ -7,7 +7,7 @@ blockedBy: ["461"]
 dateOpened: "2026-06-13"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
-graduatedTo: webadapters (blocks/renderers/module-service/prewarm.ts)
+graduatedTo: blocks/renderers/module-service/prewarm.ts
 tags: [module-as-a-service, distribution, eager, lazy, pre-warming, hot-set, cache]
 parent: "081"
 relatedProject: webadapters
@@ -54,3 +54,5 @@ Built the distribution-policy module on the #461 origin:
 `resolve` directly per request; pointing it at a shared `ServedArtifactCache` would let
 `prewarmHotSet` warm the very cache the handler reads — a small wiring change tracked with the hosted
 origin work (#451).
+
+**Graduated to** `blocks/renderers/module-service/prewarm.ts` — webadapters distribution pre-warm path.

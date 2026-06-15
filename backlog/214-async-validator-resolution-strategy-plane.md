@@ -6,7 +6,7 @@ status: resolved
 dateOpened: '2026-06-08'
 dateStarted: '2026-06-09'
 dateResolved: '2026-06-09'
-graduatedTo: { url: /plugs/customvalidatorresolutionregistry/, label: "CustomValidatorResolutionRegistry + CustomValidatorResolution plug pair (standalone TS model in validator-resolution/)" }
+graduatedTo: "plug:customvalidatorresolutionregistry"
 tags:
   - validation
   - registry
@@ -69,3 +69,5 @@ OP-1/OP-11 for the surface-vs-computation split.
   the check:standards linter expects); contract base `CustomValidatorResolution` per the
   item. Mirrors #212's `validity-merge/` structure exactly (provider/registry/index +
   `__tests__`).
+
+**Graduated to** `plug:customvalidatorresolutionregistry` — CustomValidatorResolution(Registry) plug pair (standalone TS model in validator-resolution/).

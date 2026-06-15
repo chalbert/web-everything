@@ -6,7 +6,7 @@ status: resolved
 dateOpened: '2026-06-08'
 dateStarted: '2026-06-08'
 dateResolved: '2026-06-08'
-graduatedTo: { url: /plugs/customvaliditymergeregistry/, label: "CustomValidityMergeRegistry + CustomValidityMergeStrategy plug pair (standalone TS model in validity-merge/)" }
+graduatedTo: "plug:customvaliditymergeregistry"
 tags:
   - validation
   - registry
@@ -66,3 +66,5 @@ ruling and rationale.
   `Custom*Registry` form is what the check:standards linter expects. Resolves the
   webvalidation `merge-strategy` open question (strictest-wins vs last-writer-wins)
   by reframing both as swappable strategies per #004 OP-1.
+
+**Graduated to** `plug:customvaliditymergeregistry` — CustomValidityMergeRegistry + CustomValidityMergeStrategy plug pair (standalone TS model in validity-merge/).

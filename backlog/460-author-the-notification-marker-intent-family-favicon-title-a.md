@@ -7,7 +7,7 @@ blockedBy: ["456"]
 dateOpened: "2026-06-13"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
-graduatedTo: webintents (intents.json#notification-marker)
+graduatedTo: "intent:notification-marker"
 tags: []
 ---
 

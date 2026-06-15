@@ -6,7 +6,7 @@ parent: "130"
 status: resolved
 dateOpened: '2026-06-07'
 dateResolved: "2026-06-07"
-graduatedTo: { url: /blocks/reorderable-list/, label: 'Reorderable List block — data-reorder-target styling hook' }
+graduatedTo: "block:reorderable-list"
 tags:
   - reorder
   - drag-and-drop
@@ -62,3 +62,5 @@ the styling-hooks section of `src/_includes/block-descriptions/reorderable-list.
   - Verified live in the playground (:3000): 9/9 conformant, one target during a move, cleared on
     drop, no console errors.
 - **Notes:** Visuals (line vs. shaded slot) left to the theme, per the report.
+
+**Graduated to** `block:reorderable-list` — data-reorder-target styling hook.

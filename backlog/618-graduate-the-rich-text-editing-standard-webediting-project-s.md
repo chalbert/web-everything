@@ -5,7 +5,7 @@ status: resolved
 blockedBy: ["590"]
 dateOpened: "2026-06-14"
 dateResolved: "2026-06-15"
-graduatedTo: "webediting standard — all 6 slices resolved (#628 capabilities, #629 project+engine protocol, #630 intents, #631 plugs, #632 editor block, #633 configurator cards)"
+graduatedTo: "project:webediting"
 tags: [candidate-standard, rich-text, contenteditable, editing, webediting, graduation, epic]
 crossRef: { url: /backlog/590-candidate-standard-rich-text-contenteditable-editing/, label: "Ruling — #590 ratified all seven forks" }
 ---
@@ -24,3 +24,5 @@ Umbrella epic materializing the seven ratified forks from #590 into standards, i
 6. **Technical Configurator cards** (plateau-app) — engine choice, serialization format, substrate-negotiation policy.
 
 Command vocabulary throughout is `InputEvent.inputType` (reused verbatim). Decorations use the CSS Custom Highlight API by default. Collaboration is **out of scope** — cross-ref [webrealtime](/projects/webrealtime/).
+
+**Graduated to** `project:webediting` — all 6 slices resolved — #628 capabilities, #629 project+engine protocol, #630 intents, #631 plugs, #632 editor block, #633 configurator cards.
