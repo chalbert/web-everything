@@ -788,3 +788,410 @@ None — splits cleanly along the TS-in-browser direction boundary.
 
 Net flow on approval: **+1** (slice B); #038 re-scoped `story·5 → story·3` (now batchable, was a
 single-item story). A is immediately `/batch`-able; B unblocks on A → `/batch` walks the chain.
+
+---
+
+# Focused `/split 435` (migrate existing check:* reporters onto the report model)
+
+**Date:** 2026-06-15. Separate focused run appended to today's report.
+
+## Candidate
+
+**#435** — *Migrate existing check:\* reporters onto the report model + shared renderers*
+(`workItem: story`, `size: 13`, `parent: 350`, `status: open`, `blockedBy: ["431","432"]` — **both
+resolved**). Phase 5 of #350. Its own pickup analysis (re-sized 3→8→13 across two batch pre-flights)
+already recommends `/split` into per-reporter increments. This run verifies the seam against the **real
+tree** before drawing any slice.
+
+## Work-investigation pass (what the code actually shows)
+
+Read each reporter script + the report-model contract. The body's framing of **"five heterogeneous
+reporters"** is **off by one against the tree** — the "standalone burndown" is not a separate reporter:
+
+| Reporter | File | Structured-output shape on disk today | Maps to model |
+|---|---|---|---|
+| `check:standards` | [scripts/check-standards.mjs](../scripts/check-standards.mjs) (835 ln) | `--json` already emits `{message, descriptor}` error/warn entries ([:45](../scripts/check-standards.mjs#L45), #089/#095/#196) | `findings[]` (+ `sources`) |
+| `check:readiness` | [scripts/check-readiness.mjs](../scripts/check-readiness.mjs) (270 ln) | `--json`/`--select` emit a ranked **selection** + batch pack ([:60-74](../scripts/check-readiness.mjs#L60)) | a `section` with `scores[]` (the ranked selection) |
+| `check:app-conformance` | [scripts/check-app-conformance.mjs](../scripts/check-app-conformance.mjs) (205 ln) | `--json` emits `{ok, score, layer1_conformance, layer1_queue, layer2_candidates, counts}` ([:180](../scripts/check-app-conformance.mjs#L180)); **`--burndown` writes the series** `reports/app-conformance-burndown.json` **inside this same script** ([:170-174](../scripts/check-app-conformance.mjs#L170)) | a coverage-matrix `section` (`scores[]`) **+ `series[]`** |
+| capability-manifest adherence | [capability-manifest/report.ts](../capability-manifest/report.ts) | already a structured `AdherenceReport` + `formatAdherenceReport` ([report.ts:27](../capability-manifest/report.ts#L27)) | a `section` partitioning declared/used/honoured/unused/outOfCapability |
+
+**Correction the tree forces:** there is **no standalone burndown reporter** — `grep burndown scripts/`
+hits only `check-app-conformance.mjs` (the `--burndown` flag) and `check-standards.mjs` (a comment). So
+the **5-reporter umbrella collapses to 4 real homes**; the burndown **series** is part of the
+app-conformance slice (its second output shape), not its own increment.
+
+**The fork is already dissolved (confirmed):** the report model is a **plain-object contract**
+([renderReport.ts:13](../blocks/renderers/report/renderReport.ts#L13) — "the report model IS the
+contract; producers emit it, renderers/adapters read it"). A `.mjs` reporter constructs a matching plain
+object and emits it as JSON with **no TS import**; the #432 renderers + #434 `toSarif`/`toJUnit`
+adapters are downstream consumers. So each slice is a **pure-JS producer-emit**; terminal/ANSI output
+stays bespoke (the model has no terminal renderer and needs none). Size is **volume across 4 reporters**,
+not a buried decision.
+
+## Could split — #435 ✅
+
+The shared `buildReport()` plain-object helper is authored in the **first** slice (the richest findings
+shape, `check:standards`) and reused by the rest. DAG: **A → {B ∥ C ∥ D}** fan-out.
+
+| Slice | type / workItem / size | blockedBy | Files / seam (file:line-citable) | Demoable state |
+|---|---|---|---|---|
+| **A (= re-scoped #435) — `check:standards` → report model + shared `buildReport()` helper** | idea · **story** · **3** | — (#431 ✓, #432 ✓) | NEW `scripts/lib/buildReport.mjs` (plain-object constructor matching the [#431 model](../blocks/renderers/report/renderReport.ts#L19)); extend [check-standards.mjs](../scripts/check-standards.mjs) `--json` to emit a `Report` (`sources` + a findings `section` from the existing `{message, descriptor}` entries at [:45](../scripts/check-standards.mjs#L45)); terminal path untouched | `check:standards --json` emits a model-valid report; pipes through #432 findings-table / #434 SARIF |
+| **B — `check:readiness` → report model** | idea · **story** · **2** | **A** | Extend [check-readiness.mjs](../scripts/check-readiness.mjs) `--json` to emit a `Report` (ranked selection + batch pack as a `section` with `scores[]`), reusing `buildReport()` from A | `check:readiness --json` emits a model-valid report of the ranked selection |
+| **C — `check:app-conformance` (+ burndown series) → report model** | idea · **story** · **3** | **A** | Extend [check-app-conformance.mjs](../scripts/check-app-conformance.mjs) `--json` to emit a `Report`: coverage-matrix `section` (`scores[]` from `layer1_conformance`) **+ a `series[]`** sourced from the `--burndown` log at [:170](../scripts/check-app-conformance.mjs#L170), reusing `buildReport()` | `--json` emits a model-valid coverage-matrix **+ trend series**; pipes through #432 coverage-matrix renderer |
+| **D — capability-manifest adherence → report model** | idea · **story** · **2** | **A** | Map the existing `AdherenceReport` ([report.ts:27](../capability-manifest/report.ts#L27)) into a `Report` `section` (declared/used/honoured/unused/outOfCapability buckets), reusing the model shape; `formatAdherenceReport` plain-text path stays | The adherence artifact also emits a model-valid report alongside its plain-text render |
+
+### Slice DAG
+
+```
+A (check:standards + buildReport helper)
+├──▶ B (check:readiness)
+├──▶ C (check:app-conformance + burndown series)
+└──▶ D (capability-manifest adherence)
+```
+
+A is the only chain edge (it authors the shared helper); B/C/D are mutually independent and fan out in
+parallel — the strong form of rubric (4) (3 independent leaves), and incremental: each reporter migrates
+and ships standalone.
+
+### Rubric check
+
+| Condition | Verdict |
+|---|---|
+| (1) Size is volume, not an unresolved decision | ✅ the mjs-consumes-TS-model "fork" is dissolved (plain-object emit, no import); #431/#432 resolved; this is producer-emit wiring × 4 |
+| (2) ≥2 nameable slices, each a real home | ✅ 4, each homed on a concrete reporter file + `scripts/lib/buildReport.mjs` |
+| (3) Each ≤ size 3 / batchable, named files | ✅ A=3 (richest + helper), B=2, C=3 (two shapes: matrix + series), D=2 — all file:line-cited, no buried fork |
+| (4) Acyclic DAG, real independence or incremental | ✅ A → {B ∥ C ∥ D}; 3 independent leaves; each ships standalone |
+| (5) Every slice leaves a valid demoable state | ✅ per-reporter `--json` emits a model-valid report consumable by #432/#434; terminal output unchanged throughout — gate stays green |
+
+## Could not split — #435
+
+None. The candidate splits cleanly into 4 producer-emit slices. **One framing correction applied** (the
+body's "standalone burndown" is the app-conformance `--burndown` series, folded into slice C — not a 5th
+slice).
+
+## Recommended mutation — #435 (gated on one "go")
+
+#435 **already has `parent: 350`**, so per the split edge-case it is **not** converted to a nested epic —
+keep it a re-sized `story` for its core slice (A) and add B/C/D as **siblings under #350**:
+
+1. **Re-scope #435 in place** → keep `workItem: story`, set `size: 13 → 3`, refresh the digest/body to
+   **slice A** (check:standards migration + shared `buildReport()` helper), keep `parent: 350`,
+   keep `status: open`; `blockedBy` clears (#431/#432 resolved — drop or keep as satisfied context).
+2. **Scaffold B**: `--type=idea --workitem=story --size=2 --parent=350 --blocked-by=435` — check:readiness.
+3. **Scaffold C**: `--type=idea --workitem=story --size=3 --parent=350 --blocked-by=435` — check:app-conformance + burndown series.
+4. **Scaffold D**: `--type=idea --workitem=story --size=2 --parent=350 --blocked-by=435` — capability-manifest adherence.
+5. Gate on `npm run check:standards`; confirm backlog count rose by 3.
+
+Net flow on approval: **+3** (B, C, D); #435 re-scoped `story·13 → story·3` (now batchable). A is
+immediately `/batch`-able; B/C/D unblock on A → `/batch` walks the fan-out in any order.
+
+---
+
+# Focused run — `/split 611` (managed-inbox app-screenshot capability)
+
+**Date:** 2026-06-15. Separate focused run appended to today's report.
+
+## Candidate
+
+**#611 — App screenshot access system, managed email/inbox for logged-in demo sites**
+(`workItem: story`, `size: 13`, `status: open`, no `parent`, no children). A **research idea** collected
+2026-06-14 alongside the nav-menu sweep (#610); its own sizing note (5→13, batch pre-flight) says: *"not
+a build yet (research idea) and the boundary question (Plateau-consumed service vs. repo-local
+devtooling, a #475-class call) is unresolved — dropped from the batch pool until scoped."*
+
+## Work-investigation pass (read before slicing)
+
+A slice boundary is a claim about the code — so I looked for the surface a slice would touch. There is
+none.
+
+| Surface a slice would need | State | Evidence |
+|---|---|---|
+| Managed-inbox / programmable-email tooling | **GREENFIELD** | no `*inbox*`/`mailslurp`/`mailosaur`/catch-all anywhere outside this card; only [scripts/design-refs.mjs](../scripts/design-refs.mjs) uses Playwright, for **logged-out** capture |
+| Authenticated-state capture (login/signup driver) | **GREENFIELD** | no auth/login Playwright flow; current capture is public-page only |
+| Credential vault / rotation | **GREENFIELD** | none |
+| Boundary ruling (is this a WE concern at all?) | **UNRESOLVED FORK** | the card defers it explicitly; precedent is the resolved #475 decision — *vision/impl capability is never a WE standard; it's a Plateau service WE consumes no-leakage* ([[project_vision_is_plateau_service_no_leakage]]) |
+
+Two of the card's own four "to investigate before scoping" bullets are **forks, not volume**: *build vs
+buy* (programmable-inbox SaaS vs self-hosted IMAP+API) and *boundary* (Plateau-consumed service vs
+repo-local devtooling). The remaining surface (Playwright auth driver, vault) **can't be investigated to
+slice depth** because what gets built depends entirely on how those two forks land — a SaaS-backed
+catch-all and a self-hosted IMAP service have nothing in common at the file level.
+
+## Could not split — #611
+
+**Verdict: does not split.** Two rubric conditions fail:
+
+- **(1) size is volume, not an unresolved decision** — ✗ The 13 is *driven by* the boundary +
+  build-vs-buy forks. You can't split away a fork; carving slices now would pre-decide them by guessing.
+- **(3) named files must be `file:line`-citable** — ✗ Entirely greenfield; nothing exists to cite, and
+  the surface's shape is unknowable until the boundary lands. Slicing "straight from the body" would
+  manufacture fake agent-ready work (the exact failure the skill names).
+
+(4)/(5) are moot — there are no candidate slices to form a DAG or demo.
+
+| Item | Which condition failed | Unblocking action |
+|---|---|---|
+| **#611 — managed-inbox app-screenshot capability** | **(1)** size is an unresolved decision (boundary + build-vs-buy) + **(3)** greenfield, no citable surface | **File the boundary as its own `type:decision` card** — *managed-inbox/auth-capture capability: Plateau-consumed service (no-leakage, per #475) vs. repo-local devtooling* — folding the build-vs-buy survey into its prepare scope. **De-bury #611:** replace its inline boundary/build-vs-buy bullets with a pointer to the card and set `blockedBy: <card>`. Once the boundary resolves (likely *Plateau service*, by the #475 precedent the card itself cites), re-run `/split` on the now-scopeable build. |
+
+The fork is filed as its own decision card even though scoping is deferred — *deferral governs when you
+ratify, not whether the fork is tracked* ([[feedback_decisions_are_workitems_not_plan_mode]]). The card
+is **`status: open`** (a real open call to prepare/make — there's no explicit "defer to release"
+instruction, just "not scoped yet"), so it's a Tier-B `/prepare` candidate, not parked.
+
+## Recommended mutation — #611 (gated on one "go")
+
+**No split, no epic conversion, no slices.** #611 stays a `story`. The only mutations:
+
+1. **Scaffold the decision card:** `node scripts/backlog.mjs scaffold --type=decision --workitem=story
+   --size=5 --title="Managed-inbox / auth-capture capability — boundary (Plateau service vs repo-local
+   devtooling)" --digest="…"` (no `--parent`; it's the unblocker, a sibling). Its prepare scope folds in
+   the build-vs-buy survey (Mailosaur / MailSlurp / Postmark inbound / self-hosted catch-all + IMAP) and
+   the abuse/ToS + linear-cost guardrails the #611 body already lists.
+2. **De-bury #611 in place:** replace its inline "boundary" + "build vs buy" bullets with a pointer to
+   the card; set `blockedBy: ["<card NNN>"]`. Keep `workItem: story`, keep `size: 13` (it re-scopes once
+   the boundary lands), keep `status: open`, keep `NNN`.
+
+Net flow on approval: **+1** (the decision card); #611 stays an open story, now honestly blocked on a
+tracked fork rather than carrying a buried one. Then `/prepare <card>` to bring the boundary to ready,
+ratify, and re-`/split` #611 against the resulting scope.
+
+---
+
+# Focused `/split 100` (requirement-as-code)
+
+**Date:** 2026-06-15. Focused run, `/split 100`.
+
+**Verdict: #100 does NOT split (yet)** — no batchable seam exists; the gating fork (the requirement
+**meta-schema format**) is unratified, the staging slices the body endorses stay ≈`size 5` (not ≤3),
+and the foundational surface is greenfield. Tracked below with the unblocking action.
+
+## Candidate
+
+| NNN | Title | workItem | size | parent | status |
+| --- | ----- | -------- | ---- | ------ | ------ |
+| 100 | Requirement-as-code | story | 13 | 099 | open |
+
+Oversized story (kind a). Already has `parent: "099"` → any future split is the **sibling-under-099**
+edge case (never nest, never renumber). #100 has **no children**. The item already carries a 2026-06-10
+split note ("splittable but deferred") and a 2026-06-15 batch-pre-flight resize (8→13, dropped from the
+pool); this run re-verifies that against the real tree.
+
+## Work-investigation pass (read the real surface before drawing seams)
+
+| Surface a slice would need | State | Evidence |
+|---|---|---|
+| webcases suite (the machine-checkable target) | **BARELY SCAFFOLDED** | [webcases/driftCheck.ts](../webcases/driftCheck.ts) + its test are the *only* files — the #334 mock-vs-real drift check. No requirement layer, no case-compiler. |
+| Requirement **meta-schema** (the BDD-like format) | **GREENFIELD + UNRATIFIED** | no `requirementSchema`/`requirement-as-code` anywhere in `src/`/`blocks/`/`plugs/`; the body lists it under *"Design notes (**recommended**)"* — proposed, not decided. No `type:decision` card exists for it. |
+| Authoring + validation editor (slice A) | **GREENFIELD** | no requirement editor / contradiction-ambiguity linter surface anywhere. |
+| Auto-testing loop (slice B) | **GREENFIELD** | the propose-and-verify loop (#095) is not applied to requirements; no requirement→case generator. |
+| Code-from-requirement (slice C) | **GREENFIELD** | no generation path. |
+| AI-as-swappable-provider placement | **RESOLVED** (not a fork) | settled by [#475](../backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/) no-leakage ruling — these AI impl capabilities are Plateau-served; only the meta-schema + webcases reach the standard. |
+
+So the body's A→B→C staging is a **framing, not a tree** — none of A/B/C has a `file:line`-citable
+surface to slice against. The single piece on disk (`driftCheck.ts`) is downstream of #334, unrelated to
+the requirement layer.
+
+## Could not split — #100
+
+| Which rubric condition failed | Detail |
+|---|---|
+| **(1) size is volume, not an unresolved decision** | Slice A's core is the **requirement meta-schema format** (BDD-like intent/role/state vocabulary), which the body itself marks *"recommended"* — i.e. an unratified fork. *You can't split away a fork.* (The requirement→cases relationship has a recommendation; placement is resolved by #475 — but the **format** is the live, undecided call.) |
+| **(3) slices don't re-estimate to ≤3 / batchable** | The body's own staging (meta-schema+editor → auto-test loop → code-gen) lands each slice ≈`size 5` (per the 2026-06-10 + 2026-06-15 notes), none batchable. Each is a greenfield build (authoring editor UI; a requirement→case generator; a generation path), not a ≤3 wiring task. |
+| **(also step-2 guard) surface doesn't exist yet** | No requirement layer, meta-schema, or webcases case-compiler exists. Slices "straight from the body" would manufacture fake agent-ready work against seams the tree can't confirm. |
+
+Rubric (1) failing alone is decisive — the conservative instinct ("when a clean seam isn't obvious,
+don't split") applies; this is a far-future vision capability gated on a design decision.
+
+## Unblocking action
+
+1. **File the requirement meta-schema as its own `type:decision` card** (currently buried as
+   "recommended" design notes in #100's body) — the format/vocabulary fork, the requirements-compile-to-
+   cases relationship (recommendation: compile down), citing the #475 placement ruling. Since the whole
+   capability is deliberately deferred (vision-tier), the card lands **`status: parked`** — *deferral
+   governs when you ratify, not whether the fork is tracked* ([[feedback_decisions_are_workitems_not_plan_mode]]).
+   De-bury #100's body: replace the "recommended" design-notes fork with a pointer to the card.
+2. **Then**, once the meta-schema is ratified **and** slice A (authoring+validation editor) is picked as
+   a near-term standalone win, **land foundational slice A first** (it produces the requirement corpus
+   everything else needs), then re-run `/split 100` for B/C against the now-real tree.
+
+## Recommended mutation — #100 (gated on one "go")
+
+Minimal, no on-disk split (there's nothing batchable to scaffold):
+
+1. **Scaffold the decision card**: `node scripts/backlog.mjs scaffold --type=decision --workitem=story
+   --parent=099 --title="Requirement meta-schema — BDD-like format & relationship to webcases"
+   --digest="…"`, then edit `status: open → parked` (vision-tier deferral). (Sibling under #099, since
+   #100 already has that parent.)
+2. **De-bury #100's body**: replace the *Design notes (recommended)* meta-schema fork with a pointer to
+   the new card; #100 stays an open `story` (no story→epic conversion — it doesn't split).
+3. Gate on `npm run check:standards`; confirm the backlog count rose by **1**.
+
+Net flow on approval: **+1** (the parked decision card); #100 stays an open story, now honestly blocked
+on a tracked fork rather than carrying a buried "recommended" one.
+
+---
+---
+
+# Focused `/split 359` (date / time / range picker block)
+
+**Date:** 2026-06-15. Focused run, `/split 359`.
+
+## Candidate
+
+| NNN | Title | workItem | size | parent | status |
+|---|---|---|---|---|---|
+| 359 | Date / time / range picker block | story | 13 | 315 | open |
+
+Re-sized `8 → 13` at batch pre-flight (2026-06-15) and dropped from the batch pool *with an explicit
+note that it carries an unresolved scope call* and needs `/split` first. It also **owns a scope call
+delegated from the resolved form-control inventory #468** (2026-06-13).
+
+## Work-investigation pass (read the real surface before drawing seams)
+
+| Surface a slice would need | State | Evidence (file:line) |
+|---|---|---|
+| `intent:temporal` (the UX axis the block implements) | **EXISTS but `concept`** | [intents.json:1389-1411](../src/_data/intents.json#L1389) — `presentation: media\|linear\|input` × `granularity: point\|range\|multi`; not yet `active` |
+| `intent:locale` (the formatting layer to compose) | **EXISTS, `concept`** | [intents.json:1527](../src/_data/intents.json#L1527) — locale/direction/numbering/**calendar** overrides; date/time would be its first consumer |
+| Any date / time / picker / calendar block | **GREENFIELD** | no `blocks/*date*`, `*time*`, `*picker*`, `*calendar*`; zero hits in [blocks.json](../src/_data/blocks.json) |
+| Native-anchor precedent (the pattern this block would follow) | **EXISTS** | slider IS `input[type=range]`, single+dual-thumb as **one block over the native element** [blocks.json:3175-3192](../src/_data/blocks.json#L3175); `input[type=date\|time\|datetime-local]` are the unused baseline anchors |
+| Fixture-driven demo machine | **EXISTS, copyable** | shared-fixture → playground badge + CI test pattern ([demos/data-grid-demo.html](../demos/data-grid-demo.html), bootstrap-fixture variant) |
+| The variants-vs-own-blocks scope call | **OPEN, delegated here** | [#468:18](../backlog/468-form-control-block-inventory-datepicker-timepicker-input-fam.md) resolved and handed the datepicker/timepicker scope to #359 "to settle in #359's own split" |
+
+**What the tree shows:** the intent that defines the axis exists but is still `concept`; there is **no
+picker code at all**; and #359's own body + the #468 hand-off both name an **unresolved scope decision**
+— *are single-value date and time pickers variants of one picker block here, or their own blocks?* That
+fork **determines the very shape of any slice set**: under "variants" the slices are `task`s configuring
+one block (`granularity`/`presentation` of a single temporal block); under "own blocks" they are
+separate `story`s (a datepicker block + a timepicker block + a range block), each with its own registry
+entry, demo, and fixtures. You cannot draw the seams until that's ruled.
+
+## Could split — #359
+
+**None.** No slice is safe to draw yet.
+
+## Could not split — #359
+
+| Which condition failed | Why | Unblocking action |
+|---|---|---|
+| **(1) size is an unresolved decision, not pure volume** | The body holds an open scope call (variants vs. own blocks) delegated from #468. Slicing now just scatters that same fork across children (1 block of variants vs. 2–3 separate blocks) — *you can't split away a decision*. | **File the scope call as its own `type:decision` card** (below); resolve it, then re-run `/split` against the decided shape. |
+| **(3) named files not yet citable** (secondary) | Even with the fork set aside, the surface is greenfield and `intent:temporal` is still `concept` — there's no picker code to point a slice's files at, so re-estimates would be authored from the body, not the tree. | Resolving the decision *and* the first foundational slice (activate `intent:temporal` + the first native-anchored block) exposes the real seams for the rest. |
+
+The dominant blocker is **(1)** — the fork. (3) rides along but is downstream of it: once the decision
+names *one block or several*, the foundational slice that activates `intent:temporal` over its native
+anchor becomes citable, and the remaining variants/blocks slice cleanly off it.
+
+### The decision card to file
+
+A blocking fork is filed as its own `type:decision` card even when the eventual ratification is later —
+*deferral governs when you ratify, not whether the fork is tracked*
+([[feedback_decisions_are_workitems_not_plan_mode]]). #468 explicitly delegated this call **to be made**
+(no "defer to release" instruction), so the card is **`status: open`** — a Tier-B `/prepare`/`/decision`
+candidate, not parked.
+
+- **Fork:** Single-value date & time pickers — **variants of the #359 picker block, or their own blocks?**
+- **A (default) — one temporal block, variants by dimension.** A date picker is `point`+`media`(grid), a
+  time picker is `point`+`linear/media`(clock), range is `granularity:range` — `intent:temporal` already
+  models all of these as **one protocol** ([intents.json:1389](../src/_data/intents.json#L1389)). One
+  block consuming temporal, configured by `granularity`/`presentation` over the native
+  `input[type=date\|time\|datetime-local]` anchor, mirrors the **slider precedent** (single + dual-thumb
+  = one block over `input[type=range]`, not two — [blocks.json:3175](../src/_data/blocks.json#L3175)).
+- **B — separate datepicker / timepicker blocks.** Distinct registry entries (matches #468's original
+  inventory listing and some design-system catalogs). Cost: duplicates the calendar-grid / keyboard / i18n
+  machinery across blocks and diverges from temporal's single-protocol model.
+
+(The default is well-grounded but **not ratified here** — `/split` files the fork, it does not decide it.)
+
+## Recommended mutation — #359 (gated on one "go")
+
+**No split, no epic conversion, no slices.** #359 stays a `story` under #315. The only mutations:
+
+1. **Scaffold the decision card:** `node scripts/backlog.mjs scaffold --type=decision --workitem=story
+   --size=2 --title="Date/time picker scope — single-value pickers as #359 variants vs. their own blocks"
+   --blocked-by= --digest="…"` (no `--parent`; it's the unblocker sibling). Body states fork A (default)
+   / B with the file:line refs above.
+2. **De-bury #359 in place:** replace its inline scope-call paragraph (the "Owns the datepicker/timepicker
+   scope call" block) with a pointer to the card; set `blockedBy: ["<card NNN>"]`. Keep `workItem: story`,
+   keep `size: 13` (it re-scopes once the fork lands), keep `parent: "315"`, keep `status: open`, keep `NNN`.
+
+Net flow on approval: **+1** (the decision card); #359 stays an open story, now honestly blocked on a
+tracked fork instead of carrying a buried one. Then `/prepare <card>` → `/decision` to settle the shape,
+and re-`/split` #359 against it (likely: activate `intent:temporal` + a first native-anchored block as
+foundational slice A, then the variants/range slices off it).
+
+---
+---
+
+# Focused `/split 086` (mockup-to-standard-code tool)
+
+**Date:** 2026-06-15. Focused run, `/split 086`.
+
+## Candidate
+
+| NNN | Title | workItem | size | parent | blockedBy | status |
+| --- | ----- | -------- | ---- | ------ | --------- | ------ |
+| 086 | Mockup-to-standard-code tool | story | 13 | 097 | 052 ✅ resolved | open |
+
+Over the size·8 ceiling → a split candidate. It already has `parent: 097`, so any split is the
+**sibling-under-097** edge case (never nest, never renumber). Two prior analyses (2026-06-10 via #259;
+2026-06-15 batch pre-flight) both said *splittable-but-deferred* on the grounds that the foundation
+slice was single-item/not-batchable. **This run reaches a different verdict after reading the code —
+the size:13 is stale, not deferred.**
+
+## Work-investigation pass (read the real tree before drawing seams)
+
+The decisive finding: #086's headline "two seams" — analyzer registry → neutral structure → verify-gated
+generation — **was already built by its resolved sibling #094** (same parent #097, `graduatedTo:
+blocks/renderers/upgrader/upgraderEngine.ts`), for the inverse direction (legacy code → standard).
+
+| #086 body claim / "open design work" | State on disk | Evidence |
+|---|---|---|
+| Neutral structural-description schema (the body's "hard, lasting design work") | **BUILT + the fork is RESOLVED in code** | [`ComponentIR`](../blocks/renderers/upgrader/upgraderEngine.ts#L38) — comment at [:36](../blocks/renderers/upgrader/upgraderEngine.ts#L36): *"Expressed in the standard's OWN `<component>` vocabulary … (#086 open decision, resolved)"* — the exact decision #086's body lists as recommended-not-ratified |
+| Analyzer provider registry (swappable AI) | **BUILT** | [`CustomAnalyzer` / `CustomAnalyzerRegistry`](../blocks/renderers/upgrader/upgraderEngine.ts#L60) with `handles()`-routed [`SourceInput`](../blocks/renderers/upgrader/upgraderEngine.ts#L53) input-adapter seam |
+| First reference provider + a BYO-model provider | **BUILT** | [analyzers/legacyWebComponent.ts](../blocks/renderers/upgrader/analyzers/legacyWebComponent.ts) (deterministic) · [analyzers/modelComponent.ts](../blocks/renderers/upgrader/analyzers/modelComponent.ts) (BYO-key model) |
+| Code generator reusing the existing core (not a parallel one) | **BUILT** | engine lowers `ComponentIR` → the declarative `<component>` MaaS `serve()` consumes ([:104+](../blocks/renderers/upgrader/upgraderEngine.ts#L104)) |
+| Quality / verify gate (the moat) | **BUILT** | the `offered: false` round-trip gate, documented [:27-29](../blocks/renderers/upgrader/upgraderEngine.ts#L27) |
+| "Static vs interactive as input *kinds* behind one registry" | **Seam BUILT** | `SourceInput.language` is the input-adapter hint; a mockup kind is one more `handles()` branch — **the registry already models this** |
+| The mockup **vision** analyzer (image/Figma/prototype → structure) | **Plateau service, not WE** | #475 ruling ([[project_vision_is_plateau_service_no_leakage]]): the vision *impl capability* is a Plateau-served no-leakage service WE consumes; only the neutral contract + output are WE artifacts. The shared `customVisionProvider`/`customMockupAnalyzerRegistry` pattern is named in [researchTopics.json:205](../src/_data/researchTopics.json#L205) |
+| Analyzer-as-runtime-registry framing in #086's body | **Already corrected** | engine doc-comment [:13-22](../blocks/renderers/upgrader/upgraderEngine.ts#L13) reframes it as a **devtools provider seam** (explicit-input, no global singleton — #191/#494), per [[feedback_runtime_di_vs_devtools_provider_seam]] |
+
+So #086's residual **WE-resident** work, after the #094 carve-out (engine + schema fork resolved) and
+the #475 carve-out (vision analyzer → Plateau), is narrow: extend [`SourceInput`](../blocks/renderers/upgrader/upgraderEngine.ts#L53)
+to admit a **mockup** input kind feeding the **existing** `ComponentIR`, register a mockup analyzer
+(thin client over the Plateau vision service), and a mockup demo. The generator, verify gate, registry,
+and the neutral schema are all already shipped and reused as-is.
+
+## Could split — #086
+
+**Nothing splits.** Once the #094 (built) and #475 (Plateau) carve-outs are honored, the residual
+WE-resident scope is a **single small contract-extension slice** — it fails rubric **(2)** (no ≥2
+nameable independent WE slices remain) and would not benefit from a split.
+
+## Could not split — #086
+
+| Which condition failed | Why | Unblocking action |
+|---|---|---|
+| **(2) no ≥2 nameable WE slices** — and the size:13 is **stale**, not "deferred-because-not-batchable" as the body's split-status note says | The "two independent seams + hard schema foundation" that justified size·13 are **already built** (#094, `upgraderEngine.ts`) or **placed in Plateau** (#475 vision service). What's left WE-side is one contract-extension (mockup `SourceInput` kind → existing `ComponentIR` + a thin Plateau-client analyzer + a demo) — a single `story·≈3`, not a multi-slice epic. | **Re-investigate + re-size #086 in place against the #094 engine and #475 placement, *before* any split** — it almost certainly re-sizes `story·13 → story·≈3` and **de-stales the body** (mark the neutral-schema decision resolved-in-#094 with the file:line; point the analyzer impl at the Plateau vision service per #475; drop the obsolete "hard lasting design work" framing). At `≈3` it is **directly `/batch`-able — no split needed.** |
+
+The earlier "splittable but deferred" verdict is superseded: the staging seam it described (schema → analyzer
+→ generator) no longer maps to *unbuilt WE work* — those pieces shipped via #094. Splitting #086 now would
+scaffold slices that re-build what already exists or that belong to Plateau.
+
+No new decision card is warranted: #086's five "recommended" design decisions are either **resolved in
+the #094 engine** (schema vocabulary, two-registry granularity, input-kinds-behind-one-registry, verify
+gate) or **placed by #475** (where the vision capability lives). The remaining open question is mechanical
+re-sizing, not a fork.
+
+## Recommended mutation — #086
+
+**No split, no epic conversion, no slices.** This is a remediation/re-size, which I'm flagging rather than
+auto-applying (it's outside the split-mutation a "go" authorizes). Proposed in-place edits to #086:
+
+1. **Re-size** `size: 13 → 3` (or `2`), keep `workItem: story`, keep `parent: 097`, keep `status: open`,
+   keep `NNN`.
+2. **De-stale the body:** replace the "Split status" note + the "Design decisions (recommended)" /
+   "hard, lasting design work" framing with: *the analyzer↔generator engine + neutral `ComponentIR`
+   schema are shipped (#094, `blocks/renderers/upgrader/upgraderEngine.ts`); #086 = add a **mockup input
+   adapter** feeding that engine, with the vision analyzer as a Plateau-served client (#475)*.
+3. Then the item is directly `/batch`-able. **Net flow: 0** (no new items; one item re-sized + de-staled).
+
+I can apply that re-size + body de-stale on a "go" — but it is a card-remediation pass, not a split.
