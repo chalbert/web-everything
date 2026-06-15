@@ -29,6 +29,26 @@ module.exports = function (eleventyConfig) {
     return blocks.filter(b => b.implementsIntent === intentId);
   });
 
+  // fuiDemo (#701): embed a Frontier-UI-hosted demo inline next to its standard page via a sandboxed
+  // <iframe> — no cross-repo import (the #700 ruling). The demo stays a FUI deliverable and keeps FUI
+  // branding (the chrome lives in this WE wrapper). The FUI base URL is parameterised: the dev server
+  // (:3001) by default, or a published demos host via FUI_DEMO_BASE in prod. Generalises to ANY FUI demo
+  // — pass the demo's file name; the first consumer is the #038 component-converter on /blocks/component/.
+  const FUI_DEMO_BASE = (process.env.FUI_DEMO_BASE || "http://localhost:3001").replace(/\/$/, "");
+  eleventyConfig.addShortcode("fuiDemo", function(demoFile, title, height) {
+    const src = `${FUI_DEMO_BASE}/demos/${demoFile}`;
+    const h = height || 460;
+    const label = title || demoFile;
+    return `<figure class="fui-demo">
+  <figcaption class="fui-demo-chrome">
+    <span class="fui-demo-badge" title="Hosted by Frontier UI — the implementation repo">Frontier&nbsp;UI demo</span>
+    <span class="fui-demo-title">${label}</span>
+    <a class="fui-demo-open" href="${src}" target="_blank" rel="noopener">Open in Frontier&nbsp;UI ↗</a>
+  </figcaption>
+  <iframe class="fui-demo-frame" src="${src}" title="${label}" loading="lazy" sandbox="allow-scripts allow-same-origin" style="height:${h}px"></iframe>
+</figure>`;
+  });
+
   // Build-time HTML → JSX (mirror dialect). Lazily esbuild-transpiles the shared TS transform
   // (blocks/renderers/jsx/htmlToJsx.ts — the same source the browser/tests use) and runs it over a
   // linkedom document so the source-toggle's JSX pane is generated from the authored HTML.

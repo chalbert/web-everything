@@ -2,9 +2,12 @@
 type: idea
 workItem: story
 size: 3
-status: open
+status: resolved
 blockedBy: ["038"]
 dateOpened: "2026-06-15"
+dateStarted: "2026-06-15"
+dateResolved: "2026-06-15"
+graduatedTo: .eleventy.js
 tags: []
 ---
 
@@ -31,3 +34,20 @@ A reusable iframe-embed viewer so WE docs pages can surface a frontierui-hosted 
 
 - **#038** — the converter playground must exist (in `frontierui/demos/`) before there's anything to embed.
   The generic viewer can be built against any existing FUI demo, but the first real consumer needs #038.
+
+## Progress
+
+- **2026-06-15 — built + verified (the #038 first consumer unblocked it).** Added a reusable `fuiDemo`
+  Nunjucks shortcode in `.eleventy.js`: `{% fuiDemo "<file>", "<title>", <height> %}` renders a sandboxed
+  (`allow-scripts allow-same-origin`), lazy-loaded, responsive `<iframe>` pointing at a FUI demo, wrapped
+  in **FUI-branded chrome** (a "Frontier UI demo" badge + an "Open in Frontier UI ↗" link). No cross-repo
+  import — pure iframe (the #700 DC-7 ruling). Generalises to any FUI demo via the file-name argument.
+- **Open points resolved (POC defaults):** (1) the FUI base URL is parameterised — `:3001` (FUI dev
+  server) by default, overridable via `FUI_DEMO_BASE` for the published demos host in prod; (2) the
+  branding chrome lives in the **WE embed wrapper** (not the FUI page), so provenance is clear without
+  touching the FUI demo.
+- **First consumer:** embedded the #038 component-converter on `/blocks/component/` (a new "Try it live"
+  section). The demo itself stays in `frontierui/demos/` (#700).
+- **Verified:** `eleventy --dryrun` clean; rendered `/blocks/component/` on :8080 shows the branded embed
+  with the iframe `src` → `localhost:3001/demos/component-converter.html` + sandbox attrs. `check:standards`
+  0 errors. CSS in `src/css/style.css`.
