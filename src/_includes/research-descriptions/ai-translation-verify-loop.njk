@@ -1,0 +1,70 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+  Can Web Everything add an <strong>AI-assisted translation</strong> capability — source-locale MF2
+  catalog → target-locale catalogs on the
+  <a href="/protocols/#protocol-localization">Localization protocol</a> — without it becoming a
+  standard, and without leaking a model/SDK into <code>@webeverything</code>?
+  <a href="/backlog/664-ai-assisted-translation-as-a-plateau-service-on-device-floor/">#664</a> answers
+  yes, by applying two already-settled rulings rather than re-opening them.
+</p>
+
+<h2>Recommendation (at a glance)</h2>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>The capability is a Plateau service, not a standard.</strong> Translation is an
+    <em>implementation</em> capability → by the vision-is-a-service ruling
+    (<a href="/backlog/475/">#475</a>) it lives in the served-product layer and the WE project consumes
+    it through a <strong>thin swappable client seam</strong>. Only the produced catalog reaches the
+    standard; <em>how</em> it was produced is invisible. <em>(no-leakage.)</em></li>
+  <li><strong>The one durable @webeverything edge is the verification</strong> — now codified in the
+    Localization protocol contract: a produced catalog is <em>provably-conformant</em>. This is the
+    <a href="/backlog/089/">#089</a> "AI proposes, the standard verifies" loop applied to translation.</li>
+  <li><strong>Pricing is not re-opened.</strong> The linear-cost rule
+    (<a href="/backlog/488/">#488</a>) already settled it: on-device is the bundled default/floor;
+    hosted-API + BYO-key is the metered bridge. Translation is an <em>even cleaner</em> on-device fit
+    than vision — the browser ships an on-device Translator / Language-Detector API and small open MT
+    models (NLLB-200, MADLAD-400, Opus-MT) run locally.</li>
+</ul>
+
+<h2>The conformance contract (the standard-side half)</h2>
+<p>
+  The verification that makes ours provably-conformant where incumbents (Lokalise / Phrase / DeepL)
+  are merely plausible — model-free, published, the only piece eligible to live in
+  <code>@webeverything</code>. A produced target catalog verifies that it:
+</p>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li>preserves every <strong>MF2 placeholder / selector / markup part</strong> from the source — no
+    dropped <code>{$count}</code>, no broken <code>.match</code> plural arms;</li>
+  <li>covers the target locale's <strong>CLDR plural / gender categories</strong> (ICU categories
+    present);</li>
+  <li>leaves <strong>no untranslated-but-claimed keys</strong> and <strong>no placeholder-arity
+    drift</strong>.</li>
+</ul>
+<p>
+  The model lives in the Plateau service (production); the gate lives in the standard (verification).
+  The executable harness is a <em>deferred build</em> that lands when the Localization protocol
+  graduates from <code>concept</code>.
+</p>
+
+<h2>Open questions (translation-specific — research, not blocking forks)</h2>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>On-device quality per locale-pair</strong> — which pairs clear the conformance bar today
+    (browser Translator API + NLLB/MADLAD class) and which need the hosted bridge? Per-pair graduation
+    benchmark on the #488 cadence, not a one-time reject.</li>
+  <li><strong>Distillation dataset</strong> — does the <code>(source, target, verdict)</code> corpus
+    train an on-device fine-tune the way the #488 vision verdict cache does (the platform-reinforcing
+    loop)?</li>
+  <li><strong>Markup survival</strong> — catalog- vs message-level invocation, and how MF2 markup parts
+    survive a model that wasn't trained MF2-aware (pre/post placeholder-masking inside the client seam).</li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li>Applies: <a href="/backlog/475/">#475</a> (vision = Plateau service, no-leakage) and
+    <a href="/backlog/488/">#488</a> (on-device floor + BYO-key bridge + graduation benchmarks).</li>
+  <li>Distinct from the parked translation-manager product in <a href="/backlog/089/">#089</a> — this is
+    the AI capability + verify loop, the part #089 flagged as the only real edge.</li>
+  <li>Standard: the <a href="/protocols/#protocol-localization">Localization protocol</a> (MF2-aligned
+    catalogs), owned by the <code>webintl</code> project.</li>
+</ul>
+{% endraw %}
