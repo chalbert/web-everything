@@ -134,7 +134,11 @@ When invoked (`/batch [P]` or `/batch-next [P] [NNN-slug]`):
 
 **The stop rule (solid by construction)** — the **points budget is the sole driver**; stop the batch at a
 seam if (and ONLY if) ANY of these **four** holds (full text in *Running a batch* → *The stop rule*):
-**gate red** (safety stop — never batch past a red gate), **points budget reached** (deterministic
+**gate red _from your own work_** (safety stop — never batch past a red gate *you caused*; but `check:standards`
+is whole-repo, so first **diagnose** — read the error lines + `git status`: if every error is in a *concurrent*
+session's untracked/external files and none names a file in your changeset, it is **not** your stop — log it and
+continue with your independent items, since freezing on another batch's red defeats concurrent batching;
+see *The stop rule*), **points budget reached** (deterministic
 backstop — the resolved `batchCost` sum fills the budget; every item costs ≥ 2 so it always terminates),
 **no eligible Tier-A item left** (`task`/`story·≤8`, *after* the seam re-pack **looped to exhaustion**), or
 **a new design fork surfaced** (or an item outgrew its estimate *mid-work* — never on a pre-claim "looks
