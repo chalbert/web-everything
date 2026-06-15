@@ -24,6 +24,7 @@ import { DefaultLifecycleProvider, registerLifecycle, type GuardResolver } from 
 import { statusIndicatorHTML } from '../../blocks/renderers/status-indicator/renderStatusIndicator';
 import type { ApplicationState } from './domain/types';
 import { LOAN_LIFECYCLE, FINDING_TONE } from './domain/lifecycle';
+import { identitySignal, currentActor, ROLE_LABEL, type LoanRole } from './domain/identity';
 import { DefaultAuditProvider, registerAudit, auditLifecycle } from '../../blocks/audit/AuditProvider';
 import { auditTimelineHTML } from '../../blocks/renderers/audit-timeline/renderAuditTimeline';
 import { decisionTraceHTML } from '../../blocks/renderers/decision-trace/renderDecisionTrace';
@@ -92,7 +93,10 @@ const loanLifecycle = new DefaultLifecycleProvider<ApplicationState>(LOAN_LIFECY
 // (wired at boot) — subscribes the lifecycle provider so every transition auto-appends one AuditEvent.
 // The audit-timeline render owns the history panel. Registered once at boot as the 'loan' provider.
 const loanAudit = new DefaultAuditProvider();
-const ACTOR = { role: 'underwriter' as const }; // the signed-in user (D. Okafor)
+// S1a (#686): the acting actor is now read live from the web-identity signal (domain/identity.ts) —
+// a real signed-in user (D. Okafor) carrying a role set, switchable via the topbar act-as control —
+// instead of the prior hardcoded `{ role: 'underwriter' }`. Re-read on each use so a role switch takes
+// effect immediately for both the lifecycle actor check and the audit `actor`.
 
 // Phase S11 (#387): event-driven notifications. PLATFORM-GAP: #358 — the `notification` standard is
 // still draft (no shipping runtime), so this in-memory store + the topbar region below hand-roll the
@@ -129,6 +133,24 @@ function renderNotifications(): string {
       <ul class="notif-list">${rows}</ul>
     </div>
   </div>`;
+}
+
+/**
+ * The topbar identity chip + act-as role switcher (S1a #686). Renders the signed-in user from
+ * the web-identity signal (`identitySignal.state` / `.identity`) — not ad-hoc local session — and
+ * a `<select>` to switch the acting role among the user's role set. Switching re-scopes the
+ * available lifecycle moves (see the subscriber in fillPipeline).
+ */
+function renderIdentityChip(): string {
+  const u = identitySignal.user;
+  const initials = u.label.split(/\s+/).map((p) => p[0]).join('').slice(0, 2).toUpperCase();
+  const options = u.roles
+    .map((r) => `<option value="${r}"${r === u.activeRole ? ' selected' : ''}>${ROLE_LABEL[r]}</option>`)
+    .join('');
+  return `<span class="user-chip" title="Signed in — web-identity authState: ${identitySignal.state}">
+    <span class="av">${initials}</span> ${escHtml(u.label)} ·
+    <label class="act-as">Acting as <select id="act-as" aria-label="Act as role">${options}</select></label>
+  </span>`;
 }
 
 const FINDING_LABEL: Record<Finding, string> = {
@@ -246,12 +268,12 @@ interface Move { to: ApplicationState; actor: string; }
 // when their guard passes (meets-eligibility / conditions-cleared), so the gating is visible in the UI.
 async function availableMoves(app: Application): Promise<Move[]> {
   const entity = { id: app.loanNumber, state: app.state };
-  const roles = [...new Set(LOAN_LIFECYCLE.transitions.filter((t) => t.from === app.state).map((t) => t.actor ?? '*'))];
+  // S1a (#686): moves are scoped to the signed-in user's *active* role (act-as), not surfaced across
+  // all roles — switching the role-switcher changes which lifecycle edges are offered (the demoable).
+  const role = identitySignal.activeRole;
   const moves: Move[] = [];
-  for (const role of roles) {
-    for (const to of await loanLifecycle.available(entity, { role })) {
-      if (!moves.some((m) => m.to === to)) moves.push({ to, actor: role });
-    }
+  for (const to of await loanLifecycle.available(entity, { role })) {
+    if (!moves.some((m) => m.to === to)) moves.push({ to, actor: role });
   }
   return moves;
 }
@@ -590,7 +612,7 @@ function boot() {
       <div class="right">
         <span id="notif-host"></span>
         <span class="env-badge">DEMO</span>
-        <span class="user-chip"><span class="av">UW</span> D. Okafor · Underwriter</span>
+        <span id="identity-host"></span>
       </div>
     </div>
     <nav class="lo-tabs">
@@ -620,6 +642,19 @@ function boot() {
     notifOpen = !notifOpen;
     if (notifOpen) loanNotifications.markAllRead(); // also triggers refresh
     refreshNotifications();
+  });
+
+  // S1a (#686): mount the identity chip + act-as switcher and keep it in sync with the signal.
+  const refreshIdentity = () => {
+    const host = document.getElementById('identity-host');
+    if (host) host.innerHTML = renderIdentityChip();
+  };
+  identitySignal.subscribe(refreshIdentity);
+  refreshIdentity();
+  document.querySelector('.lo-topbar')?.addEventListener('change', (e) => {
+    const sel = (e.target as HTMLElement).closest<HTMLSelectElement>('#act-as');
+    if (!sel) return;
+    identitySignal.setActiveRole(sel.value as LoanRole); // emits → refreshIdentity + re-scope moves
   });
 
   // Fill the Applications table + wire master-detail selection — re-run on every entry into /pipeline,
@@ -662,6 +697,10 @@ function boot() {
     if (!panel.dataset.lcWired) {
       panel.dataset.lcWired = '1';
 
+      // S1a (#686): when the act-as role switches, re-paint the open loan's trace so its available
+      // moves re-scope to the new role (the demoable — moves change to match who you're acting as).
+      identitySignal.subscribe(() => { if (current) void showTrace(current, panel); });
+
       // Phase S4 (#388): live co-edit — another tab saving this loan's draft fires a `storage` event here.
       // Reconcile last-writer-wins: if the incoming snapshot is newer than ours, adopt it and re-render
       // (the "X also editing" banner shows on the next render). PLATFORM-GAP: #648 (no webstates runtime).
@@ -684,7 +723,7 @@ function boot() {
           const entity = { id: current.loanNumber, state: current.state };
           // Fire AS the role the lifecycle permits for this edge (role-scoped); the provider re-checks
           // both the actor and the guard before applying — the button only existed because both passed.
-          await loanLifecycle.transition(entity, advance.dataset.to as ApplicationState, { role: advance.dataset.actor ?? ACTOR.role });
+          await loanLifecycle.transition(entity, advance.dataset.to as ApplicationState, { role: advance.dataset.actor ?? identitySignal.activeRole });
           current.state = entity.state; // reflect the applied move back onto the pipeline entity
           // Phase S11 (#387): the state change raises a notification to the actor who owns the next move
           // (the transition itself is already auto-audited with before/after via auditLifecycle).
@@ -700,7 +739,7 @@ function boot() {
           current.conditions.push(condition);
           const at = new Date().toISOString();
           await loanAudit.append({
-            target: { type: 'loan', id: current.loanNumber }, action: `condition.added — ${condition.type}`, actor: ACTOR, at,
+            target: { type: 'loan', id: current.loanNumber }, action: `condition.added — ${condition.type}`, actor: currentActor(), at,
             after: [{ path: `/conditions/${condition.id}`, op: 'add', newValue: condition.description }],
           });
           loanNotifications.push(current.loanNumber, conditionAddedNotification(current.loanNumber, condition), at);
@@ -717,7 +756,7 @@ function boot() {
           doc.rejectionReason = 'Illegible scan — please re-upload a clear copy';
           const at = new Date().toISOString();
           await loanAudit.append({
-            target: { type: 'loan', id: current.loanNumber }, action: `document.rejected — ${doc.label}`, actor: ACTOR, at,
+            target: { type: 'loan', id: current.loanNumber }, action: `document.rejected — ${doc.label}`, actor: currentActor(), at,
             before: [{ path: `/documents/${doc.id}/state`, op: 'replace', oldValue: before }],
             after: [{ path: `/documents/${doc.id}/state`, op: 'replace', newValue: 'rejected' }],
           });
@@ -743,7 +782,7 @@ function boot() {
           if (rd) {
             const at = new Date().toISOString();
             await loanAudit.append({
-              target: { type: 'loan', id: current.loanNumber }, action: `document.rejected — ${rd.label}`, actor: ACTOR, at,
+              target: { type: 'loan', id: current.loanNumber }, action: `document.rejected — ${rd.label}`, actor: currentActor(), at,
               after: [{ path: `/documents/${rd.id}/state`, op: 'replace', newValue: 'rejected' }],
             });
             loanNotifications.push(current.loanNumber, docRejectedNotification(current.loanNumber, rd), at);
@@ -761,7 +800,7 @@ function boot() {
           current.conditions = waive ? waiveCondition(current.conditions, condId) : clearCondition(current.conditions, condId);
           const after = waive ? 'waived' : 'cleared';
           await loanAudit.append({
-            target: { type: 'loan', id: current.loanNumber }, action: `condition.${after} — ${condId}`, actor: ACTOR,
+            target: { type: 'loan', id: current.loanNumber }, action: `condition.${after} — ${condId}`, actor: currentActor(),
             at: new Date().toISOString(),
             before: [{ path: `/conditions/${condId}/status`, op: 'replace', oldValue: before }],
             after: [{ path: `/conditions/${condId}/status`, op: 'replace', newValue: after }],
@@ -839,12 +878,12 @@ function boot() {
           const at = new Date();
           current.decision = issueDecision({
             outcome, finding: result.finding, reasonCodes,
-            ruleSetVersion: result.ruleSetVersion, decidedBy: ACTOR.id ?? ACTOR.role, decidedAt: at.toISOString(),
+            ruleSetVersion: result.ruleSetVersion, decidedBy: currentActor().id, decidedAt: at.toISOString(),
           });
           await loanAudit.append({
             target: { type: 'loan', id: current.loanNumber },
             action: `decision.issued — ${outcome}${current.decision.reasonCodes.length ? ` (${current.decision.reasonCodes.join(', ')})` : ''}`,
-            actor: ACTOR, at: at.toISOString(),
+            actor: currentActor(), at: at.toISOString(),
             after: [{ path: '/decision/outcome', op: 'add', newValue: outcome }],
           });
           loanNotifications.push(current.loanNumber, stateChangeNotification(current.loanNumber, current.state), at.toISOString());

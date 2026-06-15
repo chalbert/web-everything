@@ -64,6 +64,10 @@ body { margin: 0; background: var(--app-bg); color: var(--ink);
 .user-chip { display: inline-flex; align-items: center; gap: 7px; }
 .user-chip .av { width: 22px; height: 22px; border-radius: 50%; background: #2c5b8f; color: #fff;
   display: grid; place-items: center; font-size: 11px; font-weight: 700; }
+/* S1a (#686): act-as role switcher in the topbar */
+.user-chip .act-as { display: inline-flex; align-items: center; gap: 5px; color: #b8cbe0; }
+.user-chip .act-as select { background: #1c3a59; color: #e8f0f8; border: 1px solid #2c5b8f;
+  border-radius: 5px; padding: 2px 6px; font-size: 12px; font-family: inherit; cursor: pointer; }
 
 /* ---- module tab bar ---- */
 .lo-tabs { display: flex; gap: 0; background: #133a66; padding: 0 16px; }
