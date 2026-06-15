@@ -2,8 +2,10 @@
 type: idea
 workItem: epic
 parent: "099"
-status: open
+status: resolved
 dateOpened: "2026-06-06"
+dateResolved: "2026-06-15"
+graduatedTo: none
 tags: [roadmap, mvp, go-to-market, strategy, emergent, monetization, solo-founder, product]
 crossRef: { url: /backlog/089-monetization-product-ideas/, label: "Product ideas (#089)" }
 ---
