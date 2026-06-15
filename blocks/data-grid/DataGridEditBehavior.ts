@@ -107,7 +107,11 @@ export default class DataGridEditBehavior extends CustomAttribute {
 
     const editor = this.#createEditor(cell, previousValue);
     editor.setAttribute('aria-label', `Edit ${previousValue}`);
-    editor.addEventListener('keydown', this.#onEditorKeydown);
+    // `EditorElement` is a union, so the typed `keydown` overload doesn't resolve and addEventListener
+    // falls back to the base `EventListener` signature; under FUI's stricter strictFunctionTypes a
+    // `(KeyboardEvent)=>void` isn't assignable to it. Cast (option-A type-harden, #695) — byte-identical
+    // with the @frontierui/blocks copy (#170).
+    editor.addEventListener('keydown', this.#onEditorKeydown as EventListener);
     editor.addEventListener('blur', this.#onEditorBlur);
     editor.addEventListener('input', this.#onEditorInput);
 
@@ -254,7 +258,7 @@ export default class DataGridEditBehavior extends CustomAttribute {
     const session = this.#session;
     if (!session) return;
     this.#session = null;
-    session.editor.removeEventListener('keydown', this.#onEditorKeydown);
+    session.editor.removeEventListener('keydown', this.#onEditorKeydown as EventListener);
     session.editor.removeEventListener('blur', this.#onEditorBlur);
     session.editor.removeEventListener('input', this.#onEditorInput);
     session.editor.remove();

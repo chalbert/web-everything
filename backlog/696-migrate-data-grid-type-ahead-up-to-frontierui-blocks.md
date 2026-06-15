@@ -3,10 +3,12 @@ type: issue
 workItem: story
 size: 3
 parent: "658"
-status: open
+status: resolved
 blockedBy: ["693", "704"]
 dateOpened: "2026-06-15"
 dateStarted: "2026-06-15"
+dateResolved: "2026-06-15"
+graduatedTo: frontierui/blocks/data-grid/DataGridBehavior.ts
 tags: []
 ---
 
@@ -32,3 +34,21 @@ first** (byte-identical, the same #170 pattern as #694/#695), then S2c is a clea
 scaffolding that as S2c-pre (a `task` under #658) and setting `#696 blockedBy: [<that>]`. The latent type
 issue #695 hit may also recur in these families — apply the same option-A type-harden if the FUI build
 flags one.
+
+## Progress
+
+- **2026-06-15 — migrated (the S2c-pre #704 unblocked it).** Byte-identical copies UP to
+  `@frontierui/blocks`: the **data-grid** family (`DataGridBehavior`, `DataGridEditBehavior`,
+  `registerDataGrid`, `registerDataGridEdit`) + the **type-ahead** family (`TypeAheadBehavior`, `index`,
+  `registerTypeAhead`, `types`), plus their unit tests (data-grid ×2 + type-ahead ×1). All 11 files
+  `diff`-verified byte-identical; WE copies untouched (#170). data-grid's `../renderers/data-grid/...`
+  import now resolves (the #704 precursor); the `plugs/webbehaviors` deps already existed in FUI.
+- **Exports map:** added named + wildcard entries for both new top-level families (`./data-grid` →
+  `registerDataGrid.ts`, `./type-ahead` → `index.ts`, plus `./data-grid/*`, `./type-ahead/*`), per #694.
+- **Type-harden (#695 option-A, as the card anticipated):** FUI's stricter `strictFunctionTypes` flagged
+  `DataGridEditBehavior.ts` — `editor` is an `EditorElement` union, so the typed `keydown` overload
+  doesn't resolve and `addEventListener` falls back to the base `EventListener` signature, which a
+  `(KeyboardEvent)=>void` handler isn't assignable to. Cast the handler `as EventListener` at the
+  add/remove sites, applied **byte-identically to both copies** (WE + FUI). Runtime-identical.
+- **Gate:** FUI `tsc -p blocks/tsconfig.json --noEmit` clean; FUI data-grid + type-ahead suites 63/63
+  green; WE `check:standards` 0 errors + WE DataGridEditBehavior 31/31 green. Both trees valid.
