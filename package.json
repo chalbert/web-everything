@@ -2,6 +2,7 @@
   "name": "web-everything",
   "version": "1.0.0",
   "description": "Web Everything - Grouping standards for better web library standardization",
+  "customElements": "custom-elements.json",
   "scripts": {
     "dev": "concurrently --kill-others --names DOCS,DEMO --prefix-colors blue,magenta \"npx @11ty/eleventy --serve --port=8080 --quiet\" \"vite --port 3000\"",
     "dev:docs": "eleventy --serve --port=8080 --quiet",
@@ -36,7 +37,8 @@
     "autofix": "node scripts/conformance-autofix.mjs",
     "design-refs": "node scripts/design-refs.mjs",
     "design-refs:frontier": "node scripts/design-refs/frontier.mjs",
-    "gen:maas-origin": "node scripts/gen-maas-origin.mjs"
+    "gen:maas-origin": "node scripts/gen-maas-origin.mjs",
+    "gen:cem": "node scripts/gen-cem.mjs"
   },
   "devDependencies": {
     "@11ty/eleventy": "^2.0.1",

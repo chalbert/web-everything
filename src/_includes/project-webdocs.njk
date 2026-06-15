@@ -28,3 +28,37 @@
         {% endfor %}
     </div>
 </section>
+<section class="docs-section mt-12">
+    <h3 id="protocol-custom-elements-manifest" class="text-xl font-bold mb-6">Protocol — Custom Elements Manifest</h3>
+    <p class="text-gray-600 text-sm leading-relaxed mb-4">
+        A block's machine-readable <strong>structural contract</strong> is expressed as a
+        <a href="https://github.com/webcomponents/custom-elements-manifest" class="text-blue-600 underline">Custom Elements Manifest</a>
+        (<code>custom-elements.json</code>, schema <code>2.1.0</code>) — the de-facto multi-vendor manifest describing a
+        custom element's tag, attributes, properties, events, slots, CSS custom properties and parts. WE
+        <strong>adopts the open spec</strong> rather than minting a bespoke format: this is the single escapable lock —
+        the same manifest is consumed unchanged by api-viewer, Storybook, VS Code custom-data and JetBrains web-types,
+        so a project can leave WE without losing its component metadata. It is the <em>structural</em> half of the block
+        protocol; the <em>behavioral</em> half is the block's <code>block-description.njk</code> (Open UI / WAI-ARIA APG).
+    </p>
+    <ul class="text-gray-600 text-sm leading-relaxed mb-4 list-disc pl-5 space-y-1">
+        <li><strong>Derived, never hand-authored.</strong> <code>npm run gen:cem</code>
+            (<code>scripts/gen-cem.mjs</code>) projects the block-protocol fields a <code>blocks.json</code> entry
+            already carries — <code>events</code>/<code>exports</code>, paired with
+            <code>implementsIntent</code>/<code>traits</code>/<code>webStandards</code> — into the CEM shape. Output is
+            deterministic (sorted by block id, no timestamp), so the committed <code>custom-elements.json</code> can't
+            drift and a re-run over unchanged blocks is a no-op diff.</li>
+        <li><strong>No fabricated tags.</strong> A block is emitted as a CEM <code>custom-element</code> declaration
+            (<code>customElement: true</code> + <code>tagName</code>) only when it carries an explicit
+            <code>tagName</code>; otherwise it is a plain <code>class</code> declaration
+            (<code>registryName</code> is a DI-registry class name, never a tag).</li>
+        <li><strong>Spec-valid core.</strong> WE-specific fields ride under a namespaced
+            <code>x-webeverything</code> extension so the core manifest stays valid for external tooling.</li>
+        <li><strong>One seam, many consumers.</strong> Feeds the props-table block, the Technical Configurator args
+            panel, and autodocs (the Web Docs catalog surface, #627). Discoverable via the
+            <code>package.json "customElements"</code> field.</li>
+    </ul>
+    <div class="bg-blue-50 border-l-4 border-blue-400 p-3 mb-4 text-xs text-blue-800">
+        <strong>Forward-compatible:</strong> as blocks gain structured attribute / slot / CSS-API fields, the same
+        pipeline emits a richer per-element manifest — no schema change, a status flip from <code>draft</code>.
+    </div>
+</section>

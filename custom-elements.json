@@ -1,0 +1,4274 @@
+{
+  "schemaVersion": "2.1.0",
+  "readme": "Generated from src/_data/blocks.json by scripts/gen-cem.mjs (WE block protocols → CEM). Do not edit by hand.",
+  "modules": [
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/action-button/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "ActionButtonBehavior",
+          "description": "Behavioral implementation of the Action Intent, handling visual priority rendering, busy state layout (width locking, visibility), and platform-aware group ordering.",
+          "x-webeverything": {
+            "implementsIntent": "action",
+            "traits": [
+              {
+                "name": "withBusyDisabled",
+                "description": "Disables the action during pending state (aria-disabled + pointer-events:none)",
+                "intentDimension": "action.busy.disabled"
+              },
+              {
+                "name": "withBusyInteractive",
+                "description": "Keeps the action interactive during pending state (reduced opacity indicator)",
+                "intentDimension": "action.busy.interactive"
+              },
+              {
+                "name": "withPlatformOrdering",
+                "description": "Reorders action groups based on OS conventions (macOS: primary last, Windows: primary first)",
+                "intentDimension": "action.groupOrdering.platform"
+              },
+              {
+                "name": "withWidthLock",
+                "description": "Captures computed width before busy state, applies as inline min-width to prevent layout shift",
+                "intentDimension": "action.busy.widthLock"
+              }
+            ],
+            "webStandards": {
+              "invokerCommands": {
+                "status": "Baseline 2026",
+                "pattern": "commandfor/command attributes for declarative action invocation",
+                "adoption": "Action buttons can use commandfor to target Resource Action elements; command attribute specifies the mutation",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+              },
+              "ariaDisabled": {
+                "status": "Standard",
+                "pattern": "aria-disabled keeps element focusable but non-interactive",
+                "adoption": "withBusyDisabled applies aria-disabled instead of HTML disabled, preserving tab order and screen reader announcements",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-disabled"
+              },
+              "ariaLive": {
+                "status": "Standard",
+                "pattern": "aria-live regions for dynamic content announcements",
+                "adoption": "Busy state changes announced via aria-live='polite' on the button's label region",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-live"
+              },
+              "cssContainment": {
+                "status": "Baseline",
+                "pattern": "CSS contain: layout for isolation from reflow",
+                "adoption": "Action groups use contain: layout to prevent busy-state width changes from triggering ancestor reflow",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/contain"
+              }
+            },
+            "blockType": "Behavior",
+            "status": "concept"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "ActionButtonBehavior",
+          "declaration": {
+            "name": "ActionButtonBehavior",
+            "module": "@frontierui/blocks/action-button/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withBusyDisabled",
+          "declaration": {
+            "name": "withBusyDisabled",
+            "module": "@frontierui/blocks/action-button/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withBusyInteractive",
+          "declaration": {
+            "name": "withBusyInteractive",
+            "module": "@frontierui/blocks/action-button/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withPlatformOrdering",
+          "declaration": {
+            "name": "withPlatformOrdering",
+            "module": "@frontierui/blocks/action-button/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withWidthLock",
+          "declaration": {
+            "name": "withWidthLock",
+            "module": "@frontierui/blocks/action-button/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ActionButtonState",
+          "declaration": {
+            "name": "ActionButtonState",
+            "module": "@frontierui/blocks/action-button/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/renderers/audit-timeline/renderAuditTimeline.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "renderAuditTimeline",
+          "description": "Reference render for the Audit Timeline intent, the visual member of the Web Audit protocol. `renderAuditTimeline` renders an entity's `AuditEvent[]` as a chronological, filterable feed across the intent's `density` (compact|comfortable), `grouping` (flat|by-day|by-actor), and `detail` (summary|expanded) dimensions, with `role=\"list\"` and `<time datetime>` semantics. It owns the display, not the record — append-only semantics, actor attribution, and before/after belong to the protocol. Ships an element form and a string form (`auditTimelineHTML`).",
+          "x-webeverything": {
+            "implementsIntent": "audit-timeline",
+            "blockType": "Module",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "renderAuditTimeline",
+          "declaration": {
+            "name": "renderAuditTimeline",
+            "module": "@frontierui/blocks/renderers/audit-timeline/renderAuditTimeline.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "auditTimelineHTML",
+          "declaration": {
+            "name": "auditTimelineHTML",
+            "module": "@frontierui/blocks/renderers/audit-timeline/renderAuditTimeline.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/audit/AuditProvider.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "DefaultAuditProvider",
+          "description": "Reference runtime for the Web Audit protocol (webaudit / #357) — a domain entity's immutable, actor-attributed history. Ships the protocol's seam: the normalized `AuditEvent` ({ target, action, actor, at, before?, after?, correlationId? }, before/after reusing the Web States `ChangeRecord` shape), the swappable `CustomAuditProvider` contract (`append()` / `queryByEntity()` / optional `subscribe()`), a native-first append-only `DefaultAuditProvider` (it freezes each event — never mutates or deletes), and the `CustomAuditRegistry` (`window.customAudit`). The `auditLifecycle()` helper is the headline composition: it subscribes a Web Lifecycle provider so every transition becomes one `AuditEvent` automatically. First consumer: the loan-origination exercise app (#317).",
+          "x-webeverything": {
+            "blockType": "Module",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "DefaultAuditProvider",
+          "declaration": {
+            "name": "DefaultAuditProvider",
+            "module": "@frontierui/blocks/audit/AuditProvider.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "CustomAuditRegistry",
+          "declaration": {
+            "name": "CustomAuditRegistry",
+            "module": "@frontierui/blocks/audit/AuditProvider.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerAudit",
+          "declaration": {
+            "name": "registerAudit",
+            "module": "@frontierui/blocks/audit/AuditProvider.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "auditLifecycle",
+          "declaration": {
+            "name": "auditLifecycle",
+            "module": "@frontierui/blocks/audit/AuditProvider.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/autocomplete/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "Autocomplete",
+          "description": "The editable, filterable concrete member of the droplist family — an <input role=\"combobox\"> bound to a separate role=\"listbox\" surface (<auto-complete>). The richest member: typing narrows the collection (filter) instead of seeking within it (type-ahead), and DOM focus stays on the input while virtual focus moves through the listbox. A form-associated custom element so <form>/FormData/reset/validity work like a native control, mirroring the WAI-ARIA APG Combobox (list-autocomplete) pattern.",
+          "x-webeverything": {
+            "implementsIntent": "selection",
+            "composesIntents": [
+              "anchor",
+              "focus-delegation",
+              "selection",
+              "input",
+              "live-region-status",
+              "loader",
+              "windowed-collection",
+              "collection-operations",
+              "typography"
+            ],
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "Autocomplete",
+          "declaration": {
+            "name": "Autocomplete",
+            "module": "@frontierui/blocks/autocomplete/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/background-task-surface/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "BackgroundTaskSurface",
+          "description": "The persistent app-shell surface that hosts long-running work after it goes async — the receiving end of a Loader's escalation:async handoff. Renders one entry per registered task with per-task progress (the Loader's own state machine, hosted off-view), per-task retry delegating to Reliability, and arms the navigation-away / before-unload guard while any task is in flight. Distinct from the Feedback Intent (transient toasts) and the Loader Intent (in-view pending state that dies with its view).",
+          "x-webeverything": {
+            "implementsIntent": "background-task",
+            "composesIntents": [
+              "loader",
+              "reliability",
+              "layout",
+              "feedback"
+            ],
+            "traits": [
+              {
+                "name": "withBatchAggregation",
+                "description": "Present multiple concurrent tasks, each with its own progress and retry, where one task's failure does not abort the others (default is single — one entry at a time)",
+                "intentDimension": "background-task.aggregation.batch"
+              },
+              {
+                "name": "withStickyEntries",
+                "description": "Keep a resolved entry until explicitly dismissed instead of auto-clearing on success (error entries are sticky regardless, so a failure that happened off-view is still reviewable)",
+                "intentDimension": "background-task.persistence.sticky"
+              },
+              {
+                "name": "withNavigationGuard",
+                "description": "While any task is active, arm the beforeunload prompt (cross-document close/reload) and the Navigation API route-leave confirm (same-document); cleared when the last in-flight task resolves",
+                "intentDimension": "background-task.navigationGuard.warn"
+              },
+              {
+                "name": "withCompletionToast",
+                "description": "Emit a transient Feedback Intent toast when a task completes, for the case where the user is on another view and the rail entry auto-clears",
+                "intentDimension": "background-task.persistence.transient"
+              },
+              {
+                "name": "withPerTaskRetry",
+                "description": "Expose a retry affordance on a failed entry that delegates recovery to the Reliability Intent (the surface owns the affordance, not the policy)",
+                "intentDimension": "background-task.recovery.manual"
+              },
+              {
+                "name": "withReloadDurability",
+                "description": "Opt into reload-durable work via the Background Fetch / service-worker adapter so an in-flight task survives a full page reload or tab close (default is route-only, in-memory)",
+                "intentDimension": "background-task.durability.reload"
+              }
+            ],
+            "webStandards": {
+              "customEvent": {
+                "status": "Baseline",
+                "pattern": "Bubbling CustomEvent as the registration handoff",
+                "adoption": "A Loader at escalation:async dispatches a bubbling background-task-register event carrying its loader-state handle; the surface listens and adopts it. A one-shot, fire-and-handoff registration that decouples the surface from the (possibly torn-down) originating element — chosen over an injector/DI registry because the task must outlive its originating view.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/CustomEvent"
+              },
+              "beforeunload": {
+                "status": "Baseline",
+                "pattern": "beforeunload prompt for cross-document leave / close",
+                "adoption": "While navigationGuard:warn and any task is active, the surface arms beforeunload so closing the tab or a full reload prompts the user. Cleared automatically when the last in-flight task resolves. This guard is why the route-only baseline is safe: a hard reload that would lose in-flight work is gated, not silently dropped.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event"
+              },
+              "navigationApi": {
+                "status": "Baseline 2024",
+                "pattern": "Navigation API navigate event intercept for same-document route-leave",
+                "adoption": "The SPA route-leave confirm half of navigationGuard:warn intercepts the Navigation API's navigate event (preventing/confirming same-document navigations) — the same-document counterpart to beforeunload. The two primitives present as one guard contract (harvested as the navigation-guard intent, #129).",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Navigation/navigate_event"
+              },
+              "backgroundFetch": {
+                "status": "Limited availability (opt-in enhancement)",
+                "pattern": "Background Fetch API + service worker for reload-durable work",
+                "adoption": "The durability:reload tier — work that genuinely survives a full reload or tab close — is delegated here, NOT baked into the baseline. The intent borrows Background Fetch's vocabulary 'without requiring a service worker', so this surface stays usable as a route-only in-memory baseline and treats reload-durability as an opt-in adapter (see backlog spin-off).",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Background_Fetch_API"
+              },
+              "ariaStatusRegion": {
+                "status": "WAI-ARIA",
+                "pattern": "Live status region for off-view progress announcement",
+                "adoption": "Because the surface is off the user's current view, task completion and failure are announced via a polite live region (role=status) so a screen-reader user learns a backgrounded task finished without watching the rail. Reuses the Live Region Status paradigm rather than redefining it.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Roles/status_role"
+              }
+            },
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "BackgroundTaskSurface",
+          "declaration": {
+            "name": "BackgroundTaskSurface",
+            "module": "@frontierui/blocks/background-task-surface/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/breadcrumb/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "Breadcrumb",
+          "description": "A structured trail showing the user's location within a site or data hierarchy, as an ordered list of links from root to current. Native-first: it IS a <nav aria-label=\"Breadcrumb\"> wrapping an ordered list of <a> elements, with the current page a plain non-link node carrying aria-current=\"page\" — the block adds only what the bare markup cannot express alone: overflow collapse when the trail is too wide for its container, and a separator that is presentational (CSS ::before / aria-hidden), never an announced character. It composes the Navigation Intent (it is a navigation landmark) and the Typography Intent (the responsible-truncation paradigm for a long crumb label). Deliberately distinct from nav-list (APG Disclosure Navigation menus), from tabs (panel switching), and from a stepper (a linear process, not a location).",
+          "x-webeverything": {
+            "implementsIntent": "navigation",
+            "composesIntents": [
+              "navigation",
+              "typography"
+            ],
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "Breadcrumb",
+          "declaration": {
+            "name": "Breadcrumb",
+            "module": "@frontierui/blocks/breadcrumb/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/breakpoint-observer/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "BreakpointObserver",
+          "description": "Runtime implementation of the Breakpoint Intent, mapping semantic step names to concrete CSS media queries or container queries and exposing reactive state.",
+          "x-webeverything": {
+            "implementsIntent": "breakpoint",
+            "traits": [
+              {
+                "name": "withMobileFirst",
+                "description": "Accumulative min-width queries — start small, add complexity as space grows",
+                "intentDimension": "breakpoint.strategy.mobile-first"
+              },
+              {
+                "name": "withDesktopFirst",
+                "description": "Subtractive max-width queries — start large, remove features as space shrinks",
+                "intentDimension": "breakpoint.strategy.desktop-first"
+              },
+              {
+                "name": "withStrictRange",
+                "description": "Isolated range queries — each tier is an independent bucket with no accumulation",
+                "intentDimension": "breakpoint.strategy.strict-range"
+              },
+              {
+                "name": "withContainerQueries",
+                "description": "Component-scoped breakpoints using CSS container queries instead of viewport media queries",
+                "intentDimension": null
+              }
+            ],
+            "blockType": "Module",
+            "status": "concept"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "BreakpointObserver",
+          "declaration": {
+            "name": "BreakpointObserver",
+            "module": "@frontierui/blocks/breakpoint-observer/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/broadcast/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "BroadcastBehavior",
+          "description": "Declarative DOM-to-JS bridge for provider-scoped broadcast events. Fills the platform gap between targeted Invoker Commands and global event dispatch.",
+          "x-webeverything": {
+            "webStandards": {
+              "invokerCommands": {
+                "status": "Baseline January 2026",
+                "pattern": "commandfor/command for targeted commands",
+                "gap": "No broadcast equivalent — commands are always 1-to-1 via element ID",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+              },
+              "commandEvent": {
+                "status": "Baseline December 2025",
+                "pattern": "CommandEvent is constructable but designed for declarative button triggers, not programmatic broadcast",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/CommandEvent/CommandEvent"
+              },
+              "customEvent": {
+                "status": "Standard",
+                "pattern": "CustomEvent + dispatchEvent is the current broadcast mechanism",
+                "gap": "Globally-scoped string names — no discrimination, no scoping",
+                "reference": "https://dom.spec.whatwg.org/#interface-customevent"
+              }
+            },
+            "blockType": "Behavior",
+            "status": "concept"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "BroadcastBehavior",
+          "declaration": {
+            "name": "BroadcastBehavior",
+            "module": "@frontierui/blocks/broadcast/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/carousel/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "Carousel",
+          "description": "A set of equivalent slides presented one (or a few) at a time, advanced by controls, pagination markers, swipe, or optional autoplay. Native-first by construction: the substrate is a CSS scroll-snap container (scroll-snap-type + scroll-snap-align gives paging, momentum, touch, and keyboard scrolling for free), and where supported the emerging CSS carousel pseudo-elements (::scroll-button() for prev/next, ::scroll-marker / scroll-marker-group for the dots) provide native controls — the block leans on them rather than re-implementing scroll logic in JS. It adds the WAI-ARIA APG carousel accessibility (rotation announced via a live region; autoplay opt-in, paused on hover/focus, honoring prefers-reduced-motion, with a required pause control) and composes the Motion, Live-Region Status, and Navigation intents. Distinct from tabs (labelled panels, not equivalent slides) and from paginated data (the Collection Operations intent).",
+          "x-webeverything": {
+            "composesIntents": [
+              "motion",
+              "live-region-status",
+              "navigation"
+            ],
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "Carousel",
+          "declaration": {
+            "name": "Carousel",
+            "module": "@frontierui/blocks/carousel/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/checkbox/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "Checkbox",
+          "description": "Native-first over `<input type=\"checkbox\">`: a single boolean control, a checkbox group (multi-select), and the `indeterminate` (mixed) tri-state. Realizes the `input` boolean control and composes `selection` (model: multiple) for groups; the indeterminate state maps to `aria-checked=\"mixed\"` on a group parent. Zero JS for the single/standalone case (the native element IS the block); a thin behavior only coordinates a group's mixed-state parent. Sliced from #468 (form-control inventory).",
+          "x-webeverything": {
+            "implementsIntent": "input",
+            "composesIntents": [
+              "selection"
+            ],
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "Checkbox",
+          "declaration": {
+            "name": "Checkbox",
+            "module": "@frontierui/blocks/checkbox/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/renderers/collection-operations/",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "CollectionOperationsModule",
+          "description": "The headless coordinator that owns one collection and runs the WHOLE collection-operations pipeline — filter -> sort -> group -> **page** — over it, then hands the current page slice to the data-table for rendering and the totals to the pagination block. The two stage-owning blocks (data-table: filter/sort/group; pagination: page) each run one stage; until this existed no one ran the pipeline as a whole, so the obvious consumer wiring (page-then-render) sorted only the current page, not the whole book (surfaced by the loan-origination app, #317). This coordinator applies filter/sort/group across the entire set first (reusing the data-table's verified `applyPipeline`, whose `page` stage is a deliberate no-op), then windows the result — order is always collection-wide and the page is just the visible slice. Re-feeding the already-ordered slice back through the data-table is safe (filter/sort/group are idempotent on a processed slice). Ships a standalone `CollectionOperationsBehavior` and an optional headless `<collection-operations>` element that routes descendant `data-table-change` / `pagination-change` events and emits `collection-operations-change` — not a documented composition and not a rendered block (#452 ruling A/A).",
+          "x-webeverything": {
+            "implementsIntent": "collection-operations",
+            "traits": [],
+            "blockType": "Module",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "CollectionOperationsModule",
+          "declaration": {
+            "name": "CollectionOperationsModule",
+            "module": "@frontierui/blocks/renderers/collection-operations/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "CollectionOperationsBehavior",
+          "declaration": {
+            "name": "CollectionOperationsBehavior",
+            "module": "@frontierui/blocks/renderers/collection-operations/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerCollectionOperations",
+          "declaration": {
+            "name": "registerCollectionOperations",
+            "module": "@frontierui/blocks/renderers/collection-operations/"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/component/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "parseDefinition",
+          "description": "The <component> element — defines a brand-new custom element entirely from HTML (tag name, template, shadow options). The fourth gap in Web Components, alongside scoped registries, injector integration, and transient components. Intended implementation: a deterministic build-time AST transform to a class-based element.",
+          "x-webeverything": {
+            "webStandards": {
+              "customElements": {
+                "status": "Baseline",
+                "pattern": "Autonomous custom elements registered via customElements.define()",
+                "adoption": "The <component> definition lowers to an autonomous element class + customElements.define(). Autonomous only (Safari refuses customized built-ins).",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Web_Components/Using_custom_elements"
+              },
+              "declarativeShadowDOM": {
+                "status": "Baseline 2024",
+                "pattern": "<template shadowrootmode> attaches a shadow root during HTML parsing, no JS",
+                "adoption": "shadow=\"open|closed\" maps onto attachShadow / DSD. The component's children become the element's shadow content. attachShadow options forward as boolean attributes — delegates-focus maps onto attachShadow({ delegatesFocus: true }) / shadowrootdelegatesfocus.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/template#shadowrootmode"
+              },
+              "htmlTemplate": {
+                "status": "Baseline",
+                "pattern": "<template> holds inert, cloneable content",
+                "adoption": "The component's own children are the render source (implicit template, DC-11) — cloned into the shadow (or light) tree on connect. A lone direct-child <template> is the explicit, inert form for un-built runtime delivery or parser-sensitive markup; both lower identically.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/template"
+              },
+              "slot": {
+                "status": "Baseline",
+                "pattern": "<slot> projects light-DOM children into shadow content",
+                "adoption": "Content projection is native — the definition uses <slot> directly; no custom projection layer.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/slot"
+              },
+              "scopedRegistries": {
+                "status": "Stage 2 Proposal",
+                "pattern": "Per-shadow-root custom element registries",
+                "adoption": "Tier-2 scope attribute composes with the project's Scoped Registries section; global customElements by default.",
+                "reference": "https://github.com/WICG/webcomponents/blob/gh-pages/proposals/Scoped-Custom-Element-Registries.md"
+              },
+              "declarativeCustomElements": {
+                "status": "Stalled Strawman / WICG #1009",
+                "pattern": "<definition name constructor> — define a custom element from markup",
+                "adoption": "Prior art. We choose <component> over <definition>; we ship the static tier now and compose the unshipped binding primitives (Template Instantiation, DOM Parts) later.",
+                "reference": "https://github.com/WICG/webcomponents/issues/1009"
+              },
+              "elementInternals": {
+                "status": "Baseline",
+                "pattern": "attachInternals() exposes form participation (static formAssociated), default ARIA semantics (internals.role), and custom states (internals.states / :state())",
+                "adoption": "form-associated maps onto static formAssociated + attachInternals(); default-role maps onto internals.role default semantics. Custom states and form value/validation wiring are deferred (DC-14, compose with Web Validation).",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/ElementInternals"
+              },
+              "atomicMove": {
+                "status": "Baseline 2025",
+                "pattern": "Element.moveBefore() relocates a connected node without disconnecting it; a connectedMoveCallback opts custom elements into state preservation",
+                "adoption": "preserve-on-move emits an empty connectedMoveCallback() so moveBefore() preserves the element's state (focus, media, iframes, shadow) instead of teardown/rebuild.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Element/moveBefore"
+              }
+            },
+            "blockType": "Directive",
+            "status": "concept"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "parseDefinition",
+          "declaration": {
+            "name": "parseDefinition",
+            "module": "@frontierui/blocks/component/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "generateClassSource",
+          "declaration": {
+            "name": "generateClassSource",
+            "module": "@frontierui/blocks/component/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "defineFromDefinition",
+          "declaration": {
+            "name": "defineFromDefinition",
+            "module": "@frontierui/blocks/component/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ComponentDef",
+          "declaration": {
+            "name": "ComponentDef",
+            "module": "@frontierui/blocks/component/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ShadowMode",
+          "declaration": {
+            "name": "ShadowMode",
+            "module": "@frontierui/blocks/component/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/composite-widget/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "CompositeWidget",
+          "description": "Focus management and navigation protocol for complex widgets like Grids, Trees, and Menus, implementing the Roving Tabindex pattern.",
+          "x-webeverything": {
+            "blockType": "Behavior",
+            "status": "concept"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "CompositeWidget",
+          "declaration": {
+            "name": "CompositeWidget",
+            "module": "@frontierui/blocks/composite-widget/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/renderers/data-grid/",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "DataGridModule",
+          "description": "The interactive twin of the Data Table block: same tabular data, the *other* WAI-ARIA APG pattern. Renders a native `<table role=\"grid\">` of `role=\"row\"` / `role=\"columnheader\"` / `role=\"gridcell\"` cells with cell-level keyboard navigation — arrow keys move one cell (clamping at the edges), Home/End jump to the row ends, Ctrl+Home/Ctrl+End to the grid corners, PageUp/PageDown by a page — over a roving tabindex (exactly one cell is `tabindex=\"0\"`, every other is `-1`). It is the concrete consumer of the Focus Delegation intent (strategy `roving`, orientation `both`); the column-header row is itself navigable. Where the Data Table is read-and-reorder (`role=\"table\"` + `aria-sort`), the Data Grid is navigate-the-cells (`role=\"grid\"` + roving focus) — APG documents them as separate patterns, so they are parallel blocks, not one upgraded in place.",
+          "x-webeverything": {
+            "implementsIntent": "focus-delegation",
+            "composesIntents": [
+              "focus-delegation"
+            ],
+            "traits": [
+              {
+                "name": "withCellNavigation",
+                "description": "Realizes the APG Data Grid keyboard model over a roving tabindex — arrows (clamped), Home/End, Ctrl+Home/End, PageUp/Down — moving the single `tabindex=\"0\"` cell with DOM focus.",
+                "intentDimension": "strategy"
+              },
+              {
+                "name": "withGridRoles",
+                "description": "Projects the tabular data onto the `role=\"grid\"` / `role=\"row\"` / `role=\"columnheader\"` / `role=\"gridcell\"` structure with `aria-rowcount` / `aria-colcount` and per-cell `aria-rowindex` / `aria-colindex`.",
+                "intentDimension": "orientation"
+              }
+            ],
+            "webStandards": {
+              "apgDataGrid": {
+                "status": "W3C WAI-ARIA APG",
+                "pattern": "A `role=\"grid\"` of `role=\"row\"` rows and `role=\"gridcell\"` / `role=\"columnheader\"` cells with arrow-key cell navigation and a roving tabindex",
+                "adoption": "DataGridBehavior renders the native `<table>` with the grid roles and realizes the APG keyboard model verbatim (arrows clamp, Home/End to row ends, Ctrl+Home/End to grid corners, PageUp/Down by a page); the header row is navigable",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/grid/"
+              },
+              "rovingTabindex": {
+                "status": "WAI-ARIA APG (Managing Focus)",
+                "pattern": "Exactly one descendant is `tabindex=\"0\"` (the active item) and all others are `tabindex=\"-1\"`; the value moves with focus",
+                "adoption": "The active cell carries `tabindex=\"0\"`, every other cell `-1`; a keystroke recomputes the active cell and the tabindex roves to it, so Tab enters/leaves the grid as one stop while arrows move within",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/#kbd_roving_tabindex"
+              },
+              "ariaGridIndices": {
+                "status": "WAI-ARIA 1.1",
+                "pattern": "`aria-rowcount` / `aria-colcount` on the grid and `aria-rowindex` / `aria-colindex` on rows and cells declare the full extent and a cell's position",
+                "adoption": "The grid declares `aria-rowcount` / `aria-colcount` (header row included) and each row/cell carries its 1-based `aria-rowindex` / `aria-colindex`, so the position is announced even when not every row is realized in the DOM",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-colindex"
+              }
+            },
+            "blockType": "Module",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "DataGridModule",
+          "declaration": {
+            "name": "DataGridModule",
+            "module": "@frontierui/blocks/renderers/data-grid/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "DataGridBehavior",
+          "declaration": {
+            "name": "DataGridBehavior",
+            "module": "@frontierui/blocks/renderers/data-grid/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerDataGrid",
+          "declaration": {
+            "name": "registerDataGrid",
+            "module": "@frontierui/blocks/renderers/data-grid/"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/renderers/data-table/",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "DataTableModule",
+          "description": "The blocks-layer home for the Collection Operations `filter`, `sort`, and `group` stages (the `page` stage is the companion Pagination block — compose, never merge). Renders a native `<table>` whose sortable column headers project `sortDirection` onto the WAI-ARIA APG `aria-sort` attribute (ascending/descending, sortable-but-unsorted = none) via button-wrapped `<th scope=\"col\">`, orders rows with `Intl.Collator` (sensitivity/numeric/caseFirst/ignorePunctuation) and SQL-style empty placement, narrows them by `filterMatch` (all/any), and partitions them into `<tbody>` groups with `groupSummary` aggregates named after the SQL functions (count/sum/average/minimum/maximum). The pipeline order is data (default filter → sort → group → page). Ships a consumable `DataTableBehavior` (and a `<data-table>` custom element) that mounts the verified renderer, wires click-to-sort + a polite live-region announcement, and emits `data-table-change`; its first enterprise consumer is the loan-origination exercise app (#317).",
+          "x-webeverything": {
+            "implementsIntent": "collection-operations",
+            "traits": [
+              {
+                "name": "withSortableHeader",
+                "description": "Projects the active sort key's direction onto `aria-sort` on a button-wrapped `<th scope=\"col\">` (the `sort:header` seam). Sortable-but-unsorted headers are `aria-sort=\"none\"`.",
+                "intentDimension": "sortDirection"
+              },
+              {
+                "name": "withFilter",
+                "description": "Narrows the rows by combining call-site predicates per `filterMatch` (all = AND, any = OR).",
+                "intentDimension": "filterMatch"
+              },
+              {
+                "name": "withGrouping",
+                "description": "Partitions rows into `<tbody>` groups, each led by a `scope=\"rowgroup\"` summary row carrying the `groupSummary` aggregate (count/sum/average/minimum/maximum).",
+                "intentDimension": "groupSummary"
+              }
+            ],
+            "webStandards": {
+              "apgSortableTable": {
+                "status": "W3C WAI-ARIA APG",
+                "pattern": "Tabular data in a native `<table>` with `<th scope=\"col\">` headers; sortable headers wrap their label in a `<button>` and the active column carries `aria-sort`",
+                "adoption": "DataTableBehavior renders the table and projects the primary sort key onto `aria-sort` on its `<th>`; sortable-but-unsorted headers are `aria-sort=\"none\"`, non-sortable headers carry none",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/table/"
+              },
+              "ariaSort": {
+                "status": "WAI-ARIA 1.1",
+                "pattern": "aria-sort = ascending | descending | none | other, on one header at a time",
+                "adoption": "The intent's `sortDirection` projects verbatim onto `aria-sort`; only the primary sort key's header is marked (APG: one sorted header at a time), even under a multi-key sort",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-sort"
+              },
+              "intlCollator": {
+                "status": "ECMA-402 (Baseline)",
+                "pattern": "Locale-aware comparison via `sensitivity`, `numeric`, `caseFirst`, `ignorePunctuation` options",
+                "adoption": "The reference comparator is `Intl.Collator`; the intent's text-comparison dimensions adopt its option names verbatim, so `numeric:true` gives natural order (img2 before img10) with no bespoke comparator",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator"
+              },
+              "arrayToSorted": {
+                "status": "Baseline 2023",
+                "pattern": "`Array.prototype.sort` is guaranteed stable (ES2019); `toSorted()` is non-mutating (ES2023)",
+                "adoption": "Stable sort makes multi-key tiebreaking and `sortKeys:single` (which preserves prior order) well-defined without extra bookkeeping",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/toSorted"
+              },
+              "rowgroupScope": {
+                "status": "HTML / WAI-ARIA",
+                "pattern": "A `<th scope=\"rowgroup\">` associates a header with all cells in its row group",
+                "adoption": "Each group renders as its own `<tbody>` led by a `scope=\"rowgroup\"` summary row carrying the group key + its aggregate, so assistive tech announces the grouping",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/th#scope"
+              }
+            },
+            "blockType": "Module",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "DataTableModule",
+          "declaration": {
+            "name": "DataTableModule",
+            "module": "@frontierui/blocks/renderers/data-table/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "DataTableBehavior",
+          "declaration": {
+            "name": "DataTableBehavior",
+            "module": "@frontierui/blocks/renderers/data-table/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerDataTable",
+          "declaration": {
+            "name": "registerDataTable",
+            "module": "@frontierui/blocks/renderers/data-table/"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/data-transfer/DataTransferZoneElement.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "DataTransferZoneElement",
+          "description": "A drop-zone runtime that collapses the three native sources of a DataTransfer payload — drag-and-drop, clipboard paste, and <input type=file> — into one normalized `receive` event under a declared `accepts` contract (type/size), dispatching `reject` for anything that fails, with a keyboard/a11y file-picker affordance, the copy-vs-move flow as the drag dropEffect, and a copy-out (`emit`) half.",
+          "x-webeverything": {
+            "implementsIntent": "data-transfer",
+            "webStandards": {
+              "dataTransfer": {
+                "status": "Baseline",
+                "pattern": "The native DataTransfer object shared by drag events and the clipboard",
+                "adoption": "normalizeDataTransfer() reads DataTransferItemList (file vs string kinds) with a files+getData fallback, so drop and paste collapse to one shape.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer"
+              },
+              "dragAndDrop": {
+                "status": "Baseline",
+                "pattern": "HTML Drag and Drop API (dragover.preventDefault to become a drop target; dropEffect)",
+                "adoption": "The zone mirrors its configured copy/move effect onto dataTransfer.dropEffect during dragover.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API"
+              },
+              "clipboardEvent": {
+                "status": "Baseline",
+                "pattern": "ClipboardEvent.clipboardData on paste/copy",
+                "adoption": "Paste funnels through the same normalizer; copy writes the queued emit payload via setData.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/ClipboardEvent"
+              },
+              "fileInput": {
+                "status": "Baseline",
+                "pattern": "<input type=file multiple> as the keyboard-accessible source",
+                "adoption": "An always-present hidden file input behind a real <button> gives a keyboard/a11y path; drag and paste are pointer/clipboard sugar on top.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/input/file"
+              }
+            },
+            "blockType": "Component",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "DataTransferZoneElement",
+          "declaration": {
+            "name": "DataTransferZoneElement",
+            "module": "@frontierui/blocks/data-transfer/DataTransferZoneElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerDataTransferZone",
+          "declaration": {
+            "name": "registerDataTransferZone",
+            "module": "@frontierui/blocks/data-transfer/DataTransferZoneElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "normalizeDataTransfer",
+          "declaration": {
+            "name": "normalizeDataTransfer",
+            "module": "@frontierui/blocks/data-transfer/DataTransferZoneElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "normalizeFileList",
+          "declaration": {
+            "name": "normalizeFileList",
+            "module": "@frontierui/blocks/data-transfer/DataTransferZoneElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "evaluateAccept",
+          "declaration": {
+            "name": "evaluateAccept",
+            "module": "@frontierui/blocks/data-transfer/DataTransferZoneElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "kindForType",
+          "declaration": {
+            "name": "kindForType",
+            "module": "@frontierui/blocks/data-transfer/DataTransferZoneElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "typeMatches",
+          "declaration": {
+            "name": "typeMatches",
+            "module": "@frontierui/blocks/data-transfer/DataTransferZoneElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "NormalizedPayload",
+          "declaration": {
+            "name": "NormalizedPayload",
+            "module": "@frontierui/blocks/data-transfer/DataTransferZoneElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "NormalizedItem",
+          "declaration": {
+            "name": "NormalizedItem",
+            "module": "@frontierui/blocks/data-transfer/DataTransferZoneElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "AcceptSpec",
+          "declaration": {
+            "name": "AcceptSpec",
+            "module": "@frontierui/blocks/data-transfer/DataTransferZoneElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ReceiveDetail",
+          "declaration": {
+            "name": "ReceiveDetail",
+            "module": "@frontierui/blocks/data-transfer/DataTransferZoneElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "RejectDetail",
+          "declaration": {
+            "name": "RejectDetail",
+            "module": "@frontierui/blocks/data-transfer/DataTransferZoneElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "EmitDetail",
+          "declaration": {
+            "name": "EmitDetail",
+            "module": "@frontierui/blocks/data-transfer/DataTransferZoneElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "RECEIVE_EVENT",
+          "declaration": {
+            "name": "RECEIVE_EVENT",
+            "module": "@frontierui/blocks/data-transfer/DataTransferZoneElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "REJECT_EVENT",
+          "declaration": {
+            "name": "REJECT_EVENT",
+            "module": "@frontierui/blocks/data-transfer/DataTransferZoneElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "EMIT_EVENT",
+          "declaration": {
+            "name": "EMIT_EVENT",
+            "module": "@frontierui/blocks/data-transfer/DataTransferZoneElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "DEFAULT_ACCEPT",
+          "declaration": {
+            "name": "DEFAULT_ACCEPT",
+            "module": "@frontierui/blocks/data-transfer/DataTransferZoneElement.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/renderers/decision-trace/renderDecisionTrace.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "renderDecisionTrace",
+          "description": "Reference render for the Decision Trace intent, the visual member of the Web Decisions protocol (decision-record / #355). `renderDecisionTrace(record)` turns a normalized `DecisionRecord` — why a rules/criteria evaluation reached its outcome — into a criteria trace table (input/operator/threshold/outcome per criterion) plus the aggregated outcome and reason codes, across the intent's `layout` (table|list), `emphasis` (all-criteria|deciding), and `disclosure` dimensions. Schema-only standard: the render owns the explanation UI, not the rules. Composes the status-indicator block for the outcome and per-criterion tokens. Ships an element form and a string form (`decisionTraceHTML`).",
+          "x-webeverything": {
+            "implementsIntent": "decision-trace",
+            "blockType": "Module",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "renderDecisionTrace",
+          "declaration": {
+            "name": "renderDecisionTrace",
+            "module": "@frontierui/blocks/renderers/decision-trace/renderDecisionTrace.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "decisionTraceHTML",
+          "declaration": {
+            "name": "decisionTraceHTML",
+            "module": "@frontierui/blocks/renderers/decision-trace/renderDecisionTrace.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/dialog/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "Dialog",
+          "description": "The abstract substrate every dialog-based surface conforms to — a top-layer surface that interrupts or overlays the page, owning the shared modal-surface machinery: focus containment, escape/outside/backdrop dismissal, scroll-lock, modal-vs-non-modal mode, and the native-first top-layer mount. Like droplist, it is not a shippable widget — it is the family substrate. Its concrete members are each their own block, distinct configurations of the Modal Intent's placement over this one substrate: a centered modal (placement=center), an edge Drawer (placement=start/end + slide, #360), and a bottom Sheet (placement=bottom). Native-first by construction: built on the native <dialog> element (showModal for the modal focus-trap, inert background, and ::backdrop; the platform top layer) and the Popover API for the non-modal case — never a position:fixed + z-index re-implementation. It realizes the Modal Intent and composes Focus Containment (the trap), Surface (elevation/material), and Motion (enter/exit).",
+          "events": [
+            {
+              "type": {
+                "text": "CustomEvent"
+              }
+            },
+            {
+              "type": {
+                "text": "CustomEvent"
+              }
+            }
+          ],
+          "x-webeverything": {
+            "implementsIntent": "modal",
+            "composesIntents": [
+              "modal",
+              "focus-containment",
+              "surface",
+              "motion"
+            ],
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "Dialog",
+          "declaration": {
+            "name": "Dialog",
+            "module": "@frontierui/blocks/dialog/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/parsers/text-node/double-curly/DoubleCurlyBracketParser.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "DoubleCurlyBracketParser",
+          "description": "Text node parser for Mustache-style {{expression}} syntax. Detects {{ and }} delimiters in text content.",
+          "x-webeverything": {
+            "blockType": "Parser",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "DoubleCurlyBracketParser",
+          "declaration": {
+            "name": "DoubleCurlyBracketParser",
+            "module": "@frontierui/blocks/parsers/text-node/double-curly/DoubleCurlyBracketParser.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/parsers/text-node/double-square/DoubleSquareBracketParser.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "DoubleSquareBracketParser",
+          "description": "Text node parser for Polymer-style [[expression]] syntax. Detects [[ and ]] delimiters in text content.",
+          "x-webeverything": {
+            "blockType": "Parser",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "DoubleSquareBracketParser",
+          "declaration": {
+            "name": "DoubleSquareBracketParser",
+            "module": "@frontierui/blocks/parsers/text-node/double-square/DoubleSquareBracketParser.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/draft-persistence/DraftPersistence.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "DraftPersistence",
+          "description": "Durable save-and-resume of an entity's working state (the #011 storage facet of webstates): autosave-on-change snapshots restored to the exact field state across sessions, behind a pluggable CustomStorageStrategy (IndexedDB native-first, localStorage degradation, in-memory test fallback), plus the last-writer-wins co-edit primitive (per-editor token + savedAt compare + an \"also editing\" presence signal over BroadcastChannel/storage).",
+          "x-webeverything": {
+            "webStandards": {
+              "indexedDB": {
+                "status": "Baseline",
+                "pattern": "IndexedDB as the durable structured-record store",
+                "adoption": "IndexedDbStorageStrategy is the native-first default behind the CustomStorageStrategy seam (#011 Fork 1A).",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API"
+              },
+              "storagePersist": {
+                "status": "Baseline",
+                "pattern": "navigator.storage.persist() to request non-evictable storage",
+                "adoption": "requestPersistent() best-effort marks the drafts durable so the OS will not evict them under pressure.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/StorageManager/persist"
+              },
+              "broadcastChannel": {
+                "status": "Baseline",
+                "pattern": "BroadcastChannel for cross-tab presence/conflict signalling",
+                "adoption": "CoEditCoordinator broadcasts hello/saved/bye; falls back to localStorage + the storage event where BroadcastChannel is absent.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/BroadcastChannel"
+              },
+              "webStorage": {
+                "status": "Baseline",
+                "pattern": "localStorage as the graceful-degradation store",
+                "adoption": "LocalStorageStrategy is the degradation path when IndexedDB is unavailable; prefixed keys keep it namespaced.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Window/localStorage"
+              }
+            },
+            "blockType": "Module",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "DraftPersistence",
+          "declaration": {
+            "name": "DraftPersistence",
+            "module": "@frontierui/blocks/draft-persistence/DraftPersistence.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "DraftPersistenceOptions",
+          "declaration": {
+            "name": "DraftPersistenceOptions",
+            "module": "@frontierui/blocks/draft-persistence/DraftPersistence.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "MemoryStorageStrategy",
+          "declaration": {
+            "name": "MemoryStorageStrategy",
+            "module": "@frontierui/blocks/draft-persistence/DraftPersistence.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "LocalStorageStrategy",
+          "declaration": {
+            "name": "LocalStorageStrategy",
+            "module": "@frontierui/blocks/draft-persistence/DraftPersistence.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "IndexedDbStorageStrategy",
+          "declaration": {
+            "name": "IndexedDbStorageStrategy",
+            "module": "@frontierui/blocks/draft-persistence/DraftPersistence.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "pickDefaultStorage",
+          "declaration": {
+            "name": "pickDefaultStorage",
+            "module": "@frontierui/blocks/draft-persistence/DraftPersistence.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "CoEditCoordinator",
+          "declaration": {
+            "name": "CoEditCoordinator",
+            "module": "@frontierui/blocks/draft-persistence/DraftPersistence.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "resolveLww",
+          "declaration": {
+            "name": "resolveLww",
+            "module": "@frontierui/blocks/draft-persistence/DraftPersistence.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "CustomStorageStrategy",
+          "declaration": {
+            "name": "CustomStorageStrategy",
+            "module": "@frontierui/blocks/draft-persistence/DraftPersistence.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "DraftSnapshot",
+          "declaration": {
+            "name": "DraftSnapshot",
+            "module": "@frontierui/blocks/draft-persistence/DraftPersistence.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "DraftPersistenceConfig",
+          "declaration": {
+            "name": "DraftPersistenceConfig",
+            "module": "@frontierui/blocks/draft-persistence/DraftPersistence.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "CoEditor",
+          "declaration": {
+            "name": "CoEditor",
+            "module": "@frontierui/blocks/draft-persistence/DraftPersistence.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "LwwResult",
+          "declaration": {
+            "name": "LwwResult",
+            "module": "@frontierui/blocks/draft-persistence/DraftPersistence.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "DEFAULT_CONFIG",
+          "declaration": {
+            "name": "DEFAULT_CONFIG",
+            "module": "@frontierui/blocks/draft-persistence/DraftPersistence.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "PRESENCE_EVENT",
+          "declaration": {
+            "name": "PRESENCE_EVENT",
+            "module": "@frontierui/blocks/draft-persistence/DraftPersistence.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "CONFLICT_EVENT",
+          "declaration": {
+            "name": "CONFLICT_EVENT",
+            "module": "@frontierui/blocks/draft-persistence/DraftPersistence.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/drawer/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "Drawer",
+          "description": "The edge-anchored, sliding concrete member of the dialog family — a panel that enters from a viewport edge (a navigation drawer, a filter panel, a detail pane). It does NOT re-implement the modal-surface machinery: it extends the abstract dialog block (focus containment, escape/outside/backdrop dismissal, scroll-lock, modal/non-modal mode, top-layer mount are all inherited) and fixes the configuration to an edge — the Modal Intent's placement=start|end (RTL-aware), with a slide-in/out motion and swipe-to-dismiss added on top of the inherited dismissal. Relationship to the dialog family mirrors dropdown to droplist: a concrete member, not a standalone widget and not a flag on one widget. Its siblings are the centered modal (placement=center) and the bottom sheet (placement=bottom).",
+          "x-webeverything": {
+            "implementsIntent": "modal",
+            "composesIntents": [
+              "modal",
+              "surface",
+              "motion"
+            ],
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "Drawer",
+          "declaration": {
+            "name": "Drawer",
+            "module": "@frontierui/blocks/drawer/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/dropdown/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "Dropdown",
+          "description": "The single-select concrete member of the droplist family — a button-triggered, non-filtering listbox with type-ahead. A form-associated custom element (<drop-list>) so <form>/FormData/reset/validity work like the native <select> baseline, with no hidden input shim.",
+          "x-webeverything": {
+            "implementsIntent": "selection",
+            "composesIntents": [
+              "anchor",
+              "focus-delegation",
+              "selection",
+              "type-ahead"
+            ],
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "Dropdown",
+          "declaration": {
+            "name": "Dropdown",
+            "module": "@frontierui/blocks/dropdown/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/droplist/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "Droplist",
+          "description": "Composition manifest for the droplist family — the abstract substrate every list-based selection surface conforms to (Dropdown, Multi-dropdown, Autocomplete, Tree-select, native <select>). Composes existing intents rather than re-specifying their behavior, and documents the two-channel resolution rule (ambient intent vs. trait selection) that concrete members resolve through.",
+          "x-webeverything": {
+            "implementsIntent": "anchor",
+            "composesIntents": [
+              "anchor",
+              "focus-delegation",
+              "selection",
+              "type-ahead",
+              "input",
+              "live-region-status",
+              "windowed-collection",
+              "loader",
+              "typography"
+            ],
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "Droplist",
+          "declaration": {
+            "name": "Droplist",
+            "module": "@frontierui/blocks/droplist/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/attributes/on-event/OnEventAttribute.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "createOnEventAttribute",
+          "description": "Declarative event-to-action mapping using expression syntax with context resolution.",
+          "x-webeverything": {
+            "blockType": "Behavior",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "createOnEventAttribute",
+          "declaration": {
+            "name": "createOnEventAttribute",
+            "module": "@frontierui/blocks/attributes/on-event/OnEventAttribute.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "createEventAttributes",
+          "declaration": {
+            "name": "createEventAttributes",
+            "module": "@frontierui/blocks/attributes/on-event/OnEventAttribute.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerEventAttributes",
+          "declaration": {
+            "name": "registerEventAttributes",
+            "module": "@frontierui/blocks/attributes/on-event/OnEventAttribute.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/for-each/ForEachBehavior.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "ForEachBehavior",
+          "description": "Structural directive for rendering lists of items based on an array.",
+          "x-webeverything": {
+            "blockType": "Directive",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "ForEachBehavior",
+          "declaration": {
+            "name": "ForEachBehavior",
+            "module": "@frontierui/blocks/for-each/ForEachBehavior.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerForEach",
+          "declaration": {
+            "name": "registerForEach",
+            "module": "@frontierui/blocks/for-each/ForEachBehavior.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/form/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "FormState",
+          "description": "The form-level state machine and lifecycle actions, sitting ABOVE the field-level Validation Intent / Web Validation (which own per-field rules and validity). Web Validation answers 'is this field valid?'; the Form block answers 'what is the state of the whole form, and how do I reset / submit / initialize it?' Grounded in the native `<form>` element, `FormData`, the Constraint Validation API and `formAssociated` custom elements — it adds only the aggregate state and lifecycle actions the platform doesn't expose, and composes existing intents for everything else. Candidate standard (no implementation yet); composition manifest like Droplist.",
+          "x-webeverything": {
+            "composesIntents": [
+              "validation",
+              "exit-guard",
+              "feedback",
+              "reliability"
+            ],
+            "webStandards": [
+              "HTMLFormElement",
+              "FormData",
+              "Constraint Validation API",
+              "formAssociated custom elements (ElementInternals)"
+            ],
+            "blockType": "Store",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "FormState",
+          "declaration": {
+            "name": "FormState",
+            "module": "@frontierui/blocks/form/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "FormActions",
+          "declaration": {
+            "name": "FormActions",
+            "module": "@frontierui/blocks/form/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "FormValues",
+          "declaration": {
+            "name": "FormValues",
+            "module": "@frontierui/blocks/form/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/parsers/handler-expression/HandlerExpressionParser.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "HandlerExpressionParser",
+          "description": "Parser for function-call style event handler expressions. Extends CustomAttributeParser for registry integration.",
+          "x-webeverything": {
+            "blockType": "Parser",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "HandlerExpressionParser",
+          "declaration": {
+            "name": "HandlerExpressionParser",
+            "module": "@frontierui/blocks/parsers/handler-expression/HandlerExpressionParser.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "HandlerExpressionParseError",
+          "declaration": {
+            "name": "HandlerExpressionParseError",
+            "module": "@frontierui/blocks/parsers/handler-expression/HandlerExpressionParser.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "HandlerExpressionShadowError",
+          "declaration": {
+            "name": "HandlerExpressionShadowError",
+            "module": "@frontierui/blocks/parsers/handler-expression/HandlerExpressionParser.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "createHandlerExpressionParser",
+          "declaration": {
+            "name": "createHandlerExpressionParser",
+            "module": "@frontierui/blocks/parsers/handler-expression/HandlerExpressionParser.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/inline-trigger/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "InlineTrigger",
+          "description": "The runnable trigger-detection engine ratified in #591 (Fork 1-C): an editable region that detects a boundary-anchored trigger char (@/:/#//), slices the query, anchors a popover to the caret (virtual element via the anchor intent), and routes results through the picker surface / autocomplete listbox. Detection-only per Fork 2-A — emits the resolved selection {key, query, range, item} and lets the consumer commit, owning no document model, so it works uniformly in <input>/<textarea>/contenteditable and composes the rich-text standard (#590) for token insertion without being blocked on it. Ships reference text + token insertion adapters but owns neither commit. Forced invariants: APG editable-combobox virtual focus (DOM focus stays in the text, aria-activedescendant drives the listbox), IME-composition suspension, not-a-protocol.",
+          "x-webeverything": {
+            "implementsIntent": "inline-trigger",
+            "composesIntents": [
+              "input",
+              "anchor",
+              "focus-delegation",
+              "live-region-status",
+              "selection"
+            ],
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "InlineTrigger",
+          "declaration": {
+            "name": "InlineTrigger",
+            "module": "@frontierui/blocks/inline-trigger/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/input-family/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "InputFamily",
+          "description": "Native-first over the text-ish `<input>` family (text / number / currency / phone / masked): the formatting, masking, and typing affordances the bare element can't express, while keeping the native input as the substrate. Realizes the `input` intent. The platform `type` (`text`/`number`/`tel`/`email`/`url`) carries semantics, keyboard, and validation for free; the block adds a display-format layer (Intl) and an optional input mask over a raw value, never replacing the element. Zero JS for a plain typed input; the format/mask behavior is opt-in. Sliced from #468 (form-control inventory).",
+          "x-webeverything": {
+            "implementsIntent": "input",
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "InputFamily",
+          "declaration": {
+            "name": "InputFamily",
+            "module": "@frontierui/blocks/input-family/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/text-nodes/interpolation/InterpolationTextNode.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "InterpolationTextNode",
+          "description": "Reactive text node that evaluates expressions and renders their values. Connects text node parsing to the expression parser pipeline.",
+          "x-webeverything": {
+            "blockType": "Behavior",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "InterpolationTextNode",
+          "declaration": {
+            "name": "InterpolationTextNode",
+            "module": "@frontierui/blocks/text-nodes/interpolation/InterpolationTextNode.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "InterpolationTextNodeOptions",
+          "declaration": {
+            "name": "InterpolationTextNodeOptions",
+            "module": "@frontierui/blocks/text-nodes/interpolation/InterpolationTextNode.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/keyboard-shortcuts/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "KeyboardShortcuts",
+          "description": "Standardized keyboard interaction management enabling consistent shortcut handling across shadow boundaries and OS-specific layouts.",
+          "x-webeverything": {
+            "blockType": "Module",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "KeyboardShortcuts",
+          "declaration": {
+            "name": "KeyboardShortcuts",
+            "module": "@frontierui/blocks/keyboard-shortcuts/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/lifecycle/LifecycleProvider.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "DefaultLifecycleProvider",
+          "description": "Reference runtime for the Web Lifecycle protocol (weblifecycle / #353) — a domain entity's declared status set + guarded, role-scoped transition map. Ships the protocol's seam: a data-defined `LifecycleDefinition` (the only lock; portable across engines), the swappable `CustomLifecycleProvider` contract (`available()` + `transition()`), a native-first `DefaultLifecycleProvider` in-memory reference, and the `CustomLifecycleRegistry` (`window.customLifecycles`). Authorization is delegated to a `GuardResolver` (the Web Guards seam; the default is permissive, a real authz provider is async + server-authoritative) and persistence stays the entity's own concern — so the block owns only the state machine. Every applied transition emits a `LifecycleEvent` ({ entity, from, to, actor, at }), the composition seam for audit-trail (#357). First consumer: the loan-origination exercise app (#317).",
+          "x-webeverything": {
+            "blockType": "Module",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "DefaultLifecycleProvider",
+          "declaration": {
+            "name": "DefaultLifecycleProvider",
+            "module": "@frontierui/blocks/lifecycle/LifecycleProvider.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "CustomLifecycleRegistry",
+          "declaration": {
+            "name": "CustomLifecycleRegistry",
+            "module": "@frontierui/blocks/lifecycle/LifecycleProvider.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerLifecycle",
+          "declaration": {
+            "name": "registerLifecycle",
+            "module": "@frontierui/blocks/lifecycle/LifecycleProvider.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/master-detail/MasterDetailBehavior.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "MasterDetailBehavior",
+          "description": "Reference coordinator for the master-detail intent (#356) — pairs a collection (master list) with a coupled detail region. `MasterDetailBehavior(masterEl, { itemSelector, detailEl, keyOf, renderDetail, focusFlow?, emptyState? })` COMPOSES the shipping selection block (it does not reimplement selection): on select it renders the detail for the item's key (async-aware, toggling an `md-loading` Loader seam), wires the detail as a labelled `role=\"region\"`, applies the focus flow (retain|advance), and handles the empty state (placeholder|collapse), emitting `detail-change`. URL deep-linking is left to the consumer's router (compose, don't duplicate). First consumer: the loan-origination exercise app (#317).",
+          "x-webeverything": {
+            "implementsIntent": "master-detail",
+            "composesIntents": [
+              "selection"
+            ],
+            "blockType": "Behavior",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "MasterDetailBehavior",
+          "declaration": {
+            "name": "MasterDetailBehavior",
+            "module": "@frontierui/blocks/master-detail/MasterDetailBehavior.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerMasterDetail",
+          "declaration": {
+            "name": "registerMasterDetail",
+            "module": "@frontierui/blocks/master-detail/MasterDetailBehavior.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/menu/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "Menu",
+          "description": "Composition manifest for the action-invocation menu family — the ARIA menu / menubar / menuitem surface for invoking COMMANDS, not selecting values. One block with a shape: menubar | menu | context dimension (orientation derived); roving focus as a fixed mechanic (overriding the droplist family virtual default); every item composes the command intent for invocation; checkable items reuse Selection under a checkable trait; submenus compose Disclosure + Anchor (not the tree-select hierarchy intent); separator and group are owned directly. Distinct from the droplist family, which are listbox/combobox value selectors. Ratified in #173.",
+          "x-webeverything": {
+            "implementsIntent": "command",
+            "composesIntents": [
+              "command",
+              "focus-delegation",
+              "anchor",
+              "type-ahead",
+              "selection",
+              "disclosure",
+              "action"
+            ],
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "Menu",
+          "declaration": {
+            "name": "Menu",
+            "module": "@frontierui/blocks/menu/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/multi-select-dropdown/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "Multi-selectDropdown",
+          "description": "The multiple-select concrete member of the droplist family — the same button-triggered listbox substrate as the dropdown with one trait flipped: selection.model=multiple, selectionFollowsFocus=false (aria-multiselectable; Space toggles the focused option, arrows move focus only). A form-associated custom element with a multi-value surface (.values array, FormData repeating the name) like the native <select multiple> baseline.",
+          "x-webeverything": {
+            "implementsIntent": "selection",
+            "composesIntents": [
+              "anchor",
+              "focus-delegation",
+              "selection",
+              "type-ahead"
+            ],
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "Multi-selectDropdown",
+          "declaration": {
+            "name": "Multi-selectDropdown",
+            "module": "@frontierui/blocks/multi-select-dropdown/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/navigation/",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "NavListBehavior",
+          "description": "Accessible navigation menus using the W3C APG Disclosure Navigation pattern. Provides keyboard navigation, collapsible sections, and router integration with aria-current tracking.",
+          "x-webeverything": {
+            "implementsIntent": "navigation",
+            "webStandards": {
+              "disclosureNavigation": {
+                "status": "W3C APG Pattern",
+                "pattern": "Disclosure Navigation Menu pattern for site navigation",
+                "adoption": "NavSectionBehavior implements disclosure with aria-expanded and aria-controls",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/examples/disclosure-navigation/"
+              },
+              "ariaCurrent": {
+                "status": "WAI-ARIA 1.1",
+                "pattern": "aria-current='page' to indicate the current page within navigation",
+                "adoption": "RouteLinkBehavior sets aria-current='page' on active links, NavListBehavior tracks it for roving tabindex",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current"
+              },
+              "navigationLandmark": {
+                "status": "Standard",
+                "pattern": "nav element with aria-label when multiple nav landmarks exist",
+                "adoption": "nav:list attaches to nav elements, documentation recommends aria-label",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/nav"
+              },
+              "rovingTabindex": {
+                "status": "W3C APG Practice",
+                "pattern": "Focus management using tabindex 0/-1 for keyboard-navigable widgets",
+                "adoption": "NavListBehavior manages roving tabindex across navigation items",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/#kbd_roving_tabindex"
+              },
+              "prefersReducedMotion": {
+                "status": "Baseline",
+                "pattern": "prefers-reduced-motion media query",
+                "adoption": "Demo CSS disables expand/collapse animations when reduced motion preferred",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/@media/prefers-reduced-motion"
+              }
+            },
+            "blockType": "Module",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "NavListBehavior",
+          "declaration": {
+            "name": "NavListBehavior",
+            "module": "@frontierui/blocks/navigation/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "NavSectionBehavior",
+          "declaration": {
+            "name": "NavSectionBehavior",
+            "module": "@frontierui/blocks/navigation/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerNavigation",
+          "declaration": {
+            "name": "registerNavigation",
+            "module": "@frontierui/blocks/navigation/"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/notification/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "Notification",
+          "description": "The runnable surface that realizes the Feedback Intent — a transient, non-blocking message that appears, is accessibly announced, persists for a bounded time (or until dismissed), and is removed. It owns the general notification contract: a top-layer region host plus an injectable controller that app code calls imperatively to enqueue messages, with queueing/stacking, severity-mapped announcement, auto-timeout (paused on hover/focus, forced indefinite when an action is present), and manual dismissal. Presentation styles (toast, snackbar, banner-position, …) are the implementation's choice, not part of the contract — the block defines behaviour, the implementation picks the look. Native-first: the region mounts to the top layer via the Popover API where supported, falling back to a Web Portals mount. Composes the Message Intent (shared severity/tone vocabulary), the Live-Region Status Intent (announcement transport), the Surface Intent (card elevation/material), and the Motion Intent (enter/exit). Deliberately distinct from the OS-level Web Notifications API (system notifications, permission-gated — Web Permissions #009), from background-task-surface (#135, a persistent long-running-task surface), and from inline Message banners (structural, in-flow).",
+          "events": [
+            {
+              "type": {
+                "text": "CustomEvent"
+              }
+            },
+            {
+              "type": {
+                "text": "CustomEvent"
+              }
+            }
+          ],
+          "x-webeverything": {
+            "implementsIntent": "feedback",
+            "composesIntents": [
+              "message",
+              "live-region-status",
+              "surface",
+              "motion"
+            ],
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "Notification",
+          "declaration": {
+            "name": "Notification",
+            "module": "@frontierui/blocks/notification/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/renderers/pagination/",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "PaginationModule",
+          "description": "The blocks-layer home for the Collection Operations `page` stage. Renders paged controls inside a `<nav aria-label=\"pagination\">` landmark with `aria-current=\"page\"`, syncs the active page to a shareable self-canonical `?page=n` URL via the History API (Navigation API as enhancement; cross-document View Transitions for zero-JS server-rendered transitions), and wires `advance:auto` to an IntersectionObserver scroll sentinel. Numbered / prev-next / load-more presentations over the orthogonal `pageMode` × `advance` axes; infinite scroll = append + auto, never a peer mode. Ships a consumable `PaginationBehavior` (and a `<page-nav>` element) that mounts the verified renderer, delegates page / load-more clicks, clamps + advances the page state, and emits `pagination-change`; first consumer is the loan-origination pipeline (#317).",
+          "x-webeverything": {
+            "implementsIntent": "collection-operations",
+            "traits": [
+              {
+                "name": "withRangeLabel",
+                "description": "Surfaces the slice as a 'showing 21-40 of 500' result-range label. Requires a known total -> offset/page protocol only.",
+                "intentDimension": "rangeLabel"
+              },
+              {
+                "name": "withPageSizeSelect",
+                "description": "Adds a page-size selector (e.g. 10 / 25 / 50 / 100). Recommended options and persistence pending #060.",
+                "intentDimension": "page"
+              },
+              {
+                "name": "withAutoAdvance",
+                "description": "Turns append into infinite scroll by fetching the next slice at an IntersectionObserver scroll sentinel (advance:auto).",
+                "intentDimension": "advance"
+              },
+              {
+                "name": "withUrlSync",
+                "description": "Reflects the active page in a shareable, back-button-restorable ?page=n URL via the History API.",
+                "intentDimension": "urlSync"
+              }
+            ],
+            "webStandards": {
+              "paginationNavLandmark": {
+                "status": "W3C WAI-ARIA APG",
+                "pattern": "Pagination controls wrapped in a `<nav aria-label=\"pagination\">` landmark; the active page link marked `aria-current=\"page\"`",
+                "adoption": "PaginationBehavior renders the nav landmark and projects the active page as aria-current='page'; each landmark gets a unique label when more than one exists",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/landmark-regions/"
+              },
+              "ariaCurrent": {
+                "status": "WAI-ARIA 1.1",
+                "pattern": "aria-current='page' marks the active page within the pagination nav",
+                "adoption": "Set on the active page link; the companion sortDirection->aria-sort projection on table headers is deferred to the grid block",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current"
+              },
+              "historyApi": {
+                "status": "Baseline 2020",
+                "pattern": "pushState/popstate/scrollRestoration sync ?page=n to a shareable, back-button-restorable URL",
+                "adoption": "The native-first baseline for urlSync='query-param'; the active page is a self-canonical ?page=n and restores on back/forward",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/History/pushState"
+              },
+              "navigationApi": {
+                "status": "Baseline 2026",
+                "pattern": "A single navigate event intercepts same-origin same-document navigations",
+                "adoption": "Progressive enhancement over the History API baseline — used when available, never required",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API"
+              },
+              "crossDocumentViewTransitions": {
+                "status": "Progressive enhancement",
+                "pattern": "@view-transition { navigation: auto; } animates full-page navigation between server-rendered ?page=n pages with zero JS",
+                "adoption": "The MPA/server-rendered branch opts in via the CSS rule on both pages; no script required",
+                "reference": "https://developer.chrome.com/docs/web-platform/view-transitions/cross-document"
+              },
+              "intersectionObserver": {
+                "status": "Baseline",
+                "pattern": "A scroll sentinel observed by IntersectionObserver requests the next slice at the scroll boundary",
+                "adoption": "Wires advance:auto (append + auto = infinite scroll); rendering delegates to Windowed Collection, lifecycle to Loader",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/IntersectionObserver"
+              },
+              "selfCanonicalUrls": {
+                "status": "Google Search Central",
+                "pattern": "Each page is its own unique self-referencing canonical ?page=n; rel=next/prev is deprecated (2019) and never emitted as primary machinery",
+                "adoption": "Server-rendered <a href> page links are the indexable default; load-more/auto content provides a crawlable paginated path alongside the interactive UI",
+                "reference": "https://developers.google.com/search/docs/specialty/ecommerce/pagination-and-incremental-page-loading"
+              }
+            },
+            "blockType": "Module",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "PaginationModule",
+          "declaration": {
+            "name": "PaginationModule",
+            "module": "@frontierui/blocks/renderers/pagination/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "PaginationBehavior",
+          "declaration": {
+            "name": "PaginationBehavior",
+            "module": "@frontierui/blocks/renderers/pagination/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerPagination",
+          "declaration": {
+            "name": "registerPagination",
+            "module": "@frontierui/blocks/renderers/pagination/"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/picker-surface/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "PickerSurface",
+          "description": "The one general browse↔search picker surface per #370 Fork 4 (compose, don't reinvent): a `popover` container + the search `input` intent + a 2-D category grid, reusing the droplist/autocomplete substrate rather than a bespoke emoji-picker block. Owns exactly one thing — the load-bearing APG Grid (2-D arrow browse) ↔ Combobox/listbox (search) focus hand-off — and defers everything else to the intent that owns it. One reusable surface instantiated by many specific picker contexts (full-page filtered collection, in-editor tooltip picker, reaction quick-picker), each its own later story.",
+          "x-webeverything": {
+            "implementsIntent": "anchor",
+            "composesIntents": [
+              "anchor",
+              "input",
+              "focus-delegation",
+              "selection",
+              "live-region-status",
+              "windowed-collection",
+              "expressive-symbol"
+            ],
+            "blockType": "Component",
+            "status": "concept"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "PickerSurface",
+          "declaration": {
+            "name": "PickerSurface",
+            "module": "@frontierui/blocks/picker-surface/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/prefetch-behavior/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "PrefetchBehavior",
+          "description": "Attribute-based behavior that implements the Prefetch Intent by detecting user conditions via browser APIs and triggering resource prefetching.",
+          "events": [
+            {
+              "name": "prefetch-triggered",
+              "type": {
+                "text": "PrefetchTriggeredEvent"
+              },
+              "description": "Fired when a prefetch is about to start. Cancel to suppress."
+            },
+            {
+              "name": "prefetch-suppressed",
+              "type": {
+                "text": "PrefetchSuppressedEvent"
+              },
+              "description": "Fired when a prefetch is suppressed due to user conditions (saveData, low battery, slow connection)."
+            },
+            {
+              "name": "prefetch-complete",
+              "type": {
+                "text": "PrefetchCompleteEvent"
+              },
+              "description": "Fired when prefetched data is stored and ready for instant navigation."
+            }
+          ],
+          "x-webeverything": {
+            "implementsIntent": "prefetch",
+            "traits": [
+              {
+                "name": "withViewportPrefetch",
+                "description": "Triggers prefetch when link enters the viewport via IntersectionObserver",
+                "intentDimension": "prefetch.eagerness.viewport"
+              },
+              {
+                "name": "withHoverPrefetch",
+                "description": "Triggers prefetch on pointer hover (>200ms debounce) or focus",
+                "intentDimension": "prefetch.eagerness.hover"
+              },
+              {
+                "name": "withInteractionPrefetch",
+                "description": "Triggers prefetch at pointer down (moment of intent)",
+                "intentDimension": "prefetch.eagerness.interaction"
+              }
+            ],
+            "webStandards": {
+              "speculationRules": {
+                "status": "Chrome 121+",
+                "pattern": "Declarative JSON for prefetch/prerender: <script type=\"speculationrules\">",
+                "adoption": "Aligns eagerness model (conservative/moderate/eager/immediate) with our intent levels; uses browser-native prefetch when available",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Speculation_Rules_API"
+              },
+              "intersectionObserver": {
+                "status": "Baseline",
+                "pattern": "Observes element visibility relative to viewport/ancestor",
+                "adoption": "withViewportPrefetch uses IntersectionObserver with configurable rootMargin to trigger prefetch before element is fully visible",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/IntersectionObserver"
+              },
+              "navigatorConnection": {
+                "status": "Limited (Chromium)",
+                "pattern": "NetworkInformation API: effectiveType, saveData, downlink",
+                "adoption": "Suppresses prefetch when saveData is true or effectiveType is 'slow-2g'/'2g'",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/NetworkInformation"
+              },
+              "batteryStatus": {
+                "status": "Limited (Chromium)",
+                "pattern": "Battery Status API: navigator.getBattery() for charging/level",
+                "adoption": "Suppresses viewport-level prefetch when battery < 20% and not charging",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Battery_Status_API"
+              },
+              "linkRelPrefetch": {
+                "status": "Baseline",
+                "pattern": "<link rel=\"prefetch\"> for resource hints",
+                "adoption": "When the prefetched resource is a navigation, injects <link rel=\"prefetch\"> into <head> for browser-native fetching",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Attributes/rel/prefetch"
+              }
+            },
+            "blockType": "Behavior",
+            "status": "concept"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "PrefetchBehavior",
+          "declaration": {
+            "name": "PrefetchBehavior",
+            "module": "@frontierui/blocks/prefetch-behavior/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withViewportPrefetch",
+          "declaration": {
+            "name": "withViewportPrefetch",
+            "module": "@frontierui/blocks/prefetch-behavior/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withHoverPrefetch",
+          "declaration": {
+            "name": "withHoverPrefetch",
+            "module": "@frontierui/blocks/prefetch-behavior/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withInteractionPrefetch",
+          "declaration": {
+            "name": "withInteractionPrefetch",
+            "module": "@frontierui/blocks/prefetch-behavior/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "PrefetchTriggeredEvent",
+          "declaration": {
+            "name": "PrefetchTriggeredEvent",
+            "module": "@frontierui/blocks/prefetch-behavior/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "PrefetchSuppressedEvent",
+          "declaration": {
+            "name": "PrefetchSuppressedEvent",
+            "module": "@frontierui/blocks/prefetch-behavior/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "PrefetchCompleteEvent",
+          "declaration": {
+            "name": "PrefetchCompleteEvent",
+            "module": "@frontierui/blocks/prefetch-behavior/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "PrefetchCondition",
+          "declaration": {
+            "name": "PrefetchCondition",
+            "module": "@frontierui/blocks/prefetch-behavior/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "PrefetchEagerness",
+          "declaration": {
+            "name": "PrefetchEagerness",
+            "module": "@frontierui/blocks/prefetch-behavior/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/radio-group/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "RadioGroup",
+          "description": "Native-first over a `<input type=\"radio\">` group sharing a `name`: single-select among mutually-exclusive choices. Realizes the `selection` intent (model: single) and composes `focus-delegation` (roving — arrow keys move AND select within the group, the group is a single Tab stop). Native exclusivity comes free from the shared `name`; a `<fieldset>` + `<legend>` names the group. Zero JS for the standard case. Sliced from #468 (form-control inventory).",
+          "x-webeverything": {
+            "implementsIntent": "selection",
+            "composesIntents": [
+              "focus-delegation"
+            ],
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "RadioGroup",
+          "declaration": {
+            "name": "RadioGroup",
+            "module": "@frontierui/blocks/radio-group/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/reaction/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "Reaction",
+          "description": "Affix-a-symbol-to-content interaction: each reaction is an `aria-pressed` toggle backed by the Reaction Intent. Composes the expressive-symbol glyph (never re-renders it) and adopts Atlassian ReactionSummary as the contract baseline (count · users[] · reacted · optimisticallyUpdated). The only first-class precedent (Atlassian @atlaskit/reactions) is exactly this block+intent shape. Per #370 Fork 5.",
+          "x-webeverything": {
+            "composesIntents": [
+              "reaction",
+              "expressive-symbol"
+            ],
+            "blockType": "Component",
+            "status": "concept"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "Reaction",
+          "declaration": {
+            "name": "Reaction",
+            "module": "@frontierui/blocks/reaction/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/renderers/reorderable-list/",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "reduceReorder",
+          "description": "A list whose item order is user-mutable by pointer drag and by keyboard, with live-region announcement and a pluggable commit strategy. Relocates items with atomic Element.moveBefore() so an item keeps its focus/animation/connection state across a move. Manual order — not Collection Operations' computed sort.",
+          "x-webeverything": {
+            "implementsIntent": "reorder",
+            "composesIntents": [
+              "interaction",
+              "focus-delegation",
+              "live-region-status",
+              "collection-operations"
+            ],
+            "traits": [
+              {
+                "name": "withDragHandle",
+                "description": "Restrict the grab affordance to a scoped handle within each item, leaving the rest interactive",
+                "intentDimension": "reorder.grab.handle"
+              },
+              {
+                "name": "withPointerReorder",
+                "description": "Drag-to-reorder via Pointer Events with pointer capture (mouse, touch, pen)",
+                "intentDimension": "reorder.movement.pointer"
+              },
+              {
+                "name": "withKeyboardReorder",
+                "description": "Roving-tabindex keyboard path: grab, move with arrows, drop or cancel",
+                "intentDimension": "reorder.movement.keyboard"
+              },
+              {
+                "name": "withLiveAnnounce",
+                "description": "Announce each move and the final commit via a polite live region (replaces deprecated aria-grabbed)",
+                "intentDimension": "reorder.announce.live-region"
+              },
+              {
+                "name": "withCommitStrategy",
+                "description": "Persist the new order (localStorage or write-back) behind the cancelable reorder-commit event",
+                "intentDimension": "reorder.commit.persisted"
+              },
+              {
+                "name": "withCrossListReorder",
+                "description": "Move items between sibling lists that share a group key",
+                "intentDimension": "reorder.scope.cross-list"
+              }
+            ],
+            "webStandards": {
+              "pointerEvents": {
+                "status": "Baseline",
+                "pattern": "Pointer Events + setPointerCapture",
+                "adoption": "The default drag path — unifies mouse/touch/pen and captures the pointer for the duration of a drag. Preferred over the HTML5 Drag and Drop API for in-list reorder (better touch + a11y).",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Pointer_events"
+              },
+              "elementMoveBefore": {
+                "status": "Baseline 2025 (progressive enhancement)",
+                "pattern": "Element.moveBefore() atomic relocation",
+                "adoption": "Relocate an item without disconnecting it, preserving focus, animations, iframes, and custom-element connection. Wired declaratively via the Component block's preserve-on-move attribute; falls back to insertBefore where unsupported.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Element/moveBefore"
+              },
+              "ariaApgDrag": {
+                "status": "WAI-ARIA Authoring Practices",
+                "pattern": "Keyboard-operable drag with live-region announcement",
+                "adoption": "Roving tabindex over items + grab/move/drop keys; announce moves via a polite live region. The deprecated aria-grabbed/aria-dropeffect are NOT used.",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/"
+              },
+              "htmlDragAndDrop": {
+                "status": "Baseline",
+                "pattern": "HTML Drag and Drop API (draggable, dragstart/dragover/drop)",
+                "adoption": "Reserved for cross-window and OS file transfer (a data-transfer concern, see backlog #007); NOT the in-list reorder default.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API"
+              }
+            },
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "reduceReorder",
+          "declaration": {
+            "name": "reduceReorder",
+            "module": "@frontierui/blocks/renderers/reorderable-list/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "renderReorderableList",
+          "declaration": {
+            "name": "renderReorderableList",
+            "module": "@frontierui/blocks/renderers/reorderable-list/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "auditReorderableList",
+          "declaration": {
+            "name": "auditReorderableList",
+            "module": "@frontierui/blocks/renderers/reorderable-list/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "reconcileOrder",
+          "declaration": {
+            "name": "reconcileOrder",
+            "module": "@frontierui/blocks/renderers/reorderable-list/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "announce",
+          "declaration": {
+            "name": "announce",
+            "module": "@frontierui/blocks/renderers/reorderable-list/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "initialState",
+          "declaration": {
+            "name": "initialState",
+            "module": "@frontierui/blocks/renderers/reorderable-list/"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/resource-action/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "ResourceActionDirective",
+          "description": "Manages async mutation lifecycle (POST/PUT/DELETE) — busy state on triggers, double-submit prevention, optimistic updates with automatic rollback on error.",
+          "x-webeverything": {
+            "implementsIntent": "action",
+            "traits": [
+              {
+                "name": "withBusyTrigger",
+                "description": "Applies busy state to the triggering element during mutation (width locking, aria-disabled, indicator)",
+                "intentDimension": "action.busy"
+              },
+              {
+                "name": "withOptimisticMutation",
+                "description": "Applies predicted result immediately, reverts on error",
+                "intentDimension": "loader.strategy.optimistic"
+              },
+              {
+                "name": "withFeedbackOnComplete",
+                "description": "Dispatches toast/notification on success or error",
+                "intentDimension": null
+              }
+            ],
+            "webStandards": {
+              "fetchAPI": {
+                "status": "Baseline",
+                "pattern": "fetch() for mutations (POST/PUT/DELETE)",
+                "adoption": "Action operations delegate to Custom Clients for transport; AbortController for cancellation",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API"
+              },
+              "invokerCommands": {
+                "status": "Baseline January 2026",
+                "pattern": "commandfor/command for declarative action triggers",
+                "adoption": "Action triggers can use Invoker Commands for mutation invocation",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+              },
+              "ariaDisabled": {
+                "status": "Standard",
+                "pattern": "aria-disabled for non-focusable disable pattern during pending state",
+                "adoption": "withBusyTrigger applies aria-disabled + pointer-events:none during mutation",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-disabled"
+              }
+            },
+            "blockType": "Directive",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "ResourceActionDirective",
+          "declaration": {
+            "name": "ResourceActionDirective",
+            "module": "@frontierui/blocks/resource-action/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withBusyTrigger",
+          "declaration": {
+            "name": "withBusyTrigger",
+            "module": "@frontierui/blocks/resource-action/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withOptimisticMutation",
+          "declaration": {
+            "name": "withOptimisticMutation",
+            "module": "@frontierui/blocks/resource-action/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withFeedbackOnComplete",
+          "declaration": {
+            "name": "withFeedbackOnComplete",
+            "module": "@frontierui/blocks/resource-action/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ResourceActionStartEvent",
+          "declaration": {
+            "name": "ResourceActionStartEvent",
+            "module": "@frontierui/blocks/resource-action/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ResourceActionEndEvent",
+          "declaration": {
+            "name": "ResourceActionEndEvent",
+            "module": "@frontierui/blocks/resource-action/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ResourceActionErrorEvent",
+          "declaration": {
+            "name": "ResourceActionErrorEvent",
+            "module": "@frontierui/blocks/resource-action/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ResourceActionRevertEvent",
+          "declaration": {
+            "name": "ResourceActionRevertEvent",
+            "module": "@frontierui/blocks/resource-action/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/resource-loader/ResourceLoader.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "ResourceLoader",
+          "description": "Trait-based async state management orchestrator handling loading lifecycle with timing, abort, and composable UI traits.",
+          "x-webeverything": {
+            "implementsIntent": "loader",
+            "traits": [
+              {
+                "name": "withOptimistic",
+                "description": "Non-blocking — shows predicted outcome immediately, reverts on failure",
+                "intentDimension": "loader.strategy.optimistic"
+              },
+              {
+                "name": "withSoftBlocking",
+                "description": "Input-blocking — applies aria-disabled and pointer-events:none while content remains visible",
+                "intentDimension": "loader.strategy.soft"
+              },
+              {
+                "name": "withHardBlocking",
+                "description": "Visual-blocking — obscures or overlays content with a backdrop",
+                "intentDimension": "loader.strategy.hard"
+              },
+              {
+                "name": "withReplacement",
+                "description": "Content-blocking — replaces view with placeholder (skeleton, spinner)",
+                "intentDimension": "loader.strategy.replacement"
+              },
+              {
+                "name": "withDeterminate",
+                "description": "Renders measurable progress (0-100%) as a progress bar or percentage",
+                "intentDimension": "loader.progress.determinate"
+              },
+              {
+                "name": "withIndeterminate",
+                "description": "Renders activity indication (spinner, pulse, shimmer) without measurable progress",
+                "intentDimension": "loader.progress.indeterminate"
+              },
+              {
+                "name": "withSkeleton",
+                "description": "Placeholder content matching page structure for initial loads",
+                "intentDimension": "loader.context.initial"
+              },
+              {
+                "name": "withStaleWhileRevalidate",
+                "description": "Keeps previous content visible (dimmed/stale) while refreshing",
+                "intentDimension": "loader.context.transition"
+              }
+            ],
+            "webStandards": {
+              "fetchAPI": {
+                "status": "Baseline",
+                "pattern": "fetch() with AbortController for cancellable requests",
+                "adoption": "All loader operations use AbortSignal for cancellation; superseded navigations abort automatically",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API"
+              },
+              "abortController": {
+                "status": "Baseline",
+                "pattern": "AbortController/AbortSignal for cooperative cancellation",
+                "adoption": "Loaders receive signal param; AbortSignal.timeout() for built-in timeout support",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/AbortController"
+              },
+              "cacheAPI": {
+                "status": "Baseline",
+                "pattern": "Cache/CacheStorage for request-level caching",
+                "adoption": "Custom Cache sub-standard provides cache policy; runtime can delegate to Cache API",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Cache"
+              },
+              "httpCacheControl": {
+                "status": "Standard (RFC 9111)",
+                "pattern": "stale-while-revalidate directive in HTTP headers",
+                "adoption": "withStaleWhileRevalidate trait mirrors this pattern at the UI level",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control"
+              },
+              "ariaBusy": {
+                "status": "Standard",
+                "pattern": "aria-busy for announcing loading state to assistive technology",
+                "adoption": "All strategy traits set aria-busy='true' on the loading region during async operations",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-busy"
+              },
+              "progressElement": {
+                "status": "Standard",
+                "pattern": "<progress> element for native determinate progress indication",
+                "adoption": "withDeterminate trait renders native <progress> with value/max attributes",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/progress"
+              }
+            },
+            "blockType": "Module",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "ResourceLoader",
+          "declaration": {
+            "name": "ResourceLoader",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "LoadResult",
+          "declaration": {
+            "name": "LoadResult",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withSoftBlocking",
+          "declaration": {
+            "name": "withSoftBlocking",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "SoftBlockingOptions",
+          "declaration": {
+            "name": "SoftBlockingOptions",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withReplacement",
+          "declaration": {
+            "name": "withReplacement",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ReplacementOptions",
+          "declaration": {
+            "name": "ReplacementOptions",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withIndeterminate",
+          "declaration": {
+            "name": "withIndeterminate",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "IndeterminateOptions",
+          "declaration": {
+            "name": "IndeterminateOptions",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "LoaderIntent",
+          "declaration": {
+            "name": "LoaderIntent",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "LoaderState",
+          "declaration": {
+            "name": "LoaderState",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "BlockingStrategy",
+          "declaration": {
+            "name": "BlockingStrategy",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "LoaderScope",
+          "declaration": {
+            "name": "LoaderScope",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "LoaderProgress",
+          "declaration": {
+            "name": "LoaderProgress",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "LoaderContext",
+          "declaration": {
+            "name": "LoaderContext",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "TraitHandle",
+          "declaration": {
+            "name": "TraitHandle",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "TraitFactory",
+          "declaration": {
+            "name": "TraitFactory",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ResourceLoaderOptions",
+          "declaration": {
+            "name": "ResourceLoaderOptions",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ResourceLoadStartDetail",
+          "declaration": {
+            "name": "ResourceLoadStartDetail",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ResourceLoadEndDetail",
+          "declaration": {
+            "name": "ResourceLoadEndDetail",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ResourceLoadErrorDetail",
+          "declaration": {
+            "name": "ResourceLoadErrorDetail",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ResourceStateChangeDetail",
+          "declaration": {
+            "name": "ResourceStateChangeDetail",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "DEFAULT_INTENT",
+          "declaration": {
+            "name": "DEFAULT_INTENT",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "DEFAULT_TIMINGS",
+          "declaration": {
+            "name": "DEFAULT_TIMINGS",
+            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/router/elements/RouteViewElement.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "RouteViewElement",
+          "description": "Declarative client-side routing built on Navigation API, URLPattern, and ViewEngine.",
+          "x-webeverything": {
+            "implementsIntent": "navigation",
+            "webStandards": {
+              "navigationAPI": {
+                "status": "Baseline 2024",
+                "pattern": "Modern API replacing History API with events, traversal info, and interception",
+                "adoption": "Primary navigation mechanism, fallback to History API for Safari <17.2",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API"
+              },
+              "urlPatternAPI": {
+                "status": "Baseline 2025",
+                "pattern": "URLPattern for route pattern matching with named groups",
+                "adoption": "Use for all route pattern matching, enables :param and * wildcards",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/URLPattern"
+              },
+              "viewTransitionsAPI": {
+                "status": "Baseline 2024",
+                "pattern": "Document.startViewTransition() for animated route changes",
+                "adoption": "Opt-in via route:transition attribute for smooth navigation",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/View_Transitions_API"
+              },
+              "speculationRulesAPI": {
+                "status": "Chrome 121+, other browsers pending",
+                "pattern": "Declarative prefetch and prerender rules",
+                "adoption": "Generate speculation rules from route definitions for prefetching",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Speculation_Rules_API"
+              },
+              "historyAPI": {
+                "status": "Standard (Legacy)",
+                "pattern": "pushState/replaceState/popstate for URL manipulation",
+                "adoption": "Fallback only for browsers without Navigation API",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/History_API"
+              }
+            },
+            "blockType": "Component",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "RouteViewElement",
+          "declaration": {
+            "name": "RouteViewElement",
+            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "RouteOutletElement",
+          "declaration": {
+            "name": "RouteOutletElement",
+            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "RouteLinkBehavior",
+          "declaration": {
+            "name": "RouteLinkBehavior",
+            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "RoutePrefetchBehavior",
+          "declaration": {
+            "name": "RoutePrefetchBehavior",
+            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerRouter",
+          "declaration": {
+            "name": "registerRouter",
+            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "RouteContext",
+          "declaration": {
+            "name": "RouteContext",
+            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "RouteNavigationTarget",
+          "declaration": {
+            "name": "RouteNavigationTarget",
+            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "RouteGuardFn",
+          "declaration": {
+            "name": "RouteGuardFn",
+            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "RouteGuardResult",
+          "declaration": {
+            "name": "RouteGuardResult",
+            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "RouteLoaderFn",
+          "declaration": {
+            "name": "RouteLoaderFn",
+            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "RouteLoaderParams",
+          "declaration": {
+            "name": "RouteLoaderParams",
+            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "RouteDefinition",
+          "declaration": {
+            "name": "RouteDefinition",
+            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "MatchedRoute",
+          "declaration": {
+            "name": "MatchedRoute",
+            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "NavigationResult",
+          "declaration": {
+            "name": "NavigationResult",
+            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/segmented-control/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "SegmentedControl",
+          "description": "A single-select choice rendered as a row of adjacent buttons — the iOS/macOS segmented control, or 'pill' toggle group. It is the Selection Intent's single model in a horizontal, always-visible variant (compare radio group / select / switch): every option is visible at once and exactly one is pressed. It composes the Selection Intent (model=single, live immediacy — selecting commits immediately), Focus Delegation (roving tabindex, horizontal orientation with arrow-key movement), and the Typography / Density intents for sizing. Its options are authored as compound children (<segment> elements inside the control) that map to the value model — an instance of the cross-cutting compound-child paradigm (see #176's spin-off) shared with Tabs and the native <select>/<option>.",
+          "x-webeverything": {
+            "implementsIntent": "selection",
+            "composesIntents": [
+              "selection",
+              "focus-delegation",
+              "typography",
+              "density"
+            ],
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "SegmentedControl",
+          "declaration": {
+            "name": "SegmentedControl",
+            "module": "@frontierui/blocks/segmented-control/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/selection/SelectionBehavior.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "SelectionBehavior",
+          "description": "A runtime for the Collection Operations sibling `selection` intent (model / immediacy / variant / grouping) — the part the draft dropdown/droplist blocks compose but no block shipped. `SelectionBehavior` manages which item(s) in a host container are selected, over items matched by a CSS selector: it projects `aria-selected`, keeps a roving `tabindex`, commits selection live on click and Arrow/Home/End/Enter/Space (single keeps at most one, multiple toggles), and emits a `selection-change` event. The `variant:item` list-selection realization; dropdown/droplist will compose it for listbox selection.",
+          "x-webeverything": {
+            "implementsIntent": "selection",
+            "blockType": "Module",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "SelectionBehavior",
+          "declaration": {
+            "name": "SelectionBehavior",
+            "module": "@frontierui/blocks/selection/SelectionBehavior.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerSelection",
+          "declaration": {
+            "name": "registerSelection",
+            "module": "@frontierui/blocks/selection/SelectionBehavior.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/stores/simple/SimpleStore.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "SimpleStore",
+          "description": "Concrete implementation of CustomStore with built-in listener management, dot-notation paths, and derived state hooks.",
+          "x-webeverything": {
+            "blockType": "Store",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "SimpleStore",
+          "declaration": {
+            "name": "SimpleStore",
+            "module": "@frontierui/blocks/stores/simple/SimpleStore.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "SimpleStoreOptions",
+          "declaration": {
+            "name": "SimpleStoreOptions",
+            "module": "@frontierui/blocks/stores/simple/SimpleStore.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/slider/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "Slider",
+          "description": "A control for selecting a numeric value — or a min–max range — along a track. It realizes the Selection Intent's range variant (SelectionVariant = 'boolean' | 'item' | 'range'), which no block delivered before. Native-first by construction: a single-thumb slider IS <input type=\"range\">, so the block's job is only the enhancements the native control cannot express alone — a dual-thumb (from–to) range, rich ticks and labelled marks, and locale-aware value formatting (units, number format) surfaced through aria-valuetext. It composes the Selection Intent (variant=range, constraints.min/max), the Input Intent (pointer drag vs keyboard vs touch modality), and the Locale / Translation intents (value formatting). Native stays the baseline; a custom track/thumb is used only when the native element is ruled out.",
+          "x-webeverything": {
+            "implementsIntent": "selection",
+            "composesIntents": [
+              "selection",
+              "input",
+              "locale",
+              "translation"
+            ],
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "Slider",
+          "declaration": {
+            "name": "Slider",
+            "module": "@frontierui/blocks/slider/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/renderers/status-indicator/renderStatusIndicator.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "renderStatusIndicator",
+          "description": "Reference render for the Status Indicator intent (#354), the visual member of the Web Lifecycle protocol. `renderStatusIndicator` projects an entity's current lifecycle state onto a semantic status token across the intent's `tone` (neutral|info|progress|positive|caution|critical), `shape` (badge|pill|dot|text), and `affordance` (display-only|actionable) dimensions. It owns the display, not the rules: tone maps to a theme token (never a bespoke hex), the label text carries the state (never colour-only), and `role=\"status\"` marks the standing indicator while a transition announcement composes the Live Region Status intent. Ships an element form and a string form (`statusIndicatorHTML`) for table/innerHTML contexts.",
+          "x-webeverything": {
+            "implementsIntent": "status-indicator",
+            "blockType": "Module",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "renderStatusIndicator",
+          "declaration": {
+            "name": "renderStatusIndicator",
+            "module": "@frontierui/blocks/renderers/status-indicator/renderStatusIndicator.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "statusIndicatorHTML",
+          "declaration": {
+            "name": "statusIndicatorHTML",
+            "module": "@frontierui/blocks/renderers/status-indicator/renderStatusIndicator.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/stepper/StepperBehavior.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "StepperBehavior",
+          "description": "Linear, locked-progression navigation — the Wizard / multi-step-form flow. Realizes the navigation intent's third structure value (`linear`, alongside `lateral`/Tabs and `hierarchical`/Router): a fixed sequence of steps where only the current step is shown, advancing replaces rather than stacks history, and leaving mid-flow can prompt to preserve progress. The block that exercises the navigation intent's `session` persistence value (a step that survives Back/Forward but isn't a fresh shareable link). Reference runtime: `StepperBehavior` (locked progression, `aria-current=\"step\"`, the Step N of M announcement, step-change / step-advance-blocked / flow-complete events); first consumer is the auto-insurance quote wizard (#318).",
+          "x-webeverything": {
+            "implementsIntent": "navigation",
+            "traits": [
+              {
+                "name": "withFreeStepNavigation",
+                "description": "Relaxes locked progression so any step may be selected at any time (non-gated flows)",
+                "intentDimension": null
+              },
+              {
+                "name": "withResumableState",
+                "description": "Reflects the current step in the URL so the flow is deep-linkable / resumable",
+                "intentDimension": "persistence"
+              },
+              {
+                "name": "withStepValidation",
+                "description": "Gates advancing on the current step's validity — composes Form validation as the progression gate",
+                "intentDimension": null
+              },
+              {
+                "name": "withOptionalSteps",
+                "description": "Marks steps that may be skipped without blocking completion",
+                "intentDimension": null
+              }
+            ],
+            "webStandards": {
+              "ariaCurrentStep": {
+                "usage": "The current step's indicator carries aria-current=\"step\"; the step list is an ordered <ol>/<nav> so assistive tech reports position in the sequence",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current"
+              },
+              "multiPageForms": {
+                "usage": "Follows the WAI tutorial for multi-page forms — a labelled step region, a visible progress indicator, and a status message announcing 'Step N of M' on each change",
+                "reference": "https://www.w3.org/WAI/tutorials/forms/multi-page/"
+              },
+              "navigationAPI": {
+                "usage": "Step advance uses Navigation API navigate with history: 'replace' so the Back button exits the flow rather than walking step-by-step; the resumable variant writes the step index to History state (NavigationHistoryEntry.getState)",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API",
+                "adoption": "Fallback to History API replaceState for Safari <17.2"
+              },
+              "invokerCommands": {
+                "usage": "Next/Back/Go-to-step controls use the commandfor/command pattern",
+                "command": "--step-next / --step-prev / --step-show",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+              }
+            },
+            "blockType": "Component",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "StepperBehavior",
+          "declaration": {
+            "name": "StepperBehavior",
+            "module": "@frontierui/blocks/stepper/StepperBehavior.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerStepper",
+          "declaration": {
+            "name": "registerStepper",
+            "module": "@frontierui/blocks/stepper/StepperBehavior.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/tabs/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "TabsComponent",
+          "description": "Accessible tab interface component built on View (ViewBehavior for panel switching), providing tab triggers, panels, and ARIA semantics.",
+          "x-webeverything": {
+            "implementsIntent": "navigation",
+            "traits": [
+              {
+                "name": "withCloseableTabs",
+                "description": "Adds close buttons to tabs for dismissible panels",
+                "intentDimension": null
+              },
+              {
+                "name": "withReorderableTabs",
+                "description": "Enables drag-to-reorder for tab triggers",
+                "intentDimension": null
+              },
+              {
+                "name": "withOverflowTabs",
+                "description": "Handles tab overflow via scrolling or dropdown menu when tabs exceed available width",
+                "intentDimension": null
+              },
+              {
+                "name": "withLazyTabs",
+                "description": "Renders panel content only on first activation for performance",
+                "intentDimension": null
+              }
+            ],
+            "webStandards": {
+              "invokerCommands": {
+                "usage": "Tab triggers use commandfor/command pattern",
+                "command": "--tab-show",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+              },
+              "exclusiveGroups": {
+                "usage": "Panels share name attribute for mutual exclusivity",
+                "reference": "https://developer.mozilla.org/en-US/blog/html-details-exclusive-accordions/"
+              },
+              "ariaTabsPattern": {
+                "usage": "Full WAI-ARIA Tabs Pattern compliance",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/tabs/"
+              },
+              "openUITabs": {
+                "status": "Following Open UI research for future native alignment",
+                "reference": "https://open-ui.org/components/tabs.research/"
+              }
+            },
+            "blockType": "Component",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "TabsComponent",
+          "declaration": {
+            "name": "TabsComponent",
+            "module": "@frontierui/blocks/tabs/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "TabListAttribute",
+          "declaration": {
+            "name": "TabListAttribute",
+            "module": "@frontierui/blocks/tabs/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "TabTriggerAttribute",
+          "declaration": {
+            "name": "TabTriggerAttribute",
+            "module": "@frontierui/blocks/tabs/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "TabPanelAttribute",
+          "declaration": {
+            "name": "TabPanelAttribute",
+            "module": "@frontierui/blocks/tabs/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/toggle-switch/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "Toggle/Switch",
+          "description": "Native-first over `<input type=\"checkbox\">` with `role=\"switch\"`: a boolean on/off control whose change takes effect IMMEDIATELY, distinct from a checkbox's deferred-until-submit form value. Realizes the `input` boolean control. `aria-checked` true/false reflects on/off; no mixed/indeterminate state (a switch is strictly binary). Zero JS — the native element plus `role=\"switch\"` and styling IS the block. Sliced from #468 (form-control inventory).",
+          "x-webeverything": {
+            "implementsIntent": "input",
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "Toggle/Switch",
+          "declaration": {
+            "name": "Toggle/Switch",
+            "module": "@frontierui/blocks/toggle-switch/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/tooltip/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "Tooltip",
+          "description": "A small, transient, non-interactive surface that describes its trigger on hover or keyboard focus and is wired as the trigger's accessible description (aria-describedby, never aria-label). Native-first: it extends the built-in title attribute and the Popover API's popover=\"hint\" where supported, falling back to an ARIA-described custom bubble only when richer content or collision-aware positioning is needed. It composes the Anchor Intent (placement + flip/shift at the viewport edge), the Surface Intent (floating elevation/material of the bubble), and the Typography Intent (the truncation-recovery case that reads a clipped label). Deliberately distinct from a toggletip (click-revealed, live-region-announced) and from a non-modal popover with interactive content.",
+          "x-webeverything": {
+            "composesIntents": [
+              "anchor",
+              "surface",
+              "typography"
+            ],
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "Tooltip",
+          "declaration": {
+            "name": "Tooltip",
+            "module": "@frontierui/blocks/tooltip/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/transient/TransientElement.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "TransientElement",
+          "description": "Base class and utilities for custom elements that replace themselves with semantically correct native HTML during connectedCallback — enabling context-aware element selection without permanent wrapper nodes.",
+          "x-webeverything": {
+            "traits": [
+              {
+                "name": "withSelfReplacement",
+                "description": "Base mixin that handles the microtask-deferred replaceWith() lifecycle, attribute transfer, and child node migration",
+                "intentDimension": null
+              }
+            ],
+            "webStandards": {
+              "replaceWith": {
+                "status": "Baseline",
+                "pattern": "Element.replaceWith() replaces an element in its parent's child list with new nodes",
+                "adoption": "Core mechanism — transient element calls queueMicrotask(() => this.replaceWith(replacement)) from connectedCallback to safely self-replace after callback stack completes",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Element/replaceWith"
+              },
+              "customElements": {
+                "status": "Baseline",
+                "pattern": "Autonomous custom elements with connectedCallback lifecycle",
+                "adoption": "Transient elements are autonomous custom elements that run initialization logic in connectedCallback, then replace themselves with native elements",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Web_Components/Using_custom_elements"
+              },
+              "queueMicrotask": {
+                "status": "Baseline",
+                "pattern": "Schedules a microtask to run after current script completes but before rendering",
+                "adoption": "Defers replaceWith() out of connectedCallback stack to avoid re-entrancy with disconnectedCallback",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Window/queueMicrotask"
+              },
+              "headingElements": {
+                "status": "Standard",
+                "pattern": "<h1>–<h6> provide document heading hierarchy; WHATWG outline algorithm removed from spec",
+                "adoption": "AutoHeading replaces itself with the correct <hN> element based on nesting depth or injector-provided level",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/Heading_Elements"
+              },
+              "ariaHeadingRole": {
+                "status": "Standard",
+                "pattern": "role='heading' with aria-level for non-native heading semantics",
+                "adoption": "Fallback only — MDN recommends native <hN> elements over role='heading'. Self-replacement produces native elements.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Roles/heading_role"
+              }
+            },
+            "blockType": "Module",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "TransientElement",
+          "declaration": {
+            "name": "TransientElement",
+            "module": "@frontierui/blocks/transient/TransientElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "AutoHeading",
+          "declaration": {
+            "name": "AutoHeading",
+            "module": "@frontierui/blocks/transient/TransientElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "SmartLink",
+          "declaration": {
+            "name": "SmartLink",
+            "module": "@frontierui/blocks/transient/TransientElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withSelfReplacement",
+          "declaration": {
+            "name": "withSelfReplacement",
+            "module": "@frontierui/blocks/transient/TransientElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "calculateHeadingLevel",
+          "declaration": {
+            "name": "calculateHeadingLevel",
+            "module": "@frontierui/blocks/transient/TransientElement.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/tree-select/TreeSelectBehavior.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "TreeSelectBehavior",
+          "description": "The hierarchical member of the droplist family (per the #064 ruling). `TreeSelectBehavior` realizes the `hierarchy` intent: a `role=\"tree\"` of `role=\"treeitem\"` / `role=\"group\"` with `aria-level` / `aria-setsize` / `aria-posinset`, Right/Left expand-then-descend / collapse-then-ascend traversal, Up/Down/Home/End movement, and node selection (`aria-checked`, single|multiple) with an optional `cascade` (a partially-checked parent reads `mixed`). Builds the tree from a declarative `TreeNode[]` and emits `tree-change`. Native-first; degrades conceptually to a grouped `<select>`. First consumer: the auto-insurance coverage builder (#318).",
+          "x-webeverything": {
+            "implementsIntent": "hierarchy",
+            "composesIntents": [
+              "selection",
+              "disclosure"
+            ],
+            "blockType": "Component",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "TreeSelectBehavior",
+          "declaration": {
+            "name": "TreeSelectBehavior",
+            "module": "@frontierui/blocks/tree-select/TreeSelectBehavior.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerTreeSelect",
+          "declaration": {
+            "name": "registerTreeSelect",
+            "module": "@frontierui/blocks/tree-select/TreeSelectBehavior.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/trusted-html/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "TrustedHTML",
+          "description": "Structural directive enforcing Trusted Types policies on dynamic HTML content via comment-based virtual elements.",
+          "x-webeverything": {
+            "blockType": "Directive",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "TrustedHTML",
+          "declaration": {
+            "name": "TrustedHTML",
+            "module": "@frontierui/blocks/trusted-html/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/trusted-html-behavior/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "TrustedHTMLBehavior",
+          "description": "Attribute-based behavior that enforces Trusted Types policies on an element's innerHTML mutations.",
+          "x-webeverything": {
+            "blockType": "Behavior",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "TrustedHTMLBehavior",
+          "declaration": {
+            "name": "TrustedHTMLBehavior",
+            "module": "@frontierui/blocks/trusted-html-behavior/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/type-ahead/TypeAheadBehavior.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "TypeAheadBehavior",
+          "description": "Keyboard type-ahead navigation for listboxes, menus, selects, and trees: buffer typed characters, move focus to the matching item, then reset after an idle timeout. Moves focus — never filters.",
+          "x-webeverything": {
+            "implementsIntent": "type-ahead",
+            "traits": [
+              {
+                "name": "withPrefixMatching",
+                "description": "Accumulate typed characters into a prefix buffer and match item labels by prefix",
+                "intentDimension": "type-ahead.matching.prefix"
+              },
+              {
+                "name": "withSameLetterCycling",
+                "description": "A repeated single key cycles focus through items starting with that character",
+                "intentDimension": "type-ahead.matching.cycle"
+              },
+              {
+                "name": "withWrapAround",
+                "description": "Wrap focus to the start of the collection when matching passes the last item",
+                "intentDimension": "type-ahead.wrap.wrap"
+              },
+              {
+                "name": "withTimeoutReset",
+                "description": "Clear the character buffer after an idle timeout (default 500ms)",
+                "intentDimension": "type-ahead.reset.debounced"
+              }
+            ],
+            "webStandards": {
+              "ariaApgKeyboard": {
+                "status": "WAI-ARIA Authoring Practices",
+                "pattern": "Type-ahead / first-character navigation across the Listbox, Menu, Combobox, and Tree patterns",
+                "adoption": "Buffer printable keys, move focus (or aria-activedescendant) to the matching item; reset after idle timeout",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/"
+              },
+              "htmlSelectTypeAhead": {
+                "status": "Baseline",
+                "pattern": "Native <select> first-character / prefix navigation",
+                "adoption": "Mirror the platform default a custom listbox/menu would otherwise lose",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/select"
+              },
+              "keyboardEventKey": {
+                "status": "Baseline",
+                "pattern": "KeyboardEvent.key for printable-character detection",
+                "adoption": "Match single-character, non-modifier keys; ignore Arrow/Enter/Tab and modifier chords",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key"
+              }
+            },
+            "blockType": "Behavior",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "TypeAheadBehavior",
+          "declaration": {
+            "name": "TypeAheadBehavior",
+            "module": "@frontierui/blocks/type-ahead/TypeAheadBehavior.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "TypeAheadOptions",
+          "declaration": {
+            "name": "TypeAheadOptions",
+            "module": "@frontierui/blocks/type-ahead/TypeAheadBehavior.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "TypeAheadMatching",
+          "declaration": {
+            "name": "TypeAheadMatching",
+            "module": "@frontierui/blocks/type-ahead/TypeAheadBehavior.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "TypeAheadIntent",
+          "declaration": {
+            "name": "TypeAheadIntent",
+            "module": "@frontierui/blocks/type-ahead/TypeAheadBehavior.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "TypeAheadMatchDetail",
+          "declaration": {
+            "name": "TypeAheadMatchDetail",
+            "module": "@frontierui/blocks/type-ahead/TypeAheadBehavior.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/view/ViewEngine.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "ViewEngine",
+          "description": "Foundation for all show/hide/render patterns. Provides a shared engine and specialized blocks (behaviors + directives) that higher-level components build on.",
+          "x-webeverything": {
+            "webStandards": {
+              "invokerCommands": {
+                "status": "Baseline January 2026",
+                "pattern": "commandfor/command attributes for declarative triggers",
+                "adoption": "ViewBehavior handles command events (--view-show, --view-hide, --view-toggle)",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+              },
+              "exclusiveAccordion": {
+                "status": "Standard (Interop 2025)",
+                "pattern": "<details name=\"group\"> for mutually exclusive panels",
+                "adoption": "ViewEngine uses name attribute for exclusive view groups",
+                "reference": "https://developer.mozilla.org/en-US/blog/html-details-exclusive-accordions/"
+              },
+              "hiddenUntilFound": {
+                "status": "Standard (Interop 2025)",
+                "pattern": "hidden=\"until-found\" for searchable hidden content",
+                "adoption": "ViewEngine hidden mode option for searchable hidden content",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/hidden"
+              },
+              "popoverEvents": {
+                "status": "Baseline April 2025",
+                "pattern": "beforetoggle (cancelable) and toggle events with oldState/newState",
+                "adoption": "ViewEngine fires same events with same detail shape",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Popover_API"
+              },
+              "contentVisibility": {
+                "status": "Baseline Widely Available",
+                "pattern": "content-visibility: hidden for performance, auto for lazy rendering",
+                "adoption": "ViewEngine default hidden mode (performant, keeps a11y tree)",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/content-visibility"
+              },
+              "inertAttribute": {
+                "status": "Standard",
+                "pattern": "inert makes content non-interactive but visible",
+                "adoption": "ViewEngine hidden mode for preview/disabled states",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/inert"
+              },
+              "viewTransitionsAPI": {
+                "status": "Baseline 2024",
+                "pattern": "document.startViewTransition() for animated state changes",
+                "adoption": "ViewEngine wraps show/hide in view transitions when opted in",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/View_Transitions_API"
+              },
+              "domParts": {
+                "status": "Proposal (W3C Web Components)",
+                "pattern": "Low-level API for marking DOM positions for updates",
+                "adoption": "Directives use comment markers today, ready to adopt DOM Parts when available",
+                "reference": "https://github.com/WICG/webcomponents/blob/gh-pages/proposals/DOM-Parts.md"
+              }
+            },
+            "blockType": "Module",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "ViewEngine",
+          "declaration": {
+            "name": "ViewEngine",
+            "module": "@frontierui/blocks/view/ViewEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ViewEngineOptions",
+          "declaration": {
+            "name": "ViewEngineOptions",
+            "module": "@frontierui/blocks/view/ViewEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ViewBehavior",
+          "declaration": {
+            "name": "ViewBehavior",
+            "module": "@frontierui/blocks/view/ViewEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ViewShowBehavior",
+          "declaration": {
+            "name": "ViewShowBehavior",
+            "module": "@frontierui/blocks/view/ViewEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ViewIfDirective",
+          "declaration": {
+            "name": "ViewIfDirective",
+            "module": "@frontierui/blocks/view/ViewEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "ViewSwitchDirective",
+          "declaration": {
+            "name": "ViewSwitchDirective",
+            "module": "@frontierui/blocks/view/ViewEngine.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/workflow/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "WorkflowElement",
+          "description": "Multi-step process orchestration without URL changes — wizard-like flows with per-step validation, linear/branching progression, and state persistence. The non-route complement to Router's URL-based step navigation.",
+          "events": [
+            {
+              "name": "workflow-step-before-change",
+              "type": {
+                "text": "WorkflowStepBeforeChangeEvent"
+              },
+              "description": "Fired before step transition. Cancel to prevent advancement (e.g., failed validation)."
+            },
+            {
+              "name": "workflow-step-change",
+              "type": {
+                "text": "WorkflowStepChangeEvent"
+              },
+              "description": "Fired after step transition completes. Step content is now visible."
+            },
+            {
+              "name": "workflow-complete",
+              "type": {
+                "text": "WorkflowCompleteEvent"
+              },
+              "description": "Fired when user completes the final step. Cancel to prevent submission (e.g., final validation)."
+            },
+            {
+              "name": "workflow-error",
+              "type": {
+                "text": "WorkflowErrorEvent"
+              },
+              "description": "Fired when step validation fails. Provides the invalid fields and error messages."
+            }
+          ],
+          "x-webeverything": {
+            "traits": [
+              {
+                "name": "withLinearProgression",
+                "description": "Steps must be completed in order; future steps are disabled until current passes validation",
+                "intentDimension": "workflow.progression.linear"
+              },
+              {
+                "name": "withNonLinearProgression",
+                "description": "Steps can be visited in any order; all validated on final submit",
+                "intentDimension": "workflow.progression.nonLinear"
+              },
+              {
+                "name": "withBranchingLogic",
+                "description": "Step sequence adapts dynamically based on user input (progressive wizard)",
+                "intentDimension": "workflow.progression.branching"
+              },
+              {
+                "name": "withGateValidation",
+                "description": "Validates current step fields via Constraint Validation API before allowing advancement",
+                "intentDimension": "workflow.validation.gate"
+              },
+              {
+                "name": "withAutoSave",
+                "description": "Persists step data to sessionStorage/localStorage on each step change",
+                "intentDimension": "workflow.persistence.autoSave"
+              },
+              {
+                "name": "withReviewStep",
+                "description": "Final step displays summary of all collected data for confirmation",
+                "intentDimension": "workflow.progression.review"
+              }
+            ],
+            "webStandards": {
+              "constraintValidation": {
+                "status": "Baseline",
+                "pattern": "checkValidity(), reportValidity(), setCustomValidity() for per-step field validation",
+                "adoption": "withGateValidation calls checkValidity() on the active step's fieldset before allowing advancement; hidden steps are automatically skipped by the browser",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Guides/Constraint_validation"
+              },
+              "fieldset": {
+                "status": "Standard",
+                "pattern": "<fieldset> + <legend> for semantic grouping; disabling a fieldset disables all children",
+                "adoption": "Each step is a <fieldset>; inactive steps get disabled attribute to prevent interaction and exclude from form validation",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/fieldset"
+              },
+              "ariaCurrent": {
+                "status": "Standard",
+                "pattern": "aria-current='step' marks the active step in a numbered indicator",
+                "adoption": "Step indicator (progress rail) uses <ol> with aria-current='step' on the active <li>",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current"
+              },
+              "invokerCommands": {
+                "status": "Baseline 2026",
+                "pattern": "commandfor/command for declarative step navigation",
+                "adoption": "Next/Previous buttons use commandfor targeting the workflow element with command='--workflow-next' and command='--workflow-prev'",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+              },
+              "cssScrollSnap": {
+                "status": "Baseline",
+                "pattern": "CSS Scroll Snap for step transitions; scrollsnapchange event for JS hooks",
+                "adoption": "Optional trait: withSnapTransitions uses scroll-snap-type: x mandatory for horizontal step animation",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Scroll_snap"
+              },
+              "dialog": {
+                "status": "Baseline",
+                "pattern": "<dialog> for modal wizard flows with native focus trapping",
+                "adoption": "When workflow is rendered inside a <dialog>, focus management delegates to the browser's dialog focusing steps",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/dialog"
+              }
+            },
+            "blockType": "Component",
+            "status": "concept"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "WorkflowElement",
+          "declaration": {
+            "name": "WorkflowElement",
+            "module": "@frontierui/blocks/workflow/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "WorkflowStepElement",
+          "declaration": {
+            "name": "WorkflowStepElement",
+            "module": "@frontierui/blocks/workflow/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "WorkflowIndicator",
+          "declaration": {
+            "name": "WorkflowIndicator",
+            "module": "@frontierui/blocks/workflow/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withLinearProgression",
+          "declaration": {
+            "name": "withLinearProgression",
+            "module": "@frontierui/blocks/workflow/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withNonLinearProgression",
+          "declaration": {
+            "name": "withNonLinearProgression",
+            "module": "@frontierui/blocks/workflow/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withBranchingLogic",
+          "declaration": {
+            "name": "withBranchingLogic",
+            "module": "@frontierui/blocks/workflow/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withGateValidation",
+          "declaration": {
+            "name": "withGateValidation",
+            "module": "@frontierui/blocks/workflow/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withAutoSave",
+          "declaration": {
+            "name": "withAutoSave",
+            "module": "@frontierui/blocks/workflow/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "withReviewStep",
+          "declaration": {
+            "name": "withReviewStep",
+            "module": "@frontierui/blocks/workflow/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "WorkflowStepBeforeChangeEvent",
+          "declaration": {
+            "name": "WorkflowStepBeforeChangeEvent",
+            "module": "@frontierui/blocks/workflow/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "WorkflowStepChangeEvent",
+          "declaration": {
+            "name": "WorkflowStepChangeEvent",
+            "module": "@frontierui/blocks/workflow/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "WorkflowCompleteEvent",
+          "declaration": {
+            "name": "WorkflowCompleteEvent",
+            "module": "@frontierui/blocks/workflow/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "WorkflowErrorEvent",
+          "declaration": {
+            "name": "WorkflowErrorEvent",
+            "module": "@frontierui/blocks/workflow/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "WorkflowConfig",
+          "declaration": {
+            "name": "WorkflowConfig",
+            "module": "@frontierui/blocks/workflow/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "WorkflowStepDefinition",
+          "declaration": {
+            "name": "WorkflowStepDefinition",
+            "module": "@frontierui/blocks/workflow/index.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerWorkflow",
+          "declaration": {
+            "name": "registerWorkflow",
+            "module": "@frontierui/blocks/workflow/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "NativeWorkflowEngine",
+          "description": "The native-first runtime behind the Workflow Protocol's swappable CustomWorkflowEngine provider seam (#634, webworkflows): a dependency-free interpreter of the portable SCXML-style orchestration graph (steps + transitions + guards + parallel/fork-join + completion) that threads context, tracks the current position, and emits a { flow, from, to, context, at } step-transition event. Honors TIER-1 core + TIER-2 common operators and declares its supported set (the #085 compliance posture). Ships a CustomWorkflowEngineRegistry and a reference XState adapter as an alternative impl.",
+          "x-webeverything": {
+            "webStandards": {
+              "scxml": {
+                "status": "W3C Recommendation",
+                "pattern": "SCXML state-chart transition model (states + transitions + guards + parallel + final)",
+                "adoption": "The portable WorkflowGraph is a data-defined SCXML-style interchange; the native engine interprets it directly, and the XState/SCION adapters map onto it.",
+                "reference": "https://www.w3.org/TR/scxml/"
+              },
+              "customEvent": {
+                "status": "Baseline",
+                "pattern": "An observable step-transition event as the composition seam",
+                "adoption": "Every transition emits { flow, from, to, context, at } for the Flow Progress UX and for audit/reporting.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/CustomEvent"
+              }
+            },
+            "blockType": "Module",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "NativeWorkflowEngine",
+          "declaration": {
+            "name": "NativeWorkflowEngine",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "CustomWorkflowEngineRegistry",
+          "declaration": {
+            "name": "CustomWorkflowEngineRegistry",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "customWorkflowEngine",
+          "declaration": {
+            "name": "customWorkflowEngine",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "XStateWorkflowAdapter",
+          "declaration": {
+            "name": "XStateWorkflowAdapter",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "toXStateConfig",
+          "declaration": {
+            "name": "toXStateConfig",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "WorkflowGraph",
+          "declaration": {
+            "name": "WorkflowGraph",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "WorkflowStep",
+          "declaration": {
+            "name": "WorkflowStep",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "Transition",
+          "declaration": {
+            "name": "Transition",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "Guard",
+          "declaration": {
+            "name": "Guard",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "Assign",
+          "declaration": {
+            "name": "Assign",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "WorkflowEvent",
+          "declaration": {
+            "name": "WorkflowEvent",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "WorkflowContext",
+          "declaration": {
+            "name": "WorkflowContext",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "WorkflowInstance",
+          "declaration": {
+            "name": "WorkflowInstance",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "CustomWorkflowEngine",
+          "declaration": {
+            "name": "CustomWorkflowEngine",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "WorkflowOperator",
+          "declaration": {
+            "name": "WorkflowOperator",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "StepTransitionDetail",
+          "declaration": {
+            "name": "StepTransitionDetail",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "TIER1_OPERATORS",
+          "declaration": {
+            "name": "TIER1_OPERATORS",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "TIER2_OPERATORS",
+          "declaration": {
+            "name": "TIER2_OPERATORS",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "STEP_TRANSITION_EVENT",
+          "declaration": {
+            "name": "STEP_TRANSITION_EVENT",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "WORKFLOW_COMPLETE_EVENT",
+          "declaration": {
+            "name": "WORKFLOW_COMPLETE_EVENT",
+            "module": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts"
+          }
+        }
+      ]
+    }
+  ]
+}
