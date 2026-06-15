@@ -3578,5 +3578,101 @@
         "rationale": "Most-flexible default — the restriction is the author opt-in (declare accepts/accept-types/max-size)."
       }
     }
+  },
+  {
+    "id": "draft-persistence",
+    "name": "Draft Persistence",
+    "status": "active",
+    "type": "Module",
+    "summary": "Durable save-and-resume of an entity's working state (the #011 storage facet of webstates): autosave-on-change snapshots restored to the exact field state across sessions, behind a pluggable CustomStorageStrategy (IndexedDB native-first, localStorage degradation, in-memory test fallback), plus the last-writer-wins co-edit primitive (per-editor token + savedAt compare + an \"also editing\" presence signal over BroadcastChannel/storage).",
+    "sourcePath": "blocks/draft-persistence/DraftPersistence.ts",
+    "dependsOn": [],
+    "exports": [
+      "DraftPersistence",
+      "DraftPersistenceOptions",
+      "MemoryStorageStrategy",
+      "LocalStorageStrategy",
+      "IndexedDbStorageStrategy",
+      "pickDefaultStorage",
+      "CoEditCoordinator",
+      "resolveLww",
+      "CustomStorageStrategy",
+      "DraftSnapshot",
+      "DraftPersistenceConfig",
+      "CoEditor",
+      "LwwResult",
+      "DEFAULT_CONFIG",
+      "PRESENCE_EVENT",
+      "CONFLICT_EVENT"
+    ],
+    "webStandards": {
+      "indexedDB": {
+        "status": "Baseline",
+        "pattern": "IndexedDB as the durable structured-record store",
+        "adoption": "IndexedDbStorageStrategy is the native-first default behind the CustomStorageStrategy seam (#011 Fork 1A).",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API"
+      },
+      "storagePersist": {
+        "status": "Baseline",
+        "pattern": "navigator.storage.persist() to request non-evictable storage",
+        "adoption": "requestPersistent() best-effort marks the drafts durable so the OS will not evict them under pressure.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/StorageManager/persist"
+      },
+      "broadcastChannel": {
+        "status": "Baseline",
+        "pattern": "BroadcastChannel for cross-tab presence/conflict signalling",
+        "adoption": "CoEditCoordinator broadcasts hello/saved/bye; falls back to localStorage + the storage event where BroadcastChannel is absent.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/BroadcastChannel"
+      },
+      "webStorage": {
+        "status": "Baseline",
+        "pattern": "localStorage as the graceful-degradation store",
+        "adoption": "LocalStorageStrategy is the degradation path when IndexedDB is unavailable; prefixed keys keep it namespaced.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Window/localStorage"
+      }
+    },
+    "events": {
+      "coedit-presence": {
+        "description": "A peer editor on the same entity was seen (joined/left) — the \"X also editing\" signal",
+        "taxonomy": "notification",
+        "detail": {
+          "peers": "CoEditor[]"
+        },
+        "bubbles": false,
+        "cancelable": false
+      },
+      "coedit-conflict": {
+        "description": "A peer saved the same entity — compare savedAt and reconcile by last-writer-wins",
+        "taxonomy": "notification",
+        "detail": {
+          "editor": "string",
+          "savedAt": "number"
+        },
+        "bubbles": false,
+        "cancelable": false
+      }
+    },
+    "designDecisions": {
+      "storageFacetOfWebstates": {
+        "description": "Persistence is a thin storage facet of webstates, not a new top-level project",
+        "rationale": "#011 Fork 1A: webstates already owns \"the data the app holds\"; durable persistence is that concern extended to disk. A CustomStorageStrategy seam, not a monolith."
+      },
+      "nativeFirstWithDegradation": {
+        "description": "IndexedDB default → localStorage degradation → in-memory test fallback, one async contract",
+        "rationale": "Native-first default with deterministic degradation; the in-memory fallback keeps the controller testable and SSR-safe."
+      },
+      "lastWriterWins": {
+        "description": "Co-edit conflict resolves by savedAt comparison, ties to remote",
+        "rationale": "#011 Fork 3: conflict resolution is a change-tracking strategy gated to the concurrent-editor case; last-writer-wins is the simplest correct default, the merge policy left to the caller."
+      },
+      "presenceNotMerge": {
+        "description": "CoEditCoordinator surfaces who-else-is-editing + a conflict signal; it does not merge state",
+        "rationale": "Detection and policy are separable — the coordinator signals; resolveLww (or a richer change-tracking strategy) decides."
+      },
+      "pureLogicSplit": {
+        "description": "resolveLww and the storage strategies are DOM/IO-isolated from the controller",
+        "rationale": "Keeps the LWW decision and each store unit-testable without IndexedDB or multiple tabs."
+      }
+    }
   }
 ]

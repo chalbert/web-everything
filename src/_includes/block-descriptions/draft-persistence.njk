@@ -1,0 +1,55 @@
+{% from "source-toggle.njk" import autoToggle %}
+<h2>Draft Persistence</h2>
+<p>
+    Durable <strong>save-and-resume</strong> of an entity's working state — autosave a draft as the user types,
+    then restore it to the exact field state across reloads and sessions. Ruled in
+    <a href="/backlog/011-gap-4-webpersistence-project/">#011</a> as a <strong>thin storage facet of
+    <a href="/projects/webstates/">webstates</a></strong> (not a new project): <code>webstates</code> owns "the data the
+    app holds"; durable persistence is that concern extended to disk. Replaces the hand-rolled <code>localStorage</code>
+    every save-and-resume form otherwise grows.
+</p>
+
+<h3>Pluggable store (native-first, with degradation)</h3>
+<p>
+    The durable store sits behind one async <code>CustomStorageStrategy</code> contract (#011 Fork 1A), with a
+    deterministic native-first pick:
+</p>
+<table>
+    <thead>
+        <tr><th>Strategy</th><th>Role</th><th>Standard</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>IndexedDbStorageStrategy</code></td><td>Native-first default</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API">IndexedDB</a> + <a href="https://developer.mozilla.org/en-US/docs/Web/API/StorageManager/persist"><code>navigator.storage.persist()</code></a></td></tr>
+        <tr><td><code>LocalStorageStrategy</code></td><td>Graceful degradation</td><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Window/localStorage">localStorage</a></td></tr>
+        <tr><td><code>MemoryStorageStrategy</code></td><td>SSR / test fallback</td><td>in-memory map</td></tr>
+    </tbody>
+</table>
+
+<h3>Save, autosave, restore</h3>
+<pre><code class="language-typescript">const drafts = new DraftPersistence&lt;LoanForm&gt;({ version: 2 });
+await drafts.requestPersistent();           // best-effort non-evictable storage
+
+input.addEventListener('input', () =&gt; drafts.autosave('loan:42', readForm()));  // debounced
+
+const draft = await drafts.restore('loan:42');   // resume to the exact field state
+if (draft) applyForm(draft.state);
+await drafts.discard('loan:42');            // on successful commit</code></pre>
+<p class="text-sm text-gray-600">
+    A restored draft whose schema <code>version</code> no longer matches is dropped, so a shape change can't resurrect a
+    broken form.
+</p>
+
+<h3>Last-writer-wins co-edit</h3>
+<p>
+    The <code>CoEditCoordinator</code> broadcasts an <strong>"X also editing"</strong> presence signal across tabs/editors
+    over <a href="https://developer.mozilla.org/en-US/docs/Web/API/BroadcastChannel">BroadcastChannel</a> (falling back to
+    <code>localStorage</code> + the <code>storage</code> event), and emits a <code>coedit-conflict</code> when a peer saves.
+    Resolution is <strong>last-writer-wins</strong> by <code>savedAt</code> (#011 Fork 3 — a change-tracking strategy gated
+    to the concurrent-editor case): <code>reconcile(remote)</code> persists the later snapshot. Detection and policy are
+    separable — the coordinator signals; <code>resolveLww</code> (or a richer change-tracking strategy) decides.
+</p>
+
+<p class="text-sm text-gray-600 mt-4">
+    Surfaced + GAP-tagged by the loan-origination exercise app's S4 drafts phase
+    (<a href="/backlog/388-loan-phase-drafts/">#388</a>).
+</p>
