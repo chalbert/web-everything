@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-08"
 dateStarted: "2026-06-08"
 dateResolved: "2026-06-08"
-graduatedTo: "Trait `delivery` dimension — frontierui traitManifest.ts (eager entry) + trait-enforcer + webeverything traits.json/project-webtraits.njk spec + Highlight.ts demo"
+graduatedTo: frontierui/plugs/webbehaviors/traitManifest.ts
 tags: [webtraits, lazy-loading, build-time, enforcer, manifest, policy]
 relatedReport: reports/2026-06-02-lazy-traits-loading.md
 relatedProject: webtraits
@@ -72,3 +72,5 @@ The trait `delivery` dimension shipped — **default `lazy`, per-trait `eager` o
 
 **Deferred → own item:** per-*usage* (page-author) delivery override
 [#202](/backlog/202-trait-delivery-per-usage-override/).
+
+**Graduated to** `frontierui/plugs/webbehaviors/traitManifest.ts` — trait delivery dimension (eager entry) + trait-enforcer + webeverything traits.json/project-webtraits.njk spec + Highlight.ts demo.

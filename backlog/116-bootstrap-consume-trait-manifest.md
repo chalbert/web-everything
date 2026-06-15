@@ -5,7 +5,7 @@ status: resolved
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-06"
 dateResolved: "2026-06-06"
-graduatedTo: "Frontier UI plugs/bootstrap.ts — static import of `virtual:trait-manifest` (app-wide lazy traits) + plugs/virtual-trait-manifest.d.ts + vitest alias"
+graduatedTo: frontierui/plugs/bootstrap.ts
 tags: [webtraits, lazy-loading, bootstrap, enforcer, integration]
 relatedReport: reports/2026-06-02-lazy-traits-loading.md
 relatedProject: webtraits
@@ -75,3 +75,5 @@ fallback to the static manifest.
   resolved via **static import** (sync, runs before first `upgrade()`); dynamic `import().then()`
   rejected (would race the observer's fixed attribute filter). Pre-existing (not from this item):
   Frontier UI `build:plugs` has 54 unrelated tsc errors.
+
+**Graduated to** `frontierui/plugs/bootstrap.ts` — static import of virtual:trait-manifest (app-wide lazy traits) + plugs/virtual-trait-manifest.d.ts + vitest alias.

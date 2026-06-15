@@ -5,7 +5,7 @@ status: resolved
 dateOpened: '2026-06-02'
 dateStarted: "2026-06-06"
 dateResolved: "2026-06-06"
-graduatedTo: "Frontier UI lazy-traits path — plugs/webbehaviors/CustomAttributeRegistry.ts `defineLazy` + traitManifest.ts + tools/trait-enforcer/vite-plugin.ts"
+graduatedTo: frontierui/plugs/webbehaviors/CustomAttributeRegistry.ts
 tags:
   - webtraits
   - lazy-loading
@@ -31,3 +31,5 @@ All three "Scale without Weight" pillars shipped in **Frontier UI** and proven e
 - **Decision captured on the standard page** (not here): "The Map — Materialization Decision" on `/projects/webtraits/` (`src/_data/traits.json` → `map_materialization`, rendered by `src/_includes/project-webtraits.njk`).
 
 **Follow-ups (own items):** global bootstrap → `virtual:trait-manifest` wiring [#116](/backlog/116-bootstrap-consume-trait-manifest/) · default delivery eager-vs-split decision [#032](/backlog/032-trait-delivery-eager-vs-lazy/).
+
+**Graduated to** `frontierui/plugs/webbehaviors/CustomAttributeRegistry.ts` — lazy-traits path — defineLazy + plugs/webbehaviors/traitManifest.ts + tools/trait-enforcer/vite-plugin.ts.

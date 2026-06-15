@@ -8,7 +8,7 @@ blockedBy: ["145"]
 dateOpened: "2026-06-07"
 dateStarted: "2026-06-10"
 dateResolved: "2026-06-10"
-graduatedTo: frontierui:blocks/droplist/Windowed.ts (variable/measured scroll path — measure mode; buildOffsets/computeVariableWindow/variableSpacerHeights pure helpers; cumulative-offset binary search + estimate-then-correct; #023 active out-of-flow at real offset). Proven by blocks/droplist/__tests__/behaviors.test.ts (variable suites) + e2e/windowed-variable.spec.ts (real mixed-height layout, scrollbar converges to true summed height)
+graduatedTo: frontierui/blocks/droplist/Windowed.ts
 tags: [droplist, windowed, virtualization, scroll, layout]
 relatedProject: webblocks
 crossRef: { url: /backlog/145-windowed-scroll-height-driven-path/, label: "#145 windowed scroll path" }
@@ -76,3 +76,5 @@ rows have **different** heights, with the active-always-mounted invariant intact
     active-off-window stays mounted (`position:absolute`), zero console errors.
 - **Gate:** FUI unit **1366 passed / 7 skipped (88 files)**, windowed e2e **10/10** (fixed + variable),
   WE `check:standards` **0 errors**.
+
+**Graduated to** `frontierui/blocks/droplist/Windowed.ts` — variable/measured scroll path — measure mode; buildOffsets/computeVariableWindow; cumulative-offset binary search; e2e/windowed-variable.spec.ts.

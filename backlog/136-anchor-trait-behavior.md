@@ -5,7 +5,7 @@ size: 5
 status: resolved
 dateOpened: "2026-06-06"
 dateResolved: "2026-06-08"
-graduatedTo: "frontierui:blocks/droplist (Anchor.ts + Anchored.ts)"
+graduatedTo: frontierui/blocks/droplist/Anchor.ts
 tags: [droplist, autocomplete, anchor, popover, positioning, traits, behavior]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -104,3 +104,5 @@ diacritic match, native flip #161, zero console errors). Full Frontier UI suite 
 trait-manifest/Enforcer registration (so `<ul anchored>` works standalone, not only via
 `<auto-complete>`), `CompositeWidget`/`Windowed`, the custom-elements runtime patches, and full
 unit-test parity.
+
+**Graduated to** `frontierui/blocks/droplist/Anchor.ts` — droplist anchor positioning — Anchor.ts + Anchored.ts.

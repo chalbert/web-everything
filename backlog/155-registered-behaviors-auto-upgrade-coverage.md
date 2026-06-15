@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-07"
 dateStarted: "2026-06-07"
 dateResolved: "2026-06-07"
-graduatedTo: "Bootstrap auto-upgrade e2e coverage for nav:list + type-ahead (Frontier UI, extends the #144 data-grid pattern)"
+graduatedTo: frontierui/plugs/__tests__/e2e/navigation.spec.ts
 tags: [bootstrap, e2e, behavior, registration, testing, nav-list, type-ahead, coverage]
 relatedProject: webblocks
 crossRef: { url: /backlog/144-data-grid-behavior-auto-upgrade-e2e/, label: "#144 data-grid auto-upgrade e2e" }
@@ -35,3 +35,5 @@ assert the behavior-produced state appears + a keystroke drives it), **or** fold
 *"registered block behaviors auto-upgrade via bootstrap"* coverage spec so a new `attributes.define`
 in `bootstrap.ts` that never fires can't slip through for any behavior. Prefer the single shared spec
 if the fixtures are cheap to co-locate.
+
+**Graduated to** `frontierui/plugs/__tests__/e2e/navigation.spec.ts` — bootstrap auto-upgrade e2e for nav:list + type-ahead (extends the #144 data-grid pattern).

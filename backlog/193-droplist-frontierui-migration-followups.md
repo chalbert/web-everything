@@ -8,7 +8,7 @@ blockedBy: ["136"]
 dateOpened: "2026-06-08"
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"
-graduatedTo: frontierui pathInsertionMethods fix + split to #275/#276/#277
+graduatedTo: frontierui/plugs/webcomponents/Element.insertion.patch.ts
 tags: [droplist, autocomplete, anchor, frontierui, migration, traits]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -76,3 +76,5 @@ Each bullet is now either landed or split, per the acceptance:
 Gate: insertion-patch suites green in both repos (30 tests each), 65 droplist unit tests green;
 `check:standards` 0 errors. Also fixed a stray heredoc artifact (`EOF` + shell line) left at the foot
 of this file.
+
+**Graduated to** `frontierui/plugs/webcomponents/Element.insertion.patch.ts` — pathInsertionMethods fix; remaining scope split to #275/#276/#277.

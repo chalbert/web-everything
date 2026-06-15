@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-08"
 dateResolved: "2026-06-08"
-graduatedTo: "frontierui:blocks/droplist/AutoComplete.ts (registered form-associated <auto-complete> composing all six traits; 4-card conformance demo demos/autocomplete-unplugged.{html,ts}; e2e blocks/droplist/__tests__/e2e/auto-complete.spec.ts; diacritic fold in Filter.ts)"
+graduatedTo: frontierui/blocks/droplist/AutoComplete.ts
 tags: [droplist, autocomplete, custom-element, demo, registration, traits]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -118,3 +118,5 @@ replaces `customElements` with an injector registry whose stand-in never delegat
 full plateau bootstrap (only native hosting works today). That item lands autonomous-element support
 so the element can register in `bootstrap.tsx` and the demo can boot the real runtime. A
 `Document.patch.ts` guard (no-throw `createElement` for autonomous tags) already landed as groundwork.
+
+**Graduated to** `frontierui/blocks/droplist/AutoComplete.ts` — registered form-associated <auto-complete> composing all six traits; demos/autocomplete-unplugged.{html,ts}; e2e auto-complete.spec.ts; diacritic fold in Filter.ts.

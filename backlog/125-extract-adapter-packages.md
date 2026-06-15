@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-09"
 dateResolved: "2026-06-09"
-graduatedTo: "frontierui/packages/{jsx-runtime,component-compiler,vite-plugin,esbuild-plugin,rollup-plugin} — five installable @webeverything/* packages (npm workspaces)"
+graduatedTo: frontierui/packages/
 tags: [jsx, component, adapters, packaging, build-tooling, frontier-ui]
 relatedReport: reports/2026-06-06-adapter-real-project-integration.md
 relatedProject: webadapters
@@ -105,3 +105,5 @@ a prerequisite; that gate is now green.
   - Pre-existing successors unchanged: **#233** (apply #126's automatic-default to the docs — now
     unblocked, the `jsxImportSource` package exists), **#234** (extra bundler wrappers — already in the
     compiler), **#232** (deferred strategy opt-ins).
+
+**Graduated to** `frontierui/packages/` — five installable @webeverything/* packages: jsx-runtime, component-compiler, vite-plugin, esbuild-plugin, rollup-plugin (npm workspaces).

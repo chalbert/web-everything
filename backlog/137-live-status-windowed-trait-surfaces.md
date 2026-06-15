@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-08"
 dateResolved: "2026-06-08"
-graduatedTo: "frontierui:blocks/droplist/LiveStatus.ts (shared-region announcer; Filter.ts defers via data-live-status) + blocks/droplist/Windowed.ts (active-always-mounted virtualization, filter-resolved collapse); invariants proven in blocks/droplist/__tests__/behaviors.test.ts (LiveStatus + Windowed suites)"
+graduatedTo: frontierui/blocks/droplist/LiveStatus.ts
 tags: [droplist, autocomplete, live-status, windowed, virtualization, traits, behavior, a11y]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -103,3 +103,5 @@ invariants are enforced by tests, not convention.
   bootstrap either). happy-dom has no layout → windowing is active-driven/count-based here, not
   scroll/height (that's #145). The pre-existing `check:standards` "AGENTS.md inventory stale" error is
   unrelated in-flight tree work — it reproduces without this item's edits.
+
+**Graduated to** `frontierui/blocks/droplist/LiveStatus.ts` — shared-region announcer (Filter.ts defers via data-live-status) + Windowed.ts active-always-mounted virtualization; invariants in blocks/droplist/__tests__/behaviors.test.ts.

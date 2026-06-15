@@ -8,7 +8,7 @@ blockedBy: ["137"]
 dateOpened: "2026-06-07"
 dateStarted: "2026-06-10"
 dateResolved: "2026-06-10"
-graduatedTo: frontierui:blocks/droplist/Windowed.ts (scroll-driven windowing path — itemHeight-gated; computeScrollWindow/spacerHeights pure helpers; #023 active-always-mounted under scroll via out-of-flow active node). Proven by blocks/droplist/__tests__/behaviors.test.ts (scroll suites) + e2e/windowed-scroll.spec.ts (real-layout, scrollHeight===total*itemHeight)
+graduatedTo: frontierui/blocks/droplist/Windowed.ts
 tags: [droplist, windowed, virtualization, scroll, behavior, pointer, a11y]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -106,3 +106,5 @@ scrollbar reflects the full model, and the active-always-mounted invariant still
 - **Leftover:** variable per-row heights (only **fixed** `itemHeight` built) remains for **#163**
   (already open, `blockedBy: ["145"]` — now unblocked). #162/#164 were plateau-era leftovers already
   resolved; #164's overshoot is designed out here.
+
+**Graduated to** `frontierui/blocks/droplist/Windowed.ts` — scroll-driven windowing — itemHeight-gated; computeScrollWindow/spacerHeights pure helpers; #023 active out-of-flow; e2e/windowed-scroll.spec.ts.

@@ -5,7 +5,7 @@ status: resolved
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-07"
 dateResolved: "2026-06-07"
-graduatedTo: "Frontier UI plugs/__tests__/e2e/plugged-traits.spec.ts + demos/lazy-traits-plugged.* + playwright.config.ts — standing app-wide lazy-trait regression guard"
+graduatedTo: frontierui/plugs/__tests__/e2e/plugged-traits.spec.ts
 tags: [webtraits, lazy-loading, bootstrap, demo, e2e, regression, frontier-ui]
 relatedReport: reports/2026-06-02-lazy-traits-loading.md
 relatedProject: webtraits
@@ -53,3 +53,5 @@ repo), same place as the #116 change.
 - **Notes / gotcha:** Vite `bootstrapPatches()` skips injecting bootstrap into any demo HTML that
   already contains the literal string `/plugs/bootstrap.ts` — so don't write that exact path in a
   plugged demo's prose/comments (it silently disables the trait path). Documented inline in the demo.
+
+**Graduated to** `frontierui/plugs/__tests__/e2e/plugged-traits.spec.ts` — + demos/lazy-traits-plugged.* + playwright.config.ts — standing app-wide lazy-trait regression guard.

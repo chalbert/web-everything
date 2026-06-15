@@ -8,7 +8,7 @@ dateOpened: "2026-06-06"
 dateStarted: "2026-06-12"
 blockedBy: ["081"]
 dateResolved: "2026-06-12"
-graduatedTo: "MaaS versioning contract → #389 (serve impl: id-hash/pin/provenance/compat-range) + #390 (Frontier UI runtime export + maas-check validator)"
+graduatedTo: none
 preparedDate: "2026-06-11"
 tags: [module-as-a-service, versioning, content-addressing, immutability, cache-key, semver, adapters, plateau, esm]
 relatedProject: webadapters
@@ -121,3 +121,5 @@ is *supported by default*, not decided — see above.
 *exist*, so #087 is re-pointed `blockedBy: #088 → #389`); the Frontier UI half is
 **[#390](/backlog/390-frontier-ui-jsx-runtime-api-contract-version-export-maas-che/)** (runtime export +
 validator), blocked by #389.
+
+**Graduated to** `none` — MaaS versioning contract — serve impl tracked by #389 (id-hash/pin/provenance/compat-range) + #390 (Frontier UI runtime export + maas-check validator).
