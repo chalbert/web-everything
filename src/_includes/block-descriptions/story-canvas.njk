@@ -1,0 +1,62 @@
+<h2>Story Canvas</h2>
+<p>
+    Renders a single <strong>WebCase</strong> in <strong>component isolation</strong> — the docs story renderer
+    ratified by <a href="/backlog/626-map-workbench-features-to-we-standards-which-intents-blocks-a/">#626</a>
+    Fork 2: docs examples <em>are</em> <a href="/projects/webcases/">webcases</a>, not a parallel docs-only artifact.
+    One fixture serves both the conformance loop and the documentation surface, so a published example can never
+    drift from the case the conformance suite actually verifies.
+</p>
+
+<h3>The fixture — WebCase</h3>
+<p>
+    A story is a <code>WebCase</code>, the pivot the webcases generator already emits
+    (<code>@frontierui/webdocs/generator.ts</code>):
+</p>
+<pre><code class="language-typescript">interface WebCase {
+  readonly id: string;          // stable id (the source filename, e.g. 01-basic.html)
+  readonly title: string;
+  readonly description: string;
+  readonly code: string;        // the case source (HTML/TS), verbatim and trimmed
+}</code></pre>
+<p class="text-sm text-gray-600">
+    Interaction-tests fold in as webcases carrying an interaction script; docs-only presentation needs (ordering,
+    prose) are <strong>optional</strong> WebCase fields — never a second file to keep in sync.
+</p>
+
+<h3>Isolation is the contract</h3>
+<p>
+    The block's job is the <strong>isolation boundary</strong>, not the component being shown. A docs story must
+    render an arbitrary component without its styles or scripts colliding with the docs chrome. Two tiers, native-first:
+</p>
+<table>
+    <thead>
+        <tr><th>Tier</th><th>Boundary</th><th>When</th></tr>
+    </thead>
+    <tbody>
+        <tr><td>iframe (<code>srcdoc</code>)</td><td>Isolated browsing context — strongest style/script boundary</td><td>Default; a case may carry global CSS/JS</td></tr>
+        <tr><td>shadow-only</td><td>Shadow root style encapsulation</td><td>Opt-in for trusted, pure-component cases</td></tr>
+    </tbody>
+</table>
+
+<h3>Usage</h3>
+<pre><code class="language-html">&lt;!-- resolve a case by id against the page's webcases --&gt;
+&lt;story-canvas case-id="01-basic"&gt;&lt;/story-canvas&gt;</code></pre>
+<pre><code class="language-typescript">// or set the WebCase directly
+const canvas = document.querySelector('story-canvas');
+canvas.case = { id: '01-basic', title: 'Basic', description: '…', code: '&lt;drop-list …&gt;' };
+</code></pre>
+
+<h3>Contract</h3>
+<ul>
+    <li><strong>Input:</strong> a <code>WebCase</code> via the <code>case</code> property, or a <code>case-id</code>
+        attribute resolved against the page's webcases collection.</li>
+    <li><strong>Render target:</strong> the case <code>code</code> mounted in the isolation frame; the
+        <code>title</code>/<code>description</code> chrome rendered in the element's shadow root.</li>
+    <li><strong>Exports:</strong> <code>StoryCanvasElement</code>, <code>registerStoryCanvas</code>, the
+        <code>WebCase</code> type.</li>
+</ul>
+<p class="text-sm text-gray-600 mt-4">
+    Feeds the Web Docs component-catalog surface (<a href="/backlog/627-assemble-the-web-docs-component-catalog-surface-from-the-der/">#627</a>)
+    alongside the <a href="/blocks/code-view/">code-view</a> and props-table blocks. The structural API metadata
+    those siblings consume is the <a href="/protocols/">Custom Elements Manifest</a> protocol.
+</p>

@@ -3766,5 +3766,54 @@
         "rationale": "TIER-3 per the protocol: these are durable-execution backends behind the provider, never the portable graph contract."
       }
     }
+  },
+  {
+    "id": "story-canvas",
+    "name": "Story Canvas",
+    "status": "concept",
+    "type": "Component",
+    "summary": "Renders a single WebCase ({ id, title, description, code }) in component isolation — the docs story renderer ratified by #626 Fork 2 (docs examples ARE webcases). The isolated frame keeps the demoed component's styles and scripts from leaking into the docs chrome (and vice-versa), so one fixture serves both the conformance loop and the docs surface. Interaction-tests fold in as webcases carrying an interaction script; docs-only presentation needs (ordering, prose) are optional webcase fields, not a second artifact.",
+    "implementedBy": "@frontierui/blocks/story-canvas/StoryCanvasElement.ts",
+    "relatedProject": "webdocs",
+    "dependsOn": [],
+    "exports": [
+      "StoryCanvasElement",
+      "registerStoryCanvas",
+      "WebCase"
+    ],
+    "webStandards": {
+      "customElements": {
+        "status": "Baseline",
+        "pattern": "Autonomous custom element (<story-canvas>) owning the isolated render lifecycle",
+        "adoption": "The element takes a WebCase via property (`case`) or a `case-id` attribute resolved against the page's webcases, and renders code into its isolated frame.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_custom_elements"
+      },
+      "shadowDom": {
+        "status": "Baseline",
+        "pattern": "Shadow root for the story frame (title/description chrome); style-encapsulated from the host page",
+        "adoption": "The frame chrome lives in shadow DOM; the case render target is isolated separately so the case's own styles don't bleed into the chrome.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_shadow_DOM"
+      },
+      "iframeIsolation": {
+        "status": "Baseline",
+        "pattern": "Isolated browsing context for the case render target (the strongest style/script boundary)",
+        "adoption": "The default isolation tier mounts the case `code` in a same-origin srcdoc iframe so a case's global CSS/JS can't leak into the docs page; a lighter shadow-only tier is the opt-in for trusted, pure-component cases.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/iframe"
+      }
+    },
+    "designDecisions": {
+      "oneFixtureTwoConsumers": {
+        "description": "The story-canvas renders the same WebCase the conformance loop runs — not a docs-only copy",
+        "rationale": "#626 Fork 2: examples ARE webcases. One fixture serving both surfaces means a docs example can never drift from the case the conformance suite verifies."
+      },
+      "isolationIsTheContract": {
+        "description": "The block's job is the isolation boundary, not the component being shown",
+        "rationale": "A docs story must render an arbitrary component without its styles/scripts colliding with the docs chrome — isolation (iframe default, shadow-only opt-in) is the reusable concern; the component is just content."
+      },
+      "presentationIsOptionalWebcaseFields": {
+        "description": "Ordering and prose ride as optional WebCase fields, not a second artifact",
+        "rationale": "Avoids a parallel docs-metadata file that would drift from the case; the most-flexible default is the bare {id,title,description,code} with presentation fields opt-in."
+      }
+    }
   }
 ]
