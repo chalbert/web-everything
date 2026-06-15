@@ -3469,5 +3469,114 @@
       "Reference insertion adapters, owning neither commit: ships text (default — replaces the query range with a string, works in a plain <textarea>) and token (composes #590's atom/token insertion). Both are reference adapters the standard provides for the two insertion modes the intent exposes; the consumer selects or supplies one. This keeps #591 decoupled from #590 — composed, not blocked — exactly as the Fork 2-A ruling requires."
     ],
     "relatedReport": "reports/2026-06-14-inline-trigger-mention-pattern.md"
+  },
+  {
+    "id": "data-transfer",
+    "name": "Data Transfer Zone",
+    "status": "active",
+    "type": "Component",
+    "summary": "A drop-zone runtime that collapses the three native sources of a DataTransfer payload — drag-and-drop, clipboard paste, and <input type=file> — into one normalized `receive` event under a declared `accepts` contract (type/size), dispatching `reject` for anything that fails, with a keyboard/a11y file-picker affordance, the copy-vs-move flow as the drag dropEffect, and a copy-out (`emit`) half.",
+    "implementsIntent": "data-transfer",
+    "sourcePath": "blocks/data-transfer/DataTransferZoneElement.ts",
+    "dependsOn": [],
+    "exports": [
+      "DataTransferZoneElement",
+      "registerDataTransferZone",
+      "normalizeDataTransfer",
+      "normalizeFileList",
+      "evaluateAccept",
+      "kindForType",
+      "typeMatches",
+      "NormalizedPayload",
+      "NormalizedItem",
+      "AcceptSpec",
+      "ReceiveDetail",
+      "RejectDetail",
+      "EmitDetail",
+      "RECEIVE_EVENT",
+      "REJECT_EVENT",
+      "EMIT_EVENT",
+      "DEFAULT_ACCEPT"
+    ],
+    "webStandards": {
+      "dataTransfer": {
+        "status": "Baseline",
+        "pattern": "The native DataTransfer object shared by drag events and the clipboard",
+        "adoption": "normalizeDataTransfer() reads DataTransferItemList (file vs string kinds) with a files+getData fallback, so drop and paste collapse to one shape.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer"
+      },
+      "dragAndDrop": {
+        "status": "Baseline",
+        "pattern": "HTML Drag and Drop API (dragover.preventDefault to become a drop target; dropEffect)",
+        "adoption": "The zone mirrors its configured copy/move effect onto dataTransfer.dropEffect during dragover.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API"
+      },
+      "clipboardEvent": {
+        "status": "Baseline",
+        "pattern": "ClipboardEvent.clipboardData on paste/copy",
+        "adoption": "Paste funnels through the same normalizer; copy writes the queued emit payload via setData.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/ClipboardEvent"
+      },
+      "fileInput": {
+        "status": "Baseline",
+        "pattern": "<input type=file multiple> as the keyboard-accessible source",
+        "adoption": "An always-present hidden file input behind a real <button> gives a keyboard/a11y path; drag and paste are pointer/clipboard sugar on top.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/input/file"
+      }
+    },
+    "events": {
+      "receive": {
+        "description": "An accepted, normalized payload entered the zone (from drop, paste, or the file input)",
+        "taxonomy": "notification",
+        "detail": {
+          "payload": "NormalizedPayload",
+          "effect": "TransferEffect"
+        },
+        "bubbles": true,
+        "cancelable": true
+      },
+      "reject": {
+        "description": "An incoming payload failed the declared accepts contract (kind, type, or size)",
+        "taxonomy": "notification",
+        "detail": {
+          "payload": "NormalizedPayload",
+          "reasons": "RejectReason[]"
+        },
+        "bubbles": true,
+        "cancelable": false
+      },
+      "emit": {
+        "description": "The zone wrote a typed payload onto an outgoing drag or copy (the emit flow)",
+        "taxonomy": "notification",
+        "detail": {
+          "items": "NormalizedItem[]",
+          "effect": "TransferEffect"
+        },
+        "bubbles": true,
+        "cancelable": false
+      }
+    },
+    "designDecisions": {
+      "singleFunnel": {
+        "description": "Drop, paste, and file-input all converge on one private #ingest()",
+        "rationale": "The intent is \"one payload event regardless of source\" — a single funnel guarantees the accepts contract and the receive/reject decision are applied identically to all three."
+      },
+      "nativeFirst": {
+        "description": "No synthetic drag model or library — the platform DataTransfer/DragEvent/ClipboardEvent APIs only",
+        "rationale": "Native-first default: the runtime is the web platform; libraries would be opt-in enhancements, not the baseline."
+      },
+      "keyboardPathIsPrimary": {
+        "description": "The hidden <input type=file> behind a <button> is always present, not a fallback",
+        "rationale": "Drag-and-drop is inaccessible on its own; the keyboard-triggered file picker is the mandatory path, with drag/paste layered as pointer sugar."
+      },
+      "pureLogicSplit": {
+        "description": "Normalization + acceptance live in DOM-free normalize.ts; the element only wires events",
+        "rationale": "Keeps the gnarly MIME/kind/size logic unit-testable without a DOM and reusable outside the element."
+      },
+      "permissiveDefault": {
+        "description": "A zone with no constraints defaults to `any` acceptance",
+        "rationale": "Most-flexible default — the restriction is the author opt-in (declare accepts/accept-types/max-size)."
+      }
+    }
   }
 ]

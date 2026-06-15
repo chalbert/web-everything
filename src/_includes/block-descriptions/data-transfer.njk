@@ -1,0 +1,63 @@
+{% from "source-toggle.njk" import autoToggle %}
+<h2>Data Transfer Zone</h2>
+<p>
+    A drop-zone runtime that implements the <a href="/intents/data-transfer/">Data-Transfer Intent</a>: the typed-payload
+    + <code>accepts</code> contract behind the native
+    <a href="https://developer.mozilla.org/en-US/docs/Web/API/DataTransfer"><code>DataTransfer</code></a> object shared by
+    clipboard and drag events. It collapses the <strong>three native sources</strong> of a payload —
+    drag-and-drop, clipboard <strong>paste</strong>, and <code>&lt;input type=file&gt;</code> — into <strong>one</strong>
+    normalized <code>receive</code> event, so an app no longer hand-rolls <code>dragover</code>/<code>drop</code>/<code>paste</code>
+    handlers per feature.
+</p>
+
+<h3>The single funnel</h3>
+<p>
+    Every source converges on one private <code>#ingest()</code>: it normalizes the items, evaluates them against the
+    zone's declared <code>accepts</code> contract, and dispatches either a cancelable <code>receive</code> (accepted) or a
+    <code>reject</code> carrying the precise failed rule (<code>kind</code>, <code>type</code>, or <code>size</code>). The
+    normalization and acceptance logic is DOM-free (<code>normalize.ts</code>) so it is unit-testable and reusable outside
+    the element.
+</p>
+
+<h3>Declaring what a zone accepts</h3>
+<pre><code class="language-html">&lt;data-transfer-zone
+    accepts="files"
+    accept-types="image/*,application/pdf"
+    max-size="5242880"
+    effect="copy"&gt;
+  Drop images here, paste, or choose a file.
+&lt;/data-transfer-zone&gt;</code></pre>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+    <li><code>accepts</code> — the coarse <a href="/intents/data-transfer/">payload kinds</a> (<code>text</code>,
+        <code>rich</code>, <code>files</code>, <code>items</code>). Omit for the most-permissive <code>any</code> default.</li>
+    <li><code>accept-types</code> — concrete MIME types or <code>type/*</code> wildcards.</li>
+    <li><code>max-size</code> — per-file byte ceiling.</li>
+    <li><code>effect</code> — <code>copy</code> (default) or <code>move</code>, surfaced as the drag <code>dropEffect</code>.</li>
+    <li><code>flow</code> — <code>receive</code> (default), <code>emit</code> (drag/copy out), or <code>both</code>.</li>
+</ul>
+
+<h3>Native-first &amp; accessible</h3>
+<p>
+    No synthetic drag model and no library — just the platform <code>DataTransfer</code>/<code>DragEvent</code>/
+    <code>ClipboardEvent</code> APIs. The keyboard path is <strong>primary, not a fallback</strong>: an always-present
+    hidden <code>&lt;input type=file&gt;</code> behind a real <code>&lt;button&gt;</code> gives a keyboard- and
+    screen-reader-accessible way to add files, with drag and paste layered on top as pointer/clipboard sugar. The zone is a
+    <code>role="group"</code> with an <code>aria-label</code> describing the three ways to add content.
+</p>
+
+<h3>Events</h3>
+<table>
+    <thead>
+        <tr><th>Event</th><th>When</th><th>Cancelable</th><th>Detail</th></tr>
+    </thead>
+    <tbody>
+        <tr><td><code>receive</code></td><td>An accepted payload entered the zone</td><td>Yes</td><td><code>{ payload, effect }</code></td></tr>
+        <tr><td><code>reject</code></td><td>A payload failed the accepts contract</td><td>No</td><td><code>{ payload, reasons }</code></td></tr>
+        <tr><td><code>emit</code></td><td>The zone wrote a payload onto an outgoing drag/copy</td><td>No</td><td><code>{ items, effect }</code></td></tr>
+    </tbody>
+</table>
+
+<p class="text-sm text-gray-600 mt-4">
+    Surfaced + GAP-tagged by the loan-origination exercise app's S5 document upload (#383); resolves the spec-only gap on
+    the <a href="/intents/data-transfer/">Data-Transfer Intent</a> (#007).
+</p>
