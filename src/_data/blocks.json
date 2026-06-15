@@ -112,7 +112,7 @@
     "type": "Behavior",
     "summary": "Keyboard type-ahead navigation for listboxes, menus, selects, and trees: buffer typed characters, move focus to the matching item, then reset after an idle timeout. Moves focus — never filters.",
     "implementsIntent": "type-ahead",
-    "sourcePath": "blocks/type-ahead/TypeAheadBehavior.ts",
+    "implementedBy": "@frontierui/blocks/type-ahead/TypeAheadBehavior.ts",
     "dependsOn": [],
     "exports": [
       "TypeAheadBehavior",
@@ -208,7 +208,7 @@
     "type": "Module",
     "summary": "Trait-based async state management orchestrator handling loading lifecycle with timing, abort, and composable UI traits.",
     "implementsIntent": "loader",
-    "sourcePath": "blocks/resource-loader/ResourceLoader.ts",
+    "implementedBy": "@frontierui/blocks/resource-loader/ResourceLoader.ts",
     "dependsOn": [],
     "exports": [
       "ResourceLoader",
@@ -539,7 +539,7 @@
     "summary": "Structural directive for rendering lists of items based on an array.",
     "exports": ["ForEachBehavior", "registerForEach"],
     "extendsClass": "CustomAttribute",
-    "sourcePath": "blocks/for-each/ForEachBehavior.ts",
+    "implementedBy": "@frontierui/blocks/for-each/ForEachBehavior.ts",
     "dependsOn": ["handler-expression-parser"],
     "designDecisions": {
       "templateAttribute": {
@@ -565,7 +565,7 @@
     "name": "Handler Expression Parser",
     "status": "active",
     "type": "Parser",
-    "sourcePath": "blocks/parsers/handler-expression/HandlerExpressionParser.ts",
+    "implementedBy": "@frontierui/blocks/parsers/handler-expression/HandlerExpressionParser.ts",
     "summary": "Parser for function-call style event handler expressions. Extends CustomAttributeParser for registry integration.",
     "exports": [
       "HandlerExpressionParser",
@@ -621,7 +621,7 @@
     "name": "Event Behaviors (on:*)",
     "status": "active",
     "type": "Behavior",
-    "sourcePath": "blocks/attributes/on-event/OnEventAttribute.ts",
+    "implementedBy": "@frontierui/blocks/attributes/on-event/OnEventAttribute.ts",
     "summary": "Declarative event-to-action mapping using expression syntax with context resolution.",
     "exports": [
       "createOnEventAttribute",
@@ -729,7 +729,7 @@
     "name": "View",
     "status": "active",
     "type": "Module",
-    "sourcePath": "blocks/view/ViewEngine.ts",
+    "implementedBy": "@frontierui/blocks/view/ViewEngine.ts",
     "summary": "Foundation for all show/hide/render patterns. Provides a shared engine and specialized blocks (behaviors + directives) that higher-level components build on.",
     "blocks": {
       "ViewEngine": {
@@ -913,7 +913,7 @@
     "name": "Tabs",
     "status": "active",
     "type": "Component",
-    "sourcePath": "blocks/tabs/index.ts",
+    "implementedBy": "@frontierui/blocks/tabs/index.ts",
     "summary": "Accessible tab interface component built on View (ViewBehavior for panel switching), providing tab triggers, panels, and ARIA semantics.",
     "exports": [
       "TabsComponent",
@@ -1057,7 +1057,7 @@
     "status": "active",
     "type": "Component",
     "summary": "Linear, locked-progression navigation — the Wizard / multi-step-form flow. Realizes the navigation intent's third structure value (`linear`, alongside `lateral`/Tabs and `hierarchical`/Router): a fixed sequence of steps where only the current step is shown, advancing replaces rather than stacks history, and leaving mid-flow can prompt to preserve progress. The block that exercises the navigation intent's `session` persistence value (a step that survives Back/Forward but isn't a fresh shareable link). Reference runtime: `StepperBehavior` (locked progression, `aria-current=\"step\"`, the Step N of M announcement, step-change / step-advance-blocked / flow-complete events); first consumer is the auto-insurance quote wizard (#318).",
-    "sourcePath": "blocks/stepper/StepperBehavior.ts",
+    "implementedBy": "@frontierui/blocks/stepper/StepperBehavior.ts",
     "exports": [
       "StepperBehavior",
       "registerStepper"
@@ -1212,7 +1212,7 @@
       "MatchedRoute",
       "NavigationResult"
     ],
-    "sourcePath": "blocks/router/elements/RouteViewElement.ts",
+    "implementedBy": "@frontierui/blocks/router/elements/RouteViewElement.ts",
     "implementsIntent": "navigation",
     "intentDimensions": {
       "structure": "hierarchical",
@@ -1461,7 +1461,7 @@
       "SimpleStoreOptions"
     ],
     "extendsClass": "CustomStore",
-    "sourcePath": "blocks/stores/simple/SimpleStore.ts",
+    "implementedBy": "@frontierui/blocks/stores/simple/SimpleStore.ts",
     "designDecisions": {
       "dotNotationPaths": {
         "description": "Get and set nested values using dot notation (e.g., 'user.name')",
@@ -1948,7 +1948,7 @@
     "name": "Transient Component",
     "status": "active",
     "type": "Module",
-    "sourcePath": "blocks/transient/TransientElement.ts",
+    "implementedBy": "@frontierui/blocks/transient/TransientElement.ts",
     "summary": "Base class and utilities for custom elements that replace themselves with semantically correct native HTML during connectedCallback — enabling context-aware element selection without permanent wrapper nodes.",
     "exports": [
       "TransientElement",
@@ -2053,7 +2053,7 @@
     "summary": "Text node parser for Mustache-style {{expression}} syntax. Detects {{ and }} delimiters in text content.",
     "exports": ["DoubleCurlyBracketParser"],
     "extendsClass": "CustomTextNodeParser",
-    "sourcePath": "blocks/parsers/text-node/double-curly/DoubleCurlyBracketParser.ts",
+    "implementedBy": "@frontierui/blocks/parsers/text-node/double-curly/DoubleCurlyBracketParser.ts",
     "dependsOn": []
   },
   {
@@ -2064,7 +2064,7 @@
     "summary": "Text node parser for Polymer-style [[expression]] syntax. Detects [[ and ]] delimiters in text content.",
     "exports": ["DoubleSquareBracketParser"],
     "extendsClass": "CustomTextNodeParser",
-    "sourcePath": "blocks/parsers/text-node/double-square/DoubleSquareBracketParser.ts",
+    "implementedBy": "@frontierui/blocks/parsers/text-node/double-square/DoubleSquareBracketParser.ts",
     "dependsOn": []
   },
   {
@@ -2075,7 +2075,7 @@
     "summary": "Reactive text node that evaluates expressions and renders their values. Connects text node parsing to the expression parser pipeline.",
     "exports": ["InterpolationTextNode", "InterpolationTextNodeOptions"],
     "extendsClass": "CustomTextNode",
-    "sourcePath": "blocks/text-nodes/interpolation/InterpolationTextNode.ts",
+    "implementedBy": "@frontierui/blocks/text-nodes/interpolation/InterpolationTextNode.ts",
     "dependsOn": ["double-curly-bracket-parser"]
   },
   {
@@ -2105,7 +2105,7 @@
       "persistence": "url"
     },
     "dependsOn": ["view", "router"],
-    "sourcePath": "blocks/navigation/",
+    "implementedBy": "@frontierui/blocks/navigation/",
     "webStandards": {
       "disclosureNavigation": {
         "status": "W3C APG Pattern",
@@ -2325,7 +2325,7 @@
       "data-table",
       "pagination"
     ],
-    "sourcePath": "blocks/renderers/collection-operations/",
+    "implementedBy": "@frontierui/blocks/renderers/collection-operations/",
     "designDecisions": {
       "wholeBookThenWindow": {
         "description": "Run filter -> sort -> group across the ENTIRE collection, then apply the page stage (the slice) — never page-then-sort",
@@ -2365,7 +2365,7 @@
     "dependsOn": [
       "resource-loader"
     ],
-    "sourcePath": "blocks/renderers/pagination/",
+    "implementedBy": "@frontierui/blocks/renderers/pagination/",
     "webStandards": {
       "paginationNavLandmark": {
         "status": "W3C WAI-ARIA APG",
@@ -2504,7 +2504,7 @@
       "SelectionBehavior",
       "registerSelection"
     ],
-    "sourcePath": "blocks/selection/SelectionBehavior.ts"
+    "implementedBy": "@frontierui/blocks/selection/SelectionBehavior.ts"
   },
   {
     "id": "lifecycle",
@@ -2517,7 +2517,7 @@
       "CustomLifecycleRegistry",
       "registerLifecycle"
     ],
-    "sourcePath": "blocks/lifecycle/LifecycleProvider.ts"
+    "implementedBy": "@frontierui/blocks/lifecycle/LifecycleProvider.ts"
   },
   {
     "id": "status-indicator",
@@ -2530,7 +2530,7 @@
       "renderStatusIndicator",
       "statusIndicatorHTML"
     ],
-    "sourcePath": "blocks/renderers/status-indicator/renderStatusIndicator.ts"
+    "implementedBy": "@frontierui/blocks/renderers/status-indicator/renderStatusIndicator.ts"
   },
   {
     "id": "audit-trail",
@@ -2547,7 +2547,7 @@
     "dependsOn": [
       "lifecycle"
     ],
-    "sourcePath": "blocks/audit/AuditProvider.ts"
+    "implementedBy": "@frontierui/blocks/audit/AuditProvider.ts"
   },
   {
     "id": "audit-timeline",
@@ -2560,7 +2560,7 @@
       "renderAuditTimeline",
       "auditTimelineHTML"
     ],
-    "sourcePath": "blocks/renderers/audit-timeline/renderAuditTimeline.ts"
+    "implementedBy": "@frontierui/blocks/renderers/audit-timeline/renderAuditTimeline.ts"
   },
   {
     "id": "decision-trace",
@@ -2576,7 +2576,7 @@
     "dependsOn": [
       "status-indicator"
     ],
-    "sourcePath": "blocks/renderers/decision-trace/renderDecisionTrace.ts"
+    "implementedBy": "@frontierui/blocks/renderers/decision-trace/renderDecisionTrace.ts"
   },
   {
     "id": "master-detail",
@@ -2595,7 +2595,7 @@
     "dependsOn": [
       "selection"
     ],
-    "sourcePath": "blocks/master-detail/MasterDetailBehavior.ts"
+    "implementedBy": "@frontierui/blocks/master-detail/MasterDetailBehavior.ts"
   },
   {
     "id": "tree-select",
@@ -2612,7 +2612,7 @@
       "TreeSelectBehavior",
       "registerTreeSelect"
     ],
-    "sourcePath": "blocks/tree-select/TreeSelectBehavior.ts"
+    "implementedBy": "@frontierui/blocks/tree-select/TreeSelectBehavior.ts"
   },
   {
     "id": "data-table",
@@ -2629,7 +2629,7 @@
     "dependsOn": [
       "resource-loader"
     ],
-    "sourcePath": "blocks/renderers/data-table/",
+    "implementedBy": "@frontierui/blocks/renderers/data-table/",
     "webStandards": {
       "apgSortableTable": {
         "status": "W3C WAI-ARIA APG",
@@ -2750,7 +2750,7 @@
     "composesIntents": [
       "focus-delegation"
     ],
-    "sourcePath": "blocks/renderers/data-grid/",
+    "implementedBy": "@frontierui/blocks/renderers/data-grid/",
     "webStandards": {
       "apgDataGrid": {
         "status": "W3C WAI-ARIA APG",
@@ -2828,7 +2828,7 @@
     "name": "Reorderable List",
     "status": "draft",
     "type": "Component",
-    "sourcePath": "blocks/renderers/reorderable-list/",
+    "implementedBy": "@frontierui/blocks/renderers/reorderable-list/",
     "exports": [
       "reduceReorder",
       "renderReorderableList",
@@ -3477,7 +3477,7 @@
     "type": "Component",
     "summary": "A drop-zone runtime that collapses the three native sources of a DataTransfer payload — drag-and-drop, clipboard paste, and <input type=file> — into one normalized `receive` event under a declared `accepts` contract (type/size), dispatching `reject` for anything that fails, with a keyboard/a11y file-picker affordance, the copy-vs-move flow as the drag dropEffect, and a copy-out (`emit`) half.",
     "implementsIntent": "data-transfer",
-    "sourcePath": "blocks/data-transfer/DataTransferZoneElement.ts",
+    "implementedBy": "@frontierui/blocks/data-transfer/DataTransferZoneElement.ts",
     "dependsOn": [],
     "exports": [
       "DataTransferZoneElement",
@@ -3585,7 +3585,7 @@
     "status": "active",
     "type": "Module",
     "summary": "Durable save-and-resume of an entity's working state (the #011 storage facet of webstates): autosave-on-change snapshots restored to the exact field state across sessions, behind a pluggable CustomStorageStrategy (IndexedDB native-first, localStorage degradation, in-memory test fallback), plus the last-writer-wins co-edit primitive (per-editor token + savedAt compare + an \"also editing\" presence signal over BroadcastChannel/storage).",
-    "sourcePath": "blocks/draft-persistence/DraftPersistence.ts",
+    "implementedBy": "@frontierui/blocks/draft-persistence/DraftPersistence.ts",
     "dependsOn": [],
     "exports": [
       "DraftPersistence",
@@ -3681,7 +3681,7 @@
     "status": "active",
     "type": "Module",
     "summary": "The native-first runtime behind the Workflow Protocol's swappable CustomWorkflowEngine provider seam (#634, webworkflows): a dependency-free interpreter of the portable SCXML-style orchestration graph (steps + transitions + guards + parallel/fork-join + completion) that threads context, tracks the current position, and emits a { flow, from, to, context, at } step-transition event. Honors TIER-1 core + TIER-2 common operators and declares its supported set (the #085 compliance posture). Ships a CustomWorkflowEngineRegistry and a reference XState adapter as an alternative impl.",
-    "sourcePath": "blocks/workflow-engine/NativeWorkflowEngine.ts",
+    "implementedBy": "@frontierui/blocks/workflow-engine/NativeWorkflowEngine.ts",
     "dependsOn": [],
     "exports": [
       "NativeWorkflowEngine",

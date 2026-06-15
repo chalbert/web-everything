@@ -118,12 +118,18 @@ for (const r of research)
       dMissingDescription('Research', r.id, `src/_includes/research-descriptions/${r.id}.njk`));
 
 // ── 2. Spec ↔ implementation ──────────────────────────────────────────────────
+// Per #641 (block protocol/impl boundary, A/A/A): a WE block entry is a *protocol*,
+// not impl. The impl lives in the canonical `@frontierui/blocks` package, named by
+// `implementedBy` — NOT a WE-local file. So validate the *form* of the reference,
+// not local existence (a contract may precede its impl — Fork 3-A, the 9 WE-only
+// families migrate to FUI in #658). A red filesystem check here would re-encode the
+// vendored-copy assumption #641 removed.
 for (const b of blocks) {
-  if (b.sourcePath && !existsSync(join(ROOT, b.sourcePath)))
-    err(`Block "${b.id}" sourcePath does not exist: ${b.sourcePath}`,
-      dUnresolvedRef('Block', b.id, FILE.Block, 'sourcePath', b.sourcePath, 'filesystem'));
-  if (b.status === 'active' && !b.sourcePath)
-    warn(`Block "${b.id}" is status:active but has no sourcePath`);
+  if (b.implementedBy && !/^@frontierui\/blocks\//.test(b.implementedBy))
+    err(`Block "${b.id}" implementedBy must reference the canonical @frontierui/blocks impl: ${b.implementedBy}`,
+      dUnresolvedRef('Block', b.id, FILE.Block, 'implementedBy', b.implementedBy, 'contract-form'));
+  if (b.status === 'active' && !b.implementedBy)
+    warn(`Block "${b.id}" is status:active but has no implementedBy (@frontierui/blocks impl reference)`);
 }
 
 // ── 3. Status / type enums ────────────────────────────────────────────────────

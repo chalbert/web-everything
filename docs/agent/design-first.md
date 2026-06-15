@@ -120,7 +120,7 @@ A **Protocol** is a conformance-only contract — interfaces, registry shapes, o
 5. Concrete implementations of the protocol live in **Blocks** (or adapters/projects like Frontier UI). A block that implements a protocol declares `implementsProtocol: "{protocol-id}"` alongside `implementsIntent`.
 
 ## Adding a block
-1. Add entry to `blocks.json` (id, name, status, type, summary, exports, sourcePath, dependsOn, `webStandards`, `designDecisions`, optional `frameworkComparison`).
+1. Add entry to `blocks.json` (id, name, status, type, summary, exports, `implementedBy`, dependsOn, `webStandards`, `designDecisions`, optional `frameworkComparison`). A WE block entry is a **block protocol** (a CEM-aligned structural contract — `implementsIntent`/`exports`/`events`/`traits`/`webStandards` — paired with its `block-description.njk` behavioral spec), **not** impl. The impl lives in the canonical `@frontierui/blocks` package: `implementedBy` references it (e.g. `@frontierui/blocks/type-ahead/TypeAheadBehavior.ts`), never a WE-local file (#641 A/A/A; the old `sourcePath` field pointed at a vendored copy and was removed). A contract may precede its impl (`implementedBy` may name a path FUI doesn't carry yet).
 2. Create `src/_includes/block-descriptions/{id}.njk` with: overview, **Web Standards Alignment** table, **Framework Research** table (if applicable), features, usage, API reference, exports.
    - **Contracts only:** Define registry names, interface signatures, observable states/events, observable attributes.
    - **Pseudocode/usage patterns:** Show how providers register and are resolved, but do not ship concrete provider implementations (those belong in adapters/projects like Frontier UI).
