@@ -1,28 +1,32 @@
 ---
 type: issue
-workItem: story
-size: 13
-status: open
+workItem: epic
+status: resolved
 blockedBy: ["650"]
 dateOpened: "2026-06-14"
 dateStarted: "2026-06-15"
+dateResolved: "2026-06-15"
+graduatedTo: none
 tags: []
 ---
 
 # Reference wizard Block composing the Flow Progress intent (webworkflows)
 
-Build the concrete wizard/flow Block that composesIntents over the Flow Progress intent ratified in #634 — the canonical multi-step UX (current position + per-step status + register) rendered against a real CustomWorkflowEngine. Defaults to the wizard register; demonstrates back/undo (Tier-2), per-step status (wait/process/finish/error), and aria-current=step. Reuses navigation's structure:linear/guard/history rather than reinventing them. The runtime demo that proves the Web Workflows protocol + Flow Progress intent compose end-to-end in a browser.
+Umbrella for the reference wizard/flow Block that composesIntents over the Flow Progress intent ratified in #634 — the canonical multi-step UX (current position + per-step status + register) rendered against a real CustomWorkflowEngine — **and** the runtime demo that proves the Web Workflows protocol + Flow Progress intent compose end-to-end in a browser. The Block defaults to the wizard register; demonstrates back/undo (Tier-2), per-step status (wait/process/finish/error), and aria-current=step; reuses navigation's structure:linear/guard/history rather than reinventing them.
 
-## Outgrew a clean batch slice (2026-06-15, batch pre-flight) — needs a focused build
+## Sliced into an epic (2026-06-15, `/split 651`)
 
-Claimed in a batch (cascade top-up, freed by #650's `workflow-engine` block) and scoped against the real
-tree before any edit. The infrastructure is all present and usable — `flow-progress` intent, the
-`blocks/workflow-engine/` `CustomWorkflowEngine` (`customWorkflowEngine.resolve().start(graph)` →
-`WorkflowInstance` with `send/back/onTransition/onComplete`), and `StepperBehavior` to compose — so this is
-**not blocked**. But the card bundles **two deliverables**: (1) a new *interactive* wizard **Block** (a custom
-element wiring the engine to a Flow-Progress UX — current position, per-step status, `aria-current=step`,
-back/undo, transition rendering) **and** (2) a **runtime demo** proving it end-to-end in a browser (new demo
-page + `demos.json` registration + dev-server fallback + an e2e/render check). That is new-demo-class work
-(≈`story·8` in practice, not `5`) — bigger than one clean batch slice. Released unworked; the batch stopped
-here (stop rule 4). **Recommend a focused `/new-demo`-style session** (or split: the wizard Block, then its
-runtime demo). All blockers are resolved, so it's ready the moment it's picked up with webworkflows context.
+Originally a `story·13`. Both heavy substrates are shipped — the `CustomWorkflowEngine` (#650, resolved;
+`customWorkflowEngine.resolve().start(graph)` → `WorkflowInstance` with `send/back/onTransition/onComplete`),
+the ratified `flow-progress` intent (#634, `src/_data/intents.json`), and `StepperBehavior`
+(`blocks/stepper/StepperBehavior.ts`) — so the `size` was wiring-of-shipped-pieces, not a buried fork. The
+card's own body named the seam: **the wizard Block, then its runtime demo.** Split along that seam (analysis:
+[reports/2026-06-15-backlog-split-analysis.md](../reports/2026-06-15-backlog-split-analysis.md)):
+
+- **A — #691** (`story·3`) — the interactive wizard **Block** (NEW `blocks/wizard/` custom element wiring
+  the engine + StepperBehavior into a Flow-Progress UX). Unblocked (#650 ✓).
+- **B — #692** (`story·3`, blockedBy #691) — the **runtime demo** proving it end-to-end (new demo page +
+  `demos.json` registration + dev-server fallback + e2e/render check). new-demo-class work.
+
+DAG: **A → B** (incremental; the demo consumes the Block element). Watch-item: if A re-estimates >3 in
+webworkflows context, sub-slice A1 element+stepper / A2 status+back/undo.
