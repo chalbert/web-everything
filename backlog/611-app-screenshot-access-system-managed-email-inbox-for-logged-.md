@@ -1,7 +1,7 @@
 ---
 type: idea
 workItem: story
-size: 13
+size: 8
 status: open
 dateOpened: "2026-06-14"
 tags: [tooling, screenshot, exercise-app, conformance, infra]
@@ -20,15 +20,21 @@ controls end-to-end.
 > it surfaced alongside the nav-menu sweep [#610](/backlog/610-design-sweep-navigation-menus-closed-open-states-live-naviga/).
 > #610 covers **public, logged-out** browsing; **this** card is the **logged-in** capability.
 
-## What it has to do
+## How (settled by [#709](/backlog/709-managed-inbox-auth-capture-capability-boundary-plateau-servi/))
 
-- **Create & manage email addresses** programmatically (per-site or per-run), so each signup has a
-  fresh, owned inbox — avoiding shared-account collisions and rate caps.
-- **Receive & read inbound mail** automatically — verification links, magic links, OTP codes,
-  password resets — and extract the token/link for the agent to continue the flow.
-- **Drive the signup/login** (Playwright) using those credentials, then capture the authenticated
-  states.
-- **Store & rotate credentials** securely (vault, not plaintext in the repo); never commit secrets.
+A **repo-local `scripts/` helper** — internal dev tooling, no Plateau service, no owned-domain infra.
+Read the verification/OTP/magic-link mail from the **simplest source the target allows**:
+
+- **Our own exercise apps (primary):** the app's own **dev mail sink** (Mailpit / Inbucket) or a
+  provisioned test user / dev-build bypass — no email account needed.
+- **Free third-party tiers (secondary):** a **dedicated Gmail / Workspace inbox** read via the **Gmail
+  API**, with **`+`-aliasing** for a fresh per-site address off one mailbox (real reputable address →
+  not disposable-blocklisted).
+- **Throwaway fallback:** a disposable public inbox (mail.tm) driven by Playwright.
+
+Then **drive signup/login with Playwright**, extract the token/link, and capture the authenticated
+states. Creds/tokens in a **gitignored env file**, never committed; dedicated `screenshots+*` alias, not
+real work mail. Owned-domain catch-all is a **deferred contingency** — only if the above proves blocked.
 
 ## Why we'd want it
 
@@ -40,23 +46,16 @@ controls end-to-end.
 - **Reproducible, agent-owned identity** — a controlled inbox makes signup flows deterministic and
   re-runnable in CI/headless (where interactive auth like the claude.ai MCP is absent).
 
-## To investigate before scoping (deferred research)
+## Boundary decision resolved → [#709](/backlog/709-managed-inbox-auth-capture-capability-boundary-plateau-servi/)
 
-- **Build vs buy:** disposable/programmable-inbox services & catch-all domains
-  (Mailosaur / MailSlurp / Postmark inbound / a self-hosted catch-all on an owned domain) vs a
-  thin self-hosted IMAP+API. Cost, ToS, deliverability, secret-handling.
-- **Boundary:** is this a generic capability (a Plateau-style service the WE project *consumes* —
-  cf. the vision no-leakage ruling #475), or repo-local devtooling? Likely the
-  former — it's infra, not a WE standard.
-- **Abuse/ToS guardrails:** only sign up to sites where it's permitted; respect rate limits and
-  terms; no scraping that violates a site's policy.
-- **Linear-cost check:** keep per-run cost bounded (cf. the linear-cost-with-revenue rule)
-  — owned domain + self-host over per-call SaaS if volume grows.
+The blocking fork is **resolved (2026-06-15)**: this is **internal dev tooling**, a repo-local `scripts/`
+helper — no Plateau service, no owned-domain catch-all (see the *How* section above for the settled
+shape). `blockedBy` dropped; this is now a plain, scopeable build. The `/split 611` analysis that flagged
+it as decision-inflated is in [reports/2026-06-15-backlog-split-analysis.md](/reports/2026-06-15-backlog-split-analysis.md).
 
 ## Progress
 
-- **Status:** OPEN — idea collected 2026-06-14 (raised during the nav-menu work). Not scoped to a
-  build yet; needs the build-vs-buy + boundary research above.
-- **Sized 8 → 13 (2026-06-15, batch pre-flight):** not a build yet (research idea) and the boundary
-  question (Plateau-consumed service vs. repo-local devtooling, a #475-class call) is unresolved —
-  dropped from the batch pool until scoped.
+- **Status:** OPEN — **unblocked 2026-06-15** (#709 ruled). Now a scoped build, not a research idea.
+- **Sized 13 → 8 (2026-06-15):** the +5 was the unresolved boundary decision (now in #709, resolved),
+  not volume — restored to its pre-inflation build size. Re-enters `/split` only if the build volume
+  itself warrants slicing.
