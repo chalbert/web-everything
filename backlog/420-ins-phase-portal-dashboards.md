@@ -3,9 +3,12 @@ type: idea
 locus: exercise-app
 workItem: story
 size: 5
-status: open
+status: resolved
 parent: "318"
 dateOpened: "2026-06-12"
+dateStarted: "2026-06-15"
+dateResolved: "2026-06-15"
+graduatedTo: "demos/auto-insurance/app.ts S9 — /portal (policyholder: summary, ID cards, docs, claims status) + /dashboards (book-of-business pipelines + saved views over data-table/master-detail)"
 tags: [exercise-app, auto-insurance, portal, dashboards, collection-ops, phase]
 ---
 

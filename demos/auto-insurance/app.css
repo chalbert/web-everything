@@ -249,3 +249,20 @@ tbody tr.selected { background: var(--accent-soft); }
 .claim-checklist .chk { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
 .claim-notes { display: flex; flex-direction: column; gap: 6px; margin: 4px 0; }
 .claim-notes .note { padding: 6px 10px; background: #f6f8fc; border-radius: 8px; border: 1px solid var(--line); }
+
+/* ── Portal + dashboards (S9, #420) ── */
+.portal-lookup { display: flex; gap: 10px; align-items: end; margin-bottom: 16px; flex-wrap: wrap; }
+.portal-lookup label { display: grid; gap: 4px; font-size: 13px; color: var(--ink-2); }
+.portal-lookup input { padding: 8px 10px; border: 1px solid #d6dae6; border-radius: 8px; font: inherit; }
+.portal { display: flex; flex-direction: column; gap: 16px; max-width: 760px; }
+.portal-card { padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+.portal-hd { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; }
+.portal-hd h2 { margin: 0; font-size: 18px; }
+.portal-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 24px; }
+.portal-grid > div { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.portal-claims { display: flex; flex-direction: column; gap: 6px; }
+.portal-claim { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 10px; background: #f6f8fc; border-radius: 8px; font-size: 13px; }
+.saved-views { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 14px; }
+.saved-view { font-size: 12px; font-weight: 600; cursor: pointer; padding: 6px 14px; border-radius: 999px; border: 1px solid #d6dae6; background: #fff; color: var(--ink-2); }
+.saved-view.active { background: var(--accent, #2563eb); color: #fff; border-color: transparent; }
+.saved-view:hover { filter: brightness(.98); }

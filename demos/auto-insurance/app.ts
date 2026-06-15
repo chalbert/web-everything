@@ -323,6 +323,8 @@ const MODULES = [
   { path: '/quotes', label: 'Quotes' },
   { path: '/underwriting', label: 'Underwriting' },
   { path: '/claims', label: 'Claims' },
+  { path: '/portal', label: 'Portal' },        // S9 (#420): policyholder self-service
+  { path: '/dashboards', label: 'Dashboards' }, // S9 (#420): book-of-business pipelines
 ];
 
 function stub(title: string): string {
@@ -618,6 +620,68 @@ function renderClaimDetail(c: Claim, moves: ClaimState[]): string {
   </div>`;
 }
 
+// ── Policyholder portal (S9, #420) — the self-service view of a single policy: summary, ID cards,
+//    issued documents, and claims status. Reuses Status Indicator + the S4 issued-documents render. ──
+function portalSkeleton(): string {
+  return `<div class="ai-workspace">
+    <form id="portal-lookup" class="portal-lookup">
+      <label>Policy # <input name="policyNumber" placeholder="PA-100001" autocomplete="off"></label>
+      <button type="submit" class="btn primary">Open portal</button>
+      <span class="muted">Policyholder self-service view</span>
+    </form>
+    <div id="portal-mount"></div>
+  </div>`;
+}
+function renderPolicyholderPortal(p: Policy, policyClaims: Claim[]): string {
+  const r = rate(p);
+  // The holder's documents: a seeded in-force policy may not have materialized them yet (issuance runs in
+  // the S4 flow). Generate on view — idempotent (returns the existing set if already issued) — so the
+  // portal always shows ID cards + declarations for an issued-eligible policy. (#420)
+  if (['in-force', 'lapsed', 'cancelled', 'expired'].includes(p.state) && !p.issued) {
+    issuePolicyDocuments(p, r.premium, new Date(p.term.start).toISOString());
+  }
+  const meta = policyLifecycle.meta(p.state);
+  const stateChip = statusIndicatorHTML({ label: meta.label ?? p.state, tone: meta.tone, shape: 'badge' });
+  const v = p.vehicles[0];
+  const claimsList = policyClaims.length
+    ? policyClaims.map((c) => {
+        const cm = claimLifecycle.meta(c.state);
+        return `<div class="portal-claim"><span>${c.claimNumber} · ${c.lossType}</span>${statusIndicatorHTML({ label: cm.label ?? c.state, tone: cm.tone, shape: 'badge' })}</div>`;
+      }).join('')
+    : '<span class="muted">No claims on this policy.</span>';
+  return `<div class="portal">
+    <div class="portal-card">
+      <div class="portal-hd"><h2>${p.insured.firstName} ${p.insured.lastName}</h2>${stateChip}</div>
+      <div class="portal-grid">
+        <div><span class="muted">Policy</span><b>${p.policyNumber}</b></div>
+        <div><span class="muted">Vehicle</span><b>${v.year} ${v.make} ${v.model}</b></div>
+        <div><span class="muted">Territory</span><b>${p.territory}</b></div>
+        <div><span class="muted">6-mo premium</span><b>${money(r.premium)}</b></div>
+      </div>
+    </div>
+    ${renderBinding(p, r.premium)}
+    <div class="portal-card">
+      <div class="panel-hd">Your claims</div>
+      <div class="portal-claims">${claimsList}</div>
+    </div>
+  </div>`;
+}
+
+// ── Book-of-business dashboards (S9, #420) — pipeline stats + saved views over the book/claims at scale.
+//    Saved views are named filter presets feeding one shared data-table (collection-ops: sort + page),
+//    coordinated to a read-only detail via Master-Detail. ──
+function dashboardSkeleton(): string {
+  return `<div class="ai-workspace">
+    <div id="dash-stats" class="stats"></div>
+    <div id="dash-views" class="saved-views"></div>
+    <div class="ai-grid">
+      <div class="ai-main"><data-table id="dash-table"></data-table><div id="dash-pager" class="ai-pager"></div></div>
+      <aside id="dash-detail" class="ai-detail"><p class="muted">Select a row to inspect.</p></aside>
+    </div>
+    <div class="ai-substatus muted" id="dash-sub"></div>
+  </div>`;
+}
+
 function boot() {
   const root = document.getElementById('app');
   if (!root) return;
@@ -659,6 +723,8 @@ function boot() {
     `<template route="/quotes">${quoteSkeleton()}</template>`,
     `<template route="/underwriting">${uwSkeleton(referred.length)}</template>`,
     `<template route="/claims">${claimsSkeleton()}</template>`,
+    `<template route="/portal">${portalSkeleton()}</template>`,
+    `<template route="/dashboards">${dashboardSkeleton()}</template>`,
   ].join('');
 
   root.innerHTML = `
@@ -1035,6 +1101,117 @@ function boot() {
     });
   };
 
+  // Policyholder portal (S9, #420): a policy lookup → the holder-facing summary, ID cards, claims status.
+  const fillPortal = () => {
+    const mount = document.getElementById('portal-mount');
+    const lookup = document.getElementById('portal-lookup') as HTMLFormElement | null;
+    if (!mount || !lookup) return;
+    const show = (p: Policy) => { mount.innerHTML = renderPolicyholderPortal(p, claims.filter((c) => c.policyNumber === p.policyNumber)); };
+    show(book.find((p) => p.state === 'in-force' && p.issued) ?? book.find((p) => p.state === 'in-force') ?? book[0]);
+    if (!lookup.dataset.wired) {
+      lookup.dataset.wired = '1';
+      lookup.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const num = String(new FormData(lookup).get('policyNumber') || '').trim().toUpperCase();
+        const p = byPolicy.get(num);
+        mount.innerHTML = p ? renderPolicyholderPortal(p, claims.filter((c) => c.policyNumber === p.policyNumber))
+          : `<div class="empty-card"><h2>No policy ${num || '—'}</h2><p class="muted">Try a number from the <a route:link="${routePath('/book')}">Book</a>.</p></div>`;
+      });
+    }
+  };
+
+  // Book-of-business dashboards (S9, #420): pipeline stats + named saved views over the book/claims at
+  // scale. Each view is a filter preset feeding ONE shared data-table (collection-ops sort/page); the
+  // selected row coordinates to a read-only detail via Master-Detail. status-indicator chips throughout.
+  const fillDashboards = () => {
+    const statsEl = document.getElementById('dash-stats');
+    const viewsEl = document.getElementById('dash-views');
+    const table = document.getElementById('dash-table') as DataTableElement | null;
+    const panel = document.getElementById('dash-detail');
+    const pager = document.getElementById('dash-pager');
+    const sub = document.getElementById('dash-sub');
+    if (!statsEl || !viewsEl || !table || !panel || !pager) return;
+
+    const openClaims = claims.filter((c) => !['paid', 'denied', 'closed'].includes(c.state));
+    const referrals = book.filter((p) => p.state === 'referred');
+    const inForce = book.filter((p) => p.state === 'in-force');
+    const lapsed = book.filter((p) => p.state === 'lapsed');
+    const stat = (n: number, label: string) => `<div class="stat"><span class="stat-n">${n.toLocaleString()}</span><span class="stat-l">${label}</span></div>`;
+    statsEl.innerHTML = stat(book.length, 'Book') + stat(referrals.length, 'Referrals') + stat(inForce.length, 'In-force') + stat(openClaims.length, 'Open claims');
+
+    const POLICY_COLS = COLUMNS;
+    const policyRows = (ps: Policy[]): Row[] => bookRows(ps);
+    const claimCols: DataTableConfig['columns'] = [
+      { field: 'claim', label: 'Claim #', sortable: true },
+      { field: 'policy', label: 'Policy #', sortable: true },
+      { field: 'loss', label: 'Loss', sortable: true },
+      { field: 'reserve', label: 'Reserve', sortable: true },
+      { field: 'state', label: 'Status', sortable: true },
+    ];
+    const claimRowsFor = (cs: Claim[]): Row[] => cs.map((c) => ({ claim: c.claimNumber, policy: c.policyNumber, loss: c.lossType, reserve: money(c.reserve), state: claimLifecycle.meta(c.state).label ?? c.state }));
+
+    type View = { id: string; label: string; kind: 'policy' | 'claim'; columns: DataTableConfig['columns']; rows: Row[]; sortField: string };
+    const VIEWS: View[] = [
+      { id: 'referrals', label: `Referral queue (${referrals.length})`, kind: 'policy', columns: POLICY_COLS, rows: policyRows(referrals), sortField: 'policy' },
+      { id: 'in-force', label: `In-force book (${inForce.length})`, kind: 'policy', columns: POLICY_COLS, rows: policyRows(inForce), sortField: 'policy' },
+      { id: 'lapsed', label: `Lapsed (${lapsed.length})`, kind: 'policy', columns: POLICY_COLS, rows: policyRows(lapsed), sortField: 'policy' },
+      { id: 'open-claims', label: `Open claims (${openClaims.length})`, kind: 'claim', columns: claimCols, rows: claimRowsFor(openClaims), sortField: 'claim' },
+    ];
+
+    const PAGE_SIZE = 50;
+    let md: MasterDetailBehavior | undefined;
+    let active: View = VIEWS[0];
+    let rows: Row[] = active.rows;
+    const showPage = (i: number) => { table.rows = rows.slice(i * PAGE_SIZE, (i + 1) * PAGE_SIZE); md?.refresh(); };
+
+    const renderDashDetail = (key: string, el: HTMLElement) => {
+      if (active.kind === 'policy') {
+        const p = byPolicy.get(key);
+        if (!p) return;
+        const r = rate(p); const m = policyLifecycle.meta(p.state);
+        el.innerHTML = `<div class="detail-body"><h3>${p.policyNumber}</h3><p class="muted">${statusIndicatorHTML({ label: m.label ?? p.state, tone: m.tone, shape: 'badge' })} · ${p.insured.firstName} ${p.insured.lastName}</p>
+          <div class="panel-hd">Premium</div><p>${money(r.premium)} · finding ${FINDING_LABEL[r.finding]}</p>
+          <p class="muted" style="font-size:12px">Open in the <a route:link="${routePath('/book')}">Book</a> to action it.</p></div>`;
+      } else {
+        const c = byClaim.get(key);
+        if (!c) return;
+        const m = claimLifecycle.meta(c.state);
+        el.innerHTML = `<div class="detail-body"><h3>${c.claimNumber} · ${c.lossType}</h3><p class="muted">${statusIndicatorHTML({ label: m.label ?? c.state, tone: m.tone, shape: 'badge' })} · policy ${c.policyNumber} · reserve ${money(c.reserve)}</p>
+          <p class="muted" style="font-size:12px">Adjust it in the <a route:link="${routePath('/claims')}">Claims</a> workbench.</p></div>`;
+      }
+    };
+
+    const applyView = (v: View) => {
+      active = v; rows = v.rows;
+      table.config = { columns: v.columns, sort: { keys: 'single', by: [{ field: v.sortField, direction: v.id === 'open-claims' ? 'descending' : 'ascending' }] } };
+      showPage(0);
+      md = new MasterDetailBehavior(table, {
+        itemSelector: 'tbody tr', detailEl: panel, detailLabel: 'Detail',
+        keyOf: (row) => row.querySelector('td')?.textContent,
+        renderDetail: (key, el) => renderDashDetail(key, el),
+      });
+      if (sub) sub.textContent = `${v.label} · showing ${Math.min(rows.length, PAGE_SIZE)} of ${rows.length.toLocaleString()}`;
+      viewsEl.querySelectorAll('button').forEach((b) => b.classList.toggle('active', (b as HTMLElement).dataset.view === v.id));
+      new PaginationBehavior(pager, {
+        state: { pageIndex: 0, pageSize: PAGE_SIZE, total: rows.length },
+        options: { mode: 'paged', advance: 'manual', urlSync: 'none', rangeLabel: 'range' },
+        onChange: (s) => showPage(s.pageIndex),
+      });
+    };
+
+    viewsEl.innerHTML = VIEWS.map((v) => `<button type="button" class="saved-view" data-view="${v.id}">${v.label}</button>`).join('');
+    if (!viewsEl.dataset.wired) {
+      viewsEl.dataset.wired = '1';
+      viewsEl.addEventListener('click', (e) => {
+        const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button.saved-view');
+        if (!btn) return;
+        const v = VIEWS.find((x) => x.id === btn.dataset.view);
+        if (v) applyView(v);
+      });
+    }
+    applyView(active);
+  };
+
   const routeView = document.querySelector('route-view');
   // `path` is the live, base-qualified pathname; compare against base-qualified link targets. The
   // bare-base → /book redirect is owned by the route-view `entry` attribute (#365).
@@ -1044,6 +1221,8 @@ function boot() {
     if (path === routePath('/quotes')) requestAnimationFrame(fillQuote);
     if (path === routePath('/underwriting')) requestAnimationFrame(fillUnderwriting);
     if (path === routePath('/claims')) requestAnimationFrame(fillClaims);
+    if (path === routePath('/portal')) requestAnimationFrame(fillPortal);
+    if (path === routePath('/dashboards')) requestAnimationFrame(fillDashboards);
   };
   routeView?.addEventListener('route-change', (e) => onRoute((e as CustomEvent).detail?.to?.path ?? location.pathname));
   onRoute(location.pathname);
