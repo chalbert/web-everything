@@ -28,6 +28,19 @@ It's not aspirational — it's the practice we run daily, already materialized a
 
 The "product" (if it ever is one) is the **extraction and articulation** of this implicit playbook into something another team could adopt.
 
+## The developer-role inversion (positioning)
+
+The methodology's sharpest claim is what it does to the *developer role*. In a fully self-driven project (the framing ratified in [#665](/backlog/665-self-driven-project-ratify-the-framing-autonomy-taxonomy-mas/), epic [#666](/backlog/666-self-driven-project/)), **little or no application code is written by a human.** The machine drives the steps; the human's input concentrates at the two ends the machine can't own — **planning** (what to build and to what tolerance) and **validation** (is the proof good). The role doesn't disappear, it **moves up the abstraction ladder**:
+
+- **Planner / intent-author** — sets the goal and the risk/tolerance envelope; authors intents and decisions, not implementations. (The "PO/BA" personas of the role-multiplex, [#564](/backlog/564-personas-as-a-first-class-agile-concept/).)
+- **Validator** — reviews **proof, not diffs**. At L3 autonomy the system does the whole task and the human approves the *evidence* (a green gate, a reproduced behaviour, a verified finding) rather than reading every line. This is the QA persona, inverted: judging acceptance signals instead of hand-testing.
+- **Fallback-ready L3 operator** — stays the system's fallback (per the SAE L2→L3 boundary: at L3 the human is the fallback, not part of the task). Ready to take the wheel on a tolerance breach, but not steering by default.
+- **Gate / standard author** — the role where the work actually concentrates. (See the step-tree, [#671](/backlog/671-self-driven-project-step-tree-every-sdlc-step-automatable-da/).)
+
+**The inversion, stated explicitly: as app-code authoring evaporates, value concentrates in gate authoring.** A step can be automated exactly as far as its acceptance signal is machine-checkable — so the way to make a project *more* self-driven is to keep converting the next human-judgment gate into a data-driven one. That conversion *is* the high-value human work: writing the standard, the conformance check, the measurable definition-of-done that lets the machine drive one more step unattended. The developer stops being the person who types the implementation and becomes the person who **authors the gates the implementation must pass** — design decisions and standards being the deliberate human floor (the genuine-fork call is kept human on purpose).
+
+**Nuance — maintainability is a real, standing risk dimension.** This is not a free lunch. As the human writes less of the code, the binding constraint shifts to the **operator's ability to keep driving** — to understand, steer, and recover the system they no longer hand-author. Maintainability stays a first-class value/risk dimension (one of #665's five), and it is the dial that can force a human back down the ladder: a codebase the operator can no longer reason about caps the autonomy the project can safely run at, regardless of how green the gates are.
+
 ## Brainstorm — related & spin-off ideas
 
 - **Role-multiplexing / one-operator-virtual-team** — a single person occupying PO → BA → dev → QA in sequence, with agents executing each role, plausibly the throughput of a ~20-person team. Worth naming and documenting as a *pattern* (the human as orchestrator/reviewer, agents as the team). This is the conceptual bridge to personas → see [#564](/backlog/564-personas-as-a-first-class-agile-concept/).
