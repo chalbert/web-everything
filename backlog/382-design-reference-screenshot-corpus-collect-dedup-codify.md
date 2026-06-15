@@ -1,8 +1,10 @@
 ---
 type: idea
 workItem: epic
-status: open
+status: resolved
 dateOpened: "2026-06-12"
+dateResolved: "2026-06-15"
+graduatedTo: none
 relatedReport: reports/2026-06-12-design-ref-corpus-taxonomy-seed.md
 tags: [design-reference, corpus, screenshots, collection, dedup, classification, tooling, codification]
 ---
