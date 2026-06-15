@@ -5,7 +5,7 @@ size: 8
 parent: "170"
 status: open
 locus: frontierui
-blockedBy: ["649"]
+blockedBy: ["725"]
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-14"
 tags: [plugs, dedup, migration, frontierui, plateau-app]
@@ -20,14 +20,15 @@ plugs is **implementation**, owned by **Frontier UI**. Make `frontierui/plugs` t
 `webeverything/plugs`, and repoint WE + plateau-app to consume it as a no-leakage client (the
 [#604](/backlog/604-migrate-the-we-site-to-render-real-frontier-ui-blocks-replac/) WE→FUI seam).
 
-> **⚠ Blocked by [#649](/backlog/649-reconcile-plugs-we-fui-drift-dual-mode-test-backfill-ahead-o/) (added 2026-06-15).**
+> **⚠ Blocked by [#725](/backlog/725-port-we-only-plug-domains-webguards-webvalidation-their-subs/) (updated 2026-06-15).**
 > The earlier "reconcile is done, this is ready" framing is a **false premise** corrected by the
-> [#635 plugs-runtime audit](/reports/2026-06-14-plugs-runtime-audit.md) (resolved 2026-06-14): the two trees are
-> **still drifted** — WE holds canonical fixes FUI lacks (`cloneHandlers` #454, `Injector` #400 consumption-edge graph +
-> `declarativeInjector`, `ensureNativelyConstructible`) plus two **WE-only domains** (`webguards`, `webvalidation`) with no
-> FUI home. Deleting `webeverything/plugs` now would **regress real behavior** and silently decide the WE-only domains'
-> home. #649 owns that reconciliation (port WE→FUI fixes + decide the WE-only homes) and **must land first**. Spans both
-> repos (`locus: frontierui`); after #649, work it whole via `/next 449`.
+> [#635 plugs-runtime audit](/reports/2026-06-14-plugs-runtime-audit.md) (resolved 2026-06-14). **#649 (resolved
+> 2026-06-15) did the runtime half** of the reconciliation: it ported WE's canonical runtime fixes into FUI
+> (`cloneHandlers` #454, `Injector` #400 consumption-edge graph + `declarativeInjector`, `ensureNativelyConstructible`,
+> the `viewportPresence` refactor) so the shared-runtime trees are now content-equal (verified: FUI typecheck + 1675
+> unit tests green). **What remains before this delete is safe is #725**: the two **WE-only domains** (`webguards`,
+> `webvalidation`) and their `guard/`/`validity-merge/`/`validator-resolution/` subsystems still have no FUI home —
+> deleting `webeverything/plugs` before #725 lands would regress that behavior. After #725, work this whole via `/next 449`.
 
 ## Scope
 
