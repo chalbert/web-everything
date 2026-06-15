@@ -8,7 +8,7 @@ parent: "317"
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-14"
-graduatedTo: loan demo S11 notifications + audit UI — domain/notifications.ts (event-routing NotificationStore), topbar bell, two trace event affordances; audit-trail consumed, notification declared as tagged GAP driving #358
+graduatedTo: demos/loan-origination/domain/notifications.ts
 tags: [exercise-app, loan-origination, audit, notifications, phase]
 ---
 
@@ -40,3 +40,5 @@ per-application audit trail (actor / timestamp / before-after) UI. See the
 - Also fixed an unquoted-colon YAML footgun in #386's `graduatedTo` (the `resolve` writer left it bare,
   which silently skipped the item from the loader).
 - Gates: `tsc` clean, `check:app-conformance` compliant, `check:demos` + `check:standards` green.
+
+**Graduated to** `demos/loan-origination/domain/notifications.ts` — loan demo S11 — event-routing NotificationStore + topbar bell + trace affordances; audit-trail consumed; notification tagged GAP driving #358.

@@ -4,7 +4,7 @@ workItem: task
 status: resolved
 dateOpened: "2026-06-06"
 dateResolved: "2026-06-06"
-graduatedTo: "Documented no-op — won't backfill formerSlugs (pre-NNN URLs were never published); going-forward rewords stay covered by #075's /backlog/<NNN>/ redirect"
+graduatedTo: none
 tags: [backlog, routing, back-compat, dx]
 crossRef: { url: /backlog/, label: Backlog index }
 ---
@@ -31,3 +31,5 @@ recoverable from `git log --diff-filter=R --name-status -- 'backlog/*.md'`) to `
 risk (the validator already guards collisions), purely mechanical, and only worth doing if those
 un-numbered URLs were actually published anywhere — otherwise leave it as a documented no-op, since
 new rewords are covered going forward and `/backlog/<NNN>/` already survives any reword.
+
+**Graduated to** `none` — documented no-op — won't backfill formerSlugs (pre-NNN URLs never published); rewords covered by #075's /backlog/<NNN>/ redirect.

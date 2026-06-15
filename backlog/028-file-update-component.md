@@ -6,7 +6,7 @@ status: resolved
 dateOpened: '2026-06-02'
 dateStarted: "2026-06-10"
 dateResolved: "2026-06-10"
-graduatedTo: intent file-revision (File Revision Intent, src/_data/intents.json, status concept) — codifies the UX-only revision delta (valuePresence/swapModel/revert); entry+accept defer to the #007 data-transfer intent, transfer+commit to the File Upload & Update configurator domain, progress composes Loader/Background-Task, resumable composes Reliability. Open questions resolved in the item body.
+graduatedTo: "intent:file-revision"
 tags:
   - file-upload
   - file-update
@@ -45,3 +45,5 @@ intents rather than duplicating them, which resolves the open questions:
   not duplicated; transfer + commit/persistence are **technical** and stay in the configurator domain;
   progress lifecycle composes Loader / Background Task. The correctness-vs-fidelity axis question stays with
   the configurator that models it (#007 + the configurator domain own those calls).
+
+**Graduated to** `intent:file-revision` — File Revision Intent (concept) — UX-only revision delta (valuePresence/swapModel/revert); entry+accept defer to #007 data-transfer, transfer+commit to the File Upload & Update configurator domain, progress composes Loader/Background-Task, resumable composes Reliability.

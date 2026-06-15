@@ -7,7 +7,7 @@ dateOpened: '2026-06-09'
 blockedBy: ["224"]
 dateStarted: "2026-06-10"
 dateResolved: "2026-06-10"
-graduatedTo: "demos/validator-resolution-demo.{html,ts,css} (Validator Resolution Playground, registered in demos.json) — live race surface for the runtime customValidatorResolution plug (#224): controllable-delay async checks, versioning↔cancellation toggle, surviving answer composed into a <validity-merge-field> async source; 7-check runtime-conformance section covered by the data-driven playgrounds.spec.ts e2e"
+graduatedTo: "demo:validator-resolution-demo"
 tags:
   - validation
   - async
@@ -37,3 +37,5 @@ order. A demo makes that visible.
   #214 unit suite).
 
 Sibling to the validity-merge demo. Best done after #224.
+
+**Graduated to** `demo:validator-resolution-demo` — Validator Resolution Playground — live race surface for the runtime customValidatorResolution plug (#224); 7-check runtime-conformance via playgrounds.spec.ts.

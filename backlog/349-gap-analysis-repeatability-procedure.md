@@ -8,7 +8,7 @@ blockedBy: ["346"]
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: ruling recorded; spawned #366 (manual re-run skill) + scheduled-refresh story
+graduatedTo: none
 tags: [gap-analysis, competitive-analysis, repeatable, freshness, longitudinal, cadence, research]
 relatedProject: webdocs
 crossRef: { url: /research/, label: "/research/ topic index" }
@@ -52,3 +52,5 @@ Graduates to two follow-on stories under #315: a manual re-run skill (agent-read
 refresh (blocked on #192 + the manual skill). Manual-first because the first few re-runs want a human
 reading the delta (did the corpus criteria still hold? did a new axis appear the schema doesn't model?)
 before automation is trusted.
+
+**Graduated to** `none` — ruling — spawned #366 (manual re-run skill) + scheduled-refresh story.

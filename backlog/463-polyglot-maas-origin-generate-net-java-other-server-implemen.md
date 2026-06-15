@@ -7,7 +7,7 @@ blockedBy: ["461"]
 dateOpened: "2026-06-13"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
-graduatedTo: #505/#506/#507 (polyglot MaaS build program: contract+IR · conformance suite · generation-adapter)
+graduatedTo: none
 preparedDate: "2026-06-13"
 tags: [module-as-a-service, distribution, polyglot, dotnet, java, generation-adapter, codegen, enterprise, adapters, conformance, source-of-truth]
 parent: "081"
@@ -209,3 +209,5 @@ The per-language origin builds spin off now that the mechanism + SoT + conforman
 this item was the decision, not the build. Spin-offs: **#505** (neutral contract + IR, fork b) →
 **#506** (conformance suite, fork c, blocked by #505) → **#507** (deterministic generation-adapter +
 first native target, fork a, blocked by #505/#506).
+
+**Graduated to** `none` — ratified — spawned polyglot MaaS build program #505 (contract+IR) / #506 (conformance suite) / #507 (generation-adapter).

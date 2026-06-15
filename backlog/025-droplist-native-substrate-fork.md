@@ -7,7 +7,7 @@ status: resolved
 dateOpened: '2026-06-02'
 dateStarted: '2026-06-08'
 dateResolved: '2026-06-08'
-graduatedTo: "203"
+graduatedTo: none
 tags:
   - droplist
   - dropdown
@@ -58,3 +58,5 @@ this surfaced (capability provider, venue dimension, D3′–D6) **graduated to 
 ### Graduate at close-out
 
 The capability provider + venue dimension has outgrown droplist (serves any intent-resolved family; ties into module-as-a-service). On close-out, graduate it into its own item — likely a Project/Protocol-level entity — rather than leaving it buried here.
+
+**Graduated to** `none` — decision — ruling 'lightest eligible impl, native wins ties' (in body); fed the #203 capability-provider architecture (prior corrupt value: 203).

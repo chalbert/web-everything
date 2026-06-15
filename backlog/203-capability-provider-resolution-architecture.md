@@ -5,7 +5,7 @@ status: resolved
 dateOpened: "2026-06-08"
 dateStarted: "2026-06-08"
 dateResolved: "2026-06-08"
-graduatedTo: "204"
+graduatedTo: none
 tags: [capability-provider, di, intents, native-first, adapters, resolution, module-as-a-service, client-hints, progressive-enhancement, cross-cutting]
 relatedReport: reports/2026-06-02-native-platform-substrate.md
 crossRef: { url: /backlog/025-droplist-native-substrate-fork/, label: "Graduated from #025 (droplist native-first resolution)" }
@@ -124,3 +124,5 @@ those IDs), D5 (tier per ID), the adapter table (rows keyed by those IDs), and t
 into place. Ties the module-as-a-service thread ([#087](/backlog/087-module-service-distribution-caching/),
 [#088](/backlog/088-module-service-versioning/),
 [#085](/backlog/085-validation-adapters-multi-language/)) into a single resolution layer via #208.
+
+**Graduated to** `none` — epic — capability provider resolution architecture, delivered via slices #204/#206/#216… (prior corrupt value: 204).

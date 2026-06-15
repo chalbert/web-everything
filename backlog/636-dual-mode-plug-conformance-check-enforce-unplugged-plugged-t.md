@@ -7,7 +7,7 @@ blockedBy: ["635"]
 dateOpened: "2026-06-14"
 dateStarted: "2026-06-15"
 dateResolved: "2026-06-15"
-graduatedTo: "rule:validatePlugDualMode (scripts/check-standards-rules.mjs + check-standards.mjs) — #606 dual-mode plug conformance: ERROR on missing plugged-mode test, WARN→ERROR (PLUG_UNPLUGGED_TEST_ENFORCED) on missing unplugged-mode test after #649 backfill"
+graduatedTo: scripts/check-standards-rules.mjs
 tags: []
 ---
 
@@ -26,3 +26,5 @@ Add a check:standards rule enforcing the #606 invariants: every plug ships passi
 - The rule **skips silently when `plugs/` isn't checked out** — #606 makes Frontier UI the canonical home, so a post-#449 WE tree without `plugs/` is expected, not a failure.
 - Fixture tests added to [scripts/__tests__/check-standards-rules.test.mjs](/scripts/__tests__/check-standards-rules.test.mjs) (4 cases: dual-mode pass, plugged-missing error, unplugged-missing backfill warn, non-plug-dir skip). 109 rule tests green.
 - `npm run check:standards` green (0 errors, 9 backfill warns).
+
+**Graduated to** `scripts/check-standards-rules.mjs` — validatePlugDualMode rule (+ check-standards.mjs) — #606 dual-mode plug conformance: ERROR on missing plugged-mode test, WARN→ERROR (PLUG_UNPLUGGED_TEST_ENFORCED) after #649 backfill.

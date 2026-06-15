@@ -8,7 +8,7 @@ parent: "318"
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
-graduatedTo: insurance demo S4 — domain/binding.ts (payment-received guard, mock declarations + ID cards) + policy-detail bind/pay/issue surface; real quoted→bound→in-force guarded transitions; consumes lifecycle/audit/status-indicator, drives guards #289 + file-handling #028 candidates
+graduatedTo: demos/auto-insurance/domain/binding.ts
 tags: [exercise-app, auto-insurance, bind, issue, lifecycle, phase]
 ---
 
@@ -37,3 +37,5 @@ ID cards (mock). See the [requirements PRD](/reports/2026-06-12-exercise-app-aut
   app-generated artifacts (richer file-handling block uncodified, candidate **#028**) — both already in
   `conformance.json` candidateStandards.
 - Gates: `tsc` clean, `check:app-conformance` compliant, `check:demos` + `check:standards` green.
+
+**Graduated to** `demos/auto-insurance/domain/binding.ts` — insurance demo S4 — payment-received guard, mock declarations + ID cards, bind/pay/issue surface; consumes lifecycle/audit/status-indicator; drives guards #289 + file-handling #028.

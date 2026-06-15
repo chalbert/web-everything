@@ -8,7 +8,7 @@ blockedBy: ["347"]
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: filed 7 gap candidate items #358-#364 under epic #315
+graduatedTo: none
 relatedReport: reports/2026-06-12-coverage-gap-detection.md
 tags: [gap-analysis, competitive-analysis, coverage, backlog, pipeline, triage]
 relatedProject: webdocs
@@ -54,3 +54,5 @@ The **7 genuinely-new gaps** were filed as candidate stories under #315 (surface
 - **#364** Unified design-token / theming system (decision·8, cross-refs #010)
 
 Idempotency: a re-run over the unchanged matrix now finds all 11 rows tracked → opens **0** new items.
+
+**Graduated to** `none` — process item — filed 7 gap candidate items #358–#364 under epic #315.

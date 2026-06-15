@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-10"
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"
-graduatedTo: backlog splits #085/#081 + decisions #092/#093/#191 + #304-313 slices
+graduatedTo: none
 tags: [backlog, split, agile-sizing, batchable, decision]
 relatedReport: reports/2026-06-10-backlog-split-analysis.md
 ---
@@ -80,3 +80,5 @@ explicitly deferred with a reason.
 The one remaining `error` (orphaned report `reports/2026-06-01-dropdown-ux-behaviors.md`) is **pre-existing
 and out of scope** — it predates this work, no #259 item references it, and fixing it would mean editing
 the unrelated reports/research-topics subsystem. Flagged, not touched.
+
+**Graduated to** `none` — process item — executed backlog splits #085/#081 + decisions #092/#093/#191 + #304–313 slices.

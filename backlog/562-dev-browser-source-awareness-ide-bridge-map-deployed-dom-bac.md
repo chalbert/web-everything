@@ -7,7 +7,7 @@ blockedBy: ["141"]
 dateOpened: "2026-06-14"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
-graduatedTo: 575, 576, 577
+graduatedTo: none
 preparedDate: "2026-06-14"
 relatedReport: reports/2026-06-14-source-awareness-substrate.md
 crossRef: { url: /backlog/141-dev-browser-vision/, label: "Dev-browser fix-loop (#141)" }
@@ -229,3 +229,5 @@ compliance layer, platform-defined):**
 already-ruled in shape (platform-defined defaults, project-customizable, compliance-enforced, bot-consumed) and
 just needs an item to carry the default vocabulary into the compliance layer. Neither is decided here — this is
 a capture so ratifying #562 can fan them out.
+
+**Graduated to** `none` — umbrella — split into #575 / #576 / #577 (dev-browser source-awareness IDE bridge).

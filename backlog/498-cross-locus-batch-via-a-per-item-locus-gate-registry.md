@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-13"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
-graduatedTo: 500
+graduatedTo: none
 tags: [batch, repo-locus, gate, cross-repo, tooling, constellation]
 ---
 
@@ -125,3 +125,5 @@ instinct was to exclude them as "a different *workflow*." But that's weaker than
   streams (commit each item in *its* repo, never `git add -A` across repos).
 - **Related:** #083 (agent-file-lock-coordination / repo-locus origin); the `Repo-locus` section of
   docs/agent/backlog-workflow.md is the normative home — any ruling here updates that doc.
+
+**Graduated to** `none` — decision — ruling (locus→gate registry; batch becomes locus-agnostic) in body; build tracked by #500 (prior corrupt value: 500).

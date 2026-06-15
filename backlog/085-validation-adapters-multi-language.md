@@ -5,7 +5,7 @@ status: resolved
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
-graduatedTo: validation-generation/ (epic — delivered via slices #304–#309)
+graduatedTo: validation-generation/
 tags: [validation, protocol, adapters, multi-language, codegen, validation-as-a-service, conformance, intents, native-first]
 relatedProject: webvalidation
 relatedReport: reports/2026-06-06-validation-generation-protocol-adapters.md
@@ -119,3 +119,5 @@ Target the **schema layer, not the UI framework** (React/Vue/Svelte all consume 
 - **Done:** all six slices resolved — #304 (intent enumeration + `CustomValidationAdapterRegistry` foundation), #305 (native-HTML), #306 (Zod), #307 (Pydantic), #308 (JSON-Schema), #309 (Mode-2 generation service + delivery format). v1 acceptance (Mode-1 ≥3 targets from one core + Mode-2 served format + per-adapter #005 compliance + lossy-flagging) is met across those slices.
 - **Carried forward:** the two parked open-decisions — field-error shape intent → **#464**; portable cross-field rule-expression language vs shape-only → decision **#465** (both `blockedBy: 304`).
 - **Notes:** no code in this epic itself; it is the umbrella. Closed out by reconciling status `active → resolved` once every slice reached `resolved`.
+
+**Graduated to** `validation-generation/` — epic delivered via slices #304–#309.
