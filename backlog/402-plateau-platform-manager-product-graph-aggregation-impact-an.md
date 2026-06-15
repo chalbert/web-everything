@@ -2,8 +2,10 @@
 type: idea
 workItem: epic
 parent: "092"
-status: open
+status: resolved
 dateOpened: "2026-06-12"
+dateResolved: "2026-06-15"
+graduatedTo: none
 tags: [plateau, plateau-app, platform-manager, governance, dependency-graph, enterprise, product-build]
 relatedProject: webregistries
 relatedReport: reports/2026-06-12-backlog-split-analysis.md
