@@ -5,7 +5,7 @@ size: 3
 status: resolved
 dateOpened: "2026-06-06"
 dateResolved: "2026-06-06"
-graduatedTo: /blocks/data-table/
+graduatedTo: "block:data-table"
 tags: [data-table, collection-operations, a11y, interactivity, aria-live, grid, block]
 relatedProject: webblocks
 crossRef: { url: /blocks/data-table/, label: Data Table block }

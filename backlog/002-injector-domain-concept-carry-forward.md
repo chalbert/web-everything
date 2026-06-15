@@ -6,7 +6,7 @@ status: resolved
 dateOpened: '2026-02-24'
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"
-graduatedTo: Protocol
+graduatedTo: none
 tags:
   - injector
   - domain

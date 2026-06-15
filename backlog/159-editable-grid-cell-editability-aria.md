@@ -6,7 +6,7 @@ parent: "131"
 status: resolved
 dateOpened: "2026-06-07"
 dateResolved: "2026-06-07"
-graduatedTo: "editAction(readonly) + cellIsReadonly() in blocks/renderers/data-grid/editableGrid.ts; DataGridEditBehavior gates on aria-readonly"
+graduatedTo: "block:data-grid"
 tags: [data-grid, editing, a11y, aria, apg]
 relatedProject: webblocks
 crossRef: { url: /blocks/data-grid/, label: Data Grid block }
@@ -50,3 +50,5 @@ Make editability **declared and announced**, not implicit:
 — consistent with the rest of the grid reading structure from the live DOM, and it leaves per-column
 *editor kind* to [#158](/backlog/158-editable-grid-typed-editors-validation/). Did not auto-stamp every editable cell
 with `aria-readonly="false"`: authoring stays authoritative, the behavior honors what's declared.
+
+**Graduated to** `block:data-grid` — editAction(readonly) + cellIsReadonly() in blocks/renderers/data-grid/editableGrid.ts; DataGridEditBehavior gates on aria-readonly.

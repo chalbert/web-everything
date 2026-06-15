@@ -5,7 +5,7 @@ status: resolved
 dateOpened: "2026-06-09"
 dateStarted: "2026-06-09"
 dateResolved: "2026-06-09"
-graduatedTo: "Auto-Define Strategy Protocol (/projects/webcomponents/#protocol-auto-define-strategy)"
+graduatedTo: "protocol:auto-define-strategy"
 size: 5
 tags: [components, custom-elements, self-registration, auto-define, strategy-axis, research]
 relatedReport: reports/2026-06-03-jsx-adapter-feature-mapping.md
@@ -155,3 +155,5 @@ Successor builds: **#241** (contract + `defineElement` + `static tagName`), **#2
 platform flavors + open hook). Leftover: **#243** (align `CustomRenderStrategyRegistry` /
 change-strategy to the config-extends model — render-strategy currently bakes its default into the
 tool).
+
+**Graduated to** `protocol:auto-define-strategy` — contract at /projects/webcomponents/#protocol-auto-define-strategy.

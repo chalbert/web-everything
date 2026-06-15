@@ -7,7 +7,7 @@ blockedBy: ["214", "215"]
 dateOpened: '2026-06-09'
 dateStarted: "2026-06-10"
 dateResolved: "2026-06-10"
-graduatedTo: async-validator-field
+graduatedTo: plugs/webvalidation/AsyncValidatorField.ts
 tags:
   - validation
   - registry

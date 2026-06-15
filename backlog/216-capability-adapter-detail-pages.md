@@ -7,7 +7,7 @@ status: resolved
 dateOpened: "2026-06-08"
 dateStarted: "2026-06-09"
 dateResolved: "2026-06-09"
-graduatedTo: "/capabilities/adapters/{id}/ detail pages (capability-adapter-pages.njk) + capability-adapter-descriptions/{id}.njk partials + check:standards per-adapter description validator"
+graduatedTo: src/capability-adapter-pages.njk
 tags: [capability-provider, adapters, capability-adapter, discovery, detail-pages, catalog]
 crossRef: { url: /backlog/206-capability-adapter-registration-table/, label: "Follow-up of #206 (registered adapter table)" }
 ---
@@ -45,3 +45,5 @@ only as a **column header + inline `summary`** in the matrix grid. The `adapters
 Optional / discovery-polish — the #206 DoD (registration + query + single-row-add + row-shape
 validator) is already met without this. Pairs with #211 (per-capability detail pages): #211 is the
 *capability* (row) detail, this is the *adapter* (column) detail.
+
+**Graduated to** `src/capability-adapter-pages.njk` — /capabilities/adapters/{id}/ detail pages + capability-adapter-descriptions/{id}.njk partials + per-adapter description validator.

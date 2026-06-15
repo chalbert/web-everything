@@ -6,7 +6,7 @@ parent: "131"
 status: resolved
 dateOpened: "2026-06-07"
 dateResolved: "2026-06-07"
-graduatedTo: "data-editor kinds (text/number/date/select) + validation seam (native + reject()) in blocks/data-grid/DataGridEditBehavior.ts; resolveEditorKind/editorMatchesKind in editableGrid.ts"
+graduatedTo: "block:data-grid"
 tags: [data-grid, editing, validation, forms]
 relatedProject: webblocks
 crossRef: { url: /blocks/data-grid/, label: Data Grid block }
@@ -63,3 +63,5 @@ select-with-options) and a commit can be **rejected**:
 JS column-config object — same rationale as [#159](/backlog/159-editable-grid-cell-editability-aria/) (the grid reads
 structure from the live DOM). Validation is **two-tier**: native constraint validation for the common
 cases, plus a host `reject()` seam for custom rules — persistence itself stays the Frontier UI seam.
+
+**Graduated to** `block:data-grid` — data-editor kinds (text/number/date/select) + validation seam in blocks/renderers/data-grid/editableGrid.ts (resolveEditorKind/editorMatchesKind) + DataGridEditBehavior.

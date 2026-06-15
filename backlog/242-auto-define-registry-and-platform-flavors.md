@@ -7,7 +7,7 @@ blockedBy: ["241"]
 size: 5
 dateStarted: "2026-06-10"
 dateResolved: "2026-06-10"
-graduatedTo: customAutoDefine
+graduatedTo: blocks/renderers/auto-define/CustomAutoDefineRegistry.ts
 tags: [components, custom-elements, auto-define, registry, platform-config, open-extension]
 parent: "227"
 relatedProject: webcomponents

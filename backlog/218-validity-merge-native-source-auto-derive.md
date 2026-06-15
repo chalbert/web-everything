@@ -7,7 +7,7 @@ dateOpened: '2026-06-08'
 blockedBy: ["215"]
 dateStarted: "2026-06-10"
 dateResolved: "2026-06-10"
-graduatedTo: validity-merge-field
+graduatedTo: plugs/webvalidation/ValidityMergeField.ts
 tags:
   - validation
   - validity-model

@@ -7,7 +7,7 @@ status: resolved
 dateOpened: "2026-06-08"
 dateStarted: "2026-06-08"
 dateResolved: "2026-06-08"
-graduatedTo: "capabilityMatrix.json impls[] (registered adapter table) + CapabilityAdapter type / provider.adapters() + check:standards row-shape validator"
+graduatedTo: src/_data/capabilityMatrix.json
 tags: [capability-provider, adapters, adapters-json, registration, capability-vocabulary, native-first]
 crossRef: { url: /backlog/203-capability-provider-resolution-architecture/, label: "Adapter-table story of epic #203" }
 ---
@@ -68,3 +68,5 @@ registered table** (the existing `adapters.json` pattern), not per-impl scattere
 - **Notes:** Gates green — 1670 vitest pass (23 in `capabilities/`), `check:standards` 0 errors
   (14 capabilities), live `/capabilities/` 200 with the new framing. No data relocated: ownership
   distributed, storage central, one source of truth.
+
+**Graduated to** `src/_data/capabilityMatrix.json` — impls[] registered-adapter table + CapabilityAdapter type / provider.adapters() + check:standards row-shape validator.

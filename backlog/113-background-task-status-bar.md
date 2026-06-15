@@ -3,7 +3,7 @@ type: idea
 workItem: story
 size: 3
 status: resolved
-graduatedTo: /intents/background-task/
+graduatedTo: "intent:background-task"
 dateOpened: "2026-06-06"
 dateResolved: "2026-06-07"
 tags: [background-task, status-bar, async, loader, navigation, ux, surface]

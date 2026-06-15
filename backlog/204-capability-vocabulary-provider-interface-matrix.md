@@ -7,7 +7,7 @@ status: resolved
 dateOpened: "2026-06-08"
 dateStarted: "2026-06-08"
 dateResolved: "2026-06-08"
-graduatedTo: "capabilities.json + capabilityMatrix.json + capabilities/ provider module"
+graduatedTo: src/_data/capabilities.json
 tags: [capability-provider, capability-vocabulary, web-features, baseline, matrix, native-first, resolution, foundation]
 relatedReport: reports/2026-06-02-native-platform-substrate.md
 crossRef: { url: /backlog/203-capability-provider-resolution-architecture/, label: "Foundation story of epic #203 (D3′ + D4′ default)" }
@@ -63,3 +63,5 @@ configurable dimension defaulting to `build`; binding = explicit-via-base-extens
   - **Catalog + demo** — `/capabilities/` page renders the matrix (the DoD demo) + intent→caps list; nav link added; authoring note + taxonomy row in `docs/agent/design-first.md`; Vite proxy allowlist updated.
 - **Next:** resolver (#205), adapter table (#206), strictness/cascade (#207), runtime/edge impls (#208) build on this. Follow-ups filed: #210 (proxy allowlist drift-guard), #211 (per-capability detail pages).
 - **Notes:** Gates green — 1635 vitest pass, `check:standards` 0 errors (14 capabilities), eleventy build clean, `/capabilities/` 200 on :8080. `customizable-select` + `cross-root-aria` are the differential cells (capability-hard on `face`, native-ok on `base-select`). The `capabilities/` module sits outside the coverage gate (like `src/`) but inside the vitest run via an added include glob.
+
+**Graduated to** `src/_data/capabilities.json` — also minted capabilityMatrix.json + the capabilities/ provider module.

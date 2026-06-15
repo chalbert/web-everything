@@ -5,7 +5,7 @@ size: 2
 status: resolved
 dateOpened: "2026-06-06"
 dateResolved: "2026-06-07"
-graduatedTo: "autoToggle on 5 secondary snippets across broadcast.njk, resource-action.njk, prefetch-behavior.njk, background-task-surface.njk"
+graduatedTo: "adapter:jsx-adapter"
 tags: [jsx, adapters, source-toggle, docs]
 relatedReport: reports/2026-06-03-jsx-adapter-feature-mapping.md
 relatedProject: webadapters
@@ -42,3 +42,5 @@ Verify each conversion the same way #069 did: real `htmlToJsx` run / build-smoke
   - `workflow`, `router`, `component`, `dropdown`, `interpolation-text-node` — already excluded by #069 (comment-heavy / reactive `{{ }}`/`[[ ]]` / own track).
 - **Next:** _(done)_
 - **Notes:** No follow-up backlog item filed — every un-converted snippet is excluded by the documented constraint, not blocked. The single-leading-comment convention (drops in JSX) is now used on broadcast (×3 incl. Basic), background-task-surface.
+
+**Graduated to** `adapter:jsx-adapter` — autoToggle rolled onto 5 secondary snippets: broadcast.njk, resource-action.njk, prefetch-behavior.njk, background-task-surface.njk.

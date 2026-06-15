@@ -8,7 +8,7 @@ blockedBy: ["122", "137"]
 dateOpened: "2026-06-07"
 dateStarted: "2026-06-10"
 dateResolved: "2026-06-10"
-graduatedTo: droplist-filter-error-channel
+graduatedTo: frontierui/blocks/droplist/Filter.ts
 tags: [droplist, autocomplete, filter, live-status, loader, error, behavior, a11y]
 relatedReport: reports/2026-06-02-dropdown-trait-composition.md
 relatedProject: webblocks
@@ -82,3 +82,5 @@ was acceptance-test coverage of `filter`'s async `reject()` path, which this clo
   UI full unit suite green (1345 passed).
 - **Acceptance met:** a failed async filter request announces an error through the one shared
   `live-status` region (not a silent busy listbox), and a stale rejection is dropped like a stale settle.
+
+**Graduated to** `frontierui/blocks/droplist/Filter.ts` — filter error channel + live-status consumption (frontierui/blocks/droplist/LiveStatus.ts).

@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-06"
 dateResolved: "2026-06-11"
-graduatedTo: module-service
+graduatedTo: blocks/renderers/module-service/moduleService.ts
 tags: [module-as-a-service, adapters, functional-component, plateau, dev-server, esm, render-strategy]
 relatedProject: webadapters
 crossRef: { url: /adapters/, label: Rendering Adapters }
@@ -75,3 +75,5 @@ The rendering adapters answer *"can this tree be spelled three ways?"* (Axis 1 �
   - **#312** — Production runtime delivery (dev import map points at Vite-served `/blocks/renderers/jsx/index.ts`; a real deploy serves compiled `.js` + a published bare-specifier package; relates to module-resolution #271/#274 and importmap cleanup #285).
   - **#313** — Add the Frontier UI functional-component adapter as a new `FORMS` entry once it lands ([plans/functional-component-adapter.md](../plans/functional-component-adapter.md)).
 - **Notes:** resolution source in v1 is the component-cases fixtures (the authored `<component>` text); the production registry/resolver is #311.
+
+**Graduated to** `blocks/renderers/module-service/moduleService.ts` — Module-as-a-Service resolver core (webadapters).

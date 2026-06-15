@@ -4,7 +4,7 @@ workItem: task
 status: resolved
 dateOpened: "2026-06-06"
 dateResolved: "2026-06-07"
-graduatedTo: "src/_data/adapters.json#jsx-adapter (status: implemented)"
+graduatedTo: "adapter:jsx-adapter"
 tags: [jsx, adapters, source-toggle, docs]
 relatedReport: reports/2026-06-03-jsx-adapter-feature-mapping.md
 relatedProject: webadapters
@@ -29,3 +29,5 @@ Roll `autoToggle` onto the remaining block pages whose examples are clean, parse
 - **Deliberately skipped:** `router` (`@route` `{{ }}` reactive interpolation — Axis-2 unmapped + Nunjucks collision), interpolation/bracket-parser pages (`{{ }}`/`[[ ]]`), `dropdown`/`component` (already on manual/own track), `workflow` (large, comment-heavy — comments drop in JSX).
 - **Next:** _(done)_ Graduated `jsx-adapter` to `implemented`; broadcast static-detail snippet now on `autoToggle`. Remaining secondary-snippet conversions → #136.
 - **Notes:** Pages whose example is pseudo-HTML or reactive `{{ }}`/`[[ ]]` text (Axis 2) stay on the manual `sourceToggle` — that's correct, not missing coverage. Now-unblocked candidate (post-073): broadcast's "With static detail" example (`broadcast.njk:68-74`, the `broadcast-detail='{"theme":"dark"}'` JSON snippet) is still on a manual `{% highlight "html" %}` — convertible to `autoToggle` now that quote escaping works.
+
+**Graduated to** `adapter:jsx-adapter` — adapters.json#jsx-adapter status set to implemented.
