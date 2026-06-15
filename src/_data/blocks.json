@@ -3815,5 +3815,50 @@
         "rationale": "Avoids a parallel docs-metadata file that would drift from the case; the most-flexible default is the bare {id,title,description,code} with presentation fields opt-in."
       }
     }
+  },
+  {
+    "id": "code-view",
+    "name": "Code View",
+    "status": "concept",
+    "type": "Component",
+    "summary": "Renders syntax-highlighted component source with a copy affordance — the source-code-view feature from the workbench inventory (#625), ratified by #626 as a forced block mint. The copy affordance composes the data-transfer copy intent (the copy-out half). Native-first: highlighting paints token ranges via the CSS Custom Highlight API over a tokenizer rather than wrapping every token in a <span>, with library highlighters (Prism/Shiki/highlight.js) as opt-in adapters. A live-editable sandbox embed is explicitly out of scope (that is the assembler/playground concern).",
+    "composesIntents": [
+      "data-transfer"
+    ],
+    "implementedBy": "@frontierui/blocks/code-view/CodeViewElement.ts",
+    "relatedProject": "webdocs",
+    "dependsOn": [],
+    "exports": [
+      "CodeViewElement",
+      "registerCodeView"
+    ],
+    "webStandards": {
+      "cssCustomHighlight": {
+        "status": "Baseline 2024",
+        "pattern": "CSS Custom Highlight API — paint token ranges via Highlight + ::highlight() without per-token DOM",
+        "adoption": "The native-first highlighter tokenizes the source and registers a Highlight per token class, styled with ::highlight(); no <span> soup, and the source text stays a single selectable/copyable node.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/CSS_Custom_Highlight_API"
+      },
+      "clipboard": {
+        "status": "Baseline",
+        "pattern": "Async Clipboard API (navigator.clipboard.writeText) behind the data-transfer copy intent",
+        "adoption": "The copy button writes the verbatim source via the data-transfer copy-out (emit) half, so the affordance is the shared intent, not a bespoke clipboard call.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Clipboard_API"
+      }
+    },
+    "designDecisions": {
+      "nativeFirstHighlight": {
+        "description": "CSS Custom Highlight API over a tokenizer is the default; library highlighters are opt-in adapters",
+        "rationale": "Native-first default — the platform now paints ranges without DOM wrapping; Prism/Shiki/highlight.js become enhancements via an adapter, not the baseline."
+      },
+      "copyIsTheSharedIntent": {
+        "description": "The copy button composes the data-transfer copy intent, not a private clipboard call",
+        "rationale": "Reuses the standardized copy-out affordance so behavior (effect, a11y, fallbacks) is consistent with every other copy surface."
+      },
+      "noLiveEditor": {
+        "description": "Read-only highlighted source with copy; no editable sandbox",
+        "rationale": "A live-editable embed is the assembler/playground concern (#646), deliberately out of scope to keep the catalog block focused and lock-in-free."
+      }
+    }
   }
 ]

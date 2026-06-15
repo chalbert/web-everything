@@ -545,6 +545,56 @@
     },
     {
       "kind": "javascript-module",
+      "path": "@frontierui/blocks/code-view/CodeViewElement.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "CodeViewElement",
+          "description": "Renders syntax-highlighted component source with a copy affordance — the source-code-view feature from the workbench inventory (#625), ratified by #626 as a forced block mint. The copy affordance composes the data-transfer copy intent (the copy-out half). Native-first: highlighting paints token ranges via the CSS Custom Highlight API over a tokenizer rather than wrapping every token in a <span>, with library highlighters (Prism/Shiki/highlight.js) as opt-in adapters. A live-editable sandbox embed is explicitly out of scope (that is the assembler/playground concern).",
+          "x-webeverything": {
+            "composesIntents": [
+              "data-transfer"
+            ],
+            "webStandards": {
+              "cssCustomHighlight": {
+                "status": "Baseline 2024",
+                "pattern": "CSS Custom Highlight API — paint token ranges via Highlight + ::highlight() without per-token DOM",
+                "adoption": "The native-first highlighter tokenizes the source and registers a Highlight per token class, styled with ::highlight(); no <span> soup, and the source text stays a single selectable/copyable node.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/CSS_Custom_Highlight_API"
+              },
+              "clipboard": {
+                "status": "Baseline",
+                "pattern": "Async Clipboard API (navigator.clipboard.writeText) behind the data-transfer copy intent",
+                "adoption": "The copy button writes the verbatim source via the data-transfer copy-out (emit) half, so the affordance is the shared intent, not a bespoke clipboard call.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Clipboard_API"
+              }
+            },
+            "blockType": "Component",
+            "status": "concept"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "CodeViewElement",
+          "declaration": {
+            "name": "CodeViewElement",
+            "module": "@frontierui/blocks/code-view/CodeViewElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerCodeView",
+          "declaration": {
+            "name": "registerCodeView",
+            "module": "@frontierui/blocks/code-view/CodeViewElement.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
       "path": "@frontierui/blocks/renderers/collection-operations/",
       "declarations": [
         {
