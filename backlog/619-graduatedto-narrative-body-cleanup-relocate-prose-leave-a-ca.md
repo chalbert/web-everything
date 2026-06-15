@@ -1,9 +1,10 @@
 ---
 type: issue
-workItem: story
-size: 13
-status: open
+workItem: epic
+status: resolved
 dateOpened: "2026-06-14"
+dateResolved: "2026-06-15"
+graduatedTo: none
 tags: []
 ---
 
@@ -30,3 +31,17 @@ object-form `{url,label}` (#146/#147/#212/#214), item-id-split (#463 `#505/#506/
    needing cross-repo path resolution + the corrupt/folded values. Read-each-item; size on its own.
 
 Released unworked (drop-reason `outgrew`).
+
+## Split into 7 batchable slices (`/split` 2026-06-15)
+
+Now a **storied epic** — the ~111 manual `graduatedTo` values (live: 55 `review-prose` + 56
+`review-unresolved`, + 2 `fix-bare` the tool auto-fixes) are decomposed into 7 independent, fully-parallel
+`task` slices, each `size ≤ 3` and bounded by an explicit item-ID set. Each fix is a separate backlog
+file, so the slices touch disjoint files (no DAG edges) and any partial completion is a valid gated state
+(`check:standards` decrements the aggregated warning count). Slice rationale, exact item lists, and the
+rubric check live in [reports/2026-06-15-backlog-split-analysis.md](../reports/2026-06-15-backlog-split-analysis.md).
+
+**Per-item bar:** not blind-scriptable even for the "mechanical" tranche — the tool's precomputed
+`canonical` takes the *leading* token, which is wrong where the real entity sits in a parenthetical (e.g.
+#459 → `intent:system-notification`, not `project:webintents`). Each slice re-derives the true token per
+item; narrative moves to the item body.
