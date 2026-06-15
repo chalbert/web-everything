@@ -2417,6 +2417,56 @@
     },
     {
       "kind": "javascript-module",
+      "path": "@frontierui/blocks/props-table/PropsTableElement.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "PropsTableElement",
+          "description": "Renders a component's Custom Elements Manifest (#653) as a sortable API reference table — attributes, properties, events, slots, CSS custom-properties and parts. Ratified by #626 Fork 1 (sub-decision): the component API-table renderer consumes the CEM emit rather than a bespoke metadata shape, so one manifest feeds the table, the Technical Configurator args panel, and autodocs. Powers the autodocs capability in the Web Docs catalog surface (#627). Not a new control standard — a derived view over the custom-elements-manifest protocol.",
+          "x-webeverything": {
+            "composesIntents": [
+              "collection-operations"
+            ],
+            "webStandards": {
+              "customElementsManifest": {
+                "status": "Community spec",
+                "pattern": "Custom Elements Manifest (custom-elements.json, schema 2.1.0) as the input contract",
+                "adoption": "Reads a CEM declaration (or the whole manifest keyed by tag) and projects its members/attributes/events/slots/cssProperties into table rows — no bespoke metadata shape.",
+                "reference": "https://github.com/webcomponents/custom-elements-manifest"
+              },
+              "ariaSort": {
+                "status": "Baseline",
+                "pattern": "aria-sort on the sortable column headers (the table is a reference, sortable by name/kind)",
+                "adoption": "Sorting reuses the collection-operations intent so the column-sort affordance matches every other WE table.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-sort"
+              }
+            },
+            "blockType": "Component",
+            "status": "concept"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "PropsTableElement",
+          "declaration": {
+            "name": "PropsTableElement",
+            "module": "@frontierui/blocks/props-table/PropsTableElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerPropsTable",
+          "declaration": {
+            "name": "registerPropsTable",
+            "module": "@frontierui/blocks/props-table/PropsTableElement.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
       "path": "@frontierui/blocks/radio-group/index.ts",
       "declarations": [
         {

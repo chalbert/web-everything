@@ -1,0 +1,47 @@
+<h2>Props Table</h2>
+<p>
+    Renders a component's <a href="/protocols/">Custom Elements Manifest</a>
+    (<a href="/backlog/653-register-custom-elements-manifest-cem-as-a-we-protocol-emit-/">#653</a>) as a
+    <strong>sortable API reference table</strong> — attributes, properties, events, slots, CSS
+    custom-properties and parts. Ratified by
+    <a href="/backlog/626-map-workbench-features-to-we-standards-which-intents-blocks-a/">#626</a> Fork 1
+    (sub-decision): the API-table renderer consumes the CEM emit rather than a bespoke metadata shape, so
+    one manifest feeds the table, the Technical Configurator args panel, and autodocs.
+</p>
+
+<h3>Consumes the manifest, not a bespoke shape</h3>
+<p>
+    The input is the <code>custom-elements.json</code> the <a href="/protocols/">custom-elements-manifest
+    protocol</a> emits (<code>npm run gen:cem</code>). The block reads a CEM declaration (or the whole
+    manifest keyed by tag) and projects its <code>members</code> / <code>attributes</code> /
+    <code>events</code> / <code>slots</code> / <code>cssProperties</code> into rows — never a second
+    metadata source to keep in sync. Member kinds with no data are omitted (the CEM emit is a projection of
+    whatever fields a block carries, so many blocks have events but no slots yet).
+</p>
+
+<h3>Sortable like every WE table</h3>
+<p>
+    The reference is sortable by name / kind via the <a href="/intents/collection-operations/">collection-operations</a>
+    intent, with <code>aria-sort</code> on the column headers — the same sort affordance as the data-table and
+    book surfaces, not a one-off.
+</p>
+
+<h3>Usage</h3>
+<pre><code class="language-html">&lt;props-table tag="drop-list"&gt;&lt;/props-table&gt;</code></pre>
+<p class="text-sm text-gray-600">
+    Resolves the <code>drop-list</code> declaration from the page's manifest and renders its API. A
+    <code>manifest</code> property accepts an inline CEM for ad-hoc use.
+</p>
+
+<h3>Contract</h3>
+<ul>
+    <li><strong>Input:</strong> a <code>tag</code> attribute resolved against the page's CEM, or a
+        <code>manifest</code> property carrying an inline Custom Elements Manifest.</li>
+    <li><strong>Output:</strong> a sortable table of the declaration's attributes, properties, events,
+        slots, CSS custom-properties and parts.</li>
+    <li><strong>Exports:</strong> <code>PropsTableElement</code>, <code>registerPropsTable</code>.</li>
+    <li>Feeds the Web Docs catalog surface
+        (<a href="/backlog/627-assemble-the-web-docs-component-catalog-surface-from-the-der/">#627</a>)
+        alongside <a href="/blocks/story-canvas/">story-canvas</a> and
+        <a href="/blocks/code-view/">code-view</a>.</li>
+</ul>

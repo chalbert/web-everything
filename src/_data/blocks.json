@@ -3916,5 +3916,50 @@
         "rationale": "Native-first default per #628 substrate negotiation: the platform editing surface is the baseline, with library engines as registered enhancements rather than the floor."
       }
     }
+  },
+  {
+    "id": "props-table",
+    "name": "Props Table",
+    "status": "concept",
+    "type": "Component",
+    "summary": "Renders a component's Custom Elements Manifest (#653) as a sortable API reference table — attributes, properties, events, slots, CSS custom-properties and parts. Ratified by #626 Fork 1 (sub-decision): the component API-table renderer consumes the CEM emit rather than a bespoke metadata shape, so one manifest feeds the table, the Technical Configurator args panel, and autodocs. Powers the autodocs capability in the Web Docs catalog surface (#627). Not a new control standard — a derived view over the custom-elements-manifest protocol.",
+    "composesIntents": [
+      "collection-operations"
+    ],
+    "implementedBy": "@frontierui/blocks/props-table/PropsTableElement.ts",
+    "relatedProject": "webdocs",
+    "dependsOn": [],
+    "exports": [
+      "PropsTableElement",
+      "registerPropsTable"
+    ],
+    "webStandards": {
+      "customElementsManifest": {
+        "status": "Community spec",
+        "pattern": "Custom Elements Manifest (custom-elements.json, schema 2.1.0) as the input contract",
+        "adoption": "Reads a CEM declaration (or the whole manifest keyed by tag) and projects its members/attributes/events/slots/cssProperties into table rows — no bespoke metadata shape.",
+        "reference": "https://github.com/webcomponents/custom-elements-manifest"
+      },
+      "ariaSort": {
+        "status": "Baseline",
+        "pattern": "aria-sort on the sortable column headers (the table is a reference, sortable by name/kind)",
+        "adoption": "Sorting reuses the collection-operations intent so the column-sort affordance matches every other WE table.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-sort"
+      }
+    },
+    "designDecisions": {
+      "consumesCemNotBespoke": {
+        "description": "Input is the Custom Elements Manifest, not a props-table-specific schema",
+        "rationale": "#626 Fork 1: one CEM (#653) feeds the props-table, the Technical Configurator args panel, and autodocs — a derived view, never a second metadata source to keep in sync."
+      },
+      "derivedViewNotAStandard": {
+        "description": "A rendering of the CEM protocol, not a new control standard",
+        "rationale": "The contract is the manifest; this block is one presentation of it, so it adds no new conformance surface — it composes collection-operations for the sortable table."
+      },
+      "gracefulPartialManifest": {
+        "description": "Sections with no manifest data are omitted, not shown empty",
+        "rationale": "The CEM emit is a projection of whatever fields a block carries (#653) — many blocks have events but no slots yet, so the table renders only the populated member kinds."
+      }
+    }
   }
 ]
