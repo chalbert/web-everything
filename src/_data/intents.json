@@ -2690,5 +2690,121 @@
       }
     },
     "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">A small, standalone <strong>trigger-transition</strong> concern ratified in <a href=\"/backlog/609-candidate-standard-reveal-navigation-menus-mega-menu-hover-d/\">#609</a> (Fork 2A): opening and closing a revealed surface on hover <em>with intent</em> — <strong>tolerate diagonal travel</strong> from the trigger to the panel, and <strong>don't open on an incidental pass-through</strong>. It is <strong>orthogonal to the <a href=\"/intents/anchor/\">anchor</a> intent</strong> (placement + dismissal) — a reveal composes both: anchor positions the panel, hover-intent decides <em>when</em> the hover counts. Composed by reveal-nav, menu submenus, and hovercards.</p><h3>Dimensions (UX-only)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>openIntent</code>: <code>deliberate</code> (ignore an incidental pass-through — the sensible default) vs <code>eager</code> (open on enter).</li><li><code>travelForgiveness</code>: <code>forgiving</code> (tolerate the diagonal trigger&rarr;panel corridor — default) vs <code>strict</code> (close on pointer-leave).</li><li><code>touch</code>: <code>tap-toggle</code> (the most-permissive touch fallback — first tap opens) vs <code>none</code>.</li></ul><h3>UX-only &rarr; the mechanic is a Configurator card</h3><p class=\"text-sm text-gray-600 mb-2\">The <em>how</em> — delay-only timers vs a CSS safe-area bridge vs a JS pointer-direction safe-triangle polygon — is a technical strategy, <strong>not</strong> part of this intent. It is authored as a <strong>Technical Configurator</strong> domain (open-delay / close-delay / safe-area strategy / touch) in plateau-app, per intent-UX-only&rarr;configurator. Grounded in the reveal-nav design sweep (<a href=\"/research/design-sweep-navigation-menus/\">/research/design-sweep-navigation-menus/</a>).</p>"
+  },
+  {
+    "id": "flow-progress",
+    "name": "Flow Progress Intent",
+    "status": "draft",
+    "summary": "Canonical, accessible presentation of where a user is in a multi-step workflow — the current position, each step's status, and what remains before completion — so a wizard, a single-page progressive form, a conversational flow, and a board all read consistently. The UX member of the Web Workflows protocol: it reads the same workflow engine and renders the position + per-step status, while the orchestration (transitions, guards, parallel, completion) stays on the protocol. Reuses navigation's structure:linear / guard / history rather than reinventing them, and adopts the native aria-current=\"step\" token. Avoid the name 'stepper' — it collides with the numeric NumberField.",
+    "dimensions": {
+      "register": {
+        "description": "The visual arrangement of the flow — all coherent end-states (support-all); the most-permissive default is the richest, dedicated-surface wizard",
+        "values": [
+          "wizard",
+          "single-page",
+          "conversational",
+          "board"
+        ]
+      },
+      "stepStatus": {
+        "description": "How each step's state is surfaced (the cleanest surveyed enum; `disabled` and `optional` are orthogonal modifiers, not members)",
+        "values": [
+          "wait",
+          "process",
+          "finish",
+          "error"
+        ]
+      },
+      "movement": {
+        "description": "Which traversal the UX affords — reuses navigation's guard axis; back/undo is allowed by default (most-permissive), forward-only is the author's opt-in",
+        "values": [
+          "back-allowed",
+          "free",
+          "forward-only"
+        ]
+      }
+    },
+    "description": "<h3>What Flow Progress Is</h3><p class=\"text-sm text-gray-600 mb-2\">The canonical, accessible presentation of <strong>where a user is in a workflow</strong> &mdash; the checkout that is on <code>pay</code> after <code>collect-address</code>, the onboarding on step 3 of 5, the application part-way through a multi-stage review. It is the <strong>UX member</strong> of the <a href=\"/projects/webworkflows/\">Web Workflows</a> protocol: it reads the same workflow engine and renders the current position plus each step's status, while the orchestration (transitions, guards, parallel, completion) lives on the protocol.</p><h3>Reuse, don't reinvent</h3><p class=\"text-sm text-gray-600 mb-2\">This intent does <strong>not</strong> re-create linear navigation. It reuses the <a href=\"/intents/navigation/\">navigation</a> intent's <code>structure:linear</code>, <code>guard</code>, and <code>history</code> dimensions, and adopts the native <code>aria-current=\"step\"</code> token for the position indicator. Per-step status uses the cleanest surveyed enum (<code>wait</code> / <code>process</code> / <code>finish</code> / <code>error</code>), with <code>disabled</code> and <code>optional</code> as orthogonal modifiers.</p><h3>Dimensions (UX-only)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>register</code>: <code>wizard</code> (dedicated-surface, the most-permissive default) / <code>single-page</code> (progressive disclosure) / <code>conversational</code> / <code>board</code> &mdash; all coherent end-states, a configurable dimension, never a fork.</li><li><code>stepStatus</code>: <code>wait</code> / <code>process</code> / <code>finish</code> / <code>error</code>.</li><li><code>movement</code>: <code>back-allowed</code> (default) / <code>free</code> / <code>forward-only</code> &mdash; the back/undo affordance, reusing navigation's guard axis.</li></ul><h3>UX-only &rarr; orchestration is the Workflow protocol</h3><p class=\"text-sm text-gray-600 mb-2\">The <em>machinery</em> — the transition graph, guards, parallel fork/join, the runnable engine — is <strong>not</strong> part of this intent (intents carry no impl refs). It is the <a href=\"/projects/webworkflows/\">Workflow protocol</a>, resolved by a swappable <code>CustomWorkflowEngine</code>. Ratified in <a href=\"/backlog/634-meta-intent-workflow-as-composable-intent/\">#634</a>; grounded in the workflow meta-intent survey (<a href=\"/research/workflow-meta-intent/\">/research/workflow-meta-intent/</a>).</p>"
+  },
+  {
+    "id": "text-formatting",
+    "name": "Text-Formatting Controls",
+    "requiresCapabilities": [],
+    "status": "draft",
+    "summary": "The formatting-controls axis (ratified #590 Fork 5): which format operations a surface exposes, where the controls sit, and how they overflow. UX-only and editor-independent — the same axis governs a comment box, a rich-text surface, or a markdown field — so it earns its own home apart from the rich-text surface intent. Composes droplist (grouped op menus), popover (floating bubble), and button (single ops). The technical mechanic (execCommand vs a command registry vs a custom serializer) is NOT here — it is a Technical Configurator concern.",
+    "dimensions": {
+      "exposure": {
+        "description": "Which formatting operations are surfaced. minimal = inline emphasis + link; standard = + lists, headings, blockquote (the recommended default); full = + block insertion, tables, media; custom = an author-declared op set.",
+        "values": [
+          "minimal",
+          "standard",
+          "full",
+          "custom"
+        ]
+      },
+      "placement": {
+        "description": "Where the controls live relative to the surface. toolbar = a persistent bar (the discoverable default); floating = a selection bubble anchored to the current range; inline = in-content affordances (slash menu / markdown shortcuts); contextual = a right-click / long-press menu.",
+        "values": [
+          "toolbar",
+          "floating",
+          "inline",
+          "contextual"
+        ]
+      },
+      "overflow": {
+        "description": "What happens when the controls exceed the available width. overflow-menu = collapse extras behind a \"more\" affordance (the most-permissive default — nothing is lost); scroll = a horizontally scrollable strip; wrap = flow onto a second row.",
+        "values": [
+          "overflow-menu",
+          "scroll",
+          "wrap"
+        ]
+      }
+    },
+    "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">The <strong>formatting-controls axis</strong> ratified in <a href=\"/backlog/590-graduate-rich-text-editing-the-webediting-project/\">#590</a> (Fork 5): <em>which</em> format operations a surface exposes, <em>where</em> the controls sit, and <em>how</em> they overflow. It is <strong>UX-only and editor-independent</strong> — the same axis governs a plain comment box, a rich-text surface (see <a href=\"/intents/rich-text/\">rich-text</a>), or a markdown field — which is why it earns its own home rather than being baked into the editing surface.</p><h3>Dimensions (UX-only)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>exposure</code>: <code>minimal</code> (inline emphasis + link) &rarr; <code>standard</code> (<strong>recommended default</strong> — + lists, headings, blockquote) &rarr; <code>full</code> (+ block insertion, tables, media) &rarr; <code>custom</code> (author-declared op set).</li><li><code>placement</code>: <code>toolbar</code> (persistent bar — the discoverable default) vs <code>floating</code> (selection bubble) vs <code>inline</code> (slash menu / markdown shortcuts) vs <code>contextual</code> (right-click / long-press).</li><li><code>overflow</code>: <code>overflow-menu</code> (collapse behind a &ldquo;more&rdquo; affordance — the most-permissive default, nothing is lost) vs <code>scroll</code> (horizontal strip) vs <code>wrap</code> (second row).</li></ul><h3>Composition</h3><p class=\"text-sm text-gray-600 mb-2\">Controls compose existing intents: <a href=\"/intents/disclosure/\">droplist</a>-style grouped op menus, <a href=\"/intents/anchor/\">anchor</a>ed <code>floating</code> bubbles, and single-op buttons. A control reflects the current selection state (active / inactive / disabled) and applies an operation to the active range.</p><h3>UX-only &rarr; the mechanic is a Configurator card</h3><p class=\"text-sm text-gray-600 mb-2\">The <em>how</em> a format operation is realized — legacy <code>execCommand</code> vs a declarative command registry vs a custom serializer round-trip — is a technical strategy, <strong>not</strong> part of this intent. It is authored as a <strong>Technical Configurator</strong> domain, per intent-UX-only&rarr;configurator.</p>",
+    "events": [
+      "format-apply",
+      "format-state-change"
+    ]
+  },
+  {
+    "id": "rich-text",
+    "name": "Rich-Text Surface",
+    "requiresCapabilities": [
+      "contenteditable",
+      "editcontext",
+      "sanitizer-api",
+      "highlight-api"
+    ],
+    "status": "draft",
+    "summary": "The editable rich-text surface UX (ratified #590, webediting #618): an editable / read-only surface that hosts flowed, formatted content. Negotiates the editing-surface capabilities (contenteditable floor + editcontext upgrade, #590 Fork 3), sanitizes incoming content to its allowed schema (Sanitizer API), and decorates ranges without mutating the model (Highlight API). The controls that drive it are a separate axis — see text-formatting. The engine that backs it is a Technical Configurator / Editor Engine protocol concern, not part of this UX intent.",
+    "dimensions": {
+      "mode": {
+        "description": "Whether the surface accepts input. editable = the surface is editable (the default); read-only = the same content model is rendered without an editing affordance (a published view of authored content).",
+        "values": [
+          "editable",
+          "read-only"
+        ]
+      },
+      "flow": {
+        "description": "The content shape the surface permits. multiline = block-flowed content with paragraphs and block elements (the most-permissive default); singleline = a constrained single line of inline-formatted text (no block breaks) — e.g. a styled title field.",
+        "values": [
+          "multiline",
+          "singleline"
+        ]
+      },
+      "paste": {
+        "description": "How externally-pasted content is admitted, borrowing Sanitizer API vocabulary. sanitized = clean incoming HTML to the surface’s allowed schema (the safe default); plain-text = strip all formatting to text; raw = admit as-is (author-trusted source only).",
+        "values": [
+          "sanitized",
+          "plain-text",
+          "raw"
+        ]
+      }
+    },
+    "description": "<h3>What This Is</h3><p class=\"text-sm text-gray-600 mb-2\">The <strong>editable rich-text surface</strong> UX ratified in <a href=\"/backlog/590-graduate-rich-text-editing-the-webediting-project/\">#590</a> for the <a href=\"/backlog/618-graduate-the-rich-text-editing-standard-webediting-project-s/\">webediting</a> project: a surface that hosts flowed, formatted content and can be <code>editable</code> or <code>read-only</code>. The <em>controls</em> that drive formatting are a <strong>separate axis</strong> — see <a href=\"/intents/text-formatting/\">text-formatting</a> — because a formatting toolbar recurs without an editor.</p><h3>Dimensions (UX-only)</h3><ul class=\"text-sm text-gray-600 list-disc pl-5\"><li><code>mode</code>: <code>editable</code> (default) vs <code>read-only</code> (the same model rendered without an editing affordance).</li><li><code>flow</code>: <code>multiline</code> (block-flowed paragraphs — the most-permissive default) vs <code>singleline</code> (one constrained line, inline formatting only).</li><li><code>paste</code>: <code>sanitized</code> (clean to the allowed schema via the <a href=\"/capabilities/sanitizer-api/\">Sanitizer API</a> — the safe default) vs <code>plain-text</code> (strip to text) vs <code>raw</code>.</li></ul><h3>Capabilities It Negotiates</h3><p class=\"text-sm text-gray-600 mb-2\">The surface <code>requiresCapabilities</code> the four editing-surface capabilities (<a href=\"/backlog/628-webediting-capabilities-contenteditable-editcontext-sanitiz/\">#628</a>): a <a href=\"/capabilities/contenteditable/\">contenteditable</a> floor, an <a href=\"/capabilities/editcontext/\">EditContext</a> upgrade (<a href=\"/backlog/590-graduate-rich-text-editing-the-webediting-project/\">#590</a> Fork 3), the <a href=\"/capabilities/sanitizer-api/\">Sanitizer API</a> for paste, and the <a href=\"/capabilities/highlight-api/\">Highlight API</a> to decorate ranges (spellcheck / collaboration cursors) without mutating the model.</p><h3>UX-only &rarr; the engine is a protocol</h3><p class=\"text-sm text-gray-600 mb-2\">The <em>engine</em> that maintains the content model, applies operations, and serializes — is the <strong>Editor Engine protocol</strong> / a Technical Configurator concern, not part of this UX intent.</p>",
+    "events": [
+      "richtext-input",
+      "richtext-selectionchange"
+    ]
   }
 ]
