@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Wizard / Flow Progress Playground - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <link rel="stylesheet" href="/demos/wizard-flow-demo.css">
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="16 18 22 12 16 6"></polyline>
+        <polyline points="8 6 2 12 8 18"></polyline>
+      </svg>
+      Web Everything
+    </div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Wizard / Flow Progress Playground</h1>
+      <p>
+        A live runtime proof that the <a href="/blocks/wizard/">wizard Block</a>
+        (<code>&lt;wizard-flow&gt;</code>), the <strong>Flow Progress</strong> intent, and the
+        <strong>Web Workflows</strong> protocol compose end-to-end in a real browser. The element below is
+        mounted against a real <code>CustomWorkflowEngine</code> graph — a 4-step checkout flow. The engine
+        owns orchestration (transitions, history, completion); the Block renders <em>where you are</em> and
+        each step's status (<code>wait</code>/<code>process</code>/<code>finish</code>), with
+        <code>aria-current="step"</code> and a "Step N of M" live announcement.
+      </p>
+      <p class="play-caveat">
+        This is slice B of <a href="/backlog/651-reference-wizard-block-composing-the-flow-progress-intent-we/">#651</a> —
+        the runtime demo. The same graph + Block are proven headlessly by the wizard unit suite and an
+        e2e spec (<code>wizard-flow-demo.spec.ts</code>) that drives Next/Back here, so the demo and CI
+        can't drift.
+      </p>
+    </header>
+
+    <section id="wizard-host" class="wizard-host">Loading wizard&hellip;</section>
+  </main>
+
+  <!-- Playground: mounts a real <wizard-flow> Block against a CustomWorkflowEngine graph. Native APIs only. -->
+  <script type="module" src="/demos/wizard-flow-demo.ts"></script>
+</body>
+</html>
