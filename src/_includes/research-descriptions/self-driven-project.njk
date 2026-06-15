@@ -1,0 +1,191 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+    <a href="/backlog/665-self-driven-project-ratify-the-framing-autonomy-taxonomy-mas/">#665</a>
+    must ratify the framing for the <strong>Self-Driven Project</strong> (epic
+    <a href="/backlog/666-self-driven-project/">#666</a>): the self-driving-car model applied to the
+    <em>whole</em> software lifecycle — a human sets the goal and a <strong>tolerance/risk
+    envelope</strong>, the system drives the steps (design → code → test → ship → monitor → upgrade)
+    <strong>gated step-by-step</strong>, under a machine-checkable standard, <strong>transparent and
+    reversible</strong>, escalating only when something exceeds the configured tolerance. This survey
+    grounds the forks in prior art per design-first step&nbsp;1, so the call reuses the incumbents'
+    vocabulary instead of coining it cold.
+</p>
+
+<h2>What the survey settles (and what stays a genuine call)</h2>
+<ol>
+    <li><strong>The autonomy ladder is legitimate prior art — cite it, don't claim it.</strong>
+        SAE-levels-for-the-SDLC has been published convergently: ASDLC.io (L1 Assistive → L5 Full),
+        Dash0's six levels (with an explicit L3.5 "Selective Auto-Merge"), Tessl, and the academic
+        roadmap (arXiv 2509.06216) which calls outright for "a hierarchical framework analogous to the
+        SAE Levels." Their ladders number by a <em>review/merge-gating</em> axis that lines up with the
+        repo's own dev-browser ladder (<a href="/backlog/141-dev-browser-vision/">#141</a>:
+        report-only → propose → live-verify → open-PR, already ratified, default open-PR). Swarmia
+        numbers by <em>agent topology</em> and is not comparable. None of the published ladders has an
+        L0 "report-only" floor — that is a genuine addition. <em>So Fork&nbsp;1 is mostly ratify:
+        express the ladder on a public SAE-numbered scale and map #141's verb-rungs onto it, rather
+        than re-deciding whether to have a ladder.</em></li>
+    <li><strong>The novel flag: value/risk as the autonomy dial.</strong> Partitioning <em>every</em>
+        lifecycle activity into value-creation vs risk-mitigation, and using the risk side — described by
+        named quality dimensions — as the per-activity AI-autonomy <strong>dial</strong> (the dimensions
+        playing the role of SAE's Operational Design Domain / tolerance envelope) was <strong>not found
+        in any surveyed standard or framework</strong>. The substrate is precedented and citable: the
+        dimensions map to ISO/IEC&nbsp;25010:2023 (revised 8→9 characteristics, adding <em>safety</em>;
+        ISO calls them "quality requirements," not NFRs), and the list is best modeled as an
+        <strong>open, extensible registry with a default flavor</strong> — FURPS+ (the "+" is literally
+        an extension slot), SEI/ATAM (open quality scenarios, a growing set), and arc42 (a 184-quality
+        default catalog tailored into a per-project quality tree) all support extension over a closed
+        list. <em>So Fork&nbsp;2 ratifies the model and the open-registry shape; the only small pick is
+        renaming "working software."</em></li>
+    <li><strong>Methodology and tools are codified separately — no lock-in.</strong> The methodology is
+        tool-agnostic <strong>everything-as-code</strong>: goals, tolerances, gate definitions,
+        dimensions, and evidence are declarative, version-controlled artefacts a <em>third-party</em>
+        project-management/CI tool could read and drive — our own tools (the SaaS control plane, the
+        dev-browser) are <strong>non-blocking consumers</strong>. This pattern is named by GitOps
+        ("declarative desired state in Git"; OpenGitOps Principles v1.0.0) and proven per-category by
+        neutral schemas (SARIF, SPDX/CycloneDX, OpenTelemetry, OPA, OSCAL). Work-tracking data, though,
+        is a genuine <strong>white space</strong> — no adopted open work-item interchange standard exists
+        (portability is lossy CSV, non-portable even within one vendor), and the repo's
+        backlog-as-Markdown is docs-as-code applied to exactly that gap. The artefact contract therefore
+        legitimately <em>is</em> a Protocol — the single escapable lock minimize-lock-in permits.</li>
+    <li><strong>The real call is the brand.</strong> Whether "Self-Driven Project" becomes the master
+        brand over the methodology (<a href="/backlog/563-ai-driven-agile-methodology-as-a-shareable-approach/">#563</a>)
+        and the AI-driven-IDE thread is a genuine positioning judgment. Two naming caveats the survey
+        surfaced: "self-driving" is strongly Oracle's (self-driving database) — lean on "self-<em>driven</em>"
+        and avoid "self-driving database/infra/SDLC"; and <strong>"Project" already names a WE standard
+        entity</strong> (projects.json), so the brand overloads an existing term — a sub-decision in
+        Fork&nbsp;3.</li>
+</ol>
+
+<h2>The step-tree — every SDLC step × the gate that replaces human judgment × ceiling autonomy</h2>
+<p>
+    The core artefact of the framing (<a href="/backlog/671-self-driven-project-step-tree-every-sdlc-step-automatable-da/">#671</a>,
+    epic <a href="/backlog/666-self-driven-project/">#666</a>): walk the whole lifecycle and, for each
+    step, name (a) the <strong>outcome property we actually want</strong>, (b) the <strong>measurable,
+    data-driven gate</strong> that would replace today's human-judgment gate, (c) whether that gate is
+    <strong>automatable today</strong>, and therefore (d) the <strong>ceiling autonomy level</strong> the
+    step can reach now — scored on <a href="/backlog/665-self-driven-project-ratify-the-framing-autonomy-taxonomy-mas/">#665</a>'s
+    ratified SAE&nbsp;L0–L5 scale (report-only&nbsp;=&nbsp;L0, propose&nbsp;=&nbsp;L1–L2, live-verify&nbsp;+&nbsp;open-PR&nbsp;=&nbsp;L3
+    conditional, auto-merge&nbsp;=&nbsp;L3.5, live-patch/deploy&nbsp;=&nbsp;L4–L5). The load-bearing boundary is
+    <strong>L2→L3</strong>: at L2 a human is part of the task; at L3 the system does the whole task and the
+    human is the fallback; at L4 the system is its own fallback. The pattern that decides the ceiling is
+    blunt — <em>a step can be automated exactly as far as its acceptance signal is machine-checkable</em>.
+    Where this repo already runs that signal (a real gate), the ceiling is high and cited; where the gate
+    is still human prose, the ceiling is L1–L2 and the gap <em>is</em> the build target.
+</p>
+<table>
+    <thead>
+        <tr><th>SDLC step</th><th>Outcome property wanted</th><th>Data-driven gate (replaces human judgment)</th><th>Automatable today?</th><th>Ceiling autonomy</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>1 · Intent / requirement capture</strong></td>
+            <td>The stated goal is unambiguous and testable — a fresh reader (or tool) can act on it without re-asking.</td>
+            <td>Schema-validity of the intent artefact (required fields present) + a "definition-of-ready" lint; the goal carries at least one machine-checkable acceptance criterion.</td>
+            <td><strong>Partial.</strong> Structure is checkable (the backlog DoR gate already does this); <em>semantic</em> completeness — "is this the right goal?" — is not.</td>
+            <td><strong>L1–L2.</strong> System proposes/normalizes; human still authors the goal and owns "is this what I meant."</td>
+        </tr>
+        <tr>
+            <td><strong>2 · Planning / decomposition</strong></td>
+            <td>Work split into independently-deliverable, correctly-ordered, right-sized units with an honest dependency DAG.</td>
+            <td>Ranking/readiness projection + DAG-acyclicity + size bounds (<code>check:readiness</code>, the blocker-DAG validator, the split-size rule).</td>
+            <td><strong>Mostly yes</strong> for ordering/sizing/readiness (deterministic projections already ship); the <em>judgment</em> "is this the right cut?" remains human.</td>
+            <td><strong>L3 conditional.</strong> System decomposes + ranks and opens the plan; human approves the cut, not the mechanics.</td>
+        </tr>
+        <tr>
+            <td><strong>3 · Design / architecture decision</strong></td>
+            <td>The best end-state on merit is chosen, with the real fork engaged (not pre-settled) and the rationale durable.</td>
+            <td>Decision Definition-of-Ready (options + cited code refs + a bold default) is present and the fork is genuine; conformance to forced invariants.</td>
+            <td><strong>No</strong> for the call itself (it is the human-judgment core); <strong>yes</strong> for the <em>readiness</em> of the call (the prepare-decision pass is machine-assistable).</td>
+            <td><strong>L1.</strong> System researches + prepares the fork to ready; the human ratifies. This is the deliberate floor, not a gap.</td>
+        </tr>
+        <tr>
+            <td><strong>4 · Implementation</strong></td>
+            <td>Code satisfies the standard/contract and reads like its surroundings; no shadow regressions.</td>
+            <td>Build + typecheck + the standards gate green; diff matches the intent's acceptance criteria.</td>
+            <td><strong>Yes</strong> where the contract is codified and the gate exists (<code>check:standards</code>, <code>tsc&nbsp;--noEmit</code>, the conformance suites).</td>
+            <td><strong>L3–L3.5.</strong> System writes the whole change and self-checks; auto-merge on green for low-risk areas, human veto on risky ones.</td>
+        </tr>
+        <tr>
+            <td><strong>5 · Verification / testing</strong></td>
+            <td>The claim "it works" is reproduced by observation, not asserted — including the residual a runtime can't reach.</td>
+            <td>Tests pass in the <em>right</em> runtime (the agent-runnable-harness rule); coverage threshold; an inconclusive run is flagged, not counted.</td>
+            <td><strong>Yes</strong> once the harness exists — which is exactly why a real-runtime verification declares its harness as a dependency (see <a href="/backlog/684-real-browser-e2e-lane-service-worker-background-fetch-verifi/">#684</a> / <a href="/backlog/685-vscode-test-electron-extension-host-integration-harness-plat/">#685</a>).</td>
+            <td><strong>L3–L4.</strong> Ceiling tracks harness coverage; the un-harnessable residual caps the step until its lane is built.</td>
+        </tr>
+        <tr>
+            <td><strong>6 · Code review</strong></td>
+            <td>Correctness + reuse/simplification defects caught before merge; findings adversarially verified, not plausible-but-wrong.</td>
+            <td>Multi-lens automated review with a refute-by-default verification pass; severity-classified findings; zero unresolved blockers.</td>
+            <td><strong>Partial.</strong> Mechanical defects and reuse smells are machine-findable; "is this the right abstraction" stays partly human.</td>
+            <td><strong>L3 conditional.</strong> System reviews + verifies and gates merge; human approves evidence, not the diff line-by-line.</td>
+        </tr>
+        <tr>
+            <td><strong>7 · Integration / merge</strong></td>
+            <td>Changes land without breaking the tree; conflicts are proof of a wrong independence assumption, not silently forced.</td>
+            <td>Clean merge + a single post-merge full-gate green; conflict ⇒ abort-and-replay serially (git is the arbiter).</td>
+            <td><strong>Yes.</strong> Fully mechanical — merge result + gate are deterministic signals.</td>
+            <td><strong>L4.</strong> System merges, detects conflicts, and self-recovers (replay) in-domain.</td>
+        </tr>
+        <tr>
+            <td><strong>8 · Build / packaging</strong></td>
+            <td>A reproducible, content-addressed artefact with declared identity + integrity.</td>
+            <td>Deterministic build hash + provenance/SRI + compat-range check (the MaaS serve-path identity model).</td>
+            <td><strong>Yes.</strong> Build determinism + hashing are already machine signals.</td>
+            <td><strong>L4–L5.</strong> No standing human gate; identity + integrity are computed.</td>
+        </tr>
+        <tr>
+            <td><strong>9 · Deployment / release</strong></td>
+            <td>The change reaches production within the stated risk envelope, reversibly.</td>
+            <td>Staged-rollout policy gate: pre-merge cool-off → severity → auto-merge low-risk / human-gate major+visual; post-deploy health (the #101 update-policy + plateau-app gate-severity seam).</td>
+            <td><strong>Partial.</strong> Policy + health are codifiable; "ship this now?" for high-blast-radius changes stays a human gate by tolerance choice.</td>
+            <td><strong>L3.5–L4.</strong> Auto-deploy inside the envelope; tolerance breach escalates to a human.</td>
+        </tr>
+        <tr>
+            <td><strong>10 · Monitoring / observability</strong></td>
+            <td>Drift, regressions, and SLO breaches are detected as they happen, with the signal attributable.</td>
+            <td>Telemetry thresholds + error-budget burn + ref-drift audits (the deterministic governance/ref-drift health checks are the at-rest analogue).</td>
+            <td><strong>Yes.</strong> Threshold breach is the canonical machine signal.</td>
+            <td><strong>L4–L5.</strong> Continuous, unattended; humans see summaries, not every check.</td>
+        </tr>
+        <tr>
+            <td><strong>11 · Incident response / rollback</strong></td>
+            <td>A tolerance breach is contained and reversed before it widens; the immutable-artefact rule holds (re-point, never purge).</td>
+            <td>Auto-rollback on health-gate failure + a re-pointed floating pin; blast-radius bound proven.</td>
+            <td><strong>Partial.</strong> Rollback-on-signal is mechanical; novel-incident diagnosis is the L3 fallback-to-human moment.</td>
+            <td><strong>L4 in-domain</strong> (known failure shapes self-recover); <strong>L3</strong> at the edge (human is the fallback).</td>
+        </tr>
+        <tr>
+            <td><strong>12 · Maintenance / refactor</strong></td>
+            <td>The system stays drivable — debt that would stall future autonomy is paid down without changing behaviour.</td>
+            <td>Behaviour-preserving check (tests + gate unchanged-green) + a maintainability signal (complexity/duplication trend).</td>
+            <td><strong>Mostly yes</strong> for behaviour preservation; the maintainability dimension is the named residual risk (the operator's ability to keep driving).</td>
+            <td><strong>L3–L4.</strong> System refactors under a green gate; the maintainability dimension is the dial that can force a human back in.</td>
+        </tr>
+    </tbody>
+</table>
+<p>
+    Two cross-cutting reads fall out of the tree. <strong>The ceiling is set by the gate, not the step.</strong>
+    Every step that already has a machine-checkable acceptance signal in this repo reaches L3+; every step still
+    gated by human prose caps at L1–L2 — so the path to a more self-driven project is literally <em>"convert the
+    next human-judgment gate into a data-driven one,"</em> which makes <strong>gate authoring</strong> the step
+    where value concentrates (the developer-role inversion, <a href="/backlog/673-self-driven-project-developer-role-thesis-author-the-positio/">#673</a>).
+    <strong>Design (step&nbsp;3) is the deliberate L1 floor</strong> — the genuine-fork decision is kept human on
+    purpose (it is the goal-and-tolerance authorship the human owns), so the framing does not chase its autonomy up.
+    Friction found while authoring this tree is logged to <a href="/backlog/665-self-driven-project-ratify-the-framing-autonomy-taxonomy-mas/">#665</a>'s
+    A1–A6 register: scoring these twelve steps did <em>not</em> need an autonomy rung outside SAE&nbsp;L0–L5 (no
+    <strong>A1</strong> breach) nor a value/risk dimension outside the five (no <strong>A2</strong> breach) — the
+    one rung this tree exercised that the public SAE scale lacks is Dash0's <strong>L3.5</strong> auto-merge, which
+    #665 already adopted, so the scale held.
+</p>
+
+<h2>Sources</h2>
+<p>
+    Full citations in
+    <a href="/backlog/665-self-driven-project-ratify-the-framing-autonomy-taxonomy-mas/">#665</a>'s
+    related report (<code>reports/2026-06-15-self-driven-project-prior-art.md</code>): SAE J3016;
+    ASDLC.io &amp; Dash0 levels; Tessl; arXiv 2509.06216 &amp; 2506.12469; Kent Beck / David Bernstein
+    / Charles Simonyi (coding-by-intention lineage); ISO/IEC 25010:2023, FURPS+, SEI/ATAM, arc42;
+    OpenGitOps, OSCAL, SARIF, SPDX, CycloneDX, OpenTelemetry, OPA; Oracle Autonomous Database.
+</p>
+{% endraw %}
