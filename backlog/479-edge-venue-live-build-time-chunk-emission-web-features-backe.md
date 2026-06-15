@@ -1,7 +1,7 @@
 ---
 type: idea
 workItem: story
-size: 5
+size: 13
 status: open
 blockedBy: ["219"]
 dateOpened: "2026-06-13"

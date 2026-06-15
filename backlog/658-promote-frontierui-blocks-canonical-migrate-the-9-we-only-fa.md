@@ -1,7 +1,7 @@
 ---
 type: issue
 workItem: story
-size: 8
+size: 13
 status: open
 blockedBy: ["657"]
 dateOpened: "2026-06-15"
