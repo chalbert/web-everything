@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reveal Navigation — Conformance Demo · Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/reveal-nav-conformance.css">
+</head>
+<body>
+  <header class="page-head">
+    <h1>Reveal Navigation — composition recipe conformance</h1>
+    <p>
+      The reveal-nav recipe (#609 Fork 1A) is <strong>not a new block</strong>: it is the
+      <a href="/intents/disclosure/">disclosure</a> intent's <code>surface: anchored</code> value on a
+      <a href="/blocks/nav-list/">nav-list</a> section, composing the <a href="/intents/anchor/">anchor</a> intent
+      (<code>strategy: escape</code>, <code>type: menu</code>) and <a href="/intents/hover-intent/">hover-intent</a>.
+      This page proves the recipe against the W3C APG <em>Disclosure Navigation</em> invariants — and contrasts the same
+      section as an <code>in-flow</code> accordion vs. an <code>anchored</code> overlay (the two surface values).
+    </p>
+  </header>
+
+  <main class="demo-grid">
+    <!-- ───────────────── surface: anchored (reveal-nav / mega-menu) ───────────────── -->
+    <section aria-labelledby="anchored-h">
+      <h2 id="anchored-h">surface: <code>anchored</code> — reveal nav</h2>
+      <nav aria-label="Products" class="reveal-nav" data-test="reveal-nav">
+        <ul class="reveal-nav__bar">
+          <li class="reveal-nav__item">
+            <!-- Disclosure trigger: a button with aria-expanded — NOT role=menuitem (disclosure, not menu). -->
+            <button
+              type="button"
+              class="reveal-nav__trigger"
+              aria-expanded="false"
+              aria-controls="panel-products"
+              popovertarget="panel-products"
+              data-test="trigger-products"
+              data-reveal-trigger
+            >Products</button>
+            <!-- Anchored panel: native Popover API lifts it out of flow (top layer) — no reflow.
+                 Links are <a>, not role=menuitem — this is a disclosure, not an ARIA menu. -->
+            <div
+              id="panel-products"
+              class="reveal-nav__panel"
+              popover
+              data-test="panel-products"
+              data-reveal-panel
+            >
+              <ul>
+                <li><a href="#analytics">Analytics</a></li>
+                <li><a href="#automation">Automation &amp; Orchestration</a></li>
+                <li><a href="#integrations">Integrations Marketplace</a></li>
+              </ul>
+            </div>
+          </li>
+        </ul>
+      </nav>
+      <p class="note">
+        The panel uses the native <code>popover</code> attribute + CSS anchor positioning. It overlays the page
+        (<code>position: fixed</code> in the top layer), so revealing it <strong>does not push the content below</strong>.
+      </p>
+    </section>
+
+    <!-- ───────────────── surface: in-flow (accordion baseline) ───────────────── -->
+    <section aria-labelledby="inflow-h">
+      <h2 id="inflow-h">surface: <code>in-flow</code> — accordion baseline</h2>
+      <nav aria-label="Products (in-flow)" class="accordion-nav" data-test="accordion-nav">
+        <button
+          type="button"
+          class="accordion-nav__trigger"
+          aria-expanded="false"
+          aria-controls="acc-products"
+          data-test="trigger-acc-products"
+          data-accordion-trigger
+        >Products</button>
+        <ul id="acc-products" class="accordion-nav__panel" hidden>
+          <li><a href="#analytics">Analytics</a></li>
+          <li><a href="#automation">Automation &amp; Orchestration</a></li>
+          <li><a href="#integrations">Integrations Marketplace</a></li>
+        </ul>
+      </nav>
+      <p class="note">The same disclosure expands <strong>in document flow</strong> — the content below shifts down.</p>
+    </section>
+  </main>
+
+  <!-- ───────────────── conformance report ───────────────── -->
+  <section aria-labelledby="report-h" class="report">
+    <h2 id="report-h">APG Disclosure-Navigation invariants</h2>
+    <table data-test="conformance-table">
+      <thead><tr><th>Invariant</th><th>Result</th><th>Detail</th></tr></thead>
+      <tbody id="conformance-body"></tbody>
+    </table>
+  </section>
+
+  <script type="module" src="/demos/reveal-nav-conformance.ts"></script>
+</body>
+</html>

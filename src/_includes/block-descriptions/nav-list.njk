@@ -175,3 +175,30 @@
   <li><code>NavSectionBehavior</code> &mdash; Disclosure toggle behavior for collapsible sections (<code>nav:section</code>)</li>
   <li><code>registerNavigation</code> &mdash; Registers both behaviors with the attribute registry</li>
 </ul>
+
+<h3 id="reveal-nav-recipe">Composition recipe: reveal navigation (mega-menu / dropdown nav)</h3>
+<p>
+  A reveal navigation panel — a mega-menu or dropdown nav whose panel <strong>overlays</strong> rather than pushing
+  the page down — is a <strong>documented composition recipe, not a new block</strong>
+  (<a href="/backlog/609-candidate-standard-reveal-navigation-menus-mega-menu-hover-d/">#609</a> Fork 1A). It is the
+  <a href="/intents/disclosure/">disclosure</a> intent's <code>surface: anchored</code> value applied to a nav section:
+</p>
+<ul class="list-disc pl-5">
+  <li><strong>nav-list section</strong> — the <code>nav:section</code> disclosure toggle (<code>aria-expanded</code> +
+    <code>aria-controls</code>), exactly as for the in-flow accordion.</li>
+  <li><strong>disclosure <code>surface: anchored</code></strong> — the panel renders out-of-flow instead of expanding in
+    document flow, so siblings don't reflow.</li>
+  <li><strong><a href="/intents/anchor/">anchor</a> <code>strategy: escape</code>, <code>type: menu</code></strong> —
+    positions the panel relative to its trigger and lifts it to the top layer (composes Web Portals).</li>
+  <li><strong><a href="/intents/hover-intent/">hover-intent</a></strong> — opens on deliberate hover with diagonal-travel
+    forgiveness (<a href="/backlog/643-mint-the-hover-intent-intent-ux-only-open-close-a-revealed-s/">#643</a>); the
+    timing/safe-area mechanic is a Technical Configurator concern, not part of the recipe.</li>
+</ul>
+<p>
+  This stays a <strong>disclosure, not a menu</strong> (APG Disclosure-Navigation pattern): links are links, not
+  <code>role="menuitem"</code>; no arrow-key menu semantics. The baseline is native-first CSS (the panel works without JS);
+  hover-intent + anchoring are JS enhancements. See the
+  <a href="/demos/reveal-nav-conformance.html">reveal-nav conformance demo</a> for the recipe proven against the APG
+  invariants (disclosure-not-menu, no-reflow, i18n label-growth, CSS baseline + JS enhancement), and the
+  <a href="/reports/2026-06-14-reveal-navigation-disclosure-pattern/">reveal-navigation design sweep</a>.
+</p>

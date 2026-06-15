@@ -1875,6 +1875,13 @@
     "status": "draft",
     "summary": "Show/hide of a content region via a toggle control — expand/collapse, exclusive accordion grouping, and find-in-page reveal. Built on the native <details>/<summary> substrate.",
     "dimensions": {
+      "surface": {
+        "description": "Where the disclosed panel renders (#609 Fork 1A). in-flow expands the panel in document flow (the accordion baseline — pushes siblings down); anchored lifts it to an out-of-flow surface anchored to its trigger (the reveal-nav / mega-menu / dropdown recipe — composes the anchor intent with strategy=escape, type=menu, so it overlays without reflow).",
+        "values": [
+          "in-flow",
+          "anchored"
+        ]
+      },
       "defaultState": {
         "description": "Initial expanded state of the region",
         "values": [

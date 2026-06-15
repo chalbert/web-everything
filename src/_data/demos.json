@@ -330,5 +330,13 @@
       "webintents"
     ],
     "epic": "586"
+  },
+  {
+    "id": "reveal-nav-conformance",
+    "name": "Reveal Navigation — Conformance",
+    "description": "Proves the reveal-nav composition recipe (#609 Fork 1A) — disclosure surface:anchored + anchor escape/menu + hover-intent — against the W3C APG Disclosure-Navigation invariants (disclosure-not-menu, no-reflow, i18n label-growth, native-first CSS baseline + JS enhancement).",
+    "path": "/demos/reveal-nav-conformance.html",
+    "status": "active",
+    "project": "navigation"
   }
 ]
