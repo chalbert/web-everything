@@ -4,9 +4,12 @@ workItem: story
 size: 5
 parent: "193"
 locus: frontierui
-status: open
+status: resolved
 blockedBy: ["275"]
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-15"
+dateResolved: "2026-06-15"
+graduatedTo: frontierui/blocks/droplist/{Anchor,Clearable,Filter,FocusDelegation,LiveStatus,Selection}.ts static optionSpec + parseOptions merge; frontierui/vite.config.mts traitMap; declarativeOptions.test.ts
 tags: []
 ---
 
