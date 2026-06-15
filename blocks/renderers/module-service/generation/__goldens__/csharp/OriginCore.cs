@@ -4,7 +4,7 @@
 namespace FrontierUI.Maas.Generated;
 
 /// <summary>One query parameter of the serve path (name, required, role).</summary>
-public readonly record struct ServePathParam(string Name, bool Required, string Description);
+public readonly record struct ServePathParam(string Name, bool Required, bool CatalogGated, string Description);
 
 /// <summary>One response the serve path can produce, tied to its HTTP status.</summary>
 public readonly record struct ServePathResponse(int Status, string When, string[] Headers, string? MediaType);
@@ -52,9 +52,9 @@ public static class OriginCore
 
     public static readonly ServePathParam[] Params = new[]
     {
-        new ServePathParam("form", false, "The served form (e.g. wc-class). Defaults to the origin's default form. The value set is an implementation catalog, not part of the neutral contract."),
-        new ServePathParam("target", false, "The transpile target passed to the transform (e.g. an ES version). Byte-determining."),
-        new ServePathParam("strategy", false, "The define/delivery strategy passed to the transform. Byte-determining."),
+        new ServePathParam("form", false, true, "The served form (e.g. wc-class). Defaults to the origin's default form. The value set is an implementation catalog, not part of the neutral contract."),
+        new ServePathParam("target", false, false, "The transpile target passed to the transform (e.g. an ES version). Byte-determining."),
+        new ServePathParam("strategy", false, false, "The define/delivery strategy passed to the transform. Byte-determining."),
     };
 
     public static readonly ServePathResponse[] Responses = new[]

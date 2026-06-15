@@ -116,6 +116,7 @@ describe('JS backend — generated origin behaves (the #088 pin ladder)', () => 
     resolveDefinition: (name: string) => (name === 'card' ? '<card></card>' : null),
     transform: async () => ({ code: 'export const x = 1;', language: 'javascript', diagnostics: [] as string[] }),
     producer: 'test/1.2.3',
+    formCatalog: { defaultValue: 'wc-class', known: ['wc-class', 'declarative', 'html', 'jsx', 'functional'] }, // #662
   };
   async function makeHandler() {
     const mod = await import(/* @vite-ignore */ join(goldenDir, 'origin.shell.js'));
@@ -132,6 +133,19 @@ describe('JS backend — generated origin behaves (the #088 pin ladder)', () => 
     const handle = await makeHandler();
     const res = await handle(new Request('https://x/_maas/unknown.js'));
     expect(res.status).toBe(404);
+  });
+
+  it('400s an unknown form via the injected catalog seam (#662)', async () => {
+    const handle = await makeHandler();
+    const res = await handle(new Request('https://x/_maas/card.js?form=bogus'));
+    expect(res.status).toBe(400);
+  });
+
+  it('defaults a missing form to the origin default rather than passing null (#662)', async () => {
+    const handle = await makeHandler();
+    // No `form` query — must NOT 400 (defaults to wc-class) and proceeds to the normal flow.
+    const res = await handle(new Request(`https://x/_maas/card@${ID}.js`));
+    expect(res.status).toBe(200);
   });
 
   it('302-redirects an unpinned (floating) request to the immutable hash URL', async () => {

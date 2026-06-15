@@ -85,6 +85,13 @@ export interface ServePathParam {
   readonly name: string;
   readonly required: boolean;
   readonly description: string;
+  /**
+   * Catalog-gated param (#662): when set, this param defaults to the origin's default value and is
+   * validated against an injected catalog seam — an unknown value mints the {@link HTTP_STATUS.badRequest}.
+   * The default value + the legal set are an *implementation catalog* (injected), never the neutral
+   * contract; the IR only names that the seam exists. `form` is the one such param.
+   */
+  readonly catalogGated?: boolean;
 }
 
 /** One response the serve path can produce, tied to the {@link HTTP_STATUS} it carries. */
@@ -132,6 +139,7 @@ export const SERVE_PATH: ServePathIR = Object.freeze({
     {
       name: 'form',
       required: false,
+      catalogGated: true,
       description:
         'The served form (e.g. wc-class). Defaults to the origin\'s default form. The value set is an implementation catalog, not part of the neutral contract.',
     },

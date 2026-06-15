@@ -8,6 +8,7 @@
 // Plain POCOs in/out so the handler has no ASP.NET dependency (host it under any .NET HTTP stack).
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace FrontierUI.Maas.Generated;
@@ -27,12 +28,17 @@ public sealed record TransformResult(string Code, string Language, bool Lossy, I
 /// <summary>Content-addressed identity for a served artifact (#088 §1/§3).</summary>
 public sealed record ArtifactIdentity(string Id, string Integrity);
 
+/// <summary>The form catalog seam (#662): the origin's default form + the legal set. An implementation
+/// catalog (injected), never the neutral contract — lets a conforming origin mint the unknown-form 400.</summary>
+public sealed record FormCatalog(string DefaultValue, IReadOnlyList<string> Known);
+
 /// <summary>A deterministic, framework-agnostic MaaS origin built from injected seams.</summary>
 public sealed class GeneratedMaaSOrigin
 {
     private readonly Func<string, string?> _resolveDefinition;
     private readonly Func<string, TransformResult, IReadOnlyDictionary<string, string?>, string, Task<TransformResult>> _transform;
     private readonly Func<string, TransformResult, IReadOnlyDictionary<string, string?>, string, Task<ArtifactIdentity>> _identity;
+    private readonly FormCatalog _formCatalog;
     private readonly string _producer;
     private readonly string _basePath;
 
@@ -40,12 +46,14 @@ public sealed class GeneratedMaaSOrigin
         Func<string, string?> resolveDefinition,
         Func<string, TransformResult, IReadOnlyDictionary<string, string?>, string, Task<TransformResult>> transform,
         Func<string, TransformResult, IReadOnlyDictionary<string, string?>, string, Task<ArtifactIdentity>> identity,
+        FormCatalog formCatalog,
         string producer = "webadapters/0.0.0",
         string? basePath = null)
     {
         _resolveDefinition = resolveDefinition;
         _transform = transform;
         _identity = identity;
+        _formCatalog = formCatalog;
         _producer = producer;
         _basePath = basePath ?? OriginCore.BasePath;
     }
@@ -72,7 +80,9 @@ public sealed class GeneratedMaaSOrigin
         if (name.Length == 0) return JsonError(OriginCore.Status.NotFound, "Missing component name.");
 
         var query = System.Web.HttpUtility.ParseQueryString(uri.Query);
-        var form = query["form"];
+        var form = query["form"] ?? _formCatalog.DefaultValue;
+        if (!_formCatalog.Known.Contains(form))
+            return JsonError(OriginCore.Status.BadRequest, $"Unknown form \"{form}\". Known: {string.Join(", ", _formCatalog.Known)}.");
         var target = query["target"];
         var strategy = query["strategy"];
 

@@ -43,7 +43,7 @@ const constBlock = (name: string, entries: [string, string][]): string =>
   '\n    }';
 
 const emitParam = (p: ServePathParam): string =>
-  `        new ServePathParam(${cs(p.name)}, ${p.required}, ${cs(p.description)}),`;
+  `        new ServePathParam(${cs(p.name)}, ${p.required}, ${!!p.catalogGated}, ${cs(p.description)}),`;
 
 const emitResponse = (r: ServePathResponse): string =>
   `        new ServePathResponse(${r.status}, ${cs(r.when)}, ${strArray(r.headers)}, ${
@@ -82,7 +82,7 @@ function emitCore(ir: ServePathIR): string {
 namespace ${NAMESPACE};
 
 /// <summary>One query parameter of the serve path (name, required, role).</summary>
-public readonly record struct ServePathParam(string Name, bool Required, string Description);
+public readonly record struct ServePathParam(string Name, bool Required, bool CatalogGated, string Description);
 
 /// <summary>One response the serve path can produce, tied to its HTTP status.</summary>
 public readonly record struct ServePathResponse(int Status, string When, string[] Headers, string? MediaType);
@@ -125,11 +125,16 @@ ${responses}
 /** Emit the idiomatic .NET HTTP shell — a framework-agnostic handler with the IR's injection seams. */
 function emitShell(ir: ServePathIR): string {
   const paramReads = ir.params
-    .map(
-      (p) =>
+    .map((p) =>
+      p.catalogGated
+        // Catalog-gated param (#662): default a missing value to the origin's default + mint the
+        // unknown-value 400 from the injected catalog, so the generated origin conforms on its own.
+        ? `        var ${p.name} = query[${cs(p.name)}] ?? _formCatalog.DefaultValue;\n`
+          + `        if (!_formCatalog.Known.Contains(${p.name}))\n`
+          + `            return JsonError(OriginCore.Status.BadRequest, $"Unknown ${p.name} \\"{${p.name}}\\". Known: {string.Join(\", \", _formCatalog.Known)}.");`
         // NameValueCollection (HttpUtility.ParseQueryString) has no TryGetValue; its indexer
         // returns string? (null when the key is absent) — exactly the nullable read we want (#661).
-        `        var ${p.name} = query[${cs(p.name)}];`,
+        : `        var ${p.name} = query[${cs(p.name)}];`,
     )
     .join('\n');
   const paramDict =
@@ -145,6 +150,7 @@ function emitShell(ir: ServePathIR): string {
 // Plain POCOs in/out so the handler has no ASP.NET dependency (host it under any .NET HTTP stack).
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 
 namespace ${NAMESPACE};
@@ -164,12 +170,17 @@ public sealed record TransformResult(string Code, string Language, bool Lossy, I
 /// <summary>Content-addressed identity for a served artifact (#088 §1/§3).</summary>
 public sealed record ArtifactIdentity(string Id, string Integrity);
 
+/// <summary>The form catalog seam (#662): the origin's default form + the legal set. An implementation
+/// catalog (injected), never the neutral contract — lets a conforming origin mint the unknown-form 400.</summary>
+public sealed record FormCatalog(string DefaultValue, IReadOnlyList<string> Known);
+
 /// <summary>A deterministic, framework-agnostic MaaS origin built from injected seams.</summary>
 public sealed class GeneratedMaaSOrigin
 {
     private readonly Func<string, string?> _resolveDefinition;
     private readonly Func<string, TransformResult, IReadOnlyDictionary<string, string?>, string, Task<TransformResult>> _transform;
     private readonly Func<string, TransformResult, IReadOnlyDictionary<string, string?>, string, Task<ArtifactIdentity>> _identity;
+    private readonly FormCatalog _formCatalog;
     private readonly string _producer;
     private readonly string _basePath;
 
@@ -177,12 +188,14 @@ public sealed class GeneratedMaaSOrigin
         Func<string, string?> resolveDefinition,
         Func<string, TransformResult, IReadOnlyDictionary<string, string?>, string, Task<TransformResult>> transform,
         Func<string, TransformResult, IReadOnlyDictionary<string, string?>, string, Task<ArtifactIdentity>> identity,
+        FormCatalog formCatalog,
         string producer = "webadapters/0.0.0",
         string? basePath = null)
     {
         _resolveDefinition = resolveDefinition;
         _transform = transform;
         _identity = identity;
+        _formCatalog = formCatalog;
         _producer = producer;
         _basePath = basePath ?? OriginCore.BasePath;
     }

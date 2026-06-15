@@ -35,7 +35,7 @@ const q = (s: string): string =>
 const strArray = (xs: readonly string[]): string => `[${xs.map(q).join(', ')}]`;
 
 const emitParam = (p: ServePathParam): string =>
-  `{ name: ${q(p.name)}, required: ${p.required}, description: ${q(p.description)} }`;
+  `{ name: ${q(p.name)}, required: ${p.required},${p.catalogGated ? ' catalogGated: true,' : ''} description: ${q(p.description)} }`;
 
 const emitResponse = (r: ServePathResponse): string =>
   `{ status: ${r.status}, when: ${q(r.when)}, headers: ${strArray(r.headers)}, mediaType: ${
@@ -93,9 +93,15 @@ function emitCore(ir: ServePathIR): string {
 
 /** Emit the idiomatic HTTP shell: a Web-Fetch handler wiring the core, with the IR's injection seams. */
 function emitShell(ir: ServePathIR): string {
-  // Query extraction is IR-derived: one line per declared param, in IR order.
+  // Query extraction is IR-derived: one line per declared param, in IR order. A catalog-gated param
+  // (#662) defaults to the injected catalog's default and 400s on an unknown value — so a conforming
+  // origin mints the unknown-form 400 itself rather than leaning on the host.
   const paramReads = ir.params
-    .map((p) => `    const ${p.name} = url.searchParams.get(${q(p.name)}) ?? undefined;`)
+    .map((p) => p.catalogGated
+      ? `    const ${p.name} = url.searchParams.get(${q(p.name)}) ?? formCatalog.defaultValue;\n`
+        + `    if (!formCatalog.known.includes(${p.name}))\n`
+        + `      return jsonError(STATUS.badRequest, \`Unknown ${p.name} "\${${p.name}}". Known: \${formCatalog.known.join(', ')}.\`);`
+      : `    const ${p.name} = url.searchParams.get(${q(p.name)}) ?? undefined;`)
     .join('\n');
   const paramPass = ir.params.map((p) => `${p.name}`).join(', ');
 
@@ -119,9 +125,10 @@ const jsonError = (status, message) =>
  *   - identity(definition, result, params, producer) => { id, integrity }  (content-hash, #088 §1/§3)
  *   - resolveDefinition(name) => string | null                            (definition registry)
  *   - transform(definition, params) => { code, language }                 (the served-form transform)
+ *   - formCatalog: { defaultValue, known[] }                              (#662: form default + the 400 seam)
  */
 export function createGeneratedMaaSOrigin(deps) {
-  const { identity, resolveDefinition, transform } = deps;
+  const { identity, resolveDefinition, transform, formCatalog } = deps;
   const producer = deps.producer ?? 'webadapters/0.0.0';
   const basePath = deps.basePath ?? BASE_PATH;
 

@@ -20,9 +20,10 @@ const jsonError = (status, message) =>
  *   - identity(definition, result, params, producer) => { id, integrity }  (content-hash, #088 §1/§3)
  *   - resolveDefinition(name) => string | null                            (definition registry)
  *   - transform(definition, params) => { code, language }                 (the served-form transform)
+ *   - formCatalog: { defaultValue, known[] }                              (#662: form default + the 400 seam)
  */
 export function createGeneratedMaaSOrigin(deps) {
-  const { identity, resolveDefinition, transform } = deps;
+  const { identity, resolveDefinition, transform, formCatalog } = deps;
   const producer = deps.producer ?? 'webadapters/0.0.0';
   const basePath = deps.basePath ?? BASE_PATH;
 
@@ -38,7 +39,9 @@ export function createGeneratedMaaSOrigin(deps) {
     const pin = at >= 0 ? spec.slice(at + 1) : null;
     if (!name) return jsonError(STATUS.notFound, 'Missing component name.');
 
-    const form = url.searchParams.get('form') ?? undefined;
+    const form = url.searchParams.get('form') ?? formCatalog.defaultValue;
+    if (!formCatalog.known.includes(form))
+      return jsonError(STATUS.badRequest, `Unknown form "${form}". Known: ${formCatalog.known.join(', ')}.`);
     const target = url.searchParams.get('target') ?? undefined;
     const strategy = url.searchParams.get('strategy') ?? undefined;
 

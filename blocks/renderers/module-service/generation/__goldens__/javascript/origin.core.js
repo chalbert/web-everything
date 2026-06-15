@@ -37,7 +37,7 @@ export const MEDIA_TYPES = {
 };
 
 export const PARAMS = [
-  { name: 'form', required: false, description: 'The served form (e.g. wc-class). Defaults to the origin\'s default form. The value set is an implementation catalog, not part of the neutral contract.' },
+  { name: 'form', required: false, catalogGated: true, description: 'The served form (e.g. wc-class). Defaults to the origin\'s default form. The value set is an implementation catalog, not part of the neutral contract.' },
   { name: 'target', required: false, description: 'The transpile target passed to the transform (e.g. an ES version). Byte-determining.' },
   { name: 'strategy', required: false, description: 'The define/delivery strategy passed to the transform. Byte-determining.' },
 ];

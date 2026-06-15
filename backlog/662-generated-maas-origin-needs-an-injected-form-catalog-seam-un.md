@@ -3,9 +3,12 @@ type: issue
 workItem: story
 size: 2
 parent: "507"
-status: open
+status: resolved
 blockedBy: ["661"]
 dateOpened: "2026-06-15"
+dateStarted: "2026-06-15"
+dateResolved: "2026-06-15"
+graduatedTo: servePathIR.ts catalogGated flag + generation/backends/{javascript,csharp}.ts inject a formCatalog seam (default form + unknown-form 400); goldens regenerated
 tags: [module-as-a-service, polyglot, dotnet, csharp, generation-adapter, conformance]
 ---
 
