@@ -25,6 +25,8 @@ import { statusIndicatorHTML } from '../../blocks/renderers/status-indicator/ren
 import type { ApplicationState } from './domain/types';
 import { LOAN_LIFECYCLE, FINDING_TONE } from './domain/lifecycle';
 import { identitySignal, currentActor, ROLE_LABEL, type LoanRole } from './domain/identity';
+import { createLoanGuardProvider } from './domain/permissions';
+import { CustomGuardRegistry } from '../../guard/registry';
 import { DefaultAuditProvider, registerAudit, auditLifecycle } from '../../blocks/audit/AuditProvider';
 import { auditTimelineHTML } from '../../blocks/renderers/audit-timeline/renderAuditTimeline';
 import { decisionTraceHTML } from '../../blocks/renderers/decision-trace/renderDecisionTrace';
@@ -88,6 +90,16 @@ const loanGuards: GuardResolver<ApplicationState> = (guard, { entity }) => {
   }
 };
 const loanLifecycle = new DefaultLifecycleProvider<ApplicationState>(LOAN_LIFECYCLE, loanGuards);
+
+// S1b (#687): the access-control Guard protocol (#178) provider for the loan's permission scopes —
+// state-scoped editing, field-scoped HMDA wall-off, action-scoped authority + the ownsApplication
+// predicate (domain/permissions.ts). Registered here so it is a live, resolvable seam; the pipeline UI
+// that *applies* each decision (hide a field, gate an action, flip edit↔read-only) is slice S10. Distinct
+// from `loanGuards` above — that gates lifecycle *edges*; this gates *access* to fields/actions/editing.
+const loanPermissions = new CustomGuardRegistry();
+loanPermissions.define(createLoanGuardProvider(), true);
+// Expose the registry for the S10 UI + dev inspection (the consuming surface, not yet the applier).
+(globalThis as unknown as { __loanPermissions?: CustomGuardRegistry }).__loanPermissions = loanPermissions;
 
 // Web Audit block (active): the entity's immutable history. The headline composition — auditLifecycle()
 // (wired at boot) — subscribes the lifecycle provider so every transition auto-appends one AuditEvent.
