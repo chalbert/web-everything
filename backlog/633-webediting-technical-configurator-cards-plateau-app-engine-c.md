@@ -8,7 +8,7 @@ blockedBy: ["629", "631"]
 dateOpened: "2026-06-14"
 dateStarted: "2026-06-15"
 dateResolved: "2026-06-15"
-graduatedTo: plateau-app/src/technical-configurator/{seed-editing-engine,seed-serialization-format,seed-substrate-negotiation}.ts + provider/presets wiring
+graduatedTo: plateau-app/src/technical-configurator/seed-editing-engine.ts
 tags: []
 ---
 
@@ -28,3 +28,5 @@ Added the three Web Editing domains to plateau-app's Technical Configurator, eac
 **Live render NOT confirmed — pre-existing SPA breakage (carry-forward, not this item's scope):** the plateau-app dev SPA currently 500s on `webeverything/plugs/bootstrap.ts` (`virtual:trait-manifest` unresolved) and `vite build` fails on the same — an in-flight plugs migration by another session (which also left `nl-provider*.ts` untracked though HEAD's `configurator.ts` already imports it, and `types.ts` modified). My additions are purely additive data following the proven pattern, so they mount once the SPA boot is fixed. Committed only my files (3 seeds + provider/presets/configurator additive edits); did NOT touch the other session's `types.ts`/`nl-provider*`.
 
 Add three Technical Configurator decision cards to plateau-app (seed + provider entry per domain, per the existing configurator pattern): engine choice (native contenteditable vs ProseMirror/Lexical/Slate/Quill adapter), serialization format (HTML/Markdown/portable-JSON via CustomSerializerRegistry), and substrate-negotiation policy (contenteditable floor vs editcontext upgrade). Cross-repo (plateau-app), the product-side surface of #618's engine Protocol (#629) + serializer plug (#631). Blocked by #629 + #631. Collaboration transport cross-ref'd to webrealtime.
+
+**Graduated to** `plateau-app/src/technical-configurator/seed-editing-engine.ts` — + seed-serialization-format.ts + seed-substrate-negotiation.ts + provider/presets wiring.

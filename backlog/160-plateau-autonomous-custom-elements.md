@@ -6,7 +6,7 @@ parent: "131"
 status: resolved
 dateOpened: "2026-06-07"
 dateResolved: "2026-06-07"
-graduatedTo: "plateau: getStandInElement.ts (tag-keyed autonomous rehydration) + Document.patch.ts (createElement returns the real class) + pathInsertionMethods.ts (drives connectedCallback for autonomous elements) + CustomElementRegistry.ts (propagates formAssociated/observedAttributes to the stand-in); <auto-complete> registered in bootstrap.tsx; auto-complete-demo.ts boots the real runtime"
+graduatedTo: none
 tags: [plateau, custom-elements, runtime, autonomous, injectors, autocomplete]
 relatedProject: webblocks
 crossRef: { url: /blocks/autocomplete/, label: Autocomplete block }
@@ -121,3 +121,5 @@ to a real `import './main'` boot.
   **connect** landed here.
 - [#168](/backlog/168-plateau-in-browser-test-harness/) — a plateau Playwright/e2e harness so the
   autonomous lifecycle + autocomplete demo are guarded in CI, not by hand.
+
+**Graduated to** `none` — autonomous custom-element lifecycle fix in the legacy plateau repo (now abandoned): getStandInElement.ts + Document.patch.ts + pathInsertionMethods.ts + CustomElementRegistry.ts; superseded in the live constellation by frontierui/plugs/webregistries/CustomElementRegistry.ts + frontierui/plugs/core/utils/pathInsertionMethods.ts.

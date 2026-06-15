@@ -7,7 +7,7 @@ blockedBy: ["562"]
 dateOpened: "2026-06-14"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
-graduatedTo: source-resolution/
+graduatedTo: source-resolution/provider.ts
 locus: webeverything
 tags: [dev-browser, source-awareness, standard, self-description, resolver, source-map]
 ---

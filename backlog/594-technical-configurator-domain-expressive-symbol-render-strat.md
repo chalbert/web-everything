@@ -8,7 +8,7 @@ blockedBy: ["587"]
 dateOpened: "2026-06-14"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
-graduatedTo: plateau-app src/technical-configurator/seed-expressive-symbol.ts (expressive-symbol render-strategy domain + presets)
+graduatedTo: plateau-app/src/technical-configurator/seed-expressive-symbol.ts
 tags: []
 ---
 
@@ -32,3 +32,5 @@ Per #370 Fork 3 + the technical→Configurator rule: add a Technical Configurato
   - **Verified:** plateau-app gate `npm test` green (102 tests); domain structurally complete (every
     strategy declares every axis; presets reference valid value ids). Pre-existing cross-repo plug tsc
     noise is unrelated (plugs aren't tsc-gated). Commit → plateau-app.
+
+**Graduated to** `plateau-app/src/technical-configurator/seed-expressive-symbol.ts` — expressive-symbol render-strategy domain + presets.

@@ -7,7 +7,7 @@ blockedBy: ["575"]
 dateOpened: "2026-06-14"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
-graduatedTo: "plateau-app src/dev-browser/forge — ForgeProviderRegistry + GitHub provider (twin of #576 IdeBridgeRegistry)"
+graduatedTo: plateau-app/src/dev-browser/forge/
 tags: []
 ---
 
@@ -33,3 +33,5 @@ Build the forge provider registry ruled by #578: "open a PR" abstracted behind a
   - Layer: Plateau (the dev-browser acts on the repo) — lands alongside #576's IdeBridgeRegistry.
   - **Verified:** 11 forge tests pass; plateau-app gate `npm test` green (113 tests); forge dir
     `tsc --noEmit --strict` clean. Commit → plateau-app.
+
+**Graduated to** `plateau-app/src/dev-browser/forge/` — ForgeProviderRegistry + GitHub provider (twin of #576 IdeBridgeRegistry).

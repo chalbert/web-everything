@@ -8,7 +8,7 @@ blockedBy: ["004", "266"]
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"
-graduatedTo: validation-generation/
+graduatedTo: validation-generation/provider.ts
 tags: []
 ---
 

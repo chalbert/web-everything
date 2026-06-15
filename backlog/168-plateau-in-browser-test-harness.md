@@ -5,7 +5,7 @@ status: resolved
 dateOpened: "2026-06-07"
 dateStarted: "2026-06-07"
 dateResolved: "2026-06-07"
-graduatedTo: "plateau e2e harness — `npm run test:e2e` (playwright.config.ts, dedicated port 5180). #168's two specs landed: e2e/autonomous-connect.spec.ts (+ __demos__/autonomous-connect.{html,ts}) guards #160's autonomous connectedCallback on both authored + createElement paths; e2e/auto-complete-demo.spec.ts drives /auto-complete-demo.html (par→arrow→enter commit+dismiss, client diacritic 'Pärnu', zero console errors). Full e2e 17/17, vitest 198/198."
+graduatedTo: none
 tags: [plateau, testing, e2e, playwright, custom-elements, demo]
 relatedProject: webblocks
 crossRef: { url: /blocks/autocomplete/, label: Autocomplete block }
@@ -64,3 +64,5 @@ the autonomous-lifecycle + autocomplete-demo invariants are guarded in CI-style,
   object/array serialization is fine on patched pages (#165).
 - **Leftovers:** none new — remaining lifecycle callbacks (disconnect / attributeChanged / form) are
   already tracked as [#167](/backlog/167-autonomous-element-lifecycle-completeness/), now unblocked.
+
+**Graduated to** `none` — e2e harness in the legacy plateau repo (now abandoned): test:e2e (playwright.config.ts port 5180) + autonomous-connect.spec.ts + auto-complete-demo.spec.ts; superseded by frontierui’s e2e harness.

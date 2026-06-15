@@ -5,7 +5,7 @@ status: resolved
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
-graduatedTo: validation-generation/
+graduatedTo: validation-generation/provider.ts
 tags: [validation, protocol, adapters, multi-language, codegen, validation-as-a-service, conformance, intents, native-first]
 relatedProject: webvalidation
 relatedReport: reports/2026-06-06-validation-generation-protocol-adapters.md

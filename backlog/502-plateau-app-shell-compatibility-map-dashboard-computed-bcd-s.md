@@ -8,7 +8,7 @@ blockedBy: ["501", "092"]
 dateOpened: "2026-06-13"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
-graduatedTo: plateau-app src/compatibility-map — caret semver + computeCompatibilityMatrix (3-state, asymmetric skew, singleton intersection, deprecated pins) + mountCompatibilityMap dashboard wired into main.ts/index.html; verified via tsc + esbuild engine run (vitest absent in repo)
+graduatedTo: plateau-app/src/compatibility-map/
 tags: []
 ---
 
@@ -46,3 +46,5 @@ this work). Correctness was instead verified by (a) **`tsc --noEmit`** — all n
 compute engine asserting every matrix state, the singleton conflict, deprecated pins, asymmetric skew,
 and the conversion-candidate set. Installing `vitest` in plateau-app (so its declared gate runs) is a
 separate, repo-level dependency decision — left for the repo owner, not bundled into this build.
+
+**Graduated to** `plateau-app/src/compatibility-map/` — caret semver + computeCompatibilityMatrix (3-state, asymmetric skew, singleton intersection, deprecated pins) + mountCompatibilityMap dashboard wired into main.ts/index.html.

@@ -5,7 +5,7 @@ parent: "138"
 status: resolved
 dateOpened: "2026-06-07"
 dateResolved: "2026-06-07"
-graduatedTo: "Root cause + fix landed as #160 (plateau had no autonomous custom-element lifecycle, so <auto-complete>'s connectedCallback never fired). Demo now boots green on the real runtime."
+graduatedTo: none
 tags: [autocomplete, droplist, demo, conformance, bootstrap, custom-element, browser]
 relatedProject: webblocks
 crossRef: { url: /blocks/autocomplete/, label: Autocomplete block }
@@ -63,3 +63,5 @@ Spun off from #148 (filter error channel) during in-browser verification.
   pages) is captured separately as [#165](/backlog/165-playwright-evaluate-object-serialization-patched-pages/).
 - **Still open:** the Playwright smoke test this asked for is the broader plateau e2e harness —
   [#168](/backlog/168-plateau-in-browser-test-harness/).
+
+**Graduated to** `none` — root cause + fix landed as #160 (plateau had no autonomous custom-element lifecycle, so <auto-complete>’s connectedCallback never fired).

@@ -8,7 +8,7 @@ blockedBy: ["102", "094"]
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
-graduatedTo: protocol update-policy (Update Policy) — src/_data/protocols.json + src/_includes/project-webmanifests.njk anchor protocol-update-policy, status concept; webmanifests' second protocol. Declared, portable auto-update policy (renovate.json analogue) as the only lock; graded gate on one axis (pre-merge cool-off→severity→auto-merge low-risk/human-gate major+visual; post-deploy staged-rollout→auto-rollback) extended by project config; runner is a deferred Plateau service (#497). Consumes #102/#094; Platform-side pre-test edge via #092.
+graduatedTo: "protocol:update-policy"
 preparedDate: "2026-06-11"
 tags: [auto-update, evergreen, change-management, dependencies, risk-analysis, phased-rollout, reversion, pre-test, monitoring, ci]
 relatedReport: reports/2026-06-11-auto-update-pipeline.md
@@ -88,3 +88,5 @@ Both `blockedBy` items have since landed (#102 → `changelog-manifest` protocol
 - **Runner: a Plateau-app service — a deferred build, not a WE standard artifact** (constellation-layering ruling: standard→WE, runner→Plateau). Carved to **[#497](/backlog/497-auto-update-orchestration-runner-plateau-service-execute-the/)** (implements pre-merge first, staged rollout second; the concrete service name is a build-time detail deferred there). The protocol declares the full graded-gate vocabulary (incl. staged-rollout terms) now.
 
 Graduated to: the `update-policy` protocol (webmanifests).
+
+**Graduated to** `protocol:update-policy` — Update Policy (concept) — webmanifests' second protocol; declared portable auto-update policy (renovate.json analogue), graded gate; runner is a deferred Plateau service (#497); consumes #102/#094.

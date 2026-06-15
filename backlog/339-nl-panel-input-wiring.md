@@ -7,7 +7,7 @@ blockedBy: ["328"]
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
-graduatedTo: plateau-app technical-configurator NL box — registered keyword no-key provider + renderNLBox/applyNLDescription wired to describeRequirements seam, partial-fill populates Requirements state, unset axes degrade to manual fine-tune (#096); verified via tsc + esbuild integration run
+graduatedTo: plateau-app/src/technical-configurator/configurator.ts
 tags: [technical-configurator, natural-language, panel, plateau, ai-agnostic]
 ---
 
@@ -38,3 +38,5 @@ installed (pre-existing repo state, same as #502). Verified instead by **`tsc --
 type-clean) and an **esbuild-bundled integration run**: registering the keyword provider →
 `describeRequirements` partial-fills the matched axis, and an off-vocabulary description normalizes to `{}`
 (the manual-mode degrade). The seam itself is covered by the existing `nl-provider.test.ts`.
+
+**Graduated to** `plateau-app/src/technical-configurator/configurator.ts` — NL box — keyword no-key provider + renderNLBox/applyNLDescription wired to describeRequirements seam; partial-fill populates Requirements state; unset axes degrade to manual fine-tune (#096).
