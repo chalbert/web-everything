@@ -3,9 +3,12 @@ type: idea
 workItem: story
 size: 5
 parent: "398"
-status: open
+status: resolved
 blockedBy: ["424", "545"]
 dateOpened: "2026-06-12"
+dateStarted: "2026-06-15"
+dateResolved: "2026-06-15"
+graduatedTo: "plateau-app/src/web-docs/served-site.ts (mountWebDocs: #424 generateDocsSite + #425/#545 webdocs-ui Nav/ConformancePanel) — served docs site + per-customer conformance dashboard, open-core FREE tier"
 tags: [webdocs, plateau, plateau-app, conformance, open-core, product-build]
 relatedProject: webdocs
 crossRef: { url: /backlog/398-build-the-web-docs-product-fui-open-primitives-plateau-app-o/, label: "Web Docs product epic (#398)" }
