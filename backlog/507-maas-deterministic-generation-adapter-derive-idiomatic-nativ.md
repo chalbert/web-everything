@@ -2,9 +2,11 @@
 type: issue
 workItem: epic
 parent: "081"
-status: open
+status: resolved
 blockedBy: ["505", "506"]
 dateOpened: "2026-06-13"
+dateResolved: "2026-06-15"
+graduatedTo: none
 relatedReport: reports/2026-06-14-backlog-split-analysis.md
 tags: []
 ---
