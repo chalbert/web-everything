@@ -1,0 +1,129 @@
+<section class="intro-section mb-12">
+  <h3 id="mission">Mission</h3>
+  <p>
+    <strong>Web Process</strong> is the constellation's <strong>process-tier capstone</strong>. Where every
+    other <code>web*</code> project standardizes a slice of the running application, Web Process
+    standardizes the <em>methodology that builds and operates it</em> &mdash; a project's <strong>self-driven
+    SDLC</strong> &mdash; as one portable, no-lock-in <strong>everything-as-code</strong> declaration a
+    third-party PM / CI tool could read and drive. It is a <strong>capstone made <em>of</em> WE
+    standards</strong>: it owns only the genuinely-new connective tissue and <em>composes</em> the rest.
+  </p>
+  <p>
+    It defines the <strong>Self-Driven Project Artefact Contract</strong> &mdash; the binding declaration
+    that wires <em>autonomy level</em> + <em>value/risk tolerance</em> + <em>gates</em> + <em>run
+    evidence</em> + <em>steps</em> into one file/metadata structure. Two layers, kept strictly separate
+    (<a href="/backlog/690-is-the-self-driven-project-methodology-a-first-class-constel/">#690</a>):
+  </p>
+  <ul>
+    <li><strong>Layer 1 &mdash; the standard (owned here).</strong> A <em>discoverable</em> file structure +
+      metadata for requirements and methodology artefacts, plus <strong>composable meta-schemas</strong>
+      (autonomy-level registry, value/risk-ODD dimension registry, gate-definition schema, step schema),
+      each shipping a <strong>default flavor</strong>, with <strong>one fully-defined default recipe</strong>.
+      Standardize the <em>shape</em>, not a fixed process (the Web Intents lesson).</li>
+    <li><strong>Layer 2 &mdash; recipes / config (not standard surface).</strong> A concrete methodology is a
+      <em>recipe</em>: a named bundle of autonomy ceilings + tolerance dials + gate selections that
+      <strong>extends the platform default</strong>. <strong>Plateau is the configurator</strong>; WE's own
+      backlog is just <em>one dogfooded recipe</em>, a consumer of the standard, never the spec.</li>
+  </ul>
+
+  <div class="comparison-block" style="background: rgba(124, 58, 237, 0.08); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #7c3aed; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #6d28d9; font-size: 1rem;">A capstone, not a category expansion</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      The genuinely-new surface is small: an autonomy <strong>vocabulary</strong>, the value/risk-<strong>ODD
+      dial</strong>, and the everything-as-code <strong>binding Protocol</strong>. Everything else is
+      <em>composition</em> of existing WE standards. The node doesn't duplicate the constellation &mdash; it
+      is connective tissue <em>over</em> it, which is the best reason to live <em>in</em> it. The whole stack
+      is open + no-lock-in by construction: the one new lock is the binding contract, and it is escapable (a
+      foreign tool drives the same files).
+    </p>
+  </div>
+</section>
+
+<section id="protocol-self-driven-project" class="section-card">
+  <h3 id="how-it-works">Self-Driven Project Artefact Contract</h3>
+  <p>
+    The contract fixes <strong>one seam</strong> &mdash; a portable, declarative artefact structure that
+    binds the SDLC together &mdash; and nothing else. A run is described by everything-as-code files; a
+    conforming tool (WE's own loop, or a foreign PM/CI tool) reads them, drives the work, and appends
+    evidence. The contract standardizes the <em>shape</em> via four composable meta-schemas, each with a
+    default flavor that a project's recipe extends.
+  </p>
+
+  <h4 id="meta-schemas" style="margin-top: 1.25rem;">The composable meta-schemas (each ships a default flavor)</h4>
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 720px;">
+      <thead>
+        <tr><th>Meta-schema</th><th>What it fixes</th><th>Default flavor</th><th>New or composed</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Autonomy-level registry</strong></td>
+          <td>The vocabulary of how much an agent may do unattended, per step</td>
+          <td>An SAE-style <code>L0–L5</code> ladder: report-only &rarr; propose &rarr; live-verify &rarr; open-PR &rarr; auto-merge &rarr; live-patch</td>
+          <td>✅ <strong>NEW</strong> (a vocabulary)</td>
+        </tr>
+        <tr>
+          <td><strong>Value/risk-ODD dimension registry</strong></td>
+          <td>The <em>tolerance dial</em>: quality/risk dimensions whose per-step tolerance throttles the autonomy ceiling (the operational-design-domain idea, borrowed from autonomous driving)</td>
+          <td>A small dimension set (correctness, security, blast-radius, reversibility) &times; a low/medium/high tolerance scale</td>
+          <td>✅ <strong>NEW</strong> (the organizing model)</td>
+        </tr>
+        <tr>
+          <td><strong>Gate-definition schema</strong></td>
+          <td>A machine-checkable gate: command, severity, pass/fail, expiring waivers, audit</td>
+          <td>Composes <a href="/projects/webcompliance/">Web Compliance</a> + <a href="/projects/webpolicy/">Web Policy</a> (the enforcement gate + DMN rule meta-schema)</td>
+          <td>❌ compose</td>
+        </tr>
+        <tr>
+          <td><strong>Step schema</strong></td>
+          <td>The directed progression design&rarr;code&rarr;test&rarr;ship&rarr;monitor&rarr;upgrade, with guards + completion</td>
+          <td>Composes <a href="/projects/webworkflows/">Web Workflows</a> (the orchestration graph) &mdash; the SDLC is another instance of the same machinery</td>
+          <td>❌ compose</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h4 id="composed-records" style="margin-top: 1.25rem;">Records the contract references (composed, not owned)</h4>
+  <ul style="font-size: 0.9rem;">
+    <li><strong>Requirements</strong> &mdash; conform to <a href="/backlog/100-requirement-as-code/">#100 requirement-as-code</a>; the contract <em>references</em> requirement artefacts, it does not re-define their structure (kept light: discoverable + metadata-bearing, most-flexible-default).</li>
+    <li><strong>Run evidence / history</strong> &mdash; <a href="/projects/webaudit/">Web Audit</a> (append-only AuditEvent) emitted through <a href="/projects/webreporting/">Web Reporting</a>'s report model.</li>
+    <li><strong>Human-handoff record</strong> &mdash; <a href="/projects/webdecisions/">Web Decisions</a> (DecisionRecord): why a gate escalated and what the human chose.</li>
+  </ul>
+
+  <h4 id="default-recipe" style="margin-top: 1.25rem;">The one default recipe</h4>
+  <p>
+    The node ships <strong>one fully-defined default recipe</strong> (config-extends-platform-default): every
+    autonomy ceiling, tolerance dial, and gate selection is named, so a project's recipe is a <em>flavor on
+    top</em>, never authored from nothing. WE's own dev-lifecycle config is exactly such a flavor &mdash; a
+    consumer of the standard, dogfooded, never part of it. First-cut shapes for all four meta-schemas + the
+    default recipe + the GitOps / OSCAL / SPDX prior art are specified in the
+    <a href="/reports/2026-06-15-self-driven-project-artefact-contract-spec/">artefact-contract spec report</a>.
+  </p>
+</section>
+
+<section id="composition" class="section-card">
+  <h3 id="composition-heading">Composition With Other Standards</h3>
+  <ul style="font-size: 0.9rem;">
+    <li><strong><a href="/projects/webworkflows/">Web Workflows</a></strong> &mdash; the SDLC step graph is a different instance of the Workflow Protocol's orchestration machinery (possibly with an extension), not a new orchestrator.</li>
+    <li><strong><a href="/projects/webcompliance/">Web Compliance</a> + <a href="/projects/webpolicy/">Web Policy</a></strong> &mdash; the gate-definition meta-schema composes the enforcement gate and the DMN rule meta-schema.</li>
+    <li><strong><a href="/projects/webaudit/">Web Audit</a> + <a href="/projects/webreporting/">Web Reporting</a></strong> &mdash; run evidence and history ride the existing audit/report models.</li>
+    <li><strong><a href="/projects/webdecisions/">Web Decisions</a></strong> &mdash; the request-to-intervene / human-handoff record.</li>
+    <li><strong><a href="/backlog/100-requirement-as-code/">#100 requirement-as-code</a></strong> &mdash; requirement artefacts the contract references rather than redefines.</li>
+  </ul>
+</section>
+
+<section id="status" class="section-card">
+  <h3 id="status">Status</h3>
+  <p>
+    Web Process is in <strong>concept</strong> phase; the Self-Driven Project Artefact Contract is registered
+    here at <strong>concept</strong> and specified first-cut in the
+    <a href="/reports/2026-06-15-self-driven-project-artefact-contract-spec/">spec report</a>. Project-hood
+    was ratified by <a href="/backlog/690-is-the-self-driven-project-methodology-a-first-class-constel/">#690</a>
+    (a first-class WE node owns the contract), under epic
+    <a href="/backlog/666-self-driven-project/">#666</a>, with the framing settled by
+    <a href="/backlog/665-self-driven-project-ratify-the-framing-autonomy-taxonomy-mas/">#665</a>. The full
+    meta-schema registries, the default recipe, and the Plateau recipe configurator are separately-prioritized
+    builds on top of this contract.
+  </p>
+</section>

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- GLOBAL FILTER: Do Not Modify -->
+    <filter id="floatShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <linearGradient id="gradProcess" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#818cf8" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+  </defs>
+
+  <!-- BASE: Rounded Container (Slate-50) -->
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc" />
+
+  <!-- CONTENT: a directed process — three gated steps connected toward completion -->
+  <g filter="url(#floatShadow)" fill="none" stroke="url(#gradProcess)" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <!-- connecting path -->
+    <path d="M40 44 H78 a8 8 0 0 1 8 8 v24 a8 8 0 0 1 -8 8 H50" />
+    <!-- step nodes -->
+    <circle cx="40" cy="44" r="9" fill="url(#gradProcess)" stroke="none" />
+    <circle cx="86" cy="64" r="9" fill="#f8fafc" />
+    <!-- completion check -->
+    <path d="M40 80 l6 7 l11 -14" />
+  </g>
+</svg>
