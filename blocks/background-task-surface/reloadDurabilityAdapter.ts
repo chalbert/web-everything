@@ -48,7 +48,9 @@ export function isBackgroundFetchAvailable(
     scope.navigator !== null &&
     'serviceWorker' in scope.navigator &&
     scope.navigator.serviceWorker != null;
-  const reg = scope.ServiceWorkerRegistration as { prototype?: object } | undefined;
+  // Cast to a function-with-prototype so the `typeof === 'function'` guard narrows to a usable type:
+  // a bare object union narrows to `never` under stricter TS — the cross-repo build discrepancy #695 hit.
+  const reg = scope.ServiceWorkerRegistration as (Function & { prototype?: object }) | undefined;
   const hasBackgroundFetch =
     typeof reg === 'function' && !!reg.prototype && 'backgroundFetch' in reg.prototype;
   return hasServiceWorker && hasBackgroundFetch;
