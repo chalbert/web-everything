@@ -1,8 +1,10 @@
 ---
 type: idea
 workItem: epic
-status: open
+status: resolved
 dateOpened: '2026-06-03'
+dateResolved: "2026-06-15"
+graduatedTo: "block:component"
 tags:
   - webcomponents
   - component
