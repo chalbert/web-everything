@@ -4,9 +4,9 @@ workItem: story
 size: 3
 parent: "666"
 status: open
+blockedBy: ["690"]
 dateOpened: "2026-06-15"
-dateStarted: "2026-06-15"
-tags: []
+tags: [self-driven-project, artefact-contract, protocol, everything-as-code, no-lock-in]
 ---
 
 # Self-Driven Project tool-agnostic artefact contract (everything-as-code, no-lock-in Protocol)
