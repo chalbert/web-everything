@@ -123,6 +123,20 @@ export interface IssuedDocuments {
 
 export type LossType = 'collision' | 'comprehensive' | 'liability' | 'theft' | 'glass';
 
+/** An adjuster's investigation note (S8, #419) — a timestamped, role-attributed line. */
+export interface ClaimNote {
+  at: string;
+  actor: string;
+  text: string;
+}
+
+/** One required-document line on the adjuster's checklist (S8, #419). */
+export interface ClaimDocCheck {
+  id: string;
+  label: string;
+  received: boolean;
+}
+
 export interface Claim {
   claimNumber: string;
   policyNumber: string;
@@ -133,6 +147,11 @@ export interface Claim {
   reserve: number;
   documents: string[]; // file names (FNOL attachments)
   audit: AuditEntry[];
+  // ── Adjuster workbench (S8, #419) ──
+  notes?: ClaimNote[];           // investigation notes
+  checklist?: ClaimDocCheck[];   // required-document checklist (built per loss type, lazily)
+  payout?: number;               // the issued indemnity (set when paying)
+  adjustment?: { outcome: 'approved' | 'denied'; reasonCode: string; at: string }; // the recorded approve/deny (→ decision-trace)
 }
 
 // ── Endorsements (S5, #416) — mid-term change + prorated re-rate ─────────────────

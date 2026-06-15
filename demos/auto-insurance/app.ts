@@ -26,6 +26,7 @@ import { rate, FINDING_LABEL, FINDING_TONE } from './domain/rating';
 import type { Policy, PolicyState, UwFinding, Claim, ClaimState, PaymentMethod, EndorsementChangeId } from './domain/types';
 import { POLICY_LIFECYCLE, CLAIM_LIFECYCLE } from './domain/lifecycle';
 import { toDecisionRecord } from './domain/decision';
+import { APPROVE_REASONS, DENY_REASONS, buildChecklist, docsComplete, claimDecisionRecord } from './domain/adjuster';
 import { collectPayment, paymentReceived, issuePolicyDocuments } from './domain/binding';
 import { availableEndorsements, previewEndorsement, applyEndorsement } from './domain/endorsement';
 import { renewalOffer, acceptRenewal, recordNonRenewal, recordCancellation, cancellationRecorded, reinstateEligible, recordReinstatement } from './domain/renewal';
@@ -547,20 +548,72 @@ function claimsMarkup(total: number): string {
     </div>
     <div class="ai-substatus muted"><b id="claims-count">${total.toLocaleString()}</b> claims · adjuster view</div>`;
 }
+/** Outcome → Status Indicator tone for the claim-adjustment decision-trace (S8, #419). */
+const CLAIM_DECISION_TONE = (o: string): StatusTone =>
+  o === 'approved' || o === 'pass' ? 'positive'
+    : o === 'denied' || o === 'fail' ? 'critical'
+      : 'neutral';
+
 function renderClaimDetail(c: Claim, moves: ClaimState[]): string {
   const meta = claimLifecycle.meta(c.state);
   const chip = statusIndicatorHTML({ label: meta.label ?? c.state, tone: meta.tone, shape: 'badge' });
-  const CLAIM_ACTION: Record<string, string> = { triage: 'Begin triage', investigating: 'Investigate', approved: 'Approve', denied: 'Deny', paying: 'Issue payment', paid: 'Mark paid', closed: 'Close' };
-  const actions = moves.length
-    ? `<div class="uw-actions">${moves.map((m) => `<button type="button" class="uw-act ${m === 'denied' ? 'decline' : m === 'approved' || m === 'paid' ? 'approve' : ''}" data-to="${m}">${CLAIM_ACTION[m] ?? m}</button>`).join('')}</div>`
+  const CLAIM_ACTION: Record<string, string> = { triage: 'Begin triage', investigating: 'Investigate', paying: 'Issue payment', paid: 'Mark paid', closed: 'Close' };
+  // S8 (#419): approve/deny are reason-coded decisions (reason → decision-trace); the other transitions
+  // stay plain buttons. Role-scoping is the claim lifecycle's job (each edge's actor is `adjuster`) — the
+  // app drives webpermissions through the guarded `available()` set, never by hiding buttons by hand.
+  const canApprove = moves.includes('approved');
+  const canDeny = moves.includes('denied');
+  const otherMoves = moves.filter((m) => m !== 'approved' && m !== 'denied');
+  const reasonForm = (outcome: 'approved' | 'denied', reasons: typeof APPROVE_REASONS, cls: string, label: string) => `
+    <form class="claim-decide ${cls}" data-outcome="${outcome}">
+      <select name="reason" aria-label="${label} reason">${reasons.map((r) => `<option value="${r.code}">${r.label}</option>`).join('')}</select>
+      <button type="submit" class="uw-act ${cls}">${label}</button>
+    </form>`;
+  const decideBlock = (canApprove || canDeny || otherMoves.length)
+    ? `<div class="uw-actions">
+        ${otherMoves.map((m) => `<button type="button" class="uw-act ${m === 'paid' ? 'approve' : ''}" data-to="${m}">${CLAIM_ACTION[m] ?? m}</button>`).join('')}
+        ${canApprove ? reasonForm('approved', APPROVE_REASONS, 'approve', 'Approve') : ''}
+        ${canDeny ? reasonForm('denied', DENY_REASONS, 'decline', 'Deny') : ''}
+      </div>`
     : `<p class="muted">Claim is closed — no further adjuster actions.</p>`;
+
+  // Reserve setting — adjustable until the claim is closed/denied/paid (no open moves ⇒ frozen).
+  const reserveEditable = moves.length > 0;
+  const reserveBlock = reserveEditable
+    ? `<form class="reserve-form"><label class="muted" style="font-size:12px">Reserve <input name="reserve" type="number" min="0" step="500" value="${c.reserve}"></label><button type="submit" class="btn">Set</button></form>`
+    : `<span class="muted">${money(c.reserve)} (final)</span>`;
+
+  // Document checklist (built per loss type) + the docs-complete gate the approve decision records.
+  const checklist = buildChecklist(c);
+  const complete = checklist.every((d) => d.received);
+  const checklistBlock = `<div class="claim-checklist">${checklist.map((d) => `<label class="chk"><input type="checkbox" data-doc="${d.id}"${d.received ? ' checked' : ''}> ${d.label}</label>`).join('')}</div>
+    <p class="muted" style="font-size:12px">${complete ? '✓ documentation complete' : `${checklist.filter((d) => d.received).length}/${checklist.length} received`}</p>`;
+
+  // Investigation notes — timestamped, adjuster-attributed.
+  const notes = c.notes ?? [];
+  const notesBlock = `<div class="claim-notes">${notes.length
+    ? notes.map((n) => `<div class="note"><span class="muted" style="font-size:11px">${n.at.slice(0, 10)} · ${n.actor}</span><div style="font-size:13px">${n.text}</div></div>`).join('')
+    : '<span class="muted">no notes yet</span>'}</div>
+    <form class="note-form"><input name="text" placeholder="Add an investigation note…" required><button type="submit" class="btn">Add note</button></form>`;
+
+  // The recorded approve/deny, rendered through the unchanged Web Decisions decision-trace block.
+  const decisionBlock = c.adjustment
+    ? `<div class="panel-hd">Adjustment decision</div>${decisionTraceHTML(claimDecisionRecord(c, c.adjustment.outcome, c.adjustment.reasonCode, c.adjustment.at), { layout: 'table', emphasis: 'deciding', toneFor: CLAIM_DECISION_TONE })}`
+    : '';
+
   const docs = c.documents.length ? c.documents.map((d) => `<code>${d}</code>`).join(' ') : '<span class="muted">none</span>';
+  const payoutLine = c.payout ? `<p class="muted" style="font-size:12px">Payout issued: <b>${money(c.payout)}</b></p>` : '';
   return `<div class="detail-body">
     <h3>${c.claimNumber} &middot; ${c.lossType}</h3>
     <p class="muted">${chip} &middot; policy ${c.policyNumber} &middot; reserve ${money(c.reserve)}</p>
-    ${actions}
+    ${decideBlock}
+    ${payoutLine}
     <div class="panel-hd">Loss</div><p style="font-size:13px">${c.description} <span class="muted">(${c.lossDate.slice(0, 10)})</span></p>
-    <div class="panel-hd">Documents</div><p style="font-size:12px">${docs}</p>
+    <div class="panel-hd">Loss reserve</div>${reserveBlock}
+    <div class="panel-hd">Document checklist</div>${checklistBlock}
+    <div class="panel-hd">FNOL attachments</div><p style="font-size:12px">${docs}</p>
+    <div class="panel-hd">Investigation notes</div>${notesBlock}
+    ${decisionBlock}
     <div class="panel-hd">Audit trail</div><div id="claim-audit"></div>
   </div>`;
 }
@@ -856,13 +909,59 @@ function boot() {
     });
     if (!panel.dataset.clWired) {
       panel.dataset.clWired = '1';
-      panel.addEventListener('click', async (e) => {
-        const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button.uw-act');
-        if (!btn || !current) return;
-        await claimLifecycle.transition({ id: current.claimNumber, state: current.state }, btn.dataset.to as ClaimState, ADJUSTER);
-        current.state = btn.dataset.to as ClaimState;
+      const ADJ = { role: 'adjuster' as const };
+      const claimAt = () => new Date().toISOString();
+      // Drive a guarded claim transition, notify, re-render (S7 core, extended for the S8 payout). The bare
+      // transition is auto-logged by `auditLifecycle`; richer domain actions append their own line below.
+      const moveClaim = async (to: ClaimState) => {
+        if (!current) return;
+        await claimLifecycle.transition({ id: current.claimNumber, state: current.state }, to, ADJ);
+        current.state = to;
+        if (to === 'paying') current.payout = current.reserve; // S8 (#419): payout = the established reserve
         notify('claim', current.claimNumber, claimStateNotification(current.claimNumber, current.state)); // S10 (#421)
         await renderInto(current, panel);
+      };
+      // Plain transitions (triage / investigating / paying / paid / closed). Approve/deny are reason-coded
+      // forms handled in the submit listener below; their buttons carry no `data-to`, so they fall through.
+      panel.addEventListener('click', async (e) => {
+        const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('button.uw-act[data-to]');
+        if (!btn || !current) return;
+        await moveClaim(btn.dataset.to as ClaimState);
+      });
+      // Document checklist toggle — persist on the claim so it survives re-render + feeds the approve gate.
+      panel.addEventListener('change', async (e) => {
+        const box = (e.target as HTMLElement).closest<HTMLInputElement>('input[type="checkbox"][data-doc]');
+        if (!box || !current) return;
+        current.checklist = buildChecklist(current);
+        const item = current.checklist.find((d) => d.id === box.dataset.doc);
+        if (item) item.received = box.checked;
+        await claimAudit.append({ target: { type: 'claim', id: current.claimNumber }, action: `checklist.${box.checked ? 'received' : 'cleared'} — ${box.dataset.doc}`, actor: ADJ, at: claimAt() });
+        await renderInto(current, panel);
+      });
+      // Reserve setting, investigation notes, and the reason-coded approve/deny decision.
+      panel.addEventListener('submit', async (e) => {
+        const formEl = (e.target as HTMLElement).closest<HTMLFormElement>('form');
+        if (!formEl || !current) return;
+        e.preventDefault();
+        if (formEl.classList.contains('reserve-form')) {
+          const next = Math.max(0, Number(new FormData(formEl).get('reserve')) || 0);
+          current.reserve = next;
+          await claimAudit.append({ target: { type: 'claim', id: current.claimNumber }, action: `reserve.set — ${money(next)}`, actor: ADJ, at: claimAt() });
+          await renderInto(current, panel);
+        } else if (formEl.classList.contains('note-form')) {
+          const text = String(new FormData(formEl).get('text') || '').trim();
+          if (!text) return;
+          (current.notes ??= []).push({ at: claimAt(), actor: 'adjuster', text });
+          await claimAudit.append({ target: { type: 'claim', id: current.claimNumber }, action: 'investigation.note-added', actor: ADJ, at: claimAt() });
+          await renderInto(current, panel);
+        } else if (formEl.classList.contains('claim-decide')) {
+          const outcome = formEl.dataset.outcome as 'approved' | 'denied';
+          const reasonCode = String(new FormData(formEl).get('reason') || '');
+          current.adjustment = { outcome, reasonCode, at: claimAt() }; // recorded → rendered as a decision-trace
+          const flag = outcome === 'approved' && !docsComplete(current) ? ' (docs incomplete)' : '';
+          await claimAudit.append({ target: { type: 'claim', id: current.claimNumber }, action: `adjustment.recorded — ${outcome} · ${reasonCode}${flag}`, actor: ADJ, at: claimAt() });
+          await moveClaim(outcome);
+        }
       });
     }
     // FNOL: file a new claim (native file input — the richer upload UX is gap #007).

@@ -3,9 +3,12 @@ type: idea
 locus: exercise-app
 workItem: story
 size: 5
-status: open
+status: resolved
 parent: "318"
 dateOpened: "2026-06-12"
+dateStarted: "2026-06-15"
+dateResolved: "2026-06-15"
+graduatedTo: demos/auto-insurance/domain/adjuster.ts + app.ts S8 claim adjuster workbench (reason-coded approve/deny → decision-trace, reserve setting, investigation notes, doc checklist; consumes master-detail/decision-trace/audit)
 tags: [exercise-app, auto-insurance, claims, adjuster, master-detail, phase]
 ---
 

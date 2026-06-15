@@ -238,3 +238,14 @@ tbody tr.selected { background: var(--accent-soft); }
 .notif-msg { color: var(--ink-1, #1a1a1a); }
 .notif-meta { margin-top: 3px; font-size: 11px; }
 .notif-empty { padding: 14px 12px; font-size: 12px; }
+
+/* ── Adjuster workbench (S8, #419) ── */
+.claim-decide { display: inline-flex; gap: 6px; align-items: center; }
+.claim-decide select { padding: 5px 8px; border: 1px solid #d6dae6; border-radius: 8px; font: inherit; font-size: 12px; }
+.reserve-form, .note-form { display: flex; gap: 8px; align-items: center; margin: 4px 0 2px; }
+.reserve-form input, .note-form input { padding: 6px 10px; border: 1px solid #d6dae6; border-radius: 8px; font: inherit; font-size: 13px; }
+.note-form input { flex: 1; }
+.claim-checklist { display: flex; flex-direction: column; gap: 4px; margin: 4px 0; }
+.claim-checklist .chk { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
+.claim-notes { display: flex; flex-direction: column; gap: 6px; margin: 4px 0; }
+.claim-notes .note { padding: 6px 10px; background: #f6f8fc; border-radius: 8px; border: 1px solid var(--line); }
