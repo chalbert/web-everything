@@ -1,5 +1,39 @@
 [
   {
+    "id": "wizard",
+    "name": "Wizard (Flow Progress)",
+    "status": "active",
+    "type": "Component",
+    "summary": "The reference Flow-Progress surface — a `<wizard-flow>` custom element that wires a portable workflow graph through the swappable `customWorkflowEngine` (#634/#650) into the flow-progress UX (register `wizard`). It owns no orchestration: transitions, guards, and completion stay on the engine; the element renders the current position and each step's status. Composes the Stepper block for the linear-presentation mechanics it already owns (`aria-current=\"step\"`, the Step N of M announcement, one-panel-at-a-time switching) and maps the engine's step-transition stream to per-step status (wait/process/finish/error). Back/undo uses the running instance's `back()` (the movement: back-allowed default). Slice A of #651.",
+    "implementedBy": "@frontierui/blocks/wizard/WizardElement.ts",
+    "exports": [
+      "WizardElement",
+      "registerWizard"
+    ],
+    "implementsIntent": "flow-progress",
+    "intentDimensions": {
+      "register": "wizard",
+      "movement": "back-allowed"
+    },
+    "composesIntents": [
+      "flow-progress"
+    ],
+    "dependsOn": [
+      "stepper",
+      "workflow-engine"
+    ],
+    "webStandards": {
+      "ariaCurrentStep": {
+        "usage": "The active step indicator and its panel carry aria-current=\"step\" (delegated to the composed Stepper); the step list is an ordered <ol> conveying position",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current"
+      },
+      "multiPageForms": {
+        "usage": "A labelled step region, a visible per-step status indicator, and a polite live region announcing 'Step N of M' on each engine transition",
+        "reference": "https://www.w3.org/WAI/tutorials/forms/multi-page/"
+      }
+    }
+  },
+  {
     "id": "keyboard-shortcuts",
     "name": "Keyboard Shortcuts",
     "status": "draft",
