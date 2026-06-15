@@ -67,7 +67,7 @@ function routerDemoFallback(): Plugin {
   const fallbacks: Array<[RegExp, string]> = [
     [/^\/(counter|todos|users|admin|login)(\/|$)/, '/demos/declarative-spa-router.html'],
     [
-      /^\/demos\/loan-origination\/(pipeline|application|processing|underwriting|admin)(\/|$)/,
+      /^\/demos\/loan-origination\/(pipeline|application|pricing|processing|underwriting|admin)(\/|$)/,
       '/demos/loan-origination/index.html',
     ],
     [

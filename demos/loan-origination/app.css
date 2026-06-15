@@ -335,3 +335,20 @@ code { background: #eef1f5; padding: 1px 5px; border-radius: 2px; font-family: u
 .wiz-summary dl.wiz-sum { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 6px 24px; max-width: 480px; }
 .wiz-sum > div { display: flex; justify-content: space-between; border-bottom: 1px dashed var(--line); padding: 4px 0; }
 .wiz-sum dt { color: var(--ink-3); font-size: 13px; } .wiz-sum dd { margin: 0; font-weight: 600; }
+
+/* ── Phase S6 — product & rate configurator (#384) ──────────────────────── */
+.cfg-products { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; }
+.cfg-card { border: 1px solid var(--line); border-radius: var(--radius); padding: 10px 12px; background: var(--surface); cursor: pointer; transition: border-color .12s, background .12s; }
+.cfg-card[role="button"]:hover { border-color: var(--brand); }
+.cfg-card.is-selected { border-color: var(--brand); background: #eef5fc; box-shadow: inset 3px 0 0 var(--brand); }
+.cfg-card.is-ineligible { cursor: default; opacity: .72; background: var(--surface-alt); }
+.cfg-card-hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cfg-card-name { font-weight: 600; font-size: 14px; }
+.cfg-card-meta { font-size: 12px; color: var(--ink-3); margin-top: 2px; }
+.cfg-why { margin: 6px 0 0; padding-left: 16px; font-size: 12px; color: var(--neg); }
+.cfg-quote { padding: 12px; }
+.cfg-quote-dl { margin: 10px 0 0; }
+.cfg-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+.cfg-row dt { color: var(--ink-3); margin: 0; white-space: pre; } .cfg-row dd { margin: 0; }
+.cfg-row.strong { font-weight: 700; } .cfg-row.strong dt { color: var(--ink); }
+.cfg-note { font-size: 11px; margin-top: 10px; }

@@ -10,6 +10,7 @@
  */
 
 import { applicationWizardSkeleton, mountApplicationWizard } from './wizard/applicationWizardView';
+import { productConfiguratorSkeleton, mountProductConfigurator } from './configurator/productConfiguratorView';
 import { generatePipeline } from './domain/seed';
 import { evaluate, type EvaluationResult } from './domain/rules';
 import { deriveFacts } from './domain/facts';
@@ -466,6 +467,7 @@ const routePath = (logical: string) => `${BASE}${logical}`;
 const MODULES = [
   { path: '/pipeline', label: 'Pipeline' },
   { path: '/application', label: 'Application' },
+  { path: '/pricing', label: 'Product & Pricing' },
   { path: '/processing', label: 'Processing' },
   { path: '/underwriting', label: 'Underwriting' },
   { path: '/admin', label: 'Admin' },
@@ -576,6 +578,7 @@ function boot() {
   const templates = [
     `<template route="/pipeline">${pipelineSkeleton(pipeline.length)}</template>`,
     `<template route="/application">${applicationWizardSkeleton()}</template>`,
+    `<template route="/pricing">${productConfiguratorSkeleton()}</template>`,
     `<template route="/processing">${stubView('Processing')}</template>`,
     `<template route="/underwriting">${stubView('Underwriting')}</template>`,
     `<template route="/admin">${stubView('Admin')}</template>`,
@@ -888,6 +891,13 @@ function boot() {
       requestAnimationFrame(() => {
         const ws = document.querySelector<HTMLElement>('.lo-workspace');
         if (ws) mountApplicationWizard(ws);
+      });
+    }
+    // Phase S6 (#384): the product & rate configurator — price a representative application from the book.
+    if (path === routePath('/pricing')) {
+      requestAnimationFrame(() => {
+        const ws = document.querySelector<HTMLElement>('.lo-workspace');
+        if (ws && pipeline[0]) mountProductConfigurator(ws, pipeline[0]);
       });
     }
   };
