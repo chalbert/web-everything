@@ -97,7 +97,7 @@ export function buildPrompt(input: SourceInput, knownIntents?: readonly string[]
     '',
     `Source dialect hint: ${input.language ?? '(auto-detect)'}`,
     'SOURCE:',
-    input.code,
+    input.code ?? '',
   ].join('\n');
 }
 
@@ -159,7 +159,7 @@ export interface ModelAnalyzerOptions {
 export function modelComponentAnalyzer(client: ModelClient, opts: ModelAnalyzerOptions = {}): CustomAnalyzer {
   return {
     id: `model:${client.id}`,
-    handles: (input) => input.language === 'model' || (input.language == null && looksMessy(input.code)),
+    handles: (input) => input.language === 'model' || (input.language == null && input.code != null && looksMessy(input.code)),
     analyze: async (input) => parseModelIR(await client.complete(buildPrompt(input, opts.knownIntents))),
   };
 }

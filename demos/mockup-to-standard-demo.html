@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mockup-to-Standard Playground - Web Everything</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="stylesheet" href="/demos/playground.css">
+  <style>
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.25rem; margin: 1.25rem 0; }
+    .card-title { font-size: 1.05rem; margin: 0 0 .75rem; }
+    .panes { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: .75rem; }
+    .pane-label { font-weight: 600; font-size: .8rem; text-transform: uppercase; letter-spacing: .03em; color: #555; margin-bottom: .3rem; }
+    pre.code { background: #f6f8fa; border-radius: 6px; padding: .6rem; overflow: auto; font-size: 12px; margin: 0; max-height: 18rem; }
+    .verify-badge { display: inline-block; font-weight: 600; padding: .15rem .5rem; border-radius: 4px; }
+    .verify-badge.ok { background: #e6f4ea; color: #137333; }
+    .verify-badge.fail { background: #fce8e6; color: #c5221f; }
+    .verify-checks { margin: .5rem 0 0; padding-left: 1.1rem; font-size: 12px; }
+    .check-ok { color: #137333; } .check-fail { color: #c5221f; }
+  </style>
+</head>
+<body>
+  <div class="demo-header">
+    <div class="demo-header-brand">Web Everything</div>
+    <a href="/" class="demo-header-back">&larr; Back to Home</a>
+  </div>
+
+  <main class="play">
+    <header class="play-intro">
+      <h1>Mockup-to-Standard Playground</h1>
+      <p>
+        A live surface for <a href="/backlog/086-mockup-to-standard-code-tool/">backlog #086</a> — a
+        <strong>design-to-code</strong> front door on the
+        <a href="/backlog/094-ai-upgrader-tools/">#094</a> upgrader pipeline. Instead of lifting existing
+        code, each card lifts a <strong>UI mockup</strong> (static image, Figma frame, interactive
+        prototype) through the <strong>same engine</strong> and the <strong>same verify gate</strong>:
+        <strong>mockup → neutral structure (IR) → generated
+        <a href="/blocks/component/"><code>&lt;component&gt;</code></a> → verify gate → live element</strong>.
+      </p>
+      <p class="play-caveat">
+        <strong>AI is a swappable, no-leakage provider.</strong> Mockup analysis is a
+        <code>CustomVisionProvider</code> behind the registry. Here a <strong>deterministic, keyless
+        reference provider</strong> stands in until the <strong>Plateau vision service</strong>
+        (<a href="/backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/">#475</a>)
+        ships; only the neutral structure crosses back into the standard. The generated
+        <code>&lt;component&gt;</code> is the same declarative form the adapters consume — no parallel generator.
+      </p>
+    </header>
+
+    <div id="cards"></div>
+  </main>
+
+  <script type="module" src="/demos/mockup-to-standard-demo.ts"></script>
+</body>
+</html>

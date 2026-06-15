@@ -1,11 +1,14 @@
 ---
 type: idea
 workItem: story
-size: 13
+size: 3
 parent: "097"
-status: open
+status: resolved
 blockedBy: ["052"]
 dateOpened: "2026-06-06"
+dateStarted: "2026-06-15"
+dateResolved: "2026-06-15"
+graduatedTo: "demo:mockup-to-standard-demo"
 tags: [design-to-code, mockup, ai-agnostic, provider-registry, codegen, standard-compliance, adapters, native-first, swappable-provider]
 relatedProject: webadapters
 crossRef: { url: /adapters/, label: Rendering Adapters }
@@ -17,14 +20,64 @@ A tool that **ingests a UI mockup — static (image, Figma) or interactive (prot
 
  The non-negotiable constraint is that it **must not depend on a single AI tool**. Model/vision/codegen is the fastest-moving part of this space, so the tool treats the AI as a *swappable provider behind a registry* — the "inject a provider" shape we use for [render strategies](/protocols/) and the MaaS compiler seam (#081). The AI is infrastructure you plug in, not architecture you bake in.
 
-> **Split status (2026-06-10 analysis, via #259): splittable but deferred.** A *staging* split exists
-> — neutral structural-description schema (`story·5`) → analyzer registry + reference provider (`story·3`)
-> → generator wiring + quality gate (`task`s). But the foundation slice stays ≈`5` (single-item, not
-> batchable), so executing the split now is backlog churn with no batchability win. Deferred until the
-> item is picked up or its urgency rises; revisit with `/split` then.
->
-> **Sized 8 → 13 (2026-06-15, batch pre-flight):** the foundation slice is single-item/not-batchable
-> and the design decisions below are recommended-not-ratified — dropped from the batch pool.
+> **Re-sized 13 → 3 + de-staled (2026-06-15, `/split 086`).** The earlier "splittable but deferred"
+> framing assumed the analyzer↔generator engine + neutral schema were unbuilt WE work. **They are not:**
+> the whole pipeline — analyzer registry → neutral `ComponentIR` → verify-gated generation — **already
+> shipped via sibling [#094](/backlog/094-ai-upgrader-tools/)** at
+> `blocks/renderers/upgrader/upgraderEngine.ts` (for the inverse, legacy-code → standard direction). The
+> neutral-schema decision this item calls "the hard, lasting design work" is **resolved in that code**
+> (`upgraderEngine.ts:36` — *"#086 open decision, resolved"*), and the **vision** analyzer is a
+> **Plateau-served service per [#475](/backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/)**,
+> not WE work. So #086's residual WE scope is narrow and single-slice (below) — re-sized to a directly
+> batchable `story·3`; nothing to split.
+
+## Progress (2026-06-15, batch-2026-06-15) — mockup input adapter landed on the #094 pipeline
+
+The narrow WE-resident residual (below) is built — **one more input adapter on the #094 engine, no
+parallel engine, no parallel generator:**
+
+- **`SourceInput` extended** ([upgraderEngine.ts](../blocks/renderers/upgrader/upgraderEngine.ts)) with an
+  optional `mockup?: MockupSource` ({ kind: image|figma|prototype, ref, description? }); `code` is now
+  optional (mockup-only inputs carry no code). The existing code analyzers got a one-line `input.code != null`
+  routing guard each — clean, `tsc --noEmit` green repo-wide.
+- **Mockup analyzer + the no-leakage vision seam**
+  [`analyzers/mockupAnalyzer.ts`](../blocks/renderers/upgrader/analyzers/mockupAnalyzer.ts): `mockupAnalyzer(provider)`
+  routes on the `mockup` payload and lifts it to the **existing `ComponentIR`** via a swappable
+  **`CustomVisionProvider`** — the same `customVisionProvider` seam #475/#396 share. Ships three providers:
+  `createReferenceVisionProvider()` (deterministic, keyless **stand-in until the Plateau vision service ships**),
+  `createPlateauVisionProvider({ endpoint })` (the thin **no-leakage Plateau-service client**, validates the
+  returned IR before the engine trusts it), and a scripted provider for tests. `registerMockupAnalyzer()`
+  mirrors `registerReferenceAnalyzers` (provider injected, no global singleton — devtools discipline).
+- **Generation + verify gate reused as-is.** The IR lowers through `generateComponentSource` and is gated by the
+  unchanged `verifyUpgrade` (parse + fidelity round-trip + intent conformance) — a hallucinating provider is
+  never `offered`.
+- **Unit tests** [`upgrader-mockup.test.ts`](../blocks/__tests__/unit/renderers/upgrader-mockup.test.ts) (5
+  green): mockup → IR → generated → **offered**; routes without a language hint; omits an unknown intent
+  ("flag, don't fake"); the verify gate refuses a hallucinated intent; a provider error is a diagnostic, never
+  an exception. No regression across the existing upgrader suites (64 green).
+- **Demo** [`demos/mockup-to-standard-demo.html`](../demos/mockup-to-standard-demo.html) + `.ts` (registered in
+  demos.json): four mockup cards run **mockup → IR → generated `<component>` → verify badge → live custom
+  element**. Browser-verified green on :3000 (4/4 cards, 4 verify-OK, live elements mounted, no console errors).
+
+**Placement honored (#475 no-leakage):** the vision *impl capability* stays a Plateau-served service the tool
+consumes as a client; only the neutral `ComponentIR` contract + the verified standard-conformant output are WE
+artifacts. Interactive-mockup observed-state analysis (the strictly-larger problem) remains a later input-kind
+addition behind the same provider seam — added, never migrated to.
+
+## What's left (the actual WE-resident work)
+
+The engine, registry, generator, and verify gate are reused as-is from #094. #086 adds a **mockup input
+adapter** to that existing pipeline:
+
+1. **Extend `SourceInput`** (`blocks/renderers/upgrader/upgraderEngine.ts`) to admit a **mockup** input
+   kind (static image / Figma / interactive prototype) alongside the existing `code`/`language` shape —
+   one more `handles()`-routed branch on the existing `CustomAnalyzerRegistry`, *not* a new registry.
+2. **Register a mockup analyzer** that emits the **existing `ComponentIR`** — implemented as a **thin
+   no-leakage client over the Plateau vision service** (#475), the same `customVisionProvider` seam #475
+   /#396 share. A deterministic reference path can stand in until that service exists.
+3. **A mockup demo** proving mockup → `ComponentIR` → generated `<component>` → verify gate, reusing the
+   shipped generator (no parallel generator — #094's lowers to the exact `<component>` MaaS `serve()`
+   consumes).
 
 ## The two requirements, stated sharply
 
@@ -46,20 +99,23 @@ The neutral structural description is the **contract between the seams**: it's w
 
 Most design-to-code tools emit framework code and stop. The value here is that output lands as **Web Everything entities** — declarative components, the right intents wired in, accessibility/semantics from the standard rather than guessed — and can then be served/transformed in any form via the existing adapters and MaaS. The mockup tool is a *front door* onto the standard, not a competing codegen island. **Native-first:** generated code defaults to plain platform/WC output; a framework form is one adapter selection downstream, not the assumed target.
 
-## Design decisions (recommended)
+## Design decisions — all resolved or placed (no open forks)
 
-- **Provider contract granularity.** **Two registries (analyzer + generator), not one monolith** — they move at different speeds and a single image-model upgrade shouldn't touch generation. Mirrors keeping JSX-spelling separate from reactivity-strategy.
-- **Neutral structure schema.** **Express it in the standard's own vocabulary — intents/regions/roles/states — not a bespoke IR.** Borrow platform/standard terms (ARIA roles, intent names) so the contract is reviewable and stable, and so generation is a lookup, not a translation guess.
-- **Static vs. interactive as input adapters.** **Model both as analyzer *input kinds* behind one registry**, where interactive analyzers additionally emit observed state/behavior. Don't fork the pipeline; widen the analyzer contract.
-- **Quality gate.** **Round-trip / conformance check the generated code** (it must register, render, and pass `check:standards`) before it's offered — and ideally diff the rendered result back against the mockup. A generator is only trustworthy if its output is verified, not just produced.
-- **Human-in-the-loop.** **Treat the neutral structure as the editable review surface** — a person corrects structure once, and every downstream form regenerates from it. Don't make people hand-fix emitted code per form.
+These were "recommended" when authored; the #094 engine and the #475 placement have since **settled
+every one**, which is why the size dropped:
+
+- **Provider contract granularity** → **resolved in code.** The analyzer↔generator split is built; the analyzer is a registry-backed provider, generation reuses the shipped core (`upgraderEngine.ts`).
+- **Neutral structure schema** → **resolved in code.** Expressed in the standard's own `<component>` vocabulary as `ComponentIR` (`upgraderEngine.ts:36` flags this as the resolved #086 decision) — not a bespoke IR.
+- **Static vs. interactive as input adapters** → **seam built.** `SourceInput` + `handles()` routing already models input kinds behind one registry; the mockup kind is one more branch (see "What's left").
+- **Quality gate** → **built.** The `offered: false` round-trip/conformance verify gate is the shipped moat.
+- **Human-in-the-loop** → **placed by #475.** The neutral structure as the editable review surface is the #475 ruling (shared `customVisionProvider` review surface).
 
 ## Dependencies / sequencing
 
 1. **`webadapters` AST core + render-strategy registry** (#052/#077/#078/#081) — the generation half already exists; the tool consumes it, doesn't rebuild it.
-2. **Neutral structural-description schema** — the new contract; the hard, lasting design work.
-3. **Analyzer provider registry** + a first reference provider (any current vision model) proving the swap point is real.
-4. **Static input first, interactive second** — interactive analysis (observing state transitions) is a strictly larger problem; land the static→neutral→code path before it.
+2. ~~**Neutral structural-description schema**~~ — **DONE** (#094, `ComponentIR`); reused, not re-authored.
+3. ~~**Analyzer provider registry** + a first reference provider~~ — **DONE** (#094, `CustomAnalyzerRegistry` + reference/model analyzers); #086 adds a mockup analyzer to it.
+4. **Static input first, interactive second** — interactive analysis (observing state transitions) is a strictly larger problem; land the static-mockup → `ComponentIR` → code path before it.
 
 ## Relationship to existing work
 

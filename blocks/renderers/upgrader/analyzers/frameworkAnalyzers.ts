@@ -76,7 +76,7 @@ function looksLikeReact(code: string): boolean {
 }
 
 function analyzeReact(input: SourceInput): ComponentIR {
-  const { code } = input;
+  const code = input.code ?? '';
   const nameMatch = /(?:function\s+|const\s+)([A-Z][A-Za-z0-9]*)\s*[=(]/.exec(code);
   if (!nameMatch) throw new Error('no React component declaration (a capitalised function/const) found.');
   const name = toCustomElementTag(nameMatch[1]);
@@ -103,7 +103,7 @@ function analyzeReact(input: SourceInput): ComponentIR {
 
 export const reactFunctionComponentAnalyzer: CustomAnalyzer = {
   id: 'reference:react-function-component',
-  handles: (input) => input.language === 'react' || (input.language == null && looksLikeReact(input.code)),
+  handles: (input) => input.language === 'react' || (input.language == null && input.code != null && looksLikeReact(input.code)),
   analyze: analyzeReact,
 };
 
@@ -114,7 +114,7 @@ function looksLikeLit(code: string): boolean {
 }
 
 function analyzeLit(input: SourceInput): ComponentIR {
-  const { code } = input;
+  const code = input.code ?? '';
   const name = (DEFINE_RE.exec(code) ?? DECORATOR_RE.exec(code))?.[1];
   if (!name) {
     throw new Error('no custom-element tag found (expected customElements.define(…) or @customElement(…)).');
@@ -137,7 +137,7 @@ function analyzeLit(input: SourceInput): ComponentIR {
 
 export const litElementAnalyzer: CustomAnalyzer = {
   id: 'reference:lit-element',
-  handles: (input) => input.language === 'lit' || (input.language == null && looksLikeLit(input.code)),
+  handles: (input) => input.language === 'lit' || (input.language == null && input.code != null && looksLikeLit(input.code)),
   analyze: analyzeLit,
 };
 
@@ -148,7 +148,7 @@ function looksLikeVue(code: string): boolean {
 }
 
 function analyzeVue(input: SourceInput): ComponentIR {
-  const { code } = input;
+  const code = input.code ?? '';
   const templateMatch = /<template>([\s\S]*?)<\/template>/.exec(code);
   if (!templateMatch) throw new Error('no `<template>` block found in the SFC.');
   rejectDynamic(templateMatch[1], [
@@ -171,7 +171,7 @@ function analyzeVue(input: SourceInput): ComponentIR {
 
 export const vueSfcAnalyzer: CustomAnalyzer = {
   id: 'reference:vue-sfc',
-  handles: (input) => input.language === 'vue' || (input.language == null && looksLikeVue(input.code)),
+  handles: (input) => input.language === 'vue' || (input.language == null && input.code != null && looksLikeVue(input.code)),
   analyze: analyzeVue,
 };
 

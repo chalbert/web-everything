@@ -52,7 +52,7 @@ export function makeVersionMigrationAnalyzer(config: VersionMigrationConfig): Cu
     handles: (input: SourceInput) => input.language === 'version-migration',
     analyze(input: SourceInput): ComponentIR {
       // The source is itself a conformant <component>; parse it to lift name/shadow/template.
-      const def = parseDefinition(input.code);
+      const def = parseDefinition(input.code ?? '');
 
       const plan = planVersionMigration(config.installed, config.target, config.manifests, config.pkg);
       const run = applyMigrationPlan(def.templateHTML, plan, { codemods: config.codemods });

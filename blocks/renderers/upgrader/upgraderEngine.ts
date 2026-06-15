@@ -50,11 +50,28 @@ export interface ComponentIR {
 
 // ── Input adapter / analyzer provider seam (swappable AI) ───────────────────────
 
+/**
+ * A UI MOCKUP input (backlog #086) — a static image, a Figma file/frame, or an interactive
+ * prototype / live page. The #086 mockup analyzer routes on this and lifts it to the SAME neutral
+ * `ComponentIR` the code path produces, via a swappable `CustomVisionProvider` (a no-leakage client
+ * over the Plateau vision service, #475). A different *input adapter*, the same neutral output.
+ */
+export interface MockupSource {
+  /** The mockup kind — the input-adapter sub-branch (static image vs Figma vs interactive). */
+  kind: 'image' | 'figma' | 'prototype';
+  /** A reference to the mockup: a data/image URL, a Figma node URL, or a prototype/live-page URL. */
+  ref: string;
+  /** Optional annotations to aid analysis (alt text, design notes, observed states). Surfaced, never required. */
+  description?: string;
+}
+
 export interface SourceInput {
-  /** The existing/legacy code to upgrade. */
-  code: string;
-  /** Source dialect hint — the input-adapter kind. MVP reference path: `web-component`. */
+  /** The existing/legacy CODE to upgrade (the #094 path). Optional when `mockup` is provided (#086). */
+  code?: string;
+  /** Source dialect hint — the input-adapter kind. e.g. `web-component` | `react` | `model` | `mockup`. */
   language?: string;
+  /** A UI MOCKUP to analyse (the #086 path) — static image, Figma, or interactive prototype. */
+  mockup?: MockupSource;
 }
 
 export interface CustomAnalyzer {

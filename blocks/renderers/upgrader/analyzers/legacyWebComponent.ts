@@ -88,7 +88,7 @@ function inferIntents(template: string, code: string): { intents: string[]; note
 }
 
 function analyze(input: SourceInput): ComponentIR {
-  const { code } = input;
+  const code = input.code ?? '';
   const notes: string[] = [];
 
   const defineMatch = DEFINE_RE.exec(code);
@@ -129,7 +129,7 @@ function analyze(input: SourceInput): ComponentIR {
 export const legacyWebComponentAnalyzer: CustomAnalyzer = {
   id: 'reference:legacy-web-component',
   handles: (input) =>
-    input.language === 'web-component' || (input.language == null && looksLikeWebComponent(input.code)),
+    input.language === 'web-component' || (input.language == null && input.code != null && looksLikeWebComponent(input.code)),
   analyze,
 };
 

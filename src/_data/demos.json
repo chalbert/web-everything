@@ -1,5 +1,18 @@
 [
   {
+    "id": "mockup-to-standard-demo",
+    "name": "Mockup-to-Standard Playground",
+    "summary": "The #086 design-to-code front door on the #094 upgrader pipeline: each card lifts a UI mockup (static image, Figma frame, interactive prototype) through the SAME engine and SAME verify gate — mockup → neutral ComponentIR → generated <component> → verify badge → live element. Mockup analysis is a swappable, no-leakage CustomVisionProvider behind the registry; a deterministic keyless reference provider stands in until the Plateau vision service (#475) ships. No parallel generator — the generated <component> is the exact declarative form the adapters consume.",
+    "kind": "playground",
+    "description": "<h2>Concept</h2><p>A live surface for <a href=\"/backlog/086-mockup-to-standard-code-tool/\">backlog #086</a> — a <strong>design-to-code</strong> tool that ingests a UI mockup and emits Web Everything standard-compliant code. It is one more <em>input adapter</em> on the shared <a href=\"/backlog/094-ai-upgrader-tools/\">#094</a> pipeline: a mockup lifts to the same neutral <code>ComponentIR</code> and rides the same verify-gated <code>&lt;component&gt;</code> generation a legacy-code input does.</p><h3>Two invariants made visible</h3><p><strong>AI-tool independence:</strong> mockup analysis is a swappable <code>CustomVisionProvider</code> behind the registry — any model/tool meeting the contract drops in. <strong>Vision is a Plateau service consumed no-leakage</strong> (<a href=\"/backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/\">#475</a>): only the neutral structure and the verified output reach the standard. A deterministic keyless reference provider stands in until that service ships.</p><h3>Same core</h3><p>The generated <code>&lt;component&gt;</code> mounts as a real custom element — proof the tool is a front door onto the same transform the adapters document, not a competing codegen island.</p>",
+    "status": "draft",
+    "liveUrl": "http://localhost:3000/demos/mockup-to-standard-demo.html",
+    "projects": [
+      "webadapters",
+      "webintents"
+    ]
+  },
+  {
     "id": "durable-tier-verification",
     "name": "Durable-Tier Verification (A′)",
     "summary": "The A′ end-to-end verification of the Background-Task durable tier (#708, ratified from #675): a SW-registered page that drives the REAL reloadDurabilityAdapter under the chromium-sw Playwright lane. registerDurableTransfer → hard-reload → rehydrateDurableTasks proves reload-survival as a reproducible green, plus the forced-unavailable navigation-guard re-arm. Only the getRegistration().backgroundFetch manager is doubled (backed by the real service worker, which outlives the page); every other primitive — SW registration, navigator.serviceWorker.ready, the real isBackgroundFetchAvailable prototype check — is real. The true Background-Fetch network transfer surviving reload stays the documented manual residual.",
