@@ -68,8 +68,10 @@ judgment call); the happy path is these commands:
    /close). Pass the **stop reason** so the estimate stays honest: only a capacity-bound stop (`budget` /
    `context`) trains it; a work-bound stop (`empty-pool` / `fork` / `gate`) is recorded but **excluded**, so
    a batch that ran dry early doesn't drag the budget down (#553). **The agent can't read the context
-   meter — ASK the user for the current reading and use it verbatim; never estimate it. No reading → skip
-   calibration** (a guessed value silently skews every future batch's budget).
+   meter — request the current reading in PLAIN PROSE in the close-out message (never via the
+   `AskUserQuestion` popup — a reading is a data request, not a decision) and use it verbatim; never
+   estimate it. The user may not be able to read it either — if no reading is given, just skip calibration
+   and move on; do NOT re-ask or block on it** (a guessed value silently skews every future batch's budget).
 
 A batch runs several **agent-ready Tier-A** items in sequence — claim → work → close-out — **without
 stopping for approval between them**, to progress faster while still validating at every seam. **The size
@@ -125,11 +127,14 @@ When invoked (`/batch [P]` or `/batch-next [P] [NNN-slug]`):
    (which of rules 1–4 fired), and the **carry-forward** block. When the budget was reached with
    eligible work still queued, recommend starting a **fresh agent** so context resets, emitting
    `/batch-next <NNN-slug>` in its own fenced code block.
-5. **Calibrate at close-out** per *Running a batch* → *Calibrating the budget*: **ask the user for the
-   editor's current context-meter reading** (the agent can't see it), then run
+5. **Calibrate at close-out** per *Running a batch* → *Calibrating the budget*: in the close-out message,
+   **request the editor's current context-meter reading in plain prose** (the agent can't see it; **never
+   use the `AskUserQuestion` popup** — it's a data request, not a decision), then run
    `node scripts/backlog.mjs calibrate --points=<cost resolved> --context-pct=<reading from user> --stop-reason=<which stop fired>`
    so the budget tracks what a session actually fits — only a capacity-bound stop (`budget`/`context`) trains
    it; a work-bound stop (`empty-pool`/`fork`/`gate`) is excluded (#553) (closing-session does this automatically when a batch ran).
+   **If the user gives no reading (they may not be able to read the meter either), skip calibration — don't
+   re-ask, don't block, don't guess.**
    Never estimate the context percentage; skip calibration if the user gives none.
 
 **The stop rule (solid by construction)** — the **points budget is the sole driver**; stop the batch at a
