@@ -51,7 +51,10 @@ judgment call); the happy path is these commands:
    a WE item is just `npm run check:standards` here) → leftovers via **`node scripts/backlog.mjs scaffold …`**
    → **`node scripts/backlog.mjs resolve <NNN> [--graduated-to=…]`** → **commit that item's changes to its
    `commitTarget` repo** (`git add <explicit paths the item touched>` then `git commit` — **stage only this
-   piece's files, never `git add -A` across repos; never `git push`**; one commit per closed item). Update
+   piece's files, never `git add -A` across repos; never `git push`**; one commit per closed item — and if
+   your item's *own* file is already dirty from a concurrent session, `git stash push -- <that file>` →
+   edit → commit → `git stash pop` so you commit only your hunk, per *backlog-workflow.md → Commit each
+   finished piece*). Update
    the compact ledger after each (header tracks `cost <spent>/<budget>`). The `--select` pack prints a
    per-locus gate legend (`⌂ <locus> → <gateCommand> in <repoPath>`) so a cross-locus batch is self-documenting.
 4. **At each seam, evaluate the stop rule**; on continue, re-read the next item fresh (drop it only if now
