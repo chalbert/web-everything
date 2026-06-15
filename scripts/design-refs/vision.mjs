@@ -46,6 +46,40 @@ export function reviewStateFor(verdict) {
   return normalizeVerdict(verdict) === UNGATED ? 'ungated' : 'confirmed';
 }
 
+// ---- codification (backlog #481, ruling #396) ------------------------------
+// The SECOND method on the same shared vision client (#396 Fork 2): turn an admitted corpus shot into
+// standards input. Per shot it fills only the *reliable* taxonomy facets + loose, lossy-OK pattern
+// observations — never a formal neutral structure (that would couple to the unbuilt #086 and bake
+// low-fidelity structure into the corpus). No-leakage holds: only these outputs reach the corpus
+// sidecars; the formal standard-vocabulary expression lives at the reviewed promotion boundary (#481 F3).
+export const CODIFICATION_FACETS = Object.freeze(['surface', 'productRegister', 'visualStyle', 'theme', 'layout']);
+
+// Normalise a provider's codification result into a stable envelope. Facets are constrained to the
+// reliable key set (unknown keys dropped) and coerced to a trimmed string or null; patterns are loose
+// free-text observations (deduped). `ungated` marks "no codification provider ran" (the null/manual path).
+export function normalizeCodification(raw) {
+  const facets = {};
+  for (const k of CODIFICATION_FACETS) {
+    const v = raw?.facets?.[k];
+    facets[k] = typeof v === 'string' && v.trim() ? v.trim() : null;
+  }
+  const patterns = Array.isArray(raw?.patterns)
+    ? [...new Set(raw.patterns.map((p) => (typeof p === 'string' ? p.trim() : '')).filter(Boolean))]
+    : [];
+  return { facets, patterns, ungated: raw?.ungated === true };
+}
+
+// Validate + normalise a provider's codification response. A provider with no `analyzeForCodification`
+// (or the null `manual` provider) yields the `ungated` envelope, so an un-codified shot is never
+// silently treated as model-analysed — and the pass stays a no-op offline / in CI.
+export async function analyzeForCodification(provider, input) {
+  if (typeof provider?.analyzeForCodification !== 'function') {
+    return { ...normalizeCodification({ ungated: true }), provider: provider?.name ?? 'manual' };
+  }
+  const raw = await provider.analyzeForCodification(input);
+  return { ...normalizeCodification(raw), provider: provider.name };
+}
+
 // ---- provider registry (swap point) ----------------------------------------
 // A provider is `{ name, async classifyCandidate(input) => { verdict, reasons? } }` where input is
 // `{ url, pngBase64, dims, selectorState }`. Providers register by name; the pipeline selects one by
@@ -73,6 +107,9 @@ export function listVisionProviders() {
 registerVisionProvider('manual', {
   async classifyCandidate() {
     return { verdict: UNGATED, reasons: ['no vision provider configured'] };
+  },
+  async analyzeForCodification() {
+    return { ungated: true };
   },
 });
 

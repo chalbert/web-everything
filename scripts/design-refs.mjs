@@ -36,12 +36,16 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import {
   resolveVisionProvider, classifyCandidate, decideAdmission, reviewStateFor, visionEnabled,
-  VERDICTS as VISION_VERDICTS,
+  VERDICTS as VISION_VERDICTS, analyzeForCodification,
 } from './design-refs/vision.mjs';
+import {
+  applyCodificationToMeta, harvestCandidates, renderCodificationReport, candidateToScaffold,
+} from './design-refs/codification.mjs';
 import { runBenchmark } from './design-refs/benchmark.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..', 'design-refs');
+const REPORTS = join(__dirname, '..', 'reports'); // session reports (codification harvest, #481)
 const ITEMS = join(ROOT, 'items');
 const RUNS = join(ROOT, 'runs');
 const LEDGER = join(ROOT, 'ledger.json');
@@ -49,6 +53,7 @@ const INDEX = join(ROOT, 'index.json');
 const NEEDS_REVIEW = join(ROOT, 'needs-review.json');
 const QUARANTINE = join(ROOT, 'quarantine'); // archived judged-non-app frames, content-addressed (#489)
 const VERDICTS = join(ROOT, 'verdicts.json'); // vision verdict cache, keyed by contentHash (Fork 4)
+const CODIFICATION = join(ROOT, 'codification.json'); // codification cache, keyed by contentHash (#481)
 const DEFAULT_TARGETS = join(ROOT, 'targets.json');
 const DEFAULT_GALLERY = join(ROOT, 'gallery.json'); // gallery-harvest manifest (captureMethod: gallery, #397)
 const TAXONOMY = join(ROOT, 'taxonomy.json'); // keyed productRegister + category vocab (#394 ruling, #509)
@@ -645,6 +650,75 @@ async function harvest(args) {
   rebuildIndex();
 }
 
+// ---- codify: the design-ref codification pass (#481, ruling #396) ----------
+// Per shot, analyse each admitted corpus shot through the shared vision client's SECOND method
+// (`analyzeForCodification`) and fold the reliable facets + loose pattern notes into its meta.json —
+// cached by contentHash, idempotent. Cross shot, cluster recurring paradigms into LOOSE candidates →
+// a session report under reports/ (+ optional `--scaffold` to file them as type:idea items for human
+// ratification). The null `manual` provider makes this a no-op offline / in CI (the no-leakage default).
+async function codify(args) {
+  const provider = await resolveVisionProvider();
+  const cache = readJSON(CODIFICATION, {});
+  const minSupport = Number(args['min-support'] ?? 3);
+  const ids = existsSync(ITEMS) ? readdirSync(ITEMS) : [];
+  const codified = [];
+  let metaWrites = 0;
+
+  for (const id of ids) {
+    const metaPath = join(ITEMS, id, 'meta.json');
+    const meta = readJSON(metaPath, null);
+    if (!meta?.contentHash) continue;
+    const hash = meta.contentHash;
+
+    // Reuse a cached codification for the same contentHash — idempotent re-runs re-pay no model.
+    let result = cache[hash];
+    if (!result) {
+      const webpPath = join(ITEMS, id, 'screenshot.webp');
+      const input = existsSync(webpPath)
+        ? { id, url: meta.sourceUrl ?? null, pngBase64: webpBufToPng(readFileSync(webpPath)).toString('base64'), dims: meta.imageDims ?? null, meta }
+        : { id, url: meta.sourceUrl ?? null, meta };
+      result = await analyzeForCodification(provider, input);
+      result.at = new Date().toISOString();
+      cache[hash] = result;
+    }
+
+    const { meta: nextMeta, changed } = applyCodificationToMeta(meta, result);
+    if (changed) { writeJSON(metaPath, nextMeta); metaWrites++; }
+    codified.push({ id, ungated: result.ungated, facets: result.facets, patterns: result.patterns });
+  }
+
+  writeJSON(CODIFICATION, cache);
+
+  // Cross-shot harvest → candidate paradigms → a session report (the human-ratification boundary, F3).
+  const candidates = harvestCandidates(codified, { minSupport });
+  const now = new Date();
+  const runId = `codify-${now.toISOString().replace(/[:.]/g, '-')}`;
+  const report = renderCodificationReport({
+    runId, provider: provider.name, generatedAt: now.toISOString(), codified, candidates, minSupport,
+  });
+  mkdirSync(REPORTS, { recursive: true });
+  const reportPath = join(REPORTS, `${now.toISOString().slice(0, 10)}-design-ref-codification.md`);
+  writeFileSync(reportPath, report);
+
+  // Optional: file each candidate as a type:idea item for human ratification (no standard is minted —
+  // the reviewer formalises it via the new-standard flow). Default report-only.
+  let scaffolded = 0;
+  if (args.scaffold) {
+    for (const c of candidates) {
+      const { title } = candidateToScaffold(c);
+      try {
+        execFileSync('node', [join(__dirname, 'backlog.mjs'), 'scaffold', '--type=idea', `--title=${title}`], { stdio: 'ignore' });
+        scaffolded++;
+      } catch { /* a number collision yields to the next free id; the report stays the source of truth */ }
+    }
+  }
+
+  console.log(`codify — ${codified.length} shot(s), ${metaWrites} meta updated, ${candidates.length} candidate(s) (support ≥ ${minSupport})`);
+  console.log(`   provider: ${provider.name}${provider.name === 'manual' ? ' (null — set DESIGN_REFS_VISION_PROVIDER to run a real model)' : ''}`);
+  console.log(`   report:   ${reportPath}`);
+  if (args.scaffold) console.log(`   scaffolded ${scaffolded} candidate item(s)`);
+}
+
 // ---- index -----------------------------------------------------------------
 function rebuildIndex() {
   const items = [];
@@ -1069,6 +1143,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   switch (cmd) {
     case 'collect': await collect(args); break;
     case 'harvest': await harvest(args); break;
+    case 'codify': await codify(args); break;
     case 'index': { const n = rebuildIndex().length; console.log(`index.json rebuilt — ${n} items`); break; }
     case 'dedup': dedup(args); break;
     case 'prune': prune(); break;
@@ -1076,7 +1151,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     case 'export': exportTrainingCorpus(); break;
     case 'benchmark': await benchmark(); break;
     default:
-      console.log('usage: design-refs.mjs <collect|harvest|index|dedup|prune|report|export|benchmark> [--targets=path] [--only=substr] [--limit=N] [--refresh] [--vision-verify]');
+      console.log('usage: design-refs.mjs <collect|harvest|codify|index|dedup|prune|report|export|benchmark> [--targets=path] [--only=substr] [--limit=N] [--refresh] [--vision-verify]');
+      console.log('  codify: per-shot fill reliable facets + loose pattern notes into meta.json via the vision client\'s analyzeForCodification; cross-shot harvest recurring paradigms → reports/<date>-design-ref-codification.md ([--min-support=N] default 3; [--scaffold] files candidates as type:idea). No-op under the null `manual` provider (#481, ruling #396)');
       console.log('  export: emit training-manifest.json — {frame,verdict} labeled pairs (admitted + quarantine) with a deterministic held-out split, stamped with the distillation-recipe version (#490 slice A)');
       console.log('  benchmark: run the selected vision provider over the manifest held-out split — verdict-agreement + per-class quarantine-recall vs the recipe graduation floors (#490 slice B)');
       console.log('  harvest: [--gallery=path] ingest operator-curated gallery screenshots (auth-walled app interiors) — captureMethod: gallery');
