@@ -626,3 +626,165 @@ a unit test resolving a real browser+version → Baseline year through the injec
 
 Net flow on approval: **+2** (479 → epic; Slice A + decision card). Slice A is immediately `/batch`-able;
 the serve-runtime build waits on the decision.
+
+---
+
+# Focused run — `/split 038` (the `<component>` converter playground)
+
+**Date:** 2026-06-15. Separate focused run appended to today's report.
+
+## Candidate
+
+| NNN | Title | workItem | size | parent | blockedBy |
+| --- | ----- | -------- | ---- | ------ | --------- |
+| 038 | Author the `<component>` converter playground page | story | 13 | 049 | 048 ✅ resolved |
+
+038 is over the size·8 batch ceiling → a legitimate split candidate. It already has a `parent` (049),
+so any split is the **sibling-under-049** edge case — never nest, never renumber.
+
+## Work-investigation pass (read the real surface before drawing seams)
+
+- **The transform lives in frontierui, not WE.** `frontierui/compiler/src/component-transform/index.ts`
+  exports `transform(source, direction)` (bidirectional via a neutral IR). The fixtures the page must
+  share are `frontierui/compiler/__tests__/component-transform/fixtures/` (`x-empty`, `user-card`,
+  `x-shadow-closed` — paired `.html` + `.ts`).
+- **WE has no import path to frontierui.** `vite.config.mts` has no `frontierui` alias and the proxy
+  block doesn't reach it. The existing `demos/component-adapter-demo.ts` deliberately imports WE's own
+  *one-way runtime twin* (`/blocks/renderers/component/declarativeComponent`), **not** frontierui's
+  bidirectional compiler. The cross-repo "symlink mechanism" the body names does not exist.
+- **frontierui has its own demos surface + dev server** (`frontierui/demos/`, vite :3001) right next to
+  the compiler and its fixtures — a native import (`../compiler/src/component-transform/index.js`) and a
+  sibling-dir fixture read, **zero** cross-repo machinery.
+- **The two directions split cleanly on TS-in-browser.** `toImperative` (declarative→class) uses
+  `parseDeclarative` + `emitImperative` (the minimal tag reader — no heavy dep). Only `toDeclarative`
+  (class→declarative) calls `parseImperative`, which uses the full TypeScript Compiler API — the heavy
+  browser bundle. So a one-way page is a real, demoable intermediate; the reverse direction is the part
+  that pulls the TS bundle.
+
+## Could not split
+
+| NNN | Failed condition | Why | Unblocking action |
+| --- | ---------------- | --- | ----------------- |
+| 038 | **Rubric (1)** — size is volume, not a fork; you can't split away a decision (also trips (3): a slice would carry a buried fork) | The slice **structure is contingent on an unresolved placement decision**: does the playground live in **WE `demos/` + a new cross-repo import mechanism**, or **`frontierui/demos/` native**? Under *frontierui/demos* the "symlink mechanism" prerequisite (the body's biggest blocker) **disappears entirely** → 2 slices; under *WE/demos* a foundational cross-repo-import slice is real → 3 slices. The fork sits at the root of the DAG — slicing around it would bury the placement decision inside slice 1, making that slice un-batchable. | File the placement fork as its own `type:decision` card under 049 (de-burying 038's body), ratify it, then re-run `/split 038`. The split is otherwise clean (prospective shape below) — this is the *only* blocker. |
+
+### The blocking fork (to be filed as a `type:decision` card)
+
+**Where does the `<component>` converter playground live?** Both branches are coherent (neither is
+flawed → a genuine binary placement, not a configurable dimension, so it's a decision not "support all"):
+
+- **A. `frontierui/demos/` (native).** Imports `../compiler/src/component-transform` directly, reads
+  fixtures from the sibling `__tests__` dir — no cross-repo mechanism, no drift risk. Matches the
+  constellation layering instinct (the bidirectional compiler is a pure frontierui artifact /
+  impl → FUI). Cost: leaves WE's public docs/demos showcase, away from the `<component>` *standard* page
+  (`/blocks/component/`).
+- **B. WE `demos/` + cross-repo import.** Keeps the playground in WE's public showcase next to the
+  standard and the existing `component-adapter-demo`. Cost: must first build a real WE→FUI import path
+  (vite alias / proxy / symlink) for both the module and its fixtures — net-new infra, an extra
+  foundational slice, and a standing drift surface.
+
+Not the same as resolved **#037** (DC-6), which decided the *adapter's* taxonomy placement (standalone
+vs fold into the HTML Adapter). This is the *playground page's* file home.
+
+### Prospective slicing once the fork resolves (so the re-split is fast)
+
+**If branch A (frontierui/demos):** 2 sibling slices under 049 —
+- `story·3` — One-way converter page (declarative→class): fixture picker over the sibling `__tests__`
+  fixtures, single pane, inline named-rule errors. No TS-in-browser. Demoable.
+- `story·3` — Reverse direction (class→declarative) + two-pane bidirectional editor + bundle the TS
+  Compiler API for `parseImperative`. **Blocked by** the one-way slice. Demoable.
+
+**If branch B (WE/demos):** 3 sibling slices under 049 —
+- `task·2` — Cross-repo import mechanism: WE demos can import `@frontierui/compiler` and read its
+  fixtures. Foundational; demoable via a one-fixture round-trip smoke page.
+- `story·3` — One-way converter page. **Blocked by** the import-mechanism task.
+- `story·3` — Reverse direction + two-pane editor + TS-in-browser. **Blocked by** the one-way page.
+
+Either branch yields a clean acyclic DAG, every slice ≤3 / batchable, every slice demoable — so 038
+splits well *the moment the placement decision lands*. The decision is the whole blocker.
+
+## Net (038 run)
+
+- Could split now: **0**
+- Could not split: **1** (038 — pending the playground-placement decision)
+- Proposed mutation: **none on 038's structure**; one new `type:decision` card for the placement fork
+  (filing gated on your go).
+
+---
+
+# Focused re-run — `/split 038` (post-#700 ratification)
+
+**Date:** 2026-06-15. The blocking placement fork above was filed as **#700 (DC-7)** and is now
+**resolved**: ratified **branch A — the playground lives in `frontierui/demos/`** (the bidirectional
+compiler is a pure frontierui artifact; native import + sibling-dir fixtures, no cross-repo machinery, no
+drift surface). The ruling's only addendum (surface it in WE docs via an iframe embed, not a cross-repo
+import) is captured as its own build item **#701** — out of scope for this split. With the fork resolved,
+038's slice structure is unblocked, and the work-investigation pass below confirms the prospective **A**
+shape against the real frontierui tree.
+
+## Work-investigation pass (re-verified against `frontierui/`)
+
+| Surface a slice needs | State | Evidence (file:line) |
+|---|---|---|
+| Demos surface + dev server (the home) | **EXISTS** | 40+ paired `.html`+`.ts` demos in `frontierui/demos/`; vite port 3001 [vite.config.mts:88](../../frontierui/vite.config.mts#L88); new demo = drop a `.html`+`.ts` pair, bootstrap auto-injected [vite.config.mts:14](../../frontierui/vite.config.mts#L14) |
+| Bidirectional transform (the engine) | **EXISTS, shipped (#048 ✓)** | `transform(source, direction): {output, errors}` [compiler/src/component-transform/index.ts:28](../../frontierui/compiler/src/component-transform/index.ts#L28); `direction: 'toImperative'\|'toDeclarative'` |
+| Light direction — declarative→class (no TS dep) | **EXISTS** | `parseDeclarative` regex tag reader [declarative.ts:27](../../frontierui/compiler/src/component-transform/declarative.ts#L27) + `emitImperative` string builder [imperative.ts:93](../../frontierui/compiler/src/component-transform/imperative.ts#L93) — zero external deps |
+| Heavy direction — class→declarative (TS Compiler API) | **EXISTS, isolated** | `parseImperative` walks the TS AST [imperative.ts:25](../../frontierui/compiler/src/component-transform/imperative.ts#L25); `import ts from 'typescript'` [imperative.ts:18](../../frontierui/compiler/src/component-transform/imperative.ts#L18) — the **only** file pulling the ~23MB TS bundle |
+| Shared fixtures (anti-drift) | **EXISTS** | paired `.html`+`.ts` in `compiler/__tests__/component-transform/fixtures/` (`x-empty`, `user-card`, `x-shadow-closed`); contract harness [transform.test.ts:15](../../frontierui/compiler/__tests__/component-transform/transform.test.ts#L15) |
+| Converter playground page itself | **GREENFIELD** | no `component-converter*` demo in `frontierui/demos/` |
+
+The two directions split cleanly on the TS-in-browser axis exactly as the prospective shape predicted:
+the one-way page needs only `parseDeclarative`+`emitImperative` (no heavy bundle, a real demoable
+intermediate); only the reverse direction pulls `parseImperative`→`typescript`. The seam is real, not
+arbitrary.
+
+## Could split — #038 ✅
+
+038 **already has `parent: 049`**, so per the split edge-case it is **not** converted to a nested epic —
+it is **re-scoped in place** to its core slice (the one-way page), and the second slice is added as a
+**sibling under 049**.
+
+| Slice | workItem · size | What | blockedBy | Files / seam (file:line-citable) | Demoable state |
+|---|---|---|---|---|---|
+| **A (= re-scoped #038)** | story · **3** | **One-way converter page** (declarative→class): fixture picker over the sibling `__tests__/component-transform/fixtures/`, single-pane lowered output, inline named-rule errors from `transform().errors`. No TS-in-browser. | — (#048 ✓, #700 ✓) | NEW `frontierui/demos/component-converter.html` + `.ts` (the [vite.config.mts:14](../../frontierui/vite.config.mts#L14) auto-wire pattern) importing `../compiler/src/component-transform/index.js` [index.ts:28](../../frontierui/compiler/src/component-transform/index.ts#L28), calling `toImperative` ([declarative.ts:27](../../frontierui/compiler/src/component-transform/declarative.ts#L27)+[imperative.ts:93](../../frontierui/compiler/src/component-transform/imperative.ts#L93)); enumerate fixtures from the sibling dir | `/component-converter` on :3001 picks a fixture, shows its lowered class + named-rule errors |
+| **B** | story · **3** | **Reverse direction + two-pane bidirectional editor** (class→declarative): add the `toDeclarative` direction via `parseImperative`, bundle the **TS Compiler API**, two-pane live editor syncing both ways. | **A** | extends the slice-A page: wires `toDeclarative` ([imperative.ts:25](../../frontierui/compiler/src/component-transform/imperative.ts#L25), `import ts` [imperative.ts:18](../../frontierui/compiler/src/component-transform/imperative.ts#L18)); two-pane editor; vite bundles `typescript` | edit either pane → the other updates live, both directions, fixtures still selectable |
+
+### Slice DAG
+
+```
+#048 ✓ ──┐
+          ├──▶ A (one-way page) ──▶ B (reverse + two-pane + TS bundle)
+#700 ✓ ──┘
+```
+
+Incremental delivery (rubric (4)) — A is independently demoable (a working one-way converter); B layers
+the reverse direction and the heavy TS bundle on top. Rigid 2-chain, but each link ships standalone value,
+so it's legitimate incremental delivery, not a ship-nothing-until-last chain.
+
+### Rubric check
+
+| Condition | Verdict |
+|---|---|
+| (1) Size is volume, not an unresolved decision | ✅ the placement fork resolved (#700→A); transform shipped (#048); no buried fork left |
+| (2) ≥2 nameable slices, each a real home | ✅ both in `frontierui/demos/` (A new page, B extends it) |
+| (3) Each ≤ 3 / `task`, named files citable | ✅ A story·3, B story·3; files file:line-cited above |
+| (4) Acyclic DAG, real independence or incremental delivery | ✅ A→B incremental; A demoable alone |
+| (5) Every slice leaves a valid demoable state | ✅ A = working one-way page; B = bidirectional two-pane editor |
+| Split doesn't cost quality | ✅ seam mirrors the TS-in-browser cost boundary; one-way page is a genuinely useful intermediate, not half-a-feature |
+
+## Could not split — #038
+
+None — splits cleanly along the TS-in-browser direction boundary.
+
+## Recommended mutation — #038 (gated on one "go")
+
+038 keeps `parent: 049` → **sibling-under-049 edge case** (no nested-epic conversion, no renumber):
+
+1. **Re-scope #038 in place** → keep `workItem: story`, set `size: 5 → 3`, drop `blockedBy: ["048","700"]`
+   (both resolved), refresh the digest + body to **slice A** (one-way converter page in `frontierui/demos/`),
+   keep `parent: 049`, keep `status: open`.
+2. **Scaffold B** as a sibling under 049: `--type=idea --workitem=story --size=3 --parent=049
+   --blocked-by=038` — reverse direction + two-pane editor + TS Compiler API bundle.
+3. Gate on `npm run check:standards`; confirm backlog count rose by 1.
+
+Net flow on approval: **+1** (slice B); #038 re-scoped `story·5 → story·3` (now batchable, was a
+single-item story). A is immediately `/batch`-able; B unblocks on A → `/batch` walks the chain.
