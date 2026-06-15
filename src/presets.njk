@@ -1,0 +1,110 @@
+---
+layout: base.njk
+title: Web Everything — Presets
+---
+
+<section class="intro">
+  <h1>Presets</h1>
+  <p>
+    Ejectable recipes that <strong>compose blocks and intents into a ready-to-paste widget</strong>.
+    Each preset is a <a href="https://ui.shadcn.com/docs/registry/registry-item-json" target="_blank" rel="noopener">registry-item</a>:
+    a name, the blocks/intents it composes, and the plain-markup files you drop into your project.
+    The recipe <em>is</em> the standard — no tool required to consume it. Blocks ship code; presets ship a composition.
+  </p>
+</section>
+
+<section style="margin: 1.5rem 0 2rem;">
+  <div style="display: flex; flex-wrap: wrap; gap: 2rem; align-items: flex-start;">
+    <div>
+      <h3 style="margin: 0 0 0.5rem; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted);">Project</h3>
+      <div id="filter-project" style="display: flex; flex-wrap: wrap; gap: 0.4rem;">
+        {% for p in projects %}
+          {% set hit = false %}
+          {% for preset in assemblerPresets.presets %}{% if preset.ownedByProject == p.id %}{% set hit = true %}{% endif %}{% endfor %}
+          {% if hit %}
+          <label style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.6rem; border: 1px solid var(--color-border); border-radius: 9999px; font-size: 0.85em; cursor: pointer; background: var(--color-surface, #fff);">
+            <input type="checkbox" data-filter="project" value="{{ p.id }}" checked style="margin: 0;">
+            {{ p.name }}
+          </label>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+    <div>
+      <h3 style="margin: 0 0 0.5rem; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.05em; color: var(--color-text-muted);">Status</h3>
+      <div id="filter-status" style="display: flex; flex-wrap: wrap; gap: 0.4rem;">
+        {% for status in ['concept', 'draft', 'experimental', 'active'] %}
+          {% set hit = false %}
+          {% for preset in assemblerPresets.presets %}{% if preset.status == status %}{% set hit = true %}{% endif %}{% endfor %}
+          {% if hit %}
+          <label style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.25rem 0.6rem; border: 1px solid var(--color-border); border-radius: 9999px; font-size: 0.85em; cursor: pointer; background: var(--color-surface, #fff);">
+            <input type="checkbox" data-filter="status" value="{{ status }}" checked style="margin: 0;">
+            {{ status | title }}
+          </label>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</section>
+
+<div id="preset-list" style="display: flex; flex-direction: column; gap: 1.5rem;">
+  {% for preset in assemblerPresets.presets %}
+    {% set proj = None %}
+    {% for p in projects %}{% if p.id == preset.ownedByProject %}{% set proj = p %}{% endif %}{% endfor %}
+    <article class="project-card preset-card"
+       data-project="{{ preset.ownedByProject }}"
+       data-status="{{ preset.status }}"
+       style="display: block;">
+      <div class="project-header" style="margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
+        <h3 class="project-title" style="margin: 0;">{{ preset.title or preset.name }}</h3>
+        <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if preset.status == 'concept' %}#fef3c7{% elif preset.status == 'draft' %}#dbeafe{% elif preset.status == 'experimental' %}#fde68a{% elif preset.status == 'active' %}#dcfce7{% else %}#f1f5f9{% endif %}; color: {% if preset.status == 'concept' %}#92400e{% elif preset.status == 'draft' %}#1e40af{% elif preset.status == 'experimental' %}#854d0e{% elif preset.status == 'active' %}#166534{% else %}#64748b{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ preset.status | title }}</span>
+      </div>
+      <p style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ preset.description }}</p>
+      <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.75rem;">
+        <span style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.15rem 0.55rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b); font-size: 0.75em;">
+          {% if proj and proj.isSvg %}<img src="{{ proj.icon }}" alt="" width="14" height="14" style="display: inline-block;">{% endif %}
+          {{ proj.name if proj else preset.ownedByProject }}
+        </span>
+        <span style="display: inline-block; padding: 0.15rem 0.55rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted); font-size: 0.75em; font-family: var(--font-mono, monospace);">{{ preset.type }}</span>
+        {% for b in preset.composesBlocks %}
+        <a href="/projects/" style="display: inline-block; padding: 0.15rem 0.55rem; border-radius: 9999px; background: rgba(16,185,129,0.08); color: #047857; font-size: 0.75em; text-decoration: none;">block: {{ b }}</a>
+        {% endfor %}
+        {% for i in preset.composesIntents %}
+        <a href="/intents/#{{ i }}" style="display: inline-block; padding: 0.15rem 0.55rem; border-radius: 9999px; background: rgba(99,102,241,0.08); color: #4338ca; font-size: 0.75em; text-decoration: none;">intent: {{ i }}{% if preset.intentStrategies[i] %}={{ preset.intentStrategies[i] }}{% endif %}</a>
+        {% endfor %}
+      </div>
+      {% for f in preset.files %}
+      <details style="margin-top: 0.5rem;">
+        <summary style="cursor: pointer; font-size: 0.85em; font-family: var(--font-mono, monospace); color: var(--color-text-muted);">{{ f.path }}</summary>
+        <pre style="margin: 0.5rem 0 0; overflow-x: auto; max-height: 22rem; background: var(--color-code-bg, #0f172a); color: #e2e8f0; padding: 1rem; border-radius: 8px; font-size: 0.8em;"><code>{{ f.content }}</code></pre>
+      </details>
+      {% endfor %}
+    </article>
+  {% endfor %}
+</div>
+
+<p id="preset-empty" style="display: none; text-align: center; color: var(--color-text-muted); margin: 2rem 0;">No presets match the selected filters.</p>
+
+<script>
+(function () {
+  var list = document.getElementById('preset-list');
+  var empty = document.getElementById('preset-empty');
+  var cards = Array.prototype.slice.call(list.querySelectorAll('.preset-card'));
+  var checkboxes = Array.prototype.slice.call(document.querySelectorAll('input[type="checkbox"][data-filter]'));
+
+  function apply() {
+    var projects = checkboxes.filter(function (c) { return c.dataset.filter === 'project' && c.checked; }).map(function (c) { return c.value; });
+    var statuses = checkboxes.filter(function (c) { return c.dataset.filter === 'status' && c.checked; }).map(function (c) { return c.value; });
+    var visible = 0;
+    cards.forEach(function (card) {
+      var ok = projects.indexOf(card.dataset.project) !== -1 && statuses.indexOf(card.dataset.status) !== -1;
+      card.style.display = ok ? '' : 'none';
+      if (ok) visible++;
+    });
+    empty.style.display = visible === 0 ? '' : 'none';
+  }
+
+  checkboxes.forEach(function (c) { c.addEventListener('change', apply); });
+})();
+</script>

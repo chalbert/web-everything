@@ -17,7 +17,7 @@ import { checkDemos } from './check-demos.mjs';
 import {
   BACKLOG_STATUSES, BACKLOG_TYPES, WORK_ITEMS, FIB, FILE,
   dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated,
-  checkStatus, validateProtocol, validateIntent, validateCapability, validateCapabilityMatrix,
+  checkStatus, validateProtocol, validatePreset, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, permalinkSegment, validateViteProxyCoverage,
   validateModuleResolutionLock, findRawHtmlInMarkdown, findBuriedForkSections,
   findUnquotedColonScalars, findBadBodyLinks,
@@ -92,6 +92,7 @@ const plugs = arr(readJson('plugs.json'));
 const semantics = arr(readJson('semantics.json'));
 const research = arr(readJson('researchTopics.json'));
 const protocols = arr(readJson('protocols.json'));
+const presets = arr((readJson('assemblerPresets.json') || {}).presets);
 const projects = arr(readJson('projects.json'));
 const intents = arr(readJson('intents.json'));
 const capabilities = arr(readJson('capabilities.json'));
@@ -277,6 +278,18 @@ for (const proto of protocols) {
   for (const e of pe) err(e.message, e.descriptor);
   for (const w of pw) warn(w.message, w.descriptor);
 }
+
+// ── 6b-bis. Assembler presets (#646/#667, registry-item recipes, surfaced via /presets/) ──
+// Per-preset field/status/reference rules + the non-empty files[] recipe guard are the pure
+// `validatePreset` (mirrors validateProtocol); the script composes it over the live registry.
+const blockIds = new Set(blocks.map((b) => b.id));
+const presetCtx = { projectById, blockIds, intentById };
+for (const preset of presets) {
+  const { errors: pe2, warnings: pw2 } = validatePreset(preset, presetCtx);
+  for (const e of pe2) err(e.message, e.descriptor);
+  for (const w of pw2) warn(w.message, w.descriptor);
+}
+dupCheck(presets.map((p) => ({ id: p.name })), 'assemblerPresets.json');
 
 dupCheck(intents, 'intents.json');
 

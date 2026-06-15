@@ -400,6 +400,7 @@ export const FILE = {
   Intent: 'src/_data/intents.json', Capability: 'src/_data/capabilities.json',
   CapabilityAdapter: 'src/_data/capabilityMatrix.json', Project: 'src/_data/projects.json',
   Research: 'src/_data/researchTopics.json',
+  Preset: 'src/_data/assemblerPresets.json',
 };
 
 // A spec entity with no matching description .njk — the model writes the prose; `file` is the path to create.
@@ -459,6 +460,52 @@ export function validateProtocol(proto, ctx) {
       err(`Protocol "${proto.id}" expects project partial src/_includes/project-${proto.ownedByProject}.njk`);
     else if (!body.includes(`id="${proto.anchor}"`))
       err(`Protocol "${proto.id}" anchor "${proto.anchor}" not found in project-${proto.ownedByProject}.njk`);
+  }
+  return { errors, warnings: [] };
+}
+
+/**
+ * Validate a single assembler preset (#646/#667) — a shadcn-shaped registry-item. Required fields,
+ * status, `ownedByProject` resolution, every `composesBlocks`/`composesIntents` id resolves, and each
+ * `files[]` entry carries a `path` + non-empty `content` (the ejectable recipe IS the standard, so an
+ * empty file is a broken preset). The recipe is plain markup — it is NOT re-validated as a block.
+ * @param ctx { projectById: Map, blockIds: Set, intentById: Map }
+ */
+export function validatePreset(preset, ctx) {
+  const { projectById, blockIds, intentById } = ctx;
+  const errors = [];
+  const err = (m, descriptor) => errors.push({ message: m, descriptor });
+  for (const f of ['name', 'type', 'title', 'description', 'status', 'ownedByProject', 'files']) {
+    if (preset[f] === undefined || preset[f] === null || preset[f] === '')
+      err(`Preset "${preset.name || '<no name>'}" missing required field "${f}"`,
+        dMissingField('Preset', preset.name, FILE.Preset, f));
+  }
+  for (const e of checkStatus('Preset', preset.name, preset.status)) err(e.message, e.descriptor);
+  if (preset.ownedByProject && !projectById.has(preset.ownedByProject))
+    err(`Preset "${preset.name}" ownedByProject "${preset.ownedByProject}" does not resolve in projects.json`,
+      dUnresolvedRef('Preset', preset.name, FILE.Preset, 'ownedByProject', preset.ownedByProject, 'projects.json'));
+  for (const b of preset.composesBlocks || []) {
+    if (!blockIds.has(b))
+      err(`Preset "${preset.name}" composesBlocks "${b}" does not resolve in blocks.json`,
+        dUnresolvedRef('Preset', preset.name, FILE.Preset, 'composesBlocks', b, 'blocks.json'));
+  }
+  for (const i of preset.composesIntents || []) {
+    if (!intentById.has(i))
+      err(`Preset "${preset.name}" composesIntents "${i}" does not resolve in intents.json`,
+        dUnresolvedRef('Preset', preset.name, FILE.Preset, 'composesIntents', i, 'intents.json'));
+  }
+  if (Array.isArray(preset.files)) {
+    if (preset.files.length === 0)
+      err(`Preset "${preset.name}" has an empty files[] — a preset must ship at least one recipe file`,
+        dMissingField('Preset', preset.name, FILE.Preset, 'files'));
+    preset.files.forEach((file, idx) => {
+      if (!file || !file.path)
+        err(`Preset "${preset.name}" files[${idx}] missing "path"`,
+          dMissingField('Preset', preset.name, FILE.Preset, `files[${idx}].path`));
+      if (!file || !file.content)
+        err(`Preset "${preset.name}" file "${file && file.path ? file.path : idx}" has empty content`,
+          dMissingField('Preset', preset.name, FILE.Preset, `files[${idx}].content`));
+    });
   }
   return { errors, warnings: [] };
 }
