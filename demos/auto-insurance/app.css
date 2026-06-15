@@ -208,6 +208,18 @@ tbody tr.selected { background: var(--accent-soft); }
 .endorse-history li { font-size: 12px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--surface, #fff); }
 
+/* ---- S6 renewals & cancellation (#417) ---- */
+.policy-actions { display: flex; flex-direction: column; gap: 10px; }
+.pa-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+.cancel-form { display: flex; flex-direction: column; gap: 6px; padding-top: 8px; border-top: 1px solid var(--line); }
+.cancel-form select { font: inherit; font-size: 13px; padding: 6px 8px; border: 1px solid var(--line-strong);
+  border-radius: var(--radius); background: var(--surface, #fff); margin-left: 6px; }
+.btn { font: inherit; font-size: 13px; padding: 8px 14px; border: 1px solid var(--line-strong); border-radius: 8px;
+  background: var(--surface, #fff); cursor: pointer; }
+.btn:hover { filter: brightness(0.98); }
+.btn.primary { background: var(--accent, #1f3a5f); color: #fff; border-color: transparent; }
+.btn.act-cancel, .btn.act-lapse, .btn.act-nonrenew { color: var(--critical, #b4232a); }
+
 /* ---- S10 notifications (#421) — hand-rolled stand-in for the draft notification block (#358) ---- */
 .notif { position: relative; display: inline-flex; }
 .notif-bell { position: relative; font-size: 15px; background: transparent; border: none; cursor: pointer;

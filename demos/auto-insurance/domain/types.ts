@@ -165,6 +165,32 @@ export interface Endorsement {
   actor: string;
 }
 
+// ── Renewals & cancellation (S6, #417) ──────────────────────────────────────────
+/** Why a policy is cancelled — drives the cancel-reason guard + the proration basis. */
+export type CancellationReason = 'non-pay' | 'insured-request' | 'underwriting';
+
+/** A recorded cancellation — the cancel-reason guard input + the prorated refund. */
+export interface Cancellation {
+  reason: CancellationReason;
+  effective: string;        // ISO — cancellation effective date
+  termPremium: number;      // the 6-month premium the proration is taken from
+  earnedFraction: number;   // share of the term elapsed (insurer keeps)
+  unearnedRefund: number;   // refund of the unexpired term (0 if short-rate on non-pay)
+  at: string;
+  actor: string;
+}
+
+/** A renewal offer / decision at term end — re-rate carried into the next term. */
+export interface Renewal {
+  offeredAt: string;
+  oldPremium: number;
+  newPremium: number;       // re-rated next-term premium
+  effective: string;        // next term start (= current term end)
+  decision: 'accepted' | 'non-renewed';
+  at: string;
+  actor: string;
+}
+
 export interface Policy {
   policyNumber: string;
   state: PolicyState;
@@ -179,4 +205,6 @@ export interface Policy {
   payment?: PremiumPayment;   // S4 (#415): set when premium is collected — the payment-received guard input
   issued?: IssuedDocuments;   // S4 (#415): set at issuance (bound → in-force)
   endorsements?: Endorsement[]; // S5 (#416): mid-term changes applied in force
+  cancellation?: Cancellation;  // S6 (#417): set on cancel — the cancel-reason guard input
+  renewals?: Renewal[];         // S6 (#417): renewal offers/decisions at term end
 }

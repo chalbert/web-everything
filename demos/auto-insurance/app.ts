@@ -28,6 +28,8 @@ import { POLICY_LIFECYCLE, CLAIM_LIFECYCLE } from './domain/lifecycle';
 import { toDecisionRecord } from './domain/decision';
 import { collectPayment, paymentReceived, issuePolicyDocuments } from './domain/binding';
 import { availableEndorsements, previewEndorsement, applyEndorsement } from './domain/endorsement';
+import { renewalOffer, acceptRenewal, recordNonRenewal, recordCancellation, cancellationRecorded, reinstateEligible, recordReinstatement } from './domain/renewal';
+import type { CancellationReason } from './domain/types';
 import {
   NotificationStore, policyStateNotification, claimStateNotification, type AppNotification,
 } from './domain/notifications';
@@ -45,7 +47,9 @@ const uwGuard: GuardResolver<PolicyState> = (guard, ctx) => {
     case 'uw-clean': return finding === 'preferred' || finding === 'accept';
     case 'uw-refer': return finding === 'refer' || finding === 'decline';
     case 'payment-received': return paymentReceived(policyRegistry.get(ctx.entity.id)); // S4 (#415): bind gate
-    default: return true;                                              // cancel-reason / reinstate
+    case 'cancel-reason': return cancellationRecorded(policyRegistry.get(ctx.entity.id)); // S6 (#417): a reason must be on record
+    case 'reinstate': return reinstateEligible(policyRegistry.get(ctx.entity.id));        // S6 (#417): lapsed → in-force
+    default: return true;
   }
 };
 const policyLifecycle = new DefaultLifecycleProvider<PolicyState>(POLICY_LIFECYCLE, uwGuard);
@@ -154,9 +158,73 @@ function renderDetail(p: Policy): string {
     ${decision}
     ${renderBinding(p, r.premium)}
     ${renderEndorsement(p)}
+    ${renderPolicyActions(p)}
     <div class="panel-hd">Audit trail</div>
     <div id="md-audit"></div>
   </div>`;
+}
+
+/**
+ * Phase S6 (#417) — renewals & cancellation, the end-of-term + termination surface. All are GUARDED Web
+ * Lifecycle transitions: cancel records a reason (the cancel-reason guard input) + a prorated refund;
+ * non-renew expires the term; lapse (non-pay) → reinstate exercises the reinstate guard. Renewal accept
+ * carries the policy into a re-rated next term (stays in-force).
+ */
+const niceDate = (iso: string) => new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+function renderPolicyActions(p: Policy): string {
+  if (p.state === 'in-force') {
+    const offer = renewalOffer(p);
+    const delta = offer.newPremium - offer.oldPremium;
+    return `<div class="panel-hd">Renewal &amp; cancellation</div>
+      <div class="detail-body policy-actions">
+        <p class="muted">Renewal offer (term ends ${niceDate(offer.effective)}): <b>${money(offer.newPremium)}</b>${delta ? ` (${delta > 0 ? '+' : '−'}${money(Math.abs(delta))})` : ''} for the next 6-month term.</p>
+        <div class="pa-btns">
+          <button type="button" class="btn primary act-renew">Accept renewal</button>
+          <button type="button" class="btn act-nonrenew">Non-renew (expire)</button>
+        </div>
+        <form class="cancel-form">
+          <label class="muted">Cancel reason
+            <select name="reason" aria-label="Cancellation reason">
+              <option value="insured-request">Insured request (pro-rata refund)</option>
+              <option value="non-pay">Non-payment (short-rate)</option>
+              <option value="underwriting">Underwriting (pro-rata refund)</option>
+            </select>
+          </label>
+          <div class="pa-btns">
+            <button type="submit" class="btn act-cancel">Cancel policy</button>
+            <button type="button" class="btn act-lapse">Mark lapsed (non-pay)</button>
+          </div>
+        </form>
+      </div>`;
+  }
+  if (p.state === 'lapsed') {
+    return `<div class="panel-hd">Reinstate</div>
+      <div class="detail-body policy-actions">
+        <p class="muted">Policy lapsed (non-pay). Reinstate it to return to in-force, or cancel it.</p>
+        <div class="pa-btns">
+          <button type="button" class="btn primary act-reinstate">Reinstate</button>
+        </div>
+        <form class="cancel-form">
+          <label class="muted">Cancel reason
+            <select name="reason" aria-label="Cancellation reason">
+              <option value="non-pay">Non-payment (short-rate)</option>
+              <option value="insured-request">Insured request (pro-rata refund)</option>
+            </select>
+          </label>
+          <div class="pa-btns"><button type="submit" class="btn act-cancel">Cancel policy</button></div>
+        </form>
+      </div>`;
+  }
+  if (p.state === 'cancelled' && p.cancellation) {
+    const c = p.cancellation;
+    const badge = statusIndicatorHTML({ label: `Cancelled · ${c.reason} · refund ${money(c.unearnedRefund)}`, tone: 'critical', shape: 'badge' });
+    return `<div class="panel-hd">Cancellation</div>
+      <div class="detail-body policy-actions">
+        <p>${badge}</p>
+        <p class="muted">Earned ${Math.round(c.earnedFraction * 100)}% of the ${money(c.termPremium)} term; unearned refund ${money(c.unearnedRefund)}${c.reason === 'non-pay' ? ' (short-rate — no refund on non-pay)' : ''}.</p>
+      </div>`;
+  }
+  return '';
 }
 
 /**
@@ -622,6 +690,20 @@ function boot() {
           await showPolicy(current, panel);
           return;
         }
+        // S6 (#417): cancellation — record reason + prorated refund, then fire the cancel-reason-guarded transition.
+        const cancelForm = target.closest<HTMLFormElement>('form.cancel-form');
+        if (cancelForm && current) {
+          e.preventDefault();
+          const reason = (new FormData(cancelForm).get('reason') as CancellationReason) ?? 'insured-request';
+          const c = recordCancellation(current, reason, at(), ACTOR.role);
+          await bookAudit.append({ target: { type: 'policy', id: current.policyNumber }, action: `cancellation.recorded — ${reason} · refund ${money(c.unearnedRefund)}`, actor: ACTOR, at: c.at });
+          const entity = { id: current.policyNumber, state: current.state };
+          await policyLifecycle.transition(entity, 'cancelled', ACTOR); // cancel-reason guard now satisfied
+          current.state = entity.state;
+          notify('policy', current.policyNumber, policyStateNotification(current.policyNumber, 'cancelled')); // S10 (#421)
+          await showPolicy(current, panel);
+          return;
+        }
         const form = target.closest<HTMLFormElement>('form.bind-pay');
         if (!form || !current) return;
         e.preventDefault();
@@ -636,14 +718,53 @@ function boot() {
         await showPolicy(current, panel);
       });
       panel.addEventListener('click', async (e) => {
-        if (!(e.target as HTMLElement).closest('button.bind-issue') || !current) return;
-        const entity = { id: current.policyNumber, state: current.state };
-        await policyLifecycle.transition(entity, 'in-force', ACTOR);
-        current.state = entity.state;
-        const docs = issuePolicyDocuments(current, rate(current).premium, at());
-        await bookAudit.append({ target: { type: 'policy', id: current.policyNumber }, action: `policy.issued — declarations + ${docs.idCards.length} ID card(s)`, actor: ACTOR, at: docs.issuedAt });
-        notify('policy', current.policyNumber, policyStateNotification(current.policyNumber, 'in-force')); // S10 (#421)
-        await showPolicy(current, panel);
+        const t = e.target as HTMLElement;
+        if (!current) return;
+        if (t.closest('button.bind-issue')) {
+          const entity = { id: current.policyNumber, state: current.state };
+          await policyLifecycle.transition(entity, 'in-force', ACTOR);
+          current.state = entity.state;
+          const docs = issuePolicyDocuments(current, rate(current).premium, at());
+          await bookAudit.append({ target: { type: 'policy', id: current.policyNumber }, action: `policy.issued — declarations + ${docs.idCards.length} ID card(s)`, actor: ACTOR, at: docs.issuedAt });
+          notify('policy', current.policyNumber, policyStateNotification(current.policyNumber, 'in-force')); // S10 (#421)
+          await showPolicy(current, panel);
+          return;
+        }
+        // S6 (#417): renewal accept (stays in-force), non-renew (→ expired), lapse (→ lapsed), reinstate (→ in-force).
+        if (t.closest('button.act-renew')) {
+          const r = acceptRenewal(current, at(), ACTOR.role);
+          await bookAudit.append({ target: { type: 'policy', id: current.policyNumber }, action: `renewal.accepted — new term ${niceDate(r.effective)} · ${money(r.newPremium)}`, actor: ACTOR, at: r.at });
+          await showPolicy(current, panel);
+          return;
+        }
+        if (t.closest('button.act-nonrenew')) {
+          const r = recordNonRenewal(current, at(), ACTOR.role);
+          const entity = { id: current.policyNumber, state: current.state };
+          await policyLifecycle.transition(entity, 'expired', ACTOR);
+          current.state = entity.state;
+          await bookAudit.append({ target: { type: 'policy', id: current.policyNumber }, action: `renewal.non-renewed — expired ${niceDate(r.effective)}`, actor: ACTOR, at: r.at });
+          await showPolicy(current, panel);
+          return;
+        }
+        if (t.closest('button.act-lapse')) {
+          const entity = { id: current.policyNumber, state: current.state };
+          await policyLifecycle.transition(entity, 'lapsed', ACTOR);
+          current.state = entity.state;
+          await bookAudit.append({ target: { type: 'policy', id: current.policyNumber }, action: 'policy.lapsed — non-payment', actor: ACTOR, at: at() });
+          notify('policy', current.policyNumber, policyStateNotification(current.policyNumber, 'lapsed')); // S10 (#421)
+          await showPolicy(current, panel);
+          return;
+        }
+        if (t.closest('button.act-reinstate')) {
+          const entity = { id: current.policyNumber, state: current.state };
+          await policyLifecycle.transition(entity, 'in-force', ACTOR); // reinstate guard: state is lapsed
+          current.state = entity.state;
+          recordReinstatement(current, at(), ACTOR.role);
+          await bookAudit.append({ target: { type: 'policy', id: current.policyNumber }, action: 'policy.reinstated — lapsed → in-force', actor: ACTOR, at: at() });
+          notify('policy', current.policyNumber, policyStateNotification(current.policyNumber, 'in-force')); // S10 (#421)
+          await showPolicy(current, panel);
+          return;
+        }
       });
     }
 
