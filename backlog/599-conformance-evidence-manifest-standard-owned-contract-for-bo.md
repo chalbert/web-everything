@@ -7,7 +7,7 @@ blockedBy: ["575"]
 dateOpened: "2026-06-14"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
-graduatedTo: conformance-evidence/ model dir — ConformanceEvidenceManifest contract (provider.ts + index.ts)
+graduatedTo: conformance-evidence/
 tags: []
 ---
 
@@ -33,3 +33,5 @@ Mint the standard-owned conformance-evidence manifest ruled by #578 (Fork 2-A): 
     Constellation: the manifest contract → WE standard; the PR rendering + attach → Plateau dev-browser.
   - **Verified:** wired into `vitest.config.ts`; 9 tests pass; `tsc --noEmit --strict` clean;
     `check:standards` green.
+
+**Graduated to** `conformance-evidence/` — ConformanceEvidenceManifest contract (provider.ts + index.ts).

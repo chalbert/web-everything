@@ -8,7 +8,7 @@ parent: "317"
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
-graduatedTo: "loan demo S9: domain/disclosures.ts (TRID clock + e-sign gate) + trace-panel disclosures/e-sign surface; reuses audit/lifecycle/status-indicator; 3 candidate standards tagged (e-signature, deadline-clock, doc-generation)"
+graduatedTo: demos/loan-origination/domain/disclosures.ts
 tags: [exercise-app, loan-origination, disclosures, e-sign, phase]
 ---
 
@@ -38,3 +38,5 @@ changed circumstance. See the [requirements report](/reports/2026-06-11-exercise
   deadline clock**, **disclosure/document-package generation** — have no governing WE standard yet and
   are tagged in `conformance.json` `candidateStandards` (the Layer-2 /new-standard feed).
 - Gates: `tsc` clean, `check:app-conformance` compliant, `check:demos` + `check:standards` green.
+
+**Graduated to** `demos/loan-origination/domain/disclosures.ts` — loan demo S9: TRID clock + e-sign gate + trace-panel surface; 3 candidate standards tagged (e-signature, deadline-clock, doc-generation).

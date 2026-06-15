@@ -6,7 +6,7 @@ blockedBy: ["300"]
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: blocks.json + semantics.json + droplist.njk (menu-button demoted to trigger-only)
+graduatedTo: "block:droplist"
 tags: []
 ---
 
@@ -24,3 +24,5 @@ Demotion applied across all 5 roster references so the menu button is no longer 
 - `src/_includes/block-descriptions/droplist.njk:122` (per-member trait table) — removed the Menu button row (it resolves no droplist traits).
 
 `check:standards` green (0 errors). The Menu block (#300) already documented the demotion as the spec; this closes the follow-on.
+
+**Graduated to** `block:droplist` — menu-button demoted to trigger-only — blocks.json + semantics.json + droplist.njk (Fork G).

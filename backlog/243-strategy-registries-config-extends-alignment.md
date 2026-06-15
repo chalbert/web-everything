@@ -7,7 +7,7 @@ dateOpened: "2026-06-09"
 size: 5
 dateStarted: "2026-06-10"
 dateResolved: "2026-06-10"
-graduatedTo: customRenderStrategy
+graduatedTo: "protocol:render-strategy"
 tags: [refactor, registry, platform-config, render-strategy, change-strategy, consistency]
 relatedProject: webcomponents
 crossRef: { url: /projects/webcomponents/#protocol-render-strategy, label: Render Strategy Protocol }
@@ -75,3 +75,5 @@ Pure refactor — no behavior change for a project on the default flavor. Surfac
 - **Tests:** `renderStrategy.test.ts` updated for the new contract (bare registry has no default;
   default inherited by extending the flavor; per-scope override via `extends`) — 14 green. Full unit
   suite green (2010).
+
+**Graduated to** `protocol:render-strategy` — config-extends alignment of the CustomRenderStrategy registry (blocks/renderers/jsx/render-strategy/CustomRenderStrategyRegistry.ts).

@@ -8,7 +8,7 @@ blockedBy: ["346"]
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: coverage matrix benchmarkCoverage.json + /research/benchmark-coverage topic (11 ranked gaps)
+graduatedTo: src/_data/benchmarkCoverage.json
 relatedReport: reports/2026-06-12-coverage-gap-detection.md
 tags: [gap-analysis, competitive-analysis, coverage, capability-matrix, native-first, triage, research]
 relatedProject: webdocs
@@ -37,3 +37,5 @@ Blocked by #346 — there is nothing to map until the capability matrix is popul
 - Rows already tracked in the backlog are flagged `already-tracked: #NNN` (deduped against open + parked items).
 - The labelled matrix is exposed on the website (capability matrix or `/research/` view), diffable; `npm run check:standards` green.
 - Stops at "gaps are labelled and ranked" — it does **not** open the gap-fill backlog items (that is phase 4).
+
+**Graduated to** `src/_data/benchmarkCoverage.json` — coverage matrix + /research/benchmark-coverage topic (11 ranked gaps).

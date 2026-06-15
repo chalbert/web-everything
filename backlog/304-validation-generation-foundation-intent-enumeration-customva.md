@@ -8,7 +8,7 @@ blockedBy: ["004", "266"]
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"
-graduatedTo: validation-generation/ (provider.ts + registry.ts)
+graduatedTo: validation-generation/
 tags: []
 ---
 
@@ -54,3 +54,5 @@ Foundation slice (#085-A) of the validation-generation protocol: enumerate the v
 **Gate.** 16 new tests (`validation-generation/__tests__/provider.test.ts` + `registry.test.ts`) green;
 full `webvalidation` plug suite 62 green (re-export intact); new files `tsc --noEmit` clean (the only tsc
 errors are pre-existing `src/cases/webinjectors/*` snippets); `check:standards` **0 errors**.
+
+**Graduated to** `validation-generation/` — provider.ts + registry.ts.

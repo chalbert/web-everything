@@ -7,7 +7,7 @@ status: resolved
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: gap-sweep-rerun skill + /gap-sweep command + scripts/gap-sweep-status.mjs
+graduatedTo: .claude/skills/gap-sweep-rerun/
 tags: [gap-analysis, competitive-analysis, repeatable, skill, tooling]
 ---
 
@@ -33,3 +33,5 @@ The invariant gate immediately earned its keep: it caught 4 coverage-gap ids tha
 capability matrix (`notification-toast`→`toast`, `date-time-picker`→`date-picker`, `drawer-sheet`→`drawer`,
 and `design-tokens-theming` as a synthetic gap now carrying `capabilityRefs`) — fixed. Verified: status +
 snapshot + a no-op self-diff all green; `check:standards` green. Scheduled/automated version is #367.
+
+**Graduated to** `.claude/skills/gap-sweep-rerun/` — gap-sweep-rerun skill + /gap-sweep command + scripts/gap-sweep-status.mjs.

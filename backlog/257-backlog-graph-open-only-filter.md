@@ -7,7 +7,7 @@ dateOpened: "2026-06-09"
 dateStarted: "2026-06-10"
 dateResolved: "2026-06-10"
 blockedBy: ["255"]
-graduatedTo: "dependency-graph 'Open & blockers' toggle (client-side filter on the Graph tab)"
+graduatedTo: src/assets/js/backlog-graph.js
 tags: [backlog, tooling, ui, visualization]
 ---
 
@@ -66,3 +66,5 @@ node/edge set before layout.
   toggling to All re-lays-out to 41 in place; selection persists across reload.
 - **Notes:** active/claimed nodes still render muted (the renderer colours only `open` + tier), matching the
   existing legend; no model/`_data` change was needed.
+
+**Graduated to** `src/assets/js/backlog-graph.js` — open-only client-side filter on the dependency-graph Graph tab (src/backlog.njk).

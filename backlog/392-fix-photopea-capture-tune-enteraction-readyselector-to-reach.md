@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: "design-refs/targets.json: readySelector canvas→'text=New Project' (Home screen has no canvas); Photopea now captured+confirmed, dequarantined."
+graduatedTo: design-refs/targets.json
 tags: []
 ---
 
@@ -23,3 +23,5 @@ Photopea's live capture lands on its marketing splash, not the editor; the inclu
 **Result:** `design-refs collect --refresh --only=photopea` → `✅ captured … (confirmed)`; `needs-review.json` now `{}` (dequarantined); corpus item `dee20f9cb23bdc97` `reviewState: confirmed`, and the screenshot is the real editor (full menubar + left sidebar + New Project/Templates, dark enterprise-dense register) — not the landing page.
 
 > **Close-out note — repo gate red from unrelated concurrent work, not this item.** At close-out `check:standards` reports 1 error: a hidden report `reports/2026-06-12-design-ref-corpus-taxonomy-seed.md` (untracked, created 17:31 by a concurrent session working the #382 design-ref epic) with no `/research/` topic or `relatedReport` backlog item. #392 touched only `design-refs/targets.json` + the corpus the capture wrote — it added no report and changed no protocol/term counts. The fix is independently verified (capture confirmed, screenshot eyeballed). The hidden-report error belongs to whoever added that taxonomy-seed report.
+
+**Graduated to** `design-refs/targets.json` — readySelector canvas→'text=New Project' (Home has no canvas); Photopea dequarantined.

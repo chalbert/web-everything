@@ -7,7 +7,7 @@ blockedBy: ["562"]
 dateOpened: "2026-06-14"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
-graduatedTo: source-resolution/ model dir (provider.ts anchor contract + registry.ts resolver chain + index.ts wiring)
+graduatedTo: source-resolution/
 locus: webeverything
 tags: [dev-browser, source-awareness, standard, self-description, resolver, source-map]
 ---
@@ -54,3 +54,5 @@ resolver composes with any bridge.
   - Wired `source-resolution/` into `vitest.config.ts`; **16 tests** (provider + registry/chain) pass,
     `tsc --noEmit --strict` clean. The build-side anchor emitter (Sentry-style plugin) is downstream
     implementation, not this standard slice.
+
+**Graduated to** `source-resolution/` — provider.ts anchor contract + registry.ts resolver chain + index.ts.

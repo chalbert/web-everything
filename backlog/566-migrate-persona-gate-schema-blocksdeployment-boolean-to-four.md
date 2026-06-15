@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-14"
 dateStarted: "2026-06-14"
 dateResolved: "2026-06-14"
-graduatedTo: schema.ts GateType enum (advisory|validating|blocking|escalating); 28 gates migrated; /profiles renders gate type
+graduatedTo: plateau-app/src/profiles/schema.ts
 locus: plateau-app
 tags: [personas, profiles, governance, gates, plateau, schema]
 crossRef: { url: /backlog/166-governance-persona-roster-charter-schema/, label: "Governance-persona decision (#166)" }
@@ -36,3 +36,5 @@ Resolved 2026-06-14 (batch). Schema widened, no enforcement change:
 - `profiles.css` — added `--validating` / `--escalating` badge styles.
 
 Pure widening (the enum strictly subsumes the boolean); 61 plateau-app tests green, profiles type-clean. Enforcement is the follow-on #568.
+
+**Graduated to** `plateau-app/src/profiles/schema.ts` — GateType enum (advisory|validating|blocking|escalating); 28 gates migrated; /profiles renders gate type.

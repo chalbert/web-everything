@@ -7,7 +7,7 @@ parent: "315"
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: research topic benchmark-corpus + benchmarkCorpus.json data file
+graduatedTo: src/_data/benchmarkCorpus.json
 relatedReport: reports/2026-06-12-benchmark-corpus.md
 tags: [gap-analysis, competitive-analysis, design-systems, ui-libraries, corpus, research]
 relatedProject: webdocs
@@ -51,3 +51,5 @@ duplicate). `references.json` "Reference Design Systems" was **extended** (added
 React Aria, Shoelace), remaining the curated subset (`inReferences: true`). Report:
 `reports/2026-06-12-benchmark-corpus.md`. `check:standards` green; research page verified to render.
 Unblocks #346 (extraction joins against this corpus).
+
+**Graduated to** `src/_data/benchmarkCorpus.json` — research topic benchmark-corpus + benchmarkCorpus.json data file.

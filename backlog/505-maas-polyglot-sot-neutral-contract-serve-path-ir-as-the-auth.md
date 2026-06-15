@@ -7,7 +7,7 @@ status: resolved
 dateOpened: "2026-06-13"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"
-graduatedTo: serve-path IR + OpenAPI projection (blocks/renderers/module-service/servePathIR.ts, servePathOpenAPI.ts, maas-servepath.openapi.json); fetchHandler.ts derives from it as reference impl
+graduatedTo: blocks/renderers/module-service/servePathIR.ts
 tags: []
 ---
 
@@ -27,3 +27,5 @@ Shipped the neutral SoT + projection + reference-impl derivation:
 - **`protocols.json#maas-versioning`** summary updated to point at the IR as the polyglot SoT.
 
 Unblocks **#506** (conformance vectors assert against this IR) and **#507** (generation adapter reads it). No leftovers.
+
+**Graduated to** `blocks/renderers/module-service/servePathIR.ts` — serve-path IR + OpenAPI projection (servePathOpenAPI.ts, maas-servepath.openapi.json); fetchHandler.ts derives from it.

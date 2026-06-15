@@ -8,7 +8,7 @@ blockedBy: ["316"]
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: capability matrix benchmarkCapabilities.json + /research/benchmark-capabilities topic
+graduatedTo: src/_data/benchmarkCapabilities.json
 relatedReport: reports/2026-06-12-capability-extraction.md
 tags: [gap-analysis, competitive-analysis, design-systems, ui-libraries, extraction, normalization, capability-matrix, research]
 relatedProject: webdocs
@@ -39,3 +39,5 @@ Blocked by #316 — there is no per-source extraction without a settled corpus +
 - Stops at extraction — it records `nativeAnchorHint` but does **not** label covered/missing (that is #347).
 
 > Likely a split candidate: if the first pass sprawls, fan out per-source-batch extraction under #315 and keep this as the method + schema + reconciliation story.
+
+**Graduated to** `src/_data/benchmarkCapabilities.json` — capability matrix + /research/benchmark-capabilities topic.

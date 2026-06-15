@@ -7,7 +7,7 @@ blockedBy: ["070"]
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-12"
 dateResolved: "2026-06-12"
-graduatedTo: directives.ts RESOURCE_SLOT_STATES + crossStrategy.ts liftResource/lowerResource
+graduatedTo: blocks/renderers/jsx/directives.ts
 tags: [resource, directive, loader, jsx, suspense, lift-lower, crossStrategy]
 ---
 
@@ -26,3 +26,5 @@ Wire the `is="resource"` directive's semantics: its named `loading` / `error` sl
 **Fork 3 — crossStrategy lift/lower + lossy diagnostic** (`render-strategy/crossStrategy.ts`): added `liftResource` (`<template is="resource" from="E">BODY</template>` → `<Suspense>{use(E)}BODY</Suspense>`, incl. self-closing) and `lowerResource` (the reverse, raising `resource-suspends-on-read`). Uses React's real `use()`/`<Suspense>` vocabulary; `use()` is the suspend-on-read marker. The LOWER path is lossy because suspend-on-read (throw-to-Suspense via the scheduler) has no declarative equivalent — the Resource Loader resolves via explicit states instead. Ordering: `lowerResource` runs before `lowerInterpolation` (so `{use(E)}` isn't mis-read as a bare interpolation) and `liftResource` after `liftForEach`/`liftConditionals` (so inner templates lift first and the non-greedy body match closes on the resource's own `</template>`). 5 new crossStrategy tests (lift, self-closing lift, lower+flag, structural-reversible-but-flagged round-trip). POC nesting limit (shared with liftForEach): a crossStrategy body with its own nested slot `<template>`s is out of scope for the structural match — slot preservation is covered at the desugar/sugarize layer (Fork 1), which is stack-based and handles nesting.
 
 Gate: 540 renderer vitest green (2 skipped, pre-existing live-model); tsc clean on changed files; `check:standards` 0 errors.
+
+**Graduated to** `blocks/renderers/jsx/directives.ts` — RESOURCE_SLOT_STATES + crossStrategy.ts liftResource/lowerResource (render-strategy/).
