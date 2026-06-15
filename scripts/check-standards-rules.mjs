@@ -494,6 +494,21 @@ export function validatePreset(preset, ctx) {
       err(`Preset "${preset.name}" composesIntents "${i}" does not resolve in intents.json`,
         dUnresolvedRef('Preset', preset.name, FILE.Preset, 'composesIntents', i, 'intents.json'));
   }
+  // Optional CEM descriptor (#668) — coexists with the recipe, describing the composed-API surface. Rides
+  // the #653 CEM protocol; when present it must be a minimal CEM declaration (kind + name).
+  if (preset.cem !== undefined) {
+    if (!preset.cem || typeof preset.cem !== 'object')
+      err(`Preset "${preset.name}" cem must be a CEM declaration object`,
+        dMissingField('Preset', preset.name, FILE.Preset, 'cem'));
+    else {
+      if (!preset.cem.kind)
+        err(`Preset "${preset.name}" cem missing "kind" (e.g. "class")`,
+          dMissingField('Preset', preset.name, FILE.Preset, 'cem.kind'));
+      if (!preset.cem.name)
+        err(`Preset "${preset.name}" cem missing "name"`,
+          dMissingField('Preset', preset.name, FILE.Preset, 'cem.name'));
+    }
+  }
   if (Array.isArray(preset.files)) {
     if (preset.files.length === 0)
       err(`Preset "${preset.name}" has an empty files[] — a preset must ship at least one recipe file`,

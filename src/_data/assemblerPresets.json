@@ -20,6 +20,23 @@
       "intentStrategies": {
         "anchor": "escape"
       },
+      "cem": {
+        "kind": "class",
+        "name": "RevealNav",
+        "description": "Composed-API surface of the reveal-nav preset — a W3C APG Disclosure Navigation header. Describes the authoring surface (#668), never the internal reveal-nav.js wiring. Rides the #653 CEM protocol.",
+        "attributes": [
+          { "name": "aria-expanded", "description": "Disclosure state of each section head button — \"true\" while its panel is open.", "type": { "text": "\"true\" | \"false\"" } },
+          { "name": "aria-controls", "description": "Each section head points at the id of the panel it discloses.", "type": { "text": "string" } }
+        ],
+        "slots": [
+          { "name": "", "description": "Nav sections — each a head <button> plus its disclosed panel of <a class=\"nav-link\"> links." }
+        ],
+        "x-webeverything": {
+          "composesBlocks": ["nav-list"],
+          "composesIntents": ["navigation", "disclosure", "anchor", "hover-intent"],
+          "note": "A composition, not a registered custom element — the CEM coexists with the plain-markup recipe (#652 Fork 1's API-descriptor layer)."
+        }
+      },
       "files": [
         {
           "path": "reveal-nav.html",

@@ -80,6 +80,30 @@ title: Web Everything — Presets
         <pre style="margin: 0.5rem 0 0; overflow-x: auto; max-height: 22rem; background: var(--color-code-bg, #0f172a); color: #e2e8f0; padding: 1rem; border-radius: 8px; font-size: 0.8em;"><code>{{ f.content }}</code></pre>
       </details>
       {% endfor %}
+      {% if preset.cem %}
+      <details style="margin-top: 0.5rem;">
+        <summary style="cursor: pointer; font-size: 0.85em; color: var(--color-text-muted);">
+          API descriptor <span style="font-family: var(--font-mono, monospace);">(custom-elements-manifest)</span>
+        </summary>
+        <p style="margin: 0.5rem 0 0.25rem; font-size: 0.85em; color: var(--color-text-muted);">{{ preset.cem.description }}</p>
+        {% if preset.cem.attributes %}
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.82em; margin-top: 0.5rem;">
+          <thead><tr><th style="text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--color-border);">Attribute</th><th style="text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--color-border);">Type</th><th style="text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--color-border);">Description</th></tr></thead>
+          <tbody>
+          {% for a in preset.cem.attributes %}
+            <tr><td style="padding: 0.3rem 0.5rem; font-family: var(--font-mono, monospace);">{{ a.name }}</td><td style="padding: 0.3rem 0.5rem; font-family: var(--font-mono, monospace); color: var(--color-text-muted);">{{ a.type.text if a.type else '' }}</td><td style="padding: 0.3rem 0.5rem; color: var(--color-text-muted);">{{ a.description }}</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% endif %}
+        {% if preset.cem.slots %}
+        <p style="margin: 0.5rem 0 0.25rem; font-size: 0.8em; text-transform: uppercase; letter-spacing: 0.04em; color: var(--color-text-muted);">Slots</p>
+        <ul style="margin: 0; padding-left: 1.1rem; font-size: 0.82em; color: var(--color-text-muted);">
+          {% for s in preset.cem.slots %}<li><code>{{ s.name or '(default)' }}</code> — {{ s.description }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+      </details>
+      {% endif %}
     </article>
   {% endfor %}
 </div>
