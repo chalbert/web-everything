@@ -1,7 +1,6 @@
 ---
 type: issue
-workItem: story
-size: 13
+workItem: epic
 status: open
 blockedBy: ["657"]
 dateOpened: "2026-06-15"
@@ -30,15 +29,24 @@ Claimed in a batch and scoped against **both** real trees (`webeverything/blocks
   Tier A). So the back half is **blocked-in-fact** until #604 is unblocked.
 - **The #170 ordering guard adds per-family byte-equality verification** across both repos before any delete.
 
-**Recommended split (`/split`)** along the agent-ready / blocked seam — the front half is the #170-safe
-upstream migration, deliverable now; the back half waits on #604:
+## Sliced into 5 children (2026-06-15, `/split 658`)
 
-1. **S1 — Create `@frontierui/blocks` as a canonical FUI workspace sub-package** (package.json + exports +
-   workspaces wiring), exporting the families FUI already owns. Agent-ready; no WE change, no delete. Small.
-2. **S2 — Migrate the 9 WE-only families UP to `@frontierui/blocks`** (impl + register + tests), byte-verified,
-   **without deleting WE's copies** (#170: content-equal upstream first). Agent-ready after S1. Medium.
-3. **S3 — Delete WE's vendored `blocks/` + repoint all WE imports/build to `@frontierui/blocks`.**
-   This **is** the #604 client migration — **blocked by #604** (held). Do not start until #604 ships.
+Verified against both real trees (see `reports/2026-06-15-backlog-split-analysis.md`) and split along the
+agent-ready / blocked seam. This card is now a **storied epic**; its scope lives in the children. S2 was
+refined into 3 batchable units by the real file/test surface. DAG: `S1 → {S2a ∥ S2b ∥ S2c} → S3`, and
+S3 also `blockedBy #604`.
 
-**Released unworked (batch stop rule 4 — outgrew; back half blocked-in-fact by #604).** Independent of the
-rest of the batch, so the batch continued past it. Spin S1/S2/S3 via `/split` when picked up.
+- **#693 — S1.** Create `@frontierui/blocks` as a canonical FUI workspace sub-package (package.json +
+  exports + the `"blocks"` workspaces entry, the top-level `compiler` precedent), exporting the 14
+  FUI-owned families. FUI-only; no WE change, no delete. `story · 3` — agent-ready now.
+- **#694 — S2a.** Migrate the 6 single-file WE-only families (`audit`, `lifecycle`, `master-detail`,
+  `selection`, `stepper`, `tree-select`) UP, byte-verified, WE copies kept (#170 guard). `task · 3`,
+  blockedBy #693.
+- **#695 — S2b.** Migrate `background-task-surface` UP (12 files incl. 6 traits + fixtures + tests),
+  byte-verified, WE copy kept. `story · 3`, blockedBy #693.
+- **#696 — S2c.** Migrate `data-grid` + `type-ahead` UP, byte-verified, WE copies kept. `story · 3`,
+  blockedBy #693.
+- **#697 — S3.** Delete WE's vendored `blocks/` + repoint every WE import/build to `@frontierui/blocks`
+  (the #604 client cutover). `story · 8` — **not batchable**, blockedBy #694/#695/#696 **and #604**
+  (held). Re-`/split` once #604 lands (its two open forks decide *how* WE resolves the package, so S3's
+  own sub-seams aren't investigable yet).
