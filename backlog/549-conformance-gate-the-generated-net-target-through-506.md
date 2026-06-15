@@ -3,10 +3,12 @@ type: decision
 workItem: story
 size: 2
 parent: "507"
-status: open
+status: resolved
 blockedBy: []
 dateOpened: "2026-06-14"
-dateStarted: "2026-06-14"
+dateStarted: "2026-06-15"
+dateResolved: "2026-06-15"
+graduatedTo: none
 preparedDate: "2026-06-14"
 relatedReport: reports/2026-06-14-maas-conformance-gate-policy.md
 tags: [module-as-a-service, polyglot, conformance, dotnet, csharp, ci-gate, generation-adapter]
@@ -126,3 +128,48 @@ default vitest run regardless — it needs no toolchain and catches the common c
 3. The gate wiring per the ratified default (B): a `check:maas-conformance` target that detects `dotnet`,
    runs the suite when present, skips-with-notice otherwise — outside the default gate, promotable to
    required by CI config.
+
+## Decision (ratified 2026-06-15)
+
+**Fork 1 → Option B (separate opt-in suite).** The .NET execution-conformance run is a `check:maas-conformance`
+target kept OUT of the default/inner loop: it detects a capable (`.NET 8+`) toolchain, drives the generated
+origin through the #506 runner against the golden vectors when present, and **skips-with-notice** otherwise.
+A `dotnet`-guaranteed CI promotes it to required with `-- --require` (option A as a CI posture layered on B —
+not rejected, just not the default). The free byte-level **source** snapshot stays in the default vitest run.
+
+### What shipped
+
+- **Subprocess target** — [dotnetTarget.ts](../blocks/renderers/module-service/conformance/dotnetTarget.ts):
+  the generated origin as a `ConformanceTarget`, spawned once over the whole vector set, held to the same
+  byte-identical / identity-stable bar by the one neutral runner.
+- **C# host harness** — [dotnet/Program.cs](../blocks/renderers/module-service/conformance/dotnet/Program.cs)
+  + [MaasConformanceHost.csproj](../blocks/renderers/module-service/conformance/dotnet/MaasConformanceHost.csproj):
+  compiles the byte-locked `OriginCore.cs` + `GeneratedMaaSOrigin.cs` **as-is** and injects the
+  `identity` / `transform` / `resolveDefinition` seams. The `identity` impl reproduces the #088
+  `sha256-<base64url>` id + `sha256-<base64>` SRI **byte-for-byte** (verified against the golden ETag/integrity).
+  The form **catalog** 400 is host-supplied (it is impl, not neutral contract).
+- **Gate** — [scripts/check-maas-conformance.mjs](../scripts/check-maas-conformance.mjs) +
+  `check:maas-conformance` npm script, driving
+  [vitest.maas-conformance.config.ts](../vitest.maas-conformance.config.ts) →
+  [maasDotnetConformance.test.ts](../blocks/renderers/module-service/conformance/dotnet/maasDotnetConformance.test.ts)
+  (outside the default `include`; self-skips without `MAAS_DOTNET`).
+
+### First findings (the gate works) — filed as spin-offs
+
+This repo's only `dotnet` is 2.1.4, so the gate **skips-with-notice here** (the ratified behaviour; default
+gate stays green). Compiling the byte-locked goldens AS-IS surfaced two genuine #548 generation gaps that
+would block a green execution run on a capable toolchain — captured, not silently absorbed:
+
+- **#661** — generated origin won't compile: `NameValueCollection.TryGetValue` doesn't exist (one-line
+  csharp.ts fix). Blocks any execution run.
+- **#662** — generated origin needs an injected form-catalog seam (it can't mint the unknown-form 400 itself;
+  the host supplies it). Blocked by #661.
+
+## Progress
+
+- **Status:** resolved (2026-06-15)
+- **Done:** subprocess target + C# host harness + `check:maas-conformance` gate (skip-with-notice / `--require`)
+  + opt-in vitest suite, all outside the default gate. Identity reproduction verified byte-for-byte against
+  the goldens; skip path + `--require` exit codes verified; `check:standards` green; default suite unaffected.
+- **Toolchain note:** a green *execution* run needs `.NET 8+` (absent here → gate skips) **and** #661/#662
+  fixed; both filed against #507.
