@@ -25,6 +25,33 @@ Demos are **runtime, interactive** pages served by Vite on **:3000** and passthr
 `/demos/{id}/` (a detail page linking to the live `:3000` URL). Use a demo to *exercise a standard in
 a real browser* — not to document it (that's the block/adapter page's job).
 
+## Embedding a Frontier UI demo on a block page — the `fuiDemo` convention (#701/#604)
+
+The demos above are **WE-authored** (`demos/`). A *block page* shows a **live runtime** of a block whose
+implementation lives in Frontier UI — and per the docs-rendering boundary, **WE never imports or renders
+FUI block code; it embeds a FUI-*hosted* demo via a sandboxed iframe** (the #700 ruling; #604). The
+`fuiDemo` shortcode (defined in `.eleventy.js`, #701) is that one embed:
+
+```njk
+{% fuiDemo "<demo-file>.html", "<caption>", <heightPx> %}
+```
+
+It renders an `<iframe src="${FUI_DEMO_BASE}/demos/<demo-file>.html">` with FUI branding chrome. `FUI_DEMO_BASE`
+is the FUI dev server (`:3001`) by default, or the published demos host via `FUI_DEMO_BASE` in prod —
+nothing is imported across repos.
+
+**Demo→block mapping convention (so new blocks roll out as one-liners):**
+- The mapping is **declared in the block's description partial** (`src/_includes/block-descriptions/<block>.njk`)
+  as a single `{% fuiDemo … %}` line under a `<h3 id="try-it-live">Try it live</h3>` section — not in
+  `blocks.json`. The partial already owns the block's prose, so its demo lives there too; `blocks.json`
+  stays a pure registry.
+- **Demo file naming:** the FUI-hosted file is `<concept>-unplugged.html` (e.g. `autocomplete-unplugged.html`
+  for the droplist family) — the unplugged form is the public, non-invasive surface (#606). Confirm the file
+  exists in `frontierui/demos/` before referencing it.
+- **Additive, never a replacement:** keep the page's authored static code samples; the embed sits alongside
+  them as the live proof. First consumers: `component.njk` (#038 converter), `autocomplete.njk` (#733, the
+  droplist family).
+
 ```
 demos/{id}.html        # shell: loads /plugs/bootstrap.ts + the .tsx; nothing else
 demos/{id}.tsx         # the demo logic — JSX (mirror dialect) rendering real DOM
