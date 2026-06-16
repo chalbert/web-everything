@@ -1,8 +1,10 @@
 ---
 type: idea
 workItem: epic
-status: open
+status: resolved
 dateOpened: "2026-06-14"
+dateResolved: "2026-06-16"
+graduatedTo: none
 tags: [frontier-ui, dogfooding, blocks, demos, site, embedding, conformance]
 crossRef: { url: /backlog/728-component-embedding-capability-embed-a-live-component-exampl/, label: "#728 — embed mechanism this epic consumes" }
 relatedProject: webdocs
