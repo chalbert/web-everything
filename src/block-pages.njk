@@ -111,6 +111,42 @@ eleventyComputed:
         </div>
         {% endif %}
 
+        {# Anatomy — the composition graph straight from the registries (#748): the dependency edges this
+           block sits on, each piece linking to its own page so they're independently browsable. "Used by" is
+           the reverse edge (every block whose dependsOn names this one) — the bidirectional graph. The
+           interactive exploded / toggle-a-piece-off-to-watch-it-degrade view needs in-document live render
+           and layers on once that lands (#786 mode C); this is the static, buildable-now half. #}
+        {% set usedByBlocks = [] %}
+        {% for other in blocks %}{% if block.id in (other.dependsOn or []) %}{% set usedByBlocks = (usedByBlocks.push(other), usedByBlocks) %}{% endif %}{% endfor %}
+        {% if (block.dependsOn | length) or (usedByBlocks | length) %}
+        <div class="section-card mt-8">
+            <h2>Anatomy</h2>
+            <p class="mb-6 text-slate-600">Every piece this block composes, each linking to its own page. Together with the <strong>Implements / Composes Intents</strong> and <strong>Traits</strong> sections above, this is the block's full composition graph — the minimize-lock-in / graceful-degradation surface. A live <em>toggle-a-piece-off</em> exploded view layers on once in-document render lands (<a href="/backlog/786-mode-c-fui-embed-sdk-gains-a-shadow-dom-in-document-render-m/">#786</a>).</p>
+            {% if block.dependsOn | length %}
+            <h3>Built on</h3>
+            <p class="mb-2 text-slate-600">The blocks and capabilities this one composes — disable any and the block degrades to what remains.</p>
+            <ul class="list-disc pl-5 mb-4">
+                {% for dep in block.dependsOn %}
+                {% if (blocks | selectattr("id", "equalto", dep) | list | length) %}
+                <li><a href="/blocks/{{ dep }}/">{{ dep }}</a></li>
+                {% else %}
+                <li><code>{{ dep }}</code> <span class="text-slate-600">(capability)</span></li>
+                {% endif %}
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {% if usedByBlocks | length %}
+            <h3>Used by</h3>
+            <p class="mb-2 text-slate-600">Blocks that compose this one — the reverse dependency edge.</p>
+            <ul class="list-disc pl-5">
+                {% for u in usedByBlocks %}
+                <li><a href="/blocks/{{ u.id }}/">{{ u.name }}</a></li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </div>
+        {% endif %}
+
         {% set blockCases = cases[block.id] %}
         {% if blockCases %}
         <div class="section-card mt-8">

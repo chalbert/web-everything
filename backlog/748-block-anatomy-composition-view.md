@@ -2,9 +2,12 @@
 type: idea
 workItem: story
 size: 5
-status: open
+status: resolved
 parent: "746"
 dateOpened: "2026-06-16"
+dateStarted: "2026-06-16"
+dateResolved: "2026-06-16"
+graduatedTo: src/block-pages.njk
 relatedProject: webdocs
 crossRef: { url: /backlog/727-web-docs-blocks-per-component-live-surface-fui-render-props-/, label: "Per-component surface (#727)" }
 tags: [webdocs, block-explorer, anatomy, traits, plugs, intents, provider-graph, browse]
@@ -31,3 +34,11 @@ Give each block page an **anatomy panel** that lists every piece the block is co
 ## Notes
 
 Static listing can be built off the registries without the live render, so this is not hard-blocked on #727; the toggle-to-degrade and hover-highlight features layer on once #727's live render lands. Provider↔consumer edges overlap with #092 / inspection devtools (#755) — share the graph data, don't duplicate it.
+
+## Progress (resolved 2026-06-16) — static composition graph shipped; interactive half carved to #806
+Delivered the **registry-driven, buildable-now half**: an **Anatomy** `section-card` on [`src/block-pages.njk`](../src/block-pages.njk) rendering the block's composition graph straight from `blocks.json` —
+- **Built on:** `block.dependsOn` (a clean block→block graph; 17/18 values are block ids), each linking to `/blocks/{id}/`; the one capability dep (`error-recovery`) renders as a labelled non-link.
+- **Used by:** the reverse edge — every block whose `dependsOn` names this one — computed inline over the `blocks` collection, each cross-linked. Verified bidirectional (wizard *Built on* → stepper/workflow-engine; stepper *Used by* → wizard).
+- Sits alongside the existing **Implements / Composes Intents** and **Traits** sections (already cross-linked from #627/#727) to form the full browsable piece list. 11ty builds clean; gate green.
+
+**Carved out — interactive half → [#806](/backlog/806-block-anatomy-interactive-exploded-view-toggle-a-piece-off-t/) (blockedBy #786):** the exploded/hover-highlight view and the toggle-a-piece-off-to-degrade live demo both need to manipulate the *running* block in the page, which the cross-origin `fuiDemo` iframe forbids — only mode-C in-document render (#786) makes it possible. The conformance-playground fixture (acceptance bullet 4) goes with that interactive slice.
