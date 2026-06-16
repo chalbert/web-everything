@@ -62,3 +62,31 @@
         pipeline emits a richer per-element manifest — no schema change, a status flip from <code>draft</code>.
     </div>
 </section>
+<section class="docs-section mt-12">
+    <h3 id="derivation-source" class="text-xl font-bold mb-6">Dimension — Derivation source</h3>
+    <p class="text-gray-600 text-sm leading-relaxed mb-4">
+        <em>Where the catalog manifest's content comes from</em> is a <strong>supported dimension</strong>, not a
+        mandated mechanism (ruled in <a href="/backlog/706-generate-fui-s-block-catalog-from-a-derived-manifest-and-rend/" class="text-blue-600 underline">#706</a>).
+        Both an authored manifest and an implementation scan are coherent end-states — the right choice depends on
+        whether the implementation carries enough annotated metadata to derive quality summaries — so by the
+        fork-existence test it is an axis to support, not a call to decide. Every source emits the <strong>same CEM
+        contract</strong>, so downstream consumers (props table, Technical Configurator, autodocs) never see the difference.
+    </p>
+    <ul class="text-gray-600 text-sm leading-relaxed mb-4 list-disc pl-5 space-y-1">
+        <li><strong>Authored → CEM (the default / reference).</strong> The curated <code>blocks.json</code> metadata
+            (summary / type / protocol / <code>weSpecPath</code>) projected into the manifest by
+            <code>npm run gen:cem</code> — the path documented above. Default because authored summaries are
+            human-quality where a raw source scan emits only thin tag/member data with no prose.</li>
+        <li><strong>Impl-scan / CEM-from-source (opt-in).</strong> A custom-elements-manifest analyzer run over the
+            implementation source, emitting the same contract. Complete by construction (no entry can be forgotten),
+            but only as rich as the JSDoc / decorator annotations the source carries — opt-in for implementations
+            that are annotated.</li>
+        <li><strong>Hybrid.</strong> Scan for structure (tags, members, slots), author the prose summaries — the two
+            sources merged into one manifest.</li>
+    </ul>
+    <div class="bg-blue-50 border-l-4 border-blue-400 p-3 mb-4 text-xs text-blue-800">
+        <strong>Completeness is source-independent:</strong> a build-time gate asserts the manifest covers every
+        implemented block family regardless of how it was derived — a scanned manifest is complete by construction;
+        an authored one is held complete by the gate (#706 invariant).
+    </div>
+</section>
