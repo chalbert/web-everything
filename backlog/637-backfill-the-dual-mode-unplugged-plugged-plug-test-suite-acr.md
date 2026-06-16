@@ -2,9 +2,12 @@
 type: issue
 workItem: story
 size: 8
-status: open
+status: resolved
 blockedBy: ["635", "636", "649"]
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-16"
+dateResolved: "2026-06-16"
+graduatedTo: plugs/webstates/__tests__/unit/webstates.unplugged.test.ts
 tags: []
 ---
 
@@ -26,3 +29,37 @@ trees + backfills the highest-impact set, #637 is the **remaining** domains' bac
 `PLUG_UNPLUGGED_TEST_ENFORCED` flips to `true` (the #636 gate-promotion noted in #649). Not a design call —
 a factual DAG correction grounded in the #635 audit + the gate rule's own owner designation. Released to the
 pool unworked.
+
+## Progress (2026-06-15, batch-2026-06-15)
+
+After #649 resolved, the remaining domains warning under `validatePlugDualMode`
+([scripts/check-standards-rules.mjs](../scripts/check-standards-rules.mjs)) were six: `webcontexts`,
+`webdirectives`, `webexpressions`, `webstates` (stable shared domains) plus `webguards`, `webvalidation`.
+
+**Backfilled the four stable domains' unplugged-mode tests** (the gate detects an `*.unplugged.test.ts`
+that imports the non-invasive surface and exercises the domain):
+- [plugs/webstates/__tests__/unit/webstates.unplugged.test.ts](../plugs/webstates/__tests__/unit/webstates.unplugged.test.ts)
+  — scoped `CustomStoreRegistry` define/get, a store run as a plain library (state/subscribe/unsubscribe),
+  two registries independent (webstates patches no global).
+- [plugs/webcontexts/__tests__/unit/webcontexts.unplugged.test.ts](../plugs/webcontexts/__tests__/unit/webcontexts.unplugged.test.ts)
+  — asserts `isPatched()` stays false and `Node.prototype.contexts` is absent (the `Node.contexts` patch
+  is never applied), plus scoped define/get + plain context value get/set/has.
+- [plugs/webexpressions/__tests__/unit/webexpressions.unplugged.test.ts](../plugs/webexpressions/__tests__/unit/webexpressions.unplugged.test.ts)
+  — scoped `CustomTextNodeRegistry` define/get, a `CustomTextNode` subclass constructed as a plain `Text`
+  node (clone handlers never registered), two registries independent.
+- [plugs/webdirectives/__tests__/unit/webdirectives.unplugged.test.ts](../plugs/webdirectives/__tests__/unit/webdirectives.unplugged.test.ts)
+  — static/deterministic: `CustomTemplateDirective` extends native `HTMLTemplateElement`, a subclass
+  derives with both chains intact, and the native `HTMLTemplateElement.prototype` carries no bolted-on
+  lifecycle (non-invasive). (Constructing a customized built-in needs `customElements.define`, a global
+  registry mutation, so the unplugged proof is the no-patch shape, not a `new`.)
+
+**13 tests green; WE `check:standards` unplugged warnings 30 → 26** (only `webguards`/`webvalidation`
+remain).
+
+**`webguards` + `webvalidation` are deferred to [#725](/backlog/725-port-we-only-plug-domains-webguards-webvalidation-their-subs/), not this item.** They are mid-port
+to FUI (#725, itself blocked on the #730 placement fork); authoring their dual-mode tests in WE now would
+duplicate the FUI-side `vitest green` verification #725 must do, against a tree #449 will delete. So #725
+owns their dual-mode backfill (its scope already requires verifying the ported domains green). The
+`PLUG_UNPLUGGED_TEST_ENFORCED` → `true` flip therefore waits on #725 landing — flipping now would turn the
+two remaining warnings into a red gate. Resolved: the stable-domain backfill is complete; the residual is
+tracked on #725, not left untagged.

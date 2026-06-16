@@ -35,3 +35,10 @@ That layer call is not #725's to make quietly, so it's carved to a prepared deci
 `validation-generation` contract→WE / adapters→FUI — both bold-defaulted, ready to ratify). `blockedBy:
 #730` added and `size` bumped **5 → 8** (the audit under-sized it). Released to the pool unworked; resumes
 once #730 ratifies, re-shaped to copy only the impl half + import the WE-resident contract.
+
+**Also owns the `webguards`/`webvalidation` dual-mode (unplugged + plugged) test backfill** — handed off
+from [#637](/backlog/637-backfill-the-dual-mode-unplugged-plugged-plug-test-suite-acr/) (which backfilled
+the four stable domains). Authoring those tests belongs with the port (verify FUI `vitest` green for the
+ported domains), not in WE where the code is about to move. The `PLUG_UNPLUGGED_TEST_ENFORCED` → `true`
+gate-promotion (#636) waits until this lands, since `webguards`/`webvalidation` are the last two domains
+without an unplugged-mode test.
