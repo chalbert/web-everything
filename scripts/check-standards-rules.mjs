@@ -919,10 +919,10 @@ export function validatePlugDualMode(domains) {
 //     `<title>`, and a `<main>` landmark. ERROR: these are structural invariants both layouts satisfy today,
 //     so a regression hard-fails (the value the rendered gate can give only post-render).
 //   • nav active-state wiring (the #762 class) — a `<nav>` holding a hardcoded `<a href=` link list MUST
-//     wire `aria-current` so the current page is distinguishable. WARN until NAV_ACTIVE_STATE_ENFORCED flips:
-//     the live base.njk wires it, but the dead/legacy base.html nav still doesn't (7 links, no aria-current),
-//     so enforcing now would red-gate a pre-existing miss. Promote to ERROR once base.html is cleaned/removed.
-export const NAV_ACTIVE_STATE_ENFORCED = false;
+//     wire `aria-current` so the current page is distinguishable. ENFORCED (#795): the only offending file
+//     was the dead/legacy base.html (7 links, no aria-current), removed in #795; the live base.njk wires
+//     aria-current, so the lane is green and this regression class now hard-fails going forward.
+export const NAV_ACTIVE_STATE_ENFORCED = true;
 
 /**
  * Static a11y lint over the site-chrome layouts. `layouts` = [{ path, content }] (the `src/_layouts/*`
