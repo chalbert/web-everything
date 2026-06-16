@@ -4,7 +4,7 @@ workItem: story
 size: 8
 parent: "658"
 status: open
-blockedBy: ["812", "813"]
+blockedBy: ["813"]
 relatedReport: reports/2026-06-16-697-blocks-deletion-cutover-split-analysis.md
 dateOpened: "2026-06-15"
 dateStarted: "2026-06-16"
