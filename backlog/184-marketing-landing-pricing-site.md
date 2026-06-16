@@ -4,7 +4,7 @@ workItem: story
 size: 3
 parent: "181"
 blockedBy: ["097"]
-status: open
+status: parked
 dateOpened: "2026-06-08"
 tags: [monetization, marketing, landing-page, pricing, webdocs, distribution, infrastructure]
 relatedProject: webdocs
@@ -24,6 +24,9 @@ code → provably-conformant output — the hook), a pricing page wired to check
 ([#183](/backlog/183-payments-merchant-of-record/)), and a download/`npx` CTA.
 Product-agnostic: the demo and copy swap per whichever candidate is the emerging
 MVP ([#097](/backlog/097-roadmap-to-mvp/)).
+
+## Parked 2026-06-16 (batch-2026-06-16)
+`status: parked` — surfaced as "batchable" once its only `blockedBy` (#097) resolved, but #097 resolved as *"the product is too in flux to commit a scope; let the MVP emerge"* — so there is **deliberately no concrete product/pricing** to author copy against, and no single node to wait on (the pricing page also wires to the now-parked #297). Park reflects the real state; unpark when an emerging MVP gives the conversion surface concrete copy + pricing.
 
 ## Note (2026-06-11)
 Re-flagged as **blocked on #097**, not agent-ready. The landing copy and pricing

@@ -4,7 +4,7 @@ workItem: story
 size: 5
 status: open
 parent: "746"
-blockedBy: ["727"]
+blockedBy: ["727", "809"]
 dateOpened: "2026-06-16"
 relatedProject: webdocs
 crossRef: { url: /backlog/447-merge-frontier-ui-s-attribute-lifecycle-runtime-advances-up-/, label: "Attribute-lifecycle runtime (#447)" }

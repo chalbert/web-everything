@@ -4,7 +4,7 @@ workItem: story
 size: 8
 status: open
 parent: "746"
-blockedBy: ["747", "727"]
+blockedBy: ["747", "727", "809"]
 dateOpened: "2026-06-16"
 relatedProject: webtheme
 crossRef: { url: /backlog/364-unified-design-token-theming-system/, label: "webtheme tokens (#364)" }

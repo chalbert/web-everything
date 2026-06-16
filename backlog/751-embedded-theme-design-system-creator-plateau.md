@@ -4,7 +4,7 @@ workItem: story
 size: 5
 status: open
 parent: "746"
-blockedBy: ["747"]
+blockedBy: ["747", "788"]
 dateOpened: "2026-06-16"
 relatedProject: webdocs
 crossRef: { url: /backlog/086-mockup-to-standard-code-tool/, label: "Mockup/screenshot → code (#086)" }

@@ -4,7 +4,7 @@ workItem: story
 size: 5
 status: open
 parent: "746"
-blockedBy: ["786"]
+blockedBy: ["786", "809"]
 dateOpened: "2026-06-16"
 tags: [webdocs, block-explorer, anatomy, graceful-degradation, plateau-embed]
 ---

@@ -4,7 +4,7 @@ workItem: story
 size: 8
 status: open
 parent: "746"
-blockedBy: ["547"]
+blockedBy: ["547", "810"]
 dateOpened: "2026-06-16"
 relatedProject: webdocs
 crossRef: { url: /backlog/507-maas-deterministic-generation-adapter-derive-idiomatic-nativ/, label: "Generation-adapter (#507)" }
