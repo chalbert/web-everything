@@ -7,3 +7,6 @@ test-results/
 .DS_Store
 .env
 .browser-selection.json
+
+# Parcel build cache (trait-enforcer #787 conformance harness)
+.parcel-cache/

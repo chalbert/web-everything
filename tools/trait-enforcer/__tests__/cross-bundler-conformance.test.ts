@@ -33,7 +33,19 @@ import { traitEnforcer } from '../vite-plugin';
 import { traitEnforcerRollup } from '../rollup-plugin';
 import { traitEnforcerEsbuild } from '../esbuild-plugin';
 import { traitEnforcerWebpack } from '../webpack-plugin';
+import { traitEnforcerParcel } from '../parcel-plugin';
+import { runParcelBuild } from './parcel-build-harness';
 import type { TraitMap } from '../traitManifestContract';
+
+/** Parcel stores its plugin opts under this symbol; the conformance test invokes resolve()/loadConfig() through it. */
+const PARCEL_CONFIG = Symbol.for('parcel-plugin-config');
+type ParcelResolverOpts = {
+  loadConfig?: (a: { config: unknown }) => Promise<TraitEnforcerOptions> | TraitEnforcerOptions;
+  resolve: (a: { specifier: string; config: TraitEnforcerOptions }) => { code?: string } | null | undefined;
+};
+const parcelOpts = (r: unknown): ParcelResolverOpts => (r as Record<symbol, ParcelResolverOpts>)[PARCEL_CONFIG];
+/** A minimal Parcel Config stand-in — only the calls the Enforcer's loadConfig makes. */
+const fakeParcelConfig = () => ({ invalidateOnStartup() {}, async getConfig() { return null; } });
 
 // ── The one shared fixture (all three #716 delivery shapes + an unused trait) ──────────────────────
 const VID = DEFAULT_VIRTUAL_ID;
@@ -113,6 +125,14 @@ describe('manifest byte-identity — every adapter serves the one shared core ve
     expect(data.request.startsWith('data:text/javascript,')).toBe(true);
     const decoded = decodeURIComponent(data.request.slice('data:text/javascript,'.length));
     expect(decoded).toBe(EXPECTED_MANIFEST);
+  });
+
+  it('Parcel serves the manifest verbatim from resolve()', async () => {
+    const opts = parcelOpts(traitEnforcerParcel(fixture));
+    // Mode B: loadConfig returns the passed options; resolve() emits the shared-core source for them.
+    const config = (await opts.loadConfig!({ config: fakeParcelConfig() })) as TraitEnforcerOptions;
+    const result = opts.resolve({ specifier: VID, config });
+    expect(result?.code).toBe(EXPECTED_MANIFEST);
   });
 });
 
@@ -262,4 +282,18 @@ describe('chunk isolation — identical across real builds', () => {
     const entry = chunks.find((c) => c.isEntry)!;
     assertIsolation({ entry: entry.code, all: chunks.map((c) => c.code).join('\n') });
   });
+
+  it('Parcel (real build)', async () => {
+    const { entry, all } = await runParcelBuild(
+      {
+        'lazy-trait': { code: stubSource(SPECS.lazy) },
+        'eager-trait': { code: stubSource(SPECS.eager), delivery: 'eager' },
+        'preload-trait': { code: stubSource(SPECS.preload) },
+        'unused-trait': { code: stubSource(SPECS.unused) },
+      },
+      // Uses lazy/eager/preload (preload via the #202 delivery="eager" usage override); never unused.
+      ['<x-grid lazy-trait eager-trait preload-trait preload-trait-delivery="eager"></x-grid>'],
+    );
+    assertIsolation({ entry, all });
+  }, 60_000);
 });

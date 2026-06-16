@@ -7,8 +7,9 @@
  * Conformance that *all* bundlers agree byte-for-byte is the separate #716-gated
  * suite (#722, out of scope here); this proves the installed adapters end-to-end
  * and that every adapter routes through `buildTraitManifestSource`. The Parcel
- * adapter is tracked separately (#746) — Parcel's declarative plugin model can't
- * take the shared `traitEnforcerX(options)` factory shape, a design fork.
+ * adapter (#787, graduating #756) is included below — its declarative plugin model
+ * resolves the #756 config-delivery fork by supporting BOTH modes from one factory
+ * (`traitEnforcerParcel(options?)`): mode B (Map arg) and mode A (declarative loadConfig).
  */
 import { describe, it, expect } from 'vitest';
 import { rollup } from 'rollup';
@@ -21,6 +22,8 @@ import { buildTraitManifestSource } from '../vite-plugin';
 import { traitEnforcerRollup } from '../rollup-plugin';
 import { traitEnforcerEsbuild } from '../esbuild-plugin';
 import { traitEnforcerWebpack } from '../webpack-plugin';
+import { traitEnforcerParcel } from '../parcel-plugin';
+import { runParcelBuild } from './parcel-build-harness';
 import type { TraitMap } from '../traitManifestContract';
 
 const traitMap: TraitMap = {
@@ -143,5 +146,47 @@ describe('webpack adapter — real build', () => {
     } finally {
       rmSync(work, { recursive: true, force: true });
     }
+  });
+});
+
+describe('Parcel adapter — real build (#787, mirrors the webpack case)', () => {
+  it('code-splits a used trait and emits zero bytes for an unused one', async () => {
+    const { all } = await runParcelBuild(
+      {
+        sortable: { code: 'export default { name: "sortable" };' },
+        'export-csv': { code: 'export default { name: "export-csv" };' },
+      },
+      templates, // uses `sortable`, not `export-csv`
+    );
+    // The used trait is present in some bundle; the unused one is tree-shaken from the manifest entirely.
+    expect(all).toContain('sortable');
+    expect(all).not.toContain('export-csv');
+  }, 60_000);
+});
+
+describe('Parcel adapter — config delivery (#756 mode A vs B)', () => {
+  const CONFIG = Symbol.for('parcel-plugin-config');
+  const optsOf = (r: unknown) =>
+    (r as Record<symbol, { loadConfig: (a: { config: unknown }) => Promise<{ traitMap: TraitMap }> }>)[CONFIG];
+
+  it('mode B — uses the Map passed as a JS arg', async () => {
+    const opts = optsOf(traitEnforcerParcel({ traitMap }));
+    const cfg = await opts.loadConfig({ config: { invalidateOnStartup() {}, async getConfig() { return null; } } });
+    expect(cfg.traitMap).toEqual(traitMap);
+  });
+
+  it('mode A — reads the declarative config via loadConfig when no options are passed', async () => {
+    const opts = optsOf(traitEnforcerParcel()); // no options → declarative
+    const declared: TraitMap = { sortable: '/traits/Sortable' };
+    const cfg = await opts.loadConfig({
+      config: {
+        invalidateOnStartup() {},
+        // Stands in for Parcel reading .trait-enforcerrc / package.json#traitEnforcer.
+        async getConfig() {
+          return { contents: { traitMap: declared } };
+        },
+      },
+    });
+    expect(cfg.traitMap).toEqual(declared);
   });
 });

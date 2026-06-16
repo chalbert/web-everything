@@ -3,8 +3,11 @@ type: issue
 workItem: story
 size: 3
 parent: "715"
-status: open
+status: resolved
 dateOpened: "2026-06-16"
+dateStarted: "2026-06-16"
+dateResolved: "2026-06-16"
+graduatedTo: tools/trait-enforcer/parcel-plugin.ts
 tags: [trait-enforcer, tree-shaking, bundler-adapter, parcel]
 ---
 
@@ -39,3 +42,13 @@ Build the fifth trait-enforcer bundler adapter, graduating ratified decision #75
 Child of the trait-tree-shaking epic [#715](/backlog/715/); graduates ratified decision [#756](/backlog/756/)
 (support both delivery modes, default to the factory); follows the webpack adapter [#744](/backlog/744/) and
 completes the cross-bundler conformance suite [#722](/backlog/722/).
+
+## Progress (2026-06-16, batch-2026-06-16) — built
+
+- **Adapter:** [tools/trait-enforcer/parcel-plugin.ts](../tools/trait-enforcer/parcel-plugin.ts) — `traitEnforcerParcel(options?)` returns a Parcel `Resolver` whose `resolve()` matches the virtual specifier and emits `{ filePath, code: buildTraitManifestSource(config) }` (byte-identical shared core). Default export = the no-options (mode A) resolver, so `.parcelrc` registers it by relative path (Parcel ≥ 2.9.0, no published package).
+- **Both #756 delivery modes from one factory:** B (default) — `traitMap` passed as a JS arg, declares `invalidateOnStartup`; A — declarative `loadConfig` via `config.getConfig(['.trait-enforcerrc', …], { packageKey: 'traitEnforcer' })` when no options.
+- **Dev-deps:** added `@parcel/core` + `@parcel/config-default` + `@parcel/plugin`.
+- **Conformance matrix completed (5 bundlers):** [cross-bundler-conformance.test.ts](../tools/trait-enforcer/__tests__/cross-bundler-conformance.test.ts) — **Part A** Parcel manifest byte-identity (invokes the resolver) + **Part B** Parcel **real build** chunk isolation (eager inlined, lazy/preload split, unused = zero bytes) via `assertIsolation`.
+- **Real build harness:** [parcel-build-harness.ts](../tools/trait-enforcer/__tests__/parcel-build-harness.ts) — esbuild-compiles the plugin to a temp `.mjs`, writes `.parcelrc` referencing it by relative path, runs Parcel in a **child Node process** (Parcel's lmdb cache binding breaks under vitest's module env), reads back the bundles. Two Parcel-specific gotchas handled: a leading `/` specifier is project-root-relative in Parcel (use `./`), and the cache is pinned into the temp dir (+ `.parcel-cache/` gitignored).
+- **multi-bundler.test.ts:** Parcel real-build (used/unused split, mirrors the webpack case) + explicit **mode-A `loadConfig`** and mode-B assertions.
+- **Verified:** full trait-enforcer suite **60/60** (incl. 2 real Parcel builds), new files typecheck clean, `check:standards` green.
