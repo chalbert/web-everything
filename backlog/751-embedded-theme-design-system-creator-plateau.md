@@ -4,8 +4,9 @@ workItem: story
 size: 5
 status: open
 parent: "746"
-blockedBy: ["747", "788"]
+blockedBy: ["747", "788", "775", "749"]
 dateOpened: "2026-06-16"
+dateStarted: "2026-06-16"
 relatedProject: webdocs
 crossRef: { url: /backlog/086-mockup-to-standard-code-tool/, label: "Mockup/screenshot → code (#086)" }
 tags: [webdocs, block-explorer, plateau-embed, theme-creator, design-system, lead-gen, dtcg]
@@ -32,3 +33,25 @@ Wire a **"Your theme / design system"** button on the block page that opens an *
 ## Notes
 
 Hard-blocked on **#747** (the manifest format the creator emits). Per the managed-offering constellation layering (#091) the creator is a **Plateau** offering FUI embeds — not built in FUI. Screenshot→tokens should consume the existing #086/#382 pipeline, not re-implement vision (vision is a Plateau service; no-leakage client).
+
+## Blocked-in-fact — the creator + switcher it embeds don't exist yet (2026-06-16, batch-2026-06-16)
+
+Claimed in a batch; verified the prerequisites before building (the #752 sibling was genuinely an
+integration slice because the Plateau Technical Configurator already existed — this one is not). The
+declared blockers (#747 format-decision, #788 transport) are resolved, but #751's *real* dependencies are
+absent:
+
+- **The embeddable Plateau theme/design-system creator does not exist.** No theme/design-system creator
+  surface in `plateau-app/src` (only `profiles/` governance-persona schema mentions "design-system"). The
+  creator is a **separate, still-open `type: decision` — [#775](/backlog/775-design-system-creator-assembler-open-core-layering-simple-fu/)**
+  (the creator/assembler open-core layering, Tier B, ready to ratify but unratified → unbuilt). #751 *embeds*
+  that creator; it can't embed what isn't designed/built.
+- **The live switcher it feeds is unbuilt** — [#749](/backlog/749-live-theme-design-system-switcher/) is
+  `status: open, locus: frontierui`. #751's body ("the created manifest feeds the live switcher #749")
+  presumes it exists.
+- #747 ratified the manifest *format* but `graduatedTo: none` (no concrete schema artifact yet).
+
+So #751 was mis-flagged batchable: its `[747, 788]` edge was satisfied while the load-bearing deps (#775
+creator, #749 switcher) were implicit and open. Fixed the real DAG edge — added `blockedBy: 775, 749`.
+Building the creator here would pre-empt the #775 open-core decision by fiat (a quiet design call this
+batch must not make). Released unworked; resumes once #775 ratifies + the creator and #749 switcher exist.
