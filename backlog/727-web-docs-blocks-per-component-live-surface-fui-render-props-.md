@@ -1,25 +1,64 @@
 ---
 type: idea
 workItem: story
-size: 8
+size: 3
 parent: "623"
 status: open
 dateOpened: "2026-06-15"
 tags: []
 ---
 
-# Web Docs /blocks/ — per-component live surface (FUI render + props/token/a11y panels) on the catalog skeleton
+# Web Docs /blocks/ — uniform live-example slot on every per-component page
 
-The full per-component half of the Web Docs catalog, on top of the shipped /blocks/ index skeleton (#627, src/blocks.njk). Each block's /blocks/{id}/ page gains a live example (real FUI block render via #604's pipeline + the #701 fuiDemo iframe embed, NOT static specs), a props table (from the #626 CEM derivation), a token table, and an a11y panel — the Storybook-equivalent per-component view. Carved from #627 at batch-2026-06-15 once its quick-win index slice shipped.
+Add a structured live-example `section-card` to every `/blocks/{id}/` page that embeds the block's
+Frontier-UI-hosted demo via the `fuiDemo` shortcode, driven by an optional `fuiDemo` field on the block's
+`blocks.json` entry. Today the demo is embedded **ad-hoc** in 8 of 69 per-block includes; this makes it a
+uniform, data-driven slot on the catalog skeleton (#627). The core, buildable-now slice of the
+per-component live surface — the props/token/a11y panels each split off to their own data-sourcing
+decisions (below), since the body's original "props table from the #626 CEM derivation" premise was
+traced false.
 
-## Traced the data sources — false premise on the props table; needs /slice + a build (2026-06-16, batch-2026-06-16)
+## Build
 
-Claimed in a batch and traced the four panels' data sources against the real tree before building. #604 / #701 / #626 are all **resolved** now (the old `blockedBy: 604` + "held, D3-readiness" copy was stale — removed). But the panels split into *available* and *blocked-in-fact*:
+- **Slot in the template.** Add a `section-card` to [`src/block-pages.njk`](../src/block-pages.njk) (it
+  currently includes `block-descriptions/{id}.njk` at `:32-35` with no structured demo slot) that renders
+  `{% fuiDemo block.fuiDemo.file, block.fuiDemo.title, block.fuiDemo.height %}` when the block carries a
+  `fuiDemo` field.
+- **Data field.** Add an optional `fuiDemo: { file, title, height }` to the relevant entries in
+  [`src/_data/blocks.json`](../src/_data/blocks.json) (start with the 8 that already have demos).
+- **De-dupe.** Migrate the 8 ad-hoc `{% fuiDemo … %}` calls out of the `block-descriptions/*.njk`
+  includes (`tabs`, `tooltip`, `nav-list`, `autocomplete`, `for-each`, `view`, `component`,
+  `interpolation-text-node`) into the structured slot so there's one home.
+- The `fuiDemo` shortcode itself already exists ([`.eleventy.js:38`](../.eleventy.js), #701) — no
+  cross-repo import, the demo stays an FUI deliverable behind a sandboxed iframe.
 
-- **Live example — available now.** The #701 `fuiDemo` shortcode exists (`.eleventy.js:38`) and is already used in the per-block `src/_includes/block-descriptions/{id}.njk` includes that `src/block-pages.njk` renders. A uniform live-example slot is a small, real slice.
-- **Props table — blocked-in-fact (false premise).** *"props table from the #626 CEM derivation"* doesn't hold: `custom-elements.json` (68 modules) carries **zero** `members` / `attributes` / `customElement` declarations — every declaration is a plain `class` whose only payload is an `x-webeverything` block (`implementsIntent` + `traits[]`). There is **no prop/attribute data to tabulate.** A real props table needs a richer CEM **generation** step (a CE-manifest analyzer that emits members/attributes) that does not exist — a separate build/decision, not part of this item.
-- **Token table + a11y panel — unverified sources.** Neither has a confirmed on-disk data source either; both need the same "where does this data come from" answer the props table exposed.
+## Acceptance
 
-Note the inversion: the CEM data that **does** exist (`x-webeverything` intent + traits) is exactly the **anatomy/composition** data #748 wants — not props. So #748's static anatomy is buildable off this CEM; #727's props table is not.
+- Every `/blocks/{id}/` page with a `fuiDemo` field renders the live example in a uniform slot; pages
+  without one render no empty slot.
+- The 8 previously-ad-hoc demos render through the structured slot (no duplicate embeds).
+- `npm run check:standards` green; the per-block pages build.
 
-**Action:** released unworked. Needs a `/slice`: (a) the live-example slot (ready now), (b) a **decision/build** to make the CEM emit element members/attributes before any props table, (c) token + a11y data sourcing. Don't batch the whole item until (b) lands.
+## The other three panels are not part of this slice — each carved to a decision
+
+Traced against the real tree (2026-06-16, `/split 727`,
+`reports/2026-06-16-backlog-split-analysis.md`), the props/token/a11y panels each bury a distinct
+"what data, from where" call rather than buildable volume, so each is its own `type:decision`:
+
+- **Props table → [#801](/backlog/801-per-component-api-data-sourcing-for-the-web-docs-props-table/).**
+  The body's "needs a CE-manifest analyzer that does not exist" is stale — the CEM protocol + emit
+  pipeline ([#653](/backlog/653-register-custom-elements-manifest-cem-as-a-we-protocol-emit-/),
+  `scripts/gen-cem.mjs`) and the props-table renderer
+  ([#654](/backlog/654-mint-the-props-table-block-render-custom-elements-manifest-a/),
+  `block-descriptions/props-table.njk`) both shipped. What's missing is *where* the structured
+  per-component API data originates (WE-authored vs an FUI-side analyzer — a WE/FUI boundary call);
+  `custom-elements.json` carries 0 members/attributes today.
+- **Token table → [#802](/backlog/802-per-component-token-table-data-sourcing-for-the-web-docs-blo/).**
+  A per-component token tier exists (`webtheme/defaultTokens.ts:90-104`, button/card) but covers ~2 of 69,
+  is keyed by component name not `block.id`, and `webtheme/` isn't exposed to 11ty — the data wiring +
+  mapping + scope is undecided.
+- **A11y panel → [#803](/backlog/803-per-component-a11y-panel-content-data-sourcing-for-the-web-d/).**
+  No per-component a11y source exists at all (#770 is a route-level axe gate, not per-component metadata);
+  even what the panel shows is unspecified.
+
+Each decision, on ratification, spins out its own panel-integration build slice.
