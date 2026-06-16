@@ -2,8 +2,11 @@
 type: issue
 workItem: story
 size: 1
-status: open
+status: resolved
 dateOpened: "2026-06-16"
+dateStarted: "2026-06-16"
+dateResolved: "2026-06-16"
+graduatedTo: tests/a11y/route-allowlist.ts
 tags: []
 ---
 

@@ -23,10 +23,10 @@ export const WCAG_TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'] as const;
  * 9 of 10 routes cleaned and flipped to enforce in #793 (the warn→enforce ratchet's first big rung): the
  * site-wide color-contrast violations — slate-500 muted text, indigo-500 links/badges, the One-Dark
  * inline-code red, and slate-400 resolved-child text — were remediated at the theme-token level
- * (`src/css/style.css`, `src/css/prism-theme.css`), so these go build-blocking. `/backlog/` is held at
- * warn-only: its remaining hard-coded-hex fixes live in `src/backlog.njk`, which a concurrent session is
- * mid-feature on — flipping it to enforce is carved to its own follow-up so this batch doesn't commit that
- * file's in-progress work. A regression on any enforced route hard-fails. */
+ * (`src/css/style.css`, `src/css/prism-theme.css`), so these go build-blocking. `/backlog/` was the last
+ * route held at warn-only (its remaining hard-coded-hex fixes lived in `src/backlog.njk`); #805 flipped it
+ * once those slate-600 fixes landed and `/backlog/` measured clean under axe — all 10 routes now enforce.
+ * A regression on any enforced route hard-fails. */
 export const GATED_ROUTES: GatedRoute[] = [
   { path: '/', enforce: true },
   { path: '/intents/', enforce: true },
@@ -37,5 +37,5 @@ export const GATED_ROUTES: GatedRoute[] = [
   { path: '/demos/', enforce: true },
   { path: '/governance/', enforce: true },
   { path: '/research/', enforce: true },
-  { path: '/backlog/' }, // warn-only — fix entangled in concurrently-edited src/backlog.njk (#793 follow-up)
+  { path: '/backlog/', enforce: true }, // #805: backlog.njk slate-600 fixes landed + measures clean under axe
 ];
