@@ -4,13 +4,14 @@ workItem: story
 size: 5
 status: open
 parent: "728"
+locus: frontierui
 dateOpened: "2026-06-16"
 tags: [frontierui, embed-sdk, render-mode, iframe, overlay-escape]
 ---
 
 # Build the FUI-owned embed SDK skeleton + render-mode axis (B1 first, per #732)
 
-The foundational embed-SDK build #732 ruled "B1 builds first (carved under #728)" but which was **never actually filed or built** — verified 2026-06-16: no `*embed*` / render-mode code exists anywhere in `frontierui` (`graduatedTo: none` on #732; #728's only children are the decisions #732/#765 and the two *extension* modes #764/#786). Both #764 (B2) and #786 (mode C) are framed as "an additional value of the render-mode axis" of this SDK — they cannot be built until the SDK and its axis exist. Build a FUI-owned, WE-loaded embed SDK behind a stable embed contract (impl→FUI, never the #700 source import) with a render-mode axis: **mode A (contained)** as the free default, **B1 (host-restyle overlay escape)** as the first opt-in; WE's `fuiDemo` shortcode gains the per-demo mode opt-in.
+The foundational embed-SDK build #732 ruled "B1 builds first (carved under #728)" but which was **never filed or built** — verified 2026-06-16: no embed/render-mode code exists in `frontierui` (`graduatedTo: none` on #732; #728's children are only the decisions #732/#765 and the *extension* modes #764/#786). #764 (B2) and #786 (mode C) both extend "the render-mode axis" of this SDK and can't be built until it exists. Build a FUI-owned, WE-loaded embed SDK behind a stable embed contract (impl→FUI, never the #700 source import) with a render-mode axis: **mode A (contained)** the free default, **B1 (host-restyle overlay escape)** the first opt-in; WE's `fuiDemo` shortcode gains the per-demo mode opt-in.
 
 ## Unblocks
 - **#786** (mode C — Shadow-DOM in-document mount) `blockedBy` this — it adds a third value to the axis this item creates.
