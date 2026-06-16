@@ -1,10 +1,12 @@
 ---
 type: issue
 workItem: epic
-status: open
+status: resolved
 locus: frontierui
 dateOpened: "2026-06-15"
 dateStarted: "2026-06-16"
+dateResolved: "2026-06-16"
+graduatedTo: none
 tags: [frontierui, webdocs, public-surface, audit]
 ---
 
