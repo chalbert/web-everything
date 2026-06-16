@@ -961,9 +961,17 @@ ratify, and re-`/split` #611 against the resulting scope.
 
 **Date:** 2026-06-15. Focused run, `/split 100`.
 
-**Verdict: #100 does NOT split (yet)** — no batchable seam exists; the gating fork (the requirement
-**meta-schema format**) is unratified, the staging slices the body endorses stay ≈`size 5` (not ≤3),
-and the foundational surface is greenfield. Tracked below with the unblocking action.
+**Verdict (corrected 2026-06-15): #100 is splittable into staging stories, but not into *batchable*
+work — and is deferred.** The body's A→B→C staging is a real seam (the 2026-06-10 note already called it
+"splittable but deferred"), so this is not "un-splittable." What actually withholds the on-disk split is
+narrower: each staging slice re-estimates ≈`size 5` (above the ≤3 batchable bar — rubric 3), the
+foundational surface is greenfield, and the whole capability is vision-tier deferred — its gating
+meta-schema decision is parked as [#714](../backlog/714-requirement-meta-schema-bdd-like-format-relationship-to-webc.md),
+which #100 now declares via `blockedBy: ["714"]`. The earlier "can't split away a fork" framing
+**overstated** it: the meta-schema is a coherent single authorable design (a recommendation, no flawed
+branch — [[feedback_support_all_coherent_fork_existence_test]]), so rubric (1) is a *deferral*, not a
+hard blocker. Net: split is declined because it wouldn't yield batchable work and the capability is
+deferred — not because no seam exists.
 
 ## Candidate
 
@@ -991,16 +999,21 @@ So the body's A→B→C staging is a **framing, not a tree** — none of A/B/C h
 surface to slice against. The single piece on disk (`driftCheck.ts`) is downstream of #334, unrelated to
 the requirement layer.
 
-## Could not split — #100
+## Why no on-disk split (not "no seam") — #100
 
-| Which rubric condition failed | Detail |
+The A→B→C staging seam exists; the split is declined because it produces no *batchable* work and the
+capability is deferred:
+
+| Reason | Detail |
 |---|---|
-| **(1) size is volume, not an unresolved decision** | Slice A's core is the **requirement meta-schema format** (BDD-like intent/role/state vocabulary), which the body itself marks *"recommended"* — i.e. an unratified fork. *You can't split away a fork.* (The requirement→cases relationship has a recommendation; placement is resolved by #475 — but the **format** is the live, undecided call.) |
-| **(3) slices don't re-estimate to ≤3 / batchable** | The body's own staging (meta-schema+editor → auto-test loop → code-gen) lands each slice ≈`size 5` (per the 2026-06-10 + 2026-06-15 notes), none batchable. Each is a greenfield build (authoring editor UI; a requirement→case generator; a generation path), not a ≤3 wiring task. |
-| **(also step-2 guard) surface doesn't exist yet** | No requirement layer, meta-schema, or webcases case-compiler exists. Slices "straight from the body" would manufacture fake agent-ready work against seams the tree can't confirm. |
+| **(3) slices don't re-estimate to ≤3 / batchable** — *the decisive one* | The body's own staging (meta-schema+editor → auto-test loop → code-gen) lands each slice ≈`size 5` (per the 2026-06-10 + 2026-06-15 notes), none batchable. Each is a greenfield build (authoring editor UI; a requirement→case generator; a generation path), not a ≤3 wiring task. Splitting would yield 3 sub-*stories*, not `/batch`-ready tasks — so it adds tracking surface with no near-term payoff. |
+| **(1) is a deferral, not a hard blocker** | Slice A's core is the **requirement meta-schema format** (BDD-like intent/role/state vocabulary). The body marks it *"recommended"* — a coherent single design with no flawed competing branch, i.e. authorable, not a true multi-branch fork ([[feedback_support_all_coherent_fork_existence_test]]). It's tracked as **parked** #714 (`blockedBy` edge now on #100). So this gates *when* you'd build, not *whether* a seam exists. Placement is resolved by #475. |
+| **surface doesn't exist yet** | No requirement layer, meta-schema, or webcases case-compiler exists. Building the staging stories "straight from the body" is legitimate but greenfield — there are no `file:line` seams to point an agent at today. |
 
-Rubric (1) failing alone is decisive — the conservative instinct ("when a clean seam isn't obvious,
-don't split") applies; this is a far-future vision capability gated on a design decision.
+So the correct call is **decline the split (no batchable win + deferred)**, not "un-splittable." The
+conservative instinct still applies for *now* — this is a far-future vision capability gated on a parked
+design decision (#714) — but the seam is real and the split becomes worthwhile once #714 ratifies and
+slice A is pulled into the near term.
 
 ## Unblocking action
 
@@ -1195,3 +1208,184 @@ auto-applying (it's outside the split-mutation a "go" authorizes). Proposed in-p
 3. Then the item is directly `/batch`-able. **Net flow: 0** (no new items; one item re-sized + de-staled).
 
 I can apply that re-size + body de-stale on a "go" — but it is a card-remediation pass, not a split.
+
+---
+
+# Focused run — `/slice 604` (embed a live FUI-hosted demo on every WE block page)
+
+**Date:** 2026-06-15. #604 is an **unsliced epic** (`workItem: epic`, `size: 8`, no child references it),
+realigned 2026-06-15 by #707 to the iframe-embed boundary (#700/#701). Already decided to decompose; the
+body seeds a droplist-POC → per-block mapping → coverage-rollout shape — verified against the real tree
+below, not drawn from the body.
+
+## Work-investigation pass (what the code actually says)
+
+- **The WE-side per-block work is a one-liner.** A block page hosts a demo by adding a single
+  `{% fuiDemo "X.html", "title", h %}` line to its description partial
+  (`src/_includes/block-descriptions/{id}.njk`), rendered by [block-pages.njk:35](../src/block-pages.njk#L35).
+  The shortcode already ships ([.eleventy.js:38](../.eleventy.js#L38)) and is **already live** on
+  [component.njk:235](../src/_includes/block-descriptions/component.njk#L235) (`/blocks/component/`
+  embeds `component-converter.html`) — so **acceptance #1 is already partly met** and rollout is
+  *extending a working pattern*, not building a seam.
+- **The real gate per block is external: a FUI-hosted demo must exist.** The iframe targets
+  `${FUI_DEMO_BASE}/demos/${demoFile}` ([.eleventy.js:37-39](../.eleventy.js#L37)) — a FUI deliverable.
+  WE cannot author it (no `frontierui` alias in `vite.config.mts`; the #700 boundary).
+- **WE blocks (71 partials) ↔ existing FUI demos (23 `.html`): exact-id intersection is empty; the real
+  mapping is ~7.** FUI's demos are mostly trait/infra surfaces (lazy-traits, positioning, visibility-gate,
+  windowed-scroll, declarative-spa…), not component blocks (dialog, data-grid, drawer, form, menu, wizard…).
+  Blocks with a directly mappable existing FUI demo:
+
+  | WE block | FUI demo (exists) | note |
+  |---|---|---|
+  | `autocomplete` | `autocomplete-unplugged.html` | title *"<auto-complete> — droplist demo"* — a **droplist-family member** → the real POC (the body's `/blocks/dropdown/` has **no** FUI demo) |
+  | `for-each` | `for-each-demo.html` | |
+  | `tabs` | `view-tabs-demo.html` | |
+  | `interpolation-text-node` | `text-interpolation-demo.html` | |
+  | `nav-list` / `nav-section` | `navigation-demo.html` | |
+  | `conditional-view` | `visibility-gate.html` | activate-on-view (#280) |
+  | `tooltip` | `positioning-shift.html` / `anchored-resize.html` | |
+
+- **Consequence.** The original `size: 8` was scoped *"every block,"* but the WE-authorable surface is a
+  handful of one-line adds gated on demos that already exist. The bulk of *"every block"* is
+  **external-gated** (FUI must publish the demo — #705/#398), so it is **not agent-ready WE work** and
+  cannot be sliced into WE stories now.
+
+## Could split — #604 ✅
+
+Two WE-authorable slices, the POC-then-rollout shape the body proposed, repointed off the dead droplist
+POC onto `autocomplete` (a droplist-family member whose FUI demo exists). DAG: **A → B**.
+
+| Slice | type / workItem / size | blockedBy | Files / seam (file:line-citable) | Demoable state |
+|---|---|---|---|---|
+| **A — POC + repeatable pattern + per-block demo-mapping metadata** | idea · **story** · **2** | — | Embed the autocomplete droplist demo on `/blocks/autocomplete/`: add `{% fuiDemo "autocomplete-unplugged.html", … %}` to [autocomplete.njk](../src/_includes/block-descriptions/autocomplete.njk); document the one-line pattern + the demo→block mapping table (a `demoFile` convention in [blocks.json](../src/_data/blocks.json) or the partial); mirror [component.njk:235](../src/_includes/block-descriptions/component.njk#L235) | `/blocks/autocomplete/` shows a live FUI droplist demo next to its code sample (additive — static sample retained) |
+| **B — Roll out to the remaining existing-demo blocks** | idea · **story** · **3** | **A** | One `{% fuiDemo … %}` line each for `for-each`, `tabs`, `interpolation-text-node`, `nav-list`/`nav-section`, `conditional-view`, `tooltip` (~6 blocks) in their description partials, each pointing at the mapped existing FUI demo above | each page gains a live demo next to its code sample |
+
+**Rubric:** (1) volume not a fork — mechanism shipped (#701), boundary settled (#707/#700); the only
+"open" body question is answered by the external constraint (below), not a fork ✅ · (2) 2 nameable slices,
+real home (`src/_includes/block-descriptions/`) ✅ · (3) A=2 / B=3, no buried fork, files `file:line`-citable
+✅ · (4) A → B, incremental delivery (A ships a working demo + the pattern; B mechanically repeats) ✅ ·
+(5) each leaves a demoable state, static sample retained throughout ✅.
+
+## Could not split — #604
+
+| Scope | Failed condition | Unblocking action |
+|---|---|---|
+| **Full coverage — the other ~60 blocks** (dialog, data-grid, drawer, form, menu, wizard, stepper…) | **(2)/(3): no agent-ready WE work** — the FUI demo each iframe would point at **does not exist** | FUI publishes the per-block demo (**#705** derived catalog / **#398** Web Docs product). A per-block one-line follow-on story files **demand-driven** as each demo lands — not scaffolded now (would manufacture fake-ready work). |
+| **Overlay/modal-heavy blocks** (dialog, drawer, menu, notification, popover) | **(5): an iframe clips overlays meant to cover the page** — no valid demoable state at v1 | Deferred to **#728**'s modal-alternatives investigation (oversized frame · `postMessage` overlay · DI-mount). Explicitly deferred per the epic's own acceptance #5 — already tracked by #728, no new card. |
+
+**The epic's "Open (resolve at slice time)" coverage-floor question** (*"representative set vs every
+block?"*) is **answered by the external constraint, not a genuine fork**: most demos don't exist, so the
+floor is "representative set across existing-demo blocks (A+B); rollout demand-driven as FUI demos land."
+Not blocking, not a `type:decision` card — de-bury it (replace the inline question with this resolution)
+when the epic's body is refreshed.
+
+## Recommended mutation — #604 (gated on one "go")
+
+#604 is already an epic (no story→epic conversion) — but it **kept `size: 8`**, which `check:standards`
+errors on once it has sized children (double-count). So:
+
+1. **Drop `size: 8`** from #604; refresh the digest to the umbrella framing + the coverage-floor
+   resolution; keep `status: open`, keep `NNN`. (Replace the inline "Open (resolve at slice time)" bullet
+   with the resolution above.)
+2. **Scaffold A**: `--type=idea --workitem=story --size=2 --parent=604 --digest="…"` — POC + pattern +
+   demo-mapping metadata (autocomplete droplist demo).
+3. **Scaffold B**: `--type=idea --workitem=story --size=3 --parent=604 --blocked-by=<A's NNN> --digest="…"`
+   — rollout to the remaining existing-demo blocks.
+4. Gate on `npm run check:standards`; confirm backlog count rose by 2.
+
+Net flow on approval: **+2** (A, B); #604 stays an open epic, `size` dropped. A is immediately
+`/batch`-able; B unblocks on A → `/batch` walks the chain. The ~60-block full-coverage rollout stays
+external-gated (#705/#398); overlay-heavy blocks stay deferred to #728.
+
+---
+---
+
+# Focused re-run of `/split 359` (date / time / range picker block — post-#713 ratification)
+
+**Scope:** Focused run, `/split 359`. #359 is `story · size 13`, `parent: 315`, `blockedBy: ["713"]`.
+The blocker — the scope fork "are single-value pickers variants of one block, or their own blocks?" —
+was **ratified 2026-06-15 as [#713](../backlog/713-date-time-picker-scope-single-value-pickers-as-359-variants-.md) option C**
+(one abstract `temporal` core block + named shallow preset blocks `date-picker`/`time-picker`/
+`datetime-picker`/`date-range-picker` + variant traits in `traitMap` + a build-chunk assertion). #359's
+own body named the re-slice trigger: *"Once #713 ratifies, re-run `/split 359` against the decided
+shape."* The fork is settled, so the slice shape is now drawable.
+
+**Verdict: #359 splits (partial)** — 2 batchable standards slices carved (matching the sibling
+gap-fix pattern) + 1 greenfield-impl residual filed as a tracking child (re-slice after the standards
+land and the first WE trait establishes the pattern).
+
+## Work-investigation pass (what's on disk today)
+
+| Surface a slice would need | State | Evidence (file:line) |
+|---|---|---|
+| `intent:temporal` (the UX axis to realize) | **EXISTS, `status: concept`** | [intents.json:1389-1411](../src/_data/intents.json#L1389) — dimensions `presentation: media\|linear\|input` × `granularity: point\|range\|multi` already modeled; **no block realizes it** |
+| The `temporal` core block + any date/time/range block | **GREENFIELD** | no `date`/`time`/`calendar`/`temporal`/`picker` block in [blocks.json](../src/_data/blocks.json); `picker-surface` (3460) is the unrelated symbol-picker grid |
+| Native anchors (the native-first baseline) | **EXISTS (platform)** | `input[type=date\|time\|datetime-local]` — three distinct anchors (the concrete platform reason #713 C gives for named presets that slider's single anchor lacked) |
+| Sibling gap-fix pattern (the precedent shape) | **STANDARDS-ONLY** | drawer [blocks.json:3311](../src/_data/blocks.json#L3311) · dialog [:3286](../src/_data/blocks.json#L3286) · notification [:3241](../src/_data/blocks.json#L3241) · breadcrumb [:3268](../src/_data/blocks.json#L3268) · carousel [:3330](../src/_data/blocks.json#L3330) · slider [:3175](../src/_data/blocks.json#L3175) — **all `blocks.json` entries, zero impl dirs** (`block:<id>` graduations, sizes 2-5, one story each) |
+| Slider precedent (native-first, variants over one anchor) | **EXISTS** | [blocks.json:3175-3192](../src/_data/blocks.json#L3175) — single + dual-thumb = one block over `input[type=range]` |
+| Trait infra (the impl substrate #713 names) | **SHIPPED but EMPTY** | `traitEnforcer({ traitMap: {} })` [vite.config.mts:104](../vite.config.mts#L104) — Enforcer is live (#448/#484 ✓) but **zero traits are authored in WE**; no `blocks/temporal/`, no `CustomAttribute` trait module to model seams against |
+| Demo registry + dev-server fallback pattern | **EXISTS, copyable** | [demos.json](../src/_data/demos.json) + [demos/](../demos/) |
+
+**The decisive read: #359's gap-fix deliverable is the *standards layer*, matching its resolved
+siblings.** Every sibling gap-fix under #315 (drawer #360, dialog #376, notification #358, breadcrumb
+#362, carousel #363, slider #361) graduated as a `blocks.json` entry **with no impl dir** — a `block:<id>`
+standards artifact, single story, size 2-5. #713's "variant traits in `traitMap` + build-chunk
+assertion" describes the *eventual impl build property* (it reasoned about bundle isolation), not the
+gap-fix's standards deliverable. So the standards entries (the activated intent + the core + named
+presets) cleave cleanly from the greenfield trait impl — exactly the agent-ready / needs-foundation line.
+
+## Could split — #359
+
+#359 **has `parent: 315`**, so per the split edge-case it is **not** converted to a nested epic — it
+stays a re-sized `story` for its core slice, with the rest added as **siblings under #315**.
+
+| Slice | type / workItem / size | blockedBy | Files / seam (file:line-citable) | Demoable state |
+|---|---|---|---|---|
+| **A (= re-scoped #359)** — activate `intent:temporal` + abstract `temporal` core block + first native anchor (`date-picker`) | idea · **story** · **3** | — (#713 ✓) | Flip [intents.json:1391](../src/_data/intents.json#L1391) `status: concept → active`; NEW abstract `temporal` block entry in [blocks.json](../src/_data/blocks.json) (`implementsIntent: temporal`, `composesIntents: [temporal, locale, input, focus-delegation]`, native-input anchoring, design decisions citing #713 C + the slider precedent [:3175](../src/_data/blocks.json#L3175)); NEW `date-picker` shallow preset pinning `presentation: media`/`granularity: point` over `input[type=date]` | `/intents/temporal/` renders active; `/blocks/` lists the `temporal` core + `date-picker` preset (same render path the sibling gap-blocks use) |
+| **B** — the remaining named preset blocks | idea · **task** · **2** | **A** | NEW `time-picker` (`input[type=time]`, `presentation: media\|linear`), `datetime-picker` (`input[type=datetime-local]`), `date-range-picker` (`granularity: range`) preset entries in [blocks.json](../src/_data/blocks.json), each pinning dims + binding its native anchor, design decision = "thin preset over the `temporal` core, not a re-impl" | `/blocks/` lists all four named presets; catalog parity with #468's inventory + design-system `DatePicker`/`TimePicker` |
+
+### Slice DAG
+
+```
+#713 ✓ ──▶ A (#359: intent:temporal + temporal core + date-picker) ──▶ B (time / datetime / range presets)
+                                                                   └──▶ C (impl: variant traits + build-chunk assertion — tracking child, re-slice)
+```
+
+A → B is incremental (B's presets reference A's core); C waits on both and is re-sliced once A lands the
+WE trait pattern.
+
+### Rubric check (A, B)
+
+| Condition | Verdict |
+|---|---|
+| Size is volume, not an unresolved decision | ✅ #713 ratified C (the whole decomposition); no fork survives in A/B |
+| ≥2 nameable slices, each a real home | ✅ both land in `blocks.json`/`intents.json` (the catalog) — the exact home every sibling gap-fix used |
+| Each slice ≤ 3 / `task`, named files | ✅ A=3 (intent flip + core + 1 preset), B=2 (3 preset entries); files citable |
+| Acyclic DAG, real independence or incremental delivery | ✅ A→B incremental, each demoable alone |
+| Every slice leaves a valid demoable state | ✅ A: intent active + core/date-picker in catalog; B: full preset set in catalog (sibling precedent proves blocks.json-entry-only is a complete graduation) |
+| Split doesn't cost quality | ✅ seam mirrors #713 C (one core machinery, named native-anchored presets) and the sibling standards-first pattern; no cohesive unit fragmented |
+
+## Could not split (yet) — #359 impl (variant traits + build-chunk assertion)
+
+| Piece | Which condition failed | Unblocking action |
+|---|---|---|
+| **Temporal block impl** — `calendar-grid` / `clock` / `range-coordination` as separate `CustomAttribute` trait modules, registered in `traitMap`, presets declaring them as HTML attributes, + the build-chunk assertion (#713: "a time-only fixture pulls no calendar chunk") | **(3) re-estimates > 3 + not investigable to ≤3 seams yet.** WE has **zero authored traits** (`traitMap: {}`, [vite.config.mts:104](../vite.config.mts#L104)) and no `blocks/temporal/`; the droplist traits #713 cites live in **FUI**, not WE. Drawing 3 per-trait slices now guesses seams before the first WE trait + the core block establish the authoring pattern (calendar-grid alone — month grid + APG roving 2-D keyboard + `Intl` — is ~size 3). | **Land A (+B), authoring the first trait alongside the core block to establish the WE trait pattern**, then re-`/slice` C into per-trait tasks (`calendar-grid`, `clock`, `range-coordination`) + a build-chunk assertion task. Filed below as a tracking child (`blocked-by: A, B`) so the DAG is honest — **not** a same-pass batchable slice. **Locus watch-item (not a fork):** #713 placed the trait build in WE (full Enforcer parity), but the FUI block-impl migration (#658) owns running block impl — confirm WE-vs-FUI ownership at re-slice time; #713 already decided WE owns the trait authoring, so this is a re-estimate concern, not an open decision. |
+
+## Recommended mutation — #359 (gated on one "go")
+
+#359 keeps `parent: 315` → **sibling-under-315 edge case** (no epic conversion, no nesting):
+
+1. **Re-scope #359 in place** → keep `type: idea`/`workItem: story`, set `size: 13 → 3`, **clear
+   `blockedBy: ["713"]`** (resolved), keep `parent: "315"`, keep `status: open`, keep `NNN`; refresh the
+   digest to **slice A** (activate `intent:temporal` + abstract `temporal` core + `date-picker` preset),
+   replacing the "blocked on #713" note with the #713 C resolution + the re-slice pointer.
+2. **Scaffold B**: `--type=idea --workitem=task --size=2 --parent=315 --blocked-by=359 --digest="…"` —
+   the `time-picker` / `datetime-picker` / `date-range-picker` named presets.
+3. **Scaffold C (tracking child)**: `--type=idea --workitem=story --size=8 --parent=315
+   --blocked-by=359,<B's NNN> --digest="…"` — temporal block impl (variant traits in `traitMap` +
+   build-chunk assertion); re-slice after A lands the first WE trait.
+4. Gate on `npm run check:standards`; confirm the backlog count rose by 2 (B, C).
+
+Net flow on approval: **+2** (B, C); #359 re-scoped `story·13 → story·3` (now batchable), siblings under
+#315. A is immediately `/batch`-able; B unblocks on A; C waits on A+B and is re-sliced later → `/batch`
+walks A then B.
