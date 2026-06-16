@@ -2,9 +2,11 @@
 type: decision
 workItem: story
 size: 5
-status: open
+status: resolved
 dateOpened: "2026-06-16"
 dateStarted: "2026-06-16"
+dateResolved: "2026-06-16"
+graduatedTo: none
 preparedDate: "2026-06-15"
 relatedReport: reports/2026-06-15-device-capacity-provider.md
 tags: [capabilities, provider-seam, device-capacity, client-hints, composite, delegation]
@@ -68,7 +70,7 @@ mandated):
 |---|---|---|---|
 | **1 — where the capacity axis lives** | Separate `CapacityProvider` contract, same registration + venue machinery | Overload `CapabilityProvider` with capacity ids | High |
 | **2 — capacity output shape** | Expose **both** raw scalar and a derived coarse bucket | Bucket-only (or scalar-only) | Med-high |
-| **3 — how providers combine** | `CompositeProvider` routing by check-domain | Chain / fallback composition | High |
+| **3 — how providers combine** | `CompositeProvider` routing by check-domain | Status quo (single provider per scope) | High |
 
 ## Supported by default (not decisions)
 
@@ -129,6 +131,9 @@ keeps a raw measurement *and* derives a coarse bucket the call site actually con
 provider per scope; the user wants per-check routing (feature checks → runtime feature-detection,
 capacity → the GPU lib, network → edge `Save-Data`).
 
+**The actual fork is A vs C — whether to add per-check routing at all.** (B below is *not* a third
+branch on this ballot; it composes with whichever wins. See "Not a branch" after the options.)
+
 - **A — a `CompositeProvider` that routes by check-domain.** *(recommended)* A provider holding a
   `{ domain → provider }` map that dispatches each query to its configured source, satisfying the
   **same** interface so the `native-first` resolver ([`resolver.ts:180`](../capabilities/resolver.ts#L180))
@@ -136,12 +141,59 @@ capacity → the GPU lib, network → edge `Save-Data`).
   Fork 1's sibling provider (feature domain → `CapabilityProvider`, capacity domain → `CapacityProvider`).
   *Sub-decision:* route by **coarse domain** (feature / capacity / network as the registration unit)
   rather than per-id — the natural, enumerable granularity; default **by-domain**.
-- B — chain/fallback composition (try provider 1, fall through on "unknown"). Answers a *different*
-  need (redundancy/graceful degradation, not per-check routing) and **composes** with A rather than
-  rivalling it — a domain's provider can itself be a fallback chain. So it is a **supported, additive
-  follow-up**, not a competing branch; not built as the primary mechanic now.
 - C — leave selection single-provider-per-scope (status quo). *Rejected* — denies the explicit ask for
   per-check routing; the broken branch only if the user wanted nothing here, which is not the case.
+
+**Not a branch — B (chain/fallback) composes with A; it is not selected *against* A.** B is a
+fallback chain (try provider 1, fall through on "unknown"). It answers a *different* need
+(redundancy/graceful degradation, not per-check routing), so it **nests inside** A rather than rivalling
+it: A is always the outer router, and any one slot of A's `{ domain → provider }` map can hold a B
+fallback chain as its provider (e.g. `capacity → [edgeProvider, then CapacityProvider]`). The composite
+calls that slot's provider unchanged. So ratifying A ships **exactly one** built thing (the router);
+B is a **supported, additive follow-up** — not built now, becoming worth building the first time a real
+domain needs fallback. It is listed here only to record that "we might want fallback later" is **not** a
+reason to reject the simple by-domain map now.
+  - *Considered & set aside as the primary router: a `canDetect(dimension)` predicate on each provider*
+    (the chain-of-responsibility / capability-introspection shape; idiomatic here — `isNative(impl)`
+    at [`provider.ts:86`](../capabilities/provider.ts#L86) is already a `can*` predicate). It looks
+    like a more granular alternative to the by-domain map, but it is **not a rival to 3-A** — it is a
+    *spelling of this 3-B fallback chain* (ask each provider in turn, first that claims the dimension
+    wins), not a routing-granularity choice. Two reasons it doesn't displace the by-domain map as the
+    primary mechanic: **(1)** the case it would buy — non-uniform signal availability across venues
+    (edge answers `deviceMemory` but not `cores`/GPU) — is *already* covered by the orthogonal
+    `undefined`-means-unknown / `PlatformSupport` degrade contract ([`venues.ts:51`](../capabilities/venues.ts#L51)):
+    by-domain decides *ownership*, the degrade contract decides *availability in this venue*, and
+    folding them into one predicate conflates two axes. **(2)** A by-domain map is statically
+    inspectable (read one line → know the source) and unambiguous by construction; `canDetect` makes
+    routing runtime-resolved and needs a precedence rule when two providers both claim a dimension.
+    Where it **does** earn a place: as the fallthrough predicate *inside* a 3-B fallback chain it is
+    cleaner than catching on `undefined` — an implementation detail of this additive follow-up, not a
+    change to the 3-A primary mechanic.
+
+## Decision — ratified 2026-06-16
+
+All three forks ratified at their recommended defaults; the rulings compose (A+A+A).
+
+- **Fork 1 → A.** A separate `CapacityProvider` contract, sibling to `CapabilityProvider`, reusing the
+  same #206 registration table, `Venue` dimension, and `PlatformSupport` degrade contract. Measured
+  scalars and feature tiers keep distinct value semantics → distinct contracts; the lib read registers
+  as a resolver impl (*impl-is-not-a-standard*), not as a new shape on the feature contract.
+- **Fork 2 → A.** A capacity read exposes **both** the raw scalar (`deviceMemory: 8`, `cores: 8`) and a
+  derived coarse bucket (`'high' | 'mid' | 'low'`, or the GPU `tier`). Most-permissive output (nothing
+  hidden) and the only shape that survives a bucketed-only edge source (`Sec-CH-Device-Memory`).
+- **Fork 3 → A, by-domain.** A `CompositeProvider` routes by coarse check-domain via a
+  `{ domain → provider }` map, satisfying the same interface so resolver + venue selection run
+  unchanged. B (fallback chain) is **not** rejected — it nests inside a slot of A's map as an additive
+  follow-up, built only when a domain needs fallback.
+  - **By-domain is non-restrictive, not a separation mandate** *(ratification note).* The map does not
+    *force* splitting sources across domains — the **same** provider may be registered for every
+    domain, which collapses the composite straight back to single-provider behaviour. So the worst case
+    of "I don't actually want per-domain sources" costs nothing: register one provider everywhere. The
+    by-domain map is a *capability* a project opts into per-domain, never an obligation.
+
+The build is a separately-prioritized follow-up, gated on this ruling via a `blockedBy` chain (see the
+spin-off items below). No entity exists yet, so this decision graduates to `none`; the spin-off builds
+graduate to the `CapacityProvider` / `CompositeProvider` entities when implemented.
 
 ## Context — relationship to prior work
 
