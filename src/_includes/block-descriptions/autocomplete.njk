@@ -3,12 +3,6 @@
 <h2>Autocomplete — the editable, filterable droplist</h2>
 <p>The <strong>autocomplete</strong> is the richest concrete member of the <a href="/blocks/droplist/">droplist family</a>: an editable <code>&lt;input role="combobox"&gt;</code> bound to a separate <code>role="listbox"</code> surface, where typing <em>narrows</em> the collection rather than seeking within it. It is the one member that splits the substrate across two elements — the input is the focus host, the listbox is the collection — which is exactly what authoring it pressure-tests. As a form-associated custom element (<code>&lt;auto-complete&gt;</code>) it participates in <code>&lt;form&gt;</code> submission, <code>FormData</code>, reset, and validity, and it mirrors the WAI-ARIA APG <a href="https://www.w3.org/WAI/ARIA/apg/patterns/combobox/">Combobox</a> (<code>aria-autocomplete="list"</code>) pattern.</p>
 
-<h3 id="try-it-live">Try it live</h3>
-<p>The droplist-family runtime is a Frontier&nbsp;UI deliverable, so its playground is hosted there and
-embedded here — type to filter the collection, arrow to preview, Enter to commit. (Frontier&nbsp;UI dev
-server on <code>:3001</code>; in production this points at the published Frontier&nbsp;UI demos host.)</p>
-{% fuiDemo "autocomplete-unplugged.html", "Autocomplete — editable, filterable droplist", 520 %}
-
 <h3>The one idea that unlocks it — focus host ≠ collection</h3>
 <p>In the <a href="/blocks/dropdown/">dropdown</a>, one element played two roles: the <code>&lt;ul role="listbox"&gt;</code> was <em>both</em> the focus host (it took <code>tabindex=0</code> and received keydown) <em>and</em> the collection holding the options. Autocomplete breaks that: DOM focus must stay on the <code>&lt;input&gt;</code> so typing is never interrupted — so the input is the <strong>focus host</strong> while the <code>&lt;ul&gt;</code> remains the <strong>collection</strong>. They are two different elements, and that single separation is the whole story of how autocomplete differs. Everything else follows from it:</p>
 <blockquote>

@@ -114,6 +114,7 @@
   },
   {
     "id": "autocomplete",
+    "fuiDemo": { "file": "autocomplete-unplugged.html", "title": "Autocomplete — editable, filterable droplist", "height": 520 },
     "name": "Autocomplete",
     "status": "draft",
     "type": "Component",
@@ -567,6 +568,7 @@
   },
   {
     "id": "for-each",
+    "fuiDemo": { "file": "for-each-demo.html", "title": "For Each — declarative list rendering", "height": 460 },
     "name": "For Each",
     "status": "active",
     "type": "Directive",
@@ -760,6 +762,7 @@
   },
   {
     "id": "view",
+    "fuiDemo": { "file": "visibility-gate.html", "title": "The Visibility Gate — activate on view", "height": 460 },
     "name": "View",
     "status": "active",
     "type": "Module",
@@ -944,6 +947,7 @@
   },
   {
     "id": "tabs",
+    "fuiDemo": { "file": "view-tabs-demo.html", "title": "View + Tabs", "height": 460 },
     "name": "Tabs",
     "status": "active",
     "type": "Component",
@@ -2103,6 +2107,7 @@
   },
   {
     "id": "interpolation-text-node",
+    "fuiDemo": { "file": "text-interpolation-demo.html", "title": "Text interpolation", "height": 460 },
     "name": "InterpolationTextNode",
     "status": "active",
     "type": "Behavior",
@@ -2114,6 +2119,7 @@
   },
   {
     "id": "nav-list",
+    "fuiDemo": { "file": "navigation-demo.html", "title": "Navigation", "height": 460 },
     "name": "Navigation",
     "status": "active",
     "type": "Module",
@@ -2200,6 +2206,7 @@
   },
   {
     "id": "component",
+    "fuiDemo": { "file": "component-converter.html", "title": "Component converter — declarative → class", "height": 520 },
     "name": "Component",
     "status": "concept",
     "type": "Directive",
@@ -3155,6 +3162,7 @@
   },
   {
     "id": "tooltip",
+    "fuiDemo": { "file": "positioning-shift.html", "title": "Anchored positioning — shift", "height": 460 },
     "name": "Tooltip",
     "status": "draft",
     "type": "Component",

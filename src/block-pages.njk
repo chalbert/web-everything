@@ -35,6 +35,13 @@ eleventyComputed:
             {% include "block-descriptions/" + block.id + ".njk" %}
         </div>
 
+        {% if block.fuiDemo %}
+        <div class="section-card mt-8">
+            <h2>Live example</h2>
+            {% fuiDemo block.fuiDemo.file, block.fuiDemo.title, block.fuiDemo.height %}
+        </div>
+        {% endif %}
+
         {% if block.implementsIntent %}
         <div class="section-card mt-8">
             <h2>Implements Intent</h2>

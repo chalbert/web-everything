@@ -3,8 +3,10 @@ type: idea
 workItem: story
 size: 3
 parent: "623"
-status: open
+status: resolved
 dateOpened: "2026-06-15"
+dateStarted: "2026-06-16"
+dateResolved: "2026-06-16"
 tags: []
 ---
 
@@ -62,3 +64,9 @@ Traced against the real tree (2026-06-16, `/split 727`,
   even what the panel shows is unspecified.
 
 Each decision, on ratification, spins out its own panel-integration build slice.
+
+## Progress (resolved 2026-06-16)
+- Added the uniform **Live example** `section-card` to [`src/block-pages.njk`](../src/block-pages.njk) — renders `{% fuiDemo block.fuiDemo.file, block.fuiDemo.title, block.fuiDemo.height %}` only when the block carries a `fuiDemo` field (no empty slot otherwise).
+- Added optional `fuiDemo: { file, title, height }` to the 8 entries in [`src/_data/blocks.json`](../src/_data/blocks.json) that already had demos (`tooltip`, `nav-list`, `tabs`, `autocomplete`, `for-each`, `interpolation-text-node`, `component`, `view`) — surgical splice, JSON re-validated.
+- De-duped: removed the ad-hoc `{% fuiDemo … %}` calls (+ their now-redundant "Try it live" stanzas) from all 8 `block-descriptions/*.njk` includes — one home for the embed.
+- Verified: 11ty dryrun builds clean; rendered `/blocks/tooltip/` shows the **Live example** slot + `fui-demo-frame` and no stray "Try it live"; `check:standards` green.
