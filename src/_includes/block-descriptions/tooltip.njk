@@ -5,6 +5,11 @@
   <p><strong>A tooltip describes; it does not name.</strong> It is wired with <code>aria-describedby</code> (supplementing the trigger's own accessible name), never <code>aria-label</code> (which would <em>replace</em> the name and lose it whenever the bubble is hidden). It is non-interactive — focus can never live inside it.</p>
 </blockquote>
 
+<h3 id="try-it-live">Try it live</h3>
+<p>The anchored-positioning runtime is a Frontier&nbsp;UI deliverable, so the demo is hosted there and embedded here.
+(Frontier&nbsp;UI dev server on <code>:3001</code>; in production this points at the published Frontier&nbsp;UI demos host.)</p>
+{% fuiDemo "positioning-shift.html", "Anchored positioning — shift", 460 %}
+
 <h3>Native-first — the three-rung ladder</h3>
 <p>The browser already ships most of a tooltip. The default <strong>extends</strong> the platform rather than reimplementing it; a custom bubble is the last rung, reached only when content or positioning demands it. Each rung is a superset of the one below.</p>
 <table>

@@ -3,6 +3,10 @@
 
 <h2>Protocol: For Each</h2>
 <p>Iterates over a collection (Array, Observable, or Promise) and stamps a template for each item.</p>
+<h3 id="try-it-live">Try it live</h3>
+<p>The runtime is a Frontier&nbsp;UI deliverable, so the demo is hosted there and embedded here.
+(Frontier&nbsp;UI dev server on <code>:3001</code>; in production this points at the published Frontier&nbsp;UI demos host.)</p>
+{% fuiDemo "for-each-demo.html", "For Each — declarative list rendering", 460 %}
 <h3>Virtual Implementation</h3>
 <p>Uses Custom Comments (e.g. <code>&lt;!-- control:for-each --&gt;</code>) to mark the list boundaries. This behaves like a Repeater without a wrapper element.</p>
 <h3>Usage Example</h3>
