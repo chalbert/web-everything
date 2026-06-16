@@ -40,6 +40,16 @@ It renders an `<iframe src="${FUI_DEMO_BASE}/demos/<demo-file>.html">` with FUI 
 is the FUI dev server (`:3001`) by default, or the published demos host via `FUI_DEMO_BASE` in prod —
 nothing is imported across repos.
 
+> **The WE↔FUI in-document exception (#765, ratified 2026-06-16).** The "never renders FUI in its own
+> document" boundary is an *ownership* rule (FUI owns the impl **and** its rendering), not an
+> *iframe-mechanism* mandate. For the **trusted WE↔FUI pair only**, a future opt-in render mode (**mode C**)
+> may mount a FUI component **in-document** behind a **shadow root** via FUI's runtime embed SDK — FUI's SDK
+> still does the rendering, so impl→FUI is untouched; only the iframe is dropped, letting native top-layer
+> overlays escape with zero coordination (#732's escape modes A/B1/B2 stay the host-side alternative). It is
+> **never** the #700 source import (no `frontierui` alias), **never** for third parties (they iframe
+> permanently), and the **iframe stays the default** — a demo opts into C only where fidelity warrants. The
+> mode-C build is a separately-prioritized child under #728.
+
 **Demo→block mapping convention (so new blocks roll out as one-liners):**
 - The mapping is **declared in the block's description partial** (`src/_includes/block-descriptions/<block>.njk`)
   as a single `{% fuiDemo … %}` line under a `<h3 id="try-it-live">Try it live</h3>` section — not in

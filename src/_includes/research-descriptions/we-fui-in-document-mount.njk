@@ -1,0 +1,149 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Prep research for the isolation-boundary decision
+  (<a href="/backlog/765-relax-the-we-fui-isolation-boundary-for-an-in-document-di-mo/">#765</a>) — carved
+  from the overlay-escape ruling
+  (<a href="/backlog/732-overlay-modal-escape-for-embedded-demos-iframe-box-vs-host-r/">#732</a>), itself a
+  child of the embed-mechanism epic
+  (<a href="/backlog/728-component-embedding-capability-embed-a-live-component-exampl/">#728</a>). The
+  constellation states an <strong>absolute</strong> docs-rendering boundary —
+  <em>"WE never imports or renders FUI block code in its own document"</em>
+  (<code>docs/agent/demo-workflow.md:31</code>); WE surfaces a FUI block only by embedding its FUI-hosted
+  demo through the sandboxed <code>fuiDemo</code> iframe (<code>.eleventy.js:38</code>). #732 ruled that
+  overlay escape is solved <em>host-side over the iframe</em> (modes A / B1 / B2) and recorded a fourth
+  mode — <strong>C, an in-document / DI mount</strong> that drops the iframe and mounts the FUI component
+  directly in WE's host DOM — as <em>"no longer never: a future trust-gated option for the WE↔FUI pair
+  only."</em> #765 decides whether to <strong>relax the boundary to sanction C, or keep the iframe wall
+  absolute.</strong>
+</p>
+
+<h2>The decisive finding — in-document mount escapes natively; an iframe structurally cannot</h2>
+<p>
+  The whole fidelity argument turns on the <strong>top layer</strong>. A <code>&lt;dialog&gt;</code> (or a
+  <code>popover</code> element) <em>inside a shadow root</em> can <code>showModal()</code> /
+  <code>showPopover()</code> and <strong>promote to the host document's top layer</strong>, painting above
+  all page content — true even for a <em>closed</em> shadow root
+  (<a href="https://open-ui.org/components/popover.research.explainer/">Open UI — Popover explainer</a>:
+  "even shadow dom children can be promoted to the top layer"). The top layer ignores DOM position, makes
+  the rest of the page <code>inert</code>, and <code>::backdrop</code> covers the whole viewport
+  (<a href="https://developer.mozilla.org/en-US/docs/Web/API/Popover_API">MDN — Popover API</a>). An iframe
+  <em>cannot</em> do this — its top layer is its own document's, confined to its box (the exact constraint
+  <a href="/research/iframe-overlay-escape/">#732's research</a> established). So a Shadow-DOM-mounted FUI
+  component gets <strong>native, page-covering overlays with zero coordination</strong> — no
+  <code>postMessage</code> / promote / backdrop protocol — where A/B1/B2 simulate escape host-side. That is
+  the fidelity C buys, and it is iframe-impossible.
+</p>
+
+<h2>Shadow DOM scopes style + DOM — but is not a JS/security sandbox</h2>
+<p>
+  Page CSS can't reach into the shadow tree and shadow styles don't leak out;
+  <code>document.querySelector</code> can't see internals
+  (<a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_shadow_DOM">MDN</a>). But
+  JavaScript is <strong>not</strong> isolated — one shared global scope, and <code>closed</code> is "not a
+  strong security mechanism." Inheritable CSS properties and custom properties <strong>pierce in by
+  design</strong> — the intended theming channel
+  (<a href="https://open-wc.org/guides/knowledge/styling/styles-piercing-shadow-dom/">open-wc</a>). So
+  encapsulation is <em>structural, not a trust boundary</em> — which is precisely why it suits a
+  <em>trusted</em> pair: it tidies CSS/DOM bleed without pretending to sandbox sibling-author code it has no
+  need to distrust.
+</p>
+
+<h2>Every in-document composition model assumes first-party trust — and iframe isolation is for the
+  untrusted case</h2>
+<ul>
+  <li>
+    <strong>Micro-frontends mount into a shared runtime, presuming same-org trust.</strong> single-spa,
+    Module Federation and Web Components mount independently-built UI into one document and one global
+    runtime; none sandboxes, and the docs frame teams "within reason as defined by the organization"
+    (<a href="https://single-spa.js.org/docs/recommended-setup/">single-spa</a>). The composition spectrum
+    runs document-boundary (iframe) → lifecycle (single-spa) → runtime-module (Module Federation):
+    <em>decreasing isolation, increasing fidelity</em>.
+  </li>
+  <li>
+    <strong>Embed vendors iframe the untrusted surface, script the trusted orchestration.</strong> "An
+    iframe is inherently more secure than a script… embedding a script is an act of faith"
+    (<a href="https://www.roboleary.net/blog/code-embeds/">roboleary</a>). Stripe/Checkout iframe
+    <em>sensitive</em> card fields for origin isolation + reduced PCI scope; a host-mounted script
+    orchestrates. The named axis: "Isolation buys safety, tight integration buys UX"
+    (<a href="https://www.appmixer.com/blog/javascript-sdk-vs-iframe">Appmixer</a>).
+  </li>
+  <li>
+    <strong>Iframe isolation exists <em>for cross-org untrusted content</em></strong> — "to render
+    untrusted content… while preventing harm outside the frame"
+    (<a href="https://arxiv.org/pdf/2001.03643/">arxiv</a>). A first-party in-process script runs with the
+    embedding origin's full privileges. This is the platform's own justification for the exception: WE's
+    "never" is a <em>cross-organization</em> rule, and <strong>WE↔FUI is one constellation, same author,
+    complete trust</strong> (the same reasoning #732 used to bring its embed-SDK host glue in-process).
+  </li>
+</ul>
+
+<h2>The residual risks the "keep absolute" branch weighs</h2>
+<p>
+  Even a trusted in-document mount carries real cost — Shadow DOM mitigates some, not all:
+</p>
+<ul>
+  <li><strong>CSS bleed</strong> — scoped by Shadow DOM, but inheritable props / custom properties still
+    pierce in <em>by design</em>.</li>
+  <li><strong>Shared globals + duplicate runtime</strong> — not a Shadow-DOM concern; a documented
+    micro-frontend hazard (double-loaded frameworks, jsonp collisions).</li>
+  <li><strong>Custom-element name collisions</strong> — <code>customElements.define</code> is one-shot per
+    tag name per document; two definitions throw.</li>
+  <li><strong>Supply-chain surface</strong> — first-party in-process code runs with full page privileges;
+    CSP governs <em>which origins</em> load, not in-page privilege
+    (<a href="https://www.w3.org/TR/csp-embedded-enforcement/">w3c — CSP Embedded Enforcement</a>).</li>
+</ul>
+<p>
+  Against these, C buys <em>fidelity only</em> — A/B1/B2 already cover overlay escape (#732). So the
+  honest framing is: a clean, absolute, easy-to-reason isolation invariant vs. a narrow, principled
+  exception that earns native fidelity for WE's own dogfooding surface.
+</p>
+
+<h2>Classification against the architecture</h2>
+<ul>
+  <li><strong>Layer.</strong> #765 is an <strong>architecture / governance</strong> ruling — a
+    constellation boundary policy — and spawns no entity. The mount itself is <strong>impl→FUI</strong>: a
+    render mode of the FUI embed SDK (settled by #732), a runtime FUI-published bundle, never the
+    <a href="/backlog/700-component-converter-playground-placement/">#700</a>-ruled-out build-time source
+    import.</li>
+  <li><strong>Protocol, or impl detail? (Q2)</strong> Neither — a trust/isolation policy. The render-mode
+    axis {iframe A/B1/B2, in-document C} is a <em>dimension</em> of the FUI embed SDK, not a minted
+    protocol.</li>
+  <li><strong>Fixed or dimension? (Q4)</strong> The render mode is a per-demo/per-surface dimension; the
+    genuine call is the <em>policy</em> — does the boundary admit C at all.</li>
+  <li><strong>DI-injectable? (Q5)</strong> C <em>is</em> the DI / in-document mount. Isolation technique is
+    an SDK impl choice — Shadow DOM is forced (it dominates light-DOM: same native overlay escape, plus
+    style/DOM scoping).</li>
+  <li><strong>Most-permissive default? (Q6)</strong> The relaxation is <em>narrow</em>: iframe (A) stays
+    the default even for WE; C is the opt-in. Isolation-by-default is the safe baseline.</li>
+  <li><strong>Seam (Q7).</strong> The WE-docs-host ↔ FUI-component seam — the #700 constellation-layering
+    boundary; relaxing it is a deliberate, narrowly-scoped change to that seam, not a general opening.</li>
+</ul>
+
+<h2>Recommendation at a glance</h2>
+<p>
+  One genuine call (the boundary policy); the guard conditions are forced invariants, not weighs:
+</p>
+<ul>
+  <li><strong>The genuine fork</strong> — relax the boundary, or keep it absolute. Recommended
+    <strong>relax, narrowly gated</strong>: sanction mode C as a future, trust-gated, WE↔FUI-only,
+    runtime-SDK-delivered, Shadow-DOM-isolated, opt-in render mode. Confidence <strong>med-high</strong> —
+    the platform framing + complete intra-constellation trust support it, but it punctures a stated
+    <em>absolute</em> invariant for a <em>fidelity-only</em> gain.</li>
+  <li><strong>Forced invariants if relaxed</strong> — runtime FUI SDK bundle only (never #700 source
+    import) · WE↔FUI only (third parties iframe forever) · Shadow-DOM-encapsulated mount required · opt-in,
+    iframe-default · impl FUI-owned.</li>
+  <li><strong>Settled by #732 / #700</strong> — C is not needed for escape (fidelity only); C rides the
+    runtime SDK; the render-mode axis already exists on the embed SDK.</li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li>Decision: <a href="/backlog/765-relax-the-we-fui-isolation-boundary-for-an-in-document-di-mo/">#765</a> (this prep)</li>
+  <li>Parent ruling: <a href="/backlog/732-overlay-modal-escape-for-embedded-demos-iframe-box-vs-host-r/">#732</a> — overlay escape (A/B1/B2; recorded C as future)</li>
+  <li>Sibling research: <a href="/research/iframe-overlay-escape/">iframe-overlay-escape</a> — the per-document top-layer constraint</li>
+  <li>Epic: <a href="/backlog/728-component-embedding-capability-embed-a-live-component-exampl/">#728</a> — embed-mechanism capability</li>
+  <li>Boundary seam: <a href="/backlog/700-component-converter-playground-placement/">#700</a> — cross-repo import (ruled out; C rides runtime SDK instead)</li>
+  <li>v1 mechanism: <a href="/backlog/701-iframe-based-component-viewer-embed-fui-hosted-standard-demo/">#701</a> — the <code>fuiDemo</code> iframe shortcode</li>
+</ul>
+{% endraw %}
