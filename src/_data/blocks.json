@@ -1756,6 +1756,45 @@
     ]
   },
   {
+    "id": "flex-row",
+    "name": "FlexRow",
+    "status": "concept",
+    "type": "Component",
+    "summary": "Intrinsic auto-flow container that flows and wraps its children by the space actually available to it, realizing the Breakpoint Intent at scope:container. Native-first: the default is CSS @container queries / flex-wrap; ResizeObserver is named as the implementation substrate for environments without container-query support (impl-is-not-a-standard, like CSS Anchor Positioning under webpositioning). The standard-worthy surface is the semantic vocabulary + container-query wiring + the ResizeObserver fallback contract — not the flex CSS itself.",
+    "implementsIntent": "breakpoint",
+    "intentDimensions": {
+      "scope": "container"
+    },
+    "designDecisions": {
+      "containerScoped": {
+        "description": "Children reflow against the container box, never the viewport — a FlexRow nested anywhere adapts to its own column, not the window.",
+        "rationale": "This is the whole point of scope:container (ratified in #467): content-flow altitude responsiveness that composes regardless of where the component is placed, unlike viewport media queries."
+      },
+      "nativeFirstFlow": {
+        "description": "Default flow/wrap is pure CSS — `display:flex; flex-wrap:wrap` inside a `container-type:inline-size` context with @container thresholds. No script runs when the platform supports it.",
+        "rationale": "Native-first default aligns to the web platform; the block adds vocabulary and a fallback contract, not a JS layout engine. A consumer cannot be conformant to bare `flex-wrap`, so the standard-worthy part is the semantic naming + wiring, not the CSS."
+      },
+      "resizeObserverFallback": {
+        "description": "Where @container is unavailable, a ResizeObserver on the container drives the same step thresholds, emitting the identical reflow contract so authored markup is unchanged across both paths.",
+        "rationale": "ResizeObserver is the implementation substrate (impl-is-not-a-standard), mirroring how CSS Anchor Positioning sits under webpositioning. The fallback is a graceful-degradation contract, not a separate protocol."
+      }
+    },
+    "webStandards": {
+      "containerQueries": {
+        "usage": "`container-type: inline-size` + `@container` size queries provide the native, script-free reflow path; the FlexRow steps map onto container-query thresholds.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_containment/Container_queries"
+      },
+      "flexWrap": {
+        "usage": "`flex-wrap: wrap` provides the intrinsic auto-flow of children into as many rows as the available inline space allows.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/flex-wrap"
+      },
+      "resizeObserver": {
+        "usage": "The non-container-query fallback substrate — observes the container box and re-evaluates the step thresholds on resize, emitting the same reflow contract.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/ResizeObserver"
+      }
+    }
+  },
+  {
     "id": "breakpoint-observer",
     "name": "Breakpoint Observer",
     "status": "concept",

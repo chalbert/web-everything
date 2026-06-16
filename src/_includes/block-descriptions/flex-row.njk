@@ -1,0 +1,30 @@
+<p>
+    <strong>FlexRow</strong> is an intrinsic auto-flow container: it flows and wraps its children by the
+    space <em>actually available to it</em>, realizing the <a href="/intents/breakpoint/">Breakpoint Intent</a>
+    at <code>scope: container</code> (ratified in <a href="/backlog/467-responsive-container-query-layout-placement-new-project-vs-i/">#467</a>).
+    A FlexRow nested anywhere adapts to its own column, never the viewport — this is content-flow altitude
+    responsiveness, distinct from the app-shell <a href="/intents/layout/">layout</a> intent.
+</p>
+
+<h3>Native-first — the standard is the contract, not the CSS</h3>
+<p>
+    A consumer cannot be <em>conformant</em> to bare <code>flex-wrap</code>. The standard-worthy surface is the
+    <strong>semantic vocabulary + the container-query wiring + the ResizeObserver fallback contract</strong> —
+    not the flex CSS. The default path is pure platform:
+</p>
+<ul>
+    <li><strong>Container queries</strong> — a <code>container-type: inline-size</code> context with
+        <code>@container</code> thresholds drives reflow with no script running.</li>
+    <li><strong><code>flex-wrap: wrap</code></strong> — provides the intrinsic auto-flow of children into as
+        many rows as the available inline space allows.</li>
+    <li><strong>ResizeObserver fallback</strong> — where <code>@container</code> is unavailable, a
+        <code>ResizeObserver</code> on the container re-evaluates the same step thresholds and emits the
+        identical reflow contract, so authored markup is unchanged across both paths.</li>
+</ul>
+
+<p>
+    <code>ResizeObserver</code> is named here as the <em>implementation substrate</em>
+    (<a href="/backlog/020-base-select-first-class-adapter/">impl-is-not-a-standard</a>), the same way CSS Anchor
+    Positioning sits under <a href="/projects/webpositioning/">Web Positioning</a> — a graceful-degradation
+    contract, not its own protocol.
+</p>
