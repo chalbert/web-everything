@@ -5,7 +5,7 @@ size: 8
 status: open
 locus: frontierui
 parent: "170"
-blockedBy: ["649", "730"]
+blockedBy: ["649", "730", "804"]
 dateOpened: "2026-06-15"
 dateStarted: "2026-06-16"
 relatedReport: reports/2026-06-14-plugs-runtime-audit.md
@@ -42,3 +42,15 @@ the four stable domains). Authoring those tests belongs with the port (verify FU
 ported domains), not in WE where the code is about to move. The `PLUG_UNPLUGGED_TEST_ENFORCED` → `true`
 gate-promotion (#636) waits until this lands, since `webguards`/`webvalidation` are the last two domains
 without an unplugged-mode test.
+
+## Blocked again — the #730 import surface doesn't exist yet (2026-06-16, batch-2026-06-16)
+
+Claimed in a batch after #730 ratified; re-evaluated the closure at claim-time before copying anything.
+The #730 ruling (A1+B1+C2) keeps the contract halves in WE and has **FUI import them from `@webeverything`** —
+but that consumable surface **does not exist**: the WE package is `web-everything` (unscoped) with **no
+`exports` map**, FUI carries **no `@webeverything` dependency**, and `capability-manifest/` +
+`validation-generation/` are on no published path. So "copy the impl half + import the WE-resident contract"
+can't proceed — there is nothing to import from. Carved the prerequisite to
+**[#804](/backlog/804-establish-the-we-contract-export-package-surface-consumable-/)** (decide + build how WE
+exposes its standard contracts to FUI as a package, then export the two contracts + add the FUI dep);
+`blockedBy: #804` added. Released to the pool unworked; resumes once #804 lands the import surface.
