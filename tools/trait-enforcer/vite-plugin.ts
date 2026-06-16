@@ -261,20 +261,34 @@ function collectPreloadTraits(
   return preload;
 }
 
+/** The default virtual module id the manifest is served under, shared by every bundler adapter. */
+export const DEFAULT_VIRTUAL_ID = 'virtual:trait-manifest';
+
+/**
+ * The bundler-agnostic core (#717): scan usage + generate the trait-manifest
+ * source string, with **no** bundler dependency. Every per-bundler Enforcer
+ * (Vite, Rollup, webpack, esbuild, Parcel) calls this so they emit byte-identical
+ * manifests from the same input — the #716 contract realized once. Pure: the only
+ * IO is reading the scanned `.html` files under `include`.
+ */
+export function buildTraitManifestSource(options: TraitEnforcerOptions): string {
+  const { traitMap, include = ['demos', 'src'], templates = [], scanUsage = true } = options;
+  const names = Object.keys(traitMap);
+  const used = scanUsage ? collectUsedTraits(names, templates, include) : new Set(names);
+  // The per-usage delivery="eager" override is always scanned (it's a usage-site
+  // hint, independent of the usage tree-shake toggle).
+  const preload = collectPreloadTraits(names, templates, include);
+  return generateManifestModule(traitMap, used, preload);
+}
+
 /**
  * The Enforcer Vite plugin. Serves the generated trait manifest at the virtual
- * module id (default `virtual:trait-manifest`).
+ * module id (default `virtual:trait-manifest`). Thin glue over the shared
+ * {@link buildTraitManifestSource} core.
  */
 export function traitEnforcer(options: TraitEnforcerOptions): Plugin {
-  const {
-    traitMap,
-    include = ['demos', 'src'],
-    templates = [],
-    scanUsage = true,
-    virtualId = 'virtual:trait-manifest',
-  } = options;
+  const virtualId = options.virtualId ?? DEFAULT_VIRTUAL_ID;
   const resolvedId = '\0' + virtualId;
-  const names = Object.keys(traitMap);
 
   return {
     name: 'web-everything-trait-enforcer',
@@ -285,11 +299,7 @@ export function traitEnforcer(options: TraitEnforcerOptions): Plugin {
 
     load(id) {
       if (id !== resolvedId) return undefined;
-      const used = scanUsage ? collectUsedTraits(names, templates, include) : new Set(names);
-      // The per-usage delivery="eager" override is always scanned (it's a usage-site
-      // hint, independent of the usage tree-shake toggle).
-      const preload = collectPreloadTraits(names, templates, include);
-      return generateManifestModule(traitMap, used, preload);
+      return buildTraitManifestSource(options);
     },
   };
 }
