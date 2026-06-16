@@ -37,10 +37,23 @@ research dump. To *make* a prepared (or un-prepared) call, that's `/next decisio
    not a story mid-build (#375). Emit the rename slug. Claiming guards against a concurrent session
    preparing the same fork — prep is claimable work like any other.
 
-## Doing the prep — the three passes, in order
+## Doing the prep — the passes, in order (standing test first)
 
-Run the three documented passes on the claimed item, **editing the item on disk** (not just chat) — the
+Run the documented passes on the claimed item, **editing the item on disk** (not just chat) — the
 durable output is the rewritten body, not a message:
+
+0. **Standing test FIRST — is each concern even a fork? Support-both before you pick** (`backlog-workflow.md`
+   → *"Standing test before any of the above — is this even a decision?"*). Before classifying or
+   authoring a default, run the **fork-existence test** on every concern: are its branches genuinely
+   *mutually-exclusive* end-states, or just *different coherent approaches that can all be supported* (often
+   from **one artifact** — e.g. a single factory serving both delivery modes)? If they can coexist and
+   neither is *flawed*, **it is not a decision** — author it as a **"Supported by default"** entry, never a
+   `## Fork N` with a recommended pick. A concern is a real fork only when (a) exactly one branch is correct
+   and the alternative is *broken* (a forced invariant → ratify), or (b) two coherent branches *cannot*
+   coexist (a genuine either/or). **If you can't name the broken/excluded branch, there is no fork — support
+   all of them.** Running the per-fork "recommended default · main alternative" machinery on a support-both
+   concern manufactures a false pick (the #756 miss: A and B were composable from one `traitEnforcerParcel`
+   factory, so the call was *support both, default to the factory* — not "ratify B, reject A").
 
 1. **Prior-art research first — never author a fork cold** (*Fork-readiness pass* → first bullet). If
    the decision authors/designs anything greenfield (a new intent/block/plug/protocol/adapter, or any
@@ -65,9 +78,12 @@ durable output is the rewritten body, not a message:
    decomposing the concern into orthogonal axes, each pinned to **concrete `file:line` refs into the
    real tree** (go read the code, cite it — an authored snippet never substitutes); a **"recommended
    path at a glance" preview table** (one row per fork: *recommended default · main alternative ·
-   confidence* — confidence flags where judgment is actually needed); and **one `## Fork N` section per
-   open fork** (crux-with-refs → options **A/B/…** named with tradeoffs → **bold** default → *Rejected*
-   branches with reason → any sub-decision). **Author the default to survive a red-team** — at ratify
+   confidence* — confidence flags where judgment is actually needed; **only genuine forks get a row** —
+   support-both concerns from pass 0 go in the **"Supported by default"** list, not the table); and **one
+   `## Fork N` section per open fork** (crux-with-refs → options **A/B/…** named with tradeoffs → **bold**
+   default → *Rejected* branches with reason → any sub-decision). A row whose "main alternative" isn't
+   actually *excluded* (you can't say why it's broken or why it can't coexist) is a pass-0 miss — demote it
+   to "Supported by default" rather than forcing a default. **Author the default to survive a red-team** — at ratify
    time the decider attacks the branch you recommend (`backlog-workflow.md` → *"Red-team the default"*:
    argue the alternative + name the principle the default violates). So ground the default's rationale
    against the real tree now, and where a fork is high-leverage flag it for the deciding agent's skeptic
