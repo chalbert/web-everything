@@ -2,8 +2,11 @@
 type: idea
 workItem: story
 size: 8
-status: open
+status: resolved
 dateOpened: "2026-06-14"
+dateStarted: "2026-06-16"
+dateResolved: "2026-06-16"
+graduatedTo: scripts/auth-capture/captureAuthed.mjs
 tags: [tooling, screenshot, exercise-app, conformance, infra]
 crossRef: { url: /backlog/610-design-sweep-navigation-menus-closed-open-states-live-naviga/, label: "Sibling — logged-out live-nav sweep (#610)" }
 ---
@@ -59,3 +62,35 @@ it as decision-inflated is in [reports/2026-06-15-backlog-split-analysis.md](/re
 - **Sized 13 → 8 (2026-06-15):** the +5 was the unresolved boundary decision (now in #709, resolved),
   not volume — restored to its pre-inflation build size. Re-enters `/split` only if the build volume
   itself warrants slicing.
+
+## Built (2026-06-15, batch-2026-06-15)
+
+Shipped the repo-local helper at [scripts/auth-capture/](../scripts/auth-capture/) (internal dev tooling,
+no Plateau service, no owned-domain infra — #709's settled shape), built on the design-refs provider
+pattern (pure builders + thin env-gated wrappers):
+
+- **[mailSource.mjs](../scripts/auth-capture/mailSource.mjs)** — the source-agnostic core: a provider
+  registry + the two pure shared pieces, `aliasAddress` (the `screenshots+<site>` identity off one mailbox)
+  and `extractToken` (pull a magic-link URL or OTP code — numeric or, opt-in, upper-alnum — out of a body).
+- **The three-tier mail-source ladder** (#709, simplest-first), one provider module each with pure
+  request/parse builders + a thin `fetch`-injectable wrapper:
+  [providers/mailpit.mjs](../scripts/auth-capture/providers/mailpit.mjs) (tier 1 — our exercise apps' dev
+  mail sink, no account), [providers/gmail.mjs](../scripts/auth-capture/providers/gmail.mjs) (tier 2 —
+  dedicated Gmail via the Gmail API + `+`-aliasing, BYO OAuth token), and
+  [providers/mailtm.mjs](../scripts/auth-capture/providers/mailtm.mjs) (tier 3 — throwaway disposable inbox).
+- **[captureAuthed.mjs](../scripts/auth-capture/captureAuthed.mjs)** — `waitForToken` (poll a source until
+  the token arrives; source-/clock-agnostic via injected `sleep`, so it's tested with a fake source and no
+  real waiting) + `runAuthCapture` (the Playwright flow: submit the alias → `waitForToken` → open the link /
+  type the OTP → screenshot each authenticated state; Playwright imported **lazily** so the module imports
+  without a browser).
+- **Secrets discipline:** [.env.example](../scripts/auth-capture/.env.example) template; the real
+  `scripts/auth-capture/.env` is gitignored by the repo-wide `.env` rule; a dedicated `screenshots+*`
+  identity, never real mail. [README.md](../scripts/auth-capture/README.md) documents the ladder, the API,
+  and usage.
+
+**Tests** ([__tests__/authCapture.test.mjs](../scripts/auth-capture/__tests__/authCapture.test.mjs)):
+aliasing, token/magic-link extraction, the registry, every provider's pure builders, and `waitForToken`'s
+poll-until-arrives + timeout — **22 green**, no network/browser/credential. A live end-to-end run needs a
+real target + (tier 2) a provisioned Gmail token; the owned-domain catch-all stays deferred (#709).
+`check:standards` shows 0 errors from this work (the 1 red present is a concurrent session's untracked
+#730 prep report, not in this changeset).
