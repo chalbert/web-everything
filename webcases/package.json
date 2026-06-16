@@ -1,0 +1,9 @@
+{
+  "name": "@webeverything/webcases",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "exports": {
+    "./requirementValidator": "./requirementValidator.ts"
+  }
+}
