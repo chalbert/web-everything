@@ -4,7 +4,7 @@ workItem: story
 size: 8
 status: open
 parent: "746"
-blockedBy: ["547", "810"]
+blockedBy: ["811"]
 dateOpened: "2026-06-16"
 relatedProject: webdocs
 crossRef: { url: /backlog/507-maas-deterministic-generation-adapter-derive-idiomatic-nativ/, label: "Generation-adapter (#507)" }
@@ -32,6 +32,12 @@ Expose the **adapters** in the Block Explorer: a panel that generates this block
 
 Consumes the deterministic IR→emit generation-adapter core (**#547**, now resolved) — the same machinery as the MaaS server-origin generation (#463/#505/#507), surfaced for *component* targets. Conformance badges consume the cross-language conformance suite (**#506**, resolved). The "create your own adapter" path is mostly doc at this point, per the brainstorm.
 
-## Open question — emitter targets unverified (2026-06-16, batch-2026-06-16)
+## Emitter targets — verified absent, substrate decision filed (#810 → #811)
 
-#547/#506 are resolved, so the old "hard-blocked on #547" framing no longer holds and the `blockedBy` is satisfied. But the **real** open question for this panel was not confirmed against the tree this session: does #547's core actually **emit runnable per-framework component output** (React/Vue/Svelte/Angular/native WC) that the live sandbox can execute and badge? The panel's "generate across frameworks + live-test each" centrepiece depends on those per-target emitters existing, not just the IR core. **Verify the emitter-target surface before claiming this** — if the framework emitters don't exist yet, that's a prerequisite build to file, and this item is `blockedBy` it. Large feature regardless; a focused session, not a batch tail.
+**Answered (2026-06-16, batch-2026-06-16).** #810 verified the emitter surface against the tree: forward
+per-framework component emitters **do not exist**, and no existing neutral substrate forward-emits to them
+(#547 is server-origin generation off `ServePathIR` — wrong axis; the upgrader `ComponentIR` is ingest-only
+and emits the WE declarative form; `htmlToJsx` is a tree-level JSX *pane* mirror). So this panel is **not**
+a "consume #547 for components" build — it's gated on choosing the forward-emit substrate first. That fork
+is now **#811** (decide substrate + per-framework emitter architecture), and this item is `blockedBy: [811]`.
+Once #811 resolves, the emitter build is a separate focused item. Large feature regardless; not a batch tail.
