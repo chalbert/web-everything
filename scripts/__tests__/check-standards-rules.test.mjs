@@ -20,7 +20,7 @@ import {
   validateReportsNotHidden, findCompiledShadows, isSegmentCovered, permalinkSegment,
   validateViteProxyCoverage, deDateReport,
   isExportsSafeTarget, validateModuleResolutionLock, findRawHtmlInMarkdown,
-  findBuriedForkSections, findUnquotedColonScalars, findBadBodyLinks,
+  findBuriedForkSections, findUnquotedColonScalars, findBadBodyLinks, findNonBatchableMarkers,
   deriveResearchFreshness, addIsoDuration, RESEARCH_REVIEW_HORIZON_DEFAULT,
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, PLUG_UNPLUGGED_TEST_ENFORCED,
@@ -531,6 +531,42 @@ describe('findBuriedForkSections — a fork section in a non-decision body (#441
   it('returns [] for an empty or non-string body', () => {
     expect(findBuriedForkSections('')).toEqual([]);
     expect(findBuriedForkSections(undefined)).toEqual([]);
+  });
+});
+
+describe('findNonBatchableMarkers — body asserts non-batchability (mis-flagged-batchable lint)', () => {
+  const marks = (body) => [...new Set(findNonBatchableMarkers(body).map((h) => h.marker))];
+
+  it('flags the recurring disqualifier phrases', () => {
+    expect(marks('Size 8 — not batchable as one; re-slice under #658.')).toEqual(['not batchable', 're-slice']);
+    expect(marks('The deliverable is external infrastructure a code-session agent cannot stand up.'))
+      .toEqual(['external infra', 'agent cannot provision']);
+    expect(marks('Re-flagged **blocked-in-fact**; this is a human-in-the-loop build.'))
+      .toEqual(['blocked-in-fact', 'human-in-the-loop']);
+  });
+
+  it('matches a backticked slash-command marker (inline code is NOT stripped here)', () => {
+    // The #774 shape: the disqualifier is written as a backticked command.
+    expect(marks('**Needs a `/decision` (or `/prepare`) pass** to settle scope.')).toEqual(['needs prep/decision']);
+  });
+
+  it('reports the body line number', () => {
+    const f = findNonBatchableMarkers('# Title\n\nfine line\nnot batchable here');
+    expect(f).toEqual([{ line: 4, marker: 'not batchable' }]);
+  });
+
+  it('skips markers inside a fenced code block (a sample is not an assertion)', () => {
+    const body = '```\n// not batchable — a code comment sample\n```\nreal prose, fine.';
+    expect(marks(body)).toEqual([]);
+  });
+
+  it('does not fire on an unrelated, genuinely-batchable body', () => {
+    expect(marks('Add a uniform live-example slot to every /blocks/ page. Wire the shortcode.')).toEqual([]);
+  });
+
+  it('returns [] for an empty or non-string body', () => {
+    expect(findNonBatchableMarkers('')).toEqual([]);
+    expect(findNonBatchableMarkers(undefined)).toEqual([]);
   });
 });
 

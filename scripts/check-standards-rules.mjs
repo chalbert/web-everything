@@ -309,6 +309,61 @@ export function findBuriedForkSections(body) {
   return findings;
 }
 
+// ── Mis-flagged-batchable lint: a batchable item whose body asserts non-batchability ──────────────
+// The `--select` loader derives `batchable` from STRUCTURED fields only (Tier A + size ≤ 8 + all
+// `blockedBy` resolved). The disqualifier that actually makes an item un-workable often lives only in
+// PROSE — a buried fork, an author "not batchable as one; re-slice" note, an "external infra" / "agent
+// cannot provision" deliverable, a "blocked-in-fact" / "open question" caveat. When that prose is
+// present but the flags still compute `batchable`, the loader over-reports agent-readiness and every
+// batch pre-flight re-rejects the item by hand instead of fixing the data (the recurring slip this
+// lint kills — see memory `feedback_misflagged_batchable_fix_real_state`).
+//
+// The caller restricts this to `item.batchable === true`, so the lint SELF-CLEARS the moment the real
+// state is encoded: retyping to `decision`, bumping `size` to ≥13, parking, or adding the real
+// `blockedBy` edge all drop the item out of `batchable`, and the warning vanishes with no further
+// edit. The only items it fires on are exactly those still computed-batchable while their body says
+// otherwise. WARNING, not error: prose heuristics aren't proof, and the fix is a deliberate re-flag.
+//
+// Each entry is [label, regex]. Kept high-signal to limit false positives (a passing mention like
+// "this is NOT external infra" can trip it — the message says "encode the real state or reword").
+export const NON_BATCHABLE_MARKERS = [
+  ['not batchable', /\bnot\s+batchable\b/i],
+  ['re-slice', /\bre-?slice\b/i],
+  ['blocked-in-fact', /\bblocked[-\s]in[-\s]fact\b/i],
+  ['external infra', /\bexternal\s+infra(structure)?\b/i],
+  ['human-in-the-loop', /\bhuman[-\s]in[-\s]the[-\s]loop\b/i],
+  ['needs prep/decision', /\bneeds\s+(a\s+)?[`/]*(prep|prepare|decision)\b/i],
+  ['agent cannot provision', /\b(agent\s+cannot|cannot\s+(stand\s+up|provision|be\s+(built|done|stood)))\b/i],
+  ['unverified prerequisite', /\b(verify|unverified|unconfirmed)\b[^.\n]{0,60}\bbefore\s+(claim|build)/i],
+];
+
+/**
+ * Scan a backlog markdown body for non-batchability MARKERS (frontmatter already stripped by the
+ * caller). Skips fenced + inline code (mirrors findRawHtmlInMarkdown) so a sample/path doesn't trip it.
+ * Returns `{ line, marker }` per hit; the caller restricts this to `item.batchable === true` items and
+ * groups the distinct markers per item. Pure.
+ */
+export function findNonBatchableMarkers(body) {
+  const findings = [];
+  if (typeof body !== 'string' || body === '') return findings;
+  let fenceChar = null, fenceLen = 0;
+  body.split('\n').forEach((line, i) => {
+    const fm = line.match(/^\s*(`{3,}|~{3,})/);
+    if (fenceChar) {
+      if (fm && fm[1][0] === fenceChar && fm[1].length >= fenceLen) { fenceChar = null; fenceLen = 0; }
+      return;
+    }
+    if (fm) { fenceChar = fm[1][0]; fenceLen = fm[1].length; return; }
+    // Scan the raw line (fenced blocks already skipped). Unlike the raw-HTML lint we do NOT strip
+    // inline code spans: these markers are natural-language phrases and authors routinely backtick the
+    // slash-commands inside them (e.g. "needs a `/decision`"), which must still match.
+    for (const [label, rx] of NON_BATCHABLE_MARKERS) {
+      if (rx.test(line)) findings.push({ line: i + 1, marker: label });
+    }
+  });
+  return findings;
+}
+
 // ── Bad-body-link lint: leaked authoring syntax in a backlog body ──────────────
 // A backlog body is rendered at `/backlog/<id>/` on the 11ty site, so a link that only resolves in the
 // repo/editor (or not at all) renders as dead text or a 404 for a reader. Three recurring leaks:

@@ -21,7 +21,7 @@ import {
   checkStatus, validateProtocol, validatePreset, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, permalinkSegment, validateViteProxyCoverage,
   validateModuleResolutionLock, findRawHtmlInMarkdown, findBuriedForkSections,
-  findUnquotedColonScalars, findBadBodyLinks,
+  findUnquotedColonScalars, findBadBodyLinks, findNonBatchableMarkers,
   RESEARCH_REVIEW_HORIZON_DEFAULT, deriveResearchFreshness,
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, validateTemplateA11y,
@@ -435,6 +435,30 @@ for (const item of backlog) {
     `body — if it's a live design fork, carve it to a type:decision item that blocks this one; if it's ` +
     `already resolved or deferred elsewhere, reframe the heading or cite the decision (#NNN). ` +
     `See docs/agent/backlog-workflow.md → the carve rule.`);
+}
+
+// ── 6d-septies. Mis-flagged-batchable lint — body asserts non-batchability but flags compute batchable ──
+// The `--select` loader sets `item.batchable` from structured fields only (Tier A + size ≤ 8 + resolved
+// `blockedBy`); the real disqualifier often lives only in prose ("not batchable; re-slice", "external
+// infra", "blocked-in-fact", "needs a /decision"). When the prose is there but the flags still compute
+// batchable, the pool over-reports agent-readiness and every batch pre-flight re-rejects the item by
+// hand. This warns so the author encodes the real state (retype/size≥13/park/add the blockedBy edge) —
+// which drops the item out of `batchable` and self-clears the warning. WARN, not error: prose
+// heuristics aren't proof. See memory `feedback_misflagged_batchable_fix_real_state`.
+for (const item of backlog) {
+  if (!item.id || item.batchable !== true) continue;
+  const p = join(ROOT, 'backlog', `${item.id}.md`);
+  if (!existsSync(p)) continue;
+  const body = readFileSync(p, 'utf8').replace(/^---\n[\s\S]*?\n---\n/, '');
+  const hits = findNonBatchableMarkers(body);
+  if (!hits.length) continue;
+  const markers = [...new Set(hits.map((h) => h.marker))].join('", "');
+  const lines = [...new Set(hits.map((h) => h.line))].join(', ');
+  warn(`Backlog item "${item.id}" computes \`batchable\` but its body asserts non-batchability ("${markers}" ` +
+    `@ line(s) ${lines}) — the loader only sees tier+size+blockedBy, so this over-reports agent-readiness. ` +
+    `Encode the real state so it drops from the pool: retype \`type: decision\`, bump \`size\` to ≥13, ` +
+    `\`status: parked\`, or add the real \`blockedBy\` edge (file the prereq/decision if missing). ` +
+    `If the marker is a passing mention, reword it. See docs/agent/backlog-workflow.md → batching.`);
 }
 
 // ── 6d-sexies. Bad-body-link lint — leaked authoring syntax in a rendered body ──
