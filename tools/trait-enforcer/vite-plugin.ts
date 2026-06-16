@@ -41,31 +41,35 @@
 import { readdirSync, readFileSync, statSync } from 'fs';
 import { join } from 'path';
 import type { Plugin } from 'vite';
+// Byte-determining constants + types come from the neutral contract (#716) — this plugin is the
+// REFERENCE IMPLEMENTATION of that contract, not its definition, so it derives the scan grammar and the
+// delivery vocabulary from there rather than declaring its own (keeps every bundler byte-identical).
+import {
+  DEFAULT_DELIVERY,
+  USED_TRAIT_PATTERN_TEMPLATE,
+  DELIVERY_OVERRIDE_PATTERN_TEMPLATE,
+  TRAIT_NAME_PLACEHOLDER,
+  SCAN_FLAGS,
+  type TraitDelivery,
+  type TraitMap,
+  type TraitMapEntry,
+} from './traitManifestContract.js';
 
-/**
- * A build-time Map entry with an explicit `delivery` dimension. Use the object
- * form to override the default (`lazy`) — typically `{ module, delivery: 'eager' }`
- * for a tiny / always-on trait that should be baked into the main bundle.
- */
-export interface TraitMapEntry {
-  /** The trait's module specifier (a literal import path). */
-  module: string;
-  /** How the trait is delivered. Default `'lazy'` (code-split + load on demand). */
-  delivery?: 'eager' | 'lazy';
+/** Regex-escape a trait name, then substitute it for the contract's {@link TRAIT_NAME_PLACEHOLDER}. */
+function compilePattern(template: string, name: string): RegExp {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(template.replace(TRAIT_NAME_PLACEHOLDER, escaped), SCAN_FLAGS);
 }
 
-/**
- * The build-time Map: attribute name → its module specifier. A bare string is
- * the default (`delivery: 'lazy'`); use a {@link TraitMapEntry} object to set
- * `delivery: 'eager'`.
- */
-export type TraitMap = Record<string, string | TraitMapEntry>;
+// The Map types are defined by the neutral contract (#716); re-export so existing importers of these
+// names from this plugin keep working while the single definition lives in traitManifestContract.
+export type { TraitMap, TraitMapEntry } from './traitManifestContract.js';
 
-/** Normalize a Map value to `{ module, delivery }`, defaulting delivery to `lazy`. */
-function normalizeEntry(value: string | TraitMapEntry): Required<TraitMapEntry> {
+/** Normalize a Map value to `{ module, delivery }`, defaulting delivery via the contract's default. */
+function normalizeEntry(value: string | TraitMapEntry): { module: string; delivery: TraitDelivery } {
   return typeof value === 'string'
-    ? { module: value, delivery: 'lazy' }
-    : { module: value.module, delivery: value.delivery ?? 'lazy' };
+    ? { module: value, delivery: DEFAULT_DELIVERY }
+    : { module: value.module, delivery: value.delivery ?? DEFAULT_DELIVERY };
 }
 
 export interface TraitEnforcerOptions {
@@ -97,9 +101,7 @@ export interface TraitEnforcerOptions {
 export function scanTraitsInHtml(html: string, names: string[]): Set<string> {
   const found = new Set<string>();
   for (const name of names) {
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`(?:^|\\s)${escaped}(?=[\\s=/>]|$)`, 'm');
-    if (re.test(html)) found.add(name);
+    if (compilePattern(USED_TRAIT_PATTERN_TEMPLATE, name).test(html)) found.add(name);
   }
   return found;
 }
@@ -122,9 +124,7 @@ export function scanTraitsInHtml(html: string, names: string[]): Set<string> {
 export function scanTraitDeliveryOverrides(html: string, names: string[]): Set<string> {
   const preload = new Set<string>();
   for (const name of names) {
-    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`(?:^|\\s)${escaped}-delivery\\s*=\\s*["']?eager(?=[\\s"'/>]|$)`, 'm');
-    if (re.test(html)) preload.add(name);
+    if (compilePattern(DELIVERY_OVERRIDE_PATTERN_TEMPLATE, name).test(html)) preload.add(name);
   }
   return preload;
 }
