@@ -52,6 +52,7 @@
 | Building or changing a runtime demo under `demos/` | [docs/agent/demo-workflow.md](docs/agent/demo-workflow.md) |
 | Building/continuing a flagship **exercise app** (#314) — the platform-first loop (WE is primary, the app is a forcing function) | [docs/agent/exercise-app-workflow.md](docs/agent/exercise-app-workflow.md) (Claude: `/exercise-app`) |
 | Marking an external reference dead/replaced, or adding a structured reference home | [docs/agent/reference-retirement.md](docs/agent/reference-retirement.md) |
+| Adding or editing a Claude **skill** (`.claude/skills/*/SKILL.md`) — keep it a trigger+pointer, not a copy of the rubric | [docs/agent/skill-authoring.md](docs/agent/skill-authoring.md) |
 | Dev environment & scripts | `DEV_GUIDE.md` |
 | Canonical specs (per-entry) | `src/_data/{blocks,plugs,intents,protocols,semantics,references}.json`; backlog = `backlog/*.md` |
 
@@ -60,7 +61,7 @@
 - **Plugs** 51 — 31 active · 18 concept · 2 experimental
 - **Blocks** 74 — 29 active · 13 concept · 32 draft
 - **Intents** 56 — 1 active · 14 concept · 41 draft
-- **Glossary terms** 194 · **Research topics** 93 (89 open)
+- **Glossary terms** 194 · **Research topics** 97 (93 open)
 - **Projects** 40: webadapters, webanalytics, webaudit, webbehaviors, webblocks, webcases, webcharts, webcompliance, webcomponents, webcontexts, webdecisions, webdirectives, webdocs, webediting, webevents, webexpressions, webguards, webidentity, webinjectors, webintents, webintl, weblifecycle, webmanifests, webnotifications, webplugs, webpolicy, webportals, webpositioning, webprocess, webrealtime, webregistries, webreliability, webreporting, webresources, webstates, webtheme, webtraces, webtraits, webvalidation, webworkflows
 <!-- /AUTO-GENERATED:inventory -->
 

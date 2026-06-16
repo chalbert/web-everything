@@ -30,4 +30,8 @@ Expose the **adapters** in the Block Explorer: a panel that generates this block
 
 ## Notes
 
-Hard-blocked on **#547** (the deterministic IR→emit generation-adapter core) — the component panel consumes the same machinery as the MaaS server-origin generation (#463/#505/#507), surfacing it for *component* targets. Conformance badges consume the cross-language conformance suite (#506). The "create your own adapter" path is mostly doc at this point, per the brainstorm.
+Consumes the deterministic IR→emit generation-adapter core (**#547**, now resolved) — the same machinery as the MaaS server-origin generation (#463/#505/#507), surfaced for *component* targets. Conformance badges consume the cross-language conformance suite (**#506**, resolved). The "create your own adapter" path is mostly doc at this point, per the brainstorm.
+
+## Open question — emitter targets unverified (2026-06-16, batch-2026-06-16)
+
+#547/#506 are resolved, so the old "hard-blocked on #547" framing no longer holds and the `blockedBy` is satisfied. But the **real** open question for this panel was not confirmed against the tree this session: does #547's core actually **emit runnable per-framework component output** (React/Vue/Svelte/Angular/native WC) that the live sandbox can execute and badge? The panel's "generate across frameworks + live-test each" centrepiece depends on those per-target emitters existing, not just the IR core. **Verify the emitter-target surface before claiming this** — if the framework emitters don't exist yet, that's a prerequisite build to file, and this item is `blockedBy` it. Large feature regardless; a focused session, not a batch tail.
