@@ -1,0 +1,39 @@
+<h2>Date Range Picker — a temporal preset</h2>
+<p>The <strong>date-range-picker</strong> is a named shallow <em>preset</em> over the abstract <a href="/blocks/temporal/">temporal</a> core: a from–to date range. It pins the <a href="/intents/temporal/">Temporal Intent</a> to <code>presentation=media</code> (a calendar grid) and <code>granularity=range</code> (two coordinated, ordered dates), bound to two native <code>&lt;input type="date"&gt;</code> anchors (start, end). The range coordination is the core's machinery; this preset only pins the dimensions and binds the two anchors.</p>
+
+<blockquote>
+  <p><strong>A range is two coordinated values, like the slider's dual thumb.</strong> The <a href="/blocks/slider/">slider</a> models a from–to range as two bound, ordered values over one track; date-range-picker is the temporal analogue — two ordered dates over one calendar — and the ordering/pairing lives once in the <a href="/blocks/temporal/">temporal</a> core (<code>granularity=range</code>), not re-implemented per picker (#713 option C).</p>
+</blockquote>
+
+<h3>Native-first — two date inputs are the anchor and fallback</h3>
+<table>
+  <thead>
+    <tr><th>Feature</th><th>Disposition</th><th>Tier</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Two date values, keyboard entry, form-assoc</td><td><code>built-in</code> — two native <code>&lt;input type="date"&gt;</code></td><td>1</td><td>Zero-JS baseline + keyboard fallback (start + end).</td></tr>
+    <tr><td>Range coordination (start ≤ end, reported as a pair)</td><td><code>built-in</code> — the core's <code>granularity=range</code></td><td>2</td><td>The direct analogue of the slider's ordered dual thumbs.</td></tr>
+    <tr><td>Shared calendar grid (media presentation)</td><td><code>built-in</code> — the core's <code>media</code> surface</td><td>2</td><td>One grid spanning both endpoints; pointer/spatial selection over the native inputs.</td></tr>
+    <tr><td>Locale-aware parse / display</td><td><code>compose</code> — <a href="/intents/locale/">Locale Intent</a> (via the core)</td><td>1</td><td>Inherited; the preset pins nothing here.</td></tr>
+  </tbody>
+</table>
+
+<h3>Altitude 1 — the pin over the two native anchors</h3>
+{% highlight "html" %}
+<fieldset role="group" aria-label="Date range"
+          temporal="presentation=media;granularity=range" anchor="range-grid">
+  <label for="from">From</label>
+  <input id="from" type="date" name="from">
+  <label for="to">To</label>
+  <input id="to" type="date" name="to">
+</fieldset>
+<div id="range-grid" role="grid" aria-label="Choose a date range" popover>
+  <!-- one calendar grid; the core keeps from ≤ to and the native inputs are the fallback -->
+</div>
+{% endhighlight %}
+
+<h3>Boundaries</h3>
+<ul>
+  <li><strong>No machinery of its own.</strong> The grid, the start ≤ end ordering, locale formatting, and roving are the <a href="/blocks/temporal/">temporal</a> core's; this block is the <code>media</code> + <code>range</code> pin over two <code>input[type=date]</code>.</li>
+  <li><strong>Native is the baseline.</strong> The two real <code>&lt;input type="date"&gt;</code> stay form-associated and keyboard-accessible; the shared calendar grid is the enhancement.</li>
+</ul>

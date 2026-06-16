@@ -1,0 +1,35 @@
+<h2>Datetime Picker — a temporal preset</h2>
+<p>The <strong>datetime-picker</strong> is a named shallow <em>preset</em> over the abstract <a href="/blocks/temporal/">temporal</a> core: a combined date-and-time picker. It pins the <a href="/intents/temporal/">Temporal Intent</a> to <code>presentation=media</code> and <code>granularity=point</code>, bound to the native <code>&lt;input type="datetime-local"&gt;</code> anchor — one control that selects both a calendar date and a time. It composes the core's calendar and clock surfaces; it adds <strong>no machinery of its own</strong>.</p>
+
+<blockquote>
+  <p><strong>A preset is a dimension pin (#713 option C).</strong> datetime-picker = <a href="/blocks/temporal/">temporal</a> pinned to <code>media</code> + <code>point</code> over <code>input[type=datetime-local]</code> — the third distinct native anchor (after <a href="/blocks/date-picker/">date</a> and <a href="/blocks/time-picker/">time</a>) that makes the temporal family a set of named presets rather than one configurable block (the single-anchor <a href="/blocks/slider/">slider</a> needed none).</p>
+</blockquote>
+
+<h3>Native-first — the datetime-local input is the anchor and fallback</h3>
+<table>
+  <thead>
+    <tr><th>Feature</th><th>Disposition</th><th>Tier</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Combined date+time value, keyboard entry, form-assoc</td><td><code>built-in</code> — native <code>&lt;input type="datetime-local"&gt;</code></td><td>1</td><td>Zero-JS baseline + keyboard fallback.</td></tr>
+    <tr><td>Calendar + clock surfaces (media presentation)</td><td><code>built-in</code> — the core's <code>media</code> surfaces</td><td>2</td><td>Composes the date-picker grid and the time-picker clock over one native control.</td></tr>
+    <tr><td>Locale-aware parse / display</td><td><code>compose</code> — <a href="/intents/locale/">Locale Intent</a> (via the core)</td><td>1</td><td>Inherited; the preset pins nothing here.</td></tr>
+  </tbody>
+</table>
+
+<h3>Altitude 1 — the pin over the native anchor</h3>
+{% highlight "html" %}
+<label for="when">When</label>
+<input id="when" type="datetime-local" name="when"
+       temporal="presentation=media;granularity=point"
+       anchor="when-surface">
+<div id="when-surface" role="group" aria-label="Choose date and time" popover>
+  <!-- calendar + clock from the core; the native datetime-local input stays the fallback -->
+</div>
+{% endhighlight %}
+
+<h3>Boundaries</h3>
+<ul>
+  <li><strong>No machinery of its own.</strong> The calendar, clock, locale formatting, and roving are the <a href="/blocks/temporal/">temporal</a> core's; this block is the <code>media</code> + <code>point</code> pin over <code>input[type=datetime-local]</code>.</li>
+  <li><strong>Native is the baseline.</strong> The real <code>&lt;input type="datetime-local"&gt;</code> stays form-associated and keyboard-accessible; the surfaces are the enhancement.</li>
+</ul>

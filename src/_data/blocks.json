@@ -4037,5 +4037,71 @@
       "A preset is a dimension pin, not a new block of machinery (#713 option C). date-picker is the abstract `temporal` core with presentation=media + granularity=point pinned and the input[type=date] anchor bound; it re-implements none of the calendar/locale/keyboard machinery — that is the core's. This is the family rule (one core, members are pins) the same way the droplist family's members are trait selections over one substrate.",
       "input[type=date] is the anchor and fallback. Following the slider precedent (native input is the baseline, custom surface only for the gap), the preset's media presentation renders a calendar grid for pointer/spatial selection while the native date input remains the keyboard-entry and no-JS fallback, carrying form participation, validity, and locale-aware value out of the box."
     ]
+  },
+  {
+    "id": "time-picker",
+    "name": "Time Picker",
+    "status": "draft",
+    "type": "Component",
+    "summary": "A named shallow preset over the abstract `temporal` core: a single time-of-day picker. It pins the Temporal Intent to presentation=media (a spatial clock) and granularity=point (one time), bound to the native <input type=\"time\"> anchor. Like its date-picker sibling it adds no machinery of its own — clock rendering, locale-aware parse/format, and keyboard roving are the core's; the native time input stays the zero-JS keyboard fallback. (A linear presentation — a scroll wheel — is the common mobile variant; this preset pins media, and a linear member would pin presentation=linear over the same anchor.)",
+    "implementsIntent": "temporal",
+    "intentDimensions": {
+      "presentation": "media",
+      "granularity": "point"
+    },
+    "composesIntents": [
+      "temporal",
+      "locale",
+      "input",
+      "focus-delegation"
+    ],
+    "designDecisions": [
+      "A preset is a dimension pin, not new machinery (#713 option C) — time-picker is the `temporal` core with presentation=media + granularity=point pinned over input[type=time]. The distinct native anchor (input[type=time], its own parse/format and value shape) is exactly the platform reason it is a named preset and not a prop on date-picker (the slider, with one anchor, needed no such members).",
+      "input[type=time] is the anchor and fallback; the clock surface is the media enhancement, with the native time input the keyboard-entry, form-associated, no-JS baseline (the slider precedent)."
+    ]
+  },
+  {
+    "id": "datetime-picker",
+    "name": "Datetime Picker",
+    "status": "draft",
+    "type": "Component",
+    "summary": "A named shallow preset over the abstract `temporal` core: a combined date-and-time picker. It pins the Temporal Intent to presentation=media and granularity=point, bound to the native <input type=\"datetime-local\"> anchor — one control that selects both a calendar date and a time. It composes the core's calendar + clock surfaces and inherits locale-aware parse/format and keyboard roving; the native datetime-local input is the zero-JS fallback.",
+    "implementsIntent": "temporal",
+    "intentDimensions": {
+      "presentation": "media",
+      "granularity": "point"
+    },
+    "composesIntents": [
+      "temporal",
+      "locale",
+      "input",
+      "focus-delegation"
+    ],
+    "designDecisions": [
+      "A preset is a dimension pin, not new machinery (#713 option C) — datetime-picker pins presentation=media + granularity=point over input[type=datetime-local]. It is the third distinct native anchor (after date and time) that makes the temporal family a set of named presets rather than one configurable block (#713 C; the single-anchor slider precedent).",
+      "input[type=datetime-local] is the anchor and fallback; the picker composes the core's date (calendar) and time (clock) media surfaces over the one native control, which stays the keyboard/no-JS baseline."
+    ]
+  },
+  {
+    "id": "date-range-picker",
+    "name": "Date Range Picker",
+    "status": "draft",
+    "type": "Component",
+    "summary": "A named shallow preset over the abstract `temporal` core: a from–to date range. It pins the Temporal Intent to presentation=media (a calendar grid) and granularity=range (two coordinated, ordered dates), bound to two native <input type=\"date\"> anchors (start, end). The range coordination — the start date can't cross the end date, reported as a pair — is the core's machinery, exactly as the slider's dual-thumb range is two bound, ordered values over one track; this preset only pins granularity=range and binds the two anchors.",
+    "implementsIntent": "temporal",
+    "intentDimensions": {
+      "presentation": "media",
+      "granularity": "range"
+    },
+    "composesIntents": [
+      "temporal",
+      "locale",
+      "input",
+      "focus-delegation"
+    ],
+    "designDecisions": [
+      "A preset is a dimension pin, not new machinery (#713 option C) — date-range-picker pins presentation=media + granularity=range over two input[type=date] anchors. The range coordination lives in the `temporal` core (one place), the direct analogue of the slider's dual-thumb range being two coordinated, ordered values over one track — not a re-implementation per picker.",
+      "Two native date inputs are the anchor and fallback; the shared calendar grid is the media enhancement, while the pair of native date inputs stays the keyboard-entry, form-associated, no-JS baseline, kept ordered (start ≤ end) by the core."
+    ]
   }
 ]

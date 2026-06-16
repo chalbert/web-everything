@@ -1,0 +1,36 @@
+<h2>Time Picker — a temporal preset</h2>
+<p>The <strong>time-picker</strong> is a named shallow <em>preset</em> over the abstract <a href="/blocks/temporal/">temporal</a> core: a single time-of-day picker. It pins the <a href="/intents/temporal/">Temporal Intent</a> to <code>presentation=media</code> (a spatial clock) and <code>granularity=point</code> (one time), bound to the native <code>&lt;input type="time"&gt;</code> anchor. It adds <strong>no machinery of its own</strong> — clock rendering, locale-aware parse/format, and keyboard roving are the core's.</p>
+
+<blockquote>
+  <p><strong>A preset is a dimension pin (#713 option C).</strong> time-picker = <a href="/blocks/temporal/">temporal</a> with <code>presentation=media</code> + <code>granularity=point</code> pinned over <code>input[type=time]</code>. The distinct native anchor (<code>input[type=time]</code>, with its own parse/format) is the platform reason it is a named preset, not a prop on <a href="/blocks/date-picker/">date-picker</a> — the single-anchor <a href="/blocks/slider/">slider</a> needed no such members.</p>
+</blockquote>
+
+<h3>Native-first — the time input is the anchor and fallback</h3>
+<table>
+  <thead>
+    <tr><th>Feature</th><th>Disposition</th><th>Tier</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Single time value, keyboard entry, form-assoc</td><td><code>built-in</code> — native <code>&lt;input type="time"&gt;</code></td><td>1</td><td>Zero-JS baseline + keyboard fallback.</td></tr>
+    <tr><td>Spatial clock surface (media presentation)</td><td><code>built-in</code> — the core's <code>media</code> surface</td><td>2</td><td>Pointer/spatial selection over the native input.</td></tr>
+    <tr><td>Locale-aware parse / display (12/24h)</td><td><code>compose</code> — <a href="/intents/locale/">Locale Intent</a> (via the core)</td><td>1</td><td>Inherited; the preset pins nothing here.</td></tr>
+    <tr><td>Scroll-wheel (linear presentation)</td><td><code>compose</code> — a <code>presentation=linear</code> member</td><td>3</td><td>The common mobile variant pins <code>linear</code> over the same anchor; out of scope for this media preset.</td></tr>
+  </tbody>
+</table>
+
+<h3>Altitude 1 — the pin over the native anchor</h3>
+{% highlight "html" %}
+<label for="at">Time</label>
+<input id="at" type="time" name="at"
+       temporal="presentation=media;granularity=point"
+       anchor="at-clock">
+<div id="at-clock" role="group" aria-label="Choose a time" popover>
+  <!-- clock surface from the core; the native time input stays the fallback -->
+</div>
+{% endhighlight %}
+
+<h3>Boundaries</h3>
+<ul>
+  <li><strong>No machinery of its own.</strong> The clock, locale formatting, and roving are the <a href="/blocks/temporal/">temporal</a> core's; this block is the <code>media</code> + <code>point</code> pin over <code>input[type=time]</code>.</li>
+  <li><strong>Native is the baseline.</strong> The real <code>&lt;input type="time"&gt;</code> stays form-associated and keyboard-accessible; the clock is the enhancement.</li>
+</ul>
