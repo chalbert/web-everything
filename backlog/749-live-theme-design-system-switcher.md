@@ -5,7 +5,7 @@ size: 8
 status: open
 parent: "746"
 locus: frontierui
-blockedBy: ["747", "727", "809", "815"]
+blockedBy: ["747", "727", "809", "815", "775"]
 dateOpened: "2026-06-16"
 relatedProject: webtheme
 crossRef: { url: /backlog/364-unified-design-token-theming-system/, label: "webtheme tokens (#364)" }
@@ -34,3 +34,16 @@ Add a **design-system switcher** to the block page: pick from a gallery of popul
 Hard-blocked on **#747** (the manifest format the switcher loads) and **#727** (the live render to switch within). Axis sliders and native-state toggles resolve through tokens/intents owned by `webtheme` (#364) — don't coin parallel knobs.
 
 **Re-homed to FUI-locus (#809).** This switcher is chrome inside the FUI-owned workbench (#815, the iframe+chrome distribution), driving the block host-side intra-FUI — not WE-owned chrome. `blockedBy #815`; built `@frontierui`. The token/intent dependency on webtheme (#364/#747) is unchanged.
+
+## Blocked-in-fact — no concrete #747 manifest registry/presets to switch between (2026-06-16, batch-2026-06-16)
+
+Pre-flighted in a batch top-up. The declared blockers (#747/#727/#809/#815) are resolved, but the build is
+"switcher control **bound to the #747 manifest registry**" loading "Material-like, Fluent-like, Carbon-like
+presets" — and that registry **does not exist**: #747 ratified the manifest *format* but `graduatedTo: none`
+(no schema artifact, no preset gallery; grep of `plateau-app`/`frontierui` finds no design-system manifest
+registry). Same unmaterialized-foundation gap that blocks its sibling [#751](/backlog/751-embedded-theme-design-system-creator-plateau/).
+The creator/assembler that would produce those manifests is the still-open decision
+[#775](/backlog/775-design-system-creator-assembler-open-core-layering-simple-fu/) — added `blockedBy: 775`.
+**Systemic note:** the live-theming sub-cluster (#749 switcher, #751 creator, the token-provenance half of
+#755) is collectively gated on materializing #747 into a concrete manifest schema + starter preset registry;
+no item does that yet (#775 must ratify first). Not built here — that would pre-empt #775 by fiat.
