@@ -4,10 +4,13 @@ workItem: story
 size: 8
 parent: "746"
 locus: frontierui
-status: open
+status: resolved
 relatedProject: webdocs
 crossRef: { url: /backlog/809-block-explorer-workbench-render-locus-manipulation-channel-f/, label: "Ratifying decision (#809)" }
 dateOpened: "2026-06-16"
+dateStarted: "2026-06-16"
+dateResolved: "2026-06-16"
+graduatedTo: frontierui/workbench/mount.ts
 tags: [frontierui, block-explorer, workbench, embed, iframe, distribution, chrome, locus]
 ---
 
@@ -29,9 +32,30 @@ The FUI-hosted, FUI-owned interactive block workbench ratified by #809: chrome (
 
 ## Acceptance
 
-- [ ] A FUI-hosted workbench renders a selected FUI block + control chrome same-origin, embeddable via iframe on a third-party origin.
-- [ ] Live theme/trait changes + at least one rendered-component inspector work host-side with no manipulation protocol.
-- [ ] WE's block "do" page embeds the workbench iframe and wraps it with the WE-standards overlay.
+- [x] A FUI-hosted workbench renders a selected FUI block + control chrome same-origin, embeddable via iframe on a third-party origin.
+- [x] Live theme/trait changes + at least one rendered-component inspector work host-side with no manipulation protocol.
+- [x] WE's block "do" page embeds the workbench iframe and wraps it with the WE-standards overlay.
+
+## Progress
+
+**Status:** resolved · **Locus:** `frontierui` · the shell is built; slices fill it in.
+
+**Done.** Built the block-agnostic workbench shell in `frontierui/workbench/`:
+- `registry.ts` — the `WorkbenchBlock` seam slices extend: each declares loader + themeable `tokens`
+  (custom properties) + toggleable `traits` (attributes) + optional block CSS. One concrete entry
+  (`auto-complete`) ships so the shell is exercised end-to-end.
+- `mount.ts` — `mountWorkbench(root, block)`: theme switcher sets `--token` custom properties on the
+  stage; trait panel sets/toggles attributes (re-mounts so construct-time traits like `windowed`
+  take effect); inspector reads the rendered tree (`querySelector`/`getComputedStyle`) on demand.
+  **All host-side DOM — no postMessage manipulation protocol, no WE↔FUI channel.**
+- `demos/workbench.html` + `workbench.ts` — the FUI-hosted page, addressable via `?block=<id>`.
+- `demos/workbench-host.html` — host harness standing in for WE's block "do" page: a plain `<iframe>`
+  embeds the workbench, wrapped by a **WE-standards overlay** rendered from WE's own data (the #755
+  split — that overlay is WE-docs chrome, NOT part of this FUI product).
+- e2e: `workbench/__tests__/e2e/workbench.spec.ts` (registered in `playwright.config.ts` testMatch)
+  proves all three acceptance criteria — 3 specs green.
+
+Gates: `check:standards` 0 errors; `tsc --noEmit` clean for the new files; e2e 3/3 green.
 
 ## Notes
 
