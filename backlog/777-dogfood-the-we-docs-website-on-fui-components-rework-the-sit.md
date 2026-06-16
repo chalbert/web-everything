@@ -1,9 +1,11 @@
 ---
 type: idea
 workItem: epic
-status: open
+status: resolved
 blockedBy: ["765"]
 dateOpened: "2026-06-16"
+dateResolved: "2026-06-16"
+graduatedTo: none
 tags: [dogfood, fui, site-rework, di-mount, boundary, epic]
 ---
 
