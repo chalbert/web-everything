@@ -81,6 +81,12 @@ highest-leverage blocker"** directly, even if Tier-A items exist:
   permission needed — then ratify against the item; never ask the user to ratify anything that lives
   only in chat. Pause to ask before writing **only** when the conclusion is genuinely ambiguous. See
   `backlog-workflow.md` → *"The decision item is the source of truth"*.
+- **Before you resolve, red-team the default** (`backlog-workflow.md` → *"Red-team the default"*).
+  `✓ ready to ratify` is a self-stamp, not a check — and prep-and-ratify share one blind spot. So
+  *before* flipping `active → resolved`: argue the strongest case for the main alternative and try to
+  name the principle the chosen branch violates (impl-is-not-a-standard, npm-scope-mirrors-layer, the
+  A–E catalog). Attack fails → ratify; attack lands → amend the default and re-attack. Inline for every
+  call; spin up a throwaway **skeptic sub-agent** (prompted only to refute) for high-leverage / high-`gates` forks.
 - Once it's talked through and **the call is made, close out the decision item itself** per step 7:
   flip `active → resolved`, add `dateResolved`, and record the ruling (and `graduatedTo` if it became
   an entity). The gated work then turns agent-ready — continue the arc or re-run normal selection. If

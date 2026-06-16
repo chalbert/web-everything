@@ -67,7 +67,11 @@ durable output is the rewritten body, not a message:
    path at a glance" preview table** (one row per fork: *recommended default · main alternative ·
    confidence* — confidence flags where judgment is actually needed); and **one `## Fork N` section per
    open fork** (crux-with-refs → options **A/B/…** named with tradeoffs → **bold** default → *Rejected*
-   branches with reason → any sub-decision).
+   branches with reason → any sub-decision). **Author the default to survive a red-team** — at ratify
+   time the decider attacks the branch you recommend (`backlog-workflow.md` → *"Red-team the default"*:
+   argue the alternative + name the principle the default violates). So ground the default's rationale
+   against the real tree now, and where a fork is high-leverage flag it for the deciding agent's skeptic
+   sub-agent pass; prep that only *asserts* a default leaves the attack to land at decision time.
 
 ## Close out — mark prepared, release back to open
 
