@@ -1,0 +1,14 @@
+{
+  "name": "@webeverything/validation-generation",
+  "version": "0.0.0",
+  "description": "Web Everything validation-generation standard contract (#085/#309). Curated subpath exports list ONLY the WE-resident contract: provider, registry, fieldError, cel, and service (Mode-2 wire types only). crossField, adapters/*, and the service handler are excluded by omission so Node exports semantics enforce the #730 standard/impl split mechanically (#804 3a). Resolved by sibling consumers via tsconfig paths + vite alias (#804 2a); publish is a later, separately-prioritized build (#804 2b).",
+  "type": "module",
+  "private": true,
+  "exports": {
+    "./provider": "./provider.ts",
+    "./registry": "./registry.ts",
+    "./fieldError": "./fieldError.ts",
+    "./cel": "./cel.ts",
+    "./service": "./service.ts"
+  }
+}

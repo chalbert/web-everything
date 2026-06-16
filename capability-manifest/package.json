@@ -1,0 +1,10 @@
+{
+  "name": "@webeverything/capability-manifest",
+  "version": "0.0.0",
+  "description": "Web Everything capability-manifest standard contract (#266) — the dependency-free CapabilityManifest schema, feature vocabulary, conformance fixtures, runtime guard, adherence report, and build-time check. Resolved by sibling consumers via tsconfig paths + vite alias on the scoped specifier (#804 2a); publish is a later, separately-prioritized build (#804 2b).",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": "./index.ts"
+  }
+}

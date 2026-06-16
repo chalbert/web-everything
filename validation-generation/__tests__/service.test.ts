@@ -7,10 +7,11 @@
  * rule (an unsupported intent is reported in `unsupported`, never dropped).
  */
 import { describe, it, expect } from 'vitest';
-import { handleValidationRequest, serveValidation } from '../service.js';
+import { handleValidationRequest, serveValidation } from '../serviceHandler.js';
 import { createDefaultValidationAdapterRegistry } from '../adapters/index.js';
 import { createValidationAdapterRegistry } from '../registry.js';
-import type { ValidationDeclaration, ValidationServiceResponse } from '../service.js';
+import type { ValidationDeclaration } from '../provider.js';
+import type { ValidationServiceResponse } from '../service.js';
 
 const emailField: ValidationDeclaration = {
   field: 'email',

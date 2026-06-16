@@ -158,9 +158,13 @@ export {
   type ValidationServiceRequest,
   type ValidationServiceResponse,
   type ServedArtifact,
+} from '../../validation-generation/service.js';
+// Handler (impl, #730 B1/C2): excluded from the `@webeverything/*` export surface by omission and
+// ports to FUI under #725 — still re-exported here for local validation-runtime consumers.
+export {
   handleValidationRequest,
   serveValidation,
-} from '../../validation-generation/service.js';
+} from '../../validation-generation/serviceHandler.js';
 
 // Runtime dev-mode capability guard (#268) — the runtime sibling of the build-time adherence check:
 // warns (dev-only, stripped in prod) when a used validation feature is not declared by the active

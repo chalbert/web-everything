@@ -1,8 +1,10 @@
 ---
 type: idea
 workItem: epic
-status: open
+status: resolved
 dateOpened: "2026-06-15"
+dateResolved: "2026-06-16"
+graduatedTo: none
 tags: [self-driven-project, autonomy, methodology, sdlc, conformance, plateau, positioning, saas]
 relatedReport: reports/2026-06-15-self-driven-project-prior-art.md
 crossRef: { url: /backlog/665-self-driven-project-ratify-the-framing-autonomy-taxonomy-mas/, label: "Framing decision (#665)" }
