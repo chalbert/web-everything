@@ -122,14 +122,38 @@ export class CustomCompilerRegistry {
 export const compilerRegistry = new CustomCompilerRegistry();
 
 /**
- * Resolve `definition` into the requested `form`. `definition` is the authored `<component>…</component>`
- * source (the same text the component-cases fixtures hold). Throws on an unparseable definition or an
- * unknown form — those are caller errors, distinct from the *lossy* param flags reported in the result.
+ * True when `source` is an authored `<component>…</component>` definition (vs a pre-built ES module).
+ * A definition is markup and always opens with a `<` after leading whitespace; a pre-built module — a
+ * trait chunk served over MaaS (#743) — is JavaScript and never does. Used by {@link serve} to route a
+ * trait chunk to verbatim passthrough rather than the component-lowering forms.
+ */
+export function isComponentDefinition(source: string): boolean {
+  return source.trimStart().startsWith('<');
+}
+
+/**
+ * Resolve `definition` into the requested `form`. `definition` is normally the authored
+ * `<component>…</component>` source (the same text the component-cases fixtures hold), but the MaaS
+ * resolver also unions **pre-built trait modules** (#743): a resolved source that is not a component
+ * definition is already the final ES module artifact, so it is served **verbatim** — the `form` is moot
+ * (a module has exactly one served shape). Throws on an unparseable component definition or an unknown
+ * form — those are caller errors, distinct from the *lossy* param flags reported in the result.
  */
 export function serve(definition: string, opts: ServeOptions): ServeResult {
   const descriptor = formById(opts.form);
   const diagnostics: string[] = [];
   let lossy = false;
+
+  // A pre-built ES module (a #743 trait chunk) is the final artifact — serve it verbatim as JavaScript,
+  // independent of the requested form (a module has one shape). A non-default transpileTarget still
+  // lowers it via serveCompiled (loader `js`); the render-strategy axis is irrelevant to a plain module.
+  if (!isComponentDefinition(definition)) {
+    if (opts.strategy && opts.strategy !== 'declarative-static') {
+      diagnostics.push(`strategy="${opts.strategy}" not applied to a pre-built module — it has no render-strategy axis.`);
+      lossy = true;
+    }
+    return { form: opts.form, code: definition.trim(), language: 'javascript', lossy, diagnostics };
+  }
 
   // Transpile is a separate, async, injected step — see serveCompiled. serve() itself never
   // transpiles, so a target requested here is flagged (call serveCompiled to actually lower).

@@ -94,6 +94,29 @@ export function indexDefinitions(
   return registry;
 }
 
+/** One pre-built trait chunk to expose over MaaS: its attribute name and its final ES-module source. */
+export interface TraitModule {
+  /** The trait attribute token, e.g. `'sortable'` — the `<name>` segment of `/_maas/<name>.js`. */
+  readonly name: string;
+  /** The trait's final module source (already built JS) — served verbatim, not lowered. */
+  readonly source: string;
+}
+
+/**
+ * Build a registry that resolves a **trait** name to its pre-built module source — the trait-side half
+ * of the #743 union. Unlike {@link indexDefinitions} (which keys `<component>` definitions by their
+ * declared `name=`), a trait module carries no `<component>` tag, so its name is supplied explicitly.
+ * Compose this as the `fallback` of the component registry so one `resolve()` answers for both: a
+ * `/_maas/<trait>.js` fetch resolves to the trait's bytes instead of 404ing, while component names keep
+ * resolving locally. The served bytes pass through `serve()` verbatim (a non-`<component>` source is a
+ * pre-built module — see `moduleService.isComponentDefinition`).
+ */
+export function indexTraitModules(modules: Iterable<TraitModule>): CustomDefinitionRegistry {
+  const registry = new CustomDefinitionRegistry();
+  for (const { name, source } of modules) registry.define(name, source);
+  return registry;
+}
+
 /** Observable cache counters — proves "resolved once, served many" rather than asserting it. */
 export interface CacheStats {
   hits: number;

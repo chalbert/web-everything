@@ -134,6 +134,38 @@ describe('createMaaSFetchHandler — errors', () => {
   });
 });
 
+describe('trait chunks on the served path (#743) — union resolver, no more 404', () => {
+  const TRAIT_SOURCE = 'export class SortableTrait {}';
+  // The union: component names resolve to <component> defs; a trait name to its pre-built module.
+  const unionResolver: DefinitionResolver = {
+    resolve: (id) => (id === 'user-card' ? DEFINITION : id === 'sortable' ? TRAIT_SOURCE : null),
+  };
+  // The real, DOM-free serve passthrough for a pre-built module (a trait needs no parseDefinition).
+  const serveModule = stubResolve(TRAIT_SOURCE);
+  const buildUnion = () =>
+    createMaaSFetchHandler({ resolver: unionResolver, resolve: serveModule, producer: PRODUCER });
+
+  it('resolves a trait name instead of 404ing (302-redirects to the terminal hash, like any artifact)', async () => {
+    const res = await buildUnion()(new Request('http://x/_maas/sortable.js'));
+    expect(res.status).toBe(302); // found + redirected down the pin ladder — NOT the old 404
+    expect(res.headers.get('Location')).toMatch(/^\/_maas\/sortable@sha256-[A-Za-z0-9_-]+\.js/);
+  });
+
+  it('serves the trait module bytes verbatim at its terminal content-hash pin', async () => {
+    const result: ServeResult = { form: 'wc-class', code: TRAIT_SOURCE, language: 'javascript', lossy: false, diagnostics: [] };
+    const id = (await computeArtifactIdentity(TRAIT_SOURCE, result, { form: 'wc-class' }, PRODUCER)).id;
+    const res = await buildUnion()(new Request(`http://x/_maas/sortable@${id}.js?form=wc-class`));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('javascript');
+    expect(await res.text()).toBe(TRAIT_SOURCE);
+  });
+
+  it('still 404s a name that is neither a component nor a trait', async () => {
+    const res = await buildUnion()(new Request('http://x/_maas/no-such-trait.js'));
+    expect(res.status).toBe(404);
+  });
+});
+
 describe('computeArtifactIdentity — #088 identity invariant', () => {
   it('is stable for identical inputs and changes when the compiler version moves', async () => {
     const result: ServeResult = { form: 'wc-class', code: CODE, language: 'javascript', lossy: false, diagnostics: [] };

@@ -28,7 +28,9 @@ import {
 } from '../../blocks/renderers/module-service/moduleService';
 import {
   indexDefinitions,
+  indexTraitModules,
   type DefinitionResolver,
+  type TraitModule,
 } from '../../blocks/renderers/module-service/definitionRegistry';
 import { createMaaSFetchHandler } from '../../blocks/renderers/module-service/fetchHandler';
 import { componentCases } from '../../blocks/renderers/component/__fixtures__/component-cases';
@@ -53,10 +55,23 @@ compilerRegistry.register(
   { default: true },
 );
 
-/** v1 registry: element-name → authored `<component>` definition, indexed from the shared fixtures. */
+/**
+ * Pre-built trait chunks to expose on the MaaS origin (#743). WE authors no trait modules yet
+ * (`traitEnforcer({ traitMap: {} })`, vite.config.mts), so this is empty today — the union seam is wired
+ * ahead of the first authored trait (#359/#736) so a `/_maas/<trait>.js` fetch resolves the moment one
+ * lands, with no further origin change. Each entry's `source` is the trait's final ES module, served
+ * verbatim (see `moduleService.isComponentDefinition`).
+ */
+const traitModules: TraitModule[] = [];
+
+/**
+ * v1 registry: element-name → authored `<component>` definition, indexed from the shared fixtures, with
+ * the **trait-module registry unioned in as the fallback** (#743) — so one `resolve()` answers for both
+ * a component name (local) and a trait name (fallback), and a trait chunk is served instead of 404ing.
+ */
 const resolver: DefinitionResolver = indexDefinitions(
   componentCases.map((c) => c.def),
-  { skipUnnamed: true },
+  { skipUnnamed: true, fallback: indexTraitModules(traitModules) },
 );
 
 /** Run the DOM-dependent resolver (+ delegated transpile) under a transient linkedom document. */

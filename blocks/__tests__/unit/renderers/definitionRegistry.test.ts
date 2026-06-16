@@ -9,6 +9,7 @@ import {
   componentName,
   CustomDefinitionRegistry,
   indexDefinitions,
+  indexTraitModules,
   UnnamedDefinitionError,
   DefinitionCache,
   ServedArtifactCache,
@@ -16,6 +17,36 @@ import {
 } from '../../../renderers/module-service/definitionRegistry';
 import { componentCases } from '../../../renderers/component/__fixtures__/component-cases';
 import { serve } from '../../../renderers/module-service/moduleService';
+
+describe('indexTraitModules + union (the #743 trait-side resolver)', () => {
+  const traitSource = 'export class SortableTrait {}';
+  const traits = indexTraitModules([{ name: 'sortable', source: traitSource }]);
+
+  it('resolves a trait name to its pre-built module source', () => {
+    expect(traits.resolve('sortable')).toBe(traitSource);
+    expect(traits.resolve('unknown-trait')).toBeNull();
+  });
+
+  it('unions into the component resolver as a fallback — one resolve() answers both', () => {
+    const union = indexDefinitions(componentCases.map((c) => c.def), {
+      skipUnnamed: true,
+      fallback: traits,
+    });
+    // Component names still resolve locally to their <component> source…
+    expect(union.resolve('user-card')).toContain('<component name="user-card"');
+    // …and a trait name resolves via the fallback (no longer a 404).
+    expect(union.resolve('sortable')).toBe(traitSource);
+    expect(union.resolve('neither')).toBeNull();
+  });
+
+  it('a unioned trait source serves verbatim as a JS module (no component lowering)', () => {
+    const union = indexDefinitions(componentCases.map((c) => c.def), { skipUnnamed: true, fallback: traits });
+    const result = serve(union.resolve('sortable')!, { form: 'wc-class' });
+    expect(result.code).toBe(traitSource);
+    expect(result.language).toBe('javascript');
+    expect(result.lossy).toBe(false);
+  });
+});
 
 describe('componentName', () => {
   it('extracts the declared element name, or null', () => {
