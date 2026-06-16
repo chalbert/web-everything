@@ -102,7 +102,9 @@ function firstParagraph(body) {
   const buf = [];
   for (const raw of body.split('\n')) {
     const l = raw.trim();
-    const skip = !l || l === '---' || /^#/.test(l) || /^>/.test(l)
+    // A real ATX heading is hash(es) + a space (`# Title`); a `#NNN` cross-reference is NOT a heading,
+    // so a digest opening with "#719 …" must keep its lead paragraph (the lost-summary bug, #745).
+    const skip = !l || l === '---' || /^#{1,6}\s/.test(l) || /^>/.test(l)
       || /^```/.test(l) || /^[-*|]/.test(l) || /^\*\*[^*]+:\*\*/.test(l);
     if (skip) { if (buf.length) break; else continue; }
     buf.push(l);
@@ -481,3 +483,6 @@ module.exports = function backlog() {
 // Named export of the pure D3-readiness derivation (#621) for direct regression testing — Eleventy only
 // ever invokes the default function export, so attaching this property is inert to the build.
 module.exports.deriveProjectReadiness = deriveProjectReadiness;
+// Named export of the title/summary/details derivation (#745) for direct regression testing — Eleventy
+// only ever invokes the default function export, so attaching this property is inert to the build.
+module.exports.derive = derive;
