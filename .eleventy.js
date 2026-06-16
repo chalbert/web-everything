@@ -35,11 +35,22 @@ module.exports = function (eleventyConfig) {
   // (:3001) by default, or a published demos host via FUI_DEMO_BASE in prod. Generalises to ANY FUI demo
   // — pass the demo's file name; the first consumer is the #038 component-converter on /blocks/component/.
   const FUI_DEMO_BASE = (process.env.FUI_DEMO_BASE || "http://localhost:3001").replace(/\/$/, "");
-  eleventyConfig.addShortcode("fuiDemo", function(demoFile, title, height) {
+  // Per-demo render mode opt-in (#807, ruled by #732/#765). The escape/resize impl is the FUI-owned
+  // embed SDK WE loads (impl→FUI; never the #700 source import) — WE only passes the mode token. With
+  // no mode the iframe is the legacy static embed, byte-for-byte. Canonical tokens mirror FUI's
+  // `RenderMode` contract; A/B1 implemented, B2/C reserved.
+  const FUI_EMBED_MODES = {
+    a: "contained", contained: "contained",
+    b1: "host-restyle", "host-restyle": "host-restyle",
+  };
+  eleventyConfig.addShortcode("fuiDemo", function(demoFile, title, height, mode) {
     const src = `${FUI_DEMO_BASE}/demos/${demoFile}`;
     const h = height || 460;
     const label = title || demoFile;
-    return `<figure class="fui-demo">
+    const canonicalMode = mode ? FUI_EMBED_MODES[String(mode).trim().toLowerCase()] : null;
+    if (!canonicalMode) {
+      // Legacy path — static, sandboxed iframe with no SDK.
+      return `<figure class="fui-demo">
   <figcaption class="fui-demo-chrome">
     <span class="fui-demo-badge" title="Hosted by Frontier UI — the implementation repo">Frontier&nbsp;UI demo</span>
     <span class="fui-demo-title">${label}</span>
@@ -47,6 +58,19 @@ module.exports = function (eleventyConfig) {
   </figcaption>
   <iframe class="fui-demo-frame" src="${src}" title="${label}" loading="lazy" sandbox="allow-scripts allow-same-origin" style="height:${h}px"></iframe>
 </figure>`;
+    }
+    // Opt-in path — append the mode so the guest activates, tag the frame for the host, and load the
+    // FUI embed-host SDK. The `<script>` is module-deduped by URL, so emitting it per demo is safe.
+    const frameSrc = `${src}?embed-mode=${canonicalMode}`;
+    return `<figure class="fui-demo">
+  <figcaption class="fui-demo-chrome">
+    <span class="fui-demo-badge" title="Hosted by Frontier UI — the implementation repo">Frontier&nbsp;UI demo</span>
+    <span class="fui-demo-title">${label}</span>
+    <a class="fui-demo-open" href="${src}" target="_blank" rel="noopener">Open in Frontier&nbsp;UI ↗</a>
+  </figcaption>
+  <iframe class="fui-demo-frame" src="${frameSrc}" data-embed-mode="${canonicalMode}" title="${label}" loading="lazy" sandbox="allow-scripts allow-same-origin" style="height:${h}px"></iframe>
+</figure>
+<script type="module" src="${FUI_DEMO_BASE}/embed/embed-host.ts"></script>`;
   });
 
   // Build-time HTML → JSX (mirror dialect). Lazily esbuild-transpiles the shared TS transform
