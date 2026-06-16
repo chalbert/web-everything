@@ -5,6 +5,7 @@ export default defineConfig({
   testMatch: [
     'plugs/**/__tests__/**/*.spec.ts',
     'blocks/**/__tests__/**/*.spec.ts',
+    'tests/a11y/**/*.spec.ts',
   ],
   // The 11ty default build copies `.spec.ts` source files into `_site/`, where `testMatch` would
   // also match them — but their relative `../../../src/_data/*.json` imports resolve to nothing from
