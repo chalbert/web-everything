@@ -1,19 +1,26 @@
 /**
- * Multi-bundler trait Enforcer baseline (#717) — proves the per-bundler adapters
- * share the one #716-anchored core and that a REAL production build (Rollup and
- * esbuild, both installed) code-splits each used trait and ships an unused trait
- * as zero bytes.
+ * Multi-bundler trait Enforcer baseline (#717 + #744) — proves the per-bundler
+ * adapters share the one #716-anchored core and that a REAL production build
+ * (Rollup, esbuild, and webpack — all installable here) code-splits each used
+ * trait and ships an unused trait as zero bytes.
  *
- * Conformance that *all four* bundlers agree byte-for-byte is the separate
- * #716-gated suite (out of scope here); this proves the two installable adapters
- * end-to-end and that every adapter routes through `buildTraitManifestSource`.
+ * Conformance that *all* bundlers agree byte-for-byte is the separate #716-gated
+ * suite (#722, out of scope here); this proves the installed adapters end-to-end
+ * and that every adapter routes through `buildTraitManifestSource`. The Parcel
+ * adapter is tracked separately (#746) — Parcel's declarative plugin model can't
+ * take the shared `traitEnforcerX(options)` factory shape, a design fork.
  */
 import { describe, it, expect } from 'vitest';
 import { rollup } from 'rollup';
 import { build as esbuild } from 'esbuild';
+import webpack from 'webpack';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { buildTraitManifestSource } from '../vite-plugin';
 import { traitEnforcerRollup } from '../rollup-plugin';
 import { traitEnforcerEsbuild } from '../esbuild-plugin';
+import { traitEnforcerWebpack } from '../webpack-plugin';
 import type { TraitMap } from '../traitManifestContract';
 
 const traitMap: TraitMap = {
@@ -88,5 +95,53 @@ describe('esbuild adapter — real build', () => {
     // The used trait is referenced via a dynamic import; the unused one never appears.
     expect(all).toContain('sortable');
     expect(all).not.toContain('export-csv');
+  });
+});
+
+describe('webpack adapter — real build', () => {
+  it('code-splits a used trait and emits zero chunk for an unused one', async () => {
+    // webpack resolves the data:-URI manifest's `() => import(spec)` thunks against
+    // the real filesystem, so the trait stubs are written to a temp dir and the Map
+    // points at their absolute paths (the same fixture shape #238 uses for its real
+    // webpack build). `sortable` is used by the template; `export-csv` is not.
+    const work = mkdtempSync(join(tmpdir(), 'we744-webpack-'));
+    try {
+      const sortablePath = join(work, 'sortable.js');
+      const csvPath = join(work, 'export-csv.js');
+      writeFileSync(sortablePath, 'export default { name: "sortable" };');
+      writeFileSync(csvPath, 'export default { name: "export-csv" };');
+      writeFileSync(
+        join(work, 'entry.js'),
+        `import { traitManifest } from 'virtual:trait-manifest'; export default traitManifest;`,
+      );
+
+      const fileMap: TraitMap = { sortable: sortablePath, 'export-csv': csvPath };
+      const stats = await new Promise<webpack.Stats>((resolve, reject) => {
+        webpack(
+          {
+            mode: 'none', // no minify/tree-shake of names → markers survive verbatim
+            entry: join(work, 'entry.js'),
+            output: { path: join(work, 'out'), filename: 'main.js', chunkFilename: '[name].chunk.js' },
+            plugins: [traitEnforcerWebpack({ traitMap: fileMap, templates })],
+          },
+          (err, s) => {
+            if (err) return reject(err);
+            if (!s) return reject(new Error('webpack produced no stats'));
+            if (s.hasErrors()) return reject(new Error(s.toString({ all: false, errors: true })));
+            resolve(s);
+          },
+        );
+      });
+
+      const moduleIds = [...stats.compilation.modules].map((m) => m.identifier());
+      // The used trait is pulled into a code-split chunk; the unused one is absent entirely.
+      expect(moduleIds.some((id) => id.includes('sortable.js'))).toBe(true);
+      expect(moduleIds.some((id) => id.includes('export-csv.js'))).toBe(false);
+      // A real split chunk exists beyond the entry (proof the lazy import code-split).
+      const chunkAssets = Object.keys(stats.compilation.assets).filter((a) => a.endsWith('.chunk.js'));
+      expect(chunkAssets.length).toBeGreaterThan(0);
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
   });
 });
