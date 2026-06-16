@@ -28,6 +28,7 @@
 import { readFileSync, existsSync, readdirSync, writeFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative, extname } from 'node:path';
+import { buildConformanceReport } from './lib/conformanceReport.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -175,8 +176,14 @@ if (BURNDOWN) {
 
 // ── Report ──────────────────────────────────────────────────────────────────────
 if (JSON_MODE) {
+  // Report-model view (#711, slice C of #435): a coverage-matrix section from layer1_conformance + the
+  // --burndown history as series[]. Read the burndown log fresh so it reflects a point just appended by a
+  // co-passed --burndown. The legacy keys stay for existing consumers; `report` is the model-valid view.
+  const burndownLog = readJson('reports/app-conformance-burndown.json', {});
+  const report = buildConformanceReport(APP_REL, conformance, burndownLog[APP_REL] ?? []);
   console.log(JSON.stringify({ ok: compliant, app: APP_REL, score,
     layer1_conformance: conformance, layer1_queue: queue, layer2_candidates: candidates,
+    report,
     counts: { conformant, fails: fails.length, gaps: gaps.length, candidates: candidates.length } }, null, 2));
 } else {
   const R = '\x1b[31m', Y = '\x1b[33m', G = '\x1b[32m', D = '\x1b[2m', C = '\x1b[36m', M = '\x1b[35m', X = '\x1b[0m';
