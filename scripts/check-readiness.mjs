@@ -21,7 +21,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { computeReadiness, computeSelection, computeBatchPack, spliceStaleEdges } from './readiness/engine.mjs';
+import { computeReadiness, computeSelection, computeBatchPack, buildReadinessReport, spliceStaleEdges } from './readiness/engine.mjs';
 import { parseReservations, emptyState, foreignHolds, deprioritizeReserved } from './readiness/reservations.mjs';
 import { LOCI } from './check-standards-rules.mjs';
 
@@ -108,7 +108,7 @@ if (JSON_MODE) {
     mySession: MY_SESSION ?? null,
     foreign: [...foreign.entries()].map(([num, session]) => ({ num, session })),
   };
-  console.log(JSON.stringify({ ...report, selection, batch: { capacity, budget, ...batchPack }, reservations: reservationsOut, applied: APPLY ? applied : undefined, gaveUp: APPLY ? gaveUp : undefined }, null, 2));
+  console.log(JSON.stringify({ ...report, selection, batch: { capacity, budget, ...batchPack }, report: buildReadinessReport(selection, batchPack, budget), reservations: reservationsOut, applied: APPLY ? applied : undefined, gaveUp: APPLY ? gaveUp : undefined }, null, 2));
   process.exit(0);
 }
 

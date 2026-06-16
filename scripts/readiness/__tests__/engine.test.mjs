@@ -11,7 +11,8 @@
  *   - determinism: same state → identical output every run.
  */
 import { describe, it, expect } from 'vitest';
-import { computeReadiness, computeSelection, computeBatchPack, spliceStaleEdges } from '../engine.mjs';
+import { computeReadiness, computeSelection, computeBatchPack, buildReadinessReport, spliceStaleEdges } from '../engine.mjs';
+import { toSarif, toJUnit } from '../../../blocks/adapters/report/exportReport';
 
 /**
  * Build a loader-shaped item, resolving `blockedBy` into the lightweight `blockers` the real loader
@@ -247,6 +248,52 @@ describe('computeBatchPack — points budget, not a count cap', () => {
     it('no longer returns an otherLocus bucket (the single-locus filter is gone)', () => {
       expect(computeBatchPack(mixed(), 999)).not.toHaveProperty('otherLocus');
     });
+  });
+});
+
+describe('buildReadinessReport — the #431 report-model view (slice B of #435; #710)', () => {
+  const fixture = () => {
+    const sel = computeSelection(makeItems([
+      { num: 1, type: 'issue', status: 'open', workItem: 'story', size: 3, leverageScore: 5000 },
+      { num: 2, type: 'idea', status: 'open', workItem: 'story', size: 5, leverageScore: 4000, locus: 'frontierui', locusAuthored: true },
+      { num: 3, type: 'idea', status: 'open', workItem: 'task', leverageScore: 3000 },
+    ]));
+    const pack = computeBatchPack(sel.tierA, 10);
+    return { report: buildReadinessReport(sel, pack, 10), sel, pack };
+  };
+
+  it('emits one selector source and two scores-only sections (a ranking, not a conformance pass)', () => {
+    const { report } = fixture();
+    expect(report.id).toBe('check-readiness');
+    expect(report.sources).toEqual([{ id: 'check-readiness', name: 'check:readiness', kind: 'selector' }]);
+    expect(report.sections.map((s) => s.id)).toEqual(['ranked-selection', 'batch-pack']);
+    // No findings anywhere — readiness ranks, it doesn't flag conformance.
+    for (const s of report.sections) expect(s.findings).toBeUndefined();
+  });
+
+  it('ranked-selection scores carry every Tier-A item with leverageScore as the value', () => {
+    const { report, sel } = fixture();
+    const ranked = report.sections.find((s) => s.id === 'ranked-selection');
+    expect(ranked.scores).toHaveLength(sel.tierA.length);
+    expect(ranked.scores[0]).toMatchObject({ id: 'tierA/1', value: 5000, unit: 'leverage' });
+  });
+
+  it('batch-pack scores carry each packed item with batchCost (value) against the budget (max)', () => {
+    const { report, pack } = fixture();
+    const packSec = report.sections.find((s) => s.id === 'batch-pack');
+    expect(packSec.scores).toHaveLength(pack.picked.length);
+    expect(packSec.scores.every((sc) => sc.max === 10 && sc.unit === 'pts')).toBe(true);
+    expect(packSec.scores.find((sc) => sc.id === 'pack/2').label).toContain('(frontierui)');
+  });
+
+  it('is model-valid: pipes unchanged through the #434 SARIF/JUnit export adapters', () => {
+    // Readiness emits a scores-only report (no findings — it ranks, it doesn't flag), so the
+    // findings-table renderer isn't the applicable view; the export adapters are the cross-cutting
+    // proof it's a well-formed #431 Report (one SARIF run per declared source, model-valid JUnit).
+    const { report } = fixture();
+    const sarif = toSarif(report);
+    expect(sarif.runs).toHaveLength(report.sources.length);
+    expect(() => toJUnit(report)).not.toThrow();
   });
 });
 

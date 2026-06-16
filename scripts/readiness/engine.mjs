@@ -34,6 +34,7 @@
  * items and the read/write callbacks, so the same logic runs against the live backlog or an in-memory
  * fixture in tests.
  */
+import { buildReport, source as reportSource, section as reportSection, score as reportScore } from '../lib/buildReport.mjs';
 
 /** Numeric-stable ascending sort by the leading NNN id, so output never depends on load order. */
 const byNum = (a, b) => Number(a.num) - Number(b.num);
@@ -277,4 +278,44 @@ export function spliceStaleEdges(content, dropNums) {
     newContent = content.slice(0, lineStart) + replacement + content.slice(lineEnd);
   }
   return newContent;
+}
+
+/**
+ * Re-express the ranked selection + the suggested batch pack as a #431 report-model Report (slice B of
+ * #435's reporter-migration fan-out; #710). Built via the shared #435 `buildReport()` so check:readiness
+ * pipes through the #432 renderers + #434 export adapters like every other reporter. Two `scores[]`
+ * sections — readiness is a ranking, not a conformance pass, so there are no findings:
+ *   - `ranked-selection` — every Tier-A item, `value` = its leverageScore (the ranking key).
+ *   - `batch-pack`       — the budget-filled pack, `value` = batchCost, `max` = the points budget.
+ * The CLI's terminal/ANSI + `--select` paths stay bespoke; only the structured `report` view migrates.
+ * Pure (no fs/process) like the rest of this engine, so it's testable against in-memory fixtures.
+ *
+ * @param {{ tierA: Array<object> }} selection  From {@link computeSelection}.
+ * @param {{ picked: Array<object>, spent: number }} batchPack  From {@link computeBatchPack}.
+ * @param {number} budget  The points budget the pack was filled to.
+ * @returns {object} A #431 model-valid Report.
+ */
+export function buildReadinessReport(selection, batchPack, budget) {
+  const rankedScores = selection.tierA.map((it) => reportScore({
+    id: `tierA/${it.num}`,
+    label: `#${it.num} ${it.id.replace(/^\d+-/, '')}`,
+    value: it.leverageScore ?? 0,
+    unit: 'leverage',
+  }));
+  const packScores = batchPack.picked.map((it) => reportScore({
+    id: `pack/${it.num}`,
+    label: `#${it.num} ${it.id.replace(/^\d+-/, '')} (${it.locus ?? 'webeverything'})`,
+    value: it.batchCost,
+    max: budget,
+    unit: 'pts',
+  }));
+  return buildReport({
+    id: 'check-readiness',
+    title: 'Web Everything — backlog readiness & batch pack',
+    sources: [reportSource({ id: 'check-readiness', name: 'check:readiness', kind: 'selector' })],
+    sections: [
+      reportSection({ id: 'ranked-selection', title: `Ranked Tier-A (${selection.tierA.length} agent-ready)`, scores: rankedScores }),
+      reportSection({ id: 'batch-pack', title: `Suggested batch — ${batchPack.spent}/${budget} pts across ${batchPack.picked.length} item(s)`, scores: packScores }),
+    ],
+  });
 }
