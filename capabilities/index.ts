@@ -26,6 +26,7 @@ export * from './venues.js';
 export * from './runtime.js';
 export * from './edge.js';
 export * from './capacity.js';
+export * from './capacity-gpu.js';
 
 export const capabilities = capabilitiesData as Capability[];
 

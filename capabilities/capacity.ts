@@ -168,7 +168,15 @@ export function deriveBucket(
       // Data-saver on → treat as low-headroom; off → no constraint signalled.
       return scalar ? 'low' : 'high';
     case 'gpuTier': {
-      // The GPU-tier impl (a #729 spin-off) emits a bucket string directly; accept it verbatim.
+      // The GPU-tier impl (#769) emits detect-gpu's raw tier 0–3; map it to the coarse bucket.
+      // tier 3 → high, 2 → mid, 0 (no WebGL / blocklisted) & 1 → low headroom.
+      if (typeof scalar === 'number') {
+        if (!Number.isFinite(scalar)) return undefined;
+        if (scalar >= 3) return 'high';
+        if (scalar >= 2) return 'mid';
+        return 'low';
+      }
+      // A pre-bucketed string source is also accepted verbatim (back-compat / a source that buckets itself).
       const s = String(scalar) as CapacityBucket;
       return (CAPACITY_BUCKETS as readonly string[]).includes(s) ? s : undefined;
     }
