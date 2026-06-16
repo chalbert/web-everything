@@ -1,8 +1,10 @@
 ---
 type: idea
 workItem: epic
-status: open
+status: resolved
 dateOpened: "2026-06-12"
+dateResolved: "2026-06-16"
+graduatedTo: none
 tags: [project, webreporting, reporting, adapters, conformance, normalization]
 crossRef: { url: /backlog/314-flagship-exercise-apps/, label: "Exercise-app conformance tooling (#314)" }
 ---
