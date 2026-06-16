@@ -5,64 +5,123 @@ size: 3
 parent: "170"
 status: open
 dateOpened: "2026-06-16"
+dateStarted: "2026-06-16"
+preparedDate: "2026-06-16"
+relatedReport: reports/2026-06-16-730-capability-manifest-validation-generation-placement.md
 tags: []
 ---
 
 # Constellation placement of capability-manifest + validation-generation under the webguards/webvalidation FUI port
 
-The #725 port's true dependency closure includes capability-manifest (907 LOC, a #266 capability spec) and validation-generation (1466 LOC, contract+adapters) — both absent from FUI and unaddressed by #649; decide which layer owns each before #725 copies them.
+The #725 port's true dependency closure includes `capability-manifest/` (907 LOC, the #266 capability
+spec) and `validation-generation/` (1466 LOC, contract + adapters) — both absent from FUI and unaddressed
+by #649. Decide which constellation layer (`@webeverything` standard vs `@frontierui` impl) owns each
+**before** #725 copies the plug, because a mechanical copy-into-FUI would silently duplicate a *standard*
+into the impl repo (the npm-scope-mirrors-layer + impl-is-not-a-standard violation).
 
-## Why this surfaced (mid-#725, batch-2026-06-15)
+## Prepared — grounding
 
-#649 ruled `webguards`/`webvalidation` are plug **implementations** and port DOWN to FUI (#606), and the
-#635 audit sized that port as *"~1900 LOC, 18 files, 3 new FUI top-level dirs (`guard/`,
-`validity-merge/`, `validator-resolution/`)"*. Tracing the actual import closure while working #725, that
-is roughly **half** the real graph. The two domains also hard-depend on **two large subsystems FUI lacks
-and the audit never named**:
+**No greenfield design here:** both subsystems already ship in `webeverything/`. This is a
+**placement-of-shipped-code** ratification, so it skips the web survey and instead classifies the **real
+import closure** (traced 2026-06-16, see `relatedReport`) against already-ratified rulings. **3 forks**,
+each carrying a **bold** recommended default; Fork C was carved out of the survey (the Mode-2 `service.ts`
+turned out to be the one genuinely contested file, not a mechanical row in Fork B). Grounding rulings —
+all resolved: **#463** (polyglot reach: neutral-contract SoT → WE, generation adapters → FUI), **#649**
+(plugs are impl, port DOWN to FUI per #606), **#091** (managed-offering constellation layering), **#266**
+(capability-manifest is a code-model spec), **#504/#465** (CEL pivot = canonical representation; runtime =
+swappable impl detail), **#464** (field-error = data contract).
 
-- **`capability-manifest/`** — 6 files, **907 LOC**. `plugs/webvalidation/index.ts` imports it at
-  [:82](../plugs/webvalidation/index.ts#L82) (`../../capability-manifest/provider.js`) and re-exports
-  `guardCapability`/`guardCapabilities` at [:169](../plugs/webvalidation/index.ts#L169)
-  (`../../capability-manifest/guard.js`). This is the **#266 capability-declaration spec** (the
-  `{specVersion, conformanceLevel, features}` manifest contract + adherence model #267–#270), not a plug
-  runtime.
-- **`validation-generation/`** — 11 files, **1466 LOC** (`provider.ts`, `registry.ts`, `service.ts`,
-  `cel.ts`, `crossField.ts`, `fieldError.ts` + `adapters/{zod,pydantic,jsonSchema,nativeHtml,index}.ts`).
-  `plugs/webvalidation/*.ts` imports `service`/`cel`/`crossField`/`registry`/`fieldError`/`adapters` from
-  it (`../../validation-generation/*`). A mix of a **neutral contract** (provider/registry) and
-  **forward/generation adapters** (zod/pydantic/jsonSchema/nativeHtml).
+## The axis
 
-So the closure is ~**3,400 LOC across 5 absent subsystems**, not 1,900 / 3 dirs — and crucially it spans
-the **standard ↔ implementation boundary**, which a mechanical copy-into-FUI would silently violate. Per
-the npm-scope-mirrors-layer rule (`@webeverything` = standard artifacts only; `@frontierui` = impl) and
-the impl-is-not-a-standard rule, a *spec* must not be duplicated into the impl repo. That is the call
-#725 cannot make for itself.
+The concern decomposes into one axis applied per file: **does this file *define a contract* (→ WE
+standard) or *implement/generate against it* (→ FUI)?** The closure spans the standard↔impl boundary, so
+the answer differs by file, not by subsystem:
+
+- `plugs/webvalidation/index.ts` is the single re-export hub; its cross-subsystem imports are the closure
+  ([:82](../plugs/webvalidation/index.ts#L82) capability-manifest, [:107](../plugs/webvalidation/index.ts#L107)–[:163](../plugs/webvalidation/index.ts#L163) validation-generation).
+- `capability-manifest/` is self-described as "a standalone, dependency-free model of the contract"
+  ([provider.ts:1](../capability-manifest/provider.ts#L1)), structured like the `validity-merge` (#212) /
+  `validator-resolution` (#214) planes — a cohesive spec, conformance tooling included.
+- `validation-generation/` explicitly cleaves: "A code model, not a UX intent"
+  ([provider.ts:14](../validation-generation/provider.ts#L14)) — the contract — versus the per-language
+  emitters in `adapters/*` (#305–#308).
+- `cel.ts` is the #465 "single canonical representation"; its runtime is "an implementation detail, not a
+  contract clause" ([cel.ts:1](../validation-generation/cel.ts#L1)).
+- `service.ts` mirrors the MaaS `serve()` precedent (#081) — a pure handler + wire contract
+  ([service.ts:1](../validation-generation/service.ts#L1)) — the one file whose layer is judgment, not mechanics.
+
+## Recommended path at a glance
+
+| Fork | Recommended default | Main alternative | Confidence |
+|---|---|---|---|
+| A — `capability-manifest/` home | **A1: whole plane stays WE; FUI imports it from `@webeverything`** | A2: copy into FUI too | high |
+| B — `validation-generation/` split | **B1: contract files (`provider`, `registry`, `fieldError`, `cel`) → WE; impl (`crossField`, `adapters/*`) → FUI** | B2: whole subsystem → FUI | high (med on `cel`/`crossField`) |
+| C — Mode-2 `service.ts` home | **C1: whole file → WE (pure reference handler + wire contract); deployed host is a future plateau-app concern** | C2: port handler to FUI | med |
 
 ## Fork A — where does `capability-manifest/` live?
 
-- **A1 (default) — stays a WE standard; FUI's `webvalidation` imports it from `@webeverything`.** It is a
-  capability *contract* (#266), the textbook "standard → WE" artifact (#091 managed-offering constellation
-  layering). FUI already consumes WE standards (the inverse-import
-  ban is *`@webeverything` never imports FUI*, not the reverse), so the ported `webvalidation` resolves it
-  from the published package, not a copied tree. No standard leaks into the impl repo.
-- A2 — copy `capability-manifest/` into FUI too. Simplest mechanically (port closes in one repo), but puts
-  a standard artifact in `@frontierui` — a layer violation, and forks the spec into two trees (the very
-  drift #649/#170 exist to kill). Rejected unless A1 proves unbuildable.
+**Crux:** it is the #266 capability-*declaration* spec — a `{specVersion, conformanceLevel, features}`
+contract + adherence model — not a plug runtime ([index.ts:1](../capability-manifest/index.ts#L1),
+[provider.ts:1](../capability-manifest/provider.ts#L1)). All 6 files are spec: model (`provider`),
+build-time gate (`check` #267), dev-only runtime warner (`guard` #268), report format (`report` #269),
+conformance fixtures (`fixtures` #270).
 
-## Fork B — where does `validation-generation/` live?
+- **A1 (default) — the whole plane stays a WE standard; FUI's ported `webvalidation` imports it from
+  `@webeverything`.** Textbook "standard → WE" (#091). The inverse-import ban is *`@webeverything` never
+  imports FUI* — the reverse (FUI consumes WE standards) is the intended direction, so the ported plug
+  resolves the published package, not a copied tree. No standard leaks into the impl repo.
+- A2 — copy `capability-manifest/` into FUI too. *Rejected:* puts a standard artifact in `@frontierui`
+  (layer violation) and forks the spec into two trees — the exact drift #649/#170 exist to kill.
 
-- **B1 (default) — split by the #463 pattern: neutral contract → WE, generation adapters → FUI.**
-  `provider.ts`/`registry.ts` (the contract + the resolution SoT) are standard artifacts and stay WE;
-  the `adapters/{zod,pydantic,jsonSchema,nativeHtml}` are forward/generation impl
-  (the polyglot-reach forward-adapters rule, #463) and port to FUI with the plug. `service`/`cel`/`crossField`/
-  `fieldError` are classified per file (runtime impl → FUI; pure contract → WE) when B is ratified.
-- B2 — treat the whole subsystem as impl and port it wholesale to FUI. Cleaner dependency graph for the
-  plug, but pulls the neutral contract (the polyglot-reach SoT) into the impl repo, foreclosing the
-  generation-adapter story #463 ratified. Defensible only if the contract half turns out to be vestigial.
+*Sub-decision (`guard.ts`):* the only "runtime" file. Keep it in WE with the plane — splitting it would
+fork the #266 spec and break the validity-merge / validator-resolution precedent (those planes also carry
+runtime pieces and live whole). The separate+decouple bias does not bite: these were never separate, they
+are one spec.
+
+## Fork B — where does each `validation-generation/` file live?
+
+**Crux:** the subsystem is a mix of a neutral contract and forward/generation adapters — exactly the #463
+cleave. Classify per file (LOC + role in `relatedReport`):
+
+- **B1 (default) — split by the #463 pattern.** Contract → WE: `provider.ts` (neutral intent vocabulary +
+  `CustomValidationAdapter` contract, the #304 SoT), `registry.ts` (adapter-resolution SoT), `fieldError.ts`
+  (#464 RFC 9457 data contract), `cel.ts` (the #504/#465 portable pivot — the canonical representation).
+  Impl → FUI (ports with the plug): `crossField.ts` (the Mode-1 forward+ingest **adapter layer** —
+  `emitCrossFieldOrFallback` orchestrates `adapter.emitCrossField`, `jsonLogicToCel` normalizes into CEL),
+  and `adapters/{zod,pydantic,jsonSchema,nativeHtml,index}.ts` (per-language emitters; `nativeHtml` is
+  native-first-by-default but still an emitter). Every FUI file imports the WE contract → clean FUI→WE edges.
+- B2 — treat the whole subsystem as impl and port it wholesale to FUI. *Rejected:* pulls the neutral
+  contract (the polyglot-reach SoT) into the impl repo, foreclosing the generation-adapter story #463
+  ratified. Defensible only if the contract half were vestigial — it is the bulk.
+
+*Confidence notes:* `provider`/`registry`/`fieldError`/`adapters` are high-confidence. `cel.ts` → WE is
+med-high (the reference `JS_DIALECT`/`PY_DIALECT` transpilers ride with the pivot; a future richer
+transpiler could later extract to FUI — premature now). `crossField.ts` → FUI is med (alternative: keep it
+beside `cel.ts` in WE as the "portable cross-field" pair built together under #504; default FUI per the
+separate+decouple bias since it splits cleanly on the cel AST API).
+
+## Fork C — where does the Mode-2 `service.ts` live?
+
+**Crux (carved from the survey):** `service.ts` is the #309 Mode-2 generation *service* — a thin, pure,
+dependency-free dispatcher over the registry, mirroring the MaaS `serve()` precedent (#081):
+"defines the request/response contract and the handler; a Node or worker host wires the bytes"
+([service.ts:1](../validation-generation/service.ts#L1)). It splits conceptually: the wire contract
+(`ValidationServiceRequest`/`Response`/`ServedArtifact`) is unambiguously WE (the polyglot SoT #463
+depends on); the **handler** (`handleValidationRequest`/`serveValidation`) is the contested part.
+
+- **C1 (default) — whole file stays WE.** The handler is pure and host-free (no fs/net/transport), so it
+  is the spec's *reference* dispatcher — the same shape as `check.ts` shipping the reference adherence
+  gate. Per #091, a *deployed* validation-service is a future plateau-app concern; the standard + its
+  reference handler are WE. Keeps the wire contract and its reference implementation together.
+- C2 — port the handler to FUI (impl host), leaving only the contract types in WE. Cleaner "WE = types
+  only" line, but forecloses the reference-in-standard symmetry (check.ts / MaaS serve), splits a 161-line
+  file, and the deployed host that would justify it does not exist yet. *Rejected as default; the genuine
+  judgment call — flag for the decider.*
 
 ## What ratifying this unblocks
 
 #725 re-shapes to: copy only the **impl** dirs (`guard/`, `validity-merge/`, `validator-resolution/`, the
-FUI half of `validation-generation/`) + the two plug domains into FUI, wire bootstrap, and have them import
-the WE-resident contract/spec from `@webeverything`. #725 is `blockedBy` this decision. The recommendation
-above is the prepared shape (A1 + B1); a maintainer ratifies or amends before #725 resumes.
+FUI half of `validation-generation/` = `crossField.ts` + `adapters/*`) + the two plug domains into FUI,
+wire bootstrap, and have them import the WE-resident contract/spec from `@webeverything`. #725 is
+`blockedBy` this decision. The defaults above (A1 + B1 + C1) are the prepared shape; a maintainer ratifies
+or amends, then #725 resumes.
