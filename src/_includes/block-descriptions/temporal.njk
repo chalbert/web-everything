@@ -1,0 +1,54 @@
+<h2>Temporal — the abstract date/time core</h2>
+<p>The <strong>temporal</strong> block is the abstract core that realizes the <a href="/intents/temporal/">Temporal Intent</a> — date/time selection across modalities. It ships <em>no</em> concrete picker; it holds the shared machinery (calendar/clock rendering, locale parse/format, keyboard roving, range coordination) that the named shallow presets — <strong>date-picker</strong>, <strong>time-picker</strong>, <strong>datetime-picker</strong>, <strong>date-range-picker</strong> — pin down. It <strong>composes existing intents</strong> rather than inventing a paradigm: the dimension space from <a href="/intents/temporal/">Temporal</a> (<code>presentation × granularity</code>), parse/format from <a href="/intents/locale/">Locale</a>, modality from <a href="/intents/input/">Input</a>, and surface roving from <a href="/intents/focus-delegation/">Focus Delegation</a>.</p>
+
+<blockquote>
+  <p><strong>A temporal control <em>is</em> a native date/time input.</strong> The core defaults to <code>&lt;input type="date|time|datetime-local"&gt;</code> — keyboard entry, form submission, validity, and a no-JS fallback come free — and adds custom code only for what the platform can't express: a spatial/linear presentation surface, locale-aware display, and range/multi coordination. This is the <a href="/blocks/slider/">slider</a> pattern (native baseline, enhance the gap) one family over.</p>
+</blockquote>
+
+<h3>One core + named shallow presets (#713 option C)</h3>
+<p>The date/time/range pickers share one machinery contract, so that lives here once and each concrete picker is a shallow <strong>preset</strong> — a pin of <code>presentation</code> and <code>granularity</code> over this core, bound to one native anchor — not a re-implementation. This mirrors the <a href="/blocks/droplist/">droplist family</a> (one substrate, members are distinct selections). The key difference from the single-anchor <a href="/blocks/slider/">slider</a> (which needed no named members): the temporal family spans <strong>three</strong> native anchors — <code>input[type=date]</code>, <code>[type=time]</code>, <code>[type=datetime-local]</code> — each with its own parse/format and value shape, which is the concrete platform reason for named presets.</p>
+
+<h3>The dimension space — <code>presentation × granularity</code></h3>
+<table>
+  <thead>
+    <tr><th>Dimension</th><th>Values</th><th>Realization</th><th>Tier</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>presentation</code></td><td><code>input</code></td><td><code>built-in</code> — native <code>&lt;input type="date|time|…"&gt;</code> (zero-JS baseline)</td><td>1</td></tr>
+    <tr><td><code>presentation</code></td><td><code>media</code></td><td><code>built-in</code> — custom spatial surface (calendar grid, analog clock)</td><td>2</td></tr>
+    <tr><td><code>presentation</code></td><td><code>linear</code></td><td><code>built-in</code> — custom sequential surface (scroll wheel, listbox)</td><td>2</td></tr>
+    <tr><td><code>granularity</code></td><td><code>point</code></td><td><code>built-in</code> — one native input; the common case</td><td>1</td></tr>
+    <tr><td><code>granularity</code></td><td><code>range</code></td><td><code>built-in</code> — two coordinated, ordered values over one surface (cf. the slider's dual-thumb)</td><td>2</td></tr>
+    <tr><td><code>granularity</code></td><td><code>multi</code></td><td><code>built-in</code> — a set of disconnected points</td><td>2</td></tr>
+    <tr><td>Locale-aware parse / display</td><td>—</td><td><code>compose</code> — <a href="/intents/locale/">Locale Intent</a></td><td>1</td></tr>
+    <tr><td>Pointer / keyboard / touch modality</td><td>—</td><td><code>compose</code> — <a href="/intents/input/">Input Intent</a></td><td>1</td></tr>
+    <tr><td>Surface roving (grid/clock/wheel)</td><td>—</td><td><code>compose</code> — <a href="/intents/focus-delegation/">Focus Delegation</a></td><td>2</td></tr>
+  </tbody>
+</table>
+
+<h3>Altitude 1 — native input, the baseline every preset inherits</h3>
+<p>The common case (<code>presentation=input</code>) writes no JavaScript — the native control carries the value, the locale, and the form:</p>
+{% highlight "html" %}
+<!-- The native control IS the temporal core at presentation=input -->
+<label for="due">Due date</label>
+<input id="due" type="date" name="due"
+       temporal="presentation=input;granularity=point">
+{% endhighlight %}
+
+<h3>Altitude — media presentation over the native anchor</h3>
+<p>A <code>media</code> presentation layers a spatial surface (here a calendar grid) on top of the same native input, which stays the keyboard-entry + no-JS fallback. A preset (e.g. <a href="/blocks/date-picker/">date-picker</a>) is exactly this with the two dimensions pinned:</p>
+{% highlight "html" %}
+<input id="start" type="date" name="start"
+       temporal="presentation=media;granularity=point"   <!-- the date-picker pin -->
+       anchor="start-grid">
+<div id="start-grid" role="grid" aria-label="Choose a date" popover>
+  <!-- calendar cells rendered by the core's media surface; native input is the fallback -->
+</div>
+{% endhighlight %}
+
+<h3>Boundaries</h3>
+<ul>
+  <li><strong>Abstract — pins nothing.</strong> The core declares neither a <code>presentation</code> nor a <code>granularity</code>; it is the contract. A concrete picker is a preset that pins both and binds an anchor (date-picker = <code>media</code> + <code>point</code> over <code>input[type=date]</code>).</li>
+  <li><strong>Native is the baseline, not a fallback.</strong> Every preset keeps the real native date/time input — form-associated, accessible, zero-JS — and renders a custom surface only for the <code>media</code>/<code>linear</code> paradigm or for <code>range</code>/<code>multi</code>.</li>
+  <li><strong>Value text is formatted, raw stays raw.</strong> Locale-aware display flows through the <a href="/intents/locale/">Locale Intent</a> onto an accessible label; the native input keeps the machine value — the same split the <a href="/blocks/slider/">slider</a> uses (<code>aria-valuetext</code> vs <code>aria-valuenow</code>).</li>
+</ul>

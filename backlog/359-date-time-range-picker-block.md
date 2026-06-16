@@ -1,18 +1,56 @@
 ---
 type: idea
 workItem: story
-size: 13
+size: 3
 parent: "315"
-blockedBy: ["713"]
-status: open
+status: resolved
 dateOpened: "2026-06-12"
+dateStarted: "2026-06-16"
+dateResolved: "2026-06-16"
+graduatedTo: src/_data/blocks.json
 tags: []
 ---
 
-# Date / time / range picker block
+# Activate intent:temporal + abstract `temporal` core block + `date-picker` preset
 
-Date / time / range picker block — calendar-based date, time, and date-range selection with locale-aware formatting. Gap from the competitive coverage analysis (#347): intent:temporal defines the UX axis but no block implements a picker; native input[type=date|time] is the anchor for the simple case, intent:locale for formatting. High effort (calendar grid, keyboard, range, i18n). Candidate from the gap sweep — groom/split before building.
+Slice A of the date/time/range picker work (re-scoped in place by `/split 359`, 2026-06-15, after its scope blocker [#713](/backlog/713-date-time-picker-scope-single-value-pickers-as-359-variants-/) ratified). Activate the **Temporal Intent** (`status: concept → active`, src/_data/intents.json:1389-1411 — `presentation: media|linear|input` × `granularity: point|range|multi` already modeled) and author the **abstract `temporal` core block** that realizes it — `implementsIntent: temporal`, `composesIntents: [temporal, locale, input, focus-delegation]`, native-input anchoring (`input[type=date|time|datetime-local]`), locale-aware formatting — plus the first named shallow preset **`date-picker`** (pins `presentation: media`/`granularity: point` over `input[type=date]`). Standards-layer deliverable, matching the sibling gap-fix pattern (drawer/dialog/notification/carousel graduated as `blocks.json` entries, no impl dir).
 
-> **Sized 8 → 13 (2026-06-15, batch pre-flight):** not a single batchable slice — needs grooming/`/split` first AND carries an unresolved scope call. Dropped from the batch pool until split.
+## Decided shape — #713 option C (ratified 2026-06-15)
 
-**Blocked on the scope-call decision [#713](/backlog/713-date-time-picker-scope-single-value-pickers-as-359-variants-/).** `/split 359` (2026-06-15) found this is *could-not-split*: the open call — **are single-value date/time pickers variants of this block, or their own blocks?** (delegated here from the resolved form-control inventory [#468](/backlog/468-form-control-block-inventory-datepicker-timepicker-input-fam/)) — determines the entire slice shape, and you can't split away a fork. The fork is now tracked as decision #713 (default: one temporal block, variants by `granularity`/`presentation` — the slider precedent). Once #713 ratifies, re-run `/split 359` against the decided shape (likely: activate `intent:temporal` + a first native-anchored block as foundational slice A, then the variants/range slices off it). See reports/2026-06-15-backlog-split-analysis.md.
+One abstract `temporal` core block holding the shared machinery contract **plus** named shallow preset blocks (`date-picker`, `time-picker`, `datetime-picker`, `date-range-picker`) that pin `granularity`/`presentation` and bind their native anchor — presets over one core, not re-implementations. The three distinct native anchors (`input[type=date|time|datetime-local]`) are the concrete platform reason for named presets that the single-anchor slider precedent (src/_data/blocks.json:3175-3192) lacked. Design decisions on the core should cite #713 C + the slider precedent.
+
+## Slices off this (the `/split 359` shape)
+
+- **A (this card)** — activate `intent:temporal` + abstract `temporal` core + `date-picker` preset.
+- **B** (task, blocked on A) — `time-picker` / `datetime-picker` / `date-range-picker` named presets.
+- **C** (story, blocked on A+B, re-slice) — temporal block impl: `calendar-grid`/`clock`/`range-coordination` traits in `traitMap` + the build-chunk assertion (#713: "a time-only fixture pulls no calendar chunk"). Deferred because WE has zero authored traits today (`traitEnforcer({ traitMap: {} })`, vite.config.mts:104) — the impl seams aren't investigable until A lands the first WE trait pattern.
+
+See reports/2026-06-15-backlog-split-analysis.md (focused `/split 359` re-run).
+
+## Progress (2026-06-15, batch-2026-06-15)
+
+Slice A delivered — standards-layer, no impl dir (the gap-fix pattern: drawer/dialog/notification/slider
+graduated as `blocks.json` entries):
+
+- **Activated the Temporal Intent:** [src/_data/intents.json](../src/_data/intents.json) `temporal`
+  `status: concept → active` (the `presentation: media|linear|input` × `granularity: point|range|multi`
+  dimension space was already modelled).
+- **Authored the abstract `temporal` core block:** [src/_data/blocks.json](../src/_data/blocks.json) +
+  [src/_includes/block-descriptions/temporal.njk](../src/_includes/block-descriptions/temporal.njk) —
+  `implementsIntent: temporal`, `composesIntents: [temporal, locale, input, focus-delegation]`, native-input
+  anchoring (`input[type=date|time|datetime-local]`), locale-aware formatting. It pins no dimension (it is
+  the contract). `designDecisions` cite **#713 option C** (one core + named shallow presets) and the
+  **slider precedent** (native baseline, enhance the gap; three native anchors are the concrete reason for
+  named presets the single-anchor slider lacked), per the card.
+- **Authored the first preset, `date-picker`:** blocks.json entry +
+  [date-picker.njk](../src/_includes/block-descriptions/date-picker.njk) — `intentDimensions: {presentation:
+  media, granularity: point}` over `input[type=date]`; no machinery of its own (all inherited from the core).
+- **Inventory + gates:** `gen:inventory` re-run (AGENTS.md); `check:standards` 0 errors (each block now has
+  its description partial); `npx @11ty/eleventy --dryrun` builds clean (both `/blocks/temporal/` +
+  `/blocks/date-picker/` render).
+
+Cascades: **slice B ([#735](/backlog/735-time-picker-datetime-picker-date-range-picker-named-preset-b/))**
+— the remaining named presets — is `blockedBy #359` and is freed by this resolution; **slice C
+([#736](/backlog/736-temporal-block-impl-variant-traits-build-chunk-assertion-re-/))** — the impl + traits
++ build-chunk assertion — remains blocked on A+B (and is the first WE `traitMap` consumer, now unblockable
+on the A pattern).

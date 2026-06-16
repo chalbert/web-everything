@@ -3995,5 +3995,47 @@
         "rationale": "The CEM emit is a projection of whatever fields a block carries (#653) — many blocks have events but no slots yet, so the table renders only the populated member kinds."
       }
     }
+  },
+  {
+    "id": "temporal",
+    "name": "Temporal",
+    "status": "draft",
+    "type": "Component",
+    "summary": "The abstract core block that realizes the Temporal Intent (date/time selection) — the shared machinery every concrete picker pins down. Native-first by construction: a temporal control IS a native date/time input (<input type=\"date|time|datetime-local\">), so the core's job is only the enhancements native cannot express alone — a spatial/linear presentation surface (calendar grid, clock, scroll wheel), locale-aware parsing and display, and range/multi coordination — all behind one intent contract. It composes the Temporal Intent (presentation × granularity), the Locale Intent (parse/format), the Input Intent (pointer vs keyboard vs touch modality), and Focus Delegation (roving the surface). It ships no concrete picker itself: named shallow presets (date-picker, time-picker, datetime-picker, date-range-picker) pin granularity/presentation and bind their native anchor over this one core.",
+    "implementsIntent": "temporal",
+    "composesIntents": [
+      "temporal",
+      "locale",
+      "input",
+      "focus-delegation"
+    ],
+    "designDecisions": [
+      "One abstract core + named shallow presets, not re-implementations (#713 option C, ratified 2026-06-15). The date/time/range pickers share one machinery contract — calendar/clock rendering, locale parse/format, keyboard roving, range coordination — so that lives in a single abstract `temporal` core, and each concrete picker is a shallow preset that pins presentation/granularity and binds its native anchor over the core. This mirrors the Selection-Intent family (one substrate, members are distinct trait selections), not a per-picker rewrite.",
+      "Native input is the anchor and baseline — enhance, don't replace. A temporal control IS <input type=\"date\">/<time>/<datetime-local>: focusability, form participation, keyboard entry, and a platform fallback all come free, exactly as the slider precedent (the slider block) defaults to <input type=\"range\"> and only swaps to a custom track when native is ruled out. The core defaults to the native input and renders a custom presentation surface (media/linear) only when the paradigm demands it; the `input` presentation is the zero-JS native path.",
+      "Three distinct native anchors are the concrete reason for named presets — unlike the single-anchor slider. The slider had one native anchor (input[type=range]) so it needed no named members; the temporal family spans THREE platform anchors (date, time, datetime-local), each with its own parse/format and value shape, which is the platform-level reason date-picker / time-picker / datetime-picker exist as named presets rather than props on one element (#713 C; the slider precedent lacked this and so stayed a single block).",
+      "presentation × granularity is the whole dimension space (from the Temporal Intent). presentation is one of media (spatial: calendar grid, analog clock), linear (sequential: scroll wheel, listbox), or input (text: masked/native); granularity is one of point, range, or multi. A preset is exactly a pin of these two dimensions over the core; the core itself pins neither (it is the abstract contract). Locale-aware formatting flows through the Locale Intent and is published on the native input's value plus an accessible formatted label, the same split the slider uses (aria-valuetext formatted, aria-valuenow raw)."
+    ]
+  },
+  {
+    "id": "date-picker",
+    "name": "Date Picker",
+    "status": "draft",
+    "type": "Component",
+    "summary": "The first named shallow preset over the abstract `temporal` core: a single calendar-date picker. It pins the Temporal Intent to presentation=media (a spatial calendar grid) and granularity=point (one date), bound to the native <input type=\"date\"> anchor. It adds nothing the core lacks — it is the core with two dimensions pinned and one anchor chosen — so it inherits locale-aware parse/format, keyboard roving, and the native form-control baseline for free. Native <input type=\"date\"> stays the zero-JS fallback; the calendar-grid surface is the media-presentation enhancement.",
+    "implementsIntent": "temporal",
+    "intentDimensions": {
+      "presentation": "media",
+      "granularity": "point"
+    },
+    "composesIntents": [
+      "temporal",
+      "locale",
+      "input",
+      "focus-delegation"
+    ],
+    "designDecisions": [
+      "A preset is a dimension pin, not a new block of machinery (#713 option C). date-picker is the abstract `temporal` core with presentation=media + granularity=point pinned and the input[type=date] anchor bound; it re-implements none of the calendar/locale/keyboard machinery — that is the core's. This is the family rule (one core, members are pins) the same way the droplist family's members are trait selections over one substrate.",
+      "input[type=date] is the anchor and fallback. Following the slider precedent (native input is the baseline, custom surface only for the gap), the preset's media presentation renders a calendar grid for pointer/spatial selection while the native date input remains the keyboard-entry and no-JS fallback, carrying form participation, validity, and locale-aware value out of the box."
+    ]
   }
 ]

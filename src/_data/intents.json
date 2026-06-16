@@ -1388,7 +1388,7 @@
 {
     "id": "temporal",
     "name": "Temporal Intent",
-    "status": "concept",
+    "status": "active",
     "summary": "Protocol abstracting date/time selection paradigms across mouse, touch, and keyboard modalities.",
     "dimensions": {
       "presentation": {
