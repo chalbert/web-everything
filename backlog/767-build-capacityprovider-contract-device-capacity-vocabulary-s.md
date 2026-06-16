@@ -2,9 +2,11 @@
 type: issue
 workItem: story
 size: 5
-status: open
+status: resolved
 blockedBy: ["729"]
 dateOpened: "2026-06-16"
+dateStarted: "2026-06-16"
+dateResolved: "2026-06-16"
 tags: []
 ---
 
