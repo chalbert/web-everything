@@ -1,0 +1,116 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Prep research for the FUI catalog-family-denominator decision
+  (<a href="/backlog/783-decide-the-fui-catalog-block-family-denominator-dir-we-spec-/">#783</a>) — slice (b)
+  of the FUI block-catalog completeness epic
+  (<a href="/backlog/731/">#731</a>), executing the
+  <a href="/backlog/706/">#706</a> ruling. #706 ratified a <strong>fixed invariant</strong> — every
+  implemented <code>frontierui/blocks/</code> family must resolve to <strong>≥1 manifest entry</strong>,
+  gated the way WE's <code>check-demos</code> forces every demo folder to be registered — but deliberately
+  left the load-bearing word <strong>family</strong> undefined. #783 defines the gate's
+  <strong>denominator</strong> (which <code>blocks/</code> dirs are catalog families vs infra), the
+  <strong>dir→WE-spec mapping rule</strong> (including name-mismatched and multi-block dirs), and what to do
+  with dirs that carry no WE spec.
+</p>
+
+<h2>The tree as it actually is</h2>
+<p>
+  <code>frontierui/blocks/</code> has <strong>24</strong> dirs. FUI's impl manifest
+  (<code>frontierui/src/_data/blocks.json</code>, 23 entries, filled to completeness by the resolved
+  <a href="/backlog/737/">#737</a>) already carries a <strong><code>sourcePath</code></strong> field on every
+  entry pointing at the dir it realizes (e.g. <code>"sourcePath": "blocks/stores/simple"</code>). Mapping each
+  entry's <code>sourcePath</code> back to a top-level dir shows three dirs that map to <em>no</em> WE spec —
+  <code>renderers/</code> (its <code>index.ts</code> re-exports the published <code>@frontierui/jsx-runtime</code>
+  package + holds data-grid-internal render helpers), <code>traits/</code> (FUI <em>trait</em> impls governed
+  by the <strong>separate</strong> <code>traits.json</code> drift gate), and <code>__tests__/</code>. With
+  those set aside, <strong>all 21 remaining top-level dirs already have ≥1 manifest entry</strong> whose
+  <code>sourcePath</code> resolves within them — so a top-level-dir denominator is <strong>green today</strong>
+  with zero new entries. The disease #706 named (16 whole families unpublished) is already cured by #737; the
+  gate's job is to <em>keep</em> it cured.
+</p>
+
+<h2>Name-mismatch and multi-block dirs are not forks</h2>
+<p>
+  The mapping the item flags as tricky — name-mismatched dirs (<code>audit→audit-trail</code>,
+  <code>navigation→nav-list</code>, <code>stores→simple-store</code>,
+  <code>transient→transient-component</code>, <code>text-nodes→interpolation-text-node</code>) and multi-block
+  dirs (<code>parsers→</code> 3 bracket/expression parsers) — is already handled <strong>by construction</strong>,
+  because the mapping lives in each manifest entry's authored <code>sourcePath</code>, not in a
+  <code>dir-name == id</code> assumption. Coverage is simply: <em>does ≥1 manifest entry's
+  <code>sourcePath</code> fall within this dir?</em>
+</p>
+
+<h2>Prior art — how catalog tools define their discovery unit</h2>
+<p>
+  Surveyed the Custom Elements Manifest analyzer, Storybook, and Nx. They converge on one pattern:
+  <strong>discovery keys off an explicit marker, with the unit's name decoupled from its directory path</strong>,
+  and infra is excluded by <em>absence of the marker</em>, not primarily by a denylist.
+</p>
+<ul>
+  <li>
+    <strong>CEM analyzer</strong> (<code>@custom-elements-manifest/analyzer</code>) discovers per
+    <em>module → declaration</em> (a module may emit many declarations) and resolves a tag name from the
+    <code>customElements.define('x-foo', …)</code> call in the module-link phase — <strong>never</strong> from
+    filename or dirname.
+    (<a href="https://custom-elements-manifest.open-wc.org/analyzer/getting-started/">getting-started</a>,
+    <a href="https://github.com/open-wc/custom-elements-manifest/blob/master/packages/analyzer/docs/plugins.md">plugins.md</a>)
+  </li>
+  <li>
+    <strong>Storybook</strong> globs <code>*.stories.*</code> files (a file-presence marker); the unit is the
+    story file, not the directory.
+    (<a href="https://storybook.js.org/docs/api/main-config/main-config-stories">stories config</a>)
+  </li>
+  <li>
+    <strong>Nx</strong> discovers "projects" by a <strong>marker file</strong> (<code>project.json</code> /
+    <code>package.json</code>) or a marker-file glob, not a dir-name convention; non-project code is excluded
+    by absence of the marker.
+    (<a href="https://nx.dev/docs/reference/project-configuration">project configuration</a>)
+  </li>
+</ul>
+<p>
+  <strong>Bearing on the call:</strong> this <em>strongly confirms</em> the sourcePath mapping invariant (a
+  manifest's authored <code>sourcePath</code> is exactly the "name decoupled from path" marker CEM uses, which
+  is why our name-mismatch dirs are non-issues), and it <em>steelmans</em> the registration-name granularity
+  branch (marker/registration-based discovery is the broad norm). The counterweight keeping the gate
+  <strong>dir-based</strong>: those tools <em>discover what exists</em>, whereas this gate <em>forces coverage
+  of what exists in the manifest</em> — whose nearest precedent is <code>check-demos</code> (dir-based) — and
+  the completeness invariant is WE-standard-owned (#706) so it must read any implementer's filesystem rather
+  than couple to FUI's <code>attributes.define</code> convention.
+</p>
+
+<h2>The decision, after the fork-existence test</h2>
+<p>
+  Two <strong>forced invariants</strong> (ratify, not weigh): the mapping rule is <code>sourcePath</code>-anchored
+  (a <code>dir-name == id</code> rule would be broken); and the infra exclude-set is
+  <code>{__tests__, traits, renderers}</code> (each is broken to include — tests, a double-governed trait
+  catalog, a published-package re-export). The no-WE-spec <em>dirs</em> are exactly those three infra dirs →
+  <strong>exclude</strong>; there is no whole implemented-block dir missing a spec.
+</p>
+<p>
+  That leaves <strong>one genuine on-merit fork — denominator granularity</strong>:
+</p>
+<ul>
+  <li>
+    <strong>A — flat top-level dir + explicit infra exclude-set (recommended).</strong> Mirrors
+    <code>check-demos</code> (the precedent #706 cited), pure-filesystem (implementer-agnostic), deterministic,
+    green today. Blind to same-dir sibling drift (a second registered behavior in a covered dir, e.g.
+    <code>nav:section</code> inside <code>navigation/</code>).
+  </li>
+  <li>
+    <strong>B — registered-name denominator.</strong> Requires every registered public name to map to a
+    manifest entry; catches <code>nav:section</code>. But it couples the WE-standard-owned invariant to FUI's
+    registration convention and reintroduces an internal-name exclusion list (the <code>call</code>/
+    <code>pipe</code>/<code>value</code> sub-parsers).
+  </li>
+</ul>
+<p>
+  <strong>Recommended: A</strong> [confidence: med-high]. The sibling-drift gap (<code>nav:section</code> — a
+  registered W3C-APG Disclosure Navigation behavior with no WE spec) is captured as a separate build, not
+  closed by coupling the gate to a registration convention.
+</p>
+
+<p>
+  <em>Full grounding in <code>reports/2026-06-16-fui-catalog-family-denominator.md</code>.</em>
+</p>
+{% endraw %}
