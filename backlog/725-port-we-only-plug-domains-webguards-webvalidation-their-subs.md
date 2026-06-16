@@ -5,7 +5,7 @@ size: 8
 status: open
 locus: frontierui
 parent: "170"
-blockedBy: ["649", "730", "814"]
+blockedBy: ["649", "730", "814", "817"]
 dateOpened: "2026-06-15"
 dateStarted: "2026-06-16"
 relatedReport: reports/2026-06-14-plugs-runtime-audit.md
@@ -54,3 +54,23 @@ can't proceed — there is nothing to import from. Carved the prerequisite to
 **[#804](/backlog/804-establish-the-we-contract-export-package-surface-consumable-/)** (decide + build how WE
 exposes its standard contracts to FUI as a package, then export the two contracts + add the FUI dep);
 `blockedBy: #804` added. Released to the pool unworked; resumes once #804 lands the import surface.
+
+## Blocked again (3rd) — three more subsystems in the closure are unplaced (2026-06-16, batch-2026-06-16)
+
+Claimed in a batch after #804/#814 landed the `@webeverything/*` export surface; re-traced the closure
+**from the plug sources** (not the stale #635 audit) before copying. #804/#814 are real and complete — but
+they exported only **two** of the closure's **five** subsystems. The plugs also hard-import three more that
+#730 never classified and #814 never exported:
+
+- `plugs/webguards/index.ts:23-31` → `guard/{provider,registry}` (#288/#289)
+- `plugs/webvalidation/index.ts` → `validity-merge/{provider,registry}` (#212) +
+  `validator-resolution/{provider,registry,index}` (#214)
+
+These three are provider+registry **strategy planes** — and the #730 report itself cites validity-merge /
+validator-resolution as *the precedent planes capability-manifest is structured like*, i.e. the very shape
+ruled **A1 (stays WE)**. So porting them wholesale into FUI would risk the standard-into-impl leak #730
+exists to prevent, yet there is no `@webeverything` export to import them from either — the same wall as
+the 2nd block, one layer out. That placement (the same A1/B1 axis, never applied to these three) is not
+#725's to decide quietly. Carved to **[#817](/backlog/817-constellation-placement-of-guard-validity-merge-validator-re/)**
+(B1-shaped split recommended: provider/registry contract → WE + three new exports; concrete impl → FUI);
+`blockedBy: #817` added. Released unworked; resumes once #817 rules and the export delta lands.
