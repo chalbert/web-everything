@@ -64,17 +64,17 @@ judgment call); the happy path is these commands:
    **Never** pull a close-out leftover this way (unvetted — capture and leave it). The budget is a
    ceiling, not a quota: if the re-pack finds nothing new, stop short of budget. Stop → **release your
    soft holds** (`node scripts/backlog.mjs unreserve --session=<batch-slug>` — un-worked reserved items
-   flow back; `claim` already dropped the ones you worked) → final ledger + stop reason + carry-forward.
-5. **At close-out, calibrate:** **`node scripts/backlog.mjs calibrate --points=<cost resolved>
-   --context-pct=<context the user reports> --stop-reason=<which of the 4 stops fired>`** folds the session
-   into the budget estimate (the closing-session skill runs this for you; do it by hand if you stop without
-   /close). Pass the **stop reason** so the estimate stays honest: only a capacity-bound stop (`budget` /
-   `context`) trains it; a work-bound stop (`empty-pool` / `fork` / `gate`) is recorded but **excluded**, so
-   a batch that ran dry early doesn't drag the budget down (#553). **The agent can't read the context
-   meter — request the current reading in PLAIN PROSE in the close-out message (never via the
-   `AskUserQuestion` popup — a reading is a data request, not a decision) and use it verbatim; never
-   estimate it. The user may not be able to read it either — if no reading is given, just skip calibration
-   and move on; do NOT re-ask or block on it** (a guessed value silently skews every future batch's budget).
+   flow back; `claim` already dropped the ones you worked) → emit the **standard closure block**
+   (*Running a batch* → *Stopping*): a fixed terse shape — header (`cost X/budget · stop: <rule>`), one
+   `✓`/`~`/`→` line per item (carry-forwards tagged with a drop-reason), the Next line, and the single
+   calibration line. **No bespoke essay** — same shape every close, expand only for a red gate or on request.
+5. **Calibrate:** the closure's last line is **always the one standard ask, verbatim — `Context %? — for
+   calibrate; skip if you can't read it.`** (never the `AskUserQuestion` popup; never re-ask/block; the
+   agent can't read the meter, so never guess). Then run **`node scripts/backlog.mjs calibrate
+   --points=<cost resolved> --context-pct=<reading from user> --stop-reason=<which of the 4 stops fired>`**
+   (the closing-session skill runs this for you otherwise). The **stop reason** keeps it honest: only a
+   capacity-bound stop (`budget`/`context`) trains the estimate; a work-bound stop (`empty-pool`/`fork`/`gate`)
+   is recorded but **excluded** (#553). If no reading comes back, **skip calibration** — don't invent one.
 
 A batch runs several **agent-ready Tier-A** items in sequence — claim → work → close-out — **without
 stopping for approval between them**, to progress faster while still validating at every seam. **The size
@@ -126,18 +126,17 @@ When invoked (`/batch [P]` or `/batch-next [P] [NNN-slug]`):
    next) evaluate the **stop rule**, and **if the planned pack is exhausted with budget + context left,
    top up** by re-running `--select --budget=<remaining>` to absorb any cascade-freed Tier-A items (never
    raw leftovers) — see *Running a batch* → *The loop* step 4.
-4. **Stop + hand off** per *Running a batch* → *Stopping*: the final ledger, the **stop reason**
-   (which of rules 1–4 fired), and the **carry-forward** block. When the budget was reached with
-   eligible work still queued, recommend starting a **fresh agent** so context resets, emitting
-   `/batch-next <NNN-slug>` in its own fenced code block.
-5. **Calibrate at close-out** per *Running a batch* → *Calibrating the budget*: in the close-out message,
-   **request the editor's current context-meter reading in plain prose** (the agent can't see it; **never
-   use the `AskUserQuestion` popup** — it's a data request, not a decision), then run
-   `node scripts/backlog.mjs calibrate --points=<cost resolved> --context-pct=<reading from user> --stop-reason=<which stop fired>`
-   so the budget tracks what a session actually fits — only a capacity-bound stop (`budget`/`context`) trains
-   it; a work-bound stop (`empty-pool`/`fork`/`gate`) is excluded (#553) (closing-session does this automatically when a batch ran).
-   **If the user gives no reading (they may not be able to read the meter either), skip calibration — don't
-   re-ask, don't block, don't guess.**
+4. **Stop + hand off** per *Running a batch* → *Stopping*: emit the **standard closure block** — the fixed
+   terse shape (header + `✓`/`~`/`→` lines + Next + the one calibration line), *not* a bespoke essay. When
+   the budget filled with eligible work queued, the Next line is a fresh-agent handoff (`/batch-next
+   <NNN-slug>` in its own fenced block, context resets); a red gate / surfaced fork points at the item to fix
+   or decision to discuss instead.
+5. **Calibrate** per *Running a batch* → *Calibrating the budget*: the closure's last line is always the
+   standard ask verbatim — `Context %? — for calibrate; skip if you can't read it.` (never the
+   `AskUserQuestion` popup, never re-ask/block/guess) — then run `node scripts/backlog.mjs calibrate
+   --points=<cost resolved> --context-pct=<reading from user> --stop-reason=<which stop fired>`. Only a
+   capacity-bound stop (`budget`/`context`) trains it; work-bound (`empty-pool`/`fork`/`gate`) is excluded
+   (#553); closing-session runs it automatically. No reading → skip calibration.
    Never estimate the context percentage; skip calibration if the user gives none.
 
 **The stop rule (solid by construction)** — the **points budget is the sole driver**; stop the batch at a

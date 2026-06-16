@@ -488,29 +488,33 @@ Batch · cost 5/50 · gate ✓ · pts 3 · net −2/+1 · next: #155
 
 The header tracks the batch against its budget: **`cost <spent>/<budget>`** sums the resolved items' `batchCost` (the budget driver — a story's `size`, a task = 2), so you can see how close the budget backstop (stop rule 2) is. Each line carries the item's `workItem`/`size` so the chain's effort is visible. The header's **`pts`** sums resolved story/unstoried-epic *burndown* points (tasks contribute none — see *Agile sizing*), which is exactly what the `/backlog/` Burndown moves; it is intentionally ≤ `cost` (tasks add cost but no burndown points). The header also shows **net flow** `−<resolved>/+<opened>` — a batch both resolves items *and* opens new ones (leftovers captured at close-out), and capture can outpace drain; surfacing the net keeps that honest. Note each captured leftover inline on its parent item's line (`+#NNN`). Expand to full close-out detail only on a **red gate** (show the failure) or when asked. Keep the body lean — the ledger *is* the report.
 
-### Stopping — report + hand off
+### Stopping — the standard closure (fixed, terse shape)
 
-When the batch stops, **release any soft holds you still own** — `node scripts/backlog.mjs unreserve --session=<batch-slug>` (returns un-worked reserved items to full priority; see *Cross-session reservation*) — then end with: the final ledger, the **stop reason** (which of rules 1–4 fired), and — exactly as *Selecting* step 8 — the **carry-forward** block for a fresh session. When the budget was reached with eligible work still queued, recommend starting a **fresh agent** so context resets, emitting the next chain's invocation in its own fenced code block for the one-click copy:
+When the batch stops, **release any soft holds you still own** — `node scripts/backlog.mjs unreserve --session=<batch-slug>` (returns un-worked reserved items to full priority; see *Cross-session reservation*) — then close with the **standard closure block below — same shape every time, no bespoke essay**. The whole close-out is: the final ledger, a one-line stop reason, the carry-forward lines, the next-step line, and the single calibration line. Don't expand any of it into prose unless a red gate needs its failure shown, or the user asks.
 
-> Budget reached — 3 items resolved, all green. Start a fresh agent on the next chain:
-> ```
-> /batch-next 158-editable-grid-typed-editors-validation
-> ```
+```
+Batch closed · <slug> · <N> resolved · cost <X>/<budget> · stop: <rule>
+✓ #NNN slug — one-line outcome (gate ✓)        ← one per resolved item
+~ #NNN slug — reshaped: <one-line why>          ← only if any (resize / premise-fix / outgrew)
+→ #NNN slug — <drop-reason>: <one-line why>     ← one per unworked carry-forward item, tagged
+Next: /batch-next <NNN-slug>   (only if eligible work remains; else: the fork/gate to address)
+Context %? — for calibrate; skip if you can't read it.
+```
 
-If the stop was a **red gate** or a **surfaced fork**, the carry-forward instead points at what needs attention — the `active` item to fix, or the new decision item to discuss — not a fresh batch.
+Every carry-forward line carries one **drop-reason** (`taken` / `blocked-in-fact` / `not-batchable` / `outgrew`) — an untagged or "felt big" line means you stopped early (see *The drop-reason classifier*). The **Next** line is a fresh-agent handoff in its own fenced block when the budget filled with work still queued (context resets); on a **red gate** or **surfaced fork** it instead points at the `active` item to fix or the decision to discuss — not a fresh batch.
 
 ### Calibrating the budget — fold each session back into the estimate
 
 The budget is only as good as `capacityPoints`, and a fixed guess goes stale (the seed was extrapolated from one batch). So **at the end of a batch session, record what actually happened** and let it correct the estimate. This is the feedback loop the count cap never had — with no count cap, the budget *must* learn what a session really fits.
 
-Run, once, at close-out (the **closing-session** skill does this automatically when a batch ran; do it by hand otherwise). **Request the editor's current context-meter reading in plain prose in the close-out message** — the agent can't see it, so this value must come from the user, not a guess. **Never use the `AskUserQuestion` popup for it** (it's a data request, not a decision), and **never re-ask or block** — the user may not be able to read the meter either, in which case just skip calibration and move on:
+Run, once, at close-out (the **closing-session** skill does this automatically when a batch ran; do it by hand otherwise). The agent can't read the context meter, so the closure's **last line is always the one standard ask — `Context %? — for calibrate; skip if you can't read it.`** — verbatim, nothing longer. Rules baked into that line: never the `AskUserQuestion` popup (it's data, not a decision); never re-ask or block; if no reading comes back (the user may not see the meter either), **skip calibration** and move on. Then run:
 
 ```
 node scripts/backlog.mjs calibrate --points=<cost-points resolved> --context-pct=<context used at close> --stop-reason=<which stop fired>
 ```
 
 - **`--points`** = the resolved items' summed `batchCost` — the ledger's `cost <spent>` figure (a story's `size`, a task = 2). Count only items that actually `resolved` this session.
-- **`--context-pct`** = the share of the context window consumed at close (the editor's context meter, 1–100). **The agent cannot read this meter — so request the current reading in plain prose (never the `AskUserQuestion` popup) and use it verbatim; never estimate or guess it.** If the user doesn't supply one — including because they can't read the meter — **skip calibration this session rather than invent a number or re-ask** (a fabricated value silently skews the target for every future batch). A rough reading *from the user* is fine.
+- **`--context-pct`** = the share of the context window consumed at close (the editor's context meter, 1–100), from the **user's** reply to the standard ask above — use it verbatim. The agent cannot read the meter; **never estimate or guess**, and if no reading comes back, **skip calibration** rather than invent a number (a fabricated value skews every future batch's budget). A rough reading from the user is fine.
 - **`--stop-reason`** (optional but recommended) = which stop rule ended the batch. Only a **capacity-bound** stop trains the estimate: `budget` (the points budget filled) or `context` (the window was the limit). A **work-bound** stop — `empty-pool` (no eligible item left), `fork` (a decision surfaced), `gate` (a red gate), `manual` — measured *nothing* about how much a session fits, so it's recorded for audit but **excluded** from the mean (#553). Omit the flag and the session trains by default (backward compatible), but a batch that stopped on empty-pool/fork/gate should pass the real reason so its truncated `points ÷ context` doesn't drag the budget down.
 
 It computes the implied full-session capacity (`points ÷ contextFraction`) and folds it into `capacityPoints` as a **context-weighted mean over the retained 12-sample window** (each training sample weighted by its `contextPct`, work-bound samples excluded) — so the estimate *converges* as samples accumulate and high-context readings dominate, rather than a fixed-α EMA that only ever slides the window. It appends a raw sample and prints the new budget. Over a few sessions the budget converges on what this repo's batches actually sustain. Don't hand-edit `capacityPoints` — let the command move it; the raw `samples` array stays for audit (each tagged with its `stopReason`/`excluded`).
