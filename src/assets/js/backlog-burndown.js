@@ -57,7 +57,7 @@
   var W = 900, H = 360, PL = 52, PR = 18, PT = 18, PB = 58;
   var ix = PL, iw = W - PL - PR, iy = PT, ih = H - PT - PB;
   var ms = function (d) { return Date.parse(d); };
-  var COL = { scope: '#0ea5e9', done: '#16a34a', remaining: '#7c3aed', proj: '#7c3aed', net: '#94a3b8', grid: '#e2e8f0', axis: '#64748b', today: '#cbd5e1' };
+  var COL = { scope: '#0ea5e9', done: '#16a34a', remaining: '#7c3aed', proj: '#7c3aed', net: '#94a3b8', grid: '#e2e8f0', axis: '#475569', today: '#cbd5e1' };
 
   var MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   function fmtDate(t) { var d = new Date(t); return MON[d.getUTCMonth()] + ' ' + d.getUTCDate(); }

@@ -7,7 +7,7 @@
 {% set fr = topic | researchFreshness %}
 {% if fr.state == 'stale' %}{% set _bg = 'var(--color-warning-surface, #fef3c7)' %}{% set _fg = 'var(--color-warning-text, #b45309)' %}
 {% elif fr.state == 'fresh' %}{% set _bg = 'var(--color-success-surface, #dcfce7)' %}{% set _fg = 'var(--color-success-text, #15803d)' %}
-{% else %}{% set _bg = 'var(--color-surface-alt, #f1f5f9)' %}{% set _fg = 'var(--color-text-muted, #64748b)' %}{% endif %}
+{% else %}{% set _bg = 'var(--color-surface-alt, #f1f5f9)' %}{% set _fg = 'var(--color-text-muted, #475569)' %}{% endif %}
 <span class="research-freshness"
       data-freshness="{{ fr.state }}"
       data-last-reviewed="{{ fr.lastReviewed or '' }}"
@@ -29,7 +29,7 @@
 <div class="research-revision-history">
     <h2>Revision history</h2>
     {% if supersededByList.length %}
-    <p style="margin: 0 0 0.5rem 0; color: var(--color-text-muted, #64748b); font-size: 0.9em;">
+    <p style="margin: 0 0 0.5rem 0; color: var(--color-text-muted, #475569); font-size: 0.9em;">
         Superseded by:
         {% for id in supersededByList %}
             {% for t in researchTopics %}{% if t.id == id %}<a href="/research/{{ t.id }}/">{{ t.title }}</a>{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}
@@ -37,7 +37,7 @@
     </p>
     {% endif %}
     {% if supersedesList.length %}
-    <p style="margin: 0; color: var(--color-text-muted, #64748b); font-size: 0.9em;">
+    <p style="margin: 0; color: var(--color-text-muted, #475569); font-size: 0.9em;">
         Supersedes:
         {% for id in supersedesList %}
             {% for t in researchTopics %}{% if t.id == id %}<a href="/research/{{ t.id }}/">{{ t.title }}</a>{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}

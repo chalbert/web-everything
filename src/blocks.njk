@@ -72,12 +72,12 @@ title: Web Everything — Blocks
        style="text-decoration: none; color: inherit; display: block;">
       <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
         <h3 class="project-title" style="margin: 0;">{{ block.name }}</h3>
-        <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if block.status == 'concept' %}#fef3c7{% elif block.status == 'draft' %}#dbeafe{% elif block.status == 'active' %}#dcfce7{% else %}#f1f5f9{% endif %}; color: {% if block.status == 'concept' %}#92400e{% elif block.status == 'draft' %}#1e40af{% elif block.status == 'active' %}#166534{% else %}#64748b{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ block.status | title }}</span>
+        <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if block.status == 'concept' %}#fef3c7{% elif block.status == 'draft' %}#dbeafe{% elif block.status == 'active' %}#dcfce7{% else %}#f1f5f9{% endif %}; color: {% if block.status == 'concept' %}#92400e{% elif block.status == 'draft' %}#1e40af{% elif block.status == 'active' %}#166534{% else %}#475569{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ block.status | title }}</span>
       </div>
       <p style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ block.summary | truncate(180) }}</p>
       <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center;">
         {% if block.type %}
-        <span style="display: inline-block; padding: 0.15rem 0.55rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b); font-size: 0.75em;">{{ block.type }}</span>
+        <span style="display: inline-block; padding: 0.15rem 0.55rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569); font-size: 0.75em;">{{ block.type }}</span>
         {% endif %}
         {% if block.implementsIntent %}
         <span style="display: inline-block; padding: 0.15rem 0.55rem; border-radius: 9999px; background: rgba(99,102,241,0.08); color: #4338ca; font-size: 0.75em;">Intent: {{ block.implementsIntent }}</span>

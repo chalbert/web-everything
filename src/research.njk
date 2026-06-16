@@ -15,7 +15,7 @@ title: Research & References
             <h3 class="project-title" style="margin: 0 0 0.35rem 0;">Design Reference Library →</h3>
             <p style="margin: 0; color: var(--color-text-muted); font-size: 0.9em;">A growing, deduplicated corpus of real web-<strong>app</strong> screenshots, captured with rich metadata for later analysis and codification.</p>
         </div>
-        <span style="padding: 0.1rem 0.6rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b); font-size: 0.8em; font-weight: 600; white-space: nowrap;">{{ designRefs.length }} shots</span>
+        <span style="padding: 0.1rem 0.6rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569); font-size: 0.8em; font-weight: 600; white-space: nowrap;">{{ designRefs.length }} shots</span>
     </a>
 </section>
 {% endif %}
@@ -35,14 +35,14 @@ title: Research & References
         <a href="/research/{{ topic.id }}/" class="project-card" style="text-decoration: none; color: inherit;">
             <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center;">
                 <h3 class="project-title" style="margin: 0;">{{ topic.title }}</h3>
-                <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if topic.status == 'open' %}#fef3c7{% elif topic.status == 'resolved' %}#dcfce7{% else %}#f1f5f9{% endif %}; color: {% if topic.status == 'open' %}#92400e{% elif topic.status == 'resolved' %}#166534{% else %}#64748b{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ topic.status | title }}</span>
+                <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if topic.status == 'open' %}#fef3c7{% elif topic.status == 'resolved' %}#dcfce7{% else %}#f1f5f9{% endif %}; color: {% if topic.status == 'open' %}#92400e{% elif topic.status == 'resolved' %}#166534{% else %}#475569{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ topic.status | title }}</span>
             </div>
             <p style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ topic.summary }}</p>
             <div style="margin-bottom: 0.75rem;">{{ freshnessBadge(topic) }}</div>
             {% if topic.tags %}
             <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
                 {% for tag in topic.tags %}
-                <span style="display: inline-block; padding: 0.1rem 0.5rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b); font-size: 0.75em;">{{ tag }}</span>
+                <span style="display: inline-block; padding: 0.1rem 0.5rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569); font-size: 0.75em;">{{ tag }}</span>
                 {% endfor %}
             </div>
             {% endif %}

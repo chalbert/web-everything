@@ -12,17 +12,17 @@ eleventyComputed:
 {% macro typeBadge(type) %}
 <span style="padding: 0.15rem 0.6rem; border-radius: 9999px; font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
   background: {% if type == 'idea' %}#ede9fe{% elif type == 'issue' %}#fee2e2{% elif type == 'decision' %}#e0e7ff{% else %}#f1f5f9{% endif %};
-  color: {% if type == 'idea' %}#5b21b6{% elif type == 'issue' %}#991b1b{% elif type == 'decision' %}#3730a3{% else %}#64748b{% endif %};">{{ type }}</span>
+  color: {% if type == 'idea' %}#5b21b6{% elif type == 'issue' %}#991b1b{% elif type == 'decision' %}#3730a3{% else %}#475569{% endif %};">{{ type }}</span>
 {% endmacro %}
 
 {% macro statusBadge(status) %}
 <span style="padding: 0.15rem 0.6rem; border-radius: 9999px; font-size: 0.8em; font-weight: 600; white-space: nowrap;
   background: {% if status == 'open' %}#fef3c7{% elif status == 'active' %}#dbeafe{% elif status == 'resolved' %}#dcfce7{% else %}#f1f5f9{% endif %};
-  color: {% if status == 'open' %}#92400e{% elif status == 'active' %}#1e40af{% elif status == 'resolved' %}#166534{% else %}#64748b{% endif %};">{{ status | title }}</span>
+  color: {% if status == 'open' %}#92400e{% elif status == 'active' %}#1e40af{% elif status == 'resolved' %}#166534{% else %}#475569{% endif %};">{{ status | title }}</span>
 {% endmacro %}
 
 {% macro metaBadge(label, value) %}
-<span style="padding: 0.15rem 0.6rem; border-radius: 9999px; font-size: 0.75em; font-weight: 600; white-space: nowrap; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b);"><span style="text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.7;">{{ label }}</span>&nbsp;{{ value }}</span>
+<span style="padding: 0.15rem 0.6rem; border-radius: 9999px; font-size: 0.75em; font-weight: 600; white-space: nowrap; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569);"><span style="text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.7;">{{ label }}</span>&nbsp;{{ value }}</span>
 {% endmacro %}
 
 {# Epic-status badge — the same at-a-glance cue the /backlog/ tile shows (unsliced·why / all slices done /
@@ -37,7 +37,7 @@ eleventyComputed:
 } %}
 {% macro unslicedBadge(reason) %}
 {% set m = childlessReasonMeta[reason] %}
-{% if m %}<span title="{{ m.tip }}" style="padding: 0.15rem 0.6rem; border-radius: 9999px; font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: {{ m.bg }}; color: {{ m.fg }};">unsliced &middot; {{ m.label }}</span>{% else %}<span title="Unsliced epic — no child stories cut yet, and no reason recorded (add a childlessReason)." style="padding: 0.15rem 0.6rem; border-radius: 9999px; font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #f1f5f9; color: #64748b;">unsliced</span>{% endif %}
+{% if m %}<span title="{{ m.tip }}" style="padding: 0.15rem 0.6rem; border-radius: 9999px; font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: {{ m.bg }}; color: {{ m.fg }};">unsliced &middot; {{ m.label }}</span>{% else %}<span title="Unsliced epic — no child stories cut yet, and no reason recorded (add a childlessReason)." style="padding: 0.15rem 0.6rem; border-radius: 9999px; font-size: 0.75em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; background: #f1f5f9; color: #475569;">unsliced</span>{% endif %}
 {% endmacro %}
 
 {# A child slice of an epic, drawn as a clickable numbered circle coloured by the SAME agent-readiness
@@ -45,7 +45,7 @@ eleventyComputed:
    not-ready=slate) — identical to backlog.njk's childCircle so the tile and the detail header read alike. #}
 {% macro childCircle(child) %}
 {% set bg = "#f1f5f9" %}{% set bd = "#94a3b8" %}{% set fg = "#475569" %}
-{% if child.status == 'resolved' %}{% set bg = "#f8fafc" %}{% set bd = "#cbd5e1" %}{% set fg = "#94a3b8" %}
+{% if child.status == 'resolved' %}{% set bg = "#f8fafc" %}{% set bd = "#cbd5e1" %}{% set fg = "#475569" %}
 {% elif child.status == 'active' %}{% set bg = "#dbeafe" %}{% set bd = "#2563eb" %}{% set fg = "#1e40af" %}
 {% elif child.tier == 'A' %}{% set bg = "#dcfce7" %}{% set bd = "#16a34a" %}{% set fg = "#166534" %}
 {% elif child.tier == 'B' %}{% set bg = "#fef3c7" %}{% set bd = "#d97706" %}{% set fg = "#92400e" %}{% endif %}
@@ -118,7 +118,7 @@ eleventyComputed:
             {% if item.tags %}
             <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 1.25rem 0 1rem;">
                 {% for tag in item.tags %}
-                <span style="display: inline-block; padding: 0.15rem 0.6rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b); font-size: 0.8em;">{{ tag }}</span>
+                <span style="display: inline-block; padding: 0.15rem 0.6rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569); font-size: 0.8em;">{{ tag }}</span>
                 {% endfor %}
             </div>
             {% endif %}

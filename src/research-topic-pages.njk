@@ -48,7 +48,7 @@ eleventyComputed:
             {% if topic.tags %}
             <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;">
                 {% for tag in topic.tags %}
-                <span style="display: inline-block; padding: 0.15rem 0.6rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b); font-size: 0.8em;">{{ tag }}</span>
+                <span style="display: inline-block; padding: 0.15rem 0.6rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569); font-size: 0.8em;">{{ tag }}</span>
                 {% endfor %}
             </div>
             {% endif %}
@@ -84,7 +84,7 @@ eleventyComputed:
                         <h4 style="margin: 0; font-size: 1.1em;">{{ block.name }}</h4>
                         <span style="white-space: nowrap; padding: 0.1rem 0.5rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); font-size: 0.75em;">{{ block.type }}</span>
                     </div>
-                    <p style="font-size: 0.85em; color: var(--color-text-muted, #64748b); margin: 0;">{{ block.summary }}</p>
+                    <p style="font-size: 0.85em; color: var(--color-text-muted, #475569); margin: 0;">{{ block.summary }}</p>
                 </a>
                         {% endif %}
                     {% endfor %}

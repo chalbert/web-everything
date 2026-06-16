@@ -58,11 +58,11 @@ title: Web Everything — Presets
        style="display: block;">
       <div class="project-header" style="margin-bottom: 0.5rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
         <h3 class="project-title" style="margin: 0;">{{ preset.title or preset.name }}</h3>
-        <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if preset.status == 'concept' %}#fef3c7{% elif preset.status == 'draft' %}#dbeafe{% elif preset.status == 'experimental' %}#fde68a{% elif preset.status == 'active' %}#dcfce7{% else %}#f1f5f9{% endif %}; color: {% if preset.status == 'concept' %}#92400e{% elif preset.status == 'draft' %}#1e40af{% elif preset.status == 'experimental' %}#854d0e{% elif preset.status == 'active' %}#166534{% else %}#64748b{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ preset.status | title }}</span>
+        <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if preset.status == 'concept' %}#fef3c7{% elif preset.status == 'draft' %}#dbeafe{% elif preset.status == 'experimental' %}#fde68a{% elif preset.status == 'active' %}#dcfce7{% else %}#f1f5f9{% endif %}; color: {% if preset.status == 'concept' %}#92400e{% elif preset.status == 'draft' %}#1e40af{% elif preset.status == 'experimental' %}#854d0e{% elif preset.status == 'active' %}#166534{% else %}#475569{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ preset.status | title }}</span>
       </div>
       <p style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ preset.description }}</p>
       <div style="display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; margin-bottom: 0.75rem;">
-        <span style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.15rem 0.55rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b); font-size: 0.75em;">
+        <span style="display: inline-flex; align-items: center; gap: 0.35rem; padding: 0.15rem 0.55rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569); font-size: 0.75em;">
           {% if proj and proj.isSvg %}<img src="{{ proj.icon }}" alt="" width="14" height="14" style="display: inline-block;">{% endif %}
           {{ proj.name if proj else preset.ownedByProject }}
         </span>

@@ -49,13 +49,13 @@ title: Web Everything — Intents
        style="text-decoration: none; color: inherit; display: block;">
       <div class="project-header" style="margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
         <h3 class="project-title" style="margin: 0;">{{ intent.name }}</h3>
-        <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if intent.status == 'concept' %}#fef3c7{% elif intent.status == 'draft' %}#dbeafe{% elif intent.status == 'experimental' %}#fde68a{% elif intent.status == 'active' %}#dcfce7{% else %}#f1f5f9{% endif %}; color: {% if intent.status == 'concept' %}#92400e{% elif intent.status == 'draft' %}#1e40af{% elif intent.status == 'experimental' %}#854d0e{% elif intent.status == 'active' %}#166534{% else %}#64748b{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ intent.status | title }}</span>
+        <span style="padding: 0.1rem 0.5rem; border-radius: 9999px; background: {% if intent.status == 'concept' %}#fef3c7{% elif intent.status == 'draft' %}#dbeafe{% elif intent.status == 'experimental' %}#fde68a{% elif intent.status == 'active' %}#dcfce7{% else %}#f1f5f9{% endif %}; color: {% if intent.status == 'concept' %}#92400e{% elif intent.status == 'draft' %}#1e40af{% elif intent.status == 'experimental' %}#854d0e{% elif intent.status == 'active' %}#166534{% else %}#475569{% endif %}; font-size: 0.75em; font-weight: 600; white-space: nowrap;">{{ intent.status | title }}</span>
       </div>
       <p style="margin: 0 0 0.75rem 0; color: var(--color-text-muted); font-size: 0.9em;">{{ intent.summary }}</p>
       {% if dimKeys.length %}
       <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
         {% for key in dimKeys %}
-        <span style="display: inline-block; padding: 0.1rem 0.5rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #64748b); font-size: 0.75em; font-family: ui-monospace, monospace;">{{ key }}</span>
+        <span style="display: inline-block; padding: 0.1rem 0.5rem; border-radius: 9999px; background: var(--color-surface-alt, #f1f5f9); color: var(--color-text-muted, #475569); font-size: 0.75em; font-family: ui-monospace, monospace;">{{ key }}</span>
         {% endfor %}
       </div>
       {% endif %}

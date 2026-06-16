@@ -34,9 +34,7 @@ pre {
 /* Inline code default style */
 :not(pre) > code {
     background: rgba(135, 131, 120, 0.15); /* Subtle gray */
-    color: #eb5757; /* Reddish for contrast - or keep default text color */
-    color: #c7254e; /* Bootstrap-ish red */
-    color: #e06c75; /* One Dark red */
+    color: #b91c1c; /* Red-700 — darkened from One Dark #e06c75 for WCAG AA contrast on the light inline-code bg (#793); the dark-bg language-classed variant below overrides to #abb2bf */
     padding: 0.2em 0.4em;
     border-radius: 3px;
     font-size: 85%;
