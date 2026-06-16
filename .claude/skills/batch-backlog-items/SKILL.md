@@ -10,134 +10,68 @@ Trigger + pointer — the method lives in
 which builds on **"Selecting the next item to work on"**, **"Working an item"**, and **"Closing out a
 completed item"**). Don't restate the rubric here; if the method changes, edit that doc.
 
-## Quick path — the loop in commands
+Invoked as `/batch [P]` or `/batch-next [P] [NNN-slug]`: a bare number `P` overrides the **points
+budget** (not an item count; default = the calibrated `capacityPoints × targetFraction`); a `NNN`/`NNN-slug`
+**seeds** the chain's first item (skip its selection). **Open `backlog-workflow.md` only for an edge case**
+(empty pool → surface one decision; a stop-rule judgment call); the happy path is the loop below. A batch
+reuses the single-item arc **unchanged** (per-item `open → active` + `dateStarted` before code, `## Progress`
+synced, `resolved` after the full gate); it adds only the loop, the stop rule, and the ledger, and drops only
+the per-item chat-rename — a batch labels the session **once**.
 
-**Open `backlog-workflow.md` only for an edge case** (no Tier A → surface one decision; a stop-rule
-judgment call); the happy path is these commands:
+## The loop
 
-1. **`npm run check:readiness -- --select --session=<batch-slug>`** → take its **`Suggested batch — points budget`** pack (the
-   greedy fill of the ranked Tier-A list up to `budget = capacityPoints × targetFraction`, where cost =
-   a story's `size`, a task = 2). The **count is whatever fills the budget** — not a fixed 3; a `size·8`
-   joins when it fits. Skim only the packed items' bodies for a buried fork — **that's the whole
-   pre-flight.** Trust the projection: it only lists items with `blockedBy` resolved, so **don't
-   re-`grep` already-resolved blockers**; **the working tree's git/commit state is irrelevant — NEVER
-   inspect `git status`/`git diff` to decide eligibility, and never skip or drop an item because it (or
-   the tree) has uncommitted edits.** A perpetually-dirty tree is the normal baseline; `claim` does not
-   look at commit state, and concurrency is owned by the `status` transition + `reserve` holds, not git
-   (see *The stop rule* → *drop-reason classifier*). **Only look one cluster deeper for a tighter
-   alternative if the skim actually surfaces a fork** — clean pack → take it and go (full rule: *Running
-   a batch* → *Eligibility* pre-flight note).
-   **When the skim shows an item is mis-flagged** (really a decision/fork, deferred/gated, or mis-sized),
-   **fix the flag in place, don't just skip it** — `type: decision` (→ Tier B), `status: parked`, or bump
-   `size` (to `13` to drop it from the eligible pool) — then re-run the gate. A clean pool is the
-   batch's own input (full rule: *Eligibility* → reclassification note). **The body skim is principle
-   conformance, not just a fork check (#608):** also catch a stale `file:line` ref, a false premise, or a
-   missing placement note, and **remediate it in place** (pure-agent fixes only — never quietly make a
-   design call to force batchability); escalate only an irreducible fork as a ready-to-ratify nod. D3-readiness
-   (an item whose `relatedProject` is a `concept` project with no shipped surface) is already demoted by the
-   loader, so it won't reach the pool — but `npm run check:health` surfaces the deterministic governance/ref
-   flags worth a glance before a long run (full rule: *Selecting* → *Principle-conformance pre-flight*). **If the eligible pool can't fill
-   the budget**, the batch is simply shorter (stop rule 3) — don't pad it with `≥13`/`epic` work; those stay
-   single-item (the *Other Tier-A* list), surfaced separately.
-2. **Present the ordered plan, get one "go"**, and emit the single `batch-<date>-<NNN>-<NNN>…` rename
-   slug (the batch labels the session **once** — no per-item rename). **On the "go", soft-hold the pack:**
-   `node scripts/backlog.mjs reserve <NNN...> --session=<batch-slug>` so a second concurrent batch packs
-   around your items (deprioritized, not excluded — #083). Pass `--session=<batch-slug>` to every
-   `--select` (opening + top-ups) so your own holds don't sink your own chain (full rule:
-   *Running a batch* → *Cross-session reservation*).
-3. **Loop, per item:** **`node scripts/backlog.mjs claim <NNN>`** → work → gate in the item's **own locus**
-   (look up `LOCI[item.locus]` in `check-standards-rules.mjs`: run its `gateCommand` in `repoPath`, probe its
-   `devServerProbe` port for any render check, and do any `closeoutDiscipline` — exercise-app's GAP-tagging;
-   a WE item is just `npm run check:standards` here) → leftovers via **`node scripts/backlog.mjs scaffold …`**
-   → **`node scripts/backlog.mjs resolve <NNN> [--graduated-to=…]`** → **commit that item's changes to its
-   `commitTarget` repo** (`git add <explicit paths the item touched>` then `git commit` — **stage only this
-   piece's files, never `git add -A` across repos; never `git push`**; one commit per closed item — and if
-   your item's *own* file is already dirty from a concurrent session, `git stash push -- <that file>` →
-   edit → commit → `git stash pop` so you commit only your hunk, per *backlog-workflow.md → Commit each
-   finished piece*). Update
-   the compact ledger after each (header tracks `cost <spent>/<budget>`). The `--select` pack prints a
-   per-locus gate legend (`⌂ <locus> → <gateCommand> in <repoPath>`) so a cross-locus batch is self-documenting.
-4. **At each seam, evaluate the stop rule**; on continue, re-read the next item fresh (drop it only if now
-   `status: active` — i.e. another session owns it; **uncommitted edits are NOT a drop reason**). **When the planned pack runs dry but budget + context remain, top up:** re-run
-   `npm run check:readiness -- --select --budget=<remaining>` (remaining = budget − resolved `cost`) and
-   pack its fresh suggestion — it absorbs items the just-resolved work cascade-freed to Tier A.
-   **Never** pull a close-out leftover this way (unvetted — capture and leave it). The budget is a
-   ceiling, not a quota: if the re-pack finds nothing new, stop short of budget. Stop → **release your
-   soft holds** (`node scripts/backlog.mjs unreserve --session=<batch-slug>` — un-worked reserved items
-   flow back; `claim` already dropped the ones you worked) → emit the **standard closure block**
-   (*Running a batch* → *Stopping*): a fixed terse shape — header (`cost X/budget · stop: <rule>`), one
-   `✓`/`~`/`→` line per item (carry-forwards tagged with a drop-reason), the Next line, and the single
-   calibration line. **No bespoke essay** — same shape every close, expand only for a red gate or on request.
-5. **Calibrate:** the closure's last line is **always the one standard ask, verbatim — `Context %? — for
-   calibrate; skip if you can't read it.`** (never the `AskUserQuestion` popup; never re-ask/block; the
-   agent can't read the meter, so never guess). Then run **`node scripts/backlog.mjs calibrate
-   --points=<cost resolved> --context-pct=<reading from user> --stop-reason=<which of the 4 stops fired>`**
-   (the closing-session skill runs this for you otherwise). The **stop reason** keeps it honest: only a
-   capacity-bound stop (`budget`/`context`) trains the estimate; a work-bound stop (`empty-pool`/`fork`/`gate`)
-   is recorded but **excluded** (#553). If no reading comes back, **skip calibration** — don't invent one.
-
-A batch runs several **agent-ready Tier-A** items in sequence — claim → work → close-out — **without
-stopping for approval between them**, to progress faster while still validating at every seam. **The size
-of a batch is a points budget, not an item count:** it packs as many points as possible up to
-`budget = capacityPoints × targetFraction` (currently `71 × 0.6 ≈ 43`, from
-`.claude/skills/batch-backlog-items/capacity.json`), where cost (`item.batchCost`) is a story's `size`
-and a task = 2. This fixes the old timidity — a fixed "top 3" cap left a real 10-item batch at only ~20%
-context. The **`Suggested batch — points budget`** block from `npm run check:readiness -- --select` (also
-`--json` → `batch.picked`) is the pre-computed pack — **read it, don't reconstruct it by hand** (the bug
-this fixes: a hand pass found 2 where the loader lists ~23). Batchable = Tier-A **`task`** or
-**`story·≤8`** (`item.batchable`); the budget packs **smallest-first**, reaching a single `size·8` only
-when the remaining points fit. A `story·≥13` and any `epic` are **never** packed (full eligibility +
-fallback in *Running a batch* → *Eligibility*). It
-reuses the single-item arc **unchanged**, including **per-item on-disk ownership** (each item is
-individually flipped `open → active` with `dateStarted` *before* code, `## Progress` kept in sync,
-and `resolved` at close-out after the full gate). The **only** thing it drops is the per-item
-chat-rename *stop* — because a batch labels the session **once**.
-
-When invoked (`/batch [P]` or `/batch-next [P] [NNN-slug]`):
-
-1. **Parse args.** A bare number is the **points budget** override `P` (default = the calibrated
-   `capacityPoints × targetFraction` from `--select`) — it is a points budget, **not** an item count.
-   A `NNN` or `NNN-slug` **seeds** the chain's first item — skip its selection (like next-backlog-item
-   step 0); the rest are packed by budget. Both forms may appear (`/batch-next 30 158-editable-grid-typed-editors-validation`).
-2. **Plan + approve once, and label the session in the same beat.** Start from
-   `npm run check:readiness -- --select` and take its **`Suggested batch — points budget`** pack (already
-   ranked + budget-filled). Present it as an **ordered batch plan** (each item with its `live` + `md`
-   links, its `batchCost`, and the running total against the budget), per *Running a batch* → *The loop*
-   step 1. Your only per-item judgment is the body-fork pre-flight on the packed items (a `story·3` can
-   still hide a design call) — not a re-derivation of the pack. **If no Tier-A item exists to seed
-   the batch** (the ready pool is empty), there's no batch to run — fall back to `backlog-workflow.md`
-   → **"When nothing is agent-ready"**: surface the **single** highest-leverage blocker for the user to
-   resolve (the decision that unblocks the most downstream items), discuss it, and stop. Don't open a
-   batch on Tier B/C work. In the **same message** (when there *is* a plan), ask the
-   user to rename the chat once and emit a `batch-<date>-<NNN>-<NNN>…` slug in its **own fenced code
-   block** for the one-click copy — `<date>` plus the planned items' `NNN` numbers in chain order
-   (e.g. `batch-2026-06-07-155-164-165`), so two batches on the same day get distinct names. This is
-   the *only* rename, and the plan-approval stop protects it from being buried, so there is no
-   per-item rename. A single "go" (or one `AskUserQuestion`) authorizes the **whole batch**, not each
-   item.
-3. **Run the loop.** For each item: the **full single-item arc** — claim → work → close-out gate —
-   using the mechanical verbs (`node scripts/backlog.mjs claim <NNN>` to win the race + flip + stamp;
-   `… resolve <NNN> [--graduated-to=…]` at close-out; `… scaffold …` for any leftover) so each
-   transition is one command, not a hand-edit — updating the **compact ledger** after each
-   (one line per item; see *Running a batch* → *Reporting*). The arc carries its upkeep unchanged:
-   at claim, **re-evaluate the item's `blockedBy` edges and its digest** (lead paragraph), and on any
-   close-out spin-off **set its `blockedBy` + write a digest** — see `backlog-workflow.md` → **"Keep the
-   blocker DAG honest"** and **"The digest"**. At every **seam** (after close-out, before claiming the
-   next) evaluate the **stop rule**, and **if the planned pack is exhausted with budget + context left,
-   top up** by re-running `--select --budget=<remaining>` to absorb any cascade-freed Tier-A items (never
-   raw leftovers) — see *Running a batch* → *The loop* step 4.
-4. **Stop + hand off** per *Running a batch* → *Stopping*: emit the **standard closure block** — the fixed
-   terse shape (header + `✓`/`~`/`→` lines + Next + the one calibration line), *not* a bespoke essay. When
-   the budget filled with eligible work queued, the Next line is a fresh-agent handoff (`/batch-next
-   <NNN-slug>` in its own fenced block, context resets); a red gate / surfaced fork points at the item to fix
-   or decision to discuss instead.
-5. **Calibrate** per *Running a batch* → *Calibrating the budget*: the closure's last line is always the
-   standard ask verbatim — `Context %? — for calibrate; skip if you can't read it.` (never the
-   `AskUserQuestion` popup, never re-ask/block/guess) — then run `node scripts/backlog.mjs calibrate
-   --points=<cost resolved> --context-pct=<reading from user> --stop-reason=<which stop fired>`. Only a
-   capacity-bound stop (`budget`/`context`) trains it; work-bound (`empty-pool`/`fork`/`gate`) is excluded
-   (#553); closing-session runs it automatically. No reading → skip calibration.
-   Never estimate the context percentage; skip calibration if the user gives none.
+1. **Pack** — `npm run check:readiness -- --select --session=<batch-slug>` → take its `Suggested batch —
+   points budget` block (also `--json` → `batch.picked`). **Read it, don't reconstruct it** — the loader
+   budget-fills the ranked Tier-A list to `capacityPoints × targetFraction` (cost = a story's `size`, a
+   task = 2; packs **smallest-first**; **count = whatever fits**; `item.batchable` = Tier-A `task`/`story·≤8`,
+   and a `story·≥13`/`epic` is **never** packed). A `NNN`-seed fixes the first item; the rest pack by budget.
+   - **Pre-flight = skim the packed bodies for a buried fork — that's the whole judgment.** Trust the
+     projection (only `blockedBy`-resolved items appear — don't re-grep blockers; never read `git status`
+     for eligibility, a dirty tree is the baseline and `claim` ignores it). Clean pack → go; look one cluster
+     deeper only if the skim surfaces a fork.
+   - **Mis-flagged item → fix the flag in place, don't skip it** — retype `type: decision` (→ Tier B), set
+     `status: parked`, or bump `size` to `13` (drops it from the pool), then re-run. The skim is
+     principle-conformance, not just a fork check (#608): a stale `file:line`, false premise, or missing
+     placement note → **remediate in place** (pure-agent only — never quietly make a design call to force
+     batchability); escalate only an irreducible fork as a ready-to-ratify nod. (`npm run check:health`
+     surfaces deterministic governance/ref flags worth a glance before a long run.)
+   - **Pool can't fill the budget → the batch is just shorter** (stop rule 3); don't pad with `≥13`/`epic`
+     work — those stay single-item (the *Other Tier-A* list).
+2. **Plan + one "go" + label once** — present the pack as an ordered plan (each item: `live` + `md` links,
+   `batchCost`, running total vs budget). Your only per-item judgment is the body-fork pre-flight, not a
+   re-derivation. In the **same message**, emit the single rename slug `batch-<date>-<NNN>-<NNN>…` (chain
+   order, distinct per day) in its **own fenced block** — the *only* rename. One "go" authorizes the **whole
+   batch**. **On the "go", soft-hold the pack:** `node scripts/backlog.mjs reserve <NNN...> --session=<batch-slug>`
+   (a concurrent batch then packs around your items — deprioritized, not excluded, #083); pass
+   `--session=<batch-slug>` to **every** `--select` (open + top-ups) so your own holds don't sink your chain.
+   - **Empty pool → no batch.** Fall back to *backlog-workflow.md → "When nothing is agent-ready"*: surface
+     the **single** highest-leverage blocker, discuss, stop. Don't open a batch on Tier B/C work.
+3. **Loop, per item — the full arc, one command per transition:** `claim <NNN>` (wins the race + flips +
+   stamps; at claim **re-evaluate its `blockedBy` edges + digest**) → work (keep `## Progress` synced) →
+   **gate in the item's own locus** (look up `LOCI[item.locus]` in `check-standards-rules.mjs`: run
+   `gateCommand` in `repoPath`, probe `devServerProbe` for any render check, do any `closeoutDiscipline`;
+   a WE item is just `npm run check:standards`) → capture leftovers via `scaffold …` (set their `blockedBy`
+   + a digest) → `resolve <NNN> [--graduated-to=…]` → **commit that item's files to its `commitTarget` repo**
+   (`git add <explicit paths>` then `git commit` — stage only this piece, never `git add -A`, never
+   `git push`; one commit per item; if your own file is dirty from a concurrent session, `git stash push --
+   <file>` → edit → commit → pop). Update the ledger (header tracks `cost <spent>/<budget>`). The `--select`
+   pack prints a per-locus gate legend (`⌂ <locus> → <gateCommand> in <repoPath>`). See *backlog-workflow.md
+   → Reporting / Keep the blocker DAG honest / The digest*.
+4. **At each seam, evaluate the stop rule** (below). On continue, re-read the next item fresh (drop only if
+   now `status: active` — another session owns it; uncommitted edits are never a drop reason). **Pack dry but
+   budget left → top up:** re-run `--select --budget=<remaining>` (= budget − resolved `cost`) to absorb
+   cascade-freed Tier-A items — **never** a close-out leftover (unvetted: capture and leave). Budget is a
+   ceiling, not a quota: re-pack finds nothing → stop short.
+5. **Stop → close out:** release holds (`node scripts/backlog.mjs unreserve --session=<batch-slug>` — unworked
+   reserves flow back; `claim` already dropped the worked ones), then emit the **standard closure block**
+   (*backlog-workflow.md → Stopping*): the fixed terse shape — header (`cost X/budget · stop: <rule>`), one
+   `✓`/`~`/`→` line per item (carry-forwards tagged with a drop-reason), the Next line, the single calibration
+   line. **No bespoke essay**; expand only for a red gate or on request. **Calibrate:** the closure's last
+   line is always the standard ask **verbatim** — `Context %? — for calibrate; skip if you can't read it.`
+   (never the `AskUserQuestion` popup, never re-ask/block/guess) — then `node scripts/backlog.mjs calibrate
+   --points=<cost resolved> --context-pct=<reading> --stop-reason=<which stop>`. Only a capacity stop
+   (`budget`/`context`) trains the estimate; work-bound (`empty-pool`/`fork`/`gate`) is recorded but
+   **excluded** (#553). No reading → **skip** calibration (closing-session runs it for you otherwise).
 
 **The stop rule (solid by construction)** — the **points budget is the sole driver**; stop the batch at a
 seam if (and ONLY if) ANY of these **four** holds (full text in *Running a batch* → *The stop rule*):
@@ -165,7 +99,7 @@ claim must carry exactly one hard reason — `taken` (already `status: active` �
 out so its gate can't run), `not-batchable` (`decision`/`story·≥13`/`epic`), or `outgrew`
 (claimed-and-began, then sprawled). **There is NO `out-of-locus` drop reason since #500** — a batch is
 locus-agnostic and gates each item in its own locus, so a cross-repo item is claimed and closed like any
-other (full mechanic: `backlog-workflow.md` → *Repo-locus*). **There is NO `dirty`/uncommitted drop reason** —
+other (*backlog-workflow.md → Repo-locus*). **There is NO `dirty`/uncommitted drop reason** —
 `claim` never inspects git, and a modified-or-untracked working tree is the normal baseline, never a reason
 to skip an item. An eligible `task`/`story·≤8` with **none** of these **must be
 claimed** — "big / risky / load-bearing / needs a focused session / fresh agent / the tree is dirty" are the gut stops this
@@ -173,10 +107,6 @@ kills. The closing ledger **tags every unworked item with its reason**; an untag
 "felt big") means you stopped early — go back and claim it. Quitting early on a gut call (or an unsolicited
 context-check) is the failure this rule exists to kill. (The context-% question belongs at **close-out
 only**, for calibration — never as a continue/stop gate.)
-
-Everything per item — claim-as-`active`, the `## Progress` block, the close-out gate and
-leftover-capture pass, the immutable-`NNN` rules — is **exactly** the single-item arc. Batch adds
-only the loop, the stop rule, and the compact ledger.
 
 ## Cascade — linear & semi-linear chains (dependency-ordered batching)
 
@@ -200,8 +130,8 @@ single-item arc per item, **stop rule at every seam**. A chain link that turns o
 stop), and only **cascade-freed pre-existing** items continue the run — **never** close-out leftovers.
 Throughput order: **`--parallel`** (independent, concurrent) > **serial pack** (independent, sequential) >
 **cascade** (dependent, sequential) — the chain can't parallelize, so cascade trades that for running it
-unattended in one session instead of as one-item handoffs. Full method:
-[backlog-workflow.md](../../../docs/agent/backlog-workflow.md) → **"Linear & semi-linear cascade."**
+unattended in one session instead of as one-item handoffs. Full method: *backlog-workflow.md → Linear
+& semi-linear cascade*.
 
 ## Parallel lanes — opt-in `/batch --parallel` (reliability first, speed second)
 

@@ -6,118 +6,97 @@ description: Take an un-prepared open decision and do the research + authoring t
 # Prepare — bring an open decision to "ready to ratify", ahead of the call
 
 Trigger + pointer — the method lives in
-[docs/agent/backlog-workflow.md](../../../docs/agent/backlog-workflow.md): **"Fork-readiness pass"**,
-**"Per-fork classification pass"**, and **"The prepared-fork shape — a decision's Definition of
-Ready"**, which lean on [design-first.md](../../../docs/agent/design-first.md) (step 1 prior-art survey)
-and [research-workflow.md](../../../docs/agent/research-workflow.md) (publishing a `/research/` topic).
-Don't restate the rubric here; if the method changes, edit those docs.
+[backlog-workflow.md](../../../docs/agent/backlog-workflow.md): *backlog-workflow.md → Fork-readiness
+pass*, *backlog-workflow.md → Per-fork classification pass*, and *backlog-workflow.md → The
+prepared-fork shape*, which lean on *design-first.md → step 1 prior-art survey* and *research-workflow.md
+→ publishing a /research/ topic*. Don't restate the rubric here; if the method changes, edit those docs.
 
-The line that defines this skill: **prep is the autonomous half of a decision** — the research +
-authoring that can be done *ahead* of the call, with **no human judgment yet**. It does **not** make
-the call. When prep is done the item is still `open`; it just carries `preparedDate`, so
-`check:readiness --select` ranks it **prepared-first within Tier B** and tags it `✓ ready to ratify`
-(vs `○ needs prep`), and `/next decision` later surfaces it as a fast ratification rather than a cold
-research dump. To *make* a prepared (or un-prepared) call, that's `/next decision`, not this.
+Prep is the autonomous **half of a decision** — the research + authoring that can be done *ahead* of the
+call, with no human judgment yet. It does *not* make the call; that's `/next decision`. When prep is done
+the item carries `preparedDate`, so `check:readiness --select` ranks it prepared-first within Tier B and
+tags it `✓ ready to ratify` (vs `○ needs prep`).
 
 ## Quick path — the loop in commands
 
 1. **Build the candidate set — un-prepared open decisions.** `npm run check:readiness -- --select
-   --json` → take **Tier B** items where `preparedDate` is null (the `○ needs prep` ones). **Blocked
-   (Tier C) decisions aren't in that projection**, so also one-pass scan `backlog/*.md` for
+   --json` → take Tier B items where `preparedDate` is null (the `○ needs prep` ones). Blocked (Tier C)
+   decisions aren't in that projection, so also one-pass scan `backlog/*.md` for
    `type: decision`/`review` + `status: open` + no `preparedDate`. `/prepare <NNN>` (or `<NNN-slug>`)
    focuses one item — skip ranking, go to step 3. Bare `/prepare` ranks the set.
 2. **Rank by downstream-unblock leverage and recommend one** (same rule as *When nothing is
    agent-ready* → most dependents wins; tie-break smaller fork first). Present a short shortlist (top
    3–5, one-line rationale + leverage each) with two links per item ([live] · [md]) and your
    recommended pick. Prep is a real token spend (a prior-art survey + a `/research/` topic + authoring),
-   so get **one "go"** on which item before burning it — *not* a multiple-choice; planning-as-discussion.
+   so get one "go" on which item before burning it — *not* a multiple-choice; planning-as-discussion.
 3. **Claim it.** `node scripts/backlog.mjs claim <NNN> --as=preparing` (race-safe `open → preparing`
    + `dateStarted`; refuses if dirty or already taken). The `preparing` status drops it from selection
    exactly like `active`, but reads distinctly on the `/backlog/` board — a decision being *researched*,
    not a story mid-build (#375). Emit the rename slug. Claiming guards against a concurrent session
-   preparing the same fork — prep is claimable work like any other.
+   preparing the same fork.
 
 ## Doing the prep — the passes, in order (standing test first)
 
-Run the documented passes on the claimed item, **editing the item on disk** (not just chat) — the
-durable output is the rewritten body, not a message:
+Run the documented passes on the claimed item, editing the item on disk (not just chat) — the durable
+output is the rewritten body, not a message:
 
-0. **Standing test FIRST — is each concern even a fork? Support-both before you pick** (`backlog-workflow.md`
-   → *"Standing test before any of the above — is this even a decision?"*). Before classifying or
-   authoring a default, run the **fork-existence test** on every concern: are its branches genuinely
-   *mutually-exclusive* end-states, or just *different coherent approaches that can all be supported* (often
-   from **one artifact** — e.g. a single factory serving both delivery modes)? If they can coexist and
-   neither is *flawed*, **it is not a decision** — author it as a **"Supported by default"** entry, never a
-   `## Fork N` with a recommended pick. A concern is a real fork only when (a) exactly one branch is correct
-   and the alternative is *broken* (a forced invariant → ratify), or (b) two coherent branches *cannot*
-   coexist (a genuine either/or). **If you can't name the broken/excluded branch, there is no fork — support
-   all of them.** Running the per-fork "recommended default · main alternative" machinery on a support-both
-   concern manufactures a false pick (the #756 miss: A and B were composable from one `traitEnforcerParcel`
-   factory, so the call was *support both, default to the factory* — not "ratify B, reject A").
-
-1. **Prior-art research first — never author a fork cold** (*Fork-readiness pass* → first bullet). If
-   the decision authors/designs anything greenfield (a new intent/block/plug/protocol/adapter, or any
-   "no design exists yet" call), run [design-first.md](../../../docs/agent/design-first.md) step 1:
-   survey browser standards (MDN/WHATWG/W3C/WAI-ARIA APG) + the `references.json` benchmark libraries,
-   reuse platform vocabulary, and **publish the findings as a `/research/` topic** — a
-   `researchTopics.json` entry + `src/_includes/research-descriptions/{id}.njk` write-up
-   ([research-workflow.md](../../../docs/agent/research-workflow.md)) — keeping the session
+0. **Standing test FIRST — is each concern even a fork?** (*backlog-workflow.md → Standing test before
+   any of the above — is this even a decision?*). Run the fork-existence test on every concern: a real
+   fork exists only if exactly one branch is correct and the alternative is *broken* (forced invariant →
+   ratify), or two coherent branches genuinely *cannot* coexist. If you can't name the broken/excluded
+   branch, there is no fork — author it as a "Supported by default" entry, never a `## Fork N` with a pick.
+   (The #756 miss: A and B were composable from one `traitEnforcerParcel` factory, so the call was
+   *support both, default to the factory*.)
+1. **Prior-art research first — never author a fork cold** (*backlog-workflow.md → Fork-readiness pass*,
+   first bullet). If the decision designs anything greenfield (a new intent/block/plug/protocol/adapter,
+   or any "no design exists yet" call), run *design-first.md → step 1*: survey browser standards
+   (MDN/WHATWG/W3C/WAI-ARIA APG) + the `references.json` benchmark libraries, reuse platform vocabulary,
+   and publish the findings as a `/research/` topic — a `researchTopics.json` entry +
+   `src/_includes/research-descriptions/{id}.njk` write-up (*research-workflow.md*) — keeping the session
    `reports/{date}-{slug}.md` as the artifact and linking it via `relatedReport`. A decision over
    already-researched ground just links the prior report; one that only ratifies shipped code skips the
-   web survey but still needs the concrete-refs check. **Research reshapes the forks — expect it to add
-   or dissolve a fork** (#64 gained Fork 4 from its survey); a pass that only confirms the existing
-   framing means the survey was too shallow.
+   web survey but still needs the concrete-refs check. Research reshapes the forks — expect it to add or
+   dissolve a fork (#64 gained Fork 4 from its survey); a pass that only confirms the existing framing
+   means the survey was too shallow.
 2. **Per-fork classification pass** — run the fixed 7-question sequence (which layer? · protocol or
    intent dimension? · expose the whole axis? · fixed mechanic or dimension? · DI-injectable? · most-
-   permissive default? · seam between intents?) on **every** element, and record the classification in
-   the item — it *is* much of the eventual ruling. Honour the standing bias: **separate and decouple**
-   (burden of proof is on combining).
-3. **Author the prepared-fork shape** (*The prepared-fork shape*) — rewrite the body to all of:
-   a **digest that declares the grounding** (no design exists yet · N forks grounded in the published
-   `/research/` topic · each carries a **bold** recommended default); an **axis-framing paragraph**
-   decomposing the concern into orthogonal axes, each pinned to **concrete `file:line` refs into the
-   real tree** (go read the code, cite it — an authored snippet never substitutes); a **"recommended
-   path at a glance" preview table** (one row per fork: *recommended default · main alternative ·
-   confidence* — confidence flags where judgment is actually needed; **only genuine forks get a row** —
-   support-both concerns from pass 0 go in the **"Supported by default"** list, not the table); and **one
-   `## Fork N` section per open fork** (crux-with-refs → options **A/B/…** named with tradeoffs → **bold**
-   default → *Rejected* branches with reason → any sub-decision). A row whose "main alternative" isn't
-   actually *excluded* (you can't say why it's broken or why it can't coexist) is a pass-0 miss — demote it
-   to "Supported by default" rather than forcing a default. **Author the default to survive a red-team** — at ratify
-   time the decider attacks the branch you recommend (`backlog-workflow.md` → *"Red-team the default"*:
-   argue the alternative + name the principle the default violates). So ground the default's rationale
-   against the real tree now, and where a fork is high-leverage flag it for the deciding agent's skeptic
+   permissive default? · seam between intents?) on every element, and record the classification in the
+   item — it *is* much of the eventual ruling. Honour the standing bias: separate and decouple (burden of
+   proof is on combining).
+3. **Author the prepared-fork shape** (*backlog-workflow.md → The prepared-fork shape*) — rewrite the
+   body to that shape. WE-specific reminders: pin each axis to concrete `file:line` refs into the real
+   tree (go read the code, cite it — an authored snippet never substitutes); only genuine forks get a
+   preview-table row — support-both concerns from pass 0 go in the "Supported by default" list, not the
+   table. A row whose "main alternative" isn't actually *excluded* is a pass-0 miss — demote it. Author
+   the default to survive a red-team (*backlog-workflow.md → Red-team the default*): at ratify time the
+   decider argues the alternative + names the principle the default violates, so ground the default's
+   rationale against the real tree now and flag high-leverage forks for the deciding agent's skeptic
    sub-agent pass; prep that only *asserts* a default leaves the attack to land at decision time.
 
 ## Close out — mark prepared, release back to open
 
-A prepared decision is **still open** — the call hasn't been made. So:
+A prepared decision is **still open** — the call hasn't been made. So `release`, don't `resolve`:
 
 1. **Gate before stamping — every fork must actually be at DoR, *including* the one you'd rather leave
-   "for the human."** Prep's whole job is to bring the *human-judgment* fork to options + tradeoffs +
-   a **bold** recommended default the decider then ratifies or overrides — **not** to hand the human a
-   raw question. A fork you couldn't shape that way is **un-prepared, not "deferred"**: either shape it
-   (it almost always can be — even a naming/ownership/scope call gets researched options + a default;
-   see #009's "mint `webpush` vs fold the protocol into an existing project" fork), or **carve it to a
-   child** item that is *itself* prepared and rewrite the parent fork to "→ delegated to #NNN
-   (prepared)". A body still carrying a bare **"needs a human call" / "confirm X" / "TBD" / slash-name
-   (`webpush`/`webpermissions`)** fork is **not prepared** — do **not** stamp it. Walk every `## Fork N`
-   and confirm each has named options, tradeoffs, and a bold default before continuing.
-   Then **set `preparedDate: "YYYY-MM-DD"`** (today) in the item's frontmatter via an Edit — this is the
-   one flag that makes readiness rank it `✓ ready to ratify`, so stamping a half-prepared item is a
-   false "ready" the next decision turn will trust.
+   "for the human."** Prep's whole job is to bring the human-judgment fork to options + tradeoffs + a
+   bold recommended default the decider then ratifies or overrides — not to hand the human a raw
+   question. A fork you couldn't shape that way is un-prepared, not "deferred": either shape it (it almost
+   always can be — even a naming/ownership/scope call gets researched options + a default; see #009's
+   "mint `webpush` vs fold the protocol into an existing project" fork), or carve it to a child item that
+   is *itself* prepared and rewrite the parent fork to "→ delegated to #NNN (prepared)". A body still
+   carrying a bare "needs a human call" / "confirm X" / "TBD" / slash-name (`webpush`/`webpermissions`)
+   fork is not prepared — do not stamp it. Walk every `## Fork N` and confirm each has named options,
+   tradeoffs, and a bold default. Then set `preparedDate: "YYYY-MM-DD"` (today) in the item's frontmatter
+   via an Edit — the one flag that makes readiness rank it `✓ ready to ratify`, so stamping a
+   half-prepared item is a false "ready" the next decision turn will trust.
 2. **Gate:** `npm run check:standards` green (and the new `/research/` topic renders — confirm the
    `researchTopics.json` entry + `.njk` write-up parsed). Confirm a `relatedReport` link exists.
 3. **Release the claim:** `node scripts/backlog.mjs release <NNN>` (`preparing → open`; stamps untouched,
-   so `preparedDate` survives). **Do not `resolve`** — resolving is the *decision* turn's job, not
-   prep's.
+   so `preparedDate` survives). Do not `resolve` — resolving is the *decision* turn's job, not prep's.
 4. Close with a one-line net-flow note (item `#NNN` now `✓ ready to ratify`, research topic published)
    and point at `/next decision` to make the call when ready.
 
 ## Relationship to `/next decision`
 
-Prepare is the **upstream feeder** for decision-mode: it pays the research cost **once, ahead of time**,
-so the decision turn (`/next decision`) is a fast ratification of a legible fork instead of a cold
-research dump. `/prepare` does the agent work and stops at `open + preparedDate`; `/next decision` makes
-the human call and `resolve`s. Run `/prepare` to manufacture ready-to-ratify decisions, then
+Prepare is the upstream feeder for `/next decision`: it pays the research cost once, ahead of time, so
+the decision turn is a fast ratification. Run `/prepare` to manufacture ready-to-ratify decisions, then
 `/next decision` to ratify them.
