@@ -18,6 +18,10 @@ import {
   type ValidationFeatureId,
 } from './provider.js';
 import { outOfCapability } from './fixtures.js';
+// Type-only import of the #431 report-model contract — erased at runtime, so this adds no runtime
+// dependency from capability-manifest onto blocks; it just lets the adherence → Report mapper (#712,
+// slice D of #435) emit a model-valid view the #432 renderers + #434 adapters consume.
+import type { Report } from '../blocks/renderers/report/renderReport.js';
 
 /**
  * The relationship between what an implementation *declares* and what an app *uses*, partitioned into
@@ -106,4 +110,64 @@ export function formatAdherenceReport(report: AdherenceReport): string {
   }
 
   return lines.join('\n');
+}
+
+/**
+ * Map an {@link AdherenceReport} onto a #431 report-model {@link Report} (slice D of #435's
+ * reporter-migration fan-out; #712), so capability-manifest adherence flows through the shared #432
+ * renderers + #434 export adapters like every other reporter. The existing {@link formatAdherenceReport}
+ * plain-text path stays bespoke — only this structured view is the model.
+ *
+ * One `adherence` section partitioning the five buckets as `scores[]` (counts: declared / used /
+ * honoured / unused / outOfCapability, plus `missingCore`), and `findings[]` carrying the two reportable
+ * *defects* so they survive into SARIF/JUnit: each out-of-capability usage is an `error`, each missing
+ * Core feature a `warn`. The headline `conformant` flag + spec/level live on the source `meta`.
+ */
+export function adherenceToReport(report: AdherenceReport): Report {
+  const sourceId = 'capability-manifest';
+  const score = (id: string, label: string, value: number, max?: number) => ({
+    id, label, value, ...(max !== undefined ? { max } : {}), unit: 'features',
+  });
+  return {
+    id: 'capability-manifest-adherence',
+    title: `Validation adherence — ${report.conformanceLevel} @ spec ${report.specVersion}`,
+    sources: [{
+      id: sourceId,
+      name: 'capability-manifest adherence',
+      kind: 'validator',
+      meta: {
+        specVersion: report.specVersion,
+        conformanceLevel: report.conformanceLevel,
+        conformant: String(report.conformant),
+      },
+    }],
+    sections: [{
+      id: 'adherence',
+      title: 'Capability adherence — declared vs used',
+      scores: [
+        score('declared', 'declared', report.declared.length),
+        score('used', 'used', report.used.length),
+        score('honoured', 'honoured (declared & used)', report.honoured.length, report.declared.length),
+        score('unused', 'unused (declared, not used)', report.unused.length, report.declared.length),
+        score('outOfCapability', 'out of capability (used, not declared)', report.outOfCapability.length, report.used.length),
+        score('missingCore', 'missing Core (manifest defect)', report.missingCore.length),
+      ],
+      findings: [
+        ...report.outOfCapability.map((f) => ({
+          id: `outOfCapability/${f}`,
+          severity: 'error' as const,
+          title: `Used out of capability: ${shortId(f)}`,
+          ruleId: 'out-of-capability',
+          source: sourceId,
+        })),
+        ...report.missingCore.map((f) => ({
+          id: `missingCore/${f}`,
+          severity: 'warn' as const,
+          title: `${report.conformanceLevel} claim missing Core feature: ${shortId(f)}`,
+          ruleId: 'missing-core-feature',
+          source: sourceId,
+        })),
+      ],
+    }],
+  };
 }
