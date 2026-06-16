@@ -74,6 +74,14 @@ Ratified 2026-06-15, all three forks to their recommended **A** defaults:
   mechanical application of the #606 plugs ruling — even more clear-cut, since blocks were already classified as
   application implementation. "WE imports nothing from FU" binds published `@webeverything/*` artifacts, not the docs
   site, so the site/demos consuming `@frontierui/blocks` is the already-ratified #604 seam.
+  - **Amended 2026-06-16 by [#791](/backlog/791-reconcile-658-697-delete-and-repoint-with-the-604-iframe-bou/).**
+    #604 subsequently landed as #707's **iframe boundary**, which *struck* the WE→FUI import seam this
+    bullet leaned on ("WE never imports or renders FUI block code; it only embeds FUI-hosted demos via
+    iframe"). So Fork 2-A's "consume `@frontierui/blocks` as a #604 **import** client" is refined: WE
+    deletes the **impl** families but **retains a small reference-runtime `blocks/` subset** (blocks whose
+    demos exercise a WE *standard* — today `stores/simple`, `renderers/jsx`, `view`, `tabs`), and consumes
+    the migrated impl demos via **iframe embed (no import; `@frontierui/blocks` never enters WE's
+    `node_modules`)**. The impl-home axis (FUI owns `@frontierui/blocks`) is unchanged.
 - **Fork 3 — A.** A block protocol **may exist in WE with no FUI impl yet** (a contract can precede its
   implementation, as `protocols.json` `concept` entries already do). The **9 WE-only families** (`audit`,
   `background-task-surface`, `data-grid`, `lifecycle`, `master-detail`, `selection`, `stepper`, `tree-select`,
