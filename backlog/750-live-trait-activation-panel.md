@@ -4,7 +4,8 @@ workItem: story
 size: 5
 status: open
 parent: "746"
-blockedBy: ["727", "809"]
+locus: frontierui
+blockedBy: ["727", "809", "815"]
 dateOpened: "2026-06-16"
 relatedProject: webdocs
 crossRef: { url: /backlog/447-merge-frontier-ui-s-attribute-lifecycle-runtime-advances-up-/, label: "Attribute-lifecycle runtime (#447)" }
@@ -30,3 +31,5 @@ Let the viewer **activate and configure a block's traits live** from the Block E
 ## Notes
 
 Hard-blocked on **#727** (the live render). The inspector depends on #447's lifecycle runtime; if that isn't yet available in FUI, ship the toggle/config half first and gate the inspector half on #447.
+
+**Re-homed to FUI-locus (#809).** This panel is chrome inside the FUI-owned workbench (#815, iframe+chrome distribution), toggling traits host-side intra-FUI — not WE-owned chrome. `blockedBy #815`; built `@frontierui`.

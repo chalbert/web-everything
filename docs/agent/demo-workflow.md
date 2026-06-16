@@ -50,6 +50,20 @@ nothing is imported across repos.
 > permanently), and the **iframe stays the default** — a demo opts into C only where fidelity warrants. The
 > mode-C build is a separately-prioritized child under #728.
 
+> **Interactive Block-Explorer workbench: chrome is decoupled from distribution (#809, ratified 2026-06-16).**
+> The live theme/trait/inspect *workbench* is a **FUI-owned, FUI-hosted** product (#815), not WE docs chrome.
+> There are two FUI distributions of a block, and the **chrome rides only the iframe one**:
+> - **iframe + chrome** — the workbench: chrome (switcher / trait panel / inspect panels) **and** the block
+>   are served **same-origin inside one iframe**, so manipulation + inspection are intra-FUI host-side DOM
+>   with **no WE↔FUI channel and no postMessage manipulation protocol**. Embeddable on **any** site (WE
+>   included) via a plain `<iframe>`.
+> - **in-document, no chrome** — **mode C** (above): the bare FUI component mounted inline, no workbench.
+>
+> A WE block "do" page embeds the workbench iframe and wraps it with a **WE-docs overlay** for the
+> WE-**standards** panels (intent→ARIA mapping, token provenance, the #092 provider↔consumer graph) — WE
+> data that does not travel to third-party embedders. `impl→FUI` holds throughout: FUI owns the rendering
+> *and* the workbench that drives it. Re-homed slices: #749/#750/#755/#806 build `@frontierui` into #815.
+
 **Demo→block mapping convention (so new blocks roll out as one-liners):**
 - The mapping is **declared in the block's description partial** (`src/_includes/block-descriptions/<block>.njk`)
   as a single `{% fuiDemo … %}` line under a `<h3 id="try-it-live">Try it live</h3>` section — not in

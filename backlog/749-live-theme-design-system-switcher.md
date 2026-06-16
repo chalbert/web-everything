@@ -4,7 +4,8 @@ workItem: story
 size: 8
 status: open
 parent: "746"
-blockedBy: ["747", "727", "809"]
+locus: frontierui
+blockedBy: ["747", "727", "809", "815"]
 dateOpened: "2026-06-16"
 relatedProject: webtheme
 crossRef: { url: /backlog/364-unified-design-token-theming-system/, label: "webtheme tokens (#364)" }
@@ -31,3 +32,5 @@ Add a **design-system switcher** to the block page: pick from a gallery of popul
 ## Notes
 
 Hard-blocked on **#747** (the manifest format the switcher loads) and **#727** (the live render to switch within). Axis sliders and native-state toggles resolve through tokens/intents owned by `webtheme` (#364) — don't coin parallel knobs.
+
+**Re-homed to FUI-locus (#809).** This switcher is chrome inside the FUI-owned workbench (#815, the iframe+chrome distribution), driving the block host-side intra-FUI — not WE-owned chrome. `blockedBy #815`; built `@frontierui`. The token/intent dependency on webtheme (#364/#747) is unchanged.

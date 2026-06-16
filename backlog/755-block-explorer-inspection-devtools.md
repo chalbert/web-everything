@@ -4,7 +4,7 @@ workItem: story
 size: 5
 status: open
 parent: "746"
-blockedBy: ["727", "809"]
+blockedBy: ["727", "809", "815"]
 dateOpened: "2026-06-16"
 relatedProject: webdocs
 crossRef: { url: /backlog/092-provider-consumer-graph-platform-manager/, label: "Provider↔consumer graph (#092)" }
@@ -32,3 +32,7 @@ Give the Block Explorer a set of devtools-style inspectors that make the block's
 ## Notes
 
 Hard-blocked on **#727** (the live render to inspect). The wiring graph shares data with the anatomy view (#748) and the platform-manager provider↔consumer graph (#092) — one graph model, surfaced two ways, not duplicated.
+
+**Split at the layer seam (#809).** This item straddles two homes and is built as two halves:
+- **FUI workbench (FUI-locus, blockedBy #815):** the *rendered-component* inspectors — ARIA-as-rendered pane, computed-style reads, source view, event/protocol log. Same-origin host-side DOM inside the FUI workbench; no manipulation protocol.
+- **WE-docs overlay (WE-locus, `@webeverything`):** the *WE-standards* panels — "why this token" provenance trace (#747/#364), the intent→ARIA mapping proof, and the #092 provider↔consumer graph. These are WE-standard data and stay a WE overlay rendered *around* the embedded workbench; they do **not** travel to third-party embedders. A small focus/selection sync (workbench → overlay: which element/token is selected) is a build detail here, not a new manipulation protocol. If the two halves want independent scheduling, carve them into separate items at build time.
