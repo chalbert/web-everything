@@ -43,7 +43,7 @@ All four forks ratified **as recommended — B / C / B / A**:
    content/media). The quota is a **grow-target the worklist tracks, not a hard cap**.
    **Caveat recorded:** reachable *public* apps skew dev-tools, so the thinnest cells may be
    unreachable via Playwright capture and depend on the **gallery-harvest method**
-   ([#397](397-design-ref-gallery-harvest-capturemethod-for-auth-walled-app.md)) for auth-walled
+   ([#397](/backlog/397-design-ref-gallery-harvest-capturemethod-for-auth-walled-app/)) for auth-walled
    interiors. The scarcity cells are an aspirational worklist target; the first run may fall short on
    the thinnest cells without #397, and that is acceptable (grow-target, not cap).
 4. **Fork 4 — Category vocab source → A (coarse hand-roll, lightly anchored).** A **~10-domain seed**
@@ -51,7 +51,7 @@ All four forks ratified **as recommended — B / C / B / A**:
    inheriting their depth.
 
 **Build follow-through** (mechanical, agent-ready) carved to
-[#509](509-design-ref-taxonomy-seed-re-key-scarcity-targets-build-394-r.md). This resolves the last
+[#509](/backlog/509-design-ref-taxonomy-seed-re-key-scarcity-targets-build-394-r/). This resolves the last
 open fork of the **#382** epic, which resolves alongside.
 
 ## The axis being decided
@@ -76,7 +76,7 @@ orthogonal axes**:
 
 `surface` (screen-type) is **out of scope here** — #382 Fork 2 deterministically deferred per-screenshot
 visual tagging (surface, refined register, theme) to the phase-3 vision pass
-([#382:78-82](382-design-reference-screenshot-corpus-collect-dedup-codify.md)); this item only sets the
+([#382:78-82](/backlog/382-design-reference-screenshot-corpus-collect-dedup-codify/)); this item only sets the
 **target-level** curated seed.
 
 ## Architectural classification (per-fork pass)
@@ -148,7 +148,7 @@ _Rejected: A_ (too rigid for an explicitly-growing corpus), _B_ (the noise the p
 ## Fork 3 — First-run scope & distribution
 
 **Crux.** How many shots and distributed how? The placeholder is ~30–50 from the style-registers
-([#382:86-89](382-design-reference-screenshot-corpus-collect-dedup-codify.md)). The proof set is **16
+([#382:86-89](/backlog/382-design-reference-screenshot-corpus-collect-dedup-codify/)). The proof set is **16
 apps, all dev/tool-flavored** — the item's whole motivation is "prioritise registers the corpus currently
 lacks."
 

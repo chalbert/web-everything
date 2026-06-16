@@ -1,0 +1,90 @@
+<h2>Purpose</h2>
+<p>
+  Grounds decision <a href="/backlog/584-general-reference-retirement-convention-generalize-the-corpu/">#584</a>:
+  <a href="/backlog/546-corpus-source-fast-has-a-dead-docsurl-fast-docs-decommission/">#546</a> marked the
+  benchmark corpus's first dead source with a <code>retired</code> shape
+  (<code>retired</code>/<code>retiredDate</code>/<code>retiredReason</code>, keep-not-delete). The same death —
+  and the subtler <em>moved</em>, <em>superseded</em>, and <em>content-drift</em> failure modes — can hit any
+  external URL the project cites, and those citations live in <strong>heterogeneous homes</strong>. #584 asks
+  what one convention governs all of them, where it lives, and how it meshes with
+  <a href="/backlog/192-longitudinal-research-freshness-system/">#192</a>'s existing
+  <code>supersedes</code>/<code>supersededBy</code> chain. This is the
+  <a href="/backlog/583-external-reference-health-monitoring-liveness-retirement-rep/">#583</a> epic's
+  <strong>dogfood layer</strong> — a self-run convention over this repo, not the later WE platform setting.
+</p>
+
+<h2>Where the project cites external references</h2>
+<p>
+  An inventory of the tree finds two clusters. <strong>Structured JSON homes with external URLs</strong> are the
+  convention's real target: corpus sources (<code>benchmarkCorpus.json</code> — <code>docsUrl</code>/<code>repoUrl</code>,
+  the only home that already has <code>retired</code>), library references (<code>references.json</code>),
+  block &amp; intent design-system refs (<code>designSystemResearch[].reference</code> in
+  <code>blocks.json</code>/<code>intents.json</code>), and deep per-row doc URLs
+  (<code>benchmarkCapabilityPresence.json</code>). <strong>Freeform prose homes</strong> — dated
+  <code>reports/*.md</code> and the <code>research-descriptions/*.njk</code> partials — cite inline markdown
+  links no field-set can enforce. <a href="/research/">Research topics</a> already carry the <em>replacement</em>
+  half of the model (<code>supersededBy</code> + <code>lastReviewed</code>/<code>reviewHorizon</code> from
+  #192/#441/#477/#478); backlog <code>crossRef</code> cites only internal links; adapters/protocols cite no
+  external URLs yet. Validation today is one rule — a warning when a <code>verified</code> presence row lacks a
+  <code>url</code> — and there are no JSON Schema files; validation is imperative in
+  <code>check-standards-rules.mjs</code>.
+</p>
+
+<h2>What the prior-art survey found</h2>
+<ol>
+  <li>
+    <strong>The retirement vocabulary is document-type-agnostic.</strong>
+    <a href="https://www.w3.org/guide/process/obsolete-rescinded-supserseded.html">W3C</a> applies the
+    <em>same</em> lifecycle states to a Recommendation, a Note, and a Group decision; IETF applies the same
+    headers to every RFC regardless of stream. The homes differ in <em>container</em>, not in the retirement
+    <em>concept</em> — the strongest argument for one uniform shape over per-home shapes.
+  </li>
+  <li>
+    <strong>Death and supersession are distinct, linkable states — not one axis.</strong> W3C separates
+    <strong>superseded</strong> (a newer version is recommended, but the old stays <em>valid</em>) from
+    <strong>obsolete</strong> (no longer used) and <strong>rescinded</strong> (withdrawn). IETF mirrors this
+    with bidirectional <code>Obsoletes:</code>/<code>Updates:</code> headers (replacement) <em>plus a separate</em>
+    <a href="https://www.rfc-editor.org/rfc/rfc7805.html">Historic status</a> (no longer current). Python PEP
+    (<code>Superseded-By:</code>) and ADR (<code>Supersedes</code>/<code>SupersededBy</code>) carry only the
+    replacement pointer.
+  </li>
+  <li>
+    <strong>The minimal marker is a keep-not-delete boolean.</strong>
+    <a href="https://www.learnjsonschema.com/2020-12/meta-data/deprecated/">JSON Schema / OpenAPI</a> use a
+    single <code>deprecated: true</code> annotation: advisory, no behavioural change, the entry stays in place —
+    exactly #546's <code>retired</code> instinct.
+  </li>
+</ol>
+
+<h2>How this reshapes the decision</h2>
+<p>
+  Finding&nbsp;2 dissolves the original "how does it interact with #192's supersedes chain?" fork into a concrete
+  choice: model death and replacement as <strong>two orthogonal markers</strong> (a <code>retired</code> boolean
+  triplet for death, reusing #192's <code>supersededBy</code> pointer for replacement — a reference can be both,
+  as FAST is) versus folding them into <strong>one richer W3C-style <code>status</code> enum</strong>
+  (<code>active</code>/<code>superseded</code>/<code>obsolete</code>/<code>rescinded</code>). The orthogonal-marker
+  path wins under the standing
+  <a href="/backlog/">bias toward separation</a> and most-permissive-default biases: it reuses shipped vocabulary
+  (#546 + #192), needs no enum migration, and keeps the markers composable.
+</p>
+
+<h2>Classification — data governance, not a standards artifact</h2>
+<p>
+  Like #546, #584 governs the project's <em>internal reference data</em>, not a project-facing WE standard (that
+  is #583's later layer-2 platform setting). The Block/Intent/Protocol/Capability layer sequence is N/A. The
+  binding principles are native-first vocabulary reuse (borrow <code>retired</code>/<code>supersededBy</code>/<code>deprecated</code>,
+  don't mint jargon), reproducibility under #192 (keep-not-delete so a re-run sees <em>why</em> a reference left),
+  bias-toward-separation (orthogonal markers over a fused enum), and most-permissive default (the metadata is
+  opt-in, never a required field).
+</p>
+
+<h2>The four forks, at a glance</h2>
+<ul>
+  <li><strong>Uniform shape</strong> applied to every structured JSON home (vs per-home shapes).</li>
+  <li><strong>One documented convention + one shared validator helper</strong> in
+    <code>check-standards-rules.mjs</code> (vs duplicated per-home definitions).</li>
+  <li><strong>Two orthogonal markers</strong> reusing #192's <code>supersededBy</code> (vs a single
+    <code>status</code> enum).</li>
+  <li><strong>Structured homes now</strong>; freeform prose gets a documented style only, structured extraction
+    deferred to <a href="/backlog/597-reference-registry-substrate-index-the-structured-reference-/">#597</a>.</li>
+</ul>

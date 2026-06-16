@@ -65,7 +65,7 @@ Delivered the **I/O + caching shell** (the item's own framing) as a pure, depend
 - **Baseline mapping kept honest** — version → Baseline epoch is an **injected** `BaselineLookup`, not
   invented inline; absent a lookup `baselineYear` is left undefined (the parser never fabricates support).
 
-**Carved to [#479](479-edge-venue-live-build-time-chunk-emission-web-features-backe.md)** (blockedBy this) —
+**Carved to [#479](/backlog/479-edge-venue-live-build-time-chunk-emission-web-features-backe/)** (blockedBy this) —
 the two pieces that need infra absent from this pure-logic package: a real `web-features`-backed
 `BaselineLookup` (the package isn't installed) and the **live edge runtime** that actually bundles + serves
 a built module at `componentUrl` over HTTP (today `EdgeChunkCache` returns a `Resolution`, not bytes —

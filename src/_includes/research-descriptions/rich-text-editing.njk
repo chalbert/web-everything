@@ -1,0 +1,151 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    Web Everything has no rich-text / contenteditable / WYSIWYG editing standard. Only the
+    <a href="/intents/input/">Input</a> intent and <a href="/intents/type-ahead/">Type-ahead</a> cover
+    single-line text entry and search. This survey grounds decision
+    <a href="/backlog/590-candidate-standard-rich-text-contenteditable-editing/">#590</a> (whitespace
+    surfaced by <a href="/backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke/">#370</a>
+    Fork&nbsp;4, and a prerequisite for any in-editor inline picker): how does WE standardize rich-text
+    editing — the editing substrate, the document model, the command vocabulary, the toolbar UX,
+    paste/sanitization and serialization — and <em>where does each piece live</em> in the constellation
+    (intent&nbsp;/&nbsp;block&nbsp;/&nbsp;protocol&nbsp;/&nbsp;capability&nbsp;/&nbsp;plug)? Per design-first
+    step&nbsp;1, prior art is gathered first so the standard reuses platform vocabulary.
+</p>
+
+<h3>The load-bearing finding — the web ships no monolithic editor</h3>
+<p>
+    There is no platform "rich-text editor." The web ships <strong>orthogonal primitives</strong> — an
+    editing <em>surface</em>, an operation <em>vocabulary</em>, <em>sanitization</em>, <em>decorations</em>
+    — and leaves the <strong>document model</strong> to incompatible vendor engines. Every serious library
+    (ProseMirror, Lexical, Slate, Quill, CKEditor, Atlassian's editor, Microsoft's roosterjs) is
+    architecturally layered: a headless engine/model separated from the UI shell. No general design system
+    (Material&nbsp;3, Carbon, Fluent base) ships a first-class editor at all — they stop at
+    <code>textarea</code>. <strong>The architecture consensus <em>is</em> decomposition.</strong> So WE
+    standardizes rich-text editing as <strong>separate composable standards</strong> along the seam the
+    platform itself draws — not one component — mirroring the
+    <a href="/backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke/">#370</a>
+    provider&rarr;consumer split and honouring the standing separate-and-decouple bias.
+</p>
+
+<h3>Recommendation (the prepared defaults to ratify in #590)</h3>
+<p>The concern decomposes into orthogonal axes, each pinned to the layer its platform primitive implies:</p>
+<table>
+    <tr><th>Axis</th><th>Platform primitive</th><th>WE layer</th><th>Prepared default</th></tr>
+    <tr>
+        <td><strong>Editing surface</strong> (where keystrokes land, IME)</td>
+        <td><code>contenteditable</code> (Baseline 2015) · EditContext (Chromium&nbsp;121+, <em>not</em> Baseline)</td>
+        <td>Capability (tiered)</td>
+        <td>contenteditable <strong>floor</strong> + EditContext <strong>capability-upgrade</strong>, auto-negotiated (the webrealtime transport pattern)</td>
+    </tr>
+    <tr>
+        <td><strong>Document model</strong> (the data; engine)</td>
+        <td><em>none — vendor-specific</em> (ProseMirror · Lexical · Slate · Quill Delta · ADF)</td>
+        <td><strong>Protocol + adapters</strong></td>
+        <td><code>CustomEditorEngine</code> contract + registry; native-first default drives contenteditable+InputEvent; adapters bridge the libs</td>
+    </tr>
+    <tr>
+        <td><strong>Operation vocabulary</strong> (the commands)</td>
+        <td><code>InputEvent.inputType</code> / <code>beforeinput</code> (W3C Input Events)</td>
+        <td>reuse, no new vocab</td>
+        <td>reuse <code>formatBold</code> / <code>insertOrderedList</code> / … verbatim</td>
+    </tr>
+    <tr>
+        <td><strong>Formatting UX</strong> (toolbar/controls)</td>
+        <td>— (composed of buttons/popovers)</td>
+        <td>Intent (<code>text-formatting</code>)</td>
+        <td>separate intent, composed by the editor; toolbar composes <a href="/blocks/droplist/">droplist</a>/popover</td>
+    </tr>
+    <tr>
+        <td><strong>Paste / sanitization</strong> (ingestion)</td>
+        <td>HTML Sanitizer API / <code>Element.setHTML()</code> (emerging)</td>
+        <td>Plug (registry + adapter)</td>
+        <td>native <code>setHTML</code> default, DOMPurify adapter — a standalone seam the editor composes on paste</td>
+    </tr>
+    <tr>
+        <td><strong>Serialization</strong> (output boundary)</td>
+        <td>HTML · Markdown · portable JSON (ADF/Delta)</td>
+        <td>Config-extends-platform-default registry</td>
+        <td>default-less <code>CustomSerializerRegistry</code>; platform flavor default = HTML</td>
+    </tr>
+    <tr>
+        <td><strong>Decorations</strong> (non-destructive marks)</td>
+        <td>CSS Custom Highlight API (Baseline 2024)</td>
+        <td>supported by default</td>
+        <td>engine renders collab cursors / search / spellcheck without DOM mutation</td>
+    </tr>
+    <tr>
+        <td><strong>Collaboration</strong> (multi-cursor sync)</td>
+        <td>CRDT (Yjs) + awareness protocol</td>
+        <td><strong>out of scope</strong></td>
+        <td>cross-ref <a href="/projects/webrealtime/">webrealtime</a> — non-fungible with editing</td>
+    </tr>
+</table>
+<p>
+    The pivotal result: <strong>the document model is the only axis with a genuine swappable-vendor
+    story</strong>, and therefore the only one that earns a Protocol (design-first §"which layer" Q2: a
+    Protocol is justified <em>only</em> when many vendors must interoperate or swap engines). Every other
+    axis is either a native primitive WE reuses (surface, commands, decorations), a thin composition
+    (formatting UX, sanitization), or an open config setting (serialization). This is the
+    <code>CustomPositioningRegistry</code> precedent applied to editor engines: one engine, all consumers
+    delegate, libraries arrive as thin adapters.
+</p>
+
+<h3>The document-model field — every engine is incompatible</h3>
+<table>
+    <tr><th>Engine</th><th>Document model</th><th>Schema</th><th>Output</th></tr>
+    <tr><td><a href="https://prosemirror.net/">ProseMirror</a></td><td>structured node tree (nodes + marks)</td><td>strict, enforced</td><td>doc JSON / HTML</td></tr>
+    <tr><td><a href="https://lexical.dev/">Lexical</a> (Meta)</td><td>node-based immutable EditorState</td><td>node registry</td><td>JSON / HTML; 100k+ words</td></tr>
+    <tr><td><a href="https://docs.slatejs.org/">Slate</a></td><td>nested JSON tree (domain-model-first)</td><td>optional</td><td>custom JSON</td></tr>
+    <tr><td><a href="https://quilljs.com/">Quill</a></td><td>Parchment blots + flat <strong>Delta</strong> op-list</td><td>blot registry</td><td>Delta JSON / HTML</td></tr>
+    <tr><td><a href="https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/">Atlassian</a></td><td><strong>ADF</strong> — block + inline nodes</td><td>ADF schema</td><td>ADF JSON</td></tr>
+    <tr><td><a href="https://github.com/microsoft/roosterjs">roosterjs</a> (MS)</td><td>DOM-as-model (lighter)</td><td>none</td><td>HTML</td></tr>
+</table>
+<p>
+    The field splits two ways: a <strong>structured node tree</strong> (ProseMirror / Lexical / Slate / ADF —
+    block + inline + marks) vs a <strong>flat op-list</strong> (Quill Delta). The tree is the broad
+    document consensus; Delta wins for change-tracking/OT. WE's internal pivot model (the lossy shape the
+    project never sees raw) leans tree-shaped — but the tree-vs-Delta choice is flagged
+    <strong>low-confidence / divergent across libraries</strong>, the genuine judgment call beneath the
+    Protocol.
+</p>
+
+<h3>Web-standards alignment</h3>
+<table>
+    <tr><th>Standard</th><th>Status</th><th>How WE adopts it</th></tr>
+    <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/Guide/HTML/Editable_content">contenteditable</a></td><td>Baseline 2015 (<code>plaintext-only</code> 2025)</td><td>The editing-surface floor; capability <code>contenteditable</code>.</td></tr>
+    <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/EditContext_API">EditContext API</a></td><td>Chromium 121 (not Baseline)</td><td>Capability-gated upgrade for IME/decoupled input; degrades to contenteditable.</td></tr>
+    <tr><td><a href="https://w3c.github.io/input-events/">Input Events (<code>inputType</code>)</a></td><td>Baseline</td><td>The reused operation vocabulary — <code>format*</code> / <code>insert*</code> / <code>delete*</code> / <code>history*</code> verbatim. <code>execCommand</code> is deprecated and skipped.</td></tr>
+    <tr><td><a href="https://wicg.github.io/sanitizer-api/">HTML Sanitizer API (<code>setHTML</code>)</a></td><td>Emerging (FF-nightly)</td><td>Native default of the sanitization plug; DOMPurify adapter is the production floor.</td></tr>
+    <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/CSS_Custom_Highlight_API">CSS Custom Highlight API</a></td><td>Baseline 2024</td><td>Non-destructive decorations (search / spellcheck / remote cursors); used by default.</td></tr>
+    <tr><td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Selection">Selection / Range API</a></td><td>Baseline</td><td>The selection/range model the engine reads.</td></tr>
+</table>
+
+<h3>Architecture classification (per-fork layer mapping)</h3>
+<ul>
+    <li><strong>Editing surface &rarr; Capability.</strong> <code>contenteditable</code>, <code>editcontext</code>,
+        <code>sanitizer-api</code>, <code>highlight-api</code> are net-new <code>capabilities.json</code> ids
+        (none exist today); tiered per impl, with a most-permissive <code>contenteditable</code> floor.</li>
+    <li><strong>Document model / engine &rarr; Protocol</strong> (owned by a proposed new <code>webediting</code>
+        project — rich-text editing is cross-cutting and attracts its own registries/plugs/blocks).
+        <code>CustomEditorEngine</code> + <code>CustomEditorEngineRegistry</code>, native-first default,
+        library adapters. Litmus passed: genuine multi-vendor swap story.</li>
+    <li><strong>Editor &rarr; Block.</strong> The runnable element wiring surface + engine + <code>beforeinput</code>
+        command handling.</li>
+    <li><strong>Formatting UX &rarr; Intent</strong> (<code>text-formatting</code>): which <code>format*</code>
+        ops are exposed, toolbar placement/overflow — UX "what" only, composed by the editor.</li>
+    <li><strong>Serialization &rarr; Config-extends-platform-default</strong> registry
+        (<code>CustomSerializerRegistry</code>): default-less core, open registry, platform flavor default = HTML.</li>
+    <li><strong>Sanitization &rarr; Plug</strong> (<code>CustomSanitizerRegistry</code>: native <code>setHTML</code>
+        + DOMPurify adapter), composed on the <code>insertFromPaste</code> path.</li>
+    <li><strong>At graduation:</strong> Technical Configurator cards for engine choice, serialization format and
+        substrate-negotiation policy; collaboration transport cross-ref'd to webrealtime.</li>
+</ul>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/590-candidate-standard-rich-text-contenteditable-editing/">#590</a> (this survey grounds its forks).</li>
+    <li>Origin: <a href="/backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke/">#370</a> Fork 4 surfaced the gap; the provider&rarr;consumer decomposition precedent.</li>
+    <li>Composition: <a href="/projects/webrealtime/">webrealtime</a> (collaboration transport, out of scope), <a href="/blocks/droplist/">droplist</a> / <a href="/blocks/autocomplete/">autocomplete</a> + popover (toolbar/picker), <code>CustomPositioningRegistry</code> (the registry-precedent the engine Protocol mirrors).</li>
+</ul>
+{% endraw %}

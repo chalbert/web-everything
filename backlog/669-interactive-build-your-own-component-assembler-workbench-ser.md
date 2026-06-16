@@ -52,9 +52,9 @@ Verification (in `../plateau-app`): `npm test` (vitest) = 154 passed / 18 files;
 
 ## Sibling slices (under #646)
 
-- **[#688](688-assembler-authoring-canvas-pick-wire-primitives-into-a-live-.md) — authoring canvas:
+- **[#688](/backlog/688-assembler-authoring-canvas-pick-wire-primitives-into-a-live-/) — authoring canvas:
   pick + wire primitives → live composition** (story·3, `blockedBy: 669`): a primitive palette read from
   `blocks.json` + `intents.json`, assembling selections into composed markup with live preview.
-- **[#689](689-eject-the-registry-item-recipe-from-the-assembler-compositio.md) — eject the
+- **[#689](/backlog/689-eject-the-registry-item-recipe-from-the-assembler-compositio/) — eject the
   `registry-item` recipe** (task, `blockedBy: 688`): serialize the live composition → the shadcn
   `registry-item` shape `validatePreset` enforces, with copy/download.

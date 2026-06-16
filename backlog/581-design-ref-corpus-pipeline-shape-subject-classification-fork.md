@@ -18,10 +18,10 @@ tags: [design-reference, corpus, decision, pipeline, classification, screenshots
 The design-reference corpus's foundational design call: the committed-WebP / content-addressed /
 one-sidecar-per-shot pipeline shape (settled defaults), Fork 1 (subject = web-app UIs only, source
 open), and Fork 2 (deterministic-only at collect time, visual tagging deferred — refined by #475 to
-add a collect-time vision QC gate). **Extracted from epic [#382](382-design-reference-screenshot-corpus-collect-dedup-codify.md)
+add a collect-time vision QC gate). **Extracted from epic [#382](/backlog/382-design-reference-screenshot-corpus-collect-dedup-codify/)
 on 2026-06-14** so the decision resolves cleanly while the build umbrella (#382) stays open until its
 slices land — a decision and an epic can't be one item (the gate forbids resolving an epic with open
-children). Fork 3 (first-run scope / taxonomy) was delegated to [#394](394-design-ref-corpus-first-run-scope-taxonomy-seed-grow-targets.md).
+children). Fork 3 (first-run scope / taxonomy) was delegated to [#394](/backlog/394-design-ref-corpus-first-run-scope-taxonomy-seed-grow-targets/).
 **All forks ratified — this decision is resolved.**
 
 ## Settled defaults (agreed)
@@ -72,13 +72,13 @@ This adds one pipeline requirement: an **inclusion gate** that classifies each c
   news, portfolios, brochureware.
 - Edge: same company often has both; keep only the app screens.
 
-### Fork 2 — Classification depth ✅ *(resolved 2026-06-12; refined by [#475](475-design-ref-vision-gated-capture-qc-candidate-surface-quality.md) 2026-06-13)*
+### Fork 2 — Classification depth ✅ *(resolved 2026-06-12; refined by [#475](/backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/) 2026-06-13)*
 
 **Deterministic-only at collect time** (source, dates, app, company, viewport, hashes); **defer
 visual tagging to the phase-3 vision pass.** Collection stays cheap and fast; category / surface /
 register / theme get filled during codification.
 
-> **Refinement (2026-06-13, [#475](475-design-ref-vision-gated-capture-qc-candidate-surface-quality.md)):**
+> **Refinement (2026-06-13, [#475](/backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/)):**
 > the "defer visual *tagging*" half still holds (→ #396), but "deterministic-*only*" is superseded.
 > The brittle hand-authored `readySelector` gate doesn't generalise and can't tell a clean app
 > surface from a marketing splash / modal-obstructed / error frame — so a **cheap vision pass now
@@ -86,10 +86,10 @@ register / theme get filled during codification.
 > selectors kept only as an optional fast-path. Full visual tagging stays deferred to #396; both
 > consume one shared swappable vision provider.
 
-### Fork 3 — First-run scope & taxonomy seed → delegated ✅ *(resolved 2026-06-13 via [#394](394-design-ref-corpus-first-run-scope-taxonomy-seed-grow-targets.md))*
+### Fork 3 — First-run scope & taxonomy seed → delegated ✅ *(resolved 2026-06-13 via [#394](/backlog/394-design-ref-corpus-first-run-scope-taxonomy-seed-grow-targets/))*
 
 Carved to **#394** and ratified 2026-06-13 (B / C / B / A): split `designRegister` →
 `productRegister` (deterministic) + `visualStyle` (vision-pass); open-growing controlled vocab in
 keyed `design-refs/taxonomy.json`; scarcity-weighted grow-targets (~30–50, ≥3/cell); coarse
 ~10-domain hand-rolled category seed lightly anchored to G2/Capterra. The mechanical build is carved
-to [#509](509-design-ref-taxonomy-seed-re-key-scarcity-targets-build-394-r.md).
+to [#509](/backlog/509-design-ref-taxonomy-seed-re-key-scarcity-targets-build-394-r/).

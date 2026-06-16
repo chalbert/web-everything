@@ -46,15 +46,15 @@ The mechanics decompose into three orthogonal axes, and the prior-art survey col
 billing primitive — per-seat (Mintlify $250/mo·5 editors; GitBook +$12/user; Netlify is *fleeing* it),
 per-site (GitBook $65→$249; ReadMe $79→$349), per-value-action (Chromatic's snapshot — 5K free, metered
 overage, graceful pause), or pure-infra credits (Netlify deploys 15c / bandwidth 20c/GB). Web Docs'
-differentiator per [#091:206](./091-web-docs-as-a-service-plateau.md#L206) is that the docs *prove
+differentiator per [#091:206](/backlog/091-web-docs-as-a-service-plateau/#L206) is that the docs *prove
 conformance*, so the value-action to meter is the **conformance-verified regeneration** — and the meter
 already exists: [#089](/backlog/089-monetization-product-ideas/) idea-1's continuous-verification re-runs
-the suite over time ([089:57-101](./089-monetization-product-ideas.md#L57)), and the build-time
+the suite over time ([089:57-101](/backlog/089-monetization-product-ideas/#L57)), and the build-time
 ingestion it would meter is `cases.js` ([src/_data/cases.js](../src/_data/cases.js)). The **threshold** is
 downstream of the unit and genuinely a number-to-tune, pinned only by the self-host floor invariant
-([#091:48-49](./091-web-docs-as-a-service-plateau.md#L48), "cancel and self-host always holds"). The
+([#091:48-49](/backlog/091-web-docs-as-a-service-plateau/#L48), "cancel and self-host always holds"). The
 **billing surface** is *not* open: [#183](/backlog/183-payments-merchant-of-record/) (resolved) ruled MoR
-via **Lemon Squeezy** ([183:29-37](./183-payments-merchant-of-record.md#L29)), which now supports
+via **Lemon Squeezy** ([183:29-37](/backlog/183-payments-merchant-of-record/#L29)), which now supports
 usage-based/metered subscriptions — so the metered hosted model composes the chosen rail rather than
 reopening it.
 
@@ -83,7 +83,7 @@ metering gain LS doesn't already provide.
 
 **Crux.** The unit *is* the product's pricing identity (survey finding 1), and the four market units are
 mutually exclusive as the *primary* primitive. Web Docs' stated edge is that the docs prove conformance
-([#091:206](./091-web-docs-as-a-service-plateau.md#L206)); pricing should meter the action that delivers
+([#091:206](/backlog/091-web-docs-as-a-service-plateau/#L206)); pricing should meter the action that delivers
 that edge. Chromatic is the precedent: it meters the **snapshot** — the unit of work that produces its
 value — with a free allotment, metered overage, and a graceful pause at the ceiling. The Web Docs analog
 is the **conformance-verified regeneration** (re-verify the suite + re-publish the site), whose machinery
@@ -119,7 +119,7 @@ dividing line (Netlify allows it; Vercel's Hobby bans it).
 
 - **(A — recommended) A threshold *principle*, numbers deferred.** Two invariants are fixed *now*: (i)
   **the self-host floor is unlimited and free** — the generator + standards stay self-hostable, so "cancel
-  and self-host always holds" ([#091:48](./091-web-docs-as-a-service-plateau.md#L48)); the free *hosted*
+  and self-host always holds" ([#091:48](/backlog/091-web-docs-as-a-service-plateau/#L48)); the free *hosted*
   tier need only be generous enough to onboard a real solo/OSS project (one site, a usable monthly build
   allotment, commercial use permitted). (ii) **Paid begins at ongoing production value** — continuous
   re-verification of a live, hosted site past the free allotment. The *specific* free-build count and any

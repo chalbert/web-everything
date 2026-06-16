@@ -82,7 +82,7 @@ project + status), the `capabilityMatrix` ([src/_data/capabilityMatrix.json](../
 rendered by [src/capabilities.njk](../src/capabilities.njk)) maps each impl to a 3-state tier, and
 #089 idea 1 re-runs the suite over time — so fork 2 is reuse-vs-rebuild, not build-from-scratch.
 The home follow-on is verbatim the open "home decision" MaaS parks
-([backlog/081:75](./081-module-as-a-service-provider.md#L75): "stays under `webadapters` or graduates
+([backlog/081:75](/backlog/081-module-as-a-service-provider/#L75): "stays under `webadapters` or graduates
 to its own Plateau-side project entry") — both are managed providers on one Plateau host, so fork 3
 should resolve in lockstep with it.
 
@@ -154,7 +154,7 @@ longer prove anything).
 ## Fork 3 — the home: Plateau offering vs graduated project entry
 
 **Crux.** #091's third follow-on ("a Plateau offering vs a graduated Plateau-side project entry") is
-verbatim the open home decision MaaS parks ([backlog/081:75](./081-module-as-a-service-provider.md#L75)).
+verbatim the open home decision MaaS parks ([backlog/081:75](/backlog/081-module-as-a-service-provider/#L75)).
 Both are managed providers on one Plateau serve-time host sharing one billing/auth/hosting surface
 (#089 puts ideas 2/4/5 under "Plateau as the enterprise web platform"). `webdocs` exists today as a
 `concept` project entry ([projects.json:226](../src/_data/projects.json#L226)); the question is

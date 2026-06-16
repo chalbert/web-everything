@@ -2,8 +2,9 @@
 type: issue
 workItem: story
 size: 5
-status: open
+status: active
 dateOpened: "2026-06-15"
+dateStarted: "2026-06-15"
 tags: []
 ---
 
@@ -60,7 +61,7 @@ authored**:
 This closes the **born-public, half-authored-item** race only. It is **complementary to**, not a replacement
 for, the deeper agent-separation gap: a shared working tree + single git index with **no file-level lock**
 (two sessions can still edit `blocks.json`/`intents.json`/configs concurrently and clobber). That is
-[#083](083-agent-file-lock-coordination.md) (resolved as a *design* — JIT ownership + queue — but with no
+[#083](/backlog/083-agent-file-lock-coordination/) (resolved as a *design* — JIT ownership + queue — but with no
 running enforcement in the `claim`/`scaffold` path); the durable fix there is **git-worktree isolation per
 session**. Cross-ref #083; consider whether this item should fold into a re-opened #083 or stay its own
 narrow, shippable slice (recommended: keep narrow — this is a one-file CLI change, #083 is process

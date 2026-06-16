@@ -1,0 +1,133 @@
+<h3>The Question</h3>
+<p>
+    Web Everything has <a href="/intents/input/">Input</a>, <a href="/blocks/autocomplete/">autocomplete</a>,
+    and <a href="/intents/type-ahead/">Type-Ahead</a> — inputs plus a whole-field search-listbox — but
+    <strong>no mention / trigger-character pattern</strong>: the surface that watches an editable region,
+    detects a boundary-anchored trigger char (<code>@</code>, <code>:</code>, <code>#</code>,
+    <code>/</code>), extracts the query, anchors a popover to the <em>caret</em>, routes results through a
+    listbox, and on selection inserts back into the text. The in-editor <code>:</code>-emoji picker
+    (<a href="/backlog/592-in-editor-inline-tooltip-emoji-picker-trigger/">#592</a>) is one instance. Before
+    authoring an intent/block standard, this survey gathers web-platform and library prior art per
+    design-first step&nbsp;1, so the dimensions reuse platform vocabulary. It grounds the open forks in
+    <a href="/backlog/591-candidate-standard-mention-trigger-character-inline-picker/">backlog&nbsp;#591</a>
+    (whitespace surfaced by <a href="/backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke/">#370</a>
+    Fork&nbsp;4).
+</p>
+
+<h3>Recommendation (to ratify in #591)</h3>
+<ol>
+    <li><strong>Home &amp; shape → a new block + intent</strong> — not a mode of the
+        <a href="/blocks/autocomplete/">autocomplete</a> block, not intent-only. The trigger-detection engine
+        (boundary-anchored char match → query slice → caret anchor → result routing) is runnable behavior
+        every surveyed system ships as code; the declarative dimensions are the intent. It
+        <strong>composes</strong> the general picker surface
+        (<a href="/backlog/588-build-the-general-picker-surface-composed-browse-search/">#588</a>) for results.</li>
+    <li><strong>Scope → detection-only / insertion-agnostic</strong> (the divergent call). The standard emits
+        the resolved selection (<code>{key, query, range, item}</code>) and lets the consumer commit it; it
+        does <em>not</em> own the document mutation. This decouples it from any document model — it works in
+        <code>&lt;input&gt;</code>/<code>&lt;textarea&gt;</code>/<code>contenteditable</code> uniformly and
+        composes the rich-text standard
+        (<a href="/backlog/590-candidate-standard-rich-text-contenteditable-editing/">#590</a>) for atom/token
+        insertion <strong>without being blocked on it</strong>.</li>
+    <li><strong>Everything else is supported by default</strong> — open trigger-set registry; boundary/query
+        dimensions with most-permissive defaults; caret anchoring composes the
+        <a href="/intents/anchor/">Anchor</a> intent via a virtual element; results compose
+        <a href="/backlog/588-build-the-general-picker-surface-composed-browse-search/">#588</a>.
+        <strong>Invariants:</strong> virtual focus (<code>aria-activedescendant</code>, DOM focus stays in the
+        text); suspend during IME composition; <strong>not a protocol</strong>.</li>
+</ol>
+
+<h3>Finding 1 — two camps in the prior art define the scope fork</h3>
+<p>
+    <strong>Detection-only:</strong> GitHub's framework-agnostic web component
+    <a href="https://github.github.com/text-expander-element/"><code>&lt;text-expander&gt;</code></a> sets
+    trigger chars via a <code>keys</code> attribute, fires <code>text-expander-change</code> with
+    <code>{key, text}</code> when matched (you supply the menu), and fires <code>text-expander-value</code> on
+    select where you assign <code>event.detail.value</code> as the replacement string. It never touches a
+    document model. <strong>Detection + insertion:</strong>
+    <a href="https://tiptap.dev/docs/editor/api/utilities/suggestion">ProseMirror/Tiptap <code>Suggestion</code></a>
+    and Lexical's
+    <a href="https://lexical.dev/docs/api/modules/lexical_react_LexicalTypeaheadMenuPlugin"><code>LexicalTypeaheadMenuPlugin</code></a>
+    bundle the commit (<code>Suggestion.command</code>, Lexical's menu) into the editor's document — powerful
+    but coupled to that doc model. WE's separation bias and the need to stay unblocked on #590 →
+    <strong>detection-only</strong>.
+</p>
+
+<h3>Finding 2 — the trigger engine is a configured detection layer, not a bespoke per-trigger widget</h3>
+<p>
+    Tiptap <code>Suggestion</code> exposes <code>char</code>, <code>allowSpaces</code>,
+    <code>startOfLine</code>, <code>allowedPrefixes</code> (null = any prefix), and <code>minQueryLength</code>.
+    Lexical's <code>useBasicTypeaheadTriggerMatch(trigger, {minLength: 1, maxLength: 75, punctuation,
+    allowWhitespace: false})</code> is the same shape. GitHub uses <code>keys</code> + a per-key
+    <code>multiWord</code> flag. These are the orthogonal dimensions of one pattern, so they become an
+    <strong>open intent vocabulary</strong> — not invented terms, not a bespoke widget per trigger char.
+</p>
+
+<h3>Finding 3 — trigger chars are a UX convention, so the set is open config</h3>
+<p>
+    <code>@</code> (people), <code>:</code> (emoji), <code>#</code> (channels/tags), <code>/</code> (commands)
+    recur across Slack, Discord, Notion, and GitHub — but no body standardizes the set. So the trigger set is
+    an <strong>open config registry</strong> (per Config-Extends-Platform-Default + Intents-open-design): the
+    platform flavor ships the convention chars, a project extends them; the standard hardcodes no enum.
+</p>
+
+<h3>Finding 4 — a11y is the APG editable combobox, reused verbatim</h3>
+<p>
+    The
+    <a href="https://www.w3.org/WAI/ARIA/apg/patterns/combobox/examples/combobox-autocomplete-list/">WAI-ARIA APG
+    Editable Combobox With List Autocomplete</a> is the pattern: DOM focus stays on the editable region; AT
+    focus moves within the listbox via <code>aria-activedescendant</code>;
+    <code>aria-expanded</code>/<code>aria-controls</code>/<code>aria-autocomplete</code> sit on the textbox; and
+    because browsers do <em>not</em> manage visibility for <code>aria-activedescendant</code>, JavaScript must
+    scroll the active option into view. There is <strong>no dedicated "mention" APG pattern</strong> — every
+    system reuses the combobox pattern. <strong>Implication:</strong> virtual focus is a forced invariant;
+    roving tabindex would steal focus from the text and is broken.
+</p>
+
+<h3>Finding 5 — caret anchoring is the one new mechanic, and it composes existing intents</h3>
+<p>
+    The popover anchors to the caret — a <em>virtual element</em>, not a stable DOM node — so it composes the
+    <a href="/intents/anchor/">Anchor</a> intent (placement / collision / flip) over a virtual anchor (the
+    <a href="/research/virtual-elements/">virtual-elements</a> topic). In <code>contenteditable</code> the DOM
+    <code>Range.getBoundingClientRect()</code> yields the rect; in <code>&lt;input&gt;</code>/<code>&lt;textarea&gt;</code>
+    a mirror-div caret-coordinate measurement is needed. Off-screen-near-edge bugs (Lexical&nbsp;#3834) confirm
+    collision handling is load-bearing, not cosmetic.
+</p>
+
+<h3>Finding 6 — there is NO native HTML primitive</h3>
+<p>
+    <code>&lt;datalist&gt;</code> autocompletes a <em>whole field</em>, not a mid-text trigger; the
+    <a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/combobox_role">combobox
+    role</a> is the closest platform vocabulary. So an inline-trigger picker is necessarily an ARIA-composed
+    widget; the native-first baseline degrades to a plain textbox with no inline suggestions.
+</p>
+
+<h3>Per-fork classification (the 7-question pass)</h3>
+<ul>
+    <li><strong>Layer:</strong> Block + Intent (runnable detection engine + declarative dimensions); not a
+        protocol.</li>
+    <li><strong>Protocol?</strong> No — deterministic transform, no vendor-swap/interop story.</li>
+    <li><strong>Expose the axis:</strong> trigger set, boundary, query policy all surface as config/dimensions,
+        never baked.</li>
+    <li><strong>Fixed vs dimension:</strong> insertion model &amp; boundary policy are dimensions; virtual
+        focus + IME-suspend are fixed mechanics.</li>
+    <li><strong>DI-injectable:</strong> the items-source and the insertion-committer are behavioral →
+        consumer-supplied (this <em>is</em> detection-only).</li>
+    <li><strong>Default:</strong> most permissive — trigger set open, <code>allowedPrefixes</code> null = any;
+        restriction is opt-in.</li>
+    <li><strong>Seam:</strong> between the editable region (Input / #590) and the picker surface (#588),
+        anchored via Anchor — owns trigger→query→anchor→route, delegates the rest.</li>
+</ul>
+
+<h3>Cross-references</h3>
+<ul>
+    <li>Decision: <a href="/backlog/591-candidate-standard-mention-trigger-character-inline-picker/">#591 — mention / trigger-character inline picker</a></li>
+    <li>Origin: <a href="/backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke/">#370</a> Fork&nbsp;4 ·
+        <a href="/research/expressive-symbols-reactions/">expressive-symbols-reactions topic</a></li>
+    <li>Composes: <a href="/backlog/588-build-the-general-picker-surface-composed-browse-search/">general picker surface #588</a> ·
+        <a href="/intents/anchor/">Anchor</a> · <a href="/research/virtual-elements/">virtual elements</a> ·
+        <a href="/blocks/autocomplete/">autocomplete</a></li>
+    <li>Consumed by: <a href="/backlog/592-in-editor-inline-tooltip-emoji-picker-trigger/">#592 in-editor <code>:</code>-trigger picker</a> ·
+        gates token insertion on <a href="/backlog/590-candidate-standard-rich-text-contenteditable-editing/">#590 rich-text</a> (composed, not depended-on)</li>
+</ul>
+</content>

@@ -472,6 +472,11 @@ describe('findBadBodyLinks — leaked authoring syntax in a backlog body', () =>
   it('flags a link to another backlog item .md file (should be /backlog/NNN-slug/)', () => {
     expect(kinds('see [#178](../backlog/178-access-control.md#L14)')).toEqual(['backlog-md']);
     expect(kinds('see [#016](backlog/016-gap-9.md)')).toEqual(['backlog-md']);
+    // The common form: a BARE sibling NNN-slug.md with no backlog/ prefix — renders as a 404 from
+    // /backlog/<id>/ just the same (was previously missed by the lint — the #707 broken-link regression).
+    expect(kinds('see [#604](604-migrate-the-we-site.md)')).toEqual(['backlog-md']);
+    expect(kinds('see [#700](700-converter.md#fork-1)')).toEqual(['backlog-md']);
+    expect(kinds('see [#178](./178-access-control.md)')).toEqual(['backlog-md']);
   });
 
   it('does NOT flag the correct rendered URL or reports/docs .md refs', () => {

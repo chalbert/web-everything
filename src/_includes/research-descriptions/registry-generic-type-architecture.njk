@@ -1,0 +1,110 @@
+<h3>The Question</h3>
+<p>
+    <a href="/backlog/580-reconcile-fu-we-plugs-tree-divergence/">#580</a> converges the Frontier&nbsp;UI and
+    Web&nbsp;Everything <code>plugs/</code> trees into <strong>one shared runtime</strong>. The two repos shipped
+    <strong>mutually-incompatible public type contracts</strong> on three core registry surfaces, and a single
+    runtime can carry only one. <a href="/backlog/582-customcontext-and-customtextnode-customelement-registry-type/">#582</a>
+    decides the canonical generic architecture so #580 can converge one-directionally. This is a genuine
+    fork-existence call — the two forms cannot coexist, exactly one survives — not a preference. This survey
+    grounds it in the actual divergent code and in the platform vocabulary (<code>Map&lt;K,&nbsp;V&gt;</code> and
+    the iterator protocol) that the codebase's own generic <code>Registry</code> interface already mirrors.
+</p>
+
+<h3>Correction the survey surfaced</h3>
+<p>
+    #582's prose named the divergent class <code>CustomContextRegistry</code> and cited
+    <code>CustomContext.ts:64</code>. The <strong>file is right; the class name was wrong.</strong>
+    <code>CustomContextRegistry.ts</code> is <strong>byte-identical</strong> between the two repos (a
+    <code>diff</code> produces no output). The real divergence is in <strong><code>CustomContext.ts</code></strong>
+    — the abstract base class that <code>implements Registry&lt;…&gt;</code>. The prepared item is corrected to
+    name <code>CustomContext</code>.
+</p>
+
+<h3>Recommendation (forks prepared for #582)</h3>
+<ol>
+    <li><strong>Canonical form → A: adopt FU's method-level-generic, string-keyed,
+        <code>Map</code>-shaped <code>CustomContext</code></strong>, and port its
+        <code>values()</code>&nbsp;/&nbsp;<code>entries()</code>&nbsp;/&nbsp;<code>delete(): boolean</code> up.
+        Three independent reasons converge on A, so confidence is <strong>high</strong>: it is native-first; it is
+        the <em>only</em> side that actually conforms to the shared <code>Registry</code> interface; and it costs
+        <em>zero</em> consumer retyping (the WE class-level <code>Key</code> param is dead — see Finding&nbsp;3).</li>
+    <li><strong>Riders → adopt FU's typings, port WE's runtime up.</strong> <code>CustomTextNodeRegistry</code> and
+        <code>CustomElementRegistry</code> take the same stance: FU's more-flexible typings
+        (<code>ImplementedTextNode&lt;any&gt;</code>; concrete <code>upgrade(root: Node)</code>;
+        <code>options?</code> optional). Separately, WE's <code>ensureNativelyConstructible</code> runtime on
+        <code>CustomElementRegistry</code> is a real feature FU lacks — it is <strong>additive, not part of the
+        fork</strong>, and the converged tree keeps it (like <code>values()</code>/<code>entries()</code>).</li>
+    <li><strong>A third reconciled form (C) → rejected.</strong> No evidence either shipped form is wrong in a
+        way a third would fix; pure scope for no interop gain (support-all / fork-existence: diverge only when a
+        branch is flawed).</li>
+</ol>
+
+<h3>Finding 1 — The divergence is a partial-<code>Map</code> (WE) vs full-<code>Map</code> (FU) surface</h3>
+<p>
+    The native <code>Map&lt;K,&nbsp;V&gt;</code> plus the JS iterator protocol is the shape the codebase's generic
+    <code>Registry&lt;Definition, Key = string&gt;</code> interface already mirrors:
+    <code>has</code>/<code>get</code>/<code>set</code>, <code>delete</code> returning <strong>boolean</strong>,
+    and <code>keys()</code>/<code>values()</code>/<code>entries()</code> returning <code>IterableIterator</code>.
+    FU's <code>CustomContext</code> reproduces the <strong>full</strong> set; WE's is a <strong>partial
+    subset</strong> — it omits <code>values()</code> and <code>entries()</code> and its <code>delete(): void</code>
+    (which throws) violates the <code>boolean</code> contract. Native-first favours the side that completes the
+    platform vocabulary.
+</p>
+
+<h3>Finding 2 — For key typing, the method-level indexed generic is the idiomatic TS pattern</h3>
+<p>
+    A heterogeneous record accessor — return the precise type of the value at a given key — is idiomatically typed
+    in TypeScript as a <strong>method-level indexed generic</strong>:
+    <code>get&lt;K extends keyof T&gt;(key: K): T[K]</code>, the shape used by typed config/store accessors. That is
+    exactly FU's <code>get&lt;Key&gt;</code>. A class-level single <code>Key</code> union (the literal
+    <code>Map&lt;K,V&gt;</code> shape) would <em>lose</em> per-key precision — <code>get(k): V</code> returns the
+    value union, not <code>T[k]</code>. WE avoids that loss only by defaulting <code>Key = keyof ContextValue</code>
+    and never instantiating the param differently — i.e. by leaving it inert. Method-level is therefore both more
+    precise and more flexible than WE's class-level param, with no downside.
+</p>
+
+<h3>Finding 3 — The WE class-level <code>Key</code> param is dead; A retypes zero consumers</h3>
+<p>
+    #582-A's only flagged cost was "verify WE's <code>CustomContext</code> consumers retype cleanly under A."
+    Grepping every subclass across Web&nbsp;Everything, Frontier&nbsp;UI, and plateau-app: <strong>no consumer
+    anywhere binds the second (class-level) type parameter.</strong> Every declaration is
+    <code>extends CustomContext&lt;State&gt;</code> or bare <code>extends CustomContext</code>; the two-argument
+    form <code>CustomContext&lt;X, Y&gt;</code> has <strong>zero occurrences</strong> in the workspace. WE's
+    <code>Key</code> is defaulted and never overridden — dropping it is invisible to consumers. The "residual
+    verification" #582 deferred to #580 build time is resolved <em>here</em>: A is consumer-cost-free.
+</p>
+
+<h3>Finding 4 — Only FU actually satisfies the shared <code>Registry</code> interface</h3>
+<p>
+    WE declares <code>implements Registry&lt;ContextValue, keyof ContextValue&gt;</code> — passing the
+    <em>whole record</em> into the <code>Definition</code> slot. But <code>Definition</code> is the <em>value</em>
+    type (<code>get(name): Definition</code> returns one value), so WE mistypes that slot, and it omits
+    <code>values()</code>/<code>entries()</code> and returns <code>void</code> from <code>delete</code> — it does
+    not conform to the interface it claims. FU declares
+    <code>implements Registry&lt;ContextValue[keyof ContextValue], string&gt;</code> (value union in
+    <code>Definition</code>, <code>string</code> in <code>Key</code> matching the interface default) and implements
+    the full surface. So A is not merely "more ergonomic" — it is the form that conforms to the codebase's own
+    contract, which WE's form silently breaks.
+</p>
+
+<h3>Finding 5 — The <code>CustomElement</code> rider has two orthogonal axes; only one is the fork</h3>
+<p>
+    <code>CustomElementRegistry</code> diverges on <strong>two unrelated axes</strong>. The
+    <strong>typing axis</strong> is fork-aligned: FU's concrete <code>upgrade(root: Node)</code> is correct (FU's
+    own comment notes WE's <code>Parameters&lt;typeof OriginalCustomElementRegistry…&gt;</code> is
+    <em>self-referential</em> here, since the class is assigned to <code>window.CustomElementRegistry</code>), and
+    FU's <code>options?</code> optional ctor is the most-permissive default. The <strong>runtime axis</strong> is
+    <em>not</em> a fork: WE has an <code>ensureNativelyConstructible</code> mechanism (registers the real class
+    natively under a private <code>scoped-ctor-N-el</code> tag so <code>new RealClass()</code> /
+    <code>Reflect.construct</code> don't throw "Illegal constructor" in a real browser) that FU lacks entirely.
+    That is a genuine WE-only feature — additive, carried up regardless of the typing decision. Keeping these two
+    axes separate is what lets the rider take FU's typings without losing WE's runtime.
+</p>
+
+<h3>What this means for #582</h3>
+<p>
+    The decision is a fast ratification: <strong>A</strong> for the canonical <code>CustomContext</code> form
+    (native-first &times; sole <code>Registry</code>-conformant side &times; zero consumer cost — three
+    independent reasons), FU's typings for both riders, and WE's <code>ensureNativelyConstructible</code> ported
+    up as additive. C is rejected. The full line-by-line diffs and consumer grep are in the linked session report.
+</p>

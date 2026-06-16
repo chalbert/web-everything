@@ -19,7 +19,7 @@ crossRef: { url: /research/responsive-container-query-layout/, label: "Prep surv
 > **Ruling (2026-06-13) — all three forks ratified at their defaults.**
 > - **Fork 1 → A:** extend the existing `breakpoint` + `layout` intents; no new project, no new intent.
 > - **Fork 2 → A:** one `breakpoint` intent + a `scope: viewport | container` dimension (the genuine call — shared `steps`/`change` model + CSS treating `@container` as a syntactic sibling of `@media` outweigh the substrate difference, which is an impl detail, not a second user-facing concern).
-> - **Fork 3 → A:** a deferred `webblocks` FlexRow block (ResizeObserver = impl substrate), carved to [#508](508-flexrow-intrinsic-auto-flow-block-webblocks-realizes-breakpo.md). Not built now.
+> - **Fork 3 → A:** a deferred `webblocks` FlexRow block (ResizeObserver = impl substrate), carved to [#508](/backlog/508-flexrow-intrinsic-auto-flow-block-webblocks-realizes-breakpo/). Not built now.
 >
 > Applied: `breakpoint` gained `scope: { values: [viewport, container] }` + a Reference Scope doc section in [src/_data/intents.json](../src/_data/intents.json); `layout` left as-is. Graduated to the `breakpoint` intent.
 

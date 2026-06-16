@@ -1,0 +1,94 @@
+<h2>Purpose</h2>
+<p>
+  Grounds decision <a href="/backlog/616-retroactively-ratify-the-weblifecycle-project-lifecycle-prot/">#616</a>
+  — a governance-hygiene ratification surfaced by the
+  <a href="/backlog/607-audit-all-resolved-backlog-items-against-the-guiding-princip/">#607</a> audit (G3,
+  slip&rarr;drift). <a href="/backlog/353-candidate-standard-lifecycle-workflow-state-domain-entity-stat/">#353</a>
+  minted a new WE <strong>project</strong> (<code>weblifecycle</code>) <em>and</em> a <strong>protocol</strong>
+  (<code>lifecycle</code>) inline from loan-exercise-app work, same-day open&rarr;resolved, while its own body
+  listed the placement as an open question (<em>&ldquo;Project + Protocol, or an intent?&rdquo;</em>). The
+  carve-rule (&ldquo;a fork lives in a <code>type:decision</code>, never inline&rdquo;) landed in the same
+  commit, so the entity shipped <strong>ungoverned</strong>. This is a <strong>ratify-shipped-code</strong>
+  decision: not a greenfield design, but a check that the placement is correct against the codified test, then
+  a <code>type:decision</code> filed to govern it. No reversal of #353.
+</p>
+
+<h2>What we are ratifying</h2>
+<p>
+  The <code>weblifecycle</code> project (<a href="/projects/weblifecycle/">Web Lifecycle</a>, status
+  <code>concept</code>) owning the <code>lifecycle</code> protocol (status <code>draft</code>,
+  <code>realizesIntent: status-indicator</code>). The contract fixes <strong>one seam</strong>: a declarative
+  status set + transition map (each transition: <code>from &rarr; to</code>, an optional guard predicate, the
+  permitted actor/role), resolved by a swappable <code>CustomLifecycleProvider</code> registry &mdash; the
+  transition map is the only lock, data-defined and portable, so a workflow engine plugs in behind the provider
+  without touching the entity. Every transition emits an observable <code>{ entity, from, to, actor, at }</code>
+  event &mdash; the composition seam for audit-trail and reporting. Authorization is delegated to
+  <a href="/projects/webguards/">Web Guards</a>; persistence and status rendering live elsewhere.
+</p>
+
+<h2>The placement test (internal precedent)</h2>
+<p>
+  <a href="/backlog/409-decision-master-detail-intent-vs-project/">#409</a> codified the test verbatim: the four
+  exercise-app standards (lifecycle, status-indicator, audit, decision) <em>&ldquo;each became a Project +
+  Protocol because each had a real <strong>contract</strong> &mdash; a provider seam
+  (<code>CustomLifecycleProvider</code>, <code>CustomAuditProvider</code>) or an interchange schema
+  (<code>DecisionRecord</code>)&rdquo;</em>; master-detail had <strong>none</strong>, so it stayed a plain intent
+  &mdash; <em>&ldquo;not every gap is a project.&rdquo;</em>
+  <a href="/backlog/467-decision-responsive-container-query-layout-placement/">#467</a> applied the same lens to
+  responsive layout. Run against <code>lifecycle</code>, the test passes on <strong>both</strong> disjuncts: a
+  swappable provider registry <em>and</em> a portable interchange schema. #409 already <em>named</em> lifecycle
+  as a legitimate Project+Protocol; #616 only supplies the missing explicit ratification.
+</p>
+
+<h2>What the prior-art survey found</h2>
+<p>
+  The protocol's load-bearing claim is that the <strong>transition map is a portable interchange</strong> any
+  engine can resolve. The survey confirms this &mdash; it reshapes nothing, but it is what justifies the
+  <strong>Protocol</strong> classification (a technical interchange contract, not a UX preference):
+</p>
+<ol>
+  <li>
+    <strong>A transition map <em>is</em> a recognized interchange format.</strong> The W3C standardized
+    statechart serialization as <a href="https://github.com/GnomesOfZurich/scxml">SCXML</a> (2015): an engine
+    parses the structure, validates it, and lets the calling code decide what guards mean and what actions do
+    &mdash; precisely the protocol's <em>transition-map-is-the-only-lock; the provider resolves the rest</em>
+    split. Portable across engines (Apache Commons SCXML for Java, SCION for the web).
+  </li>
+  <li>
+    <strong>The swappable-engine premise is real.</strong>
+    <a href="https://xstate.js.org/api/">XState</a> is a JS/TS statechart engine that adheres to SCXML &mdash; a
+    concrete instance of &ldquo;a workflow engine plugs in behind the provider.&rdquo; BPM servers and
+    hand-rolled switches are the other end of the same swap.
+  </li>
+  <li>
+    <strong>The domain-entity framing is the textbook FSM use case.</strong> An FSM models
+    <em>&ldquo;the lifecycle of one thing in response to events&rdquo;</em> &mdash; a permit application, a
+    benefits claim, a procurement contract &mdash; exactly <code>weblifecycle</code>'s scope (loan, policy,
+    claim, order, ticket). (<a href="https://image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/12141754">USPTO</a>,
+    <a href="https://rclayton.silvrback.com/use-state-machines">Use State Machines!</a>)
+  </li>
+  <li>
+    <strong>Actor/role-on-transition is standard.</strong> Roles are routinely defined to execute each
+    transition, controlling who may shift the entity from one state to another &mdash; with the
+    <em>whether-allowed</em> decision correctly delegated to a guard, not owned here.
+  </li>
+  <li>
+    <strong>The boundary against process orchestration is principled.</strong> An FSM is in one state at a
+    time, whereas BPMN allows a workflow to be in many &mdash; so a single-status domain lifecycle is a narrower,
+    distinct concern, supporting &ldquo;fix one seam and nothing else&rdquo; and confirming
+    <code>weblifecycle</code> should not absorb a process-engine scope.
+  </li>
+</ol>
+
+<h2>Classification &amp; the two forks</h2>
+<p>
+  Technical contract (provider seam + portable interchange + observable event) &rarr; a <strong>Protocol</strong>
+  owned by a <strong>Project</strong>; the UX half (current state + next actions) is the separate
+  <a href="/intents/status-indicator/">status-indicator</a> intent. <code>CustomLifecycleProvider</code> is a
+  runtime-DI seam; authorization composes Web Guards; persistence is the entity's own concern; audit composes
+  via the event &mdash; bias-to-separation honoured. Distinct from <a href="/projects/webstates/">Web States</a>
+  (reactive primitives), a different altitude with a different contract shape. So:
+  <strong>Fork 1</strong> &mdash; standalone project vs fold into <code>webstates</code> &rarr; <em>standalone</em>
+  (high confidence); <strong>Fork 2</strong> &mdash; Protocol vs intent for the contract &rarr; <em>Protocol</em>
+  (high confidence). Both default to ratify-as-shipped.
+</p>

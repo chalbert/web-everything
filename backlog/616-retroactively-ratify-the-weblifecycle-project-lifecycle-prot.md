@@ -16,8 +16,8 @@ tags: [decision, lifecycle, weblifecycle, protocol, layer-placement, governance,
 # Retroactively ratify the weblifecycle project + lifecycle protocol placement
 
 **Prepared 2026-06-14 — ready to ratify.** No greenfield design — this **ratifies shipped code**.
-Grounding: the placement test codified by [#409](409-decision-master-detail-intent-vs-project.md)
-(re-run by [#467](467-decision-responsive-container-query-layout-placement.md)), plus a focused prior-art
+Grounding: the placement test codified by [#409](/backlog/409-decision-master-detail-intent-vs-project/)
+(re-run by #467), plus a focused prior-art
 survey published at [`/research/domain-entity-lifecycle/`](/research/domain-entity-lifecycle/) (session
 report `reports/2026-06-14-domain-entity-lifecycle-placement.md`). **2 forks**, each carrying a **bold**
 recommended default; both default to *ratify-as-shipped*, both high-confidence — the survey **confirmed**
@@ -25,8 +25,8 @@ the design rather than reshaping it, which is the expected outcome for a ratific
 
 ## Why this is a decision
 
-Governance gap from the [#607](607-audit-all-resolved-backlog-items-against-the-guiding-princip.md) audit
-(G3, downgraded slip→drift). [#353](353-candidate-standard-lifecycle-workflow-state-domain-entity-stat.md)
+Governance gap from the [#607](/backlog/607-audit-all-resolved-backlog-items-against-the-guiding-princip/) audit
+(G3, downgraded slip→drift). #353
 minted a new WE **project** (`weblifecycle`) **and** a **protocol** (`lifecycle`) inline from loan-exercise-app
 work, same-day open→resolved, with **no governing `type:decision`** — its own body listed the placement as an
 open question (*"Project + Protocol, or an intent?"*; *"vs `webstates`"*). Sibling discoveries turned out

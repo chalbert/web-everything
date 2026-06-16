@@ -18,14 +18,14 @@ tags: [webdocs, decision, placement, intents, blocks, adapters, derivation]
 # Map workbench features to WE standards — which intents/blocks/adapters/protocols to mint vs reuse
 
 **Placement/derivation decision — prepared, ready to ratify.** Classify the 20-feature matrix from
-[#625](625-inventory-the-full-feature-surface-across-workbench-tools.md)
+[#625](/backlog/625-inventory-the-full-feature-surface-across-workbench-tools/)
 ([`workbenchFeatures.json`](../src/_data/workbenchFeatures.json)) against the live registry. No fresh design
 exists; the call is grounded in the published `/research/` topic
 [webdocs-feature-derivation](/research/webdocs-feature-derivation/) (report linked via `relatedReport`).
 Applying the **fork-existence test**, the surface collapses to **~11 ratify-as-classified placements**, a
 **forced block-mint set**, and **only two genuine forks** — each carrying a **bold** recommended default
 below. Output is the build plan that feeds the surface assembly
-([#627](627-assemble-the-web-docs-component-catalog-surface-from-the-der.md)).
+([#627](/backlog/627-assemble-the-web-docs-component-catalog-surface-from-the-der/)).
 
 This is mostly a *classification* decision, not a fork-storm: most of #625's `weStatus` placements are
 "support all coherent / dedupe against the registry," which the standing test says are **not decisions** —
@@ -70,12 +70,12 @@ adopted as-classified.
 
 **Spun out at ratification** (filed under epic #623, in `blockedBy` order):
 
-- [#653](653-register-custom-elements-manifest-cem-as-a-we-protocol-emit-.md) — register CEM as a WE protocol + emit pipeline (blockedBy #626)
-- [#654](654-mint-the-props-table-block-render-custom-elements-manifest-a.md) — mint the `props-table` block (blockedBy #653 — needs CEM)
-- [#655](655-mint-the-story-canvas-block-render-a-webcase-in-isolation.md) — mint the `story-canvas` block (blockedBy #626)
-- [#656](656-mint-the-code-view-block-syntax-highlighted-source-with-copy.md) — mint the `code-view` block (blockedBy #626)
+- [#653](/backlog/653-register-custom-elements-manifest-cem-as-a-we-protocol-emit-/) — register CEM as a WE protocol + emit pipeline (blockedBy #626)
+- [#654](/backlog/654-mint-the-props-table-block-render-custom-elements-manifest-a/) — mint the `props-table` block (blockedBy #653 — needs CEM)
+- [#655](/backlog/655-mint-the-story-canvas-block-render-a-webcase-in-isolation/) — mint the `story-canvas` block (blockedBy #626)
+- [#656](/backlog/656-mint-the-code-view-block-syntax-highlighted-source-with-copy/) — mint the `code-view` block (blockedBy #626)
 
-These feed the catalog surface assembly [#627](627-assemble-the-web-docs-component-catalog-surface-from-the-der.md); its `/blocks/` index slice was already safe to start independent of these mints.
+These feed the catalog surface assembly [#627](/backlog/627-assemble-the-web-docs-component-catalog-surface-from-the-der/); its `/blocks/` index slice was already safe to start independent of these mints.
 
 ## Fork 1 — Component-metadata interchange & its layer
 

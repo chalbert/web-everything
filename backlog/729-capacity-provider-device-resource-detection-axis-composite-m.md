@@ -4,76 +4,150 @@ workItem: story
 size: 5
 status: open
 dateOpened: "2026-06-16"
+dateStarted: "2026-06-16"
+preparedDate: "2026-06-15"
+relatedReport: reports/2026-06-15-device-capacity-provider.md
 tags: [capabilities, provider-seam, device-capacity, client-hints, composite, delegation]
 ---
 
 # Capacity provider: device-resource detection axis + composite multi-source routing
 
-The capability provider seam (epic #203, children #204–#208) is swappable and delegation-based, but
-it models **platform feature capability** (Baseline/web-features: dialog, popover, anchor-positioning)
-and selects **one** provider per scope by venue. Two things it does NOT yet do: (1) expose a
-**device-capacity** axis — `hardwareConcurrency`, `deviceMemory`, network/`saveData`, battery, GPU /
-device tier — as a registered provider alongside the feature one; (2) **combine multiple providers**
-so different checks route to different sources. Decide whether/how to add both, delegating the actual
-detection to existing solutions rather than building/maintaining it in-house.
+**Prepared — ready to ratify.** No new design exists yet; the **three** forks below are grounded in a
+prior-art survey published as the [`device-capacity-provider`](/research/device-capacity-provider/)
+research topic (session report `reports/2026-06-15-device-capacity-provider.md`). Each fork carries a
+**bold** recommended default; the glance table says where judgment is actually needed. The survey
+**reshaped** the original framing — it added Fork 2 (the scalar-vs-bucket output shape) and excluded
+battery as a broken branch rather than an option.
 
-## Context — what already exists
+The decision extends the capability-provider epic [#203](/backlog/203-capability-resolution-architecture/)
+rather than forking a parallel architecture: same injectable contract, same `native-first` resolver,
+same `Venue` dimension, same registration table (#206). The **build** (vocabulary rows +
+`CapacityProvider` / `CompositeProvider` impls + the one `detect-gpu` dependency) is a
+separately-prioritized follow-up once the forks are ratified — not part of this call.
 
-- `CapabilityProvider` interface — [capabilities/provider.ts:73](../capabilities/provider.ts#L73)
-  (`tier()`, `requiredCapabilities()`, `impls()`). Injectable, swappable.
-- Venue-selected impls — [capabilities/venues.ts:38](../capabilities/venues.ts#L38)
-  (`type Venue = 'build' | 'runtime' | 'edge'`), one chosen via
-  [`providerForVenue`](../capabilities/venues.ts#L150). `build` = static matrix, `runtime` = live
-  feature detection, `edge` = Client-Hints header parsing (#219, [capabilities/edge-io.ts](../capabilities/edge-io.ts)).
-- Detection is already **delegated** to the platform (browser APIs, `Sec-CH-UA-*`) — not maintained
-  in-house. This item keeps that property.
-- Scope cascade — [capabilities/cascade.ts](../capabilities/cascade.ts) — scopes *bindings*
-  (base → app → view → fragment), it does NOT multiplex *sources*.
+## The axis-framing
 
-Both gaps share one design: a provider can answer for a **domain of checks**, and you want to pick a
-different provider per domain. So this is really one decision with two surfaced forks.
+The concern decomposes into three orthogonal axes, each pinned to the real tree:
 
-## Fork A — where the device-capacity axis lives (vocabulary + provider)
+1. **Where the device-capacity axis lives** — capacity signals (`navigator.hardwareConcurrency`,
+   `navigator.deviceMemory`, `navigator.connection.*`, GPU tier) are *scalar runtime measurements*,
+   categorically unlike the 3-state polyfill `Tier` union the feature provider uses
+   ([`capabilities/provider.ts:20`](../capabilities/provider.ts#L20)). Do they get their own
+   contract beside [`CapabilityProvider`](../capabilities/provider.ts#L73), or overload it?
+2. **The output shape of a capacity read** — a raw scalar (`deviceMemory: 8`), a normalized coarse
+   bucket (`device-tier: 'high'`), or both? The feature provider answers with a single `Tier`
+   ([`provider.ts:75`](../capabilities/provider.ts#L75)); capacity has no equivalent settled shape,
+   and the prior-art combinators all derive a bucket from a raw measurement.
+3. **How multiple providers combine** — the resolver consults exactly one provider per scope today
+   ([`venues.ts:150` `providerForVenue`](../capabilities/venues.ts#L150)); the user wants different
+   check-domains to route to different sources (feature→runtime, capacity→GPU lib, network→edge).
 
-Device signals (`navigator.hardwareConcurrency`, `navigator.deviceMemory`, `navigator.connection`,
-`getBattery()`, GPU/device-tier) are categorically different from web-features tiers (they're scalar
-runtime measurements, not native/polyfill/hard tiers). Options:
+The decisive survey finding tying these together: **signal availability is not uniform across venues.**
+`hardwareConcurrency` and GPU-tier are runtime-only (no request header carries them), while
+`deviceMemory` (`Sec-CH-Device-Memory`) and `Save-Data` also resolve at the **edge**. That is exactly
+the `Venue` dimension the feature provider already models
+([`venues.ts:38`](../capabilities/venues.ts#L38)) and the `undefined`-means-unknown degrade contract
+([`venues.ts:51` `PlatformSupport`](../capabilities/venues.ts#L51)) — so the capacity axis should
+**reuse** that machinery, which is itself an argument for a sibling provider over a parallel path.
 
-- **A1 (default) — separate `CapacityProvider` contract, same registration pattern.** A sibling to
-  `CapabilityProvider` keyed by capacity dimension → measured value/bucket, registered the same way
-  (#206 table), delegating to an existing lib for the read. Keeps the feature-tier semantics clean
-  (an impl is not a standard, and bias toward separation: burden of proof is on combining; two
-  scalar/tier semantics → two contracts).
-- A2 — overload the existing `CapabilityProvider` with new capability IDs for device signals. One
-  registry, but conflates measured scalars with feature tiers; the `Tier` union (#204) doesn't fit
-  `deviceMemory: 8`.
+**Detection locus is itself a flexible dimension — capacity reads can run *in* or *out of* the
+browser, and WE forces neither.** This is the same `Venue` axis seen from the timing/accuracy side:
+each locus enables a different set of features and carries its own limitation, so a project picks the
+trade that fits (and the Fork-3 composite can mix them — cheap edge signals at delivery, richer
+in-browser signals after load). The two coherent end-states (both supported by default, never
+mandated):
 
-## Fork B — how multiple providers combine (the "combine for different checks" ask)
+| Locus | What it enables | Its limitation |
+|---|---|---|
+| **In-browser** (runtime feature detection / `detect-gpu` / `navigator.*`) | **Real** measured capacity — the full signal set incl. CPU cores + GPU tier; most accurate | **Performance** — detection must run *before/while* the app loads (GPU benchmark especially costly); a pre-load capacity gate or a two-pass "load, then refine" is the cost of accuracy |
+| **Out-of-browser** (MaaS / edge — UA + Client Hints, server-decided) | **Zero runtime cost**, cached per equivalence class, decided *before* delivery (the #219 edge venue) | **Coarser & header-only** — sees just the signals that ride in headers (`deviceMemory`, `Save-Data`); no CPU/GPU; UA-based inference is approximate |
 
-- **B1 (default) — a `CompositeProvider` that routes by check domain.** A provider that holds a map of
-  `{ domain → provider }` and dispatches each query to the configured source (feature → runtime,
-  device-tier → Client-Hints/edge, network → external lib), satisfying the SAME interface so the
-  `native-first` resolver ([capabilities/resolver.ts](../capabilities/resolver.ts)) and venue
-  selection run unchanged. Deterministic, declarative routing table.
-- B2 — chain/fallback composition (try provider 1, fall through to provider 2 on "unknown"). Useful
-  for graceful degradation but answers a different need (redundancy, not per-check routing); could be
-  a follow-up, not the primary mechanic (per the dimension-vs-fixed-mechanic principle: expose as a
-  configurable axis only if both branches are legitimate end-states).
-- B3 — leave selection single-provider-per-scope (status quo); reject the compose ask. Rejected unless
-  B1/B2 prove unnecessary — the user explicitly wants per-check routing.
+### Recommended path at a glance
 
-## Delegation constraint (non-negotiable)
+| Fork | Recommended default | Main alternative | Confidence |
+|---|---|---|---|
+| **1 — where the capacity axis lives** | Separate `CapacityProvider` contract, same registration + venue machinery | Overload `CapabilityProvider` with capacity ids | High |
+| **2 — capacity output shape** | Expose **both** raw scalar and a derived coarse bucket | Bucket-only (or scalar-only) | Med-high |
+| **3 — how providers combine** | `CompositeProvider` routing by check-domain | Chain / fallback composition | High |
 
-Per the user's framing and the native-first / minimize-lock-in principles:
-WE does NOT build/maintain detection. The provider impls are thin adapters over existing solutions
-(browser APIs, Client-Hints, a maintained device-tier/network lib). What WE standardizes is the
-**provider contract + composite routing**, not the detection algorithm. Survey candidate libs as part
-of preparing this decision.
+## Supported by default (not decisions)
 
-## Relationship to prior work
+- **Delegation is non-negotiable** — WE never builds/maintains detection. Impls are thin adapters over
+  native APIs + Client Hints + one maintained lib. Survey verdict: CPU/RAM/network are native reads,
+  **GPU tier delegates to [`detect-gpu`](https://github.com/pmndrs/detect-gpu)** (pmndrs; the single
+  axis warranting a dependency), battery is excluded. So the delegation constraint is met with **one**
+  library — not itself a fork.
+- **Battery is excluded as broken, not an option.** The Battery Status API is deprecated, removed by
+  Firefox, never shipped by Safari, and a fingerprinting vector (~76% Chromium-only). Per the
+  fork-existence test it is dropped with this reason, not weighed.
+- **The vocabulary is the adaptive-loading set** — `hardwareConcurrency`, `deviceMemory`,
+  `effectiveType`/`saveData`, GPU tier, borrowing official platform names (W3C Device Memory, Network
+  Information API, the `Save-Data` / `Sec-CH-Device-Memory` Client Hints, `WEBGL_debug_renderer_info`).
+  WE's capacity provider is the platform-neutral, framework-free form of Google's `react-adaptive-hooks`.
 
-Extends epic #203's provider-resolution architecture rather than forking a parallel one — same
-interface, same resolver, same registration table (#206). Not an epic, not a conflation
-(no decision+epic conflation): this is the design decision; the build (vocabulary rows +
-`CapacityProvider`/`CompositeProvider` impls + lib selection) is separately-prioritized follow-up once
-the forks are ratified.
+## Fork 1 — where the device-capacity axis lives
+
+**Crux.** Device signals are scalar measurements; the feature provider's `Tier` union
+([`provider.ts:20`](../capabilities/provider.ts#L20)) is a 3-state polyfillability class. A capacity
+read (`deviceMemory: 8`) doesn't fit a feature tier. Do they share one registry or get two?
+
+- **A — separate `CapacityProvider` contract, same registration pattern.** *(recommended)* A sibling
+  to `CapabilityProvider` keyed by capacity dimension → measured value/bucket, registered the same way
+  (the #206 adapter table) and resolved through the **same** `Venue` dimension + `PlatformSupport`
+  degrade contract. Keeps the feature-tier semantics clean and honours the standing separation bias
+  (two distinct value semantics → two contracts; *impl-is-not-a-standard* — the lib read is registered
+  as a resolver impl, not as a new shape on the feature contract). Classification: layer = **Capability**;
+  not a Protocol (DI-injectable provider seam, no multi-vendor wire format); DI-injectable = yes.
+- B — overload the existing `CapabilityProvider` with new capability ids for device signals. One
+  registry, but conflates measured scalars with feature tiers — the `tier()` method
+  ([`provider.ts:75`](../capabilities/provider.ts#L75)) returns a `Tier`, which can't carry
+  `deviceMemory: 8` without widening the union for every feature consumer. *Rejected* unless A's
+  second contract proves to duplicate the first — the value semantics genuinely differ, so the burden
+  of proof on combining is not met.
+
+## Fork 2 — the output shape of a capacity read *(added by the survey)*
+
+**Crux.** Capacity has no settled output shape the way features have `Tier`. The original framing only
+glimpsed this via Fork 1's "the `Tier` union doesn't fit `deviceMemory: 8`" aside. Every prior-art
+combinator (`detect-gpu`: fps → tier 0–3; Network Information: `downlink`/`rtt` → `effectiveType`)
+keeps a raw measurement *and* derives a coarse bucket the call site actually consults.
+
+- **A — expose both the raw scalar and a derived coarse bucket.** *(recommended)* `CapacityProvider`
+  answers a dimension with its raw value (`deviceMemory: 8`, `cores: 8`) **and** a normalized bucket
+  (`'high' | 'mid' | 'low'`, or the GPU `tier`). The raw value is the most-permissive output (Q6 —
+  nothing is hidden); the bucket is the composable convenience adaptive-loading consumers want and the
+  only shape that survives a venue with a bucketed-only source (`Sec-CH-Device-Memory` reports buckets,
+  not exact RAM). Classification: dimension exposed in full (Q3), default = most-permissive (Q6).
+- B — bucket-only (or scalar-only). Bucket-only discards information a consumer may want
+  (`hardwareConcurrency` for a worker-pool size); scalar-only forces every consumer to re-derive a
+  threshold and can't represent a bucketed-only edge source. *Rejected* — collapsing the axis to one
+  value loses a legitimate end-state on each side; exposing both costs only the derivation function.
+
+## Fork 3 — how multiple providers combine
+
+**Crux.** `providerForVenue` ([`venues.ts:150`](../capabilities/venues.ts#L150)) returns exactly one
+provider per scope; the user wants per-check routing (feature checks → runtime feature-detection,
+capacity → the GPU lib, network → edge `Save-Data`).
+
+- **A — a `CompositeProvider` that routes by check-domain.** *(recommended)* A provider holding a
+  `{ domain → provider }` map that dispatches each query to its configured source, satisfying the
+  **same** interface so the `native-first` resolver ([`resolver.ts:180`](../capabilities/resolver.ts#L180))
+  and venue selection run unchanged. Deterministic, declarative routing table; composes cleanly with
+  Fork 1's sibling provider (feature domain → `CapabilityProvider`, capacity domain → `CapacityProvider`).
+  *Sub-decision:* route by **coarse domain** (feature / capacity / network as the registration unit)
+  rather than per-id — the natural, enumerable granularity; default **by-domain**.
+- B — chain/fallback composition (try provider 1, fall through on "unknown"). Answers a *different*
+  need (redundancy/graceful degradation, not per-check routing) and **composes** with A rather than
+  rivalling it — a domain's provider can itself be a fallback chain. So it is a **supported, additive
+  follow-up**, not a competing branch; not built as the primary mechanic now.
+- C — leave selection single-provider-per-scope (status quo). *Rejected* — denies the explicit ask for
+  per-check routing; the broken branch only if the user wanted nothing here, which is not the case.
+
+## Context — relationship to prior work
+
+Extends epic [#203](/backlog/203-capability-resolution-architecture/)'s provider-resolution
+architecture (children #204–#208) — same interface, same resolver, same `Venue` dimension, same #206
+registration table. Not an epic, not a decision+epic conflation: this is the design decision; the build
+(vocabulary rows + `CapacityProvider`/`CompositeProvider` impls + the `detect-gpu` dependency) is a
+separately-prioritized follow-up gated on these forks being ratified. At resolution each fork gains a
+dated ruling and the item graduates to spin-off builds via a `blockedBy` chain.

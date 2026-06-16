@@ -14,9 +14,9 @@ tags: [dev-browser, ide-bridge, vscode-extension, plateau, two-way-sync]
 
 # Deep two-way VS Code extension — emit active projects + coordinate patch work (carved from #562 Fork 2)
 
-Carved from [#562](562-dev-browser-source-awareness-ide-bridge-map-deployed-dom-bac.md) Fork 2 (ruling **A**,
+Carved from [#562](/backlog/562-dev-browser-source-awareness-ide-bridge-map-deployed-dom-bac/) Fork 2 (ruling **A**,
 separation bias): the **richest IDE-bridge provider**, kept out of the must-have substrate
-([#576](576-ide-bridge-provider-registry-passive-file-line-jump-file-sys.md)) and given its own home so the
+([#576](/backlog/576-ide-bridge-provider-registry-passive-file-line-jump-file-sys/)) and given its own home so the
 foundation stays shippable and this layer is independently prioritized.
 
 A VS Code extension running a **localhost HTTP/WS server** the dev-browser tab talks to, providing the

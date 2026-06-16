@@ -15,7 +15,7 @@ tags: [webdocs, storybook, inventory, landscape, benchmark, registry]
 # Inventory the component-workbench / docs-tool landscape (Storybook & peers)
 
 Consolidated landscape of Storybook-like tools — **no such inventory exists today** (only Storybook + Mintlify were
-named in [#426](426-incumbent-ingestion-adapters-storybook-mintlify-to-the-webca.md)/#429). Publish a `reports/`
+named in [#426](/backlog/426-incumbent-ingestion-adapters-storybook-mintlify-to-the-webca/)/#429). Publish a `reports/`
 landscape + `src/_data/workbenchTools.json` registry, mirroring the
 [benchmarkCorpus](../src/_data/benchmarkCorpus.json) pattern (registry + report + research topic).
 
@@ -35,7 +35,7 @@ landscape + `src/_data/workbenchTools.json` registry, mirroring the
 
 ## Notes
 
-Pure research/authoring — no human fork. Feeds [#625](625-inventory-the-full-feature-surface-across-workbench-tools.md)
+Pure research/authoring — no human fork. Feeds [#625](/backlog/625-inventory-the-full-feature-surface-across-workbench-tools/)
 (feature surface) and tells #398's adapter work (#426/#550) **which other adapters** are worth building beyond
 Storybook/Mintlify.
 

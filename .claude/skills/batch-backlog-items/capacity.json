@@ -1,80 +1,102 @@
 {
   "_doc": "Calibrated session capacity for POINTS-BUDGETED batches (docs/agent/backlog-workflow.md -> 'Running a batch'). The batch's point budget = round(capacityPoints * targetFraction). 'points' = batchCost (a story's size; a task = 2). `node scripts/backlog.mjs calibrate --points=<P> --context-pct=<C>` folds a session into capacityPoints as a CONTEXT-WEIGHTED MEAN over the last 12 samples: each session's implied capacity (points / context-fraction) is weighted by its contextPct, so a high-context session counts far more than an early low-context stop (whose extrapolation is near-noise and biased low by fixed startup overhead). Unlike the previous fixed-alpha EMA this converges as samples accumulate and actually uses the stored history, while the 12-sample window keeps it adaptive to a regime change (e.g. a new model).",
-  "capacityPoints": 88,
+  "capacityPoints": 147,
   "targetFraction": 0.6,
   "samples": [
     {
-      "date": "2026-06-13",
-      "points": 6,
-      "contextPct": 13,
-      "impliedCapacity": 46
-    },
-    {
-      "date": "2026-06-13",
-      "points": 26,
-      "contextPct": 30,
-      "impliedCapacity": 87
-    },
-    {
-      "date": "2026-06-13",
-      "points": 24,
-      "contextPct": 27,
-      "impliedCapacity": 89
-    },
-    {
-      "date": "2026-06-13",
-      "points": 49,
-      "contextPct": 53,
-      "impliedCapacity": 92
-    },
-    {
-      "date": "2026-06-13",
-      "points": 28,
-      "contextPct": 30,
-      "impliedCapacity": 93
-    },
-    {
-      "date": "2026-06-13",
-      "points": 10,
-      "contextPct": 17,
-      "impliedCapacity": 59
-    },
-    {
       "date": "2026-06-14",
-      "points": 28,
-      "contextPct": 41,
-      "impliedCapacity": 68
+      "points": 9,
+      "contextPct": 15,
+      "impliedCapacity": 60,
+      "stopReason": "gate",
+      "excluded": true
     },
     {
-      "date": "2026-06-14",
-      "points": 22,
-      "contextPct": 28,
-      "impliedCapacity": 79
-    },
-    {
-      "date": "2026-06-14",
-      "points": 46,
-      "contextPct": 31,
-      "impliedCapacity": 148
-    },
-    {
-      "date": "2026-06-14",
-      "points": 11,
-      "contextPct": 23,
-      "impliedCapacity": 48
-    },
-    {
-      "date": "2026-06-14",
-      "points": 36,
-      "contextPct": 33,
-      "impliedCapacity": 109
-    },
-    {
-      "date": "2026-06-14",
-      "points": 24,
-      "contextPct": 23,
-      "impliedCapacity": 104,
+      "date": "2026-06-15",
+      "points": 35,
+      "contextPct": 43,
+      "impliedCapacity": 81,
       "stopReason": "fork",
+      "excluded": true
+    },
+    {
+      "date": "2026-06-15",
+      "points": 29,
+      "contextPct": 29,
+      "impliedCapacity": 100,
+      "stopReason": "gate",
+      "excluded": true
+    },
+    {
+      "date": "2026-06-15",
+      "points": 34,
+      "contextPct": 46,
+      "impliedCapacity": 74,
+      "stopReason": "empty-pool",
+      "excluded": true
+    },
+    {
+      "date": "2026-06-15",
+      "points": 42,
+      "contextPct": 38,
+      "impliedCapacity": 111,
+      "stopReason": "fork",
+      "excluded": true
+    },
+    {
+      "date": "2026-06-15",
+      "points": 19,
+      "contextPct": 29,
+      "impliedCapacity": 66,
+      "stopReason": "empty-pool",
+      "excluded": true
+    },
+    {
+      "date": "2026-06-15",
+      "points": 36,
+      "contextPct": 48,
+      "impliedCapacity": 75,
+      "stopReason": "fork",
+      "excluded": true
+    },
+    {
+      "date": "2026-06-15",
+      "points": 25,
+      "contextPct": 45,
+      "impliedCapacity": 56,
+      "stopReason": "empty-pool",
+      "excluded": true
+    },
+    {
+      "date": "2026-06-15",
+      "points": 8,
+      "contextPct": 19,
+      "impliedCapacity": 42,
+      "stopReason": "empty-pool",
+      "excluded": true
+    },
+    {
+      "date": "2026-06-15",
+      "points": 20,
+      "contextPct": 34,
+      "impliedCapacity": 59,
+      "stopReason": "fork",
+      "excluded": true
+    },
+    {
+      "date": "2026-06-16",
+      "points": 40,
+      "contextPct": 43,
+      "impliedCapacity": 93,
+      "stopReason": "empty-pool",
+      "excluded": true
+    },
+    {
+      "date": "2026-06-16",
+      "points": 39,
+      "contextPct": 19,
+      "impliedCapacity": 205,
+      "stopReason": "empty-pool",
       "excluded": true
     }
   ]

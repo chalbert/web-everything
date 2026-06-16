@@ -1,0 +1,76 @@
+<h2>Purpose</h2>
+<p>
+  Prep research for the derivation decision
+  (<a href="/backlog/626-map-workbench-features-to-we-standards-which-intents-blocks-/">#626</a>) — stage 3
+  of the Web Docs feature-pipeline epic
+  (<a href="/backlog/623-web-docs-feature-pipeline-inventory-workbench-tools-derive-i/">#623</a>). It takes the
+  20-feature matrix from <a href="/research/workbench-feature-surface/">#625</a>
+  (<code>src/_data/workbenchFeatures.json</code>) and classifies every feature against the live registry:
+  reuse an existing standard, extend one, or mint a new one — and at <em>what layer</em>.
+</p>
+
+<h2>The shape of the decision</h2>
+<p>
+  #625 pre-sorted each feature with a <code>weStatus</code>. Applying WE's <strong>fork-existence
+  test</strong> (mandate nothing; a fork is real only when its branches are mutually-exclusive end-states),
+  most placements are <strong>not decisions</strong> — they are ratified as classified. The whole surface
+  collapses to ~11 reuse/extend/out-of-scope placements, a small set of forced block mints
+  (<code>props-table</code> / <code>story-canvas</code> / <code>code-view</code>), and just
+  <strong>two genuine forks</strong>.
+</p>
+
+<h2>Prior art</h2>
+<h3>Custom Elements Manifest (CEM) — the component-metadata interchange</h3>
+<p>
+  CEM (<code>custom-elements.json</code>) describes custom elements as JSON: modules → declarations carrying
+  attributes, properties, events, slots, CSS parts/custom-properties, and methods. Current schema
+  <strong>2.1.0</strong> with a top-level <code>schemaVersion</code>; emitted by
+  <code>@custom-elements-manifest/analyzer</code>; advertised via a <code>"customElements"</code> pointer in
+  <code>package.json</code>. The load-bearing fact: it is consumed by <strong>many independent vendors that
+  share no engine</strong> — api-viewer (API tables + live demo + auto controls), Storybook (web-components),
+  VS Code custom-data / <code>wc-info</code>, JetBrains web-types, linters. That is WE's exact litmus for a
+  <strong>Protocol</strong>, and WE already hosts the shape in the
+  <a href="/protocols/#protocol-changelog-manifest">changelog-manifest</a> protocol (a declarative manifest
+  read by multiple tools off one seam). WE has <strong>no <code>formats</code> registry</strong>, so the
+  matrix's <code>format:*</code> refs are dangling — the entity-kind is a real open call (Fork 1).
+</p>
+<h3>api-viewer — the zero-build proof</h3>
+<p>
+  Given one CEM, api-viewer renders a component in isolation, its API tables, and a live knobs panel — no
+  build, no framework. It proves the three "new-surface" render features (isolation, autodocs, args) are
+  <strong>one capability fed by one manifest</strong>, not three separate builds.
+</p>
+<h3>CSF, Pagefind, Starlight — the rest</h3>
+<p>
+  Story <em>ingestion</em> is already surveyed in the
+  <a href="/research/webdocs-incumbent-ingestion-adapters/">#426 ingestion-adapters</a> topic (CSF3 → the
+  webcases pivot) — the strongest evidence for Fork 2. <strong>Pagefind</strong> (Starlight's static
+  WASM build-time search index, no SaaS) reframes "search" from a mint to <em>reuse input blocks + a build
+  step</em>. <strong>Long-form docs</strong> reuse the existing 11ty/markdown pipeline + a block-embed
+  directive — <em>not</em> the unregistered <code>webediting</code> WYSIWYG project (#618), which is the
+  served product's authoring UX, not the catalog's read surface.
+</p>
+
+<h2>The two genuine forks #626 carries</h2>
+<table>
+  <thead><tr><th>Fork</th><th>Recommended</th><th>Alternative</th><th>Confidence</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>1 — Component-metadata interchange &amp; layer</strong></td>
+      <td>Adopt CEM as a new WE <code>protocol</code></td>
+      <td>Bespoke WE manifest format · tooling-only (no entity)</td>
+      <td>High</td>
+    </tr>
+    <tr>
+      <td><strong>2 — Docs examples ↔ webcases</strong></td>
+      <td>Examples <em>are</em> webcases (one fixture, conformance + docs)</td>
+      <td>Sibling docs-only <code>examples</code> concept</td>
+      <td>Med</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  Everything else is a ratify-as-classified placement; the full classification table lives on the decision
+  item under <code>## Context</code>. Full grounding:
+  <code>reports/2026-06-14-webdocs-feature-derivation.md</code>.
+</p>

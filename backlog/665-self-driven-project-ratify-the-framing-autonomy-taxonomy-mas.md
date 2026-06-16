@@ -82,13 +82,24 @@ default in place — `preparedDate`/this register are the durable record, not ch
 | A1 | SAE L0–L5 public scale maps cleanly onto #141's rungs (Fork 1) | first real per-step autonomy config that doesn't fit a rung | open |
 | A2 | The 5-dim default flavor + open registry is enough (Fork 2) | first project that needs a dimension outside the five | open |
 | A3 | "value increment" reads better than "working software" | first control-plane copy review with a non-technical user | open |
-| A4 | Master brand subsuming #563 + AI-driven-IDE is the strongest framing (Fork 3) | friction naming/positioning the first SaaS surface | open |
-| A5 | The "Project" overload is harmless (context disambiguates) | first user/doc that conflates a Self-Driven Project with a WE standards Project | open |
+| A4 | Master brand subsuming #563 + AI-driven-IDE is the strongest framing (Fork 3) | friction naming/positioning the first SaaS surface | **revised 2026-06-15 (#690)** — ↓ |
+| A5 | The "Project" overload is harmless (context disambiguates) | first user/doc that conflates a Self-Driven Project with a WE standards Project | **moot 2026-06-15 (#690)** — no separate brand |
 | A6 | A third-party PM tool can drive the artefacts (no-lock-in invariant) | first attempt to point a foreign tool at the artefact contract | open |
 
 > Ratifying this item **does not freeze** it: it sets the provisional defaults running and commits us to
 > the register. Revising a provisional default later is normal upkeep, not a re-opened decision —
 > *unless* the change touches a **firm invariant** or the **brand direction**, which re-enters here.
+
+> **A4 revision (2026-06-15, via [#690](/backlog/690-is-the-self-driven-project-methodology-a-first-class-constel/)).**
+> Brand direction re-entered (as the protocol requires) and was revised: **Fork 3 moves from "self-driven as
+> a new *master brand*" → "self-driven as a *positioning attribute* carried by existing brands."** The
+> methodology **lives in Web Everything** (scoped to web apps initially — a web app is the full-stack
+> product), **WE owns the open standard**, and **Plateau is the optional configurator** (recipes; the
+> Technical-Configurator pattern). **No separate brand, no new name** — so A5 (the "Project" overload) is
+> **moot**, and the deferred public-name call dissolves. Rationale: the value is the open / no-lock-in /
+> composable everything-as-code *posture* + the ground-truth gate (the concept itself is trodden ground), so
+> there is nothing a separate brand buys that justifies the surface; a market scan also found the candidate
+> namespace crowded/colliding. Full reasoning in #690.
 
 ## Forced invariants (ratify, not weigh)
 

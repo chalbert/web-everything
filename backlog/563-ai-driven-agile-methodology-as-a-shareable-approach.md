@@ -59,4 +59,4 @@ The methodology's sharpest claim is what it does to the *developer role*. In a f
 
 - ⬜ Epic captured (2026-06-14). Brainstorm above; no build committed.
 - ⬜ Artifact-shape fork carved to its own decision card [#569](/backlog/569-artifact-shape-for-the-ai-driven-agile-methodology-playbook-/) (parked; ratify near release, aligned with #143). Gates this epic's decomposition.
-- ⬜ Personas-as-concept carved to [#564](/backlog/564-personas-as-a-first-class-agile-concept/).
+- ✅ Personas-as-concept resolved in [#564](/backlog/564-personas-as-a-first-class-agile-concept/) (2026-06-14, ratified). **Ruling for this playbook (Fork 2·A):** name "persona/preset" as this methodology's *explicit role-switching primitive* — "the operator switches persona (PO/BA/dev/QA)" — as a documented concept, not a built schema (CrewAI role-persona prior art). Authoring tracked in [#622](/backlog/622-document-the-persona-preset-primitive-as-a-named-platform-co/).

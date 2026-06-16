@@ -17,9 +17,9 @@ tags: [webdocs, catalog, blocks-index, build, surface]
 # Assemble the Web Docs component-catalog surface from the derived standards
 
 Build the navigable docs/catalog surface (the **Storybook-equivalent**) from the intents/blocks named by the
-derivation decision ([#626](626-map-workbench-features-to-we-standards-which-intents-blocks-.md)). **Converges with**
-[#604](604-migrate-the-we-site-to-render-real-frontier-ui-blocks-replac.md) (render real FUI blocks) and
-[#398](398-build-the-web-docs-product-fui-open-primitives-plateau-app-o.md) (served product) — does **not** fork a
+derivation decision ([#626](/backlog/626-map-workbench-features-to-we-standards-which-intents-blocks-/)). **Converges with**
+[#604](/backlog/604-migrate-the-we-site-to-render-real-frontier-ui-blocks-replac/) (render real FUI blocks) and
+[#398](/backlog/398-build-the-web-docs-product-fui-open-primitives-plateau-app-o/) (served product) — does **not** fork a
 parallel build; it consumes their render pipeline.
 
 ## Quick-win first slice (workable before the full chain) — DONE
@@ -43,7 +43,7 @@ parallel build; it consumes their render pipeline.
   catalog-auto-render note ([docs/agent/design-first.md](../docs/agent/design-first.md)). `check:standards` 0
   errors (incl. §9 Vite-proxy coverage — `/blocks/` was already proxied for the per-block pages); renders on the
   11ty build.
-- **Full per-component live surface carved to [#727](727-web-docs-blocks-per-component-live-surface-fui-render-props-.md)**
+- **Full per-component live surface carved to [#727](/backlog/727-web-docs-blocks-per-component-live-surface-fui-render-props-/)**
   (`blockedBy: 604`) — the live FUI render (via #604's pipeline + the #701 fuiDemo iframe) + props/token/a11y
   panels are genuinely gated on the #604 render pipeline (held, D3-readiness) and consume #626's derivation.
   Resolving the skeleton here and tracking the gated bulk separately matches the body's "size 8 is provisional —

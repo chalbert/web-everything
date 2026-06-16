@@ -18,7 +18,7 @@ tags: [dev-browser, fix-loop, source-awareness, source-map, ide, deployed-app, f
 
 ## Digest
 
-The [#141 fix-loop](141-dev-browser-vision.md) and [#410's deployed live-patch](410-dev-browser-deployed-app-live-patch-gated-capability-safety-.md)
+The [#141 fix-loop](/backlog/141-dev-browser-vision/) and [#410's deployed live-patch](/backlog/410-dev-browser-deployed-app-live-patch-gated-capability-safety-/)
 both assume the browser can map a rendered DOM node — on a *deployed*, possibly minified, source-maps-stripped
 URL — back to the **source construct** that produced it, then act on the repo (jump to `file:line`, open a PR,
 drive the IDE). No item captured this implied dependency. **No design existed yet**; this prep surveyed the

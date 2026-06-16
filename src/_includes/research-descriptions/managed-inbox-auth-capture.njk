@@ -1,0 +1,132 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Prep research for the boundary decision
+  (<a href="/backlog/709-managed-inbox-auth-capture-capability-boundary-plateau-servi/">#709</a>),
+  carved out of the auth-walled app-screenshot capability
+  (<a href="/backlog/611-app-screenshot-access-system-managed-email-inbox-for-logged-/">#611</a>).
+  An agent that screenshots app interiors behind a login — dashboards, post-signup UI, the states the
+  exercise-app conformance loop and competitive capture can't otherwise reach — needs a
+  <strong>managed email identity</strong> it controls end-to-end: create inboxes, read
+  verification / magic-link / OTP mail, drive signup via Playwright, and vault credentials. Two
+  questions gate the build: <em>where the capability lives</em>, and <em>how its inbox is built</em>.
+</p>
+
+<h2>The shape of the decision</h2>
+<p>
+  Applying WE's <strong>fork-existence test</strong> (mandate nothing; a fork is real only when its
+  branches are mutually-exclusive end-states), the surface collapses to <strong>two forks</strong> plus
+  a fixed guardrail set. Fork 1 (the boundary) is a near-exact replay of an
+  <strong>already-ruled precedent</strong>; Fork 2 (build-vs-buy) has its floor forced by a Plateau
+  platform rule, leaving the owned realization as a delegated Plateau sub-choice.
+</p>
+
+<h2>Fork 1 — Where the capability lives (a replay of the #475 vision ruling)</h2>
+<p>
+  The managed email identity is <strong>stateful, credential-bearing infra with an operational
+  lifecycle</strong> (a domain, a mail path, a credential vault, signup automation) — an
+  <em>implementation capability</em>, not a declarative standard. That is precisely the class the
+  <a href="/backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/">#475 vision
+  ruling</a> settled: an impl capability is <strong>never a WE standard</strong> — it is a
+  <strong>Plateau service</strong> the WE tooling consumes as a <strong>no-leakage client</strong>,
+  and WE holds only a thin, vendor-free <em>client seam</em> in its devtooling. The canonical seam is
+  <code>design-refs/vision.mjs</code>: a provider is selected by an environment variable
+  (<code>DESIGN_REFS_VISION_PROVIDER_MODULE</code>), no vendor name appears in the core, only outputs
+  flow on, and the interim direct-call seam is later <em>repointed</em> at the Plateau service.
+</p>
+<ul>
+  <li>
+    <strong>A — Plateau service + thin no-leakage WE client seam (recommended, high confidence).</strong>
+    The managed-inbox / auth-capture capability is a Plateau service (the
+    <a href="/backlog/091-managed-offering-constellation-layering/">#091 managed-offering layering</a>,
+    served product = plateau-app); WE's capture devtooling holds an env-selected, vendor-free client
+    seam that drives signup + fetches the latest token/link per address, repointed at the Plateau
+    service when it exists. Identical shape to #475, and to the three-consumers-of-one-capability
+    pattern (#475 / #396 / #086).
+  </li>
+  <li>
+    <strong>B — Own the capability inside the WE repo (the broken branch).</strong> A self-hosted
+    IMAP+API owned permanently in WE's capture scripts rebuilds in WE what Plateau should own, and
+    drags credential-vaulting + signup automation — a stateful, abuse-surfaced service — into the
+    <em>standards</em> layer. Correct only as the <em>interim thin-seam</em> shape, never as the home.
+  </li>
+</ul>
+
+<h2>Fork 2 — Build vs buy (floor forced by the linear-cost rule)</h2>
+<p>
+  Plateau's <strong>cost-must-scale-with-revenue</strong> hard rule governs the inbox implementation.
+  The landscape splits three ways, and only owned-identity options satisfy the rule as a
+  <em>floor</em>:
+</p>
+<table>
+  <thead>
+    <tr><th>Category</th><th>Examples</th><th>Receives real inbound?</th><th>Cost model</th><th>Fit</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Programmable-inbox SaaS</td>
+      <td>MailSlurp (18+ SDKs), Mailosaur ($19–$199/mo, no free tier), Mailsac (free = public)</td>
+      <td>Yes (vendor domain)</td>
+      <td><strong>Metered</strong> per inbox/email</td>
+      <td>Fast to wire, but per-call cost + ToS often bar third-party signups → a <em>tier</em>, not the floor</td>
+    </tr>
+    <tr>
+      <td>Inbound-parse on owned domain</td>
+      <td>Cloudflare Email Routing + Workers (<strong>free</strong>), Postmark inbound, SendGrid / Mailgun inbound</td>
+      <td>Yes (your domain)</td>
+      <td>Free (CF) → metered (Postmark/SG)</td>
+      <td><strong>Owned identity</strong>; CF Routing catch-all is fixed-cost → the recommended floor</td>
+    </tr>
+    <tr>
+      <td>Dev SMTP sinks</td>
+      <td>Mailpit, Inbucket</td>
+      <td><strong>No</strong> — capture your own outbound only, no MX</td>
+      <td>Free (self-host)</td>
+      <td><strong>Wrong tool</strong> — cannot receive a target site's verification mail</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  <strong>Recommended floor:</strong> an owned-domain catch-all (<code>~$10/yr</code> domain) via
+  <strong>Cloudflare Email Routing + Email Workers</strong> (free, fixed-cost), with a thin API to
+  fetch the latest token/link per address; the fully-owned alternative is a self-hosted
+  <strong>Stalwart</strong> / maddy catch-all on the Plateau box. Both are fixed-cost — inbound
+  delivery needs no DKIM/SPF sending reputation, so <em>receiving</em> is far easier to self-host than
+  sending. Metered programmable-inbox SaaS is demoted to an <strong>opt-in BYO tier</strong> for a
+  quick start. The exact owned realization (CF Routing vs self-host) is a
+  <strong>Plateau implementation sub-choice</strong> delegated to the Plateau build; WE states the
+  floor + the constraint.
+</p>
+
+<h2>Required by default (guardrails, not a fork)</h2>
+<p>
+  Automated third-party signups carry ToS risk on both the inbox vendor and the target site. Fixed,
+  non-negotiable constraints: only sign up where the target's terms permit (own products, or free
+  tiers that allow automation); never circumvent CAPTCHA or anti-bot; respect rate limits and robots;
+  vault credentials (never commit); a fresh owned inbox per site/run. A guardrail set, not a decision
+  branch.
+</p>
+
+<h2>Classification (per-fork pass)</h2>
+<ul>
+  <li><strong>Layer:</strong> Capability (impl/infra) — no runnable standard code; a service + a
+    tool-time client. Same class as vision (#475/#480).</li>
+  <li><strong>Protocol?</strong> No — no independent-vendor interop/swap story at the standard level.
+    The thin seam is a <em>devtools provider seam</em> (a plain injected client consulted at capture
+    time), not a registry/protocol — the <code>vision.mjs</code> shape.</li>
+  <li><strong>DI-injectable / default:</strong> Yes — provider injected by name (cf.
+    <code>DESIGN_REFS_VISION_PROVIDER_MODULE</code>); default = the fixed-cost owned provider, SaaS
+    opt-in.</li>
+  <li><strong>Separate-and-decouple:</strong> capability (Plateau service) decoupled from the
+    consumption seam (WE devtools client) — satisfied, identical to #475.</li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li>Decision: <a href="/backlog/709-managed-inbox-auth-capture-capability-boundary-plateau-servi/">#709</a> (this prep)</li>
+  <li>Build it unblocks: <a href="/backlog/611-app-screenshot-access-system-managed-email-inbox-for-logged-/">#611</a></li>
+  <li>Governing precedent: <a href="/backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/">#475</a> (vision = Plateau service, no-leakage client)</li>
+  <li>Managed-offering layering: <a href="/backlog/091-managed-offering-constellation-layering/">#091</a></li>
+  <li>On-device / linear-cost precedent: <a href="/backlog/488-on-device-ui-screenshot-vision-model-as-a-plateau-capability/">#488</a></li>
+</ul>
+{% endraw %}

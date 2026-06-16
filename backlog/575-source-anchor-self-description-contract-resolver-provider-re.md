@@ -14,7 +14,7 @@ tags: [dev-browser, source-awareness, standard, self-description, resolver, sour
 
 # Source-anchor self-description contract + resolver provider registry (DOM node → file:line)
 
-The keystone build graduating from [#562](562-dev-browser-source-awareness-ide-bridge-map-deployed-dom-bac.md)
+The keystone build graduating from [#562](/backlog/562-dev-browser-source-awareness-ide-bridge-map-deployed-dom-bac/)
 (ratified 2026-06-14). Two coupled pieces, both WE-standard-owned (the Plateau dev-browser is the consumer):
 
 1. **Source-anchor self-description contract** — a build-emitted, minification-surviving anchor that maps a
@@ -31,7 +31,7 @@ The keystone build graduating from [#562](562-dev-browser-source-awareness-ide-b
 
 Grounded in the [`source-awareness-substrate`](/research/source-awareness-substrate/) research topic.
 **Constellation:** the anchor contract + resolver registry are the **WE standard** (#475/#091 split). Pairs
-with the bridge registry [#576](576-ide-bridge-provider-registry-passive-file-line-jump-file-sys.md); any
+with the bridge registry [#576](/backlog/576-ide-bridge-provider-registry-passive-file-line-jump-file-sys/); any
 resolver composes with any bridge.
 
 ## Progress

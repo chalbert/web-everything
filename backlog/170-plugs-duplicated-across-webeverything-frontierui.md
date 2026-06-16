@@ -9,6 +9,15 @@ relatedProject: webplugs
 
 # The plugs runtime is duplicated (and drifting) between Web Everything and Frontier UI
 
+> **⚠ Direction REVERSED by [#606](/backlog/606-where-does-the-plugs-platform-layer-runtime-live-web-everyth/) (2026-06-14, ratified).**
+> This epic was built on "WE is canonical; Frontier UI imports `@we/plugs/*` and deletes its vendored
+> copy." #606 ruled the plugs runtime is **implementation**, not a standard artifact, so the canonical
+> home is **Frontier UI** (`@frontierui/plugs`, a granular sub-package), **not** WE. The dedup goal is
+> unchanged and the drift-reconciliation done by #447/#448/#580 still stands (it produced one reconciled
+> superset) — but that superset now relocates to **`frontierui/plugs` as canonical**; **WE deletes its
+> `plugs/`** and consumes `@frontierui/plugs` as a client (the #604 WE→FUI seam). #449 is re-scoped to
+> the reversed migration. Re-read this whole body through that inverted lens before the next pickup.
+>
 > **Sliced into a storied epic (2026-06-12).** Strategy fork is resolved (alias — see *Resolution of the
 > strategy fork* below); a fresh on-disk re-measure showed the reconcile is a **bidirectional core-runtime
 > merge** (15 drifted, 9 WE-only, 3 FU-only — directionality in

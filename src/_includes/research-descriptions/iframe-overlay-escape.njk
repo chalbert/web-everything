@@ -1,0 +1,170 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Prep research for the overlay-escape decision
+  (<a href="/backlog/732-overlay-modal-escape-for-embedded-demos-iframe-box-vs-host-r/">#732</a>) — a
+  carved fork of the embed-mechanism epic
+  (<a href="/backlog/728-component-embedding-capability-embed-a-live-component-exampl/">#728</a>). The
+  <code>fuiDemo</code> shortcode (<code>.eleventy.js:38</code>) embeds a Frontier-UI-hosted demo next to
+  its standard page in a <strong>sandboxed, fixed-height <code>&lt;iframe&gt;</code></strong>
+  (<code>sandbox="allow-scripts allow-same-origin"</code>, <code>style="height:${h}px"</code>; the
+  <code>.fui-demo</code> wrapper sets <code>overflow:hidden</code>, <code>style.css:1657</code>). It
+  works for "see the component run" — but a demo whose component opens a <strong>modal, popover, toast,
+  or any overlay meant to cover the host docs page</strong> shows it only inside the demo's box. #732
+  decides the <em>escape mechanism</em>; the iframe v1 ships for every non-overlay demo regardless.
+</p>
+
+<h2>The load-bearing finding — it's a platform constraint, not an effort tradeoff</h2>
+<p>
+  The reason an iframed overlay can't cover the host page is the <strong>top layer is per-document</strong>.
+  The web platform's overlay primitives — <code>&lt;dialog&gt;.showModal()</code> with
+  <code>::backdrop</code>, and the <a href="https://developer.mozilla.org/en-US/docs/Web/API/Popover_API">Popover API</a>
+  — render into a document's <em>top layer</em>, which paints above everything <em>in that document</em>.
+  An iframe is its own document, so <strong>its top layer is confined to the iframe's box</strong> — by
+  security design, no iframe content can paint outside its frame. This is not something a bigger frame or
+  more code can overcome; it is the same boundary that makes iframes a safe embedding primitive.
+</p>
+<p>
+  That makes the WE <a href="/blocks/dialog/">Dialog block</a> (<code>blocks.json:3286</code>) the exact
+  pressure point. Its thesis is "native-first <strong>top-layer mount</strong> via the native
+  <code>&lt;dialog&gt;</code> element (<code>showModal</code> for the focus-trap, <code>inert</code>
+  background, and <code>::backdrop</code>) and the Popover API — <em>never</em> a
+  <code>position:fixed</code> + <code>z-index</code> re-implementation." Run that block inside
+  <code>fuiDemo</code> and its <code>::backdrop</code> dims only the iframe, not the docs page. So the
+  <strong>Dialog family (modal / drawer / sheet) is the first
+  <a href="/backlog/604-migrate-the-we-site-to-render-real-frontier-ui-blocks-replac/">#604</a> block
+  that visibly breaks</strong> — the concrete trigger #732's acceptance asks to name.
+</p>
+
+<h2>The resize concern is already solved — reuse, don't mint</h2>
+<p>
+  "Grow the frame to fit its content" is an orthogonal, <strong>solved</strong> problem with a de-facto
+  standard, not a thing WE should design:
+</p>
+<ul>
+  <li>
+    <strong>iframe-resizer</strong> (davidjbradshaw, v5) — the canonical library. The child posts its
+    content size via <code>postMessage</code>; the parent resizes the iframe; a
+    <code>MutationObserver</code>/<code>ResizeObserver</code> detects content changes. Crucially the
+    handshake is <em>child-initiated</em>, which is how it works cross-origin without the parent reaching
+    into the frame.
+  </li>
+  <li>
+    <strong>oEmbed</strong>'s real-world height pattern — the <code>rich</code> type's spec
+    <em>requires</em> a fixed <code>height</code>, yet Twitter/Instagram-class providers ignore that and
+    <strong>post height over <code>postMessage</code> instead</strong> because live, responsive content
+    has no predefined height. The spec's fixed-height rule is widely treated as advisory.
+  </li>
+</ul>
+<p>
+  Both point the same way: a content-size <code>postMessage</code> handshake is well-trodden. WE should
+  <strong>reuse that message shape</strong> (iframe-resizer's, or a minimal subset), <strong>never mint a
+  WE "resize protocol"</strong> — that would be lock-in for zero interop gain (minimize-lock-in: a
+  protocol is the single escapable lock, never reached for casually).
+</p>
+
+<h2>The overlay-escape concern splits into two host-side flavors</h2>
+<p>
+  Given the top-layer constraint, the only way an overlay can cover the host page is for
+  <strong>host-side code to do it</strong> — the demo signals intent across the frame boundary, and the
+  host (which owns its own top layer) realizes the overlay. The prior art shows two distinct host-side
+  techniques the original item collapsed into one "B":
+</p>
+<table>
+  <thead><tr><th>Flavor</th><th>How it works</th><th>Prior art</th><th>Cost</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>B1 — promote the frame</strong></td>
+      <td>Demo posts a boolean <code>overlay-open</code>/<code>overlay-close</code>; the host toggles a
+        class that restyles the <em>existing</em> iframe to <code>position:fixed; inset:0; z-index:…</code>.
+        The demo paints its own backdrop inside the now-full-viewport frame, so it covers everything.</td>
+      <td>The <strong>Intercom messenger</strong> model — a small launcher iframe that the host script
+        promotes to a fixed full-viewport overlay when opened.</td>
+      <td>One boolean message; a host class toggle. No new backdrop contract.</td>
+    </tr>
+    <tr>
+      <td><strong>B2 — native host backdrop</strong></td>
+      <td>Demo posts overlay intent + geometry; the host paints <em>its own</em>
+        <code>&lt;dialog&gt;</code>/popover backdrop and positions the frame, syncing geometry and handing
+        off the focus trap.</td>
+      <td>Stripe-style web-component-wraps-iframe with rich bidirectional <code>postMessage</code>.</td>
+      <td>A geometry/focus message contract both sides implement; the heaviest option.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Security — origin validation is a forced invariant, not a choice</h2>
+<p>
+  Any host that listens for frame messages must <strong>validate <code>event.origin</code> against an
+  allowlist</strong> (the FUI demo host) and never act on an unvalidated message. Overlay/postMessage
+  abuse is an active attack class: 2025 reporting on payment-skimmer techniques (The Hacker News,
+  Sep 2025) calls out <em>overlay</em> and <em>postMessage spoofing</em> as primary vectors — a malicious
+  page overlays a look-alike on a real payment iframe, or forges messages to a permissive listener. For
+  WE this is a fixed rule under every fork, not a branch to weigh.
+</p>
+
+<h2>Classification against the architecture</h2>
+<ul>
+  <li>
+    <strong>Layer.</strong> The <code>fuiDemo</code> shortcode is build-time <em>devtools</em> (an 11ty
+    shortcode), not a standard. The overlay <em>message contract</em>, if it ever needs a registry home,
+    is a <strong>Protocol</strong> candidate — a contract two independent repos (WE host ↔ FUI demo) and
+    possibly future third-party embeds implement.
+  </li>
+  <li>
+    <strong>Protocol, or just an impl detail? (Q2)</strong> Reach for a Protocol only when many vendors
+    interoperate. The resize channel is a <em>reused</em> existing protocol (iframe-resizer/oEmbed) — not
+    a WE mint. The overlay channel has exactly <strong>one consumer today</strong>
+    (<code>component.njk:235</code>; <code>autocomplete.njk:10</code> is a contained droplist, not a
+    host-covering overlay), so minting a protocol now is premature lock-in. #728's own slicing note
+    already rules this: "carve a generic embed primitive only when a real <em>second</em> embed consumer
+    appears." So the contract stays <strong>shortcode-local / unregistered</strong> until then, and
+    registers as a <code>webembed</code>-style protocol in <code>protocols.json</code> when a second
+    consumer (a third-party oEmbed adapter, a marketing surface) lands.
+  </li>
+  <li>
+    <strong>Fixed mechanic or dimension? (Q4)</strong> Whether a demo needs overlay-escape is a
+    <strong>per-demo dimension</strong> — the <code>fuiDemo</code> shortcode gains an optional opt-in flag
+    — because both "contained" and "escapes" are legitimate end-states for <em>different</em> demos, not
+    one behavior for all.
+  </li>
+  <li>
+    <strong>Most-permissive default? (Q6)</strong> Default the resize handshake <strong>on</strong>
+    (content-sized beats brittle fixed pixel heights across themes/viewports — strictly more flexible).
+    Default overlay-escape <strong>off / opt-in</strong> (most demos don't need it; the message contract
+    and promote-to-fullscreen behavior shouldn't be forced on every demo).
+  </li>
+  <li>
+    <strong>Seam between intents (Q7).</strong> The overlay traverses the frame boundary — a composition
+    seam between the demo's Modal intent and the host page's top layer. The dimension lives on the
+    <em>embed mechanism</em> (the host owns the frame), gated to whether the demo declares an overlay need.
+  </li>
+</ul>
+
+<h2>Recommendation at a glance</h2>
+<p>
+  One genuine call (the escape mechanism); the rest is "supported by default" or a forced invariant:
+</p>
+<ul>
+  <li><strong>Supported by default</strong> — auto-resize handshake rides along once any channel exists
+    (reuse iframe-resizer/oEmbed shape; never a WE resize protocol).</li>
+  <li><strong>Forced invariant</strong> — origin-validated <code>postMessage</code> (allowlist the FUI host).</li>
+  <li><strong>Settled by #728</strong> — overlay contract stays shortcode-local until a second embed
+    consumer appears, then registers as a protocol.</li>
+  <li><strong>The genuine fork</strong> — escape mechanism: <strong>A-contained baseline + B1-promote on
+    opt-in</strong> (recommended), <em>B2 native-backdrop rejected</em> as over-built for a "see it run"
+    demo (the promoted-frame backdrop reads fine; native pixel-perfect host chrome isn't worth the
+    geometry/focus contract), <em>C — defer to the DI mount</em> unavailable (gated on reopening the
+    cross-repo import seam <a href="/backlog/700-component-converter-playground-placement/">#700</a>).</li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li>Decision: <a href="/backlog/732-overlay-modal-escape-for-embedded-demos-iframe-box-vs-host-r/">#732</a> (this prep)</li>
+  <li>Epic: <a href="/backlog/728-component-embedding-capability-embed-a-live-component-exampl/">#728</a> — embed-mechanism capability</li>
+  <li>Consumer app: <a href="/backlog/604-migrate-the-we-site-to-render-real-frontier-ui-blocks-replac/">#604</a> — WE block-page demos</li>
+  <li>Trigger block: <a href="/blocks/dialog/">Dialog</a> (native top-layer mount)</li>
+  <li>Gated future path: <a href="/backlog/700-component-converter-playground-placement/">#700</a> — cross-repo import / DI mount</li>
+  <li>v1 mechanism: <a href="/backlog/701-iframe-based-component-viewer-embed-fui-hosted-standard-demo/">#701</a> — the <code>fuiDemo</code> shortcode</li>
+</ul>
+{% endraw %}

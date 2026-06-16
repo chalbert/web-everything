@@ -2,9 +2,11 @@
 type: decision
 workItem: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-06-14"
 dateStarted: "2026-06-14"
+dateResolved: "2026-06-14"
+graduatedTo: none
 preparedDate: "2026-06-14"
 locus: plateau-app
 relatedReport: reports/2026-06-14-persona-preset-primitive.md
@@ -13,6 +15,17 @@ crossRef: { url: /backlog/166-governance-persona-roster-charter-schema/, label: 
 ---
 
 # Personas as a first-class agile concept
+
+> **Resolved 2026-06-14 — ratified as written.** All three rows stand:
+> **Forced invariant** — a persona is a lens (RACI), never authorization (RBAC); if access ever
+> follows a persona it is a *separate* PBAC mapping the persona references, owned by
+> [#178](/backlog/178-access-control-authorization-gate/). **Fork 1 → A** — name the shared
+> **pattern/vocabulary** ("persona = a named preset over composable concepts: preferences +
+> surfaces-lit-up"); keep two separate homes (governance in plateau-app `/profiles`, agile-role in
+> #563's playbook); do **not** build a unified runtime schema. **Fork 2 → A** — name "persona/preset"
+> as #563's explicit role-switching primitive, as a documented methodology concept (not a built
+> schema). Materialization spun off as **[#622](/backlog/622-document-the-persona-preset-primitive-as-a-named-platform-co/)**
+> (one concept doc both lenses cite — satisfies both forks); Fork 2's naming also noted on #563.
 
 No *unified* design exists yet — "persona" appears in two places (governance charters, [#166](/backlog/166-governance-persona-roster-charter-schema/); the agile roles one operator multiplexes, [#563](/backlog/563-ai-driven-agile-methodology-as-a-shareable-approach/)) but it's never been decided whether they're *one* primitive. Are both projections of **persona = a named preset over composable concepts** (preferences + surfaces-lit-up), not a closed group? Forks grounded in [`/research/persona-preset-primitive/`](/research/persona-preset-primitive/) ([report](../reports/2026-06-14-persona-preset-primitive.md)). Two forks + one forced invariant: unification depth → **name the shared pattern, NOT a unified schema**; methodology naming → **name "persona/preset" as #563's role-switching concept**; permission boundary is a **forced invariant — persona is a lens (RACI), never authorization (RBAC)**.
 

@@ -2023,5 +2023,72 @@
     ],
     "relatedBlocks": [],
     "relatedPlugs": []
+  },
+  {
+    "id": "managed-inbox-auth-capture",
+    "title": "Managed-inbox / auth-capture capability — build-vs-buy & the Plateau-service boundary",
+    "status": "open",
+    "summary": "Prep research for decision #709 (the boundary fork carved out of #611, the auth-walled app-screenshot capability). An agent that screenshots apps behind a login needs a managed email identity it controls end-to-end (create inboxes, read verification/magic/OTP mail, drive signup via Playwright, vault credentials). Two forks. Fork 1 — where the capability lives — is a near-exact replay of the #475 vision ruling: it is a stateful, credential-bearing IMPL capability, not a WE standard, so by #475 it is a Plateau service WE consumes as a NO-LEAKAGE client, with only a thin vendor-free client seam in WEs capture devtooling (the design-refs/vision.mjs precedent: env-selected provider module, repointed at the Plateau service when it exists) [recommended A — high confidence]; owning the capability inside the WE standards repo (B) rebuilds in WE what Plateau should own and drags credential-vaulting + signup automation into the standards layer (the broken branch). Fork 2 — build vs buy — is governed by Plateaus linear-cost-with-revenue hard rule: metered per-inbox/per-email SaaS (MailSlurp, Mailosaur) scales cost with capture volume not revenue, so it is excluded as the FLOOR and demoted to an opt-in BYO tier; the recommended floor is an owned-domain catch-all (Cloudflare Email Routing + Email Workers, free, fixed-cost; or a self-hosted Stalwart/maddy catch-all on the Plateau box) [med-high]. The exact owned realization is a Plateau implementation sub-choice (delegated to the Plateau build); WE states the floor and the constraint. Landscape note: dev SMTP sinks (Mailpit, Inbucket) are the WRONG tool — they capture your own outbound only, no public MX, so they cannot receive a target sites verification mail. Abuse/ToS guardrails (only sign up where terms permit, no CAPTCHA circumvention, respect rate limits, vault credentials) are required-by-default invariants, not a fork. Full grounding in reports/2026-06-15-managed-inbox-auth-capture.md.",
+    "dateOpened": "2026-06-15",
+    "lastReviewed": "2026-06-15",
+    "reviewHorizon": "P12M",
+    "tags": [
+      "managed-inbox",
+      "auth-capture",
+      "screenshot",
+      "plateau-service",
+      "no-leakage",
+      "linear-cost",
+      "build-vs-buy",
+      "decision-prep"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": ""
+  },
+  {
+    "id": "device-capacity-provider",
+    "title": "Device-capacity provider — detection-axis + composite multi-source routing",
+    "status": "open",
+    "summary": "Prep research for decision #729 (an extension of the capability-provider epic #203). The provider seam models platform-FEATURE capability (Baseline/web-features tiers) and picks ONE provider per scope by venue; #729 asks it to (1) add a device-CAPACITY axis (hardwareConcurrency, deviceMemory, network/saveData, battery, GPU tier) and (2) combine providers so different checks route to different sources — delegating detection to existing solutions (WE standardizes the contract+routing, never the algorithm). The survey reshapes the item from two forks to THREE. Signal landscape with one load-bearing finding — availability is NOT uniform across venues: hardwareConcurrency + GPU-tier are runtime-only (no request header carries them), while deviceMemory (Sec-CH-Device-Memory) and Save-Data also resolve at the edge — so the capacity axis should REUSE the existing Venue dimension + the undefined-means-unknown degrade contract, an argument FOR a sibling provider on the same machinery. Battery is excluded not forked (deprecated, removed by Firefox, never in Safari, fingerprinting vector, ~76% Chromium-only) — the fork-existence test in action. Combinator prior-art: Google Chrome Labs react-adaptive-hooks (+ Addy Osmani's adaptive-loading pattern, svelte-adaptive-sensors port) combine exactly hardwareConcurrency+deviceMemory+effectiveType+saveData; WE's capacity provider is the platform-neutral, framework-free version. Every combinator consumes COARSE BUCKETS at the call site (effectiveType '4g', GPU tier 0–3) derived from a raw measurement — which is the new Fork 2 (expose both raw scalar AND derived bucket; default both). Only GPU-tier warrants a maintained dependency: detect-gpu (pmndrs — WebGL benchmark→tier 0–3, handles Apple privacy-masked renderer strings); CPU/RAM/network are thin native reads, battery excluded — delegation met with ONE lib. Recommended: Fork 1 separate CapacityProvider [high], Fork 2 both scalar+bucket [med-high], Fork 3 CompositeProvider routing by check-domain [high]. Full grounding in reports/2026-06-15-device-capacity-provider.md.",
+    "dateOpened": "2026-06-15",
+    "lastReviewed": "2026-06-15",
+    "reviewHorizon": "P12M",
+    "tags": [
+      "capabilities",
+      "provider-seam",
+      "device-capacity",
+      "client-hints",
+      "adaptive-loading",
+      "detect-gpu",
+      "composite",
+      "decision-prep"
+    ],
+    "relatedBlocks": [],
+    "relatedPlugs": [],
+    "relatedProject": ""
+  },
+  {
+    "id": "iframe-overlay-escape",
+    "title": "Embedded-demo overlay escape — how an iframed demo's modal covers the host page",
+    "status": "open",
+    "summary": "Prep research for decision #732 (a carved fork of the embed-mechanism epic #728). The fuiDemo shortcode (.eleventy.js:38) embeds a FUI-hosted demo in a sandboxed, fixed-height iframe (sandbox='allow-scripts allow-same-origin', style='height:${h}px'; .fui-demo wrapper has overflow:hidden, style.css:1657). A demo's modal/popover/toast can't escape that box to cover the host docs page. The load-bearing finding is a PLATFORM CONSTRAINT, not an effort tradeoff: the top layer (<dialog> showModal / ::backdrop, the Popover API) is PER-DOCUMENT, so an iframe document's top layer is confined to the iframe's box — by security design, no iframe content can paint outside its frame. This is exactly the crux of the WE Dialog block (blocks.json:3286), whose thesis is 'native-first top-layer mount via <dialog> showModal + ::backdrop, never a position:fixed re-implementation' — so the Dialog family (modal/drawer/sheet) is the first #604 block that visibly breaks inside fuiDemo, the concrete trigger #732 asks for. Prior art reshaped the forks: the resize concern (auto-size the frame to content) is a SOLVED, de-facto-standard protocol — iframe-resizer (davidjbradshaw, v5; child posts content size via postMessage, parent resizes, MutationObserver/ResizeObserver-driven, child-initiated to bypass cross-origin) and oEmbed's real-world height-postMessage pattern (Twitter/Instagram ignore the spec's fixed height and post height instead) — so WE should REUSE that message shape, never mint a WE resize protocol (minimize-lock-in). The overlay-escape concern splits into TWO host-side flavors the original item collapsed into one 'B': B1 — host PROMOTES the existing frame to a fixed full-viewport layer (the Intercom messenger model: host toggles position:fixed;inset:0 on the frame; the demo paints its own backdrop, now covering everything; one boolean open/close message) vs B2 — host renders the backdrop/positioning NATIVELY (demo posts overlay intent+geometry; host paints its own <dialog>/popover, syncs geometry + focus-trap handoff). Net classification: auto-resize rides along as a baseline (strictly better than fixed pixel heights across themes/viewports) once any channel exists; origin-validated postMessage is a forced invariant (the payment-skimmer overlay/postMessage-spoof attack surface, per The Hacker News 2025); the overlay message contract stays shortcode-local/unregistered until a SECOND embed consumer appears (per #728's own slicing ruling — component.njk:235 is the only consumer today), then registers as a webembed-style protocol. The genuine call is the escape mechanism: recommended A-contained baseline + B1-promote on opt-in [med — B1 vs B2 is where judgment lives], B2 rejected as over-built for a 'see it run' demo, C (defer to the #700-gated DI mount) unavailable today. Full grounding in reports/2026-06-16-iframe-overlay-escape.md.",
+    "dateOpened": "2026-06-16",
+    "lastReviewed": "2026-06-16",
+    "reviewHorizon": "P12M",
+    "tags": [
+      "embedding",
+      "iframe",
+      "overlay",
+      "postmessage",
+      "iframe-resizer",
+      "oembed",
+      "top-layer",
+      "dialog",
+      "decision-prep"
+    ],
+    "relatedBlocks": ["dialog"],
+    "relatedPlugs": [],
+    "relatedProject": ""
   }
 ]

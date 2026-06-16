@@ -14,7 +14,7 @@ tags: [dev-browser, fix-loop, conventions, compliance, webcompliance, platform-d
 
 # Platform-default VCS convention vocabulary in the compliance layer (branch/commit/PR shape the fix-loop reads)
 
-Cluster B from [#562](562-dev-browser-source-awareness-ide-bridge-map-deployed-dom-bac.md)'s surfaced
+Cluster B from [#562](/backlog/562-dev-browser-source-awareness-ide-bridge-map-deployed-dom-bac/)'s surfaced
 follow-on work. The fix-loop must **know what VCS conventions to follow** when it opens a PR — branch naming,
 commit-message format (conventional-commits?, trace/failure back-reference, the `Co-Authored-By` bot trailer),
 PR shape. **This is not a decision that prescribes a convention** — per the conventions-as-compliance ruling
@@ -30,4 +30,4 @@ So this item carries the **platform-default VCS convention vocabulary into the c
 
 Shape is already ruled (platform-default + project-customizable + compliance-enforced + bot-consumed); this is
 the build that carries the vocabulary, not a fresh fork. Pairs with the bot-PR-mechanics decision
-[#578](578-fix-loop-git-integration-bot-pr-mechanics-flow-forge-auth-ag.md) (which *reads* this vocabulary).
+[#578](/backlog/578-fix-loop-git-integration-bot-pr-mechanics-flow-forge-auth-ag/) (which *reads* this vocabulary).

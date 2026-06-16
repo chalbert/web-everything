@@ -20,7 +20,7 @@ tags: [dev-browser, fix-loop, git-integration, pr-mechanics, decision]
 ## Digest
 
 The fix-loop's *"act on the repo → open a PR"* step (the #141 PR step,
-[#562](562-dev-browser-source-awareness-ide-bridge-map-deployed-dom-bac.md)'s downstream) assumes a whole
+[#562](/backlog/562-dev-browser-source-awareness-ide-bridge-map-deployed-dom-bac/)'s downstream) assumes a whole
 **VCS-interaction surface** no item captured — surfaced as #562's Cluster A. **No design existed yet**; this
 prep surveyed established bot-PR practice (Dependabot, Renovate, GitHub's Copilot coding agent) and published
 the [`bot-pr-mechanics`](/research/bot-pr-mechanics/) research topic. The survey **collapses the eight raised
@@ -50,20 +50,20 @@ demoted out of the call (full detail in `## Context`):
   authorization dial (a forge write is privileged). Full A/B/C survey recorded in `## Context`.
 - **Forge-agnosticism = a forge provider registry** — "open a PR" abstracted behind a per-forge provider
   (GitHub/GitLab/Gitea/Forgejo/Bitbucket), every provider used, precedence + degradation the only rules —
-  the **same support-all ruling #562 gave its bridge registry** ([#576](576-ide-bridge-provider-registry-passive-file-line-jump-file-sys.md)).
+  the **same support-all ruling #562 gave its bridge registry** ([#576](/backlog/576-ide-bridge-provider-registry-passive-file-line-jump-file-sys/)).
   Prior art is unambiguous (Renovate's `Platform` interface, Woodpecker's `forge.Forge`, git-pkgs/forge,
   go-git-providers). v1 ships the **GitHub provider first** — *prioritization, not a fork* (the ruled
   end-state is the registry; *when* each provider lands is burndown ordering).
 - **Git-flow / PR-strategy policy dials** — draft-vs-ready, target branch, one-fix-per-PR vs. batched,
   rebase/squash/merge, auto-merge. Every value is coherent → configurable per project; the **defaults live in
-  the compliance layer** ([#579](579-platform-default-vcs-convention-vocabulary-in-the-compliance.md),
+  the compliance layer** ([#579](/backlog/579-platform-default-vcs-convention-vocabulary-in-the-compliance/),
   Cluster B), *read* by the bot, never invented by it.
 - **Conflict & concurrency** — rebase-on-stale-base, detect-and-skip racing fixes; the local-edit conflict is
-  [#577](577-deep-two-way-vs-code-extension-emit-active-projects-coordina.md)'s concern. Mechanics, not a
+  [#577](/backlog/577-deep-two-way-vs-code-extension-emit-active-projects-coordina/)'s concern. Mechanics, not a
   merit fork.
 - **Revert / rollback** — a merged-bad fix is backed out by the same loop opening a **normal revert PR**
   through the same gates (no special privilege); autonomy-gated per #410's revertibility ruling.
-- **Monorepo / multi-repo targeting** — derived from the resolver ([#575](575-source-anchor-self-description-contract-resolver-provider-re.md)):
+- **Monorepo / multi-repo targeting** — derived from the resolver ([#575](/backlog/575-source-anchor-self-description-contract-resolver-provider-re/)):
   the repo is wherever the resolved `file:line` lives; cross-repo → **independent PR per repo** (atomic
   cross-repo merge rejected — forges don't support it).
 
@@ -75,7 +75,7 @@ required human review — **no bypass path**. The autofix **verify gate**
 ([scripts/autofix/engine.mjs:229-247](../scripts/autofix/engine.mjs#L229)) is *necessary but not sufficient*:
 it proves the fix cleared the failure locally; the org's CI + review still gate the merge. *Which* gates
 apply is **read from the compliance layer** (#579), not asserted by the bot. **Auto-merge** (the #141/#410
-autonomy ladder — [#141 Fork 2](141-dev-browser-vision.md) ratified *default = open-PR*) is reachable **only
+autonomy ladder — [#141 Fork 2](/backlog/141-dev-browser-vision/) ratified *default = open-PR*) is reachable **only
 after every gate is green**. This is a ratify, not an open call: 2025 agent-PR consensus converges on exactly
 it (GitHub's Copilot coding agent opens PRs that run the same branch-protection + required-checks gates;
 best practice separates "analysis" from "execution" with a human approval gate).
@@ -122,7 +122,7 @@ not asserted by the bot. The A/B/C survey is retained below as recorded prior ar
 installation tokens (~1h), fine-grained permissions, org-owned (survives employee churn), a built-in bot
 identity, and API-made commits that are **auto-signed and verified** — strictly better than a long-lived,
 user-tied PAT. But a **browser/extension is a poor place to hold an App private key**. Couples to
-[#410 Fork 2](410-dev-browser-deployed-app-live-patch-gated-capability-safety-.md)'s authorization dial (a
+[#410 Fork 2](/backlog/410-dev-browser-deployed-app-live-patch-gated-capability-safety-/)'s authorization dial (a
 forge write is a privileged action) and reuses the bridge precedence/degradation model from #562.
 
 - **A — Reuse the IDE-bridge's existing git auth** *(recommended, v1)*. Open the PR through the
@@ -179,7 +179,7 @@ additive field-set on #410-4A's audit record — default **a sibling extension r
 ### Why this is captured here
 
 Surfaced and documented during #562's prep as **Cluster A** (the genuine-design half; Cluster B — convention
-*vocabulary* — is [#579](579-platform-default-vcs-convention-vocabulary-in-the-compliance.md)). The fix-loop's
+*vocabulary* — is [#579](/backlog/579-platform-default-vcs-convention-vocabulary-in-the-compliance/)). The fix-loop's
 *"act on the repo → open a PR"* step quietly assumes a whole VCS-interaction surface nobody had captured.
 #562 fanned it out on ratification with a first-cut classification per axis; this prep ran the survey and
 brought it to DoR.
@@ -246,13 +246,13 @@ is only reachable after every gate is green — the autonomy dial (#141/#410) *i
    who/when/diff/revert; the manifest is which-gates-ran / verify-before-after / autonomy-level.
 
 Spin-off builds filed (each its own `blockedBy`-chained item, sequenced after the v1 fix-loop + bridge):
-**(a)** [#598](598-forge-provider-registry-abstract-open-a-pr-behind-a-per-forg.md) forge provider registry
-(Plateau; ⟵ #575); **(b)** [#600](600-credential-source-provider-seam-bridge-auth-v1-github-app-br.md)
+**(a)** [#598](/backlog/598-forge-provider-registry-abstract-open-a-pr-behind-a-per-forg/) forge provider registry
+(Plateau; ⟵ #575); **(b)** [#600](/backlog/600-credential-source-provider-seam-bridge-auth-v1-github-app-br/)
 credential-source provider seam (Plateau, A-first/B-hosted, compliance-read default; ⟵ #598); **(c)**
-[#599](599-conformance-evidence-manifest-standard-owned-contract-for-bo.md) conformance-evidence manifest
-contract (WE standard; ⟵ #575); **(d)** [#601](601-pr-body-renderer-render-the-conformance-evidence-manifest-in.md)
+[#599](/backlog/599-conformance-evidence-manifest-standard-owned-contract-for-bo/) conformance-evidence manifest
+contract (WE standard; ⟵ #575); **(d)** [#601](/backlog/601-pr-body-renderer-render-the-conformance-evidence-manifest-in/)
 its Plateau PR-body renderer, thin markdown first (⟵ #599, #598).
 
 **Hygiene follow-on:** because this ruling exercised the **fork-existence test** in anger (a false fork
-dissolved into a provider seam), [#602](602-fork-existence-test-sweep-find-single-solution-mandates-that.md)
+dissolved into a provider seam), [#602](/backlog/602-fork-existence-test-sweep-find-single-solution-mandates-that/)
 sweeps the rest of the standard for single-solution mandates the same test would reject.

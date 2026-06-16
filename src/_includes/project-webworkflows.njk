@@ -1,0 +1,184 @@
+<section class="intro-section mb-12">
+  <h3 id="mission">Mission</h3>
+  <p>
+    <strong>Web Workflows</strong> standardizes a <strong>workflow</strong> &mdash; a set of smaller UX
+    intents arranged in <strong>directed progression toward one goal</strong>
+    (<code>checkout = collect-address &rarr; pay &rarr; confirm</code>), with threaded state, a single
+    completion criterion, and one current position. It is the missing <strong>third composition
+    mode</strong>: Web Everything already has <em>simultaneous</em> composition (a block composes intents
+    that all act at once) and <em>cross-cutting</em> composition (one intent's policy reused across blocks),
+    but neither expresses <em>directed/temporal</em> composition &mdash; step-intents progressing toward a
+    terminal goal with threaded state.
+  </p>
+  <p>
+    Web Workflows fixes one seam &mdash; a <strong>declarative orchestration graph</strong> (steps +
+    transitions + guards + parallel/fork-join + completion) resolved by a swappable
+    <strong>workflow engine</strong> &mdash; and nothing else. The graph is data, so a workflow engine
+    (XState, SCION, a hand-rolled switch) plugs in behind the provider without touching the step-intents,
+    which compose into the flow unaware they are in one. <strong>The transition graph is the only
+    lock.</strong>
+  </p>
+
+  <div class="comparison-block" style="background: rgba(14, 165, 233, 0.08); padding: 1.25rem; border-radius: 8px; border-left: 4px solid #0ea5e9; margin: 1.5rem 0;">
+    <h4 style="margin-top: 0; color: #0369a1; font-size: 1rem;">Sibling of Web Lifecycle, not the same thing</h4>
+    <p style="margin-bottom: 0; font-size: 0.95rem;">
+      <a href="/projects/weblifecycle/">Web Lifecycle</a> owns a <em>persisted domain entity's</em> status
+      &mdash; an FSM in one state at a time (a loan is <code>underwriting</code>), whose event is an audit
+      trail. Web Workflows owns the <em>user's ephemeral traversal</em> &mdash; a process orchestration that
+      may occupy <em>many</em> states at once (parallel branches), whose event is back/undo navigation. Same
+      SCXML transition-map <em>form</em>, different subject, cardinality, and event semantics. They are
+      siblings over a shared form, not one protocol &mdash; bias-to-separation
+      (<a href="/backlog/634-meta-intent-workflow-as-composable-intent/">#634</a>,
+      <a href="/backlog/616-retroactively-ratify-the-weblifecycle-project-lifecycle-prot/">#616</a>).
+    </p>
+  </div>
+</section>
+
+<section id="features" class="section-card">
+  <h3 id="feature-surface">Feature Surface</h3>
+  <p>
+    What a workflow standard covers, and where each capability is fulfilled. <strong>Protocol</strong> =
+    fixed by the Workflow contract (the only lock); <strong>Engine</strong> = resolved behind the swappable
+    <code>CustomWorkflowEngine</code> provider; <strong>Compose</strong> = deferred to a neighbouring Web
+    Everything standard.
+  </p>
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 720px;">
+      <thead>
+        <tr><th>Feature</th><th>Prior art</th><th>What it does</th><th>Layer</th></tr>
+      </thead>
+      <tbody>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(14,165,233,0.06);">The seam (fixed by the protocol)</td></tr>
+        <tr><td><strong>Orchestration graph</strong></td><td>XState / SCXML statecharts, BPMN</td><td>Steps + transitions + guards + parallel/fork-join + completion, data-defined &amp; portable</td><td>Protocol</td></tr>
+        <tr><td><strong>Threaded context</strong></td><td>XState <code>context</code>, workflow variables</td><td>State carried across steps toward the completion criterion</td><td>Protocol</td></tr>
+        <tr><td><strong>Engine seam</strong></td><td>—</td><td><code>CustomWorkflowEngine</code>: default &rarr; project override &rarr; custom plug, resolved off the injector chain</td><td>Protocol</td></tr>
+        <tr><td><strong>Step-transition event</strong></td><td>Domain events, statechart transitions</td><td>Each fired transition emits <code>{ flow, from, to, context, at }</code></td><td>Protocol</td></tr>
+        <tr><td colspan="4" style="font-weight:600; background:rgba(14,165,233,0.06);">Deferred to neighbours (composed, not owned)</td></tr>
+        <tr><td><strong>Per-step UX</strong></td><td>Steppers, wizards, progress bars</td><td>Current position + per-step status + register (wizard / single-page / conversational / board)</td><td>🔗 Member &mdash; <a href="/intents/flow-progress/">Flow Progress intent</a></td></tr>
+        <tr><td><strong>Authorization</strong></td><td>CASL, OpenFGA, server authz</td><td><em>May THIS actor advance this transition?</em> &mdash; a guard predicate</td><td>🔗 Compose &mdash; <a href="/projects/webguards/">Web Guards</a></td></tr>
+        <tr><td><strong>Linear navigation</strong></td><td>Router, history API</td><td><code>structure:linear</code> / <code>guard</code> / <code>history</code> dimensions reused, not reinvented</td><td>🔗 Compose &mdash; <a href="/intents/navigation/">navigation intent</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="protocol-workflow" class="section-card">
+  <h3 id="how-it-works">Workflow Protocol</h3>
+  <p>
+    A flow never bundles its orchestration into the step-intents. It declares a <strong>workflow
+    definition</strong> (steps + transition graph + completion), resolves the application's
+    <strong>workflow engine</strong> through the injector chain, and asks it to advance. The engine
+    evaluates the edge's guard (delegating authorization to a guard provider), threads context, applies the
+    move, and emits the step-transition event. The protocol fixes only the seam &mdash; the engine behind
+    the provider is swappable.
+  </p>
+  {% highlight "typescript" %}
+// The orchestration graph — the ONLY lock. Data-defined (SCXML-style), portable across engines.
+interface WorkflowDefinition<S extends string> {
+  initial: S;
+  steps: Record<S, { final?: boolean; parallel?: S[] }>;   // `final` = a completion state
+  transitions: Array<{
+    from: S; to: S;
+    // Authorization is NOT owned here — `guard` names a Web Guards predicate the
+    // CustomGuardProvider resolves (async, server-authoritative). Omit for a free move.
+    guard?: string;
+    // The operator producing this edge (Tier-1 sequence/branch/nest, Tier-2 back/parallel/gate).
+    op?: 'sequence' | 'branch' | 'nest' | 'parallel' | 'back' | 'gate';
+  }>;
+}
+
+// The provider seam — satisfied by the native default and every plugged engine alike.
+interface CustomWorkflowEngine<S extends string = string> {
+  // Which transitions are available from the current position(s), guards pre-evaluated.
+  available(flow: FlowRef, actor: ActorRef): Promise<S[]>;
+  // Advance one edge. Rejects if unknown or its guard denies. On success, emits the event.
+  advance(flow: FlowRef, to: S, actor: ActorRef): Promise<StepTransitionEvent<S>>;
+  // Has the flow reached a completion (`final`) state?
+  isComplete(flow: FlowRef): boolean;
+}
+
+interface StepTransitionEvent<S extends string> {
+  flow: FlowRef; from: S; to: S; context: unknown; at: string; // ISO
+}
+
+// 1. The application registers ONE engine (native-first default; project overrides it).
+customWorkflows.define('checkout', new XStateWorkflowEngine(checkoutDefinition));
+
+injector Application {
+  provide { workflow: 'checkout' } to '@web-workflows';   // every descendant resolves this engine
+}
+
+// 2. A surface delegates — it owns neither the graph nor the authorization.
+const engine = InjectorRoot.getProviderOf(el, 'customWorkflows');
+const next = await engine.available(checkout, currentUser);   // → ['pay', 'edit-address']
+const ev = await engine.advance(checkout, 'pay', currentUser); // guard-checked + context-threaded
+  {% endhighlight %}
+
+  <h4 id="operators" style="margin-top: 1.5rem;">Operator vocabulary (tiered, open meta-schema)</h4>
+  <p>
+    The standardized operator set is <strong>tiered by universality</strong> and stays an
+    <strong>open meta-schema</strong> &mdash; engines declare <em>which</em> operators they honor (the
+    <a href="/backlog/085-validation-adapters-multi-language/">#085</a> compliance-matrix posture). Tier-3
+    is recorded here, not dropped, so promoting an operator later is a status flip, not a re-survey.
+  </p>
+  <div style="overflow-x: auto; max-width: 100%;">
+    <table style="min-width: 720px;">
+      <thead>
+        <tr><th>Tier</th><th>Operators</th><th>Why here</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><strong>Tier-1 &mdash; core (mandatory)</strong></td><td>sequence · branch/guard · nest (sub-workflow) · threaded context · completion/final · current-position</td><td>The coherence invariant &mdash; what makes a workflow a workflow rather than co-located intents.</td></tr>
+        <tr><td><strong>Tier-2 &mdash; common (optional)</strong></td><td>parallel fork/join · back/undo · gate/wait-for-event</td><td>Recurs across surveyed systems &amp; UI wizards; optional, not structural.</td></tr>
+        <tr><td><strong>Tier-3 &mdash; deferred (known, not standardized)</strong></td><td>fan-out/matrix · inclusive-OR · history/resume · retry · compensation/saga</td><td>Redundant via existing primitives (matrix &rarr; parallel; inclusive-OR &rarr; parallel + per-branch guards) or durable-execution <em>backend</em> concerns that belong to the engine behind the provider, never the contract.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <ul style="font-size: 0.9rem; color: var(--color-text-muted); margin-top: 1rem;">
+    <li><strong>One contract:</strong> <code>CustomWorkflowEngine</code> &mdash;
+      <code>available()</code> + <code>advance()</code> + <code>isComplete()</code> &mdash; is satisfied by
+      the default and every plugged engine alike.</li>
+    <li><strong>One registry:</strong> <code>CustomWorkflowRegistry</code>
+      (<code>window.customWorkflows</code>) holds the named definitions/engines; the project selects or
+      overrides via the injector chain.</li>
+    <li><strong>Authorization is delegated, never re-implemented:</strong> a transition's
+      <code>guard</code> is a <a href="/projects/webguards/">Web Guards</a> predicate &mdash; Web Workflows
+      owns <em>the graph</em>; Web Guards owns <em>who may advance an edge</em>.</li>
+    <li><strong>Every transition is observable:</strong> the emitted <code>StepTransitionEvent</code> is the
+      composition seam for the <a href="/intents/flow-progress/">Flow Progress intent</a>, audit, and
+      reporting &mdash; the standard owns the event, not the log.</li>
+  </ul>
+</section>
+
+<section id="composition" class="section-card">
+  <h3 id="composition">Composition With Other Standards</h3>
+  <ul style="font-size: 0.9rem;">
+    <li><strong><a href="/intents/flow-progress/">Flow Progress intent</a></strong> &mdash; the UX half: the
+      current position, per-step status, and register (wizard / single-page / conversational / board). It
+      reads the same engine; it is the workflow's visual member.</li>
+    <li><strong><a href="/projects/weblifecycle/">Web Lifecycle</a></strong> &mdash; the sibling: a persisted
+      entity's FSM status (one state, audit event) vs a workflow's ephemeral traversal (may be many states,
+      back/undo event). Shared SCXML form, separate protocols.</li>
+    <li><strong><a href="/intents/navigation/">Navigation intent</a></strong> &mdash; the Flow Progress
+      intent reuses its <code>structure:linear</code> / <code>guard</code> / <code>history</code> dimensions
+      rather than reinventing linear movement.</li>
+    <li><strong><a href="/projects/webguards/">Web Guards</a></strong> &mdash; resolves each transition's
+      guard predicate (authorization / precondition).</li>
+  </ul>
+</section>
+
+<section id="status" class="section-card">
+  <h3 id="status">Status</h3>
+  <p>
+    Web Workflows is in <strong>concept</strong> phase; the Workflow protocol's seam (orchestration graph +
+    engine provider + step-transition event) is specified here at <strong>draft</strong>, and the
+    <a href="/intents/flow-progress/">Flow Progress intent</a> carries the UX. It was ratified by
+    <a href="/backlog/634-meta-intent-workflow-as-composable-intent/">#634</a> (Fork 1 = A: Project +
+    Protocol + Intent decomposition; Fork 2 = A: tiered operators, open meta-schema), grounded in the
+    workflow meta-intent survey (<a href="/research/workflow-meta-intent/">/research/workflow-meta-intent/</a>).
+    It subsumes the collection-operations coordinator
+    (<a href="/backlog/369-collection-operations-coordinator/">#369</a>) as a degenerate co-located instance.
+    The native-first default engine adapter and a reference wizard block are the first planned work, on top
+    of this contract &mdash; filed as separately-prioritized builds.
+  </p>
+</section>

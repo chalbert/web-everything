@@ -18,7 +18,7 @@ The Frontier UI site has its **own** block catalog — `frontierui/src/_data/blo
 
 ## Why this isn't already covered
 
-The whole web-docs pipeline — [#623](623-web-docs-feature-pipeline-inventory-workbench-tools-derive-i.md) (derive), [#627](627-assemble-the-web-docs-component-catalog-surface-from-the-der.md) (catalog surface), [#604](604-migrate-the-we-site-to-render-real-frontier-ui-blocks-replac.md) (render real FUI blocks) — targets the **WE docs site**: every reference is to `webeverything/src/_data/blocks.json` and `/blocks/` on `:8080`. None of them touch `frontierui/src/_data/blocks.json`, which is a **second, independent** block surface on FUI's own site. The constellation principle (WE = standard, FUI = impl, plateau-app = product) says docs-that-render-the-standard live on WE, not FUI — yet [#425](398-build-the-web-docs-product-fui-open-primitives-plateau-app-o.md) (FUI self-hosts Web Docs UI primitives) means FUI plausibly *should* dogfood a rendered surface. That tension is the open call.
+The whole web-docs pipeline — [#623](/backlog/623-web-docs-feature-pipeline-inventory-workbench-tools-derive-i/) (derive), [#627](/backlog/627-assemble-the-web-docs-component-catalog-surface-from-the-der/) (catalog surface), [#604](/backlog/604-migrate-the-we-site-to-render-real-frontier-ui-blocks-replac/) (render real FUI blocks) — targets the **WE docs site**: every reference is to `webeverything/src/_data/blocks.json` and `/blocks/` on `:8080`. None of them touch `frontierui/src/_data/blocks.json`, which is a **second, independent** block surface on FUI's own site. The constellation principle (WE = standard, FUI = impl, plateau-app = product) says docs-that-render-the-standard live on WE, not FUI — yet [#425](/backlog/398-build-the-web-docs-product-fui-open-primitives-plateau-app-o/) (FUI self-hosts Web Docs UI primitives) means FUI plausibly *should* dogfood a rendered surface. That tension is the open call.
 
 ## The invariant (not a fork)
 
@@ -26,7 +26,7 @@ Whatever surface exists must be **auto-derived from the implementation** (CEM / 
 
 ## Correction (2026-06-15) — the original A/B was mis-framed against the rendering boundary
 
-The fork was first written as "FUI exports a manifest only and **WE becomes the single rendered docs surface**" vs. "two renders." That framing contradicts a boundary already ruled on: **FUI owns both the implementation and its rendered display; WE never renders or imports FUI block code — it only *embeds* a FUI-hosted surface via the [#701](701-iframe-based-component-viewer-embed-fui-hosted-standard-demo.md) iframe component viewer (FUI-branded), which is the realisation of the [#700](700-component-converter-playground-placement.md) DC-7 ruling that ruled out cross-repo import.** There is no WE→FUI import seam (`vite.config.mts`/`.eleventy.js` have no `frontierui` alias; the only mechanism is the `fuiDemo` iframe shortcode in `.eleventy.js`).
+The fork was first written as "FUI exports a manifest only and **WE becomes the single rendered docs surface**" vs. "two renders." That framing contradicts a boundary already ruled on: **FUI owns both the implementation and its rendered display; WE never renders or imports FUI block code — it only *embeds* a FUI-hosted surface via the [#701](/backlog/701-iframe-based-component-viewer-embed-fui-hosted-standard-demo/) iframe component viewer (FUI-branded), which is the realisation of the [#700](/backlog/700-component-converter-playground-placement/) DC-7 ruling that ruled out cross-repo import.** There is no WE→FUI import seam (`vite.config.mts`/`.eleventy.js` have no `frontierui` alias; the only mechanism is the `fuiDemo` iframe shortcode in `.eleventy.js`).
 
 So the old **Option A is ruled out, not a coherent branch**: WE *cannot* be "the single rendered surface" for FUI's blocks without exactly the cross-repo import #700 rejected. "Docs render the standard on WE" is true for WE's *own* standard pages, but a FUI block instance is FUI's deliverable — WE can only put a window onto it.
 
@@ -49,10 +49,10 @@ Spin-offs filed: the FUI manifest+catalog **build**, and the **#604 reconciliati
 
 ## Dependencies / coordination
 
-- Derivation mechanism is shared with the WE pipeline ([#623](623-web-docs-feature-pipeline-inventory-workbench-tools-derive-i.md)/[#627](627-assemble-the-web-docs-component-catalog-surface-from-the-der.md)) — FUI's manifest derivation should use the same mechanism, not fork a parallel one.
-- WE-side embedding reuses the [#701](701-iframe-based-component-viewer-embed-fui-hosted-standard-demo.md) `fuiDemo` iframe viewer (already built) — no new WE→FUI seam.
+- Derivation mechanism is shared with the WE pipeline ([#623](/backlog/623-web-docs-feature-pipeline-inventory-workbench-tools-derive-i/)/[#627](/backlog/627-assemble-the-web-docs-component-catalog-surface-from-the-der/)) — FUI's manifest derivation should use the same mechanism, not fork a parallel one.
+- WE-side embedding reuses the [#701](/backlog/701-iframe-based-component-viewer-embed-fui-hosted-standard-demo/) `fuiDemo` iframe viewer (already built) — no new WE→FUI seam.
 - #425 (FUI self-host Web Docs UI primitives, resolved) is the primitive set FUI's local catalog render dogfoods.
-- [#604](604-migrate-the-we-site-to-render-real-frontier-ui-blocks-replac.md) needs reconciling to the iframe boundary (see flag above).
+- [#604](/backlog/604-migrate-the-we-site-to-render-real-frontier-ui-blocks-replac/) needs reconciling to the iframe boundary (see flag above).
 
 ## Acceptance (decision done when)
 

@@ -1,0 +1,126 @@
+{% raw %}
+<h3>The Question</h3>
+<p>
+    Web Everything has one accessibility intent — <a href="/intents/live-region-status/">Live Region
+    Status</a> — but it owns <em>announcement</em> (the <code>aria-live</code> channel), not
+    <em>naming</em>. There is <strong>no accessible-name intent</strong>: no reusable
+    <code>role="img"</code> / <code>aria-label</code> / <code>aria-labelledby</code> naming policy. The
+    <a href="/intents/icon/">Icon</a> intent's dimensions are size/weight/style only, and the
+    expressive-symbol intent (<a href="/backlog/587-author-the-expressive-symbol-rendering-intent-substrate/">#587</a>)
+    currently owns its <em>own</em> accessible-name axis in-place. This survey grounds decision
+    <a href="/backlog/596-candidate-cross-cutting-accessible-name-intent/">#596</a> (surfaced by
+    <a href="/backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke/">#370</a>
+    Fork&nbsp;3): should naming be a <strong>cross-cutting intent</strong> composed across glyphs, icons,
+    media, images and avatars, or stay a <strong>per-intent dimension</strong> each intent owns itself?
+    Per design-first step&nbsp;1, prior art is gathered first so the dimensions reuse platform vocabulary.
+</p>
+
+<h3>Recommendation (to ratify in #596)</h3>
+<ol>
+    <li><strong>Mint a cross-cutting <code>accessible-name</code> intent</strong> (Fork&nbsp;1, med-high).
+        The naming policy recurs unchanged across icon, expressive-symbol, media, image and avatar — a
+        concept that recurs without its neighbour earns its own home, which is the standing
+        separate-and-decouple bias. The counter — "too thin, the platform already standardizes naming" —
+        is real and is answered by Fork&nbsp;2.</li>
+    <li><strong>Own the declarative policy axes only; defer name <em>computation</em> to the platform
+        AccName algorithm</strong> (Fork&nbsp;2, high). Dimensions: <code>naming</code>
+        (meaningful&nbsp;|&nbsp;decorative) and <code>labelSource</code>
+        (explicit&nbsp;|&nbsp;referenced&nbsp;|&nbsp;derived-fallback). The intent does <em>not</em>
+        re-specify the <code>aria-labelledby&nbsp;&gt;&nbsp;aria-label&nbsp;&gt;&nbsp;native&nbsp;&gt;&nbsp;title</code>
+        precedence — that is the browser-implemented W3C standard; re-minting it as a WE protocol is
+        lock-in for zero interop gain.</li>
+    <li><strong>Everything else is supported by default</strong> — orthogonal to
+        <a href="/intents/live-region-status/">Live Region Status</a> (naming&nbsp;≠&nbsp;announcement);
+        #587 keeps its interim dimension and <em>graduates to composing</em> this intent once minted
+        (a migration note, not a blocker). <strong>Not a protocol.</strong></li>
+</ol>
+
+<h3>Finding 1 — name <em>computation</em> is already a platform standard</h3>
+<p>
+    The <a href="https://www.w3.org/TR/accname-1.2/">W3C Accessible Name and Description Computation
+    (AccName&nbsp;1.2)</a> defines, step by step, how every browser derives an element's accessible name
+    from a fixed precedence:
+</p>
+<table>
+    <thead><tr><th>Priority</th><th>Source</th><th>Notes</th></tr></thead>
+    <tbody>
+        <tr><td>1 (highest)</td><td><code>aria-labelledby</code></td><td>Concatenates referenced elements' text; wins when present and valid.</td></tr>
+        <tr><td>2</td><td><code>aria-label</code></td><td>Direct string; used when there is no visible label to reference.</td></tr>
+        <tr><td>3</td><td>Native (e.g. <code>&lt;img alt&gt;</code>, <code>&lt;label&gt;</code>, text content)</td><td>Host-language naming.</td></tr>
+        <tr><td>4 (lowest)</td><td><code>title</code></td><td>Fallback only.</td></tr>
+    </tbody>
+</table>
+<p>
+    A higher-priority non-empty source wins; lower ones are ignored. The accessible name is therefore
+    <strong>read-only computed state</strong> — you do not "implement" it, you provide the <em>inputs</em>
+    the browser reads. <strong>Consequence:</strong> there is no swappable-vendor runtime behavior to
+    factor out, so the cross-cutting concern is <strong>not a protocol</strong> (Q2 of the per-fork
+    classification). This is the <a href="/semantics/">native-first</a> result: standardize the
+    declarative policy, not the computation the platform already performs.
+</p>
+
+<h3>Finding 2 — the only cross-cutting naming primitive in the prior art is a thin icon wrapper</h3>
+<p>
+    Across the benchmark systems, only <a href="https://www.radix-ui.com/primitives/docs/utilities/accessible-icon">Radix
+    <code>AccessibleIcon</code></a> ships a <em>reusable</em> naming abstraction: wrap an icon, pass a
+    <code>label</code>, and it injects a visually-hidden label plus <code>aria-hidden</code> on the glyph
+    (because "the same visual cross icon may mean close or delete"). Material&nbsp;3, Carbon and Fluent
+    expose <strong>per-component label props</strong> that map straight to
+    <code>aria-label</code>/<code>aria-labelledby</code> — no shared "naming intent." This confirms both
+    sides of the fork: the concern genuinely recurs (everyone needs it on icons/images), <em>and</em> the
+    field's solution is a thin policy wrapper, not a heavy mechanism — which supports minting a
+    <em>small composable</em> intent over either doing nothing or building a protocol.
+</p>
+
+<h3>Finding 3 — the recurring policy is small, non-trivial, and identical everywhere</h3>
+<p>Two declarative axes recur unchanged across glyph/icon/media/image:</p>
+<table>
+    <thead><tr><th>Axis</th><th>Values</th><th>Effect</th></tr></thead>
+    <tbody>
+        <tr><td><code>naming</code></td><td>meaningful · decorative</td><td>Meaningful → <code>role="img"</code> + a label; decorative → author opts into <code>aria-hidden="true"</code>.</td></tr>
+        <tr><td><code>labelSource</code></td><td>explicit · referenced · derived-fallback</td><td><code>aria-label</code> · <code>aria-labelledby</code> · a fallback that is <strong>never empty</strong> (CLDR short name for emoji per #587; <code>alt</code> for images; <strong>never</strong> a raw codepoint or filename). Custom images/stickers have no derived fallback, so the label is <em>required</em>, not defaulted.</td></tr>
+    </tbody>
+</table>
+<p>
+    Most-permissive default (Q6): <strong>meaningful with a derived fallback</strong> — the author opts
+    <em>into</em> decorative, never into silence. This matches the #587 ruling exactly, which is what a
+    cross-cutting intent would generalize.
+</p>
+
+<h3>Finding 4 — WCAG 2.5.3 "Label in Name" constrains the policy</h3>
+<p>
+    Where a control has visible text, its accessible name must contain that text
+    (<a href="https://www.w3.org/WAI/ARIA/apg/practices/names-and-descriptions/">APG: Providing Accessible
+    Names and Descriptions</a>). The naming policy must respect this — an <code>aria-label</code> must not
+    silently override a visible label — which again argues for deferring computation to AccName rather than
+    inventing precedence.
+</p>
+
+<h3>Per-fork classification (architecture)</h3>
+<ol>
+    <li><strong>Layer:</strong> Intent — a declarative UX "what" ("name this element / mark it
+        decorative"). No runnable behavior beyond setting attributes the browser reads → not a Block.</li>
+    <li><strong>Protocol or intent dimension?</strong> Not a protocol. AccName is the platform standard all
+        browsers implement; there is no swappable-vendor interop story. → Intent concern.</li>
+    <li><strong>Expose the whole axis?</strong> Yes — both <code>naming</code> and <code>labelSource</code>
+        are configurable dimensions, not one baked behavior.</li>
+    <li><strong>Fixed mechanic or dimension?</strong> "Meaningful content must be named" is a fixed a11y
+        invariant; meaningful↔decorative and label-source are legitimate dimensions (both end-states
+        valid).</li>
+    <li><strong>DI-injectable?</strong> Local/structural — the label is content-specific to the element,
+        not an ambient behavioral fallback. Local dimension, not DI.</li>
+    <li><strong>Default?</strong> Most-permissive: meaningful + derived fallback; decorative is opt-in.</li>
+    <li><strong>Seam between intents?</strong> Yes — it sits at the seam of icon, expressive-symbol, media,
+        image and avatar; put the dimension on <code>accessible-name</code> and have those compose it. This
+        is the textbook separate-and-decouple case.</li>
+</ol>
+
+<h3>Cross-references</h3>
+<ul>
+    <li><a href="/intents/live-region-status/">Live Region Status intent</a> — the sibling a11y intent (announcement, not naming); orthogonal.</li>
+    <li><a href="/intents/icon/">Icon intent</a> — size/weight/style only; would compose this for naming.</li>
+    <li><a href="/intents/validation/">Validation intent</a> — precedent for an intent owning its own aria surface in-place (the per-intent-dimension branch's analogy).</li>
+    <li><a href="/backlog/587-author-the-expressive-symbol-rendering-intent-substrate/">#587</a> — expressive-symbol intent; interim owner of an accessible-name dimension.</li>
+    <li><a href="/backlog/596-candidate-cross-cutting-accessible-name-intent/">#596</a> — the decision this survey grounds.</li>
+</ul>
+{% endraw %}

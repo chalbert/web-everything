@@ -1,0 +1,131 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Prep research for the device-capacity decision
+  (<a href="/backlog/729-capacity-provider-device-resource-detection-axis-composite-m/">#729</a>) —
+  an extension of the capability-provider epic
+  (<a href="/backlog/203-capability-resolution-architecture/">#203</a>). The provider seam models
+  <strong>platform-feature capability</strong> (Baseline / <code>web-features</code> tiers — dialog,
+  popover, anchor-positioning) and selects <strong>one</strong> provider per scope by venue. #729 asks
+  two things of it: (1) add a <strong>device-capacity</strong> axis
+  (<code>hardwareConcurrency</code>, <code>deviceMemory</code>, network / <code>saveData</code>,
+  battery, GPU tier) as a registered provider alongside the feature one; (2) <strong>combine</strong>
+  multiple providers so different checks route to different sources. The hard constraint: WE does
+  <strong>not</strong> build or maintain detection — the impls are thin adapters over existing
+  solutions; WE standardizes the <em>contract + routing</em>, never the algorithm.
+</p>
+
+<h2>The signal landscape</h2>
+<p>
+  Five candidate device-capacity signals, each delegated to the platform or a maintained library, with
+  one decisive property the original framing missed: <strong>signal availability is not uniform across
+  venues</strong>.
+</p>
+<table>
+  <thead>
+    <tr><th>Signal</th><th>Native read</th><th>Edge / header</th><th>Lib?</th><th>Venues</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>CPU cores</td><td><code>navigator.hardwareConcurrency</code></td><td>none (no client hint)</td><td>native</td><td>runtime only</td></tr>
+    <tr><td>RAM</td><td><code>navigator.deviceMemory</code> (bucketed 0.25&ndash;8)</td><td><code>Sec-CH-Device-Memory</code> (Chromium)</td><td>native</td><td>runtime + edge</td></tr>
+    <tr><td>Network</td><td><code>navigator.connection.effectiveType / saveData / downlink / rtt</code></td><td><code>Save-Data</code> (low-entropy, on by default)</td><td>native</td><td>runtime + edge</td></tr>
+    <tr><td>GPU tier</td><td>WebGL renderer benchmark</td><td>none</td><td><strong>detect-gpu</strong></td><td>runtime only</td></tr>
+    <tr><td>Battery</td><td><code>navigator.getBattery()</code></td><td>none</td><td>&mdash;</td><td><strong>excluded</strong></td></tr>
+  </tbody>
+</table>
+<p>
+  <code>hardwareConcurrency</code> and GPU-tier are <strong>runtime-only</strong> — no request header
+  carries them; <code>deviceMemory</code> and <code>Save-Data</code> also resolve at the edge. This is
+  exactly the <code>Venue</code> dimension the feature provider already models
+  (<code>build</code> / <code>runtime</code> / <code>edge</code>), and the same
+  &ldquo;<code>undefined</code> means unknown in this venue&rdquo; degrade contract
+  (<code>PlatformSupport</code>). So the capacity axis should <strong>reuse</strong> that machinery —
+  an argument <em>for</em> a sibling provider on the same seam, not for a parallel resolution path.
+</p>
+<p>
+  Read from the timing side, this is a <strong>detection-locus</strong> trade WE leaves flexible
+  (forcing neither): <strong>in-browser</strong> detection measures <em>real</em> capacity (the full
+  signal set, incl. CPU + GPU) but pays a <strong>performance</strong> cost — it must run before/while
+  the app loads (a pre-load gate or a load-then-refine two-pass), the GPU benchmark especially.
+  <strong>Out-of-browser</strong> (MaaS / edge, UA + Client Hints) is zero-runtime-cost and cached but
+  <strong>coarser and header-only</strong> (no CPU/GPU; approximate). Both are coherent end-states,
+  supported by default; the Fork-3 composite can even mix them (cheap edge signals at delivery, richer
+  in-browser signals after load).
+</p>
+<h3>Battery is excluded, not a branch</h3>
+<p>
+  The Battery Status API is deprecated, removed by Firefox, never shipped by Safari, and a known
+  fingerprinting vector (~76% support, Chromium-only). By WE's <strong>fork-existence test</strong>
+  (exclude only what is actually broken), it is not a fork option — it is dropped with a one-line
+  reason.
+</p>
+
+<h2>Prior art &mdash; the combinator pattern</h2>
+<p>
+  Google Chrome Labs <strong>react-adaptive-hooks</strong> (with Addy Osmani's
+  <em>adaptive loading</em> pattern, and the Svelte <code>svelte-adaptive-sensors</code> port) combine
+  precisely <code>hardwareConcurrency</code> + <code>deviceMemory</code> + <code>effectiveType</code> +
+  <code>saveData</code> to classify a device high/low-end and toggle loading, code-splitting and
+  data-fetching. WE's capacity provider is the <strong>platform-neutral, framework-free</strong>
+  version of that pattern: the same four signals, through the injectable provider contract instead of
+  React hooks. Two things this prior-art settles:
+</p>
+<ul>
+  <li>
+    <strong>The vocabulary</strong> — CPU / RAM / network / save-data are the established axes; battery
+    and GPU are the periphery (GPU for graphics-heavy apps, battery deprecated).
+  </li>
+  <li>
+    <strong>The output shape</strong> — every combinator consumes <em>coarse buckets</em> at the call
+    site (<code>effectiveType: '4g'</code>, GPU <code>tier: 0&ndash;3</code>), derived from a raw
+    measurement underneath. <strong>detect-gpu</strong> (pmndrs — the de-facto Three.js-ecosystem GPU
+    classifier: WebGL benchmark &rarr; tier 0&ndash;3, handles Apple's privacy-masked renderer strings)
+    is the canonical raw&rarr;bucket example, and the single dimension that warrants a maintained
+    dependency. CPU/RAM/network are thin native reads; battery is excluded &mdash; so the delegation
+    constraint is met with <strong>one</strong> library.
+  </li>
+</ul>
+
+<h2>The decision shape</h2>
+<p>The survey reshapes #729 from two forks to <strong>three</strong> (the output-shape fork is new):</p>
+<table>
+  <thead>
+    <tr><th>Fork</th><th>Recommended default</th><th>Main alternative</th><th>Confidence</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1 &mdash; where the capacity axis lives</td>
+      <td>Separate <code>CapacityProvider</code> contract, same registration + venue machinery</td>
+      <td>Overload <code>CapabilityProvider</code> with capacity ids</td>
+      <td>High</td>
+    </tr>
+    <tr>
+      <td>2 &mdash; capacity output shape</td>
+      <td>Expose <strong>both</strong> raw scalar and a derived coarse bucket</td>
+      <td>Bucket-only (or scalar-only)</td>
+      <td>Med-high</td>
+    </tr>
+    <tr>
+      <td>3 &mdash; how providers combine</td>
+      <td><code>CompositeProvider</code> routing by check-domain</td>
+      <td>Chain / fallback composition</td>
+      <td>High</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Web-standards alignment</h2>
+<p>
+  Every signal borrows official platform vocabulary, in keeping with WE's native-first /
+  minimize-lock-in principles: W3C Device Memory, the Network Information API, the
+  <code>Save-Data</code> / <code>Sec-CH-Device-Memory</code> Client Hints, and WebGL's
+  <code>WEBGL_debug_renderer_info</code>. WE standardizes the provider contract and the composite
+  routing table over these; the detection stays in the platform / <code>detect-gpu</code>.
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+  <li>Epic <a href="/backlog/203-capability-resolution-architecture/">#203</a> — the provider-resolution architecture this extends.</li>
+  <li>Decision <a href="/backlog/729-capacity-provider-device-resource-detection-axis-composite-m/">#729</a> — the prepared decision this grounds.</li>
+</ul>
+{% endraw %}

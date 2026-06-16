@@ -18,7 +18,7 @@ design patterns can be analysed and codified into Web Everything. **Phase 1** (c
 into a deduplicated, idempotently re-runnable collection) **is shipped**; later phases are
 perceptual-dedup consolidation (#395) and vision-based codification (#396 → #481). The foundational
 design call — pipeline shape, subject filter, classification depth — resolved in
-[#581](581-design-ref-corpus-pipeline-shape-subject-classification-fork.md) (+ delegated forks #394,
+[#581](/backlog/581-design-ref-corpus-pipeline-shape-subject-classification-fork/) (+ delegated forks #394,
 #396, #475). This epic stays `open` only as the build umbrella; it resolves when its last open slice
 (#481) lands.
 
@@ -37,7 +37,7 @@ company, application type, design register, surface, theme, viewport, …). The 
 Phase 1 is collection + general classification only; deep analysis/codification is deferred.
 
 The pipeline shape, subject filter (web-app UIs only), and collect-time classification depth are
-settled — see **[#581](581-design-ref-corpus-pipeline-shape-subject-classification-fork.md)** for the
+settled — see **[#581](/backlog/581-design-ref-corpus-pipeline-shape-subject-classification-fork/)** for the
 resolved forks and agreed defaults.
 
 ## Build status — phase 1 (2026-06-12)

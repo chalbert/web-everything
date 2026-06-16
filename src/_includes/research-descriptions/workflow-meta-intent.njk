@@ -1,0 +1,193 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Grounds decision <a href="/backlog/634-meta-intent-workflow-as-composable-intent/">#634</a> — should
+  Web Everything recognize a <strong>workflow</strong> (a &ldquo;meta-intent&rdquo;): a set of smaller
+  UX intents arranged in <em>directed progression toward one goal</em> (<code>checkout = collect-address
+  &rarr; pay &rarr; confirm</code>), with threaded state, a completion criterion, and a current
+  position — and if so, where in the constellation does it live and how rich is its operator vocabulary?
+  This is a <strong>greenfield</strong> call (no workflow concept exists today), so the survey below
+  precedes the forks. It is the deliberate sibling of the
+  <a href="/research/domain-entity-lifecycle/">domain-entity lifecycle</a> work
+  (<a href="/backlog/616-retroactively-ratify-the-weblifecycle-project-lifecycle-prot/">#616</a>), which
+  drew the boundary this item now occupies.
+</p>
+
+<h2>The concept — a third composition mode</h2>
+<p>
+  WE already has two ways intents combine, and a workflow is a missing third:
+</p>
+<ul>
+  <li>
+    <strong>Simultaneous</strong> — a <a href="/blocks/">block</a> composes intents that all act at once
+    (droplist composes anchor + selection + focus-delegation, <code>blocks.json</code>
+    <code>composesIntents</code>). The whole is a block.
+  </li>
+  <li>
+    <strong>Cross-cutting</strong> — one intent's <em>policy</em> reused across many blocks
+    (<a href="/intents/accessible-name/">accessible-name</a>,
+    <a href="/intents/live-region-status/">live-region-status</a>).
+  </li>
+  <li>
+    <strong>Directed / temporal (the gap)</strong> — step-intents arranged in progression toward a
+    terminal goal, with state threaded between them. A workflow is itself goal-bearing and addressable,
+    so it reads as a meta-intent: a composition whose atoms are intents.
+  </li>
+</ul>
+
+<h2>The coherence invariant — what makes it a workflow, not a bag of steps</h2>
+<p>
+  Across <em>every</em> system surveyed (statecharts, BPMN, GitHub Actions, Temporal, UI steppers) the
+  same four things distinguish a workflow from co-located steps. They are not forks — they are the
+  fixed definition, mechanical enough to gate on:
+</p>
+<ol>
+  <li><strong>Threaded state</strong> — one shared context carried step &rarr; step.</li>
+  <li><strong>Directed progression</strong> — an ordering / transitions, even if it branches.</li>
+  <li><strong>A single completion criterion</strong> — there is a &ldquo;done&rdquo; (a final/goal state).</li>
+  <li><strong>A current position</strong> — exactly one cursor; resumable (&ldquo;at step 3&rdquo;).</li>
+</ol>
+<p>
+  A page that merely hosts many unrelated intents has none of these.
+</p>
+
+<h2>What the platform offers (and doesn't)</h2>
+<p>
+  <strong>There is no native multi-step workflow primitive.</strong> The one native composition
+  primitive is the HTML <code>&lt;form&gt;</code>, and it is single-step: it gathers controls into
+  <em>one</em> synchronous submission. A multi-step flow must be hand-assembled from:
+  <code>&lt;form&gt;</code>/<code>&lt;fieldset&gt;</code> (per-step grouping), the
+  <a href="https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API">Navigation API</a> (routing
+  + per-step state via <code>currentEntry.getState()</code> + Back/Forward), the
+  <a href="https://developer.mozilla.org/en-US/docs/Web/API/View_Transition_API">View Transitions API</a>
+  (step animation, MPA &amp; SPA), form-associated custom elements (custom step controls), and
+  <code>&lt;dialog&gt;</code> (modal steps). For the position indicator the platform offers exactly one
+  token: <strong><code>aria-current="step"</code></strong>. Notably, the
+  <a href="https://www.w3.org/WAI/ARIA/apg/patterns/">WAI-ARIA APG</a> has <em>no</em> wizard/stepper
+  pattern — authors improvise focus management from the Tabs pattern. <strong>Progression, completion,
+  ordering, and current-position are entirely the developer's job today</strong> — the gap a standard
+  fills.
+</p>
+
+<h2>The strongest meta-schema: statecharts (XState &harr; SCXML)</h2>
+<p>
+  The most rigorous, <em>dual-standardized</em> prior art is the statechart, descending from Harel
+  (1987) and serialized by the W3C as <a href="https://www.w3.org/TR/scxml/">SCXML</a> (2015) with
+  <a href="https://stately.ai/docs/xstate">XState</a> as the dominant JS engine. The same engine family
+  already cited by <a href="/research/domain-entity-lifecycle/">#616</a>. Its operator kernel maps
+  one-to-one onto a workflow:
+</p>
+<table>
+  <thead>
+    <tr><th>Operator</th><th>XState</th><th>SCXML</th><th>Role in a workflow</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Sequence</td><td><code>on:{EVT:{target}}</code></td><td><code>&lt;transition&gt;</code></td><td>step &rarr; step</td></tr>
+    <tr><td>Branch / guard</td><td><code>guard</code></td><td><code>cond</code></td><td>conditional next-step</td></tr>
+    <tr><td>Nest (sub-workflow)</td><td><code>type:'compound'</code></td><td>nested <code>&lt;state&gt;</code></td><td>a step <em>is</em> a workflow / reuse</td></tr>
+    <tr><td>Parallel (fork/join)</td><td><code>type:'parallel'</code></td><td><code>&lt;parallel&gt;</code></td><td>concurrent sub-steps, join when all done</td></tr>
+    <tr><td>Completion</td><td><code>final</code> / <code>onDone</code></td><td><code>&lt;final&gt;</code></td><td>the goal state + output</td></tr>
+    <tr><td>Threaded state</td><td><code>context</code> + <code>assign</code></td><td><code>&lt;datamodel&gt;</code></td><td>shared carried state</td></tr>
+    <tr><td>Current position</td><td>active state value</td><td>active configuration</td><td>the cursor</td></tr>
+  </tbody>
+</table>
+<p>
+  A serialized statechart is a <strong>portable interchange</strong>: an engine parses the graph and
+  lets the calling code decide what guards mean and what actions do — verbatim the
+  <em>transition-map-is-the-only-lock; the provider resolves the rest</em> split that made
+  <code>lifecycle</code> a Protocol. This is what classifies the orchestration machinery as a
+  <strong>Protocol</strong> (a technical interchange), not a UX preference.
+</p>
+
+<h2>Process-orchestration vs FSM — why workflow is #616's sibling, not its twin</h2>
+<p>
+  <a href="/research/domain-entity-lifecycle/">#616</a>'s survey drew the load-bearing boundary
+  explicitly: <em>&ldquo;an FSM is in one state at a time, whereas BPMN allows a workflow to be in many
+  — so a single-status domain lifecycle is a narrower, distinct concern&hellip; <code>weblifecycle</code>
+  should not absorb a process-engine scope.&rdquo;</em> That excluded scope is precisely a workflow.
+  The two concerns share the SCXML transition-map <em>form</em> but differ in subject and semantics:
+</p>
+<table>
+  <thead>
+    <tr><th></th><th>Lifecycle (#616)</th><th>Workflow (#634)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Subject</td><td>a persisted domain <strong>entity</strong> (loan, claim, order)</td><td>a user's <strong>traversal</strong> of a task (ephemeral flow instance)</td></tr>
+    <tr><td>Cardinality</td><td>one state at a time (FSM)</td><td>can be in many (parallel / process orchestration)</td></tr>
+    <tr><td>Event</td><td><code>{ entity, from, to, actor, at }</code> — audit trail</td><td>step transition over a session — supports <strong>back/undo</strong></td></tr>
+    <tr><td>Persistence</td><td>the entity's own concern (durable)</td><td>session/draft (often discarded on abandon)</td></tr>
+  </tbody>
+</table>
+<p>
+  Per the standing <strong>bias to separation</strong> (burden of proof is on combining) and #616's
+  own exclusion, these are <strong>siblings over a shared transition-map form</strong>, not one protocol.
+</p>
+
+<h2>The &ldquo;several valid ways&rdquo; are a register dimension, not a fork</h2>
+<p>
+  Multi-step flows surface in several shapes — wizard/stepper, single-page progressive disclosure,
+  conversational, board/state-machine. All are <em>coherent</em> end-states, so by the
+  support-all / fork-existence rule they are a configurable <strong>register</strong> dimension over one
+  composition core, defaulted most-permissively — not a decision. The market keeps the two underlying
+  seams in separate libraries: <strong>state-threading</strong> (React Hook Form
+  <code>FormProvider</code>, Formik) vs <strong>visual sequencing</strong> (MUI <code>Stepper</code>,
+  Ant <code>Steps</code>, Carbon <code>ProgressIndicator</code>). For per-step status the cleanest
+  canonical enum is Ant's <code>wait</code> / <code>process</code> / <code>finish</code> /
+  <code>error</code> (plus <code>disabled</code>, with <code>optional</code> as an orthogonal modifier).
+  Vocabulary note: avoid the name <em>&ldquo;stepper&rdquo;</em> for the object — it collides with the
+  numeric NumberField (Adobe Spectrum, the HTML spin-button).
+</p>
+
+<h2>Cross-system operator universality</h2>
+<p>
+  Comparing statecharts, BPMN 2.0 (exclusive/parallel/inclusive gateways), GitHub Actions
+  (<code>steps</code>, <code>needs:</code>, <code>if:</code>, <code>matrix</code>, <code>uses:</code>),
+  Temporal (child workflows, retry, saga), and UI steppers yields a clear tiering:
+</p>
+<ul>
+  <li>
+    <strong>Tier 1 — Core (universal, the coherence invariant):</strong> sequence, branch/guard,
+    nest (sub-workflow), threaded context, completion/final, current-position. Every system names all six.
+  </li>
+  <li>
+    <strong>Tier 2 — Common (high-value, optional):</strong> parallel fork/join, back/undo (the
+    UI-specific operator absent from backend engines but expected in every wizard), gate/wait-for-event.
+  </li>
+  <li>
+    <strong>Tier 3 — Niche (defer):</strong> fan-out/matrix (a specialization of parallel),
+    history/resume (shallow/deep), retry, compensation/saga (durable-execution backend concerns,
+    Temporal), inclusive-OR (BPMN-only; expressible as parallel + per-branch guards).
+  </li>
+</ul>
+
+<h2>Classification &amp; the forks</h2>
+<p>
+  By the #409 placement test (a Project+Protocol needs a real contract — a provider seam or an
+  interchange schema), workflow passes on <strong>both</strong> disjuncts, exactly as lifecycle did: a
+  swappable <code>CustomWorkflowEngine</code> registry (XState / SCION / a hand-rolled switch behind the
+  provider) <em>and</em> a portable, data-defined orchestration graph. So the concern decomposes across
+  the constellation the same way #616 did — the <strong>orchestration machinery is a Protocol</strong>
+  owned by a Project, the <strong>UX (position, step-status, register) is an Intent</strong> (UX-only,
+  like <a href="/intents/status-indicator/">status-indicator</a> and
+  <a href="/intents/navigation/">navigation</a>, whose <code>structure:linear</code> + <code>guard</code>
+  + <code>history</code> a workflow reuses rather than reinvents), and a concrete wizard/flow
+  <strong>Block</strong> composes the step-intents (composition stays block-owned). This yields:
+</p>
+<ul>
+  <li>
+    <strong>Fork 1 — Placement:</strong> Project + Protocol + Intent decomposition (recommended,
+    high) vs intent-only vs fold into <code>weblifecycle</code> vs new top-level entity.
+  </li>
+  <li>
+    <strong>Fork 2 — Operator scope:</strong> Tier-1 core mandatory + Tier-2 optional, defer Tier-3,
+    keep the operator set an open meta-schema authors extend (recommended, med-high) vs minimal-only vs
+    maximal.
+  </li>
+</ul>
+<p>
+  Full options, tradeoffs, and the per-fork classification live on the decision item,
+  <a href="/backlog/634-meta-intent-workflow-as-composable-intent/">#634</a>. Both defaults follow the
+  <code>#085</code> posture — <em>standardize the meta-schema, not the list</em> — and the #616/#409
+  precedent.
+</p>
+{% endraw %}

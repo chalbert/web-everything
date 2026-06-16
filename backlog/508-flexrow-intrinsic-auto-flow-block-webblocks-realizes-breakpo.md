@@ -14,7 +14,7 @@ Deferred webblocks block: an intrinsic auto-flow container that flows/wraps its 
 
 ## Origin
 
-Carved from decision [#467](467-responsive-container-query-layout-placement-new-project-vs-i.md) (Fork 3, default A). The two rejected alternatives, for the record:
+Carved from decision [#467](/backlog/467-responsive-container-query-layout-placement-new-project-vs-i/) (Fork 3, default A). The two rejected alternatives, for the record:
 
 - **B — a dimension of the `layout` intent.** Rejected: `layout` is app-shell altitude (drawer / rail / pane / dock); FlexRow is content-flow altitude. Folding them overloads `layout` and violates bias-toward-separation.
 - **C — nothing (it's just CSS `flex-wrap`).** Rejected: a consumer can't be *conformant* to "use flexbox." The standard-worthy part is the semantic vocabulary + container-query wiring + the ResizeObserver fallback contract.

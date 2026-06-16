@@ -433,6 +433,48 @@ module.exports = function backlog() {
   items.countEpicParked = items.filter((it) => it.epicState === 'parked').length;
   items.countEpicActionable = items.countEpicUnsliced + items.countEpicDone;
 
+  // Active batches (DEV-ONLY, advisory) — the live soft-reservations a running `/batch` stamps in
+  // `.claude/skills/batch-backlog-items/reservations.json` (`held[]` of `{num, session, at}`; the
+  // `session` slug — `batch-YYYY-MM-DD-n1-n2…` — names the batch and groups its items). Surfaced on the
+  // Prioritisation tab so a concurrent batcher can see what's already being worked. Honest scope: this is
+  // ephemeral session state — on the dev server it live-reloads as batches reserve/clear, but a STATIC
+  // build freezes whatever was held at build time, so we treat it as a dev-only convenience. Stale holds
+  // (older than `ttlMinutes`, default 120) are dropped here exactly as `check:readiness` ignores them, so
+  // a crashed session can't show a phantom batch forever. Each item also gets `reservedBy` (its holding
+  // session) for the per-row marker. Read defensively — a missing/garbled file just means "no batches".
+  items.activeBatches = [];
+  try {
+    const resPath = join(ROOT, '.claude/skills/batch-backlog-items/reservations.json');
+    if (existsSync(resPath)) {
+      const res = JSON.parse(readFileSync(resPath, 'utf8'));
+      const ttlMs = (typeof res.ttlMinutes === 'number' ? res.ttlMinutes : 120) * 60_000;
+      const now = Date.now();
+      const live = (Array.isArray(res.held) ? res.held : [])
+        .filter((h) => h && h.session && h.num && !Number.isNaN(Date.parse(h.at)) && (now - Date.parse(h.at)) <= ttlMs);
+      const byNum = new Map(items.map((it) => [String(it.num), it]));
+      const bySession = new Map();
+      for (const h of live) {
+        const num = String(h.num);
+        const it = byNum.get(num);
+        if (it) it.reservedBy = h.session; // per-row "held by" marker
+        if (!bySession.has(h.session)) bySession.set(h.session, { session: h.session, at: h.at, nums: [] });
+        const b = bySession.get(h.session);
+        b.nums.push(num);
+        if (Date.parse(h.at) < Date.parse(b.at)) b.at = h.at; // earliest hold = batch start
+      }
+      // Derive a human date (the slug carries YYYY-MM-DD; fall back to the earliest hold's day) and the
+      // burndown-point sum of an item's held work, so the chip can show "N items · M pts" like the others.
+      items.activeBatches = [...bySession.values()].map((b) => {
+        const m = /batch-(\d{4}-\d{2}-\d{2})/.exec(b.session);
+        const pts = b.nums.reduce((t, n) => {
+          const it = byNum.get(n);
+          return t + (it && typeof it.size === 'number' ? it.size : 0);
+        }, 0);
+        return { ...b, nums: b.nums.sort((x, y) => Number(x) - Number(y)), date: m ? m[1] : b.at.slice(0, 10), points: pts };
+      }).sort((a, b) => String(b.at).localeCompare(String(a.at))); // most-recently-started first
+    }
+  } catch { /* advisory only — never break the build over reservation state */ }
+
   return items;
 };
 

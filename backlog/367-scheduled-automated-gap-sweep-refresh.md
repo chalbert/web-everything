@@ -16,7 +16,7 @@ Graduate the manual gap-sweep re-run skill (#366) to a scheduled agent sweep tha
 ## Precondition (not yet met) — surfaced at a 2026-06-13 batch claim
 
 This item's graduation is gated on a **soft precondition the readiness loader can't see**: "*once the
-cadence has proven stable manually*" (its own body), reaffirmed by [#349](349-repeatability-define-how-the-gap-sweep-re-runs-over-time-and-produces-a-comparable-diffable-result.md)'s
+cadence has proven stable manually*" (its own body), reaffirmed by #349's
 ruling — "*a manual skill first … graduate to scheduled only if it proves stable.*" Both hard blockers
 (#192 freshness engine, #366 manual skill) are resolved, so the DAG shows it ready — but #366 **resolved
 on 2026-06-13** (graduated to the `gap-sweep-rerun` skill + `/gap-sweep` + `scripts/gap-sweep-status.mjs`),

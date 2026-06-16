@@ -15,7 +15,7 @@ tags: [design-reference, corpus, taxonomy, classification, tooling]
 
 ## Digest
 
-Mechanical build follow-through for the [#394](394-design-ref-corpus-first-run-scope-taxonomy-seed-grow-targets.md)
+Mechanical build follow-through for the [#394](/backlog/394-design-ref-corpus-first-run-scope-taxonomy-seed-grow-targets/)
 ruling (taxonomy ratified **B / C / B / A**). Add `design-refs/taxonomy.json` seeded with the
 `productRegister` + ~10-domain `category` canonical lists; re-key the 16 existing `designRegister`
 values to `productRegister` (no recapture); append scarcity-weighted grow-target cells to

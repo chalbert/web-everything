@@ -16,9 +16,9 @@ tags: [webdocs, feature-inventory, matrix, capabilities, storybook]
 # Inventory the full feature surface across workbench tools
 
 Cross-tabbed **feature matrix** (tool × capability) over the landscape from
-[#624](624-inventory-the-component-workbench-docs-tool-landscape-storyb.md). The union of capabilities a
+[#624](/backlog/624-inventory-the-component-workbench-docs-tool-landscape-storyb/). The union of capabilities a
 Web-Everything-native docs surface must cover or consciously omit — this is the raw material the derivation decision
-([#626](626-map-workbench-features-to-we-standards-which-intents-blocks-.md)) classifies.
+([#626](/backlog/626-map-workbench-features-to-we-standards-which-intents-blocks-/)) classifies.
 
 ## Candidate feature axes (to confirm/expand during the sweep)
 

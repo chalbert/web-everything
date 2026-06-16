@@ -63,7 +63,7 @@ runtime lines remain) before #449 is unblocked.
 A per-file `diff webeverything/plugs/<f> frontierui/plugs/<f>` over all 16. **The verdict: #447/#448 were
 mostly *complete* — WE is genuinely ahead in 11 of 16 — but FU *diverged* on the type architecture of three
 core registries, and that divergence is a real decision, not a one-directional port.** So this item is
-**not** purely mechanical; it is blocked on a type-architecture call ([#582](582-customcontext-and-customtextnode-customelement-registry-type.md)).
+**not** purely mechanical; it is blocked on a type-architecture call ([#582](/backlog/582-customcontext-and-customtextnode-customelement-registry-type/)).
 
 **WE already ⊇ FU — these *prove* the superset, no action (adopt WE; FU loses nothing under #449):**
 - `webinjectors/Injector.ts`, `webinjectors/index.ts`, `webinjectors/__tests__/unit/Injector.test.ts` — WE-only lines, FU+0.
@@ -74,7 +74,7 @@ core registries, and that divergence is a real decision, not a one-directional p
 **Style/representation divergence — pick WE, no runtime loss:**
 - `webexpressions/CustomTextNodeParser.ts` + `UndeterminedTextNode.ts` — `parserName: string | null` (WE) vs `parserName?: string` (FU). Equivalent; keep WE for consistency.
 
-**FU-ahead / mutually-incompatible — the blocking decision ([#582](582-customcontext-and-customtextnode-customelement-registry-type.md)):**
+**FU-ahead / mutually-incompatible — the blocking decision ([#582](/backlog/582-customcontext-and-customtextnode-customelement-registry-type/)):**
 - `webcontexts/CustomContext.ts` — **the crux.** WE: `Key`-parameterized `Registry<ContextValue, keyof ContextValue>`. FU: `string`-keyed `Registry` with method-level `get<Key>`, **plus genuinely FU-ahead runtime** WE lacks — `values()`, `entries()`, and a `delete(_key): boolean` signature (WE has `delete(): void`). Not a superset either direction; the converged tree must choose ONE public form.
 - `webexpressions/CustomTextNodeRegistry.ts` — FU made `ImplementedTextNode` generic (`<any>`) + imports `RootNode`. Same "which generic form" question.
 - `webregistries/CustomElementRegistry.ts` — both have `upgrade()`; FU types it with a concrete signature + an `ImplementedElement` type, WE uses `Parameters<typeof …upgrade>`. Same type-form family.
@@ -82,7 +82,7 @@ core registries, and that divergence is a real decision, not a one-directional p
 
 **Test files (FU-ahead lines, reconcile after the code lands):** `__tests__/e2e/webcomponents.spec.ts` (FU+148/WE+162 — both moved substantially), `core/__tests__/pathInsertionMethods.extended.test.ts`, `webcomponents/__tests__/unit/Element.insertion.patch.test.ts`.
 
-**Next:** ratify [#582](582-customcontext-and-customtextnode-customelement-registry-type.md) (the canonical registry generic form), then this item becomes one-directional: port FU's iteration methods + the Node.contexts.patch robustness up into WE under the chosen form, reconcile the 3 test files, and confirm `WE ⊇ FU`. Released to `open` (blocked on #582) — the mechanical 11/16 are settled above.
+**Next:** ratify [#582](/backlog/582-customcontext-and-customtextnode-customelement-registry-type/) (the canonical registry generic form), then this item becomes one-directional: port FU's iteration methods + the Node.contexts.patch robustness up into WE under the chosen form, reconcile the 3 test files, and confirm `WE ⊇ FU`. Released to `open` (blocked on #582) — the mechanical 11/16 are settled above.
 
 ## Progress
 

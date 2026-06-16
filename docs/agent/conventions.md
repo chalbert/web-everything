@@ -57,3 +57,12 @@ The `<body>` background is a **pale → darker gradient** (`linear-gradient` in 
 When a sheet isn't used (or for one-off framed elements that escape it), the same readability rule applies element-by-element — set `background: #fff;`:
 - **Data tables** — set `background: #fff;` on the `<table>`. Row/cell tints (divergence highlights, confidence pills) layer on top of the white base.
 - **Bordered boxes** — any framed `<div>` with `border: 1px solid var(--color-border)` (callout/message panels, list rows like intent → capability) — set `background: #fff;` on the box. Accents (colored left border, chips) stay on top.
+
+## Adding a top-level page (`.njk`)
+A new public page has **three** wiring points, and one is a silent footgun if missed. Add a page by touching all three, then run the gate:
+
+1. **The page** — create `src/<name>.njk` with front-matter `layout: base.njk`, `title:`, and an explicit `permalink: /<name>/`. The 11ty `--serve` watcher (`:8080`) picks it up automatically. Follow `src/about.njk` (prose) or `src/project-lifecycle.njk` (card grid) for shape; apply the surface rules above.
+2. **The nav** — add a `<a href="/<name>/" class="nav-link">` link to the right `nav-group` in `src/_layouts/base.njk` (Standards / Explore / About).
+3. **The Vite proxy** — add `<name>` to the catalog alternation in `vite.config.mts` (the `^/(projects|…|author|…)` proxy key). **This is the footgun:** miss it and the page renders on the 11ty server (`:8080`) but **404s on the Vite dev server (`:3000`)** — which is the URL you actually browse. Vite does not auto-discover routes; the allowlist is hand-maintained.
+
+Then run `npm run check:standards` — section 9 ("Vite dev-proxy allowlist must cover every 11ty catalog route", #210) cross-checks every `src/*.njk` permalink segment against the proxy keys and **fails the build** on a missing entry. Running the gate is what catches a forgotten step 3; a green local `:8080` page is not proof the wiring is complete. Note `check:standards` does **not** run the 11ty build itself, so also smoke a template-touching change with `npm run verify` (or `npx @11ty/eleventy --dryrun`).

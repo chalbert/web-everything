@@ -1,0 +1,142 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+    <a href="/backlog/641-decide-the-block-protocol-implementation-boundary-we-blocks-/">#641</a> is the
+    <strong>blocks analogue</strong> of the <a href="/backlog/606-where-does-the-plugs-platform-layer-runtime-live-web-everyth/">#606</a>
+    plugs ruling. WE's top-level <code>blocks/</code> are <strong>byte-identical vendored copies</strong> of
+    <code>frontierui/blocks/</code> (e.g. <code>blocks/navigation/NavListBehavior.ts</code>,
+    <code>registerNavigation.ts</code>, <code>transient/TransientElement.ts</code> all diff-clean) — the same
+    copy-paste / silent-drift hazard <a href="/backlog/170-plugs-duplicated-across-webeverything-frontierui/">#170</a>
+    flagged for plugs. #606 already settled the <em>impl-home</em> axis: <strong>implementation →
+    <code>@frontierui</code></strong> (FUI owns the canonical code), WE keeps the <strong>contracts</strong> and
+    consumes the impl as a <a href="/backlog/604-migrate-the-we-site-to-render-real-frontier-ui-blocks-replac/">#604</a>
+    client — and #606 <em>explicitly names &ldquo;block protocols&rdquo;</em> among the contracts WE keeps. So
+    #641's genuinely new question is narrow: <strong>what IS a block protocol</strong> — which artifact in WE
+    expresses a block's contract, once the concrete code lives in Frontier&nbsp;UI?
+</p>
+
+<h2>The survey — how the ecosystem expresses a component contract decoupled from implementation</h2>
+<p>
+    The decision reduces to one question: what shape does a runtime-agnostic <em>block contract</em> take? The
+    ecosystem splits the answer along two axes — a <strong>structural/API</strong> contract and a
+    <strong>behavioral/a11y</strong> contract — no single artifact covers both.
+</p>
+<table>
+    <thead>
+        <tr><th>Pattern</th><th>What it contracts</th><th>Evidence</th><th>Decoupled from impl?</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Custom Elements Manifest (CEM)</strong></td>
+            <td>Structural API surface — attributes, properties, events, slots, CSS shadow parts, CSS custom
+                properties, methods, module exports</td>
+            <td><code>custom-elements.json</code>, community schema v2.1.0; live analyzer + LSP + MCP; consumed by
+                IDEs, docs viewers, component catalogs, framework-wrapper generators. Shipped by Shoelace / Web
+                Awesome, IBM Carbon, Adobe Spectrum, Microsoft Fluent.</td>
+            <td><strong>Yes</strong> — a JSON descriptor generated from (and consumed independently of) the code.</td>
+        </tr>
+        <tr>
+            <td><strong>Open UI + WAI-ARIA APG</strong></td>
+            <td>Behavioral contract — anatomy → parts → states → behaviors, plus role/state/keyboard tables and a
+                conformance test suite</td>
+            <td>Open UI (W3C CG) specifies built-in control parts/states/behaviors (feeds <code>&lt;select&gt;</code>
+                customization, Popover, anchor positioning); WAI-ARIA APG specifies role + keyboard contracts in
+                prose + semantic tables (e.g. the combobox pattern).</td>
+            <td><strong>Yes</strong> — prose + tests, the platform's own way of specifying controls; silent on impl.</td>
+        </tr>
+        <tr>
+            <td><strong>TS interface / <code>.d.ts</code></strong></td>
+            <td>Typed props/events/slots in TypeScript</td>
+            <td>Familiar and toolable, but the ecosystem treats <code>.d.ts</code> as an <em>input</em> the CEM
+                analyzer reads — VS Code <code>html-data</code> and JetBrains <code>web-types</code> are
+                <em>generated from</em> the CEM, not authored as the contract.</td>
+            <td><strong>Weakly</strong> — language-specific implementation artifact, not runtime-agnostic.</td>
+        </tr>
+    </tbody>
+</table>
+<p>
+    Direct evidence the JSON-meta-model target is recognized: the <strong>W3C UI Specification Schema Community
+    Group</strong> chartered (Aug&nbsp;2025) to define an <em>implementation-agnostic</em> JSON/JSON-Schema
+    meta-model for UI elements, <em>explicitly aligning vocabulary with Open&nbsp;UI</em> (anatomy, states,
+    variants). It <strong>closed 21&nbsp;May&nbsp;2026</strong> — a cautionary signal: standing up a brand-new
+    schema is hard to sustain; extending the established CEM family inherits a live tooling network instead.
+</p>
+
+<h2>Classification — WE already has the contract surface; #606 already drew the boundary</h2>
+<p>
+    Running the project's <em>which-layer</em> pass: a block's concrete code (a <code>CustomAttribute</code>
+    class, a <code>register*</code> helper) ships runnable behavior, so it is <strong>implementation</strong> —
+    classified <em>outside</em> the standard by #606 (which called FUI's <code>blocks/</code> &ldquo;the
+    application implementations built on top of plugs &hellip; correctly outside the standard&rdquo;). What stays
+    in WE is the <strong>contract</strong>, and WE already authors it in two halves that map cleanly onto the
+    survey's two axes:
+</p>
+<ul>
+    <li><strong>Structural contract → <code>src/_data/blocks.json</code></strong> — each entry already declares
+        <code>implementsIntent</code>, <code>exports</code>, <code>events</code> (with <code>detail</code>
+        shapes), <code>traits</code>, <code>webStandards</code> alignment, <code>designDecisions</code>, and a
+        <code>sourcePath</code>. This is a CEM-shaped descriptor in all but schema name.</li>
+    <li><strong>Behavioral contract → <code>src/_includes/block-descriptions/{id}.njk</code></strong> — prose +
+        ARIA + keyboard interaction tables: the Open&nbsp;UI / APG half.</li>
+</ul>
+<p>
+    The one field that lies today is <code>sourcePath</code>: it points at WE's <em>vendored</em>
+    <code>blocks/…</code> copy. Under the #606 analogue that copy is deleted and the block's canonical impl is
+    <code>@frontierui/blocks</code> — so <code>sourcePath</code> becomes a reference to the FUI impl (or a
+    typed <code>implementedBy</code> link), not a pointer to WE-owned code.
+</p>
+
+<h2>The asymmetry the on-disk survey surfaced</h2>
+<p>
+    The trees are <em>not</em> a clean mirror. WE carries <strong>9 block families FUI lacks</strong> (audit,
+    background-task-surface, data-grid, lifecycle, master-detail, selection, stepper, tree-select, type-ahead);
+    FUI carries <strong>droplist</strong> (a rich composite) and <strong>traits</strong> (lazy mixins) WE lacks.
+    So a naive &ldquo;delete WE's <code>blocks/</code>, consume <code>@frontierui/blocks</code>&rdquo; would
+    <strong>lose 9 families of real implementation</strong> — the exact bidirectional-merge hazard #170 hit with
+    plugs. That makes &ldquo;may a block protocol exist in WE <em>without</em> a FUI impl yet?&rdquo; a real
+    sub-question, not a detail: contracts that precede their implementation are normal (the
+    <code>protocols.json</code> entries sit at <code>status: concept</code> with no impl), but the 9 families
+    that <em>do</em> have impl code must flow to FUI before WE's copy is deleted.
+</p>
+
+<h2>Recommendation (forks prepared for #641)</h2>
+<ol>
+    <li><strong>Fork 1 — a block protocol = the existing <code>blocks.json</code> entry (formalized as a
+        CEM-aligned structural contract) + its <code>block-description</code> (the Open&nbsp;UI/APG behavioral
+        spec).</strong> No new schema invented; the established surface is the contract, with
+        <code>sourcePath</code> repointed to the FUI impl. Extending the existing JSON beats minting a fresh
+        per-block <code>protocols.json</code> entry (over-formalization — blocks aren't cross-project conformance
+        contracts) or a TS-interface SoT (impl-shaped, weakest standards-alignment, and the dead W3C CG warns
+        against bespoke schemas).</li>
+    <li><strong>Fork 2 — FUI owns canonical <code>@frontierui/blocks</code>; WE deletes its byte-identical
+        vendored <code>blocks/</code> and consumes <code>@frontierui/blocks</code> as a #604 client.</strong> The
+        direct #606 analogue (high confidence — even more clear-cut than plugs, since blocks were already
+        classified as application implementation). WE-owns and standalone-package rejected for the same reasons
+        #606 rejected them.</li>
+    <li><strong>Fork 3 — yes, a block protocol may exist in WE with no FUI impl</strong> (a contract can precede
+        its implementation, like a <code>concept</code> protocol). But the migration order is load-bearing:
+        the 9 WE-only families with real impl code must flow to <code>@frontierui/blocks</code> <em>before</em>
+        WE's <code>blocks/</code> is deleted, or that work is lost — file it as the execution build, don't delete
+        first.</li>
+</ol>
+<p>Confidence: <strong>high</strong> on Forks 1–2 (the #606 analogue and the existing-surface fit are clear);
+    <strong>med-high</strong> on Fork 3 (the principle is clear; the per-family classification is execution).</p>
+
+<h2>Cross-references</h2>
+<ul>
+    <li>Decision: <a href="/backlog/641-decide-the-block-protocol-implementation-boundary-we-blocks-/">#641</a>.</li>
+    <li>Ancestor ruling: <a href="/backlog/606-where-does-the-plugs-platform-layer-runtime-live-web-everyth/">#606</a>
+        (plugs = implementation → <code>@frontierui/plugs</code>); related survey
+        <a href="/research/spec-reference-runtime-boundary/">spec vs reference runtime vs polyfill</a>.</li>
+    <li>Premise / blast radius: <a href="/backlog/170-plugs-duplicated-across-webeverything-frontierui/">#170</a>
+        (duplication/drift), <a href="/backlog/604-migrate-the-we-site-to-render-real-frontier-ui-blocks-replac/">#604</a>
+        (WE consumes FUI), <a href="/backlog/239-adapter-packages-self-contained-publish/">#239</a> (npm scope).</li>
+    <li>Project: <a href="/projects/frontierui/">Frontier UI</a> (the implementation umbrella).</li>
+    <li>Sources: <code>webcomponents/custom-elements-manifest</code> (schema v2.1.0) &middot;
+        <a href="https://open-ui.org/">Open UI</a> &middot;
+        <a href="https://www.w3.org/WAI/ARIA/apg/">WAI-ARIA APG</a> &middot;
+        W3C UI Specification Schema CG (chartered Aug 2025, closed May 2026) &middot;
+        JetBrains <code>web-types</code> &middot; VS Code HTML <code>customData</code> &middot;
+        Shoelace / Web Awesome &amp; IBM Carbon CEM.</li>
+</ul>
+{% endraw %}

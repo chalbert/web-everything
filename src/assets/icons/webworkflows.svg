@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <!-- GLOBAL FILTER: Do Not Modify -->
+    <filter id="floatShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="4" />
+      <feOffset dx="2" dy="4" result="offsetblur" />
+      <feComponentTransfer><feFuncA type="linear" slope="0.2"/></feComponentTransfer>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+
+    <!-- Sky (Workflows) -->
+    <linearGradient id="gradSky" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+  </defs>
+
+  <!-- BASE: Rounded Container (Slate-50) -->
+  <rect x="14" y="14" width="100" height="100" rx="30" fill="#f8fafc" />
+
+  <!-- CONTENT: a directed flow that forks — start node → branch into two parallel steps → join -->
+  <g filter="url(#floatShadow)" fill="none" stroke="url(#gradSky)"
+     stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <!-- the directed edges: start → fork up & down -->
+    <path d="M 44 64 L 64 44" />
+    <path d="M 44 64 L 64 84" />
+    <!-- arrowhead on the upper branch (directed progression) -->
+    <path d="M 56 42 L 66 42 L 66 52" />
+  </g>
+  <g filter="url(#floatShadow)">
+    <!-- the step nodes: start, then a parallel fork into two -->
+    <circle cx="40" cy="64" r="9" fill="url(#gradSky)" />
+    <circle cx="70" cy="40" r="9" fill="url(#gradSky)" />
+    <circle cx="70" cy="88" r="9" fill="url(#gradSky)" />
+  </g>
+</svg>

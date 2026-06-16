@@ -85,7 +85,11 @@
                 const failSearch = !!q && text.indexOf(q) === -1;
                 const failStatus = st && card.dataset.status && !st.has(card.dataset.status);
                 const failType = ty && card.dataset.type && !ty.has(card.dataset.type);
-                const failSize = sz && card.dataset.size && !sz.has(card.dataset.size);
+                // A size subset is an explicit "show only these point sizes", so an unsized
+                // card (epic/task with no points) is excluded too — unlike tier below, where
+                // a missing value passes. When every size is active, nothing is hidden.
+                const sizeActive = sz && sz.size < sizeAll.length;
+                const failSize = sizeActive && !sz.has(card.dataset.size);
                 // Only open items carry a tier; a card with no data-tier always passes the tier
                 // facet, so filtering to Tier A narrows the open pool without hiding active/resolved.
                 const failTier = tr && card.dataset.tier && !tr.has(card.dataset.tier);
@@ -121,6 +125,13 @@
                             if (val === v) return;
                             if (set.has(val)) { set.delete(val); } else { set.add(val); }
                         });
+                    } else if (set.size === allValues.length) {
+                        // Plain click while every chip is active (the default — no filter in
+                        // effect) means "show only this" (solo), matching the natural expectation
+                        // that clicking a chip filters TO it. Once a real subset is in effect,
+                        // clicks toggle individual chips in/out.
+                        set.clear();
+                        set.add(v);
                     } else {
                         if (set.has(v)) { set.delete(v); } else { set.add(v); }
                     }

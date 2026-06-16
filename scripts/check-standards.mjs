@@ -456,13 +456,21 @@ for (const item of backlog) {
       `that is MEMORY-files-only; markdown renders it literally and the slug has no page. In a backlog ` +
       `body, link another item as /backlog/NNN-slug/ or drop to plain prose.`);
   }
-  const deadKinds = ['localhost', 'absfile', 'backlog-md'].filter((k) => byKind(k).length);
-  if (deadKinds.length) {
-    const detail = deadKinds.map((k) => `${k === 'backlog-md' ? 'backlog→.md (use /backlog/NNN-slug/)' :
-      k === 'absfile' ? 'absolute /Users//file:// link' : 'localhost link'} @ line(s) ${lines(k)}`).join('; ');
+  // Item-to-item `.md` links are a guaranteed 404 on the live site (the route is /backlog/NNN-slug/) and
+  // a known, mechanical fix → ERROR so they can't recur. localhost/abs-file links stay WARN (likelier to
+  // be a deliberate editor-only ref). One message per item per severity so output stays scannable.
+  if (byKind('backlog-md').length) {
+    err(`Backlog item "${item.id}" links to another item with a dead .md path @ line(s) ${lines('backlog-md')} ` +
+      `— a bare/relative \`NNN-slug.md\` renders as a 404 from /backlog/${item.id}/. ` +
+      `Use the rendered URL \`/backlog/NNN-slug/\` instead.`);
+  }
+  const warnKinds = ['localhost', 'absfile'].filter((k) => byKind(k).length);
+  if (warnKinds.length) {
+    const detail = warnKinds.map((k) => `${k === 'absfile' ? 'absolute /Users//file:// link' :
+      'localhost link'} @ line(s) ${lines(k)}`).join('; ');
     warn(`Backlog item "${item.id}" has a body link that is dead on the live site — ${detail}. ` +
       `Use the rendered /backlog/NNN-slug/ URL (or a site-relative path); editor-only refs to ` +
-      `reports/ and docs/agent/ are fine, item-to-item .md links are not.`);
+      `reports/ and docs/agent/ are fine.`);
   }
 }
 

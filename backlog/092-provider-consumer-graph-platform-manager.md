@@ -31,7 +31,7 @@ prepared defaults:
   capability subset it depends on) is **net-new schema**, not free reuse — the downstream build must scope
   it as new work.
 - **Fork 3 (home): RATIFIED — split per the constellation** (precedent, not a fresh call — same answer
-  as [#091](091-web-docs-as-a-service-plateau.md) and the one #081 will take). Graph-model + seam-contract
+  as [#091](/backlog/091-web-docs-as-a-service-plateau/) and the one #081 will take). Graph-model + seam-contract
   → **WE** open standard (`webregistries`, self-hostable — the "nothing to lock into" half); cross-repo
   aggregation + graph UI + governance workflows → **plateau-app** licensed product.
 

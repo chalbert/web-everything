@@ -4,6 +4,7 @@ workItem: story
 size: 13
 parent: "099"
 status: open
+blockedBy: ["714"]
 dateOpened: "2026-06-06"
 tags: [requirement-as-code, bdd, ai, verification, evergreen, conformance, editor, spec, propose-and-verify]
 relatedReport: reports/2026-06-06-front-end-platform-book.md

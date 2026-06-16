@@ -112,12 +112,13 @@
     var q = ((search && search.value) || '').trim().toLowerCase();
     var shown = 0;
     rows.forEach(function (r) {
-      // A pinned row (an in-flight decision being actively made) ignores the readiness/type chip filters
-      // so the call in progress never disappears from the decision-ready view; a free-text search still
-      // narrows it, since search is an explicit lookup.
-      var pinned = r.getAttribute('data-pinned') === 'true';
-      var ok = (pinned || !reads || reads[r.getAttribute('data-readiness')])
-            && (pinned || !types || types[r.getAttribute('data-type')])
+      // A pinned row (an in-flight decision being actively made) is still subject to the readiness/type
+      // chips — it carries data-readiness="decision", so it stays visible by default and under the
+      // Decision filter, but correctly drops out when you narrow to a readiness it isn't (e.g. Batchable
+      // should show only batchable cards). Pinning governs ORDER (it's concatenated to the top), not an
+      // unconditional filter bypass. Free-text search narrows it like any other row.
+      var ok = (!reads || reads[r.getAttribute('data-readiness')])
+            && (!types || types[r.getAttribute('data-type')])
             && (!q || (r.getAttribute('data-search') || '').indexOf(q) >= 0);
       r.style.display = ok ? '' : 'none';
       if (ok) shown++;

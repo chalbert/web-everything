@@ -42,7 +42,7 @@ This decision item is **resolved**; the work is now agent-ready via #544 → #54
 
 **Prepared decision — ratified 2026-06-14 (see Ruling above).** FUI slice of #398: ship enough free, composable primitives to
 assemble a self-hosted Web Docs UI (page shell, nav, protocol/conformance panels) — the load-bearing
-"cancel and self-host always holds" floor from the [#091](091-web-docs-as-a-service-plateau.md) ruling.
+"cancel and self-host always holds" floor from the [#091](/backlog/091-web-docs-as-a-service-plateau/) ruling.
 #091/#398 settled the **home** (FUI ships them) and the **what**, not the **form**. **4 forks**, grounded
 in the published [`/research/webdocs-primitive-form/`](/research/webdocs-primitive-form/) topic +
 [report](../reports/2026-06-14-webdocs-primitive-form.md), each with a **bold** recommended default. The

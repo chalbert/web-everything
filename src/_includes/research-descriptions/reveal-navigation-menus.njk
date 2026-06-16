@@ -1,0 +1,130 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+  Top-level site navigation whose sections <strong>disclose a panel of links</strong> on hover/focus —
+  dropdown nav, mega-menus, the Web&nbsp;Everything header itself — is a paradigm WE has the base for but
+  has never written down as a standard. This survey grounds decision
+  <a href="/backlog/609-candidate-standard-reveal-navigation-menus-mega-menu-hover-d/">#609</a>: where does
+  the <em>reveal-panel layer</em> live, and which of its many concerns (no-reflow, hover-intent, touch,
+  i18n, a11y semantics) are genuine forks vs. forced invariants vs. support-all? The base already exists as
+  the <a href="/blocks/nav-list/">nav-list</a> block (W3C&nbsp;APG <em>Disclosure Navigation</em>,
+  <code>nav:section</code> toggle); #609 is the layer on top — <strong>not</strong> a duplicate.
+</p>
+<p>
+  <strong>Dogfood instance.</strong> The WE header (<code>.nav-menu</code> / <code>.nav-menu-heads</code> /
+  <code>.nav-menu-panel</code> in <code>base.njk:32-69</code> + <code>style.css:241-276</code>) is a live,
+  hand-rolled example: an absolute popover panel (no header reflow), section heads as column titles,
+  <code>:focus-within</code> for keyboard, a <code>::before</code> hover-bridge. It is the reference to
+  conform <em>to the standard</em> once minted — and, as the survey found, it is <strong>not yet
+  APG-conformant</strong> (no <code>aria-expanded</code>, no Esc/outside-click dismissal).
+</p>
+
+<h2>Recommendation (at a glance)</h2>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>Disclosure, not menu</strong> — forced invariant. Ratify.</li>
+  <li><strong>Fork 1 (home):</strong> a <strong>composition recipe</strong> (nav-list section + Disclosure +
+    Anchor), no new block — default; a named composition block is the main alternative. <em>Confidence: med.</em></li>
+  <li><strong>Fork 2 (hover-intent home):</strong> mint a <strong>small standalone hover-intent concern</strong>
+    that reveal-nav / submenus / hovercards compose — default; an anchor-intent dimension is the alternative.
+    <em>Confidence: med.</em></li>
+  <li><strong>No-reflow · i18n label-growth · native-first CSS baseline</strong> — forced invariants, not new
+    dimensions. The mechanic of hover-intent (CSS-bridge / JS-polygon / delay) → Technical Configurator.</li>
+</ul>
+
+<h2>A11y — Disclosure vs. Menu (decisive)</h2>
+<p>
+  The <a href="https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/examples/disclosure-navigation/">W3C&nbsp;APG
+  Disclosure Navigation Menu</a> example is the pattern recommended for "typical site navigation with expandable
+  groups of links." The <a href="https://www.w3.org/WAI/ARIA/apg/patterns/menubar/">Menu &amp; Menubar
+  pattern</a> requires composite-widget focus management — roving tabindex, first-character type-ahead — that is
+  for <em>application command menus</em> (think Google Docs), and is "unnecessary for typical site navigation."
+</p>
+<table class="text-sm w-full my-3">
+  <thead><tr><th class="text-left">Concern</th><th class="text-left">Disclosure (site nav) — chosen</th><th class="text-left">Menu/Menubar (app commands)</th></tr></thead>
+  <tbody>
+    <tr><td>ARIA</td><td>native list/anchor + <code>aria-expanded</code> + <code>aria-controls</code></td><td><code>role=menu/menubar/menuitem</code>, <code>aria-haspopup</code></td></tr>
+    <tr><td>Keyboard</td><td>Tab through links; Enter/Space toggles; Esc closes</td><td>roving focus, arrow keys, first-char type-ahead, Home/End</td></tr>
+    <tr><td>Semantics kept</td><td>links stay links (right-click, open-in-tab work)</td><td>items are commands; link semantics stripped</td></tr>
+    <tr><td>Use it for</td><td>site navigation that reveals link lists</td><td>editor/app command surfaces</td></tr>
+  </tbody>
+</table>
+<p>
+  This matches WE's existing <a href="/blocks/nav-list/">nav-list</a> ruling (<em>Disclosure Navigation</em>
+  chosen over <em>ARIA menu role</em>) and the community consensus (Adrian Roselli, Terrill Thompson — "menus
+  are not menus"). It is a <strong>forced invariant</strong>, not a fork.
+</p>
+
+<h2>Hover-intent &amp; the diagonal problem</h2>
+<p>
+  Invented by Bruce&nbsp;"Tog"&nbsp;Tognazzini and Jim&nbsp;Batson on Apple's HID team and popularized as the
+  "Amazon triangle": moving the pointer <em>diagonally</em> from a trigger toward its panel briefly crosses a
+  sibling trigger, and a naïve <code>:hover</code> handler closes the panel mid-traverse ("menu rage"). Three
+  escalating mechanics appear in the wild:
+</p>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li><strong>delay-only</strong> — a close timeout; what Radix NavigationMenu and Headless&nbsp;UI ship.</li>
+  <li><strong>CSS safe-area bridge</strong> — an invisible strip spanning the trigger→panel gap so
+    <code>:hover</code> survives the trip; what the WE dogfood does (<code>style.css:263-270</code>).</li>
+  <li><strong>pointer-direction polygon</strong> ("safe triangle") — track cursor velocity and build a triangle
+    toward the panel corners, keeping it open while the pointer stays inside
+    (<a href="https://github.com/kamens/jQuery-menu-aim">jQuery-menu-aim</a>,
+    <a href="https://www.smashingmagazine.com/2023/08/better-context-menus-safe-triangles/">Smashing&nbsp;2023</a>,
+    <a href="https://css-tricks.com/dropdown-menus-with-more-forgiving-mouse-movement-paths/">CSS-Tricks</a>).</li>
+</ul>
+<p>
+  The mechanic is <em>unsettled across libraries</em>: Radix deliberately ships delay-only with open requests to
+  add the polygon (<a href="https://github.com/radix-ui/primitives/issues/1549">#1549</a>,
+  <a href="https://github.com/radix-ui/primitives/issues/2437">#2437</a>); PrimeVue is adding it. So the
+  <strong>intent</strong> — "tolerate diagonal travel; don't open on incidental pass-through" — is a forced
+  invariant, while the <strong>mechanic</strong> is a <a href="/projects/">Technical Configurator</a> setting.
+  Hover-intent recurs across reveal-nav, menu submenus, and hovercards, so per WE's separation bias it earns its
+  own small reusable concern (Fork 2).
+</p>
+
+<h2>Reveal mechanics, modality, no-reflow</h2>
+<p>
+  <a href="https://www.nngroup.com/articles/mega-menus-work-well/">NN/g</a> validates mega-menus for site nav
+  (show all options in a 2-D layout; avoid hover-only timing traps; give a non-hover path). Three triggers are
+  all mandatory (support-all): <strong>pointer</strong> (hover), <strong>keyboard</strong> (focus /
+  <code>:focus-within</code> / Enter), and <strong>touch</strong> — which has no hover at all, so the first tap
+  must <em>toggle</em> the panel, not navigate.
+</p>
+<p>
+  <strong>No-reflow</strong> is the existing <a href="/intents/anchor/">Anchor</a> axis, not a new dimension: an
+  anchored header panel (<code>anchor.strategy = escape</code>, top-layer/popover) must never resize chrome,
+  while an in-flow sidebar accordion (<code>strategy = inline</code>) reflowing is legitimate — the same axis,
+  two values. The native substrate (CSS Anchor Positioning <code>anchor()</code> / <code>position-try</code>
+  flip+shift; Popover API top-layer + light-dismiss) is already owned by the Anchor intent; the reveal panel
+  <em>composes</em> it and adds nothing. <strong>i18n</strong>: translated labels grow (DE/FI +30–40%); the bar
+  and columns must absorb growth without reflow or clipping — no English-keyed fixed widths, no truncation.
+</p>
+
+<h2>Composition seam &amp; classification</h2>
+<p>
+  Reveal nav is <strong>composition, not invention</strong>: <a href="/blocks/nav-list/">nav-list</a>
+  (<code>blocks.json:2082</code>) provides the base + <code>nav:section</code> disclosure primitive;
+  <a href="/intents/disclosure/">disclosure</a> (<code>intents.json:1816</code>) the expand/collapse contract;
+  <a href="/intents/navigation/">navigation</a> (<code>intents.json:1146</code>) the landmark +
+  <code>aria-current</code>; <a href="/intents/anchor/">anchor</a> (<code>intents.json:1204</code>) the panel
+  placement, collision, strategy, and dismissal. The adjacent <a href="/blocks/menu/">menu</a>
+  (<code>blocks.json:3181</code>) and <a href="/blocks/drawer/">drawer</a> (<code>blocks.json:3277</code>)
+  blocks both exist as <em>composition manifests</em> — the house-style precedent that makes a named
+  reveal-nav block the credible alternative to a pure recipe in Fork&nbsp;1.
+</p>
+<p>
+  Running the per-fork classification: the reveal panel ships no <em>new</em> runnable machinery beyond the
+  composed parts (rules out a heavy Block); there is no swappable-vendor interop story for the composition
+  itself (rules out a Protocol); the genuinely new behavioral concern is hover-intent, which is
+  DI-injectable/configurable (mechanic via Configurator) and recurs without nav (so, by the separation bias,
+  its own concern). The most-permissive default everywhere: support all three triggers, both reflow strategies,
+  and any panel shape.
+</p>
+
+<h2>Cross-references</h2>
+<ul class="text-sm text-gray-600 list-disc pl-5">
+  <li>Decision: <a href="/backlog/609-candidate-standard-reveal-navigation-menus-mega-menu-hover-d/">#609 — reveal navigation menus</a></li>
+  <li>Fed by: <a href="/backlog/610-design-sweep-navigation-menus-closed-open-states-live-naviga/">#610 — nav-menu design sweep</a></li>
+  <li>Base/composed: <a href="/blocks/nav-list/">nav-list</a>, <a href="/intents/disclosure/">disclosure</a>, <a href="/intents/navigation/">navigation</a>, <a href="/intents/anchor/">anchor</a></li>
+  <li>Disambiguate from: <a href="/blocks/menu/">menu</a> (commands), <a href="/blocks/drawer/">drawer</a> (off-canvas)</li>
+</ul>
+{% endraw %}

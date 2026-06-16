@@ -23,8 +23,8 @@ Once customizable `<select>` (`appearance: base-select`) ships in more than one 
 
 ## What two later rulings already settled
 
-- **[#024](024-droplist-cross-root-aria-mandate.md): base-select is a sanctioned _co-equal_ substrate, no default.** The custom-component path is *not* "canonical" over it — neither is privileged. So the original framing ("does custom stay canonical?") is moot: they're peers.
-- **[#025](025-droplist-native-substrate-fork.md) → [#203](203-capability-provider-resolution-architecture.md): `native-first` is an eligible-tiebreak resolver policy.** base-select is the "native" impl that policy selects where eligible; the **capability provider gates eligibility per-browser**, so "Chromium-only" is *already handled* by the resolver — an unsupported target degrades to the custom impl, not a break.
+- **[#024](/backlog/024-droplist-cross-root-aria-mandate/): base-select is a sanctioned _co-equal_ substrate, no default.** The custom-component path is *not* "canonical" over it — neither is privileged. So the original framing ("does custom stay canonical?") is moot: they're peers.
+- **[#025](/backlog/025-droplist-native-substrate-fork/) → [#203](/backlog/203-capability-provider-resolution-architecture/): `native-first` is an eligible-tiebreak resolver policy.** base-select is the "native" impl that policy selects where eligible; the **capability provider gates eligibility per-browser**, so "Chromium-only" is *already handled* by the resolver — an unsupported target degrades to the custom impl, not a break.
 
 ## Concrete code to look at — base-select is *already* a first-class resolver impl
 
@@ -38,7 +38,7 @@ The substantive work is **already done at the capability-resolver layer (#206)**
 **What is NOT done, and what the matrix row reveals:**
 
 1. The `base-select` row carries **no `status`/availability field** — it's presented as a fully-equal peer of `face` despite being single-engine.
-2. base-select is **absent from the public adapters catalog** [`src/_data/adapters.json`](../src/_data/adapters.json) (the rendering/syntax/library adapter index rendered at `/adapters/`), and has no detail page ([#216](216-capability-adapter-detail-pages.md)).
+2. base-select is **absent from the public adapters catalog** [`src/_data/adapters.json`](../src/_data/adapters.json) (the rendering/syntax/library adapter index rendered at `/adapters/`), and has no detail page ([#216](/backlog/216-capability-adapter-detail-pages/)).
 
 So the live question is narrow: **base-select is already first-class where it counts (the resolver). Do we (a) surface it in the public adapters catalog + detail page, and (b) add an honest single-engine status — or leave it resolver-only?**
 
@@ -55,6 +55,6 @@ So the live question is narrow: **base-select is already first-class where it co
 **Ruling:**
 1. **Recognition (the only standards-layer piece) is already done.** base-select is a registered resolver impl (`capabilityMatrix.json:33-57`), picked via `native-first` where eligible, with per-browser eligibility gated by [`runtime.ts:64`](../capabilities/runtime.ts). #024 already settled it as a co-equal substrate. No further standards work.
 2. **No `adapters.json` entry.** That catalog is for rendering/syntax/library adapters; base-select is a native-substrate impl, and the capability matrix already *is* its impl listing. Don't manufacture a standards surface for an implementation.
-3. **The real deliverable is an eventual *implementation build*** — the base-select-backed droplist component: a WC wrapper that adopts `appearance: base-select`, plugs the droplist intents/traits onto it, and handles form-association / a11y / degradation (the same shape `frontierui/blocks/droplist/*` already is for the **FACE** impl; no base-select impl exists yet). This is a **build**, gated on base-select reaching a **second engine** — captured as **[#291](291-base-select-backed-droplist-implementation.md)** (`parked` until the precondition trips).
+3. **The real deliverable is an eventual *implementation build*** — the base-select-backed droplist component: a WC wrapper that adopts `appearance: base-select`, plugs the droplist intents/traits onto it, and handles form-association / a11y / degradation (the same shape `frontierui/blocks/droplist/*` already is for the **FACE** impl; no base-select impl exists yet). This is a **build**, gated on base-select reaching a **second engine** — captured as **[#291](/backlog/291-base-select-backed-droplist-implementation/)** (`parked` until the precondition trips).
 
 So: base-select makes sense (it's `native-ok` for more capabilities than `face`), it's already a sanctioned impl, and the work it implies is a deferred implementation, not a standard.

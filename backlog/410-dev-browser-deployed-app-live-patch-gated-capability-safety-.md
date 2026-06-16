@@ -18,7 +18,7 @@ tags: [dev-browser, fix-loop, live-patch, safety, deployed-app, autonomy, confor
 
 ## Digest
 
-The dev-browser fix-loop ([#141](141-dev-browser-vision.md)) ships v1 as report → propose →
+The dev-browser fix-loop ([#141](/backlog/141-dev-browser-vision/)) ships v1 as report → propose →
 **local-session** live-verify → open-PR, and **carved out** live-patching a _deployed_ app — the single
 riskiest capability — for its own safety design. **No design existed yet**; this prep surveyed the
 established practice and published the [`deployed-live-patch-safety`](/research/deployed-live-patch-safety/)
@@ -69,7 +69,7 @@ pipeline, patch catalog.
 ## Axis-framing
 
 #141 named the four concerns this item must answer and spun it out
-([#141 Fork 2 resolution](141-dev-browser-vision.md)). The machinery this builds on already exists in the
+([#141 Fork 2 resolution](/backlog/141-dev-browser-vision/)). The machinery this builds on already exists in the
 tree: the conformance-autofix engine ([scripts/conformance-autofix.mjs:3](../scripts/conformance-autofix.mjs#L3))
 with its **verify gate** — apply → re-run → keep only if the failure cleared with no new error, else revert
 ([scripts/autofix/engine.mjs:15](../scripts/autofix/engine.mjs#L15)) — bounded

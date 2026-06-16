@@ -338,7 +338,11 @@ export function findBadBodyLinks(body) {
       const tgt = m[1];
       if (/^(https?:\/\/)?localhost\b/i.test(tgt)) findings.push({ line: ln, kind: 'localhost', text: tgt });
       else if (/^(\/Users\/|file:\/\/)/i.test(tgt)) findings.push({ line: ln, kind: 'absfile', text: tgt });
-      else if (/(^|\/)backlog\/[^)]*\.md([)#]|$)/.test(`${tgt})`)) findings.push({ line: ln, kind: 'backlog-md', text: tgt });
+      // A link to another backlog item — bare sibling `NNN-slug.md`, or `./`, `../backlog/`, `/backlog/`,
+      // `backlog/` prefixed. ALL render as a dead href from `/backlog/<id>/` (bare `NNN-slug.md` resolves to
+      // `/backlog/<id>/NNN-slug.md` → 404); the live route is `/backlog/NNN-slug/`. The `\d{3}-` prefix +
+      // absence of any non-`backlog/` dir keeps sanctioned `reports/…md` / `docs/…md` refs out of scope.
+      else if (/^(?:\.{0,2}\/)?(?:backlog\/)?\d{3}-[a-z0-9-]+\.md(?:#.*)?$/.test(tgt)) findings.push({ line: ln, kind: 'backlog-md', text: tgt });
     }
   });
   return findings;

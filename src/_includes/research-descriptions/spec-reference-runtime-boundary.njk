@@ -1,0 +1,125 @@
+{% raw %}
+<h2>The Question</h2>
+<p>
+    <a href="/backlog/606-where-does-the-plugs-platform-layer-runtime-live-web-everyth/">#606</a> settles where the
+    <code>plugs/</code> runtime lives. <code>plugs/</code> is an <strong>executable runtime tree</strong> — scoped
+    registries and browser-API patches (<code>plugs/webregistries/</code>, <code>plugs/webinjectors/</code>,
+    <code>plugs/bootstrap.ts</code>), not specs — and it sits in <strong>Web&nbsp;Everything</strong>, the
+    <em>standard</em> layer. That placement was inherited from epic
+    <a href="/backlog/170-plugs-duplicated-across-webeverything-frontierui/">#170</a>'s consolidation premise
+    ("WE owns the runtime; Frontier&nbsp;UI aliases via <code>@we/plugs</code>"), never ratified on its own
+    merits. The one adjacent ruling, <a href="/backlog/239-adapter-packages-self-contained-publish/">#239</a>,
+    cuts the other way: "<code>@webeverything/*</code> is reserved for standard artifacts and never depends on
+    Frontier&nbsp;UI." This survey grounds the call in how real ecosystems draw the boundary between a
+    <strong>standard</strong> and its <strong>runtime</strong>.
+</p>
+
+<h2>The survey — three archetypes for "the executable substrate of a standard"</h2>
+<p>
+    The decision reduces to <strong>one archetype question</strong>: which of these three real patterns is
+    <code>plugs/</code>? Each implies a different home.
+</p>
+<table>
+    <thead>
+        <tr><th>Archetype</th><th>Where the runtime lives</th><th>Evidence</th><th>Implies for plugs</th></tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><strong>Polyfill</strong></td>
+            <td>OUTSIDE the spec — a separate package, often vendor-neutral</td>
+            <td>Web&nbsp;Components polyfills ship as <code>@webcomponents/webcomponentsjs</code> (separate
+                <code>webcomponents/polyfills</code> repo); <code>core-js</code> is a third-party ECMAScript
+                polyfill TC39 does <strong>not</strong> publish — TC39 ships the spec + the
+                <code>test262</code> conformance suite (tests, not runtime)</td>
+            <td>Push plugs <em>out</em> of WE → Fork&nbsp;B or&nbsp;C</td>
+        </tr>
+        <tr>
+            <td><strong>Reference implementation</strong></td>
+            <td>WITH the spec — the canonical executable embodiment, to make it demonstrable/testable</td>
+            <td>CommonMark ships the spec <strong>and</strong> <code>cmark</code> (C reference impl) under one
+                org; <code>dart-sass</code> is the canonical/official Sass impl; CPython is the reference impl
+                PEPs realize against</td>
+            <td>Keep the runtime <em>with</em> the standard → Fork&nbsp;A</td>
+        </tr>
+        <tr>
+            <td><strong>Shared substrate package</strong></td>
+            <td>Its own package, BELOW many impls — earned by plurality of consumers</td>
+            <td>React publishes <code>scheduler</code> + <code>react-reconciler</code> as packages shared by
+                react-dom / react-native; Lit publishes <code>@lit/reactive-element</code> as the base
+                <code>LitElement</code> extends</td>
+            <td>Carve a standalone <code>webplugs</code> package → Fork&nbsp;C</td>
+        </tr>
+    </tbody>
+</table>
+<p>
+    The polyfill and reference-implementation patterns are <strong>not mutually exclusive</strong>: TC39 ships
+    tests-not-runtime, yet CommonMark ships <em>both</em> a spec and a reference impl. So "specs ship no runtime"
+    is a <em>tendency of mature, multi-vendor standards</em> (browsers as the independent implementers), not a
+    law that binds a <strong>young</strong> standard whose reference runtime <em>is</em> its demonstration vehicle.
+</p>
+
+<h2>Classification — WE's plugs are a reference implementation, not a polyfill</h2>
+<p>
+    Per the project's <em>which-layer</em> pass, <code>plugs/</code> ships runnable code, so it is not an Intent or
+    a Protocol; the contract it realizes is <code>plugs.json</code> (the primitive catalog) plus the per-primitive
+    specs, which stay in WE under every fork. The load-bearing question is therefore
+    <strong>reference-implementation vs application-implementation</strong>:
+</p>
+<ul>
+    <li><code>plugs/bootstrap.ts</code> patches <code>window</code> in <em>plugged mode</em> so a real browser can
+        run WE standards; WE demos exist to <strong>exercise the standard itself</strong>. That is exactly the
+        CommonMark/<code>cmark</code> and dart-sass role — the executable embodiment of the spec, co-located with
+        it. → <strong>reference implementation, a standard artifact.</strong></li>
+    <li>Frontier&nbsp;UI's <code>blocks/</code> are the <em>application</em> implementations built on top of plugs.
+        Those are the polyfill/impl analogue, correctly outside the standard.</li>
+</ul>
+
+<h2>The #239 correction the survey surfaced</h2>
+<p>
+    The item argued: "#239 governs <em>published</em> packages; <code>@we/plugs</code> is an unpublished path
+    alias, so #239's letter doesn't bind." <strong>That reading is incomplete.</strong> #239 re-scoped
+    <code>jsx-runtime</code> to <code>@frontierui/*</code> <strong>despite it having no <code>@frontierui</code>
+    import</strong> — purely because "it <strong>is</strong> implementation." So #239's load-bearing principle is
+    <strong>standard-artifact vs implementation</strong>, <em>not</em> published-vs-unpublished. The
+    unpublished-alias argument is a red herring. The real question #239 poses is the <em>classification</em> — and a
+    reference implementation of the standard <em>is</em> a standard artifact (an artifact <em>of</em> the project),
+    categorically unlike <code>jsx-runtime</code> (application glue). plugs satisfies #239's letter (it imports
+    nothing from FU — the only dependency #239 forbids) <strong>and</strong> its spirit. <strong>#239 does not
+    extend to plugs.</strong>
+</p>
+
+<h2>Recommendation (fork prepared for #606)</h2>
+<ol>
+    <li><strong>A — WE owns the reference runtime</strong>, on the corrected "reference-implementation, not
+        polyfill" justification (CommonMark / dart-sass / CPython precedent). plugs stays in WE; FU + plateau-app
+        alias <code>@we/plugs/*</code>; <a href="/backlog/449-wire-the-we-plugs-alias-in-frontier-ui-and-delete-the-vendor/">#449</a>
+        proceeds as the mechanical alias + delete it is scoped as.</li>
+    <li><strong>C — carve a standalone <code>webplugs</code> package — is the named escape hatch</strong>, not a
+        rival today. The separation bias ("a concept that recurs without its neighbour earns its own home") triggers
+        C the moment a <strong>second independent impl</strong> consumes plugs (the
+        <code>scheduler</code>&nbsp;/&nbsp;<code>@lit/reactive-element</code> precedent). Today Frontier&nbsp;UI is
+        the <em>only</em> impl consumer — plateau-app consumes the same alias as a <em>product</em>, not an
+        independent impl — so the split into a third versioned package is <strong>not yet earned</strong>. <em>When</em>
+        to build C is normal burndown ordering, not a design fork (the package's maintenance cost is prioritization,
+        not a merit branch).</li>
+    <li><strong>B — FU owns the runtime — is rejected.</strong> No archetype supports the <em>implementation</em>
+        layer owning the <em>standard's own</em> reference runtime, and it inverts the demo model (WE demos, whose
+        whole job is to run the standard directly, would depend on FU impl).</li>
+</ol>
+<p>
+    Confidence: <strong>med-high</strong>. The archetype classification is clear; the only genuine judgment is whether
+    a second impl consumer is near enough to pull C forward now.
+</p>
+
+<h2>Cross-references</h2>
+<ul>
+    <li>Decision: <a href="/backlog/606-where-does-the-plugs-platform-layer-runtime-live-web-everyth/">#606</a>
+        (blocks <a href="/backlog/449-wire-the-we-plugs-alias-in-frontier-ui-and-delete-the-vendor/">#449</a>).</li>
+    <li>Epic premise: <a href="/backlog/170-plugs-duplicated-across-webeverything-frontierui/">#170</a>;
+        adjacent ruling: <a href="/backlog/239-adapter-packages-self-contained-publish/">#239</a> (npm scope).</li>
+    <li>Project: <a href="/projects/webregistries/">webregistries</a> (the primitives plugs patches).</li>
+    <li>Sources: WHATWG specs &middot; <code>webcomponents/polyfills</code> &middot; <code>tc39/test262</code> &middot;
+        <code>commonmark/cmark</code> &middot; <code>sass/dart-sass</code> &middot;
+        React <code>react-reconciler</code> &middot; <code>@lit/reactive-element</code>.</li>
+</ul>
+{% endraw %}
