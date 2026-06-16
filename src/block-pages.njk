@@ -42,6 +42,14 @@ eleventyComputed:
         </div>
         {% endif %}
 
+        {% if block.technicalConfig %}
+        <div class="section-card mt-8">
+            <h2>Configure technical aspects</h2>
+            <p class="mb-4">These are <strong>technical</strong> delivery settings (render strategy, transport, trait lazy-loading, chunk splitting) — never UX dimensions on the block, and never a Web Everything mandate. Explore the tradeoffs for this block in the embedded <a href="/intents/">Plateau</a> configurator; the cost preview (chunk graph + bytes/requests/hydration) updates as you change a setting. Use <em>Open full configurator&nbsp;↗</em> for the project-wide decision.</p>
+            {% technicalConfigurator block.technicalConfig, block.technicalConfig.height %}
+        </div>
+        {% endif %}
+
         {% if block.implementsIntent %}
         <div class="section-card mt-8">
             <h2>Implements Intent</h2>

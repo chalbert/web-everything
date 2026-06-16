@@ -15,6 +15,14 @@
       "register": "wizard",
       "movement": "back-allowed"
     },
+    "technicalConfig": {
+      "domain": "render-strategy",
+      "strategy": "declarative-shadow-dom",
+      "requirements": {
+        "first-paint": "pre-rendered",
+        "hydration": "light"
+      }
+    },
     "composesIntents": [
       "flow-progress"
     ],

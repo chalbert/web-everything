@@ -1,6 +1,7 @@
 const syntaxHighlight = require("@11ty/eleventy-plugin-syntaxhighlight");
 
 const { deriveResearchFreshness } = require("./scripts/lib/research-freshness.cjs");
+const { buildTechnicalConfiguratorUrl } = require("./scripts/lib/technical-configurator-url.cjs");
 
 module.exports = function (eleventyConfig) {
   eleventyConfig.addPlugin(syntaxHighlight);
@@ -81,6 +82,29 @@ ${fuiDemoChrome(label, src)}
   <iframe class="fui-demo-frame" src="${frameSrc}" data-embed-mode="${canonicalMode}" title="${label}" loading="lazy" sandbox="allow-scripts allow-same-origin" style="height:${h}px"></iframe>
 </figure>
 ${fuiHostScript}`;
+  });
+
+  // technicalConfigurator (#752): embed the Plateau Technical Configurator next to a block's standard
+  // page, seeded with that block's technical dimensions. Per the constellation, the configurator is a
+  // Plateau offering WE *embeds* (never imports) — same sandboxed-iframe boundary as fuiDemo. Per the
+  // #788 ratification the seed transport is URL-canonical + typed (built by
+  // technical-configurator-url.cjs); the embed src carries `embed=1`, the "Open full configurator ↗"
+  // deep-link omits it so it lands on the project-wide tool. Base URL is env-parameterised:
+  // plateau-app dev server (:4000) by default, a published host via PLATEAU_BASE in prod.
+  const PLATEAU_BASE = (process.env.PLATEAU_BASE || "http://localhost:4000").replace(/\/$/, "");
+  eleventyConfig.addShortcode("technicalConfigurator", function(config, height) {
+    const cfg = config || {};
+    const embedSrc = buildTechnicalConfiguratorUrl(PLATEAU_BASE, cfg, { embed: true });
+    const deepLink = buildTechnicalConfiguratorUrl(PLATEAU_BASE, cfg, {});
+    const h = height || 520;
+    return `<figure class="fui-demo tc-embed">
+  <figcaption class="fui-demo-chrome">
+    <span class="fui-demo-badge tc-embed-badge" title="Hosted by Plateau — the product app">Plateau&nbsp;configurator</span>
+    <span class="fui-demo-title">Seeded with this block's technical dimensions</span>
+    <a class="fui-demo-open" href="${deepLink}" target="_blank" rel="noopener">Open full configurator ↗</a>
+  </figcaption>
+  <iframe class="fui-demo-frame" src="${embedSrc}" title="Technical configurator (seeded)" loading="lazy" sandbox="allow-scripts allow-same-origin" style="height:${h}px"></iframe>
+</figure>`;
   });
 
   // Build-time HTML → JSX (mirror dialect). Lazily esbuild-transpiles the shared TS transform

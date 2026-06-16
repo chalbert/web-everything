@@ -1700,6 +1700,9 @@ table td, table th {
   background: linear-gradient(90deg, #6d28d9, #2563eb);
   white-space: nowrap;
 }
+/* #752: Plateau-hosted configurator embed — same chrome as fuiDemo, distinct (teal) badge so the
+   host repo reads as Plateau, not Frontier UI. */
+.tc-embed-badge { background: linear-gradient(90deg, #0f766e, #0891b2); }
 .fui-demo-title { opacity: 0.8; flex: 1 1 auto; }
 .fui-demo-open { white-space: nowrap; font-weight: 600; text-decoration: none; }
 .fui-demo-open:hover { text-decoration: underline; }
