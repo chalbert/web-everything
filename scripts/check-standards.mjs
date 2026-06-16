@@ -24,7 +24,7 @@ import {
   findUnquotedColonScalars, findBadBodyLinks,
   RESEARCH_REVIEW_HORIZON_DEFAULT, deriveResearchFreshness,
   validateCapabilityPresence, validateRetirementShape,
-  validatePlugDualMode,
+  validatePlugDualMode, validateTemplateA11y,
 } from './check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -817,6 +817,22 @@ try {
   }
 } catch (e) {
   err(`Backlog type-filter coverage check failed: ${e.message}`);
+}
+
+// ── 11. Static template a11y lint (#772, complements the #770/#771 rendered axe gate) ──
+// Structural a11y rules that live in the .njk source and a headless axe run cannot observe from the
+// computed page (it sees rendered DOM, not the authoring miss). Scoped to the site-chrome layouts —
+// the #762 regression locus — so spec-content and breadcrumb navs never false-positive.
+try {
+  const LAYOUTS = join(ROOT, 'src/_layouts');
+  const layouts = readdirSync(LAYOUTS)
+    .filter((f) => f.endsWith('.njk') || f.endsWith('.html'))
+    .map((f) => ({ path: `src/_layouts/${f}`, content: readFileSync(join(LAYOUTS, f), 'utf8') }));
+  const { errors: ae, warnings: aw } = validateTemplateA11y(layouts);
+  for (const e of ae) err(e.message);
+  for (const w of aw) warn(w.message);
+} catch (e) {
+  err(`Static template a11y lint failed: ${e.message}`);
 }
 
 // ── Report ────────────────────────────────────────────────────────────────────

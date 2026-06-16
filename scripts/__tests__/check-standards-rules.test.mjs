@@ -24,6 +24,7 @@ import {
   deriveResearchFreshness, addIsoDuration, RESEARCH_REVIEW_HORIZON_DEFAULT,
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, PLUG_UNPLUGGED_TEST_ENFORCED,
+  validateTemplateA11y, NAV_ACTIVE_STATE_ENFORCED,
 } from '../check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -717,6 +718,39 @@ describe('validatePlugDualMode — #606 dual-mode plug conformance (#636)', () =
     const res = validatePlugDualMode([
       { name: 'webempty', hasSource: false, hasUnpluggedTest: false, hasPluggedTest: false },
     ]);
+    expect(res.errors).toEqual([]);
+    expect(res.warnings).toEqual([]);
+  });
+});
+
+describe('validateTemplateA11y — static template a11y lint (#772, #762 class)', () => {
+  const FULL_PAGE = '<!DOCTYPE html><html lang="en"><head><title>X</title></head><body><nav><a href="/a/" aria-current="page">A</a></nav><main>y</main></body></html>';
+
+  it('passes a full-page layout with lang, title, main, and aria-current-wired nav', () => {
+    const res = validateTemplateA11y([{ path: 'src/_layouts/base.njk', content: FULL_PAGE }]);
+    expect(res.errors).toEqual([]);
+    expect(res.warnings).toEqual([]);
+  });
+
+  it('ERRORs <html> without lang, without title, and without a <main> landmark', () => {
+    const res = validateTemplateA11y([{ path: 'l.njk', content: '<html><head></head><body><p>x</p></body></html>' }]);
+    const msgs = res.errors.map((e) => e.message).join(' ');
+    expect(msgs).toMatch(/without a lang/);
+    expect(msgs).toMatch(/no <title>/);
+    expect(msgs).toMatch(/no <main> landmark/);
+  });
+
+  it('flags a hardcoded nav link list lacking aria-current as the #762 class (warn until enforced)', () => {
+    const content = '<html lang="en"><head><title>X</title></head><body><nav><a href="/a/">A</a><a href="/b/">B</a></nav><main>y</main></body></html>';
+    const res = validateTemplateA11y([{ path: 'src/_layouts/legacy.html', content }]);
+    const bucket = NAV_ACTIVE_STATE_ENFORCED ? res.errors : res.warnings;
+    expect(bucket.map((e) => e.message).join(' ')).toMatch(/aria-current.*#762/);
+    const other = NAV_ACTIVE_STATE_ENFORCED ? res.warnings : res.errors;
+    expect(other.map((e) => e.message).join(' ')).not.toMatch(/aria-current/);
+  });
+
+  it('does not apply landmark rules to a partial template (no <html>)', () => {
+    const res = validateTemplateA11y([{ path: 'partial.njk', content: '<section><p>fragment</p></section>' }]);
     expect(res.errors).toEqual([]);
     expect(res.warnings).toEqual([]);
   });

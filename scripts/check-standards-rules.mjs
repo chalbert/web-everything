@@ -907,3 +907,49 @@ export function validatePlugDualMode(domains) {
   }
   return { errors, warnings };
 }
+
+// ── Static template a11y lint (#772, ratified #763 supported-not-decided) ──────
+// The structural a11y rules a headless axe run (the #770/#771 rendered-DOM gate) CANNOT observe from the
+// computed page — they live in the .njk SOURCE and must be caught at authoring time, before render. Scoped
+// to the site-chrome layouts (`src/_layouts/*`) — the #762 regression locus and the only hand-authored page
+// shell — so spec-content navs (block-descriptions) and in-page breadcrumbs never false-positive.
+//
+// Two rule classes (mirroring the #636 dual-mode warn→enforce shape):
+//   • page-shell landmarks — a full-page layout (one emitting `<html`) MUST carry a `lang` attribute, a
+//     `<title>`, and a `<main>` landmark. ERROR: these are structural invariants both layouts satisfy today,
+//     so a regression hard-fails (the value the rendered gate can give only post-render).
+//   • nav active-state wiring (the #762 class) — a `<nav>` holding a hardcoded `<a href=` link list MUST
+//     wire `aria-current` so the current page is distinguishable. WARN until NAV_ACTIVE_STATE_ENFORCED flips:
+//     the live base.njk wires it, but the dead/legacy base.html nav still doesn't (7 links, no aria-current),
+//     so enforcing now would red-gate a pre-existing miss. Promote to ERROR once base.html is cleaned/removed.
+export const NAV_ACTIVE_STATE_ENFORCED = false;
+
+/**
+ * Static a11y lint over the site-chrome layouts. `layouts` = [{ path, content }] (the `src/_layouts/*`
+ * files the script reads). Pure: returns { errors, warnings }. A nav whose links are macro-driven with a
+ * conditional `aria-current` passes (the token is present in source); a hardcoded link list with none fails.
+ */
+export function validateTemplateA11y(layouts) {
+  const errors = [];
+  const warnings = [];
+  for (const { path, content } of layouts) {
+    const isFullPage = /<html[\s>]/i.test(content);
+    if (isFullPage) {
+      if (!/<html[^>]*\slang=/i.test(content))
+        errors.push({ message: `Layout "${path}" emits <html> without a lang attribute (WCAG 3.1.1 html-has-lang) — set <html lang="…">.` });
+      if (!/<title[\s>]/i.test(content))
+        errors.push({ message: `Layout "${path}" emits <html> but has no <title> (WCAG 2.4.2 document-title) — add a <title> in <head>.` });
+      if (!/<main[\s>]/i.test(content))
+        errors.push({ message: `Layout "${path}" has no <main> landmark (WCAG 1.3.1 region) — wrap the page body in <main>.` });
+    }
+    // Nav active-state wiring (#762): only fires on a hardcoded <a href=…> list inside a <nav>.
+    const hasNav = /<nav[\s>]/i.test(content);
+    const hasHardcodedNavLink = /<a\s[^>]*href=/i.test(content);
+    if (hasNav && hasHardcodedNavLink && !/aria-current/i.test(content)) {
+      const msg = `Layout "${path}" has a <nav> with a hardcoded link list but no aria-current wiring — the current page is indistinguishable from siblings (#762, WCAG 2.4.8). Mark the active link with aria-current="page".`;
+      if (NAV_ACTIVE_STATE_ENFORCED) errors.push({ message: msg });
+      else warnings.push({ message: msg });
+    }
+  }
+  return { errors, warnings };
+}
