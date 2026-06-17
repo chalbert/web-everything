@@ -2,10 +2,13 @@
 type: idea
 workItem: story
 size: 3
-status: open
+status: resolved
 parent: "746"
 blockedBy: ["749"]
 dateOpened: "2026-06-16"
+dateStarted: "2026-06-17"
+dateResolved: "2026-06-17"
+graduatedTo: "frontierui/workbench/mount.ts (Share panel — permalink serialize/restore + export-as-code, reusing the #749 switcher state)"
 relatedProject: webdocs
 tags: [webdocs, block-explorer, permalink, share, export, reproducibility]
 ---
@@ -21,8 +24,17 @@ Make any configured state of the Block Explorer **reproducible and shareable**. 
 
 ## Acceptance
 
-- [ ] Opening a permalink restores the exact configured view (design system, traits, sliders, viewport, state).
-- [ ] Export-as-code produces a runnable snippet for the current configuration.
+- [x] Opening a permalink restores the exact configured view (design system, traits, sliders, viewport, state).
+- [x] Export-as-code produces a runnable snippet for the current configuration.
+
+## Progress
+
+Done — built into the FUI workbench (`frontierui/workbench/mount.ts`), reusing the #749 switcher's state. A new **Share** chrome panel:
+
+- **Copy permalink** — `serializeState()` encodes the full view into URL params: `block`, `ds` (active design system), `traits`, `axes` (density/radius/contrast slider values), `scheme`/`hc`/`fc` (native state), `rtl`/`locale`, `cq` (container sim). On mount a restore block parses `location.search` and re-applies — traits first (so the re-render applies them pre-connect), then the design system, then axes + native-state + RTL/locale + container — reproducing the exact view. Clipboard write + echoes the URL.
+- **Export as code** — `exportAsCode()` emits a ready-to-paste snippet: a `<style> :root { --wb-*… }` block of the active design-system tokens (#747 shape) + the configured element's markup (authoring attributes; ARIA/role/tabindex stripped). Clipboard + echo.
+
+Verified: `tsc --noEmit` (strict) clean; a new e2e (`a permalink round-trips … #754`) + all 9 workbench e2e specs pass on the live `:3001` (Carbon + RTL + radius=12 → permalink encodes `ds=carbon-like`/`rtl=1`/`radius=12`; opening it fresh restores `data-ds`/`dir`/the slider; export emits the Carbon tokens + `<auto-complete …>`); FUI `check:standards` 0 err/0 warn. The serialization is the reusable payload for the theme creator's "share this design system" (#751) and the dev-browser hand-off (#410).
 
 ## Notes
 
