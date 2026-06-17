@@ -52,6 +52,68 @@ const cemEvents = (events) =>
     ...(e.description ? { description: e.description } : {}),
   }));
 
+/**
+ * Project the block's authored **public-API surface** onto CEM member kinds (#801 Fork-1=B,
+ * sharpened to the *public-API* line; #822 structural-surface ruling). A block author authors
+ * only the surface they deliberately commit to as public — declarative API
+ * (attributes/reflected-or-public properties/slots/cssProperties/cssParts); everything else is
+ * assumed private and excluded by default (the #706 opt-in impl-scan adds private members later).
+ *
+ * Each authored array mirrors the CEM 2.1.0 member shape (no bespoke schema — #654
+ * `consumesCemNotBespoke` / #801 I2): a string is sugar for `{ name }`; an object is passed
+ * through with only the spec fields kept. Properties become CEM `members` of `kind: 'field'`
+ * with `privacy: 'public'`; an attribute-reflected property carries `fieldName`/`reflects` so the
+ * props-table can pair it with its attribute.
+ */
+const asEntries = (val) => {
+  if (!val) return [];
+  if (Array.isArray(val)) return val.map((e) => (typeof e === 'string' ? { name: e } : e));
+  // object keyed by member name → { name, ...rest }
+  return Object.entries(val).map(([name, e]) => ({ name, ...(e && typeof e === 'object' ? e : {}) }));
+};
+
+const cemAttributes = (b) =>
+  asEntries(b.attributes).map((a) => ({
+    name: a.name,
+    ...(a.type ? { type: { text: a.type } } : {}),
+    ...(a.description ? { description: a.description } : {}),
+    ...(a.default !== undefined ? { default: String(a.default) } : {}),
+    ...(a.fieldName ? { fieldName: a.fieldName } : {}),
+  }));
+
+/** Authored public properties → CEM field members (privacy: public). */
+const cemMembers = (b) =>
+  asEntries(b.properties).map((p) => ({
+    kind: 'field',
+    name: p.name,
+    privacy: 'public',
+    ...(p.type ? { type: { text: p.type } } : {}),
+    ...(p.description ? { description: p.description } : {}),
+    ...(p.default !== undefined ? { default: String(p.default) } : {}),
+    ...(p.reflects ? { reflects: true } : {}),
+    ...(p.attribute ? { attribute: p.attribute } : {}),
+  }));
+
+const cemSlots = (b) =>
+  asEntries(b.slots).map((s) => ({
+    name: s.name,
+    ...(s.description ? { description: s.description } : {}),
+  }));
+
+const cemCssProperties = (b) =>
+  asEntries(b.cssProperties).map((c) => ({
+    name: c.name,
+    ...(c.syntax ? { syntax: c.syntax } : {}),
+    ...(c.default !== undefined ? { default: String(c.default) } : {}),
+    ...(c.description ? { description: c.description } : {}),
+  }));
+
+const cemCssParts = (b) =>
+  asEntries(b.cssParts).map((p) => ({
+    name: p.name,
+    ...(p.description ? { description: p.description } : {}),
+  }));
+
 /** WE-specific block-protocol fields, namespaced so the core CEM stays spec-valid. */
 const weExtension = (b) => {
   const x = {};
@@ -75,7 +137,12 @@ const cemModule = (b) => {
     name: declName,
     ...(b.summary ? { description: b.summary } : {}),
     ...(isCustomElement ? { customElement: true, tagName: b.tagName } : {}),
+    ...(cemAttributes(b).length ? { attributes: cemAttributes(b) } : {}),
+    ...(cemMembers(b).length ? { members: cemMembers(b) } : {}),
+    ...(cemSlots(b).length ? { slots: cemSlots(b) } : {}),
     ...(cemEvents(b.events).length ? { events: cemEvents(b.events) } : {}),
+    ...(cemCssProperties(b).length ? { cssProperties: cemCssProperties(b) } : {}),
+    ...(cemCssParts(b).length ? { cssParts: cemCssParts(b) } : {}),
     ...weExtension(b),
   };
 

@@ -126,6 +126,12 @@
           "description": "Reference render for the Audit Timeline intent, the visual member of the Web Audit protocol. `renderAuditTimeline` renders an entity's `AuditEvent[]` as a chronological, filterable feed across the intent's `density` (compact|comfortable), `grouping` (flat|by-day|by-actor), and `detail` (summary|expanded) dimensions, with `role=\"list\"` and `<time datetime>` semantics. It owns the display, not the record — append-only semantics, actor attribution, and before/after belong to the protocol. Ships an element form and a string form (`auditTimelineHTML`).",
           "x-webeverything": {
             "implementsIntent": "audit-timeline",
+            "webStandards": {
+              "headingElements": {
+                "usage": "Renders an entity’s `AuditEvent[]` as an ordered `<ol>` timeline; each event’s moment uses `<time datetime>` for a machine-readable, accessibly-announced timestamp.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/time"
+              }
+            },
             "blockType": "Module",
             "status": "active"
           }
@@ -159,6 +165,12 @@
           "name": "DefaultAuditProvider",
           "description": "Reference runtime for the Web Audit protocol (webaudit / #357) — a domain entity's immutable, actor-attributed history. Ships the protocol's seam: the normalized `AuditEvent` ({ target, action, actor, at, before?, after?, correlationId? }, before/after reusing the Web States `ChangeRecord` shape), the swappable `CustomAuditProvider` contract (`append()` / `queryByEntity()` / optional `subscribe()`), a native-first append-only `DefaultAuditProvider` (it freezes each event — never mutates or deletes), and the `CustomAuditRegistry` (`window.customAudit`). The `auditLifecycle()` helper is the headline composition: it subscribes a Web Lifecycle provider so every transition becomes one `AuditEvent` automatically. First consumer: the loan-origination exercise app (#317).",
           "x-webeverything": {
+            "webStandards": {
+              "headingElements": {
+                "usage": "Reference runtime for the Web Audit protocol: an immutable, actor-attributed `AuditEvent[]` history; each entry timestamps with the `<time>` element’s machine-readable `datetime`.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/time"
+              }
+            },
             "blockType": "Module",
             "status": "active"
           }
@@ -220,6 +232,12 @@
               "collection-operations",
               "typography"
             ],
+            "webStandards": {
+              "ariaCombobox": {
+                "usage": "An `<input role=\"combobox\">` with `aria-autocomplete=\"list\"`, `aria-expanded`, and `aria-controls` bound to a separate `role=\"listbox\"`; the active option is tracked with `aria-activedescendant` as the input filters.",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/combobox/"
+              }
+            },
             "blockType": "Component",
             "status": "draft"
           }
@@ -376,6 +394,16 @@
               "navigation",
               "typography"
             ],
+            "webStandards": {
+              "navigationLandmark": {
+                "usage": "A `<nav aria-label=\"Breadcrumb\">` wrapping an ordered list of links from root to current, the current page marked `aria-current=\"page\"`.",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/breadcrumb/"
+              },
+              "ariaCurrent": {
+                "usage": "The trail’s final, current location carries `aria-current=\"page\"`.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-current"
+              }
+            },
             "blockType": "Component",
             "status": "draft"
           }
@@ -424,6 +452,12 @@
                 "intentDimension": null
               }
             ],
+            "webStandards": {
+              "containerQueries": {
+                "usage": "Maps semantic breakpoint step names to concrete CSS media or container queries and exposes the active step reactively, observing via `matchMedia` / container-query matching.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_containment/Container_queries"
+              }
+            },
             "blockType": "Module",
             "status": "concept"
           }
@@ -498,6 +532,12 @@
               "live-region-status",
               "navigation"
             ],
+            "webStandards": {
+              "ariaApgKeyboard": {
+                "usage": "A `role=\"region\"` with `aria-roledescription=\"carousel\"`, slide-picker controls, an accessible label, and a rotation pause control, following the APG carousel pattern.",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/carousel/"
+              }
+            },
             "blockType": "Component",
             "status": "draft"
           }
@@ -527,6 +567,12 @@
             "composesIntents": [
               "selection"
             ],
+            "webStandards": {
+              "constraintValidation": {
+                "usage": "Native-first over `<input type=\"checkbox\">`: a single boolean, a multi-select group, and the `indeterminate` (mixed) tri-state, with native required-validity.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/checkbox"
+              }
+            },
             "blockType": "Component",
             "status": "draft"
           }
@@ -604,6 +650,16 @@
           "x-webeverything": {
             "implementsIntent": "collection-operations",
             "traits": [],
+            "webStandards": {
+              "intlCollator": {
+                "usage": "The headless filter → sort → group → page coordinator; locale-aware sort comparisons go through `Intl.Collator`.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator"
+              },
+              "arrayToSorted": {
+                "usage": "Sorting is non-mutating via `Array.prototype.toSorted`, leaving the source collection untouched.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/toSorted"
+              }
+            },
             "blockType": "Module",
             "status": "active"
           }
@@ -752,6 +808,12 @@
           "name": "CompositeWidget",
           "description": "Focus management and navigation protocol for complex widgets like Grids, Trees, and Menus, implementing the Roving Tabindex pattern.",
           "x-webeverything": {
+            "webStandards": {
+              "rovingTabindex": {
+                "usage": "Implements the Roving Tabindex focus model for composite widgets (grids, trees, menus): exactly one descendant is `tabindex=\"0\"`, all others `tabindex=\"-1\"`, and the value moves with focus so the widget is a single Tab stop.",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/#kbd_roving_tabindex"
+              }
+            },
             "blockType": "Behavior",
             "status": "concept"
           }
@@ -1141,6 +1203,120 @@
     },
     {
       "kind": "javascript-module",
+      "path": "@frontierui/blocks/date-picker/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "DatePicker",
+          "description": "The first named shallow preset over the abstract `temporal` core: a single calendar-date picker. It pins the Temporal Intent to presentation=media (a spatial calendar grid) and granularity=point (one date), bound to the native <input type=\"date\"> anchor. It adds nothing the core lacks — it is the core with two dimensions pinned and one anchor chosen — so it inherits locale-aware parse/format, keyboard roving, and the native form-control baseline for free. Native <input type=\"date\"> stays the zero-JS fallback; the calendar-grid surface is the media-presentation enhancement.",
+          "x-webeverything": {
+            "implementsIntent": "temporal",
+            "composesIntents": [
+              "temporal",
+              "locale",
+              "input",
+              "focus-delegation"
+            ],
+            "webStandards": {
+              "ariaApgKeyboard": {
+                "usage": "A single calendar-date preset: native `<input type=\"date\">` or a grid calendar dialog with arrow-key day navigation.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/date"
+              }
+            },
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "DatePicker",
+          "declaration": {
+            "name": "DatePicker",
+            "module": "@frontierui/blocks/date-picker/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/date-range-picker/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "DateRangePicker",
+          "description": "A named shallow preset over the abstract `temporal` core: a from–to date range. It pins the Temporal Intent to presentation=media (a calendar grid) and granularity=range (two coordinated, ordered dates), bound to two native <input type=\"date\"> anchors (start, end). The range coordination — the start date can't cross the end date, reported as a pair — is the core's machinery, exactly as the slider's dual-thumb range is two bound, ordered values over one track; this preset only pins granularity=range and binds the two anchors.",
+          "x-webeverything": {
+            "implementsIntent": "temporal",
+            "composesIntents": [
+              "temporal",
+              "locale",
+              "input",
+              "focus-delegation"
+            ],
+            "webStandards": {
+              "ariaApgKeyboard": {
+                "usage": "A from–to range preset over the calendar grid: two coupled date values with range-selection keyboard handling.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/date"
+              }
+            },
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "DateRangePicker",
+          "declaration": {
+            "name": "DateRangePicker",
+            "module": "@frontierui/blocks/date-range-picker/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/datetime-picker/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "DatetimePicker",
+          "description": "A named shallow preset over the abstract `temporal` core: a combined date-and-time picker. It pins the Temporal Intent to presentation=media and granularity=point, bound to the native <input type=\"datetime-local\"> anchor — one control that selects both a calendar date and a time. It composes the core's calendar + clock surfaces and inherits locale-aware parse/format and keyboard roving; the native datetime-local input is the zero-JS fallback.",
+          "x-webeverything": {
+            "implementsIntent": "temporal",
+            "composesIntents": [
+              "temporal",
+              "locale",
+              "input",
+              "focus-delegation"
+            ],
+            "webStandards": {
+              "ariaApgKeyboard": {
+                "usage": "A combined date-and-time preset: native `<input type=\"datetime-local\">` or a composed calendar + clock surface.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/datetime-local"
+              }
+            },
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "DatetimePicker",
+          "declaration": {
+            "name": "DatetimePicker",
+            "module": "@frontierui/blocks/datetime-picker/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
       "path": "@frontierui/blocks/renderers/decision-trace/renderDecisionTrace.ts",
       "declarations": [
         {
@@ -1149,6 +1325,12 @@
           "description": "Reference render for the Decision Trace intent, the visual member of the Web Decisions protocol (decision-record / #355). `renderDecisionTrace(record)` turns a normalized `DecisionRecord` — why a rules/criteria evaluation reached its outcome — into a criteria trace table (input/operator/threshold/outcome per criterion) plus the aggregated outcome and reason codes, across the intent's `layout` (table|list), `emphasis` (all-criteria|deciding), and `disclosure` dimensions. Schema-only standard: the render owns the explanation UI, not the rules. Composes the status-indicator block for the outcome and per-criterion tokens. Ships an element form and a string form (`decisionTraceHTML`).",
           "x-webeverything": {
             "implementsIntent": "decision-trace",
+            "webStandards": {
+              "headingElements": {
+                "usage": "Renders a decision record as a structured, heading-delimited trace (context → options → ruling), using semantic headings and lists for screen-reader navigability.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/Heading_Elements"
+              }
+            },
             "blockType": "Module",
             "status": "active"
           }
@@ -1201,6 +1383,16 @@
               "surface",
               "motion"
             ],
+            "webStandards": {
+              "dialog": {
+                "usage": "The shared modal-surface substrate over the native `<dialog>` element: top-layer rendering, a backdrop, focus trapping, and restore-focus-on-close.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/HTMLDialogElement"
+              },
+              "ariaApgKeyboard": {
+                "usage": "Realizes the APG modal-dialog keyboard model: focus moves into the dialog on open, Tab cycles within it, Escape closes, and focus returns to the trigger.",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/"
+              }
+            },
             "blockType": "Component",
             "status": "draft"
           }
@@ -1226,6 +1418,12 @@
           "name": "DoubleCurlyBracketParser",
           "description": "Text node parser for Mustache-style {{expression}} syntax. Detects {{ and }} delimiters in text content.",
           "x-webeverything": {
+            "webStandards": {
+              "domParts": {
+                "usage": "Detects Mustache-style `{{expression}}` delimiters in text content and emits binding holes for the interpolation pipeline (the template-parts contract).",
+                "reference": "https://github.com/WICG/webcomponents/blob/gh-pages/proposals/DOM-Parts.md"
+              }
+            },
             "blockType": "Parser",
             "status": "active"
           }
@@ -1251,6 +1449,12 @@
           "name": "DoubleSquareBracketParser",
           "description": "Text node parser for Polymer-style [[expression]] syntax. Detects [[ and ]] delimiters in text content.",
           "x-webeverything": {
+            "webStandards": {
+              "domParts": {
+                "usage": "Detects Polymer-style `[[expression]]` delimiters in text content and emits binding holes for the interpolation pipeline (the template-parts contract).",
+                "reference": "https://github.com/WICG/webcomponents/blob/gh-pages/proposals/DOM-Parts.md"
+              }
+            },
             "blockType": "Parser",
             "status": "active"
           }
@@ -1469,6 +1673,16 @@
               "surface",
               "motion"
             ],
+            "webStandards": {
+              "dialog": {
+                "usage": "The edge-anchored member of the dialog family: the same native `<dialog>` top-layer + focus model, sliding in from a viewport edge.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/HTMLDialogElement"
+              },
+              "inertAttribute": {
+                "usage": "While open as a modal, the rest of the page is made `inert` so focus and the accessibility tree are confined to the drawer.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/inert"
+              }
+            },
             "blockType": "Component",
             "status": "draft"
           }
@@ -1493,6 +1707,91 @@
           "kind": "class",
           "name": "Dropdown",
           "description": "The single-select concrete member of the droplist family — a button-triggered, non-filtering listbox with type-ahead. A form-associated custom element (<drop-list>) so <form>/FormData/reset/validity work like the native <select> baseline, with no hidden input shim.",
+          "attributes": [
+            {
+              "name": "options",
+              "type": {
+                "text": "string"
+              },
+              "description": "Data source for the listbox — an injector reference (e.g. `options=\"@countries\"`) resolved through the ancestor injector chain, or an inline JSON literal."
+            },
+            {
+              "name": "value",
+              "type": {
+                "text": "string"
+              },
+              "description": "The selected option's value, reflected to the form-associated element so `<form>`/FormData/reset see it.",
+              "fieldName": "value"
+            },
+            {
+              "name": "name",
+              "type": {
+                "text": "string"
+              },
+              "description": "Form field name the selected value is submitted under (native form-association, no hidden input shim)."
+            },
+            {
+              "name": "disabled",
+              "type": {
+                "text": "boolean"
+              },
+              "description": "Disables the control; excluded from form submission and the tab order.",
+              "default": "false"
+            },
+            {
+              "name": "required",
+              "type": {
+                "text": "boolean"
+              },
+              "description": "Marks the control required for `:user-invalid` / constraint validation.",
+              "default": "false"
+            }
+          ],
+          "members": [
+            {
+              "kind": "field",
+              "name": "value",
+              "privacy": "public",
+              "type": {
+                "text": "string"
+              },
+              "description": "Gets or sets the current selection; setting updates the form value and re-emits the public `change` event.",
+              "reflects": true,
+              "attribute": "value"
+            },
+            {
+              "kind": "field",
+              "name": "options",
+              "privacy": "public",
+              "type": {
+                "text": "Option[]"
+              },
+              "description": "The resolved option set, re-exposed on the component-local `@options` injector context for descendants."
+            }
+          ],
+          "events": [
+            {
+              "name": "change",
+              "type": {
+                "text": "CustomEvent"
+              },
+              "description": "Fires when the user commits a new selection; `detail` carries the selected value. Re-emitted at the `<drop-list>` boundary after the internal `selection-change` is stopped."
+            }
+          ],
+          "cssParts": [
+            {
+              "name": "trigger",
+              "description": "The button that opens the listbox and shows the current selection."
+            },
+            {
+              "name": "listbox",
+              "description": "The popup `role=\"listbox\"` container."
+            },
+            {
+              "name": "option",
+              "description": "Each `role=\"option\"` row within the listbox."
+            }
+          ],
           "x-webeverything": {
             "implementsIntent": "selection",
             "composesIntents": [
@@ -1501,6 +1800,16 @@
               "selection",
               "type-ahead"
             ],
+            "webStandards": {
+              "ariaListbox": {
+                "usage": "A button-triggered `role=\"listbox\"` of `role=\"option\"`; the trigger owns `aria-expanded` / `aria-controls`, the active option `aria-selected`, with one selected value reflected to the form-associated element.",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/listbox/"
+              },
+              "htmlSelectTypeAhead": {
+                "usage": "Printable-key type-ahead jumps to the next option whose label starts with the typed buffer, matching native `<select>` behaviour.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/select"
+              }
+            },
             "blockType": "Component",
             "status": "draft"
           }
@@ -1538,6 +1847,12 @@
               "loader",
               "typography"
             ],
+            "webStandards": {
+              "ariaListbox": {
+                "usage": "The abstract substrate every list-selection member conforms to: a `role=\"listbox\"` of `role=\"option\"` items with single/multi selection and managed focus, realized concretely by Dropdown / Multi-dropdown / Autocomplete / Tree-select.",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/listbox/"
+              }
+            },
             "blockType": "Component",
             "status": "draft"
           }
@@ -1563,6 +1878,12 @@
           "name": "createOnEventAttribute",
           "description": "Declarative event-to-action mapping using expression syntax with context resolution.",
           "x-webeverything": {
+            "webStandards": {
+              "customEvent": {
+                "usage": "Declarative event-to-action mapping: maps DOM/`CustomEvent`s to actions with expression-resolved context, over the standard event model.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/CustomEvent"
+              }
+            },
             "blockType": "Behavior",
             "status": "active"
           }
@@ -1597,6 +1918,46 @@
     },
     {
       "kind": "javascript-module",
+      "path": "@frontierui/blocks/flex-row/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "FlexRow",
+          "description": "Intrinsic auto-flow container that flows and wraps its children by the space actually available to it, realizing the Breakpoint Intent at scope:container. Native-first: the default is CSS @container queries / flex-wrap; ResizeObserver is named as the implementation substrate for environments without container-query support (impl-is-not-a-standard, like CSS Anchor Positioning under webpositioning). The standard-worthy surface is the semantic vocabulary + container-query wiring + the ResizeObserver fallback contract — not the flex CSS itself.",
+          "x-webeverything": {
+            "implementsIntent": "breakpoint",
+            "webStandards": {
+              "containerQueries": {
+                "usage": "`container-type: inline-size` + `@container` size queries provide the native, script-free reflow path; the FlexRow steps map onto container-query thresholds.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_containment/Container_queries"
+              },
+              "flexWrap": {
+                "usage": "`flex-wrap: wrap` provides the intrinsic auto-flow of children into as many rows as the available inline space allows.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/flex-wrap"
+              },
+              "resizeObserver": {
+                "usage": "The non-container-query fallback substrate — observes the container box and re-evaluates the step thresholds on resize, emitting the same reflow contract.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/ResizeObserver"
+              }
+            },
+            "blockType": "Component",
+            "status": "concept"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "FlexRow",
+          "declaration": {
+            "name": "FlexRow",
+            "module": "@frontierui/blocks/flex-row/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
       "path": "@frontierui/blocks/for-each/ForEachBehavior.ts",
       "declarations": [
         {
@@ -1604,6 +1965,12 @@
           "name": "ForEachBehavior",
           "description": "Structural directive for rendering lists of items based on an array.",
           "x-webeverything": {
+            "webStandards": {
+              "htmlTemplate": {
+                "usage": "A structural directive that repeats a `<template>` per array item, cloning its content fragment for each row.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/template"
+              }
+            },
             "blockType": "Directive",
             "status": "active"
           }
@@ -1690,6 +2057,12 @@
           "name": "HandlerExpressionParser",
           "description": "Parser for function-call style event handler expressions. Extends CustomAttributeParser for registry integration.",
           "x-webeverything": {
+            "webStandards": {
+              "customEvent": {
+                "usage": "Parses function-call-style event-handler expressions and binds them to the element via `addEventListener`, dispatching/handling `CustomEvent`s through the registry.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener"
+              }
+            },
             "blockType": "Parser",
             "status": "active"
           }
@@ -1747,6 +2120,16 @@
               "live-region-status",
               "selection"
             ],
+            "webStandards": {
+              "ariaCombobox": {
+                "usage": "A `contenteditable` region that detects a boundary-anchored trigger char (@ / : / # / /) and opens a combobox-style suggestion list bound via `aria-controls` / `aria-activedescendant`.",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/combobox/"
+              },
+              "contentEditable": {
+                "usage": "Trigger detection slices the editable text around the caret using the `contenteditable` selection/range model.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/contenteditable"
+              }
+            },
             "blockType": "Component",
             "status": "draft"
           }
@@ -1773,6 +2156,12 @@
           "description": "Native-first over the text-ish `<input>` family (text / number / currency / phone / masked): the formatting, masking, and typing affordances the bare element can't express, while keeping the native input as the substrate. Realizes the `input` intent. The platform `type` (`text`/`number`/`tel`/`email`/`url`) carries semantics, keyboard, and validation for free; the block adds a display-format layer (Intl) and an optional input mask over a raw value, never replacing the element. Zero JS for a plain typed input; the format/mask behavior is opt-in. Sliced from #468 (form-control inventory).",
           "x-webeverything": {
             "implementsIntent": "input",
+            "webStandards": {
+              "constraintValidation": {
+                "usage": "Native-first over the text-ish `<input>` family (text / number / currency / phone / masked): preserves native constraint validation, `inputmode`, and the validity UI the bare element already provides.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Constraint_validation"
+              }
+            },
             "blockType": "Component",
             "status": "draft"
           }
@@ -1798,6 +2187,12 @@
           "name": "InterpolationTextNode",
           "description": "Reactive text node that evaluates expressions and renders their values. Connects text node parsing to the expression parser pipeline.",
           "x-webeverything": {
+            "webStandards": {
+              "domParts": {
+                "usage": "A reactive Text node that evaluates an expression and writes its value to `textContent`, the runtime twin of the template-parts / DOM Parts binding model.",
+                "reference": "https://github.com/WICG/webcomponents/blob/gh-pages/proposals/DOM-Parts.md"
+              }
+            },
             "blockType": "Behavior",
             "status": "active"
           }
@@ -1831,6 +2226,12 @@
           "name": "KeyboardShortcuts",
           "description": "Standardized keyboard interaction management enabling consistent shortcut handling across shadow boundaries and OS-specific layouts.",
           "x-webeverything": {
+            "webStandards": {
+              "keyboardEventKey": {
+                "usage": "Normalizes shortcut handling on `KeyboardEvent.key` / `.code` across shadow boundaries and OS layouts, so chords resolve consistently regardless of where focus sits.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key"
+              }
+            },
             "blockType": "Module",
             "status": "draft"
           }
@@ -1856,6 +2257,12 @@
           "name": "DefaultLifecycleProvider",
           "description": "Reference runtime for the Web Lifecycle protocol (weblifecycle / #353) — a domain entity's declared status set + guarded, role-scoped transition map. Ships the protocol's seam: a data-defined `LifecycleDefinition` (the only lock; portable across engines), the swappable `CustomLifecycleProvider` contract (`available()` + `transition()`), a native-first `DefaultLifecycleProvider` in-memory reference, and the `CustomLifecycleRegistry` (`window.customLifecycles`). Authorization is delegated to a `GuardResolver` (the Web Guards seam; the default is permissive, a real authz provider is async + server-authoritative) and persistence stays the entity's own concern — so the block owns only the state machine. Every applied transition emits a `LifecycleEvent` ({ entity, from, to, actor, at }), the composition seam for audit-trail (#357). First consumer: the loan-origination exercise app (#317).",
           "x-webeverything": {
+            "webStandards": {
+              "customEvent": {
+                "usage": "Reference runtime for the Web Lifecycle protocol: a guarded, role-scoped status-transition map; each transition dispatches a `CustomEvent` carrying the from/to status.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/CustomEvent"
+              }
+            },
             "blockType": "Module",
             "status": "active"
           }
@@ -1901,6 +2308,12 @@
             "composesIntents": [
               "selection"
             ],
+            "webStandards": {
+              "ariaApgKeyboard": {
+                "usage": "Pairs a master list with a coupled detail region: the active list item is `aria-current`, the detail region is `aria-labelledby` the selection and updated as a `aria-controls` target.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-current"
+              }
+            },
             "blockType": "Behavior",
             "status": "active"
           }
@@ -1944,6 +2357,12 @@
               "disclosure",
               "action"
             ],
+            "webStandards": {
+              "ariaApgKeyboard": {
+                "usage": "The action-invocation substrate: `role=\"menu\"` / `role=\"menubar\"` of `role=\"menuitem\"` with the APG keyboard model (arrows move, Enter/Space invoke, Escape closes) — for invoking commands, not selecting values.",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/menu-button/"
+              }
+            },
             "blockType": "Component",
             "status": "draft"
           }
@@ -1976,6 +2395,12 @@
               "selection",
               "type-ahead"
             ],
+            "webStandards": {
+              "ariaListbox": {
+                "usage": "The dropdown substrate with `aria-multiselectable=\"true\"`: Space toggles each `role=\"option\"`’s `aria-selected`, the trigger summarises the selected set.",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/listbox/"
+              }
+            },
             "blockType": "Component",
             "status": "draft"
           }
@@ -2094,6 +2519,12 @@
               "surface",
               "motion"
             ],
+            "webStandards": {
+              "ariaLive": {
+                "usage": "A transient, non-blocking message announced through an `aria-live` region (`polite`/`assertive` by urgency) so it reaches assistive tech without stealing focus.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-live"
+              }
+            },
             "blockType": "Component",
             "status": "draft"
           }
@@ -2237,6 +2668,12 @@
               "windowed-collection",
               "expressive-symbol"
             ],
+            "webStandards": {
+              "popoverEvents": {
+                "usage": "One general browse↔search picker built on the Popover API container plus a search `input` and a 2-D category grid — composed, not reinvented.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Popover_API"
+              }
+            },
             "blockType": "Component",
             "status": "concept"
           }
@@ -2478,6 +2915,12 @@
             "composesIntents": [
               "focus-delegation"
             ],
+            "webStandards": {
+              "rovingTabindex": {
+                "usage": "Native-first over a `<input type=\"radio\">` group sharing a `name`: the group is one Tab stop, arrow keys move selection (and focus) among mutually-exclusive choices.",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/radio/"
+              }
+            },
             "blockType": "Component",
             "status": "draft"
           }
@@ -2507,6 +2950,12 @@
               "reaction",
               "expressive-symbol"
             ],
+            "webStandards": {
+              "ariaApgKeyboard": {
+                "usage": "Each reaction is an `aria-pressed` toggle button affixing a symbol to content; Space/Enter toggle the pressed state.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-pressed"
+              }
+            },
             "blockType": "Component",
             "status": "concept"
           }
@@ -3391,6 +3840,12 @@
               "typography",
               "density"
             ],
+            "webStandards": {
+              "ariaApgKeyboard": {
+                "usage": "A single-select row of adjacent buttons exposed as a `role=\"radiogroup\"` of `role=\"radio\"` segments — arrow keys move selection, one segment is `aria-checked`.",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/radio/"
+              }
+            },
             "blockType": "Component",
             "status": "draft"
           }
@@ -3417,6 +3872,12 @@
           "description": "A runtime for the Collection Operations sibling `selection` intent (model / immediacy / variant / grouping) — the part the draft dropdown/droplist blocks compose but no block shipped. `SelectionBehavior` manages which item(s) in a host container are selected, over items matched by a CSS selector: it projects `aria-selected`, keeps a roving `tabindex`, commits selection live on click and Arrow/Home/End/Enter/Space (single keeps at most one, multiple toggles), and emits a `selection-change` event. The `variant:item` list-selection realization; dropdown/droplist will compose it for listbox selection.",
           "x-webeverything": {
             "implementsIntent": "selection",
+            "webStandards": {
+              "ariaSort": {
+                "usage": "The headless selection runtime (model / immediacy / variant / grouping) backing the droplist members; selected items reflect `aria-selected`, multi-select sets `aria-multiselectable`.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-selected"
+              }
+            },
             "blockType": "Module",
             "status": "active"
           }
@@ -3450,6 +3911,12 @@
           "name": "SimpleStore",
           "description": "Concrete implementation of CustomStore with built-in listener management, dot-notation paths, and derived state hooks.",
           "x-webeverything": {
+            "webStandards": {
+              "queueMicrotask": {
+                "usage": "A reactive store with dot-notation paths and derived state; listener notifications are batched on the microtask queue (`queueMicrotask`) to coalesce synchronous writes.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/queueMicrotask"
+              }
+            },
             "blockType": "Store",
             "status": "active"
           }
@@ -3490,6 +3957,12 @@
               "locale",
               "translation"
             ],
+            "webStandards": {
+              "ariaApgKeyboard": {
+                "usage": "A `role=\"slider\"` (single value) or dual-thumb range over a track, arrow/Home/End keyboard model, with `aria-valuemin/now/max`; native `<input type=\"range\">` where applicable.",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/slider-multithumb/"
+              }
+            },
             "blockType": "Component",
             "status": "draft"
           }
@@ -3516,6 +3989,12 @@
           "description": "Reference render for the Status Indicator intent (#354), the visual member of the Web Lifecycle protocol. `renderStatusIndicator` projects an entity's current lifecycle state onto a semantic status token across the intent's `tone` (neutral|info|progress|positive|caution|critical), `shape` (badge|pill|dot|text), and `affordance` (display-only|actionable) dimensions. It owns the display, not the rules: tone maps to a theme token (never a bespoke hex), the label text carries the state (never colour-only), and `role=\"status\"` marks the standing indicator while a transition announcement composes the Live Region Status intent. Ships an element form and a string form (`statusIndicatorHTML`) for table/innerHTML contexts.",
           "x-webeverything": {
             "implementsIntent": "status-indicator",
+            "webStandards": {
+              "ariaStatusRegion": {
+                "usage": "Projects an entity’s lifecycle status as a labelled badge; status changes are surfaced through a `role=\"status\"` live region.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/status_role"
+              }
+            },
             "blockType": "Module",
             "status": "active"
           }
@@ -3770,6 +4249,82 @@
     },
     {
       "kind": "javascript-module",
+      "path": "@frontierui/blocks/temporal/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "Temporal",
+          "description": "The abstract core block that realizes the Temporal Intent (date/time selection) — the shared machinery every concrete picker pins down. Native-first by construction: a temporal control IS a native date/time input (<input type=\"date|time|datetime-local\">), so the core's job is only the enhancements native cannot express alone — a spatial/linear presentation surface (calendar grid, clock, scroll wheel), locale-aware parsing and display, and range/multi coordination — all behind one intent contract. It composes the Temporal Intent (presentation × granularity), the Locale Intent (parse/format), the Input Intent (pointer vs keyboard vs touch modality), and Focus Delegation (roving the surface). It ships no concrete picker itself: named shallow presets (date-picker, time-picker, datetime-picker, date-range-picker) pin granularity/presentation and bind their native anchor over this one core.",
+          "x-webeverything": {
+            "implementsIntent": "temporal",
+            "composesIntents": [
+              "temporal",
+              "locale",
+              "input",
+              "focus-delegation"
+            ],
+            "webStandards": {
+              "ariaApgKeyboard": {
+                "usage": "The abstract date/time core: native-first over `<input type=\"date|time|datetime-local\">`, falling back to a `role=\"dialog\"` + `role=\"grid\"` calendar with the APG date-picker keyboard model.",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/examples/datepicker-dialog/"
+              }
+            },
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "Temporal",
+          "declaration": {
+            "name": "Temporal",
+            "module": "@frontierui/blocks/temporal/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/time-picker/index.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "TimePicker",
+          "description": "A named shallow preset over the abstract `temporal` core: a single time-of-day picker. It pins the Temporal Intent to presentation=media (a spatial clock) and granularity=point (one time), bound to the native <input type=\"time\"> anchor. Like its date-picker sibling it adds no machinery of its own — clock rendering, locale-aware parse/format, and keyboard roving are the core's; the native time input stays the zero-JS keyboard fallback. (A linear presentation — a scroll wheel — is the common mobile variant; this preset pins media, and a linear member would pin presentation=linear over the same anchor.)",
+          "x-webeverything": {
+            "implementsIntent": "temporal",
+            "composesIntents": [
+              "temporal",
+              "locale",
+              "input",
+              "focus-delegation"
+            ],
+            "webStandards": {
+              "ariaApgKeyboard": {
+                "usage": "A time-of-day preset: native `<input type=\"time\">` or a spatial clock surface.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/time"
+              }
+            },
+            "blockType": "Component",
+            "status": "draft"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "TimePicker",
+          "declaration": {
+            "name": "TimePicker",
+            "module": "@frontierui/blocks/time-picker/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
       "path": "@frontierui/blocks/toggle-switch/index.ts",
       "declarations": [
         {
@@ -3778,6 +4333,12 @@
           "description": "Native-first over `<input type=\"checkbox\">` with `role=\"switch\"`: a boolean on/off control whose change takes effect IMMEDIATELY, distinct from a checkbox's deferred-until-submit form value. Realizes the `input` boolean control. `aria-checked` true/false reflects on/off; no mixed/indeterminate state (a switch is strictly binary). Zero JS — the native element plus `role=\"switch\"` and styling IS the block. Sliced from #468 (form-control inventory).",
           "x-webeverything": {
             "implementsIntent": "input",
+            "webStandards": {
+              "ariaApgKeyboard": {
+                "usage": "Native `<input type=\"checkbox\">` with `role=\"switch\"`: a boolean on/off control whose change takes effect immediately; Space/Enter toggle `aria-checked`.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/switch_role"
+              }
+            },
             "blockType": "Component",
             "status": "draft"
           }
@@ -3808,6 +4369,12 @@
               "surface",
               "typography"
             ],
+            "webStandards": {
+              "ariaApgTooltip": {
+                "usage": "A non-interactive `role=\"tooltip\"` surface revealed on hover or keyboard focus and wired as the trigger’s `aria-describedby`, dismissible with Escape.",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/tooltip/"
+              }
+            },
             "blockType": "Component",
             "status": "draft"
           }
@@ -3934,6 +4501,12 @@
               "selection",
               "disclosure"
             ],
+            "webStandards": {
+              "ariaTreeview": {
+                "usage": "A `role=\"tree\"` of `role=\"treeitem\"` nodes with `aria-expanded` on parents and `aria-selected` on the chosen node; arrow keys walk and expand/collapse the hierarchy.",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/treeview/"
+              }
+            },
             "blockType": "Component",
             "status": "active"
           }
@@ -3967,6 +4540,12 @@
           "name": "TrustedHTML",
           "description": "Structural directive enforcing Trusted Types policies on dynamic HTML content via comment-based virtual elements.",
           "x-webeverything": {
+            "webStandards": {
+              "trustedTypes": {
+                "usage": "A structural directive that enforces a Trusted Types policy on dynamic HTML, routing injected markup through `TrustedHTML` so the sink is XSS-safe.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API"
+              }
+            },
             "blockType": "Directive",
             "status": "draft"
           }
@@ -3992,6 +4571,12 @@
           "name": "TrustedHTMLBehavior",
           "description": "Attribute-based behavior that enforces Trusted Types policies on an element's innerHTML mutations.",
           "x-webeverything": {
+            "webStandards": {
+              "trustedTypes": {
+                "usage": "An attribute behaviour that enforces a Trusted Types policy on an element’s `innerHTML` mutations via `TrustedHTML`.",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API"
+              }
+            },
             "blockType": "Behavior",
             "status": "draft"
           }
@@ -4242,6 +4827,53 @@
           "declaration": {
             "name": "ViewSwitchDirective",
             "module": "@frontierui/blocks/view/ViewEngine.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/wizard/WizardElement.ts",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "WizardElement",
+          "description": "The reference Flow-Progress surface — a `<wizard-flow>` custom element that wires a portable workflow graph through the swappable `customWorkflowEngine` (#634/#650) into the flow-progress UX (register `wizard`). It owns no orchestration: transitions, guards, and completion stay on the engine; the element renders the current position and each step's status. Composes the Stepper block for the linear-presentation mechanics it already owns (`aria-current=\"step\"`, the Step N of M announcement, one-panel-at-a-time switching) and maps the engine's step-transition stream to per-step status (wait/process/finish/error). Back/undo uses the running instance's `back()` (the movement: back-allowed default). Slice A of #651.",
+          "x-webeverything": {
+            "implementsIntent": "flow-progress",
+            "composesIntents": [
+              "flow-progress"
+            ],
+            "webStandards": {
+              "ariaCurrentStep": {
+                "usage": "The active step indicator and its panel carry aria-current=\"step\" (delegated to the composed Stepper); the step list is an ordered <ol> conveying position",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current"
+              },
+              "multiPageForms": {
+                "usage": "A labelled step region, a visible per-step status indicator, and a polite live region announcing 'Step N of M' on each engine transition",
+                "reference": "https://www.w3.org/WAI/tutorials/forms/multi-page/"
+              }
+            },
+            "blockType": "Component",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "WizardElement",
+          "declaration": {
+            "name": "WizardElement",
+            "module": "@frontierui/blocks/wizard/WizardElement.ts"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "registerWizard",
+          "declaration": {
+            "name": "registerWizard",
+            "module": "@frontierui/blocks/wizard/WizardElement.ts"
           }
         }
       ]

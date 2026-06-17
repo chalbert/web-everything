@@ -156,6 +156,118 @@ eleventyComputed:
         </div>
         {% endif %}
 
+        {# Public API — the props-table surface (#838, ratified by #801 Fork-1=B → the *public-API* line).
+           The block's authored public contract — attributes / properties / events / slots / CSS
+           custom-properties / parts — is the same data `scripts/gen-cem.mjs` projects onto the emitted
+           Custom Elements Manifest (one seam, many consumers: api-viewer, the Technical Configurator args
+           panel, autodocs). The live `<props-table>` element is FUI-owned (impl) and never rendered here
+           per the docs-rendering boundary; WE renders the identical CEM-shaped contract server-side from
+           its OWN `blocks.json` source. Only the deliberately-public surface is authored — private/internal
+           members are excluded by default (the #706 opt-in impl-scan adds them later). Each table is
+           omitted when the block authors no member of that kind (most blocks carry events but no slots
+           yet — the projection shows whatever the contract declares). #}
+        {% if block.attributes or block.properties or block.events or block.slots or block.cssProperties or block.cssParts %}
+        <div class="section-card mt-8">
+            <h2>Public API</h2>
+            <p class="mb-6 text-slate-600">The block's <strong>public contract</strong> — the surface a consumer programs against. This is the same data the <a href="/protocols/">Custom Elements Manifest</a> projects (<code>npm run gen:cem</code>), rendered here from the block's own <code>blocks.json</code> declaration.</p>
+
+            {% if block.attributes %}
+            <h3>Attributes</h3>
+            <table>
+                <thead><tr><th>Attribute</th><th>Type</th><th>Default</th><th>Description</th></tr></thead>
+                <tbody>
+                    {% for a in block.attributes %}
+                    <tr>
+                        <td><code>{{ a.name }}</code></td>
+                        <td>{% if a.type %}<code>{{ a.type }}</code>{% else %}&mdash;{% endif %}</td>
+                        <td>{% if a.default is defined %}<code>{{ a.default }}</code>{% else %}&mdash;{% endif %}</td>
+                        <td>{{ a.description }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+
+            {% if block.properties %}
+            <h3>Properties</h3>
+            <table>
+                <thead><tr><th>Property</th><th>Type</th><th>Reflects</th><th>Description</th></tr></thead>
+                <tbody>
+                    {% for p in block.properties %}
+                    <tr>
+                        <td><code>{{ p.name }}</code></td>
+                        <td>{% if p.type %}<code>{{ p.type }}</code>{% else %}&mdash;{% endif %}</td>
+                        <td>{% if p.reflects %}<code>{{ p.attribute or p.name }}</code>{% else %}&mdash;{% endif %}</td>
+                        <td>{{ p.description }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+
+            {# events carry two on-disk shapes (an array of {name,…} or an object keyed by event name);
+               an array has `.length`, an object does not — branch so both render the same row set, the
+               same normalization gen-cem applies. #}
+            {% if block.events %}
+            <h3>Events</h3>
+            <table>
+                <thead><tr><th>Event</th><th>Type</th><th>Description</th></tr></thead>
+                <tbody>
+                    {% if block.events.length %}
+                    {% for e in block.events %}
+                    <tr><td><code>{{ e.name }}</code></td><td><code>{{ e.class or 'CustomEvent' }}</code></td><td>{{ e.description }}</td></tr>
+                    {% endfor %}
+                    {% else %}
+                    {% for name, e in block.events %}
+                    <tr><td><code>{{ name }}</code></td><td><code>{{ e.class or 'CustomEvent' }}</code></td><td>{{ e.description }}</td></tr>
+                    {% endfor %}
+                    {% endif %}
+                </tbody>
+            </table>
+            {% endif %}
+
+            {% if block.slots %}
+            <h3>Slots</h3>
+            <table>
+                <thead><tr><th>Slot</th><th>Description</th></tr></thead>
+                <tbody>
+                    {% for s in block.slots %}
+                    <tr><td><code>{{ s.name or '(default)' }}</code></td><td>{{ s.description }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+
+            {% if block.cssProperties %}
+            <h3>CSS custom properties</h3>
+            <table>
+                <thead><tr><th>Property</th><th>Default</th><th>Description</th></tr></thead>
+                <tbody>
+                    {% for c in block.cssProperties %}
+                    <tr>
+                        <td><code>{{ c.name }}</code></td>
+                        <td>{% if c.default is defined %}<code>{{ c.default }}</code>{% else %}&mdash;{% endif %}</td>
+                        <td>{{ c.description }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+
+            {% if block.cssParts %}
+            <h3>CSS parts</h3>
+            <table>
+                <thead><tr><th>Part</th><th>Description</th></tr></thead>
+                <tbody>
+                    {% for part in block.cssParts %}
+                    <tr><td><code>{{ part.name }}</code></td><td>{{ part.description }}</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+        </div>
+        {% endif %}
+
         {# Anatomy — the composition graph straight from the registries (#748): the dependency edges this
            block sits on, each piece linking to its own page so they're independently browsable. "Used by" is
            the reverse edge (every block whose dependsOn names this one) — the bidirectional graph. The
