@@ -76,6 +76,7 @@ customElements.define('user-card', UserCard);
         <li>The component's <strong>own children are the template</strong> — the render source, cloned into the shadow (or light) tree on first connect. May contain <code>&lt;style&gt;</code> and <code>&lt;slot&gt;</code>. <strong>No nested <code>&lt;template&gt;</code> is required.</strong> A childless <code>&lt;component&gt;</code> registers an element with an empty template. <em>(DC-11, DC-9)</em></li>
         <li>A lone direct-child <code>&lt;template&gt;</code> is supported as the <strong>explicit, inert form</strong> — needed only when content must stay inert before the build transform runs (un-built runtime delivery, or table-fragment markup like <code>&lt;tr&gt;</code> the parser would otherwise drop). Both forms lower to byte-identical output. <em>(DC-11)</em></li>
         <li>The <code>&lt;component&gt;</code> element <strong>registers its definition then removes itself</strong> — no wrapper node remains. <em>(DC-3)</em></li>
+        <li><code>observe="attr-1 attr-2 …"</code> — declares the attributes the element reflects into its template. Lowers to a static <code>observedAttributes</code> getter plus an <code>attributeChangedCallback</code> that updates each bound text hole. A <code>{% raw %}{{ attr }}{% endraw %}</code> interpolation in the template binds that observed attribute's value to a generated text node — <strong>one-way, attribute → text content only</strong> (no event/output binding, no nested property access at this tier). The expression inside <code>{% raw %}{{ }}{% endraw %}</code> parses with the <a href="/projects/webexpressions/">Web Expressions</a> grammar — the <code>CustomExpressionParser</code> restricted sublanguage — so this build-time path and the runtime <a href="/blocks/interpolation-text-node/">interpolation text node</a> share <strong>one grammar contract</strong>; only <em>when</em> they resolve differs. The compile-time lowering bakes a per-hole updater with no injector chain — the <strong>unplugged twin</strong> of the runtime interpolation path, reusing the grammar, not the runtime registry resolution. <em>(DC-4 B1)</em></li>
     </ul>
 </section>
 
@@ -102,6 +103,11 @@ customElements.define('user-card', UserCard);
             <td><a href="https://github.com/WICG/webcomponents/blob/gh-pages/proposals/Scoped-Custom-Element-Registries.md">Scoped Registries</a></td>
             <td>Stage 2 Proposal</td>
             <td>Tier-2 <code>scope</code> attribute composes with the project's Scoped Registries section; global by default.</td>
+        </tr>
+        <tr>
+            <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_custom_elements#responding_to_attribute_changes">Observed attributes</a></td>
+            <td>Baseline</td>
+            <td><code>observe=</code> lowers to a static <code>observedAttributes</code> + <code>attributeChangedCallback</code>; <code>{% raw %}{{ }}{% endraw %}</code> text holes update one-way from those attributes (DC-4 B1).</td>
         </tr>
         <tr>
             <td><a href="https://github.com/WICG/webcomponents/issues/1009">Declarative Custom Elements</a></td>
@@ -138,8 +144,8 @@ customElements.define('user-card', UserCard);
         <tr><td>State-preserving moves (<code>preserve-on-move</code> → <code>connectedMoveCallback</code>)</td><td>built-in (DC-15)</td><td>2</td></tr>
         <tr><td>Slots / content projection</td><td>compose (native <code>&lt;slot&gt;</code>)</td><td>1</td></tr>
         <tr><td>Build-time AST transform → class</td><td>adapter</td><td>1</td></tr>
-        <tr><td>Observed attributes → reflect to template</td><td>built-in</td><td>2</td></tr>
-        <tr><td>Reactive bindings in template</td><td>compose (<a href="/blocks/for-each/">for-each</a> / Web Expressions)</td><td>2</td></tr>
+        <tr><td>Observed attributes → reflect to template (<code>observe=</code> → <code>observedAttributes</code> + <code>{% raw %}{{ }}{% endraw %}</code> text holes, one-way)</td><td>built-in (DC-4 B1)</td><td>2</td></tr>
+        <tr><td>Reactive bindings in template (event/output, nested paths, <code>if</code>/<code>each</code>)</td><td>compose (<a href="/blocks/for-each/">for-each</a> / Web Expressions)</td><td>2</td></tr>
         <tr><td>Scoped registration (<code>scope</code>)</td><td>compose (Scoped Registries)</td><td>2</td></tr>
         <tr><td>Script enhancement hook (<code>behavior</code>/<code>extends</code>)</td><td>built-in hook</td><td>2</td></tr>
         <tr><td>Live in-browser transform in the toggle</td><td>defer</td><td>2</td></tr>
@@ -218,7 +224,7 @@ customElements.define('x-rating', XRating);
     <h3 id="composition">Composition</h3>
     <ul>
         <li><a href="/blocks/transient-component/">Transient Component</a> — <code>&lt;component&gt;</code> reuses the self-removal lifecycle; transient elements <em>resolve</em> to native HTML, this <em>defines</em> a reusable element.</li>
-        <li><a href="/blocks/for-each/">For Each</a> &amp; Web Expressions — supply tier-2 reactive bindings and <code>if</code>/<code>each</code> inside the template (DC-4).</li>
+        <li><a href="/blocks/for-each/">For Each</a> &amp; Web Expressions — supply tier-2 reactive bindings and <code>if</code>/<code>each</code> inside the template (DC-4). The one-way <code>observe=</code> / <code>{% raw %}{{ }}{% endraw %}</code> attribute→text path (DC-4 B1) is the <strong>unplugged compile-time twin</strong> of the runtime <a href="/blocks/interpolation-text-node/">interpolation text node</a>: it reuses the Web Expressions grammar contract but bakes a static per-hole updater at build time instead of resolving through the runtime registry.</li>
         <li><a href="/projects/webinjectors/">Web Injectors</a> — a defined element resolves services/contexts from the DOM tree, like any custom element.</li>
         <li><a href="/projects/webcomponents/#ssr-contract">SSR contract</a> — a build emits the element's Declarative Shadow DOM; the definition itself is build-time.</li>
     </ul>
