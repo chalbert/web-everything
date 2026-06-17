@@ -4,7 +4,7 @@ workItem: story
 size: 8
 status: open
 parent: "746"
-blockedBy: ["851"]
+blockedBy: ["851", "855"]
 locus: frontierui
 dateOpened: "2026-06-16"
 relatedProject: webdocs
@@ -84,3 +84,13 @@ Claimed in batch-2026-06-17; the pre-build trace surfaced two genuine blockers, 
 Net: this is not the clean consume-mode-first slice #811 framed it as — it carries a blocked criterion (#851)
 and an undecided cross-repo handoff. Resolve #851 + settle the handoff seam, then it is buildable (the
 forward generation + create-your-own-adapter doc, criteria #1/#2, are ready once the handoff is decided).
+
+### Update (2026-06-17, batch-2026-06-17 re-pack)
+
+Seam 1 cleared: **#851 resolved** (the incumbent-ingest adapter shipped). Seam 2 was still only *flagged* in
+prose, never filed — so the panel kept surfacing as Tier-A on the satisfied `blockedBy: [851]` edge while the
+handoff design call remained open. Filed that seam as decision **[#855](/backlog/855-decide-the-we-fui-wrapper-handoff-mechanism-for-the-polyglot/)**
+and added it as a `blockedBy` edge (*decisions-are-work-items*: the cross-repo handoff is a real design call,
+not a mid-batch improvisation). This item stays `open`, blocked on #855; once #855 ratifies, the consume-mode
+panel (criteria #1/#2) + the #851 reverse-ingest demo (#3) are buildable. Still locus:frontierui, story·8 —
+not a batch tail.
