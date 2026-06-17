@@ -1,8 +1,10 @@
 ---
 type: idea
 workItem: epic
-status: open
+status: resolved
 dateOpened: "2026-06-14"
+dateResolved: "2026-06-17"
+graduatedTo: none
 relatedProject: webdocs
 tags: [monitoring, references, liveness, retirement, currency, freshness, link-rot, constellation, plateau-saas]
 ---
@@ -47,19 +49,19 @@ the **policy-declaration-vs-swappable-runner** protocol shape #101 ratified:
 
 ## Candidate slices (brainstorm — un-carved; carve as they become ready)
 
-Three are now carved as children (#584, #585, #597). The rest are captured here for later:
+Carved as children: foundation #584/#585/#597, plus the dogfood-Layer-1 builds #861/#862/#863 (2026-06-17, now unblocked — #597 resolved). **#585 is now a ready build** — its inert `blockedBy` self-edge to this epic was dropped 2026-06-17; only the resolved #597 prereq remained. The rest are captured here for later:
 
 1. **General retirement convention** → **#584** (carved). Generalize #546's `retired` shape beyond the corpus.
 2. **Active liveness sweep** → **#585** (carved). Fetch every reference; don't wait to trip over a 404.
 3. **Multi-modal classification** (folded into #585's scope): retirement isn't binary — `404` gone ·
    `301/302` moved→repoint · archived/frozen (Wayback) · **content-drift** (URL alive but no longer says
    what we cited — the silent killer) · paywall/auth · **superseded-by-newer-canonical** (FAST→Fluent).
-4. **Remediation routing.** Each class → an action (repoint / snapshot-pin / retire+reason / supersede /
-   re-research) that *spawns a backlog item*. Bridges detection (#585) → convention (#584).
-5. **Archive-on-cite.** Proactively pin a snapshot when citing a volatile source so provenance survives
-   the URL's death (the rejected #546 Fork-1-B path, done right: at citation time, not retroactively).
-6. **Axis-vacancy alerting.** When a retirement drops a corpus category below N live sources, flag "find a
-   replacement" (feeds the backlog like #192's new-axis sweep). #546 does this check *manually* today.
+4. **Remediation routing** → **#861** (carved). Each class → an action (repoint / snapshot-pin / retire+reason /
+   supersede / re-research) that *spawns a backlog item*. Bridges detection (#585) → convention (#584).
+5. **Archive-on-cite** → **#862** (carved). Proactively pin a snapshot when citing a volatile source so provenance
+   survives the URL's death (the rejected #546 Fork-1-B path, done right: at citation time, not retroactively).
+6. **Axis-vacancy alerting** → **#863** (carved). When a retirement drops a corpus category below N live sources,
+   flag "find a replacement" (feeds the backlog like #192's new-axis sweep). #546 does this check *manually* today.
 7. **Reference-registry substrate** → **#597** (carved). One index of "external references this project
    depends on," over the five structured homes (corpus `docsUrl`/`repoUrl`, `references.json`,
    `blocks.json` web-standard refs, `benchmarkCapabilityPresence.json` rows, `intents.json`). The
