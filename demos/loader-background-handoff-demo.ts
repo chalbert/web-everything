@@ -1,12 +1,16 @@
 /**
- * Loader → Background Task Surface handoff playground (producer side).
+ * Loader → Background Task handoff playground (producer side).
  *
- * Where the Background Task Surface playground drives the surface through a
- * *scripted* handle, this one wires the **real** producer: a real
- * `ResourceLoader` running `backgroundLoad` escalates into a real
- * `<background-tasks>` rail when its work crosses the debounce threshold. Each
- * card auto-runs a deterministic scenario and a badge proves one invariant of
- * the escalation contract.
+ * Wires the **real** producer: a real `ResourceLoader` running `backgroundLoad`
+ * escalates into a live receiver when its work crosses the debounce threshold,
+ * by dispatching the bubbling `background-task-register` event. Each card auto-runs
+ * a deterministic scenario and a badge proves one invariant of the escalation +
+ * handoff contract.
+ *
+ * The receiving end is the WE **reference receiver** (`__fixtures__/reference-receiver`),
+ * NOT Frontier UI's `<background-tasks>` surface — the surface is impl, demoed
+ * FUI-side. Decoupling onto the reference receiver (per #812 Fork-2(d)) keeps this a
+ * demo of the WE-standard producer CONTRACT — the event seam — not of the impl.
  *
  * Scenarios + the controllable-promise lever come from the SHARED fixture module
  * the unit suite imports, so the badges below and CI exercise the same behavior
@@ -14,18 +18,18 @@
  */
 
 import { setPlaygroundReady } from '/demos/playground-harness';
-import {
-  registerBackgroundTasks,
-  type BackgroundTasksElement,
-} from '/blocks/background-task-surface/index';
 import { ResourceLoader, backgroundLoad } from '/blocks/resource-loader/index';
+import {
+  defineReferenceReceiver,
+  type ReferenceTaskReceiver,
+} from '/blocks/resource-loader/__fixtures__/reference-receiver';
 import {
   createDeferred,
   handoffScenarios,
   type HandoffScenario,
 } from '/blocks/resource-loader/__fixtures__/handoff-scenarios';
 
-registerBackgroundTasks();
+defineReferenceReceiver();
 
 /** Snappy debounce so the escalation threshold is visible without a long wait. */
 const THRESHOLD_MS = 150;
@@ -39,50 +43,48 @@ function el(tag: string, className?: string, text?: string): HTMLElement {
   return node;
 }
 
-const rows = (s: Element) => s.querySelectorAll('.bt-entry');
-const stateOf = (s: Element, id: string) =>
-  s.querySelector(`.bt-entry[data-task-id="${id}"]`)?.getAttribute('data-state') ?? null;
+const rows = (r: Element) => r.querySelectorAll('.rr-entry');
+const stateOf = (r: Element, id: string) =>
+  r.querySelector(`.rr-entry[data-task-id="${id}"]`)?.getAttribute('data-state') ?? null;
 /** The determinate <progress> value for an entry (null when indeterminate/absent). */
-const progressOf = (s: Element, id: string): number | null => {
-  const bar = s.querySelector(
-    `.bt-entry[data-task-id="${id}"] .bt-progress`,
+const progressOf = (r: Element, id: string): number | null => {
+  const bar = r.querySelector(
+    `.rr-entry[data-task-id="${id}"] .rr-progress`,
   ) as HTMLProgressElement | null;
   return bar && bar.position >= 0 ? bar.value : null;
 };
 
-/** Build a surface with a loader target inside it (so the register bubbles up). */
-function makeSurface(attrs: Record<string, string> = {}): BackgroundTasksElement {
-  const surface = document.createElement('background-tasks') as BackgroundTasksElement;
-  for (const [k, v] of Object.entries(attrs)) surface.setAttribute(k, v);
-  surface.autoClearDelayMs = 0;
-  surface.appendChild(document.createElement('div')); // the loader's target
-  return surface;
+/** Build a receiver with a loader target inside it (so the register bubbles up). */
+function makeReceiver(): ReferenceTaskReceiver {
+  const receiver = document.createElement('reference-task-receiver') as ReferenceTaskReceiver;
+  receiver.appendChild(document.createElement('div')); // the loader's target
+  return receiver;
 }
 
-/** The loader for a card's surface — its target is the div mounted inside. */
-const loaderFor = (surface: Element) =>
+/** The loader for a card's receiver — its target is the div mounted inside. */
+const loaderFor = (receiver: Element) =>
   new ResourceLoader({
-    target: surface.querySelector('div') as HTMLElement,
+    target: receiver.querySelector('div') as HTMLElement,
     timings: { debounced: THRESHOLD_MS },
   });
 
 type Result = { ok: boolean; detail: string };
 
-/** One runner per scenario — drives the real pair and asserts the invariant. */
-const runners: Record<string, (s: BackgroundTasksElement) => Promise<Result>> = {
-  async 'escalate-on-async'(surface) {
-    const loader = loaderFor(surface);
+/** One runner per scenario — drives the real producer and asserts the invariant. */
+const runners: Record<string, (r: ReferenceTaskReceiver) => Promise<Result>> = {
+  async 'escalate-on-async'(receiver) {
+    const loader = loaderFor(receiver);
     const d = createDeferred<string>();
     const p = backgroundLoad(loader, () => d.promise, { id: 'export', label: 'Export data' });
 
-    const beforeThreshold = rows(surface).length === 0;
+    const beforeThreshold = rows(receiver).length === 0;
     await sleep(THRESHOLD_MS + 40);
-    const escalated = stateOf(surface, 'export') === 'active';
+    const escalated = stateOf(receiver, 'export') === 'active';
 
     d.resolve('1,024 rows');
     await p;
     await tick();
-    const succeeded = stateOf(surface, 'export') === 'success';
+    const succeeded = stateOf(receiver, 'export') === 'success';
 
     return {
       ok: beforeThreshold && escalated && succeeded,
@@ -90,21 +92,21 @@ const runners: Record<string, (s: BackgroundTasksElement) => Promise<Result>> = 
     };
   },
 
-  async 'fast-load-no-escalate'(surface) {
-    const loader = loaderFor(surface);
+  async 'fast-load-no-escalate'(receiver) {
+    const loader = loaderFor(receiver);
     const d = createDeferred<string>();
     const p = backgroundLoad(loader, () => d.promise, { id: 'fast', label: 'Quick fetch' });
 
     d.resolve('done'); // resolves before the threshold
     const result = await p;
     await sleep(THRESHOLD_MS + 40); // prove nothing escalates late
-    const empty = rows(surface).length === 0;
+    const empty = rows(receiver).length === 0;
 
-    return { ok: result.state === 'success' && empty, detail: `result=${result.state}, rail-empty=${empty}` };
+    return { ok: result.state === 'success' && empty, detail: `result=${result.state}, empty=${empty}` };
   },
 
-  async 'error-then-retry'(surface) {
-    const loader = loaderFor(surface);
+  async 'error-then-retry'(receiver) {
+    const loader = loaderFor(receiver);
     const deferreds: Array<ReturnType<typeof createDeferred<string>>> = [];
     let attempts = 0;
     const fn = () => {
@@ -119,15 +121,15 @@ const runners: Record<string, (s: BackgroundTasksElement) => Promise<Result>> = 
     deferreds[0].reject(new Error('network'));
     await p;
     await tick();
-    const failedSticky = stateOf(surface, 'sync') === 'error' && attempts === 1;
+    const failedSticky = stateOf(receiver, 'sync') === 'error' && attempts === 1;
 
-    const btn = surface.querySelector(
-      '.bt-entry[data-task-id="sync"] .bt-retry',
+    const btn = receiver.querySelector(
+      '.rr-entry[data-task-id="sync"] .rr-retry',
     ) as HTMLButtonElement | null;
     btn?.click();
     const reran = attempts === 2;
     await sleep(THRESHOLD_MS + 40);
-    const activeAgain = stateOf(surface, 'sync') === 'active';
+    const activeAgain = stateOf(receiver, 'sync') === 'active';
 
     return {
       ok: !!btn && failedSticky && reran && activeAgain,
@@ -135,11 +137,11 @@ const runners: Record<string, (s: BackgroundTasksElement) => Promise<Result>> = 
     };
   },
 
-  async 'determinate-progress'(surface) {
-    // A determinate loader: the resolved intent's `progress` drives the rail's
+  async 'determinate-progress'(receiver) {
+    // A determinate loader: the resolved intent's `progress` drives the receiver's
     // <progress> mode, so reported fractions render as a filling bar.
     const loader = new ResourceLoader({
-      target: surface.querySelector('div') as HTMLElement,
+      target: receiver.querySelector('div') as HTMLElement,
       timings: { debounced: THRESHOLD_MS },
       intent: { progress: 'determinate' },
     });
@@ -147,20 +149,20 @@ const runners: Record<string, (s: BackgroundTasksElement) => Promise<Result>> = 
     const p = backgroundLoad(loader, () => d.promise, { id: 'upload', label: 'Upload file' });
 
     await sleep(THRESHOLD_MS + 40);
-    const escalated = stateOf(surface, 'upload') === 'active';
+    const escalated = stateOf(receiver, 'upload') === 'active';
 
     loader.reportProgress(256, 1024); // 25% (loaded/total)
     await tick();
-    const quarter = progressOf(surface, 'upload');
+    const quarter = progressOf(receiver, 'upload');
 
     loader.reportProgress(768, 1024); // 75%
     await tick();
-    const threeQuarter = progressOf(surface, 'upload');
+    const threeQuarter = progressOf(receiver, 'upload');
 
     d.resolve('uploaded');
     await p;
     await tick();
-    const succeeded = stateOf(surface, 'upload') === 'success';
+    const succeeded = stateOf(receiver, 'upload') === 'success';
 
     return {
       ok: escalated && quarter === 0.25 && threeQuarter === 0.75 && succeeded,
@@ -187,27 +189,21 @@ function buildCard(scenario: HandoffScenario): { node: HTMLElement; run: () => P
   invPane.append(el('div', 'pane-label', 'Invariant'));
   invPane.append(el('pre', 'code', scenario.invariant));
   invPane.append(el('div', 'pane-label', 'Producer'));
-  invPane.append(el('pre', 'code', "backgroundLoad(loader, fn, { id, label })"));
+  invPane.append(el('pre', 'code', 'backgroundLoad(loader, fn, { id, label })'));
   grid.append(invPane);
 
   const livePane = el('div', 'pane');
-  livePane.append(el('div', 'pane-label', 'Live rail'));
+  livePane.append(el('div', 'pane-label', 'Reference receiver'));
   const preview = el('div', 'preview');
-  const surface = makeSurface(
-    scenario.id === 'error-then-retry'
-      ? { retry: '', persistence: 'sticky' }
-      : scenario.id === 'escalate-on-async' || scenario.id === 'determinate-progress'
-        ? { persistence: 'sticky' }
-        : {},
-  );
-  preview.append(surface);
+  const receiver = makeReceiver();
+  preview.append(receiver);
   livePane.append(preview);
   grid.append(livePane);
 
   section.append(grid);
 
   const run = async () => {
-    const result = await runners[scenario.id](surface);
+    const result = await runners[scenario.id](receiver);
     badge.className = `badge ${result.ok ? 'pass' : 'fail'}`;
     badge.textContent = result.ok ? `✓ ${result.detail}` : `✗ ${result.detail}`;
     if (result.ok) passCount++;
@@ -222,7 +218,7 @@ async function main(): Promise<void> {
 
   const summary = el('div', 'summary', '');
   const cards = handoffScenarios.map(buildCard);
-  // Mount first so every surface connects (scaffold + register listener) before run.
+  // Mount first so every receiver connects (scaffold + register listener) before run.
   host.replaceChildren(summary, ...cards.map((c) => c.node));
 
   for (const card of cards) await card.run();

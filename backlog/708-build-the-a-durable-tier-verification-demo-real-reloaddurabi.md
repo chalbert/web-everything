@@ -7,7 +7,7 @@ blockedBy: ["675"]
 dateOpened: "2026-06-15"
 dateStarted: "2026-06-15"
 dateResolved: "2026-06-15"
-graduatedTo: "demo:durable-tier-verification"
+graduatedTo: "block:background-task-surface"
 relatedProject: webintents
 tags: [background-task, durability, background-fetch, service-worker, verification, demo, e2e]
 ---
@@ -36,3 +36,12 @@ Implement the A′ ruling from #675: a SW-registered demo page under demos/ (Vit
   the /demos/ 11ty index renders the new card.
 - **Manual residual** (unchanged): a real Background-Fetch *network* transfer surviving reload — non-deterministic
   in automation — stays documented, not asserted.
+
+## Migrated to FUI (2026-06-17, #697 WE-side cutover)
+
+The durable-tier verification demo (`demos/durable-tier-verification/`) and its `.sw.spec.ts` were
+**block-impl** artifacts of `background-task-surface` (a moved family). Per #791/#812/#813 they migrated UP
+to Frontier UI: #813 hosts the demo on FUI, #816 added the FUI `chromium-sw` e2e lane. WE's local copies
+were deleted in #697 and the durable surface is now surfaced in WE via the **`background-task-surface`
+block's `fuiDemo`** iframe — hence `graduatedTo: block:background-task-surface` (the WE home that now
+embeds the FUI-hosted durable demo), replacing the removed `demo:durable-tier-verification` target.

@@ -7,13 +7,21 @@
 export { default as ResourceLoader } from './ResourceLoader';
 export type { LoadResult } from './ResourceLoader';
 
-// Background Task Surface handoff (producer side)
+// Loader → off-view-receiver handoff (producer side)
 export {
   backgroundLoad,
   ResourceLoaderHandle,
   BACKGROUND_TASK_REGISTER_EVENT,
+  BACKGROUND_TASK_DISMISS_EVENT,
 } from './backgroundHandoff';
 export type { BackgroundLoadOptions } from './backgroundHandoff';
+// The producer-owned wire contract (the standard handoff seam)
+export type {
+  LoaderSnapshot,
+  LoaderStateHandle,
+  BackgroundTaskRegisterDetail,
+  BackgroundTaskDismissDetail,
+} from './handoffContract';
 
 // Traits
 export { withSoftBlocking } from './traits/withSoftBlocking';

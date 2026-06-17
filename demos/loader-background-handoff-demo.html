@@ -6,8 +6,6 @@
   <title>Loader → Background Task Handoff Playground - Web Everything</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="/demos/playground.css">
-  <!-- Reuse the surface's rail styling (.bt-*) so the two playgrounds can't drift. -->
-  <link rel="stylesheet" href="/demos/background-task-surface-demo.css">
   <link rel="stylesheet" href="/demos/loader-background-handoff-demo.css">
 </head>
 <body>
@@ -26,28 +24,31 @@
     <header class="play-intro">
       <h1>Loader → Background Task Handoff Playground</h1>
       <p>
-        The <strong>producer</strong> half of the
-        <a href="/blocks/background-task-surface/">Background Task Surface</a> handoff: a real
+        The <strong>producer</strong> half of the Background Task handoff &mdash; a WE standard: a real
         <a href="/blocks/resource-loader/">Resource Loader</a> running <code>backgroundLoad()</code>
-        escalates a slow load into a live <code>&lt;background-tasks&gt;</code> rail. Each card drives
-        the <strong>real pair</strong> &mdash; not a scripted mock &mdash; and a <strong>badge proves an
-        invariant</strong> of the escalation contract.
+        escalates a slow load by dispatching a bubbling <code>background-task-register</code> event that
+        a <strong>receiver</strong> adopts off-view. The receiving end here is a minimal
+        <strong>reference receiver</strong> (not Frontier&nbsp;UI's <code>&lt;background-tasks&gt;</code>
+        surface, which is impl and demoed FUI-side) &mdash; so each card proves an
+        <strong>invariant of the escalation + handoff <em>contract</em></strong>, the cross-boundary seam,
+        rather than the surface's own behavior.
       </p>
       <p class="play-caveat">
         <strong>Escalation:async trigger.</strong> A load escalates exactly when it crosses the Loader's
         debounce threshold into <code>loading</code> &mdash; the moment the Loader already decided the
         work was slow enough to surface a pending UI. Fast loads that resolve first never enter
-        <code>loading</code>, so they never reach the rail. The threshold is shortened here for a snappy
+        <code>loading</code>, so they never register. The threshold is shortened here for a snappy
         demo. Scenarios and the controllable-promise lever come from the same shared fixture module the
         unit suite imports, so the badges and CI can't drift. This wires
-        <a href="/backlog/152-loader-background-task-handoff-wiring/">#152</a>.
+        <a href="/backlog/152-loader-background-task-handoff-wiring/">#152</a> (decoupled per
+        <a href="/backlog/812-how-we-apps-straddle-demos-consume-the-9-moved-block-impl-fa/">#812</a>).
       </p>
     </header>
 
     <div id="examples">Loading scenarios&hellip;</div>
   </main>
 
-  <!-- Playground: drives a real ResourceLoader → real <background-tasks> surface. Native APIs only. -->
+  <!-- Playground: drives a real ResourceLoader → the WE reference receiver. Native APIs only. -->
   <script type="module" src="/demos/loader-background-handoff-demo.ts"></script>
 </body>
 </html>

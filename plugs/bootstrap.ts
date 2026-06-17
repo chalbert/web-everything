@@ -50,9 +50,6 @@ import { registerRouter } from '../blocks/router/registerRouter';
 import { registerTransient } from '../blocks/transient/registerTransient';
 import { registerNavigation } from '../blocks/navigation/registerNavigation';
 import { registerForEach } from '../blocks/for-each/registerForEach';
-import { registerTypeAhead } from '../blocks/type-ahead/registerTypeAhead';
-import { registerDataGrid } from '../blocks/data-grid/registerDataGrid';
-import { registerDataGridEdit } from '../blocks/data-grid/registerDataGridEdit';
 import { registerTraits } from './webbehaviors/traitManifest';
 // The trait manifest — "The Map" (#116/#170). Static import so it resolves synchronously
 // *before* the first upgrade(): the observer's attribute filter is fixed at upgrade time, so
@@ -261,15 +258,6 @@ registerNavigation(window.attributes);
 
 // Register for-each directive
 registerForEach(window.attributes);
-
-// Register type-ahead behavior (type-ahead)
-registerTypeAhead(window.attributes);
-
-// Register data-grid behavior (grid:cell-navigation)
-registerDataGrid(window.attributes);
-
-// Register data-grid editable sub-pattern behavior (grid:cell-edit)
-registerDataGridEdit(window.attributes);
 
 // Register lazily-loaded traits from The Map — the trait manifest (#116/#170/#448). Must run
 // before the first upgrade(): defineLazy seeds the observer's attribute filter, fixed at upgrade

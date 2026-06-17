@@ -1,22 +1,23 @@
 /**
- * Loader → Background Task Surface handoff (producer side).
+ * Loader → off-view-receiver handoff (producer side).
  *
- * The {@link ../background-task-surface/BackgroundTasksElement | Background Task
- * Surface} adopts a live `LoaderStateHandle` carried by a bubbling
- * `background-task-register` event and hosts it off-view. This module is the
- * *producer* half: it adapts a real {@link ResourceLoader} into that handle and
- * dispatches the registration when the loader's work goes async.
+ * A *receiver* (Frontier UI's `<background-tasks>` surface in production; the
+ * `__fixtures__/reference-receiver` in WE) adopts a live `LoaderStateHandle`
+ * carried by a bubbling `background-task-register` event and hosts it off-view.
+ * This module is the *producer* half: it adapts a real {@link ResourceLoader} into
+ * that handle and dispatches the registration when the loader's work goes async.
  *
  * **Escalation:async trigger.** Rather than invent a new threshold, this reuses
  * the Loader's own debounce: a load escalates exactly when it crosses into the
  * `loading` state (i.e. it was slow enough that the Loader decided to surface a
  * pending UI). Fast operations that resolve before the timing threshold never
- * enter `loading`, so they never escalate to the rail. Backgrounding is opt-in:
- * call {@link backgroundLoad} instead of `loader.load()`.
+ * enter `loading`, so they never escalate. Backgrounding is opt-in: call
+ * {@link backgroundLoad} instead of `loader.load()`.
  *
- * The coupling to the surface is a bubbling DOM `CustomEvent` only — the type
- * import below is erased at runtime, so the producer carries no runtime
- * dependency on the surface element.
+ * The coupling to the receiver is a bubbling DOM `CustomEvent` only — WE owns the
+ * producer half and the {@link ./handoffContract | wire contract}; the receiver
+ * impl lives in `@frontierui/blocks`, reached only across the iframe boundary, so
+ * the producer carries no runtime dependency on it.
  *
  * @module blocks/resource-loader
  */
@@ -29,13 +30,13 @@ import type {
   ResourceProgressDetail,
   TraitFactory,
 } from './types';
-// Type-only — the surface owns the handoff contract; no runtime coupling.
+// The producer-owned wire contract — pure types, erased at runtime; no runtime coupling.
 import type {
   LoaderSnapshot,
   LoaderStateHandle,
   BackgroundTaskRegisterDetail,
   BackgroundTaskDismissDetail,
-} from '../background-task-surface/types';
+} from './handoffContract';
 
 /** The bubbling registration event the surface listens for. */
 export const BACKGROUND_TASK_REGISTER_EVENT = 'background-task-register';

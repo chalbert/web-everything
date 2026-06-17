@@ -1,19 +1,19 @@
 /**
- * E2E: prove `nav:list` and `type-ahead` auto-upgrade via the bootstrap registry.
+ * E2E: prove `nav:list` auto-upgrades via the bootstrap registry.
  *
  * Backlog #155, the sibling of #144 (which closed this loop for `grid:cell-navigation`). Every other
- * place that exercises these two behaviors ATTACHES them by hand or relies on a demo that "looks
- * right" with authored state. Nothing proved that a plain authored `<nav nav:list>` / `<ul type-ahead>`
+ * place that exercises this behavior ATTACHES it by hand or relies on a demo that "looks
+ * right" with authored state. Nothing proved that a plain authored `<nav nav:list>`
  * on a real bootstrapped page upgrades through the live CustomAttributeRegistry — i.e. that the
- * `registerNavigation(window.attributes)` and `registerTypeAhead(window.attributes)` lines in
- * plugs/bootstrap.ts actually fire.
+ * `registerNavigation(window.attributes)` line in plugs/bootstrap.ts actually fires.
  *
  * The shared fixture (demos/registered-behaviors-bootstrap-fixture.html) does ONLY
- * `window.attributes.upgrade(document.body)` — no manual attach. Both widgets are authored with NO
- * pre-seeded active state, so the behavior-produced state (a roving tabindex; a keystroke-driven focus
- * move) is itself proof the registration line fired. Each assertion fails the moment a line stops
- * firing — one shared home so a new behavior `define` in bootstrap.ts that never fires can't slip
- * through. (grid:cell-navigation / grid:cell-edit are guarded by their own bootstrap specs.)
+ * `window.attributes.upgrade(document.body)` — no manual attach. The widget is authored with NO
+ * pre-seeded active state, so the behavior-produced state (a roving tabindex) is itself proof the
+ * registration line fired. Each assertion fails the moment that line stops firing — one shared home so
+ * a new behavior `define` in bootstrap.ts that never fires can't slip through. (type-ahead and the
+ * data-grid grid:cell-navigation / grid:cell-edit behaviors were deleted from WE in #697 — impl moved to
+ * @frontierui/blocks, demos FUI-hosted — so their bootstrap cases were retired; nav:list carries the proof.)
  */
 
 import { test, expect } from '@playwright/test';
@@ -53,28 +53,6 @@ test.describe('registered behaviors bootstrap auto-upgrade', () => {
 
       // Still exactly one roving tab stop across the whole nav.
       await expect(page.locator('[data-test="nav"] [tabindex="0"]')).toHaveCount(1);
-    });
-  });
-
-  test.describe('type-ahead', () => {
-    test('typing a prefix moves focus to the matching option — without any manual attach', async ({ page }) => {
-      const argentina = page.locator('[data-test="opt-argentina"]');
-      const brazil = page.locator('[data-test="opt-brazil"]');
-      const canada = page.locator('[data-test="opt-canada"]');
-
-      // The behavior seeds no visible state; focus an option, then a printable key drives the move —
-      // which can only work if TypeAheadBehavior bound keydown via the registration.
-      await argentina.focus();
-      await expect(argentina).toBeFocused();
-
-      await page.keyboard.press('b');
-      await expect(brazil).toBeFocused();
-
-      // Wait out the buffer reset (default 500ms) so the next key starts a fresh search rather than
-      // appending to "b" — proves the idle-reset path is live too, not just the first keystroke.
-      await page.waitForTimeout(600);
-      await page.keyboard.press('c');
-      await expect(canada).toBeFocused();
     });
   });
 });
