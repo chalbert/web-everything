@@ -1,0 +1,18 @@
+[
+  {
+    "id": "material-like",
+    "name": "Material-like",
+    "summary": "MD3-flavored bundle — comfortable density, natural motion, lift surfaces, generously rounded corners. Exercises every optional field of the manifest schema.",
+    "status": "concept",
+    "ownedByProject": "webtheme",
+    "manifest": "design-systems/material-like.designsystem.json"
+  },
+  {
+    "id": "acme-brand",
+    "name": "Acme Brand",
+    "summary": "A colors-only brand — the minimal end of the schema. Overrides the accent token and otherwise inherits every platform default.",
+    "status": "concept",
+    "ownedByProject": "webtheme",
+    "manifest": "design-systems/acme-brand.designsystem.json"
+  }
+]

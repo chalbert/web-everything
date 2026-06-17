@@ -18,7 +18,7 @@ import { buildReport, source as reportSource, finding as reportFinding, section 
 import {
   BACKLOG_STATUSES, BACKLOG_TYPES, WORK_ITEMS, FIB, FILE,
   dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated,
-  checkStatus, validateProtocol, validatePreset, validateIntent, validateCapability, validateCapabilityMatrix,
+  checkStatus, validateProtocol, validatePreset, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, permalinkSegment, validateViteProxyCoverage,
   validateModuleResolutionLock,
   findUnquotedColonScalars, lintBacklogItemRendering,
@@ -94,6 +94,7 @@ const semantics = arr(readJson('semantics.json'));
 const research = arr(readJson('researchTopics.json'));
 const protocols = arr(readJson('protocols.json'));
 const presets = arr((readJson('assemblerPresets.json') || {}).presets);
+const designSystems = arr(readJson('designSystems.json'));
 const projects = arr(readJson('projects.json'));
 const intents = arr(readJson('intents.json'));
 const capabilities = arr(readJson('capabilities.json'));
@@ -291,6 +292,28 @@ for (const preset of presets) {
   for (const w of pw2) warn(w.message, w.descriptor);
 }
 dupCheck(presets.map((p) => ({ id: p.name })), 'assemblerPresets.json');
+
+// ── 6b-ter. Design systems (#747 Fork-3-A / #871, theme+intents bundles, surfaced via /design-systems/) ──
+// A thin `designSystems.json` rendering index pointing at manifests of shape
+// `{ extends, themeTokens (DTCG ref), intentDefaults?, traitDefaults? }`. The per-entry field/status/
+// reference rules + the manifest-shape checks (themeTokens resolves, extends resolves, optional fields)
+// are the pure `validateDesignSystem`; the script injects the manifest reads (resolved from repo root,
+// the DTCG ref resolved relative to its own manifest's dir).
+const readManifest = (rel) => {
+  const p = join(ROOT, rel);
+  if (!existsSync(p)) return null;
+  try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; }
+};
+const tokenRefResolves = (manifestRel, tokenRef) =>
+  existsSync(join(dirname(join(ROOT, manifestRel)), tokenRef));
+const designSystemIds = new Set(designSystems.map((d) => d.id).filter(Boolean));
+const designSystemCtx = { projectById, intentById, designSystemIds, readManifest, tokenRefResolves };
+for (const ds of designSystems) {
+  const { errors: de, warnings: dw } = validateDesignSystem(ds, designSystemCtx);
+  for (const e of de) err(e.message, e.descriptor);
+  for (const w of dw) warn(w.message, w.descriptor);
+}
+dupCheck(designSystems, 'designSystems.json');
 
 dupCheck(intents, 'intents.json');
 

@@ -117,7 +117,7 @@ export default defineConfig({
       },
       // Proxy doc pages and assets to 11ty server (but not demos/*.html, TypeScript plugs, or blocks)
       // Note: /blocks/*.ts are served by Vite, /blocks/ doc pages are proxied
-      '^/(projects|adapters|intents|capabilities|protocols|presets|plugs/(?!.*\\.ts)|cases|mission|semantics|states|resources|author|governance|research|backlog|validation-rules|project-lifecycle|assets|css|js|sitemap.xml|build-id.json)': {
+      '^/(projects|adapters|intents|capabilities|protocols|design-systems|presets|plugs/(?!.*\\.ts)|cases|mission|semantics|states|resources|author|governance|research|backlog|validation-rules|project-lifecycle|assets|css|js|sitemap.xml|build-id.json)': {
         target: 'http://localhost:8080',
         changeOrigin: true,
       },

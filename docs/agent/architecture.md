@@ -21,9 +21,14 @@
 | **blocks** | Reusable implementations | `@frontierui/blocks` (vendored at `blocks/` pending #170) | No (import directly) | SimpleStore, OnEventAttribute, CallParser |
 | **plug / block contracts** | The standard's plug list + block protocols (what WE owns) | `src/_data/plugs.json`, `src/_data/blocks.json` + `block-descriptions/*` | No (no runnable code) | CustomPositioner, CustomEditorEngine |
 | **protocols** | Conformance contracts owned by a Project (interfaces, registry shapes, observable states/events) | `src/_data/protocols.json` + body in `project-*.njk` | No (no runnable code) | Validation, Error Recovery, Anchor Positioning |
+| **design systems** | Named theme+intents bundles ([#747](../../backlog/747-design-system-equals-theme-plus-intents-bundle-manifest-catalog.md) Fork-3-A) — a thin rendering index pointing at manifests | `src/_data/designSystems.json` (index) + `design-systems/*.designsystem.json` (manifests) + DTCG `*.tokens.json` | No (config, consumed by the #749 switcher) | Material-like, Acme Brand |
 
 - **Plugged mode**: bootstrap applies patches, exposes globals on `window`.
 - **Unplugged mode**: direct imports, no patches, tree-shakeable. (The unplugged, non-invasive library is the real product surface — #606.)
+
+**Authoring a design system** ([#747](../../backlog/747-design-system-equals-theme-plus-intents-bundle-manifest-catalog.md) Fork-3-A, built in [#871](../../backlog/871-build-the-design-system-bundle-infrastructure-designsystems-.md)) — two layers, surfaced at `/design-systems/`:
+1. Drop a manifest at `design-systems/<id>.designsystem.json` of shape `{ extends, themeTokens, intentDefaults?, traitDefaults? }`. `themeTokens` is the **only required field** — a DTCG token file (e.g. `./<id>.tokens.json`, resolved relative to the manifest) that *references*, never embeds, its tokens. `extends` resolves to `@webtheme/default` (the platform default) or another design-system id. `intentDefaults` keys must resolve to registered intents (`density`/`motion`/`surface`/…); `traitDefaults` is **presentational only** (radius/feel — Fork 4-A; behavioral-trait activation never enters the bundle).
+2. Add a thin index entry to `src/_data/designSystems.json` — `{ id, name, summary, status, ownedByProject, manifest }` — so the catalog can iterate it. The `validateDesignSystem` rule in `check-standards-rules.mjs` enforces both layers; the `/design-systems/` page (`src/design-systems.njk`) and the nav entry auto-render from the index.
 
 ## Key patterns
 

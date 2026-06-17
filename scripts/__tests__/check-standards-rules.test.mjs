@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
 import {
-  checkStatus, validateProtocol, validateIntent, validateCapability, validateCapabilityMatrix,
+  checkStatus, validateProtocol, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, isSegmentCovered, permalinkSegment,
   validateViteProxyCoverage, deDateReport,
   isExportsSafeTarget, validateModuleResolutionLock, findRawHtmlInMarkdown,
@@ -92,6 +92,59 @@ describe('validateProtocol — fields, refs, anchor probe', () => {
   it('errors when the anchor is missing from an existing partial', () => {
     expect(messages(run({ anchor: 'ghost-anchor' })))
       .toContainEqual(expect.stringContaining('anchor "ghost-anchor" not found'));
+  });
+});
+
+// ── Design systems (§6b-ter, #747 Fork-3-A / #871) ─────────────────────────────
+describe('validateDesignSystem — registry + manifest two-layer shape', () => {
+  const manifests = {
+    'ds/full.designsystem.json': {
+      extends: '@webtheme/default', themeTokens: './full.tokens.json',
+      intentDefaults: { density: 'comfortable' }, traitDefaults: { radius: 'lg' },
+    },
+    'ds/minimal.designsystem.json': { extends: '@webtheme/default', themeTokens: './minimal.tokens.json' },
+    'ds/no-tokens.designsystem.json': { extends: '@webtheme/default' },
+    'ds/bad-extends.designsystem.json': { extends: '@nope/ghost', themeTokens: './full.tokens.json' },
+    'ds/bad-intent.designsystem.json': { themeTokens: './full.tokens.json', intentDefaults: { ghost: 'x' } },
+    'ds/missing-token-file.designsystem.json': { themeTokens: './gone.tokens.json' },
+  };
+  const ctx = {
+    projectById: new Map([['webtheme', { id: 'webtheme' }]]),
+    intentById: new Map([['density', { id: 'density' }]]),
+    designSystemIds: new Set(['full', 'minimal']),
+    readManifest: (rel) => manifests[rel] || null,
+    // every referenced token file resolves except the explicit "gone" one
+    tokenRefResolves: (_m, ref) => ref !== './gone.tokens.json',
+  };
+  const base = { id: 'full', name: 'Full', summary: 's', status: 'concept', ownedByProject: 'webtheme', manifest: 'ds/full.designsystem.json' };
+  const run = (o) => validateDesignSystem({ ...base, ...o }, ctx);
+
+  it('stays clean for a well-formed full bundle', () => {
+    expect(run({}).errors).toEqual([]);
+  });
+  it('stays clean for a colors-only minimal bundle (optional fields omitted)', () => {
+    expect(run({ id: 'minimal', manifest: 'ds/minimal.designsystem.json' }).errors).toEqual([]);
+  });
+  it('errors on a missing required registry field', () => {
+    expect(messages(run({ summary: '' }))).toContainEqual(expect.stringContaining('missing required field "summary"'));
+  });
+  it('errors on an unresolved ownedByProject', () => {
+    expect(messages(run({ ownedByProject: 'ghost' }))).toContainEqual(expect.stringContaining('ownedByProject "ghost" does not resolve'));
+  });
+  it('errors when the manifest pointer does not resolve', () => {
+    expect(messages(run({ manifest: 'ds/absent.designsystem.json' }))).toContainEqual(expect.stringContaining('does not resolve (missing or not valid JSON)'));
+  });
+  it('errors when the manifest omits themeTokens (the only required manifest field)', () => {
+    expect(messages(run({ id: 'x', manifest: 'ds/no-tokens.designsystem.json' }))).toContainEqual(expect.stringContaining('missing required field "themeTokens"'));
+  });
+  it('errors when themeTokens does not resolve relative to the manifest', () => {
+    expect(messages(run({ id: 'x', manifest: 'ds/missing-token-file.designsystem.json' }))).toContainEqual(expect.stringContaining('themeTokens "./gone.tokens.json" does not resolve'));
+  });
+  it('errors when extends resolves to neither the platform default nor a known design system', () => {
+    expect(messages(run({ id: 'x', manifest: 'ds/bad-extends.designsystem.json' }))).toContainEqual(expect.stringContaining('extends "@nope/ghost" does not resolve'));
+  });
+  it('errors when an intentDefaults key is not a known intent', () => {
+    expect(messages(run({ id: 'x', manifest: 'ds/bad-intent.designsystem.json' }))).toContainEqual(expect.stringContaining('intentDefaults "ghost" does not resolve'));
   });
 });
 
@@ -324,6 +377,17 @@ describe('real data stays clean (per family)', () => {
   });
   it('intents', () => {
     expect(collect(intents, (i) => validateIntent(i, { capabilityIds }))).toEqual([]);
+  });
+  it('design systems', () => {
+    const designSystems = loadJson('designSystems.json');
+    const designSystemIds = new Set(designSystems.map((d) => d.id).filter(Boolean));
+    const readManifest = (rel) => {
+      const p = join(ROOT, rel);
+      if (!existsSync(p)) return null;
+      try { return JSON.parse(readFileSync(p, 'utf8')); } catch { return null; }
+    };
+    const tokenRefResolves = (manifestRel, ref) => existsSync(join(dirname(join(ROOT, manifestRel)), ref));
+    expect(collect(designSystems, (d) => validateDesignSystem(d, { projectById, intentById, designSystemIds, readManifest, tokenRefResolves }))).toEqual([]);
   });
   it('capabilities', () => {
     expect(collect(capabilities, (c) => validateCapability(c))).toEqual([]);
@@ -822,5 +886,34 @@ describe('lintBacklogItemRendering (#845 — the shared per-item rendering lint)
     const { errors, warnings } = lintBacklogItemRendering({ item: item(), body });
     expect(errors).toEqual([]);
     expect(warnings).toEqual([]);
+  });
+
+  describe('premature-epic-closure guard (#777)', () => {
+    const epic = (over = {}) => item({ workItem: 'epic', status: 'resolved', ...over });
+
+    it('errors on an unchecked scope box in a RESOLVED epic', () => {
+      const body = '# T\n\n- [ ] migration slice not done\n';
+      expect(lintBacklogItemRendering({ item: epic(), body }).errors.some((e) => /RESOLVED epic with .* unchecked scope box/.test(e))).toBe(true);
+    });
+
+    it('warns on forward-looking uncarved-slice language in a RESOLVED epic', () => {
+      const body = '# T\n\nThe chrome slice is not carved yet (gated on #765).\n';
+      const { errors, warnings } = lintBacklogItemRendering({ item: epic(), body });
+      expect(errors).toEqual([]);
+      expect(warnings.some((w) => /uncarved-slice language/.test(w))).toBe(true);
+    });
+
+    it('does not fire on a checked-and-cited box, or on a non-resolved/non-epic item', () => {
+      const checked = '# T\n\n- [x] slice shipped (#123)\n';
+      expect(lintBacklogItemRendering({ item: epic(), body: checked }).errors).toEqual([]);
+      const openEpic = '# T\n\n- [ ] not carved yet\n';
+      expect(lintBacklogItemRendering({ item: epic({ status: 'open' }), body: openEpic }).errors).toEqual([]);
+      expect(lintBacklogItemRendering({ item: item({ status: 'resolved' }), body: openEpic }).errors).toEqual([]);
+    });
+
+    it('ignores an unchecked box inside a fenced code block', () => {
+      const body = '# T\n\n```\n- [ ] this is sample text, not scope\n```\n';
+      expect(lintBacklogItemRendering({ item: epic(), body }).errors).toEqual([]);
+    });
   });
 });

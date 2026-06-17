@@ -1,0 +1,6 @@
+{
+  "color": {
+    "$type": "color",
+    "accent": { "$value": "oklch(0.62 0.21 25)", "$description": "Acme brand red — a colors-only brand override." }
+  }
+}

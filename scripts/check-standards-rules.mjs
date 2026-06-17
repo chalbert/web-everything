@@ -525,6 +525,37 @@ export function lintBacklogItemRendering({ item, body }) {
     }
   }
 
+  // Premature-epic-closure guard (the #777 lesson). The cross-item guard in check-standards.mjs only
+  // catches a resolved epic with an open CHILD; #777 resolved with its one child done while four
+  // migration slices lived only as prose ("Not carved yet (gated on #765)"), so it slipped through —
+  // an umbrella closed over uncarved scope. Two body-level tells of that, scanned only on a RESOLVED
+  // epic, skipping fenced code:
+  //   1. an unchecked GFM task box `- [ ]` — a literal "not done" marker. Closing over it is always a
+  //      contradiction (check the box once the scope ships, or don't resolve) → ERROR.
+  //   2. forward-looking uncarved-slice language ("not carved", "carve once/after/later") — softer,
+  //      because a deliberate deferral that cites its tracking item (#666 → #665) is legitimate → WARN.
+  if (item.status === 'resolved' && item.workItem === 'epic') {
+    const uncheckedBoxes = [];
+    const uncarvedTells = [];
+    let inFence = false;
+    body.split('\n').forEach((raw, i) => {
+      const l = raw.trim();
+      if (/^```/.test(l)) { inFence = !inFence; return; }
+      if (inFence) return;
+      if (/^[-*]\s*\[ \]/.test(l)) uncheckedBoxes.push(i + 1);
+      if (/\b(not (yet )?carved|left uncarved|uncarved|carve (once|after|later))\b/i.test(l)) uncarvedTells.push(i + 1);
+    });
+    if (uncheckedBoxes.length)
+      errors.push(`Backlog item "${id}" is a RESOLVED epic with ${uncheckedBoxes.length} unchecked scope box(es) ` +
+        `(\`- [ ]\` @ line(s) ${uncheckedBoxes.join(', ')}) — an umbrella closed over work it still marks as not done ` +
+        `(the #777 footgun). If the scope shipped, check the box and cite the child that delivered it; if it didn't, ` +
+        `reopen the epic (status: open) and carve the remaining slice(s). See docs/agent/backlog-workflow.md → "Closing out".`);
+    if (uncarvedTells.length)
+      warnings.push(`Backlog item "${id}" is a RESOLVED epic whose body still uses uncarved-slice language @ line(s) ` +
+        `${uncarvedTells.join(', ')} — verify that scope actually shipped or is a deliberate deferral that cites its ` +
+        `tracking item (#NNN). If it was simply never sliced, reopen and carve it rather than closing the umbrella over it.`);
+  }
+
   return { errors, warnings };
 }
 
@@ -543,6 +574,7 @@ export const FILE = {
   CapabilityAdapter: 'src/_data/capabilityMatrix.json', Project: 'src/_data/projects.json',
   Research: 'src/_data/researchTopics.json',
   Preset: 'src/_data/assemblerPresets.json',
+  DesignSystem: 'src/_data/designSystems.json',
 };
 
 // A spec entity with no matching description .njk — the model writes the prose; `file` is the path to create.
@@ -665,6 +697,77 @@ export function validatePreset(preset, ctx) {
     });
   }
   return { errors, warnings: [] };
+}
+
+/**
+ * Validate a single design-system bundle (#747 Fork-3-A, #871) — a thin registry entry that points at
+ * a manifest of shape `{ extends, themeTokens (DTCG ref), intentDefaults?, traitDefaults? }`. Two layers
+ * are checked: the rendering index (id/name/summary/status/ownedByProject + a `manifest` pointer that
+ * resolves) and the manifest it points at (per #747: `themeTokens` is the only required field, it must
+ * resolve as a file, `extends` must resolve to the platform default or another design system, and every
+ * other field is optional). `intentDefaults` keys, when present, must resolve to known intents (the
+ * bundle sets intent defaults — Fork 2-A); `traitDefaults` stays free-form (Fork 4-A's forward-compatible
+ * presentational slot — the behavioral traits in traits.json are deliberately NOT a valid target here).
+ *
+ * Pure: manifest reads are injected — `readManifest(relPath) => object|null` (null = absent/unparseable)
+ * and `tokenRefResolves(manifestRelPath, tokenRef) => boolean` (resolves the DTCG ref relative to the
+ * manifest's own directory) — so the rule is exercisable with synthetic manifests.
+ * @param ctx { projectById: Map, intentById: Map, designSystemIds: Set, readManifest, tokenRefResolves }
+ */
+export function validateDesignSystem(ds, ctx) {
+  const { projectById, intentById, designSystemIds, readManifest, tokenRefResolves } = ctx;
+  const errors = [];
+  const warnings = [];
+  const err = (m, descriptor) => errors.push({ message: m, descriptor });
+  const warn = (m, descriptor) => warnings.push({ message: m, descriptor });
+  const id = ds.id || '<no id>';
+  for (const f of ['id', 'name', 'summary', 'status', 'ownedByProject', 'manifest']) {
+    if (!ds[f]) err(`Design system "${id}" missing required field "${f}"`,
+      dMissingField('DesignSystem', ds.id, FILE.DesignSystem, f));
+  }
+  for (const e of checkStatus('DesignSystem', ds.id, ds.status)) err(e.message, e.descriptor);
+  if (ds.ownedByProject && !projectById.has(ds.ownedByProject))
+    err(`Design system "${id}" ownedByProject "${ds.ownedByProject}" does not resolve in projects.json`,
+      dUnresolvedRef('DesignSystem', ds.id, FILE.DesignSystem, 'ownedByProject', ds.ownedByProject, 'projects.json'));
+  if (!ds.manifest) return { errors, warnings };
+
+  const manifest = readManifest(ds.manifest);
+  if (!manifest) {
+    err(`Design system "${id}" manifest "${ds.manifest}" does not resolve (missing or not valid JSON)`,
+      dUnresolvedRef('DesignSystem', ds.id, FILE.DesignSystem, 'manifest', ds.manifest, ds.manifest));
+    return { errors, warnings };
+  }
+  // themeTokens — the only required manifest field; it must resolve as a DTCG file.
+  if (!manifest.themeTokens)
+    err(`Design system "${id}" manifest missing required field "themeTokens" (a DTCG token ref)`,
+      dMissingField('DesignSystem', ds.id, ds.manifest, 'themeTokens'));
+  else if (!tokenRefResolves(ds.manifest, manifest.themeTokens))
+    err(`Design system "${id}" themeTokens "${manifest.themeTokens}" does not resolve relative to ${ds.manifest}`,
+      dUnresolvedRef('DesignSystem', ds.id, ds.manifest, 'themeTokens', manifest.themeTokens, ds.manifest));
+  // extends — must resolve to the platform default sentinel or another registered design system.
+  if (manifest.extends !== undefined) {
+    const ok = manifest.extends === '@webtheme/default' || designSystemIds.has(manifest.extends);
+    if (!ok)
+      err(`Design system "${id}" extends "${manifest.extends}" does not resolve (expected "@webtheme/default" or another design-system id)`,
+        dUnresolvedRef('DesignSystem', ds.id, ds.manifest, 'extends', manifest.extends, FILE.DesignSystem));
+  }
+  // intentDefaults — optional; when present every key must resolve to a known intent (Fork 2-A).
+  if (manifest.intentDefaults !== undefined) {
+    if (typeof manifest.intentDefaults !== 'object' || Array.isArray(manifest.intentDefaults))
+      err(`Design system "${id}" intentDefaults must be an object of { intentId: value }`,
+        dMissingField('DesignSystem', ds.id, ds.manifest, 'intentDefaults'));
+    else for (const intentId of Object.keys(manifest.intentDefaults))
+      if (!intentById.has(intentId))
+        err(`Design system "${id}" intentDefaults "${intentId}" does not resolve in intents.json`,
+          dUnresolvedRef('DesignSystem', ds.id, ds.manifest, 'intentDefaults', intentId, 'intents.json'));
+  }
+  // traitDefaults — optional, presentational only (Fork 4-A). Kept free-form: today's behavioral traits
+  // (traits.json) are deliberately not a valid target, so we only type-check the slot's shape.
+  if (manifest.traitDefaults !== undefined &&
+      (typeof manifest.traitDefaults !== 'object' || Array.isArray(manifest.traitDefaults)))
+    err(`Design system "${id}" traitDefaults must be an object of presentational { trait: value }`,
+      dMissingField('DesignSystem', ds.id, ds.manifest, 'traitDefaults'));
+  return { errors, warnings };
 }
 
 /**

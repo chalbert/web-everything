@@ -1,0 +1,11 @@
+{
+  "color": {
+    "$type": "color",
+    "accent": { "$value": "oklch(0.55 0.20 265)", "$description": "MD3-flavored primary — a saturated indigo." },
+    "surface": { "$value": "oklch(0.99 0.005 265)" }
+  },
+  "radius": {
+    "$type": "dimension",
+    "lg": { "$value": "1rem", "$description": "Material's generously rounded corners." }
+  }
+}
