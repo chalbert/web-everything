@@ -1,0 +1,104 @@
+<h2>The Question</h2>
+<p>
+  The polyglot adapter panel (<a href="/backlog/753-polyglot-adapter-panel/">#753</a>), under the Block
+  Explorer epic (<a href="/backlog/746-block-explorer-interactive-fui-block-workbench/">#746</a>), generates
+  a block across React / Vue and <strong>live-tests each</strong>. <a href="/backlog/821-consume-mode-per-framework-wrapper-generator-block-cem-react/">#821</a>
+  shipped the <strong>WE</strong>-owned generator — a pure <code>generateWrapper(declaration, target)</code>
+  over a block's <a href="/protocols/#protocol-custom-elements-manifest">Custom Elements Manifest</a>. But the
+  panel that <em>displays + live-tests</em> that source is <strong>FUI</strong>
+  (<code>locus: frontierui</code>, per the docs-rendering boundary — WE never renders FUI block code).
+  This survey grounds <a href="/backlog/855-decide-the-we-fui-wrapper-handoff-mechanism-for-the-polyglot/">#855</a>:
+  <strong>how does the FUI panel obtain and live-test the WE-generated wrapper source across the repo seam?</strong>
+  The item filed three options cold — (A) a build-time published artifact, (B) a bundle the
+  <code>fuiDemo</code> iframe loads, (C) a sandbox that generates on demand.
+</p>
+
+<h2>What the survey found</h2>
+<p>
+  Two tree facts shrink the question before any survey: the generator is already a <strong>pure, importable,
+  no-DOM/no-FUI function</strong> the codebase explicitly intends FUI to call directly (#821's CLI note), and
+  consume-mode output is a <strong>pure function of the CEM</strong> — deterministic, no per-user input — so
+  "regenerate on demand" produces output that never varies.
+</p>
+
+<h3>1 · How shipping WC libraries distribute generated wrappers</h3>
+<p>
+  The dominant pattern is unambiguous and one-directional: <strong>wrappers are a build-time artifact of the
+  source library, published as a package the consumer reads. On-demand/runtime generation in the consumer has
+  no production precedent.</strong>
+</p>
+<table>
+  <thead><tr><th>Tool</th><th>Generation locus</th><th>CEM-driven?</th><th>Distribution</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><a href="https://stenciljs.com/docs/output-targets">Stencil output targets</a></td>
+      <td>The component library's build</td>
+      <td>No (internal metadata)</td>
+      <td>A separately published npm package</td>
+    </tr>
+    <tr>
+      <td><a href="https://www.npmjs.com/package/@lit-labs/gen-wrapper-react">Lit Labs <code>gen-wrapper-*</code></a></td>
+      <td>The element library's build</td>
+      <td><strong>Yes</strong> — reads <code>custom-elements.json</code></td>
+      <td>Published wrapper source/package</td>
+    </tr>
+    <tr>
+      <td><a href="https://lit.dev/docs/frameworks/react/"><code>@lit/react</code> <code>createComponent</code></a></td>
+      <td>n/a — runtime, hand-wired per element</td>
+      <td>No</td>
+      <td>Imported at app render time</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  Only Lit's <code>gen-wrapper-*</code> is CEM-driven — the exact shape of WE's #821 generator — and it
+  generates at the <strong>source library</strong> build, then publishes. No shipping tool generates on
+  demand in the consumer. <strong>This settles A vs C and dissolves B:</strong> (A) build-time is the
+  universal precedent; (C) on-demand has no precedent and no benefit for deterministic output; (B) "a bundle
+  the iframe loads" only describes <em>where the bundle sits</em>, an impl detail of the chosen build-time
+  handoff — not a distinct mechanism.
+</p>
+
+<h3>2 · In-browser live-test sandboxes (the FUI panel's render)</h3>
+<p>
+  The live-test render is FUI's regardless of the handoff (embedded in the WE block page via the #701
+  <code>fuiDemo</code> iframe), so the sandbox <em>technology</em> is FUI impl WE does not mandate. Guidance:
+  <strong>esm.sh + import maps</strong> is the lightest credible multi-framework path (React TSX <em>and</em>
+  Vue SFC, no cross-origin-isolation tax inside an embedded iframe); <a href="https://sandpack.codesandbox.io/">Sandpack</a>
+  is the turnkey source-string-in middle ground; <a href="https://www.npmjs.com/package/esbuild-wasm">esbuild-wasm</a>
+  fits only a React-only commitment (no Vue SFC); <a href="https://webcontainers.io/">WebContainers</a> is
+  overkill and pays a COOP/COEP embedding tax.
+</p>
+
+<h3>3 · What survives as a decision</h3>
+<p>
+  The three filed options collapse to <strong>one forced invariant + one genuine fork</strong>. Forced:
+  <strong>build-time handoff (A), FUI-owned sandbox</strong>. The real fork is <em>what crosses the WE→FUI
+  boundary</em>:
+</p>
+<ul>
+  <li>
+    <strong>A1 — WE publishes the derived wrapper artifact.</strong> WE runs <code>gen:wrapper</code> and
+    publishes the wrapper source set as a versioned <code>@webeverything/*</code> artifact; FUI imports dumb
+    strings. Matches the Stencil/Lit "publish a wrapper package" precedent. Con: a third published thing that
+    is only a pure function of two already-published WE things (the CEM + the generator).
+  </li>
+  <li>
+    <strong>A2 — WE publishes the generator + CEM contract; FUI derives at its build.</strong> Package
+    <code>generateWrapper</code> as <code>@webeverything/gen-wrapper</code> (already a pure no-DOM export)
+    alongside the ratified CEM (#626); the FUI demo build materializes wrappers itself. Single source of
+    truth = generator + CEM; matches the existing #821 authoring intent. Con: WE codegen runs inside FUI's
+    build; less faithful to the Stencil/Lit generate-at-source locus.
+  </li>
+</ul>
+<p>
+  <strong>Recommended default: A2</strong> (med-high) — the generator already exists as a pure importable
+  function the codebase intends FUI to call; A2 keeps one source of truth (generator + ratified CEM), avoids
+  versioning a derived artifact, and stays fresh by construction. <strong>The residual is</strong> prior-art
+  fidelity: Stencil/Lit generate at the source library and publish the wrapper (A1), so if WE later wants a
+  sole-generation execution site or a cacheable pre-built CDN artifact, A1 is added then — not excluded, just
+  not the consume-mode-probe default.
+</p>
+<p>
+  Full grounding in <code>reports/2026-06-17-we-fui-wrapper-handoff.md</code>.
+</p>
