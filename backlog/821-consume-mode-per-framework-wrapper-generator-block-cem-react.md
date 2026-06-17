@@ -2,10 +2,13 @@
 type: issue
 workItem: story
 size: 5
-status: open
+status: resolved
 parent: "746"
 relatedProject: webdocs
 dateOpened: "2026-06-16"
+dateStarted: "2026-06-17"
+dateResolved: "2026-06-17"
+graduatedTo: scripts/gen-wrapper/genWrapper.mjs
 crossRef: { url: /backlog/811-decide-the-forward-component-emit-substrate-per-framework-em/, label: "Substrate decision (#811)" }
 tags: [webdocs, adapters, polyglot, generation, conformance, wrapper, cem]
 ---
@@ -47,11 +50,11 @@ Block Explorer panel that *displays + live-tests* it lives in FUI (#746 homes th
 
 ## Acceptance
 
-- [ ] Given a block's CEM, the generator emits valid React **and** Vue wrapper source that references the
+- [x] Given a block's CEM, the generator emits valid React **and** Vue wrapper source that references the
       block's tag, properties, and events.
-- [ ] Output is a pure string artifact with no FUI/runtime-DOM dependency (so it crosses the layer seam
+- [x] Output is a pure string artifact with no FUI/runtime-DOM dependency (so it crosses the layer seam
       to FUI cleanly).
-- [ ] Unit tests cover prop/attribute/event forwarding for at least one fixture block.
+- [x] Unit tests cover prop/attribute/event forwarding for at least one fixture block.
 
 ## Notes
 
@@ -59,3 +62,25 @@ Splits the WE half out of #753 (mirrors how #755 was split at the layer seam). A
 source transpilation is the separate, deferred #818 (needs an emit-purpose IR; demand-gated behind this
 probe). Conformance badge rendering belongs to the FUI panel + #506; this item only produces the code the
 badge grades.
+
+## Progress
+
+- **Status:** resolved
+- **Branch:** docs/standard-authoring-workflow
+- **Done:**
+  - [scripts/gen-wrapper/genWrapper.mjs](../scripts/gen-wrapper/genWrapper.mjs) — pure
+    `generateWrapper(declaration, target)` over a CEM `custom-element` declaration; React (`.tsx`) +
+    Vue (`.ts`) emitters. Forwards attributes as element bindings, reactive properties onto the
+    instance (React via ref/effect, Vue via `.prop`), events as `onPascal` handlers / Vue `emit`,
+    children → default slot. Drops private/method/static members. "Flag, don't fake": throws on a
+    non-custom-element (class) declaration. Also exports `customElementDeclarations(manifest)`,
+    `TARGETS`, `wrapperExtension`.
+  - [scripts/gen-wrapper/cli.mjs](../scripts/gen-wrapper/cli.mjs) + `npm run gen:wrapper` (`--check`
+    mode) — materializes `generated/wrappers/<target>/<Name>.<ext>` from `custom-elements.json`.
+  - [scripts/gen-wrapper/__tests__/genWrapper.test.mjs](../scripts/gen-wrapper/__tests__/genWrapper.test.mjs)
+    — 17 vitest cases (React + Vue forwarding, flag-don't-fake, manifest extraction, metadata).
+- **Next:** none — done. Real-block wrapping waits on **#822** (blocks.json carries no `tagName`/
+  attributes today, so the CEM emits 0 custom-element declarations; the generator is contracted against
+  the CEM shape and unit-tested with a fixture). FUI panel that consumes this is **#753**.
+- **Notes:** all 17 tests green; `gen:wrapper` reports 0 emitted today (honest — see #822);
+  `check:standards` green.

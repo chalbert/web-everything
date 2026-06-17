@@ -4,7 +4,7 @@ workItem: story
 size: 8
 status: open
 parent: "746"
-blockedBy: ["821"]
+blockedBy: ["821", "822"]
 locus: frontierui
 dateOpened: "2026-06-16"
 relatedProject: webdocs
