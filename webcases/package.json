@@ -4,6 +4,8 @@
   "type": "module",
   "private": true,
   "exports": {
-    "./requirementValidator": "./requirementValidator.ts"
+    "./requirementValidator": "./requirementValidator.ts",
+    "./compileRequirement": "./compileRequirement.ts",
+    "./generateCase": "./generateCase.ts"
   }
 }
