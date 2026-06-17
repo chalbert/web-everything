@@ -22,6 +22,7 @@
     "gen:inventory": "node scripts/gen-inventory.mjs",
     "gen:reference-index": "node scripts/gen-reference-index.mjs",
     "sweep:references": "node scripts/sweep-reference-liveness.mjs",
+    "route:references": "node scripts/route-reference-remediation.mjs",
     "gen:maas-openapi": "node scripts/gen-maas-openapi.mjs",
     "gen:maas-conformance": "node scripts/gen-maas-conformance.mjs",
     "check:maas-conformance": "node scripts/check-maas-conformance.mjs",

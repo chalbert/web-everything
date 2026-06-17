@@ -64,6 +64,18 @@ sweep only **detects** — routing a class to a spawned backlog item is #861, ax
 #863. Useful flags: `--limit=N` (bounded sample), `--home=<corpus|references|blocks|capability|intents>`,
 `--timeout=ms`, `--concurrency=N`, `--out=<path>`.
 
+## Routing decay to the backlog — the remediation router (#861)
+
+`npm run route:references` ([scripts/route-reference-remediation.mjs](../../scripts/route-reference-remediation.mjs))
+reads the latest sweep report and turns each **actionable** class into a tracked backlog item under
+epic #583, with the #584 convention as the recommended fix: `gone → retire-and-replace`,
+`moved → update-url`, `archived → rehome-from-archive`, `content-drift → re-verify-citation`,
+`superseded → swap-to-canonical`. Transient/judgement classes (`unreachable`, `server-error`,
+`paywall`) and healthy ones (`live`, `retired`) are reported but **not** auto-filed. It is **dry-run by
+default** (prints the proposed items); add `--file` to scaffold them. Idempotent: each spawned item
+embeds a `remediation-for: <url>` marker, and any URL already carrying one is skipped — so re-running
+after each sweep never double-files.
+
 ## Freeform prose — documented style, not enforced
 
 `reports/*.md` and `src/_includes/research-descriptions/*.njk` carry references as freeform prose that a
