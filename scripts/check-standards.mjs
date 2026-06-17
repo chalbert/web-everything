@@ -20,8 +20,8 @@ import {
   dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated,
   checkStatus, validateProtocol, validatePreset, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, permalinkSegment, validateViteProxyCoverage,
-  validateModuleResolutionLock, findRawHtmlInMarkdown, findBuriedForkSections,
-  findUnquotedColonScalars, findBadBodyLinks, findNonBatchableMarkers,
+  validateModuleResolutionLock,
+  findUnquotedColonScalars, lintBacklogItemRendering,
   RESEARCH_REVIEW_HORIZON_DEFAULT, deriveResearchFreshness,
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, validateTemplateA11y,
@@ -394,108 +394,20 @@ const projectPending = backlog.filter((it) => it.projectPending).map((it) => `#$
 if (projectPending.length)
   warn(`${projectPending.length} open build(s) held by D3-readiness — relatedProject is a \`concept\` project with no shipped surface, so the standard must exist first (loader demotes them out of Tier A; not a \`blockedBy\` edge). Either ship/graduate the project or re-home the item. Items: ${projectPending.join(', ')}`);
 
-// ── 6d-bis. Raw-HTML-in-body lint (#290) ──
-// An un-backticked HTML tag in a backlog body is passed through by 11ty and parsed by the browser; a
-// void/unclosed interactive one (`<select>`, `<dialog>`) swallows the rest of the page, rendering the
-// item visibly empty (the #020 bug). Warn (don't fail) so the author wraps it in backticks — balanced
-// raw HTML (e.g. #028) renders fine, so this nudges rather than red-gates. The loader exposes only the
-// rendered `details`, so read the raw body here and strip the leading frontmatter before scanning.
+// ── 6d-bis. Per-item RENDERING lints (#290 raw-HTML · #441 buried-fork · mis-flagged-batchable · #845 ──
+// bad-body-links) — the structural/rendering checks that operate on ONE item's body, consolidated into the
+// shared `lintBacklogItemRendering` (#845) so the whole-repo gate and the scoped `check:standards --item NNN`
+// validator emit the SAME findings. One raw-body read per item feeds all four (was four separate passes).
+// The frontmatter unquoted-colon scan stays its own file-driven loop below (a malformed-YAML item is
+// dropped by the loader, so it isn't in `backlog` at all — it must be caught by scanning files directly).
 for (const item of backlog) {
   if (!item.id) continue;
   const p = join(ROOT, 'backlog', `${item.id}.md`);
   if (!existsSync(p)) continue;
   const body = readFileSync(p, 'utf8').replace(/^---\n[\s\S]*?\n---\n/, '');
-  const hits = findRawHtmlInMarkdown(body);
-  if (!hits.length) continue;
-  // One warning per item (not per tag) so a rich-HTML body like #028 doesn't flood the output. List
-  // the distinct element names + the body lines so the author can find and backtick-wrap them.
-  const tags = [...new Set(hits.map((h) => h.name))].map((n) => `<${n}>`).join(', ');
-  const lines = [...new Set(hits.map((h) => h.line))].join(', ');
-  warn(`Backlog item "${item.id}" has raw HTML (${tags}) at body line(s) ${lines} outside code — ` +
-    `11ty passes it through and the browser parses it as a live element; a void/unclosed interactive ` +
-    `tag (e.g. <select>/<script>) swallows the rest of the page. Wrap them in backticks.`);
-}
-
-// ── 6d-quater. Buried-fork lint — a fork section in a non-decision body (#441 carve rule) ──
-// A fork belongs in a `type: decision` item, never inline in an idea/epic/story (#192 / #315 / #087
-// pattern). Flag a fork-shaped section heading in a non-decision, non-resolved item so the author
-// carves it to a decision that `blocks` the original (docs/agent/backlog-workflow.md → the carve
-// rule). Warn (don't fail): the heading is a strong signal, not proof; a section already pointing at a
-// decision (`#NNN` + carve/resolve/block language) is suppressed in the rule, so a carved item is
-// quiet. A `decision` item legitimately is the fork; a resolved item's open-questions are historical.
-for (const item of backlog) {
-  if (!item.id || item.type === 'decision' || item.status === 'resolved') continue;
-  const p = join(ROOT, 'backlog', `${item.id}.md`);
-  if (!existsSync(p)) continue;
-  const body = readFileSync(p, 'utf8').replace(/^---\n[\s\S]*?\n---\n/, '');
-  const hits = findBuriedForkSections(body);
-  if (!hits.length) continue;
-  const where = hits.map((h) => `"${h.heading}" (line ${h.line})`).join(', ');
-  warn(`Backlog item "${item.id}" (${item.type}) has a fork-shaped section ${where} in a non-decision ` +
-    `body — if it's a live design fork, carve it to a type:decision item that blocks this one; if it's ` +
-    `already resolved or deferred elsewhere, reframe the heading or cite the decision (#NNN). ` +
-    `See docs/agent/backlog-workflow.md → the carve rule.`);
-}
-
-// ── 6d-septies. Mis-flagged-batchable lint — body asserts non-batchability but flags compute batchable ──
-// The `--select` loader sets `item.batchable` from structured fields only (Tier A + size ≤ 8 + resolved
-// `blockedBy`); the real disqualifier often lives only in prose ("not batchable; re-slice", "external
-// infra", "blocked-in-fact", "needs a /decision"). When the prose is there but the flags still compute
-// batchable, the pool over-reports agent-readiness and every batch pre-flight re-rejects the item by
-// hand. This warns so the author encodes the real state (retype/size≥13/park/add the blockedBy edge) —
-// which drops the item out of `batchable` and self-clears the warning. WARN, not error: prose
-// heuristics aren't proof. See memory `feedback_misflagged_batchable_fix_real_state`.
-for (const item of backlog) {
-  if (!item.id || item.batchable !== true) continue;
-  const p = join(ROOT, 'backlog', `${item.id}.md`);
-  if (!existsSync(p)) continue;
-  const body = readFileSync(p, 'utf8').replace(/^---\n[\s\S]*?\n---\n/, '');
-  const hits = findNonBatchableMarkers(body);
-  if (!hits.length) continue;
-  const markers = [...new Set(hits.map((h) => h.marker))].join('", "');
-  const lines = [...new Set(hits.map((h) => h.line))].join(', ');
-  warn(`Backlog item "${item.id}" computes \`batchable\` but its body asserts non-batchability ("${markers}" ` +
-    `@ line(s) ${lines}) — the loader only sees tier+size+blockedBy, so this over-reports agent-readiness. ` +
-    `Encode the real state so it drops from the pool: retype \`type: decision\`, bump \`size\` to ≥13, ` +
-    `\`status: parked\`, or add the real \`blockedBy\` edge (file the prereq/decision if missing). ` +
-    `If the marker is a passing mention, reword it. See docs/agent/backlog-workflow.md → batching.`);
-}
-
-// ── 6d-sexies. Bad-body-link lint — leaked authoring syntax in a rendered body ──
-// A backlog body renders at /backlog/<id>/, so editor-only or dead links read as 404s/garbage there.
-// `[[wikilink]]` is MEMORY-only syntax with no page → ERROR; localhost/abs-file links and backlog→backlog
-// `.md` links (should be /backlog/NNN-slug/) → WARN. Reports/docs `.md` refs are the sanctioned
-// agent-facing convention and are not flagged. One message per item per kind so output stays scannable.
-for (const item of backlog) {
-  if (!item.id) continue;
-  const p = join(ROOT, 'backlog', `${item.id}.md`);
-  if (!existsSync(p)) continue;
-  const body = readFileSync(p, 'utf8').replace(/^---\n[\s\S]*?\n---\n/, '');
-  const hits = findBadBodyLinks(body);
-  if (!hits.length) continue;
-  const byKind = (k) => hits.filter((h) => h.kind === k);
-  const lines = (k) => [...new Set(byKind(k).map((h) => h.line))].join(', ');
-  if (byKind('wikilink').length) {
-    err(`Backlog item "${item.id}" uses [[wiki-link]] syntax at body line(s) ${lines('wikilink')} — ` +
-      `that is MEMORY-files-only; markdown renders it literally and the slug has no page. In a backlog ` +
-      `body, link another item as /backlog/NNN-slug/ or drop to plain prose.`);
-  }
-  // Item-to-item `.md` links are a guaranteed 404 on the live site (the route is /backlog/NNN-slug/) and
-  // a known, mechanical fix → ERROR so they can't recur. localhost/abs-file links stay WARN (likelier to
-  // be a deliberate editor-only ref). One message per item per severity so output stays scannable.
-  if (byKind('backlog-md').length) {
-    err(`Backlog item "${item.id}" links to another item with a dead .md path @ line(s) ${lines('backlog-md')} ` +
-      `— a bare/relative \`NNN-slug.md\` renders as a 404 from /backlog/${item.id}/. ` +
-      `Use the rendered URL \`/backlog/NNN-slug/\` instead.`);
-  }
-  const warnKinds = ['localhost', 'absfile'].filter((k) => byKind(k).length);
-  if (warnKinds.length) {
-    const detail = warnKinds.map((k) => `${k === 'absfile' ? 'absolute /Users//file:// link' :
-      'localhost link'} @ line(s) ${lines(k)}`).join('; ');
-    warn(`Backlog item "${item.id}" has a body link that is dead on the live site — ${detail}. ` +
-      `Use the rendered /backlog/NNN-slug/ URL (or a site-relative path); editor-only refs to ` +
-      `reports/ and docs/agent/ are fine.`);
-  }
+  const { errors: itemErr, warnings: itemWarn } = lintBacklogItemRendering({ item, body });
+  for (const m of itemErr) err(m);
+  for (const m of itemWarn) warn(m);
 }
 
 // ── 6d-quinquies. Unquoted-colon scalar in frontmatter (#453) ──

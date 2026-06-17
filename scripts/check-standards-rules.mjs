@@ -445,6 +445,89 @@ export function findUnquotedColonScalars(content) {
   return findings;
 }
 
+// ── Per-item backlog RENDERING lint (#845) ────────────────────────────────────
+// The structural/rendering checks that operate on ONE backlog item in isolation — no registry/cross-item
+// context needed, so they're cheap enough to run on every edit (a scoped `check:standards --item NNN`
+// validator, or a PostToolUse hook on backlog/*.md). Composes the pure detectors above with the SAME
+// canonical messages the whole-repo gate (`check-standards.mjs`) emits, so the two never diverge — the
+// gate calls this for its per-item rendering passes and the scoped script calls it standalone.
+//
+// Inputs: `body` = the item body with frontmatter stripped (for the markdown scans); `item` = the
+// loader-shaped record (id/type/status/batchable — drives the conditional checks). Returns
+// `{ errors, warnings }` of message strings. The frontmatter unquoted-colon scan is NOT here — it must
+// run file-driven (a malformed-YAML item is skipped by the loader, so it isn't in the item array at all),
+// so each caller runs `findUnquotedColonScalars(content)` over the raw file itself. Also excludes the
+// digest-length nudge (validateBacklogItem owns it) and the blockedBy cycle walk (a graph-level check).
+export function lintBacklogItemRendering({ item, body }) {
+  const errors = [];
+  const warnings = [];
+  const id = item.id;
+
+  // Body links — a backlog body renders at /backlog/<id>/, so leaked authoring syntax reads as dead text.
+  const linkHits = findBadBodyLinks(body);
+  if (linkHits.length) {
+    const byKind = (k) => linkHits.filter((h) => h.kind === k);
+    const lines = (k) => [...new Set(byKind(k).map((h) => h.line))].join(', ');
+    if (byKind('wikilink').length) {
+      errors.push(`Backlog item "${id}" uses [[wiki-link]] syntax at body line(s) ${lines('wikilink')} — ` +
+        `that is MEMORY-files-only; markdown renders it literally and the slug has no page. In a backlog ` +
+        `body, link another item as /backlog/NNN-slug/ or drop to plain prose.`);
+    }
+    if (byKind('backlog-md').length) {
+      errors.push(`Backlog item "${id}" links to another item with a dead .md path @ line(s) ${lines('backlog-md')} ` +
+        `— a bare/relative \`NNN-slug.md\` renders as a 404 from /backlog/${id}/. ` +
+        `Use the rendered URL \`/backlog/NNN-slug/\` instead.`);
+    }
+    const warnKinds = ['localhost', 'absfile'].filter((k) => byKind(k).length);
+    if (warnKinds.length) {
+      const detail = warnKinds.map((k) => `${k === 'absfile' ? 'absolute /Users//file:// link' :
+        'localhost link'} @ line(s) ${lines(k)}`).join('; ');
+      warnings.push(`Backlog item "${id}" has a body link that is dead on the live site — ${detail}. ` +
+        `Use the rendered /backlog/NNN-slug/ URL (or a site-relative path); editor-only refs to ` +
+        `reports/ and docs/agent/ are fine.`);
+    }
+  }
+
+  // Raw HTML — an un-backticked recognised element is parsed live by the browser; a void/unclosed one
+  // swallows the rest of the page (the #020 bug). WARN (balanced rich-HTML bodies render fine).
+  const htmlHits = findRawHtmlInMarkdown(body);
+  if (htmlHits.length) {
+    const tags = [...new Set(htmlHits.map((h) => h.name))].map((n) => `<${n}>`).join(', ');
+    const hl = [...new Set(htmlHits.map((h) => h.line))].join(', ');
+    warnings.push(`Backlog item "${id}" has raw HTML (${tags}) at body line(s) ${hl} outside code — ` +
+      `11ty passes it through and the browser parses it as a live element; a void/unclosed interactive ` +
+      `tag (e.g. <select>/<script>) swallows the rest of the page. Wrap them in backticks.`);
+  }
+
+  // Buried fork — a fork-shaped section in a non-decision, non-resolved body should be carved to a decision.
+  if (item.type !== 'decision' && item.status !== 'resolved') {
+    const forkHits = findBuriedForkSections(body);
+    if (forkHits.length) {
+      const where = forkHits.map((h) => `"${h.heading}" (line ${h.line})`).join(', ');
+      warnings.push(`Backlog item "${id}" (${item.type}) has a fork-shaped section ${where} in a non-decision ` +
+        `body — if it's a live design fork, carve it to a type:decision item that blocks this one; if it's ` +
+        `already resolved or deferred elsewhere, reframe the heading or cite the decision (#NNN). ` +
+        `See docs/agent/backlog-workflow.md → the carve rule.`);
+    }
+  }
+
+  // Mis-flagged batchable — body asserts non-batchability but the structured flags compute batchable.
+  if (item.batchable === true) {
+    const markerHits = findNonBatchableMarkers(body);
+    if (markerHits.length) {
+      const markers = [...new Set(markerHits.map((h) => h.marker))].join('", "');
+      const ml = [...new Set(markerHits.map((h) => h.line))].join(', ');
+      warnings.push(`Backlog item "${id}" computes \`batchable\` but its body asserts non-batchability ("${markers}" ` +
+        `@ line(s) ${ml}) — the loader only sees tier+size+blockedBy, so this over-reports agent-readiness. ` +
+        `Encode the real state so it drops from the pool: retype \`type: decision\`, bump \`size\` to ≥13, ` +
+        `\`status: parked\`, or add the real \`blockedBy\` edge (file the prereq/decision if missing). ` +
+        `If the marker is a passing mention, reword it. See docs/agent/backlog-workflow.md → batching.`);
+    }
+  }
+
+  return { errors, warnings };
+}
+
 // ── Implementation-lifecycle vocabulary + descriptor plumbing (#256) ───────────
 // Shared by the script (blocks/plugs status) AND the entity validators below, so the lifecycle
 // vocabulary and the descriptor `file` pointers have a single definition. Ordered concept → draft →

@@ -229,7 +229,22 @@ shortlist** (the top few candidates you're about to present), not to all 100+ it
 - **Options stated with tradeoffs.** Each realistic branch is named with its tradeoff and (where you have one) a recommended default — so the reader sees what they're choosing between. Add any branch the body omits.
 - **Short, concise, well-explained.** Tight digest (≤100 words, "what + why"), body that explains the fork without rambling — trim bloat, sharpen vague sentences. Concise *and* complete: don't drop the example or a real option to hit brevity.
 
-Improving the item here is durable capture, not busywork: the next reader (or a fresh session) inherits a fork that's ready to decide instead of one that needs re-explaining. Keep `check:standards` green after the edit.
+Improving the item here is durable capture, not busywork: the next reader (or a fresh session) inherits a fork that's ready to decide instead of one that needs re-explaining.
+
+**Re-run `check:standards` after a substantive body rewrite — and always before `resolve` — not after every trivial edit.** The gate validates an item's *structural / rendering* shape (link syntax, raw HTML, frontmatter, digest length, blocker-DAG, decision/epic conflation), **not** the correctness of the ruling — that's the discussion + *Red-team the default*'s job. The shape footguns it catches render **live on `/backlog/`**: a `[[wiki-link]]` (memory-files-only) prints literally, and raw interactive HTML (`<details>`, an unclosed `<select>`) can swallow the rest of the page — so a prose-heavy decision rewrite is exactly where they slip in. The whole-repo gate doesn't run per-edit (it's an on-demand scan). For per-edit feedback there is a **scoped per-item lint** (#845): **`npm run check:item -- <NNN>`** (or `node scripts/check-backlog-item.mjs <NNN-slug>`) runs *just* these rendering/structural checks on one `backlog/<id>.md` — the same `lintBacklogItemRendering` findings the gate emits, plus the frontmatter-colon and per-item `blockedBy` checks — and exits non-zero on an error. It's cheap enough to run on every update, or to wire as a `PostToolUse` hook on `backlog/*.md` so the footguns are caught the moment they're written:
+
+```jsonc
+// .claude/settings.json — opt-in: lint a backlog item on every Write/Edit to backlog/*.md
+"hooks": {
+  "PostToolUse": [{
+    "matcher": "Write|Edit",
+    "hooks": [{ "type": "command",
+      "command": "f=\"$CLAUDE_TOOL_FILE_PATH\"; case \"$f\" in */backlog/[0-9]*.md) npm run --silent check:item -- \"$(basename \"$f\" .md)\" || true;; esac" }]
+  }]
+}
+```
+
+The whole-repo `check:standards` stays the authority for the cross-entity checks the single-file pass can't see (graduatedTo/relatedProject resolution, the `blockedBy` cycle walk, dup ids, decision/epic conflation) — run it after a real body rewrite and always before `resolve`, as above.
 
 ### Red-team the default — attack the recommended branch before resolving (#766)
 

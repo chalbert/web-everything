@@ -25,6 +25,7 @@ import {
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, PLUG_UNPLUGGED_TEST_ENFORCED,
   validateTemplateA11y, NAV_ACTIVE_STATE_ENFORCED,
+  lintBacklogItemRendering,
 } from '../check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -789,5 +790,37 @@ describe('validateTemplateA11y — static template a11y lint (#772, #762 class)'
     const res = validateTemplateA11y([{ path: 'partial.njk', content: '<section><p>fragment</p></section>' }]);
     expect(res.errors).toEqual([]);
     expect(res.warnings).toEqual([]);
+  });
+});
+
+describe('lintBacklogItemRendering (#845 — the shared per-item rendering lint)', () => {
+  const item = (over = {}) => ({ id: '999-x', type: 'idea', status: 'open', batchable: false, ...over });
+
+  it('errors on a [[wiki-link]] and a dead .md backlog link; warns on raw HTML', () => {
+    const body = 'See [[feedback_foo]].\n\nA raw <select> here.\n\nLink to [x](092-thing.md).';
+    const { errors, warnings } = lintBacklogItemRendering({ item: item(), body });
+    expect(errors.some((e) => /\[\[wiki-link\]\]/.test(e))).toBe(true);
+    expect(errors.some((e) => /dead \.md path/.test(e))).toBe(true);
+    expect(warnings.some((w) => /raw HTML/.test(w))).toBe(true);
+  });
+
+  it('warns on a fork-shaped heading only in a non-decision, non-resolved body', () => {
+    const body = '## Open question — A vs B\n\nWeigh the options.';
+    expect(lintBacklogItemRendering({ item: item(), body }).warnings.some((w) => /fork-shaped/.test(w))).toBe(true);
+    expect(lintBacklogItemRendering({ item: item({ type: 'decision' }), body }).warnings.some((w) => /fork-shaped/.test(w))).toBe(false);
+    expect(lintBacklogItemRendering({ item: item({ status: 'resolved' }), body }).warnings.some((w) => /fork-shaped/.test(w))).toBe(false);
+  });
+
+  it('warns on a non-batchability marker only when the item computes batchable', () => {
+    const body = 'This is not batchable; re-slice first.';
+    expect(lintBacklogItemRendering({ item: item({ batchable: true }), body }).warnings.some((w) => /asserts non-batchability/.test(w))).toBe(true);
+    expect(lintBacklogItemRendering({ item: item({ batchable: false }), body }).warnings.some((w) => /asserts non-batchability/.test(w))).toBe(false);
+  });
+
+  it('is clean for a well-formed body', () => {
+    const body = 'A normal item body linking to [another](/backlog/092-thing/) the right way.';
+    const { errors, warnings } = lintBacklogItemRendering({ item: item(), body });
+    expect(errors).toEqual([]);
+    expect(warnings).toEqual([]);
   });
 });

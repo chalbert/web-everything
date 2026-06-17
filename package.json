@@ -4,7 +4,7 @@
   "description": "Web Everything - Grouping standards for better web library standardization",
   "customElements": "custom-elements.json",
   "scripts": {
-    "dev": "concurrently --kill-others --names DOCS,DEMO --prefix-colors blue,magenta \"npx @11ty/eleventy --serve --port=8080 --quiet\" \"vite --port 3000\"",
+    "dev": "concurrently --restart-tries -1 --restart-after 1500 --names DOCS,DEMO --prefix-colors blue,magenta \"npx @11ty/eleventy --serve --port=8080 --quiet\" \"vite --port 3000\"",
     "dev:docs": "eleventy --serve --port=8080 --quiet",
     "dev:vite": "vite --port 3000",
     "build": "npm run build:docs && npm run build:demo",
@@ -25,6 +25,7 @@
     "gen:maas-conformance": "node scripts/gen-maas-conformance.mjs",
     "check:maas-conformance": "node scripts/check-maas-conformance.mjs",
     "check:standards": "node scripts/check-standards.mjs",
+    "check:item": "node scripts/check-backlog-item.mjs",
     "check:app-conformance": "node scripts/check-app-conformance.mjs",
     "check:demos": "node scripts/check-demos.mjs",
     "check:validation-adherence": "vitest run capability-manifest/__tests__/check.test.ts",
