@@ -288,6 +288,86 @@
           "content": "/* hovercard.js (#858) — progressive enhancement for the hovercard. Baseline\n * markup is a trigger + a hidden card region (the [hidden] attribute keeps it\n * out of the a11y tree until shown). This layers hover-intent open/close delays\n * so a quick pass-through doesn't flash the card, plus focus/blur support and\n * Esc-to-dismiss for keyboard users.\n */\n(function () {\n  'use strict';\n  Array.prototype.forEach.call(document.querySelectorAll('[data-hovercard]'), function (root) {\n    var trigger = root.querySelector('[data-hovercard-trigger]');\n    var card = root.querySelector('[data-hovercard-card]');\n    if (!trigger || !card) return;\n    var openDelay = parseInt(root.dataset.openDelay, 10) || 350;\n    var closeDelay = 200;\n    var openT = null, closeT = null;\n\n    var show = function () {\n      clearTimeout(closeT);\n      openT = setTimeout(function () { card.hidden = false; }, openDelay);\n    };\n    var hide = function () {\n      clearTimeout(openT);\n      closeT = setTimeout(function () { card.hidden = true; }, closeDelay);\n    };\n\n    trigger.addEventListener('mouseenter', show);\n    trigger.addEventListener('mouseleave', hide);\n    card.addEventListener('mouseenter', function () { clearTimeout(closeT); });\n    card.addEventListener('mouseleave', hide);\n\n    // Keyboard: focus opens immediately, blur (focus leaving the root) closes.\n    trigger.addEventListener('focus', function () { clearTimeout(closeT); card.hidden = false; });\n    root.addEventListener('focusout', function (e) {\n      if (!root.contains(e.relatedTarget)) card.hidden = true;\n    });\n    trigger.addEventListener('keydown', function (e) {\n      if (e.key === 'Escape' && !card.hidden) { card.hidden = true; }\n    });\n  });\n})();"
         }
       ]
+    },
+    {
+      "name": "toolbar",
+      "type": "registry:block",
+      "title": "Toolbar",
+      "description": "A W3C APG toolbar: a single-tab-stop row of grouped action buttons with roving tabindex and arrow-key navigation, including a toggle group and an overflow menu. Baseline is real <button>s in a role=\"toolbar\"; toolbar.js layers the roving-tabindex arrow navigation and Home/End. A composed recipe — no custom element required to consume it.",
+      "ownedByProject": "webdocs",
+      "status": "active",
+      "composesBlocks": [
+        "action-button",
+        "segmented-control",
+        "menu"
+      ],
+      "composesIntents": [
+        "action",
+        "command",
+        "focus-delegation",
+        "navigation"
+      ],
+      "intentStrategies": {
+        "focus-delegation": "roving-tabindex"
+      },
+      "cem": {
+        "kind": "class",
+        "name": "Toolbar",
+        "description": "Composed-API surface of the toolbar preset — a W3C APG roving-tabindex action toolbar. Describes the authoring surface (#668), never the internal toolbar.js wiring. Rides the #653 CEM protocol.",
+        "attributes": [
+          {
+            "name": "aria-label",
+            "description": "Accessible name for the toolbar region.",
+            "type": {
+              "text": "string"
+            }
+          },
+          {
+            "name": "aria-orientation",
+            "description": "Navigation axis — \"horizontal\" (default) or \"vertical\".",
+            "type": {
+              "text": "\"horizontal\" | \"vertical\""
+            }
+          }
+        ],
+        "slots": [
+          {
+            "name": "",
+            "description": "Toolbar items — action <button>s, toggle groups, and an overflow menu."
+          }
+        ],
+        "x-webeverything": {
+          "composesBlocks": [
+            "action-button",
+            "segmented-control",
+            "menu"
+          ],
+          "composesIntents": [
+            "action",
+            "command",
+            "focus-delegation",
+            "navigation"
+          ],
+          "note": "A composition, not a registered custom element — the CEM coexists with the plain-markup recipe (#652 Fork 1 API-descriptor layer)."
+        }
+      },
+      "files": [
+        {
+          "path": "toolbar.html",
+          "type": "registry:markup",
+          "content": "<!-- Toolbar (#859) — a W3C APG toolbar: a single-tab-stop row of grouped\n     action buttons. Baseline: real <button>s in a role=\"toolbar\"; the first\n     control is the only initial tab stop (tabindex=0), the rest are -1.\n     Enhanced (toolbar.js): Arrow keys move the roving tab stop, Home/End jump\n     to the ends, and the toolbar stays one Tab stop in the page. -->\n<div class=\"toolbar\" role=\"toolbar\" aria-label=\"Text formatting\" data-toolbar>\n  <div class=\"toolbar-group\" role=\"group\" aria-label=\"History\">\n    <button type=\"button\" class=\"toolbar-btn\" tabindex=\"0\" aria-label=\"Undo\">↶</button>\n    <button type=\"button\" class=\"toolbar-btn\" tabindex=\"-1\" aria-label=\"Redo\">↷</button>\n  </div>\n  <span class=\"toolbar-sep\" role=\"separator\" aria-orientation=\"vertical\"></span>\n  <div class=\"toolbar-group\" role=\"group\" aria-label=\"Style\">\n    <button type=\"button\" class=\"toolbar-btn\" tabindex=\"-1\" aria-pressed=\"false\" aria-label=\"Bold\"><b>B</b></button>\n    <button type=\"button\" class=\"toolbar-btn\" tabindex=\"-1\" aria-pressed=\"false\" aria-label=\"Italic\"><i>I</i></button>\n    <button type=\"button\" class=\"toolbar-btn\" tabindex=\"-1\" aria-pressed=\"false\" aria-label=\"Underline\"><u>U</u></button>\n  </div>\n  <span class=\"toolbar-sep\" role=\"separator\" aria-orientation=\"vertical\"></span>\n  <button type=\"button\" class=\"toolbar-btn toolbar-overflow\" tabindex=\"-1\" aria-haspopup=\"menu\" aria-expanded=\"false\" aria-label=\"More actions\">⋯</button>\n</div>"
+        },
+        {
+          "path": "toolbar.css",
+          "type": "registry:style",
+          "content": ".toolbar {\n  display: inline-flex;\n  align-items: center;\n  gap: 0.35rem;\n  padding: 0.3rem;\n  border: 1px solid var(--color-border, #e2e8f0);\n  border-radius: 10px;\n  background: rgba(0, 0, 0, 0.015);\n}\n.toolbar-group { display: inline-flex; gap: 0.15rem; }\n.toolbar-btn {\n  display: inline-flex;\n  align-items: center;\n  justify-content: center;\n  min-width: 2rem;\n  height: 2rem;\n  padding: 0 0.5rem;\n  font: inherit;\n  color: var(--color-text-main);\n  background: none;\n  border: 1px solid transparent;\n  border-radius: 7px;\n  cursor: pointer;\n}\n.toolbar-btn:hover { background: rgba(0, 0, 0, 0.05); }\n.toolbar-btn:focus-visible {\n  outline: 2px solid var(--color-primary, #2563eb);\n  outline-offset: 1px;\n}\n.toolbar-btn[aria-pressed=\"true\"] {\n  background: var(--color-primary, #2563eb);\n  color: #fff;\n}\n.toolbar-sep {\n  width: 1px;\n  align-self: stretch;\n  margin: 0.2rem 0.15rem;\n  background: var(--color-border, #e2e8f0);\n}"
+        },
+        {
+          "path": "toolbar.js",
+          "type": "registry:script",
+          "content": "/* toolbar.js (#859) — progressive enhancement for the W3C APG toolbar. Baseline\n * markup already keeps the toolbar to one Tab stop (first button tabindex=0, the\n * rest -1). This layers the roving-tabindex behaviour: Arrow keys move focus and\n * the tab stop between controls, Home/End jump to the ends, and toggle buttons\n * flip aria-pressed on activation.\n */\n(function () {\n  'use strict';\n  Array.prototype.forEach.call(document.querySelectorAll('[data-toolbar]'), function (toolbar) {\n    var vertical = toolbar.getAttribute('aria-orientation') === 'vertical';\n    var items = function () {\n      return Array.prototype.slice.call(toolbar.querySelectorAll('.toolbar-btn'));\n    };\n    var focusAt = function (list, i) {\n      var n = (i + list.length) % list.length;\n      list.forEach(function (b, j) { b.tabIndex = j === n ? 0 : -1; });\n      list[n].focus();\n    };\n\n    toolbar.addEventListener('keydown', function (e) {\n      var list = items();\n      var i = list.indexOf(document.activeElement);\n      if (i === -1) return;\n      var next = vertical ? 'ArrowDown' : 'ArrowRight';\n      var prev = vertical ? 'ArrowUp' : 'ArrowLeft';\n      if (e.key === next) { e.preventDefault(); focusAt(list, i + 1); }\n      else if (e.key === prev) { e.preventDefault(); focusAt(list, i - 1); }\n      else if (e.key === 'Home') { e.preventDefault(); focusAt(list, 0); }\n      else if (e.key === 'End') { e.preventDefault(); focusAt(list, list.length - 1); }\n    });\n\n    // Toggle buttons flip aria-pressed on click.\n    toolbar.addEventListener('click', function (e) {\n      var btn = e.target.closest('.toolbar-btn');\n      if (btn && btn.hasAttribute('aria-pressed')) {\n        btn.setAttribute('aria-pressed', btn.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');\n      }\n    });\n  });\n})();"
+        }
+      ]
     }
   ]
 }
