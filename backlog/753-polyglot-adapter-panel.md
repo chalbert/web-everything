@@ -4,7 +4,8 @@ workItem: story
 size: 8
 status: open
 parent: "746"
-blockedBy: ["811"]
+blockedBy: ["821"]
+locus: frontierui
 dateOpened: "2026-06-16"
 relatedProject: webdocs
 crossRef: { url: /backlog/507-maas-deterministic-generation-adapter-derive-idiomatic-nativ/, label: "Generation-adapter (#507)" }
@@ -41,3 +42,24 @@ and emits the WE declarative form; `htmlToJsx` is a tree-level JSX *pane* mirror
 a "consume #547 for components" build — it's gated on choosing the forward-emit substrate first. That fork
 is now **#811** (decide substrate + per-framework emitter architecture), and this item is `blockedBy: [811]`.
 Once #811 resolves, the emitter build is a separate focused item. Large feature regardless; not a batch tail.
+
+## Resolved + re-homed (2026-06-16, #811 ruling)
+
+**#811 resolved** and its per-fork classification exposed a **layer seam** in this item, so it has been
+re-homed and split (mirroring #755):
+
+- **This item is the FUI-owned panel** — `locus: frontierui`. Per parent #746 ("the workbench lives in
+  **FUI**; WE embeds it via the #701 `fuiDemo` iframe") and the docs-rendering boundary (WE never renders
+  FUI block code), the panel UI + live-test sandbox + badge display are FUI's. WE has no Block Explorer
+  implementation; building this panel in WE would cross the boundary.
+- **The WE-owned substrate is split out to [#821](/backlog/821-consume-mode-per-framework-wrapper-generator-block-cem-react/)** —
+  the consume-mode per-framework wrapper generator (block CEM → React/Vue/… wrapper source). That is the
+  genuinely agent-ready slice #811 unblocked; this panel is now `blockedBy: [821]` (the old `blockedBy: 811`
+  edge is dropped — #811 is resolved). #701 (the `fuiDemo` iframe) is already resolved, so it is not a
+  blocker.
+- **Author-mode** idiomatic-source transpilation stays the separate, deferred **#818** (`blockedBy: 753`,
+  demand-gated behind this panel's consume-mode probe).
+
+#811's ruling: ship **consume mode first** (CEM-driven wrappers, cheap) as the appetite probe;
+author-mode source emit (#818) is gated on demonstrated appetite. Both modes are supported as panel output
+tabs (Fork 1 dissolved — support-all-coherent).
