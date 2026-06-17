@@ -30,6 +30,52 @@ module.exports = function (eleventyConfig) {
     return blocks.filter(b => b.implementsIntent === intentId);
   });
 
+  // webStandards display structuring (#828): the {concern:{usage,reference}} bag (#803 realization SoT,
+  // rendered raw by the #826 panel) is polished for /blocks/{id}/ WITHOUT changing the field shape —
+  // humanize the camelCase concern key, bucket into a fixed category order, sort by label within a
+  // bucket. Returns an array of {concern, label, category, usage, reference}; the template iterates it and
+  // emits a category subheader on each group change. Pure presentation — the object on disk is untouched.
+  const WS_ACRONYMS = new Set(["api","css","html","dom","url","apg","db","idb","ui","http","svg","json","cem","scxml"]);
+  function humanizeConcern(key) {
+    const tokens = String(key)
+      .replace(/([a-z0-9])([A-Z])/g, "$1 $2")        // camelCase boundary
+      .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")     // ACRONYMWord boundary (cacheAPI → cache API)
+      .split(/\s+/).filter(Boolean);
+    const cased = tokens.map(t =>
+      WS_ACRONYMS.has(t.toLowerCase()) ? t.toUpperCase() : t.toLowerCase());
+    // a leading aria-/apg- ARIA-attribute token hyphenates to the next (ariaCurrentStep →
+    // "aria-current step"), matching the platform's own attribute spelling; the rest space-separate.
+    if (cased.length >= 2 && (cased[0] === "aria" || cased[0] === "apg")) {
+      return [cased[0] + "-" + cased[1], ...cased.slice(2)].join(" ");
+    }
+    return cased.join(" ");
+  }
+  const WS_CATEGORIES = ["ARIA & accessibility patterns", "CSS", "Platform APIs & DOM"];
+  // explicit a11y/CSS members beyond the aria*/apg*/css* prefixes; everything unmatched falls to the
+  // "Platform APIs & DOM" catch-all (never miscategorized — only the conservative prefixes + lists bucket).
+  const WS_A11Y = new Set(["rovingTabindex","navigationLandmark","paginationNavLandmark","disclosureNavigation","headingElements","exclusiveAccordion","exclusiveGroups","inertAttribute","rowgroupScope"]);
+  const WS_CSS = new Set(["containerQueries","flexWrap","contentVisibility","prefersReducedMotion"]);
+  function concernCategory(key) {
+    if (/^(aria|apg)/i.test(key) || WS_A11Y.has(key)) return WS_CATEGORIES[0];
+    if (/^css/i.test(key) || WS_CSS.has(key)) return WS_CATEGORIES[1];
+    return WS_CATEGORIES[2];
+  }
+  eleventyConfig.addFilter("webStandardsRows", function(bag) {
+    if (!bag || typeof bag !== "object") return [];
+    const rows = Object.entries(bag).map(([concern, detail]) => ({
+      concern,
+      label: humanizeConcern(concern),
+      category: concernCategory(concern),
+      usage: (detail && detail.usage) || "",
+      reference: (detail && detail.reference) || "",
+    }));
+    rows.sort((a, b) => {
+      const ci = WS_CATEGORIES.indexOf(a.category) - WS_CATEGORIES.indexOf(b.category);
+      return ci !== 0 ? ci : a.label.localeCompare(b.label);
+    });
+    return rows;
+  });
+
   // fuiDemo (#701): embed a Frontier-UI-hosted demo inline next to its standard page via a sandboxed
   // <iframe> — no cross-repo import (the #700 ruling). The demo stays a FUI deliverable and keeps FUI
   // branding (the chrome lives in this WE wrapper). The FUI base URL is parameterised: the dev server

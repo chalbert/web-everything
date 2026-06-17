@@ -122,12 +122,16 @@ eleventyComputed:
         {# Accessibility & Web Standards — the per-component realization SoT (#803/#826): one row per
            concern in block.webStandards → how this block satisfies it + a Reference link to the governing
            spec. Graceful absence mirrors fuiDemo/composesIntents (no field → no panel). The flexible
-           {concern:{usage,reference}} bag is rendered as-authored; structuring it for display is a later
-           refinement. #}
+           {concern:{usage,reference}} bag (the realization SoT, #803) is rendered through the
+           `webStandardsRows` filter (#828): the raw camelCase concern key is humanized (ariaCurrentStep →
+           "aria-current step"), and rows are grouped into a fixed category order (ARIA & accessibility →
+           CSS → Platform APIs & DOM) and sorted by label within each group. Display-only — the on-disk
+           field shape is untouched; the raw key is preserved as a hover title for traceability. #}
         {% if block.webStandards %}
+        {% set wsRows = block.webStandards | webStandardsRows %}
         <div class="section-card mt-8">
             <h2>Accessibility &amp; Web Standards</h2>
-            <p class="mb-6 text-slate-600">The web-platform standards this block realizes — each concern names how the block satisfies it, with a link to the governing specification.</p>
+            <p class="mb-6 text-slate-600">The web-platform standards this block realizes — each concern names how the block satisfies it, with a link to the governing specification. Concerns are grouped by area and ordered for scanning.</p>
             <table>
                 <thead>
                     <tr>
@@ -137,11 +141,14 @@ eleventyComputed:
                     </tr>
                 </thead>
                 <tbody>
-                    {% for concern, detail in block.webStandards %}
+                    {% for row in wsRows %}
+                    {% if loop.first or row.category != wsRows[loop.index0 - 1].category %}
+                    <tr class="bg-slate-50"><th colspan="3" class="text-left font-semibold text-slate-700">{{ row.category }}</th></tr>
+                    {% endif %}
                     <tr>
-                        <td><code>{{ concern }}</code></td>
-                        <td>{{ detail.usage }}</td>
-                        <td>{% if detail.reference %}<a href="{{ detail.reference }}" target="_blank" rel="noopener">Reference&nbsp;↗</a>{% else %}&mdash;{% endif %}</td>
+                        <td><code title="{{ row.concern }}">{{ row.label }}</code></td>
+                        <td>{{ row.usage }}</td>
+                        <td>{% if row.reference %}<a href="{{ row.reference }}" target="_blank" rel="noopener">Reference&nbsp;↗</a>{% else %}&mdash;{% endif %}</td>
                     </tr>
                     {% endfor %}
                 </tbody>
