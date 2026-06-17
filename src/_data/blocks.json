@@ -1044,6 +1044,16 @@
   },
   {
     "id": "tabs",
+    "attributes": [
+      { "name": "name", "type": "string", "description": "Shared group name making the panels mutually exclusive — the native exclusive-group (`name`) semantics the ARIA Tabs pattern is built on." }
+    ],
+    "properties": [
+      { "name": "activeTab", "type": "string", "reflects": true, "attribute": "active", "description": "The id of the currently selected tab; setting it switches the shown panel via the composed View behavior." }
+    ],
+    "slots": [
+      { "name": "tab", "description": "Each tab trigger (uses the `commandfor`/`command` invoker pattern)." },
+      { "name": "panel", "description": "Each tab panel, shown one at a time and wired to its tab via ARIA." }
+    ],
     "fuiDemo": { "file": "view-tabs-demo.html", "title": "View + Tabs", "height": 460 },
     "name": "Tabs",
     "status": "active",
@@ -3396,6 +3406,13 @@
   },
   {
     "id": "tooltip",
+    "attributes": [
+      { "name": "for", "type": "string", "description": "Id of the trigger this tooltip describes — wired as the trigger’s `aria-describedby` (never `aria-label`)." },
+      { "name": "placement", "type": "string", "default": "top", "description": "Anchor placement relative to the trigger, with flip/shift at the viewport edge (composed Anchor Intent)." }
+    ],
+    "slots": [
+      { "name": "", "description": "The tooltip content (default slot) — a `role=\"tooltip\"` surface revealed on hover/focus." }
+    ],
     "fuiDemo": { "file": "positioning-shift.html", "title": "Anchored positioning — shift", "height": 460 },
     "name": "Tooltip",
     "status": "draft",
@@ -3421,6 +3438,18 @@
   },
   {
     "id": "slider",
+    "attributes": [
+      { "name": "min", "type": "number", "default": 0, "description": "Lower bound of the track (composed Selection Intent `constraints.min`)." },
+      { "name": "max", "type": "number", "default": 100, "description": "Upper bound of the track (`constraints.max`)." },
+      { "name": "step", "type": "number", "default": 1, "description": "Granularity of value changes along the track." },
+      { "name": "value", "type": "number | [number, number]", "fieldName": "value", "description": "The current value — a single number, or a `[from, to]` pair for a dual-thumb range." },
+      { "name": "range", "type": "boolean", "default": false, "description": "Dual-thumb from–to range mode (the Selection range variant native `<input type=\"range\">` cannot express alone)." },
+      { "name": "disabled", "type": "boolean", "default": false, "description": "Disables the control." }
+    ],
+    "properties": [
+      { "name": "value", "type": "number | [number, number]", "reflects": true, "attribute": "value", "description": "Gets or sets the value; arrow/Home/End follow the APG slider keyboard model." },
+      { "name": "valueText", "type": "string", "description": "Locale-aware formatted value surfaced through `aria-valuetext` (units, number format)." }
+    ],
     "name": "Slider",
     "status": "draft",
     "type": "Component",
@@ -3566,6 +3595,21 @@
   },
   {
     "id": "dialog",
+    "attributes": [
+      { "name": "open", "type": "boolean", "default": false, "fieldName": "open", "description": "Whether the surface is shown; reflects the native `<dialog>` open state (top-layer mount)." },
+      { "name": "modal", "type": "boolean", "default": true, "description": "Modal (`showModal()` — focus trap + inert background + `::backdrop`) vs non-modal (Popover API) mounting." }
+    ],
+    "properties": [
+      { "name": "open", "type": "boolean", "reflects": true, "attribute": "open", "description": "Gets or sets the shown state; opening moves focus into the surface, closing restores it to the trigger." },
+      { "name": "returnValue", "type": "string", "description": "The value set when the dialog closes (native `<dialog>` returnValue), e.g. which button dismissed it." }
+    ],
+    "slots": [
+      { "name": "", "description": "The dialog content (default slot)." }
+    ],
+    "cssParts": [
+      { "name": "backdrop", "description": "The `::backdrop` behind a modal surface." },
+      { "name": "panel", "description": "The surface container that holds the content." }
+    ],
     "name": "Dialog",
     "status": "draft",
     "type": "Component",
@@ -3601,6 +3645,17 @@
   },
   {
     "id": "drawer",
+    "attributes": [
+      { "name": "open", "type": "boolean", "default": false, "fieldName": "open", "description": "Whether the drawer is shown; inherits the dialog family top-layer + focus model." },
+      { "name": "placement", "type": "'start' | 'end'", "default": "start", "description": "Which viewport edge the panel slides in from (RTL-aware) — the Modal Intent `placement=start|end`." },
+      { "name": "dismissible", "type": "boolean", "default": true, "description": "Whether backdrop/outside-click and swipe-to-dismiss close the drawer (on top of the inherited Escape dismissal)." }
+    ],
+    "properties": [
+      { "name": "open", "type": "boolean", "reflects": true, "attribute": "open", "description": "Gets or sets the shown state; while open as a modal the rest of the page is `inert`." }
+    ],
+    "slots": [
+      { "name": "", "description": "The drawer content (default slot)." }
+    ],
     "name": "Drawer",
     "status": "draft",
     "type": "Component",
@@ -3654,6 +3709,18 @@
   },
   {
     "id": "checkbox",
+    "attributes": [
+      { "name": "checked", "type": "boolean", "default": false, "fieldName": "checked", "description": "The boolean checked state of the native `<input type=\"checkbox\">`." },
+      { "name": "indeterminate", "type": "boolean", "default": false, "description": "The mixed tri-state — maps to `aria-checked=\"mixed\"` on a group parent." },
+      { "name": "disabled", "type": "boolean", "default": false, "description": "Disables the control; excluded from form submission and the tab order." },
+      { "name": "required", "type": "boolean", "default": false, "description": "Marks the control required for native constraint validation (`:user-invalid`)." },
+      { "name": "name", "type": "string", "description": "Form field name the value is submitted under." },
+      { "name": "value", "type": "string", "default": "on", "description": "Value submitted when checked." }
+    ],
+    "properties": [
+      { "name": "checked", "type": "boolean", "reflects": true, "attribute": "checked", "description": "Gets or sets the checked state." },
+      { "name": "indeterminate", "type": "boolean", "description": "Gets or sets the mixed tri-state (display-only; not submitted)." }
+    ],
     "name": "Checkbox",
     "status": "draft",
     "type": "Component",
@@ -3676,6 +3743,15 @@
   },
   {
     "id": "toggle-switch",
+    "attributes": [
+      { "name": "checked", "type": "boolean", "default": false, "fieldName": "checked", "description": "On/off state; reflects to `aria-checked` true/false. A switch is strictly binary — no mixed state." },
+      { "name": "disabled", "type": "boolean", "default": false, "description": "Disables the control; excluded from form submission and the tab order." },
+      { "name": "name", "type": "string", "description": "Form field name the on/off value is submitted under (native `<input type=\"checkbox\">`)." },
+      { "name": "value", "type": "string", "default": "on", "description": "Value submitted when the switch is on." }
+    ],
+    "properties": [
+      { "name": "checked", "type": "boolean", "reflects": true, "attribute": "checked", "description": "Gets or sets the on/off state; the change takes effect immediately (distinct from a checkbox’s deferred form value)." }
+    ],
     "name": "Toggle / Switch",
     "status": "draft",
     "type": "Component",
@@ -3695,6 +3771,18 @@
   },
   {
     "id": "radio-group",
+    "attributes": [
+      { "name": "name", "type": "string", "description": "Shared `name` across the `<input type=\"radio\">` group — native exclusivity comes free from it." },
+      { "name": "value", "type": "string", "fieldName": "value", "description": "The selected option’s value among the mutually-exclusive choices." },
+      { "name": "disabled", "type": "boolean", "default": false, "description": "Disables the whole group." },
+      { "name": "required", "type": "boolean", "default": false, "description": "Requires a selection for native constraint validation." }
+    ],
+    "properties": [
+      { "name": "value", "type": "string", "reflects": true, "attribute": "value", "description": "Gets or sets the selected value; arrow keys move selection (and focus) within the single Tab stop (roving)." }
+    ],
+    "slots": [
+      { "name": "", "description": "The radio options (default slot); a `<fieldset>`/`<legend>` names the group." }
+    ],
     "name": "Radio Group",
     "status": "draft",
     "type": "Component",
