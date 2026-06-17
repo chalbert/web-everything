@@ -64,7 +64,11 @@ output is the rewritten body, not a message:
    proof is on combining).
 3. **Author the prepared-fork shape** (*backlog-workflow.md → The prepared-fork shape*) — rewrite the
    body to that shape. WE-specific reminders: pin each axis to concrete `file:line` refs into the real
-   tree (go read the code, cite it — an authored snippet never substitutes); only genuine forks get a
+   tree (go read the code, cite it — an authored snippet never substitutes); **open every `## Fork N`
+   with its one-line fork-existence justification (#819)** — name the *flawed/excluded* branch (forced
+   invariant) or *why the coherent branches genuinely cannot coexist* (real either/or); a fork that can't
+   produce that line is a pass-0 miss, dissolve it to "Supported by default" rather than stamp over it.
+   Only genuine forks get a
    preview-table row — support-both concerns from pass 0 go in the "Supported by default" list, not the
    table. A row whose "main alternative" isn't actually *excluded* is a pass-0 miss — demote it. Author
    the default to survive a red-team (*backlog-workflow.md → Red-team the default*): at ratify time the
@@ -84,7 +88,8 @@ A prepared decision is **still open** — the call hasn't been made. So `release
    "mint `webpush` vs fold the protocol into an existing project" fork), or carve it to a child item that
    is *itself* prepared and rewrite the parent fork to "→ delegated to #NNN (prepared)". A body still
    carrying a bare "needs a human call" / "confirm X" / "TBD" / slash-name (`webpush`/`webpermissions`)
-   fork is not prepared — do not stamp it. Walk every `## Fork N` and confirm each has named options,
+   fork is not prepared — do not stamp it. Walk every `## Fork N` and confirm each has its fork-existence
+   justification line (#819), named options,
    tradeoffs, and a bold default. Then set `preparedDate: "YYYY-MM-DD"` (today) in the item's frontmatter
    via an Edit — the one flag that makes readiness rank it `✓ ready to ratify`, so stamping a
    half-prepared item is a false "ready" the next decision turn will trust.
