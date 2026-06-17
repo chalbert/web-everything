@@ -1,20 +1,21 @@
 ---
-type: decision
+type: issue
 workItem: story
 size: 3
 parent: "731"
 status: open
 dateOpened: "2026-06-16"
 dateStarted: "2026-06-16"
-preparedDate: "2026-06-16"
+decidedDate: "2026-06-16"
 relatedReport: reports/2026-06-16-fui-catalog-family-denominator.md
 relatedProject: webdocs
-tags: [frontierui, webdocs, catalog, completeness-gate, denominator, decision-prep]
+tags: [frontierui, webdocs, catalog, completeness-gate, denominator]
 ---
 
 # Decide the FUI catalog-block-family denominator + dir→WE-spec mapping rule
 
-**Prepared, ready to ratify.** [#706](/backlog/706-generate-fui-s-block-catalog-from-a-derived-manifest-and-ren/)
+**Ratified 2026-06-16 — decision recorded below; this item is now the build story for its residual (Check 2).**
+[#706](/backlog/706-generate-fui-s-block-catalog-from-a-derived-manifest-and-ren/)
 fixed the invariant — *every implemented `frontierui/blocks/` family must resolve to ≥1 manifest entry, gated
 like WE's `check-demos` forces every demo folder to be registered* — but left **family** (the gate's
 **denominator**) undefined. This decision defines the denominator, the dir→WE-spec **mapping rule**, and the
@@ -23,6 +24,32 @@ no-spec-dir handling. Grounded in a prior-art survey (CEM analyzer · Storybook 
 it reduces to **two forced invariants + one genuine on-merit fork** (denominator granularity, recommended
 **flat-dir**); most of the item's apparent complexity (name-mismatch, multi-block) is already handled by the
 manifest's `sourcePath` field and is **not** a decision.
+
+## Decision (ratified 2026-06-16) — two checks, two owners
+
+The fork's apparent A-vs-B tension dissolves once the two cons are recognised as **two different jobs** with
+**two different owners**, not one gate that must choose:
+
+- **Check 1 — WE-owned completeness gate (Option A).** Denominator = each top-level `frontierui/blocks/<dir>`
+  minus `{__tests__, traits, renderers}`; covered iff ≥1 manifest `sourcePath` resolves within it. Pure
+  `readdirSync('blocks')`, **implementer-agnostic**, mirrors `check-demos`. **This is [#784](/backlog/784/)**
+  (unblocked by this ratification). Green today with zero new entries.
+- **Check 2 — FUI-internal registered-name→spec gate (the value of Option B, re-homed).** Denominator = every
+  registered public name (`attributes.define(…)`); each must map to a `blocks.json` entry / WE spec. Catches
+  same-dir **sibling drift** that Check 1 is blind to (`nav:section`). **This is the build this story now
+  carries** (see *Build* below).
+
+**Why this beats picking A or B as a single gate:** Option B's *only* real con was *"couples the WE-standard-owned
+invariant to FUI's registration convention."* That con **evaporates** once Check 2 is FUI's *own internal* gate —
+FUI depending on FUI's `attributes.define` convention is legitimate (it's FUI checking its own tree, not the
+portable standard reaching into FUI's habits). So the split yields **A's portability *and* B's drift-catching,
+each in its correct home, neither downside.** Precedent for FUI carrying its own drift gate alongside the
+WE-owned one already exists in the same file: `traits/` is excluded from the WE gate precisely because it is
+*"already governed by the separate `traits.json` drift gate"* (`check-standards.mjs:95-116`). Check 2 is that
+same pattern for registered blocks.
+
+I1 (sourcePath-anchored mapping) and I2 (`{__tests__, traits, renderers}` exclude-set) ratify as written — both
+were forced invariants, not weighable. The full fork analysis is retained below for the record.
 
 ## The mapping is already mechanized — `sourcePath`, not dir-name
 
@@ -46,7 +73,7 @@ is **green today** with zero new entries.
 |---|---|---|---|---|
 | I1 | Mapping rule | **`sourcePath`-anchored coverage** (≥1 entry's `sourcePath` within the dir) | dir-name == id matching | Forced invariant — alt is broken (breaks every name-mismatch) |
 | I2 | Infra exclude-set | **`{__tests__, traits, renderers}`** excluded from the denominator | include them | Forced invariant — alt double-governs traits / false-positives a package re-export |
-| 1 | Denominator **granularity** | **A — flat top-level dir + explicit infra set** (mirrors `check-demos`, implementer-agnostic, green today) | B — registered-name (catches same-dir siblings like `nav:section`) | **Med-high** — the one real call |
+| 1 | Denominator **granularity** | **Ratified: A *and* B, split into two checks** — A as the WE-owned dir gate (#784), B re-homed as an FUI-internal registered-name gate (this story) | (a single gate forced to choose A *or* B) | **Ratified** — split dissolves the fork |
 
 ## Forced invariants (ratify, not weigh)
 
@@ -112,25 +139,35 @@ A pays nothing for FUI's registration convention and is green today. Every other
 under both options — `navigation/` is the *only* place the choice changes the gate's verdict right now, which is
 why the sibling-drift gap is filed as a follow-up build rather than treated as a reason to adopt B wholesale.
 
-**Recommended default: A.** It is the literal `check-demos` precedent #706 cited, kills the documented
-family-level drift, stays implementer-agnostic, and is green with no new entries. The sibling-drift gap is real
-but rare, and is better captured as a follow-up build (below) than by coupling the gate to a registration
-convention.
+**Ratified outcome: A *as the WE-owned gate*, plus B *re-homed* as a separate FUI-internal gate — not either/or.**
+A is the literal `check-demos` precedent #706 cited, kills family-level drift, stays implementer-agnostic, and is
+green with no new entries (→ #784). B's drift-catching value is kept too, but moved out of the WE gate into an
+FUI-internal registered-name check (this story's *Build*), where depending on FUI's registration convention is
+legitimate. See *Decision (ratified)* above for the full rationale.
 
 *Rejected sub-option — leaf-dir recursion* (recurse category dirs `parsers/`/`text-nodes/`/`stores/` to their
 child family dirs): reintroduces the `call`/`pipe`/`value` internal-exclusion problem (leaf dirs with no public
 registration) for little gain, since it *still* misses the same-dir sibling case (`nav:section`) that motivates
 going finer. If you want siblings caught, go to B; otherwise flat-dir is simpler at the same coverage.
 
-## Captured follow-ups (not fork branches — file at ratification)
+## Build (this story carries — Check 2 + its first finding)
 
-- **`nav:section` has no WE spec.** `frontierui/blocks/navigation/NavSectionBehavior.ts` is a real, registered
-  (`nav:section` — `registerNavigation.ts`) **W3C-APG Disclosure Navigation** behavior with no WE `blocks.json`
-  entry. Genuine impl-ahead-of-spec drift, invisible to a dir-based gate (its dir is covered by `nav-list`). →
-  file a build to author the WE `nav-section` / disclosure-navigation block spec + FUI manifest entry,
-  independent of the granularity ruling.
-- **Deferred enhancement:** if same-dir sibling drift recurs, revisit Fork-1 Option B as a *second, lighter*
-  check layered on the dir gate — not a replacement.
+The ratified decision spins off the WE-owned dir gate to #784 and keeps the FUI-internal registered-name gate
+here. Scope:
+
+1. **Add Check 2 to `frontierui/scripts/check-standards.mjs`** — an FUI-internal drift rule that walks every
+   registered public name (`attributes.define(…)` / `customElements.define(…)` across `blocks/`) and FAILS if a
+   name has no matching `src/_data/blocks.json` entry. Modeled on the sibling `traits.json` drift gate already in
+   the same file (`check-standards.mjs:95-116`); carries its own internal-name exclusion set (the
+   `call`/`pipe`/`value` sub-parsers and trait registrations) as that gate does.
+2. **Resolve its first finding — `nav:section`.** `frontierui/blocks/navigation/NavSectionBehavior.ts` is a real,
+   registered (`nav:section` — `registerNavigation.ts:18`) **W3C-APG Disclosure Navigation** behavior with no WE
+   `blocks.json` entry — the exact sibling drift Check 2 exists to catch (invisible to #784's dir gate because
+   `navigation/` is already covered by `nav-list`). Author the WE `nav-section` / disclosure-navigation block
+   spec + the FUI `blocks.json` entry so Check 2 goes green.
+
+**Acceptance:** Check 2 added; it red-flags `nav:section` before the spec lands and goes green after; no
+regression to Check 1 (#784) or the `traits.json` gate; `check:standards` green in frontierui.
 
 ---
 
@@ -142,9 +179,9 @@ WE-standard-owned (#706); the *denominator/gate code* is FUI's instantiation, li
 `frontierui/scripts/check-standards.mjs` (built by [#784](/backlog/784/)). The most-flexible/least-coupling
 default (flat-dir, filesystem-only) is the most implementer-agnostic denominator that satisfies the invariant.
 
-**Where this sits.** Slice (b) of epic [#731](/backlog/731/). Ratifying this unblocks #784 (add the gate +
-reconcile residual entries); [#785](/backlog/785/) (document derivation-source as a Web-Docs dimension) is
-already resolved. The mapping/denominator was the fork the resolved [#737](/backlog/737/) deliberately left
+**Where this sits.** Slice (b) of epic [#731](/backlog/731/). Ratified — unblocked #784 (Check 1: the WE-owned
+dir gate + reconcile residual entries); this story now carries Check 2 (the FUI-internal registered-name gate);
+[#785](/backlog/785/) (document derivation-source as a Web-Docs dimension) is already resolved. The mapping/denominator was the fork the resolved [#737](/backlog/737/) deliberately left
 behind (*"Impls with no WE spec id stay unregistered … those belong to the #731 family/mapping decision"*).
 
 **Prior art** (full survey: report + `/research/fui-catalog-family-denominator/`): CEM analyzer (per
