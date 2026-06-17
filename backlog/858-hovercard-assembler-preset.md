@@ -1,0 +1,15 @@
+---
+type: idea
+workItem: task
+parent: "646"
+status: resolved
+dateOpened: "2026-06-17"
+dateStarted: "2026-06-17"
+dateResolved: "2026-06-17"
+graduatedTo: "src/_data/assemblerPresets.json#hovercard (hovercard assembler preset — hover/focus content-preview recipe)"
+tags: []
+---
+
+# Hovercard assembler preset
+
+Add a hovercard preset to assemblerPresets.json following the #667 reveal-nav precedent (resolved foundation). Unblocked batch-time volume — registry + eject pipeline already shipped (#688/#689). A composed hovercard block configuration the assembler can drop onto the canvas and eject.

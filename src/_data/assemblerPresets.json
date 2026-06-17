@@ -210,6 +210,84 @@
           "content": "/* filter-bar.js (#857) — progressive enhancement for the filter bar. Baseline\n * markup is real form controls; this debounces text input and emits a single\n * normalized \"filter:change\" CustomEvent carrying the current filter state, so\n * a consumer wires one listener instead of N control handlers.\n */\n(function () {\n  'use strict';\n  var bar = document.querySelector('[data-filter-bar]');\n  if (!bar) return;\n  var countEl = bar.querySelector('[data-filter-count]');\n\n  var readState = function () {\n    var state = {};\n    Array.prototype.forEach.call(bar.querySelectorAll('[data-filter]'), function (el) {\n      var key = el.dataset.filter;\n      if (el.type === 'radio') { if (el.checked) state[key] = el.value; }\n      else if (el.multiple) {\n        state[key] = Array.prototype.filter.call(el.options, function (o) { return o.selected; }).map(function (o) { return o.value; });\n      } else { state[key] = el.value; }\n    });\n    return state;\n  };\n\n  var emit = function () {\n    bar.dispatchEvent(new CustomEvent('filter:change', { bubbles: true, detail: readState() }));\n  };\n\n  var timer = null;\n  bar.addEventListener('input', function (e) {\n    if (e.target.type === 'search' || e.target.type === 'text') {\n      clearTimeout(timer);\n      timer = setTimeout(emit, 180);\n    } else { emit(); }\n  });\n  bar.addEventListener('change', function (e) {\n    if (e.target.type !== 'search' && e.target.type !== 'text') emit();\n  });\n  bar.addEventListener('reset', function () { setTimeout(emit, 0); });\n\n  // Public helper: a consumer calls bar.setResultCount(n) to reflect a live total.\n  bar.setResultCount = function (n) {\n    if (countEl) countEl.textContent = n + (n === 1 ? ' result' : ' results');\n  };\n})();"
         }
       ]
+    },
+    {
+      "name": "hovercard",
+      "type": "registry:block",
+      "title": "Hovercard",
+      "description": "A rich content preview disclosed on hover/focus of an inline trigger (the GitHub user-card pattern). Baseline is an <a> trigger paired with a hidden card region; hovercard.js layers hover-intent delay, focus support, and aria-describedby wiring so it stays keyboard- and screen-reader-accessible. A composed recipe — no custom element required to consume it.",
+      "ownedByProject": "webdocs",
+      "status": "active",
+      "composesBlocks": [
+        "tooltip",
+        "inline-trigger"
+      ],
+      "composesIntents": [
+        "hover-intent",
+        "inline-trigger",
+        "disclosure",
+        "surface"
+      ],
+      "intentStrategies": {
+        "hover-intent": "delay"
+      },
+      "cem": {
+        "kind": "class",
+        "name": "Hovercard",
+        "description": "Composed-API surface of the hovercard preset — a hover/focus content preview. Describes the authoring surface (#668), never the internal hovercard.js wiring. Rides the #653 CEM protocol.",
+        "attributes": [
+          {
+            "name": "aria-describedby",
+            "description": "The trigger points at the id of the card region it discloses.",
+            "type": {
+              "text": "string"
+            }
+          },
+          {
+            "name": "data-open-delay",
+            "description": "Hover-intent open delay in ms (default 350).",
+            "type": {
+              "text": "number"
+            }
+          }
+        ],
+        "slots": [
+          {
+            "name": "",
+            "description": "Card body — arbitrary preview content (avatar, name, meta, actions)."
+          }
+        ],
+        "x-webeverything": {
+          "composesBlocks": [
+            "tooltip",
+            "inline-trigger"
+          ],
+          "composesIntents": [
+            "hover-intent",
+            "inline-trigger",
+            "disclosure",
+            "surface"
+          ],
+          "note": "A composition, not a registered custom element — the CEM coexists with the plain-markup recipe (#652 Fork 1 API-descriptor layer)."
+        }
+      },
+      "files": [
+        {
+          "path": "hovercard.html",
+          "type": "registry:markup",
+          "content": "<!-- Hovercard (#858) — a rich preview disclosed on hover/focus of an inline\n     trigger (the GitHub user-card pattern). Baseline: an <a> trigger with an\n     aria-describedby'd card region, hidden by default. Enhanced (hovercard.js):\n     hover-intent open/close delays, focus + blur support, and Esc to dismiss. -->\n<span class=\"hovercard\" data-hovercard>\n  <a href=\"/author/\" class=\"hovercard-trigger\" aria-describedby=\"hovercard-1\" data-hovercard-trigger>@author</a>\n  <span id=\"hovercard-1\" class=\"hovercard-card\" role=\"tooltip\" hidden data-hovercard-card>\n    <span class=\"hovercard-head\">\n      <img class=\"hovercard-avatar\" src=\"/img/avatar.png\" alt=\"\" width=\"44\" height=\"44\" />\n      <span class=\"hovercard-id\">\n        <strong class=\"hovercard-name\">Project Author</strong>\n        <span class=\"hovercard-handle\">@author</span>\n      </span>\n    </span>\n    <span class=\"hovercard-bio\">Maintains the Web Everything standards constellation.</span>\n  </span>\n</span>"
+        },
+        {
+          "path": "hovercard.css",
+          "type": "registry:style",
+          "content": ".hovercard { position: relative; display: inline-block; }\n.hovercard-trigger {\n  color: var(--color-primary, #2563eb);\n  text-decoration: none;\n  font-weight: 500;\n}\n.hovercard-trigger:hover { text-decoration: underline; }\n.hovercard-card {\n  position: absolute;\n  top: calc(100% + 8px);\n  left: 0;\n  z-index: 60;\n  width: 18rem;\n  box-sizing: border-box;\n  display: flex;\n  flex-direction: column;\n  gap: 0.5rem;\n  padding: 0.8rem;\n  background: #fff;\n  border: 1px solid var(--color-border, #e2e8f0);\n  border-radius: 12px;\n  box-shadow: 0 16px 40px -12px rgba(15, 23, 42, 0.25);\n  opacity: 0;\n  transform: translateY(-4px);\n  transition: opacity 0.2s ease, transform 0.2s ease;\n}\n.hovercard-card:not([hidden]) { opacity: 1; transform: translateY(0); }\n.hovercard-head { display: flex; gap: 0.6rem; align-items: center; }\n.hovercard-avatar { border-radius: 50%; flex-shrink: 0; }\n.hovercard-id { display: flex; flex-direction: column; }\n.hovercard-handle { color: var(--color-text-muted); font-size: 0.85em; }\n.hovercard-bio { font-size: 0.9em; color: var(--color-text-main); }\n@media (prefers-reduced-motion: reduce) {\n  .hovercard-card { transition: opacity 0.2s ease; transform: none; }\n  .hovercard-card:not([hidden]) { transform: none; }\n}"
+        },
+        {
+          "path": "hovercard.js",
+          "type": "registry:script",
+          "content": "/* hovercard.js (#858) — progressive enhancement for the hovercard. Baseline\n * markup is a trigger + a hidden card region (the [hidden] attribute keeps it\n * out of the a11y tree until shown). This layers hover-intent open/close delays\n * so a quick pass-through doesn't flash the card, plus focus/blur support and\n * Esc-to-dismiss for keyboard users.\n */\n(function () {\n  'use strict';\n  Array.prototype.forEach.call(document.querySelectorAll('[data-hovercard]'), function (root) {\n    var trigger = root.querySelector('[data-hovercard-trigger]');\n    var card = root.querySelector('[data-hovercard-card]');\n    if (!trigger || !card) return;\n    var openDelay = parseInt(root.dataset.openDelay, 10) || 350;\n    var closeDelay = 200;\n    var openT = null, closeT = null;\n\n    var show = function () {\n      clearTimeout(closeT);\n      openT = setTimeout(function () { card.hidden = false; }, openDelay);\n    };\n    var hide = function () {\n      clearTimeout(openT);\n      closeT = setTimeout(function () { card.hidden = true; }, closeDelay);\n    };\n\n    trigger.addEventListener('mouseenter', show);\n    trigger.addEventListener('mouseleave', hide);\n    card.addEventListener('mouseenter', function () { clearTimeout(closeT); });\n    card.addEventListener('mouseleave', hide);\n\n    // Keyboard: focus opens immediately, blur (focus leaving the root) closes.\n    trigger.addEventListener('focus', function () { clearTimeout(closeT); card.hidden = false; });\n    root.addEventListener('focusout', function (e) {\n      if (!root.contains(e.relatedTarget)) card.hidden = true;\n    });\n    trigger.addEventListener('keydown', function (e) {\n      if (e.key === 'Escape' && !card.hidden) { card.hidden = true; }\n    });\n  });\n})();"
+        }
+      ]
     }
   ]
 }
