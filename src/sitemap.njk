@@ -1,0 +1,21 @@
+---
+# Per #774 Fork-2=A: the single source of truth for the rendered-site a11y gate's
+# route list (#770), authored over 11ty's complete page knowledge (collections.all),
+# and doubling as the missing SEO sitemap (sitemaps.org/0.9). No protocol minted —
+# this is the sitemaps.org artifact, consumed not re-specified.
+permalink: /sitemap.xml
+eleventyExcludeFromCollections: true
+---
+<?xml version="1.0" encoding="utf-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+{%- for entry in collections.all %}
+{%- if entry.url and entry.url.endsWith("/") %}
+  <url>
+    <loc>{{ site.url }}{{ entry.url }}</loc>
+{%- if entry.date %}
+    <lastmod>{{ entry.date.toISOString() }}</lastmod>
+{%- endif %}
+  </url>
+{%- endif %}
+{%- endfor %}
+</urlset>
