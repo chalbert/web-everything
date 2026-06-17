@@ -368,6 +368,83 @@
           "content": "/* toolbar.js (#859) — progressive enhancement for the W3C APG toolbar. Baseline\n * markup already keeps the toolbar to one Tab stop (first button tabindex=0, the\n * rest -1). This layers the roving-tabindex behaviour: Arrow keys move focus and\n * the tab stop between controls, Home/End jump to the ends, and toggle buttons\n * flip aria-pressed on activation.\n */\n(function () {\n  'use strict';\n  Array.prototype.forEach.call(document.querySelectorAll('[data-toolbar]'), function (toolbar) {\n    var vertical = toolbar.getAttribute('aria-orientation') === 'vertical';\n    var items = function () {\n      return Array.prototype.slice.call(toolbar.querySelectorAll('.toolbar-btn'));\n    };\n    var focusAt = function (list, i) {\n      var n = (i + list.length) % list.length;\n      list.forEach(function (b, j) { b.tabIndex = j === n ? 0 : -1; });\n      list[n].focus();\n    };\n\n    toolbar.addEventListener('keydown', function (e) {\n      var list = items();\n      var i = list.indexOf(document.activeElement);\n      if (i === -1) return;\n      var next = vertical ? 'ArrowDown' : 'ArrowRight';\n      var prev = vertical ? 'ArrowUp' : 'ArrowLeft';\n      if (e.key === next) { e.preventDefault(); focusAt(list, i + 1); }\n      else if (e.key === prev) { e.preventDefault(); focusAt(list, i - 1); }\n      else if (e.key === 'Home') { e.preventDefault(); focusAt(list, 0); }\n      else if (e.key === 'End') { e.preventDefault(); focusAt(list, list.length - 1); }\n    });\n\n    // Toggle buttons flip aria-pressed on click.\n    toolbar.addEventListener('click', function (e) {\n      var btn = e.target.closest('.toolbar-btn');\n      if (btn && btn.hasAttribute('aria-pressed')) {\n        btn.setAttribute('aria-pressed', btn.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');\n      }\n    });\n  });\n})();"
         }
       ]
+    },
+    {
+      "name": "date-range",
+      "type": "registry:block",
+      "title": "Date-range picker",
+      "description": "A from/to date-range field with quick presets (Last 7 days, This month…) over two native date inputs. Baseline is two real <input type=\"date\">s plus preset buttons in a fieldset; date-range.js enforces from ≤ to, applies presets, and emits a normalized range-change event. Locale formatting defers to the platform Intl path. A composed recipe — no custom element required to consume it.",
+      "ownedByProject": "webdocs",
+      "status": "active",
+      "composesBlocks": [
+        "date-range-picker",
+        "date-picker",
+        "segmented-control"
+      ],
+      "composesIntents": [
+        "temporal",
+        "selection",
+        "input",
+        "locale"
+      ],
+      "cem": {
+        "kind": "class",
+        "name": "DateRange",
+        "description": "Composed-API surface of the date-range preset — a from/to range field with quick presets. Describes the authoring surface (#668), never the internal date-range.js wiring. Rides the #653 CEM protocol.",
+        "attributes": [
+          {
+            "name": "data-min",
+            "description": "Earliest selectable date (ISO yyyy-mm-dd), mirrored onto both inputs.",
+            "type": {
+              "text": "string"
+            }
+          },
+          {
+            "name": "data-max",
+            "description": "Latest selectable date (ISO yyyy-mm-dd), mirrored onto both inputs.",
+            "type": {
+              "text": "string"
+            }
+          }
+        ],
+        "slots": [
+          {
+            "name": "",
+            "description": "From/to date inputs and the quick-preset buttons."
+          }
+        ],
+        "x-webeverything": {
+          "composesBlocks": [
+            "date-range-picker",
+            "date-picker",
+            "segmented-control"
+          ],
+          "composesIntents": [
+            "temporal",
+            "selection",
+            "input",
+            "locale"
+          ],
+          "note": "A composition, not a registered custom element — the CEM coexists with the plain-markup recipe (#652 Fork 1 API-descriptor layer)."
+        }
+      },
+      "files": [
+        {
+          "path": "date-range.html",
+          "type": "registry:markup",
+          "content": "<!-- Date-range picker (#860) — a from/to range field with quick presets.\n     Baseline: two native <input type=\"date\">s in a <fieldset> plus a row of\n     preset buttons; the native pickers and locale formatting come free from the\n     platform. Enhanced (date-range.js): clamps from ≤ to, wires the presets, and\n     emits a single normalized \"daterange:change\" event. -->\n<fieldset class=\"date-range\" data-date-range>\n  <legend class=\"date-range-legend\">Date range</legend>\n  <div class=\"date-range-presets\" role=\"group\" aria-label=\"Quick ranges\">\n    <button type=\"button\" class=\"date-range-preset\" data-range-preset=\"7\">Last 7 days</button>\n    <button type=\"button\" class=\"date-range-preset\" data-range-preset=\"30\">Last 30 days</button>\n    <button type=\"button\" class=\"date-range-preset\" data-range-preset=\"month\">This month</button>\n  </div>\n  <div class=\"date-range-fields\">\n    <label class=\"date-range-field\">\n      <span class=\"date-range-label\">From</span>\n      <input type=\"date\" class=\"date-range-input\" data-range-from />\n    </label>\n    <span class=\"date-range-dash\" aria-hidden=\"true\">→</span>\n    <label class=\"date-range-field\">\n      <span class=\"date-range-label\">To</span>\n      <input type=\"date\" class=\"date-range-input\" data-range-to />\n    </label>\n  </div>\n  <p class=\"date-range-error\" role=\"alert\" hidden data-range-error>The end date can't be before the start date.</p>\n</fieldset>"
+        },
+        {
+          "path": "date-range.css",
+          "type": "registry:style",
+          "content": ".date-range {\n  display: flex;\n  flex-direction: column;\n  gap: 0.75rem;\n  margin: 0;\n  padding: 1rem;\n  border: 1px solid var(--color-border, #e2e8f0);\n  border-radius: 12px;\n}\n.date-range-legend {\n  padding: 0 0.4rem;\n  font-size: 0.7em;\n  text-transform: uppercase;\n  letter-spacing: 0.06em;\n  color: var(--color-text-muted);\n}\n.date-range-presets { display: flex; flex-wrap: wrap; gap: 0.4rem; }\n.date-range-preset {\n  padding: 0.3rem 0.7rem;\n  font: inherit;\n  font-size: 0.85em;\n  background: rgba(0, 0, 0, 0.03);\n  border: 1px solid var(--color-border, #e2e8f0);\n  border-radius: 999px;\n  cursor: pointer;\n}\n.date-range-preset:hover { background: rgba(0, 0, 0, 0.06); }\n.date-range-fields { display: flex; align-items: flex-end; gap: 0.75rem; }\n.date-range-field { display: flex; flex-direction: column; gap: 0.25rem; }\n.date-range-label { font-size: 0.8em; color: var(--color-text-muted); }\n.date-range-input {\n  padding: 0.4rem 0.6rem;\n  font: inherit;\n  border: 1px solid var(--color-border, #e2e8f0);\n  border-radius: 8px;\n}\n.date-range-dash { align-self: center; color: var(--color-text-muted); }\n.date-range-error { margin: 0; color: #dc2626; font-size: 0.85em; }"
+        },
+        {
+          "path": "date-range.js",
+          "type": "registry:script",
+          "content": "/* date-range.js (#860) — progressive enhancement for the from/to date-range\n * field. Baseline markup is two native <input type=\"date\">s; the native pickers\n * and locale-aware display come free from the platform. This layers: quick-range\n * presets, a from <= to clamp (mirrored onto each input's min/max so the native\n * picker enforces it too), and a single normalized \"daterange:change\" event.\n */\n(function () {\n  'use strict';\n  var iso = function (d) { return d.toISOString().slice(0, 10); };\n  Array.prototype.forEach.call(document.querySelectorAll('[data-date-range]'), function (root) {\n    var from = root.querySelector('[data-range-from]');\n    var to = root.querySelector('[data-range-to]');\n    var error = root.querySelector('[data-range-error]');\n    if (!from || !to) return;\n    if (root.dataset.min) { from.min = root.dataset.min; to.min = root.dataset.min; }\n    if (root.dataset.max) { from.max = root.dataset.max; to.max = root.dataset.max; }\n\n    var validate = function () {\n      var bad = from.value && to.value && from.value > to.value;\n      if (error) error.hidden = !bad;\n      to.setCustomValidity(bad ? 'End date is before start date' : '');\n      return !bad;\n    };\n    var emit = function () {\n      if (!validate()) return;\n      // Clamp the native pickers to the chosen bounds.\n      to.min = from.value || (root.dataset.min || '');\n      from.max = to.value || (root.dataset.max || '');\n      root.dispatchEvent(new CustomEvent('daterange:change', { bubbles: true, detail: { from: from.value, to: to.value } }));\n    };\n\n    from.addEventListener('change', emit);\n    to.addEventListener('change', emit);\n\n    root.addEventListener('click', function (e) {\n      var btn = e.target.closest('[data-range-preset]');\n      if (!btn) return;\n      var spec = btn.dataset.rangePreset;\n      var end = new Date();\n      var start = new Date();\n      if (spec === 'month') { start = new Date(end.getFullYear(), end.getMonth(), 1); }\n      else { start.setDate(end.getDate() - (parseInt(spec, 10) - 1)); }\n      from.value = iso(start);\n      to.value = iso(end);\n      emit();\n    });\n  });\n})();"
+        }
+      ]
     }
   ]
 }
