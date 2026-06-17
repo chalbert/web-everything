@@ -3,9 +3,12 @@ type: idea
 workItem: story
 size: 3
 parent: "623"
-status: open
+status: resolved
 blockedBy: ["803"]
 dateOpened: "2026-06-17"
+dateStarted: "2026-06-17"
+dateResolved: "2026-06-17"
+graduatedTo: src/block-pages.njk
 tags: []
 ---
 

@@ -119,6 +119,36 @@ eleventyComputed:
         </div>
         {% endif %}
 
+        {# Accessibility & Web Standards — the per-component realization SoT (#803/#826): one row per
+           concern in block.webStandards → how this block satisfies it + a Reference link to the governing
+           spec. Graceful absence mirrors fuiDemo/composesIntents (no field → no panel). The flexible
+           {concern:{usage,reference}} bag is rendered as-authored; structuring it for display is a later
+           refinement. #}
+        {% if block.webStandards %}
+        <div class="section-card mt-8">
+            <h2>Accessibility &amp; Web Standards</h2>
+            <p class="mb-6 text-slate-600">The web-platform standards this block realizes — each concern names how the block satisfies it, with a link to the governing specification.</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Concern</th>
+                        <th>Usage</th>
+                        <th>Reference</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for concern, detail in block.webStandards %}
+                    <tr>
+                        <td><code>{{ concern }}</code></td>
+                        <td>{{ detail.usage }}</td>
+                        <td>{% if detail.reference %}<a href="{{ detail.reference }}" target="_blank" rel="noopener">Reference&nbsp;↗</a>{% else %}&mdash;{% endif %}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
         {# Anatomy — the composition graph straight from the registries (#748): the dependency edges this
            block sits on, each piece linking to its own page so they're independently browsable. "Used by" is
            the reverse edge (every block whose dependsOn names this one) — the bidirectional graph. The
