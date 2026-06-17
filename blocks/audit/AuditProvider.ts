@@ -19,37 +19,12 @@
  */
 
 import type { LifecycleEvent } from '../lifecycle/LifecycleProvider';
+import type { AuditEvent, AuditQuery, CustomAuditProvider } from './contract';
 
-/** A single before/after change — the Web States ChangeRecord shape (RFC 6902 vocabulary). */
-export interface AuditChange {
-  path: string;
-  op: 'add' | 'remove' | 'replace';
-  oldValue?: unknown;
-  newValue?: unknown;
-}
-
-/** The normalized audit record. */
-export interface AuditEvent {
-  target: { type: string; id: string };
-  action: string;
-  actor: { id?: string; role: string };
-  at: string; // ISO timestamp
-  before?: AuditChange[];
-  after?: AuditChange[];
-  correlationId?: string;
-}
-
-export interface AuditQuery {
-  action?: string;
-  since?: string; // ISO; inclusive lower bound on `at`
-}
-
-/** The provider seam — the only lock. Append-only by contract. */
-export interface CustomAuditProvider {
-  append(event: AuditEvent): Promise<void>;
-  queryByEntity(id: string, query?: AuditQuery): Promise<AuditEvent[]>;
-  subscribe?(id: string, onAppend: (e: AuditEvent) => void): () => void;
-}
+// Re-export the pure-contract surface so existing `./AuditProvider` importers reach the types and the
+// runtime from one site (the split is at the file seam — see ./contract.ts, the future
+// `@webeverything/contracts/audit` entry).
+export type * from './contract';
 
 /** Native-first, in-memory, append-only reference. The log is never mutated after append. */
 export class DefaultAuditProvider implements CustomAuditProvider {

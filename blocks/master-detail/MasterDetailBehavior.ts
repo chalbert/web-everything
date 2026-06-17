@@ -9,30 +9,12 @@
  */
 
 import { SelectionBehavior } from '../selection/SelectionBehavior';
+import type { MasterDetailOptions } from './contract';
 
-export type FocusFlow = 'retain' | 'advance';
-export type EmptyState = 'placeholder' | 'collapse';
-
-export interface MasterDetailOptions {
-  /** CSS selector for the selectable master items, within the master element. */
-  itemSelector: string;
-  /** The coupled detail region. */
-  detailEl: HTMLElement;
-  /** Map a selected master item to the key its detail is rendered from. */
-  keyOf: (item: HTMLElement) => string | null | undefined;
-  /** Render the detail for a key into the region (sync or async). */
-  renderDetail: (key: string, detailEl: HTMLElement) => void | Promise<void>;
-  /** On select: keep focus on the list (`retain`, default) or move it to the detail (`advance`). */
-  focusFlow?: FocusFlow;
-  /** With nothing selected: show a placeholder (default) or hide the region. */
-  emptyState?: EmptyState;
-  /** Class the composed SelectionBehavior toggles on the selected item. */
-  selectedClass?: string;
-  /** Markup for the placeholder empty state. */
-  placeholderHTML?: string;
-  /** Accessible label for the detail region. */
-  detailLabel?: string;
-}
+// Re-export the pure-contract surface so existing `./MasterDetailBehavior` importers reach the types and
+// the runtime from one site (the split is at the file seam — see ./contract.ts, the future
+// `@webeverything/contracts/master-detail` entry).
+export type * from './contract';
 
 export class MasterDetailBehavior {
   private readonly selection: SelectionBehavior;

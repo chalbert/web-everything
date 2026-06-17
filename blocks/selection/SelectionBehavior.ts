@@ -10,23 +10,12 @@
  * loan-origination pipeline's row → underwriting-trace master-detail (#317 / #374).
  */
 
-export type SelectionModel = 'single' | 'multiple';
+import type { SelectionChange, SelectionModel, SelectionOptions } from './contract';
 
-export interface SelectionOptions {
-  /** CSS selector (scoped to the host) for the selectable items. */
-  itemSelector: string;
-  /** `single` (default) keeps at most one selected; `multiple` toggles. */
-  model?: SelectionModel;
-  /** Class set on selected items in addition to `aria-selected`. Default 'selected'. */
-  selectedClass?: string;
-  onChange?: (change: SelectionChange) => void;
-}
-
-export interface SelectionChange {
-  selected: HTMLElement[];
-  /** The item whose state just changed (selected or deselected), or null on clear. */
-  last: HTMLElement | null;
-}
+// Re-export the pure-contract surface so existing `./SelectionBehavior` importers reach the types and the
+// runtime from one site (the split is at the file seam — see ./contract.ts, the future
+// `@webeverything/contracts/selection` entry).
+export type * from './contract';
 
 export class SelectionBehavior {
   private readonly model: SelectionModel;

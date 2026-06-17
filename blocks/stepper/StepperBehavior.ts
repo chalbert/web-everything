@@ -10,24 +10,12 @@
  * announcement. Emits `step-change` / `step-advance-blocked` / `flow-complete`.
  */
 
-export type Progression = 'locked' | 'free';
+import type { Progression, StepperOptions } from './contract';
 
-export interface StepperOptions {
-  /** Selector for the step content panels within the host. */
-  stepSelector?: string;
-  /** Selector for the step indicators (the ordered list items). */
-  indicatorSelector?: string;
-  /** `locked` (default) = one-at-a-time, gated; `free` = any step anytime (withFreeStepNavigation). */
-  progression?: Progression;
-  /** The progression gate (withStepValidation): may the user leave `fromIndex`? Default: always. */
-  canAdvance?: (fromIndex: number) => boolean;
-  /** Indices that may be skipped without blocking completion (withOptionalSteps). */
-  optional?: number[];
-  /** A polite live region for the "Step N of M" announcement. */
-  liveRegion?: HTMLElement;
-  /** Human label for a step, used in the announcement. */
-  stepLabel?: (index: number) => string;
-}
+// Re-export the pure-contract surface so existing `./StepperBehavior` importers reach the types and the
+// runtime from one site (the split is at the file seam — see ./contract.ts, the future
+// `@webeverything/contracts/stepper` entry).
+export type * from './contract';
 
 const evt = (name: string, detail: unknown, cancelable = false): CustomEvent =>
   new CustomEvent(name, { detail, bubbles: true, cancelable });

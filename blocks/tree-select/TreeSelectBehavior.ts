@@ -9,23 +9,12 @@
  * selection handler) and exposes the selection as `aria-checked` + a `tree-change` event.
  */
 
-export interface TreeNode {
-  id: string;
-  label: string;
-  children?: TreeNode[];
-  /** Whether this node can be checked (a leaf coverage, or a selectable group). */
-  selectable?: boolean;
-}
+import type { TreeModel, TreeNode, TreeSelectOptions } from './contract';
 
-export type TreeModel = 'single' | 'multiple';
-
-export interface TreeSelectOptions {
-  model?: TreeModel;
-  /** Toggling a node toggles all its descendants; a partially-checked parent reads mixed. */
-  cascade?: boolean;
-  defaultExpanded?: boolean;
-  onChange?: (selectedIds: string[]) => void;
-}
+// Re-export the pure-contract surface so existing `./TreeSelectBehavior` importers reach the types and the
+// runtime from one site (the split is at the file seam — see ./contract.ts, the future
+// `@webeverything/contracts/tree-select` entry).
+export type * from './contract';
 
 interface Flat {
   node: TreeNode;
