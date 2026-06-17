@@ -1765,6 +1765,7 @@
   },
   {
     "id": "action-button",
+    "componentTokens": "button",
     "name": "Action Button",
     "status": "concept",
     "type": "Behavior",

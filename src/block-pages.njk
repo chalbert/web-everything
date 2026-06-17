@@ -268,6 +268,34 @@ eleventyComputed:
         </div>
         {% endif %}
 
+        {# Component tokens — the per-component design-token table (#829, ratified by #802). The block names
+           the webtheme component-token group(s) it draws from via `componentTokens` (string|string[], #802
+           Fork 2); `componentTokens` (the `src/_data/componentTokens.js` global) carries each group resolved
+           through the SAME webtheme pipeline the CEM `cssProperties` emit uses (#802 Fork 1 — one source).
+           Three columns (#802 Fork 3): the CSS custom property the block overrides · the alias it references ·
+           the literal it resolves to. Graceful absence — no field → no panel (the `fuiDemo` precedent). #}
+        {% if block.componentTokens %}
+        {% set tokenGroups = block.componentTokens if (block.componentTokens | string) != block.componentTokens else [block.componentTokens] %}
+        <div class="section-card mt-8">
+            <h2>Component tokens</h2>
+            <p class="mb-6 text-slate-600">The design tokens this component exposes — each overridable CSS custom property, the primitive it <strong>aliases</strong>, and the literal it currently <strong>resolves</strong> to. Every token aliases a primitive so it can never drift from the scale. Same source as the <a href="/protocols/">Custom Elements Manifest</a> <code>cssProperties</code> emit.</p>
+            <table>
+                <thead><tr><th>Override</th><th>Alias</th><th>Resolved</th></tr></thead>
+                <tbody>
+                    {% for group in tokenGroups %}
+                    {% for row in componentTokens[group] %}
+                    <tr>
+                        <td><code>{{ row.name }}</code></td>
+                        <td>{% if row.reference %}<code>{{ row.reference }}</code>{% else %}&mdash;{% endif %}</td>
+                        <td><code>{{ row.resolved }}</code></td>
+                    </tr>
+                    {% endfor %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% endif %}
+
         {# Anatomy — the composition graph straight from the registries (#748): the dependency edges this
            block sits on, each piece linking to its own page so they're independently browsable. "Used by" is
            the reverse edge (every block whose dependsOn names this one) — the bidirectional graph. The

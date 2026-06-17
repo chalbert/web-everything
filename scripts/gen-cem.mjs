@@ -27,6 +27,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { resolvedComponentGroups, componentTokenGroups } from './lib/component-tokens.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA = join(ROOT, 'src/_data');
@@ -34,6 +35,9 @@ const OUT = join(ROOT, 'custom-elements.json');
 const SCHEMA_VERSION = '2.1.0';
 
 const blocks = JSON.parse(readFileSync(join(DATA, 'blocks.json'), 'utf8'));
+
+/** The webtheme component-token tier, resolved once and shared across every block module (#802). */
+const tokenGroups = await resolvedComponentGroups();
 
 /**
  * Map a block's `events` to CEM event descriptors. blocks.json carries events in two
@@ -100,13 +104,43 @@ const cemSlots = (b) =>
     ...(s.description ? { description: s.description } : {}),
   }));
 
-const cemCssProperties = (b) =>
+/** DTCG `$type` → CSS `syntax` for an emitted `@property`-style row (best-effort; omitted when unknown). */
+const TYPE_SYNTAX = { dimension: '<length>', color: '<color>', number: '<number>', duration: '<time>' };
+
+/** Authored styling API (the #801 public-API line) → CEM cssProperties. */
+const cemAuthoredCssProperties = (b) =>
   asEntries(b.cssProperties).map((c) => ({
     name: c.name,
     ...(c.syntax ? { syntax: c.syntax } : {}),
     ...(c.default !== undefined ? { default: String(c.default) } : {}),
     ...(c.description ? { description: c.description } : {}),
   }));
+
+/**
+ * Token-tier cssProperties (#802): project each `componentTokens` group's resolved rows. The emitted
+ * `default` is the alias-aware CSS value the component actually uses (`var(--radius-md)`, matching the
+ * #403 compile), with the resolved literal carried in the description for external consumers.
+ */
+const cemTokenCssProperties = (b) =>
+  componentTokenGroups(b.componentTokens).flatMap((g) => (tokenGroups[g] || []).map((row) => ({
+    name: row.name,
+    ...(row.type && TYPE_SYNTAX[row.type] ? { syntax: TYPE_SYNTAX[row.type] } : {}),
+    default: row.reference || row.resolved,
+    description: row.reference
+      ? `Component token aliasing \`${row.reference}\` — resolves to \`${row.resolved}\`.`
+      : `Component token — \`${row.resolved}\`.`,
+  })));
+
+/**
+ * Union the authored styling API with the token-tier rows (#802 amendment: neither side owns
+ * `cssProperties`; the build emits the union, a clobber on either is a defect). Authored wins on a
+ * name collision (the deliberately-committed contract is authoritative over the derived default).
+ */
+const cemCssProperties = (b) => {
+  const authored = cemAuthoredCssProperties(b);
+  const names = new Set(authored.map((r) => r.name));
+  return [...authored, ...cemTokenCssProperties(b).filter((r) => !names.has(r.name))];
+};
 
 const cemCssParts = (b) =>
   asEntries(b.cssParts).map((p) => ({

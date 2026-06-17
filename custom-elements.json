@@ -10,6 +10,32 @@
           "kind": "class",
           "name": "ActionButtonBehavior",
           "description": "Behavioral implementation of the Action Intent, handling visual priority rendering, busy state layout (width locking, visibility), and platform-aware group ordering.",
+          "cssProperties": [
+            {
+              "name": "--button-radius",
+              "syntax": "<length>",
+              "default": "var(--radius-md)",
+              "description": "Component token aliasing `var(--radius-md)` — resolves to `0.5rem`."
+            },
+            {
+              "name": "--button-padding-x",
+              "syntax": "<length>",
+              "default": "var(--space-4)",
+              "description": "Component token aliasing `var(--space-4)` — resolves to `1rem`."
+            },
+            {
+              "name": "--button-padding-y",
+              "syntax": "<length>",
+              "default": "var(--space-2)",
+              "description": "Component token aliasing `var(--space-2)` — resolves to `0.5rem`."
+            },
+            {
+              "name": "--button-bg",
+              "syntax": "<color>",
+              "default": "var(--color-accent)",
+              "description": "Component token aliasing `var(--color-accent)` — resolves to `oklch(0.55 0.18 256)`."
+            }
+          ],
           "x-webeverything": {
             "implementsIntent": "action",
             "traits": [
