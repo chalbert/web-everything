@@ -46,14 +46,26 @@
     "name": "Keyboard Shortcuts",
     "status": "draft",
     "type": "Module",
-    "summary": "Standardized keyboard interaction management enabling consistent shortcut handling across shadow boundaries and OS-specific layouts."
+    "summary": "Standardized keyboard interaction management enabling consistent shortcut handling across shadow boundaries and OS-specific layouts.",
+    "webStandards": {
+      "keyboardEventKey": {
+        "usage": "Normalizes shortcut handling on `KeyboardEvent.key` / `.code` across shadow boundaries and OS layouts, so chords resolve consistently regardless of where focus sits.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key"
+      }
+    }
   },
   {
     "id": "composite-widget",
     "name": "Composite Widget",
     "status": "concept",
     "type": "Behavior",
-    "summary": "Focus management and navigation protocol for complex widgets like Grids, Trees, and Menus, implementing the Roving Tabindex pattern."
+    "summary": "Focus management and navigation protocol for complex widgets like Grids, Trees, and Menus, implementing the Roving Tabindex pattern.",
+    "webStandards": {
+      "rovingTabindex": {
+        "usage": "Implements the Roving Tabindex focus model for composite widgets (grids, trees, menus): exactly one descendant is `tabindex=\"0\"`, all others `tabindex=\"-1\"`, and the value moves with focus so the widget is a single Tab stop.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/#kbd_roving_tabindex"
+      }
+    }
   },
   {
     "id": "droplist",
@@ -78,7 +90,13 @@
       "Family vs. members: droplist is the abstract family, not a shippable widget. Concrete members (Dropdown single-select, Multi-dropdown, Autocomplete, Tree-select, native baseline) are each their own block — distinct trait selections over the same substrate, not configurations of one widget. A menu button is NOT a droplist member: it opens a role=menu of commands (a value-invoker, not a value-selector) owned by the Menu block (#300); only its trigger shape (button[aria-haspopup]) is shared, demoted to trigger-only per #173 Fork G / #301.",
       "Two channels, never crossed: structural dimensions (model, editable, which traits compose) are always local Trait Selection and cannot travel on the Ambient Intent (DI) channel; behavioral dimensions (focusStrategy, collision, truncate) may fall back to ambient intent. Per-dimension resolution: explicit ⊕ ambient (behavioral only) ⊕ default.",
       "implementsIntent stays 'anchor' (the surface it most directly realizes) so existing intent→block reverse-lookup is unchanged; composesIntents is an additive field listing the full set, surfaced on both the block page and each composed intent's page."
-    ]
+    ],
+    "webStandards": {
+      "ariaListbox": {
+        "usage": "The abstract substrate every list-selection member conforms to: a `role=\"listbox\"` of `role=\"option\"` items with single/multi selection and managed focus, realized concretely by Dropdown / Multi-dropdown / Autocomplete / Tree-select.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/listbox/"
+      }
+    }
   },
   {
     "id": "dropdown",
@@ -98,7 +116,17 @@
       "Form-associated custom element: implements static formAssociated = true and uses ElementInternals.setFormValue, so <form>/FormData/reset/validity, bfcache restore, <label for>, setValidity(), :user-valid/:user-invalid, and the autocomplete attribute all light up without a hidden <input> shim.",
       "Generic over data, scoped by injector: the options attribute resolves through the ancestor injector chain (e.g. options=\"@countries\") or accepts an inline JSON literal; resolved options are re-exposed on the element's own injector as the component-local @options context, so descendants of <drop-list> read them and anything outside cannot.",
       "Event boundary: the inner selection trait fires selection-change inside the template; the class listens at the <drop-list> element, calls stopPropagation, updates @selected via the value setter, and re-emits a public change event consumers listen for with on:change. The internal context stays private; the external surface stays narrow."
-    ]
+    ],
+    "webStandards": {
+      "ariaListbox": {
+        "usage": "A button-triggered `role=\"listbox\"` of `role=\"option\"`; the trigger owns `aria-expanded` / `aria-controls`, the active option `aria-selected`, with one selected value reflected to the form-associated element.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/listbox/"
+      },
+      "htmlSelectTypeAhead": {
+        "usage": "Printable-key type-ahead jumps to the next option whose label starts with the typed buffer, matching native `<select>` behaviour.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/select"
+      }
+    }
   },
   {
     "id": "multi-select-dropdown",
@@ -118,7 +146,13 @@
       "Decoupled toggle selection model: model=multiple sets aria-multiselectable on the listbox; Space toggles aria-selected on the focused option and selectionFollowsFocus=false stops auto-commit, so arrows move virtual focus only. This is the standard multi-select listbox keyboard model, distinct from the dropdown's follows-focus single commit.",
       "Multi-value form-control surface mirroring <select multiple>: the form-associated element submits one entry per selected value by passing a FormData (repeating name) to ElementInternals.setFormValue, instead of a single string. The public surface is plural — a .values string[] and .selectedOptions array — and the change event detail carries the full selection, not a single option.",
       "Trigger shows a summary, not a single label: with multiple values the button renders a count or summary (e.g. \"3 selected\") falling back to the placeholder when empty, rather than a single option's label — the only template-level difference from the dropdown beyond the selection trait value."
-    ]
+    ],
+    "webStandards": {
+      "ariaListbox": {
+        "usage": "The dropdown substrate with `aria-multiselectable=\"true\"`: Space toggles each `role=\"option\"`’s `aria-selected`, the trigger summarises the selected set.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/listbox/"
+      }
+    }
   },
   {
     "id": "autocomplete",
@@ -146,7 +180,13 @@
       "filter is a thin composition over loader + live-region-status, not a monolith: filter consumes the loader intent (customContexts:loaderIntent) for the async lifecycle — debounce (~250ms), enter a loading state, cancel stale in-flight responses, inject the results — and pushes a count to the live-status announcer on each settle (\"7 results available\" / \"No results found\"). filter=\"client\" skips the async path and just hides non-matching options. live-region-status owns the single announcer region; filter announces counts on settle and focus-delegation announces the active option (\"Paris, 2 of 7\") on each move — two callers, one region.",
       "Concrete member is its own element, not a flag on <drop-list>: the two-element input+listbox substrate is a genuinely different shape than the dropdown's single button-triggered listbox, so autocomplete ships as a distinct <auto-complete name src> custom element rather than <drop-list editable>. This keeps each concrete droplist member one block (dropdown, multi-select-dropdown, autocomplete), consistent with the family rule that members are distinct trait selections over the substrate, not configurations of one widget.",
       "Form-associated, single string surface like the dropdown: static formAssociated = true + ElementInternals.setFormValue, so FormData, reset, validity, bfcache restore, <label for>, and autocomplete attribute all work with no hidden input. On commit the only autocomplete-specific glue runs — write the selected label into the input value, dismiss the surface, keep focus on the input, and reveal the clear (X) affordance (input.clearable) when the value is non-empty. clearable, filter, live-status, and windowed are all now built and tested in Frontier UI's reference implementation (blocks/droplist/Clearable.ts, Filter.ts, LiveStatus.ts, Windowed.ts), alongside focus-delegation, selection, and anchor — all six trait surfaces ship; the block defines them as contracts, exactly as the family already does for anchor's positioning strategy."
-    ]
+    ],
+    "webStandards": {
+      "ariaCombobox": {
+        "usage": "An `<input role=\"combobox\">` with `aria-autocomplete=\"list\"`, `aria-expanded`, and `aria-controls` bound to a separate `role=\"listbox\"`; the active option is tracked with `aria-activedescendant` as the input filters.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/combobox/"
+      }
+    }
   },
   {
     "id": "type-ahead",
@@ -602,6 +642,12 @@
         "description": "Phase 1 renders once on connect; no reactive array watching",
         "rationale": "Covers the most common use case (render route-loaded data). Reactive updates will be added in Phase 2 with store subscription integration."
       }
+    },
+    "webStandards": {
+      "htmlTemplate": {
+        "usage": "A structural directive that repeats a `<template>` per array item, cloning its content fragment for each row.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/template"
+      }
     }
   },
   {
@@ -658,6 +704,12 @@
         "description": "The 'as' keyword names the loop context",
         "rationale": "Matches PHP/Blade/many template languages. Intuitive for developers familiar with foreach loops."
       }
+    },
+    "webStandards": {
+      "customEvent": {
+        "usage": "Parses function-call-style event-handler expressions and binds them to the element via `addEventListener`, dispatching/handling `CustomEvent`s through the registry.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/EventTarget/addEventListener"
+      }
     }
   },
   {
@@ -693,7 +745,13 @@
       "required": true,
       "error": "MissingParserError thrown if no parser found in registry"
     },
-    "designRationale": "Parser registry allows different DOM subtrees to use different parser configurations. Parsers extend CustomAttributeParser for consistency with the attribute parsing system."
+    "designRationale": "Parser registry allows different DOM subtrees to use different parser configurations. Parsers extend CustomAttributeParser for consistency with the attribute parsing system.",
+    "webStandards": {
+      "customEvent": {
+        "usage": "Declarative event-to-action mapping: maps DOM/`CustomEvent`s to actions with expression-resolved context, over the standard event model.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/CustomEvent"
+      }
+    }
   },
   {
     "id": "broadcast",
@@ -758,7 +816,13 @@
     "status": "draft",
     "type": "Directive",
     "summary": "Structural directive enforcing Trusted Types policies on dynamic HTML content via comment-based virtual elements.",
-    "related": ["trusted-html-behavior"]
+    "related": ["trusted-html-behavior"],
+    "webStandards": {
+      "trustedTypes": {
+        "usage": "A structural directive that enforces a Trusted Types policy on dynamic HTML, routing injected markup through `TrustedHTML` so the sink is XSS-safe.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API"
+      }
+    }
   },
   {
     "id": "trusted-html-behavior",
@@ -766,7 +830,13 @@
     "status": "draft",
     "type": "Behavior",
     "summary": "Attribute-based behavior that enforces Trusted Types policies on an element's innerHTML mutations.",
-    "related": ["trusted-html"]
+    "related": ["trusted-html"],
+    "webStandards": {
+      "trustedTypes": {
+        "usage": "An attribute behaviour that enforces a Trusted Types policy on an element’s `innerHTML` mutations via `TrustedHTML`.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API"
+      }
+    }
   },
   {
     "id": "view",
@@ -1521,6 +1591,12 @@
         "description": "setItem automatically creates intermediate objects for nested paths",
         "rationale": "Reduces boilerplate when setting deeply nested values"
       }
+    },
+    "webStandards": {
+      "queueMicrotask": {
+        "usage": "A reactive store with dot-notation paths and derived state; listener notifications are batched on the microtask queue (`queueMicrotask`) to coalesce synchronous writes.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/queueMicrotask"
+      }
     }
   },
   {
@@ -1844,6 +1920,12 @@
         "description": "Supports both viewport-level (media queries) and component-level (container queries) breakpoints",
         "rationale": "Modern layouts use container queries for component-scoped responsiveness. The block detects and uses the appropriate API."
       }
+    },
+    "webStandards": {
+      "containerQueries": {
+        "usage": "Maps semantic breakpoint step names to concrete CSS media or container queries and exposes the active step reactively, observing via `matchMedia` / container-query matching.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_containment/Container_queries"
+      }
     }
   },
   {
@@ -2139,7 +2221,13 @@
     "exports": ["DoubleCurlyBracketParser"],
     "extendsClass": "CustomTextNodeParser",
     "implementedBy": "@frontierui/blocks/parsers/text-node/double-curly/DoubleCurlyBracketParser.ts",
-    "dependsOn": []
+    "dependsOn": [],
+    "webStandards": {
+      "domParts": {
+        "usage": "Detects Mustache-style `{{expression}}` delimiters in text content and emits binding holes for the interpolation pipeline (the template-parts contract).",
+        "reference": "https://github.com/WICG/webcomponents/blob/gh-pages/proposals/DOM-Parts.md"
+      }
+    }
   },
   {
     "id": "double-square-bracket-parser",
@@ -2150,7 +2238,13 @@
     "exports": ["DoubleSquareBracketParser"],
     "extendsClass": "CustomTextNodeParser",
     "implementedBy": "@frontierui/blocks/parsers/text-node/double-square/DoubleSquareBracketParser.ts",
-    "dependsOn": []
+    "dependsOn": [],
+    "webStandards": {
+      "domParts": {
+        "usage": "Detects Polymer-style `[[expression]]` delimiters in text content and emits binding holes for the interpolation pipeline (the template-parts contract).",
+        "reference": "https://github.com/WICG/webcomponents/blob/gh-pages/proposals/DOM-Parts.md"
+      }
+    }
   },
   {
     "id": "interpolation-text-node",
@@ -2162,7 +2256,13 @@
     "exports": ["InterpolationTextNode", "InterpolationTextNodeOptions"],
     "extendsClass": "CustomTextNode",
     "implementedBy": "@frontierui/blocks/text-nodes/interpolation/InterpolationTextNode.ts",
-    "dependsOn": ["double-curly-bracket-parser"]
+    "dependsOn": ["double-curly-bracket-parser"],
+    "webStandards": {
+      "domParts": {
+        "usage": "A reactive Text node that evaluates an expression and writes its value to `textContent`, the runtime twin of the template-parts / DOM Parts binding model.",
+        "reference": "https://github.com/WICG/webcomponents/blob/gh-pages/proposals/DOM-Parts.md"
+      }
+    }
   },
   {
     "id": "nav-list",
@@ -2436,6 +2536,16 @@
         ],
         "notes": "TanStack runs all stages over one row model in order; we split the stages across composable blocks and add a coordinator that sequences them so order stays collection-wide."
       }
+    },
+    "webStandards": {
+      "intlCollator": {
+        "usage": "The headless filter → sort → group → page coordinator; locale-aware sort comparisons go through `Intl.Collator`.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator"
+      },
+      "arrayToSorted": {
+        "usage": "Sorting is non-mutating via `Array.prototype.toSorted`, leaving the source collection untouched.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/toSorted"
+      }
     }
   },
   {
@@ -2592,7 +2702,13 @@
       "SelectionBehavior",
       "registerSelection"
     ],
-    "implementedBy": "@frontierui/blocks/selection/SelectionBehavior.ts"
+    "implementedBy": "@frontierui/blocks/selection/SelectionBehavior.ts",
+    "webStandards": {
+      "ariaSort": {
+        "usage": "The headless selection runtime (model / immediacy / variant / grouping) backing the droplist members; selected items reflect `aria-selected`, multi-select sets `aria-multiselectable`.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-selected"
+      }
+    }
   },
   {
     "id": "lifecycle",
@@ -2605,7 +2721,13 @@
       "CustomLifecycleRegistry",
       "registerLifecycle"
     ],
-    "implementedBy": "@frontierui/blocks/lifecycle/LifecycleProvider.ts"
+    "implementedBy": "@frontierui/blocks/lifecycle/LifecycleProvider.ts",
+    "webStandards": {
+      "customEvent": {
+        "usage": "Reference runtime for the Web Lifecycle protocol: a guarded, role-scoped status-transition map; each transition dispatches a `CustomEvent` carrying the from/to status.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/CustomEvent"
+      }
+    }
   },
   {
     "id": "status-indicator",
@@ -2618,7 +2740,13 @@
       "renderStatusIndicator",
       "statusIndicatorHTML"
     ],
-    "implementedBy": "@frontierui/blocks/renderers/status-indicator/renderStatusIndicator.ts"
+    "implementedBy": "@frontierui/blocks/renderers/status-indicator/renderStatusIndicator.ts",
+    "webStandards": {
+      "ariaStatusRegion": {
+        "usage": "Projects an entity’s lifecycle status as a labelled badge; status changes are surfaced through a `role=\"status\"` live region.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/status_role"
+      }
+    }
   },
   {
     "id": "audit-trail",
@@ -2635,7 +2763,13 @@
     "dependsOn": [
       "lifecycle"
     ],
-    "implementedBy": "@frontierui/blocks/audit/AuditProvider.ts"
+    "implementedBy": "@frontierui/blocks/audit/AuditProvider.ts",
+    "webStandards": {
+      "headingElements": {
+        "usage": "Reference runtime for the Web Audit protocol: an immutable, actor-attributed `AuditEvent[]` history; each entry timestamps with the `<time>` element’s machine-readable `datetime`.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/time"
+      }
+    }
   },
   {
     "id": "audit-timeline",
@@ -2648,7 +2782,13 @@
       "renderAuditTimeline",
       "auditTimelineHTML"
     ],
-    "implementedBy": "@frontierui/blocks/renderers/audit-timeline/renderAuditTimeline.ts"
+    "implementedBy": "@frontierui/blocks/renderers/audit-timeline/renderAuditTimeline.ts",
+    "webStandards": {
+      "headingElements": {
+        "usage": "Renders an entity’s `AuditEvent[]` as an ordered `<ol>` timeline; each event’s moment uses `<time datetime>` for a machine-readable, accessibly-announced timestamp.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/time"
+      }
+    }
   },
   {
     "id": "decision-trace",
@@ -2664,7 +2804,13 @@
     "dependsOn": [
       "status-indicator"
     ],
-    "implementedBy": "@frontierui/blocks/renderers/decision-trace/renderDecisionTrace.ts"
+    "implementedBy": "@frontierui/blocks/renderers/decision-trace/renderDecisionTrace.ts",
+    "webStandards": {
+      "headingElements": {
+        "usage": "Renders a decision record as a structured, heading-delimited trace (context → options → ruling), using semantic headings and lists for screen-reader navigability.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/Heading_Elements"
+      }
+    }
   },
   {
     "id": "master-detail",
@@ -2683,7 +2829,13 @@
     "dependsOn": [
       "selection"
     ],
-    "implementedBy": "@frontierui/blocks/master-detail/MasterDetailBehavior.ts"
+    "implementedBy": "@frontierui/blocks/master-detail/MasterDetailBehavior.ts",
+    "webStandards": {
+      "ariaApgKeyboard": {
+        "usage": "Pairs a master list with a coupled detail region: the active list item is `aria-current`, the detail region is `aria-labelledby` the selection and updated as a `aria-controls` target.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-current"
+      }
+    }
   },
   {
     "id": "tree-select",
@@ -2700,7 +2852,13 @@
       "TreeSelectBehavior",
       "registerTreeSelect"
     ],
-    "implementedBy": "@frontierui/blocks/tree-select/TreeSelectBehavior.ts"
+    "implementedBy": "@frontierui/blocks/tree-select/TreeSelectBehavior.ts",
+    "webStandards": {
+      "ariaTreeview": {
+        "usage": "A `role=\"tree\"` of `role=\"treeitem\"` nodes with `aria-expanded` on parents and `aria-selected` on the chosen node; arrow keys walk and expand/collapse the hierarchy.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/treeview/"
+      }
+    }
   },
   {
     "id": "data-table",
@@ -2839,6 +2997,11 @@
       "focus-delegation"
     ],
     "implementedBy": "@frontierui/blocks/renderers/data-grid/",
+    "fuiDemo": {
+      "file": "data-grid-demo.html",
+      "title": "Data Grid Playground — APG grid navigation + editable cells",
+      "height": 560
+    },
     "webStandards": {
       "apgDataGrid": {
         "status": "W3C WAI-ARIA APG",
@@ -3072,6 +3235,11 @@
       "layout",
       "feedback"
     ],
+    "fuiDemo": {
+      "file": "background-task-surface-demo.html",
+      "title": "Background Task Surface — escalation, retry, durability invariants",
+      "height": 560
+    },
     "webStandards": {
       "customEvent": {
         "status": "Baseline",
@@ -3224,7 +3392,13 @@
       "Native-first ladder: title → popover=hint → ARIA bubble. The built-in title attribute is the zero-cost baseline (free hover text, but no styling, no touch, no focus parity, and an uncontrollable UA delay), so the block extends it rather than forbidding it. The Popover API's popover=\"hint\" is the next rung — a real top-layer element with light-dismiss, styleable, that auto-closes when another hint opens — and is the default substrate where Baseline-supported. A fully custom ARIA-described bubble is the top rung, used only when content is richer than text or when Anchor-Intent collision handling (flip/shift/resize) is required. Third-party positioning (Floating UI) is an opt-in adapter behind the Anchor Intent, never the baseline.",
       "Hover and keyboard-focus parity, with WCAG 1.4.13 obligations. The tooltip shows on pointer hover AND on keyboard focus of the trigger (parity is non-negotiable — a mouse-only tooltip is inaccessible), with a short show delay (~500ms hover, immediate on focus) and a hide delay. Per WCAG 1.4.13 (Content on Hover or Focus) the surface must be hoverable (the pointer can move onto the tooltip without it vanishing — a pointer-leave grace period bridges the gap), persistent (it stays until focus/hover leaves or Escape), and dismissible (Escape hides it without moving focus). There is no active-item model and no selection.",
       "Tooltip ≠ toggletip ≠ popover — three distinct contracts. A tooltip is hover/focus-revealed, non-interactive, and announced as a description. A toggletip is click/tap-revealed, can be re-summoned, and is announced via a live region (because there is no persistent describing relationship) — it is a separate concern, cross-referenced, not a flag on this block. A non-modal popover holds interactive content the user can Tab into; the moment content is interactive it is no longer a tooltip (focus can't live in a tooltip). Keeping these separate stops the common anti-pattern of putting buttons or links inside a tooltip."
-    ]
+    ],
+    "webStandards": {
+      "ariaApgTooltip": {
+        "usage": "A non-interactive `role=\"tooltip\"` surface revealed on hover or keyboard focus and wired as the trigger’s `aria-describedby`, dismissible with Escape.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/tooltip/"
+      }
+    }
   },
   {
     "id": "slider",
@@ -3244,7 +3418,13 @@
       "Dual-thumb range is two bound values, not one element. The platform has no single dual-thumb range input, so a from–to range is modelled as two coordinated thumbs over one track, each a value with its own aria-valuenow/min/max, kept ordered (the low thumb can't cross the high thumb) and reported as a pair. This is the concrete realization of the Selection Intent's range variant — constraints.min and constraints.max become the two thumb bounds — rather than a new paradigm invented here.",
       "Value reporting is formatted, not raw — aria-valuetext over the Locale Intent. A slider's accessible value is whatever the user should hear ('$1,200', '40%', '3.5 km'), not the bare number, so formatted output flows through the Locale / Translation intents and is published via aria-valuetext while aria-valuenow keeps the raw number for AT that computes percentages. RTL flips the track direction so 'increase' still maps to the start-to-end reading order.",
       "Slider is the continuous-along-a-track member, distinct from a stepper. Stepping by keyboard arrows/PageUp-Down and snapping to ticks are in scope, but a slider is fundamentally for choosing a value by position on a track; precise numeric entry is a future numeric/stepper input's job. Naming that boundary now keeps the slider from absorbing spinner/number-field concerns and keeps the two as separate Selection-Intent members."
-    ]
+    ],
+    "webStandards": {
+      "ariaApgKeyboard": {
+        "usage": "A `role=\"slider\"` (single value) or dual-thumb range over a track, arrow/Home/End keyboard model, with `aria-valuemin/now/max`; native `<input type=\"range\">` where applicable.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/slider-multithumb/"
+      }
+    }
   },
   {
     "id": "segmented-control",
@@ -3264,7 +3444,13 @@
       "Roving tabindex, horizontal — one tab stop, arrows move within. Per the WAI-ARIA radio/tablist pattern the control is a single tab stop: Tab enters at the pressed segment, Left/Right (roving) move and (because immediacy is live) select as they move, Home/End jump to ends. This is delegated wholesale to the Focus Delegation Intent (strategy=roving;orientation=horizontal) rather than re-implemented, so keyboard behavior stays identical to every other roving widget.",
       "Options are authored as compound children, not an options prop. The author writes <segment> children inside the control and the block maps each to a value-model entry; this is the same shape as <tab> inside Tabs and <option> inside <select>. The segmented control is the smallest clean instance of that recurring pattern, so it adopts it directly. Whether that 'compound child → option' pattern should be promoted to its own protocol/semantics contract (vs. remaining documentation of Selection's grouping) is a genuine cross-cutting fork, deliberately NOT settled inside this block — it is carried as a separate decision item. Recommended default there: document it as a shared paradigm (a protocol/semantics term cross-referenced by Selection + Tabs), not a new UX intent, since it is an authoring-and-lowering convention with no UX dimensions of its own.",
       "Distinct from a multi-select button group and from Tabs. Each option pressed-or-not but exactly one pressed (aria-pressed / a rad/tablist-style roles) separates it from a toolbar of independent toggle buttons (multi-select, no roving-select). And although it shares the compound-child shape with Tabs, Tabs control which panel is shown (disclosure of associated regions) whereas a segmented control sets a value; keeping them separate blocks stops the value-vs-panel concerns from merging."
-    ]
+    ],
+    "webStandards": {
+      "ariaApgKeyboard": {
+        "usage": "A single-select row of adjacent buttons exposed as a `role=\"radiogroup\"` of `role=\"radio\"` segments — arrow keys move selection, one segment is `aria-checked`.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/radio/"
+      }
+    }
   },
   {
     "id": "menu",
@@ -3290,7 +3476,13 @@
       "Submenus compose Disclosure + Anchor — not the tree-select hierarchy intent. A submenu is a parent menuitem with aria-haspopup=menu + aria-expanded (Disclosure) opening its own Anchored menu surface, with the cascade owned by the menu keyboard model (Right opens / Left closes). The tree-select hierarchy intent is rejected: it owns flatten-to-visible-rows + aria-level/setsize/posinset + cross-level Up/Down traversal, none of which a cascading popup has — a submenu is a fresh anchored surface, a different paradigm (#173 Fork E).",
       "The Menu block owns separator and group directly. role=separator (a non-focusable divider) and role=group (a labelled section) are first-class APG menu roles every library ships; the block owns them rather than deferring. The labelled-group case may lean on Selection's existing grouping dimension for the heading / aria-labelledby wiring; otherwise there is no cross-cutting reuse (#173 Fork F).",
       "Claims the menu-button trigger; the droplist 'Menu button' roster entry is demoted to trigger-only. A true menu button (a button with aria-haspopup=menu / aria-expanded) opens a role=menu of commands — it belongs to this block, not the droplist family (a value-selector substrate). #173 claims the trigger; the droplist roster entry becomes 'the trigger shape only; surface owned by the Menu block' (the demotion is the follow-on #301) (#173 Fork G)."
-    ]
+    ],
+    "webStandards": {
+      "ariaApgKeyboard": {
+        "usage": "The action-invocation substrate: `role=\"menu\"` / `role=\"menubar\"` of `role=\"menuitem\"` with the APG keyboard model (arrows move, Enter/Space invoke, Escape closes) — for invoking commands, not selecting values.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/menu-button/"
+      }
+    }
   },
   {
     "id": "notification",
@@ -3317,7 +3509,13 @@
       "Announcement is severity-mapped and delegated to Live-Region Status. The region is a live region; politeness is derived from the Feedback severity, not hand-set per call: info/success → role=\"status\" (polite, aria-live=polite), warning/error → role=\"alert\" (assertive). The announcement transport (the live region, the politeness, the re-announce semantics) is the Live-Region Status Intent — this block composes it rather than re-implementing aria-live wiring. A notification's announcement is decoupled from its visual persistence: it is announced once when shown, even though it lingers on screen.",
       "The transient contract: queue, timeout, dismissal — owned here as a contract, timed in the impl. stackLimit governs concurrency (1 = replace the current message, >1 = a FIFO stack up to the limit, surplus queued). duration drives an auto-timeout (short / long / indefinite) that is PAUSED while the pointer is over the region or focus is within it (so a reader is never raced by a timer — WCAG 2.2.1), and is FORCED to indefinite whenever an action is present (a user must never lose an actionable notification — e.g. an Undo — to an expiring timer; this is mandated by the Feedback Intent). Every notification is also manually dismissable (a close affordance) and Escape-dismissable. The block owns these as a queue-policy contract; the concrete timing constants and easing live in the implementation.",
       "Transient and out-of-flow — distinct from background-task-surface and from inline Message. background-task-surface (#135) is a PERSISTENT surface that hosts long-running work after it goes async and outlives the originating view; a notification is TRANSIENT and fire-and-forget. The Message Intent is STRUCTURAL, in-flow messaging rendered in the document layout; a notification is an out-of-flow overlay in the top layer. The three are cross-referenced and kept separate (bias toward separation) — a forgivable failure may emit a notification, a long retry escalates to background-task-surface, and a persistent form-level error is an inline Message; conflating them loses the placement and lifecycle distinctions that make each correct."
-    ]
+    ],
+    "webStandards": {
+      "ariaLive": {
+        "usage": "A transient, non-blocking message announced through an `aria-live` region (`polite`/`assertive` by urgency) so it reaches assistive tech without stealing focus.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-live"
+      }
+    }
   },
   {
     "id": "breadcrumb",
@@ -3335,7 +3533,17 @@
       "The separator is presentational, never content. The visual divider between crumbs (›, /, →) is rendered via CSS (li ::before) or marked aria-hidden, so assistive tech reads 'Home, Products, Widgets' — the list structure conveys order — not 'Home slash Products slash Widgets'. A separator baked into the DOM as text is an accessibility anti-pattern this block forbids.",
       "Overflow is collapse, not wrap or scroll. When the trail exceeds its container the middle is collapsed behind a single disclosure (an ellipsis crumb that reveals the hidden ancestors), keeping the first (root) and last (current) crumbs visible — the two a user needs most. The per-crumb label truncation is the Typography Intent's responsible-truncation paradigm (shared with tabs, chips, table cells), not a breadcrumb-specific mechanism.",
       "Location, not navigation menu and not process — distinct from nav-list, tabs, and stepper. A breadcrumb answers 'where am I in the hierarchy?' (a trail of ancestors), which is a different question from nav-list's 'what can I navigate to?' (a disclosure menu), tabs' 'which panel is shown?' (sibling panels), and a stepper's 'how far through this process?' (linear steps). It composes the Navigation Intent like nav-list but is its own pattern with its own ARIA (aria-current=\"page\", ordered list), cross-referenced rather than folded into nav-list."
-    ]
+    ],
+    "webStandards": {
+      "navigationLandmark": {
+        "usage": "A `<nav aria-label=\"Breadcrumb\">` wrapping an ordered list of links from root to current, the current page marked `aria-current=\"page\"`.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/breadcrumb/"
+      },
+      "ariaCurrent": {
+        "usage": "The trail’s final, current location carries `aria-current=\"page\"`.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-current"
+      }
+    }
   },
   {
     "id": "dialog",
@@ -3360,7 +3568,17 @@
       "Native-first: built on <dialog> + the top layer, never re-implemented. The native <dialog> element with showModal() already provides the modal focus-trap, the inert background, the ::backdrop, Escape-to-cancel, and a real top-layer paint — so the substrate defaults to it and enhances only what the platform doesn't give (placement other than center, scroll-lock nuance, coordinated enter/exit motion, swipe). The non-modal mode uses dialog.show() or the Popover API. A position:fixed + z-index stack is rejected — it is exactly the stacking-context class of bug the top layer removes.",
       "Modal vs non-modal is the Modal Intent's `mode` dimension, owned here so members inherit it. mode=modal → showModal() (focus-trapping, background inert, backdrop); mode=non-modal → show()/popover (focus stays free, page interactive). The substrate owns this branch — and the Modal Intent's `dismissal`, `backdrop`, and `scrolling` dimensions are realized here once — so a concrete member only fixes `placement` (+ motion). This is the concrete reason a drawer composes, not re-implements, the dialog.",
       "implementsIntent stays 'modal' (the contract it most directly realizes) so intent→block reverse-lookup is unchanged; composesIntents lists the full set (Focus Containment, Surface, Motion), surfaced on the block page and each composed intent's page — the same convention droplist uses with 'anchor'."
-    ]
+    ],
+    "webStandards": {
+      "dialog": {
+        "usage": "The shared modal-surface substrate over the native `<dialog>` element: top-layer rendering, a backdrop, focus trapping, and restore-focus-on-close.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/HTMLDialogElement"
+      },
+      "ariaApgKeyboard": {
+        "usage": "Realizes the APG modal-dialog keyboard model: focus moves into the dialog on open, Tab cycles within it, Escape closes, and focus returns to the trigger.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/"
+      }
+    }
   },
   {
     "id": "drawer",
@@ -3379,7 +3597,17 @@
       "A drawer IS Modal placement=start|end, RTL-aware. The edge is the Modal Intent's placement dimension fixed to a viewport inline edge (start/end, which mirror under RTL), distinguishing it from the centered modal (center) and bottom sheet (bottom) siblings. The drawer adds a slide-in/out motion (the Motion Intent) along that edge — the visual signature of a drawer over a fade-in modal.",
       "Swipe-to-dismiss layered on inherited dismissal, never replacing it. Because a drawer is touch-prominent (mobile navigation, filter panels), it adds an edge-swipe gesture to dismiss, on top of — not instead of — the dialog substrate's escape/outside/backdrop dismissal. The gesture is an enhancement; the keyboard/pointer dismissal it inherits remains the accessible baseline.",
       "Member, not widget-with-a-flag — distinct block from modal and sheet. Drawer, centered modal, and bottom sheet are separate concrete members (distinct placements over the shared substrate), following the dialog family's family-vs-members ruling and droplist's precedent (Dropdown, Multi-dropdown, Autocomplete are separate blocks). A `side` is the drawer's own small axis (which edge); the cross-member differences live in the placement that defines each member."
-    ]
+    ],
+    "webStandards": {
+      "dialog": {
+        "usage": "The edge-anchored member of the dialog family: the same native `<dialog>` top-layer + focus model, sliding in from a viewport edge.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/HTMLDialogElement"
+      },
+      "inertAttribute": {
+        "usage": "While open as a modal, the rest of the page is made `inert` so focus and the accessibility tree are confined to the drawer.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/inert"
+      }
+    }
   },
   {
     "id": "carousel",
@@ -3397,7 +3625,13 @@
       "WAI-ARIA APG carousel accessibility is mandatory, not optional. The rotating region announces the current slide via a live region; the carousel exposes prev/next and a slide-picker (markers); per the APG, slides are a group (or tabpanel-style) with accessible names. The block bakes these in — a carousel that is just a scroll-snap strip with no announced rotation and no controls is not conformant and not what this block ships.",
       "Autoplay is opt-in and accessibility-gated. Autoplay is OFF by default; when enabled it must pause on hover and on keyboard focus within the carousel, must NOT auto-advance under prefers-reduced-motion, and must expose a visible pause/play control (WCAG 2.2.2 Pause, Stop, Hide). These are fixed obligations of the autoplay configuration, not author choices — an unpausable auto-rotating carousel is an accessibility failure the block forbids.",
       "Equivalent slides, not labelled panels and not paginated data — distinct from tabs and Collection Operations. A carousel rotates through peer content the user can browse (promos, images, cards); tabs switch between distinctly-labelled panels via a tablist; Collection Operations pages/filters/sorts a data set. A carousel composes Navigation for its prev/next + markers but is its own pattern, cross-referenced rather than merged."
-    ]
+    ],
+    "webStandards": {
+      "ariaApgKeyboard": {
+        "usage": "A `role=\"region\"` with `aria-roledescription=\"carousel\"`, slide-picker controls, an accessible label, and a rotation pause control, following the APG carousel pattern.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/carousel/"
+      }
+    }
   },
   {
     "id": "checkbox",
@@ -3413,7 +3647,13 @@
       "Native-first: the standalone checkbox is the bare `<input type=\"checkbox\">` with a `<label>` — no JS, no wrapper element. The block adds value only for the GROUP case (a set of checkboxes with a select-all/mixed parent) and the programmatic `indeterminate` property the platform exposes but never sets itself.",
       "Indeterminate is the platform tri-state, not a coined one: `el.indeterminate = true` renders the mixed glyph and the group parent exposes `aria-checked=\"mixed\"` (WAI-ARIA tri-state checkbox). It is a display/ARIA state, never a submitted value — a checkbox still submits checked/unchecked.",
       "Distinct from toggle/switch (#473): a checkbox is a deferred form value (committed on submit, reversible before), a switch is an immediate on/off action. Same `<input type=checkbox>` substrate, different semantics and role — kept as separate blocks, not one with a mode flag."
-    ]
+    ],
+    "webStandards": {
+      "constraintValidation": {
+        "usage": "Native-first over `<input type=\"checkbox\">`: a single boolean, a multi-select group, and the `indeterminate` (mixed) tri-state, with native required-validity.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/checkbox"
+      }
+    }
   },
   {
     "id": "toggle-switch",
@@ -3426,7 +3666,13 @@
       "Native-first: a switch is the platform `<input type=\"checkbox\" role=\"switch\">` (or a `<button aria-pressed>` for a pure action) — no custom element. The block standardizes the role + label + immediate-effect contract, not a new widget.",
       "Immediate vs. deferred is THE distinction from checkbox (#472): a switch applies its state on toggle (e.g. enable a setting now); a checkbox is a form value committed on submit. Same `<input type=checkbox>` substrate, different role and timing — separate blocks, never a checkbox `mode` flag.",
       "Strictly binary: a switch has no `indeterminate`/`mixed` state (unlike the checkbox). `aria-checked` is true/false only; the WAI-ARIA APG Switch pattern with `<kbd>Space</kbd>` toggle and an on/off accessible name."
-    ]
+    ],
+    "webStandards": {
+      "ariaApgKeyboard": {
+        "usage": "Native `<input type=\"checkbox\">` with `role=\"switch\"`: a boolean on/off control whose change takes effect immediately; Space/Enter toggle `aria-checked`.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/switch_role"
+      }
+    }
   },
   {
     "id": "radio-group",
@@ -3442,7 +3688,13 @@
       "Native-first: a radio group is N `<input type=\"radio\">` sharing a `name`, wrapped in `<fieldset>`/`<legend>` — mutual exclusivity and the single submitted value are the platform's, no JS. The block standardizes the grouping + labelling contract.",
       "Roving focus is the platform's for native radios: arrow keys move focus AND change selection, and the group is ONE Tab stop (the checked radio, or the first when none). This is exactly the focus-delegation `roving` value — the block composes that intent rather than redefining traversal.",
       "Single-select, distinct from a checkbox group (#472): radios are mutually exclusive (pick one), a checkbox group is multi-select (pick any). Maps to selection `model: single` vs `multiple`. A radio group has no indeterminate state but can start with none selected."
-    ]
+    ],
+    "webStandards": {
+      "rovingTabindex": {
+        "usage": "Native-first over a `<input type=\"radio\">` group sharing a `name`: the group is one Tab stop, arrow keys move selection (and focus) among mutually-exclusive choices.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/radio/"
+      }
+    }
   },
   {
     "id": "input-family",
@@ -3455,7 +3707,13 @@
       "Native-first: the substrate is always a native `<input>` with the most specific platform `type` (`number` for numerics, `tel` for phone, `email`/`url` where they fit) — the type gives the mobile keyboard, the constraint-validation hooks, and the submitted value for free. The block never swaps the element for a custom widget; it layers formatting/masking on top.",
       "Display value vs. raw value are kept separate (the data-table formatter rule, #368): currency/number formatting is presentational via `Intl.NumberFormat` (and locale-aware grouping/decimals), while the form-submitted/queried value stays the unformatted raw — so `1234.5` submits as `1234.5` even when shown as `$1,234.50`. A `type=number` input can't show grouped currency, so a currency field is a `type=text inputmode=decimal` with the Intl layer, raw value mirrored to a hidden/native value.",
       "Masking is the one affordance the platform lacks: a phone/SSN/date mask constrains and segments typing (`(555) 123-4567`) — the block standardizes a declarative mask pattern over the raw digits, never `innerHTML`, and degrades to a plain typed input when JS is off. Masks are opt-in, distinct from constraint validation (`pattern`/`maxlength`), which stays native."
-    ]
+    ],
+    "webStandards": {
+      "constraintValidation": {
+        "usage": "Native-first over the text-ish `<input>` family (text / number / currency / phone / masked): preserves native constraint validation, `inputmode`, and the validity UI the bare element already provides.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Constraint_validation"
+      }
+    }
   },
   {
     "id": "form",
@@ -3509,7 +3767,13 @@
       "Reaction set is an open, config-driven named-set registry (#370 Fork 6): default-less core, convergent `sentiment` default, `allowAllEmojis` escape to the full picker. Composes the expressive-symbol render strategy for the glyphs.",
       "vs #354 status badge: a reaction count chip resembles a `surface`-tokened badge but means \"N people reacted,\" not \"this state\" — they compose, they do not merge."
     ],
-    "relatedReport": "reports/2026-06-12-expressive-symbols-reactions.md"
+    "relatedReport": "reports/2026-06-12-expressive-symbols-reactions.md",
+    "webStandards": {
+      "ariaApgKeyboard": {
+        "usage": "Each reaction is an `aria-pressed` toggle button affixing a symbol to content; Space/Enter toggle the pressed state.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-pressed"
+      }
+    }
   },
   {
     "id": "picker-surface",
@@ -3534,7 +3798,13 @@
       "One general surface, many specific contexts: what this block ratifies is the reusable browse↔search composition, NOT a single picker widget. It is instantiated by several specific picker contexts — each its own later story because trigger, density, and container differ: a full-page filtered collection (the Web Docs 'shop' consumer, #398), an in-editor inline/tooltip picker (a :-trigger popover anchored to the caret — blocked on the not-yet-existing rich-text/contenteditable + mention-trigger standards), and the reaction quick-picker (the small popover the reaction bar opens for allowAllEmojis, #370 Fork 6). Two consumers already justify compose over a bespoke block: a runtime end-user picking a symbol to react/insert, and an authoring-time dev/designer shopping the icon+emoji+sticker catalog inside Web Docs (the see/shop paradigm of #236/#283).",
       "Accessibility is composed, not baked: result-count announcements on filter settle ('7 results available' / 'No results found') and the active option on each move ('grinning face, 2 of 84') go through live-region-status — one shared announcer, two callers (filter counts + active-descendant moves), exactly as autocomplete already wires it. Large emoji sets are virtualized via windowed-collection; the rendered glyphs are deferred to the expressive-symbol intent (the picker shops them, never re-renders them)."
     ],
-    "relatedReport": "reports/2026-06-12-expressive-symbols-reactions.md"
+    "relatedReport": "reports/2026-06-12-expressive-symbols-reactions.md",
+    "webStandards": {
+      "popoverEvents": {
+        "usage": "One general browse↔search picker built on the Popover API container plus a search `input` and a 2-D category grid — composed, not reinvented.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Popover_API"
+      }
+    }
   },
   {
     "id": "inline-trigger",
@@ -3557,7 +3827,17 @@
       "Accessibility is the APG editable combobox, verbatim (forced invariant): DOM focus stays on the editable region (virtual focus); the listbox is navigated via aria-activedescendant with the active option scrolled into view by JS (browsers don't manage visibility for aria-activedescendant). The textbox carries aria-expanded/aria-controls/aria-autocomplete. A roving tabindex would steal focus from the text and is broken. Detection suspends during IME composition (composing a trigger char in a CJK IME must not fire the picker). Match counts announce through live-region-status. No dedicated 'mention' APG pattern exists — everyone reuses the combobox pattern; the native-first baseline degrades to a plain textbox with no inline suggestions.",
       "Reference insertion adapters, owning neither commit: ships text (default — replaces the query range with a string, works in a plain <textarea>) and token (composes #590's atom/token insertion). Both are reference adapters the standard provides for the two insertion modes the intent exposes; the consumer selects or supplies one. This keeps #591 decoupled from #590 — composed, not blocked — exactly as the Fork 2-A ruling requires."
     ],
-    "relatedReport": "reports/2026-06-14-inline-trigger-mention-pattern.md"
+    "relatedReport": "reports/2026-06-14-inline-trigger-mention-pattern.md",
+    "webStandards": {
+      "ariaCombobox": {
+        "usage": "A `contenteditable` region that detects a boundary-anchored trigger char (@ / : / # / /) and opens a combobox-style suggestion list bound via `aria-controls` / `aria-activedescendant`.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/combobox/"
+      },
+      "contentEditable": {
+        "usage": "Trigger detection slices the editable text around the caret using the `contenteditable` selection/range model.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/contenteditable"
+      }
+    }
   },
   {
     "id": "data-transfer",
@@ -4069,7 +4349,13 @@
       "Native input is the anchor and baseline — enhance, don't replace. A temporal control IS <input type=\"date\">/<time>/<datetime-local>: focusability, form participation, keyboard entry, and a platform fallback all come free, exactly as the slider precedent (the slider block) defaults to <input type=\"range\"> and only swaps to a custom track when native is ruled out. The core defaults to the native input and renders a custom presentation surface (media/linear) only when the paradigm demands it; the `input` presentation is the zero-JS native path.",
       "Three distinct native anchors are the concrete reason for named presets — unlike the single-anchor slider. The slider had one native anchor (input[type=range]) so it needed no named members; the temporal family spans THREE platform anchors (date, time, datetime-local), each with its own parse/format and value shape, which is the platform-level reason date-picker / time-picker / datetime-picker exist as named presets rather than props on one element (#713 C; the slider precedent lacked this and so stayed a single block).",
       "presentation × granularity is the whole dimension space (from the Temporal Intent). presentation is one of media (spatial: calendar grid, analog clock), linear (sequential: scroll wheel, listbox), or input (text: masked/native); granularity is one of point, range, or multi. A preset is exactly a pin of these two dimensions over the core; the core itself pins neither (it is the abstract contract). Locale-aware formatting flows through the Locale Intent and is published on the native input's value plus an accessible formatted label, the same split the slider uses (aria-valuetext formatted, aria-valuenow raw)."
-    ]
+    ],
+    "webStandards": {
+      "ariaApgKeyboard": {
+        "usage": "The abstract date/time core: native-first over `<input type=\"date|time|datetime-local\">`, falling back to a `role=\"dialog\"` + `role=\"grid\"` calendar with the APG date-picker keyboard model.",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/examples/datepicker-dialog/"
+      }
+    }
   },
   {
     "id": "date-picker",
@@ -4091,7 +4377,13 @@
     "designDecisions": [
       "A preset is a dimension pin, not a new block of machinery (#713 option C). date-picker is the abstract `temporal` core with presentation=media + granularity=point pinned and the input[type=date] anchor bound; it re-implements none of the calendar/locale/keyboard machinery — that is the core's. This is the family rule (one core, members are pins) the same way the droplist family's members are trait selections over one substrate.",
       "input[type=date] is the anchor and fallback. Following the slider precedent (native input is the baseline, custom surface only for the gap), the preset's media presentation renders a calendar grid for pointer/spatial selection while the native date input remains the keyboard-entry and no-JS fallback, carrying form participation, validity, and locale-aware value out of the box."
-    ]
+    ],
+    "webStandards": {
+      "ariaApgKeyboard": {
+        "usage": "A single calendar-date preset: native `<input type=\"date\">` or a grid calendar dialog with arrow-key day navigation.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/date"
+      }
+    }
   },
   {
     "id": "time-picker",
@@ -4113,7 +4405,13 @@
     "designDecisions": [
       "A preset is a dimension pin, not new machinery (#713 option C) — time-picker is the `temporal` core with presentation=media + granularity=point pinned over input[type=time]. The distinct native anchor (input[type=time], its own parse/format and value shape) is exactly the platform reason it is a named preset and not a prop on date-picker (the slider, with one anchor, needed no such members).",
       "input[type=time] is the anchor and fallback; the clock surface is the media enhancement, with the native time input the keyboard-entry, form-associated, no-JS baseline (the slider precedent)."
-    ]
+    ],
+    "webStandards": {
+      "ariaApgKeyboard": {
+        "usage": "A time-of-day preset: native `<input type=\"time\">` or a spatial clock surface.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/time"
+      }
+    }
   },
   {
     "id": "datetime-picker",
@@ -4135,7 +4433,13 @@
     "designDecisions": [
       "A preset is a dimension pin, not new machinery (#713 option C) — datetime-picker pins presentation=media + granularity=point over input[type=datetime-local]. It is the third distinct native anchor (after date and time) that makes the temporal family a set of named presets rather than one configurable block (#713 C; the single-anchor slider precedent).",
       "input[type=datetime-local] is the anchor and fallback; the picker composes the core's date (calendar) and time (clock) media surfaces over the one native control, which stays the keyboard/no-JS baseline."
-    ]
+    ],
+    "webStandards": {
+      "ariaApgKeyboard": {
+        "usage": "A combined date-and-time preset: native `<input type=\"datetime-local\">` or a composed calendar + clock surface.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/datetime-local"
+      }
+    }
   },
   {
     "id": "date-range-picker",
@@ -4157,6 +4461,12 @@
     "designDecisions": [
       "A preset is a dimension pin, not new machinery (#713 option C) — date-range-picker pins presentation=media + granularity=range over two input[type=date] anchors. The range coordination lives in the `temporal` core (one place), the direct analogue of the slider's dual-thumb range being two coordinated, ordered values over one track — not a re-implementation per picker.",
       "Two native date inputs are the anchor and fallback; the shared calendar grid is the media enhancement, while the pair of native date inputs stays the keyboard-entry, form-associated, no-JS baseline, kept ordered (start ≤ end) by the core."
-    ]
+    ],
+    "webStandards": {
+      "ariaApgKeyboard": {
+        "usage": "A from–to range preset over the calendar grid: two coupled date values with range-selection keyboard handling.",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/date"
+      }
+    }
   }
 ]
