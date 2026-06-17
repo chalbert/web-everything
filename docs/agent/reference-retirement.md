@@ -48,6 +48,22 @@ A shape change touches one place. The covered homes:
 its pointer space is topic ids, a richer relationship than a plain reference pointer, so it is not
 folded into this helper.
 
+## Detecting decay — the active liveness sweep (#585)
+
+The markers above are how a *known* retirement is recorded; the **liveness sweep** is how decay is
+*found* before it bites (the #531-FAST lesson). `npm run sweep:references`
+([scripts/sweep-reference-liveness.mjs](../../scripts/sweep-reference-liveness.mjs)) fetches every URL
+in the [#597 reference index](../../src/_data/referenceIndex.json) and classifies each into one
+multi-modal health class — `live` / `gone` / `moved` / `archived` / `paywall` / `server-error` /
+`unreachable` / `content-drift` / `superseded` / `retired`. Curated #584 markers
+(`supersededBy`/`retired`) win over a live probe (a marker-only row is never fetched); `content-drift`
+is only asserted against a pinned snapshot baseline (supplied later by #862's archive-on-cite). The
+result is a point-in-time report at `reports/reference-liveness-latest.json` (gitignored — it changes
+every run); the `classify()` core is a pure, network-free function with an offline unit suite. The
+sweep only **detects** — routing a class to a spawned backlog item is #861, axis-vacancy alerting is
+#863. Useful flags: `--limit=N` (bounded sample), `--home=<corpus|references|blocks|capability|intents>`,
+`--timeout=ms`, `--concurrency=N`, `--out=<path>`.
+
 ## Freeform prose — documented style, not enforced
 
 `reports/*.md` and `src/_includes/research-descriptions/*.njk` carry references as freeform prose that a
