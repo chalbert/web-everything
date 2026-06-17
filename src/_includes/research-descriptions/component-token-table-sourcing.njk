@@ -1,0 +1,63 @@
+<h3>The Question</h3>
+<p>
+    A per-component page (<code>/blocks/{id}/</code>) should be able to show a <strong>token table</strong>
+    — the design tokens a component exposes or overrides. The
+    <a href="/backlog/727-web-docs-blocks-uniform-live-example-slot-on-every-per-compo/">#727</a> split
+    traced the original build premise false and carved this to its own decision
+    (<a href="/backlog/802-per-component-token-table-data-sourcing-for-the-web-docs-blo/">#802</a>), sibling
+    to the <a href="/blocks/props-table/">props-table</a> sourcing call
+    (<a href="/backlog/801-per-component-api-data-sourcing-for-the-web-docs-props-table/">#801</a>) and the
+    a11y panel (<a href="/backlog/803-per-component-a11y-panel-content-data-sourcing-for-the-web-d/">#803</a>).
+    Three concerns: <strong>where the data comes from</strong>, <strong>how a block maps to its
+    component-token group</strong>, and <strong>what the table shows</strong>. This survey grounds each
+    against prior art per design-first step&nbsp;1 so the table reuses the existing token + manifest
+    substrates instead of inventing a parallel one.
+</p>
+
+<h3>What the tree already has</h3>
+<ul>
+    <li>A component token tier exists but is tiny and archetype-keyed —
+        <code>webtheme/defaultTokens.ts:90-117</code> carries only <code>button</code>/<code>card</code>
+        groups (2 of 69 blocks), each aliasing a primitive, and those keys are <em>not</em> block ids.</li>
+    <li>A clean <code>flattenTokens()</code>/<code>resolveTokens()</code> pipeline
+        (<code>webtheme/tokens.ts:78-140</code>) already yields each token's <code>aliasOf</code> +
+        resolved literal — the three columns a token table wants.</li>
+    <li>The Custom Elements Manifest WE already emits (<code>custom-elements.json</code> via
+        <code>scripts/gen-cem.mjs</code>, <a href="/backlog/653-register-custom-elements-manifest-cem-as-a-we-protocol-emit-/">#653</a>)
+        has a first-class <code>cssProperties</code> slot per component that the
+        <a href="/blocks/props-table/">props-table</a> already claims to render — but
+        <code>gen-cem.mjs</code> emits none today.</li>
+</ul>
+
+<h3>Prior art</h3>
+<ul>
+    <li><strong>Material Design 3</strong> — three-tier ref/sys/comp tokens; component tokens
+        <em>alias</em> a system token and the docs show that alias chain. Validates showing the alias, not
+        just the literal.</li>
+    <li><strong>Adobe Spectrum</strong> — per-component tokens that reference alias/global tiers; the table
+        shows the reference.</li>
+    <li><strong>Custom Elements Manifest <code>cssProperties</code></strong> — the de-facto multi-vendor
+        home for a component's CSS custom properties (api-viewer, Storybook autodocs, VS Code custom-data).
+        The same manifest the props table consumes — "one manifest, many consumers."</li>
+    <li><strong>Storybook design-token addons + Style Dictionary</strong> — both key off an explicit
+        marker/annotation, never a dir/name convention, and treat the token <em>reference</em> as
+        first-class with the resolved value alongside.</li>
+</ul>
+
+<h3>Recommendation (to ratify in #802)</h3>
+<ol>
+    <li><strong>Source from CEM <code>cssProperties</code></strong>, projected by <code>gen-cem.mjs</code>
+        — not a parallel <code>src/_data</code> token feed. Applies #626 Fork&nbsp;1's one-manifest-many-
+        consumers ruling to tokens.</li>
+    <li><strong>Explicit optional <code>componentTokens</code> field</strong> on the block's
+        <code>blocks.json</code> entry, naming the <code>defaultTokens</code> group it draws from — mirrors
+        the <code>fuiDemo</code> precedent; name-convention is the broken branch
+        (<code>button</code>&ne;<code>action-button</code>).</li>
+    <li><strong>Show override · alias · resolved literal</strong> (three columns), the M3/Spectrum-aligned
+        superset; the data is already in <code>ResolvedToken</code>.</li>
+</ol>
+
+<p class="text-sm text-gray-600">
+    Full grounding, classification pass, and red-team notes in
+    <code>reports/2026-06-16-component-token-table-sourcing.md</code>.
+</p>
