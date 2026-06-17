@@ -1,20 +1,16 @@
 ---
 type: issue
-workItem: story
-size: 13
+workItem: epic
 status: open
 dateOpened: "2026-06-17"
 tags: [conventions, docs, gate, check-standards, locus]
+relatedReport: reports/2026-06-17-backlog-split-analysis.md
 crossRef: { url: /backlog/841-decide-the-we-contract-custom-element-tag-naming-convention-/, label: "triggered by the #841 ambiguity" }
 ---
 
 # Gate: code-path references in backlog & reports must indicate their repo locus
 
-File-path references in backlog items and reports (e.g. `src/_data/blocks.json`) are ambiguous about which constellation repo they live in — the same relative path names different files in WE vs frontierui vs plateau-app, and a reader in chat/raw-md can't tell. Surfaced as real confusion in #841. Establish a convention: every code-path reference carries a `<repo>:` locus prefix (aliases `we:`/`fui:`/`plateau:`; in-repo links keep a relative target so they stay clickable — `[we:path](path)`), codified in docs/agent/conventions.md and enforced by a new check:standards gate that flags bare path-like tokens lacking a locus marker. Includes a one-time migration of existing backlog + reports references (finishes #841). Open knobs (body): alias-vs-full-name; rollout scope.
-
-## Not batchable — resized 5→13 (2026-06-17, batch-2026-06-17 pre-flight)
-
-Surfaced as Tier-A but pre-flight shows it is three things in one, each non-trivial: (1) **codify the convention** in conventions.md; (2) **a new check:standards gate** with a heuristic that distinguishes a code-path token from ordinary prose / version numbers / URLs *and* accepts the `<repo>:` form — a high-false-positive design problem across 866 backlog + 100+ report files; (3) a **one-time mass migration** of every existing path reference, which is a stop-the-world-class bulk rewrite that races concurrent `claim`/`resolve` splices (the same quiescence hazard as #487). Plus the body's own **open knobs** (alias-vs-full-name — soft-defaulted to aliases; rollout scope). Genuinely ≥13 and best split (convention/decision · gate-build · migration). Resized so it drops from the batch pool; needs a focused session. Finishes #841.
+Umbrella for establishing a repo-locus convention on code-path references in `backlog/*.md` and `reports/*.md` — every path carries a `<repo>:` prefix (`we:`/`fui:`/`plateau:`; in-repo links keep a clickable relative target, `[we:path](path)`) so a reader in chat/raw-md can tell which constellation repo it names. Surfaced as real confusion in #841, which this finishes. **Sliced (2026-06-17) into #883 (convention clause) → #884 (detection gate, warn-level) → #885 (mass migration + hard gate)** — see [reports/2026-06-17-backlog-split-analysis.md](reports/2026-06-17-backlog-split-analysis.md). The detail sections below are the seed reference for the slices.
 
 ## Why
 
