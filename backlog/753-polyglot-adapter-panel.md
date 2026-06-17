@@ -4,7 +4,7 @@ workItem: story
 size: 8
 status: open
 parent: "746"
-blockedBy: ["821", "822"]
+blockedBy: ["851"]
 locus: frontierui
 dateOpened: "2026-06-16"
 relatedProject: webdocs
@@ -63,3 +63,24 @@ re-homed and split (mirroring #755):
 #811's ruling: ship **consume mode first** (CEM-driven wrappers, cheap) as the appetite probe;
 author-mode source emit (#818) is gated on demonstrated appetite. Both modes are supported as panel output
 tabs (Fork 1 dissolved — support-all-coherent).
+
+## Two seams surfaced at claim (batch-2026-06-17) — not a clean mechanical story·8
+
+Claimed in batch-2026-06-17; the pre-build trace surfaced two genuine blockers, so it was **released to
+`open`** and re-flagged rather than improvised:
+
+1. **Reverse-ingest (acceptance #3) is blocked-in-fact.** The demo round-trips an *incumbent* component
+   (e.g. a MUI button) → neutral contract → WE block, but **no incumbent-ingest adapter exists**: `htmlToJsx`
+   is a tree-level JSX-pane mirror and the upgrader `ComponentIR` ingests the WE declarative form, not
+   third-party components. Filed as **#851** (incumbent-component ingest adapter) and added as a
+   `blockedBy` edge — the substrate this criterion needs before it can be built.
+2. **The WE→FUI wrapper-handoff is an open design seam (gates acceptance #1).** #821's generator
+   (`scripts/gen-wrapper/genWrapper.mjs`) is a **WE** script; this panel is **FUI**. *How* the FUI panel
+   obtains + live-tests the WE-generated React/Vue wrappers — build-time artifact handoff, a generated
+   bundle the `fuiDemo` iframe loads, or a sandbox runtime — is **undecided**, and per *decisions-are-work-items*
+   it should be settled in a decision item, not chosen mid-batch. The live-test sandbox (running generated
+   React/Vue) is itself a non-trivial sub-build. **Settle this before building criteria #1/#2.**
+
+Net: this is not the clean consume-mode-first slice #811 framed it as — it carries a blocked criterion (#851)
+and an undecided cross-repo handoff. Resolve #851 + settle the handoff seam, then it is buildable (the
+forward generation + create-your-own-adapter doc, criteria #1/#2, are ready once the handoff is decided).
