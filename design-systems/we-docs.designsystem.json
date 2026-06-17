@@ -1,0 +1,6 @@
+{
+  "extends": "@webtheme/default",
+  "themeTokens": "./we-docs.tokens.json",
+  "intentDefaults": { "density": "comfortable", "motion": "natural" },
+  "traitDefaults": { "radius": "md" }
+}

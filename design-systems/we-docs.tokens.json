@@ -1,0 +1,9 @@
+{
+  "color": {
+    "$type": "color",
+    "accent": { "$value": "#4f46e5", "$description": "WE-docs brand accent — Indigo-600, the site's --color-primary (WCAG-AA contrast-tuned, #793)." },
+    "accent-hover": { "$value": "#4338ca", "$description": "Indigo-700 — the site's --color-primary-hover." },
+    "text": { "$value": "#1e293b", "$description": "Slate-800 — the site's --color-text-main." },
+    "text-muted": { "$value": "#475569", "$description": "Slate-600 — the site's --color-text-muted (WCAG-AA, #793)." }
+  }
+}
