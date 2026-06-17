@@ -1,8 +1,10 @@
 ---
 type: idea
 workItem: epic
-status: open
+status: resolved
 dateOpened: "2026-06-14"
+dateResolved: "2026-06-17"
+graduatedTo: none
 relatedProject: webdocs
 crossRef: { url: /backlog/398-build-the-web-docs-product-fui-open-primitives-plateau-app-o/, label: "Sibling — Web Docs served product (#398)" }
 tags: [webdocs, storybook, inventory, component-catalog, intents, blocks, discovery, pipeline]
