@@ -3,10 +3,12 @@ type: decision
 workItem: story
 size: 3
 parent: "746"
-status: active
+status: resolved
 blockedBy: ["821"]
 dateOpened: "2026-06-17"
 dateStarted: "2026-06-17"
+dateResolved: "2026-06-17"
+graduatedTo: none
 preparedDate: "2026-06-17"
 tags: [webdocs, block-explorer, adapters, polyglot, boundary, decision]
 relatedProject: webdocs
@@ -22,25 +24,49 @@ How does the **FUI** polyglot panel ([#753](/backlog/753-polyglot-adapter-panel/
 
 The seam is a *cross-repo artifact handoff*, not a rendering question. WE owns the generation: [`genWrapper.mjs:202`](../scripts/gen-wrapper/genWrapper.mjs) exports a pure `generateWrapper(declaration, target)` whose output ["crosses the layer seam to the FUI Block Explorer panel"](../scripts/gen-wrapper/genWrapper.mjs) ([`genWrapper.mjs:6`](../scripts/gen-wrapper/genWrapper.mjs)), with a CLI ([`cli.mjs`](../scripts/gen-wrapper/cli.mjs)) that materializes `generated/wrappers/<target>/<Name>.<ext>` from the ratified CEM (`custom-elements.json`, #626). FUI owns the render: the panel is `locus: frontierui` and embeds in the WE block page only through the #701 `fuiDemo` iframe ([`.eleventy.js:100`](../.eleventy.js#L100)). The prior art (Stencil output targets, Lit Labs `gen-wrapper-*`, `@lit/react`) is **unanimous and one-directional**: framework wrappers are a *build-time artifact of the source library*, published for the consumer to read — **no shipping tool generates wrappers on-demand in the consumer** ([report §Topic 1](../reports/2026-06-17-we-fui-wrapper-handoff.md)). That, plus the fact that consume-mode output is a *pure function of the CEM* (deterministic, no per-user input — [`genWrapper.mjs:69-189`](../scripts/gen-wrapper/genWrapper.mjs)), forces the invariants below and leaves exactly one real choice.
 
-### Recommended path at a glance
+### Ruling at a glance
 
-| Fork | Recommended default | Main alternative | Confidence |
-|---|---|---|---|
-| **1 — what crosses the WE→FUI boundary** | **A2 — WE publishes the generator + CEM contract; the FUI demo build derives the wrappers itself** | A1 — WE publishes the pre-generated wrapper source as a versioned `@webeverything/*` artifact FUI imports | **Med-high → High** (post red-team) |
+| What crosses the WE→FUI boundary | Ratified | Confidence |
+|---|---|---|
+| **The CEM contract + behavioral wrapper conformance vectors (B2). The generator (`genWrapper`) is FUI/tool-side, NOT a `@webeverything` standard.** | **B2 (2026-06-17, user-ratified)** | High on "generator ≠ WE standard"; B2-over-B1 ratified |
 
-## Proposed ruling (2026-06-17) — A2, pending ratification
+> The original A1/A2 axis ("does WE publish the derived wrapper code or the generator?") was **withdrawn** — both leaked framework-specific codegen into the contracts-only layer. See *Reframing* below.
 
-**WE publishes `@webeverything/gen-wrapper` (the pure `generateWrapper` export) + the ratified CEM; FUI's demo build imports and runs it over the CEM to materialize wrappers into its own build.** No third derived-artifact package. Confidence **high** (raised from med-high — the red-team strengthened rather than dented the default). **The residual is** prior-art fidelity (Stencil/Lit generate-at-source-and-publish); A1's sole legitimate future override remains a CDN-cacheable pre-built artifact, **demand-gated, added then** — not excluded, just not the consume-mode default.
+## Ruling (2026-06-17) — RATIFIED: B2
 
-**Red-team outcome (skeptic prompted only to refute A2 — no refutation landed):**
+**WE publishes only the CEM contract (`custom-elements.json`, the `custom-elements-manifest` protocol, #626) + a small corpus of *behavioral* wrapper conformance vectors (CEM-input → runtime-behavior assertions: renders the tag, forwards attributes, assigns reactive properties, bridges events).** The generator `genWrapper` is **FUI/tool-side** (or own-repo per #507) — a zero-lock-in build devtool, never a published standard; its copy in `scripts/` is demoted to a *reference generator / conformance fixture* subordinate to the contract (the #461 `fetchHandler` "reference impl, not the definition" pattern). Only the **contract** crosses the seam; code never does. FUI runs a generator (its own, or WE's reference one vendored as a swappable devDependency) over WE's CEM to produce its wrappers; the vectors certify the output reflects the CEM without WE owning the codegen.
 
-- **Version-skew *favors* A2, not A1.** A1 publishes a *third* versioned thing (`@webeverything/wrappers`) that must stay pinned to both the CEM version and the generator version it derived from — the exact 3-way drift surface #876 exists to police. A2 collapses that to a single `@webeverything/gen-wrapper` + CEM pin derived locally, so there is no published derivative that can silently lag its inputs.
-- **Codegen-in-the-consumer's-build is idiomatic, not an anti-pattern** (Prisma `generate`, GraphQL codegen, protobuf/`buf`, OpenAPI generators). The Stencil/Lit *generate-at-source-and-publish* precedent only binds publishing to **arbitrary** downstreams; a single known consumer (FUI, already importing `@webeverything` contracts) is not constrained by it — confirming the item's own rebuttal.
-- **The #506 gate already materializes `generated/wrappers/` in WE CI** ([`cli.mjs:9`](../scripts/gen-wrapper/cli.mjs)) — so A1's published artifact is "nearly free." But that artifact is an **internal gate fixture**, not a reason for FUI to consume a CI fixture *as the contract*; it argues A1 is cheap-to-add-later, which is exactly where A2 already files it. (Today `generated/wrappers/` is not even produced — 0 declarations until #822 lands `tagName`.)
-- **Supply-chain / reproducibility is non-differential.** FUI already executes `@webeverything` contract code; `generateWrapper` is pure, no-DOM, no-network, no-FUI-import ([`genWrapper.mjs:1-19`](../scripts/gen-wrapper/genWrapper.mjs), [`:202`](../scripts/gen-wrapper/genWrapper.mjs#L202)) — deterministic in its inputs. A1 doesn't remove WE-authored code from FUI's trust boundary; it only changes which WE artifact is trusted.
-- **No WE principle is breached by A2**; it is the impl-consumes-standard direction (npm-scope-mirrors-layer, #239). A1 is the side that strains single-source-of-truth by shipping a derivable third package.
+*Red-team (B2 vs B1):* the strongest B1 case is YAGNI-timing (one known consumer, zero published versions → a conformance corpus is maintenance before a second generator exists). It lands on **when**, not **whether** — so B2 is the ratified end-state and the *vector build is sequenced* with the panel (#753), not required before it. The contracts-only principle makes conformance (not codegen) the only way a contracts layer keeps authority over output it doesn't generate → B2.
 
-**Unblocks:** the consume-mode panel build (#753) — buildable against A2 once #822 enriches `blocks.json` with `tagName` (the CEM is empty until then). Mechanism is settled; #855 resolves ahead of #822.
+**Follow-ups filed:** **#891** — author the behavioral conformance vectors + runner WE owns; **#892** — re-home/demote `genWrapper` to FUI-side tooling + correct the #821 "WE-owned generator" framing and #753's "obtain the source WE's generator emits" framing.
+
+## Reframing (2026-06-17, user push) — the A1/A2 axis shares a false premise
+
+> ⚠️ **The first-pass proposed ruling (A2 — "WE publishes `@webeverything/gen-wrapper`") is WITHDRAWN.** User challenge: *WE should only be contracts and protocols* — a framework-specific codegen is not a contract, so WE publishing the generator-as-standard overreaches.
+
+**The challenge holds, and the cited precedent backs it.** Tracing #463's forward-adapter family rather than inheriting the summary:
+
+- **#505** elevates the *neutral contract / IR* to the source of truth, WE-owned.
+- **#507** builds the deterministic *generation adapter* that derives native targets **"(own repo)"** — the executable adapter lives in its own repo, **not** under `@webeverything`. WE owns the contract (#505) + the #506 conformance suite; the adapter is a *tool that targets the contract*, outside the standard scope.
+
+So the original Fork-1 axis ("does WE publish the derived wrapper code (A1) or the generator (A2)?") has a **false shared premise** — that WE ships *either*. Both leak something framework-specific into the contracts/protocols layer (`@webeverything`).
+
+### Principle-clean decomposition (what actually crosses the seam)
+
+1. **WE publishes only the CEM contract** (`custom-elements.json`, the `custom-elements-manifest` protocol, #626) — a manifest/protocol, exactly WE's job. *This is the only thing that crosses the WE→FUI boundary.* Code never crosses; the contract does.
+2. **WE may also publish wrapper conformance vectors** (golden "correct output" any generator must match) — the #506-style conformance artifact, contract-adjacent, legitimately WE's.
+3. **The generator (`genWrapper`) is a build-time codegen *tool*, not a standard.** Framework-specific (React/Vue) glue that renders the native element = impl/tooling. Home is **FUI** (the consumer that renders) — or its own repo per #507 — consumed as a **zero-lock-in build devtool**, never the lock. `genWrapper` in `scripts/` today is demoted to a *reference generator / conformance fixture*, subordinate to the CEM contract (the #461 `fetchHandler` "reference impl, not the definition" pattern).
+
+**Net:** FUI runs a generator (its own, or WE's reference one vendored as a swappable devDependency) over WE's published CEM to produce its wrappers. The standard/lock is the **CEM contract (+ conformance vectors)**; the generator stays swappable. `@webeverything` holds only contracts/protocols/conformance — no framework-specific codegen as a shipped standard.
+
+### Reframed Fork 1 — what WE owns at the seam (NOT "what WE publishes of the generator")
+
+- **B1 — WE publishes the CEM contract only.** FUI owns generation wholesale (writes/vendors its own generator). Leanest; conformance is implicit (FUI's output is checked by nothing WE-owned). *Con:* no WE-side guarantee that a FUI wrapper faithfully reflects the CEM.
+- **B2 — WE publishes the CEM contract + wrapper conformance vectors** *(leaning recommendation)*. FUI owns the generator but its output is gated against WE's golden vectors. Mirrors the ratified #505+#506 split (contract + conformance, adapter in own repo). *Con:* WE authors/maintains a small conformance corpus.
+
+In both, `genWrapper` is FUI/tool-side, and the boundary carries a **contract**, not code. *Pending the user's call; confidence on "generator is not a `@webeverything` standard" is now high (precedent-backed); B1-vs-B2 is the open sub-call.*
+
+**Withdrawn first-pass red-team (A1-vs-A2 framing — retained for trail, premise now rejected).** The skeptic pass found no refutation *within the A1/A2 framing* (version-skew favors A2, codegen-in-consumer is idiomatic, etc.). It did not catch the framing error — both A1 and A2 assume WE ships the generator/output, which the contracts-only principle rejects. Superseded by the reframing above.
 
 ## Fork 1 — what crosses the WE→FUI boundary: published derived artifact vs published generation contract
 
