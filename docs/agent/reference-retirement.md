@@ -76,6 +76,17 @@ default** (prints the proposed items); add `--file` to scaffold them. Idempotent
 embeds a `remediation-for: <url>` marker, and any URL already carrying one is skipped — so re-running
 after each sweep never double-files.
 
+## Coverage floor — the axis-vacancy alerter (#863)
+
+`npm run check:axis-vacancy` ([scripts/check-axis-vacancy.mjs](../../scripts/check-axis-vacancy.mjs))
+guards the *other* failure mode: not a single dead link, but a corpus **axis** (a `category` in
+`benchmarkCorpus.json`) thinned below a minimum of live sources so the benchmark loses its footing on
+that comparison axis. It counts live vs `retired` (#584) per category and flags any below the floor
+(default 2; `--threshold=N`). Pass `--with-sweep=reports/reference-liveness-latest.json` to also count
+sweep-`gone`/`unreachable`/`superseded` sources as not-live. It exits non-zero on any vacancy, so it
+can gate CI or the scheduled refresh (#367). An undefined category on a source surfaces as its own
+vacant axis (a schema gap).
+
 ## Freeform prose — documented style, not enforced
 
 `reports/*.md` and `src/_includes/research-descriptions/*.njk` carry references as freeform prose that a
