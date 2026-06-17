@@ -42,6 +42,61 @@ eleventyComputed:
         </div>
         {% endif %}
 
+        {# WE Standards overlay (#832, the WE-locus half of the #755 split / #809) — rendered AROUND the
+           FUI-hosted embed above, from WE's OWN standard data, never inside the iframe (the demo runs in
+           FrontierUI; these conformance panels are WE-docs chrome and don't travel to third-party
+           embedders). Three proofs: (1) the intent→ARIA bridge — the genuinely-new pairing of the UX
+           intent the author declares against the platform ARIA WE resolves it to; (2) why-this-token
+           provenance (#747/#364) and (3) the #092 provider↔consumer graph, shown compactly here and
+           detailed in the Component-tokens / Anatomy sections below (summarized, not duplicated). Gated on
+           an embed being present so it literally wraps the workbench; degrades panel-by-panel on absent
+           substrate (the fuiDemo/webStandards graceful-absence precedent). #}
+        {% if block.fuiDemo and (block.implementsIntent or block.composesIntents or block.componentTokens or block.dependsOn) %}
+        {% set wsKeys = (block.webStandards | webStandardsRows) if block.webStandards else [] %}
+        {% set providerCount = block.dependsOn | length %}
+        {% set consumerBlocks = [] %}
+        {% for other in blocks %}{% if block.id in (other.dependsOn or []) %}{% set consumerBlocks = (consumerBlocks.push(other), consumerBlocks) %}{% endif %}{% endfor %}
+        <div class="section-card mt-8">
+            <h2>WE Standards overlay</h2>
+            <p class="mb-6 text-slate-600">WE-owned conformance proofs for the component embedded above, rendered from WE's <strong>own standard data</strong> — the demo runs in FrontierUI; these panels are Web&nbsp;Docs chrome and never travel into the iframe or to a third-party embedder (the <a href="/backlog/755/">#755</a>/<a href="/backlog/809/">#809</a> boundary split).</p>
+
+            {% if block.implementsIntent or block.composesIntents %}
+            <h3>Intent&nbsp;→&nbsp;platform ARIA</h3>
+            <p class="mb-2 text-slate-600">The author declares a <strong>UX intent</strong> — no ARIA in the authored markup. WE resolves that intent to the web-platform accessibility mechanisms on the right: the standards bridge that proves the intent is realized, not asserted.</p>
+            <table>
+                <thead><tr><th>Declared intent (UX)</th><th>Resolved platform ARIA / web standard</th></tr></thead>
+                <tbody>
+                    <tr>
+                        <td>
+                            {% if block.implementsIntent %}<a href="/intents/{{ block.implementsIntent }}/"><code>{{ block.implementsIntent }}</code></a>{% endif %}
+                            {% for c in block.composesIntents %}{% if c != block.implementsIntent %}<br><a href="/intents/{{ c }}/"><code>{{ c }}</code></a> <span class="text-slate-500 text-sm">(composed)</span>{% endif %}{% endfor %}
+                        </td>
+                        <td>
+                            {% if wsKeys | length %}
+                            {% for row in wsKeys %}<code title="{{ row.concern }}">{{ row.label }}</code>{% if not loop.last %}, {% endif %}{% endfor %}
+                            <div class="text-sm text-slate-500 mt-1">Full realization in <strong>Accessibility &amp; Web Standards</strong> below.</div>
+                            {% else %}<span class="text-slate-500">Realized via the intent's standard ARIA pattern — see the linked intent.</span>{% endif %}
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+            {% endif %}
+
+            {% if block.componentTokens %}
+            {% set tokenGroups832 = block.componentTokens if (block.componentTokens | string) != block.componentTokens else [block.componentTokens] %}
+            <h3 class="mt-6">Why this token</h3>
+            <p class="mb-2 text-slate-600">The component's styling resolves <strong>through the design-token scale</strong>, so it can never drift from the primitives:
+                {% for group in tokenGroups832 %}{% for row in componentTokens[group] %}{% if loop.first %}<code>{{ row.name }}</code>{% if row.reference %} → <code>{{ row.reference }}</code>{% endif %} → <code>{{ row.resolved }}</code>{% endif %}{% endfor %}{% endfor %}.
+                Full provenance in <strong>Component tokens</strong> below.</p>
+            {% endif %}
+
+            {% if providerCount or (consumerBlocks | length) %}
+            <h3 class="mt-6">Provider&nbsp;↔&nbsp;consumer graph</h3>
+            <p class="mb-2 text-slate-600">The composition edges this block sits on (<a href="/backlog/092/">#092</a>): it composes <strong>{{ providerCount }}</strong> provider{{ 's' if providerCount != 1 }}{% if consumerBlocks | length %} and is used by <strong>{{ consumerBlocks | length }}</strong> consumer{{ 's' if (consumerBlocks | length) != 1 }}{% endif %} — disable any provider and the block degrades to what remains (the minimize-lock-in surface). Full bidirectional graph in <strong>Anatomy</strong> below.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+
         {% if block.technicalConfig %}
         <div class="section-card mt-8">
             <h2>Configure technical aspects</h2>
