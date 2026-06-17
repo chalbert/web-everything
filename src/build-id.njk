@@ -1,0 +1,8 @@
+---
+# #850: emits the current build identity at /build-id.json — polled by the client
+# staleness detector and by the agent HTTP probe. Excluded from collections so it
+# never lands in the sitemap (#846).
+permalink: /build-id.json
+eleventyExcludeFromCollections: true
+---
+{{ buildId | dump(2) | safe }}

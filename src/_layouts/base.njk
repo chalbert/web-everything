@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ title | default("Web Everything") }}</title>
+    <meta name="build-id" content="{{ buildId.id }}"><!-- #850 dev-server staleness signal -->
     <link rel="icon" type="image/svg+xml" href="/assets/favicon.svg">
     <link rel="stylesheet" href="/css/style.css">
     <link rel="stylesheet" href="/css/prism-theme.css">
@@ -102,6 +103,7 @@
     <footer class="site-footer">
         <p>&copy; 2026 Web Everything. No cookies were used. | <a href="https://patreon.com/" style="color: inherit; text-decoration: underline; display: inline-flex; align-items: center; gap: 4px;"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg> Support this project</a></p>
 
+    <script src="/assets/js/staleness-detector.js"></script><!-- #850 -->
     <script src="/assets/js/copy-code.js"></script>
     <script src="/assets/js/mode-selector.js"></script>
     <script src="/assets/js/format-selector.js"></script>
