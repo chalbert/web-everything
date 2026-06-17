@@ -2480,8 +2480,8 @@
         "rationale": "Matches the WG's bottom-up strategy — reactive templating composes with Web Expressions / for-each / Template Instantiation as those mature, rather than baking an unshipped binding syntax into the standard now."
       },
       "scriptingHook": {
-        "description": "Declarative-only in tier 1. A tier-2 behavior/extends hook associates a registered class/trait for progressive enhancement. No inline <script> in the definition. (Open point DC-5.)",
-        "openPoint": "DC-5",
+        "description": "Declarative-only in tier 1. A tier-2 behavior/extends hook associates a registered class/trait for progressive enhancement. No inline <script> in the definition. DC-5 ratified this POLICY (2026-06-08); the resolution MECHANISM (how a registry-key resolves+applies without breaching the wc-class self-contained-ESM/fixed-member-order invariants) is the open decision #852. (Open point DC-5 → build decision #852.)",
+        "openPoint": "DC-5/#852",
         "rationale": "Answers WICG #1009's 'can a declarative element be enhanced with script?' without the script-gadget XSS surface that an inline <script> in a parsed definition would open."
       },
       "implicitTemplate": {
@@ -2494,8 +2494,8 @@
         "rationale": "Map-through, native-first: the platform already settled the spelling via DSD, so we forward it into the lowering's attachShadow(init) rather than invent new vocabulary. Option keys emit in a fixed order to keep generated output byte-identical."
       },
       "elementInternals": {
-        "description": "attachInternals() is exposed declaratively: form-associated (DC-12) emits static formAssociated + attachInternals() for form participation; default-role=\"…\" (DC-13) sets internals.role default ARIA semantics (instance role= still overrides). Custom states / :state() (DC-14) and form value/validation wiring are deferred (tier-2/3, compose with Web Validation). Tracked in backlog 082.",
-        "openPoint": "DC-12/DC-13/DC-14",
+        "description": "attachInternals() is exposed declaratively: form-associated (DC-12) emits static formAssociated + attachInternals() for form participation; default-role=\"…\" (DC-13) sets internals.role default ARIA semantics (instance role= still overrides); default-aria-* (#853) extends DC-13 to the rest of the string-valued internals.aria* surface (e.g. ariaLabel/ariaChecked/ariaHasPopup/ariaValueNow) via the same constructor-time map-through, with unknown keys rejected. Custom states / :state() (DC-14) and form value/validation wiring are deferred (tier-2/3, compose with Web Validation). Tracked in backlog 082.",
+        "openPoint": "DC-12/DC-13/DC-14/#853",
         "rationale": "ElementInternals is the platform's imperative-only surface with no HTML form today, so it is the richest declarative target. default-role is chosen over reusing role= to avoid ambiguity on the definition element (the definition's own role vs the defined element's default). The generated class sets internals.role in the constructor and declares static formAssociated; the runtime twin guards attachInternals for non-browser test runtimes (happy-dom) while real browsers wire it up."
       },
       "preserveOnMove": {

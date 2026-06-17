@@ -105,11 +105,12 @@ export const componentCases: ComponentCase[] = [
   },
   {
     id: 'form-associated',
-    title: '8 · Form participation + default role (attachInternals)',
-    note: 'form-associated emits static formAssociated + attachInternals() (form participation); default-role sets internals.role default ARIA semantics (instance role= still overrides). The generated-class pane shows both; the runtime wires them in browsers that support ElementInternals.',
+    title: '8 · Form participation + default ARIA (attachInternals)',
+    note: 'form-associated emits static formAssociated + attachInternals() (form participation); default-role sets internals.role and default-aria-* (#853) map through the rest of the ElementInternals default-ARIA surface (here a slider\'s value range) — instance aria-*/IDL still overrides. The generated-class pane shows all of them set in the constructor; the runtime wires them in browsers that support ElementInternals.',
     shadow: 'open',
     def:
-      `<component name="x-rating" shadow="open" form-associated default-role="slider">\n` +
+      `<component name="x-rating" shadow="open" form-associated default-role="slider"\n` +
+      `           default-aria-value-min="0" default-aria-value-max="5" default-aria-value-now="3">\n` +
       `  <span><slot>★</slot></span>\n` +
       `</component>`,
     usage: `<x-rating></x-rating>`,

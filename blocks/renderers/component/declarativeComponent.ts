@@ -34,12 +34,35 @@ export interface ComponentDef {
   formAssociated: boolean;
   /** `default-role="…"` → internals.role default ARIA semantics; instance `role=` still overrides (DC-13). */
   defaultRole: string | null;
+  /**
+   * `default-aria-*="…"` → `internals.aria*` default-ARIA surface beyond role (#853, the default-role
+   * precedent extended). Each entry is a `{ prop, value }` where `prop` is a string-valued ARIAMixin
+   * property (e.g. `ariaLabel`, `ariaChecked`). Defaults in the ARIA cascade — instance `aria-*=` / IDL
+   * still overrides. Sorted by `prop` for deterministic emit.
+   */
+  defaultAria: Array<{ prop: string; value: string }>;
   /** `preserve-on-move` → emit connectedMoveCallback() so moveBefore() preserves state (atomic move, DC-15). */
   preserveOnMove: boolean;
 }
 
 export const pascal = (name: string): string =>
   name.split('-').filter(Boolean).map((s) => s[0].toUpperCase() + s.slice(1)).join('');
+
+/**
+ * String-valued ARIAMixin properties ElementInternals exposes — the `default-aria-*` surface (#853).
+ * Element-reference IDL (e.g. `ariaActiveDescendantElement`) is deliberately excluded: those take an
+ * element, not a static default string. Instance `aria-*=` / IDL still overrides any of these.
+ */
+const VALID_ARIA_PROPS = new Set([
+  'ariaAtomic', 'ariaAutoComplete', 'ariaBrailleLabel', 'ariaBrailleRoleDescription', 'ariaBusy',
+  'ariaChecked', 'ariaColCount', 'ariaColIndex', 'ariaColIndexText', 'ariaColSpan', 'ariaCurrent',
+  'ariaDescription', 'ariaDisabled', 'ariaExpanded', 'ariaHasPopup', 'ariaHidden', 'ariaInvalid',
+  'ariaKeyShortcuts', 'ariaLabel', 'ariaLevel', 'ariaLive', 'ariaModal', 'ariaMultiLine',
+  'ariaMultiSelectable', 'ariaOrientation', 'ariaPlaceholder', 'ariaPosInSet', 'ariaPressed',
+  'ariaReadOnly', 'ariaRelevant', 'ariaRequired', 'ariaRoleDescription', 'ariaRowCount', 'ariaRowIndex',
+  'ariaRowIndexText', 'ariaRowSpan', 'ariaSelected', 'ariaSetSize', 'ariaSort', 'ariaValueMax',
+  'ariaValueMin', 'ariaValueNow', 'ariaValueText',
+]);
 
 /** Parse a `<component name shadow><template>…</template></component>` definition. Throws on invalid input. */
 export function parseDefinition(src: string): ComponentDef {
@@ -72,6 +95,21 @@ export function parseDefinition(src: string): ComponentDef {
   if (defaultRole && !/^[a-z][a-z-]*$/.test(defaultRole))
     throw new Error(`default-role must be an ARIA role token (lowercase letters/hyphens), got "${defaultRole}".`);
 
+  // `default-aria-*` (#853): the rest of the string-valued ElementInternals default-ARIA surface, the
+  // same constructor-time map-through as default-role. `default-aria-has-popup` → `ariaHasPopup`. Unknown
+  // keys are rejected (typo / element-reference IDL like ariaActiveDescendantElement, which isn't a string).
+  const defaultAria = Array.from(comp.attributes)
+    .filter((a) => a.name.startsWith('default-aria-'))
+    .map((a) => {
+      const prop = 'aria' + pascal(a.name.slice('default-aria-'.length));
+      if (!VALID_ARIA_PROPS.has(prop))
+        throw new Error(`Unknown default-aria attribute "${a.name}" (→ ${prop}) — not a string-valued ElementInternals ARIA property.`);
+      const value = a.value.trim();
+      if (!value) throw new Error(`${a.name} must have a non-empty value.`);
+      return { prop, value };
+    })
+    .sort((x, y) => x.prop.localeCompare(y.prop));
+
   // Lifecycle opt-in — defining connectedMoveCallback makes moveBefore() an atomic, state-preserving move.
   const preserveOnMove = comp.hasAttribute('preserve-on-move');
 
@@ -92,6 +130,7 @@ export function parseDefinition(src: string): ComponentDef {
     serializable,
     formAssociated,
     defaultRole,
+    defaultAria,
     preserveOnMove,
   };
 }
@@ -113,7 +152,7 @@ function shadowInitLiteral(def: ComponentDef): string {
 export function generateClassSource(def: ComponentDef): string {
   const cls = pascal(def.name);
   const literal = '`' + def.templateHTML.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${') + '`';
-  const hasInternals = def.formAssociated || !!def.defaultRole;
+  const hasInternals = def.formAssociated || !!def.defaultRole || def.defaultAria.length > 0;
   // Members in a FIXED order so output is byte-identical: static (formAssociated, tagName) →
   // fields (#internals, #root) → constructor (default ARIA role) → connectedCallback.
   // `static tagName` (Auto-Define #241) is the single source of truth for the tag↔class binding —
@@ -129,9 +168,15 @@ export function generateClassSource(def: ComponentDef): string {
     ...(hasInternals ? ['  #internals = this.attachInternals();'] : []),
     ...(def.shadow === 'none' ? [] : ['  #root = this.shadowRoot;']),
   ];
-  const ctor = def.defaultRole
-    ? ['  constructor() {', '    super();', `    this.#internals.role = '${def.defaultRole}';`, '  }']
-    : [];
+  // Constructor maps default-ARIA through to ElementInternals: role first, then the default-aria-*
+  // props (sorted in parse for determinism). Single-quote/backslash escaped so authored values can't
+  // break out of the generated string literal.
+  const ariaLit = (v: string): string => v.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+  const ctorBody = [
+    ...(def.defaultRole ? [`    this.#internals.role = '${ariaLit(def.defaultRole)}';`] : []),
+    ...def.defaultAria.map(({ prop, value }) => `    this.#internals.${prop} = '${ariaLit(value)}';`),
+  ];
+  const ctor = ctorBody.length ? ['  constructor() {', '    super();', ...ctorBody, '  }'] : [];
   const body =
     def.shadow === 'none'
       ? ['    if (!this.firstChild) this.append(TEMPLATE.content.cloneNode(true));']

@@ -244,6 +244,83 @@ describe('declarativeComponent — ElementInternals: form-associated & default-r
   });
 });
 
+describe('declarativeComponent — default-aria-* defaults beyond role (#853)', () => {
+  it('maps default-aria-* attributes to internals.aria* props in the constructor', () => {
+    const def = parseDefinition(
+      '<component name="x-aria" shadow="open" default-aria-label="Close" default-aria-disabled="true"><span></span></component>'
+    );
+    expect(def.defaultAria).toEqual([
+      { prop: 'ariaDisabled', value: 'true' },
+      { prop: 'ariaLabel', value: 'Close' },
+    ]);
+    const src = generateClassSource(def);
+    expect(src).toContain('#internals = this.attachInternals();');
+    expect(src).toContain("this.#internals.ariaLabel = 'Close';");
+    expect(src).toContain("this.#internals.ariaDisabled = 'true';");
+  });
+
+  it('kebab-maps multi-word keys (has-popup → ariaHasPopup, value-now → ariaValueNow)', () => {
+    const def = parseDefinition(
+      '<component name="x-aria2" shadow="open" default-aria-has-popup="menu" default-aria-value-now="50"><span></span></component>'
+    );
+    const src = generateClassSource(def);
+    expect(src).toContain("this.#internals.ariaHasPopup = 'menu';");
+    expect(src).toContain("this.#internals.ariaValueNow = '50';");
+  });
+
+  it('combines default-role + default-aria-* (role emitted first), preserving fixed member order', () => {
+    const def = parseDefinition(
+      '<component name="x-aria3" shadow="open" form-associated default-role="slider" default-aria-value-min="0"><span></span></component>'
+    );
+    const src = generateClassSource(def);
+    expect(src.indexOf("this.#internals.role = 'slider';")).toBeLessThan(
+      src.indexOf("this.#internals.ariaValueMin = '0';")
+    );
+    const order = ['static formAssociated', '#internals', '#root', 'constructor()', 'connectedCallback()'].map((s) =>
+      src.indexOf(s)
+    );
+    expect(order.every((i) => i > -1)).toBe(true);
+    expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it('emits attachInternals for default-aria even without form-associated or default-role', () => {
+    const def = parseDefinition('<component name="x-aria4" shadow="open" default-aria-label="x"><span></span></component>');
+    expect(generateClassSource(def)).toContain('#internals = this.attachInternals();');
+  });
+
+  it('rejects an unknown default-aria key with a diagnostic', () => {
+    expect(() =>
+      parseDefinition('<component name="x-bad3" default-aria-bogus="x"><span></span></component>')
+    ).toThrow(/Unknown default-aria attribute/);
+  });
+
+  it('rejects an empty default-aria value', () => {
+    expect(() =>
+      parseDefinition('<component name="x-bad4" default-aria-label=""><span></span></component>')
+    ).toThrow(/must have a non-empty value/);
+  });
+
+  it('escapes single quotes in a default-aria value (no literal break-out)', () => {
+    const def = parseDefinition(
+      `<component name="x-aria5" shadow="open" default-aria-label="It's open"><span></span></component>`
+    );
+    expect(generateClassSource(def)).toContain("this.#internals.ariaLabel = 'It\\'s open';");
+  });
+
+  it('omits internals when no default-aria / role / form-associated present', () => {
+    const def = parseDefinition('<component name="x-plain2" shadow="open"><span></span></component>');
+    expect(def.defaultAria).toEqual([]);
+    expect(generateClassSource(def)).not.toContain('attachInternals');
+  });
+
+  it('constructs the live element without throwing (runtime twin guards attachInternals)', () => {
+    const def = parseDefinition(
+      '<component name="x-live-aria" shadow="open" default-aria-label="Rating" default-aria-value-now="3"><span></span></component>'
+    );
+    expect(() => renderInstance(def, '<x-live-aria></x-live-aria>')).not.toThrow();
+  });
+});
+
 describe('declarativeComponent — preserve-on-move (DC-15)', () => {
   it('emits an empty connectedMoveCallback when preserve-on-move is present', () => {
     const def = parseDefinition('<component name="x-pm" shadow="open" preserve-on-move><slot></slot></component>');
