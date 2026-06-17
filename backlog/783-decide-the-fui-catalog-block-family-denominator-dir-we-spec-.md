@@ -3,9 +3,11 @@ type: issue
 workItem: story
 size: 3
 parent: "731"
-status: open
+status: resolved
 dateOpened: "2026-06-16"
-dateStarted: "2026-06-16"
+dateStarted: "2026-06-17"
+dateResolved: "2026-06-17"
+graduatedTo: frontierui/scripts/check-standards.mjs (registered-name drift gate, Check 2)
 decidedDate: "2026-06-16"
 relatedReport: reports/2026-06-16-fui-catalog-family-denominator.md
 relatedProject: webdocs
@@ -188,3 +190,11 @@ behind (*"Impls with no WE spec id stay unregistered … those belong to the #73
 module→declaration, tag name from `define()` not dirname), Storybook (`*.stories.*` file-glob marker), Nx
 (`project.json` marker files) — all key discovery off an explicit **marker** with the name **decoupled from the
 directory path**, infra excluded by absence-of-marker. This confirms I1 and steelmans Fork-1 B.
+
+## Build progress (resolved 2026-06-16)
+
+**Check 2 added** to `frontierui/scripts/check-standards.mjs` — the FUI-internal registered-name→spec drift gate. It walks every public name registered on disk (`attributes.define` / `customElements.define` across `blocks/`, skipping `__tests__`) and fails if a name isn't declared by some `blocks.json` entry's new `registeredNames` field; bidirectional (a declared name nothing registers is a phantom), modeled on the `traits.json` gate. 17 registered names now covered. Negative-tested: removing `nav:section` from `registeredNames` red-flags it ("sibling drift #783 Check 2"); restoring goes green. No regression to Check 1 (#784) or the traits gate; `check:standards` green in frontierui.
+
+- Populated `registeredNames` on the 9 FUI entries that register public names (router, data-grid, background-task-surface, droplist, transient-component, for-each, event-behaviors, type-ahead, nav-list).
+
+**`nav:section` finding — resolved by mapping, not a new block (corrects a stale build premise).** The build text assumed `nav:section` had *no* WE spec and called for authoring a *new standalone nav-section block*. Traced to the tree, that premise is stale: **WE already specs `nav:section` as a behavior of the navigation module** — the WE `nav-list` entry's `blocks` map carries `NavSectionBehavior` (`attribute: "nav:section"`, disclosure-navigation `webStandards`), and `src/_includes/block-descriptions/nav-section.njk` documents it, explicitly "part of the Navigation module." So the correct, non-divergent resolution honoring WE's existing single-navigation-block model is to **declare `nav:section` on the existing FUI nav-list entry's `registeredNames`** (`["nav:list", "nav:section"]`), whose `weSpecPath` `/blocks/nav-list/` resolves. Promoting `nav:section` to a standalone block would split the navigation module for no benefit and create two FUI entries sharing `sourcePath blocks/navigation`. Check 2's goal — every registered name maps to a spec, caught at *name* granularity — is fully met. (Orphan `nav-section.njk` left as-is: pre-existing, harmless, out of scope.)
