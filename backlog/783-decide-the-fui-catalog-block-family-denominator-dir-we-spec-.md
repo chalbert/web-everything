@@ -87,6 +87,31 @@ The genuine on-merit either/or: what *unit* does the gate iterate to demand cove
   **reintroduces an internal-name exclusion list** (the `call`/`pipe`/`value` sub-parsers under `parsers/`,
   trait registrations) — more drift surface, the very thing the gate fights.
 
+**Worked example — `frontierui/blocks/navigation/` (the one dir where A and B diverge today).** The dir holds
+two registered behaviors but only one manifest entry:
+
+```
+blocks/navigation/
+  NavListBehavior.ts      → attributes.define('nav:list',    NavListBehavior)     ← registerNavigation.ts:17
+  NavSectionBehavior.ts   → attributes.define('nav:section', NavSectionBehavior)  ← registerNavigation.ts:18
+  registerNavigation.ts
+  index.ts
+
+blocks.json (1 entry maps here):
+  { "id": "nav-list", "weSpecPath": "/blocks/nav-list/", "sourcePath": "blocks/navigation" }   ← :143-150
+```
+
+- **Under A (flat dir):** the gate iterates `navigation/` and asks *"≥1 manifest `sourcePath` within it?"* —
+  yes (`nav-list`). Dir **covered → green.** The unregistered `nav:section` spec gap is **invisible** (it lives
+  in an already-covered dir).
+- **Under B (registered-name):** the gate iterates the two `attributes.define(…)` names: `nav:list` maps to an
+  entry (✓), `nav:section` maps to **none** → **red**, naming the exact missing spec.
+
+This is the whole fork in one dir: B catches the real `nav:section` impl-ahead-of-spec drift that A misses;
+A pays nothing for FUI's registration convention and is green today. Every other top-level dir is identical
+under both options — `navigation/` is the *only* place the choice changes the gate's verdict right now, which is
+why the sibling-drift gap is filed as a follow-up build rather than treated as a reason to adopt B wholesale.
+
 **Recommended default: A.** It is the literal `check-demos` precedent #706 cited, kills the documented
 family-level drift, stays implementer-agnostic, and is green with no new entries. The sibling-drift gap is real
 but rare, and is better captured as a follow-up build (below) than by coupling the gate to a registration
