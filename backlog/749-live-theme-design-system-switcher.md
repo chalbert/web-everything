@@ -5,7 +5,7 @@ size: 8
 status: open
 parent: "746"
 locus: frontierui
-blockedBy: ["747", "727", "809", "815", "775"]
+blockedBy: ["747", "727", "809", "815", "775", "871"]
 dateOpened: "2026-06-16"
 relatedProject: webtheme
 crossRef: { url: /backlog/364-unified-design-token-theming-system/, label: "webtheme tokens (#364)" }
@@ -28,6 +28,10 @@ Add a **design-system switcher** to the block page: pick from a gallery of popul
 - [ ] Switching presets re-renders the same block under the new design system with no code change.
 - [ ] A/B + token-diff, the axis sliders, the native-state toggles, RTL/locale, and the container simulator all drive the live render.
 - [ ] A playground fixture exercises at least two contrasting presets on one block.
+
+## Re-blocked 2026-06-17 (batch-2026-06-17 top-up) — blocked-in-fact on the manifest registry
+
+Surfaced as Tier-A after its other blockers resolved, but the build "binds the switcher to **the #747 manifest registry**" — and that registry doesn't exist: #747 *ruled* the bundle shape, but the `designSystems.json` registry + `/design-systems/` catalog were never built (verified absent this batch). Filed as **#871**; added it to `blockedBy`. Cascade-frees once #871 ships the registry the switcher reads.
 
 ## Notes
 
