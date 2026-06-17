@@ -29,6 +29,7 @@
     "check:app-conformance": "node scripts/check-app-conformance.mjs",
     "check:demos": "node scripts/check-demos.mjs",
     "check:fresh": "node scripts/dev/check-fresh.mjs",
+    "ingest:component": "node scripts/ingest-adapter/cli.mjs",
     "check:validation-adherence": "vitest run capability-manifest/__tests__/check.test.ts",
     "validation:see": "node scripts/validation-normalize/live-config.mjs",
     "check:readiness": "node scripts/check-readiness.mjs",
