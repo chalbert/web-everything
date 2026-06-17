@@ -1,0 +1,34 @@
+<h3 id="overview">Overview</h3>
+<p>
+    Chrome layout primitive that frames a page the way hand-written site shells do: a (sticky)
+    <code>&lt;header&gt;</code> with a brand lockup and a header-controls region, an optional
+    <code>&lt;nav&gt;</code> landmark, the <code>&lt;main&gt;</code> content region, and an optional
+    <code>&lt;footer&gt;</code>. A skip link is emitted as the first focusable element so keyboard users
+    can bypass the chrome.
+</p>
+<p>
+    Built for the must-build chrome set (<a href="/backlog/870-build-the-must-build-fui-chrome-blocks-app-shell-sectioned-d/">#870</a>)
+    so the WE-docs chrome dogfood (<a href="/backlog/865-migrate-we-docs-site-chrome-to-fui-components-header-nav-foo/">#865</a>)
+    can mount it directly in the host document via the in-document (mode&nbsp;C) embed path.
+</p>
+
+<h3 id="usage">Usage</h3>
+{% highlight "typescript" %}
+import { mountAppShell } from '@frontierui/blocks/app-shell';
+
+// mode-C mount: render the shell into a host shadow root
+mountAppShell(shadowRoot, {
+  brand: { title: 'Web Everything', href: '/', tagline: 'The web is the platform' },
+  headerControls: [navToggle, githubLink],
+  nav: sectionedNav,
+  main: pageContent,
+  footer: footerContent,
+});
+{% endhighlight %}
+
+<h3 id="exports">Exports</h3>
+<ul>
+    <li><code>createAppShell(config)</code> — builds the shell <code>DocumentFragment</code></li>
+    <li><code>mountAppShell(root, config)</code> — mounts into a shadow root, returns a teardown fn</li>
+    <li><code>mountInDocument(root)</code> — the mode-C contract entry point (default config)</li>
+</ul>

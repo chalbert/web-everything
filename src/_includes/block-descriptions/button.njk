@@ -1,0 +1,36 @@
+<h3 id="overview">Overview</h3>
+<p>
+    Chrome button family covering the three button shapes site chrome hand-rolls: <strong>icon</strong>
+    buttons (icon-only, with a required <code>aria-label</code>), <strong>icon links</strong> (the same
+    rendered as an <code>&lt;a&gt;</code> when given an <code>href</code> — e.g. the GitHub control), and
+    <strong>toggle</strong> buttons (the mobile-nav hamburger: an <code>aria-pressed</code> control that
+    mirrors <code>aria-expanded</code> when it drives an <code>aria-controls</code> target).
+</p>
+<p>
+    Built for the must-build chrome set (<a href="/backlog/870-build-the-must-build-fui-chrome-blocks-app-shell-sectioned-d/">#870</a>)
+    so the WE-docs chrome dogfood (<a href="/backlog/865-migrate-we-docs-site-chrome-to-fui-components-header-nav-foo/">#865</a>)
+    can mount it directly via the in-document (mode&nbsp;C) embed path.
+</p>
+
+<h3 id="usage">Usage</h3>
+{% highlight "typescript" %}
+import { createButton } from '@frontierui/blocks/button';
+
+const action = createButton({ label: 'Save' });
+const github = createButton({ variant: 'icon', label: 'GitHub', icon: githubSvg, href: 'https://github.com' });
+const navToggle = createButton({
+  variant: 'toggle',
+  label: 'Toggle navigation',
+  icon: hamburgerSvg,
+  controls: 'site-nav',
+  onClick: ({ pressed }) => nav.toggleAttribute('open', pressed),
+});
+{% endhighlight %}
+
+<h3 id="exports">Exports</h3>
+<ul>
+    <li><code>createButton(config)</code> — builds a button/anchor element</li>
+    <li><code>mountButton(root, config)</code> — mounts one button into a shadow root, returns a teardown fn</li>
+    <li><code>setButtonPressed(el, pressed)</code> — imperatively set a toggle button's state</li>
+    <li><code>mountInDocument(root)</code> — the mode-C contract entry point (showcases the variants)</li>
+</ul>

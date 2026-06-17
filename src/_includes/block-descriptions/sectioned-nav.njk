@@ -1,0 +1,39 @@
+<h3 id="overview">Overview</h3>
+<p>
+    Sectioned-disclosure navigation panel: collapsible section heads over link lists, implementing the
+    W3C APG Disclosure Navigation pattern. It is the sectioned counterpart of the flat
+    <a href="/blocks/nav-list/">nav-list</a> block — each section is a
+    <code>&lt;button aria-expanded aria-controls&gt;</code> head over a <code>&lt;ul&gt;</code> of links.
+    Clicking a head toggles its section, <kbd>Escape</kbd> collapses the focused section, and the link
+    for the current page carries <code>aria-current="page"</code>.
+</p>
+<p>
+    Built for the must-build chrome set (<a href="/backlog/870-build-the-must-build-fui-chrome-blocks-app-shell-sectioned-d/">#870</a>)
+    so the WE-docs chrome dogfood (<a href="/backlog/865-migrate-we-docs-site-chrome-to-fui-components-header-nav-foo/">#865</a>)
+    can mount it directly via the in-document (mode&nbsp;C) embed path.
+</p>
+
+<h3 id="usage">Usage</h3>
+{% highlight "typescript" %}
+import { mountSectionedNav } from '@frontierui/blocks/sectioned-nav';
+
+mountSectionedNav(shadowRoot, {
+  ariaLabel: 'Main',
+  sections: [
+    { id: 'catalog', label: 'Catalog', links: [
+      { href: '/blocks/', label: 'Blocks', current: true },
+      { href: '/intents/', label: 'Intents' },
+    ] },
+    { id: 'project', label: 'Project', expanded: false, links: [
+      { href: '/backlog/', label: 'Backlog' },
+    ] },
+  ],
+});
+{% endhighlight %}
+
+<h3 id="exports">Exports</h3>
+<ul>
+    <li><code>createSectionedNav(config)</code> — builds the <code>&lt;nav&gt;</code> panel element</li>
+    <li><code>mountSectionedNav(root, config)</code> — mounts into a shadow root, returns a teardown fn</li>
+    <li><code>mountInDocument(root)</code> — the mode-C contract entry point (default config)</li>
+</ul>

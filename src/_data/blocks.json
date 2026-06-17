@@ -4576,5 +4576,82 @@
         "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/date"
       }
     }
+  },
+  {
+    "id": "app-shell",
+    "name": "App Shell",
+    "status": "active",
+    "type": "Module",
+    "implementedBy": "@frontierui/blocks/app-shell/",
+    "summary": "Chrome layout primitive that frames a page: a (sticky) header with a brand lockup and a header-controls region, an optional nav landmark, the main content region (preceded by a skip link), and an optional footer. Built for the #870 must-build set so the #865 WE-docs chrome dogfood can mount it in-document (mode C).",
+    "exports": ["createAppShell", "mountAppShell", "mountInDocument"],
+    "webStandards": {
+      "landmarkRoles": {
+        "status": "WAI-ARIA",
+        "pattern": "header / nav / main / footer landmark elements structure the page for assistive technology",
+        "adoption": "App Shell emits native <header>, <nav aria-label>, <main>, <footer> landmark regions",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/main"
+      },
+      "skipLink": {
+        "status": "WCAG 2.4.1",
+        "pattern": "A skip link as the first focusable element lets keyboard users bypass repeated chrome",
+        "adoption": "App Shell renders a skip link targeting the focusable <main> region",
+        "reference": "https://www.w3.org/WAI/WCAG21/Techniques/general/G1"
+      },
+      "positionSticky": {
+        "status": "Baseline",
+        "pattern": "position: sticky pins the header to the top on scroll without JavaScript",
+        "adoption": "Sticky header is the default; opt out via config",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/position"
+      }
+    }
+  },
+  {
+    "id": "sectioned-nav",
+    "name": "Sectioned Nav",
+    "status": "active",
+    "type": "Module",
+    "implementedBy": "@frontierui/blocks/sectioned-nav/",
+    "summary": "Sectioned-disclosure navigation panel: collapsible section heads (W3C APG Disclosure Navigation) over link lists — the sectioned counterpart of the flat nav-list block. Click toggles a section, Escape collapses the focused one, and the active link carries aria-current. Built for the #870 must-build set so the #865 WE-docs chrome dogfood can mount it in-document (mode C).",
+    "exports": ["createSectionedNav", "mountSectionedNav", "mountInDocument"],
+    "implementsIntent": "navigation",
+    "dependsOn": ["nav-list"],
+    "webStandards": {
+      "disclosureNavigation": {
+        "status": "W3C APG Pattern",
+        "pattern": "Disclosure Navigation Menu — section heads expose aria-expanded + aria-controls over collapsible link lists",
+        "adoption": "Each section head is a button with aria-expanded/aria-controls; Escape collapses the focused section",
+        "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/examples/disclosure-navigation/"
+      },
+      "ariaCurrent": {
+        "status": "WAI-ARIA 1.1",
+        "pattern": "aria-current='page' marks the link for the current page",
+        "adoption": "The current link in a section carries aria-current='page'",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current"
+      }
+    }
+  },
+  {
+    "id": "button",
+    "name": "Button",
+    "status": "active",
+    "type": "Module",
+    "implementedBy": "@frontierui/blocks/button/",
+    "summary": "Chrome button family: icon-only buttons, icon links (rendered as <a> when given an href, e.g. the GitHub control), and aria-pressed/aria-expanded toggle buttons (the mobile-nav hamburger). Built for the #870 must-build set so the #865 WE-docs chrome dogfood can mount it in-document (mode C).",
+    "exports": ["createButton", "mountButton", "setButtonPressed", "mountInDocument"],
+    "webStandards": {
+      "ariaPressed": {
+        "status": "WAI-ARIA",
+        "pattern": "aria-pressed turns a button into a toggle button with announced on/off state",
+        "adoption": "The toggle variant maintains aria-pressed and mirrors aria-expanded when it controls a target",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Roles/button_role"
+      },
+      "accessibleName": {
+        "status": "WAI-ARIA",
+        "pattern": "Icon-only controls need an accessible name via aria-label",
+        "adoption": "Icon buttons/links set aria-label from the configured label",
+        "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-label"
+      }
+    }
   }
 ]
