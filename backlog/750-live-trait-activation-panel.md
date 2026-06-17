@@ -2,11 +2,14 @@
 type: idea
 workItem: story
 size: 5
-status: open
+status: resolved
 parent: "746"
 locus: frontierui
 blockedBy: ["727", "809", "815"]
 dateOpened: "2026-06-16"
+dateStarted: "2026-06-17"
+dateResolved: "2026-06-17"
+graduatedTo: frontierui/workbench/mount.ts (live trait activation + state panel)
 relatedProject: webdocs
 crossRef: { url: /backlog/447-merge-frontier-ui-s-attribute-lifecycle-runtime-advances-up-/, label: "Attribute-lifecycle runtime (#447)" }
 tags: [webdocs, block-explorer, traits, live, state-machine, inspector]
@@ -33,3 +36,14 @@ Let the viewer **activate and configure a block's traits live** from the Block E
 Hard-blocked on **#727** (the live render). The inspector depends on #447's lifecycle runtime; if that isn't yet available in FUI, ship the toggle/config half first and gate the inspector half on #447.
 
 **Re-homed to FUI-locus (#809).** This panel is chrome inside the FUI-owned workbench (#815, iframe+chrome distribution), toggling traits host-side intra-FUI — not WE-owned chrome. `blockedBy #815`; built `@frontierui`.
+
+## Progress
+
+Resolved 2026-06-16 (locus: frontierui). Built the **toggle/config + live-state half** on the #815 workbench shell; carried the transition state-machine half (it needs #447's lifecycle runtime as a consumable FUI API, which doesn't exist yet — see #831).
+
+- **Per-trait config controls** (`workbench/registry.ts` + `mount.ts`): `TraitControl` gained a `config` kind (free-text value), an `observed` flag, and a `doc` catalog link. The seed `auto-complete` block now exposes a `placeholder` config trait alongside the toggles/select.
+- **Live activation, in place**: live-observed traits (`resize`/`shift`/`placeholder` — in AutoComplete's `observedAttributes` + handled in its `attributeChangedCallback`) are set on the *existing* instance with no re-mount, so you watch the block adapt; construct-time traits (`windowed`/`disabled`/`filter`) re-mount. `changeTrait()` routes each.
+- **Trait-state panel** (the observability surface): lists each trait's current applied state (on/off/value) and how it applies (`· live` vs `· re-mount`), refreshed on every change.
+- **Catalog cross-links**: each trait row links to its detail page (`/blocks/autocomplete/`, `/intents/anchor/`), `target=_top` to escape the iframe. URLs verified to resolve.
+- **Fixture**: a new e2e (`workbench.spec.ts`) asserts live in-place application, the config trait, the state-panel reflection, the re-mount marker, and the doc link. All 4 workbench specs pass against :3001; `tsc --noEmit` + `check:standards` green.
+- **Deferred → #831**: the per-trait transition state-machine (states + transitions over time) consuming #447's attribute-lifecycle runtime (no importable transitions API in FUI today).
