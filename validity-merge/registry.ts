@@ -8,13 +8,13 @@
  * rather than each control baking its own merge math. Like the capability provider (#204) this is a
  * standalone, dependency-free model: the runtime plug fulfils the same API (`define`/`get`/`resolve`).
  */
-import {
-  assertMergedValidity,
-  type CustomValidityMergeStrategy,
-  type MergedValidity,
-  type SourceResult,
-  type SourceState,
-} from './provider.js';
+import type {
+  CustomValidityMergeStrategy,
+  MergedValidity,
+  SourceResult,
+  SourceState,
+} from './contract.js';
+import { assertMergedValidity } from './provider.js';
 
 /** A scope asked for a strategy name that was never registered. */
 export class UnknownStrategyError extends Error {

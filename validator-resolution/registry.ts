@@ -9,13 +9,13 @@
  * rather than each control baking its own stale-answer policy. Like the merge plane this is a
  * standalone, dependency-free model: the runtime plug fulfils the same API (`define`/`get`/`resolve`).
  */
-import {
-  assertResolvedSource,
-  type AsyncResult,
-  type CustomValidatorResolution,
-  type ResolvedSource,
-  type ValidationInput,
-} from './provider.js';
+import type {
+  AsyncResult,
+  CustomValidatorResolution,
+  ResolvedSource,
+  ValidationInput,
+} from './contract.js';
+import { assertResolvedSource } from './provider.js';
 
 /** A scope asked for a resolution strategy that was never registered. */
 export class UnknownResolutionError extends Error {

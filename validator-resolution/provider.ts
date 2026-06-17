@@ -1,66 +1,31 @@
 /**
- * Async validator resolution strategy plane — the swappable concern behind *how* an in-flight async
- * check is reconciled when the input keeps changing (#214, the named sibling of #212).
+ * Async validator resolution strategy plane — the **runtime-impl half** (#214, the named sibling of #212).
  *
- * #212's validity-merge plane treats `async` as one source that reports `pending{version}` then
- * resolves to `valid|invalid`. But *how* an in-flight async check is resolved when input keeps moving
- * — cancel the stale request? version it and drop late answers? — is its **own** swappable concern: a
- * `CustomValidatorResolution` strategy resolved through a `CustomValidatorResolutionRegistry` (sibling
- * to the `CustomValidityMerge` plane). The **only** constraint (mirroring #004 OP-1's surface rule) is
- * that a strategy's results feed the same `pending{version}` → `valid|invalid` `SourceResult` the merge
- * plane consumes; `assertResolvedSource` enforces it. Vary the resolution policy, never that surface.
+ * The source guard and the two registered strategies — the runtime that fulfils the contract. The
+ * pure-contract half (types/interfaces, compile-erased) is its sibling `./contract.ts`, the future
+ * `@webeverything/contracts/validator-resolution` entry; the registry + async runner live in
+ * `./registry.ts`, the default wiring in `./index.ts`. This file re-exports the contract surface
+ * (`export type * from './contract.js'`) so existing `./provider.js` importers keep one import site for
+ * both halves; the split is at the *file* seam, not the public surface.
  *
- * This module ships the surface types, the surface guard, and the two registered strategies:
- * **versioning** (the native-first default — stamp a per-field generation token and drop answers older
- * than the current input) and **cancellation** (abort the in-flight request via `AbortController`). The
- * registry + the async runner live in `./registry.ts`; the default wiring in `./index.ts`. Like the
- * validity-merge plane (#212) this is a standalone, dependency-free model of the contract — the runtime
- * plug fulfils the same shape.
+ * The two shipped strategies: **versioning** (the native-first default — stamp a per-field generation
+ * token and drop answers older than the current input) and **cancellation** (abort the in-flight request
+ * via `AbortController`). The **only** constraint (mirroring #004 OP-1's surface rule) is that a
+ * strategy's results feed the same `pending{version}` → `valid|invalid` `SourceResult` the merge plane
+ * consumes; `assertResolvedSource` enforces it. Like the validity-merge plane (#212) this is a
+ * standalone, dependency-free model — the runtime plug fulfils the same shape.
  */
-import type { SourceResult } from '../validity-merge/provider.js';
+import type {
+  AsyncResult,
+  CustomValidatorResolution,
+  ResolvedSource,
+  ValidationHandle,
+  ValidationInput,
+} from './contract.js';
 
-/** The field input under validation. Opaque to the plane — a strategy tracks generations, never inspects it. */
-export type ValidationInput = unknown;
-
-/** What an async validator eventually resolves to — the terminal half of `pending → valid|invalid`. */
-export interface AsyncResult {
-  state: 'valid' | 'invalid';
-  /** Human-facing message when `state === 'invalid'`. */
-  message?: string;
-}
-
-/**
- * A handle for one in-flight validation generation. `startValidation` mints it; the runner threads it
- * back through `shouldApplyResult` so a strategy can decide whether a late answer is still current.
- * `version` is the generation token stamped onto the `pending{version}` source result (the merge
- * plane's stable id); `signal` is present only for the cancellation strategy.
- */
-export interface ValidationHandle {
-  fieldId: string;
-  version: number;
-  input: ValidationInput;
-  signal?: AbortSignal;
-}
-
-/**
- * The injectable contract every resolution strategy satisfies — one interface, swappable impls
- * (versioning, cancellation, custom). `key` names it for registration. `startValidation` opens a
- * generation for a field's current input; `shouldApplyResult` decides whether a freshly-arrived answer
- * is still current (the heart of stale-drop); `onInputChange` tells the strategy the input moved on
- * while a check was in flight (bump the generation / abort the request).
- */
-export interface CustomValidatorResolution {
-  readonly key: string;
-  startValidation(fieldId: string, input: ValidationInput): ValidationHandle;
-  shouldApplyResult(handle: ValidationHandle, result: AsyncResult): boolean;
-  onInputChange(fieldId: string, newInput: ValidationInput): void;
-}
-
-/**
- * What the resolution plane emits into the merge plane: a `pending`/`valid`/`invalid` `SourceResult`
- * carrying a generation `version` — exactly the source result #212 consumes. Never `idle`.
- */
-export type ResolvedSource = SourceResult & { state: 'pending' | 'valid' | 'invalid'; version: number };
+// Re-export the pure-contract surface so `./provider.js` importers reach the types and the runtime from
+// one site (the split is at the file seam, see ./contract.ts).
+export type * from './contract.js';
 
 export const RESOLVED_STATES: readonly ResolvedSource['state'][] = ['pending', 'valid', 'invalid'];
 

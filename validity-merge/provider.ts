@@ -1,73 +1,32 @@
 /**
- * Validity-merge strategy plane — the swappable concern behind a control's merged validity
- * (#212, falls out of #004's OP-1 ruling).
+ * Validity-merge strategy plane — the **runtime-impl half** (#212, falls out of #004's OP-1 ruling).
  *
- * #004 OP-1 mandates the **surface protocol** — the `MergedValidity` hand-off shape (plus the four
- * observable interaction regions and stable-id events tracked by the broader validation work) —
- * **not** the merge math. *How* a control reduces several independent `SourceResult`s into one
- * `MergedValidity` is a swappable concern: a `CustomValidityMergeStrategy` resolved through a
- * `CustomValidityMergeRegistry` (sibling to the async `CustomValidatorResolution` plane). Custom
- * strategies are first-class — the **only** constraint is they must emit the surface contract
- * (`assertMergedValidity` enforces it): vary the computation, never the surface, else L1
- * swappability (#004 OP-11) breaks.
+ * The surface guard, the precedence default, and the two registered strategies — the runtime that
+ * fulfils the contract. The pure-contract half (types/interfaces, compile-erased) is its sibling
+ * `./contract.ts`, the future `@webeverything/contracts/validity-merge` entry; the registry +
+ * auto-stamping orchestrator live in `./registry.ts`, the default wiring in `./index.ts`. This file
+ * re-exports the contract surface (`export type * from './contract.js'`) so existing `./provider.js`
+ * importers keep one import site for both halves; the split is at the *file* seam, not the public surface.
  *
- * This module ships the surface types, the surface guard, and the two registered strategies:
- * **source-reduction** (the native-first default) and **last-write-wins** (the degenerate
- * single-source reduction — the old "flat flag"). The registry + auto-stamping orchestrator live in
- * `./registry.ts`; the default wiring in `./index.ts`. Like the capability provider (#204) this is a
- * standalone, dependency-free model of the contract — the runtime plug fulfils the same shape.
+ * The two shipped strategies: **source-reduction** (the native-first default) and **last-write-wins**
+ * (the degenerate single-source reduction — the old "flat flag"). Custom strategies are first-class —
+ * the **only** constraint is they must emit the surface contract (`assertMergedValidity` enforces it):
+ * vary the computation, never the surface, else L1 swappability (#004 OP-11) breaks. Like the capability
+ * provider (#204) this is a standalone, dependency-free model — the runtime plug fulfils the same shape.
  */
+import type {
+  CustomValidityMergeStrategy,
+  MergedValidity,
+  SourceResult,
+  SourceState,
+  ValidityMessage,
+} from './contract.js';
 
-/** The state a single named validity source reports. `pending` carries a generation `version`. */
-export type SourceState = 'idle' | 'valid' | 'invalid' | 'pending';
+// Re-export the pure-contract surface so `./provider.js` importers reach the types and the runtime from
+// one site (the split is at the file seam, see ./contract.ts).
+export type * from './contract.js';
 
 export const SOURCE_STATES: readonly SourceState[] = ['idle', 'valid', 'invalid', 'pending'];
-
-/**
- * One named source's current result — the merge input. `source` is a stable name
- * (`native`/`schema`/`async`/`manual`, or a custom one); `version` is the generation token the
- * orchestrator auto-stamps (so a dev setting a server error never hand-authors ids) and a `pending`
- * async result carries so a late, stale answer can be dropped.
- */
-export interface SourceResult {
-  source: string;
-  state: SourceState;
-  /** Human-facing message when `state === 'invalid'`. */
-  message?: string;
-  /** Generation token — auto-stamped by the orchestrator; hand-authored only for explicit staleness. */
-  version?: number;
-}
-
-/** One message in a merged result, tagged with the source it came from. */
-export interface ValidityMessage {
-  source: string;
-  message: string;
-}
-
-/**
- * The surface contract every strategy must emit (#004 OP-1). The hand-off shape a control hands to
- * its view layer: the reduced `state`, convenience `valid`/`pending` flags, the ordered `messages`
- * with their sources, which source `blocking`s the merged state (`null` when not invalid), and the
- * `version` generation token of this merged result (the stable id the broader surface events key on).
- */
-export interface MergedValidity {
-  state: SourceState;
-  valid: boolean;
-  pending: boolean;
-  messages: ValidityMessage[];
-  blocking: string | null;
-  version: number;
-}
-
-/**
- * The injectable contract every merge strategy satisfies — one interface, swappable impls
- * (source-reduction, last-write-wins, custom). `key` names the strategy for registration; `merge`
- * reduces the named source results to the surface contract.
- */
-export interface CustomValidityMergeStrategy {
-  readonly key: string;
-  merge(sources: SourceResult[]): MergedValidity;
-}
 
 /** A strategy returned a value that is not a conformant `MergedValidity` (surface contract broken). */
 export class SurfaceContractError extends Error {

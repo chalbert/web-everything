@@ -12,14 +12,14 @@
  * The contract is **async/trust-crossing** (#288): `evaluateRegion` runs a provider's `evaluate` and
  * passes the answer through `assertGuardDecision` so a misbehaving provider is caught at the seam.
  */
-import {
-  assertGuardDecision,
-  type CustomGuardProvider,
-  type GuardContext,
-  type GuardDecision,
-  type GuardEvent,
-  type GuardRegion,
-} from './provider.js';
+import type {
+  CustomGuardProvider,
+  GuardContext,
+  GuardDecision,
+  GuardEvent,
+  GuardRegion,
+} from './contract.js';
+import { assertGuardDecision } from './provider.js';
 
 /** A scope asked for a guard provider that was never registered. */
 export class UnknownGuardProviderError extends Error {
