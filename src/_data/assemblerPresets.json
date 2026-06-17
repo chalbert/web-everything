@@ -138,6 +138,78 @@
           "content": "/* command-palette.js (#856) — progressive enhancement for the ⌘K command\n * palette. Baseline markup is a native <dialog> + filterable listbox; this\n * layers the global shortcut, incremental filtering, and roving keyboard\n * selection via aria-activedescendant.\n */\n(function () {\n  'use strict';\n  var dialog = document.getElementById('cmdk');\n  if (!dialog || typeof dialog.showModal !== 'function') return;\n  var input = dialog.querySelector('[data-cmdk-input]');\n  var list = dialog.querySelector('#cmdk-list');\n  var empty = dialog.querySelector('.cmdk-empty');\n  var triggers = document.querySelectorAll('[data-cmdk-open]');\n  var options = function () {\n    return Array.prototype.slice.call(list.querySelectorAll('.cmdk-option')).filter(function (o) {\n      return !o.hidden;\n    });\n  };\n\n  var open = function () { if (!dialog.open) { dialog.showModal(); input.value = ''; filter(''); input.focus(); } };\n  Array.prototype.forEach.call(triggers, function (t) { t.addEventListener('click', open); });\n  document.addEventListener('keydown', function (e) {\n    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); open(); }\n  });\n\n  var highlight = function (opt) {\n    options().forEach(function (o) { o.setAttribute('aria-selected', o === opt ? 'true' : 'false'); });\n    if (opt) { input.setAttribute('aria-activedescendant', opt.id); opt.scrollIntoView({ block: 'nearest' }); }\n  };\n  var filter = function (q) {\n    q = q.trim().toLowerCase();\n    var any = false;\n    Array.prototype.forEach.call(list.querySelectorAll('.cmdk-option'), function (o) {\n      var match = o.dataset.value.toLowerCase().indexOf(q) !== -1;\n      o.hidden = !match;\n      any = any || match;\n    });\n    if (empty) empty.hidden = any;\n    highlight(options()[0] || null);\n  };\n  input.addEventListener('input', function () { filter(input.value); });\n\n  input.addEventListener('keydown', function (e) {\n    var opts = options();\n    if (!opts.length) return;\n    var cur = opts.indexOf(opts.filter(function (o) { return o.getAttribute('aria-selected') === 'true'; })[0]);\n    if (e.key === 'ArrowDown') { e.preventDefault(); highlight(opts[Math.min(cur + 1, opts.length - 1)]); }\n    else if (e.key === 'ArrowUp') { e.preventDefault(); highlight(opts[Math.max(cur - 1, 0)]); }\n    else if (e.key === 'Enter') {\n      e.preventDefault();\n      var sel = opts[cur] || opts[0];\n      if (sel) { dialog.close(); dialog.dispatchEvent(new CustomEvent('cmdk:select', { detail: { value: sel.dataset.value } })); }\n    }\n  });\n\n  list.addEventListener('click', function (e) {\n    var opt = e.target.closest('.cmdk-option');\n    if (!opt) return;\n    dialog.close();\n    dialog.dispatchEvent(new CustomEvent('cmdk:select', { detail: { value: opt.dataset.value } }));\n  });\n})();"
         }
       ]
+    },
+    {
+      "name": "filter-bar",
+      "type": "registry:block",
+      "title": "Filter bar",
+      "description": "A toolbar of filter controls over a collection: a search input, a segmented status toggle, and a multi-select facet dropdown, with a live result-count status and a clear-all action. Baseline is plain markup with real form controls; filter-bar.js debounces input and emits a single normalized filter-change event. A composed recipe — no custom element required to consume it.",
+      "ownedByProject": "webdocs",
+      "status": "active",
+      "composesBlocks": [
+        "input-family",
+        "segmented-control",
+        "multi-select-dropdown",
+        "action-button"
+      ],
+      "composesIntents": [
+        "selection",
+        "collection-operations",
+        "input",
+        "feedback"
+      ],
+      "cem": {
+        "kind": "class",
+        "name": "FilterBar",
+        "description": "Composed-API surface of the filter-bar preset — a row of filter controls over a collection. Describes the authoring surface (#668), never the internal filter-bar.js wiring. Rides the #653 CEM protocol.",
+        "attributes": [
+          {
+            "name": "aria-controls",
+            "description": "Id of the collection region the bar filters.",
+            "type": {
+              "text": "string"
+            }
+          }
+        ],
+        "slots": [
+          {
+            "name": "",
+            "description": "Filter controls — a search input, segmented toggles, and facet dropdowns."
+          }
+        ],
+        "x-webeverything": {
+          "composesBlocks": [
+            "input-family",
+            "segmented-control",
+            "multi-select-dropdown",
+            "action-button"
+          ],
+          "composesIntents": [
+            "selection",
+            "collection-operations",
+            "input",
+            "feedback"
+          ],
+          "note": "A composition, not a registered custom element — the CEM coexists with the plain-markup recipe (#652 Fork 1 API-descriptor layer)."
+        }
+      },
+      "files": [
+        {
+          "path": "filter-bar.html",
+          "type": "registry:markup",
+          "content": "<!-- Filter bar (#857) — a toolbar of filter controls over a collection.\n     Baseline: real form controls (search input, segmented radio toggle,\n     <select multiple>) inside a role=\"search\" toolbar, plus a live result\n     count. Enhanced (filter-bar.js): debounced input, a normalized\n     filter-change event, and a clear-all reset. -->\n<form class=\"filter-bar\" role=\"search\" aria-controls=\"result-list\" data-filter-bar>\n  <div class=\"filter-field filter-field-search\">\n    <label class=\"filter-label\" for=\"filter-q\">Search</label>\n    <input type=\"search\" id=\"filter-q\" name=\"q\" class=\"filter-input\" placeholder=\"Filter…\" autocomplete=\"off\" data-filter=\"q\" />\n  </div>\n  <div class=\"filter-field\" role=\"radiogroup\" aria-label=\"Status\">\n    <label class=\"filter-seg\"><input type=\"radio\" name=\"status\" value=\"\" checked data-filter=\"status\" /> All</label>\n    <label class=\"filter-seg\"><input type=\"radio\" name=\"status\" value=\"active\" data-filter=\"status\" /> Active</label>\n    <label class=\"filter-seg\"><input type=\"radio\" name=\"status\" value=\"archived\" data-filter=\"status\" /> Archived</label>\n  </div>\n  <div class=\"filter-field\">\n    <label class=\"filter-label\" for=\"filter-tags\">Tags</label>\n    <select id=\"filter-tags\" name=\"tags\" class=\"filter-select\" multiple size=\"1\" data-filter=\"tags\" aria-label=\"Tags\">\n      <option value=\"docs\">Docs</option>\n      <option value=\"design\">Design</option>\n      <option value=\"infra\">Infra</option>\n    </select>\n  </div>\n  <output class=\"filter-count\" for=\"filter-q\" aria-live=\"polite\" data-filter-count></output>\n  <button type=\"reset\" class=\"filter-clear\" data-filter-clear>Clear</button>\n</form>"
+        },
+        {
+          "path": "filter-bar.css",
+          "type": "registry:style",
+          "content": ".filter-bar {\n  display: flex;\n  flex-wrap: wrap;\n  align-items: flex-end;\n  gap: 1rem;\n  padding: 0.75rem 1rem;\n  border: 1px solid var(--color-border, #e2e8f0);\n  border-radius: 12px;\n  background: rgba(0, 0, 0, 0.015);\n}\n.filter-field { display: flex; flex-direction: column; gap: 0.25rem; }\n.filter-label {\n  font-size: 0.7em;\n  text-transform: uppercase;\n  letter-spacing: 0.06em;\n  color: var(--color-text-muted);\n}\n.filter-input,\n.filter-select {\n  padding: 0.4rem 0.6rem;\n  font: inherit;\n  border: 1px solid var(--color-border, #e2e8f0);\n  border-radius: 8px;\n}\n.filter-field[role=\"radiogroup\"] {\n  flex-direction: row;\n  align-items: center;\n  gap: 0;\n  border: 1px solid var(--color-border, #e2e8f0);\n  border-radius: 8px;\n  overflow: hidden;\n}\n.filter-seg {\n  display: inline-flex;\n  align-items: center;\n  gap: 0.3rem;\n  padding: 0.4rem 0.7rem;\n  cursor: pointer;\n  font-size: 0.9em;\n}\n.filter-seg:has(input:checked) {\n  background: var(--color-primary, #2563eb);\n  color: #fff;\n}\n.filter-seg input { position: absolute; opacity: 0; pointer-events: none; }\n.filter-count {\n  margin-left: auto;\n  align-self: center;\n  font-size: 0.85em;\n  color: var(--color-text-muted);\n}\n.filter-clear {\n  align-self: center;\n  padding: 0.4rem 0.8rem;\n  font: inherit;\n  background: none;\n  border: 1px solid var(--color-border, #e2e8f0);\n  border-radius: 8px;\n  cursor: pointer;\n}"
+        },
+        {
+          "path": "filter-bar.js",
+          "type": "registry:script",
+          "content": "/* filter-bar.js (#857) — progressive enhancement for the filter bar. Baseline\n * markup is real form controls; this debounces text input and emits a single\n * normalized \"filter:change\" CustomEvent carrying the current filter state, so\n * a consumer wires one listener instead of N control handlers.\n */\n(function () {\n  'use strict';\n  var bar = document.querySelector('[data-filter-bar]');\n  if (!bar) return;\n  var countEl = bar.querySelector('[data-filter-count]');\n\n  var readState = function () {\n    var state = {};\n    Array.prototype.forEach.call(bar.querySelectorAll('[data-filter]'), function (el) {\n      var key = el.dataset.filter;\n      if (el.type === 'radio') { if (el.checked) state[key] = el.value; }\n      else if (el.multiple) {\n        state[key] = Array.prototype.filter.call(el.options, function (o) { return o.selected; }).map(function (o) { return o.value; });\n      } else { state[key] = el.value; }\n    });\n    return state;\n  };\n\n  var emit = function () {\n    bar.dispatchEvent(new CustomEvent('filter:change', { bubbles: true, detail: readState() }));\n  };\n\n  var timer = null;\n  bar.addEventListener('input', function (e) {\n    if (e.target.type === 'search' || e.target.type === 'text') {\n      clearTimeout(timer);\n      timer = setTimeout(emit, 180);\n    } else { emit(); }\n  });\n  bar.addEventListener('change', function (e) {\n    if (e.target.type !== 'search' && e.target.type !== 'text') emit();\n  });\n  bar.addEventListener('reset', function () { setTimeout(emit, 0); });\n\n  // Public helper: a consumer calls bar.setResultCount(n) to reflect a live total.\n  bar.setResultCount = function (n) {\n    if (countEl) countEl.textContent = n + (n === 1 ? ' result' : ' results');\n  };\n})();"
+        }
+      ]
     }
   ]
 }
