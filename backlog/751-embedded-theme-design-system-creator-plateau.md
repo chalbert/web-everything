@@ -1,12 +1,11 @@
 ---
 type: idea
 workItem: story
-size: 5
+size: 13
 status: open
 parent: "746"
 blockedBy: ["747", "788", "775", "749"]
 dateOpened: "2026-06-16"
-dateStarted: "2026-06-16"
 relatedProject: webdocs
 crossRef: { url: /backlog/086-mockup-to-standard-code-tool/, label: "Mockup/screenshot → code (#086)" }
 tags: [webdocs, block-explorer, plateau-embed, theme-creator, design-system, lead-gen, dtcg]
@@ -55,3 +54,12 @@ So #751 was mis-flagged batchable: its `[747, 788]` edge was satisfied while the
 creator, #749 switcher) were implicit and open. Fixed the real DAG edge — added `blockedBy: 775, 749`.
 Building the creator here would pre-empt the #775 open-core decision by fiat (a quiet design call this
 batch must not make). Released unworked; resumes once #775 ratifies + the creator and #749 switcher exist.
+
+## Re-surfaced + resized 5→13 (2026-06-17, batch-2026-06-17)
+
+Two of the prior blockers have since cleared — **#775 ratified** (the open-core layering decision, `graduatedTo: none`) and **#749 shipped** (the switcher, built FUI-resident this batch). But the item is still **not batchable**, for two reasons the cleared edges don't address:
+
+1. **The embeddable Plateau creator surface still does not exist.** #775 was a *decision*, not a build (`graduatedTo: none`) — it authorized the creator but spawned no build item, and `plateau-app/src` has no theme/design-system creator surface (verified). #751 as written is not a thin "embed" slice; its Build list is the whole creator (authoring UI + localStorage + sign-in upsell + DTCG/Figma import adapter + screenshot→tokens via the #086/#382 vision pipeline) **plus** the embed. That is **epic-scale**, not size 5 — resized to 13; it should be sliced (creator-build · embed-on-block-page · ingest adapter · screenshot→tokens).
+2. **Cross-boundary feed is an open question.** The body says "the created manifest feeds the live switcher (#749)" — but #749 shipped **FUI-resident** (its presets live in `frontierui/workbench/designSystems.ts`; the workbench is same-origin FUI-owned with **no WE↔FUI channel**, #809). How a *Plateau*-authored manifest reaches that switcher (and whether the switcher should consume a user-supplied manifest at all, vs. its fixed gallery) is undecided — surface it when slicing (it rhymes with the #881 mode-C host-config transport fork).
+
+Stays `open`, blocked in fact on the unbuilt creator; dropped from the batch pool by the resize. Needs a focused session to slice.
