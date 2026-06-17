@@ -24,6 +24,7 @@
     "sweep:references": "node scripts/sweep-reference-liveness.mjs",
     "route:references": "node scripts/route-reference-remediation.mjs",
     "check:axis-vacancy": "node scripts/check-axis-vacancy.mjs",
+    "pin:references": "node scripts/pin-reference-snapshots.mjs",
     "gen:maas-openapi": "node scripts/gen-maas-openapi.mjs",
     "gen:maas-conformance": "node scripts/gen-maas-conformance.mjs",
     "check:maas-conformance": "node scripts/check-maas-conformance.mjs",

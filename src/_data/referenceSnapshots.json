@@ -1,0 +1,46 @@
+{
+  "id": "reference-snapshots",
+  "description": "Archive-on-cite snapshot pins (#862): per-URL drift baseline hash + Wayback fallback. Hashes are immutable point-in-time pins; the #585 sweep compares against them to detect content-drift.",
+  "summary": {
+    "pinned": 4,
+    "withArchive": 4
+  },
+  "snapshots": {
+    "https://ant.design/": {
+      "url": "https://ant.design/",
+      "home": "corpus",
+      "sourceId": "ant-design",
+      "hash": "sha256:5029ed69b302a9f06538560d4d3f1e14830bd8d4bb4bece0d21d85367a884ed9",
+      "contentLength": 627536,
+      "archiveUrl": "http://web.archive.org/web/20260608184153/https://ant.design/",
+      "pinnedAt": "2026-06-17T15:39:04.962Z"
+    },
+    "https://ark-ui.com/": {
+      "url": "https://ark-ui.com/",
+      "home": "corpus",
+      "sourceId": "ark-ui",
+      "hash": "sha256:f381fda7c300c3743581a86c598cd53f61e663cd532d916806c0734a8ae23d3b",
+      "contentLength": 201131,
+      "archiveUrl": "http://web.archive.org/web/20260527041517/https://ark-ui.com/",
+      "pinnedAt": "2026-06-17T15:39:04.962Z"
+    },
+    "https://atlassian.design/": {
+      "url": "https://atlassian.design/",
+      "home": "corpus",
+      "sourceId": "atlassian",
+      "hash": "sha256:b36fa42b0b26ab690b2a2b4a42f192a6b276a0b10b0dd0c39c9b810f92646535",
+      "contentLength": 509123,
+      "archiveUrl": "http://web.archive.org/web/20260608122508/https://atlassian.design/",
+      "pinnedAt": "2026-06-17T15:39:04.962Z"
+    },
+    "https://base-ui.com/": {
+      "url": "https://base-ui.com/",
+      "home": "corpus",
+      "sourceId": "base-ui",
+      "hash": "sha256:9c57c0a7c069ed49238559fa7235fe306428b02d98e10a80ef01009d85ef3610",
+      "contentLength": 70652,
+      "archiveUrl": "http://web.archive.org/web/20260524132138/https://base-ui.com/",
+      "pinnedAt": "2026-06-17T15:39:04.962Z"
+    }
+  }
+}

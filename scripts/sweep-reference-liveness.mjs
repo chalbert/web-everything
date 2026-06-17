@@ -38,9 +38,11 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { hashBody } from './pin-reference-snapshots.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const INDEX = join(ROOT, 'src/_data/referenceIndex.json');
+const SNAPSHOTS = join(ROOT, 'src/_data/referenceSnapshots.json');
 const DEFAULT_OUT = join(ROOT, 'reports/reference-liveness-latest.json');
 
 /** Hosts that serve frozen archival copies — a final URL here means `archived`, not `moved`. */
@@ -117,12 +119,18 @@ export function classify(ref, probe, opts = {}) {
  * needs. Network errors are caught and surfaced as `{ error }` (never thrown) so one dead host can't
  * abort the sweep.
  */
-async function probeUrl(url, { fetchImpl, timeoutMs }) {
+async function probeUrl(url, { fetchImpl, timeoutMs, hashContent = false }) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const res = await fetchImpl(url, { redirect: 'follow', signal: ctrl.signal, method: 'GET' });
-    return { status: res.status, finalUrl: res.url || url, redirected: !!res.redirected, error: null };
+    // Only read+hash the body when a drift baseline (#862) exists for this URL — otherwise the body is
+    // wasted bandwidth, since classify() ignores bodyHash without a baseline to compare against.
+    let bodyHash = null;
+    if (hashContent && res.ok && typeof res.text === 'function') {
+      try { bodyHash = hashBody(await res.text()); } catch { /* body read is best-effort */ }
+    }
+    return { status: res.status, finalUrl: res.url || url, redirected: !!res.redirected, bodyHash, error: null };
   } catch (err) {
     return { status: null, finalUrl: url, redirected: false, error: err?.name === 'AbortError' ? 'timeout' : (err?.message || 'fetch failed') };
   } finally {
@@ -159,8 +167,9 @@ export async function runSweep(refs, {
   const results = await pool(refs, concurrency, async (ref) => {
     // A marker-only ref (retired/superseded) skips the network — it's already classified.
     const skipProbe = (ref.supersededBy != null && ref.supersededBy !== '') || ref.retired === true;
-    const probe = skipProbe ? null : await probeUrl(ref.url, { fetchImpl, timeoutMs });
-    const verdict = classify(ref, probe, { baselineHash: baselines[ref.url] });
+    const baselineHash = baselines[ref.url];
+    const probe = skipProbe ? null : await probeUrl(ref.url, { fetchImpl, timeoutMs, hashContent: baselineHash != null });
+    const verdict = classify(ref, probe, { baselineHash });
     return { url: ref.url, home: ref.home, sourceId: ref.sourceId, label: ref.label, ...verdict };
   });
 
@@ -186,11 +195,20 @@ if (isMain) {
   if (args.home) refs = refs.filter((r) => r.home === args.home);
   if (args.limit) refs = refs.slice(0, parseInt(args.limit, 10));
 
-  console.log(`sweeping ${refs.length} reference(s)${args.home ? ` (home=${args.home})` : ''}…`);
+  // Load the #862 drift baselines (url → pinned hash) so content-drift detection activates for any
+  // reference that's been snapshot-pinned. Absent the store, the sweep runs status-only (no drift).
+  let baselines = {};
+  if (existsSync(SNAPSHOTS)) {
+    const snaps = JSON.parse(readFileSync(SNAPSHOTS, 'utf8')).snapshots || {};
+    for (const [url, s] of Object.entries(snaps)) if (s.hash) baselines[url] = s.hash;
+  }
+
+  console.log(`sweeping ${refs.length} reference(s)${args.home ? ` (home=${args.home})` : ''}${Object.keys(baselines).length ? ` · ${Object.keys(baselines).length} drift baseline(s)` : ''}…`);
   const report = await runSweep(refs, {
     concurrency: args.concurrency ? parseInt(args.concurrency, 10) : 10,
     timeoutMs: args.timeout ? parseInt(args.timeout, 10) : 12000,
     generatedAt: new Date().toISOString(),
+    baselines,
   });
 
   const out = args.out ? join(ROOT, String(args.out)) : DEFAULT_OUT;

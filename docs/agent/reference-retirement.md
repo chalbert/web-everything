@@ -87,6 +87,19 @@ sweep-`gone`/`unreachable`/`superseded` sources as not-live. It exits non-zero o
 can gate CI or the scheduled refresh (#367). An undefined category on a source surfaces as its own
 vacant axis (a schema gap).
 
+## Archive-on-cite — snapshot pinning (#862, "dogfood Layer 1")
+
+`npm run pin:references` ([scripts/pin-reference-snapshots.mjs](../../scripts/pin-reference-snapshots.mjs))
+pins a point-in-time snapshot per cited URL into [src/_data/referenceSnapshots.json](../../src/_data/referenceSnapshots.json):
+a whitespace-insensitive content **hash** (the drift baseline) plus the closest **Wayback** archive URL
+(the graceful-degradation fallback when the live URL later 404s/moves). This is what turns the #585
+sweep's `content-drift` class from inference into detection — the sweep auto-loads these hashes as
+baselines and reads+hashes a page's body *only* when it has one to compare against. The store is a
+**committed, immutable** baseline (the hash must not move, or the comparison is meaningless): pinning is
+idempotent — an already-pinned URL is skipped unless `--repin=<url>` forces a refresh; `--limit=N` /
+`--home=<…>` bound a run. A pinned hash that later diverges is flagged for human re-verification, never
+auto-retired (the hash is coarse on purpose).
+
 ## Freeform prose — documented style, not enforced
 
 `reports/*.md` and `src/_includes/research-descriptions/*.njk` carry references as freeform prose that a
