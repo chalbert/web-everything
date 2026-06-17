@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { renderAuditTimeline, auditTimelineHTML } from '../../../renderers/audit-timeline/renderAuditTimeline';
-import type { AuditEvent } from '../../../audit/AuditProvider';
+import type { AuditEvent } from '../../../audit/contract';
 
 const evs: AuditEvent[] = [
   { target: { type: 'loan', id: 'L1' }, action: 'created', actor: { role: 'system' }, at: '2026-06-11T09:00:00Z' },

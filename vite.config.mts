@@ -56,24 +56,16 @@ function webEverythingPatches(): Plugin {
 /**
  * Vite plugin that provides SPA history fallback for the router-backed demos.
  *
- * A client-side router owns paths that have no file on disk (e.g. `/counter`, or the loan-origination
- * app's `/demos/loan-origination/pipeline`). A hard reload of such a deep link hits the dev server,
- * which would 404 — so we rewrite the request to the demo's HTML entry and let the router re-match the
- * path in the browser. Each demo mounted under its own base path needs an entry here.
+ * A client-side router owns paths that have no file on disk (e.g. `/counter`). A hard reload of such a
+ * deep link hits the dev server, which would 404 — so we rewrite the request to the demo's HTML entry and
+ * let the router re-match the path in the browser. Each demo mounted under its own base path needs an
+ * entry here. (The loan-origination + auto-insurance exercise apps moved to FUI in #823/#824, so their
+ * base-path entries were removed.)
  */
 function routerDemoFallback(): Plugin {
-  // [pathTest, htmlEntry] — first match wins. The loan-origination app is served under a base path,
-  // so its routes are base-qualified; only its real assets (app.ts/app.css) keep an extension.
+  // [pathTest, htmlEntry] — first match wins.
   const fallbacks: Array<[RegExp, string]> = [
     [/^\/(counter|todos|users|admin|login)(\/|$)/, '/demos/declarative-spa-router.html'],
-    [
-      /^\/demos\/loan-origination\/(pipeline|application|pricing|processing|underwriting|admin)(\/|$)/,
-      '/demos/loan-origination/index.html',
-    ],
-    [
-      /^\/demos\/auto-insurance\/(book|quotes|underwriting|claims)(\/|$)/,
-      '/demos/auto-insurance/index.html',
-    ],
   ];
   return {
     name: 'router-demo-fallback',

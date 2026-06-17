@@ -176,8 +176,8 @@ The Router block already ships the mechanism — **use it, don't hand-roll a `re
   `/demos/{id}/index.html`, so a hard reload of a deep route is served the SPA entry instead of 404ing
   (the dev-server half the block can't do from inside the page).
 
-This wiring is gated automatically — see below. (Both `loan-origination` and `auto-insurance` are
-reference implementations.)
+This wiring is gated automatically — see below. (The `loan-origination` and `auto-insurance` exercise
+apps moved to FUI in #823/#824 and are now embedded via the `fuiDemo` iframe, not served from WE.)
 
 ## 7. Quality gates for demos — `check:demos`
 

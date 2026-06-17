@@ -7,7 +7,7 @@
  * stops being a bespoke table per screen.
  */
 
-import type { AuditEvent } from '../../audit/AuditProvider';
+import type { AuditEvent } from '../../audit/contract';
 
 export type TimelineDensity = 'compact' | 'comfortable';
 export type TimelineGrouping = 'flat' | 'by-day' | 'by-actor';

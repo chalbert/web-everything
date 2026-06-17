@@ -1,10 +1,12 @@
 ---
 type: issue
 workItem: epic
-status: open
+status: resolved
 blockedBy: ["657"]
 dateOpened: "2026-06-15"
 dateStarted: "2026-06-15"
+dateResolved: "2026-06-17"
+graduatedTo: "@frontierui/blocks (canonical granular block-impl workspace sub-package; 9 WE-only families migrated UP, WE's vendored runtime deleted, reference-runtime subset + @webeverything/contracts type-halves retained)"
 tags: []
 ---
 
@@ -50,3 +52,19 @@ S3 also `blockedBy #604`.
   (the #604 client cutover). `story · 8` — **not batchable**, blockedBy #694/#695/#696 **and #604**
   (held). Re-`/split` once #604 lands (its two open forks decide *how* WE resolves the package, so S3's
   own sub-seams aren't investigable yet).
+
+## Second-wave children — epic NOT done (2026-06-17)
+
+S1+S2 are all resolved (#693/#694/#695/#696). S3 (#697) resolved too, but its cutover was reconciled
+against the #604 iframe boundary (#791) and the app-coupled deletion carved out into a new sub-DAG.
+Three children are still live, so the umbrella stays **open**:
+
+- **#823 — epic, open** (`locus: frontierui`). Move the two flagship exercise apps (loan-origination
+  #317 + auto-insurance #318) to FUI — #812 Fork-1(a) execution. Prerequisite gating the app-coupled
+  deletion.
+- **#824 — story · 5, open**, blockedBy #823. Delete WE's 6 app-coupled block-impl families
+  (audit/lifecycle/master-detail/selection/stepper/tree-select) after the apps move to FUI.
+- **#870 — story · 5, active** (`locus: frontierui`). Build the must-build FUI chrome blocks
+  (app-shell, sectioned-disclosure nav, button) for the WE-docs dogfood.
+
+Resolve this epic only once #823, #824, and #870 are all resolved (no-open-slice guard).
