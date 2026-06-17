@@ -30,7 +30,7 @@ eleventyComputed:
 
 <div class="container block-detail-page">
     <div class="block-body content">
-        {% if demo.liveUrl %}
+        {% if demo.liveUrl or demo.fuiDemoFile %}
         <div class="section-card" style="padding: 2rem; margin-bottom: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
             <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 2rem;">
                 <div style="flex: 1;">
@@ -66,11 +66,21 @@ eleventyComputed:
                     </div>
                     {% endif %}
                 </div>
+                {% if demo.liveUrl %}
                 <a href="{{ demo.liveUrl }}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.875rem 1.75rem; background: white; color: #667eea; border-radius: 0.5rem; font-weight: 600; text-decoration: none; transition: transform 0.2s; flex-shrink: 0; align-self: flex-start;">
                     Open Demo
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
                 </a>
+                {% endif %}
             </div>
+        </div>
+        {% endif %}
+
+        {% if demo.fuiDemoFile %}
+        <div class="section-card">
+            <h2>Live demo</h2>
+            <p style="opacity:0.8;">Hosted by <strong>Frontier&nbsp;UI</strong> (the implementation repo) and embedded here in a sandboxed iframe — Web Everything never imports the app's component code (the #700/#701 boundary; FUI keeps provenance). Open it standalone from the frame's “Open in Frontier&nbsp;UI ↗” link.</p>
+            {% fuiDemo demo.fuiDemoFile, demo.name, (demo.fuiDemoHeight or 640) %}
         </div>
         {% endif %}
 

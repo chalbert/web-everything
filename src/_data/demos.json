@@ -19,7 +19,8 @@
     "kind": "playground",
     "description": "<h2>Concept</h2><p>Candidate <strong>B</strong> of the <a href=\"/backlog/314-flagship-exercise-apps/\">flagship exercise-apps</a> program — a <strong>personal-auto</strong> policy lifecycle (quote → bind → issue → endorse → renew → cancel) plus FNOL/claims, chosen for its deeply conditional questionnaires, coverage hierarchy, rating/underwriting rules, and roles. Approximated, not a compliant rating plan. Requirements: <a href=\"/reports/2026-06-12-exercise-app-auto-insurance-requirements/\">requirements report</a>. Tracked by epic <a href=\"/backlog/318-exercise-app-auto-insurance-lifecycle/\">#318</a>.</p><h3>Live now — S0 foundation</h3><p>The domain core: a rating engine (multiplicative factors → 6-month premium) and an underwriting rules engine that emits a per-policy <strong>decision-trace</strong>, a deterministic 4k-policy book seed, and two entity lifecycles (policy + claim). The harness rates the whole book client-side and renders the finding distribution plus a clickable per-policy detail.</p><h3>The point: a second consumer</h3><p>Insurance <strong>reuses</strong> the standards the loan app drove (lifecycle, status-indicator, audit, decision-trace, master-detail, data-table, pagination, selection, router) in a different domain and a different visual register — proving the platform reskins and the standards compose across apps. It will <strong>drive</strong> the next gap set: tree-select, configurator, file handling, view-transitions, permissions, persistence.</p>",
     "status": "draft",
-    "liveUrl": "http://localhost:3000/demos/auto-insurance/index.html",
+    "fuiDemoFile": "auto-insurance.html",
+    "fuiDemoHeight": 680,
     "projects": [
       "weblifecycle",
       "webaudit",
@@ -37,7 +38,8 @@
     "kind": "playground",
     "description": "<h2>Concept</h2><p>Candidate <strong>A</strong> of the <a href=\"/backlog/314-flagship-exercise-apps/\">flagship exercise-apps</a> program — a residential mortgage <strong>origination</strong> flow (application → clear-to-close) chosen because it stresses the whole standard: complex multi-step validation, codifiable business rules, identity/permissions, persistence, a product configurator, file handling, and a pipeline at scale. Structure is anchored on real industry shape (URLA/1003, DTI/LTV, AUS findings, TRID) but <strong>approximated, not a compliant LOS</strong>. Requirements: <a href=\"/reports/2026-06-11-exercise-app-loan-origination-requirements/\">requirements report</a>.</p><h3>Live now — S0 foundation</h3><p>The framework-agnostic domain core: a <strong>rules-as-data engine</strong> (JSON predicate DSL, versioned, AUS-style aggregation) that emits a per-rule <strong>proof-of-compliance trace</strong>, a product catalog + rate sheet with LLPA pricing, derived underwriting facts (DTI/LTV/reserves), a deterministic 5k-application seed, and a mock provider seam (credit/AUS/verification/e-sign/doc-classify). The harness generates and evaluates all 5,000 applications client-side and renders the finding distribution plus a clickable trace per loan.</p><h3>Built against the standard</h3><p>Hosted under <code>demos/loan-origination/</code> on the declarative-SPA shell so the app dogfoods the standard's own routing, loader, components, and intents as later slices land (S1 permissions → S2 lifecycle → S3 the 1003 wizard).</p>",
     "status": "draft",
-    "liveUrl": "http://localhost:3000/demos/loan-origination/index.html",
+    "fuiDemoFile": "loan-origination.html",
+    "fuiDemoHeight": 680,
     "projects": [
       "webvalidation",
       "webintents",
