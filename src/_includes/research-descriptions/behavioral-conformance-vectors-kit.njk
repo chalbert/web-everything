@@ -1,0 +1,173 @@
+{% raw %}
+<h2>Purpose</h2>
+<p>
+  Prep research for decision
+  <a href="/backlog/899-behavioral-conformance-vectors-in-browser-implementer-valida/">#899</a> — how an
+  implementer <em>proves</em> a component conforms to a WE standard when the contract is
+  <strong>build-agnostic</strong> (only the final rendered component is judged, never how it was built).
+  The leaning direction is a conformance <strong>KIT</strong> (declarative vector corpus + schema +
+  dependency-free reference verifier + binding interface, runnable by anyone with no hosted dependency)
+  plus a hosted in-browser exerciser as the convenience/paid product. This survey grounds the kit's two
+  stated forks — <em>runner home</em> (plateau vs FUI) and <em>reference-verifier thinness</em> — in the
+  established prior art and the constellation rulings. Full grounding in
+  <code>reports/2026-06-18-behavioral-conformance-vectors-kit.md</code>.
+</p>
+
+<h2>The question</h2>
+<p>
+  The static manifest check — <code>capability-manifest/check.ts</code>, the
+  <a href="/backlog/267-build-time-check-validation-adherence-tool/">#267</a> build-time
+  <code>check:validation-adherence</code> — validates <em>declared-vs-used features</em> but
+  <strong>cannot</strong> capture <strong>behavioral/temporal</strong> conformance. The canonical example:
+  <code>validator-resolution</code>'s <code>versioning</code> default must <em>drop a stale async
+  generation</em> (<code>validator-resolution/provider.ts:84-88</code> —
+  <code>shouldApplyResult</code> returns <code>handle.version === current generation</code>). Whether a
+  late-settling v1 is correctly dropped after v2 supersedes it is only observable by running real
+  (or virtual) time and watching the rendered ARIA state — no static check sees it.
+</p>
+
+<h2>What a vector looks like</h2>
+<p>
+  A vector is declarative data: a setup, a (possibly <em>timed</em>) interaction script, and the
+  <strong>observable</strong> outcome on the final component — in contract vocabulary, read through the
+  platform surface (DOM / ARIA / events), never impl internals. The temporal case is the one that
+  <em>needs</em> a controllable clock:
+</p>
+<pre><code>{
+  "id": "validator-resolution/versioning/stale-async-dropped",
+  "contract": "@webeverything/validator-resolution",
+  "steps": [
+    { "atMs": 0,  "do": "setInput",   "field": "email", "value": "a@b.com" },
+    { "atMs": 0,  "do": "beginAsync", "token": "v1", "settlesInMs": 200, "result": { "state": "invalid", "message": "taken" } },
+    { "atMs": 50, "do": "setInput",   "field": "email", "value": "c@d.com" },
+    { "atMs": 50, "do": "beginAsync", "token": "v2", "settlesInMs": 80,  "result": { "state": "valid" } }
+  ],
+  "expect": { "finalState": "valid", "neverObserved": [ { "renderedMessage": "taken" } ], "aria": { "aria-invalid": "false" } },
+  "observeVia": ["aria", "renderedMessage", "validity"]
+}</code></pre>
+<p>
+  v1 settles <em>after</em> v2 but is a stale generation → a conforming component must drop it.
+  "Never observed 'taken'" can only be checked by running time — which is exactly why
+  <em>how it's built</em> (debounce / <code>AbortController</code> / generation token) is irrelevant:
+  only the observable result is judged.
+</p>
+
+<h2>Prior art surveyed</h2>
+<table>
+  <thead><tr><th>Reference</th><th>Model</th><th>Reusable paradigm for the kit</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Web Platform Tests</strong> (<code>testharness.js</code> + <code>testdriver.js</code> + wpt.fyi)</td>
+      <td>Three artifacts, two narrow contracts: corpus ⊥ runner ⊥ dashboard. Vendors run the corpus on
+        their own browsers/CI and POST a <code>wptreport.json</code>; wpt.fyi <em>executes nothing</em>.</td>
+      <td>The corpus/runner seam <strong>is</strong> the monetization line — wpt.fyi adds huge value owning
+        zero tests and running none. <strong>No virtual clock in the corpus</strong> (real wall-clock + a
+        runner-supplied multiplier); the time machinery lives entirely in the runner tier. Detachable
+        reporting hook (<code>testharnessreport.js</code> → an open report schema).</td>
+    </tr>
+    <tr>
+      <td><strong>JSON Schema Test Suite</strong> (the closest analog)</td>
+      <td>A 100% JSON corpus with <strong>no shared runner code at all</strong>; versioned per draft, one
+        file per keyword; each case <code>{ description, schema, tests:[{ data, valid }] }</code>.</td>
+      <td>"Language agnostic… requires only a JSON parser" — each impl writes a ~30-line adapter loop.
+        Outcome kept minimal/observable (a <code>valid</code> boolean — deliberately not <em>which</em>
+        error). An <code>optional/</code> tranche separates non-required capabilities.</td>
+    </tr>
+    <tr>
+      <td><strong>test262</strong> (ECMAScript)</td>
+      <td>YAML frontmatter + body; harness <code>includes</code> load first; the <code>$262</code> host
+        object is filled in per engine.</td>
+      <td><code>$262</code> is the single named <strong>binding interface</strong> every engine implements,
+        so one corpus runs on V8/SpiderMonkey/JSC unchanged. Async tests signal via <code>$DONE()</code> —
+        the <em>host</em> owns the event loop, the corpus just declares "async".</td>
+    </tr>
+    <tr>
+      <td><strong>ARIA-AT</strong> (assistive-tech)</td>
+      <td>Authored assertions (priority <code>1/2/3</code> = MUST/SHOULD/MAY) written once AT-agnostic;
+        per-AT <strong>commands</strong> vary via <code>commands.json</code>. aria-at-app is a hosted iframe
+        runner collecting interop results.</td>
+      <td>Split the <em>invariant assertion</em> from the <em>per-impl command mapping</em>; add
+        MUST/SHOULD/MAY priority tiers. The open-corpus + paid-hosted-runner shape, again.</td>
+    </tr>
+    <tr>
+      <td><strong>Testing Library</strong> / black-box</td>
+      <td>"The more your tests resemble the way your software is used, the more confidence they give" —
+        query by role/label/text, never component instances.</td>
+      <td>The ARIA/DOM/event surface is the <em>only</em> layer every implementation of the same component
+        must agree on by definition; it survives refactors and a failing <code>getByRole</code> is a real
+        a11y defect. Corpus stays <code>{ setup, interactions, expectedRole/Name/State/Events }</code>.</td>
+    </tr>
+    <tr>
+      <td><strong>@sinonjs/fake-timers</strong> · Playwright <code>page.clock</code></td>
+      <td>Hijack <code>setTimeout</code>/<code>Date</code>/<code>rAF</code>; advance explicitly via
+        <code>tick</code>/<code>tickAsync</code>/<code>next</code>/<code>runAll</code>. Vitest/Jest fake
+        timers are thin wrappers over Sinon; <code>page.clock</code> is the same model over CDP.</td>
+      <td>The clean seam: a <strong>clock verb contract</strong>
+        (<code>now/tick/tickAsync/next/runAll</code>) is standardizable; the <em>install mechanism</em> is a
+        swappable backend — embedded Sinon for jsdom, <code>page.clock</code> for real render. The same
+        assertion code honours either backend.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>In-repo prior art — this is not greenfield</h2>
+<p>
+  WE already ships a conformance-vector + reference-target + golden-output pattern at
+  <code>blocks/renderers/module-service/conformance/</code> — <code>vectors.ts</code>
+  (<code>VectorInput</code> = seed fixture + request), <code>golden.json</code> (frozen expected
+  responses), <code>runner.ts</code>, <code>referenceTarget.ts</code>, <code>dotnetTarget.ts</code>.
+  #899 <strong>generalizes that <em>request→golden</em> shape</strong> to <em>behavioral/temporal</em>
+  vectors with <em>DOM/ARIA observation</em> and a <em>controllable clock</em> — the MaaS conformance
+  corpus is the in-repo proof that "declarative vectors + a reference target + a polyglot second target"
+  already works here.
+</p>
+
+<h2>Synthesis handed to #899 — two forced invariants + one genuine call</h2>
+<p>
+  Run through the constellation rulings, the item's two stated forks largely <strong>dissolve</strong>:
+</p>
+<ul>
+  <li>
+    <strong>Forced invariant A — the layer split (per <a href="/backlog/817-constellation-placement-of-guard-validity-merge-validator-re/">#817</a>'s
+    file-seam test).</strong> WE owns the vector corpus (JSON) + vector schema + the
+    <strong>assertion-semantics</strong> reference verifier (it <em>is</em> a WE conformance gate, like a
+    <code>check.ts</code>, so #817 keeps it WE) + the binding <strong>interface</strong> (including a clock
+    <em>verb contract</em> <code>now/tick/tickAsync/next/runAll</code>). The binding
+    <strong>implementation</strong> (mount/dispatch/read) and the clock <strong>implementation</strong>
+    (Sinon-style / <code>page.clock</code>-style) are <em>runtime</em> → FUI. The verifier consumes
+    <strong>time as data</strong> (a timestamped observed trace), never a live clock — so no WE-side gate
+    consumes the clock impl, and #817 ports it out. A runtime clock/DOM driver <em>inside</em>
+    <code>@webeverything</code> is the broken branch #817 already excluded.
+  </li>
+  <li>
+    <strong>Forced invariant B — the hosted exerciser is a plateau product (per
+    <a href="/backlog/091-web-docs-as-a-service-plateau/">#091</a>).</strong> A zero-setup,
+    in-browser, dashboards / pass-fail-over-time, results-collecting surface is the wpt.fyi / aria-at-app
+    shape — a served product, plateau's constellation layer. This is #091's <em>decompose, no home
+    decision</em> pattern: the hosted dashboard → plateau; a thin <strong>stateless</strong> local
+    exerciser → FUI devtool. FUI hosting a stateful results SaaS is the broken branch.
+  </li>
+  <li>
+    <strong>The one genuine fork (Fork 2 narrowed).</strong> After #817 settles the <em>verifier</em> as
+    pure assertion semantics, the surviving either/or is: does the <strong>WE project</strong>
+    additionally publish a runnable <strong>reference backend</strong> (clock + DOM dispatch) as
+    zero-lock-in proof-of-runnability, or stay pure-contract and let FUI / implementers own <em>all</em>
+    runnable backends? <strong>Recommended default: pure-contract</strong> — the reference backend lives in
+    FUI (open/free per open-core, so the floor stays escapable), keeping WE = contracts/conformance only
+    (#817, <a href="/backlog/855-decide-the-we-fui-wrapper-handoff-mechanism-for-the-polyglot/">#855</a>,
+    <em>impl-is-not-a-standard</em>). Confidence ~70-75%; the residual is the WPT precedent —
+    <code>testharness.js</code> <em>does</em> ship alongside the corpus — and the JSON Schema Test Suite
+    Node-binding precedent for a separate, non-scoped reference package.
+  </li>
+</ul>
+
+<h2>Cross-references</h2>
+<ul>
+  <li><a href="/backlog/899-behavioral-conformance-vectors-in-browser-implementer-valida/">#899</a> — the decision this prepares.</li>
+  <li><a href="/backlog/817-constellation-placement-of-guard-validity-merge-validator-re/">#817</a> — WE keeps the contract, runtime → FUI (the file-seam test driving invariant A).</li>
+  <li><a href="/backlog/091-web-docs-as-a-service-plateau/">#091</a> — managed offerings decompose across the constellation; served product → plateau (invariant B).</li>
+  <li><a href="/backlog/855-decide-the-we-fui-wrapper-handoff-mechanism-for-the-polyglot/">#855</a> — only the contract crosses the seam, code never does.</li>
+  <li><a href="/backlog/314-flagship-exercise-apps/">#314</a> — exercise-app conformance loop (related forcing function, distinct surface).</li>
+  <li><a href="/projects/webvalidation/">webvalidation</a> — the project whose <code>validity-merge</code> / <code>validator-resolution</code> contracts supply the worked vector examples.</li>
+</ul>
+{% endraw %}
