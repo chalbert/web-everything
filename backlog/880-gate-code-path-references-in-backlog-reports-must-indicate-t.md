@@ -1,8 +1,10 @@
 ---
 type: issue
 workItem: epic
-status: open
+status: resolved
 dateOpened: "2026-06-17"
+dateResolved: "2026-06-18"
+graduatedTo: none
 tags: [conventions, docs, gate, check-standards, locus]
 relatedReport: reports/2026-06-17-backlog-split-analysis.md
 crossRef: { url: /backlog/841-decide-the-we-contract-custom-element-tag-naming-convention-/, label: "triggered by the #841 ambiguity" }
@@ -61,9 +63,10 @@ WE-relative by construction — exempt or auto-prefixed).
 
 ## Scope / done-when
 
-- [ ] Convention clause added to [we:docs/agent/conventions.md](docs/agent/conventions.md) (the machine-checked
-  naming authority #841 also targets).
-- [ ] `check:standards` check implemented with the false-positive carve-outs above; green on a migrated corpus.
-- [ ] One-time migration of existing `backlog/*.md` + `reports/*.md` (includes finishing #841, partially
-  modelled already).
-- [ ] Authoring note in the backlog-workflow doc so new items comply from creation.
+- [x] Convention clause added to [we:docs/agent/conventions.md](docs/agent/conventions.md) (the machine-checked
+  naming authority #841 also targets). → delivered by #883.
+- [x] `check:standards` check implemented with the false-positive carve-outs above; green on a migrated corpus.
+  → delivered by #884 (detection, warn-level) + #885 (hard gate on migrated corpus).
+- [x] One-time migration of existing `backlog/*.md` + `reports/*.md` (includes finishing #841, partially
+  modelled already). → delivered by #885 (spot-checked by #909).
+- [x] Authoring note in the backlog-workflow doc so new items comply from creation. → delivered by #883.
