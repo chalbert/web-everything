@@ -1,6 +1,6 @@
 # Backlog split analysis — 2026-06-18
 
-Focused runs (appended in order): `/split 904`, `/slice 753`, `/split 894`, `/split 818`, `/slice 934`, `/split 725`.
+Focused runs (appended in order): `/split 904`, `/slice 753`, `/split 894`, `/split 818`, `/slice 934`, `/split 725`, `/split 725` (2nd pass — webvalidation residual, could-not-split), `/split 940`.
 
 ## Candidate
 
@@ -488,3 +488,162 @@ and a dual-mode-test-backfill `task`, both siblings under #170. Confidence ~85%;
 whether webvalidation·5 holds or creeps toward 8 once the 24-file copy + cross-import rewire is underway
 (it's mechanical and the alias surface pre-exists, so 5 is the honest estimate). The `webguards` root +
 re-scoped #725 are batchable immediately.
+
+---
+
+# Focused run (2nd pass): `/split 725` — the webvalidation-only residual, post 5→13 re-size
+
+> The first `/split 725` section above split the *original* #725 ("webguards **+** webvalidation +
+> subsystems") into three: `webguards` port (#950, story·3), dual-mode test backfill (#951, task), and
+> #725 re-scoped to **webvalidation-only** and re-sized 13 → 5. A later pre-flight (commit `378fb61`)
+> re-sized that residual **5 → 13** on finding it's a ~22-file #170-class migration, dropping it from the
+> batch pool. This pass asks: can the **webvalidation-only residual** itself be sliced further?
+
+## Candidate
+
+**#725** — *Port the `webvalidation` plug domain + its subsystems into Frontier UI* · `story · 13` ·
+`status: open` · `parent: 170` · `locus: frontierui`. Blockers (#649/#730/#814/#817/#893) **all
+resolved**; no open fork remains.
+
+## Work-investigation pass (read the real tree, both repos)
+
+The residual is now a **single-repo, purely-additive FUI port** — the WE-side contract carve already
+landed and is verified on disk:
+
+- WE contract files exist (`contracts/{validity-merge,validator-resolution,guard}.ts`, dated Jun 17) and
+  the placement forks that produced them are all resolved: **#730/#814/#817/#893** (each story·3,
+  `resolved`). So #725 **no longer touches WE standard files** — the "two-repo blast radius" that
+  justified the 5→13 bump is largely stale; the top digest itself says "**Purely additive on the FUI
+  side**."
+- FUI already carries the `@webeverything/*` vite aliases for the contract surface
+  ([fui:vite.config.mts:212-230](../../frontierui/vite.config.mts#L212)): `capability-manifest` whole
+  plane + `validation-generation/{provider,registry,fieldError,cel,service}` + `contracts/{validity-merge,
+  validator-resolution,guard}`. The impl halves (`crossField`, `adapters/*`, `serviceHandler`) are the
+  ones that port DOWN.
+- FUI carries **none** of `validity-merge/`, `validator-resolution/`, `validation-generation/`,
+  `plugs/webvalidation/` yet — confirmed absent. Genuinely additive.
+
+The import closure, traced from the plug sources (not the body):
+
+- The whole domain hangs off **one barrel**, [we:plugs/webvalidation/index.ts](../plugs/webvalidation/index.ts),
+  which re-exports from **all** subsystems at once: `validator-resolution/{provider,registry}`
+  (`:34`,`:40`), `validity-merge/{provider,registry}` (`:52`,`:57`), `capability-manifest/provider`
+  (`:82`) + `/guard` (`:173`), and `validation-generation/{provider,cel,crossField,registry,fieldError,
+  adapters,service,serviceHandler}` (`:107`–`:167`).
+- The five plug files under `plugs/webvalidation/` (751 LOC) each import the strategy planes:
+  `CustomValidityMergeRegistry`/`ValidityMergeField`/`applyMergedValidity` → `validity-merge/{provider,
+  registry}`; `CustomValidatorResolutionRegistry`/`AsyncValidatorField` → `validator-resolution/*`.
+- Subsystem impl volume to port: `validity-merge` impl (~250 LOC), `validator-resolution` impl (~250),
+  `validation-generation` impl-half `crossField`+`adapters/*`+`serviceHandler` (743 LOC), the 6
+  `plugs/webvalidation/*` files (751 LOC), + bootstrap wiring. ≈ 22 files.
+
+## Verdict — could NOT split (the residual is atomic)
+
+The earlier pass already extracted **everything cleanly extractable** from the original #725 — the
+disjoint `webguards` domain (#950) and the cross-cutting test backfill (#951). What remains is **one
+coherent plug-domain port** that does not decompose further without quality loss:
+
+| Tried seam | Why it fails the rubric |
+|---|---|
+| One slice **per subsystem** (validity-merge ∥ validator-resolution ∥ validation-generation) | Each ported subsystem alone is a **registry with no consumer** until the plug barrel wires it → **rubric 5 fail** (no valid/demoable state — DoD needs a fixture-demo, and the plug is the only consumer). And FUI gains nothing usable from a lone strategy plane → **rubric 4 fail** (no real independence, no incremental delivery). |
+| Split the barrel: **form-validity runtime** (validity-merge + validator-resolution + their 5 plug files) vs **validation-generation + capability-manifest** consumption | The two halves share **one file** — `we:plugs/webvalidation/index.ts` re-exports both at `:34-57` and `:107-173`. Landing it half-built leaves the `webvalidation` plug in a partial-export state whose dual-mode test (exercises the full barrel) can't pass → **rubric 5 fail**; and both slices edit the same index → not independent (**rubric 4**). Truly separating them means **splitting `webvalidation` into two plug domains** — a plug-taxonomy **design fork**, which is *not* a mechanical slice → **rubric 1 fail** (can't split away a decision). |
+| Port files (slice 1) then wire bootstrap (slice 2) | Files without wiring = dead code; bootstrap-only without files = nothing to wire. Same single-deliverable, no demoable intermediate → **rubric 5 fail**. |
+
+**Precedent confirms atomicity:** the sibling `webguards` port (**#950**) handles the analogous "port the
+whole plug domain + its runtime subsystem in one focused pass" as a single `story·3`. #725 is the same
+shape with 3-4× the subsystems — so it's a *bigger* single story, not a *splittable* one.
+
+**Unblocking action for a future split:** none worth taking. The only seam left (the
+form-validity-runtime ÷ validation-generation cut) is unlocked **only** by a decision to split the
+`webvalidation` plug into two plug domains — almost certainly not worth the taxonomy churn. Work #725 as
+the **focused single-item session** its own body already prescribes.
+
+**Sizing observation (not a split, flagged for the next claim):** the 5→13 bump leaned on "modifies WE
+standard files / two-repo blast radius," but that contract carve has since landed (#814/#893/#817/#730 all
+`resolved`), leaving #725 single-repo and purely additive over a pre-existing alias surface. ≈22 files of
+mechanical copy + import-rewire is an honest **`story · 8`**, not `13`. A re-size 13 → 8 is defensible at
+claim time (it would also make #725 batch-eligible again) — but that's a sizing call, outside this skill's
+split mandate, so left untouched here.
+
+## Net
+
+**No split.** The webvalidation residual is atomic; the prior pass already harvested the two real seams
+(#950, #951). Confidence **~85%** the residual won't sub-slice safely; the residual uncertainty is the
+one taxonomy fork (split `webvalidation` into two plugs) I judged not worth opening. Zero backlog
+mutation.
+
+---
+
+## Candidate
+
+**#940** — *Rich-text-editor library engine adapters (ProseMirror/Lexical/Slate/Quill) — #923 deferred
+slice* · `workItem: story` · `size: 13` · `locus: frontierui` · `blockedBy: ["923"]` · `status: open`.
+
+#923 is **resolved** (graduatedTo `fui:blocks/rich-text-editor/RichTextEditorElement.ts`), so the blocker
+is satisfied and the work is investigable now.
+
+### Work-investigation pass — the real surface
+
+The swappable seam #923 shipped is clean and engine-agnostic:
+
+- `CustomEditorEngine { name; attach(ctx) → EditorEngineHandle }` and `EditorEngineHandle
+  { getValue, setValue, format, destroy }` — `fui:blocks/rich-text-editor/editorEngine.ts:34` /
+  `:22`. **The portable pivot is HTML** (`getValue()` returns `host.innerHTML`, `fui:editorEngine.ts:73`).
+- A registry, `CustomEditorEngineRegistry` (`fui:editorEngine.ts:103`), pre-seeded with the native engine as
+  default (`customEditorEngine`, `fui:editorEngine.ts:124`). Engine selection is the `engine=""` attribute on
+  the element (`fui:RichTextEditorElement.ts:51`, `:77`); an unknown engine falls back to the default (`:78`).
+- The native floor: `NativeContentEditableEngine` (`fui:editorEngine.ts:47`) — contenteditable + InputEvent +
+  sanitize-on-paste. Dependency-free.
+
+**Precedent for a single-library engine adapter** (#935 XState, in the parallel `workflow-engine` block):
+`fui:blocks/workflow-engine/xstateAdapter.ts` (pure data transform, no library import) +
+`fui:xstateRuntime.ts` (drives the real library) + `fui:blocks/workflow-engine/__tests__/xstateRuntime.test.ts`, with `xstate` declared
+as an **optional peerDep + devDep** (`fui:package.json:31-37`, `:53`). Each rich-text engine adapter
+mirrors this exactly: a new file implementing `CustomEditorEngine`, the library as an optional peer/dev
+dep, a unit test.
+
+**No editor demo exists yet** — neither `we:demos/*rich*|*editor*` nor `fui:demos/` has a rich-text page;
+#923 graduated to the element + unit tests only. The body itself mandates a **Playwright e2e on the editor
+demo** per engine (happy-dom can't do real selection/range/layout). So a demo page + e2e harness is a
+genuine **shared fixture** the engine slices depend on — not optional polish.
+
+So the split is **volume, not uncertainty** for three of the four libraries (each is an independent
+`CustomEditorEngine` file behind the same seam, mapping the library doc-model ↔ HTML). The **Slate**
+library carries a real buried fork (React) → that slice is could-not-split pending its own decision.
+
+### Could split — #940 → storied epic
+
+| Slice | size / type | Scope (named files, all `file:line`-cited above) | blockedBy | Batchable |
+|---|---|---|---|---|
+| **demo + Playwright e2e harness** (foundational shared fixture) | `task·2` | New FUI demo page exercising `<rich-text-editor>` with an `engine=""` switcher + a Playwright spec verifying real contenteditable selection/format on the native engine. The fixture every engine slice extends. | — | ✅ |
+| **`quill` adapter** | `story·3` | `fui:blocks/rich-text-editor/engines/quill.ts` impl of `CustomEditorEngine` (HTML via `getSemanticHTML()` / `dangerouslyPasteHTML`); register on `customEditorEngine`; `quill` optional peerDep+devDep; unit test + add engine to demo switcher + e2e. Most self-contained (one package). | demo slice | ✅ |
+| **`lexical` adapter** | `story·5` | `fui:blocks/rich-text-editor/engines/lexical.ts`; headless `createEditor` + `lexical`/`@lexical/html` (`$generateHtmlFromNodes` / `$generateNodesFromDOM`); optional deps; unit test + e2e. | demo slice | ✅ |
+| **`prosemirror` adapter** | `story·5` | `fui:blocks/rich-text-editor/engines/prosemirror.ts`; schema + `DOMParser`/`DOMSerializer` from `prosemirror-model` (the multi-package one: model/state/view/schema-basic/keymap/commands as optional deps); unit test + e2e. | demo slice | ✅ |
+
+**DAG:** demo-harness slice (unblocked) → `{ quill, lexical, prosemirror }` all proceed **in parallel**
+once it lands. ≥2 independent (rubric 4 ✓). Each engine ships valid on its own (native floor + any other
+registered engine keep working; new engine is opt-in via `engine=""`) → incremental delivery, no broken
+intermediate state (rubric 5 ✓). Sizes re-estimated against the real surface (rubric 3 ✓).
+
+### Could not split — the Slate slice (buried fork)
+
+| Slice | Rubric condition failed | Unblocking action |
+|---|---|---|
+| **`slate` adapter** | **(1) Volume, not uncertainty** — Slate's editing surface is React-based (`slate-react`), so a Slate engine pulls **React** into FUI even as an optional dep. That's an unresolved design fork, not just more work — the same framework-runtime concern as the polyglot live-sandbox **#955 Fork B**. | **Resolve a new `type:decision` card** (Slate engine: React-optional-dep fork — options: headless `slate` core + non-React render / accept React-optional / drop Slate from the set), cross-referenced to #955. Once ratified, scaffold (or drop) the Slate build slice. Filed as its own card so the fork is de-buried from #940's body, per *Decisions Are Work Items*. |
+
+### Proposed mutation (gated on "go")
+
+- Convert **#940** `story` → **storied epic** (drop `size`, umbrella digest), keep `NNN` / `status:open`.
+- Scaffold under `--parent=940`: **demo+e2e harness** (task·2, no blocker); **quill** (story·3),
+  **lexical** (story·5), **prosemirror** (story·5) — each `--blocked-by=<demo NNN>`.
+- Scaffold a **`type:decision` story·3** (Slate React fork), cross-referenced to #955; note in the epic
+  body that the Slate build is deferred pending that decision.
+- Numbers allocated at scaffold time (highest on disk = 958 → next free). Net flow: **+5 opened** (4
+  build slices + 1 decision), #940 story → epic. Gate: `npm run check:standards`.
+
+### Net
+
+**Splittable.** Confidence **~85%** the quill/lexical/prosemirror seams are clean and independent
+(grounded in the resolved #923 seam + the #935 XState precedent); residual is the demo-harness sizing
+(task·2 may stretch if no FUI demo scaffold convention exists). The Slate slice is correctly *could-not-split*
+pending the React fork — high confidence (~90%) that's a genuine decision, not just volume.
