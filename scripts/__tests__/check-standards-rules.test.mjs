@@ -21,6 +21,7 @@ import {
   validateReportsNotHidden, findCompiledShadows, isSegmentCovered, permalinkSegment,
   validateViteProxyCoverage, deDateReport,
   isExportsSafeTarget, validateModuleResolutionLock, findRawHtmlInMarkdown,
+  flattenExportsTargets, validateRenderersNotPublished, validateReferenceRuntimeForms, REFERENCE_RUNTIME_FORMS,
   findBuriedForkSections, findUnquotedColonScalars, findBadBodyLinks, findNonBatchableMarkers,
   deriveResearchFreshness, addIsoDuration, RESEARCH_REVIEW_HORIZON_DEFAULT,
   validateCapabilityPresence, validateRetirementShape,
@@ -480,6 +481,64 @@ describe('module-resolution exports-lock (#274/#271)', () => {
     }));
     const { errors } = validateModuleResolutionLock(entries);
     expect(errors.map((e) => e.message)).toEqual([]);
+  });
+});
+
+describe('codegen-placement invariants (#964 — hardening #956)', () => {
+  it('flattenExportsTargets: pulls leaf strings from a nested exports map', () => {
+    expect(flattenExportsTargets('./dist/index.js')).toEqual(['./dist/index.js']);
+    expect(flattenExportsTargets({ '.': { import: './a.js', require: './b.cjs' }, './x': './x.js' }))
+      .toEqual(['./a.js', './b.cjs', './x.js']);
+    expect(flattenExportsTargets(undefined)).toEqual([]);
+  });
+
+  it('flags an @webeverything/* package re-exporting blocks/renderers/*', () => {
+    const { errors } = validateRenderersNotPublished([
+      { name: '@webeverything/contracts', exports: { './serve': './blocks/renderers/module-service/moduleService.js' }, source: 'pkg/package.json' },
+    ]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain('blocks/renderers/');
+  });
+
+  it('passes when @webeverything/* exports only contract/vector paths', () => {
+    const { errors } = validateRenderersNotPublished([
+      { name: '@webeverything/contracts', exports: { '.': './dist/contracts.js', './vectors': './dist/vectors.js' }, source: 'pkg/package.json' },
+    ]);
+    expect(errors).toEqual([]);
+  });
+
+  it('ignores unscoped / @frontierui manifests (only the published @webeverything scope is governed)', () => {
+    const { errors } = validateRenderersNotPublished([
+      { name: 'web-everything', exports: undefined, source: 'package.json' },
+      { name: '@frontierui/blocks', exports: { './renderers': './blocks/renderers/index.js' }, source: '../frontierui/package.json' },
+    ]);
+    expect(errors).toEqual([]);
+  });
+
+  it('flags a new WE-side serve() form beyond the ratified reference-runtime set', () => {
+    const { errors } = validateReferenceRuntimeForms(['declarative', 'wc-class', 'html', 'jsx', 'functional', 'vue-sfc']);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain('vue-sfc');
+    expect(errors[0].message).toContain('genWrapper');
+  });
+
+  it('passes the ratified reference-runtime form set', () => {
+    const { errors } = validateReferenceRuntimeForms([...REFERENCE_RUNTIME_FORMS]);
+    expect(errors).toEqual([]);
+  });
+
+  it('real data stays clean: live package manifests carry no published-renderer leak', () => {
+    const { errors } = validateRenderersNotPublished([
+      { name: JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).name, exports: JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).exports, source: 'package.json' },
+    ]);
+    expect(errors).toEqual([]);
+  });
+
+  it('real data stays clean: the live ServeForm union is the ratified set', () => {
+    const src = readFileSync(join(ROOT, 'blocks/renderers/module-service/moduleService.ts'), 'utf8');
+    const union = src.match(/export type ServeForm\s*=\s*([^;]+);/);
+    const ids = [...union[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+    expect(validateReferenceRuntimeForms(ids).errors).toEqual([]);
   });
 });
 

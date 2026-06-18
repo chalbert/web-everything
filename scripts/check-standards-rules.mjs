@@ -1040,6 +1040,85 @@ export function validateModuleResolutionLock(entries) {
   return { errors, warnings: [] };
 }
 
+// ── Codegen-placement invariants (#964, hardening #956's ruling) ─────────────
+// #956 ratified: the `serve()` form-generators stay in the WE repo as reference runtime (#791), but
+// `@webeverything` publishes only the contract + conformance vectors — never the lowering code (#855).
+// Both load-bearing invariants were true-by-absence; #964 makes them enforced.
+
+export const RENDERERS_PUBLISH_ENFORCED = true; // #964: renderers never enter a published @webeverything exports map
+/** The published WE scope (`npm scope mirrors layer`, #239): standard artifacts only — never impl/renderers. */
+export const WEBEVERYTHING_PUBLISHED_SCOPE = '@webeverything/';
+
+/** Flatten an `exports` map (string | nested conditions/subpaths) to its leaf target strings. */
+export function flattenExportsTargets(exports) {
+  const out = [];
+  const walk = (node) => {
+    if (typeof node === 'string') out.push(node);
+    else if (Array.isArray(node)) node.forEach(walk);
+    else if (node && typeof node === 'object') Object.values(node).forEach(walk);
+  };
+  walk(exports);
+  return out;
+}
+
+/**
+ * Invariant 1 (#956/#855): no `@webeverything/*` published package may re-export the reference-runtime
+ * renderers. The form-generators (`blocks/renderers/*`) are repo-internal reference runtime (#791); a
+ * published `exports` target that reaches into `blocks/renderers/` would ship the lowering code as a de
+ * facto standard — exactly what #855 forbids. Pure: takes the gathered `{ name, exports, source }`
+ * manifests; vacuously passes when no `@webeverything/*` manifest exists (true today — root pkg is the
+ * unscoped `web-everything` with no exports map).
+ */
+export function validateRenderersNotPublished(manifests) {
+  if (!RENDERERS_PUBLISH_ENFORCED) return { errors: [], warnings: [] };
+  const errors = [];
+  for (const { name, exports, source } of manifests) {
+    if (typeof name !== 'string' || !name.startsWith(WEBEVERYTHING_PUBLISHED_SCOPE)) continue;
+    for (const target of flattenExportsTargets(exports)) {
+      if (/(^|\/)blocks\/renderers\//.test(String(target).replace(/^\.\//, '')))
+        errors.push({ message:
+          `Published-renderer leak: ${name} (${source}) has an exports target "${target}" reaching ` +
+          `blocks/renderers/. The form-generators are WE-repo reference runtime (#791) — @webeverything ` +
+          `publishes only the contract + conformance vectors, never the lowering code (#855/#956). ` +
+          `Drop the renderer from the published exports map.` });
+    }
+  }
+  return { errors, warnings: [] };
+}
+
+export const REFERENCE_RUNTIME_FORMS_ENFORCED = true; // #964: WE-side serve() form catalog is frozen to the ratified reference-runtime set
+/**
+ * The form ids WE's reference runtime emits in-repo (#956's principled refinement). These five are the
+ * forms a `<component>` definition is *already* lowered to by WE-side code — they stay WE (#791). A
+ * genuinely-new framework target (Vue/Svelte/Angular SFC, …) has NO WE reference runtime, so its
+ * generator must follow the #855/genWrapper pattern (contract+vectors in WE, generator in FUI) and must
+ * NOT be slipped into the WE-side `serve()` switch — the catalog's openness lives in the *adapter* layer
+ * (#663), not the reference runtime.
+ */
+export const REFERENCE_RUNTIME_FORMS = new Set(['declarative', 'wc-class', 'html', 'jsx', 'functional']);
+
+/**
+ * Invariant 2 (#956 per-form refinement → gate): the WE-side `serve()` form catalog (the `FORMS` ids /
+ * `ServeForm` union in `module-service/moduleService.ts`) must be a subset of the ratified
+ * reference-runtime set. A new id beyond it manufactures a WE-side codegen path for a framework target
+ * that should go through FUI — closing the "a demo ships a consumer to keep codegen in WE" escape #956's
+ * skeptic flagged. Pure: takes the gathered form ids; the fs parse lives in the gate.
+ */
+export function validateReferenceRuntimeForms(formIds) {
+  if (!REFERENCE_RUNTIME_FORMS_ENFORCED) return { errors: [], warnings: [] };
+  const errors = [];
+  for (const id of formIds) {
+    if (!REFERENCE_RUNTIME_FORMS.has(id))
+      errors.push({ message:
+        `New WE-side serve() form "${id}": the reference-runtime form catalog is frozen to ` +
+        `{${[...REFERENCE_RUNTIME_FORMS].join(', ')}} (#956). A genuinely-new framework target has no WE ` +
+        `reference runtime — its generator must follow the #855/genWrapper pattern (contract+vectors in ` +
+        `WE, generator in FUI), not a WE-side serve() case. The form catalog's openness lives in the ` +
+        `adapter layer (#663), never the WE renderer.` });
+  }
+  return { errors, warnings: [] };
+}
+
 // ── Research freshness derivation (#441 Fork 4 / #477) ───────────────────────
 // The derivation lives in a CommonJS module (scripts/lib/research-freshness.cjs) so the sync-only
 // Eleventy 2.x config can `require` it for the reader freshness badge; here we re-export its named

@@ -11,7 +11,7 @@
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { createRequire } from 'node:module';
 import { renderInventory, spliceInventory } from './gen-inventory.mjs';
 import { parseClaims, mineFiles, porcelainFiles, partitionFindings } from './readiness/claimScope.mjs';
@@ -24,6 +24,7 @@ import {
   checkStatus, validateProtocol, validatePreset, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, permalinkSegment, validateViteProxyCoverage,
   validateModuleResolutionLock,
+  validateRenderersNotPublished, validateReferenceRuntimeForms,
   findUnquotedColonScalars, lintBacklogItemRendering,
   RESEARCH_REVIEW_HORIZON_DEFAULT, deriveResearchFreshness,
   validateCapabilityPresence, validateRetirementShape,
@@ -857,6 +858,48 @@ try {
   for (const e of me) err(e.message, e.descriptor);
 } catch (e) {
   err(`Module-resolution exports-lock check failed: ${e.message}`);
+}
+
+// ── 9c. Codegen-placement invariants (#964 — hardening #956's ruling) ──
+// #956 settled: `serve()`'s form-generators stay WE-repo reference runtime (#791); `@webeverything`
+// ships only contract + vectors (#855). Its skeptic flagged both invariants as true-by-absence; this
+// makes them enforced. (1) No `@webeverything/*` published package may re-export `blocks/renderers/*`.
+// (2) The WE-side `serve()` form catalog stays frozen to the ratified reference-runtime set — a new
+// framework dialect can't be slipped into the WE renderer to manufacture a WE-side codegen consumer; it
+// must go through the FUI genWrapper pattern. The fs gather lives here; the pure rules do the asserting.
+try {
+  // (1) gather every in-repo package.json manifest (root + nested, excluding node_modules) → name + exports.
+  const manifests = [];
+  const walkPkgs = (dir) => {
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      if (ent.name === 'node_modules' || ent.name === '.git' || ent.name.startsWith('.')) continue;
+      const p = join(dir, ent.name);
+      if (ent.isDirectory()) walkPkgs(p);
+      else if (ent.name === 'package.json') {
+        try {
+          const pkg = JSON.parse(readFileSync(p, 'utf8'));
+          manifests.push({ name: pkg.name, exports: pkg.exports, source: relative(ROOT, p) });
+        } catch { /* unparseable package.json — skip */ }
+      }
+    }
+  };
+  walkPkgs(ROOT);
+  const { errors: pe } = validateRenderersNotPublished(manifests);
+  for (const e of pe) err(e.message, e.descriptor);
+
+  // (2) parse the WE-side serve() form catalog (`ServeForm` union ids) and assert it stays the ratified set.
+  const moduleService = join(ROOT, 'blocks', 'renderers', 'module-service', 'moduleService.ts');
+  if (existsSync(moduleService)) {
+    const src = readFileSync(moduleService, 'utf8');
+    const union = src.match(/export type ServeForm\s*=\s*([^;]+);/);
+    const formIds = union
+      ? [...union[1].matchAll(/'([^']+)'|"([^"]+)"/g)].map((m) => m[1] ?? m[2])
+      : [];
+    const { errors: fe } = validateReferenceRuntimeForms(formIds);
+    for (const e of fe) err(e.message, e.descriptor);
+  }
+} catch (e) {
+  err(`Codegen-placement invariants check failed: ${e.message}`);
 }
 
 // ── Demos: operational-wiring gate (routing/base-path/registry/dev-fallback) ────
