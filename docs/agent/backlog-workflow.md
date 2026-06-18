@@ -68,6 +68,13 @@ body is the detail-page content. Keep the *deep* thinking in a report and link
 to it via `relatedReport`, rather than pasting a whole report in here.
 ```
 
+**Repo-locus on code-path references.** Every code-path reference in the body (and in reports) must carry a
+`<repo>:` prefix so its constellation repo is unambiguous in chat / raw markdown: in-repo paths keep a
+clickable relative link with the locus in the link text (`[we:src/_data/blocks.json](src/_data/blocks.json)`),
+cross-repo paths are plain text with the prefix (`fui:blocks/…`, `plateau:src/domains/…`). Short aliases
+(`we:`/`fui:`/`plateau:`) are the default; full names accepted. Full rule + carve-outs: *conventions.md →
+Repo-locus code-path references* (gated by #884/#885).
+
 **`blockedBy` — a directional prerequisite edge, not a "see also".** `blockedBy: ["NNN", …]` declares that this item *cannot start until each listed item is `resolved`*. It is a distinct relation from the two existing link fields: `crossRef` is a non-directional "see also" URL/label, and `parent` is epic grouping (which item rolls up under which) — neither carries the "blocks / is-blocked-by" direction. Lifting prerequisites out of prose ("blocked on…", "after #NNN") into this field turns the backlog into a real **DAG**, the prerequisite for any *deterministic* readiness scoring (#249/#250) that doesn't need an LLM to read sentences. Keep a short human note in the body too; the field is the machine-readable half. The loader resolves it to a `blockers` array (linked on the detail page), and `check:standards` **errors** if an edge is unresolvable, self-referential, or forms a cycle (the readiness function assumes acyclicity).
 
 **2 — Pointer item** (mirrors a report): omit the body entirely. With a `relatedReport` and no body, the item's title, summary, and detail-page content are loaded *from the report md itself* — so the backlog shows the report, with nothing restated by hand.
@@ -142,6 +149,8 @@ The backlog tracks **open** work; when an item — or a plan it mirrors — is *
    - **Scope is delivered → resolve the epic.** If that child was the last open slice and nothing more belongs under the umbrella, run the close-out gate on the **epic** too and `resolve` it (`--graduated-to=<entity>|none`). Don't let a finished epic linger `open`.
 
    The `/backlog/` tile surfaces the cue: a storied epic whose every child is resolved shows an **`all slices done`** badge (review it), and a `resolved` epic with an open child shows a red **`⚠ open slice`** badge (a contradiction to fix). Either badge means this step was skipped.
+
+   **Before resolving an *epic*, the umbrella must own no uncarved scope — not in children, AND not in its own body.** The `⚠ open slice` guard only catches a live *child*; the subtler failure is closing an epic whose **prose** still describes work that was never sliced (#777 resolved with its one child done while four migration slices lived only as a "not carved yet (gated on #765)" list — so the gate cleared but the epic shipped nothing and read as complete). So at epic close-out, walk the body: **every scope item must be either checked-and-cited (it shipped → name the child/artifact that delivered it) or carved into a tracked child** (an open slice, or a `blockedBy` edge to a real prereq). If any scope is still uncarved, you have only two honest moves — **carve it** (scaffold the slice) **or keep the epic open**; resolving over it is never one of them. `check:standards` enforces the body half: an unchecked `- [ ]` box in a resolved epic is an **error** (check it once shipped, or reopen), and forward-looking uncarved-slice language ("not carved", "carve once/after/later") is a **warn** (confirm the scope shipped or is a deferral that cites its tracking `#NNN`).
 
 > Deletion is no longer the close-out step — `resolved` is. The only time you remove a `backlog/<id>.md` is to discard an item that was opened in error or fully superseded, not to record completed work.
 
@@ -245,6 +254,17 @@ Improving the item here is durable capture, not busywork: the next reader (or a 
 ```
 
 The whole-repo `check:standards` stays the authority for the cross-entity checks the single-file pass can't see (graduatedTo/relatedProject resolution, the `blockedBy` cycle walk, dup ids, decision/epic conflation) — run it after a real body rewrite and always before `resolve`, as above.
+
+### A ratified decision is reversible — stay agile, don't ossify
+
+As the constellation matures, **more and more decisions carry a `resolved` ruling — and a growing fraction of them will eventually be revisited or reversed. That is normal and healthy, not a failure of the original call.** A ruling was the best read of the evidence *at the time*; new findings, a shifted boundary, a downstream build that exposes a wrong assumption, or simply the user changing their mind are all legitimate grounds to reopen it. Treat the backlog of ratified decisions as **agile and revisable**, never as a frozen contract you must defend at all costs.
+
+This cuts **both ways**, and holding both is the point:
+
+- **Push back first — defend the standing ruling on its merits.** When a new request cuts against a `resolved` decision, don't silently flip. **Surface the prior decision, explain *why* it was ruled that way** (cite the item `#NNN`, its rationale, the principle it served), and say plainly that the new ask reverses it. The standing ruling has earned a reasoned defense; make the user choose against it with eyes open, not by accident. This is the same instinct as the *Red-team* pass, pointed at change rather than at the original default.
+- **But stay genuinely open — change directly when the case holds.** Pushing back is *advocacy, not obstruction*. If the user's reasoning is sound, or they simply decide the tradeoff differently now, **reverse the call without friction** — don't re-litigate a settled-then-reopened point past the first honest defense, and don't treat your own prior recommendation as something to protect. Agility beats consistency: a coherent reversal today is worth more than a stale ruling defended out of inertia.
+
+**Mechanically, a reversal is a normal decision turn, not an erasure.** Reopen the decision item (`resolved → active`, or file a successor `decision` that supersedes it with a `crossRef`/`blockedBy` to the original), record the *new* ruling **and a one-line "supersedes the #NNN ruling because …"** so the lineage stays honest, then re-run the ratification gate (explicit ratification + *Red-team*). Never just overwrite the old ruling as if it never existed — the audit trail of *why it changed* is itself valuable. Downstream items the original unblocked may need re-checking against the new call. (Heavier-weight categories already lean this way — monetization/tiering rulings are explicitly *soft-accepted & revisitable* — but the agility applies to **any** ratified decision; standards rulings just carry a higher bar for what justifies the reversal.)
 
 ### Red-team the default — attack the recommended branch before resolving (#766)
 

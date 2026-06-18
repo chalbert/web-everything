@@ -25,6 +25,33 @@
 - **Implementations**: interfaces `Implemented[Name]` (`ImplementedStore`); definitions `[Name]Definition` (`StoreDefinition`).
 - **Injectors**: domains start with `@` (`@web-intents`, `@date/core`). Use the provider syntax from the Web Injectors spec for defaults/fallbacks.
 
+## Repo-locus code-path references (`backlog/*.md`, `reports/*.md`)
+
+The constellation has three repos — **webeverything** (standard), **frontierui** (impl), **plateau-app**
+(product) — and the *same* relative path can exist in two of them (`src/_data/blocks.json` lives in WE; FUI
+has its own `blocks.json`). A bare relative path resolves as a link on the rendered docs site (the backlog
+lives in WE) but is ambiguous in chat or raw markdown. So **every code-path reference in `backlog/*.md` and
+`reports/*.md` must indicate its repo locus** via a `<repo>:` prefix on the *visible* reference text:
+
+- **In-repo (webeverything):** keep the relative link *target* so it stays clickable, put the locus in the
+  *link text* — `[we:src/_data/blocks.json](src/_data/blocks.json)`.
+- **Cross-repo (frontierui / plateau-app):** the path can't resolve here, so it's plain text with the prefix —
+  `fui:blocks/droplist/AutoComplete.ts:444`, `plateau:src/domains/…`.
+- Line refs ride the path as today — `we:scripts/gen-cem.mjs:164-194`.
+
+Locus tokens align with the constellation repo dirs. **Short aliases are the authored default** for
+readability; the full repo name is also accepted (the gate normalizes either):
+
+| Repo | Full | Alias (default in prose) |
+|---|---|---|
+| webeverything | `webeverything:` | `we:` |
+| frontierui | `frontierui:` | `fui:` |
+| plateau-app | `plateau-app:` | `plateau:` |
+
+Exempt from the prefix (WE-relative by construction): fenced code blocks, npm package specifiers
+(`@frontierui/blocks`), URLs, and the frontmatter `relatedReport`/`graduatedTo`/`crossRef` fields. Enforced by
+`check:standards` (warn-level via #884, hard after the one-pass corpus migration in #885).
+
 ## Glossary Philosophy (`src/_data/semantics.json`)
 - **Term first**: identify the abstract concept (`Action`, `Layout`), not the project artifact (`Action Intent`).
 - Each entry: **Term** (general web/UI concept), **Definition** (universal explanation), **Usage** (the Web Everything implementation, e.g. "standardized by Web Intents").
