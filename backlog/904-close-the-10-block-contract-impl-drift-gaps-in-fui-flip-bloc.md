@@ -1,12 +1,26 @@
 ---
 type: issue
-workItem: story
-size: 13
-parent: "170"
+workItem: epic
 status: open
 dateOpened: "2026-06-18"
+relatedReport: reports/2026-06-18-backlog-split-analysis.md
 tags: []
 ---
+
+# FUI block-impl backfill + drift enforcement — umbrella for the 10 missing block impls + gate flip + export-shape arm
+
+> **Sliced into a storied epic (2026-06-18, `/slice`).** This was a `story · size 13`; its claim-time
+> investigation found the 10 block impls were never built (not moved), so the real deliverable is
+> **building 10 FUI block impls** (`locus: frontierui`) then closing the gate. Each block impl is
+> independently deliverable, so it sliced cleanly. Umbrella for: 10 per-block builds → flip
+> `BLOCK_IMPL_DRIFT_ENFORCED` → add the export-shape gate arm. Per-slice scope lives in the children
+> (#A–#L). The body below is the spec. **DAG:** `data-transfer → code-view`, `workflow-engine → wizard`;
+> the other 6 block builds are independent roots; the flip + export-arm wait on all 10.
+> Split rationale + slice table: `we:reports/2026-06-18-backlog-split-analysis.md`.
+>
+> _Dropped `parent: "170"` on slice: #170 is the **plugs-runtime** dedup epic; this is **block-impl**
+> drift — a cited analogue (the gate carries "#170/#659"), not within #170's plugs scope. Kept as a
+> lineage cross-reference only, not a parent edge._
 
 # Close the 10 block contract-impl drift gaps in FUI + flip BLOCK_IMPL_DRIFT_ENFORCED + add export-shape arm
 
