@@ -17,7 +17,7 @@ Foundational shared fixture for the #940 engine adapters: a FUI demo page exerci
 
 ## Progress (batch-2026-06-18) — resolved
 
-Shipped in `frontierui` (locus): `fui:demos/rich-text-editor/index.html` + `rich-text-editor.ts` (the
+Shipped in `frontierui` (locus): `fui:demos/rich-text-editor/index.html` + `fui:demos/rich-text-editor/rich-text-editor.ts` (the
 demo page) and `fui:demos/rich-text-editor/__tests__/engine-switcher.spec.ts` (the Playwright lane,
 picked up by the existing `demos/**/__tests__/**/*.spec.ts` testMatch). The page mounts the real
 `<rich-text-editor>` block, wires the `engine=""` switcher off the live `customEditorEngine` registry

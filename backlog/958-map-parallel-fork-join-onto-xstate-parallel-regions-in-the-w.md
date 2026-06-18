@@ -36,7 +36,7 @@ into a region, and surfaces `branchStepIds` + `branchFinalIds`.
   `parallel` step — it builds a `type:'parallel'` state whose regions are the branch subgraphs (each a
   nested sub-statechart ending at its branch-`final`), with the parallel state's `onDone` taking the join
   target. Factored the per-step node build into `buildNode` so top-level and region states share it.
-- **Adapter** (`xstateAdapter.ts`): `activeIds` now recurses the parallel value to the leaf step ids
+- **Adapter** (`fui:blocks/workflow-engine/xstateAdapter.ts`): `activeIds` now recurses the parallel value to the leaf step ids
   (was `Object.keys`, which surfaced region containers). The key parity subtlety: a closed branch's final
   lingers in XState's region value until the join fires, but the native engine drops it from `current()`
   immediately — so `current()`/the event bridge filter `branchFinalIds`. `supports()` re-adds
