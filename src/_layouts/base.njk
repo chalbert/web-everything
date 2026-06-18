@@ -17,6 +17,14 @@
         {%- set isActive = page.url and page.url.startsWith(href) -%}
         <a href="{{ href }}" class="nav-link{% if isActive %} active{% endif %}"{% if isActive %} aria-current="page"{% endif %}>{{ label }}</a>
     {%- endmacro %}
+    {#- #865 dogfood: mount FUI chrome (app-shell + sectioned-nav, #870) in-document over this mount point
+        via the mode-C SDK (#786, #765-sanctioned). WE owns the IA (the `chrome` data → #881-A
+        `data-chrome-config` JSON sidecar); FUI owns the rendering. The hand-written header/nav/footer below
+        stay the progressive-enhancement SSR baseline: shown before/without JS, hidden once the FUI shell
+        mounts (unslotted light DOM); the page body projects in via `<main slot="main">`. The SDK degrades
+        gracefully (load failure → the SSR chrome remains). -#}
+    <div id="we-chrome-shell" data-embed-mode="in-document" data-embed-src="{{ links.frontierUrl }}/embed/chrome-in-document.ts">
+    <script type="application/json" data-chrome-config>{{ chrome | dump | safe }}</script>
     <header class="site-header">
         <div style="display: flex; align-items: center; gap: 1rem;">
             <a href="/" class="site-title">
@@ -97,7 +105,7 @@
         </div>
     </header>
 
-    <main class="{{ mainClass }}">
+    <main class="{{ mainClass }}" slot="main">
         {{ content | safe }}
     </main>
 
@@ -110,6 +118,7 @@
     <script src="/assets/js/format-selector.js"></script>
     <script src="/assets/js/reveal-nav.js"></script>
     </footer>
+    </div><!-- /#we-chrome-shell (#865 mode-C mount point) -->
 
     <!-- Mobile nav toggle (no effect on desktop — toggle is hidden there) -->
     <script>
@@ -399,6 +408,20 @@
             }, 150);
         });
     })();
+    </script>
+
+    {#- #865: load the FUI mode-C in-document SDK and mount the chrome shell. Module import, so a load
+        failure is silent and the SSR baseline above remains the rendered chrome (progressive enhancement).
+        Dev → FUI Vite (:3001) transpiles the .ts; prod → the published FUI host (links.frontierUrl). -#}
+    <script type="module">
+      import("{{ links.frontierUrl }}/embed/in-document.ts")
+        .then((m) => {
+          // #765 sanctions the WE↔FUI pair for mode-C; trust the FUI host origin so the SDK mounts
+          // its module (it defaults to same-origin only).
+          m.setTrustedOrigins([new URL("{{ links.frontierUrl }}").origin]);
+          m.mountAllInDocument();
+        })
+        .catch(() => { /* FUI host unavailable — keep the SSR chrome baseline */ });
     </script>
 </body>
 </html>
