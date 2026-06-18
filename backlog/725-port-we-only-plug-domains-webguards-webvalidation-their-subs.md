@@ -1,19 +1,27 @@
 ---
 type: issue
 workItem: story
-size: 5
+size: 13
 status: open
 locus: frontierui
 parent: "170"
 blockedBy: ["649", "730", "814", "817", "893"]
 dateOpened: "2026-06-15"
-dateStarted: "2026-06-18"
 relatedReport: reports/2026-06-14-plugs-runtime-audit.md
 tags: [plugs, dedup, migration, frontierui, webguards, webvalidation]
 ---
 
 # Port the `webvalidation` plug domain + its subsystems into Frontier UI
 
+> **Pre-flighted in batch-2026-06-18 — re-sized 5 → 13 (drops from the batch pool); NOT a clean batch
+> seam.** The FUI aliases ARE wired (`fui:vite.config.mts` carries `@webeverything/{capability-manifest,
+> validation-generation/*,contracts/*}`), so the carve landed — but the actual port is a **#170-class
+> migration of ~22 runtime files**: `plugs/webvalidation/*` (6), `validation-generation/` runtime
+> (`cel`/`fieldError`/`serviceHandler`/`crossField`/`registry`/`provider`/`service`), `validity-merge` +
+> `validator-resolution` runtime (`registry`/`provider` each), `capability-manifest` consumption
+> (`provider`/`report`/`guard`/`check`/`fixtures`), plus bootstrap wiring — each faithfully ported with
+> FUI build + vitest green. That is well past a `story·5`; it wants its own focused migration pass (and a
+> per-subsystem sub-slice would batch better). Parent #170 is also a D3-held plugs-platform migration.
 Re-scoped via `/slice` (batch-2026-06-18, see we:reports/2026-06-18-backlog-split-analysis.md): this item now
 ports **only the `webvalidation` domain** into FUI — the runtime halves of `validity-merge/`,
 `validator-resolution/`, `validation-generation/` (incl. the impl-only `we:validation-generation/crossField.ts`/`adapters/*`/
