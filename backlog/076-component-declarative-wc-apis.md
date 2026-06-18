@@ -1,9 +1,11 @@
 ---
 type: idea
 workItem: epic
-status: open
+status: resolved
 dateOpened: "2026-06-06"
 dateStarted: "2026-06-06"
+dateResolved: "2026-06-18"
+graduatedTo: none
 tags: [webcomponents, component, declarative, attach-internals]
 relatedProject: webcomponents
 relatedReport: reports/2026-06-17-076-declarative-wc-apis-split-analysis.md
@@ -33,12 +35,15 @@ Mechanical — the platform settled the spelling via Declarative Shadow DOM; we 
 - [x] `connectedMoveCallback` / `moveBefore` (`preserve-on-move`) — ✅ landed (DC-15, backlog 084)
 - [x] Observed attributes → template reflection (`observe=`) — ✅ **shipped** via [#825](/backlog/825-observe-attribute-reflection-compile-time-lowering-dc-4-b1-u/) + [#830](/backlog/830-lower-observe-and-to-observedattributes-attributechangedcall/) (DC-4 ratified, #792)
 - [x] Lifecycle side-effects via the `behavior`/`extends` hook — DC-5 (#044) **ratified 2026-06-08**; declarative attribute **carved to build [#852](/backlog/852-behavior-extends-tier-2-enhancement-hook-on-component-dc-5-r/)** (was mis-labelled design-blocked)
-- [ ] Scoped registration (`scope=`) — author-facing spelling still unsettled (runtime fixed by #228) → **open decision carved to [#854](/backlog/854-scope-declarative-scoped-registration-spelling-on-component/)**
-- [ ] Constraint validation — **decided by separation**: composes via Web Validation ([#085](/backlog/085-validation-adapters-multi-language/), which explicitly never wires into a component); a form-associated `<component>` reaches `setValidity` — no `<component>` attribute to build
-- [ ] `attachInternals` → **custom states** — deferred (DC-14): seeding-only is low-value; revisit on a concrete use
-- [ ] Reactive bindings — depends on unshipped Template Instantiation / DOM Parts — **defer (platform-blocked)**
-- [ ] Manual slot assignment — `slotAssignment:'manual'` has no DSD attr; opting in renders empty slots without a JS `slot.assign()` layer (**footgun**) — defer to tier-3 (unblocked by the #852 behavior hook)
-- [ ] Shared stylesheets — `<style>` covers per-component; cross-instance `adoptedStyleSheets` sharing has no form — defer
+- [x] Scoped registration (`scope=`) — **decided by [#854](/backlog/854-scope-declarative-scoped-registration-spelling-on-component/)**: scoped registration lives **off** `<component>` (a runtime declared-registry, not a compile-time `<component>` attribute; runtime built by [#901](/backlog/901-build-the-runtime-scoped-registration-mechanism-declared-reg/), reconciled by [#902](/backlog/902-reconcile-pre-existing-scope-presumptions-to-the-854-ruling-/)) — so there is **no `scope=` attribute on `<component>`** to build
+- [x] Constraint validation — **decided by separation**: composes via Web Validation ([#085](/backlog/085-validation-adapters-multi-language/), which explicitly never wires into a component); a form-associated `<component>` reaches `setValidity` — no `<component>` attribute to build
+
+### Deferred — out of scope for this epic (settled-as-deferred, not pending builds)
+Each is a decision **not** to build now (platform-blocked or low-value); revisit triggers noted. No carve — nothing is buildable to slice.
+- `attachInternals` → **custom states** — deferred (DC-14): seeding-only is low-value; revisit on a concrete use
+- Reactive bindings — depends on unshipped Template Instantiation / DOM Parts — **defer (platform-blocked)**
+- Manual slot assignment — `slotAssignment:'manual'` has no DSD attr; opting in renders empty slots without a JS `slot.assign()` layer (**footgun**) — defer to tier-3 (unblocked by the #852 behavior hook)
+- Shared stylesheets — `<style>` covers per-component; cross-instance `adoptedStyleSheets` sharing has no form — defer
 
 ## Progress
 - **Status:** open — **re-sliced 2026-06-17** (report [we:2026-06-17-076-declarative-wc-apis-split-analysis.md](../reports/2026-06-17-076-declarative-wc-apis-split-analysis.md)). The prior "all buildable work landed, remainder design-blocked" read was **stale**: tracing each blocked line to its real home showed two gating decisions had since ratified, so they are now plain builds. Carved out:
