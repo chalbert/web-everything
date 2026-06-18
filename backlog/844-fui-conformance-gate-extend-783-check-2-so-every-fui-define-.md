@@ -4,7 +4,8 @@ workItem: story
 size: 3
 status: open
 dateOpened: "2026-06-17"
-blockedBy: ["843"]
+blockedBy: ["908"]
+dateStarted: "2026-06-18"
 locus: frontierui
 crossRef: { url: /backlog/783-decide-the-fui-catalog-block-family-denominator-dir-we-spec-/, label: "Check-2 home (#783)" }
 tags: [frontierui, cem, conformance, drift-gate]
@@ -33,3 +34,15 @@ The drift backstop from the #822 ruling, in its correct home (FUI-side, the #783
   pass a different tag at the use-site.
 - **Scope:** custom *attributes* (`attributes.define` — `nav:list`, `grid:*`) are **out** (no tagName; they
   stay plain `class` declarations per #822). This gate covers `customElements.define` element tags only.
+
+## Blocked — gate premise conflicts with #843 (batch-2026-06-17 pre-flight)
+
+The gate asserts FUI register **defaults** equal the `we-` spec tagName. But FUI currently registers the
+**pretty** names (`auto-complete`, `route-view`, `auto-heading`…) as its defaults — which #843 ratified are
+**consumer overrides, not WE-contract values**. So "default == we-spec" presumes FUI flips every element-tag
+default to a `we-` name (a FUI-wide rename + demo/test churn) — not explicitly ratified, and the #843
+"overrides" wording reads the other way. Filed as decision
+[#908](/backlog/908-decide-whether-fui-element-tag-registration-defaults-must-be/): (A) FUI flips defaults to
+`we-`, pretty → overrides; (B) pretty stays canonical, gate only checks the `we-` tag is a registered alias;
+(C) gate only that no element is unregistered. #843 satisfied the old `blockedBy:[843]` edge; the real blocker
+is #908. Re-blocked rather than improvising the FUI rename the gate-as-written presumes.
