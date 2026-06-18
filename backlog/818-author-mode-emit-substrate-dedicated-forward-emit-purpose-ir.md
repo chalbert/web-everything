@@ -14,7 +14,7 @@ tags: [webdocs, adapters, polyglot, generation, component-emit]
 
 > **PARKED 2026-06-18 (batch pre-flight) — DEMAND-GATED, not agent-ready.** The body's own gate is
 > "build only after #753's consume-mode ships **and** appetite for idiomatic source is shown." #753's
-> consume-mode is resolved (`graduatedTo frontierui/workbench/mount.ts`), but the appetite half is
+> consume-mode is resolved (`graduatedTo fui:workbench/mount.ts`), but the appetite half is
 > unmet — no demand signal exists, and the cheap data-emit foundation is explicitly meant to ride the
 > existing channel *when* it's shown. Parked so the selector stops surfacing it as Tier-A batchable;
 > un-park (→ `status: open`) the moment appetite for author-mode source appears.

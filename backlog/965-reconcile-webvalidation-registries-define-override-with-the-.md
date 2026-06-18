@@ -20,7 +20,7 @@ The ported webvalidation registries (CustomValidityMergeRegistry/CustomValidator
 Reproduced `npx tsc --noEmit` on the FUI plugs tree: **6** errors, not 4 — #950's in-flight `webguards`
 port added a third value-first registry (`CustomGuardRegistry.define(provider, asDefault?)`) with the
 identical incompatibility, so the count is now 3× TS2416 (guard/validity-merge/validator-resolution) +
-3× cascading TS2345 in `plugs/bootstrap.ts`.
+3× cascading TS2345 in `we:plugs/bootstrap.ts`.
 
 **Fix = the registry-base contract, once** (as the title scopes). Changed the base
 `CustomRegistry.define` first parameter from `name: string` → `name: unknown` (and the matching
@@ -30,7 +30,7 @@ accepts every override shape (value→unknown holds) while the body is unchanged
 …)`). This validates all three value-first overrides at once and restores subclass→base assignability,
 clearing the 3 cascading bootstrap TS2345s too.
 
-- Edited `plugs/core/CustomRegistry.ts` + `plugs/core/Registry.ts` in WE; copied **byte-identical** to FUI.
+- Edited `we:plugs/core/CustomRegistry.ts` + `we:plugs/core/Registry.ts` in WE; copied **byte-identical** to FUI.
 - FUI `npx tsc --noEmit`: **6 → 0** errors. WE `check:standards`: 0 errors (scoped).
 - vitest green: WE webvalidation+core (107), FUI webvalidation+webguards+core (69) — runtime unchanged
   (pure type-signature loosening).
