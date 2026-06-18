@@ -204,6 +204,37 @@ toolchain reach (#127).
 
 **Lineage:** #039 #040 #042 #043 #044 #045 #046 #047 #074 #082 #084 #127 #792 #854.
 
+### Compose an existing trait — don't hand-roll a covered pattern {#compose-dont-handroll}
+
+A block/component **MUST compose an existing WE trait/behavior/contract for any capability a
+standard already covers** (disclosure → `nav:section`, roving focus → `nav:list`). Hand-rolling an
+interaction a registered trait provides (ad-hoc `addEventListener` re-implementing the pattern) is a
+**conformance defect, not a style choice**. New behavior is allowed — but authored as a *new trait*
+(a `CustomAttribute`), never as per-block event wiring.
+
+**Advisory alone is insufficient** — the rule existed in spirit (authoring skills + `AGENTS.md`) and
+still failed twice (`sectioned-nav` #870, `disclosure-nav` #931), so a **mechanical gate is
+required**, not just a checklist. Enforced by two orthogonal mechanisms:
+1. **Declaration** — a block records the traits it *consumes* in a `composesBehaviors` field
+   (distinct from the `traits` it *provides*), projected into CEM `x-webeverything` and asserted to
+   resolve against `src/_data/traits.json`. Mirrors the existing `composesIntents` field.
+2. **Detection** — a `check:standards` gate (`validateBlockComposesTraits`, beside
+   `validateBlockImplConformance`) runs a **curated "source-pattern → required-trait" deny-list**
+   over FUI source (e.g. click/keydown on an `aria-expanded` head → must compose `nav:section`),
+   **warn-first → ERROR** once curated (the #840/#844/#477 rollout precedent). Open-ended
+   `addEventListener` sniffing is *rejected* (false-positive factory); declaration-only is *rejected*
+   (can't catch a block that declares nothing and hand-rolls — the #931 mode). A *rendered* axe check
+   **cannot** substitute: a hand-rolled disclosure is a11y-clean, so the defect is visible only in
+   source + declaration → the gate is static.
+
+The authoring pre-flight ("search the trait registry before wiring an interaction; compose, don't
+re-implement") ships as the gate's **complement**, never as the enforcement. The declarative-only
+end-state (trait-marked templates with no behavior code to hand-roll) is the long-term fix, sequenced
+after #932/#934 — it removes the *temptation*; the gate catches what slips *now*.
+
+**Lineage:** #933 (ratified 2026-06-18) · incidents #870 #931 · precedent #436/#437 (conventions
+fold into compliance), #840/#844/#477 (warn-first rollout).
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)
