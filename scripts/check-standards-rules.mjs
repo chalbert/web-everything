@@ -1160,6 +1160,49 @@ export function validatePlugDualMode(domains) {
   return { errors, warnings };
 }
 
+// ── Repo-locus prefix detection (#884, enforces the #883 convention; #880 slice B) ──
+// Every code-path reference in backlog/*.md + reports/*.md must carry a `<repo>:` locus marker
+// (`we:`/`fui:`/`plateau:` or the full name) so its constellation repo is unambiguous in chat / raw
+// markdown (the convention codified in conventions.md by #883). This scans for path-like tokens that
+// LACK a marker. Carve-outs (per #880): fenced code blocks, markdown-link targets (the link *text*
+// carries the locus — `[we:path](path)`), `@scope/pkg` npm specifiers, URLs, and the WE-relative
+// frontmatter fields (`relatedReport`/`graduatedTo`/`crossRef`). WARN-level until the #885 corpus
+// migration, then it flips to ERROR (flip REPO_LOCUS_PREFIX_ENFORCED). Pure: docs read by the caller.
+export const REPO_LOCUS_PREFIX_ENFORCED = false;
+
+// Longer/prefix-conflicting extensions first + a no-trailing-letter guard so `blocks.json` matches
+// `json` (not `js` + leftover `on`).
+const PATHLIKE_RE = /[\w./-]+\.(?:tsx|ts|json|mjs|cjs|js|md|njk|css|html|yaml|yml)(?![a-z])(?::\d+(?:-\d+)?)?/g;
+const LOCUS_MARKER_RE = /(?:we|fui|plateau|webeverything|frontierui|plateau-app):$/;
+const EXEMPT_FIELD_RE = /^\s*(?:relatedReport|graduatedTo|crossRef)\s*:/;
+
+/**
+ * Scan docs (`[{ file, content }]`) for code-path tokens lacking a `<repo>:` locus marker. Returns
+ * per-file findings `[{ file, count, sample }]` (pure). Strips fenced code blocks first; applies the
+ * #880 carve-outs per token. Inline backtick code is NOT exempt — a path in backticks still needs the
+ * prefix (`` `we:scripts/x.ts` ``).
+ */
+export function scanRepoLocusPrefixes(docs) {
+  const findings = [];
+  for (const { file, content } of docs) {
+    const noFenced = content.replace(/```[\s\S]*?```/g, '');
+    const unmarked = [];
+    for (const line of noFenced.split('\n')) {
+      if (EXEMPT_FIELD_RE.test(line)) continue;
+      for (const m of line.matchAll(PATHLIKE_RE)) {
+        const before = line.slice(0, m.index);
+        if (LOCUS_MARKER_RE.test(before)) continue;        // already marked (we:/fui:/… or full name)
+        if (/\]\($/.test(before)) continue;                // markdown link target — text carries the locus
+        if (/@$/.test(before)) continue;                   // @scope/pkg npm specifier (scope sits in the token)
+        if (/https?:\/*$/.test(before)) continue;          // URL (the `//…` is consumed into the token)
+        unmarked.push(m[0]);
+      }
+    }
+    if (unmarked.length) findings.push({ file, count: unmarked.length, sample: unmarked[0] });
+  }
+  return findings;
+}
+
 // ── Block contract↔impl drift conformance (#659 — the #606/#641 plugs analogue for blocks) ──
 // #641 ruled WE blocks are pure *protocols*; the impl lives in FUI (`implementedBy:
 // @frontierui/blocks/…`). Unlike the plug runtime, WE holds NO block-impl copy post-#641

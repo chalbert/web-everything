@@ -26,6 +26,7 @@ import {
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, PLUG_UNPLUGGED_TEST_ENFORCED,
   validateBlockImplConformance, BLOCK_IMPL_DRIFT_ENFORCED,
+  scanRepoLocusPrefixes,
   validateTemplateA11y, NAV_ACTIVE_STATE_ENFORCED,
   lintBacklogItemRendering,
 } from '../check-standards-rules.mjs';
@@ -861,6 +862,43 @@ describe('validateBlockImplConformance — block contract↔impl drift (#659, th
     expect(res.errors).toEqual([]);
     expect(res.warnings).toEqual([]);
     expect(res.checked).toBe(0);
+  });
+});
+
+describe('scanRepoLocusPrefixes — #884 repo-locus prefix detection (#883 convention)', () => {
+  const scan = (content) => scanRepoLocusPrefixes([{ file: 'backlog/x.md', content }]);
+
+  it('flags a bare unmarked code-path reference', () => {
+    const f = scan('Edit `src/_data/blocks.json` to add the field.');
+    expect(f.length).toBe(1);
+    expect(f[0].sample).toBe('src/_data/blocks.json');
+  });
+
+  it('accepts a marked reference (we:/fui:/plateau: or full name)', () => {
+    expect(scan('See `we:src/_data/blocks.json`.')).toEqual([]);
+    expect(scan('See `fui:blocks/temporal/traits/Clock.ts`.')).toEqual([]);
+    expect(scan('See `plateau:src/main.ts`.')).toEqual([]);
+    expect(scan('See `webeverything:scripts/gen-cem.mjs`.')).toEqual([]);
+  });
+
+  it('exempts a markdown-link target (the link text carries the locus)', () => {
+    expect(scan('[we:src/_data/blocks.json](src/_data/blocks.json) is the file.')).toEqual([]);
+  });
+
+  it('exempts @scope/pkg npm specifiers and URLs', () => {
+    expect(scan('Import from `@frontierui/blocks/index.ts`.')).toEqual([]);
+    expect(scan('See https://example.com/path/file.ts for details.')).toEqual([]);
+  });
+
+  it('exempts fenced code blocks and WE-relative frontmatter fields', () => {
+    expect(scan('```\nsrc/foo.ts\n```\n')).toEqual([]);
+    expect(scan('graduatedTo: scripts/gen-cem.mjs')).toEqual([]);
+    expect(scan('relatedReport: reports/2026-01-01-x.md')).toEqual([]);
+  });
+
+  it('counts multiple unmarked tokens per file', () => {
+    const f = scan('`a/b.ts` and `c/d.mjs` and `e/f.json`');
+    expect(f[0].count).toBe(3);
   });
 });
 

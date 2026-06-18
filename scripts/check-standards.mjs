@@ -26,6 +26,7 @@ import {
   RESEARCH_REVIEW_HORIZON_DEFAULT, deriveResearchFreshness,
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, validateTemplateA11y, validateBlockImplConformance,
+  scanRepoLocusPrefixes, REPO_LOCUS_PREFIX_ENFORCED,
 } from './check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -597,6 +598,28 @@ const backlogReportRefs = new Set(
 {
   const { errors: re } = validateReportsNotHidden(reportFiles, { researchIds, backlogReportRefs });
   for (const e of re) err(e.message, e.descriptor);
+}
+
+// ── 6f. Repo-locus prefix on code-path references (#884, enforces #883; #880 slice B) ─
+// Every code-path reference in backlog/*.md + reports/*.md must carry a `<repo>:` locus marker so its
+// constellation repo is unambiguous in chat / raw markdown. The fs reads stay here; the carve-out scan
+// is the pure `scanRepoLocusPrefixes`. WARN-level (one aggregate line — the un-migrated corpus has
+// hundreds, so per-token would flood) until the #885 corpus migration flips it to ERROR.
+{
+  const docs = [];
+  for (const f of readdirSync(join(ROOT, 'backlog')).filter((n) => n.endsWith('.md')))
+    docs.push({ file: `backlog/${f}`, content: readFileSync(join(ROOT, 'backlog', f), 'utf8') });
+  for (const f of reportFiles) docs.push({ file: `reports/${f}`, content: readFileSync(join(REPORTS, f), 'utf8') });
+  const findings = scanRepoLocusPrefixes(docs);
+  if (findings.length) {
+    const total = findings.reduce((n, x) => n + x.count, 0);
+    const sample = findings.slice(0, 5).map((x) => `${x.file} (${x.sample})`).join(', ');
+    const msg =
+      `${total} code-path reference(s) across ${findings.length} file(s) in backlog/ + reports/ lack a ` +
+      `<repo>: locus prefix (#883 convention; #884 detection, #885 enforces) — e.g. ${sample}${findings.length > 5 ? ', …' : ''}`;
+    if (REPO_LOCUS_PREFIX_ENFORCED) err(msg);
+    else warn(msg);
+  }
 }
 
 // ── 7. AGENTS.md inventory must be in sync (generated, not hand-edited) ────────
