@@ -1,13 +1,13 @@
 ---
 type: issue
 workItem: story
-size: 8
+size: 13
 status: open
 locus: frontierui
 parent: "170"
 blockedBy: ["649", "730", "814", "817", "893"]
 dateOpened: "2026-06-15"
-dateStarted: "2026-06-16"
+dateStarted: "2026-06-18"
 relatedReport: reports/2026-06-14-plugs-runtime-audit.md
 tags: [plugs, dedup, migration, frontierui, webguards, webvalidation]
 ---
@@ -74,3 +74,24 @@ the 2nd block, one layer out. That placement (the same A1/B1 axis, never applied
 #725's to decide quietly. Carved to **[#817](/backlog/817-constellation-placement-of-guard-validity-merge-validator-re/)**
 (B1-shaped split recommended: provider/registry contract → WE + three new exports; concrete impl → FUI);
 `blockedBy: #817` added. Released unworked; resumes once #817 rules and the export delta lands.
+
+## Re-sized 8 → 13 (batch-2026-06-18 — not a batchable slice)
+
+Claimed in a batch; with #730 now resolved (A1+B1+C2), traced the post-ratification shape. This is
+**not a batchable story·8** — it is a two-repo, contract-splitting port whose closure the body itself
+flags as ~3,400 LOC across 5 subsystems:
+
+- It **modifies WE standard files** (per #730 C2: split `we:validation-generation/service.ts` into
+  wire-contract types staying WE + handler moving to FUI; per B1: `we:crossField.ts` + `adapters/*` move
+  to FUI while `provider`/`registry`/`fieldError`/`cel` stay WE) — high blast radius across **both**
+  repos' gates, unlike the self-contained single-repo FUI block builds the rest of this batch did.
+- It ports `webguards`/`webvalidation` + `guard/`/`validity-merge/`/`validator-resolution/` into FUI,
+  wiring each cross-import through the `@webeverything/*` sibling-aliases (already present in
+  `fui:vite.config.mts`), plus bootstrap wiring.
+- It **also owns** the `webguards`/`webvalidation` dual-mode (unplugged + plugged) test backfill
+  (handed off from #637).
+
+**Action:** resized to **13** (drops from the batch pool — a story·≥13 is never packed; encodes the
+documented reality, not a new design call). Released `active → open`. Should be worked in a **focused
+single-item session**, ideally `/slice`d into the contract-split (WE-side) and the impl-port (FUI-side)
+as separately-gateable pieces. Blockers all resolved; ready to work, just not as a batch tail.
