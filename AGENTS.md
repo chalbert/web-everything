@@ -21,6 +21,7 @@
 ## Hard rules (always apply)
 1. **Design-first**: document in JSON/njk before implementing. Respect `designDecisions`; discuss before overriding one.
 2. **Naming is enforced**: traits `with[Capability]` (never `use*`), registries `Custom[Name]Registry`, injector domains start with `@`, event attrs `on:event`. Full list → [conventions.md](docs/agent/conventions.md).
+2a. **Compose an existing trait — don't hand-roll a covered pattern**: before wiring any interaction, search the trait registry and compose the existing WE trait/behavior (disclosure → `nav:section`, roving focus → `nav:list`); hand-rolling a covered pattern with ad-hoc `addEventListener` is a **conformance defect** the `check:standards` block-drift gate catches. New behavior ships as a *new trait*, never per-block wiring. Statute → [platform-decisions.md#compose-dont-handroll](docs/agent/platform-decisions.md#compose-dont-handroll) (#933).
 3. **New terms** introduced by any block/plug/intent **must** be added to `src/_data/semantics.json` (term-first).
 4. **Tests required**: 80% coverage minimum. Unit/integration `*.test.ts` (Vitest), E2E `*.spec.ts` (Playwright).
 5. **Demo edits**: keep the `text/plain#demo-js-source` and the running `type="module"` sections of `demos/declarative-spa.html` in sync.
@@ -62,9 +63,9 @@
 ## Repository inventory
 <!-- AUTO-GENERATED:inventory — run `npm run gen:inventory`; do not edit by hand -->
 - **Plugs** 51 — 31 active · 18 concept · 2 experimental
-- **Blocks** 78 — 32 active · 14 concept · 32 draft
+- **Blocks** 79 — 33 active · 14 concept · 32 draft
 - **Intents** 56 — 1 active · 14 concept · 41 draft
-- **Glossary terms** 194 · **Research topics** 117 (113 open)
+- **Glossary terms** 194 · **Research topics** 119 (115 open)
 - **Projects** 40: webadapters, webanalytics, webaudit, webbehaviors, webblocks, webcases, webcharts, webcompliance, webcomponents, webcontexts, webdecisions, webdirectives, webdocs, webediting, webevents, webexpressions, webguards, webidentity, webinjectors, webintents, webintl, weblifecycle, webmanifests, webnotifications, webplugs, webpolicy, webportals, webpositioning, webprocess, webrealtime, webregistries, webreliability, webreporting, webresources, webstates, webtheme, webtraces, webtraits, webvalidation, webworkflows
 <!-- /AUTO-GENERATED:inventory -->
 

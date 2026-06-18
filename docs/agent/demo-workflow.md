@@ -11,7 +11,11 @@ against the registry (`src/_data/{blocks,intents,plugs}.json`):
 
 - **ACTIVE** block/plug/intent → **use it.** Hand-rolling an active surface (a `<table>` instead of the
   data-table block, `addEventListener` instead of `on:*`, module vars instead of a store) is a *defect*,
-  not a shortcut.
+  not a shortcut. This includes **behavioral traits**: a covered interaction (disclosure → `nav:section`,
+  roving focus → `nav:list`) **MUST compose the existing trait**, never re-wire it by hand — search the
+  trait registry before wiring, and let the block declare what it consumes in `composesBehaviors`.
+  Statute: [platform-decisions.md#compose-dont-handroll](platform-decisions.md#compose-dont-handroll)
+  (#933; incidents #870/#931 were hand-rolled nav demos the gate now catches).
 - **DRAFT** contract with no runtime → that's a **gap** — implement the runtime, or tag the scaffold
   `// PLATFORM-GAP: #NNN` against a tracked backlog item.
 - **UNCODIFIED** → candidate **new standard** (`/new-standard`).

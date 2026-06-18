@@ -19,12 +19,12 @@ Fork 2 of #933. Add a composesBehaviors field to the block manifest (we:src/_dat
   fabrication; `gen:cem` re-run is a no-op diff today (no block consumes yet).
 - **Resolution assertion.** New §3b in [we:scripts/check-standards.mjs](../scripts/check-standards.mjs)
   (after the status/type enums). The resolution target is the **de-facto behavior registry = the union of
-  every block's provided `traits[].name`** — `src/_data/traits.json` is the standard's *prose* on The
+  every block's provided `traits[].name`** — `we:src/_data/traits.json` is the standard's *prose* on The
   Map (no flat name list), so the resolvable manifest is the declared `traits[]` surface across blocks
   (the only sound, non-fork reading; matches the §validateDesignSystem comment that "behavioral traits"
   = the named traits, not a JSON list). Each `composesBehaviors` entry (string or `{name}`) must resolve
   to a provided trait; an unresolved entry is the #933 "compose, don't hand-roll" red.
 - **`composesTraits` rejected.** A block declaring the legacy field name errors with a fix-it pointer to
-  `composesBehaviors` (The Map collision, traits.json#L29).
+  `composesBehaviors` (The Map collision, we:src/_data/traits.json#L29).
 - Gate green for this changeset (the one red is #949, a concurrent session's untracked file — out of
   scope per the batch scoped-stop rule).

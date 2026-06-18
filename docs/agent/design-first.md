@@ -69,6 +69,15 @@ A standard often spans layers: an **intent** declares it, a **block** implements
 1. Check if it's documented in `src/_data/blocks.json` / `plugs.json` / `intents.json`.
 2. Read the design in `src/_includes/{block|plug}-descriptions/{id}.njk`.
 3. Follow the documented API; consult the `designDecisions` field for rationale. If you disagree with a decision, **discuss with the user before changing it**.
+4. **Compose, don't hand-roll** (pre-flight before wiring *any* interaction). For every capability a
+   standard already covers, you **MUST compose the existing WE trait/behavior** — disclosure →
+   `nav:section`, roving focus → `nav:list` — never re-implement it with ad-hoc `addEventListener`
+   wiring. Search the trait registry (`registerNavigation` et al., the provided `traits[]` across blocks)
+   *first*; a block records what it consumes in `composesBehaviors` (#936). Hand-rolling a covered
+   pattern is a **conformance defect, not a style choice** — caught mechanically by the `check:standards`
+   block-drift gate, so the pre-flight is the cheap path, not the only one. New behavior is allowed, but
+   authored as a *new trait* (a `CustomAttribute`), never per-block event wiring. Statute:
+   [platform-decisions.md#compose-dont-handroll](platform-decisions.md#compose-dont-handroll) (#933).
 
 ## Block Standard vs. Implementation (Critical Distinction)
 
