@@ -1,0 +1,79 @@
+<h2>Purpose</h2>
+<p>
+  Prep research for decision
+  <a href="/backlog/974-define-the-maas-wrapper-serve-protocol-cem-framework-wrapper/">#974</a>
+  (blocks the live-test sandbox
+  <a href="/backlog/912-polyglot-panel-live-test-sandbox-execute-the-generated-wrapp/">#912</a>; Block
+  Explorer epic <a href="/backlog/746-block-explorer/">#746</a>, <code>locus: frontierui</code>).
+  #974 was filed to <em>"define the MaaS wrapper-serve protocol — the CEM→framework-wrapper ESM serve
+  contract a browser sandbox consumes,"</em> on the premise that <em>that protocol is not yet defined.</em>
+  This research tests that premise first.
+</p>
+
+<h2>The headline finding</h2>
+<p>
+  The premise is false in the same way <a href="/backlog/792-component-compile-time-path/">#792</a> caught
+  for the binding layer: the contract <strong>already exists</strong>. The MaaS serve-path IR
+  (<code>blocks/renderers/module-service/servePathIR.ts</code>, ratified in
+  <a href="/backlog/505-maas-polyglot-sot-neutral-contract-serve-path-ir-as-the-auth/">#505</a> /
+  <a href="/backlog/463-polyglot-maas-origin-generate-net-java-other-server-implemen/">#463</a>) is a
+  language-neutral, zero-import source of truth that already defines the URL grammar
+  (<code>&lt;name&gt;[@&lt;pin&gt;].js</code>), the <code>form</code>/<code>target</code>/<code>strategy</code>
+  params, content-hash identity, immutable/floating cache, ETag/SRI headers, and the 400/404/500 error
+  set. A React <em>"functional component + element wrapper"</em> form already ships
+  (<code>moduleService.ts</code> <code>ServeForm</code>). So #974 does <strong>not</strong> mint a new
+  protocol — it reconciles the wrapper-serve need against the existing one.
+</p>
+
+<h2>Every #974 sub-question maps to an existing artifact</h2>
+<table>
+  <thead><tr><th>#974 sub-question</th><th>Already defined in</th></tr></thead>
+  <tbody>
+    <tr><td>request: block id + framework [+ CEM hash]</td><td><code>SERVE_PATH.route</code> + <code>params</code> (framework axis = the one fork)</td></tr>
+    <tr><td>response: ESM + content-type + cache/version headers</td><td><code>MEDIA_TYPES</code>, <code>CACHE_POLICY</code>, <code>MAAS_HEADERS</code></td></tr>
+    <tr><td>bare <code>react</code>/<code>vue</code> import resolution</td><td>#081 native-import contract + #955 Fork B (bundler/devDep)</td></tr>
+    <tr><td>error / 404 semantics</td><td><code>SERVE_PATH.responses</code> (400 / 404 / 500)</td></tr>
+  </tbody>
+</table>
+
+<h2>Forced invariants (supported by default)</h2>
+<ul>
+  <li><strong>Conform to the existing IR; do not mint a parallel protocol.</strong> Minting a second
+    MaaS-shaped contract would duplicate the #505 SoT and serve drift between two contracts.</li>
+  <li><strong>Identity folds the producer version.</strong> <code>protocols.json#maas-versioning</code>
+    makes the version id a content hash over <em>every</em> byte-determining input — definition +
+    transform/compiler version + params + provenance — and names omission <em>"the one excluded (broken)
+    option."</em> So the wrapper id folds the <strong>genWrapper producer version</strong>, not CEM-hash
+    only.</li>
+  <li><strong>Cache + errors</strong> reuse <code>CACHE_POLICY</code> and the existing response set.</li>
+  <li><strong>Bare-specifier ESM</strong>, import-map/bundler resolution at the consumer (#081/#955).</li>
+  <li><strong>FUI endpoint is its own runtime</strong> conforming to the WE contract (runtime never
+    crosses the WE→FUI seam — #855/#817); genWrapper is injected as its transform-provider.</li>
+</ul>
+
+<h2>The one genuine fork — framework-axis representation</h2>
+<p>
+  How is the framework (react/vue) carried in the contract? <strong>A1</strong> — overload the
+  catalog-gated <code>form</code> param (<code>react-wrapper</code>/<code>vue-wrapper</code> as injected
+  FUI catalog values; zero neutral-contract change). <strong>A2</strong> — add a distinct neutral
+  <code>framework</code> param, because framework is orthogonal to <em>form</em> (wrapper vs full-rewrite
+  vs wc-class) and to the ES <em>target</em>; encoding it in <code>form</code> collapses two axes into one
+  enum. <strong>Recommended default: A2 (~65%)</strong> on merit — distinct axes, cleaning up the
+  accidentally React-only <code>functional</code> form, matching WE's separate-and-expose bias. Residual:
+  A1 is coherent and cheaper, the IR deliberately keeps value-sets injected (over-engineering risk for two
+  frameworks), and <code>functional</code> shows framework-in-form has worked. High-leverage —
+  <strong>flag for the deciding agent's skeptic pass.</strong>
+</p>
+
+<h2>Prior art (already surveyed — linked, not re-run)</h2>
+<p>
+  #974 sits at the intersection of five prior prep passes:
+  <a href="/research/polyglot-maas-origin/">polyglot-maas-origin</a> (serve mechanics),
+  <a href="/research/we-fui-wrapper-handoff/">we-fui-wrapper-handoff</a> (<code>@lit/react</code> /
+  Stencil / Lit-Labs <code>gen-wrapper</code> — wrappers are a build-time, CEM-pure artifact),
+  <a href="/research/forward-component-emit-substrate/">forward-component-emit-substrate</a> ("mints no new
+  protocol"), <a href="/research/polyglot-live-test-sandbox/">polyglot-live-test-sandbox</a> (the FUI
+  endpoint that is this protocol's first caller), and esm.sh / <code>@lit/react</code> (bare-specifier ESM
+  serve). Full grounding:
+  <code>reports/2026-06-18-maas-wrapper-serve-protocol.md</code>.
+</p>
