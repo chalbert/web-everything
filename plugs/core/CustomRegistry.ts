@@ -26,7 +26,13 @@ export default abstract class CustomRegistry<Definition, Key extends string | sy
     this.#extends = options.extends || [];
   }
 
-  define(name: string, ...args: unknown[]): void {
+  // The base provides the default name-keyed convention `define(name, definition)`. Subclasses may
+  // override with their own registration shape — notably a value-first `define(value, asDefault?)`
+  // that derives the key from the value's own `key` (e.g. CustomGuardRegistry, CustomValidityMerge-
+  // Registry, CustomValidatorResolutionRegistry). For those overrides to be valid (TS checks method
+  // params bivariantly), the first parameter is typed `unknown` rather than `string` — a `string`
+  // base param admits neither direction against a value-shaped override and yields a TS2416 mismatch.
+  define(name: unknown, ...args: unknown[]): void {
     this.set(name as Key, args[0] as Definition);
   }
 
