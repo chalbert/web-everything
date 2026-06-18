@@ -1252,6 +1252,70 @@ export function validateBlockImplConformance(blocks) {
   return { errors, warnings, skipped, checked };
 }
 
+// ── validateBlockComposesTraits — compose-don't-hand-roll deny-list (#937, Fork 1 of #933) ──
+// Sibling of validateBlockImplConformance (same cross-repo, source-null→skip precedent). Where the
+// #936 §3b resolution arm asserts a block's *declared* `composesBehaviors` resolve, THIS arm catches
+// the inverse: a block that hand-rolls behaviour it should have COMPOSED. It is a *curated* deny-list,
+// NOT an open `addEventListener` sniff (that framing was rejected on #933): each rule names the block
+// ids it applies to, so it can never false-positive on an unrelated block (e.g. the behaviour's own
+// provider impl, which hand-rolls the choreography by design). A block silences a rule the intended
+// way — by actually composing the named behaviour (declaring it in `composesBehaviors`), which is the
+// migration #944/#934 perform. Warn-first until the list is curated + false-positive-free, then flip
+// COMPOSE_TRAITS_ENFORCED (the #840/#844/#477 warn→ERROR precedent). Static (source regex), not
+// rendered/axe — it reads the impl source, never the computed DOM.
+export const COMPOSE_TRAITS_ENFORCED = false; // #937: warn-first; flip once the deny-list is curated + false-positive-free
+
+// Seed rules. `signature` = every regex must match the block's concatenated impl source for the rule to
+// fire (an AND, to keep the match specific). `appliesTo` = the curated block-id allow-list it scans.
+export const COMPOSE_DENY_LIST = [
+  {
+    id: 'disclosure-aria-expanded',
+    requires: 'nav:section',
+    appliesTo: ['disclosure-nav', 'sectioned-nav'],
+    signature: [/aria-expanded/, /addEventListener\(\s*['"`](?:click|keydown)['"`]/],
+    why: 'hand-wires click/keydown on an aria-expanded head — that disclosure choreography is exactly what the nav:section behavior provides',
+  },
+  {
+    id: 'roving-tabindex',
+    requires: 'nav:list',
+    appliesTo: [], // seeded rule; no curated target yet — adding one is a one-line edit
+    signature: [/tabindex/i, /Arrow(?:Up|Down|Left|Right)/],
+    why: 'hand-wires roving tabindex + arrow-key movement — that is what the nav:list behavior provides',
+  },
+];
+
+// `blocks` = [{ id, composesBehaviors, source }] — `source` is the block's concatenated FUI impl source,
+// or null/undefined when ../frontierui isn't checked out (→ skip, mirrors validateBlockImplConformance).
+// Returns { errors, warnings, skipped, checked }.
+export function validateBlockComposesTraits(blocks) {
+  const errors = [];
+  const warnings = [];
+  let skipped = 0;
+  let checked = 0;
+  const rulesByBlock = new Map();
+  for (const r of COMPOSE_DENY_LIST)
+    for (const id of r.appliesTo) {
+      if (!rulesByBlock.has(id)) rulesByBlock.set(id, []);
+      rulesByBlock.get(id).push(r);
+    }
+  for (const b of blocks) {
+    const rules = rulesByBlock.get(b.id);
+    if (!rules) continue; // not a curated target — never sniffed
+    if (b.source === null || b.source === undefined) { skipped++; continue; } // FUI absent
+    checked++;
+    const composed = new Set((b.composesBehaviors || []).map((e) => (typeof e === 'string' ? e : e && e.name)));
+    for (const r of rules) {
+      if (composed.has(r.requires)) continue; // already composes it — migrated, no finding
+      if (r.signature.every((re) => re.test(b.source))) {
+        const msg = `Block "${b.id}" ${r.why}, but does not compose "${r.requires}" (compose-don't-hand-roll, #933/#937). Declare composesBehaviors: ["${r.requires}"] and delegate to the behavior.`;
+        if (COMPOSE_TRAITS_ENFORCED) errors.push({ message: msg, descriptor: dUnresolvedRef('Block', b.id, blockSpecFile(b.id), 'composesBehaviors', r.id, r.requires) });
+        else warnings.push({ message: msg, descriptor: dUnresolvedRef('Block', b.id, blockSpecFile(b.id), 'composesBehaviors', r.id, r.requires) });
+      }
+    }
+  }
+  return { errors, warnings, skipped, checked };
+}
+
 // ── Static template a11y lint (#772, ratified #763 supported-not-decided) ──────
 // The structural a11y rules a headless axe run (the #770/#771 rendered-DOM gate) CANNOT observe from the
 // computed page — they live in the .njk SOURCE and must be caught at authoring time, before render. Scoped

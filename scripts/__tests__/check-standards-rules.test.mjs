@@ -26,6 +26,7 @@ import {
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, PLUG_UNPLUGGED_TEST_ENFORCED,
   validateBlockImplConformance, BLOCK_IMPL_DRIFT_ENFORCED,
+  validateBlockComposesTraits, COMPOSE_TRAITS_ENFORCED,
   scanRepoLocusPrefixes,
   validateTemplateA11y, NAV_ACTIVE_STATE_ENFORCED,
   lintBacklogItemRendering,
@@ -861,6 +862,65 @@ describe('validateBlockImplConformance — block contract↔impl drift (#659, th
     const res = validateBlockImplConformance([{ id: 'composite-widget', implPresent: true }]);
     expect(res.errors).toEqual([]);
     expect(res.warnings).toEqual([]);
+    expect(res.checked).toBe(0);
+  });
+});
+
+describe('validateBlockComposesTraits — compose-don\'t-hand-roll deny-list (#937, Fork 1 of #933)', () => {
+  const handRolledDisclosure = `
+    head.setAttribute('aria-expanded', 'false');
+    head.addEventListener('click', () => toggle(head));
+  `;
+
+  it('warns a curated target that hand-rolls behaviour it should compose (warn until enforced)', () => {
+    const res = validateBlockComposesTraits([
+      { id: 'sectioned-nav', source: handRolledDisclosure },
+    ]);
+    const bucket = COMPOSE_TRAITS_ENFORCED ? res.errors : res.warnings;
+    expect(bucket.map((e) => e.message).join(' ')).toMatch(/sectioned-nav.*nav:section.*#933\/#937/);
+    expect(res.checked).toBe(1);
+    const other = COMPOSE_TRAITS_ENFORCED ? res.warnings : res.errors;
+    expect(other).toEqual([]);
+  });
+
+  it('clears the finding once the block composes the behaviour (the migration path)', () => {
+    const res = validateBlockComposesTraits([
+      { id: 'sectioned-nav', composesBehaviors: ['nav:section'], source: handRolledDisclosure },
+    ]);
+    expect(res.errors).toEqual([]);
+    expect(res.warnings).toEqual([]);
+    expect(res.checked).toBe(1);
+  });
+
+  it('accepts {name} object form in composesBehaviors', () => {
+    const res = validateBlockComposesTraits([
+      { id: 'sectioned-nav', composesBehaviors: [{ name: 'nav:section' }], source: handRolledDisclosure },
+    ]);
+    expect(res.warnings).toEqual([]);
+  });
+
+  it('never sniffs a block outside the curated allow-list (zero false-positive by construction)', () => {
+    const res = validateBlockComposesTraits([
+      { id: 'some-other-block', source: handRolledDisclosure },
+    ]);
+    expect(res.errors).toEqual([]);
+    expect(res.warnings).toEqual([]);
+    expect(res.checked).toBe(0);
+  });
+
+  it('does not fire on a partial signature match (AND across regexes)', () => {
+    const res = validateBlockComposesTraits([
+      { id: 'sectioned-nav', source: "head.setAttribute('aria-expanded', 'false');" }, // no listener
+    ]);
+    expect(res.warnings).toEqual([]);
+    expect(res.checked).toBe(1);
+  });
+
+  it('skips when FUI source is absent (source null) — never a failure', () => {
+    const res = validateBlockComposesTraits([{ id: 'sectioned-nav', source: null }]);
+    expect(res.errors).toEqual([]);
+    expect(res.warnings).toEqual([]);
+    expect(res.skipped).toBe(1);
     expect(res.checked).toBe(0);
   });
 });

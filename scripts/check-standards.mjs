@@ -26,6 +26,7 @@ import {
   RESEARCH_REVIEW_HORIZON_DEFAULT, deriveResearchFreshness,
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, validateTemplateA11y, validateBlockImplConformance,
+  validateBlockComposesTraits, COMPOSE_DENY_LIST,
   scanRepoLocusPrefixes, REPO_LOCUS_PREFIX_ENFORCED,
 } from './check-standards-rules.mjs';
 
@@ -757,6 +758,35 @@ const allCompileFiles = COMPILE_ROOTS.flatMap((r) => walk(r));
   const { errors: be, warnings: bw } = validateBlockImplConformance(blockImpl);
   for (const e of be) err(e.message, e.descriptor);
   for (const w of bw) warn(w.message, w.descriptor);
+
+  // ── 8d. compose-don't-hand-roll deny-list (#937, Fork 1 of #933) ──
+  // The inverse of 8c/§3b: a block that hand-rolls behaviour it should have COMPOSED. Curated by block
+  // id (COMPOSE_DENY_LIST), so we only read the FUI source of the named targets — concatenate the impl
+  // dir's *.ts so a multi-file signature sees the whole surface. The pure rule does the matching; this
+  // just gathers source (detect-or-skip when ../frontierui is absent, mirrors 8c).
+  {
+    const targets = new Set(COMPOSE_DENY_LIST.flatMap((r) => r.appliesTo));
+    const readBlockSource = (implementedBy) => {
+      if (!fuiPresent || !implementedBy) return null;
+      const rel = implementedBy.replace(/^@frontierui\/blocks\//, '').replace(/\/$/, '');
+      const target = join(fuiBlocks, rel);
+      // implementedBy may name a file or a dir; scan the impl directory's TS either way.
+      const dir = /\.[a-z]+$/.test(rel) ? dirname(target) : target;
+      if (!existsSync(dir)) return null;
+      const walk = (d) => readdirSync(d, { withFileTypes: true }).flatMap((ent) => {
+        const p = join(d, ent.name);
+        if (ent.isDirectory()) return walk(p);
+        return /\.ts$/.test(ent.name) && !/\.test\.ts$/.test(ent.name) ? [readFileSync(p, 'utf8')] : [];
+      });
+      return walk(dir).join('\n');
+    };
+    const composeInput = blocks
+      .filter((b) => targets.has(b.id))
+      .map((b) => ({ id: b.id, composesBehaviors: b.composesBehaviors, source: readBlockSource(b.implementedBy) }));
+    const { errors: ce, warnings: cw } = validateBlockComposesTraits(composeInput);
+    for (const e of ce) err(e.message, e.descriptor);
+    for (const w of cw) warn(w.message, w.descriptor);
+  }
 }
 
 // ── 9. Vite dev-proxy allowlist must cover every 11ty catalog route ────────────
