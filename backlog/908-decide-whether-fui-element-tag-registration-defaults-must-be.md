@@ -2,9 +2,11 @@
 type: decision
 workItem: story
 size: 3
-status: open
+status: resolved
+codifiedIn: docs/agent/platform-decisions.md#tagname-naming
 dateOpened: "2026-06-18"
 dateStarted: "2026-06-18"
+dateResolved: "2026-06-18"
 preparedDate: "2026-06-18"
 relatedReport: reports/2026-06-17-custom-element-tag-naming-convention.md
 crossRef: { url: /backlog/844-fui-conformance-gate-extend-783-check-2-so-every-fui-define-/, label: "Blocked gate (#844)" }
@@ -153,3 +155,16 @@ parameterized-registration invariant because …"** with explicit lineage, and r
   overrides" framing. B would be a **reversal** of #841 — record with lineage if chosen.
 - **Conformance direction:** the gate is *FUI conforms to WE* (#463 standard→impl), extending #783 Check-2;
   not WE mirroring FUI.
+
+## Resolution — ratified 2026-06-18 (Fork 1 → A)
+
+FUI's register default arg migrates to the `we-*` spec `tagName`; pretty names (`page-nav`, `auto-heading`)
+live on as consumer overrides; the 5 hard-coded literals become parameterized `register*(tag = 'we-…')`.
+**This is a confirmation, not a new call:** A is a verbatim re-affirmation of the already-ratified #841
+parameterized-registration invariant and #843's "pretty names are overrides" framing, and it is exactly what
+the codified [`we:#tagname-naming`](../docs/agent/platform-decisions.md#tagname-naming) rule states; the only
+coherent alternative (B) is a partial reversal of #841, and C is spec-broken (a custom-element constructor
+can't register under two tag names without throwaway subclasses). Ratified under the standing authorization to
+resolve non-critical, movable, rule-confirmed calls (posture is 0.0.0-unpublished — cheap to move). Unblocks
+the #844 gate (build it as written: default arg == spec, flag literals). The FUI-side migration is downstream
+build work, not a residual of this decision.

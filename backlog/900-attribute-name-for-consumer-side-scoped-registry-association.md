@@ -3,9 +3,11 @@ type: decision
 workItem: story
 size: 2
 parent: "854"
-status: open
+status: resolved
+codifiedIn: docs/agent/platform-decisions.md#component-dc
 dateOpened: "2026-06-18"
 dateStarted: "2026-06-18"
+dateResolved: "2026-06-18"
 preparedDate: "2026-06-17"
 relatedReport: reports/2026-06-17-854-scope-declarative-scoped-registration-spelling.md
 relatedProject: webcomponents
@@ -137,3 +139,15 @@ purely whether reviewers find `registry=` ambiguous enough to pay the symmetry b
 but it only takes effect once #854's association mechanism lands. Ratify #900 alongside or just after
 #854's model so the attribute it names actually exists; until then it's a settled spelling waiting for its
 mechanism.
+
+## Resolution — ratified 2026-06-18 (`registry=`)
+
+The consumer-side scoped-registry association attribute is **`registry=`** (paired with
+`<script type="registry" id="x">` ↔ `<el registry="x">`). It mirrors the shipped `injector=` precedent
+(`INJECTOR_ASSOC_ATTR === INJECTOR_SCRIPT_TYPE`, [we:declarativeInjector.ts:38](../plugs/webinjectors/declarativeInjector.ts#L38))
+and the native `customElementRegistry` vocabulary, and avoids the live `scope=` collisions (native `<th scope>`,
+the `cross-list` reorder marker). A deliberately low-stakes naming call the card itself flagged as a bikeshed;
+ratified under the standing authorization to resolve non-critical movable calls (a token rename is trivially
+reversible). **Carry-over for [#902](854):** reconcile the pre-existing `scope=` presumptions in
+[we:component.njk:105-106,151](../src/_includes/block-descriptions/component.njk#L105) to `registry=` when the
+#854 mechanism lands (#902 owns that reconcile).
