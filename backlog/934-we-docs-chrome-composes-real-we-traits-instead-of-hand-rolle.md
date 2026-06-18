@@ -1,17 +1,24 @@
 ---
 type: idea
 workItem: epic
-size: 13
 parent: "777"
-status: open
+status: resolved
 blockedBy: ["932"]
 dateOpened: "2026-06-18"
+dateResolved: "2026-06-18"
 locus: frontierui
 relatedProject: webdocs
 tags: [dogfood, chrome, traits, webbehaviors]
 ---
 
 # WE-docs chrome composes real WE traits instead of hand-rolled behavior
+
+> **Resolved 2026-06-18 (batch-2026-06-18).** All six slices landed — #941 (shadow-safe `nav:section`),
+> #942 (boot the webbehaviors registry in mode-C chrome), #943 (`nav:menubar` coordinator trait), #944
+> (sectioned-nav composes `nav:section`), #945 (disclosure-nav composes `nav:menubar`+`nav:section`,
+> `wireDisclosure()` deleted), #946 (regression guards assert trait composition; 16/16 nav e2e). The
+> chrome blocks are now trait-marked templates the registry wires — the rendered nav genuinely exercises
+> the standard, restoring #777's "site as conformance proof" premise. Blocker #932 resolved.
 
 The #865/#931 chrome renders correctly but is a **weak conformance proof**: its blocks hand-wire interaction
 behavior imperatively, re-implementing WE traits (`nav:section`, `nav:list`) that already exist. So the
@@ -28,31 +35,29 @@ and the rendered site genuinely exercises the standard. Blocked on #932 (whether
   missing is the decision + wiring to boot it in mode-C — that is #932.
 - This epic is the *build* that #932's ruling unblocks; it does not re-decide the seam.
 
-## Likely slices (#932 ratified 2026-06-18 — draw the rest at slice time)
+## Sliced 2026-06-18 (`/slice 934`) — umbrella for #941–#946
 
 **#932 ruling applied:** boot the registry & compose (Fork 1=A); no boundary issue (website≠standard,
-`we:docs/agent/platform-decisions.md` `#we-fui-embed-boundary` rule 6); registry lifecycle **leans shared** —
-settle against a running mount here (Fork 3). **This epic is NOT a pure rebuild** — it carries a real
-trait-platform build below; re-confirm size 13 (likely light) when slicing.
+`we:docs/agent/platform-decisions.md` `#we-fui-embed-boundary` rule 6); registry lifecycle **leans shared**.
+Sliced against the real frontierui tree (report `we:reports/2026-06-18-backlog-split-analysis.md`) — confirmed
+this epic is **NOT a pure rebuild**: it carries a genuine new coordinator-trait build (#943). Six slices:
 
-- **Shadow-scope the nav traits (precondition).** `fui:blocks/navigation/NavSectionBehavior.ts:47`
-  `controlledElement` uses `document.querySelector` → inert inside a shadow root; switch to a
-  `this.target.getRootNode()`-scoped lookup so the trait resolves its panel in a mode-C mount at all. Audit
-  `nav:list` for the same. Without this slice, "compose traits" is a no-op.
-- **Add the horizontal-menu coordinator trait.** The current `nav:section`/`nav:list` miss sibling-exclusive
-  open, outside click/focus dismiss, responsive desktop-only gating, and Escape→collapse+refocus (all in the
-  hand-rolled `fui:blocks/disclosure-nav/DisclosureNav.ts` `wireDisclosure`). New/extended trait, not a rebuild.
-- **Boot the registry in the mode-C chrome path** — instantiate a (lean: shared-per-page) `CustomAttributeRegistry`,
-  register the chrome traits, `upgrade(shadowRoot)` on mount, `downgrade` on teardown (`fui:embed/chrome-in-document.ts`).
-- **Rebuild `disclosure-nav` as a trait-composing template** — emit `<button nav:section="…">` markup + CSS;
-  delete `wireDisclosure()` and the ported behavior. Keep the horizontal/responsive CSS (that part is genuinely
-  presentational, not a trait).
-- **Rebuild `sectioned-nav` likewise** (the vertical accordion), retiring its hand-rolled toggle.
-- **Reconcile the `navigation` intent** — declare/compose it meaningfully (note: WE's intent→conformance is
-  itself unfinished — there is a build-time `intentProfileResolver` but no runtime conformance gate; coordinate
-  with that gap rather than fake a tie).
-- **Update the #931 regression guards** to assert trait composition (e.g. `nav:section` present + registry
-  upgraded), not just collapsed-by-default DOM.
+- **#941** (task) — Shadow-scope `nav:section` lookup (`fui:blocks/navigation/NavSectionBehavior.ts:47` → `getRootNode()`-scoped);
+  `nav:list` already shadow-safe. Precondition. *Root.*
+- **#942** (story·2) — Boot a lean shared-per-page `CustomAttributeRegistry` in `fui:embed/chrome-in-document.ts`
+  (`upgrade`/`downgrade` on mount/teardown). *Root.*
+- **#943** (story·5) — Build the horizontal-menu coordinator trait (sibling-exclusive · outside-click/focus
+  dismiss · responsive gating · Escape+refocus) — the genuinely new build. *blockedBy #941.*
+- **#944** (story·2) — Rebuild `sectioned-nav` onto `nav:section` (no coordinator). *blockedBy #941, #942.*
+- **#945** (story·3) — Rebuild `disclosure-nav` as a trait template; delete `wireDisclosure()`.
+  *blockedBy #941, #943, #942.*
+- **#946** (task) — Update the #931 regression guards to assert trait composition. *blockedBy #945, #944.*
+
+**Could-not-split → carved to #947 (parked decision).** "Reconcile the `navigation` intent" buries a fork:
+WE's intent→conformance is build-time only (`we:webtraits/intentProfileResolver.ts`), with **no runtime
+conformance gate** — so "compose the intent meaningfully" would either fake a tie (forbidden) or silently
+expand into building a gate (a separate epic). It is **not** in this epic's `Done when`. → #947 decides
+*build the gate, or rule intent-reconcile out of scope.*
 
 ## Done when
 
@@ -62,5 +67,5 @@ trait-platform build below; re-confirm size 13 (likely light) when slicing.
 - `disclosure-nav`/`sectioned-nav` carry no hand-rolled behavior code; the conformance value is real.
 - Aligns with #933's compose-not-hand-roll invariant (this epic is its first real application).
 
-Supersedes the *behavioral* half of #931 (whose hand-rolled `disclosure-nav` is explicitly interim). Unsliced
-until #932 ratifies (slicing now would guess the boot/layering shape the decision settles).
+Supersedes the *behavioral* half of #931 (whose hand-rolled `disclosure-nav` is explicitly interim). Sliced
+2026-06-18 into #941–#946 (with #947 carved out as a parked decision) once #932 ratified.
