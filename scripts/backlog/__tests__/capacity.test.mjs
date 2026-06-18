@@ -4,7 +4,7 @@
 // drag the budget. Pure functions — no CLI/argv/file I/O.
 
 import { describe, it, expect } from 'vitest';
-import { trainsEstimate, capacityFromSamples, NON_TRAINING_STOPS, TRAINING_STOPS } from '../capacity.mjs';
+import { trainsEstimate, capacityFromSamples, isKnownStopReason, NON_TRAINING_STOPS, TRAINING_STOPS, KNOWN_STOP_REASONS } from '../capacity.mjs';
 
 describe('trainsEstimate', () => {
   it('capacity-bound stops train', () => {
@@ -13,10 +13,28 @@ describe('trainsEstimate', () => {
   it('work-bound stops do not train', () => {
     for (const r of NON_TRAINING_STOPS) expect(trainsEstimate(r)).toBe(false);
   });
-  it('absent / unknown reason trains (fail-open, backward compatible)', () => {
+  it('outgrew (the rule-4 stop) is work-bound and does not train (#968)', () => {
+    expect(NON_TRAINING_STOPS.has('outgrew')).toBe(true);
+    expect(trainsEstimate('outgrew')).toBe(false);
+  });
+  it('absent reason trains (fail-open, backward compatible)', () => {
     expect(trainsEstimate(undefined)).toBe(true);
     expect(trainsEstimate('')).toBe(true);
-    expect(trainsEstimate('some-future-reason')).toBe(true);
+  });
+});
+
+describe('isKnownStopReason (the CLI fail-closed guard, #968)', () => {
+  it('every training and non-training stop is known', () => {
+    for (const r of TRAINING_STOPS) expect(isKnownStopReason(r)).toBe(true);
+    for (const r of NON_TRAINING_STOPS) expect(isKnownStopReason(r)).toBe(true);
+  });
+  it('a typo or un-listed token is not known (so the CLI rejects it instead of silently training)', () => {
+    expect(isKnownStopReason('some-future-reason')).toBe(false);
+    expect(isKnownStopReason('outgrwe')).toBe(false); // transposed typo of outgrew
+    expect(isKnownStopReason('')).toBe(false);
+  });
+  it('KNOWN_STOP_REASONS is exactly the union of training + non-training', () => {
+    expect(KNOWN_STOP_REASONS).toEqual(new Set([...TRAINING_STOPS, ...NON_TRAINING_STOPS]));
   });
 });
 

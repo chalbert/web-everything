@@ -30,7 +30,7 @@ import { applyTransition, readField } from './backlog/frontmatter.mjs';
 import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
 import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize } from './readiness/reservations.mjs';
 import { parseClaims, serializeClaims, pruneExpiredClaims, recordClaim, porcelainFiles } from './readiness/claimScope.mjs';
-import { trainsEstimate, capacityFromSamples } from './backlog/capacity.mjs';
+import { trainsEstimate, capacityFromSamples, isKnownStopReason, KNOWN_STOP_REASONS } from './backlog/capacity.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = join(ROOT, 'backlog');
@@ -231,6 +231,10 @@ function calibrate() {
   const stopReason = flag('stop-reason'); // optional; capacity-bound stops train, work-bound are excluded
   if (!Number.isFinite(points) || points <= 0) die('calibrate needs --points=<cost-points resolved this session>');
   if (!Number.isFinite(ctxPct) || ctxPct <= 0 || ctxPct > 100) die('calibrate needs --context-pct=<1–100, context consumed at close>');
+  // Fail-closed on an unrecognised --stop-reason (#968): a typo or un-listed token would otherwise
+  // default to *training* the estimate (fail-open) and silently corrupt the budget. Reject it instead.
+  if (stopReason && !isKnownStopReason(stopReason))
+    die(`calibrate: unknown --stop-reason="${stopReason}" — use one of: ${[...KNOWN_STOP_REASONS].join(', ')} (or omit it)`);
 
   let cap;
   try { cap = JSON.parse(readFileSync(CAPACITY_PATH, 'utf8')); }
@@ -271,7 +275,7 @@ switch (verb) {
       `  ${GRN}resolve${RST} <NNN> [--graduated-to=X]   active → resolved + dateResolved\n` +
       `  ${GRN}release${RST} <NNN>               active|preparing → open\n` +
       `  ${GRN}scaffold${RST} --type= --workitem= --size= --title= [--digest=] [--blocked-by=] [--parent=]\n` +
-      `  ${GRN}calibrate${RST} --points= --context-pct= [--stop-reason=budget|context|empty-pool|fork|gate]   fold a session into the batch point-budget estimate\n` +
+      `  ${GRN}calibrate${RST} --points= --context-pct= [--stop-reason=budget|context|empty-pool|fork|gate|outgrew|manual|abort]   fold a session into the batch point-budget estimate\n` +
       `  ${GRN}reserve${RST} <NNN...> --session=<slug>    soft-hold planned items (deprioritize for other sessions)\n` +
       `  ${GRN}unreserve${RST} [--session=<slug>] [<NNN...>]  release soft holds (clear a session, or specific items)\n` +
       `  (add --json for machine output)`);
