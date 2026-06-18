@@ -187,6 +187,9 @@ const weExtension = (b) => {
   if (b.implementsIntent) x.implementsIntent = b.implementsIntent;
   if (b.composesIntents) x.composesIntents = b.composesIntents;
   if (b.traits) x.traits = b.traits;
+  // #936 (Fork 2 of #933): the behaviors a block CONSUMES (distinct from `traits`, which it PROVIDES).
+  // Name mirrors `composesIntents`; `composesTraits` is rejected at the gate (The Map collision, #936).
+  if (b.composesBehaviors) x.composesBehaviors = b.composesBehaviors;
   if (b.webStandards) x.webStandards = b.webStandards;
   if (b.type) x.blockType = b.type;
   if (b.status) x.status = b.status;

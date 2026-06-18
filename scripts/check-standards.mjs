@@ -143,6 +143,40 @@ for (const b of blocks) {
   if (b.type && !BLOCK_TYPES.has(b.type)) warn(`Block "${b.id}" has unusual type "${b.type}"`);
 }
 for (const p of plugs) checkStatusInto('Plug', p.id, p.status);
+
+// ── 3b. composesBehaviors resolution (#936, Fork 2 of #933) ───────────────────
+// A block's `traits[]` records the named behaviors it PROVIDES (`withSortableHeader`, …); the new
+// `composesBehaviors[]` records the behaviors it CONSUMES. The de-facto behavior registry is the
+// union of every provided `traits[].name` — each composesBehaviors entry must resolve to one, so a
+// declared composition can't name a behavior that no block provides (the #933 "compose, don't
+// hand-roll" signal). The legacy field name `composesTraits` is rejected — it collides with "The
+// Map" (the trait-manifest concept, src/_data/traits.json) — authors must use `composesBehaviors`.
+{
+  const traitName = (t) => (typeof t === 'string' ? t : t && t.name);
+  const providedBehaviors = new Set(
+    blocks.flatMap((b) => (Array.isArray(b.traits) ? b.traits.map(traitName) : [])).filter(Boolean));
+  for (const b of blocks) {
+    if (b.composesTraits !== undefined)
+      err(`Block "${b.id}" uses reserved field "composesTraits" — it collides with The Map (the trait manifest, src/_data/traits.json); use "composesBehaviors" (#936)`,
+        dUnresolvedRef('Block', b.id, blockSpecFile(b.id), 'composesTraits', 'composesTraits', 'composesBehaviors'));
+    if (b.composesBehaviors === undefined) continue;
+    if (!Array.isArray(b.composesBehaviors)) {
+      err(`Block "${b.id}" composesBehaviors must be an array of behavior names (or {name} objects)`,
+        dUnresolvedRef('Block', b.id, blockSpecFile(b.id), 'composesBehaviors', String(b.composesBehaviors), 'array'));
+      continue;
+    }
+    for (const entry of b.composesBehaviors) {
+      const name = traitName(entry);
+      if (!name)
+        err(`Block "${b.id}" composesBehaviors entry has no name: ${JSON.stringify(entry).slice(0, 60)}`,
+          dUnresolvedRef('Block', b.id, blockSpecFile(b.id), 'composesBehaviors', JSON.stringify(entry).slice(0, 40), 'trait manifest'));
+      else if (!providedBehaviors.has(name))
+        err(`Block "${b.id}" composesBehaviors "${name}" does not resolve to a provided trait (no block declares it in traits[]) — #936`,
+          dUnresolvedRef('Block', b.id, blockSpecFile(b.id), 'composesBehaviors', name, 'trait manifest'));
+    }
+  }
+}
+
 for (const r of research)
   if (r.status && !RESEARCH_STATUSES.has(r.status)) warn(`Research topic "${r.id}" has unusual status "${r.status}"`);
 // Research-freshness foundation schema (#441 / #476): validate the shape of the new freshness +
