@@ -2,112 +2,153 @@
 type: decision
 workItem: story
 size: 3
-status: open
+status: resolved
 locus: frontierui
 relatedProject: webdocs
+relatedReport: reports/2026-06-18-954-polyglot-panel-we-artifact-consumption.md
 parent: "746"
+blockedBy: []
 dateOpened: "2026-06-18"
+dateStarted: "2026-06-18"
+dateResolved: "2026-06-18"
+graduatedTo: none
+preparedDate: "2026-06-18"
 tags: [webdocs, block-explorer, adapters, polyglot]
 ---
 
 # Decide how the FUI polyglot panel consumes WE-side artifacts (author-mode serve() source + conformance runner/verdict)
 
+> **RATIFIED 2026-06-18.** Both forks resolved as the prepared defaults — both are forced invariants
+> (one branch each broken/impossible), grounding re-traced to the tree, red-team failed. Confidence ~90%
+> each.
+> - **Fork 1 (deterministic WE outputs — `serve()` source #818 + #506 verdict #913) = A, data-emit.**
+>   WE runs `serve()` / the #506 gate at build time and **commits the output as JSON**; the FUI panel
+>   reads it. Only rendered text + verdict + diagnostics cross the #700 seam. B (FUI ports `serve()`) is
+>   broken — reverses #956=A, #707-forbidden, diverges from `FORMS`. C (publish a `@webeverything`
+>   consumable) is the #872 end-state, premature here.
+> - **Fork 2 (#891 behavioral badge) = vectors-as-data + runner-runs-FUI-side.** The WE-owned runner
+>   (`we:wrapper-conformance/runner.ts`, pure DOM, imports no FUI) executes FUI-side against FUI's live
+>   `WrapperSubject`; vectors cross as data. Pure data-emit is impossible (no WE-side verdict). Runner
+>   packaging rides #872; the badge needs a mounted subject → downstream of #912.
+>
+> **Codified rule:** *deterministic WE outputs → data-emit (commit output, panel reads); verdicts that
+> depend on FUI's live output → vectors-as-data + runner-runs-FUI-side. The standard/engine never leave
+> WE; only outputs and standard-artifacts cross WE→FUI.*
+>
+> **Downstream:** #818 unblocked (Fork 1; still demand-gated). #913 split per bias-toward-separation —
+> #913 keeps the cheap #506-verdict badge (unblocked); the behavioral badge moved to new **#967**
+> (`blockedBy: [912, 954]`). Related new decision **#966** (parked) — home of a *hosted* compliance
+> product.
+
+> **Prepared 2026-06-18** ([report](../reports/2026-06-18-954-polyglot-panel-we-artifact-consumption.md)).
+> Precondition [#956](/backlog/956-decide-module-service-serve-form-generation-placement-we-ref/) is
+> **resolved = A** (`serve()` stays WE reference-runtime, unpublished) — so the cross-repo boundary is real
+> and `blockedBy` is cleared. Prior-art is prior rulings (#700/#707/#872/#855/#891 + #956); no new
+> `/research/` topic (*Why no research topic* in the report; same posture as #791/#855/#956). Both forks
+> below trace to **forced invariants** — one branch each is broken or impossible — so the decision turn is
+> a skeptic-checked ratify, not an open A/B.
+
 Surfaced claiming **#818** (author-mode emit) **and #913** (per-target conformance badges) in
 batch-2026-06-18 — both are FUI polyglot-panel slices that consume **WE-side** artifacts the FUI workbench
-has no import path to (no `webeverything` alias in FUI tsconfig/vite; the #700 cross-repo-impl boundary):
+has no import path to (no `webeverything` alias in FUI tsconfig/vite; the #700/#707 cross-repo-impl boundary):
 
 - **#818** renders idiomatic source via the transform core `serve(definition,{form})`
-  (`we:blocks/renderers/module-service/moduleService.ts`).
+  ([`we:moduleService.ts:142`](../blocks/renderers/module-service/moduleService.ts#L142)).
 - **#913** renders a pass/fail badge per target consuming the #891 behavioral wrapper-conformance **runner**
-  (`we:wrapper-conformance/runner.ts` — its real home; the body's `fui:wrapper-conformance/runner.ts` is
-  wrong) and the #506 cross-language gate **verdict** (`we:blocks/renderers/module-service/conformance`).
+  ([`we:wrapper-conformance/runner.ts`](../wrapper-conformance/runner.ts) — its real home; the body's
+  `fui:wrapper-conformance/runner.ts` is wrong) and the #506 cross-language gate **verdict**
+  (`we:blocks/renderers/module-service/conformance/`).
 
 The polyglot panel is **FUI-owned** (`fui:workbench/mount.ts`, #753) and its consume-mode uses FUI's *own*
-`genWrapper` (`fui:tools/gen-wrapper/genWrapper.ts`) — it imports no WE impl. So neither "render via
-serve()" nor "badge from the runner/verdict" can be wired as the bodies assume. One placement mechanism
-likely answers both: how does a FUI workbench surface reach WE-side transform/conformance output?
+`genWrapper` (`fui:tools/gen-wrapper/genWrapper.ts`) — it imports no WE impl.
 
-## The fork (one mechanism for both artifact types — source forms and conformance verdicts)
+## Grounding digest (traced to the tree)
 
-- **A — Data-emit channel (bold default).** WE emits its polyglot output as **committed data** the FUI
-  workbench reads: `serve()` renders the source forms to a JSON/text artifact, and the #506/#891 gate
-  emits a verdict JSON per block/target. The FUI panel consumes those data files — no cross-repo *code*
-  import, honoring #700 (only data crosses the seam, never impl). Author-mode source can ALSO surface as a
-  WE-side docs source-toggle (demo-workflow §4) that the panel mirrors. Likely the lightest path that fits
-  "rides what already ships."
-- **B — FUI ports the equivalents** (`serve()` forms + a conformance reader) into the workbench, as it did
-  `genWrapper` for consume-mode. Self-contained but duplicates the WE transform/conformance logic in FUI —
-  lock-in risk + divergence from WE's `ServeForm` set and golden vectors.
+- **`serve()` returns pure data, not code FUI can import.** `serve(definition,{form})`
+  ([`we:moduleService.ts:142`](../blocks/renderers/module-service/moduleService.ts#L142)) returns
+  `ServeResult{form,code,language,lossy,diagnostics}` ([`:67`](../blocks/renderers/module-service/moduleService.ts#L67))
+  over the `FORMS` catalog ([`:51`](../blocks/renderers/module-service/moduleService.ts#L51)) that already
+  drives the demo toggle. **#956 = A** keeps `serve()` a WE-internal, **unpublished** reference runtime →
+  FUI cannot import it (#707). So the panel must consume its *output*.
+- **The #506 gate already commits verdict data.** The dir `we:blocks/renderers/module-service/conformance/`
+  commits a golden verdict (`we:blocks/renderers/module-service/conformance/golden.json`) plus its
+  generator/runner/vector siblings — a WE-computable, already-committed verdict surface.
+- **But #891's behavioral runner needs a live subject WE never sees.** `runVectors(subject, vectors)`
+  ([`we:wrapper-conformance/runner.ts:163`](../wrapper-conformance/runner.ts#L163)) requires a
+  `WrapperSubject` ([`:37`](../wrapper-conformance/runner.ts#L37)) — a *mounted* wrapper instance. Its
+  header: "FUI owns the generator and implements one subject per framework." The behavioral verdict is a
+  function of **FUI's own `genWrapper` output**, which WE never observes → **no WE-side verdict to emit**.
+
+## The axis — two artifact natures, not one mechanism
+
+The item asked for *one* placement mechanism for both artifact types. Tracing them apart shows two
+**different natures**, so the genuine call is to *reject* "one channel for both":
+
+- **Deterministic WE outputs** (`serve()` source forms · #506 verdict) — WE computes them from a
+  `<component>` definition alone, no FUI input. Their nature is *committable data*.
+- **FUI-dependent verdict** (#891 behavioral badge) — a function of FUI's live wrapper instance, which WE
+  cannot see. Its nature is *vectors-out, run-in-FUI*.
+
+## Recommended path at a glance
+
+| Seam | **Default** | Excluded / broken branch |
+| --- | --- | --- |
+| Fork 1 — `serve()` source forms (#818) + #506 verdict (#913a) | **A — data-emit** (WE commits output + verdict JSON; panel reads) | B (FUI ports `serve()`) reverses #956 keeper, #707-blocked, diverges from `FORMS`; C (publish package) over-engineered + #872-gated |
+| Fork 2 — #891 behavioral badge (#913b) | **Vectors cross as data; runner executes FUI-side** (packaging rides #872; gate on #912) | Pure data-emit is *impossible* (no WE-side verdict); full FUI fork-and-diverge breaks standard-artifact ownership |
+
+## Fork 1 — deterministic WE outputs (source forms + #506 verdict) → the panel
+
+*Fork-existence:* a **forced invariant**. The excluded branch (B — FUI ports `serve()` into the workbench,
+as it ported `genWrapper`) is **broken**: #956 = A just ratified `serve()` as a WE-internal keeper, so
+relocating it reverses that ruling, duplicates the WE transform/`FORMS` set (divergence from the golden
+forms), and #707 forbids FUI re-importing the relocated copy. Data-emit is therefore *forced*, not merely
+preferred.
+
+- **A — Data-emit channel (default).** WE emits its polyglot output as **committed data** the FUI workbench
+  reads. For **#818**: a per-block × form artifact `{code, language, lossy, diagnostics}`, produced by
+  running `serve()` over each block's `<component>` definition at build time (an extension of the toggle
+  `FORMS` already drives); the panel reads the JSON and renders author-mode tabs. For **#913 part 1**: a
+  per-block/target verdict JSON committed alongside the #506
+  `we:blocks/renderers/module-service/conformance/golden.json`; the panel reads it → badge.
+  Only rendered text + diagnostics cross the seam, honoring #700. *Residual: the emit-artifact
+  format/build-step is a small new seam — an impl detail, not a fork.*
+- **B — FUI ports the equivalents** (`serve()` forms + a conformance reader) into the workbench.
+  *Broken — see fork-existence above.*
 - **C — WE publishes consumables** (the #872 `@webeverything/contracts`-style package, or a published
-  runner) the FUI workbench imports. Cleanest long-term but gated on the publish pipeline; heavier than
-  the slices' "rides what already ships" framing.
+  `serve()` API) the workbench imports. *Cleanest long-term but #956 = A explicitly did not publish
+  `serve()`/its output; heavier than the slices' "rides what already ships" framing and gated on the #872
+  pipeline. Demote unless the decider judges the published end-state worth pulling forward.*
 
-Also re-confirm the **demand-gate** (#818's bold "build only after appetite for idiomatic source is shown")
-at decision time — #818 is the slice whose appetite was never demonstrated.
+## Fork 2 — #891 behavioral conformance badge (#913 part 2) → the panel
 
-**Blocks #818 and #913** (both `blockedBy: 954`). Sibling of #753/#912/#913 under #746.
+*Fork-existence:* a **forced invariant** in the opposite direction. The excluded branch (pure data-emit,
+i.e. WE emits the verdict) is **impossible** — WE never sees FUI's `genWrapper` output, so it cannot compute
+the verdict. The two coherent halves (standard vectors vs FUI-side execution) genuinely cannot live on one
+side.
 
----
+- **Default — vectors cross as data; runner executes FUI-side.** Mirrors #891's own design intent: the
+  **vectors** (`we:wrapper-conformance/vectors.ts`) cross as data (consistent with Fork 1); the **runner**
+  (`we:wrapper-conformance/runner.ts`, a WE-owned standard artifact per #855 B2 — ~165 lines of pure DOM
+  logic, imports no FUI) executes **FUI-side** against FUI's live `WrapperSubject`. The runner's packaging
+  **rides #872** (published `@webeverything`-scoped consumable end-state; byte-replication the #694/#170
+  interim) — this item only fixes *that the runner runs FUI-side*, not how it is packaged. The badge needs a
+  **mounted** subject → it is **downstream of #912** (live-test sandbox); recommend adding `blockedBy: 912`
+  to the #891-behavioral half of #913.
+- **Excluded — full FUI fork-and-diverge** (FUI re-authors its own runner). Breaks the runner's
+  standard-artifact ownership (#855 B2) and risks divergence from the WE golden vectors.
 
-## Proposed ruling — PENDING RATIFICATION (`/next 954`, 2026-06-18)
+## Supported by default (not forks)
 
-**Grounding (traced to the tree, not inherited):**
+- **Demand-gate re-confirm (#818).** Keep #818 demand-gated — *build idiomatic-source author mode only after
+  appetite is shown*. Independent of placement; #753 shipped consume-mode tabs, but whether
+  *idiomatic-source* appetite is demonstrated is a decision-time user call. The Fork-1 data-emit foundation
+  is cheap enough to ride the existing emit channel **when** appetite shows; do not build ahead of it.
+- **#913 split.** Likely split the cheap #506-verdict badge (Fork 1) from the #912-gated behavioral badge
+  (Fork 2) per bias-toward-separation — a slice call for the decision/build turn, not part of these rulings.
 
-- `serve(definition,{form})` ([we:moduleService.ts:142](../blocks/renderers/module-service/moduleService.ts#L142))
-  returns a **pure-data** `ServeResult{form,code,language,lossy,diagnostics}` ([:60](../blocks/renderers/module-service/moduleService.ts#L60))
-  over the `FORMS` catalog — the same catalog comment says it already "drives the demo toggle." So source
-  forms are deterministic WE-side outputs already serialized for display.
-- The #506 cross-language gate (`we:blocks/renderers/module-service/conformance/`) already commits verdict data
-  (`we:blocks/renderers/module-service/conformance/golden.json`) — a WE-computable, committable artifact.
-- **But** `we:wrapper-conformance/runner.ts` `runVectors(subject, vectors)` requires a live `WrapperSubject`
-  (a *mounted* wrapper instance). #891's runner is **generator-agnostic by design** ("FUI implements one
-  subject per framework … FUI's generated React/Vue wrappers run as `WrapperSubject`s"). The behavioral
-  verdict is therefore a function of **FUI's own `genWrapper` output**, which WE never sees — there is **no
-  WE-side verdict to emit** for this one.
+## On resolve (when ratified)
 
-**The fork is two natures, not one mechanism.** Reject "one channel for both":
-
-### Ruling 1 — deterministic, WE-computable outputs → **A (data-emit)**. Confidence ~85%.
-
-- **#818 author-mode source forms:** WE emits a committed artifact per block × form
-  (`{code, language, lossy, diagnostics}`) by running `serve()` over each block's `<component>` definition at
-  build time — an extension of the toggle the `FORMS` catalog already drives. The FUI panel reads the JSON
-  and renders author-mode tabs. Only rendered text + diagnostics cross; the `<component>` definitions and the
-  transform code stay WE-side. Pure #700-honoring data-emit, "rides what already ships."
-- **#913 part 1 (#506 cross-language verdict):** emit a per-block/target verdict JSON alongside `we:blocks/renderers/module-service/conformance/golden.json`;
-  the panel reads it → badge.
-
-*Residual:* the emit-artifact format/build-step is a small new seam (where it's written, how the FUI vite
-build picks it up) — an impl detail, not a fork.
-
-### Ruling 2 — #891 behavioral conformance badge → **vectors cross as data, runner executes FUI-side**. Confidence ~75%.
-
-Pure A is **impossible** here (corrects #913's note): WE can't emit a verdict for a wrapper it never sees.
-Instead, mirroring #891's own design intent:
-
-- The **vectors** (`we:wrapper-conformance/vectors.ts`) cross as data (consistent with A).
-- The **runner** executes **FUI-side** against FUI's live subject. The runner is a WE-owned **standard
-  artifact** (#855 B2), ~165 lines of pure DOM logic — so its end-state home is a WE-**published consumable**
-  (option **C**: a legitimately `@webeverything`-scoped conformance package, since it's a standard artifact
-  that imports no FUI), with **byte-replication the documented interim** (the #694/#170 precedent, governed by
-  the #872 distribution pipeline). This is **not** a new distribution decision — it rides #872; this item only
-  fixes *that the runner runs FUI-side*, not how it's packaged.
-- This badge needs a **mounted** subject to assert against → it is correctly **downstream of #912** (the
-  live-test sandbox), not just #753. Recommend adding `blockedBy: 912` to the #891-behavioral half of #913.
-
-*Residual:* whether #913 should split — the cheap #506-verdict badge (Ruling 1) vs the #912-gated behavioral
-badge (Ruling 2). Likely yes (bias-toward-separation), but that's a slice call, not part of this ruling.
-
-### Demand-gate re-confirm (#818). Confidence ~70%.
-
-Keep #818 demand-gated. #753 shipped consume-mode source tabs; whether *idiomatic-source* appetite is now
-demonstrated is a user call. The Ruling-1 data-emit foundation is cheap enough to ride the existing emit
-channel **when** appetite shows — do not build ahead of it.
-
-### On resolve (when ratified)
-
-- `codifiedIn`: the data-emit-vs-FUI-execute split is a reusable boundary rule (deterministic WE outputs →
-  data-emit; verdicts that depend on FUI's live output → vectors-as-data + runner-runs-FUI-side).
-- Unblock #818 (Ruling 1) and #913 (split per above); set `graduatedTo`.
-
-**PENDING RATIFICATION — item stays `open`, no commit/spawn until explicit "ratify/go."**
+- `codifiedIn`: the data-emit-vs-FUI-execute split is a reusable boundary rule — *deterministic WE outputs →
+  data-emit; verdicts that depend on FUI's live output → vectors-as-data + runner-runs-FUI-side.*
+- Unblock #818 (Fork 1, still demand-gated) and #913 (split per above; add `blockedBy: 912` to its
+  behavioral half); set `graduatedTo`.

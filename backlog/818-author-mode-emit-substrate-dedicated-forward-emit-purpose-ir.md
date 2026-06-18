@@ -6,7 +6,7 @@ status: open
 parent: "746"
 locus: frontierui
 relatedProject: webdocs
-blockedBy: ["753", "954"]
+blockedBy: []
 relatedReport: reports/2026-06-18-backlog-split-analysis.md
 dateOpened: "2026-06-16"
 tags: [webdocs, adapters, polyglot, generation, component-emit]
@@ -20,6 +20,14 @@ tags: [webdocs, adapters, polyglot, generation, component-emit]
 > written — it needs a placement call. Filed **[#954](/backlog/954-decide-how-polyglot-author-mode-source-reaches-the-fui-workb/)**
 > (`type: decision`, `blockedBy: 954` added; also set the missing `locus: frontierui` to match its #746
 > siblings). The bold demand-gate (appetite for idiomatic source) is also unresolved and folded into #954.
+>
+> **#954 ratified 2026-06-18 — Fork 1 = A (data-emit); `blockedBy` cleared.** Placement resolved: WE
+> runs `serve()` at build time and **commits the per-block × form output** (`{code, language, lossy,
+> diagnostics}`) as JSON; the FUI panel reads that data and renders author-mode tabs (only rendered
+> text + diagnostics cross the #700 seam — FUI never imports `serve()`/`moduleService`). The emit
+> artifact format/build-step is a small new seam (impl detail, not a fork). **Still DEMAND-GATED** —
+> build the idiomatic-source author mode only after appetite is shown; the data-emit foundation is cheap
+> enough to ride the existing emit channel *when* it is.
 
 # Author-mode emit foundation — wire an output-tabs author mode onto the existing `serve(){form}` forms over the declarative `<component>` subset
 
