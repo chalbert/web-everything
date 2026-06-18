@@ -1229,7 +1229,7 @@ export function scanRepoLocusPrefixes(docs) {
 //
 // `blocks` = [{ id, implementedBy, implPresent }] — implPresent is true/false when FUI was walked,
 // or null when FUI is absent (→ skip that block). Returns { errors, warnings, skipped, checked }.
-export const BLOCK_IMPL_DRIFT_ENFORCED = false;
+export const BLOCK_IMPL_DRIFT_ENFORCED = true; // #926: all 10 FUI block impls (#916–#925) landed (batch-2026-06-18); a moved/deleted impl now hard-fails
 
 export function validateBlockImplConformance(blocks) {
   const errors = [];
