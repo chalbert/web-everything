@@ -9,10 +9,12 @@
  * Run: `npm run check:standards`  (exits 1 on any error; warnings don't fail)
  */
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
 import { renderInventory, spliceInventory } from './gen-inventory.mjs';
+import { parseClaims, mineFiles, porcelainFiles, partitionFindings } from './readiness/claimScope.mjs';
 import { checkDemos } from './check-demos.mjs';
 import { buildReport, source as reportSource, finding as reportFinding, section as reportSection } from './lib/buildReport.mjs';
 import { loadBlocks } from './lib/blocks-loader.cjs';
@@ -652,8 +654,11 @@ const backlogReportRefs = new Set(
     const msg =
       `${total} code-path reference(s) across ${findings.length} file(s) in backlog/ + reports/ lack a ` +
       `<repo>: locus prefix (#883 convention; #884 detection, #885 enforces) — e.g. ${sample}${findings.length > 5 ? ', …' : ''}`;
-    if (REPO_LOCUS_PREFIX_ENFORCED) err(msg);
-    else warn(msg);
+    // Carry the per-file list so `--scope` (#952) can attribute this aggregate across sessions — it's
+    // the canonical concurrent-red case (one finding spanning several sessions' files).
+    const descriptor = { kind: 'repo-locus', files: findings.map((f) => f.file) };
+    if (REPO_LOCUS_PREFIX_ENFORCED) err(msg, descriptor);
+    else warn(msg, descriptor);
   }
 }
 
@@ -662,7 +667,7 @@ try {
   const agentsPath = join(ROOT, 'AGENTS.md');
   const current = readFileSync(agentsPath, 'utf8');
   if (spliceInventory(current, renderInventory()) !== current)
-    err('AGENTS.md inventory is stale — run `npm run gen:inventory`');
+    err('AGENTS.md inventory is stale — run `npm run gen:inventory`', { kind: 'inventory', file: 'AGENTS.md' });
 } catch (e) {
   err(`AGENTS.md inventory check failed: ${e.message}`);
 }
@@ -911,11 +916,39 @@ try {
   err(`Static template a11y lint failed: ${e.message}`);
 }
 
+// ── Scope attribution (#952, ratified #949 Fork 3-A) ───────────────────────────
+// `--scope=<session>` (alias `--mine=<session>`) partitions errors by ownership: an error on a file THIS
+// session dirtied (per its claim-time baseline, #949 Fork 2-A) BLOCKS; a concurrent/pre-existing red is
+// printed as a non-failing note. A path-less finding can't be proven foreign, so it stays blocking
+// (fail-safe). The DEFAULT no-flag run is untouched — whole-repo-strict (CI / close-out unchanged).
+const scopeArg = process.argv.find((a) => a.startsWith('--scope=') || a.startsWith('--mine='));
+const scopeSession = scopeArg ? scopeArg.split('=').slice(1).join('=') : null;
+let externalErrors = []; // errors attributed to other sessions under --scope (printed, non-blocking)
+let scopeNote = null;
+if (scopeSession) {
+  try {
+    const claims = parseClaims(readFileSync(join(ROOT, '.claude/skills/batch-backlog-items/claims.json'), 'utf8'));
+    const dirty = porcelainFiles(execFileSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }));
+    const mine = mineFiles(claims, scopeSession, dirty);
+    if (mine === null) {
+      scopeNote = `--scope="${scopeSession}" has no recorded claim baseline — running whole-repo-strict.`;
+    } else {
+      const { blocking, external } = partitionFindings(errors, mine);
+      externalErrors = external;
+      errors.length = 0; errors.push(...blocking); // only my-scope (+ unattributable) errors gate
+      scopeNote = `--scope="${scopeSession}" — ${mine.size} owned file(s); ${external.length} external error(s) demoted to notes.`;
+    }
+  } catch (e) {
+    scopeNote = `--scope failed to resolve a baseline (${e.message}) — running whole-repo-strict.`;
+  }
+}
+
 // ── Report ────────────────────────────────────────────────────────────────────
 const summary = {
   blocks: blocks.length, plugs: plugs.length, protocols: protocols.length, intents: intents.length,
   capabilities: capabilities.length, terms: semantics.length, research: research.length, backlog: backlog.length,
   errors: errors.length, warnings: warnings.length,
+  ...(scopeSession ? { scope: scopeSession, externalErrors: externalErrors.length } : {}),
 };
 
 if (JSON_MODE) {
@@ -946,11 +979,13 @@ if (JSON_MODE) {
   });
   // `report` is the #431 model-valid view (pipes through the #432 renderers + #434 SARIF/JUnit adapters);
   // `errors`/`warnings` stay for the existing #196 auto-fix feed that targets descriptors directly.
-  console.log(JSON.stringify({ ok: errors.length === 0, summary, report, errors: shape(errors), warnings: shape(warnings) }, null, 2));
+  console.log(JSON.stringify({ ok: errors.length === 0, summary, report, errors: shape(errors), warnings: shape(warnings), ...(scopeSession ? { externalErrors: shape(externalErrors) } : {}) }, null, 2));
 } else {
-  const RED = '\x1b[31m', YEL = '\x1b[33m', GRN = '\x1b[32m', DIM = '\x1b[2m', RST = '\x1b[0m';
+  const RED = '\x1b[31m', YEL = '\x1b[33m', GRN = '\x1b[32m', CYN = '\x1b[36m', DIM = '\x1b[2m', RST = '\x1b[0m';
   console.log(`${DIM}check-standards — Web Everything${RST}`);
+  if (scopeNote) console.log(`${CYN}  scope${RST} ${DIM}${scopeNote}${RST}`);
   for (const w of warnings) console.log(`${YEL}  warn${RST} ${w.message}`);
+  for (const e of externalErrors) console.log(`${DIM}  note (external) ${e.message}${RST}`);
   for (const e of errors) console.log(`${RED} error${RST} ${e.message}`);
   console.log(
     `\n${errors.length ? RED : GRN}${errors.length} error(s)${RST}, ${warnings.length} warning(s) ` +

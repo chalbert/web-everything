@@ -23,17 +23,20 @@
  *   add --json to any verb for machine-readable output.
  */
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applyTransition, readField } from './backlog/frontmatter.mjs';
 import { nextNum, slugify, renderItem } from './backlog/scaffold.mjs';
 import { parseReservations, emptyState, addHolds, removeBySession, removeNums, pruneExpired, serialize } from './readiness/reservations.mjs';
+import { parseClaims, serializeClaims, pruneExpiredClaims, recordClaim, porcelainFiles } from './readiness/claimScope.mjs';
 import { trainsEstimate, capacityFromSamples } from './backlog/capacity.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIR = join(ROOT, 'backlog');
 const CAPACITY_PATH = join(ROOT, '.claude/skills/batch-backlog-items/capacity.json');
 const RESERVATIONS_PATH = join(ROOT, '.claude/skills/batch-backlog-items/reservations.json');
+const CLAIMS_PATH = join(ROOT, '.claude/skills/batch-backlog-items/claims.json');
 const RED = '\x1b[31m', GRN = '\x1b[32m', YEL = '\x1b[33m', DIM = '\x1b[2m', BLD = '\x1b[1m', RST = '\x1b[0m';
 
 const argv = process.argv.slice(2);
@@ -88,6 +91,17 @@ function transition(v) {
     // Clear-on-claim (#083 invariant 2): a hard claim supersedes any soft reservation on this item —
     // drop it so the now-`active` item never lingers as a stale hold against another session.
     saveReservations(removeNums(loadReservations(), [file.match(/^\d+/)[0]]));
+    // Gate-attribution baseline (#952, #949 Fork 2-A): snapshot the files ALREADY dirty (everyone else's
+    // in-flight + pre-existing) the first time this session claims, and stamp the owning id. Lets
+    // `check:standards --scope=<session>` later block only on files THIS session dirtied. Best-effort —
+    // a git/IO hiccup must never fail the claim (attribution is an opt-in convenience, not the lock).
+    const session = flag('session');
+    if (session) {
+      try {
+        const baselineFiles = [...porcelainFiles(execFileSync('git', ['status', '--porcelain'], { cwd: ROOT, encoding: 'utf8' }))];
+        saveClaims(recordClaim(loadClaims(), { session, id, baselineFiles, nowIso: new Date().toISOString() }));
+      } catch { /* attribution is best-effort — never block a claim on it */ }
+    }
   }
   if (v === 'claim') {
     const claimedStatus = as === 'preparing' ? 'preparing' : 'active';
@@ -111,6 +125,16 @@ function loadReservations() {
 /** Write the registry, self-pruning expired holds on every write (TTL hygiene). */
 function saveReservations(state) {
   writeFileSync(RESERVATIONS_PATH, serialize(pruneExpired(state, Date.now())));
+}
+
+/** Read the per-session claim-baseline registry (#952); a missing/unreadable file degrades to empty. */
+function loadClaims() {
+  try { return parseClaims(readFileSync(CLAIMS_PATH, 'utf8')); }
+  catch { return parseClaims(''); }
+}
+/** Write the claim registry, self-pruning expired session baselines on every write (TTL hygiene). */
+function saveClaims(state) {
+  writeFileSync(CLAIMS_PATH, serializeClaims(pruneExpiredClaims(state, Date.now())));
 }
 
 /**
