@@ -4,7 +4,7 @@ workItem: story
 size: 3
 parent: "777"
 status: open
-blockedBy: ["865"]
+blockedBy: ["865", "866"]
 dateOpened: "2026-06-17"
 tags: []
 ---
