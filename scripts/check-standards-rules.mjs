@@ -1160,6 +1160,46 @@ export function validatePlugDualMode(domains) {
   return { errors, warnings };
 }
 
+// ── Block contract↔impl drift conformance (#659 — the #606/#641 plugs analogue for blocks) ──
+// #641 ruled WE blocks are pure *protocols*; the impl lives in FUI (`implementedBy:
+// @frontierui/blocks/…`). Unlike the plug runtime, WE holds NO block-impl copy post-#641
+// (`sourcePath` is gone), so the #170 drift hazard for blocks is not byte-divergence but a
+// *contract pointing at an impl that has moved or does not exist*. This gate is cross-repo and
+// detect-or-skip (the `devServerProbe` pattern, mirroring 8b's "skip when plugs/ isn't checked
+// out"): when FUI is present every `implementedBy` must resolve to a real impl path; when FUI is
+// absent (CI without the sibling repo) the content arm is SKIPPED, never failed.
+//
+// Staging (mirroring the #636 warn→enforce shape): a contract may legitimately point *ahead* of an
+// impl FUI hasn't built yet, so a missing impl is a WARN until the FUI block-impl backfill closes
+// the gaps (#659 found 10 such gaps at authoring time), then it promotes to ERROR (flip
+// BLOCK_IMPL_DRIFT_ENFORCED) so a moved/deleted impl hard-fails. The fs walk lives in
+// check-standards.mjs; this rule is pure.
+//
+// `blocks` = [{ id, implementedBy, implPresent }] — implPresent is true/false when FUI was walked,
+// or null when FUI is absent (→ skip that block). Returns { errors, warnings, skipped, checked }.
+export const BLOCK_IMPL_DRIFT_ENFORCED = false;
+
+export function validateBlockImplConformance(blocks) {
+  const errors = [];
+  const warnings = [];
+  let skipped = 0;
+  let checked = 0;
+  for (const b of blocks) {
+    if (!b.implementedBy) continue; // no impl pointer — form is gated elsewhere (#641)
+    if (b.implPresent === null || b.implPresent === undefined) {
+      skipped++; // FUI absent — the cross-repo content arm can't run here
+      continue;
+    }
+    checked++;
+    if (b.implPresent === false) {
+      const msg = `Block "${b.id}" implementedBy points at an impl that does not resolve in ../frontierui — ${b.implementedBy} (block contract↔impl drift, #170/#659). Build the FUI impl or correct the reference.`;
+      if (BLOCK_IMPL_DRIFT_ENFORCED) errors.push({ message: msg });
+      else warnings.push({ message: msg });
+    }
+  }
+  return { errors, warnings, skipped, checked };
+}
+
 // ── Static template a11y lint (#772, ratified #763 supported-not-decided) ──────
 // The structural a11y rules a headless axe run (the #770/#771 rendered-DOM gate) CANNOT observe from the
 // computed page — they live in the .njk SOURCE and must be caught at authoring time, before render. Scoped

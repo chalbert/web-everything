@@ -25,7 +25,7 @@ import {
   findUnquotedColonScalars, lintBacklogItemRendering,
   RESEARCH_REVIEW_HORIZON_DEFAULT, deriveResearchFreshness,
   validateCapabilityPresence, validateRetirementShape,
-  validatePlugDualMode, validateTemplateA11y,
+  validatePlugDualMode, validateTemplateA11y, validateBlockImplConformance,
 } from './check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -671,6 +671,35 @@ const allCompileFiles = COMPILE_ROOTS.flatMap((r) => walk(r));
     for (const e of pe) err(e.message, e.descriptor);
     for (const w of pw) warn(w.message, w.descriptor);
   }
+}
+
+// ── 8c. Block contract↔impl drift conformance (#659, the #606/#641 plugs analogue) ─
+// WE blocks are pure protocols; the impl lives in FUI (`implementedBy: @frontierui/blocks/…`).
+// When the sibling FUI repo is checked out, every `implementedBy` must resolve to a real impl
+// path — a reference that no longer resolves is contract↔impl drift (#170, blocks edition). The
+// content arm is detect-or-skip: a WE tree without ../frontierui (CI without the sibling repo) is
+// expected, not a failure (mirrors 8b). The fs resolution lives here; the pure rule is
+// `validateBlockImplConformance`.
+{
+  const fuiBlocks = join(ROOT, '..', 'frontierui', 'blocks');
+  const fuiPresent = existsSync(fuiBlocks);
+  // Resolve `@frontierui/blocks/<rel>` to a real path: a `.ext` reference is a file; an extension-less
+  // reference is a dir (optionally with an index module). null when FUI isn't checked out (→ skip).
+  const resolveImpl = (implementedBy) => {
+    if (!fuiPresent) return null;
+    const rel = implementedBy.replace(/^@frontierui\/blocks\//, '').replace(/\/$/, '');
+    const target = join(fuiBlocks, rel);
+    if (existsSync(target)) return true;
+    if (!/\.[a-z]+$/.test(rel)) return ['index.ts', 'index.js'].some((f) => existsSync(join(target, f)));
+    return false;
+  };
+  const blockImpl = blocks
+    .filter((b) => b.implementedBy)
+    .map((b) => ({ id: b.id, implementedBy: b.implementedBy, implPresent: resolveImpl(b.implementedBy) }));
+  // Skip silently when ../frontierui isn't checked out (mirrors 8b) — the content arm just can't run.
+  const { errors: be, warnings: bw } = validateBlockImplConformance(blockImpl);
+  for (const e of be) err(e.message, e.descriptor);
+  for (const w of bw) warn(w.message, w.descriptor);
 }
 
 // ── 9. Vite dev-proxy allowlist must cover every 11ty catalog route ────────────

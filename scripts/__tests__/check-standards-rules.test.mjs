@@ -25,6 +25,7 @@ import {
   deriveResearchFreshness, addIsoDuration, RESEARCH_REVIEW_HORIZON_DEFAULT,
   validateCapabilityPresence, validateRetirementShape,
   validatePlugDualMode, PLUG_UNPLUGGED_TEST_ENFORCED,
+  validateBlockImplConformance, BLOCK_IMPL_DRIFT_ENFORCED,
   validateTemplateA11y, NAV_ACTIVE_STATE_ENFORCED,
   lintBacklogItemRendering,
 } from '../check-standards-rules.mjs';
@@ -822,6 +823,44 @@ describe('validatePlugDualMode — #606 dual-mode plug conformance (#636)', () =
     ]);
     expect(res.errors).toEqual([]);
     expect(res.warnings).toEqual([]);
+  });
+});
+
+describe('validateBlockImplConformance — block contract↔impl drift (#659, the #606/#641 analogue)', () => {
+  it('passes a block whose impl resolves in FUI', () => {
+    const res = validateBlockImplConformance([
+      { id: 'button', implementedBy: '@frontierui/blocks/button/', implPresent: true },
+    ]);
+    expect(res.errors).toEqual([]);
+    expect(res.warnings).toEqual([]);
+    expect(res.checked).toBe(1);
+  });
+
+  it('flags a missing FUI impl as drift (warn until enforced)', () => {
+    const res = validateBlockImplConformance([
+      { id: 'wizard', implementedBy: '@frontierui/blocks/wizard/WizardElement.ts', implPresent: false },
+    ]);
+    const bucket = BLOCK_IMPL_DRIFT_ENFORCED ? res.errors : res.warnings;
+    expect(bucket.map((e) => e.message).join(' ')).toMatch(/wizard.*does not resolve.*#170\/#659/);
+    const other = BLOCK_IMPL_DRIFT_ENFORCED ? res.warnings : res.errors;
+    expect(other.map((e) => e.message).join(' ')).not.toMatch(/does not resolve/);
+  });
+
+  it('skips the content arm when FUI is absent (implPresent null) — never a failure', () => {
+    const res = validateBlockImplConformance([
+      { id: 'button', implementedBy: '@frontierui/blocks/button/', implPresent: null },
+    ]);
+    expect(res.errors).toEqual([]);
+    expect(res.warnings).toEqual([]);
+    expect(res.skipped).toBe(1);
+    expect(res.checked).toBe(0);
+  });
+
+  it('ignores a block with no implementedBy (form gated elsewhere)', () => {
+    const res = validateBlockImplConformance([{ id: 'composite-widget', implPresent: true }]);
+    expect(res.errors).toEqual([]);
+    expect(res.warnings).toEqual([]);
+    expect(res.checked).toBe(0);
   });
 });
 
