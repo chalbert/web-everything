@@ -11,7 +11,7 @@ tags: []
 
 # Relocate the whole trait-enforcer (manifest contract + 5 plugins) out of WE to FUI
 
-Ratified #779 consequence: the entire `tools/trait-enforcer/` — the 5 bundler plugins (vite/rollup/webpack/esbuild/parcel) AND the `we:traitManifestContract.ts` manifest format (ruled an FUI-shaped build→runtime IR, not a neutral contract) — belongs in FUI, which already holds its own copy. Remove WE's `tools/trait-enforcer/`, drop `traitEnforcer()` from WE's vite.config.mts, but PRESERVE in WE the higher-level Web Traits protocol surface (`trait` attribute + registerTraits/CustomAttributeRegistry semantics + delivery vocab).
+Ratified #779 consequence: the entire `tools/trait-enforcer/` — the 5 bundler plugins (vite/rollup/webpack/esbuild/parcel) AND the `we:traitManifestContract.ts` manifest format (ruled an FUI-shaped build→runtime IR, not a neutral contract) — belongs in FUI, which already holds its own copy. Remove WE's `tools/trait-enforcer/`, drop `traitEnforcer()` from WE's we:vite.config.mts, but PRESERVE in WE the higher-level Web Traits protocol surface (`trait` attribute + registerTraits/CustomAttributeRegistry semantics + delivery vocab).
 
 WE iframe-embeds FUI demos and never renders trait code → its traitMap is empty by design, permanently, so the plugin earns no place in WE's build. This supersedes the WE placement of #484/#717/#744/#756/#787 — the enforcer was built correctly; the principle on where it LIVES changed (#641/#658/#855 boundary hardening, #507 adapter-outside-WE). Lineage, not erasure. Note the #779 residual: whether even the protocol surface is wholly FUI (~70% it stays WE) is decided here, as part of choosing exactly what to preserve vs move.
 
@@ -25,7 +25,7 @@ so this can't be executed as a mechanical move. Filed as decision **[#905](/back
   plugins, or `we:composedTraitSet.ts`. A move must ADD those to FUI, not delete a duplicate.
 - **WE consumes the pieces marked for removal.** `we:blocks/renderers/module-service/traitServePath.ts` imports
   `traitManifestContract` **types** (the MaaS serve-path); `we:plugs/bootstrap.ts` + `we:tools/maas/vite-plugin.ts`
-  consume `virtual:trait-manifest`, provided by `vite.config.mts:96` `traitEnforcer({traitMap:{}})`. WE may
+  consume `virtual:trait-manifest`, provided by `we:vite.config.mts:96` `traitEnforcer({traitMap:{}})`. WE may
   not import FUI (npm-scope-mirrors-layer), so moving `traitManifestContract` out breaks `traitServePath`.
 - **The protocol surface is already separate** — `trait` attr + `registerTraits` + `CustomAttributeRegistry`
   live in `plugs/webbehaviors/`, **not** in `tools/trait-enforcer/`, so "preserve it" = leave `plugs/webbehaviors/`
@@ -41,19 +41,19 @@ and needs ratification.
 #905 ratified the scope (A: move 5 plugins + `composedTraitSet`; keep `we:traitManifestContract.ts` + the
 `we:plugs/webbehaviors/` protocol surface in WE; swap vite to `resolve.alias`). But claiming it for the batch
 surfaced that the #905 surgery prep **under-counted FUI's side**: it assumed `fui:frontierui/tools/trait-enforcer/`
-holds only a "partial stub" (`vite-plugin.ts` + `virtual.d.ts`). In fact FUI's `vite-plugin.ts` is a
+holds only a "partial stub" (`fui:vite-plugin.ts` + `fui:virtual.d.ts`). In fact FUI's `fui:vite-plugin.ts` is a
 **295-line divergent reimplementation** (defines `TraitMap`/`TraitMapEntry` + the scanner **inline**, not via
 the WE contract — 62 diverging non-comment lines vs WE's 305-line contract-driven version) with its **own
-passing test suite** (`trait-enforcer.test.ts` + `chunk-isolation.build.test.ts`). So this is not a clean
+passing test suite** (`fui:trait-enforcer.test.ts` + `fui:chunk-isolation.build.test.ts`). So this is not a clean
 file relocation; it is a **cross-repo divergent-implementation reconciliation** requiring:
 
-1. Converge FUI's inline-typed `vite-plugin.ts` onto WE's contract-driven SoT (the #170/#694 byte-replication
+1. Converge FUI's inline-typed `fui:vite-plugin.ts` onto WE's contract-driven SoT (the #170/#694 byte-replication
    → single-contract convergence), preserving FUI's scanner behavior so its existing tests still pass.
 2. Wire a new `@webeverything/trait-manifest-contract` cross-repo alias (tsconfig `paths` + vite `resolve.alias`,
    the #804-2a pattern) so the FUI-resident plugins import the WE-resident contract (FUI→WE).
 3. Move the 4 sibling plugins + `composedTraitSet` + their (non-contract) tests, reconciling test collisions
-   (both repos have a `trait-enforcer.test.ts`).
-4. WE config surgery (drop `traitEnforcer()` from `vite.config.mts`, add the empty `virtual:trait-manifest`
+   (both repos have a `fui:trait-enforcer.test.ts`).
+4. WE config surgery (drop `traitEnforcer()` from `we:vite.config.mts`, add the empty `virtual:trait-manifest`
    alias) + **dual-repo build/test verification**.
 
 That divergent-impl reconciliation + dual-repo build-config surgery + dual-repo verification is a focused
