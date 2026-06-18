@@ -39,7 +39,7 @@ Mechanical — the platform settled the spelling via Declarative Shadow DOM; we 
 - [x] Constraint validation — **decided by separation**: composes via Web Validation ([#085](/backlog/085-validation-adapters-multi-language/), which explicitly never wires into a component); a form-associated `<component>` reaches `setValidity` — no `<component>` attribute to build
 
 ### Deferred — out of scope for this epic (settled-as-deferred, not pending builds)
-Each is a decision **not** to build now (platform-blocked or low-value); revisit triggers noted. No carve — nothing is buildable to slice.
+Each is a decision **not** to build now (platform-blocked or low-value); revisit triggers noted. No carve — nothing is buildable to slice. **Tracked for later in parked [#928](/backlog/928-remaining-declarative-component-capability-defers-custom-sta/)** (custom states, manual slots, shared stylesheets); reactive bindings stays under DC-4 [#042](/backlog/042-component-reactive-depth/)/[#792](/backlog/792-dc-4-binding-layer-compile-time-expr-contract-observe-reflec/).
 - `attachInternals` → **custom states** — deferred (DC-14): seeding-only is low-value; revisit on a concrete use
 - Reactive bindings — depends on unshipped Template Instantiation / DOM Parts — **defer (platform-blocked)**
 - Manual slot assignment — `slotAssignment:'manual'` has no DSD attr; opting in renders empty slots without a JS `slot.assign()` layer (**footgun**) — defer to tier-3 (unblocked by the #852 behavior hook)
