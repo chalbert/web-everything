@@ -50,7 +50,11 @@ the per-item chat-rename — a batch labels the session **once**.
    stamps; at claim **re-evaluate its `blockedBy` edges + digest**) → work (keep `## Progress` synced) →
    **gate in the item's own locus** (look up `LOCI[item.locus]` in `check-standards-rules.mjs`: run
    `gateCommand` in `repoPath`, probe `devServerProbe` for any render check, do any `closeoutDiscipline`;
-   a WE item is just `npm run check:standards`) → capture leftovers via `scaffold …` (set their `blockedBy`
+   a WE item is just `npm run check:standards`). **Pass `--scope=<batch-slug>` to the WE gates** —
+   `npm run check:standards -- --scope=<batch-slug>` (file-keyed, #952) and `npm run check:health --
+   --scope=<batch-slug>` (id-keyed, #957) both demote *concurrent* sessions' findings to non-failing notes
+   and surface only your changeset, so the gate-red diagnosis below is deterministic, not a manual `grep
+   errors + git status` triage. → capture leftovers via `scaffold …` (set their `blockedBy`
    + a digest) → `resolve <NNN> [--graduated-to=…]` → **commit that item's files to its `commitTarget` repo**
    (`git add <explicit paths>` then `git commit` — stage only this piece, never `git add -A`, never
    `git push`; one commit per item; if your own file is dirty from a concurrent session, `git stash push --
@@ -76,10 +80,11 @@ the per-item chat-rename — a batch labels the session **once**.
 **The stop rule (solid by construction)** — the **points budget is the sole driver**; stop the batch at a
 seam if (and ONLY if) ANY of these **four** holds (full text in *Running a batch* → *The stop rule*):
 **gate red _from your own work_** (safety stop — never batch past a red gate *you caused*; but `check:standards`
-is whole-repo, so first **diagnose** — read the error lines + `git status`: if every error is in a *concurrent*
-session's untracked/external files and none names a file in your changeset, it is **not** your stop — log it and
-continue with your independent items, since freezing on another batch's red defeats concurrent batching;
-see *The stop rule*), **points budget reached** (deterministic
+is whole-repo, so first **diagnose** — fastest via `--scope=<batch-slug>` on both WE gates (#952/#957), which
+auto-demotes concurrent findings; or manually read the error lines + `git status`: if every error is in a
+*concurrent* session's untracked/external files and none names a file in your changeset, it is **not** your stop
+— log it and continue with your independent items, since freezing on another batch's red defeats concurrent
+batching; see *The stop rule*), **points budget reached** (deterministic
 backstop — the resolved `batchCost` sum fills the budget; every item costs ≥ 2 so it always terminates),
 **no eligible Tier-A item left** (`task`/`story·≤8`, *after* the seam re-pack **looped to exhaustion**), or
 **a new design fork surfaced** (or an item outgrew its estimate *mid-work* — never on a pre-claim "looks

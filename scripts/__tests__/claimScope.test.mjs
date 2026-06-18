@@ -3,6 +3,7 @@ import {
   emptyClaimState, parseClaims, serializeClaims, pruneExpiredClaims,
   porcelainFiles, recordClaim, baselineFor, mineFiles,
   findingFiles, classifyFinding, partitionFindings,
+  claimedIdsFor, partitionById,
 } from '../readiness/claimScope.mjs';
 
 describe('claimScope — claim-time baseline + finding attribution (#952, #949)', () => {
@@ -95,6 +96,31 @@ describe('claimScope — claim-time baseline + finding attribution (#952, #949)'
       ] };
       const pruned = pruneExpiredClaims(s, now);
       expect(pruned.sessions.map((x) => x.session)).toEqual(['fresh']);
+    });
+  });
+
+  // #957: check:health --scope attributes by owning item id (its findings are id-keyed, not file-keyed).
+  describe('claimedIdsFor + partitionById (id-axis attribution, #957)', () => {
+    const state = recordClaim(
+      recordClaim(emptyClaimState(), { session: 'b1', id: '957-x', baselineFiles: [], nowIso: 'T0' }),
+      { session: 'b1', id: '964-y', baselineFiles: [], nowIso: 'T1' },
+    );
+
+    it('claimedIdsFor returns the session ids, null for an unknown session', () => {
+      expect(claimedIdsFor(state, 'b1')).toEqual(new Set(['957-x', '964-y']));
+      expect(claimedIdsFor(state, 'nope')).toBeNull();
+    });
+
+    it('partitionById: mine = claimed id; external = another id; no-id stays mine (fail-safe)', () => {
+      const findings = [
+        { id: 957, ref: 'a' },   // mine
+        { id: 999, ref: 'b' },   // external
+        { project: 'webdocs' },  // unattributable (D3 — no id) → mine, fail-safe
+      ];
+      const mineIds = new Set(['957', '964']);
+      const { mine, external } = partitionById(findings, mineIds);
+      expect(mine.map((f) => f.id ?? f.project)).toEqual([957, 'webdocs']);
+      expect(external.map((f) => f.id)).toEqual([999]);
     });
   });
 });

@@ -120,6 +120,33 @@ export function baselineFor(state, session) {
 }
 
 /**
+ * Look up the backlog item ids a session has claimed (as strings); `null` when the session is unknown.
+ * Mirrors `baselineFor` but on the `ids` axis — `check:health --scope` attributes by owning item id (its
+ * findings are id-keyed, not file-keyed) rather than by the git baseline (#957).
+ */
+export function claimedIdsFor(state, session) {
+  const s = (state.sessions ?? []).find((x) => x.session === session);
+  return s ? new Set(s.ids.map(String)) : null;
+}
+
+/**
+ * Partition id-keyed findings by ownership against `mineIds`. `mine` = findings whose `id` is claimed by
+ * the session (or that carry NO id at all — unattributable, kept fail-safe like a path-less gate finding);
+ * `external` = id-carrying findings owned by another session. Pure; mirrors `partitionFindings` on the id
+ * axis (#957). `getId` extracts the owning id from a finding (default `f.id`).
+ */
+export function partitionById(findings, mineIds, getId = (f) => f.id) {
+  const mine = [];
+  const external = [];
+  for (const f of findings) {
+    const id = getId(f);
+    if (id == null) { mine.push(f); continue; }      // unattributable → fail-safe, stays in scope
+    (mineIds.has(String(id)) ? mine : external).push(f);
+  }
+  return { mine, external };
+}
+
+/**
  * The set of files attributable to `session`: dirty NOW (`currentFiles`) minus its claim baseline.
  * Returns `null` when the session has no recorded baseline (→ caller falls back to whole-repo strict).
  */
