@@ -1,7 +1,7 @@
 ---
 type: issue
 workItem: story
-size: 5
+size: 13
 status: open
 blockedBy: ["905"]
 dateOpened: "2026-06-18"
@@ -35,3 +35,27 @@ Lean (in #905, ~70%): move only the 5 bundler plugins + `composedTraitSet` to FU
 + the protocol surface in WE; swap vite's `virtual:trait-manifest` to the empty `resolve.alias` the vitest leg
 already uses (mechanical, `bootstrap` still resolves). Not improvised here — it reverses part of #779's framing
 and needs ratification.
+
+## Re-sized 5 → 13; not batchable as one (batch-2026-06-18 claim)
+
+#905 ratified the scope (A: move 5 plugins + `composedTraitSet`; keep `we:traitManifestContract.ts` + the
+`we:plugs/webbehaviors/` protocol surface in WE; swap vite to `resolve.alias`). But claiming it for the batch
+surfaced that the #905 surgery prep **under-counted FUI's side**: it assumed `fui:frontierui/tools/trait-enforcer/`
+holds only a "partial stub" (`vite-plugin.ts` + `virtual.d.ts`). In fact FUI's `vite-plugin.ts` is a
+**295-line divergent reimplementation** (defines `TraitMap`/`TraitMapEntry` + the scanner **inline**, not via
+the WE contract — 62 diverging non-comment lines vs WE's 305-line contract-driven version) with its **own
+passing test suite** (`trait-enforcer.test.ts` + `chunk-isolation.build.test.ts`). So this is not a clean
+file relocation; it is a **cross-repo divergent-implementation reconciliation** requiring:
+
+1. Converge FUI's inline-typed `vite-plugin.ts` onto WE's contract-driven SoT (the #170/#694 byte-replication
+   → single-contract convergence), preserving FUI's scanner behavior so its existing tests still pass.
+2. Wire a new `@webeverything/trait-manifest-contract` cross-repo alias (tsconfig `paths` + vite `resolve.alias`,
+   the #804-2a pattern) so the FUI-resident plugins import the WE-resident contract (FUI→WE).
+3. Move the 4 sibling plugins + `composedTraitSet` + their (non-contract) tests, reconciling test collisions
+   (both repos have a `trait-enforcer.test.ts`).
+4. WE config surgery (drop `traitEnforcer()` from `vite.config.mts`, add the empty `virtual:trait-manifest`
+   alias) + **dual-repo build/test verification**.
+
+That divergent-impl reconciliation + dual-repo build-config surgery + dual-repo verification is a focused
+single-item job (≈13), not a batchable·5 — re-sized and released to `open` rather than risk a careless
+overwrite breaking FUI's scanner. Scope/ruling unchanged (#905-A); only the size/batchability is corrected.
