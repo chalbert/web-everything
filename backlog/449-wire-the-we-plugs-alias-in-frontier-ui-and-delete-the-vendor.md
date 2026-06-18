@@ -35,6 +35,15 @@ plugs is **implementation**, owned by **Frontier UI**. Make `frontierui/plugs` t
 > `webvalidation`) and their `guard/`/`validity-merge/`/`validator-resolution/` subsystems still have no FUI home —
 > deleting `webeverything/plugs` before #725 lands would regress that behavior. After #725, work this whole via `/next 449`.
 
+> **Carry-forward from #726 (batch-2026-06-18).** #726 added unplugged-mode tests at
+> `we:plugs/webguards/__tests__/unit/webguards.unplugged.test.ts` and
+> `we:plugs/webvalidation/__tests__/unit/webvalidation.unplugged.test.ts` and flipped
+> `PLUG_UNPLUGGED_TEST_ENFORCED` to true (the WE gate now *errors* on a missing unplugged test). When this
+> item deletes `we:plugs/`, **relocate both tests to the FUI canonical home** (`fui:plugs/webguards/` +
+> `fui:plugs/webvalidation/`, adjusting the `guard/`→`blocks/guard/` and
+> `validity-merge/`/`validator-resolution/` import paths per the FUI tree) so coverage is not dropped —
+> folds into Scope §5's test-relocation point.
+
 ## Scope
 
 1. **Make `frontierui/plugs` canonical `@frontierui/plugs`.** Add `fui:frontierui/plugs/package.json` with dual exports:

@@ -1217,7 +1217,7 @@ export function validateRetirementShape(entry, { label = 'entry', resolveSuperse
 // requirement is a WARN until that backfill lands, then it promotes to ERROR
 // (flip PLUG_UNPLUGGED_TEST_ENFORCED to true) so "missing either mode's tests"
 // fully fails the gate. The plugged-mode + no-untested-plug invariants are ERROR now.
-export const PLUG_UNPLUGGED_TEST_ENFORCED = false;
+export const PLUG_UNPLUGGED_TEST_ENFORCED = true;
 
 export function validatePlugDualMode(domains) {
   const errors = [];
