@@ -29,7 +29,7 @@ now **three** copies of the DOM factory:
 1. `we:webeverything/blocks/renderers/jsx/JSXRenderer.ts` — the canonical source (fullest: function
    components / directive duck-typing, customized-built-in `is`, namespaced `on:`/`bind:` attrs,
    `<template>.content` routing).
-2. `we:frontierui/blocks/renderers/jsx/JSXRenderer.ts` — an **older, divergent** copy (lacks the above).
+2. `fui:frontierui/blocks/renderers/jsx/JSXRenderer.ts` — an **older, divergent** copy (lacks the above).
 3. `fui:frontierui/packages/jsx-runtime/src/JSXRenderer.ts` — the new package copy (= #1, plus one
    `as unknown as` cast for the package's `strict` build).
 

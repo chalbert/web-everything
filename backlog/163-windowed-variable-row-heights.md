@@ -40,7 +40,7 @@ Build the variable-height path:
   rows, refining as they scroll into view (the standard "estimated size + correction" approach).
 - Keep the keyboard/active path coherent with the variable offsets (scroll-active-into-view uses the
   row's real cumulative offset, not `index * itemHeight`).
-- Verify with the same real-layout Playwright harness #145 added (`we:plateau/e2e/windowed-scroll.spec.ts`
+- Verify with the same real-layout Playwright harness #145 added (`plateau:plateau/e2e/windowed-scroll.spec.ts`
   + the `__demos__/windowed-scroll` demo) — extend it with rows of mixed heights.
 
 Acceptance: `windowed` renders the correct visible slice and a faithful scrollbar for a long list whose

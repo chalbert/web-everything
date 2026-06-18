@@ -10,6 +10,24 @@ WE-historical (e.g. `we:base.html`, removed in #795) or WE-conceptual/future pat
 should be `fui:`/`plateau:` can be corrected in place. Listed inside a fence so the now-enforced
 gate does not re-flag these bare paths.
 
+## Spot-check outcome (#909, 2026-06-18)
+
+Pass complete. **21 tokens corrected** — every path that *literally names a foreign repo directory*
+was relabelled off `we:`:
+
+- **→ `fui:`** (3 distinct, 5 occurrences): `frontierui/blocks/renderers/jsx/JSXRenderer.ts`,
+  `frontierui/plugs/package.json`, `frontierui/tests/a11y/route-allowlist.ts`.
+- **→ `plateau:`** (18 distinct, 19 occurrences): all `plateau/src/**`, `plateau/e2e/**`,
+  `plateau/playwright.config.ts` (the abandoned legacy `plateau` repo's historical impl refs) and the
+  three `plateau-app/**` paths (`technical-configurator/configurator.ts`,
+  `.../configurator.ts:581`, `.../seed-render-strategy.ts`).
+
+The remaining ~216 distinct `we:` defaults are correct: WE-historical (`base.html`, removed #795),
+WE-conceptual/future, or the backlog's own home-repo refs. **Deliberately left `we:`** (too weak a
+signal for a mechanical pass): port-shorthand tokens like `3001/demos/auto-insurance.html` /
+`3011/auto-complete-demo.html` (a :3001 hint implies FUI but the token is not a resolvable repo
+path), and bare tool/config filenames (`renovate.json`, `nx.json`, …) that are repo-agnostic.
+
 ```
 token	(count)	sample locations
 renovate.json	(10)	101-auto-update-pipeline.md:25, 101-auto-update-pipeline.md:85, 101-auto-update-pipeline.md:92 …

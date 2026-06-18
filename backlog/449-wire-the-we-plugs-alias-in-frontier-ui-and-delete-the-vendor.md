@@ -32,7 +32,7 @@ plugs is **implementation**, owned by **Frontier UI**. Make `frontierui/plugs` t
 
 ## Scope
 
-1. **Make `frontierui/plugs` canonical `@frontierui/plugs`.** Add `we:frontierui/plugs/package.json` with dual exports:
+1. **Make `frontierui/plugs` canonical `@frontierui/plugs`.** Add `fui:frontierui/plugs/package.json` with dual exports:
    - `.` → the **unplugged**, non-invasive library entry (plugs as opt-in primitives — native-first).
    - `/bootstrap` → the **plugged** POC entry (the invasive runtime that patches Node/registries).
    - Keep FU-only files local and out of the public surface as appropriate: `fui:globals.d.ts`,
@@ -50,7 +50,7 @@ plugs is **implementation**, owned by **Frontier UI**. Make `frontierui/plugs` t
 
 ## Acceptance
 
-- `we:frontierui/plugs/package.json` exposes `.` (unplugged) + `/bootstrap` (plugged); FU build + vitest + e2e green.
+- `fui:frontierui/plugs/package.json` exposes `.` (unplugged) + `/bootstrap` (plugged); FU build + vitest + e2e green.
 - `webeverything/plugs/` is gone; WE demos render against `@frontierui/plugs`; WE build + check:standards green.
 - plateau-app composes via `@frontierui/plugs`; plateau-app build green.
 - No `../plugs/` or `@we/plugs/*` references survive in any of the three repos.

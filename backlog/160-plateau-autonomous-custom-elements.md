@@ -16,7 +16,7 @@ crossRef: { url: /blocks/autocomplete/, label: Autocomplete block }
 
 Surfaced while registering the real `<auto-complete>` element (#138). Plateau replaces
 `window.customElements` with an injector-based `CustomElementRegistry`
-(`we:plateau/src/plugs/custom-elements/CustomElementRegistry.ts`). On `define(name, Class)` it
+(`plateau:plateau/src/plugs/custom-elements/CustomElementRegistry.ts`). On `define(name, Class)` it
 stores the class's callbacks in a definition **and** registers a native *stand-in*
 (`we:getStandInElement.ts`) under that tag. The stand-in only re-hydrates the real class when the
 element carries an `is=` attribute (the customized-built-in path, e.g. `<template is="for-each">`).

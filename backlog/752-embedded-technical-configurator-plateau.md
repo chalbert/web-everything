@@ -69,7 +69,7 @@ All three deps (#788 transport, #789 domains, #790 cost-preview) resolved; built
   inside the embed (Plateau's existing `/technical-configurator` cost mount, #790).
 - **Seed data** — the `wizard` block seeds a **non-default** config (render-strategy · DSD ·
   pre-rendered/light) in `fui:blocks.json`.
-- **Plateau receiving end** — `seedFromUrl()` in `we:plateau-app/.../technical-configurator/configurator.ts`
+- **Plateau receiving end** — `seedFromUrl()` in `plateau:plateau-app/.../technical-configurator/configurator.ts`
   overlays the URL seed over localStorage (URL wins, per #788); validates domain/strategy/axis ids
   against the provider (unknown → ignored, no dead-seed). Typechecks clean (plateau-app's 39 pre-existing
   tsc errors are unrelated — none in this file).

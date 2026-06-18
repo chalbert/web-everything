@@ -44,7 +44,7 @@ documents the limitation with a sanctioned helper so specs don't each rediscover
 
 Took the **fix** branch (preferred). Runtime-bisected the patched page (deleting each patched `window`
 global in turn — none was the culprit), then probed the constructor/`instanceof` health and found the
-exact cause: `we:plateau/src/plugs/custom-elements/Node.patch.ts` defined a custom
+exact cause: `plateau:plateau/src/plugs/custom-elements/Node.patch.ts` defined a custom
 `Node[Symbol.hasInstance]` as `instance instanceof OriginalNode || instance instanceof Node`. `Node`
 there *is* the constructor the hasInstance is defined on, so the second branch re-invoked itself —
 infinite recursion for any non-node value (`{a:1}`, `[1,2,3]`), throwing "Maximum call stack size

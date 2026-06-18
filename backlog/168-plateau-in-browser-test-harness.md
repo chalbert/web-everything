@@ -43,7 +43,7 @@ the autonomous-lifecycle + autocomplete-demo invariants are guarded in CI-style,
 - **Status:** resolved — both named specs landed and the suite is green.
 - **Branch:** plateau repo, working tree (uncommitted per backlog rules).
 - **Done:**
-  - Harness scaffold pre-existed (seeded by #162: `we:plateau/playwright.config.ts`, `e2e/`, `test:e2e`,
+  - Harness scaffold pre-existed (seeded by #162: `plateau:plateau/playwright.config.ts`, `e2e/`, `test:e2e`,
     dedicated port 5180, `reuseExistingServer`).
   - **Spec 1 — autonomous connect (#160 guard):** `we:e2e/autonomous-connect.spec.ts` + demo
     `src/plugs/custom-elements/__demos__/autonomous-connect.{html,ts}`. A minimal autonomous

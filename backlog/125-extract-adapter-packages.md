@@ -65,7 +65,7 @@ a prerequisite; that gate is now green.
     own Progress flags the leftover: *"not wired as a we:package.json subpath export / standalone
     `@webeverything/component-compiler` package — that packaging is #125's job."*
   - **Artifact 1 (`@webeverything/jsx-runtime`)** does **not** exist as a package. Source lives at
-    `we:frontierui/blocks/renderers/jsx/JSXRenderer.ts` (classic: default `jsx`, named `createElement`,
+    `fui:frontierui/blocks/renderers/jsx/JSXRenderer.ts` (classic: default `jsx`, named `createElement`,
     `Fragment`), wired in-repo via classic `jsxInject` (`vite.config.mts` / `we:tsconfig.json`) per #126.
     Missing: the **automatic** `/jsx-runtime` entry (`jsx`/`jsxs`/`Fragment`) + JSX type namespace +
     `we:package.json` `exports`. This is the keystone unblocking **#233** (apply #126's automatic-default ruling).

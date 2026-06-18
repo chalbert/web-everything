@@ -48,18 +48,18 @@ glue, so opening, dismissing, and `aria-expanded` are the trait's responsibility
 
 **Done — built the anchor trait as two real CustomAttribute behaviors (behavior/provider split
 per #023, native-first per #063):**
-- `we:plateau/src/blocks/attributes/Anchor.ts` — the **binding** half on the trigger/input: opens on
+- `plateau:plateau/src/blocks/attributes/Anchor.ts` — the **binding** half on the trigger/input: opens on
   focus/click/typing/open-keys, dismisses on Escape (with focus-return), outside-click, blur, and
   commit; reflects `aria-expanded` and wires `aria-controls`; toggles surface `hidden` + Popover
   top layer when available. 18 unit tests (`we:__tests__/Anchor.test.ts`).
-- `we:plateau/src/blocks/attributes/Anchored.ts` — the **positioning** half on the surface: native-first
+- `plateau:plateau/src/blocks/attributes/Anchored.ts` — the **positioning** half on the surface: native-first
   CSS Anchor Positioning (`anchor-name` ↔ `position-anchor`, `position-area`,
   `position-try-fallbacks`), Popover opt-in, placement reflected to `data-anchored-placement`.
   9 unit tests (`we:__tests__/Anchored.test.ts`).
 - Rewired `we:__tests__/Autocomplete.trace.test.ts` — the "par → arrow → enter" trace now composes
   `Anchor`; the open-on-focus and dismiss-on-commit glue is gone (only the autocomplete-specific
   "write chosen label into input" glue remains). aria-expanded open/dismiss is the trait's job.
-- Expanded `we:plateau/src/definitions/anchor.md` to document the two behaviors.
+- Expanded `plateau:plateau/src/definitions/anchor.md` to document the two behaviors.
 
 **Verification:** full plateau suite green (147 tests); webeverything `check:standards` 0 errors.
 

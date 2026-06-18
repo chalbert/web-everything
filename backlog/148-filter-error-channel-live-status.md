@@ -56,7 +56,7 @@ Acceptance: a failed async filter request announces an error through the shared 
     the #023-style one-region/no-double-announce integration on a rejecting async request). 39 related
     tests green; plateau `tsc` clean for touched files.
   - Spec: `we:autocomplete.njk` documents the symmetric failure channel; demo card 3 (failing source)
-    added to `we:plateau/src/auto-complete-demo.ts`. `check:standards` green (0 errors).
+    added to `plateau:plateau/src/auto-complete-demo.ts`. `check:standards` green (0 errors).
 - **Next:** none — closed. Demo *playground* can't be eyeballed yet due to a pre-existing crash →
   filed as **#156** (autocomplete conformance demo substrate crash); not caused by this item.
 - **Notes:** the error path deliberately does NOT clear the listbox (a transient failure shouldn't

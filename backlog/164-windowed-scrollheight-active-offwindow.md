@@ -29,7 +29,7 @@ focused option is far from the viewport.
 - Position the off-window active row so it doesn't visually overlap a spacer region (it's currently
   rendered inline at the slice edge; consider `position: absolute` translate or visually-hidden while
   off-window, since it exists only to keep `aria-activedescendant` resolvable).
-- Add a real-layout assertion to `we:plateau/e2e/windowed-scroll.spec.ts`: with the active row scrolled far
+- Add a real-layout assertion to `plateau:plateau/e2e/windowed-scroll.spec.ts`: with the active row scrolled far
   off-screen, `scrollHeight === total * itemHeight` exactly.
 
 Acceptance: `scrollHeight` equals the full model height even while the always-mounted active row is
@@ -37,7 +37,7 @@ outside the visible window.
 
 ## Resolution — spacer subtracts the off-window active row
 
-Fixed in `we:plateau/src/blocks/attributes/Windowed.ts`:
+Fixed in `plateau:plateau/src/blocks/attributes/Windowed.ts`:
 
 - **Pure math.** `spacerHeights()` gained an optional `activeIndex`. When the active row sits outside
   `[start, end)` it is an extra in-flow row the spacer already reserves a slot for (double-counted), so

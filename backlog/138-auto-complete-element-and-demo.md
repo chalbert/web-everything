@@ -88,7 +88,7 @@ today)" and references plateau; stale now that all six traits ship in Frontier U
   playground — webeverything has no dependency path to plateau impl, by design).
 
 **Done:**
-- `we:plateau/src/blocks/elements/AutoComplete.ts` — registered `<auto-complete>`, a form-associated
+- `plateau:plateau/src/blocks/elements/AutoComplete.ts` — registered `<auto-complete>`, a form-associated
   (`ElementInternals`) autonomous custom element composing the six trait behaviors
   (filter, clearable, focus-delegation, selection, anchor, anchored) over a private
   input+listbox+status substrate. Owns the glue the trace test used to fake: source wiring
@@ -104,7 +104,7 @@ today)" and references plateau; stale now that all six traits ship in Frontier U
   (error channel), and a viewport-edge flip card. (Originally booted natively with an injectors shim;
   once [#160](/backlog/160-plateau-autonomous-custom-elements/) landed autonomous-element support it
   now boots the **real** plateau runtime.)
-- Tests: `we:plateau/src/blocks/elements/__tests__/AutoComplete.test.ts` (element-level trace + stale-cancel
+- Tests: `plateau:plateau/src/blocks/elements/__tests__/AutoComplete.test.ts` (element-level trace + stale-cancel
   + client diacritic) and diacritic cases in `we:Filter.test.ts`. Full plateau suite **188 green**.
 - Verified in a real browser (Playwright, headless Chromium): full async trace commits "Parma",
   surface dismisses, status announces "3 results available", client `par` → `[Pärnu, Paris, Parma]`,

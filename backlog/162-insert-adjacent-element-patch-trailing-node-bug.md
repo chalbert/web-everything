@@ -13,7 +13,7 @@ crossRef: { url: /backlog/145-windowed-scroll-height-driven-path/, label: "#145 
 
 # Fix the `insertAdjacentElement` DOM patch — it forwards the node as the position arg
 
-`we:plateau/src/plugs/custom-elements/pathInsertionMethods.ts` patches insertion methods to upgrade
+`plateau:plateau/src/plugs/custom-elements/pathInsertionMethods.ts` patches insertion methods to upgrade
 undetermined nodes on the way in. `insertAdjacentElement` is registered as a **trailing**-node method
 (`we:Element.patch.ts` → `trailingMethods`), i.e. the node is the LAST argument: `insertAdjacentElement(position, node)`.
 
