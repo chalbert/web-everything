@@ -1,12 +1,13 @@
 ---
 type: idea
 workItem: story
-size: 3
+size: 8
 status: open
 parent: "746"
 locus: frontierui
-blockedBy: ["887", "886", "888"]
+blockedBy: ["887", "886", "888", "930"]
 dateOpened: "2026-06-16"
+dateStarted: "2026-06-18"
 relatedProject: webdocs
 crossRef: { url: /backlog/086-mockup-to-standard-code-tool/, label: "Mockup/screenshot → code (#086)" }
 tags: [webdocs, block-explorer, plateau-embed, theme-creator, design-system, lead-gen]
@@ -57,3 +58,27 @@ carved out into siblings; this card was re-scoped to the embed capstone (size 13
 
 `blockedBy: [887, 886, 888]` — needs the transport decided, a creator to embed, and a manifest to feed.
 Full analysis: `we:reports/2026-06-17-backlog-split-analysis.md`.
+
+## Re-blocked + re-sized 3 → 8 (batch-2026-06-18 claim)
+
+Claiming for the batch surfaced two gaps the "capstone wiring·3" estimate under-counted (it assumed
+#886/#888 left an emit-ready creator whose tokens align with the switcher):
+
+1. **The creator has no emit path.** `plateau:plateau-app/src/design-system-creator/` builds + validates a
+   manifest (#886/#888) but **never posts it** — no `postMessage` / `apply-design-system` anywhere
+   (grepped). So the live-apply handoff needs building on **both** sides (creator emit + FUI receiver),
+   not just the FUI receiver, across two checked-out repos.
+2. **An undefined, lossy token-mapping bridge (the real blocker).** The creator authors **DTCG tokens**
+   (`color.primary`, `space.*`, a `radius` trait) while FUI's stage applies **5 fixed props**
+   (`fui:frontierui/workbench/designSystems.ts` `DesignSystemTokens`: `--wb-accent/--wb-radius/--wb-pad/--wb-font/--wb-shadow`,
+   consumed by `applyDesignSystem` at `fui:frontierui/workbench/mount.ts:277`). #887 ratified the
+   *transport* but explicitly left the message's field list / fidelity as a build detail — and that detail
+   is a genuine **semantic-alignment fork** (rhymes with #910's WE↔FUI tag-alignment), not improvisable in a
+   batch. Filed as decision **[#930](/backlog/930-decide-the-plateau-creator-manifest-fui-workbench-stage-toke/)**
+   (A: lossy DTCG→`--wb` mapping table · B: stage consumes DTCG directly · C: constrain the creator to the
+   `--wb` shape); `blockedBy: [930]` added.
+
+Re-sized 3 → 8 (3-repo emit+receive+bridge build, gated on #930), released to `open`. Once #930 rules, the
+build is: creator emit (`window.parent.postMessage` over the #887-A origin-validated bus) + a "Your theme"
+button on the FUI workbench opening the creator iframe + an origin-validated `message` receiver mapping the
+manifest → a `DesignSystemPreset` and calling `applyDesignSystem`.
