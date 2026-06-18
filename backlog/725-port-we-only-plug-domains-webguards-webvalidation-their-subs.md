@@ -2,11 +2,14 @@
 type: issue
 workItem: story
 size: 13
-status: open
+status: resolved
 locus: frontierui
 parent: "170"
 blockedBy: ["649", "730", "814", "817", "893"]
 dateOpened: "2026-06-15"
+dateStarted: "2026-06-18"
+dateResolved: "2026-06-18"
+graduatedTo: none
 relatedReport: reports/2026-06-14-plugs-runtime-audit.md
 tags: [plugs, dedup, migration, frontierui, webguards, webvalidation]
 ---
@@ -32,6 +35,40 @@ validator-resolution},validation-generation/*,capability-manifest}` FUI vite ali
 WE's copies is #449's job (which #725 gates). Done when FUI build + vitest are green for the ported domain.
 The sibling `webguards` port and the dual-mode test backfill (with the #636 gate flip) were sliced out as
 separate items under #170. Historical blocking trail (now all resolved) preserved below.
+
+## Progress — RESOLVED (2026-06-18)
+
+The `webvalidation` domain is ported into FUI, purely additive, with the contract/impl split honoured per
+#730/#817. Ported (impl halves, runtime-only — contract halves stay WE, reached via the `@webeverything/*`
+aliases): `fui:validity-merge/{provider,registry,index}.ts`,
+`fui:validator-resolution/{provider,registry,index}.ts`,
+`fui:validation-generation/{crossField,serviceHandler,adapters/{index,zod,pydantic,jsonSchema,nativeHtml}}.ts`,
+and `fui:plugs/webvalidation/{index,CustomValidityMergeRegistry,CustomValidatorResolutionRegistry,ValidityMergeField,AsyncValidatorField,applyMergedValidity}.ts`.
+
+- **Import rewiring:** the plug barrel + each impl file resolve their WE-resident halves through aliases —
+  `@webeverything/contracts/{validity-merge,validator-resolution}` (the type-only contract),
+  `@webeverything/validation-generation/{provider,registry,fieldError,cel,service}` (Mode-1/2 generation),
+  `@webeverything/capability-manifest` (whole plane). FUI-local impl (`crossField`, `adapters/*`,
+  `serviceHandler`, the two strategy planes' provider/registry) imported relatively.
+- **vitest wiring:** `fui:vitest.config.ts` carries a separate alias map from `fui:vite.config.mts`
+  (it had only `trait-manifest-contract`); added the 8 `@webeverything/{capability-manifest,
+  validation-generation/*,contracts/*}` aliases webvalidation needs so vitest resolves the ported tree.
+- **Bootstrap:** `fui:plugs/bootstrap.ts` now creates `customValidityMerge` +
+  `customValidatorResolution` registries and defines `<validity-merge-field>` / `<async-validator-field>`,
+  mirroring WE (webguards left to #950).
+- **Gates:** FUI `vitest run` green (1974 pass / 8 skip, no regression); a transient resolution+runtime
+  smoke over the ported barrel passed (deleted — the real dual-mode suite is #951); `npm run build:demo`
+  built clean.
+- **Known carry (filed #965):** `tsc --noEmit` over `fui:tsconfig.json` reports 4 errors on the ported
+  registries (`CustomValidityMergeRegistry`/`CustomValidatorResolutionRegistry` `define(strategy,…)`
+  override is structurally incompatible with the base `CustomRegistry.define(name:string,…)`, + 2 cascades
+  in bootstrap). **Latent in WE too** — WE's `we:tsconfig.json` only includes `src/**`, never `plugs/`, so it
+  never surfaces there; FUI's plugs tree is tsc-clean at baseline, so the port carries it in faithfully
+  rather than diverging the copy (which would reintroduce the #170 drift this whole chain fights). Not
+  gated by FUI `check:standards`/vitest/`build:demo`. Filed as a registry-base reconciliation follow-up.
+
+Unblocks #449 (delete WE's `plugs/webvalidation` + subsystem copies). Sibling `webguards` port = #950
+(active); dual-mode test backfill + #636 gate flip = #951.
 
 ---
 
