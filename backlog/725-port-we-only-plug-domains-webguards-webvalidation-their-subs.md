@@ -5,7 +5,7 @@ size: 8
 status: open
 locus: frontierui
 parent: "170"
-blockedBy: ["649", "730", "814", "817"]
+blockedBy: ["649", "730", "814", "817", "893"]
 dateOpened: "2026-06-15"
 dateStarted: "2026-06-16"
 relatedReport: reports/2026-06-14-plugs-runtime-audit.md
