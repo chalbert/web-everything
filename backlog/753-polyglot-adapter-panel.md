@@ -1,18 +1,40 @@
 ---
 type: idea
 workItem: story
-size: 13
-status: open
+size: 3
+status: resolved
 parent: "746"
 blockedBy: ["843", "851", "855", "892"]
 locus: frontierui
 dateOpened: "2026-06-16"
+dateStarted: "2026-06-18"
+dateResolved: "2026-06-18"
+graduatedTo: frontierui/workbench/mount.ts
 relatedProject: webdocs
 crossRef: { url: /backlog/507-maas-deterministic-generation-adapter-derive-idiomatic-nativ/, label: "Generation-adapter (#507)" }
+relatedReport: reports/2026-06-18-backlog-split-analysis.md
 tags: [webdocs, block-explorer, adapters, polyglot, generation, conformance, ingest]
 ---
 
-# Polyglot adapter panel — generate the component across frameworks/languages, live-test it, link to authoring your own
+# Polyglot adapter panel — consume-mode forward output tabs (generate the component per framework)
+
+> **Sliced 2026-06-18 (`/slice 753`, report [we:reports/2026-06-18-backlog-split-analysis.md](../reports/2026-06-18-backlog-split-analysis.md)).**
+> The size·13 capstone was split into 5 pieces. Per the "already has a parent" edge case, this item is
+> **kept as a `story·3` under #746, re-scoped to the core slice (a) — consume-mode forward output tabs** —
+> and the other four pieces are **siblings under #746**:
+> - **(b) #912** — live-test sandbox (execute the generated wrapper), `blockedBy: 753`
+> - **(c) #913** — per-target conformance badges (#891 runner + #506 gate), `blockedBy: 753`
+> - **(d) #914** — create-your-own-adapter doc + scaffold, `blockedBy: 753`
+> - **(e) #915** — reverse-ingest paste demo (#851 adapter), independent root
+>
+> **This item's scope is now just slice (a):** a new workbench panel that, for the current block's CEM
+> declaration, calls `generateWrapper(decl, target)` (`fui:tools/gen-wrapper/genWrapper.mjs:207`,
+> targets React/Vue) and shows the generated wrapper **source** in per-target tabs. Substrate is resolved
+> (#821/#843/#892); no live render, badge, doc, or ingest here — those are the sibling slices. This is the
+> consume-mode appetite probe that gates author-mode #818. The full umbrella vision is preserved below for
+> lineage.
+
+---
 
 Expose the **adapters** in the Block Explorer: a panel that generates this block for each supported target (React/Vue/Svelte/Angular/native WC, plus enterprise .NET/Java/Go from the polyglot line #463/#505/#507) and lets the viewer live-test the generated output in an embedded sandbox — proving fidelity, not just showing code. Each target shows a conformance badge from the deterministic gate. Add "create your own adapter" (doc + scaffold) and a reverse/ingest demo: paste an incumbent component (e.g. a MUI button) → ingest adapter normalizes it to the neutral contract → re-emit as a WE block, showing the normalization-hub value in one move.
 
@@ -131,3 +153,23 @@ reverse-ingest demo. The "blocked-in-fact" marker the health gate flags (§"Two 
 call) and should be **`/slice`d** into independently-deliverable pieces — e.g. (a) consume-mode forward
 output tabs (#821 wrappers), (b) the live-test sandbox, (c) conformance badges, (d) create-your-own-adapter
 doc/scaffold, (e) the reverse-ingest demo — each a batchable slice, before the capstone is assembled.
+
+## Built — slice (a) consume-mode forward output tabs (batch-2026-06-18)
+
+Resolved as the re-scoped `story·3` (slice (a) only — the 8→13/"capstone" note below is **pre-slice
+lineage**, superseded by the top-of-file slice header). Shipped in **frontierui**:
+
+- **`workbench/registry.ts`** — `WorkbenchBlock.cem?: CemDeclaration` field + the `<auto-complete>` CEM
+  declaration (attributes/properties/events mirroring its live surface).
+- **`workbench/mount.ts`** — a **Polyglot** panel: for `block.cem`, calls
+  `generateWrapper(cem, target)` (`tools/gen-wrapper/genWrapper.mjs`) per `TARGETS` (React/Vue) and
+  shows the generated wrapper **source** in per-target tabs (`data-test="wb-polyglot-{react,vue}"`,
+  output `wb-polyglot-out`). Opens on the first target; a block without a CEM omits the panel.
+- **`tools/gen-wrapper/genWrapper.d.ts`** — ambient types so the TS workbench imports the `.mjs`
+  generator with real types (`CemDeclaration`, `WrapperTarget`, `generateWrapper`, `TARGETS`).
+- **`workbench/__tests__/e2e/workbench.spec.ts`** — e2e: panel opens on React source
+  (`React.createElement('auto-complete'`), Vue tab switches the source in place.
+
+Scope held to source-only (no live render / badge / doc / ingest — those stay sibling slices
+#912–#915). Gate: `check:standards` green (0 errors, 18 pre-existing warnings), gen-wrapper vitest 17/17,
+`tsc --noEmit` clean.
