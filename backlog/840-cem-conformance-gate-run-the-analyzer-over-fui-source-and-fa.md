@@ -2,10 +2,13 @@
 type: idea
 workItem: story
 size: 8
-status: open
+status: resolved
 blockedBy: ["838", "839", "910"]
 locus: frontierui
 dateOpened: "2026-06-17"
+dateStarted: "2026-06-18"
+dateResolved: "2026-06-18"
+graduatedTo: scripts/check-standards.mjs
 tags: []
 ---
 
@@ -43,3 +46,29 @@ Filed both as decision **#910** (CEM-conformance derivation + alignment strategy
 `blockedBy` edge; released to `open`. The analyzer is still not installed in FUI (deferred until #910
 picks the derivation approach). Once #910 rules, this becomes the buildable gate (likely warn-first, per
 the #636/#726 staging).
+
+## Progress — built (2026-06-18)
+
+#910 ratified (provisional): (a) align WE element → FUI source by the CEM declaration's module path;
+(b) compare **member-surface only**, deferring tag-equality. Built the **CEM member-surface drift gate** in
+`fui:frontierui/scripts/check-standards.mjs`:
+
+- **Alignment key** — each `we:custom-elements.json` custom-element declaration carries a
+  `@frontierui/blocks/<dir>/` module `path`; that path (not the tag or class name, which both differ across
+  the WE↔FUI seam) maps the WE element to its FUI source dir. The earlier "no alignment key" wall is solved
+  by this existing path.
+- **Member-surface derivation** — for each WE element, scan the FUI source under its module path for the
+  declared attribute surface (`static observedAttributes` arrays + any `attributes.define` names) and compare
+  against the WE-authored `attributes` (excluding `aria-*`/`data-*` pass-throughs, which aren't component
+  members). Drift = a WE-declared component attribute the FUI impl doesn't expose, or a path with no element
+  surface to verify. Tags are **not** compared (deferred to #844/#908 per #910-b).
+- **Lighter than #910-a's full plugin, by design.** #910-b defers tag-derivation — exactly the hard part the
+  `@custom-elements-manifest/analyzer` custom plugin existed for ("a parameterized default tag isn't
+  statically a concrete tag") — so the member-surface first cut reads `observedAttributes`/`attributes.define`
+  directly instead of installing + configuring the analyzer. #910 is provisional and invites revisiting (a)
+  toward the full analyzer if richer member comparison (properties/slots/methods) is later wanted.
+- **Staged warn-first** (`CEM_DRIFT_ENFORCED = false`, like the #844 gate): verified **0 errors**, 5 CEM-drift
+  warns surfaced (real drift — e.g. `route:guard`/`route:loader`… not in `RouteViewElement`'s
+  `observedAttributes`; the `we-autocomplete` CEM path `blocks/autocomplete/` resolves to no element surface
+  since the impl lives in `blocks/droplist/`). Flip the flag to ERROR once the WE↔FUI member surfaces are
+  reconciled (the warns are the worklist). FUI `check:standards` green.
