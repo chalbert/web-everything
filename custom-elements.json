@@ -308,6 +308,70 @@
           "description": "The editable, filterable concrete member of the droplist family — an <input role=\"combobox\"> bound to a separate role=\"listbox\" surface (<auto-complete>). The richest member: typing narrows the collection (filter) instead of seeking within it (type-ahead), and DOM focus stays on the input while virtual focus moves through the listbox. A form-associated custom element so <form>/FormData/reset/validity work like a native control, mirroring the WAI-ARIA APG Combobox (list-autocomplete) pattern.",
           "customElement": true,
           "tagName": "we-autocomplete",
+          "attributes": [
+            {
+              "name": "name",
+              "type": {
+                "text": "string"
+              },
+              "description": "Form-control name; flows through to the enclosing <form>.",
+              "fieldName": "name"
+            },
+            {
+              "name": "src",
+              "type": {
+                "text": "string"
+              },
+              "description": "Query endpoint URL prefix the filter trait appends the typed text to (async mode); omit for a client-mode inline option set.",
+              "fieldName": "src"
+            },
+            {
+              "name": "value",
+              "type": {
+                "text": "string"
+              },
+              "description": "Initial committed value; mirrored to the DOM property.",
+              "fieldName": "value"
+            },
+            {
+              "name": "placeholder",
+              "type": {
+                "text": "string"
+              },
+              "description": "Input placeholder shown when empty.",
+              "fieldName": "placeholder"
+            },
+            {
+              "name": "clearable",
+              "type": {
+                "text": "boolean"
+              },
+              "description": "Show the clear (X) affordance once the value is non-empty.",
+              "fieldName": "clearable"
+            }
+          ],
+          "members": [
+            {
+              "kind": "field",
+              "name": "value",
+              "privacy": "public",
+              "type": {
+                "text": "string"
+              },
+              "description": "Gets or sets the form-submittable committed value string (matches <input>.value).",
+              "reflects": true,
+              "attribute": "value"
+            },
+            {
+              "kind": "field",
+              "name": "selectedOption",
+              "privacy": "public",
+              "type": {
+                "text": "{ value: string; label: string } | null"
+              },
+              "description": "Gets the rich, programmatic representation of the committed option; not form-submittable."
+            }
+          ],
           "x-webeverything": {
             "implementsIntent": "selection",
             "composesIntents": [
@@ -353,6 +417,88 @@
           "description": "The persistent app-shell surface that hosts long-running work after it goes async — the receiving end of a Loader's escalation:async handoff. Renders one entry per registered task with per-task progress (the Loader's own state machine, hosted off-view), per-task retry delegating to Reliability, and arms the navigation-away / before-unload guard while any task is in flight. Distinct from the Feedback Intent (transient toasts) and the Loader Intent (in-view pending state that dies with its view).",
           "customElement": true,
           "tagName": "we-background-task-surface",
+          "attributes": [
+            {
+              "name": "aggregation",
+              "type": {
+                "text": "string"
+              },
+              "description": "Aggregation mode: 'single' (one entry at a time) or 'batch' (many concurrent tasks, each with its own progress and retry).",
+              "default": "single",
+              "fieldName": "aggregation"
+            },
+            {
+              "name": "persistence",
+              "type": {
+                "text": "string"
+              },
+              "description": "Resolved-entry persistence: 'transient' (auto-clear on success) or 'sticky' (keep until dismissed); errors are always sticky.",
+              "default": "transient",
+              "fieldName": "persistence"
+            },
+            {
+              "name": "navigation-guard",
+              "type": {
+                "text": "boolean"
+              },
+              "description": "When set, arms the beforeunload prompt and Navigation API route-leave confirm while any task is active.",
+              "default": "false",
+              "fieldName": "navigationGuard"
+            }
+          ],
+          "members": [
+            {
+              "kind": "field",
+              "name": "aggregation",
+              "privacy": "public",
+              "type": {
+                "text": "'single' | 'batch'"
+              },
+              "description": "Gets or sets the aggregation mode (single or batch). Defaults to 'single'.",
+              "reflects": true,
+              "attribute": "aggregation"
+            },
+            {
+              "kind": "field",
+              "name": "persistence",
+              "privacy": "public",
+              "type": {
+                "text": "'transient' | 'sticky'"
+              },
+              "description": "Gets or sets resolved-entry persistence (transient or sticky); errors are always sticky. Defaults to 'transient'.",
+              "reflects": true,
+              "attribute": "persistence"
+            },
+            {
+              "kind": "field",
+              "name": "navigationGuard",
+              "privacy": "public",
+              "type": {
+                "text": "boolean"
+              },
+              "description": "Gets or sets whether the beforeunload + route-leave navigation guard is armed while a task is active. Defaults to false.",
+              "reflects": true,
+              "attribute": "navigation-guard"
+            },
+            {
+              "kind": "field",
+              "name": "completionToast",
+              "privacy": "public",
+              "type": {
+                "text": "boolean"
+              },
+              "description": "Gets or sets whether a Feedback toast is emitted on task completion. Defaults to false."
+            },
+            {
+              "kind": "field",
+              "name": "retry",
+              "privacy": "public",
+              "type": {
+                "text": "boolean"
+              },
+              "description": "Gets or sets whether a per-task retry affordance is exposed on failed entries. Defaults to false."
+            }
+          ],
           "events": [
             {
               "name": "background-task-register",
@@ -1143,6 +1289,15 @@
           "description": "The blocks-layer home for the Collection Operations `filter`, `sort`, and `group` stages (the `page` stage is the companion Pagination block — compose, never merge). Renders a native `<table>` whose sortable column headers project `sortDirection` onto the WAI-ARIA APG `aria-sort` attribute (ascending/descending, sortable-but-unsorted = none) via button-wrapped `<th scope=\"col\">`, orders rows with `Intl.Collator` (sensitivity/numeric/caseFirst/ignorePunctuation) and SQL-style empty placement, narrows them by `filterMatch` (all/any), and partitions them into `<tbody>` groups with `groupSummary` aggregates named after the SQL functions (count/sum/average/minimum/maximum). The pipeline order is data (default filter → sort → group → page). Ships a consumable `DataTableBehavior` (and a `<data-table>` custom element) that mounts the verified renderer, wires click-to-sort + a polite live-region announcement, and emits `data-table-change`; its first enterprise consumer is the loan-origination exercise app (#317).",
           "customElement": true,
           "tagName": "we-data-table",
+          "attributes": [
+            {
+              "name": "sort:header",
+              "type": {
+                "text": "boolean"
+              },
+              "description": "Behavior attribute that attaches the sortable-header behavior to a native <table>: renders the headers, projects the primary sort key onto aria-sort, and emits sortchange/filterchange/groupchange."
+            }
+          ],
           "x-webeverything": {
             "implementsIntent": "collection-operations",
             "traits": [
@@ -2882,6 +3037,136 @@
           "description": "The blocks-layer home for the Collection Operations `page` stage. Renders paged controls inside a `<nav aria-label=\"pagination\">` landmark with `aria-current=\"page\"`, syncs the active page to a shareable self-canonical `?page=n` URL via the History API (Navigation API as enhancement; cross-document View Transitions for zero-JS server-rendered transitions), and wires `advance:auto` to an IntersectionObserver scroll sentinel. Numbered / prev-next / load-more presentations over the orthogonal `pageMode` × `advance` axes; infinite scroll = append + auto, never a peer mode. Ships a consumable `PaginationBehavior` (and a `<page-nav>` element) that mounts the verified renderer, delegates page / load-more clicks, clamps + advances the page state, and emits `pagination-change`; first consumer is the loan-origination pipeline (#317).",
           "customElement": true,
           "tagName": "we-pagination",
+          "attributes": [
+            {
+              "name": "page:nav",
+              "type": {
+                "text": "boolean"
+              },
+              "description": "Behavior selector that attaches PaginationBehavior to the control container, rendering the nav landmark."
+            },
+            {
+              "name": "aria-label",
+              "type": {
+                "text": "string"
+              },
+              "description": "Labels the pagination nav landmark (\"pagination\"); each landmark gets a unique label when more than one exists."
+            },
+            {
+              "name": "aria-current",
+              "type": {
+                "text": "string"
+              },
+              "description": "Set to \"page\" on the active page link to mark the current page."
+            },
+            {
+              "name": "data-url-sync",
+              "type": {
+                "text": "string"
+              },
+              "description": "Selects URL-state sync ('none' | 'query-param'); 'query-param' writes a self-canonical ?page=n via the History API.",
+              "default": "none",
+              "fieldName": "urlSync"
+            },
+            {
+              "name": "data-page-mode",
+              "type": {
+                "text": "string"
+              },
+              "description": "Selects the page mode ('paged' | 'append'); append grows the list, paged replaces the slice.",
+              "default": "paged",
+              "fieldName": "mode"
+            },
+            {
+              "name": "data-advance",
+              "type": {
+                "text": "string"
+              },
+              "description": "Selects the advance trigger ('manual' | 'auto'); 'auto' wires an IntersectionObserver scroll sentinel.",
+              "default": "manual",
+              "fieldName": "advance"
+            }
+          ],
+          "members": [
+            {
+              "kind": "field",
+              "name": "mode",
+              "privacy": "public",
+              "type": {
+                "text": "'paged' | 'append'"
+              },
+              "description": "Gets or sets the page mode — whether advancing replaces the slice (paged) or grows the list (append).",
+              "reflects": true,
+              "attribute": "data-page-mode"
+            },
+            {
+              "kind": "field",
+              "name": "advance",
+              "privacy": "public",
+              "type": {
+                "text": "'manual' | 'auto'"
+              },
+              "description": "Gets or sets the advance trigger — next slice requested by click (manual) or automatically at the scroll boundary (auto). Default 'manual'.",
+              "reflects": true,
+              "attribute": "data-advance"
+            },
+            {
+              "kind": "field",
+              "name": "urlSync",
+              "privacy": "public",
+              "type": {
+                "text": "'none' | 'query-param'"
+              },
+              "description": "Gets or sets URL-state sync — 'query-param' writes a self-canonical ?page=n URL.",
+              "reflects": true,
+              "attribute": "data-url-sync"
+            },
+            {
+              "kind": "field",
+              "name": "rangeLabel",
+              "privacy": "public",
+              "type": {
+                "text": "'none' | 'range'"
+              },
+              "description": "Gets or sets the result-range label mode — 'range' surfaces 'showing 21–40 of 500' and requires a known total (offset/page protocol only)."
+            },
+            {
+              "kind": "field",
+              "name": "pageIndex",
+              "privacy": "public",
+              "type": {
+                "text": "number"
+              },
+              "description": "Gets or sets the zero-based active page index in the page-state model."
+            },
+            {
+              "kind": "field",
+              "name": "pageSize",
+              "privacy": "public",
+              "type": {
+                "text": "number"
+              },
+              "description": "Gets or sets the number of items per slice (selector defaults pending #060)."
+            },
+            {
+              "kind": "field",
+              "name": "pageCount",
+              "privacy": "public",
+              "type": {
+                "text": "number"
+              },
+              "description": "Gets the total number of pages; absent under a cursor protocol (no total)."
+            },
+            {
+              "kind": "field",
+              "name": "total",
+              "privacy": "public",
+              "type": {
+                "text": "number"
+              },
+              "description": "Gets the total item count; absent under a cursor protocol."
+            }
+          ],
           "x-webeverything": {
             "implementsIntent": "collection-operations",
             "traits": [
@@ -4057,6 +4342,182 @@
           "description": "Declarative client-side routing built on Navigation API, URLPattern, and ViewEngine.",
           "customElement": true,
           "tagName": "we-route-view",
+          "attributes": [
+            {
+              "name": "scroll",
+              "type": {
+                "text": "string"
+              },
+              "description": "On <we-route-view>: scroll restoration mode ('auto' | 'manual' | 'none').",
+              "default": "auto"
+            },
+            {
+              "name": "base",
+              "type": {
+                "text": "string"
+              },
+              "description": "On <we-route-view>: base path prepended to all route patterns."
+            },
+            {
+              "name": "transition",
+              "type": {
+                "text": "boolean"
+              },
+              "description": "On <we-route-view>: enable the View Transitions API for route changes."
+            },
+            {
+              "name": "keep-alive",
+              "type": {
+                "text": "boolean"
+              },
+              "description": "On <we-route-view>: cache deactivated route content (ViewEngine hidden modes) instead of destroying it.",
+              "fieldName": "keepAlive"
+            },
+            {
+              "name": "name",
+              "type": {
+                "text": "string"
+              },
+              "description": "On <we-route-outlet>: the named outlet identifier (empty string for the primary outlet)."
+            },
+            {
+              "name": "route",
+              "type": {
+                "text": "string"
+              },
+              "description": "On a child <template>: URLPattern path to match (e.g. /users/:id)."
+            },
+            {
+              "name": "route:guard",
+              "type": {
+                "text": "string"
+              },
+              "description": "On a child <template>: canActivate guard name, resolved from the @routeGuard context."
+            },
+            {
+              "name": "route:guard:leave",
+              "type": {
+                "text": "string"
+              },
+              "description": "On a child <template>: canDeactivate guard name, resolved from the @routeGuard context."
+            },
+            {
+              "name": "route:loader",
+              "type": {
+                "text": "string"
+              },
+              "description": "On a child <template>: loader function name, resolved from the @routeLoader context."
+            },
+            {
+              "name": "route:error",
+              "type": {
+                "text": "boolean"
+              },
+              "description": "On a child <template>: marks the template as the error boundary for its route."
+            },
+            {
+              "name": "route:outlet",
+              "type": {
+                "text": "string"
+              },
+              "description": "On a child <template>: target named outlet (omit for the primary outlet)."
+            },
+            {
+              "name": "lazy",
+              "type": {
+                "text": "boolean"
+              },
+              "description": "On a child <template>: lazy-load the route content on first navigation."
+            },
+            {
+              "name": "route:link",
+              "type": {
+                "text": "string"
+              },
+              "description": "On <a> (RouteLinkBehavior): target path to navigate to; intercepts clicks to use the Navigation API and manages the .active class."
+            },
+            {
+              "name": "route:prefetch",
+              "type": {
+                "text": "string"
+              },
+              "description": "On <a> (RoutePrefetchBehavior): prefetch eagerness ('none' | 'hover' | 'visible' | 'eager'); paired with route:link."
+            }
+          ],
+          "members": [
+            {
+              "kind": "field",
+              "name": "scroll",
+              "privacy": "public",
+              "type": {
+                "text": "string"
+              },
+              "description": "Gets or sets the scroll-restoration mode on <we-route-view> ('auto' | 'manual' | 'none')."
+            },
+            {
+              "kind": "field",
+              "name": "base",
+              "privacy": "public",
+              "type": {
+                "text": "string"
+              },
+              "description": "Gets or sets the base path prepended to all route patterns on <we-route-view>."
+            },
+            {
+              "kind": "field",
+              "name": "transition",
+              "privacy": "public",
+              "type": {
+                "text": "boolean"
+              },
+              "description": "Gets or sets whether the View Transitions API is used for route changes on <we-route-view>."
+            },
+            {
+              "kind": "field",
+              "name": "keepAlive",
+              "privacy": "public",
+              "type": {
+                "text": "boolean"
+              },
+              "description": "Gets or sets whether deactivated route content is cached instead of destroyed on <we-route-view>."
+            },
+            {
+              "kind": "field",
+              "name": "routes",
+              "privacy": "public",
+              "type": {
+                "text": "ReadonlyArray<RouteDefinition>"
+              },
+              "description": "Gets the read-only list of route definitions parsed from <we-route-view>'s child <template> elements."
+            },
+            {
+              "kind": "field",
+              "name": "currentRoute",
+              "privacy": "public",
+              "type": {
+                "text": "MatchedRoute | null"
+              },
+              "description": "Gets the currently matched and active route on <we-route-view> (null before the first navigation)."
+            },
+            {
+              "kind": "field",
+              "name": "activeContent",
+              "privacy": "public",
+              "type": {
+                "text": "Element | null"
+              },
+              "description": "Gets the currently stamped route content element on <we-route-outlet> (null when empty)."
+            },
+            {
+              "kind": "field",
+              "name": "isActive",
+              "privacy": "public",
+              "type": {
+                "text": "boolean"
+              },
+              "description": "Gets whether this link’s route is currently active (RouteLinkBehavior on the host <a>)."
+            }
+          ],
           "x-webeverything": {
             "implementsIntent": "navigation",
             "webStandards": {
@@ -5024,6 +5485,40 @@
           "description": "Base class and utilities for custom elements that replace themselves with semantically correct native HTML during connectedCallback — enabling context-aware element selection without permanent wrapper nodes.",
           "customElement": true,
           "tagName": "we-transient-component",
+          "attributes": [
+            {
+              "name": "level",
+              "type": {
+                "text": "string"
+              },
+              "description": "On <auto-heading>: explicit heading level (e.g. \"3\"); highest-priority source for the resolved <hN> tag, clamped to a maximum of 6.",
+              "fieldName": "level"
+            },
+            {
+              "name": "href",
+              "type": {
+                "text": "string"
+              },
+              "description": "On <smart-link>: when present the element resolves to <a> (navigation); when absent it resolves to <button> (action)."
+            }
+          ],
+          "members": [
+            {
+              "kind": "field",
+              "name": "excludedAttributes",
+              "privacy": "public",
+              "type": {
+                "text": "string[]"
+              },
+              "description": "Gets the list of attribute names to exclude from transfer to the replacement element (defaults to an empty array)."
+            }
+          ],
+          "slots": [
+            {
+              "name": "",
+              "description": "Default slot: child nodes are moved (not cloned) to the replacement element, preserving listeners on children."
+            }
+          ],
           "x-webeverything": {
             "traits": [
               {

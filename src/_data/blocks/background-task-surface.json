@@ -1,5 +1,61 @@
 {
   "id": "background-task-surface",
+  "attributes": [
+    {
+      "name": "aggregation",
+      "type": "string",
+      "default": "single",
+      "fieldName": "aggregation",
+      "description": "Aggregation mode: 'single' (one entry at a time) or 'batch' (many concurrent tasks, each with its own progress and retry)."
+    },
+    {
+      "name": "persistence",
+      "type": "string",
+      "default": "transient",
+      "fieldName": "persistence",
+      "description": "Resolved-entry persistence: 'transient' (auto-clear on success) or 'sticky' (keep until dismissed); errors are always sticky."
+    },
+    {
+      "name": "navigation-guard",
+      "type": "boolean",
+      "default": false,
+      "fieldName": "navigationGuard",
+      "description": "When set, arms the beforeunload prompt and Navigation API route-leave confirm while any task is active."
+    }
+  ],
+  "properties": [
+    {
+      "name": "aggregation",
+      "type": "'single' | 'batch'",
+      "reflects": true,
+      "attribute": "aggregation",
+      "description": "Gets or sets the aggregation mode (single or batch). Defaults to 'single'."
+    },
+    {
+      "name": "persistence",
+      "type": "'transient' | 'sticky'",
+      "reflects": true,
+      "attribute": "persistence",
+      "description": "Gets or sets resolved-entry persistence (transient or sticky); errors are always sticky. Defaults to 'transient'."
+    },
+    {
+      "name": "navigationGuard",
+      "type": "boolean",
+      "reflects": true,
+      "attribute": "navigation-guard",
+      "description": "Gets or sets whether the beforeunload + route-leave navigation guard is armed while a task is active. Defaults to false."
+    },
+    {
+      "name": "completionToast",
+      "type": "boolean",
+      "description": "Gets or sets whether a Feedback toast is emitted on task completion. Defaults to false."
+    },
+    {
+      "name": "retry",
+      "type": "boolean",
+      "description": "Gets or sets whether a per-task retry affordance is exposed on failed entries. Defaults to false."
+    }
+  ],
   "element": true,
   "name": "Background Task Surface",
   "status": "draft",

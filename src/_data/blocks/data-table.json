@@ -1,5 +1,12 @@
 {
   "id": "data-table",
+  "attributes": [
+    {
+      "name": "sort:header",
+      "type": "boolean",
+      "description": "Behavior attribute that attaches the sortable-header behavior to a native <table>: renders the headers, projects the primary sort key onto aria-sort, and emits sortchange/filterchange/groupchange."
+    }
+  ],
   "element": true,
   "name": "Data Table",
   "status": "active",

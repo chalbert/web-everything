@@ -1,5 +1,121 @@
 {
   "id": "router",
+  "attributes": [
+    {
+      "name": "scroll",
+      "type": "string",
+      "default": "auto",
+      "description": "On <we-route-view>: scroll restoration mode ('auto' | 'manual' | 'none')."
+    },
+    {
+      "name": "base",
+      "type": "string",
+      "description": "On <we-route-view>: base path prepended to all route patterns."
+    },
+    {
+      "name": "transition",
+      "type": "boolean",
+      "description": "On <we-route-view>: enable the View Transitions API for route changes."
+    },
+    {
+      "name": "keep-alive",
+      "type": "boolean",
+      "fieldName": "keepAlive",
+      "description": "On <we-route-view>: cache deactivated route content (ViewEngine hidden modes) instead of destroying it."
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "description": "On <we-route-outlet>: the named outlet identifier (empty string for the primary outlet)."
+    },
+    {
+      "name": "route",
+      "type": "string",
+      "description": "On a child <template>: URLPattern path to match (e.g. /users/:id)."
+    },
+    {
+      "name": "route:guard",
+      "type": "string",
+      "description": "On a child <template>: canActivate guard name, resolved from the @routeGuard context."
+    },
+    {
+      "name": "route:guard:leave",
+      "type": "string",
+      "description": "On a child <template>: canDeactivate guard name, resolved from the @routeGuard context."
+    },
+    {
+      "name": "route:loader",
+      "type": "string",
+      "description": "On a child <template>: loader function name, resolved from the @routeLoader context."
+    },
+    {
+      "name": "route:error",
+      "type": "boolean",
+      "description": "On a child <template>: marks the template as the error boundary for its route."
+    },
+    {
+      "name": "route:outlet",
+      "type": "string",
+      "description": "On a child <template>: target named outlet (omit for the primary outlet)."
+    },
+    {
+      "name": "lazy",
+      "type": "boolean",
+      "description": "On a child <template>: lazy-load the route content on first navigation."
+    },
+    {
+      "name": "route:link",
+      "type": "string",
+      "description": "On <a> (RouteLinkBehavior): target path to navigate to; intercepts clicks to use the Navigation API and manages the .active class."
+    },
+    {
+      "name": "route:prefetch",
+      "type": "string",
+      "description": "On <a> (RoutePrefetchBehavior): prefetch eagerness ('none' | 'hover' | 'visible' | 'eager'); paired with route:link."
+    }
+  ],
+  "properties": [
+    {
+      "name": "scroll",
+      "type": "string",
+      "description": "Gets or sets the scroll-restoration mode on <we-route-view> ('auto' | 'manual' | 'none')."
+    },
+    {
+      "name": "base",
+      "type": "string",
+      "description": "Gets or sets the base path prepended to all route patterns on <we-route-view>."
+    },
+    {
+      "name": "transition",
+      "type": "boolean",
+      "description": "Gets or sets whether the View Transitions API is used for route changes on <we-route-view>."
+    },
+    {
+      "name": "keepAlive",
+      "type": "boolean",
+      "description": "Gets or sets whether deactivated route content is cached instead of destroyed on <we-route-view>."
+    },
+    {
+      "name": "routes",
+      "type": "ReadonlyArray<RouteDefinition>",
+      "description": "Gets the read-only list of route definitions parsed from <we-route-view>'s child <template> elements."
+    },
+    {
+      "name": "currentRoute",
+      "type": "MatchedRoute | null",
+      "description": "Gets the currently matched and active route on <we-route-view> (null before the first navigation)."
+    },
+    {
+      "name": "activeContent",
+      "type": "Element | null",
+      "description": "Gets the currently stamped route content element on <we-route-outlet> (null when empty)."
+    },
+    {
+      "name": "isActive",
+      "type": "boolean",
+      "description": "Gets whether this link’s route is currently active (RouteLinkBehavior on the host <a>)."
+    }
+  ],
   "tagName": [
     { "tag": "we-route-view", "class": "RouteViewElement" },
     { "tag": "we-route-outlet", "class": "RouteOutletElement" }

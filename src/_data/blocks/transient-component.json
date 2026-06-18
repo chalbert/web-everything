@@ -1,5 +1,31 @@
 {
   "id": "transient-component",
+  "attributes": [
+    {
+      "name": "level",
+      "type": "string",
+      "fieldName": "level",
+      "description": "On <auto-heading>: explicit heading level (e.g. \"3\"); highest-priority source for the resolved <hN> tag, clamped to a maximum of 6."
+    },
+    {
+      "name": "href",
+      "type": "string",
+      "description": "On <smart-link>: when present the element resolves to <a> (navigation); when absent it resolves to <button> (action)."
+    }
+  ],
+  "properties": [
+    {
+      "name": "excludedAttributes",
+      "type": "string[]",
+      "description": "Gets the list of attribute names to exclude from transfer to the replacement element (defaults to an empty array)."
+    }
+  ],
+  "slots": [
+    {
+      "name": "",
+      "description": "Default slot: child nodes are moved (not cloned) to the replacement element, preserving listeners on children."
+    }
+  ],
   "element": true,
   "name": "Transient Component",
   "status": "active",

@@ -1,5 +1,51 @@
 {
   "id": "autocomplete",
+  "attributes": [
+    {
+      "name": "name",
+      "type": "string",
+      "fieldName": "name",
+      "description": "Form-control name; flows through to the enclosing <form>."
+    },
+    {
+      "name": "src",
+      "type": "string",
+      "fieldName": "src",
+      "description": "Query endpoint URL prefix the filter trait appends the typed text to (async mode); omit for a client-mode inline option set."
+    },
+    {
+      "name": "value",
+      "type": "string",
+      "fieldName": "value",
+      "description": "Initial committed value; mirrored to the DOM property."
+    },
+    {
+      "name": "placeholder",
+      "type": "string",
+      "fieldName": "placeholder",
+      "description": "Input placeholder shown when empty."
+    },
+    {
+      "name": "clearable",
+      "type": "boolean",
+      "fieldName": "clearable",
+      "description": "Show the clear (X) affordance once the value is non-empty."
+    }
+  ],
+  "properties": [
+    {
+      "name": "value",
+      "type": "string",
+      "reflects": true,
+      "attribute": "value",
+      "description": "Gets or sets the form-submittable committed value string (matches <input>.value)."
+    },
+    {
+      "name": "selectedOption",
+      "type": "{ value: string; label: string } | null",
+      "description": "Gets the rich, programmatic representation of the committed option; not form-submittable."
+    }
+  ],
   "element": true,
   "fuiDemo": {
     "file": "autocomplete-unplugged.html",
