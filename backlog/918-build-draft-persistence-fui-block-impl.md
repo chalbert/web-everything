@@ -20,17 +20,17 @@ Build draft-persistence in `fui:blocks/draft-persistence/` (contract: we:src/_da
 
 Shipped in **frontierui** at `blocks/draft-persistence/` (Module, no element):
 
-- **`storage.ts`** — the `CustomStorageStrategy` seam + `MemoryStorageStrategy`,
+- **`fui:storage.ts`** — the `CustomStorageStrategy` seam + `MemoryStorageStrategy`,
   `LocalStorageStrategy` (prefixed), `IndexedDbStorageStrategy` (native-first), `pickDefaultStorage`
   (IDB→local→memory, `nativeFirstWithDegradation`), `requestPersistent`, `DraftSnapshot`.
-- **`coedit.ts`** — `resolveLww` (later savedAt wins, ties→remote, #011 Fork 3) + `CoEditCoordinator`
+- **`fui:coedit.ts`** — `resolveLww` (later savedAt wins, ties→remote, #011 Fork 3) + `CoEditCoordinator`
   (hello/saved/bye over BroadcastChannel, localStorage+storage-event fallback; tracks peers, fires
   `coedit-presence`/`coedit-conflict`; never merges — `presenceNotMerge`), `CoEditor`, `LwwResult`,
   `PRESENCE_EVENT`/`CONFLICT_EVENT`, injectable `MessageBus`.
-- **`DraftPersistence.ts`** — the controller: `load` (resume), `update` (debounced autosave-on-change),
+- **`fui:DraftPersistence.ts`** — the controller: `load` (resume), `update` (debounced autosave-on-change),
   `save`/`flush`/`clear`, `reconcile` (LWW), `startCoEdit`/`peers`/`stopCoEdit`; `DraftPersistenceOptions`,
   `DraftPersistenceConfig`, `DEFAULT_CONFIG`. Re-exports the full contract surface.
-- **FUI `src/_data/blocks.json`** — new `draft-persistence` family entry (protocol webstates).
+- **FUI `fui:src/_data/blocks.json`** — new `draft-persistence` family entry (protocol webstates).
 
 Pure-logic split: storage + LWW are DOM/IO-isolated and unit-tested without IndexedDB or tabs (bus
 injected). Gate: `check:standards` green (0 errors; 32 blocks), 12 vitest specs pass, `tsc` clean.

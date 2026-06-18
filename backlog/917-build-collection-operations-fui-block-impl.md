@@ -20,17 +20,17 @@ Build the headless collection-operations coordinator in `fui:blocks/renderers/co
 
 Headless coordinator shipped in **frontierui** at `blocks/renderers/collection-operations/`:
 
-- **`windowCollection.ts`** — the pure page stage: runs the data-table's verified `applyPipeline`
+- **`fui:windowCollection.ts`** — the pure page stage: runs the data-table's verified `applyPipeline`
   (filter→sort→group) across the ENTIRE collection, then windows the ordered result to the current
   page (clamps over-far indices; re-projects groups onto the window keeping collection-wide
   summaries). Reuses `applyPipeline` whole — re-implements none of the contract. Fixes the
   page-then-sort bug #317 surfaced.
-- **`CollectionOperationsBehavior.ts`** — `CollectionOperationsBehavior` (event wiring: routes
+- **`fui:CollectionOperationsBehavior.ts`** — `CollectionOperationsBehavior` (event wiring: routes
   descendant `data-table-change` → re-run pipeline + reset to page 0; `pagination-change` →
   re-window; feeds `pageRows`→data-table `.rows` + `total`→pagination `setTotal`; emits
   `collection-operations-change`) + the headless `<collection-operations>` element
   (`CollectionOperationsModule`) + idempotent `registerCollectionOperations`. Renders no DOM.
-- Exported from `blocks/renderers/index.ts`. Exports match the contract
+- Exported from `fui:blocks/renderers/index.ts`. Exports match the contract
   (`CollectionOperationsModule`, `CollectionOperationsBehavior`, `registerCollectionOperations`).
 
 Per #452 (A/A): standalone headless machinery, not a documented composition, not a rendered block.

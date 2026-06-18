@@ -20,13 +20,13 @@ Build story-canvas in `fui:blocks/story-canvas/` (contract: we:src/_data/blocks/
 
 Shipped in **frontierui** at `blocks/story-canvas/`:
 
-- **`StoryCanvasElement.ts`** — the `<story-canvas>` element + `registerStoryCanvas` (parameterized
+- **`fui:StoryCanvasElement.ts`** — the `<story-canvas>` element + `registerStoryCanvas` (parameterized
   #841) + the `WebCase` type ({id,title,description,code} + optional order/prose). Renders one WebCase
   in isolation: a same-origin **srcdoc iframe** by default (strongest style/script boundary,
   `isolationIsTheContract`), a **shadow-only** tier via `isolation="shadow"` for trusted cases; the
   frame chrome (title/description) lives in the element's own shadow root. Case resolves from the
   `.case` property or a `case-id` attribute against the page webcases (`globalThis.webcases`).
-- **FUI `src/_data/blocks.json`** — new `story-canvas` family entry (protocol webdocs).
+- **FUI `fui:src/_data/blocks.json`** — new `story-canvas` family entry (protocol webdocs).
 
 One fixture serves both the conformance loop and the docs surface (#626 Fork 2 — examples ARE
 webcases). Gate: `check:standards` green (0 errors; 33 blocks), 5 vitest specs pass, `tsc` clean.

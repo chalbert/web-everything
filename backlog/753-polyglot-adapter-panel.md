@@ -159,15 +159,15 @@ doc/scaffold, (e) the reverse-ingest demo — each a batchable slice, before the
 Resolved as the re-scoped `story·3` (slice (a) only — the 8→13/"capstone" note below is **pre-slice
 lineage**, superseded by the top-of-file slice header). Shipped in **frontierui**:
 
-- **`workbench/registry.ts`** — `WorkbenchBlock.cem?: CemDeclaration` field + the `<auto-complete>` CEM
+- **`fui:workbench/registry.ts`** — `WorkbenchBlock.cem?: CemDeclaration` field + the `<auto-complete>` CEM
   declaration (attributes/properties/events mirroring its live surface).
-- **`workbench/mount.ts`** — a **Polyglot** panel: for `block.cem`, calls
-  `generateWrapper(cem, target)` (`tools/gen-wrapper/genWrapper.mjs`) per `TARGETS` (React/Vue) and
+- **`fui:workbench/mount.ts`** — a **Polyglot** panel: for `block.cem`, calls
+  `generateWrapper(cem, target)` (`fui:tools/gen-wrapper/genWrapper.mjs`) per `TARGETS` (React/Vue) and
   shows the generated wrapper **source** in per-target tabs (`data-test="wb-polyglot-{react,vue}"`,
   output `wb-polyglot-out`). Opens on the first target; a block without a CEM omits the panel.
-- **`tools/gen-wrapper/genWrapper.d.ts`** — ambient types so the TS workbench imports the `.mjs`
+- **`fui:tools/gen-wrapper/genWrapper.d.ts`** — ambient types so the TS workbench imports the `.mjs`
   generator with real types (`CemDeclaration`, `WrapperTarget`, `generateWrapper`, `TARGETS`).
-- **`workbench/__tests__/e2e/workbench.spec.ts`** — e2e: panel opens on React source
+- **`fui:workbench/__tests__/e2e/workbench.spec.ts`** — e2e: panel opens on React source
   (`React.createElement('auto-complete'`), Vue tab switches the source in place.
 
 Scope held to source-only (no live render / badge / doc / ingest — those stay sibling slices

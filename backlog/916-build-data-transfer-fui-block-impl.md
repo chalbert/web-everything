@@ -20,17 +20,17 @@ Build the data-transfer drop-zone runtime in `fui:blocks/data-transfer/` (contra
 
 Shipped in **frontierui** at `blocks/data-transfer/`:
 
-- **`normalize.ts`** (DOM-free, `pureLogicSplit`) — `normalizeDataTransfer` (DataTransferItemList +
+- **`fui:normalize.ts`** (DOM-free, `pureLogicSplit`) — `normalizeDataTransfer` (DataTransferItemList +
   files/getData fallback), `normalizeFileList`, `evaluateAccept` (kind/type/size → reasons),
   `kindForType`, `typeMatches` (glob), plus types (`NormalizedPayload/Item`, `AcceptSpec`,
   `RejectReason`) + `DEFAULT_ACCEPT` (permissive — `permissiveDefault`).
-- **`DataTransferZoneElement.ts`** — the `<data-transfer>` element + `registerDataTransferZone`
+- **`fui:DataTransferZoneElement.ts`** — the `<data-transfer>` element + `registerDataTransferZone`
   (parameterized #841). Single funnel (`#ingest`): drag-drop + paste + `<input type=file>` all
   collapse to one normalized `receive` (cancelable) / `reject` decision under the attribute-declared
   accepts contract (`accept`/`accept-kinds`/`max-size`/`effect`). Keyboard-primary picker (always-
   present hidden input behind a real button). Copy-out `emit` half (`setEmitPayload` →
   dragstart/copy writes via setData). Native-first: DataTransfer/DragEvent/ClipboardEvent only.
   Re-exports the pure surface so all contract `exports` resolve from the element module.
-- **FUI `src/_data/blocks.json`** — new `data-transfer` family entry.
+- **FUI `fui:src/_data/blocks.json`** — new `data-transfer` family entry.
 
 Gate: `check:standards` green (0 errors; 31 blocks), 16 vitest specs pass, `tsc` clean.
