@@ -2,11 +2,36 @@
 // Supports both "plugged" (patches global) and "unplugged" (library) modes
 
 export { default as CustomElementRegistry } from './CustomElementRegistry';
-export type { 
+export type {
   CustomElementRegistryOptions,
   ElementDefinition,
-  ImplementedElement 
+  ImplementedElement
 } from './CustomElementRegistry';
+
+// Declarative `<script type="registry">` scoped-registration binding (#901, implements #854): the
+// Tier-1.5 declared-registry form + the `registry="<id>"` association (#900) + the MOMENT-2 binding
+// behavior. The runtime, no-build twin of `<script type="injector">` (#278).
+export {
+  applyDeclarativeRegistries,
+  parseRegistryScript,
+  resolveScopedRegistry,
+  flushPendingDefinitions,
+  applyScopedRegistryToHost,
+  getScopedRegistryOf,
+  getActiveRegistryResult,
+  resetDeclaredRegistries,
+  RegistryScriptError,
+  REGISTRY_SCRIPT_TYPE,
+  REGISTRY_ASSOC_ATTR,
+  SCOPED_REGISTRY_KEY,
+  type CtorResolver,
+  type DeclarativeRegistryOptions,
+  type RegistryScriptDeclaration,
+  type RegistryScriptBinding,
+  type PendingDefinition,
+  type DeclarativeRegistryResult,
+} from './declarativeRegistry';
+export { default as ScopedRegistryAttribute } from './ScopedRegistryAttribute';
 
 /**
  * Apply patches to the global window.customElements.
