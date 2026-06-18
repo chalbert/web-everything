@@ -1,7 +1,7 @@
 ---
 type: idea
 workItem: story
-size: 8
+size: 13
 status: open
 parent: "746"
 blockedBy: ["843", "851", "855", "892"]
@@ -115,3 +115,19 @@ never edges**:
 Net: the **real next slice on this line is #843** (in WE, unblocked, ratified, ~mechanical). #753 itself stays
 `open`, blocked on `[843, 851, 855, 892]`; it is the FUI capstone, not the next build. (fix-real-state, not a
 silent skip.)
+
+### Resized 8 → 13 (batch-2026-06-18 — all blockers cleared, but it's the capstone, not a story·8)
+
+All four `blockedBy` edges (#843, #851, #855, #892) are now **resolved**, so the loader surfaced this as
+Tier-A batchable — but pre-flight confirms the body's own repeated verdict: this is the **FUI capstone**,
+not a clean story·8 batch tail. The deliverable spans **multiple non-trivial surfaces**: forward-generation
+output tabs across 7+ targets (React/Vue/Svelte/Angular/native WC + .NET/Java/Go), an **embedded live-test
+sandbox that executes the generated framework code** (the body itself flags this as "a non-trivial
+sub-build"), per-target conformance badges, a create-your-own-adapter doc + scaffold, and a paste-an-incumbent
+reverse-ingest demo. The "blocked-in-fact" marker the health gate flags (§"Two seams surfaced") is
+**historical** — that seam (#851) was cleared — so the real issue is **size, not blockers**.
+
+**Action:** resized to **13** (drops from the batch pool; encodes the documented reality, not a new design
+call) and should be **`/slice`d** into independently-deliverable pieces — e.g. (a) consume-mode forward
+output tabs (#821 wrappers), (b) the live-test sandbox, (c) conformance badges, (d) create-your-own-adapter
+doc/scaffold, (e) the reverse-ingest demo — each a batchable slice, before the capstone is assembled.
