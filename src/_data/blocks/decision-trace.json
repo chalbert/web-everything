@@ -1,0 +1,22 @@
+{
+  "id": "decision-trace",
+  "name": "Decision Trace",
+  "status": "active",
+  "type": "Module",
+  "summary": "Reference render for the Decision Trace intent, the visual member of the Web Decisions protocol (decision-record / #355). `renderDecisionTrace(record)` turns a normalized `DecisionRecord` — why a rules/criteria evaluation reached its outcome — into a criteria trace table (input/operator/threshold/outcome per criterion) plus the aggregated outcome and reason codes, across the intent's `layout` (table|list), `emphasis` (all-criteria|deciding), and `disclosure` dimensions. Schema-only standard: the render owns the explanation UI, not the rules. Composes the status-indicator block for the outcome and per-criterion tokens. Ships an element form and a string form (`decisionTraceHTML`).",
+  "implementsIntent": "decision-trace",
+  "exports": [
+    "renderDecisionTrace",
+    "decisionTraceHTML"
+  ],
+  "dependsOn": [
+    "status-indicator"
+  ],
+  "implementedBy": "@frontierui/blocks/renderers/decision-trace/renderDecisionTrace.ts",
+  "webStandards": {
+    "headingElements": {
+      "usage": "Renders a decision record as a structured, heading-delimited trace (context → options → ruling), using semantic headings and lists for screen-reader navigability.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/Heading_Elements"
+    }
+  }
+}

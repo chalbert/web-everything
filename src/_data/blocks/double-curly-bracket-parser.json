@@ -1,0 +1,19 @@
+{
+  "id": "double-curly-bracket-parser",
+  "name": "DoubleCurlyBracketParser",
+  "status": "active",
+  "type": "Parser",
+  "summary": "Text node parser for Mustache-style {{expression}} syntax. Detects {{ and }} delimiters in text content.",
+  "exports": [
+    "DoubleCurlyBracketParser"
+  ],
+  "extendsClass": "CustomTextNodeParser",
+  "implementedBy": "@frontierui/blocks/parsers/text-node/double-curly/DoubleCurlyBracketParser.ts",
+  "dependsOn": [],
+  "webStandards": {
+    "domParts": {
+      "usage": "Detects Mustache-style `{{expression}}` delimiters in text content and emits binding holes for the interpolation pipeline (the template-parts contract).",
+      "reference": "https://github.com/WICG/webcomponents/blob/gh-pages/proposals/DOM-Parts.md"
+    }
+  }
+}

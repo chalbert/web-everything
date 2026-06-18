@@ -1,0 +1,28 @@
+{
+  "id": "time-picker",
+  "name": "Time Picker",
+  "status": "draft",
+  "type": "Component",
+  "summary": "A named shallow preset over the abstract `temporal` core: a single time-of-day picker. It pins the Temporal Intent to presentation=media (a spatial clock) and granularity=point (one time), bound to the native <input type=\"time\"> anchor. Like its date-picker sibling it adds no machinery of its own — clock rendering, locale-aware parse/format, and keyboard roving are the core's; the native time input stays the zero-JS keyboard fallback. (A linear presentation — a scroll wheel — is the common mobile variant; this preset pins media, and a linear member would pin presentation=linear over the same anchor.)",
+  "implementsIntent": "temporal",
+  "intentDimensions": {
+    "presentation": "media",
+    "granularity": "point"
+  },
+  "composesIntents": [
+    "temporal",
+    "locale",
+    "input",
+    "focus-delegation"
+  ],
+  "designDecisions": [
+    "A preset is a dimension pin, not new machinery (#713 option C) — time-picker is the `temporal` core with presentation=media + granularity=point pinned over input[type=time]. The distinct native anchor (input[type=time], its own parse/format and value shape) is exactly the platform reason it is a named preset and not a prop on date-picker (the slider, with one anchor, needed no such members).",
+    "input[type=time] is the anchor and fallback; the clock surface is the media enhancement, with the native time input the keyboard-entry, form-associated, no-JS baseline (the slider precedent)."
+  ],
+  "webStandards": {
+    "ariaApgKeyboard": {
+      "usage": "A time-of-day preset: native `<input type=\"time\">` or a spatial clock surface.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/time"
+    }
+  }
+}

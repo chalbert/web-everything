@@ -1,0 +1,25 @@
+{
+  "id": "master-detail",
+  "name": "Master-Detail",
+  "status": "active",
+  "type": "Behavior",
+  "summary": "Reference coordinator for the master-detail intent (#356) — pairs a collection (master list) with a coupled detail region. `MasterDetailBehavior(masterEl, { itemSelector, detailEl, keyOf, renderDetail, focusFlow?, emptyState? })` COMPOSES the shipping selection block (it does not reimplement selection): on select it renders the detail for the item's key (async-aware, toggling an `md-loading` Loader seam), wires the detail as a labelled `role=\"region\"`, applies the focus flow (retain|advance), and handles the empty state (placeholder|collapse), emitting `detail-change`. URL deep-linking is left to the consumer's router (compose, don't duplicate). First consumer: the loan-origination exercise app (#317).",
+  "implementsIntent": "master-detail",
+  "composesIntents": [
+    "selection"
+  ],
+  "exports": [
+    "MasterDetailBehavior",
+    "registerMasterDetail"
+  ],
+  "dependsOn": [
+    "selection"
+  ],
+  "implementedBy": "@frontierui/blocks/master-detail/MasterDetailBehavior.ts",
+  "webStandards": {
+    "ariaApgKeyboard": {
+      "usage": "Pairs a master list with a coupled detail region: the active list item is `aria-current`, the detail region is `aria-labelledby` the selection and updated as a `aria-controls` target.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-current"
+    }
+  }
+}

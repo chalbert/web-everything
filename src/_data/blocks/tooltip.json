@@ -1,0 +1,48 @@
+{
+  "id": "tooltip",
+  "attributes": [
+    {
+      "name": "for",
+      "type": "string",
+      "description": "Id of the trigger this tooltip describes — wired as the trigger’s `aria-describedby` (never `aria-label`)."
+    },
+    {
+      "name": "placement",
+      "type": "string",
+      "default": "top",
+      "description": "Anchor placement relative to the trigger, with flip/shift at the viewport edge (composed Anchor Intent)."
+    }
+  ],
+  "slots": [
+    {
+      "name": "",
+      "description": "The tooltip content (default slot) — a `role=\"tooltip\"` surface revealed on hover/focus."
+    }
+  ],
+  "fuiDemo": {
+    "file": "positioning-shift.html",
+    "title": "Anchored positioning — shift",
+    "height": 460
+  },
+  "name": "Tooltip",
+  "status": "draft",
+  "type": "Component",
+  "summary": "A small, transient, non-interactive surface that describes its trigger on hover or keyboard focus and is wired as the trigger's accessible description (aria-describedby, never aria-label). Native-first: it extends the built-in title attribute and the Popover API's popover=\"hint\" where supported, falling back to an ARIA-described custom bubble only when richer content or collision-aware positioning is needed. It composes the Anchor Intent (placement + flip/shift at the viewport edge), the Surface Intent (floating elevation/material of the bubble), and the Typography Intent (the truncation-recovery case that reads a clipped label). Deliberately distinct from a toggletip (click-revealed, live-region-announced) and from a non-modal popover with interactive content.",
+  "composesIntents": [
+    "anchor",
+    "surface",
+    "typography"
+  ],
+  "designDecisions": [
+    "Describes, never names — aria-describedby, not aria-label. A tooltip supplements an already-named control with extra description; it is not the control's name. Wiring it as aria-label would replace the accessible name (and silently lose it when the tooltip is hidden), so the trigger keeps its own name and the tooltip is referenced via aria-describedby. This also means a tooltip is never the sole carrier of essential information — content that must be perceivable belongs in the always-rendered DOM, not in a hover-only surface.",
+    "Native-first ladder: title → popover=hint → ARIA bubble. The built-in title attribute is the zero-cost baseline (free hover text, but no styling, no touch, no focus parity, and an uncontrollable UA delay), so the block extends it rather than forbidding it. The Popover API's popover=\"hint\" is the next rung — a real top-layer element with light-dismiss, styleable, that auto-closes when another hint opens — and is the default substrate where Baseline-supported. A fully custom ARIA-described bubble is the top rung, used only when content is richer than text or when Anchor-Intent collision handling (flip/shift/resize) is required. Third-party positioning (Floating UI) is an opt-in adapter behind the Anchor Intent, never the baseline.",
+    "Hover and keyboard-focus parity, with WCAG 1.4.13 obligations. The tooltip shows on pointer hover AND on keyboard focus of the trigger (parity is non-negotiable — a mouse-only tooltip is inaccessible), with a short show delay (~500ms hover, immediate on focus) and a hide delay. Per WCAG 1.4.13 (Content on Hover or Focus) the surface must be hoverable (the pointer can move onto the tooltip without it vanishing — a pointer-leave grace period bridges the gap), persistent (it stays until focus/hover leaves or Escape), and dismissible (Escape hides it without moving focus). There is no active-item model and no selection.",
+    "Tooltip ≠ toggletip ≠ popover — three distinct contracts. A tooltip is hover/focus-revealed, non-interactive, and announced as a description. A toggletip is click/tap-revealed, can be re-summoned, and is announced via a live region (because there is no persistent describing relationship) — it is a separate concern, cross-referenced, not a flag on this block. A non-modal popover holds interactive content the user can Tab into; the moment content is interactive it is no longer a tooltip (focus can't live in a tooltip). Keeping these separate stops the common anti-pattern of putting buttons or links inside a tooltip."
+  ],
+  "webStandards": {
+    "ariaApgTooltip": {
+      "usage": "A non-interactive `role=\"tooltip\"` surface revealed on hover or keyboard focus and wired as the trigger’s `aria-describedby`, dismissible with Escape.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/tooltip/"
+    }
+  }
+}

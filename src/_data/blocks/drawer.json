@@ -1,0 +1,65 @@
+{
+  "id": "drawer",
+  "attributes": [
+    {
+      "name": "open",
+      "type": "boolean",
+      "default": false,
+      "fieldName": "open",
+      "description": "Whether the drawer is shown; inherits the dialog family top-layer + focus model."
+    },
+    {
+      "name": "placement",
+      "type": "'start' | 'end'",
+      "default": "start",
+      "description": "Which viewport edge the panel slides in from (RTL-aware) — the Modal Intent `placement=start|end`."
+    },
+    {
+      "name": "dismissible",
+      "type": "boolean",
+      "default": true,
+      "description": "Whether backdrop/outside-click and swipe-to-dismiss close the drawer (on top of the inherited Escape dismissal)."
+    }
+  ],
+  "properties": [
+    {
+      "name": "open",
+      "type": "boolean",
+      "reflects": true,
+      "attribute": "open",
+      "description": "Gets or sets the shown state; while open as a modal the rest of the page is `inert`."
+    }
+  ],
+  "slots": [
+    {
+      "name": "",
+      "description": "The drawer content (default slot)."
+    }
+  ],
+  "name": "Drawer",
+  "status": "draft",
+  "type": "Component",
+  "summary": "The edge-anchored, sliding concrete member of the dialog family — a panel that enters from a viewport edge (a navigation drawer, a filter panel, a detail pane). It does NOT re-implement the modal-surface machinery: it extends the abstract dialog block (focus containment, escape/outside/backdrop dismissal, scroll-lock, modal/non-modal mode, top-layer mount are all inherited) and fixes the configuration to an edge — the Modal Intent's placement=start|end (RTL-aware), with a slide-in/out motion and swipe-to-dismiss added on top of the inherited dismissal. Relationship to the dialog family mirrors dropdown to droplist: a concrete member, not a standalone widget and not a flag on one widget. Its siblings are the centered modal (placement=center) and the bottom sheet (placement=bottom).",
+  "implementsIntent": "modal",
+  "composesIntents": [
+    "modal",
+    "surface",
+    "motion"
+  ],
+  "designDecisions": [
+    "Extends the dialog substrate — inherits the machinery, adds nothing it can avoid. Focus containment, escape/outside/backdrop dismissal, scroll-lock, modal/non-modal mode, and the native-first top-layer mount all come from the abstract dialog block; the drawer re-implements none of them. This is the whole point of the family substrate (droplist:dropdown :: dialog:drawer) — the drawer's spec is small because it only describes what it fixes, not how a dialog works.",
+    "A drawer IS Modal placement=start|end, RTL-aware. The edge is the Modal Intent's placement dimension fixed to a viewport inline edge (start/end, which mirror under RTL), distinguishing it from the centered modal (center) and bottom sheet (bottom) siblings. The drawer adds a slide-in/out motion (the Motion Intent) along that edge — the visual signature of a drawer over a fade-in modal.",
+    "Swipe-to-dismiss layered on inherited dismissal, never replacing it. Because a drawer is touch-prominent (mobile navigation, filter panels), it adds an edge-swipe gesture to dismiss, on top of — not instead of — the dialog substrate's escape/outside/backdrop dismissal. The gesture is an enhancement; the keyboard/pointer dismissal it inherits remains the accessible baseline.",
+    "Member, not widget-with-a-flag — distinct block from modal and sheet. Drawer, centered modal, and bottom sheet are separate concrete members (distinct placements over the shared substrate), following the dialog family's family-vs-members ruling and droplist's precedent (Dropdown, Multi-dropdown, Autocomplete are separate blocks). A `side` is the drawer's own small axis (which edge); the cross-member differences live in the placement that defines each member."
+  ],
+  "webStandards": {
+    "dialog": {
+      "usage": "The edge-anchored member of the dialog family: the same native `<dialog>` top-layer + focus model, sliding in from a viewport edge.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/HTMLDialogElement"
+    },
+    "inertAttribute": {
+      "usage": "While open as a modal, the rest of the page is made `inert` so focus and the accessibility tree are confined to the drawer.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/inert"
+    }
+  }
+}

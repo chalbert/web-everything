@@ -14,6 +14,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
+import { loadBlocks } from '../lib/blocks-loader.cjs';
 import { buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated } from '../check-standards-rules.mjs';
 
 const require = createRequire(import.meta.url);
@@ -163,7 +164,7 @@ describe('validateBacklogItem — real backlog stays clean', () => {
   // and assert the pure rule emits zero errors over every real item. This is the regression guard:
   // a future rule tightening that starts erroring on a legitimate free-form graduatedTo / crossRef /
   // size in the real backlog fails here instead of only surfacing on a manual live run.
-  const blocks = loadJson('blocks.json');
+  const blocks = loadBlocks(); // per-block specs src/_data/blocks/<id>.json, assembled (#882)
   const intents = loadJson('intents.json');
   const protocols = loadJson('protocols.json');
   const projects = loadJson('projects.json');

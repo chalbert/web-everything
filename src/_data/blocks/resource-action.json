@@ -1,0 +1,163 @@
+{
+  "id": "resource-action",
+  "name": "Resource Action",
+  "status": "draft",
+  "type": "Directive",
+  "summary": "Manages async mutation lifecycle (POST/PUT/DELETE) — busy state on triggers, double-submit prevention, optimistic updates with automatic rollback on error.",
+  "implementsIntent": "action",
+  "dependsOn": [
+    "resource-loader"
+  ],
+  "exports": [
+    "ResourceActionDirective",
+    "withBusyTrigger",
+    "withOptimisticMutation",
+    "withFeedbackOnComplete",
+    "ResourceActionStartEvent",
+    "ResourceActionEndEvent",
+    "ResourceActionErrorEvent",
+    "ResourceActionRevertEvent"
+  ],
+  "webStandards": {
+    "fetchAPI": {
+      "status": "Baseline",
+      "pattern": "fetch() for mutations (POST/PUT/DELETE)",
+      "adoption": "Action operations delegate to Custom Clients for transport; AbortController for cancellation",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API"
+    },
+    "invokerCommands": {
+      "status": "Baseline January 2026",
+      "pattern": "commandfor/command for declarative action triggers",
+      "adoption": "Action triggers can use Invoker Commands for mutation invocation",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+    },
+    "ariaDisabled": {
+      "status": "Standard",
+      "pattern": "aria-disabled for non-focusable disable pattern during pending state",
+      "adoption": "withBusyTrigger applies aria-disabled + pointer-events:none during mutation",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-disabled"
+    }
+  },
+  "events": {
+    "resource-action-start": {
+      "description": "Fired when a mutation begins",
+      "taxonomy": "notification",
+      "detail": {
+        "operation": "ResourceOperation",
+        "trigger": "HTMLElement"
+      },
+      "bubbles": true,
+      "cancelable": true,
+      "class": "ResourceActionStartEvent",
+      "provider": "customEvents:resource-action-start"
+    },
+    "resource-action-end": {
+      "description": "Fired when a mutation completes successfully",
+      "taxonomy": "notification",
+      "detail": {
+        "operation": "ResourceOperation",
+        "result": "unknown"
+      },
+      "bubbles": true,
+      "cancelable": false,
+      "class": "ResourceActionEndEvent",
+      "provider": "customEvents:resource-action-end"
+    },
+    "resource-action-error": {
+      "description": "Fired when a mutation fails",
+      "taxonomy": "notification",
+      "detail": {
+        "operation": "ResourceOperation",
+        "error": "Error"
+      },
+      "bubbles": true,
+      "cancelable": false,
+      "class": "ResourceActionErrorEvent",
+      "provider": "customEvents:resource-action-error"
+    },
+    "resource-action-revert": {
+      "description": "Fired when an optimistic update is rolled back due to error",
+      "taxonomy": "notification",
+      "detail": {
+        "operation": "ResourceOperation",
+        "previousState": "unknown"
+      },
+      "bubbles": true,
+      "cancelable": false,
+      "class": "ResourceActionRevertEvent",
+      "provider": "customEvents:resource-action-revert"
+    },
+    "rationale": "Typed event classes enable listenForScoped discrimination between multiple concurrent mutations (e.g., save + delete actions on the same form)."
+  },
+  "designDecisions": {
+    "mutationVsQuery": {
+      "description": "Resource Action handles mutations (writes); Resource Loader handles queries (reads)",
+      "rationale": "Reads and writes have fundamentally different UX patterns. Reads show loading states in-place; writes show busy states on triggers. Splitting them avoids feature bloat."
+    },
+    "doubleSubmitPrevention": {
+      "description": "Automatically prevents double submission by disabling triggers during pending state",
+      "rationale": "Every mutation UI needs double-submit prevention. Building it into the directive avoids repetitive boilerplate."
+    },
+    "optimisticRevert": {
+      "description": "Optimistic updates are automatically reverted on error",
+      "rationale": "Optimistic UI is the happy path; revert-on-error is the safety net. The directive manages both sides of the lifecycle."
+    },
+    "virtualElement": {
+      "description": "Uses comment-based markers like Resource Loader for layout preservation",
+      "rationale": "Same reasoning as Resource Loader — no wrapper divs that would break Grid/Flex parent-child relationships."
+    }
+  },
+  "frameworkComparison": {
+    "tanstackQuery": {
+      "patterns": [
+        "useMutation",
+        "onMutate (optimistic)",
+        "onError (rollback)",
+        "invalidateQueries"
+      ],
+      "notes": "Mutation lifecycle with optimistic update/rollback and automatic cache invalidation"
+    },
+    "apolloClient": {
+      "patterns": [
+        "useMutation",
+        "optimisticResponse",
+        "update cache"
+      ],
+      "notes": "GraphQL mutations with optimistic cache updates"
+    },
+    "remix": {
+      "patterns": [
+        "<Form> component",
+        "action functions",
+        "useActionData",
+        "useNavigation"
+      ],
+      "notes": "Progressive enhancement forms with server actions"
+    },
+    "swr": {
+      "patterns": [
+        "useSWRMutation",
+        "trigger()",
+        "revalidation on mutation"
+      ],
+      "notes": "Separated mutation from query with manual trigger"
+    }
+  },
+  "traits": [
+    {
+      "name": "withBusyTrigger",
+      "description": "Applies busy state to the triggering element during mutation (width locking, aria-disabled, indicator)",
+      "intentDimension": "action.busy"
+    },
+    {
+      "name": "withOptimisticMutation",
+      "description": "Applies predicted result immediately, reverts on error",
+      "intentDimension": "loader.strategy.optimistic"
+    },
+    {
+      "name": "withFeedbackOnComplete",
+      "description": "Dispatches toast/notification on success or error",
+      "intentDimension": null
+    }
+  ]
+}

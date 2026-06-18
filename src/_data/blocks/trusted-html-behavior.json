@@ -1,0 +1,16 @@
+{
+  "id": "trusted-html-behavior",
+  "name": "Trusted HTML Behavior",
+  "status": "draft",
+  "type": "Behavior",
+  "summary": "Attribute-based behavior that enforces Trusted Types policies on an element's innerHTML mutations.",
+  "related": [
+    "trusted-html"
+  ],
+  "webStandards": {
+    "trustedTypes": {
+      "usage": "An attribute behaviour that enforces a Trusted Types policy on an element’s `innerHTML` mutations via `TrustedHTML`.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API"
+    }
+  }
+}

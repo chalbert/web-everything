@@ -1,0 +1,95 @@
+{
+  "id": "dropdown",
+  "name": "Dropdown",
+  "status": "draft",
+  "type": "Component",
+  "summary": "The single-select concrete member of the droplist family — a button-triggered, non-filtering listbox with type-ahead. A form-associated custom element (<drop-list>) so <form>/FormData/reset/validity work like the native <select> baseline, with no hidden input shim.",
+  "implementsIntent": "selection",
+  "composesIntents": [
+    "anchor",
+    "focus-delegation",
+    "selection",
+    "type-ahead"
+  ],
+  "designDecisions": [
+    "Single-select is structural identity, not a runtime preference: selection.model=single is locked by the trait language and cannot be overridden by an ambient intent — a multi-dropdown is a different concrete block (multi-select-dropdown), not a configuration of this one. This is the two-channel rule established by the droplist family.",
+    "Form-associated custom element: implements static formAssociated = true and uses ElementInternals.setFormValue, so <form>/FormData/reset/validity, bfcache restore, <label for>, setValidity(), :user-valid/:user-invalid, and the autocomplete attribute all light up without a hidden <input> shim.",
+    "Generic over data, scoped by injector: the options attribute resolves through the ancestor injector chain (e.g. options=\"@countries\") or accepts an inline JSON literal; resolved options are re-exposed on the element's own injector as the component-local @options context, so descendants of <drop-list> read them and anything outside cannot.",
+    "Event boundary: the inner selection trait fires selection-change inside the template; the class listens at the <drop-list> element, calls stopPropagation, updates @selected via the value setter, and re-emits a public change event consumers listen for with on:change. The internal context stays private; the external surface stays narrow."
+  ],
+  "attributes": [
+    {
+      "name": "options",
+      "type": "string",
+      "description": "Data source for the listbox — an injector reference (e.g. `options=\"@countries\"`) resolved through the ancestor injector chain, or an inline JSON literal."
+    },
+    {
+      "name": "value",
+      "type": "string",
+      "description": "The selected option's value, reflected to the form-associated element so `<form>`/FormData/reset see it.",
+      "fieldName": "value"
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "description": "Form field name the selected value is submitted under (native form-association, no hidden input shim)."
+    },
+    {
+      "name": "disabled",
+      "type": "boolean",
+      "default": false,
+      "description": "Disables the control; excluded from form submission and the tab order."
+    },
+    {
+      "name": "required",
+      "type": "boolean",
+      "default": false,
+      "description": "Marks the control required for `:user-invalid` / constraint validation."
+    }
+  ],
+  "properties": [
+    {
+      "name": "value",
+      "type": "string",
+      "reflects": true,
+      "attribute": "value",
+      "description": "Gets or sets the current selection; setting updates the form value and re-emits the public `change` event."
+    },
+    {
+      "name": "options",
+      "type": "Option[]",
+      "description": "The resolved option set, re-exposed on the component-local `@options` injector context for descendants."
+    }
+  ],
+  "events": [
+    {
+      "name": "change",
+      "class": "CustomEvent",
+      "description": "Fires when the user commits a new selection; `detail` carries the selected value. Re-emitted at the `<drop-list>` boundary after the internal `selection-change` is stopped."
+    }
+  ],
+  "cssParts": [
+    {
+      "name": "trigger",
+      "description": "The button that opens the listbox and shows the current selection."
+    },
+    {
+      "name": "listbox",
+      "description": "The popup `role=\"listbox\"` container."
+    },
+    {
+      "name": "option",
+      "description": "Each `role=\"option\"` row within the listbox."
+    }
+  ],
+  "webStandards": {
+    "ariaListbox": {
+      "usage": "A button-triggered `role=\"listbox\"` of `role=\"option\"`; the trigger owns `aria-expanded` / `aria-controls`, the active option `aria-selected`, with one selected value reflected to the form-associated element.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/listbox/"
+    },
+    "htmlSelectTypeAhead": {
+      "usage": "Printable-key type-ahead jumps to the next option whose label starts with the typed buffer, matching native `<select>` behaviour.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/select"
+    }
+  }
+}

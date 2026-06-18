@@ -1,0 +1,93 @@
+{
+  "id": "data-grid",
+  "name": "Data Grid",
+  "status": "draft",
+  "type": "Module",
+  "summary": "The interactive twin of the Data Table block: same tabular data, the *other* WAI-ARIA APG pattern. Renders a native `<table role=\"grid\">` of `role=\"row\"` / `role=\"columnheader\"` / `role=\"gridcell\"` cells with cell-level keyboard navigation — arrow keys move one cell (clamping at the edges), Home/End jump to the row ends, Ctrl+Home/Ctrl+End to the grid corners, PageUp/PageDown by a page — over a roving tabindex (exactly one cell is `tabindex=\"0\"`, every other is `-1`). It is the concrete consumer of the Focus Delegation intent (strategy `roving`, orientation `both`); the column-header row is itself navigable. Where the Data Table is read-and-reorder (`role=\"table\"` + `aria-sort`), the Data Grid is navigate-the-cells (`role=\"grid\"` + roving focus) — APG documents them as separate patterns, so they are parallel blocks, not one upgraded in place.",
+  "exports": [
+    "DataGridModule",
+    "DataGridBehavior",
+    "registerDataGrid"
+  ],
+  "implementsIntent": "focus-delegation",
+  "composesIntents": [
+    "focus-delegation"
+  ],
+  "implementedBy": "@frontierui/blocks/renderers/data-grid/",
+  "fuiDemo": {
+    "file": "data-grid-demo.html",
+    "title": "Data Grid Playground — APG grid navigation + editable cells",
+    "height": 560
+  },
+  "webStandards": {
+    "apgDataGrid": {
+      "status": "W3C WAI-ARIA APG",
+      "pattern": "A `role=\"grid\"` of `role=\"row\"` rows and `role=\"gridcell\"` / `role=\"columnheader\"` cells with arrow-key cell navigation and a roving tabindex",
+      "adoption": "DataGridBehavior renders the native `<table>` with the grid roles and realizes the APG keyboard model verbatim (arrows clamp, Home/End to row ends, Ctrl+Home/End to grid corners, PageUp/Down by a page); the header row is navigable",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/grid/"
+    },
+    "rovingTabindex": {
+      "status": "WAI-ARIA APG (Managing Focus)",
+      "pattern": "Exactly one descendant is `tabindex=\"0\"` (the active item) and all others are `tabindex=\"-1\"`; the value moves with focus",
+      "adoption": "The active cell carries `tabindex=\"0\"`, every other cell `-1`; a keystroke recomputes the active cell and the tabindex roves to it, so Tab enters/leaves the grid as one stop while arrows move within",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/#kbd_roving_tabindex"
+    },
+    "ariaGridIndices": {
+      "status": "WAI-ARIA 1.1",
+      "pattern": "`aria-rowcount` / `aria-colcount` on the grid and `aria-rowindex` / `aria-colindex` on rows and cells declare the full extent and a cell's position",
+      "adoption": "The grid declares `aria-rowcount` / `aria-colcount` (header row included) and each row/cell carries its 1-based `aria-rowindex` / `aria-colindex`, so the position is announced even when not every row is realized in the DOM",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-colindex"
+    }
+  },
+  "designDecisions": {
+    "parallelBlockNotUpgrade": {
+      "description": "The Data Grid is its own block alongside the Data Table, not a sortable table \"upgraded\" with cell navigation",
+      "rationale": "The read-only Sortable Table (`role=\"table\"`, click-to-sort, `aria-sort`) and the interactive Data Grid (`role=\"grid\"`, arrow-key cell focus) are two distinct APG patterns with different interaction models and a11y contracts — APG documents them separately. Folding grid navigation into the Data Table would conflate them. They compose onto the same collection when both reordering and cell traversal are wanted (decision carried from backlog #115).",
+      "default": "two parallel blocks, cross-referenced"
+    },
+    "composesFocusDelegation": {
+      "description": "The grid is a concrete consumer of the Focus Delegation intent (strategy `roving`, orientation `both`), not a bespoke focus model",
+      "rationale": "Focus Delegation already standardizes roving tabindex vs. virtual focus, arrow-key movement, and the Tab-between / arrows-within invariant. The grid realizes the `roving` strategy over two axes rather than reinventing focus management; the movement engine is the verifiable seam."
+    },
+    "headerRowNavigable": {
+      "description": "The column-header row is part of the navigable grid (arrow-up reaches the headers); positions range over `1 (header) + dataRows` rows",
+      "rationale": "The APG Data Grid examples include the header row in arrow navigation so a keyboard user can read column labels in place. Modelling row 0 as the header keeps Ctrl+Home a true grid origin and avoids a special-case off-by-one between the visual table and the position model."
+    },
+    "clampNotWrap": {
+      "description": "Movement clamps at the grid edges; it does not wrap (last → first)",
+      "rationale": "APG lists wrapping as an opt-in, not the default. Clamping matches the unsurprising default and a spreadsheet's behavior; a wrapping option is a Focus Delegation `wrap` concern a concrete implementation can layer on."
+    },
+    "contractsOnly": {
+      "description": "This block defines the contract (grid roles, the roving-tabindex invariant, the keyboard movement model, the audit); concrete strategies live in Frontier UI",
+      "rationale": "Web Everything is the standard. The block names the seams (the movement engine, the active-cell projection); competing implementations (virtualized rows, editable cells, server paging, two-dimensional selection) register against them without changing the contract."
+    }
+  },
+  "frameworkComparison": {
+    "react": {
+      "patterns": [
+        "React Aria useGridList / useGrid (roving focus + grid keyboard model)",
+        "AG Grid cell navigation (arrow keys, Ctrl+Home/End, Page keys)"
+      ],
+      "notes": "React Aria supplies the grid/roving-focus a11y wiring this block names as the Focus Delegation seam; AG Grid is prior art for the exact key bindings (arrows, Home/End, Ctrl corners, Page) we adopt from APG."
+    },
+    "vue": {
+      "patterns": [
+        "Vuetify v-data-table-virtual focus model",
+        "PrimeVue DataTable cell navigation / cellSelection"
+      ],
+      "notes": "Component-level grid keyboard navigation; no shared focus vocabulary — we anchor to the APG roving-tabindex model and the Focus Delegation intent instead."
+    }
+  },
+  "traits": [
+    {
+      "name": "withCellNavigation",
+      "description": "Realizes the APG Data Grid keyboard model over a roving tabindex — arrows (clamped), Home/End, Ctrl+Home/End, PageUp/Down — moving the single `tabindex=\"0\"` cell with DOM focus.",
+      "intentDimension": "strategy"
+    },
+    {
+      "name": "withGridRoles",
+      "description": "Projects the tabular data onto the `role=\"grid\"` / `role=\"row\"` / `role=\"columnheader\"` / `role=\"gridcell\"` structure with `aria-rowcount` / `aria-colcount` and per-cell `aria-rowindex` / `aria-colindex`.",
+      "intentDimension": "orientation"
+    }
+  ]
+}

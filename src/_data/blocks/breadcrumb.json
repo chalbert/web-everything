@@ -1,0 +1,28 @@
+{
+  "id": "breadcrumb",
+  "name": "Breadcrumb",
+  "status": "draft",
+  "type": "Component",
+  "summary": "A structured trail showing the user's location within a site or data hierarchy, as an ordered list of links from root to current. Native-first: it IS a <nav aria-label=\"Breadcrumb\"> wrapping an ordered list of <a> elements, with the current page a plain non-link node carrying aria-current=\"page\" — the block adds only what the bare markup cannot express alone: overflow collapse when the trail is too wide for its container, and a separator that is presentational (CSS ::before / aria-hidden), never an announced character. It composes the Navigation Intent (it is a navigation landmark) and the Typography Intent (the responsible-truncation paradigm for a long crumb label). Deliberately distinct from nav-list (APG Disclosure Navigation menus), from tabs (panel switching), and from a stepper (a linear process, not a location).",
+  "implementsIntent": "navigation",
+  "composesIntents": [
+    "navigation",
+    "typography"
+  ],
+  "designDecisions": [
+    "A breadcrumb IS a nav landmark wrapping an ordered list — enhance the native markup, don't replace it. The accessible baseline is <nav aria-label=\"Breadcrumb\"><ol><li><a>…</a></li>…</ol></nav> with the last item a non-link carrying aria-current=\"page\". This is zero-JS and fully accessible on its own, so the block defaults to it and adds code only for the two things the markup can't do alone: overflow collapse and responsible label truncation. Reinventing it as a custom widget would discard the free landmark + list semantics for nothing.",
+    "The separator is presentational, never content. The visual divider between crumbs (›, /, →) is rendered via CSS (li ::before) or marked aria-hidden, so assistive tech reads 'Home, Products, Widgets' — the list structure conveys order — not 'Home slash Products slash Widgets'. A separator baked into the DOM as text is an accessibility anti-pattern this block forbids.",
+    "Overflow is collapse, not wrap or scroll. When the trail exceeds its container the middle is collapsed behind a single disclosure (an ellipsis crumb that reveals the hidden ancestors), keeping the first (root) and last (current) crumbs visible — the two a user needs most. The per-crumb label truncation is the Typography Intent's responsible-truncation paradigm (shared with tabs, chips, table cells), not a breadcrumb-specific mechanism.",
+    "Location, not navigation menu and not process — distinct from nav-list, tabs, and stepper. A breadcrumb answers 'where am I in the hierarchy?' (a trail of ancestors), which is a different question from nav-list's 'what can I navigate to?' (a disclosure menu), tabs' 'which panel is shown?' (sibling panels), and a stepper's 'how far through this process?' (linear steps). It composes the Navigation Intent like nav-list but is its own pattern with its own ARIA (aria-current=\"page\", ordered list), cross-referenced rather than folded into nav-list."
+  ],
+  "webStandards": {
+    "navigationLandmark": {
+      "usage": "A `<nav aria-label=\"Breadcrumb\">` wrapping an ordered list of links from root to current, the current page marked `aria-current=\"page\"`.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/breadcrumb/"
+    },
+    "ariaCurrent": {
+      "usage": "The trail’s final, current location carries `aria-current=\"page\"`.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-current"
+    }
+  }
+}

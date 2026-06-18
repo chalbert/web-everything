@@ -1,0 +1,124 @@
+{
+  "id": "action-button",
+  "componentTokens": "button",
+  "name": "Action Button",
+  "status": "concept",
+  "type": "Behavior",
+  "summary": "Behavioral implementation of the Action Intent, handling visual priority rendering, busy state layout (width locking, visibility), and platform-aware group ordering.",
+  "implementsIntent": "action",
+  "dependsOn": [
+    "resource-action"
+  ],
+  "traits": [
+    {
+      "name": "withBusyDisabled",
+      "description": "Disables the action during pending state (aria-disabled + pointer-events:none)",
+      "intentDimension": "action.busy.disabled"
+    },
+    {
+      "name": "withBusyInteractive",
+      "description": "Keeps the action interactive during pending state (reduced opacity indicator)",
+      "intentDimension": "action.busy.interactive"
+    },
+    {
+      "name": "withPlatformOrdering",
+      "description": "Reorders action groups based on OS conventions (macOS: primary last, Windows: primary first)",
+      "intentDimension": "action.groupOrdering.platform"
+    },
+    {
+      "name": "withWidthLock",
+      "description": "Captures computed width before busy state, applies as inline min-width to prevent layout shift",
+      "intentDimension": "action.busy.widthLock"
+    }
+  ],
+  "webStandards": {
+    "invokerCommands": {
+      "status": "Baseline 2026",
+      "pattern": "commandfor/command attributes for declarative action invocation",
+      "adoption": "Action buttons can use commandfor to target Resource Action elements; command attribute specifies the mutation",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+    },
+    "ariaDisabled": {
+      "status": "Standard",
+      "pattern": "aria-disabled keeps element focusable but non-interactive",
+      "adoption": "withBusyDisabled applies aria-disabled instead of HTML disabled, preserving tab order and screen reader announcements",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-disabled"
+    },
+    "ariaLive": {
+      "status": "Standard",
+      "pattern": "aria-live regions for dynamic content announcements",
+      "adoption": "Busy state changes announced via aria-live='polite' on the button's label region",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-live"
+    },
+    "cssContainment": {
+      "status": "Baseline",
+      "pattern": "CSS contain: layout for isolation from reflow",
+      "adoption": "Action groups use contain: layout to prevent busy-state width changes from triggering ancestor reflow",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/contain"
+    }
+  },
+  "frameworkComparison": {
+    "materialUI": {
+      "patterns": [
+        "Button loading prop",
+        "LoadingButton variant",
+        "startIcon/endIcon"
+      ],
+      "notes": "Loading state with spinner replacement; icon positioning; size variants"
+    },
+    "radixUI": {
+      "patterns": [
+        "Primitive button",
+        "asChild composition",
+        "data-state attribute"
+      ],
+      "notes": "Composable primitives; state exposed via data attributes for CSS styling"
+    },
+    "fluentUI": {
+      "patterns": [
+        "SplitButton",
+        "MenuButton",
+        "CompoundButton"
+      ],
+      "notes": "Action button variants; split button for primary + secondary actions"
+    },
+    "headlessUI": {
+      "patterns": [
+        "Button component",
+        "controlled state",
+        "render props"
+      ],
+      "notes": "Headless approach: behavior without opinions on styling; closest to our intent model"
+    }
+  },
+  "designDecisions": {
+    "layoutShiftPrevention": {
+      "description": "lockWidth: captures computed width before entering busy state, applies it as inline min-width",
+      "rationale": "Prevents layout reflow when label text changes (e.g., 'Save' → 'Saving...'). The intent declares the UX need; this block implements the CSS technique."
+    },
+    "visibilityMapping": {
+      "description": "Maps intent busy state to CSS: disabled → aria-disabled + pointer-events:none, interactive → opacity:0.7",
+      "rationale": "Translates the abstract 'interaction' field from ActionBusy into concrete accessibility attributes and CSS."
+    },
+    "iconIntegration": {
+      "description": "Resolves icon name/size from Icon Intent, renders via icon provider",
+      "rationale": "Icons are a cross-cutting concern. The Action block delegates icon rendering to whatever icon system is provided via the Icon Intent."
+    },
+    "ariaOverDisabled": {
+      "description": "Uses aria-disabled instead of HTML disabled attribute during busy state",
+      "rationale": "HTML disabled removes the element from tab order and prevents screen reader interaction. aria-disabled keeps focus and announcements while preventing activation."
+    },
+    "platformOrdering": {
+      "description": "macOS convention: primary action last (right). Windows convention: primary action first (left). Detects via navigator.platform or user configuration.",
+      "rationale": "Users have muscle memory for platform conventions. Getting this wrong forces cognitive overhead on every confirmation dialog."
+    }
+  },
+  "exports": [
+    "ActionButtonBehavior",
+    "withBusyDisabled",
+    "withBusyInteractive",
+    "withPlatformOrdering",
+    "withWidthLock",
+    "ActionButtonState"
+  ]
+}

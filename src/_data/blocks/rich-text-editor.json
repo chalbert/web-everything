@@ -1,0 +1,56 @@
+{
+  "id": "rich-text-editor",
+  "name": "Rich Text Editor",
+  "status": "concept",
+  "type": "Component",
+  "summary": "The rich-text editing Block of the Web Editing standard (#618). Resolves the swappable CustomEditorEngineRegistry (editor-engine protocol, #629) — native-first contenteditable+InputEvent by default, with ProseMirror/Lexical/Slate/Quill registered as alternative engine impls behind the same interface. Implements the rich-text intent and composes the text-formatting intent (#630) for the formatting surface; composes the sanitizer plug (CustomSanitizerRegistry, #631) on paste so external HTML is normalized before it enters the document model. Decorations (active-format ranges, spellcheck/find marks) paint via the CSS Custom Highlight API by default — no <span> soup in the editable region.",
+  "implementsIntent": "rich-text",
+  "composesIntents": [
+    "text-formatting"
+  ],
+  "implementedBy": "@frontierui/blocks/rich-text-editor/RichTextEditorElement.ts",
+  "relatedProject": "webediting",
+  "dependsOn": [],
+  "exports": [
+    "RichTextEditorElement",
+    "registerRichTextEditor"
+  ],
+  "webStandards": {
+    "contentEditable": {
+      "status": "Baseline",
+      "pattern": "contenteditable + the InputEvent API (beforeinput/input, inputType) as the native-first editing surface",
+      "adoption": "The default engine drives a contenteditable region through beforeinput, reading inputType to map native editing intents to document-model operations — no library required for the floor.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/InputEvent"
+    },
+    "editContext": {
+      "status": "Baseline 2025",
+      "pattern": "EditContext API — decoupled editing surface for IME/selection without contenteditable quirks",
+      "adoption": "Where available, the engine upgrades from the contenteditable floor to EditContext for robust IME composition; the negotiation is the editing-surface capability tier (#628).",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/EditContext"
+    },
+    "cssCustomHighlight": {
+      "status": "Baseline 2024",
+      "pattern": "CSS Custom Highlight API for editor decorations (active format, find, spellcheck ranges)",
+      "adoption": "Decorations register as Highlights painted via ::highlight(), so the editable text node stays clean and decorations never corrupt the document model.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/CSS_Custom_Highlight_API"
+    }
+  },
+  "designDecisions": {
+    "engineIsSwappable": {
+      "description": "The editor resolves CustomEditorEngineRegistry; the native contenteditable+InputEvent engine is the default",
+      "rationale": "editor-engine protocol (#629): swapping the native default for a ProseMirror/Lexical adapter leaves the document model untouched because the engine reads/writes the structured pivot, never a vendor doc format — the spec is the only lock."
+    },
+    "sanitizeOnPaste": {
+      "description": "Pasted external HTML passes through the CustomSanitizerRegistry plug before entering the model",
+      "rationale": "Untrusted paste is the primary injection vector for a rich-text surface; routing it through the shared sanitizer plug (#631) keeps the policy swappable and consistent, not re-implemented per editor."
+    },
+    "formattingIsAComposedIntent": {
+      "description": "The toolbar/formatting UX is the composed text-formatting intent (#630), not owned by this block",
+      "rationale": "Separation of concerns: the editor owns the editing surface + engine seam; the formatting affordances are a distinct, reusable intent the block composes."
+    },
+    "nativeFirstSurface": {
+      "description": "contenteditable floor, EditContext upgrade — library engines are opt-in",
+      "rationale": "Native-first default per #628 substrate negotiation: the platform editing surface is the baseline, with library engines as registered enhancements rather than the floor."
+    }
+  }
+}

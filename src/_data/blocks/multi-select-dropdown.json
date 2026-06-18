@@ -1,0 +1,26 @@
+{
+  "id": "multi-select-dropdown",
+  "name": "Multi-select Dropdown",
+  "status": "draft",
+  "type": "Component",
+  "summary": "The multiple-select concrete member of the droplist family — the same button-triggered listbox substrate as the dropdown with one trait flipped: selection.model=multiple, selectionFollowsFocus=false (aria-multiselectable; Space toggles the focused option, arrows move focus only). A form-associated custom element with a multi-value surface (.values array, FormData repeating the name) like the native <select multiple> baseline.",
+  "implementsIntent": "selection",
+  "composesIntents": [
+    "anchor",
+    "focus-delegation",
+    "selection",
+    "type-ahead"
+  ],
+  "designDecisions": [
+    "One trait flip from the dropdown, nothing else: single→multiple is a single value change on the selection behavior — selection=\"model=multiple;selectionFollowsFocus=false\" — while focus-delegation, anchor, and type-ahead are byte-for-byte identical to the dropdown. That clean isolation (the focus behavior never learns selection became multiple) is the family's evidence that Selection was correctly factored out of \"dropdown\". Multiplicity is structural identity locked by the trait language, never an ambient-intent override.",
+    "Decoupled toggle selection model: model=multiple sets aria-multiselectable on the listbox; Space toggles aria-selected on the focused option and selectionFollowsFocus=false stops auto-commit, so arrows move virtual focus only. This is the standard multi-select listbox keyboard model, distinct from the dropdown's follows-focus single commit.",
+    "Multi-value form-control surface mirroring <select multiple>: the form-associated element submits one entry per selected value by passing a FormData (repeating name) to ElementInternals.setFormValue, instead of a single string. The public surface is plural — a .values string[] and .selectedOptions array — and the change event detail carries the full selection, not a single option.",
+    "Trigger shows a summary, not a single label: with multiple values the button renders a count or summary (e.g. \"3 selected\") falling back to the placeholder when empty, rather than a single option's label — the only template-level difference from the dropdown beyond the selection trait value."
+  ],
+  "webStandards": {
+    "ariaListbox": {
+      "usage": "The dropdown substrate with `aria-multiselectable=\"true\"`: Space toggles each `role=\"option\"`’s `aria-selected`, the trigger summarises the selected set.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/listbox/"
+    }
+  }
+}

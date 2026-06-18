@@ -15,6 +15,7 @@ import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { createRequire } from 'node:module';
+import { loadBlocks } from '../lib/blocks-loader.cjs';
 import {
   checkStatus, validateProtocol, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, isSegmentCovered, permalinkSegment,
@@ -351,7 +352,7 @@ describe('findUnquotedColonScalars — frontmatter quote-fix lint (#453)', () =>
 // asserts zero errors, so a future rule tightening that starts erroring on legitimate real data fails
 // here instead of only surfacing on a manual `npm run check:standards` run.
 describe('real data stays clean (per family)', () => {
-  const blocks = loadJson('blocks.json');
+  const blocks = loadBlocks(); // per-block specs src/_data/blocks/<id>.json, assembled (#882)
   const intents = loadJson('intents.json');
   const protocols = loadJson('protocols.json');
   const projects = loadJson('projects.json');

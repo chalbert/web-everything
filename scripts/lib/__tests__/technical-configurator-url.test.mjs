@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { buildTechnicalConfiguratorUrl, TC_ROUTE, TC_DOMAIN_IDS } = require('../technical-configurator-url.cjs');
-const blocks = require('../../../src/_data/blocks.json');
+const blocks = require('../blocks-loader.cjs').loadBlocks(); // per-block specs, assembled (#882)
 
 const BASE = 'http://localhost:4000';
 // The configurator's first-listed domain (#789 ordering puts the legacy domains first), i.e. the

@@ -1,0 +1,148 @@
+{
+  "id": "reorderable-list",
+  "name": "Reorderable List",
+  "status": "draft",
+  "type": "Component",
+  "implementedBy": "@frontierui/blocks/renderers/reorderable-list/",
+  "exports": [
+    "reduceReorder",
+    "renderReorderableList",
+    "auditReorderableList",
+    "reconcileOrder",
+    "announce",
+    "initialState"
+  ],
+  "summary": "A list whose item order is user-mutable by pointer drag and by keyboard, with live-region announcement and a pluggable commit strategy. Relocates items with atomic Element.moveBefore() so an item keeps its focus/animation/connection state across a move. Manual order — not Collection Operations' computed sort.",
+  "implementsIntent": "reorder",
+  "composesIntents": [
+    "interaction",
+    "focus-delegation",
+    "live-region-status",
+    "collection-operations"
+  ],
+  "webStandards": {
+    "pointerEvents": {
+      "status": "Baseline",
+      "pattern": "Pointer Events + setPointerCapture",
+      "adoption": "The default drag path — unifies mouse/touch/pen and captures the pointer for the duration of a drag. Preferred over the HTML5 Drag and Drop API for in-list reorder (better touch + a11y).",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Pointer_events"
+    },
+    "elementMoveBefore": {
+      "status": "Baseline 2025 (progressive enhancement)",
+      "pattern": "Element.moveBefore() atomic relocation",
+      "adoption": "Relocate an item without disconnecting it, preserving focus, animations, iframes, and custom-element connection. Wired declaratively via the Component block's preserve-on-move attribute; falls back to insertBefore where unsupported.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Element/moveBefore"
+    },
+    "ariaApgDrag": {
+      "status": "WAI-ARIA Authoring Practices",
+      "pattern": "Keyboard-operable drag with live-region announcement",
+      "adoption": "Roving tabindex over items + grab/move/drop keys; announce moves via a polite live region. The deprecated aria-grabbed/aria-dropeffect are NOT used.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/"
+    },
+    "htmlDragAndDrop": {
+      "status": "Baseline",
+      "pattern": "HTML Drag and Drop API (draggable, dragstart/dragover/drop)",
+      "adoption": "Reserved for cross-window and OS file transfer (a data-transfer concern, see backlog #007); NOT the in-list reorder default.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API"
+    }
+  },
+  "events": {
+    "reorder-start": {
+      "description": "Fired when an item is grabbed (pointer down on the grab affordance, or keyboard grab key)",
+      "taxonomy": "notification",
+      "detail": {
+        "item": "HTMLElement",
+        "fromIndex": "number"
+      },
+      "bubbles": true,
+      "cancelable": false
+    },
+    "reorder-move": {
+      "description": "Fired as the grabbed item passes a new candidate position during a drag",
+      "taxonomy": "notification",
+      "detail": {
+        "item": "HTMLElement",
+        "fromIndex": "number",
+        "toIndex": "number"
+      },
+      "bubbles": true,
+      "cancelable": false
+    },
+    "reorder-commit": {
+      "description": "Fired when a move is committed (dropped). Cancelable — preventDefault to reject the new order (e.g. server validation); the commit strategy listens here to persist",
+      "taxonomy": "notification",
+      "detail": {
+        "item": "HTMLElement",
+        "fromIndex": "number",
+        "toIndex": "number",
+        "order": "string[]"
+      },
+      "bubbles": true,
+      "cancelable": true
+    },
+    "reorder-cancel": {
+      "description": "Fired when a grab is abandoned (Esc, or pointer released outside a valid target); order is unchanged",
+      "taxonomy": "notification",
+      "detail": {
+        "item": "HTMLElement",
+        "fromIndex": "number"
+      },
+      "bubbles": true,
+      "cancelable": false
+    }
+  },
+  "designDecisions": {
+    "keyboardParityMandatory": {
+      "description": "A conforming reorderable list provides a keyboard path (roving tabindex + grab/move/drop keys + live-region announcement) equivalent to the pointer path.",
+      "rationale": "WAI-ARIA APG requires a keyboard alternative for drag interactions; the deprecated aria-grabbed/aria-dropeffect are unfit. Pointer-only reorder is non-conforming, not 'partially done'."
+    },
+    "pointerNotHtml5Dnd": {
+      "description": "The default drag path uses Pointer Events, not the HTML5 Drag and Drop API.",
+      "rationale": "Pointer Events unify mouse/touch/pen and give clean capture; HTML5 DnD is clunky and weak for touch/a11y. HTML5 DnD is reserved for OS file / cross-window transfer (data-transfer, backlog #007)."
+    },
+    "atomicMove": {
+      "description": "Item relocation uses Element.moveBefore() (the Component block's preserve-on-move), not remove+insert.",
+      "rationale": "Reordered cards are often interactive; an atomic move preserves focus, in-flight animations, iframes, and custom-element connection state that a disconnect/reconnect would reset."
+    },
+    "manualVsComputedOrder": {
+      "description": "Reorder produces a manual order, mutually exclusive with the Collection Operations sort dimension.",
+      "rationale": "A list is hand-ordered OR comparator-sorted, never both at once; the two intents are distinct answers to 'what determines order' and cross-reference rather than merge."
+    },
+    "commitStrategyProvider": {
+      "description": "Where the new order is written is a provider behind the cancelable reorder-commit event, defaulting to ephemeral.",
+      "rationale": "Persistence varies (none / localStorage / write-back to source); keep it a strategy the host supplies rather than baking one backend into the block. Start as an attribute; promote to a CustomReorderCommitRegistry only if multiple backends emerge."
+    }
+  },
+  "traits": [
+    {
+      "name": "withDragHandle",
+      "description": "Restrict the grab affordance to a scoped handle within each item, leaving the rest interactive",
+      "intentDimension": "reorder.grab.handle"
+    },
+    {
+      "name": "withPointerReorder",
+      "description": "Drag-to-reorder via Pointer Events with pointer capture (mouse, touch, pen)",
+      "intentDimension": "reorder.movement.pointer"
+    },
+    {
+      "name": "withKeyboardReorder",
+      "description": "Roving-tabindex keyboard path: grab, move with arrows, drop or cancel",
+      "intentDimension": "reorder.movement.keyboard"
+    },
+    {
+      "name": "withLiveAnnounce",
+      "description": "Announce each move and the final commit via a polite live region (replaces deprecated aria-grabbed)",
+      "intentDimension": "reorder.announce.live-region"
+    },
+    {
+      "name": "withCommitStrategy",
+      "description": "Persist the new order (localStorage or write-back) behind the cancelable reorder-commit event",
+      "intentDimension": "reorder.commit.persisted"
+    },
+    {
+      "name": "withCrossListReorder",
+      "description": "Move items between sibling lists that share a group key",
+      "intentDimension": "reorder.scope.cross-list"
+    }
+  ]
+}

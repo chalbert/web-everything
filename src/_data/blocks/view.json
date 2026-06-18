@@ -1,0 +1,228 @@
+{
+  "id": "view",
+  "fuiDemo": {
+    "file": "visibility-gate.html",
+    "title": "The Visibility Gate — activate on view",
+    "height": 460
+  },
+  "name": "View",
+  "status": "active",
+  "type": "Module",
+  "implementedBy": "@frontierui/blocks/view/ViewEngine.ts",
+  "summary": "Foundation for all show/hide/render patterns. Provides a shared engine and specialized blocks (behaviors + directives) that higher-level components build on.",
+  "blocks": {
+    "ViewEngine": {
+      "type": "Utility",
+      "description": "Shared core: hidden modes, toggle events, transitions, exclusive groups. Not a block — imported by blocks that need it."
+    },
+    "ViewBehavior": {
+      "type": "Behavior",
+      "attribute": "view",
+      "description": "Imperative show/hide via Invoker Commands. Element always in DOM.",
+      "extendsClass": "CustomAttribute"
+    },
+    "ViewShowBehavior": {
+      "type": "Behavior",
+      "attribute": "view:show",
+      "description": "Expression-bound reactive visibility. Element always in DOM.",
+      "extendsClass": "CustomAttribute"
+    },
+    "ViewIfDirective": {
+      "type": "Directive",
+      "attributes": [
+        "view:if",
+        "view:else"
+      ],
+      "description": "Structural conditional rendering. Nothing in DOM when false.",
+      "extendsClass": "CustomTemplateDirective"
+    },
+    "ViewSwitchDirective": {
+      "type": "Directive",
+      "attributes": [
+        "view:switch",
+        "view:case",
+        "view:default"
+      ],
+      "description": "Multi-branch structural rendering. One branch at a time.",
+      "extendsClass": "CustomTemplateDirective"
+    }
+  },
+  "exports": [
+    "ViewEngine",
+    "ViewEngineOptions",
+    "ViewBehavior",
+    "ViewShowBehavior",
+    "ViewIfDirective",
+    "ViewSwitchDirective"
+  ],
+  "webStandards": {
+    "invokerCommands": {
+      "status": "Baseline January 2026",
+      "pattern": "commandfor/command attributes for declarative triggers",
+      "adoption": "ViewBehavior handles command events (--view-show, --view-hide, --view-toggle)",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+    },
+    "exclusiveAccordion": {
+      "status": "Standard (Interop 2025)",
+      "pattern": "<details name=\"group\"> for mutually exclusive panels",
+      "adoption": "ViewEngine uses name attribute for exclusive view groups",
+      "reference": "https://developer.mozilla.org/en-US/blog/html-details-exclusive-accordions/"
+    },
+    "hiddenUntilFound": {
+      "status": "Standard (Interop 2025)",
+      "pattern": "hidden=\"until-found\" for searchable hidden content",
+      "adoption": "ViewEngine hidden mode option for searchable hidden content",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/hidden"
+    },
+    "popoverEvents": {
+      "status": "Baseline April 2025",
+      "pattern": "beforetoggle (cancelable) and toggle events with oldState/newState",
+      "adoption": "ViewEngine fires same events with same detail shape",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Popover_API"
+    },
+    "contentVisibility": {
+      "status": "Baseline Widely Available",
+      "pattern": "content-visibility: hidden for performance, auto for lazy rendering",
+      "adoption": "ViewEngine default hidden mode (performant, keeps a11y tree)",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/content-visibility"
+    },
+    "inertAttribute": {
+      "status": "Standard",
+      "pattern": "inert makes content non-interactive but visible",
+      "adoption": "ViewEngine hidden mode for preview/disabled states",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/inert"
+    },
+    "viewTransitionsAPI": {
+      "status": "Baseline 2024",
+      "pattern": "document.startViewTransition() for animated state changes",
+      "adoption": "ViewEngine wraps show/hide in view transitions when opted in",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/View_Transitions_API"
+    },
+    "domParts": {
+      "status": "Proposal (W3C Web Components)",
+      "pattern": "Low-level API for marking DOM positions for updates",
+      "adoption": "Directives use comment markers today, ready to adopt DOM Parts when available",
+      "reference": "https://github.com/WICG/webcomponents/blob/gh-pages/proposals/DOM-Parts.md"
+    }
+  },
+  "designDecisions": {
+    "nomenclature": {
+      "chosen": "view",
+      "alternatives": [
+        "outlet",
+        "conditional",
+        "show",
+        "display",
+        "region"
+      ],
+      "rationale": "\"View\" is framework-agnostic, implies visual display, and pairs naturally with router terminology. Dropped 'Conditional' from name — View is the foundation, not one specific pattern."
+    },
+    "architecture": {
+      "description": "View separates HOW to hide/show (engine) from WHEN to hide/show (blocks)",
+      "engine": "ViewEngine handles hidden modes, toggle events, transitions, exclusive groups",
+      "blocks": "Each block solves a different DOM-presence scenario: always present (Behavior) vs stamped on demand (Directive)",
+      "rationale": "Higher-level components (Tabs, Router, Accordion) pick the block that fits their DOM model, or use the engine directly. No reimplementation of show/hide mechanics."
+    },
+    "blockSelection": {
+      "description": "The right block depends on what exists in the DOM when content is inactive",
+      "criteria": {
+        "domPresence": "Does the content always exist in HTML, or is it created on demand?",
+        "accessibility": "Should hidden content remain in a11y tree or be findable via Ctrl+F?",
+        "statePreservation": "Should component state survive hide/show cycles?",
+        "controlModel": "Imperative (commands) vs declarative (expressions)?"
+      },
+      "rationale": "Making the DOM-presence question explicit prevents misuse. view:show and view:if look similar but have fundamentally different DOM models."
+    },
+    "exclusiveGroups": {
+      "attribute": "name",
+      "description": "Views with same name attribute are mutually exclusive (only one visible)",
+      "rationale": "Mirrors <details name=\"...\"> pattern from HTML standard. Familiar, consistent with platform direction."
+    },
+    "triggers": {
+      "primary": "commandfor/command (Invoker Commands pattern)",
+      "fallback": "on:click handlers for older browsers",
+      "rationale": "Align with Invoker Commands API (Baseline Jan 2026). Custom commands use -- prefix per spec."
+    },
+    "hiddenModes": {
+      "description": "Multiple ways to hide content with different tradeoffs",
+      "modes": {
+        "content-visibility:hidden": "Default. Hidden, skipped for rendering, stays in a11y tree",
+        "display:none": "Fully hidden, no layout cost, no accessibility",
+        "hidden=until-found": "Hidden but browser-searchable (Ctrl+F finds it)",
+        "inert": "Visible but non-interactive"
+      },
+      "default": "content-visibility:hidden",
+      "rationale": "content-visibility provides best performance while maintaining accessibility tree presence. Directives don't use hidden modes by default (they remove DOM), only when using keep-alive."
+    },
+    "events": {
+      "pattern": "Match Popover API event shape",
+      "events": {
+        "beforetoggle": {
+          "description": "Cancelable, fired before visibility change",
+          "taxonomy": "notification",
+          "detail": {
+            "oldState": "hidden|visible",
+            "newState": "hidden|visible"
+          },
+          "bubbles": true,
+          "cancelable": true,
+          "class": "ViewBeforeToggleEvent",
+          "provider": "customEvents:view-beforetoggle"
+        },
+        "toggle": {
+          "description": "Fired after visibility change",
+          "taxonomy": "notification",
+          "detail": {
+            "oldState": "hidden|visible",
+            "newState": "hidden|visible"
+          },
+          "bubbles": true,
+          "cancelable": false,
+          "class": "ViewToggleEvent",
+          "provider": "customEvents:view-toggle"
+        }
+      },
+      "rationale": "Consistency with platform. Developers familiar with popover events. Typed event classes enable provider-based discrimination via Web Events — a parent can distinguish a View toggle from a Popover toggle using listenForScoped.",
+      "collisionRisk": "High — 'beforetoggle' and 'toggle' are shared with Popover API and <details>. Without scoped events, a parent listening for 'toggle' would receive events from both views and popovers."
+    },
+    "statePreservation": {
+      "attribute": "view:keep-alive",
+      "description": "Caches hidden content state instead of destroying it. Only relevant for directives (behaviors preserve state naturally).",
+      "options": [
+        "max (LRU limit)",
+        "include/exclude patterns"
+      ],
+      "rationale": "Inspired by Vue KeepAlive. When using keep-alive, directives delegate hide/show of cached content to ViewEngine."
+    },
+    "transitions": {
+      "integration": "View Transitions API",
+      "attribute": "view:transition",
+      "description": "Opt-in to native browser View Transitions when switching content",
+      "rationale": "View Transitions API is baseline in all browsers (2024). Native > library."
+    }
+  },
+  "frameworkComparison": {
+    "alpine": {
+      "show": "x-show",
+      "if": "x-if"
+    },
+    "vue": {
+      "show": "v-show",
+      "if": "v-if",
+      "keepAlive": "KeepAlive"
+    },
+    "angular": {
+      "if": "ngIf",
+      "switch": "ngSwitch",
+      "outlet": "router-outlet"
+    },
+    "solid": {
+      "if": "Show",
+      "switch": "Switch/Match"
+    },
+    "react": {
+      "outlet": "Outlet",
+      "lazy": "Suspense"
+    }
+  }
+}

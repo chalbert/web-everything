@@ -1,0 +1,74 @@
+{
+  "id": "checkbox",
+  "attributes": [
+    {
+      "name": "checked",
+      "type": "boolean",
+      "default": false,
+      "fieldName": "checked",
+      "description": "The boolean checked state of the native `<input type=\"checkbox\">`."
+    },
+    {
+      "name": "indeterminate",
+      "type": "boolean",
+      "default": false,
+      "description": "The mixed tri-state — maps to `aria-checked=\"mixed\"` on a group parent."
+    },
+    {
+      "name": "disabled",
+      "type": "boolean",
+      "default": false,
+      "description": "Disables the control; excluded from form submission and the tab order."
+    },
+    {
+      "name": "required",
+      "type": "boolean",
+      "default": false,
+      "description": "Marks the control required for native constraint validation (`:user-invalid`)."
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "description": "Form field name the value is submitted under."
+    },
+    {
+      "name": "value",
+      "type": "string",
+      "default": "on",
+      "description": "Value submitted when checked."
+    }
+  ],
+  "properties": [
+    {
+      "name": "checked",
+      "type": "boolean",
+      "reflects": true,
+      "attribute": "checked",
+      "description": "Gets or sets the checked state."
+    },
+    {
+      "name": "indeterminate",
+      "type": "boolean",
+      "description": "Gets or sets the mixed tri-state (display-only; not submitted)."
+    }
+  ],
+  "name": "Checkbox",
+  "status": "draft",
+  "type": "Component",
+  "summary": "Native-first over `<input type=\"checkbox\">`: a single boolean control, a checkbox group (multi-select), and the `indeterminate` (mixed) tri-state. Realizes the `input` boolean control and composes `selection` (model: multiple) for groups; the indeterminate state maps to `aria-checked=\"mixed\"` on a group parent. Zero JS for the single/standalone case (the native element IS the block); a thin behavior only coordinates a group's mixed-state parent. Sliced from #468 (form-control inventory).",
+  "implementsIntent": "input",
+  "composesIntents": [
+    "selection"
+  ],
+  "designDecisions": [
+    "Native-first: the standalone checkbox is the bare `<input type=\"checkbox\">` with a `<label>` — no JS, no wrapper element. The block adds value only for the GROUP case (a set of checkboxes with a select-all/mixed parent) and the programmatic `indeterminate` property the platform exposes but never sets itself.",
+    "Indeterminate is the platform tri-state, not a coined one: `el.indeterminate = true` renders the mixed glyph and the group parent exposes `aria-checked=\"mixed\"` (WAI-ARIA tri-state checkbox). It is a display/ARIA state, never a submitted value — a checkbox still submits checked/unchecked.",
+    "Distinct from toggle/switch (#473): a checkbox is a deferred form value (committed on submit, reversible before), a switch is an immediate on/off action. Same `<input type=checkbox>` substrate, different semantics and role — kept as separate blocks, not one with a mode flag."
+  ],
+  "webStandards": {
+    "constraintValidation": {
+      "usage": "Native-first over `<input type=\"checkbox\">`: a single boolean, a multi-select group, and the `indeterminate` (mixed) tri-state, with native required-validity.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/checkbox"
+    }
+  }
+}

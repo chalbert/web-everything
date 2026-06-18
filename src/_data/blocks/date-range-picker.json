@@ -1,0 +1,28 @@
+{
+  "id": "date-range-picker",
+  "name": "Date Range Picker",
+  "status": "draft",
+  "type": "Component",
+  "summary": "A named shallow preset over the abstract `temporal` core: a from–to date range. It pins the Temporal Intent to presentation=media (a calendar grid) and granularity=range (two coordinated, ordered dates), bound to two native <input type=\"date\"> anchors (start, end). The range coordination — the start date can't cross the end date, reported as a pair — is the core's machinery, exactly as the slider's dual-thumb range is two bound, ordered values over one track; this preset only pins granularity=range and binds the two anchors.",
+  "implementsIntent": "temporal",
+  "intentDimensions": {
+    "presentation": "media",
+    "granularity": "range"
+  },
+  "composesIntents": [
+    "temporal",
+    "locale",
+    "input",
+    "focus-delegation"
+  ],
+  "designDecisions": [
+    "A preset is a dimension pin, not new machinery (#713 option C) — date-range-picker pins presentation=media + granularity=range over two input[type=date] anchors. The range coordination lives in the `temporal` core (one place), the direct analogue of the slider's dual-thumb range being two coordinated, ordered values over one track — not a re-implementation per picker.",
+    "Two native date inputs are the anchor and fallback; the shared calendar grid is the media enhancement, while the pair of native date inputs stays the keyboard-entry, form-associated, no-JS baseline, kept ordered (start ≤ end) by the core."
+  ],
+  "webStandards": {
+    "ariaApgKeyboard": {
+      "usage": "A from–to range preset over the calendar grid: two coupled date values with range-selection keyboard handling.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/date"
+    }
+  }
+}

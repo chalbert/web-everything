@@ -1,0 +1,50 @@
+{
+  "id": "breakpoint-observer",
+  "name": "Breakpoint Observer",
+  "status": "concept",
+  "type": "Module",
+  "summary": "Runtime implementation of the Breakpoint Intent, mapping semantic step names to concrete CSS media queries or container queries and exposing reactive state.",
+  "implementsIntent": "breakpoint",
+  "traits": [
+    {
+      "name": "withMobileFirst",
+      "description": "Accumulative min-width queries — start small, add complexity as space grows",
+      "intentDimension": "breakpoint.strategy.mobile-first"
+    },
+    {
+      "name": "withDesktopFirst",
+      "description": "Subtractive max-width queries — start large, remove features as space shrinks",
+      "intentDimension": "breakpoint.strategy.desktop-first"
+    },
+    {
+      "name": "withStrictRange",
+      "description": "Isolated range queries — each tier is an independent bucket with no accumulation",
+      "intentDimension": "breakpoint.strategy.strict-range"
+    },
+    {
+      "name": "withContainerQueries",
+      "description": "Component-scoped breakpoints using CSS container queries instead of viewport media queries",
+      "intentDimension": null
+    }
+  ],
+  "designDecisions": {
+    "unitMapping": {
+      "description": "Converts semantic steps to pixel/em/rem breakpoints based on application configuration",
+      "rationale": "The intent declares abstract steps ('compact', 'medium', 'expanded'). This block maps them to concrete values (e.g., compact: 0-599px, medium: 600-904px)."
+    },
+    "queryAPI": {
+      "description": "Exposes matches(query) method for components to test current breakpoint: matches({ up: 'medium' }), matches({ only: 'compact' })",
+      "rationale": "Components need to query the active breakpoint at runtime. This block provides the matchMedia/container query implementation."
+    },
+    "containerQuerySupport": {
+      "description": "Supports both viewport-level (media queries) and component-level (container queries) breakpoints",
+      "rationale": "Modern layouts use container queries for component-scoped responsiveness. The block detects and uses the appropriate API."
+    }
+  },
+  "webStandards": {
+    "containerQueries": {
+      "usage": "Maps semantic breakpoint step names to concrete CSS media or container queries and exposes the active step reactively, observing via `matchMedia` / container-query matching.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/CSS_containment/Container_queries"
+    }
+  }
+}

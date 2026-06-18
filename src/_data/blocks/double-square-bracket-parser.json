@@ -1,0 +1,19 @@
+{
+  "id": "double-square-bracket-parser",
+  "name": "DoubleSquareBracketParser",
+  "status": "active",
+  "type": "Parser",
+  "summary": "Text node parser for Polymer-style [[expression]] syntax. Detects [[ and ]] delimiters in text content.",
+  "exports": [
+    "DoubleSquareBracketParser"
+  ],
+  "extendsClass": "CustomTextNodeParser",
+  "implementedBy": "@frontierui/blocks/parsers/text-node/double-square/DoubleSquareBracketParser.ts",
+  "dependsOn": [],
+  "webStandards": {
+    "domParts": {
+      "usage": "Detects Polymer-style `[[expression]]` delimiters in text content and emits binding holes for the interpolation pipeline (the template-parts contract).",
+      "reference": "https://github.com/WICG/webcomponents/blob/gh-pages/proposals/DOM-Parts.md"
+    }
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "id": "type-ahead",
+  "name": "Type-Ahead",
+  "status": "draft",
+  "type": "Behavior",
+  "summary": "Keyboard type-ahead navigation for listboxes, menus, selects, and trees: buffer typed characters, move focus to the matching item, then reset after an idle timeout. Moves focus — never filters.",
+  "implementsIntent": "type-ahead",
+  "implementedBy": "@frontierui/blocks/type-ahead/TypeAheadBehavior.ts",
+  "dependsOn": [],
+  "exports": [
+    "TypeAheadBehavior",
+    "TypeAheadOptions",
+    "TypeAheadMatching",
+    "TypeAheadIntent",
+    "TypeAheadMatchDetail"
+  ],
+  "webStandards": {
+    "ariaApgKeyboard": {
+      "status": "WAI-ARIA Authoring Practices",
+      "pattern": "Type-ahead / first-character navigation across the Listbox, Menu, Combobox, and Tree patterns",
+      "adoption": "Buffer printable keys, move focus (or aria-activedescendant) to the matching item; reset after idle timeout",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/"
+    },
+    "htmlSelectTypeAhead": {
+      "status": "Baseline",
+      "pattern": "Native <select> first-character / prefix navigation",
+      "adoption": "Mirror the platform default a custom listbox/menu would otherwise lose",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/select"
+    },
+    "keyboardEventKey": {
+      "status": "Baseline",
+      "pattern": "KeyboardEvent.key for printable-character detection",
+      "adoption": "Match single-character, non-modifier keys; ignore Arrow/Enter/Tab and modifier chords",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key"
+    }
+  },
+  "events": {
+    "typeahead-match": {
+      "description": "Fired when the buffer matches an item and focus moves to it",
+      "taxonomy": "notification",
+      "detail": {
+        "query": "string",
+        "matched": "HTMLElement"
+      },
+      "bubbles": true,
+      "cancelable": false
+    },
+    "typeahead-nomatch": {
+      "description": "Fired when the buffer matches no item (focus is unchanged)",
+      "taxonomy": "notification",
+      "detail": {
+        "query": "string"
+      },
+      "bubbles": true,
+      "cancelable": false
+    },
+    "typeahead-reset": {
+      "description": "Fired when the character buffer is cleared after the idle timeout",
+      "taxonomy": "notification",
+      "detail": {
+        "query": "string"
+      },
+      "bubbles": true,
+      "cancelable": false
+    }
+  },
+  "designDecisions": {
+    "moveFocusNotFilter": {
+      "description": "Type-ahead moves focus to an existing item; it never removes or hides items.",
+      "rationale": "Distinguishes the pattern from combobox autocomplete/filtering (aria-autocomplete='list'); preserves the full item set and mirrors the native <select> behavior."
+    },
+    "resetTimeout": {
+      "description": "The accumulated character buffer clears after an idle timeout, defaulting to 500ms.",
+      "rationale": "Matches the WAI-ARIA APG recommendation and native <select> convention; configurable via type-ahead-reset."
+    },
+    "behaviorComposition": {
+      "description": "Implemented as a CustomAttribute behavior attached to an existing container, composing with Composite Widget rather than absorbing it.",
+      "rationale": "Roving-tabindex / aria-activedescendant focus management is orthogonal — type-ahead only decides WHICH item should receive focus and delegates the actual focus move when a composite-widget container is present."
+    }
+  },
+  "traits": [
+    {
+      "name": "withPrefixMatching",
+      "description": "Accumulate typed characters into a prefix buffer and match item labels by prefix",
+      "intentDimension": "type-ahead.matching.prefix"
+    },
+    {
+      "name": "withSameLetterCycling",
+      "description": "A repeated single key cycles focus through items starting with that character",
+      "intentDimension": "type-ahead.matching.cycle"
+    },
+    {
+      "name": "withWrapAround",
+      "description": "Wrap focus to the start of the collection when matching passes the last item",
+      "intentDimension": "type-ahead.wrap.wrap"
+    },
+    {
+      "name": "withTimeoutReset",
+      "description": "Clear the character buffer after an idle timeout (default 500ms)",
+      "intentDimension": "type-ahead.reset.debounced"
+    }
+  ]
+}

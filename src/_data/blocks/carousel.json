@@ -1,0 +1,24 @@
+{
+  "id": "carousel",
+  "name": "Carousel",
+  "status": "draft",
+  "type": "Component",
+  "summary": "A set of equivalent slides presented one (or a few) at a time, advanced by controls, pagination markers, swipe, or optional autoplay. Native-first by construction: the substrate is a CSS scroll-snap container (scroll-snap-type + scroll-snap-align gives paging, momentum, touch, and keyboard scrolling for free), and where supported the emerging CSS carousel pseudo-elements (::scroll-button() for prev/next, ::scroll-marker / scroll-marker-group for the dots) provide native controls — the block leans on them rather than re-implementing scroll logic in JS. It adds the WAI-ARIA APG carousel accessibility (rotation announced via a live region; autoplay opt-in, paused on hover/focus, honoring prefers-reduced-motion, with a required pause control) and composes the Motion, Live-Region Status, and Navigation intents. Distinct from tabs (labelled panels, not equivalent slides) and from paginated data (the Collection Operations intent).",
+  "composesIntents": [
+    "motion",
+    "live-region-status",
+    "navigation"
+  ],
+  "designDecisions": [
+    "Native-first: CSS scroll-snap is the baseline; the CSS carousel pseudo-elements are the frontier. A scroll-snap container (scroll-snap-type: x mandatory + scroll-snap-align on each slide) already gives paging, momentum, touch, and arrow-key scrolling with zero JS, so the block defaults to it. Where the emerging CSS Overflow carousel features ship (::scroll-button() for prev/next, ::scroll-marker + scroll-marker-group for pagination dots — the Open UI / CSS WG work), the block uses them as native controls instead of JS handlers. Custom JS paging is the fallback for browsers without them, never the baseline.",
+    "WAI-ARIA APG carousel accessibility is mandatory, not optional. The rotating region announces the current slide via a live region; the carousel exposes prev/next and a slide-picker (markers); per the APG, slides are a group (or tabpanel-style) with accessible names. The block bakes these in — a carousel that is just a scroll-snap strip with no announced rotation and no controls is not conformant and not what this block ships.",
+    "Autoplay is opt-in and accessibility-gated. Autoplay is OFF by default; when enabled it must pause on hover and on keyboard focus within the carousel, must NOT auto-advance under prefers-reduced-motion, and must expose a visible pause/play control (WCAG 2.2.2 Pause, Stop, Hide). These are fixed obligations of the autoplay configuration, not author choices — an unpausable auto-rotating carousel is an accessibility failure the block forbids.",
+    "Equivalent slides, not labelled panels and not paginated data — distinct from tabs and Collection Operations. A carousel rotates through peer content the user can browse (promos, images, cards); tabs switch between distinctly-labelled panels via a tablist; Collection Operations pages/filters/sorts a data set. A carousel composes Navigation for its prev/next + markers but is its own pattern, cross-referenced rather than merged."
+  ],
+  "webStandards": {
+    "ariaApgKeyboard": {
+      "usage": "A `role=\"region\"` with `aria-roledescription=\"carousel\"`, slide-picker controls, an accessible label, and a rotation pause control, following the APG carousel pattern.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/carousel/"
+    }
+  }
+}

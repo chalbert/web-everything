@@ -1,0 +1,63 @@
+{
+  "id": "broadcast",
+  "name": "Broadcast",
+  "status": "concept",
+  "type": "Behavior",
+  "summary": "Declarative DOM-to-JS bridge for provider-scoped broadcast events. Fills the platform gap between targeted Invoker Commands and global event dispatch.",
+  "exports": [
+    "BroadcastBehavior"
+  ],
+  "extendsClass": "CustomAttribute",
+  "dependsOn": [
+    "event-behaviors"
+  ],
+  "relatedProject": "webevents",
+  "attribute": "broadcast",
+  "webStandards": {
+    "invokerCommands": {
+      "status": "Baseline January 2026",
+      "pattern": "commandfor/command for targeted commands",
+      "gap": "No broadcast equivalent — commands are always 1-to-1 via element ID",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+    },
+    "commandEvent": {
+      "status": "Baseline December 2025",
+      "pattern": "CommandEvent is constructable but designed for declarative button triggers, not programmatic broadcast",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/CommandEvent/CommandEvent"
+    },
+    "customEvent": {
+      "status": "Standard",
+      "pattern": "CustomEvent + dispatchEvent is the current broadcast mechanism",
+      "gap": "Globally-scoped string names — no discrimination, no scoping",
+      "reference": "https://dom.spec.whatwg.org/#interface-customevent"
+    }
+  },
+  "designDecisions": {
+    "naming": {
+      "chosen": "broadcast",
+      "alternatives": [
+        "event-dispatch",
+        "dispatch",
+        "emit"
+      ],
+      "rationale": "Broadcast clearly communicates 'everyone, do this' intent. Mirrors the event taxonomy from Web Events research. 'dispatch' is too generic (could mean targeted). 'emit' is framework jargon (Node.js EventEmitter, Vue $emit)."
+    },
+    "dispatchTarget": {
+      "description": "Always dispatches on document",
+      "rationale": "Broadcast commands are global by definition. Subtree-scoped broadcast is a separate unsolved problem (DOM events only bubble up, not down). Keep the block simple and single-purpose."
+    },
+    "triggerEvent": {
+      "default": "click",
+      "configurable": "broadcast-on attribute for other triggers (e.g., change, submit)",
+      "rationale": "Buttons are the primary broadcast trigger. Other elements may need different trigger events."
+    },
+    "providerResolution": {
+      "description": "Resolves event class from the injector scope of the host element, constructs an instance, dispatches on document",
+      "rationale": "The host element's scope determines which event class to use. This allows different parts of the app to broadcast different event classes for the same provider key."
+    },
+    "detailSource": {
+      "description": "Optional broadcast-detail attribute for static detail, or broadcast-from attribute referencing a store/context for dynamic detail",
+      "rationale": "Broadcast commands often carry payload (e.g., theme name, locale code). Static JSON covers simple cases; store reference covers reactive cases."
+    }
+  }
+}

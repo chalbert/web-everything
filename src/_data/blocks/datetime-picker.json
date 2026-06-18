@@ -1,0 +1,28 @@
+{
+  "id": "datetime-picker",
+  "name": "Datetime Picker",
+  "status": "draft",
+  "type": "Component",
+  "summary": "A named shallow preset over the abstract `temporal` core: a combined date-and-time picker. It pins the Temporal Intent to presentation=media and granularity=point, bound to the native <input type=\"datetime-local\"> anchor — one control that selects both a calendar date and a time. It composes the core's calendar + clock surfaces and inherits locale-aware parse/format and keyboard roving; the native datetime-local input is the zero-JS fallback.",
+  "implementsIntent": "temporal",
+  "intentDimensions": {
+    "presentation": "media",
+    "granularity": "point"
+  },
+  "composesIntents": [
+    "temporal",
+    "locale",
+    "input",
+    "focus-delegation"
+  ],
+  "designDecisions": [
+    "A preset is a dimension pin, not new machinery (#713 option C) — datetime-picker pins presentation=media + granularity=point over input[type=datetime-local]. It is the third distinct native anchor (after date and time) that makes the temporal family a set of named presets rather than one configurable block (#713 C; the single-anchor slider precedent).",
+    "input[type=datetime-local] is the anchor and fallback; the picker composes the core's date (calendar) and time (clock) media surfaces over the one native control, which stays the keyboard/no-JS baseline."
+  ],
+  "webStandards": {
+    "ariaApgKeyboard": {
+      "usage": "A combined date-and-time preset: native `<input type=\"datetime-local\">` or a composed calendar + clock surface.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/datetime-local"
+    }
+  }
+}

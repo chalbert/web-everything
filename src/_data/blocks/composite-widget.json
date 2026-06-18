@@ -1,0 +1,13 @@
+{
+  "id": "composite-widget",
+  "name": "Composite Widget",
+  "status": "concept",
+  "type": "Behavior",
+  "summary": "Focus management and navigation protocol for complex widgets like Grids, Trees, and Menus, implementing the Roving Tabindex pattern.",
+  "webStandards": {
+    "rovingTabindex": {
+      "usage": "Implements the Roving Tabindex focus model for composite widgets (grids, trees, menus): exactly one descendant is `tabindex=\"0\"`, all others `tabindex=\"-1\"`, and the value moves with focus so the widget is a single Tab stop.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/practices/keyboard-interface/#kbd_roving_tabindex"
+    }
+  }
+}

@@ -15,8 +15,9 @@ import { createRequire } from 'node:module';
 import { renderInventory, spliceInventory } from './gen-inventory.mjs';
 import { checkDemos } from './check-demos.mjs';
 import { buildReport, source as reportSource, finding as reportFinding, section as reportSection } from './lib/buildReport.mjs';
+import { loadBlocks } from './lib/blocks-loader.cjs';
 import {
-  BACKLOG_STATUSES, BACKLOG_TYPES, WORK_ITEMS, FIB, FILE,
+  BACKLOG_STATUSES, BACKLOG_TYPES, WORK_ITEMS, FIB, FILE, blockSpecFile,
   dMissingField, dUnresolvedRef, dMissingDescription, buildGraduatedKinds, validateBacklogItem, isCanonicalGraduated,
   checkStatus, validateProtocol, validatePreset, validateDesignSystem, validateIntent, validateCapability, validateCapabilityMatrix,
   validateReportsNotHidden, findCompiledShadows, permalinkSegment, validateViteProxyCoverage,
@@ -88,7 +89,7 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const BLOCK_TYPES = new Set(['Store', 'Parser', 'Behavior', 'Directive', 'Component', 'Module']);
 
 // ── Load specs ───────────────────────────────────────────────────────────────
-const blocks = arr(readJson('blocks.json'));
+const blocks = arr(loadBlocks()); // per-block specs src/_data/blocks/<id>.json, assembled (#882)
 const plugs = arr(readJson('plugs.json'));
 const semantics = arr(readJson('semantics.json'));
 const research = arr(readJson('researchTopics.json'));
@@ -130,7 +131,7 @@ for (const r of research)
 for (const b of blocks) {
   if (b.implementedBy && !/^@frontierui\/blocks\//.test(b.implementedBy))
     err(`Block "${b.id}" implementedBy must reference the canonical @frontierui/blocks impl: ${b.implementedBy}`,
-      dUnresolvedRef('Block', b.id, FILE.Block, 'implementedBy', b.implementedBy, 'contract-form'));
+      dUnresolvedRef('Block', b.id, blockSpecFile(b.id), 'implementedBy', b.implementedBy, 'contract-form'));
   if (b.status === 'active' && !b.implementedBy)
     warn(`Block "${b.id}" is status:active but has no implementedBy (@frontierui/blocks impl reference)`);
 }

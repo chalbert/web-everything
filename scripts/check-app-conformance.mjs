@@ -29,6 +29,7 @@ import { readFileSync, existsSync, readdirSync, writeFileSync, statSync } from '
 import { fileURLToPath } from 'node:url';
 import { dirname, join, relative, extname } from 'node:path';
 import { buildConformanceReport } from './lib/conformanceReport.mjs';
+import { loadBlocks } from './lib/blocks-loader.cjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -42,7 +43,7 @@ if (!existsSync(APP_DIR)) { console.error(`✗ app not found: ${APP_REL}`); proc
 
 // ── Registries (the only things we can validate against) ────────────────────────
 const readJson = (p, dflt) => { try { return JSON.parse(readFileSync(join(ROOT, p), 'utf8')); } catch { return dflt; } };
-const blocks = readJson('src/_data/blocks.json', []);
+const blocks = loadBlocks(); // per-block specs src/_data/blocks/<id>.json, assembled (#882)
 const intents = readJson('src/_data/intents.json', []);
 const protocols = readJson('src/_data/protocols.json', []);
 const byId = (arr, id) => arr.find((x) => x.id === id);

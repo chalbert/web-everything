@@ -1,0 +1,80 @@
+{
+  "id": "dialog",
+  "attributes": [
+    {
+      "name": "open",
+      "type": "boolean",
+      "default": false,
+      "fieldName": "open",
+      "description": "Whether the surface is shown; reflects the native `<dialog>` open state (top-layer mount)."
+    },
+    {
+      "name": "modal",
+      "type": "boolean",
+      "default": true,
+      "description": "Modal (`showModal()` — focus trap + inert background + `::backdrop`) vs non-modal (Popover API) mounting."
+    }
+  ],
+  "properties": [
+    {
+      "name": "open",
+      "type": "boolean",
+      "reflects": true,
+      "attribute": "open",
+      "description": "Gets or sets the shown state; opening moves focus into the surface, closing restores it to the trigger."
+    },
+    {
+      "name": "returnValue",
+      "type": "string",
+      "description": "The value set when the dialog closes (native `<dialog>` returnValue), e.g. which button dismissed it."
+    }
+  ],
+  "slots": [
+    {
+      "name": "",
+      "description": "The dialog content (default slot)."
+    }
+  ],
+  "cssParts": [
+    {
+      "name": "backdrop",
+      "description": "The `::backdrop` behind a modal surface."
+    },
+    {
+      "name": "panel",
+      "description": "The surface container that holds the content."
+    }
+  ],
+  "name": "Dialog",
+  "status": "draft",
+  "type": "Component",
+  "summary": "The abstract substrate every dialog-based surface conforms to — a top-layer surface that interrupts or overlays the page, owning the shared modal-surface machinery: focus containment, escape/outside/backdrop dismissal, scroll-lock, modal-vs-non-modal mode, and the native-first top-layer mount. Like droplist, it is not a shippable widget — it is the family substrate. Its concrete members are each their own block, distinct configurations of the Modal Intent's placement over this one substrate: a centered modal (placement=center), an edge Drawer (placement=start/end + slide, #360), and a bottom Sheet (placement=bottom). Native-first by construction: built on the native <dialog> element (showModal for the modal focus-trap, inert background, and ::backdrop; the platform top layer) and the Popover API for the non-modal case — never a position:fixed + z-index re-implementation. It realizes the Modal Intent and composes Focus Containment (the trap), Surface (elevation/material), and Motion (enter/exit).",
+  "implementsIntent": "modal",
+  "composesIntents": [
+    "modal",
+    "focus-containment",
+    "surface",
+    "motion"
+  ],
+  "events": [
+    "dialog-opened",
+    "dialog-closed"
+  ],
+  "designDecisions": [
+    "Family substrate, not a shippable widget — droplist applied to dialogs. A dialog's hard parts (focus containment, dismissal, backdrop, scroll-lock, top-layer mounting, modal/non-modal mode) are the shared modal-surface machinery EVERY dialog-based surface needs, so dialog declares the substrate once and concrete members compose it — exactly as droplist is the abstract substrate for Dropdown/Autocomplete/Tree-select. Keeping the family thin and the machinery in one place is why a drawer need not re-implement any of it.",
+    "Family vs. members: concrete members are each their own block, not configurations of one widget. A centered Modal (placement=center), an edge Drawer (placement=start/end + slide, #360), and a bottom Sheet (placement=bottom) are distinct members — each a fixed configuration of the Modal Intent's placement over this substrate — rather than one dialog widget toggled by a flag. This mirrors droplist's family/members ruling (Dropdown, Multi-dropdown, Autocomplete are separate blocks) and the menu block's distinct-pattern stance, and keeps each member's spec honest about what it fixes.",
+    "Native-first: built on <dialog> + the top layer, never re-implemented. The native <dialog> element with showModal() already provides the modal focus-trap, the inert background, the ::backdrop, Escape-to-cancel, and a real top-layer paint — so the substrate defaults to it and enhances only what the platform doesn't give (placement other than center, scroll-lock nuance, coordinated enter/exit motion, swipe). The non-modal mode uses dialog.show() or the Popover API. A position:fixed + z-index stack is rejected — it is exactly the stacking-context class of bug the top layer removes.",
+    "Modal vs non-modal is the Modal Intent's `mode` dimension, owned here so members inherit it. mode=modal → showModal() (focus-trapping, background inert, backdrop); mode=non-modal → show()/popover (focus stays free, page interactive). The substrate owns this branch — and the Modal Intent's `dismissal`, `backdrop`, and `scrolling` dimensions are realized here once — so a concrete member only fixes `placement` (+ motion). This is the concrete reason a drawer composes, not re-implements, the dialog.",
+    "implementsIntent stays 'modal' (the contract it most directly realizes) so intent→block reverse-lookup is unchanged; composesIntents lists the full set (Focus Containment, Surface, Motion), surfaced on the block page and each composed intent's page — the same convention droplist uses with 'anchor'."
+  ],
+  "webStandards": {
+    "dialog": {
+      "usage": "The shared modal-surface substrate over the native `<dialog>` element: top-layer rendering, a backdrop, focus trapping, and restore-focus-on-close.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/HTMLDialogElement"
+    },
+    "ariaApgKeyboard": {
+      "usage": "Realizes the APG modal-dialog keyboard model: focus moves into the dialog on open, Tab cycles within it, Escape closes, and focus returns to the trigger.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/dialog-modal/"
+    }
+  }
+}

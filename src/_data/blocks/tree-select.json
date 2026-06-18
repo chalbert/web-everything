@@ -1,0 +1,23 @@
+{
+  "id": "tree-select",
+  "name": "Tree Select",
+  "status": "active",
+  "type": "Component",
+  "summary": "The hierarchical member of the droplist family (per the #064 ruling). `TreeSelectBehavior` realizes the `hierarchy` intent: a `role=\"tree\"` of `role=\"treeitem\"` / `role=\"group\"` with `aria-level` / `aria-setsize` / `aria-posinset`, Right/Left expand-then-descend / collapse-then-ascend traversal, Up/Down/Home/End movement, and node selection (`aria-checked`, single|multiple) with an optional `cascade` (a partially-checked parent reads `mixed`). Builds the tree from a declarative `TreeNode[]` and emits `tree-change`. Native-first; degrades conceptually to a grouped `<select>`. First consumer: the auto-insurance coverage builder (#318).",
+  "implementsIntent": "hierarchy",
+  "composesIntents": [
+    "selection",
+    "disclosure"
+  ],
+  "exports": [
+    "TreeSelectBehavior",
+    "registerTreeSelect"
+  ],
+  "implementedBy": "@frontierui/blocks/tree-select/TreeSelectBehavior.ts",
+  "webStandards": {
+    "ariaTreeview": {
+      "usage": "A `role=\"tree\"` of `role=\"treeitem\"` nodes with `aria-expanded` on parents and `aria-selected` on the chosen node; arrow keys walk and expand/collapse the hierarchy.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/treeview/"
+    }
+  }
+}

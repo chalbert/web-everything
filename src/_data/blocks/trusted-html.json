@@ -1,0 +1,16 @@
+{
+  "id": "trusted-html",
+  "name": "Trusted HTML",
+  "status": "draft",
+  "type": "Directive",
+  "summary": "Structural directive enforcing Trusted Types policies on dynamic HTML content via comment-based virtual elements.",
+  "related": [
+    "trusted-html-behavior"
+  ],
+  "webStandards": {
+    "trustedTypes": {
+      "usage": "A structural directive that enforces a Trusted Types policy on dynamic HTML, routing injected markup through `TrustedHTML` so the sink is XSS-safe.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Trusted_Types_API"
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "keyboard-shortcuts",
+  "name": "Keyboard Shortcuts",
+  "status": "draft",
+  "type": "Module",
+  "summary": "Standardized keyboard interaction management enabling consistent shortcut handling across shadow boundaries and OS-specific layouts.",
+  "webStandards": {
+    "keyboardEventKey": {
+      "usage": "Normalizes shortcut handling on `KeyboardEvent.key` / `.code` across shadow boundaries and OS layouts, so chords resolve consistently regardless of where focus sits.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key"
+    }
+  }
+}

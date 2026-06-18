@@ -1,0 +1,62 @@
+{
+  "id": "radio-group",
+  "attributes": [
+    {
+      "name": "name",
+      "type": "string",
+      "description": "Shared `name` across the `<input type=\"radio\">` group — native exclusivity comes free from it."
+    },
+    {
+      "name": "value",
+      "type": "string",
+      "fieldName": "value",
+      "description": "The selected option’s value among the mutually-exclusive choices."
+    },
+    {
+      "name": "disabled",
+      "type": "boolean",
+      "default": false,
+      "description": "Disables the whole group."
+    },
+    {
+      "name": "required",
+      "type": "boolean",
+      "default": false,
+      "description": "Requires a selection for native constraint validation."
+    }
+  ],
+  "properties": [
+    {
+      "name": "value",
+      "type": "string",
+      "reflects": true,
+      "attribute": "value",
+      "description": "Gets or sets the selected value; arrow keys move selection (and focus) within the single Tab stop (roving)."
+    }
+  ],
+  "slots": [
+    {
+      "name": "",
+      "description": "The radio options (default slot); a `<fieldset>`/`<legend>` names the group."
+    }
+  ],
+  "name": "Radio Group",
+  "status": "draft",
+  "type": "Component",
+  "summary": "Native-first over a `<input type=\"radio\">` group sharing a `name`: single-select among mutually-exclusive choices. Realizes the `selection` intent (model: single) and composes `focus-delegation` (roving — arrow keys move AND select within the group, the group is a single Tab stop). Native exclusivity comes free from the shared `name`; a `<fieldset>` + `<legend>` names the group. Zero JS for the standard case. Sliced from #468 (form-control inventory).",
+  "implementsIntent": "selection",
+  "composesIntents": [
+    "focus-delegation"
+  ],
+  "designDecisions": [
+    "Native-first: a radio group is N `<input type=\"radio\">` sharing a `name`, wrapped in `<fieldset>`/`<legend>` — mutual exclusivity and the single submitted value are the platform's, no JS. The block standardizes the grouping + labelling contract.",
+    "Roving focus is the platform's for native radios: arrow keys move focus AND change selection, and the group is ONE Tab stop (the checked radio, or the first when none). This is exactly the focus-delegation `roving` value — the block composes that intent rather than redefining traversal.",
+    "Single-select, distinct from a checkbox group (#472): radios are mutually exclusive (pick one), a checkbox group is multi-select (pick any). Maps to selection `model: single` vs `multiple`. A radio group has no indeterminate state but can start with none selected."
+  ],
+  "webStandards": {
+    "rovingTabindex": {
+      "usage": "Native-first over a `<input type=\"radio\">` group sharing a `name`: the group is one Tab stop, arrow keys move selection (and focus) among mutually-exclusive choices.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/radio/"
+    }
+  }
+}

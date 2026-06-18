@@ -16,11 +16,13 @@ import {
   DraftError,
 } from '../modelFixer.mjs';
 
-const BLOCKS = JSON.stringify([{ id: 'gauge', name: 'Gauge', summary: 'A radial value gauge.', type: 'Component' }]);
+// A Block's spec is its own per-block file whose whole content IS the row (#882) — a single object,
+// at src/_data/blocks/<id>.json, not a row in an array.
+const BLOCKS = JSON.stringify({ id: 'gauge', name: 'Gauge', summary: 'A radial value gauge.', type: 'Component' });
 const DESC_FILE = 'src/_includes/block-descriptions/gauge.njk';
-const DATA_FILE = 'src/_data/blocks.json';
+const DATA_FILE = 'src/_data/blocks/gauge.json';
 
-/** In-memory world: blocks.json present, description file absent. `verify` flags the missing file. */
+/** In-memory world: the per-block spec present, description file absent. `verify` flags the missing file. */
 function makeWorld(extra = {}) {
   const fs = { [DATA_FILE]: BLOCKS, ...extra };
   const read = (file) => {

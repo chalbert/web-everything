@@ -1,0 +1,32 @@
+{
+  "id": "menu",
+  "name": "Menu",
+  "status": "draft",
+  "type": "Component",
+  "summary": "Composition manifest for the action-invocation menu family — the ARIA menu / menubar / menuitem surface for invoking COMMANDS, not selecting values. One block with a shape: menubar | menu | context dimension (orientation derived); roving focus as a fixed mechanic (overriding the droplist family virtual default); every item composes the command intent for invocation; checkable items reuse Selection under a checkable trait; submenus compose Disclosure + Anchor (not the tree-select hierarchy intent); separator and group are owned directly. Distinct from the droplist family, which are listbox/combobox value selectors. Ratified in #173.",
+  "implementsIntent": "command",
+  "composesIntents": [
+    "command",
+    "focus-delegation",
+    "anchor",
+    "type-ahead",
+    "selection",
+    "disclosure",
+    "action"
+  ],
+  "designDecisions": [
+    "Invocation, not value (the menu's thesis). A menu item INVOKES an action — a command — which is a different paradigm from committing a value, and the whole reason the menu warrants its own block separate from the droplist family (listbox/combobox value-selectors). Every item composes the command intent (#016/#299) for invocation; the Action intent stays orthogonal (visual prominence — primary/destructive), and an item composes both. Overloading Action or Selection for invocation is rejected: it dissolves the menu-vs-select distinction this block exists to draw (#173 Fork A).",
+    "Roving focus, fixed — not a dimension. focus-delegation.strategy = roving with selectionFollowsFocus = independent, a FIXED menu mechanic overriding the droplist family's virtual default. APG permits roving OR aria-activedescendant for menus with no menu-specific preference; WE chooses roving by convention (what Radix/Headless/MUI/Fluent all ship). It is not exposed as a configurable axis because there is no legitimate desktop-menu end-state that uses virtual (the only virtual case — a giant virtualized menu — is out of scope), per dimension-vs-fixed-mechanic (#173 Fork B).",
+    "One block, shape dimension — not three blocks. shape: menubar | menu | context (default menu), with orientation derived. Menubar, popup menu, and context menu share the entire item/role/keyboard machinery and differ only in summoning (always-visible / trigger-click / pointer + Shift+F10) and orientation: a menubar adds tabindex=0 on its first item; a context menu binds the contextmenu event + Shift+F10. Matches Carbon/Ant and the platform's shared role machinery, rather than tripling the surface Radix-style (#173 Fork C).",
+    "Checkable items reuse Selection under a checkable trait. menuitemcheckbox / menuitemradio are genuine aria-checked selection state, not invocation, so they compose the Selection intent (model=single → radio group, model=multiple → independent checkboxes) under a checkable trait. A plain menuitem carries NO Selection (pure command). Matches the Fluent/Carbon/Radix consensus and avoids duplicating Selection's single-vs-multiple machinery (#173 Fork D).",
+    "Submenus compose Disclosure + Anchor — not the tree-select hierarchy intent. A submenu is a parent menuitem with aria-haspopup=menu + aria-expanded (Disclosure) opening its own Anchored menu surface, with the cascade owned by the menu keyboard model (Right opens / Left closes). The tree-select hierarchy intent is rejected: it owns flatten-to-visible-rows + aria-level/setsize/posinset + cross-level Up/Down traversal, none of which a cascading popup has — a submenu is a fresh anchored surface, a different paradigm (#173 Fork E).",
+    "The Menu block owns separator and group directly. role=separator (a non-focusable divider) and role=group (a labelled section) are first-class APG menu roles every library ships; the block owns them rather than deferring. The labelled-group case may lean on Selection's existing grouping dimension for the heading / aria-labelledby wiring; otherwise there is no cross-cutting reuse (#173 Fork F).",
+    "Claims the menu-button trigger; the droplist 'Menu button' roster entry is demoted to trigger-only. A true menu button (a button with aria-haspopup=menu / aria-expanded) opens a role=menu of commands — it belongs to this block, not the droplist family (a value-selector substrate). #173 claims the trigger; the droplist roster entry becomes 'the trigger shape only; surface owned by the Menu block' (the demotion is the follow-on #301) (#173 Fork G)."
+  ],
+  "webStandards": {
+    "ariaApgKeyboard": {
+      "usage": "The action-invocation substrate: `role=\"menu\"` / `role=\"menubar\"` of `role=\"menuitem\"` with the APG keyboard model (arrows move, Enter/Space invoke, Escape closes) — for invoking commands, not selecting values.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/menu-button/"
+    }
+  }
+}

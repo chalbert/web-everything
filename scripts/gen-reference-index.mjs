@@ -9,7 +9,7 @@
  * The five homes (and their URL-bearing fields):
  *   corpus            src/_data/benchmarkCorpus.json           sources[].docsUrl, sources[].repoUrl
  *   references        src/_data/references.json                [].links[].url   (external only)
- *   blocks            src/_data/blocks.json                    [].webStandards.*.reference
+ *   blocks            src/_data/blocks/*.json                  [].webStandards.*.reference
  *   capability        src/_data/benchmarkCapabilityPresence.json  rows[].url
  *   intents           src/_data/intents.json                   URLs inside HTML description
  *
@@ -23,6 +23,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { loadBlocks } from './lib/blocks-loader.cjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA = join(ROOT, 'src/_data');
@@ -31,7 +32,9 @@ const OUT = join(DATA, 'referenceIndex.json');
 const SOURCES = {
   corpus: 'benchmarkCorpus.json',
   references: 'references.json',
-  blocks: 'blocks.json',
+  // blocks are read via the per-block loader (#882), not this path; the key stays so `blocks`
+  // remains one of the structured homes listed in `homes` (Object.keys(SOURCES)).
+  blocks: 'blocks/*.json',
   capability: 'benchmarkCapabilityPresence.json',
   intents: 'intents.json',
 };
@@ -82,8 +85,8 @@ function collect() {
     for (const link of cat.links ?? []) push(link.url, 'references', cat.category, link.title);
   }
 
-  // 3. Web-standard refs on blocks
-  const blocks = readJson(SOURCES.blocks);
+  // 3. Web-standard refs on blocks (assembled from per-block specs src/_data/blocks/<id>.json, #882)
+  const blocks = loadBlocks();
   for (const b of blocks ?? []) {
     for (const [key, std] of Object.entries(b.webStandards ?? {})) {
       push(std?.reference, 'blocks', b.id, `${b.name} · ${key}`);

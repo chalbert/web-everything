@@ -1,0 +1,23 @@
+{
+  "id": "audit-trail",
+  "name": "Audit",
+  "status": "active",
+  "type": "Module",
+  "summary": "Reference runtime for the Web Audit protocol (webaudit / #357) — a domain entity's immutable, actor-attributed history. Ships the protocol's seam: the normalized `AuditEvent` ({ target, action, actor, at, before?, after?, correlationId? }, before/after reusing the Web States `ChangeRecord` shape), the swappable `CustomAuditProvider` contract (`append()` / `queryByEntity()` / optional `subscribe()`), a native-first append-only `DefaultAuditProvider` (it freezes each event — never mutates or deletes), and the `CustomAuditRegistry` (`window.customAudit`). The `auditLifecycle()` helper is the headline composition: it subscribes a Web Lifecycle provider so every transition becomes one `AuditEvent` automatically. First consumer: the loan-origination exercise app (#317).",
+  "exports": [
+    "DefaultAuditProvider",
+    "CustomAuditRegistry",
+    "registerAudit",
+    "auditLifecycle"
+  ],
+  "dependsOn": [
+    "lifecycle"
+  ],
+  "implementedBy": "@frontierui/blocks/audit/AuditProvider.ts",
+  "webStandards": {
+    "headingElements": {
+      "usage": "Reference runtime for the Web Audit protocol: an immutable, actor-attributed `AuditEvent[]` history; each entry timestamps with the `<time>` element’s machine-readable `datetime`.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/time"
+    }
+  }
+}

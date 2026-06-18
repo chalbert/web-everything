@@ -1,0 +1,33 @@
+{
+  "id": "app-shell",
+  "name": "App Shell",
+  "status": "active",
+  "type": "Module",
+  "implementedBy": "@frontierui/blocks/app-shell/",
+  "summary": "Chrome layout primitive that frames a page: a (sticky) header with a brand lockup and a header-controls region, an optional nav landmark, the main content region (preceded by a skip link), and an optional footer. Built for the #870 must-build set so the #865 WE-docs chrome dogfood can mount it in-document (mode C).",
+  "exports": [
+    "createAppShell",
+    "mountAppShell",
+    "mountInDocument"
+  ],
+  "webStandards": {
+    "landmarkRoles": {
+      "status": "WAI-ARIA",
+      "pattern": "header / nav / main / footer landmark elements structure the page for assistive technology",
+      "adoption": "App Shell emits native <header>, <nav aria-label>, <main>, <footer> landmark regions",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/main"
+    },
+    "skipLink": {
+      "status": "WCAG 2.4.1",
+      "pattern": "A skip link as the first focusable element lets keyboard users bypass repeated chrome",
+      "adoption": "App Shell renders a skip link targeting the focusable <main> region",
+      "reference": "https://www.w3.org/WAI/WCAG21/Techniques/general/G1"
+    },
+    "positionSticky": {
+      "status": "Baseline",
+      "pattern": "position: sticky pins the header to the top on scroll without JavaScript",
+      "adoption": "Sticky header is the default; opt out via config",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/position"
+    }
+  }
+}

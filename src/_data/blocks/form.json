@@ -1,0 +1,38 @@
+{
+  "id": "form",
+  "name": "Form",
+  "status": "draft",
+  "type": "Store",
+  "summary": "The form-level state machine and lifecycle actions, sitting ABOVE the field-level Validation Intent / Web Validation (which own per-field rules and validity). Web Validation answers 'is this field valid?'; the Form block answers 'what is the state of the whole form, and how do I reset / submit / initialize it?' Grounded in the native `<form>` element, `FormData`, the Constraint Validation API and `formAssociated` custom elements — it adds only the aggregate state and lifecycle actions the platform doesn't expose, and composes existing intents for everything else. Candidate standard (no implementation yet); composition manifest like Droplist.",
+  "composesIntents": [
+    "validation",
+    "exit-guard",
+    "feedback",
+    "reliability"
+  ],
+  "exports": [
+    "FormState",
+    "FormActions",
+    "FormValues"
+  ],
+  "webStandards": [
+    "HTMLFormElement",
+    "FormData",
+    "Constraint Validation API",
+    "formAssociated custom elements (ElementInternals)"
+  ],
+  "relatedProject": "webblocks",
+  "related": [
+    "validation",
+    "input-family",
+    "droplist"
+  ],
+  "designDecisions": [
+    "Sits above the field layer, never duplicating it: per-field rules and validity belong to the Validation Intent / Web Validation project. The Form block owns only the form-LEVEL aggregate (valid/invalid, touched/untouched, focused/unfocused, dirty/pristine across fields) and the lifecycle actions (submit, reset, clear, initialize). Composition over redefinition, the Droplist rule.",
+    "Native-first substrate: the block augments a real `<form>` rather than replacing it. `FormData` reads the current values, the Constraint Validation API supplies per-field validity, and `formAssociated` custom elements (via `ElementInternals` form-lifecycle callbacks: formResetCallback, formStateRestoreCallback) let custom fields participate in the native form. The block adds aggregate state + actions the platform leaves to userland; it never re-implements field validity or submission the platform already does.",
+    "Form validity merges from field validity through the swappable ValidityMergeRegistry (#212 / #004 OP-1), NOT a merge rule baked into the Form block. The standard consumes the `MergedValidity` hand-off shape; HOW field results reduce to form validity (native-first default: source-reduction over named sources with declared precedence and a `pending{version}` token) is the registry's swappable concern. This closes the item's open 'last-writer vs strictest' question by deferring it to the already-ratified strategy plane.",
+    "Dirty / pristine is current-vs-initial, and `initialize(initialValues?)` re-baselines it: `initialValues` (the seed), `defaultValues` (reset target), and current `values` are kept distinct. dirty = current ≠ initial; reset → defaults; clear → empty; initialize → re-seed AND mark pristine (the new baseline). Three value sets, never one overloaded field — mirrors the three-distinct-dates discipline elsewhere.",
+    "Composes, not re-specifies, three intents for the rest: Validation Intent (field validity merges up to form validity), Exit Guard (the unsaved-changes navigation guard #129, armed from `dirty`), and Feedback/Reliability (submit lifecycle: in-flight, success, error). Each behavior defers to the owning intent, keeping the Form spec thin."
+  ],
+  "designRationale": "Surfaced as a gap: there is no block answering the whole-form state/lifecycle question, only field-level validity. Built fresh on the native form + validation primitives (the legacy plateau repo is explicitly NOT a model and was not consulted). Authored as a candidate (draft) composition manifest; a reference implementation is a follow-on once the contract is reviewed."
+}

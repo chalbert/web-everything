@@ -1,0 +1,19 @@
+{
+  "id": "input-family",
+  "name": "Input Family",
+  "status": "draft",
+  "type": "Component",
+  "summary": "Native-first over the text-ish `<input>` family (text / number / currency / phone / masked): the formatting, masking, and typing affordances the bare element can't express, while keeping the native input as the substrate. Realizes the `input` intent. The platform `type` (`text`/`number`/`tel`/`email`/`url`) carries semantics, keyboard, and validation for free; the block adds a display-format layer (Intl) and an optional input mask over a raw value, never replacing the element. Zero JS for a plain typed input; the format/mask behavior is opt-in. Sliced from #468 (form-control inventory).",
+  "implementsIntent": "input",
+  "designDecisions": [
+    "Native-first: the substrate is always a native `<input>` with the most specific platform `type` (`number` for numerics, `tel` for phone, `email`/`url` where they fit) — the type gives the mobile keyboard, the constraint-validation hooks, and the submitted value for free. The block never swaps the element for a custom widget; it layers formatting/masking on top.",
+    "Display value vs. raw value are kept separate (the data-table formatter rule, #368): currency/number formatting is presentational via `Intl.NumberFormat` (and locale-aware grouping/decimals), while the form-submitted/queried value stays the unformatted raw — so `1234.5` submits as `1234.5` even when shown as `$1,234.50`. A `type=number` input can't show grouped currency, so a currency field is a `type=text inputmode=decimal` with the Intl layer, raw value mirrored to a hidden/native value.",
+    "Masking is the one affordance the platform lacks: a phone/SSN/date mask constrains and segments typing (`(555) 123-4567`) — the block standardizes a declarative mask pattern over the raw digits, never `innerHTML`, and degrades to a plain typed input when JS is off. Masks are opt-in, distinct from constraint validation (`pattern`/`maxlength`), which stays native."
+  ],
+  "webStandards": {
+    "constraintValidation": {
+      "usage": "Native-first over the text-ish `<input>` family (text / number / currency / phone / masked): preserves native constraint validation, `inputmode`, and the validity UI the bare element already provides.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Constraint_validation"
+    }
+  }
+}

@@ -1,0 +1,243 @@
+{
+  "id": "resource-loader",
+  "name": "Resource Loader",
+  "status": "active",
+  "type": "Module",
+  "summary": "Trait-based async state management orchestrator handling loading lifecycle with timing, abort, and composable UI traits.",
+  "implementsIntent": "loader",
+  "implementedBy": "@frontierui/blocks/resource-loader/ResourceLoader.ts",
+  "dependsOn": [],
+  "exports": [
+    "ResourceLoader",
+    "LoadResult",
+    "withSoftBlocking",
+    "SoftBlockingOptions",
+    "withReplacement",
+    "ReplacementOptions",
+    "withIndeterminate",
+    "IndeterminateOptions",
+    "LoaderIntent",
+    "LoaderState",
+    "BlockingStrategy",
+    "LoaderScope",
+    "LoaderProgress",
+    "LoaderContext",
+    "TraitHandle",
+    "TraitFactory",
+    "ResourceLoaderOptions",
+    "ResourceLoadStartDetail",
+    "ResourceLoadEndDetail",
+    "ResourceLoadErrorDetail",
+    "ResourceStateChangeDetail",
+    "DEFAULT_INTENT",
+    "DEFAULT_TIMINGS"
+  ],
+  "webStandards": {
+    "fetchAPI": {
+      "status": "Baseline",
+      "pattern": "fetch() with AbortController for cancellable requests",
+      "adoption": "All loader operations use AbortSignal for cancellation; superseded navigations abort automatically",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API"
+    },
+    "abortController": {
+      "status": "Baseline",
+      "pattern": "AbortController/AbortSignal for cooperative cancellation",
+      "adoption": "Loaders receive signal param; AbortSignal.timeout() for built-in timeout support",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/AbortController"
+    },
+    "cacheAPI": {
+      "status": "Baseline",
+      "pattern": "Cache/CacheStorage for request-level caching",
+      "adoption": "Custom Cache sub-standard provides cache policy; runtime can delegate to Cache API",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Cache"
+    },
+    "httpCacheControl": {
+      "status": "Standard (RFC 9111)",
+      "pattern": "stale-while-revalidate directive in HTTP headers",
+      "adoption": "withStaleWhileRevalidate trait mirrors this pattern at the UI level",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control"
+    },
+    "ariaBusy": {
+      "status": "Standard",
+      "pattern": "aria-busy for announcing loading state to assistive technology",
+      "adoption": "All strategy traits set aria-busy='true' on the loading region during async operations",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-busy"
+    },
+    "progressElement": {
+      "status": "Standard",
+      "pattern": "<progress> element for native determinate progress indication",
+      "adoption": "withDeterminate trait renders native <progress> with value/max attributes",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/progress"
+    }
+  },
+  "events": {
+    "resource-load-start": {
+      "description": "Fired when an async loading operation begins",
+      "taxonomy": "notification",
+      "detail": {
+        "operation": "ResourceOperation",
+        "timing": "string"
+      },
+      "bubbles": true,
+      "cancelable": false,
+      "class": "ResourceLoadStartEvent",
+      "provider": "customEvents:resource-load-start"
+    },
+    "resource-load-end": {
+      "description": "Fired when an async loading operation completes successfully",
+      "taxonomy": "notification",
+      "detail": {
+        "operation": "ResourceOperation",
+        "data": "unknown",
+        "duration": "number"
+      },
+      "bubbles": true,
+      "cancelable": false,
+      "class": "ResourceLoadEndEvent",
+      "provider": "customEvents:resource-load-end"
+    },
+    "resource-load-error": {
+      "description": "Fired when an async loading operation fails",
+      "taxonomy": "notification",
+      "detail": {
+        "operation": "ResourceOperation",
+        "error": "Error",
+        "retryable": "boolean"
+      },
+      "bubbles": true,
+      "cancelable": false,
+      "class": "ResourceLoadErrorEvent",
+      "provider": "customEvents:resource-load-error"
+    },
+    "resource-state-change": {
+      "description": "Fired on any state machine transition (idle, pending, loading, success, empty, error, stale)",
+      "taxonomy": "notification",
+      "detail": {
+        "oldState": "LoaderState",
+        "newState": "LoaderState"
+      },
+      "bubbles": true,
+      "cancelable": false,
+      "class": "ResourceStateChangeEvent",
+      "provider": "customEvents:resource-state-change"
+    },
+    "rationale": "Typed event classes registered via provider key. Enables listenForScoped discrimination when multiple loaders coexist (e.g., router loader + inline data grid loader firing load-end simultaneously)."
+  },
+  "designDecisions": {
+    "virtualElement": {
+      "description": "Uses comment-based markers instead of wrapper elements",
+      "rationale": "Preserves parent-child CSS layout (Grid/Flex). No extra <div> between parent and content."
+    },
+    "traitComposition": {
+      "description": "Loading behaviors are composed via mixin traits, not subclassing",
+      "rationale": "Strategy (soft/hard/replacement/optimistic) and progress (determinate/indeterminate) are orthogonal dimensions. Mixins compose better than a class hierarchy."
+    },
+    "intentDriven": {
+      "description": "Block does not decide loading UX — it reads LoaderIntent from the injector chain",
+      "rationale": "Decouples the loading consumer from the loading UX. Apps declare intent once; all consumers (router, forms, grids) adapt consistently."
+    },
+    "stateMachine": {
+      "states": [
+        "idle",
+        "pending",
+        "loading",
+        "success",
+        "empty",
+        "error",
+        "stale"
+      ],
+      "description": "7-state machine governing the full async lifecycle",
+      "rationale": "pending vs loading distinction enables debounced timing (no flash for fast ops). empty is distinct from success for empty-state UX. stale enables stale-while-revalidate pattern."
+    },
+    "registryFirst": {
+      "description": "Loading templates (skeletons, error cards, empty states) are defined in CustomResourceRegistry, not inline",
+      "rationale": "Ensures consistent loading visuals across the application. Inline templates create visual inconsistency."
+    }
+  },
+  "frameworkComparison": {
+    "tanstackQuery": {
+      "patterns": [
+        "staleTime/gcTime",
+        "query keys",
+        "request deduplication",
+        "focus/reconnect revalidation"
+      ],
+      "notes": "Stale-while-revalidate model with hierarchical cache invalidation by key"
+    },
+    "swr": {
+      "patterns": [
+        "useSWR hook",
+        "stale-while-revalidate",
+        "auto-revalidation on focus/reconnect"
+      ],
+      "notes": "Lightweight SWR pattern from Vercel; minimal API with built-in deduplication"
+    },
+    "apolloClient": {
+      "patterns": [
+        "Apollo Link chain",
+        "fetchPolicy (cache-first, network-only, etc.)",
+        "optimistic responses"
+      ],
+      "notes": "Link middleware pattern is the inspiration for Custom Middleware sub-standard"
+    },
+    "reactSuspense": {
+      "patterns": [
+        "Suspense boundaries",
+        "fallback content",
+        "streaming SSR"
+      ],
+      "notes": "Declarative loading boundaries; similar concept to our virtual element approach"
+    },
+    "remix": {
+      "patterns": [
+        "loader functions",
+        "useLoaderData",
+        "defer/Await",
+        "useNavigation"
+      ],
+      "notes": "Route-level data fetching with progressive enhancement; inspiration for Router integration"
+    }
+  },
+  "traits": [
+    {
+      "name": "withOptimistic",
+      "description": "Non-blocking — shows predicted outcome immediately, reverts on failure",
+      "intentDimension": "loader.strategy.optimistic"
+    },
+    {
+      "name": "withSoftBlocking",
+      "description": "Input-blocking — applies aria-disabled and pointer-events:none while content remains visible",
+      "intentDimension": "loader.strategy.soft"
+    },
+    {
+      "name": "withHardBlocking",
+      "description": "Visual-blocking — obscures or overlays content with a backdrop",
+      "intentDimension": "loader.strategy.hard"
+    },
+    {
+      "name": "withReplacement",
+      "description": "Content-blocking — replaces view with placeholder (skeleton, spinner)",
+      "intentDimension": "loader.strategy.replacement"
+    },
+    {
+      "name": "withDeterminate",
+      "description": "Renders measurable progress (0-100%) as a progress bar or percentage",
+      "intentDimension": "loader.progress.determinate"
+    },
+    {
+      "name": "withIndeterminate",
+      "description": "Renders activity indication (spinner, pulse, shimmer) without measurable progress",
+      "intentDimension": "loader.progress.indeterminate"
+    },
+    {
+      "name": "withSkeleton",
+      "description": "Placeholder content matching page structure for initial loads",
+      "intentDimension": "loader.context.initial"
+    },
+    {
+      "name": "withStaleWhileRevalidate",
+      "description": "Keeps previous content visible (dimmed/stale) while refreshing",
+      "intentDimension": "loader.context.transition"
+    }
+  ]
+}

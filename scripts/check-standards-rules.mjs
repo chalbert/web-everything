@@ -568,14 +568,22 @@ export const LIFECYCLE = new Set(['concept', 'draft', 'experimental', 'active'])
 export const STATUS_SYNONYMS = { implemented: 'active', stable: 'active', done: 'active', planned: 'concept', wip: 'draft' };
 
 // Spec data files, keyed by entity for descriptor `file` pointers (the row/file a fixer edits).
+// Block is NOT here: blocks are split one-file-per-block (#882), so a Block fixer's target is
+// per-id — resolve it through `fileFor`/`blockSpecFile`, never a single registry path.
 export const FILE = {
-  Block: 'src/_data/blocks.json', Plug: 'src/_data/plugs.json', Protocol: 'src/_data/protocols.json',
+  Plug: 'src/_data/plugs.json', Protocol: 'src/_data/protocols.json',
   Intent: 'src/_data/intents.json', Capability: 'src/_data/capabilities.json',
   CapabilityAdapter: 'src/_data/capabilityMatrix.json', Project: 'src/_data/projects.json',
   Research: 'src/_data/researchTopics.json',
   Preset: 'src/_data/assemblerPresets.json',
   DesignSystem: 'src/_data/designSystems.json',
 };
+
+/** The per-block spec file a Block fixer edits (#882 — replaces the former single blocks.json row). */
+export const blockSpecFile = (id) => `src/_data/blocks/${id}.json`;
+
+/** Resolve the descriptor `file` write-target for an entity kind: per-id for Block, the registry otherwise. */
+export const fileFor = (kind, id) => (kind === 'Block' ? blockSpecFile(id) : FILE[kind]);
 
 // A spec entity with no matching description .njk — the model writes the prose; `file` is the path to create.
 export const dMissingDescription = (entity, id, file) =>
@@ -590,16 +598,19 @@ export const dMissingDescription = (entity, id, file) =>
 export function checkStatus(kind, id, status) {
   const out = [];
   if (!status) return out;
+  // The descriptor `file` is where a fixer WRITES the corrected status. Blocks are split one-file-per
+  // block (#882), so a Block fix must target its own src/_data/blocks/<id>.json, not a single registry.
+  const file = fileFor(kind, id);
   if (STATUS_SYNONYMS[status]) {
     const to = STATUS_SYNONYMS[status];
     out.push({
       message: `${kind} "${id}" uses deprecated status "${status}" — use canonical "${to}"`,
-      descriptor: FILE[kind] ? { kind: 'deprecated-status', fix: 'reference', entity: kind, id, file: FILE[kind], field: 'status', from: status, to } : undefined,
+      descriptor: file ? { kind: 'deprecated-status', fix: 'reference', entity: kind, id, file, field: 'status', from: status, to } : undefined,
     });
   } else if (!LIFECYCLE.has(status)) {
     out.push({
       message: `${kind} "${id}" has invalid status "${status}" (expected ${[...LIFECYCLE].join(' / ')})`,
-      descriptor: FILE[kind] ? { kind: 'invalid-status', fix: 'model', entity: kind, id, file: FILE[kind], field: 'status', from: status, allowed: [...LIFECYCLE] } : undefined,
+      descriptor: file ? { kind: 'invalid-status', fix: 'model', entity: kind, id, file, field: 'status', from: status, allowed: [...LIFECYCLE] } : undefined,
     });
   }
   return out;
@@ -660,8 +671,8 @@ export function validatePreset(preset, ctx) {
       dUnresolvedRef('Preset', preset.name, FILE.Preset, 'ownedByProject', preset.ownedByProject, 'projects.json'));
   for (const b of preset.composesBlocks || []) {
     if (!blockIds.has(b))
-      err(`Preset "${preset.name}" composesBlocks "${b}" does not resolve in blocks.json`,
-        dUnresolvedRef('Preset', preset.name, FILE.Preset, 'composesBlocks', b, 'blocks.json'));
+      err(`Preset "${preset.name}" composesBlocks "${b}" does not resolve in the blocks registry (src/_data/blocks/)`,
+        dUnresolvedRef('Preset', preset.name, FILE.Preset, 'composesBlocks', b, 'blocks registry'));
   }
   for (const i of preset.composesIntents || []) {
     if (!intentById.has(i))

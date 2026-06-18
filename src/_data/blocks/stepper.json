@@ -1,0 +1,160 @@
+{
+  "id": "stepper",
+  "name": "Stepper",
+  "status": "active",
+  "type": "Component",
+  "summary": "Linear, locked-progression navigation — the Wizard / multi-step-form flow. Realizes the navigation intent's third structure value (`linear`, alongside `lateral`/Tabs and `hierarchical`/Router): a fixed sequence of steps where only the current step is shown, advancing replaces rather than stacks history, and leaving mid-flow can prompt to preserve progress. The block that exercises the navigation intent's `session` persistence value (a step that survives Back/Forward but isn't a fresh shareable link). Reference runtime: `StepperBehavior` (locked progression, `aria-current=\"step\"`, the Step N of M announcement, step-change / step-advance-blocked / flow-complete events); first consumer is the auto-insurance quote wizard (#318).",
+  "implementedBy": "@frontierui/blocks/stepper/StepperBehavior.ts",
+  "exports": [
+    "StepperBehavior",
+    "registerStepper"
+  ],
+  "implementsIntent": "navigation",
+  "intentDimensions": {
+    "structure": "linear",
+    "history": "replace",
+    "scroll": "top",
+    "transition": "directional",
+    "guard": "confirm",
+    "persistence": "session"
+  },
+  "dependsOn": [
+    "view"
+  ],
+  "webStandards": {
+    "ariaCurrentStep": {
+      "usage": "The current step's indicator carries aria-current=\"step\"; the step list is an ordered <ol>/<nav> so assistive tech reports position in the sequence",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current"
+    },
+    "multiPageForms": {
+      "usage": "Follows the WAI tutorial for multi-page forms — a labelled step region, a visible progress indicator, and a status message announcing 'Step N of M' on each change",
+      "reference": "https://www.w3.org/WAI/tutorials/forms/multi-page/"
+    },
+    "navigationAPI": {
+      "usage": "Step advance uses Navigation API navigate with history: 'replace' so the Back button exits the flow rather than walking step-by-step; the resumable variant writes the step index to History state (NavigationHistoryEntry.getState)",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API",
+      "adoption": "Fallback to History API replaceState for Safari <17.2"
+    },
+    "invokerCommands": {
+      "usage": "Next/Back/Go-to-step controls use the commandfor/command pattern",
+      "command": "--step-next / --step-prev / --step-show",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+    }
+  },
+  "designDecisions": {
+    "architecture": {
+      "description": "A thin layer over View (panel switching — only the current step is shown) plus a step indicator and a progression gate. Like Tabs, but with locked progression: a gate function decides whether the user may advance or jump.",
+      "responsibilities": {
+        "stepper": "Step sequence, progression locking, aria-current=\"step\", progress indicator, Next/Back wiring",
+        "viewBehavior": "Show/hide the current step panel",
+        "navigationGuard": "Intercept leaving an in-progress flow (guard: confirm)"
+      },
+      "rationale": "The hard parts (panel switching, leave-guarding, history) are general navigation paradigms the block composes — it owns only the linear sequencing and the locked-progression rule."
+    },
+    "progression": {
+      "modes": [
+        "locked (default)",
+        "free"
+      ],
+      "locked": "The user advances one step at a time and may jump back only to already-completed steps; advancing past an incomplete/invalid step is blocked",
+      "free": "Any step may be selected at any time (withFreeStepNavigation) — for non-gated flows like a settings wizard",
+      "rationale": "Locked progression is what distinguishes a Wizard from Tabs; it is the safe default. Free navigation is the author's opt-in."
+    },
+    "persistence": {
+      "default": "session",
+      "description": "The step index lives in History state by default — it survives Back/Forward traversal and a refresh, but is not a fresh shareable link (the canonical Wizard behavior, and the block that justifies keeping the navigation intent's `session` value per #057).",
+      "configurable": {
+        "url": "Deep-linkable / resumable wizard — the step is reflected in the URL and can be bookmarked or shared (withResumableState); only meaningful when arriving mid-flow is valid",
+        "memory": "Purely ephemeral — step state is lost on refresh (in-memory only)"
+      },
+      "rationale": "Persistence is the one navigation dimension a linear flow legitimately varies across, so it is exposed as a configurable axis rather than baked; `session` is the representative default."
+    },
+    "guard": {
+      "description": "Leaving an in-progress flow (closing, navigating away, Back out of the first step) prompts to confirm, so progress is not silently lost",
+      "mechanism": "Composes the navigation-guard concept (a canDeactivate-style hook); a clean/finished flow leaves freely",
+      "rationale": "guard: confirm is the default because mid-wizard data loss is the most common failure; authors can set guard: free for trivial flows"
+    },
+    "aria": {
+      "roles": {
+        "list": "Ordered step list (<ol> or <nav>) conveying sequence and position",
+        "step": "Each step indicator; the active one carries aria-current=\"step\"",
+        "region": "Each step's content panel, labelled by its step heading"
+      },
+      "attributes": [
+        "aria-current=\"step\"",
+        "aria-disabled (steps not yet reachable)",
+        "aria-label (Step N of M)"
+      ],
+      "liveRegion": "A status message announces 'Step N of M: <title>' on each change",
+      "rationale": "There is no dedicated ARIA Stepper pattern; the accessible model is an ordered list with aria-current=\"step\" plus a status announcement, per the WAI multi-page-forms tutorial"
+    },
+    "keyboard": {
+      "controls": [
+        "Next / Back buttons (Enter/Space)",
+        "Step indicators focusable only when reachable (locked) or all (free)"
+      ],
+      "rationale": "Primary interaction is the Next/Back controls; arbitrary step jumping is gated by the progression mode"
+    },
+    "events": {
+      "step-change": {
+        "description": "Fired when the active step changes",
+        "taxonomy": "notification",
+        "detail": {
+          "from": "number|null",
+          "to": "number",
+          "trigger": "HTMLElement|null"
+        },
+        "bubbles": true,
+        "cancelable": true,
+        "class": "StepChangeEvent",
+        "provider": "customEvents:step-change"
+      },
+      "step-advance-blocked": {
+        "description": "Fired when an advance is prevented by the progression gate (e.g. the current step is invalid)",
+        "taxonomy": "notification",
+        "detail": {
+          "step": "number",
+          "reason": "string"
+        },
+        "bubbles": true,
+        "cancelable": false,
+        "class": "StepAdvanceBlockedEvent",
+        "provider": "customEvents:step-advance-blocked"
+      },
+      "flow-complete": {
+        "description": "Fired when the final step is confirmed and the flow finishes",
+        "taxonomy": "notification",
+        "detail": {
+          "steps": "number"
+        },
+        "bubbles": true,
+        "cancelable": true,
+        "class": "FlowCompleteEvent",
+        "provider": "customEvents:flow-complete"
+      },
+      "rationale": "Typed event classes registered via provider key, mirroring Tabs; module-prefixed names ('step-change') reduce accidental collision."
+    }
+  },
+  "traits": [
+    {
+      "name": "withFreeStepNavigation",
+      "description": "Relaxes locked progression so any step may be selected at any time (non-gated flows)",
+      "intentDimension": null
+    },
+    {
+      "name": "withResumableState",
+      "description": "Reflects the current step in the URL so the flow is deep-linkable / resumable",
+      "intentDimension": "persistence"
+    },
+    {
+      "name": "withStepValidation",
+      "description": "Gates advancing on the current step's validity — composes Form validation as the progression gate",
+      "intentDimension": null
+    },
+    {
+      "name": "withOptionalSteps",
+      "description": "Marks steps that may be skipped without blocking completion",
+      "intentDimension": null
+    }
+  ]
+}

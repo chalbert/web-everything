@@ -12,6 +12,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { loadBlocks } from './lib/blocks-loader.cjs';
 
 export const START = '<!-- AUTO-GENERATED:inventory — run `npm run gen:inventory`; do not edit by hand -->';
 export const END = '<!-- /AUTO-GENERATED:inventory -->';
@@ -33,7 +34,7 @@ const byStatus = (list) => {
 
 /** Render the inventory body (between markers). Pure function of the data files. */
 export function renderInventory() {
-  const blocks = arr(readJson('blocks'));
+  const blocks = loadBlocks(); // per-block specs src/_data/blocks/<id>.json, assembled (#882)
   const plugs = arr(readJson('plugs'));
   const intents = arr(readJson('intents'));
   const semantics = arr(readJson('semantics'));

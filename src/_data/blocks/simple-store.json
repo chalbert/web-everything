@@ -1,0 +1,33 @@
+{
+  "id": "simple-store",
+  "name": "SimpleStore",
+  "status": "active",
+  "type": "Store",
+  "summary": "Concrete implementation of CustomStore with built-in listener management, dot-notation paths, and derived state hooks.",
+  "exports": [
+    "SimpleStore",
+    "SimpleStoreOptions"
+  ],
+  "extendsClass": "CustomStore",
+  "implementedBy": "@frontierui/blocks/stores/simple/SimpleStore.ts",
+  "designDecisions": {
+    "dotNotationPaths": {
+      "description": "Get and set nested values using dot notation (e.g., 'user.name')",
+      "rationale": "Simplifies working with nested state without manual object traversal"
+    },
+    "onBeforeNotify": {
+      "description": "Optional hook called before listeners are notified",
+      "rationale": "Enables derived state calculations (e.g., computed totals) to be updated atomically before any subscriber sees the change"
+    },
+    "autoCreateIntermediate": {
+      "description": "setItem automatically creates intermediate objects for nested paths",
+      "rationale": "Reduces boilerplate when setting deeply nested values"
+    }
+  },
+  "webStandards": {
+    "queueMicrotask": {
+      "usage": "A reactive store with dot-notation paths and derived state; listener notifications are batched on the microtask queue (`queueMicrotask`) to coalesce synchronous writes.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/queueMicrotask"
+    }
+  }
+}

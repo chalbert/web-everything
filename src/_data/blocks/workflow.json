@@ -1,0 +1,208 @@
+{
+  "id": "workflow",
+  "name": "Workflow",
+  "status": "concept",
+  "type": "Component",
+  "summary": "Multi-step process orchestration without URL changes — wizard-like flows with per-step validation, linear/branching progression, and state persistence. The non-route complement to Router's URL-based step navigation.",
+  "dependsOn": [
+    "view",
+    "tabs"
+  ],
+  "traits": [
+    {
+      "name": "withLinearProgression",
+      "description": "Steps must be completed in order; future steps are disabled until current passes validation",
+      "intentDimension": "workflow.progression.linear"
+    },
+    {
+      "name": "withNonLinearProgression",
+      "description": "Steps can be visited in any order; all validated on final submit",
+      "intentDimension": "workflow.progression.nonLinear"
+    },
+    {
+      "name": "withBranchingLogic",
+      "description": "Step sequence adapts dynamically based on user input (progressive wizard)",
+      "intentDimension": "workflow.progression.branching"
+    },
+    {
+      "name": "withGateValidation",
+      "description": "Validates current step fields via Constraint Validation API before allowing advancement",
+      "intentDimension": "workflow.validation.gate"
+    },
+    {
+      "name": "withAutoSave",
+      "description": "Persists step data to sessionStorage/localStorage on each step change",
+      "intentDimension": "workflow.persistence.autoSave"
+    },
+    {
+      "name": "withReviewStep",
+      "description": "Final step displays summary of all collected data for confirmation",
+      "intentDimension": "workflow.progression.review"
+    }
+  ],
+  "webStandards": {
+    "constraintValidation": {
+      "status": "Baseline",
+      "pattern": "checkValidity(), reportValidity(), setCustomValidity() for per-step field validation",
+      "adoption": "withGateValidation calls checkValidity() on the active step's fieldset before allowing advancement; hidden steps are automatically skipped by the browser",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Guides/Constraint_validation"
+    },
+    "fieldset": {
+      "status": "Standard",
+      "pattern": "<fieldset> + <legend> for semantic grouping; disabling a fieldset disables all children",
+      "adoption": "Each step is a <fieldset>; inactive steps get disabled attribute to prevent interaction and exclude from form validation",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/fieldset"
+    },
+    "ariaCurrent": {
+      "status": "Standard",
+      "pattern": "aria-current='step' marks the active step in a numbered indicator",
+      "adoption": "Step indicator (progress rail) uses <ol> with aria-current='step' on the active <li>",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current"
+    },
+    "invokerCommands": {
+      "status": "Baseline 2026",
+      "pattern": "commandfor/command for declarative step navigation",
+      "adoption": "Next/Previous buttons use commandfor targeting the workflow element with command='--workflow-next' and command='--workflow-prev'",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+    },
+    "cssScrollSnap": {
+      "status": "Baseline",
+      "pattern": "CSS Scroll Snap for step transitions; scrollsnapchange event for JS hooks",
+      "adoption": "Optional trait: withSnapTransitions uses scroll-snap-type: x mandatory for horizontal step animation",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Scroll_snap"
+    },
+    "dialog": {
+      "status": "Baseline",
+      "pattern": "<dialog> for modal wizard flows with native focus trapping",
+      "adoption": "When workflow is rendered inside a <dialog>, focus management delegates to the browser's dialog focusing steps",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/dialog"
+    }
+  },
+  "events": [
+    {
+      "name": "workflow-step-before-change",
+      "class": "WorkflowStepBeforeChangeEvent",
+      "providerKey": "customEvents:workflow-step-before-change",
+      "detail": "{ from, to, direction, trigger }",
+      "cancelable": true,
+      "description": "Fired before step transition. Cancel to prevent advancement (e.g., failed validation)."
+    },
+    {
+      "name": "workflow-step-change",
+      "class": "WorkflowStepChangeEvent",
+      "providerKey": "customEvents:workflow-step-change",
+      "detail": "{ from, to, direction, trigger }",
+      "cancelable": false,
+      "description": "Fired after step transition completes. Step content is now visible."
+    },
+    {
+      "name": "workflow-complete",
+      "class": "WorkflowCompleteEvent",
+      "providerKey": "customEvents:workflow-complete",
+      "detail": "{ data, steps }",
+      "cancelable": true,
+      "description": "Fired when user completes the final step. Cancel to prevent submission (e.g., final validation)."
+    },
+    {
+      "name": "workflow-error",
+      "class": "WorkflowErrorEvent",
+      "providerKey": "customEvents:workflow-error",
+      "detail": "{ step, fields, errors }",
+      "cancelable": false,
+      "description": "Fired when step validation fails. Provides the invalid fields and error messages."
+    }
+  ],
+  "frameworkComparison": {
+    "angularCdkStepper": {
+      "patterns": [
+        "CdkStepper base class",
+        "CdkStep with stepControl",
+        "linear mode",
+        "editable/optional steps"
+      ],
+      "notes": "Most complete headless stepper; linear mode with per-step FormGroup validation"
+    },
+    "muiStepper": {
+      "patterns": [
+        "activeStep controlled index",
+        "nonLinear prop",
+        "horizontal/vertical orientation",
+        "alternativeLabel"
+      ],
+      "notes": "Display-only component; state management and validation are external"
+    },
+    "patternflyWizard": {
+      "patterns": [
+        "progressive wizard (dynamic steps)",
+        "sidebar step rail",
+        "review step",
+        "cancel/back/next footer"
+      ],
+      "notes": "Most fully specified wizard pattern; progressive wizard adds steps based on user input"
+    },
+    "stepperize": {
+      "patterns": [
+        "headless step orchestration",
+        "typed step definitions",
+        "scoped hooks"
+      ],
+      "notes": "Emerging standard for headless multi-step; ~1kB, framework-agnostic"
+    },
+    "reactHookForm": {
+      "patterns": [
+        "trigger() per-step validation",
+        "useForm per step or shared",
+        "state accumulation"
+      ],
+      "notes": "Per-step trigger() enables field-level validation without full form submission"
+    }
+  },
+  "designDecisions": {
+    "nonRouteWorkflow": {
+      "description": "Steps are state-based, not URL-based. No URL changes during step navigation.",
+      "rationale": "Router already handles URL-based multi-step flows. Workflow covers the complementary case: modal wizards, in-page flows, and short processes where URL bookmarking is unnecessary."
+    },
+    "domPresence": {
+      "description": "All steps remain in DOM (behavior pattern). Inactive steps are hidden via View's exclusive group + disabled fieldset.",
+      "rationale": "State preservation across step navigation. Users expect form data to survive forward/back navigation. Consistent with Tabs pattern."
+    },
+    "fieldsetPerStep": {
+      "description": "Each step wraps its content in a <fieldset> element. Inactive steps have disabled attribute.",
+      "rationale": "Disabled fieldset prevents interaction with hidden step fields and automatically excludes them from form validation. Semantic grouping via <legend> for screen readers."
+    },
+    "exclusiveGroupVisibility": {
+      "description": "Steps use View's name-based exclusive group. Showing a step auto-hides siblings.",
+      "rationale": "Reuses ViewEngine's proven exclusive group mechanism. Same pattern as Tabs panels and HTML <details name='...'>."
+    },
+    "gateValidation": {
+      "description": "Per-step validation before advancement (gate model). Uses native Constraint Validation API.",
+      "rationale": "Prevents invalid data from accumulating. Immediate feedback is the consensus best practice for complex flows (NN/G, PatternFly, Angular CDK)."
+    },
+    "invokerNavigation": {
+      "description": "Next/Previous buttons use Invoker Commands: commandfor + command='--workflow-next'/'--workflow-prev'.",
+      "rationale": "Declarative navigation without JS event listeners. Consistent with platform direction (Invoker Commands Baseline 2026)."
+    },
+    "progressiveWizard": {
+      "description": "withBranchingLogic supports dynamic step lists that grow/shrink based on user input.",
+      "rationale": "Many real-world workflows have conditional steps (e.g., 'Do you have dependents?' → show dependent steps). PatternFly's progressive wizard pattern addresses this."
+    }
+  },
+  "exports": [
+    "WorkflowElement",
+    "WorkflowStepElement",
+    "WorkflowIndicator",
+    "withLinearProgression",
+    "withNonLinearProgression",
+    "withBranchingLogic",
+    "withGateValidation",
+    "withAutoSave",
+    "withReviewStep",
+    "WorkflowStepBeforeChangeEvent",
+    "WorkflowStepChangeEvent",
+    "WorkflowCompleteEvent",
+    "WorkflowErrorEvent",
+    "WorkflowConfig",
+    "WorkflowStepDefinition",
+    "registerWorkflow"
+  ]
+}

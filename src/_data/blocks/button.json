@@ -1,0 +1,28 @@
+{
+  "id": "button",
+  "name": "Button",
+  "status": "active",
+  "type": "Module",
+  "implementedBy": "@frontierui/blocks/button/",
+  "summary": "Chrome button family: icon-only buttons, icon links (rendered as <a> when given an href, e.g. the GitHub control), and aria-pressed/aria-expanded toggle buttons (the mobile-nav hamburger). Built for the #870 must-build set so the #865 WE-docs chrome dogfood can mount it in-document (mode C).",
+  "exports": [
+    "createButton",
+    "mountButton",
+    "setButtonPressed",
+    "mountInDocument"
+  ],
+  "webStandards": {
+    "ariaPressed": {
+      "status": "WAI-ARIA",
+      "pattern": "aria-pressed turns a button into a toggle button with announced on/off state",
+      "adoption": "The toggle variant maintains aria-pressed and mirrors aria-expanded when it controls a target",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Roles/button_role"
+    },
+    "accessibleName": {
+      "status": "WAI-ARIA",
+      "pattern": "Icon-only controls need an accessible name via aria-label",
+      "adoption": "Icon buttons/links set aria-label from the configured label",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-label"
+    }
+  }
+}

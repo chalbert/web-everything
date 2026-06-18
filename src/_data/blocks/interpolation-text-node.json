@@ -1,0 +1,27 @@
+{
+  "id": "interpolation-text-node",
+  "fuiDemo": {
+    "file": "text-interpolation-demo.html",
+    "title": "Text interpolation",
+    "height": 460
+  },
+  "name": "InterpolationTextNode",
+  "status": "active",
+  "type": "Behavior",
+  "summary": "Reactive text node that evaluates expressions and renders their values. Connects text node parsing to the expression parser pipeline.",
+  "exports": [
+    "InterpolationTextNode",
+    "InterpolationTextNodeOptions"
+  ],
+  "extendsClass": "CustomTextNode",
+  "implementedBy": "@frontierui/blocks/text-nodes/interpolation/InterpolationTextNode.ts",
+  "dependsOn": [
+    "double-curly-bracket-parser"
+  ],
+  "webStandards": {
+    "domParts": {
+      "usage": "A reactive Text node that evaluates an expression and writes its value to `textContent`, the runtime twin of the template-parts / DOM Parts binding model.",
+      "reference": "https://github.com/WICG/webcomponents/blob/gh-pages/proposals/DOM-Parts.md"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "id": "segmented-control",
+  "name": "Segmented Control",
+  "status": "draft",
+  "type": "Component",
+  "summary": "A single-select choice rendered as a row of adjacent buttons — the iOS/macOS segmented control, or 'pill' toggle group. It is the Selection Intent's single model in a horizontal, always-visible variant (compare radio group / select / switch): every option is visible at once and exactly one is pressed. It composes the Selection Intent (model=single, live immediacy — selecting commits immediately), Focus Delegation (roving tabindex, horizontal orientation with arrow-key movement), and the Typography / Density intents for sizing. Its options are authored as compound children (<segment> elements inside the control) that map to the value model — an instance of the cross-cutting compound-child paradigm (see #176's spin-off) shared with Tabs and the native <select>/<option>.",
+  "implementsIntent": "selection",
+  "composesIntents": [
+    "selection",
+    "focus-delegation",
+    "typography",
+    "density"
+  ],
+  "designDecisions": [
+    "It is Selection single, always-visible and horizontal — not a new selection model. A segmented control is the same single-select contract as a radio group or a <select>; what differs is presentation (all options visible at once, laid out as adjacent pressed buttons) and immediacy (live — choosing commits immediately, no separate confirm). So it sets selection=\"model=single\" with live immediacy rather than introducing any new dimension, which keeps it swappable with the other single-select members under one ambient selectionIntent.",
+    "Roving tabindex, horizontal — one tab stop, arrows move within. Per the WAI-ARIA radio/tablist pattern the control is a single tab stop: Tab enters at the pressed segment, Left/Right (roving) move and (because immediacy is live) select as they move, Home/End jump to ends. This is delegated wholesale to the Focus Delegation Intent (strategy=roving;orientation=horizontal) rather than re-implemented, so keyboard behavior stays identical to every other roving widget.",
+    "Options are authored as compound children, not an options prop. The author writes <segment> children inside the control and the block maps each to a value-model entry; this is the same shape as <tab> inside Tabs and <option> inside <select>. The segmented control is the smallest clean instance of that recurring pattern, so it adopts it directly. Whether that 'compound child → option' pattern should be promoted to its own protocol/semantics contract (vs. remaining documentation of Selection's grouping) is a genuine cross-cutting fork, deliberately NOT settled inside this block — it is carried as a separate decision item. Recommended default there: document it as a shared paradigm (a protocol/semantics term cross-referenced by Selection + Tabs), not a new UX intent, since it is an authoring-and-lowering convention with no UX dimensions of its own.",
+    "Distinct from a multi-select button group and from Tabs. Each option pressed-or-not but exactly one pressed (aria-pressed / a rad/tablist-style roles) separates it from a toolbar of independent toggle buttons (multi-select, no roving-select). And although it shares the compound-child shape with Tabs, Tabs control which panel is shown (disclosure of associated regions) whereas a segmented control sets a value; keeping them separate blocks stops the value-vs-panel concerns from merging."
+  ],
+  "webStandards": {
+    "ariaApgKeyboard": {
+      "usage": "A single-select row of adjacent buttons exposed as a `role=\"radiogroup\"` of `role=\"radio\"` segments — arrow keys move selection, one segment is `aria-checked`.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/radio/"
+    }
+  }
+}

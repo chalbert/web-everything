@@ -1,0 +1,45 @@
+{
+  "id": "for-each",
+  "fuiDemo": {
+    "file": "for-each-demo.html",
+    "title": "For Each — declarative list rendering",
+    "height": 460
+  },
+  "name": "For Each",
+  "status": "active",
+  "type": "Directive",
+  "summary": "Structural directive for rendering lists of items based on an array.",
+  "exports": [
+    "ForEachBehavior",
+    "registerForEach"
+  ],
+  "extendsClass": "CustomAttribute",
+  "implementedBy": "@frontierui/blocks/for-each/ForEachBehavior.ts",
+  "dependsOn": [
+    "handler-expression-parser"
+  ],
+  "designDecisions": {
+    "templateAttribute": {
+      "description": "Implemented as a CustomAttribute on <template> rather than CustomTemplateDirective",
+      "rationale": "Avoids Safari's restriction on the 'is' attribute for built-in element extensions. CustomAttribute registration via the attribute registry is more portable."
+    },
+    "commentMarkers": {
+      "description": "Uses comment nodes to mark list boundaries instead of a wrapper element",
+      "rationale": "Preserves parent-child DOM relationships for CSS Grid/Flex. Comment markers are invisible to layout."
+    },
+    "contextInjection": {
+      "description": "Each stamped item's root element gets an injector with customContexts:{alias} set",
+      "rationale": "Standard injector chain resolution means {{@item.name}} works without special handling. Same pattern used by the router for route context."
+    },
+    "phaseOneLimitation": {
+      "description": "Phase 1 renders once on connect; no reactive array watching",
+      "rationale": "Covers the most common use case (render route-loaded data). Reactive updates will be added in Phase 2 with store subscription integration."
+    }
+  },
+  "webStandards": {
+    "htmlTemplate": {
+      "usage": "A structural directive that repeats a `<template>` per array item, cloning its content fragment for each row.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/template"
+    }
+  }
+}

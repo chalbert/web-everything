@@ -1,0 +1,28 @@
+{
+  "id": "date-picker",
+  "name": "Date Picker",
+  "status": "draft",
+  "type": "Component",
+  "summary": "The first named shallow preset over the abstract `temporal` core: a single calendar-date picker. It pins the Temporal Intent to presentation=media (a spatial calendar grid) and granularity=point (one date), bound to the native <input type=\"date\"> anchor. It adds nothing the core lacks — it is the core with two dimensions pinned and one anchor chosen — so it inherits locale-aware parse/format, keyboard roving, and the native form-control baseline for free. Native <input type=\"date\"> stays the zero-JS fallback; the calendar-grid surface is the media-presentation enhancement.",
+  "implementsIntent": "temporal",
+  "intentDimensions": {
+    "presentation": "media",
+    "granularity": "point"
+  },
+  "composesIntents": [
+    "temporal",
+    "locale",
+    "input",
+    "focus-delegation"
+  ],
+  "designDecisions": [
+    "A preset is a dimension pin, not a new block of machinery (#713 option C). date-picker is the abstract `temporal` core with presentation=media + granularity=point pinned and the input[type=date] anchor bound; it re-implements none of the calendar/locale/keyboard machinery — that is the core's. This is the family rule (one core, members are pins) the same way the droplist family's members are trait selections over one substrate.",
+    "input[type=date] is the anchor and fallback. Following the slider precedent (native input is the baseline, custom surface only for the gap), the preset's media presentation renders a calendar grid for pointer/spatial selection while the native date input remains the keyboard-entry and no-JS fallback, carrying form participation, validity, and locale-aware value out of the box."
+  ],
+  "webStandards": {
+    "ariaApgKeyboard": {
+      "usage": "A single calendar-date preset: native `<input type=\"date\">` or a grid calendar dialog with arrow-key day navigation.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/date"
+    }
+  }
+}

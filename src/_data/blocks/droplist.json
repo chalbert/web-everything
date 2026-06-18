@@ -1,0 +1,31 @@
+{
+  "id": "droplist",
+  "name": "Droplist",
+  "status": "draft",
+  "type": "Component",
+  "summary": "Composition manifest for the droplist family — the abstract substrate every list-based selection surface conforms to (Dropdown, Multi-dropdown, Autocomplete, Tree-select, native <select>). Composes existing intents rather than re-specifying their behavior, and documents the two-channel resolution rule (ambient intent vs. trait selection) that concrete members resolve through.",
+  "implementsIntent": "anchor",
+  "composesIntents": [
+    "anchor",
+    "focus-delegation",
+    "selection",
+    "type-ahead",
+    "input",
+    "live-region-status",
+    "windowed-collection",
+    "loader",
+    "typography"
+  ],
+  "designDecisions": [
+    "Composition over monolith: a droplist's hard parts (positioning, focus, selection, async, truncation) are general paradigms it composes, not droplist-specific behavior. Droplist therefore declares a composesIntents manifest and defers each behavior to the owning intent — keeping the family spec thin and the paradigms reusable by menus, comboboxes, trees, grids, and date pickers.",
+    "Family vs. members: droplist is the abstract family, not a shippable widget. Concrete members (Dropdown single-select, Multi-dropdown, Autocomplete, Tree-select, native baseline) are each their own block — distinct trait selections over the same substrate, not configurations of one widget. A menu button is NOT a droplist member: it opens a role=menu of commands (a value-invoker, not a value-selector) owned by the Menu block (#300); only its trigger shape (button[aria-haspopup]) is shared, demoted to trigger-only per #173 Fork G / #301.",
+    "Two channels, never crossed: structural dimensions (model, editable, which traits compose) are always local Trait Selection and cannot travel on the Ambient Intent (DI) channel; behavioral dimensions (focusStrategy, collision, truncate) may fall back to ambient intent. Per-dimension resolution: explicit ⊕ ambient (behavioral only) ⊕ default.",
+    "implementsIntent stays 'anchor' (the surface it most directly realizes) so existing intent→block reverse-lookup is unchanged; composesIntents is an additive field listing the full set, surfaced on both the block page and each composed intent's page."
+  ],
+  "webStandards": {
+    "ariaListbox": {
+      "usage": "The abstract substrate every list-selection member conforms to: a `role=\"listbox\"` of `role=\"option\"` items with single/multi selection and managed focus, realized concretely by Dropdown / Multi-dropdown / Autocomplete / Tree-select.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/listbox/"
+    }
+  }
+}

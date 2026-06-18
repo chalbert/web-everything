@@ -1,0 +1,33 @@
+{
+  "id": "notification",
+  "name": "Notification",
+  "status": "draft",
+  "type": "Component",
+  "summary": "The runnable surface that realizes the Feedback Intent — a transient, non-blocking message that appears, is accessibly announced, persists for a bounded time (or until dismissed), and is removed. It owns the general notification contract: a top-layer region host plus an injectable controller that app code calls imperatively to enqueue messages, with queueing/stacking, severity-mapped announcement, auto-timeout (paused on hover/focus, forced indefinite when an action is present), and manual dismissal. Presentation styles (toast, snackbar, banner-position, …) are the implementation's choice, not part of the contract — the block defines behaviour, the implementation picks the look. Native-first: the region mounts to the top layer via the Popover API where supported, falling back to a Web Portals mount. Composes the Message Intent (shared severity/tone vocabulary), the Live-Region Status Intent (announcement transport), the Surface Intent (card elevation/material), and the Motion Intent (enter/exit). Deliberately distinct from the OS-level Web Notifications API (system notifications, permission-gated — Web Permissions #009), from background-task-surface (#135, a persistent long-running-task surface), and from inline Message banners (structural, in-flow).",
+  "implementsIntent": "feedback",
+  "composesIntents": [
+    "message",
+    "live-region-status",
+    "surface",
+    "motion"
+  ],
+  "events": [
+    "notification-shown",
+    "notification-dismissed"
+  ],
+  "designDecisions": [
+    "Named for the concept, not the presentation — `notification`, never `toast`. A toast is ONE presentation of a notification (a small transient card in a viewport corner); snackbars, banner-position notices, and status pills are others. The standard captures the general UX particularities every notification shares — temporary, non-blocking, dismissable, queued, severity-weighted, accessibly announced — and leaves the visual presentation to the implementation (Frontier UI). Baking 'toast' into the block name or contract would over-fit the standard to one look and is rejected (bias toward the most general, presentation-agnostic contract).",
+    "In-page UI, not the OS — distinct from the Web Notifications API. This block is in-document notification UI: a top-layer region inside the page. The browser's Notifications API (system/desktop notifications, permission-gated, surfacing outside the tab) shares the word but not the surface, the lifecycle, or the permission model — that is a separate capability owned by Web Permissions (#009). The two are cross-referenced and never conflated; choosing between them is the app's call (in-page reassurance vs. out-of-tab alert).",
+    "Component region + injectable controller — declarative placement, imperative trigger. The block ships a notification-region Component (the top-layer host, placed declaratively once per app) plus a controller resolved from the injector chain that arbitrary app logic calls to enqueue/dismiss (`show(message)` / `dismiss(id)`). Triggering is imperative because a notification originates from app events (a save succeeded, a request failed), not from a specific DOM trigger the way a tooltip or menu does. The standard defines the controller interface and the region element + its observable events; the concrete controller implementation (timing, animation, batching) is Frontier UI's, not the standard's.",
+    "Native-first top-layer surface — Popover API, then Web Portals. The region mounts to the platform top layer via the Popover API (popover=\"manual\", so it is not light-dismissed by an unrelated click) where Baseline-supported, falling back to a Web Portals top-layer mount only where it is not. It is never a hand-rolled position:fixed + z-index stack — stacking-context bugs are exactly what the top layer exists to remove.",
+    "Announcement is severity-mapped and delegated to Live-Region Status. The region is a live region; politeness is derived from the Feedback severity, not hand-set per call: info/success → role=\"status\" (polite, aria-live=polite), warning/error → role=\"alert\" (assertive). The announcement transport (the live region, the politeness, the re-announce semantics) is the Live-Region Status Intent — this block composes it rather than re-implementing aria-live wiring. A notification's announcement is decoupled from its visual persistence: it is announced once when shown, even though it lingers on screen.",
+    "The transient contract: queue, timeout, dismissal — owned here as a contract, timed in the impl. stackLimit governs concurrency (1 = replace the current message, >1 = a FIFO stack up to the limit, surplus queued). duration drives an auto-timeout (short / long / indefinite) that is PAUSED while the pointer is over the region or focus is within it (so a reader is never raced by a timer — WCAG 2.2.1), and is FORCED to indefinite whenever an action is present (a user must never lose an actionable notification — e.g. an Undo — to an expiring timer; this is mandated by the Feedback Intent). Every notification is also manually dismissable (a close affordance) and Escape-dismissable. The block owns these as a queue-policy contract; the concrete timing constants and easing live in the implementation.",
+    "Transient and out-of-flow — distinct from background-task-surface and from inline Message. background-task-surface (#135) is a PERSISTENT surface that hosts long-running work after it goes async and outlives the originating view; a notification is TRANSIENT and fire-and-forget. The Message Intent is STRUCTURAL, in-flow messaging rendered in the document layout; a notification is an out-of-flow overlay in the top layer. The three are cross-referenced and kept separate (bias toward separation) — a forgivable failure may emit a notification, a long retry escalates to background-task-surface, and a persistent form-level error is an inline Message; conflating them loses the placement and lifecycle distinctions that make each correct."
+  ],
+  "webStandards": {
+    "ariaLive": {
+      "usage": "A transient, non-blocking message announced through an `aria-live` region (`polite`/`assertive` by urgency) so it reaches assistive tech without stealing focus.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-live"
+    }
+  }
+}

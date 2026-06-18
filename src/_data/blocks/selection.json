@@ -1,0 +1,19 @@
+{
+  "id": "selection",
+  "name": "Selection",
+  "status": "active",
+  "type": "Module",
+  "summary": "A runtime for the Collection Operations sibling `selection` intent (model / immediacy / variant / grouping) — the part the draft dropdown/droplist blocks compose but no block shipped. `SelectionBehavior` manages which item(s) in a host container are selected, over items matched by a CSS selector: it projects `aria-selected`, keeps a roving `tabindex`, commits selection live on click and Arrow/Home/End/Enter/Space (single keeps at most one, multiple toggles), and emits a `selection-change` event. The `variant:item` list-selection realization; dropdown/droplist will compose it for listbox selection.",
+  "implementsIntent": "selection",
+  "exports": [
+    "SelectionBehavior",
+    "registerSelection"
+  ],
+  "implementedBy": "@frontierui/blocks/selection/SelectionBehavior.ts",
+  "webStandards": {
+    "ariaSort": {
+      "usage": "The headless selection runtime (model / immediacy / variant / grouping) backing the droplist members; selected items reflect `aria-selected`, multi-select sets `aria-multiselectable`.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-selected"
+    }
+  }
+}

@@ -72,7 +72,9 @@ function makeWorld(files: Record<string, string>, descNeeds: DescNeed[] = []): W
       let data: unknown;
       try { data = JSON.parse(content); }
       catch { failures.push({ message: `Invalid JSON in ${file}`, descriptor: { kind: 'invalid-json', file } }); continue; }
-      for (const row of Array.isArray(data) ? data : []) {
+      // Per-block specs are one object per file (#882); the monolith was an array. Accept both.
+      const rows = Array.isArray(data) ? data : (data && typeof data === 'object' && 'id' in (data as object) ? [data] : []);
+      for (const row of rows) {
         const r = row as { id?: string; status?: string };
         if (r?.status && STATUS_SYNONYMS[r.status]) {
           failures.push({
@@ -250,14 +252,14 @@ function buildCard(spec: CardSpec): { node: HTMLElement; settle: Promise<boolean
 // ── Fixtures ──────────────────────────────────────────────────────────────────────
 
 function refWorld(id: string, status: string): { world: World; target: Failure } {
-  const world = makeWorld({ 'src/_data/blocks.json': JSON.stringify([{ id, status }], null, 2) + '\n' });
+  const world = makeWorld({ [`src/_data/blocks/${id}.json`]: JSON.stringify({ id, status }, null, 2) + '\n' });
   return { world, target: world.verify().failures[0] };
 }
 
 function modelWorld(id: string, name: string, summary: string): { world: World; target: Failure } {
   const file = `src/_data/block-descriptions/${id}.njk`;
   const world = makeWorld(
-    { 'src/_data/blocks.json': JSON.stringify([{ id, name, summary, type: 'block' }], null, 2) + '\n' },
+    { [`src/_data/blocks/${id}.json`]: JSON.stringify({ id, name, summary, type: 'block' }, null, 2) + '\n' },
     [{ entity: 'Block', id, file }],
   );
   return { world, target: world.verify().failures[0] };

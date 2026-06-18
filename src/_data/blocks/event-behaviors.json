@@ -1,0 +1,41 @@
+{
+  "id": "event-behaviors",
+  "name": "Event Behaviors (on:*)",
+  "status": "active",
+  "type": "Behavior",
+  "implementedBy": "@frontierui/blocks/attributes/on-event/OnEventAttribute.ts",
+  "summary": "Declarative event-to-action mapping using expression syntax with context resolution.",
+  "exports": [
+    "createOnEventAttribute",
+    "createEventAttributes",
+    "registerEventAttributes"
+  ],
+  "syntax": {
+    "description": "Expression syntax with inline arguments",
+    "examples": [
+      "on:click=\"save($event)\"",
+      "on:click=\"delete($event, @item.id)\"",
+      "on:change=\"update(value, @form.field)\""
+    ]
+  },
+  "configuration": {
+    "getHandlers": "Required. Function returning handler registry for an element",
+    "getContexts": "Optional. Function returning named contexts Map",
+    "getState": "Optional. Function returning default state object",
+    "parserName": "Optional. Name of parser in CustomAttributeParserRegistry (default: 'handler')"
+  },
+  "parserResolution": {
+    "description": "HandlerExpressionParser is resolved from CustomAttributeParserRegistry in the injector chain",
+    "registryProvider": "customAttributeParsers",
+    "defaultParserName": "handler",
+    "required": true,
+    "error": "MissingParserError thrown if no parser found in registry"
+  },
+  "designRationale": "Parser registry allows different DOM subtrees to use different parser configurations. Parsers extend CustomAttributeParser for consistency with the attribute parsing system.",
+  "webStandards": {
+    "customEvent": {
+      "usage": "Declarative event-to-action mapping: maps DOM/`CustomEvent`s to actions with expression-resolved context, over the standard event model.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/CustomEvent"
+    }
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "id": "toggle-switch",
+  "attributes": [
+    {
+      "name": "checked",
+      "type": "boolean",
+      "default": false,
+      "fieldName": "checked",
+      "description": "On/off state; reflects to `aria-checked` true/false. A switch is strictly binary — no mixed state."
+    },
+    {
+      "name": "disabled",
+      "type": "boolean",
+      "default": false,
+      "description": "Disables the control; excluded from form submission and the tab order."
+    },
+    {
+      "name": "name",
+      "type": "string",
+      "description": "Form field name the on/off value is submitted under (native `<input type=\"checkbox\">`)."
+    },
+    {
+      "name": "value",
+      "type": "string",
+      "default": "on",
+      "description": "Value submitted when the switch is on."
+    }
+  ],
+  "properties": [
+    {
+      "name": "checked",
+      "type": "boolean",
+      "reflects": true,
+      "attribute": "checked",
+      "description": "Gets or sets the on/off state; the change takes effect immediately (distinct from a checkbox’s deferred form value)."
+    }
+  ],
+  "name": "Toggle / Switch",
+  "status": "draft",
+  "type": "Component",
+  "summary": "Native-first over `<input type=\"checkbox\">` with `role=\"switch\"`: a boolean on/off control whose change takes effect IMMEDIATELY, distinct from a checkbox's deferred-until-submit form value. Realizes the `input` boolean control. `aria-checked` true/false reflects on/off; no mixed/indeterminate state (a switch is strictly binary). Zero JS — the native element plus `role=\"switch\"` and styling IS the block. Sliced from #468 (form-control inventory).",
+  "implementsIntent": "input",
+  "designDecisions": [
+    "Native-first: a switch is the platform `<input type=\"checkbox\" role=\"switch\">` (or a `<button aria-pressed>` for a pure action) — no custom element. The block standardizes the role + label + immediate-effect contract, not a new widget.",
+    "Immediate vs. deferred is THE distinction from checkbox (#472): a switch applies its state on toggle (e.g. enable a setting now); a checkbox is a form value committed on submit. Same `<input type=checkbox>` substrate, different role and timing — separate blocks, never a checkbox `mode` flag.",
+    "Strictly binary: a switch has no `indeterminate`/`mixed` state (unlike the checkbox). `aria-checked` is true/false only; the WAI-ARIA APG Switch pattern with `<kbd>Space</kbd>` toggle and an on/off accessible name."
+  ],
+  "webStandards": {
+    "ariaApgKeyboard": {
+      "usage": "Native `<input type=\"checkbox\">` with `role=\"switch\"`: a boolean on/off control whose change takes effect immediately; Space/Enter toggle `aria-checked`.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/switch_role"
+    }
+  }
+}

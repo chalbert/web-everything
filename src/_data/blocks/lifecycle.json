@@ -1,0 +1,19 @@
+{
+  "id": "lifecycle",
+  "name": "Lifecycle",
+  "status": "active",
+  "type": "Module",
+  "summary": "Reference runtime for the Web Lifecycle protocol (weblifecycle / #353) — a domain entity's declared status set + guarded, role-scoped transition map. Ships the protocol's seam: a data-defined `LifecycleDefinition` (the only lock; portable across engines), the swappable `CustomLifecycleProvider` contract (`available()` + `transition()`), a native-first `DefaultLifecycleProvider` in-memory reference, and the `CustomLifecycleRegistry` (`window.customLifecycles`). Authorization is delegated to a `GuardResolver` (the Web Guards seam; the default is permissive, a real authz provider is async + server-authoritative) and persistence stays the entity's own concern — so the block owns only the state machine. Every applied transition emits a `LifecycleEvent` ({ entity, from, to, actor, at }), the composition seam for audit-trail (#357). First consumer: the loan-origination exercise app (#317).",
+  "exports": [
+    "DefaultLifecycleProvider",
+    "CustomLifecycleRegistry",
+    "registerLifecycle"
+  ],
+  "implementedBy": "@frontierui/blocks/lifecycle/LifecycleProvider.ts",
+  "webStandards": {
+    "customEvent": {
+      "usage": "Reference runtime for the Web Lifecycle protocol: a guarded, role-scoped status-transition map; each transition dispatches a `CustomEvent` carrying the from/to status.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/CustomEvent"
+    }
+  }
+}

@@ -1,0 +1,201 @@
+{
+  "id": "tabs",
+  "attributes": [
+    {
+      "name": "name",
+      "type": "string",
+      "description": "Shared group name making the panels mutually exclusive — the native exclusive-group (`name`) semantics the ARIA Tabs pattern is built on."
+    }
+  ],
+  "properties": [
+    {
+      "name": "activeTab",
+      "type": "string",
+      "reflects": true,
+      "attribute": "active",
+      "description": "The id of the currently selected tab; setting it switches the shown panel via the composed View behavior."
+    }
+  ],
+  "slots": [
+    {
+      "name": "tab",
+      "description": "Each tab trigger (uses the `commandfor`/`command` invoker pattern)."
+    },
+    {
+      "name": "panel",
+      "description": "Each tab panel, shown one at a time and wired to its tab via ARIA."
+    }
+  ],
+  "fuiDemo": {
+    "file": "view-tabs-demo.html",
+    "title": "View + Tabs",
+    "height": 460
+  },
+  "name": "Tabs",
+  "status": "active",
+  "type": "Component",
+  "implementedBy": "@frontierui/blocks/tabs/index.ts",
+  "summary": "Accessible tab interface component built on View (ViewBehavior for panel switching), providing tab triggers, panels, and ARIA semantics.",
+  "exports": [
+    "TabsComponent",
+    "TabListAttribute",
+    "TabTriggerAttribute",
+    "TabPanelAttribute"
+  ],
+  "implementsIntent": "navigation",
+  "intentDimensions": {
+    "structure": "lateral",
+    "history": "none",
+    "scroll": "preserve",
+    "transition": "none",
+    "guard": "free",
+    "persistence": "memory"
+  },
+  "dependsOn": [
+    "view"
+  ],
+  "webStandards": {
+    "invokerCommands": {
+      "usage": "Tab triggers use commandfor/command pattern",
+      "command": "--tab-show",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Invoker_Commands_API"
+    },
+    "exclusiveGroups": {
+      "usage": "Panels share name attribute for mutual exclusivity",
+      "reference": "https://developer.mozilla.org/en-US/blog/html-details-exclusive-accordions/"
+    },
+    "ariaTabsPattern": {
+      "usage": "Full WAI-ARIA Tabs Pattern compliance",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/tabs/"
+    },
+    "openUITabs": {
+      "status": "Following Open UI research for future native alignment",
+      "reference": "https://open-ui.org/components/tabs.research/"
+    }
+  },
+  "designDecisions": {
+    "architecture": {
+      "description": "Tabs is a thin UI layer over View. Uses ViewBehavior for panel switching (panels always in DOM) and ViewEngine for hidden modes and toggle events.",
+      "responsibilities": {
+        "tabs": "ARIA roles, keyboard navigation, active styling",
+        "viewBehavior": "Panel show/hide via commands and exclusive groups",
+        "viewEngine": "Hidden modes, toggle events, transitions"
+      },
+      "rationale": "Tabs panels are always present in DOM (behavior pattern), not stamped on demand (directive pattern). ViewBehavior is the right primitive."
+    },
+    "syntax": {
+      "options": [
+        {
+          "name": "Attribute-based (recommended)",
+          "example": "<div tab-list><button tab-trigger=\"panel1\">Tab 1</button></div><div tab-panels><section tab-panel=\"panel1\">Content</section></div>",
+          "rationale": "Works with any markup, progressive enhancement"
+        },
+        {
+          "name": "Custom element",
+          "example": "<we-tabs><we-tab-trigger slot=\"triggers\">Tab 1</we-tab-trigger><we-tab-panel slot=\"panels\">Content</we-tab-panel></we-tabs>",
+          "rationale": "More encapsulated, but less flexible"
+        }
+      ],
+      "chosen": "Attribute-based for core, custom element as optional wrapper"
+    },
+    "aria": {
+      "roles": {
+        "tablist": "Container for tab triggers",
+        "tab": "Individual tab trigger",
+        "tabpanel": "Content panel"
+      },
+      "attributes": [
+        "aria-selected",
+        "aria-controls",
+        "aria-labelledby"
+      ],
+      "rationale": "WAI-ARIA Tabs Pattern compliance"
+    },
+    "keyboard": {
+      "horizontal": [
+        "ArrowLeft/Right to navigate",
+        "Home/End for first/last"
+      ],
+      "vertical": [
+        "ArrowUp/Down when orientation=vertical"
+      ],
+      "activation": [
+        "Enter/Space to activate (manual mode)",
+        "Arrow keys activate (automatic mode)"
+      ],
+      "rationale": "WAI-ARIA keyboard interaction model"
+    },
+    "activationMode": {
+      "modes": [
+        "automatic (default)",
+        "manual"
+      ],
+      "automatic": "Tab activates on focus (arrow keys switch tabs)",
+      "manual": "Tab activates on Enter/Space (arrow keys only move focus)",
+      "rationale": "Automatic is more accessible, manual allows preview before commit"
+    },
+    "orientation": {
+      "options": [
+        "horizontal (default)",
+        "vertical"
+      ],
+      "description": "Affects keyboard navigation direction and ARIA orientation",
+      "rationale": "Vertical tabs are common for settings pages, mobile navigation"
+    },
+    "stateSync": {
+      "urlHash": "Optional sync with URL hash for bookmarkable tabs",
+      "storage": "Optional persistence to sessionStorage/localStorage",
+      "rationale": "Users expect tab state to persist on refresh or when sharing URLs"
+    },
+    "events": {
+      "tab-change": {
+        "description": "Fired when the active tab changes",
+        "taxonomy": "notification",
+        "detail": {
+          "from": "string|null",
+          "to": "string",
+          "trigger": "HTMLElement"
+        },
+        "bubbles": true,
+        "cancelable": true,
+        "class": "TabChangeEvent",
+        "provider": "customEvents:tab-change"
+      },
+      "tab-close": {
+        "description": "Fired when a closeable tab is dismissed",
+        "taxonomy": "notification",
+        "detail": {
+          "panel": "string",
+          "trigger": "HTMLElement"
+        },
+        "bubbles": true,
+        "cancelable": true,
+        "class": "TabCloseEvent",
+        "provider": "customEvents:tab-close"
+      },
+      "rationale": "Typed event classes registered via provider key. Module-prefixed names ('tab-change') reduce accidental collision; provider-based instanceof discrimination provides structural guarantee via Web Events."
+    }
+  },
+  "traits": [
+    {
+      "name": "withCloseableTabs",
+      "description": "Adds close buttons to tabs for dismissible panels",
+      "intentDimension": null
+    },
+    {
+      "name": "withReorderableTabs",
+      "description": "Enables drag-to-reorder for tab triggers",
+      "intentDimension": null
+    },
+    {
+      "name": "withOverflowTabs",
+      "description": "Handles tab overflow via scrolling or dropdown menu when tabs exceed available width",
+      "intentDimension": null
+    },
+    {
+      "name": "withLazyTabs",
+      "description": "Renders panel content only on first activation for performance",
+      "intentDimension": null
+    }
+  ]
+}

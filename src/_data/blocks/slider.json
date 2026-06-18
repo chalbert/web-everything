@@ -1,0 +1,78 @@
+{
+  "id": "slider",
+  "attributes": [
+    {
+      "name": "min",
+      "type": "number",
+      "default": 0,
+      "description": "Lower bound of the track (composed Selection Intent `constraints.min`)."
+    },
+    {
+      "name": "max",
+      "type": "number",
+      "default": 100,
+      "description": "Upper bound of the track (`constraints.max`)."
+    },
+    {
+      "name": "step",
+      "type": "number",
+      "default": 1,
+      "description": "Granularity of value changes along the track."
+    },
+    {
+      "name": "value",
+      "type": "number | [number, number]",
+      "fieldName": "value",
+      "description": "The current value — a single number, or a `[from, to]` pair for a dual-thumb range."
+    },
+    {
+      "name": "range",
+      "type": "boolean",
+      "default": false,
+      "description": "Dual-thumb from–to range mode (the Selection range variant native `<input type=\"range\">` cannot express alone)."
+    },
+    {
+      "name": "disabled",
+      "type": "boolean",
+      "default": false,
+      "description": "Disables the control."
+    }
+  ],
+  "properties": [
+    {
+      "name": "value",
+      "type": "number | [number, number]",
+      "reflects": true,
+      "attribute": "value",
+      "description": "Gets or sets the value; arrow/Home/End follow the APG slider keyboard model."
+    },
+    {
+      "name": "valueText",
+      "type": "string",
+      "description": "Locale-aware formatted value surfaced through `aria-valuetext` (units, number format)."
+    }
+  ],
+  "name": "Slider",
+  "status": "draft",
+  "type": "Component",
+  "summary": "A control for selecting a numeric value — or a min–max range — along a track. It realizes the Selection Intent's range variant (SelectionVariant = 'boolean' | 'item' | 'range'), which no block delivered before. Native-first by construction: a single-thumb slider IS <input type=\"range\">, so the block's job is only the enhancements the native control cannot express alone — a dual-thumb (from–to) range, rich ticks and labelled marks, and locale-aware value formatting (units, number format) surfaced through aria-valuetext. It composes the Selection Intent (variant=range, constraints.min/max), the Input Intent (pointer drag vs keyboard vs touch modality), and the Locale / Translation intents (value formatting). Native stays the baseline; a custom track/thumb is used only when the native element is ruled out.",
+  "implementsIntent": "selection",
+  "composesIntents": [
+    "selection",
+    "input",
+    "locale",
+    "translation"
+  ],
+  "designDecisions": [
+    "Single-thumb slider IS native <input type=\"range\"> — enhance, don't replace. A one-thumb slider is already a complete, accessible, form-associated platform control: keyboard arrows, step, focusability, and form submission all come free. The block defaults to the native element and only swaps to a custom track/thumb when a native gap is hit (dual-thumb, vertical orientation that the platform doesn't reliably expose, or rich tick rendering). This keeps the common case zero-JS and form-native, and confines custom code to the cases that genuinely need it.",
+    "Dual-thumb range is two bound values, not one element. The platform has no single dual-thumb range input, so a from–to range is modelled as two coordinated thumbs over one track, each a value with its own aria-valuenow/min/max, kept ordered (the low thumb can't cross the high thumb) and reported as a pair. This is the concrete realization of the Selection Intent's range variant — constraints.min and constraints.max become the two thumb bounds — rather than a new paradigm invented here.",
+    "Value reporting is formatted, not raw — aria-valuetext over the Locale Intent. A slider's accessible value is whatever the user should hear ('$1,200', '40%', '3.5 km'), not the bare number, so formatted output flows through the Locale / Translation intents and is published via aria-valuetext while aria-valuenow keeps the raw number for AT that computes percentages. RTL flips the track direction so 'increase' still maps to the start-to-end reading order.",
+    "Slider is the continuous-along-a-track member, distinct from a stepper. Stepping by keyboard arrows/PageUp-Down and snapping to ticks are in scope, but a slider is fundamentally for choosing a value by position on a track; precise numeric entry is a future numeric/stepper input's job. Naming that boundary now keeps the slider from absorbing spinner/number-field concerns and keeps the two as separate Selection-Intent members."
+  ],
+  "webStandards": {
+    "ariaApgKeyboard": {
+      "usage": "A `role=\"slider\"` (single value) or dual-thumb range over a track, arrow/Home/End keyboard model, with `aria-valuemin/now/max`; native `<input type=\"range\">` where applicable.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/slider-multithumb/"
+    }
+  }
+}

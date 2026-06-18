@@ -1,0 +1,155 @@
+{
+  "id": "prefetch-behavior",
+  "name": "Prefetch Behavior",
+  "status": "concept",
+  "type": "Behavior",
+  "summary": "Attribute-based behavior that implements the Prefetch Intent by detecting user conditions via browser APIs and triggering resource prefetching.",
+  "implementsIntent": "prefetch",
+  "dependsOn": [
+    "resource-loader",
+    "router"
+  ],
+  "traits": [
+    {
+      "name": "withViewportPrefetch",
+      "description": "Triggers prefetch when link enters the viewport via IntersectionObserver",
+      "intentDimension": "prefetch.eagerness.viewport"
+    },
+    {
+      "name": "withHoverPrefetch",
+      "description": "Triggers prefetch on pointer hover (>200ms debounce) or focus",
+      "intentDimension": "prefetch.eagerness.hover"
+    },
+    {
+      "name": "withInteractionPrefetch",
+      "description": "Triggers prefetch at pointer down (moment of intent)",
+      "intentDimension": "prefetch.eagerness.interaction"
+    }
+  ],
+  "webStandards": {
+    "speculationRules": {
+      "status": "Chrome 121+",
+      "pattern": "Declarative JSON for prefetch/prerender: <script type=\"speculationrules\">",
+      "adoption": "Aligns eagerness model (conservative/moderate/eager/immediate) with our intent levels; uses browser-native prefetch when available",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Speculation_Rules_API"
+    },
+    "intersectionObserver": {
+      "status": "Baseline",
+      "pattern": "Observes element visibility relative to viewport/ancestor",
+      "adoption": "withViewportPrefetch uses IntersectionObserver with configurable rootMargin to trigger prefetch before element is fully visible",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/IntersectionObserver"
+    },
+    "navigatorConnection": {
+      "status": "Limited (Chromium)",
+      "pattern": "NetworkInformation API: effectiveType, saveData, downlink",
+      "adoption": "Suppresses prefetch when saveData is true or effectiveType is 'slow-2g'/'2g'",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/NetworkInformation"
+    },
+    "batteryStatus": {
+      "status": "Limited (Chromium)",
+      "pattern": "Battery Status API: navigator.getBattery() for charging/level",
+      "adoption": "Suppresses viewport-level prefetch when battery < 20% and not charging",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Battery_Status_API"
+    },
+    "linkRelPrefetch": {
+      "status": "Baseline",
+      "pattern": "<link rel=\"prefetch\"> for resource hints",
+      "adoption": "When the prefetched resource is a navigation, injects <link rel=\"prefetch\"> into <head> for browser-native fetching",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Attributes/rel/prefetch"
+    }
+  },
+  "events": [
+    {
+      "name": "prefetch-triggered",
+      "class": "PrefetchTriggeredEvent",
+      "providerKey": "customEvents:prefetch-triggered",
+      "detail": "{ url, eagerness, trigger }",
+      "cancelable": true,
+      "description": "Fired when a prefetch is about to start. Cancel to suppress."
+    },
+    {
+      "name": "prefetch-suppressed",
+      "class": "PrefetchSuppressedEvent",
+      "providerKey": "customEvents:prefetch-suppressed",
+      "detail": "{ url, reason, condition }",
+      "cancelable": false,
+      "description": "Fired when a prefetch is suppressed due to user conditions (saveData, low battery, slow connection)."
+    },
+    {
+      "name": "prefetch-complete",
+      "class": "PrefetchCompleteEvent",
+      "providerKey": "customEvents:prefetch-complete",
+      "detail": "{ url, duration, fromCache }",
+      "cancelable": false,
+      "description": "Fired when prefetched data is stored and ready for instant navigation."
+    }
+  ],
+  "frameworkComparison": {
+    "remix": {
+      "patterns": [
+        "<Link prefetch=\"intent|render|viewport\">",
+        "prefetch on hover/focus"
+      ],
+      "notes": "Three eagerness levels on Link component; 'intent' = hover+focus, 'render' = immediate, 'viewport' = IntersectionObserver"
+    },
+    "nextjs": {
+      "patterns": [
+        "<Link> automatic prefetch",
+        "prefetch={false} opt-out"
+      ],
+      "notes": "Automatic viewport prefetch on all Links; uses IntersectionObserver internally"
+    },
+    "quicklink": {
+      "patterns": [
+        "viewport detection",
+        "requestIdleCallback",
+        "connection-aware"
+      ],
+      "notes": "Library by Google: prefetches in-viewport links during idle time, respects saveData and effectiveType"
+    },
+    "instantPage": {
+      "patterns": [
+        "mousedown/touchstart prefetch",
+        "65ms hover threshold"
+      ],
+      "notes": "Library: prefetches on hover (65ms debounce) or touchstart; minimal overhead approach"
+    },
+    "speculationRulesAPI": {
+      "patterns": [
+        "eagerness: conservative|moderate|eager|immediate",
+        "document rules",
+        "URL patterns"
+      ],
+      "notes": "Chrome's native declarative prefetch/prerender; our eagerness levels align with this model"
+    }
+  },
+  "designDecisions": {
+    "conditionDetection": {
+      "description": "Maps Prefetch Intent user conditions to browser APIs: limited-data → saveData, low-power → Battery API, slow-connection → effectiveType",
+      "rationale": "The intent declares abstract conditions. This block maps them to concrete browser APIs with graceful degradation when APIs are unavailable."
+    },
+    "eagernessToEvents": {
+      "description": "Maps eagerness levels to DOM events: viewport → IntersectionObserver, hover → pointerenter (>200ms), interaction → pointerdown",
+      "rationale": "Each eagerness level corresponds to a specific user gesture timing. The block translates the abstract intent into concrete event listeners."
+    },
+    "suppressionPriority": {
+      "description": "Conditions are checked in priority order: saveData > low battery > slow connection. Any match suppresses.",
+      "rationale": "User's explicit data-saving preference (saveData) should always win. Battery and connection are softer signals."
+    },
+    "speculationRulesAlignment": {
+      "description": "Eagerness levels map to Speculation Rules API terms: viewport=moderate, hover=conservative, interaction=conservative, immediate=eager",
+      "rationale": "Aligning with the emerging browser standard ensures forward-compatible semantics and potential delegation to native prefetch."
+    }
+  },
+  "exports": [
+    "PrefetchBehavior",
+    "withViewportPrefetch",
+    "withHoverPrefetch",
+    "withInteractionPrefetch",
+    "PrefetchTriggeredEvent",
+    "PrefetchSuppressedEvent",
+    "PrefetchCompleteEvent",
+    "PrefetchCondition",
+    "PrefetchEagerness"
+  ]
+}

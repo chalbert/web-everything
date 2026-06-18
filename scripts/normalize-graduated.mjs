@@ -29,12 +29,16 @@ import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readField, setFrontmatterField, quoteScalar } from './backlog/frontmatter.mjs';
+import { loadBlocks } from './lib/blocks-loader.cjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BL = join(ROOT, 'backlog');
 
 // kind → registry id-set, in the constellation's canonical order. The `<reg>.json` file name each kind
-// reads from doubles as the file#anchor → kind map (`blocks.json#x` → `block:x`).
+// reads from doubles as the file#anchor → kind map (`blocks.json#x` → `block:x`). `blocks.json` is kept
+// here as the canonical VIRTUAL anchor even though the file is gone (#882) — the block id-set now comes
+// from the per-block specs (src/_data/blocks/<id>.json), assembled below; the `blocks.json#<id>` grammar
+// stays a stable cross-backlog contract so existing graduatedTo references keep resolving.
 const REG_SPEC = [
   ['block', 'blocks.json'], ['intent', 'intents.json'], ['protocol', 'protocols.json'],
   ['project', 'projects.json'], ['plug', 'plugs.json'], ['adapter', 'adapters.json'], ['demo', 'demos.json'],
@@ -45,6 +49,12 @@ function loadRegistries() {
   for (const [kind, file] of REG_SPEC) {
     fileToKind.set(file, kind);
     let ids = new Set();
+    if (kind === 'block') {
+      // Per-block specs (#882) — assembled, not a single file; the `blocks.json` anchor stays virtual.
+      try { ids = new Set(loadBlocks().map((b) => b.id).filter(Boolean)); } catch { /* none → empty */ }
+      reg.set(kind, ids);
+      continue;
+    }
     try {
       const raw = JSON.parse(readFileSync(join(ROOT, 'src/_data', file), 'utf8'));
       const arr = Array.isArray(raw) ? raw : raw.items || [];

@@ -34,8 +34,9 @@
 // Each entity that can lack a description maps to the registry JSON the descriptor's `id` resolves in,
 // so the fixer can read the entity's own `name`/`summary` and prompt the model with real context
 // rather than asking it to invent a component from a bare id.
+// Block is NOT here: blocks are split one-file-per-block (#882), so a Block's data is its own
+// src/_data/blocks/<id>.json (a single object) — resolved per-id in lookupEntity, not via this map.
 const ENTITY_DATA = {
-  Block: 'src/_data/blocks.json',
   Plug: 'src/_data/plugs.json',
   Research: 'src/_data/researchTopics.json',
   CapabilityAdapter: 'src/_data/capabilities.json',
@@ -43,7 +44,8 @@ const ENTITY_DATA = {
 
 /** Find the entity row (by id) in its registry JSON, or null. Tolerant of array or grouped shapes. */
 function lookupEntity(entity, id, read) {
-  const file = ENTITY_DATA[entity];
+  // A Block's spec is its own per-block file (#882) whose whole content IS the row.
+  const file = entity === 'Block' ? `src/_data/blocks/${id}.json` : ENTITY_DATA[entity];
   if (!file) return null;
   let parsed;
   try {
@@ -51,6 +53,7 @@ function lookupEntity(entity, id, read) {
   } catch {
     return null;
   }
+  if (entity === 'Block') return parsed && parsed.id === id ? parsed : null;
   const rows = Array.isArray(parsed) ? parsed : Object.values(parsed).flat();
   return rows.find((r) => r && r.id === id) ?? null;
 }

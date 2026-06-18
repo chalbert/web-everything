@@ -1,0 +1,19 @@
+{
+  "id": "status-indicator",
+  "name": "Status Indicator",
+  "status": "active",
+  "type": "Module",
+  "summary": "Reference render for the Status Indicator intent (#354), the visual member of the Web Lifecycle protocol. `renderStatusIndicator` projects an entity's current lifecycle state onto a semantic status token across the intent's `tone` (neutral|info|progress|positive|caution|critical), `shape` (badge|pill|dot|text), and `affordance` (display-only|actionable) dimensions. It owns the display, not the rules: tone maps to a theme token (never a bespoke hex), the label text carries the state (never colour-only), and `role=\"status\"` marks the standing indicator while a transition announcement composes the Live Region Status intent. Ships an element form and a string form (`statusIndicatorHTML`) for table/innerHTML contexts.",
+  "implementsIntent": "status-indicator",
+  "exports": [
+    "renderStatusIndicator",
+    "statusIndicatorHTML"
+  ],
+  "implementedBy": "@frontierui/blocks/renderers/status-indicator/renderStatusIndicator.ts",
+  "webStandards": {
+    "ariaStatusRegion": {
+      "usage": "Projects an entity’s lifecycle status as a labelled badge; status changes are surfaced through a `role=\"status\"` live region.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Roles/status_role"
+    }
+  }
+}

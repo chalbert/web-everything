@@ -1,0 +1,19 @@
+{
+  "id": "audit-timeline",
+  "name": "Audit Timeline",
+  "status": "active",
+  "type": "Module",
+  "summary": "Reference render for the Audit Timeline intent, the visual member of the Web Audit protocol. `renderAuditTimeline` renders an entity's `AuditEvent[]` as a chronological, filterable feed across the intent's `density` (compact|comfortable), `grouping` (flat|by-day|by-actor), and `detail` (summary|expanded) dimensions, with `role=\"list\"` and `<time datetime>` semantics. It owns the display, not the record — append-only semantics, actor attribution, and before/after belong to the protocol. Ships an element form and a string form (`auditTimelineHTML`).",
+  "implementsIntent": "audit-timeline",
+  "exports": [
+    "renderAuditTimeline",
+    "auditTimelineHTML"
+  ],
+  "implementedBy": "@frontierui/blocks/renderers/audit-timeline/renderAuditTimeline.ts",
+  "webStandards": {
+    "headingElements": {
+      "usage": "Renders an entity’s `AuditEvent[]` as an ordered `<ol>` timeline; each event’s moment uses `<time datetime>` for a machine-readable, accessibly-announced timestamp.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/time"
+    }
+  }
+}
