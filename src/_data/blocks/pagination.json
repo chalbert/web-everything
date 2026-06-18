@@ -1,0 +1,144 @@
+{
+  "id": "pagination",
+  "element": true,
+  "name": "Pagination",
+  "status": "active",
+  "type": "Module",
+  "summary": "The blocks-layer home for the Collection Operations `page` stage. Renders paged controls inside a `<nav aria-label=\"pagination\">` landmark with `aria-current=\"page\"`, syncs the active page to a shareable self-canonical `?page=n` URL via the History API (Navigation API as enhancement; cross-document View Transitions for zero-JS server-rendered transitions), and wires `advance:auto` to an IntersectionObserver scroll sentinel. Numbered / prev-next / load-more presentations over the orthogonal `pageMode` × `advance` axes; infinite scroll = append + auto, never a peer mode. Ships a consumable `PaginationBehavior` (and a `<page-nav>` element) that mounts the verified renderer, delegates page / load-more clicks, clamps + advances the page state, and emits `pagination-change`; first consumer is the loan-origination pipeline (#317).",
+  "exports": [
+    "PaginationModule",
+    "PaginationBehavior",
+    "registerPagination"
+  ],
+  "implementsIntent": "collection-operations",
+  "dependsOn": [
+    "resource-loader"
+  ],
+  "implementedBy": "@frontierui/blocks/renderers/pagination/",
+  "webStandards": {
+    "paginationNavLandmark": {
+      "status": "W3C WAI-ARIA APG",
+      "pattern": "Pagination controls wrapped in a `<nav aria-label=\"pagination\">` landmark; the active page link marked `aria-current=\"page\"`",
+      "adoption": "PaginationBehavior renders the nav landmark and projects the active page as aria-current='page'; each landmark gets a unique label when more than one exists",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/landmark-regions/"
+    },
+    "ariaCurrent": {
+      "status": "WAI-ARIA 1.1",
+      "pattern": "aria-current='page' marks the active page within the pagination nav",
+      "adoption": "Set on the active page link; the companion sortDirection->aria-sort projection on table headers is deferred to the grid block",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current"
+    },
+    "historyApi": {
+      "status": "Baseline 2020",
+      "pattern": "pushState/popstate/scrollRestoration sync ?page=n to a shareable, back-button-restorable URL",
+      "adoption": "The native-first baseline for urlSync='query-param'; the active page is a self-canonical ?page=n and restores on back/forward",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/History/pushState"
+    },
+    "navigationApi": {
+      "status": "Baseline 2026",
+      "pattern": "A single navigate event intercepts same-origin same-document navigations",
+      "adoption": "Progressive enhancement over the History API baseline — used when available, never required",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API"
+    },
+    "crossDocumentViewTransitions": {
+      "status": "Progressive enhancement",
+      "pattern": "@view-transition { navigation: auto; } animates full-page navigation between server-rendered ?page=n pages with zero JS",
+      "adoption": "The MPA/server-rendered branch opts in via the CSS rule on both pages; no script required",
+      "reference": "https://developer.chrome.com/docs/web-platform/view-transitions/cross-document"
+    },
+    "intersectionObserver": {
+      "status": "Baseline",
+      "pattern": "A scroll sentinel observed by IntersectionObserver requests the next slice at the scroll boundary",
+      "adoption": "Wires advance:auto (append + auto = infinite scroll); rendering delegates to Windowed Collection, lifecycle to Loader",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/IntersectionObserver"
+    },
+    "selfCanonicalUrls": {
+      "status": "Google Search Central",
+      "pattern": "Each page is its own unique self-referencing canonical ?page=n; rel=next/prev is deprecated (2019) and never emitted as primary machinery",
+      "adoption": "Server-rendered <a href> page links are the indexable default; load-more/auto content provides a crawlable paginated path alongside the interactive UI",
+      "reference": "https://developers.google.com/search/docs/specialty/ecommerce/pagination-and-incremental-page-loading"
+    }
+  },
+  "designDecisions": {
+    "dedicatedBlockOverGrid": {
+      "description": "A dedicated pagination block realizing the `page` dimension family, rather than folding it into a broad grid/data-table block",
+      "rationale": "Every concrete renderable in the gap is pagination (nav landmark, aria-current, page-size selector, range label, scroll sentinel). The filter/sort/group rendering home (and the sortDirection->aria-sort projection, a table-header concern) is a separate, larger block tracked independently. Keeps this contract bounded and demonstrable against the verified WAI-ARIA APG pattern."
+    },
+    "pageModeXAdvance": {
+      "description": "Two orthogonal axes — pageMode (paged | append) x advance (manual | auto) — not one coupled `mode` list",
+      "rationale": "Infinite scroll is a derived opt-in (append + auto), not a peer mode. paged + auto is undefined (you do not auto-replace a slice on scroll). Matches the Collection Operations intent vocabulary verbatim.",
+      "default": "paged + manual"
+    },
+    "nativeFirstUrlState": {
+      "description": "History API is the baseline for urlSync; Navigation API and cross-document View Transitions are enhancements",
+      "rationale": "Native-first: the History API has been Baseline since 2020 and covers ?page=n + back/forward + scroll restoration with no library. The Navigation API (Baseline 2026) and zero-JS View Transitions layer on where supported."
+    },
+    "seoLoadBearing": {
+      "description": "urlSync is load-bearing for append modes, not optional polish",
+      "rationale": "Googlebot does not fire user-action JS, so load-more/auto content is not reliably crawlable; append modes are only advisable with query-param URL sync on, else the footer and back button break. Server-rendered self-canonical ?page=n links are the SEO-safe default; rel=next/prev is dead."
+    },
+    "rangeLabelRequiresTotal": {
+      "description": "rangeLabel ('showing 21-40 of 500') and jump-to-page compose only over an offset/page resource protocol",
+      "rationale": "A cursor protocol has no total, so it structurally forces prev-next or load-more and forces rangeLabel off. This cross-layer constraint is inherited from the Custom Pagination resource, not re-modeled here.",
+      "openQuestion": "Recommended page-size options and defaults, and how the range label degrades with no total, are unverified — owned by backlog #060."
+    },
+    "contractsOnly": {
+      "description": "This block defines the contract (nav structure, observable events, URL-state and advance strategies); concrete strategy implementations live in Frontier UI",
+      "rationale": "Web Everything is the standard. The block names the registry/strategy seams; competing implementations (a custom URL-state provider, an alternate advance trigger) register against them without changing the contract."
+    },
+    "focusAfterPageChange": {
+      "description": "Focus and screen-reader announcement after a page change are intentionally unresolved here",
+      "rationale": "The APG landmark + aria-current contract is verified; post-change focus/announcement is an open question tracked in backlog #059 and must not be guessed."
+    }
+  },
+  "frameworkComparison": {
+    "react": {
+      "patterns": [
+        "TanStack Table pagination model (pageIndex/pageSize/pageCount)",
+        "React Aria usePagination"
+      ],
+      "notes": "TanStack models the page state; React Aria supplies the a11y wiring. We compose both into one declarative block over the intent."
+    },
+    "vue": {
+      "patterns": [
+        "Vuetify v-pagination",
+        "Quasar QPagination"
+      ],
+      "notes": "Component-level numbered pagination with aria-current; no built-in cursor/offset protocol coupling."
+    },
+    "github": {
+      "patterns": [
+        "Primer Pagination"
+      ],
+      "notes": "Server-rendered <a href> numbered links inside a nav landmark — closest to our SEO-safe default."
+    },
+    "adobe": {
+      "patterns": [
+        "React Spectrum (range labels, page-size)"
+      ],
+      "notes": "Prior art for the result-range label and page-size selector affordances (defaults pending #060)."
+    }
+  },
+  "traits": [
+    {
+      "name": "withRangeLabel",
+      "description": "Surfaces the slice as a 'showing 21-40 of 500' result-range label. Requires a known total -> offset/page protocol only.",
+      "intentDimension": "rangeLabel"
+    },
+    {
+      "name": "withPageSizeSelect",
+      "description": "Adds a page-size selector (e.g. 10 / 25 / 50 / 100). Recommended options and persistence pending #060.",
+      "intentDimension": "page"
+    },
+    {
+      "name": "withAutoAdvance",
+      "description": "Turns append into infinite scroll by fetching the next slice at an IntersectionObserver scroll sentinel (advance:auto).",
+      "intentDimension": "advance"
+    },
+    {
+      "name": "withUrlSync",
+      "description": "Reflects the active page in a shareable, back-button-restorable ?page=n URL via the History API.",
+      "intentDimension": "urlSync"
+    }
+  ]
+}

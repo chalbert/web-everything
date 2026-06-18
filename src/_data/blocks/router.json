@@ -1,0 +1,338 @@
+{
+  "id": "router",
+  "tagName": [
+    { "tag": "we-route-view", "class": "RouteViewElement" },
+    { "tag": "we-route-outlet", "class": "RouteOutletElement" }
+  ],
+  "name": "Router",
+  "status": "active",
+  "type": "Component",
+  "summary": "Declarative client-side routing built on Navigation API, URLPattern, and ViewEngine.",
+  "exports": [
+    "RouteViewElement",
+    "RouteOutletElement",
+    "RouteLinkBehavior",
+    "RoutePrefetchBehavior",
+    "registerRouter",
+    "RouteContext",
+    "RouteNavigationTarget",
+    "RouteGuardFn",
+    "RouteGuardResult",
+    "RouteLoaderFn",
+    "RouteLoaderParams",
+    "RouteDefinition",
+    "MatchedRoute",
+    "NavigationResult"
+  ],
+  "implementedBy": "@frontierui/blocks/router/elements/RouteViewElement.ts",
+  "implementsIntent": "navigation",
+  "intentDimensions": {
+    "structure": "hierarchical",
+    "history": "push",
+    "scroll": "auto",
+    "transition": "none",
+    "guard": "free",
+    "persistence": "url"
+  },
+  "consumesIntent": [
+    "loader"
+  ],
+  "dependsOn": [
+    "view",
+    "resource-loader",
+    "error-recovery",
+    "prefetch-behavior",
+    "resource-action"
+  ],
+  "viewIntegration": {
+    "description": "<route-view> uses ViewEngine directly — it does its own structural DOM stamping in-place (or into named outlets) but delegates hide/show mechanics to ViewEngine.",
+    "uses": {
+      "ViewEngine": "Hidden modes for keep-alive cached routes inside <route-view> (or named outlets), toggle events (beforetoggle/toggle), View Transitions API integration",
+      "ViewBehavior": "Not used — router content doesn't exist until a route matches, no pre-existing elements to attach behavior to",
+      "ViewIfDirective": "Not used — router has its own URL-based matching, not expression-based conditionals",
+      "ViewSwitchDirective": "Not used — router manages its own outlet stamping"
+    },
+    "rationale": "Route content shouldn't exist in DOM until the URL matches. No placeholders, no ghost elements. <route-view> does structural work in-place; ViewEngine provides shared show/hide mechanics."
+  },
+  "webStandards": {
+    "navigationAPI": {
+      "status": "Baseline 2024",
+      "pattern": "Modern API replacing History API with events, traversal info, and interception",
+      "adoption": "Primary navigation mechanism, fallback to History API for Safari <17.2",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Navigation_API"
+    },
+    "urlPatternAPI": {
+      "status": "Baseline 2025",
+      "pattern": "URLPattern for route pattern matching with named groups",
+      "adoption": "Use for all route pattern matching, enables :param and * wildcards",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/URLPattern"
+    },
+    "viewTransitionsAPI": {
+      "status": "Baseline 2024",
+      "pattern": "Document.startViewTransition() for animated route changes",
+      "adoption": "Opt-in via route:transition attribute for smooth navigation",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/View_Transitions_API"
+    },
+    "speculationRulesAPI": {
+      "status": "Chrome 121+, other browsers pending",
+      "pattern": "Declarative prefetch and prerender rules",
+      "adoption": "Generate speculation rules from route definitions for prefetching",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Speculation_Rules_API"
+    },
+    "historyAPI": {
+      "status": "Standard (Legacy)",
+      "pattern": "pushState/replaceState/popstate for URL manipulation",
+      "adoption": "Fallback only for browsers without Navigation API",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/History_API"
+    }
+  },
+  "designDecisions": {
+    "hybridArchitecture": {
+      "description": "Router uses a hybrid pattern: components for structural boundaries, behaviors for enhancing existing elements, plain HTML attributes for declarative metadata. Primary rendering is in-place inside <route-view>.",
+      "components": {
+        "RouteViewElement": "Custom element (<route-view>). Orchestrator that owns child templates, listens to Navigation API, and stamps matched content in-place as its own children. The router renders where you define the routes.",
+        "RouteOutletElement": "Custom element (<route-outlet>). Named auxiliary views only — for cases where a route renders content to a different area outside the <route-view>."
+      },
+      "behaviors": {
+        "RouteLinkBehavior": "CustomAttribute on <a> (route:link). Must preserve native anchor semantics.",
+        "RoutePrefetchBehavior": "CustomAttribute on <a> (route:prefetch). Metadata paired with route:link."
+      },
+      "plainAttributes": {
+        "description": "route, route:guard, route:guard:leave, route:loader, route:error, route:outlet on <template> elements are plain HTML attributes read by <route-view> via querySelectorAll. No classes or registry entries needed.",
+        "rationale": "Eliminates RouteAttribute, RouteGuardAttribute, RouteLoaderAttribute, RouteErrorAttribute classes. The config component owns template parsing."
+      },
+      "rationale": "In-place rendering is the simplest model — the router renders where you define the routes. Named outlets exist only for auxiliary views (sidebar, header, footer). Links must stay as <a> elements for accessibility."
+    },
+    "naming": {
+      "prefix": "route:",
+      "componentTags": [
+        "route-view",
+        "route-outlet"
+      ],
+      "behaviorAttributes": [
+        "route:link",
+        "route:prefetch"
+      ],
+      "templateAttributes": [
+        "route",
+        "route:guard",
+        "route:guard:leave",
+        "route:loader",
+        "route:error",
+        "route:outlet",
+        "lazy"
+      ],
+      "rationale": "Noun-based prefix consistent with view: and on: conventions. Component tag names use route- prefix. Template attributes are plain HTML read by the view component — no registry needed."
+    },
+    "nomenclature": {
+      "route": "URL pattern to view mapping",
+      "outlet": "Named insertion point for routed content (from React Router/Angular)",
+      "link": "Navigation trigger element",
+      "guard": "Conditional navigation logic (canActivate, canDeactivate)",
+      "loader": "Data fetching before route activation",
+      "rationale": "Terms from React Router and Angular Router, widely understood"
+    },
+    "patternSyntax": {
+      "description": "Route patterns follow URLPattern API syntax",
+      "examples": [
+        "/users/:id - Named parameter",
+        "/files/* - Wildcard match",
+        "/blog/:year/:month? - Optional parameter",
+        "https://*.example.com/* - Full URL patterns"
+      ],
+      "rationale": "URLPattern is a web standard, no need for custom syntax"
+    },
+    "outlets": {
+      "element": "<route-outlet name=\"...\">",
+      "primary": "<route-view> renders matched content in-place — no separate outlet needed for the primary path",
+      "named": "Named outlets (<route-outlet name=\"...\">)  for auxiliary views only (sidebars, headers, footers)",
+      "rationale": "In-place rendering is the simplest model. Named outlets exist for the special case where a route needs to render content outside the <route-view>."
+    },
+    "links": {
+      "attribute": "route:link",
+      "activeClass": "Automatic .active class on matching routes",
+      "prefetch": "Optional hover/intersection prefetching",
+      "rationale": "Declarative links enable pre-rendering and active state styling"
+    },
+    "contextProviders": {
+      "route": {
+        "injectorKey": "customContexts:route",
+        "providedTo": "Stamped content inside <route-view> (or named <route-outlet>), set on the element's injector",
+        "shape": "RouteContext { params, data, error, path, query, hash, state }"
+      },
+      "routeGuard": {
+        "injectorKey": "customContexts:routeGuard",
+        "providedTo": "<route-view> ancestor (user-provided)",
+        "shape": "Record<string, RouteGuardFn>"
+      },
+      "routeLoader": {
+        "injectorKey": "customContexts:routeLoader",
+        "providedTo": "<route-view> ancestor (user-provided)",
+        "shape": "Record<string, RouteLoaderFn>"
+      },
+      "loaderIntent": {
+        "injectorKey": "customContexts:loaderIntent",
+        "providedTo": "<route-view> ancestor (user-provided)",
+        "shape": "LoaderIntent (from Loader Intent protocol)",
+        "consumed": true,
+        "description": "Declares how route loading states affect the UI. Router resolves this from the injector chain and selects matching Resource Loader traits. Falls back to soft blocking (aria-busy + CSS) when not provided."
+      },
+      "rationale": "All router data flows through customContexts, consistent with the framework's @ prefix convention. Guards and loaders are named functions resolved from their respective contexts, not magic globals. The loaderIntent context is consumed (not provided) by the router — it reads the app's declared loading UX profile."
+    },
+    "guards": {
+      "types": [
+        "canActivate",
+        "canDeactivate"
+      ],
+      "description": "Plain functions (RouteGuardFn), not class instances. Provided via customContexts:routeGuard, resolved by name from route:guard and route:guard:leave attribute values.",
+      "noAbstractClass": "The Navigation API's navigate event already provides the guard mechanism — event.intercept() to proceed, event.preventDefault() to cancel, event.signal to abort. An abstract RouteGuard class would duplicate platform-level control. Guard functions are stateless decision points; the injector/context system handles DI via closures.",
+      "navigationApiMapping": {
+        "event.preventDefault()": "Guard returns false (canDeactivate, before intercept)",
+        "event.intercept({ handler })": "Guard returns true, proceed with navigation pipeline",
+        "navigation.navigate(redirect)": "Guard returns a string (redirect URL)",
+        "event.signal": "Passed to loaders for automatic abort on navigation supersede"
+      },
+      "rationale": "Functional guards follow Angular v15+ direction (away from class-based CanActivate). Simpler, composable, testable. Navigation API is the single integration point — Router wraps it, not duplicates it."
+    },
+    "loaders": {
+      "attribute": "route:loader",
+      "description": "Named async functions provided via customContexts:routeLoader, resolved by name from route:loader attribute value",
+      "integration": "Router resolves customContexts:loaderIntent from the injector chain. The intent's strategy dimension selects which Resource Loader trait controls the loading UX (soft, hard, replacement, optimistic). Per-route overrides via route:loader-strategy, route:loader-context, route:loader-timing attributes.",
+      "rationale": "Inspired by React Router loaders, Remix, TanStack Router. Context-based resolution keeps loaders injectable and testable. The Loader Intent bridge means apps declare loading UX once; all consumers (router, forms, data grids) adapt consistently."
+    },
+    "errorHandling": {
+      "attribute": "route:error",
+      "description": "Error boundary for route loading failures",
+      "rationale": "Clean error UI without try-catch in user code"
+    },
+    "lazyLoading": {
+      "attribute": "route:lazy",
+      "description": "Code-split route components, load on navigation",
+      "rationale": "Performance optimization for large apps"
+    },
+    "scrollRestoration": {
+      "modes": [
+        "auto",
+        "manual",
+        "none"
+      ],
+      "description": "Control scroll position on navigation",
+      "rationale": "Navigation API provides native scroll restoration"
+    },
+    "prefetching": {
+      "modes": [
+        "none",
+        "hover",
+        "visible",
+        "eager"
+      ],
+      "integration": "Speculation Rules API when available",
+      "rationale": "Predictive loading for instant navigation feel"
+    },
+    "events": {
+      "route-change": {
+        "description": "Fired when the active route changes",
+        "taxonomy": "notification",
+        "detail": {
+          "from": "RouteNavigationTarget|null",
+          "to": "RouteNavigationTarget",
+          "matched": "MatchedRoute"
+        },
+        "target": "<route-view>",
+        "bubbles": true,
+        "cancelable": true,
+        "class": "RouteChangeEvent",
+        "provider": "customEvents:route-change"
+      },
+      "route-load-start": {
+        "description": "Fired when a route loader begins fetching data",
+        "taxonomy": "notification",
+        "detail": {
+          "route": "MatchedRoute"
+        },
+        "target": "<route-view>",
+        "bubbles": true,
+        "cancelable": false,
+        "class": "RouteLoadStartEvent",
+        "provider": "customEvents:route-load-start"
+      },
+      "route-load-end": {
+        "description": "Fired when a route loader finishes fetching data",
+        "taxonomy": "notification",
+        "detail": {
+          "route": "MatchedRoute",
+          "data": "unknown"
+        },
+        "target": "<route-view>",
+        "bubbles": true,
+        "cancelable": false,
+        "class": "RouteLoadEndEvent",
+        "provider": "customEvents:route-load-end"
+      },
+      "route-error": {
+        "description": "Fired when a route loader fails",
+        "taxonomy": "notification",
+        "detail": {
+          "route": "MatchedRoute",
+          "error": "Error"
+        },
+        "target": "<route-view>",
+        "bubbles": true,
+        "cancelable": false,
+        "class": "RouteErrorEvent",
+        "provider": "customEvents:route-error"
+      },
+      "rationale": "Module-prefixed names ('route-change') reduce collision risk. Typed event classes with provider keys enable listenForScoped discrimination for apps embedding multiple routers or combining routers with other blocks that fire change/error events."
+    }
+  },
+  "frameworkComparison": {
+    "reactRouter": {
+      "patterns": [
+        "BrowserRouter",
+        "Routes",
+        "Route",
+        "Outlet",
+        "Link",
+        "useNavigate",
+        "useParams",
+        "loader"
+      ],
+      "notes": "Similar loader pattern, data-driven routing"
+    },
+    "vueRouter": {
+      "patterns": [
+        "RouterView",
+        "RouterLink",
+        "useRoute",
+        "beforeEach guards"
+      ],
+      "notes": "Navigation guards inspiration"
+    },
+    "angular": {
+      "patterns": [
+        "RouterModule",
+        "router-outlet",
+        "routerLink",
+        "CanActivate",
+        "Resolve"
+      ],
+      "notes": "Named outlets, guards, resolvers"
+    },
+    "tanstackRouter": {
+      "patterns": [
+        "file-based routing",
+        "search params",
+        "loaders"
+      ],
+      "notes": "Type-safe routing, search param handling"
+    },
+    "sveltekit": {
+      "patterns": [
+        "file-based routing",
+        "+page.js loaders",
+        "+error.svelte"
+      ],
+      "notes": "File-based but concepts translate to declarative"
+    }
+  }
+}

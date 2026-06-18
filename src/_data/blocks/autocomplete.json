@@ -1,0 +1,39 @@
+{
+  "id": "autocomplete",
+  "element": true,
+  "fuiDemo": {
+    "file": "autocomplete-unplugged.html",
+    "title": "Autocomplete — editable, filterable droplist",
+    "height": 520
+  },
+  "name": "Autocomplete",
+  "status": "draft",
+  "type": "Component",
+  "summary": "The editable, filterable concrete member of the droplist family — an <input role=\"combobox\"> bound to a separate role=\"listbox\" surface (<auto-complete>). The richest member: typing narrows the collection (filter) instead of seeking within it (type-ahead), and DOM focus stays on the input while virtual focus moves through the listbox. A form-associated custom element so <form>/FormData/reset/validity work like a native control, mirroring the WAI-ARIA APG Combobox (list-autocomplete) pattern.",
+  "implementsIntent": "selection",
+  "composesIntents": [
+    "anchor",
+    "focus-delegation",
+    "selection",
+    "input",
+    "live-region-status",
+    "loader",
+    "windowed-collection",
+    "collection-operations",
+    "typography"
+  ],
+  "designDecisions": [
+    "advance defaults to auto on autocomplete — the one member that overrides the Collection Operations family default of manual. The dimension (collection-operations.advance: manual | auto) is owned by Collection Operations and already wired onto grids/data tables, where it defaults to manual because auto-advance turns a full page into infinite scroll with its documented harms (unreachable footer, no stopping point). An autocomplete listbox is a bounded popover, not a page — there is no footer to strand — and every surveyed combobox auto-loads the next slice at the scroll boundary, so auto is the most-flexible default here and manual-only is the author opt-in (ratified #018 Fork 2). Mechanically: append + auto renders an IntersectionObserver scroll sentinel at the listbox boundary that triggers the next-page fetch, coordinating with the already-composed loader intent (loadingMore state, ~250ms debounce, stale-cancel) and windowed-collection (virtualized rows); the manual fallback renders a clicked \"Load more\" row that is reachable by keyboard and announced by live-region-status — the accessible escape hatch for the same fetch. No new contract: this is family wiring over the already-owned dimension.",
+    "Focus host ≠ collection: this is the one member where the focus host and the option collection are different elements. DOM focus must stay on the <input> so typing is never interrupted, so the input is the focus host (role=combobox, carries aria-activedescendant and aria-expanded) while a separate <ul role=listbox> is the collection. focus-delegation=\"strategy=virtual;controller=<input-id>\" tells the trait its host is elsewhere: keydown attaches to the input, aria-activedescendant is written onto the input, and no tabindex is added (the input is already focusable). The dropdown conflated container and host on one element; autocomplete is the case that pulls them apart — the controller param (now real in Frontier UI's blocks/droplist/FocusDelegation.ts) is exactly that generalization.",
+    "Filter swaps in for type-ahead, and the two are mutually exclusive: both consume printable keystrokes, so a member composes one or the other. In the dropdown, typing seeks (type-ahead jumps the active item to a match); in the autocomplete, typing filters (filter narrows the list). \"Autocomplete = dropdown made editable\" precisely means: swap type-ahead for filter and move the focus host from the listbox to the input. selection, anchor, and focus movement are otherwise unchanged — selectionFollowsFocus=false, so arrowing only previews, Enter commits.",
+    "filter is a thin composition over loader + live-region-status, not a monolith: filter consumes the loader intent (customContexts:loaderIntent) for the async lifecycle — debounce (~250ms), enter a loading state, cancel stale in-flight responses, inject the results — and pushes a count to the live-status announcer on each settle (\"7 results available\" / \"No results found\"). filter=\"client\" skips the async path and just hides non-matching options. live-region-status owns the single announcer region; filter announces counts on settle and focus-delegation announces the active option (\"Paris, 2 of 7\") on each move — two callers, one region.",
+    "Concrete member is its own element, not a flag on <drop-list>: the two-element input+listbox substrate is a genuinely different shape than the dropdown's single button-triggered listbox, so autocomplete ships as a distinct <auto-complete name src> custom element rather than <drop-list editable>. This keeps each concrete droplist member one block (dropdown, multi-select-dropdown, autocomplete), consistent with the family rule that members are distinct trait selections over the substrate, not configurations of one widget.",
+    "Form-associated, single string surface like the dropdown: static formAssociated = true + ElementInternals.setFormValue, so FormData, reset, validity, bfcache restore, <label for>, and autocomplete attribute all work with no hidden input. On commit the only autocomplete-specific glue runs — write the selected label into the input value, dismiss the surface, keep focus on the input, and reveal the clear (X) affordance (input.clearable) when the value is non-empty. clearable, filter, live-status, and windowed are all now built and tested in Frontier UI's reference implementation (blocks/droplist/Clearable.ts, Filter.ts, LiveStatus.ts, Windowed.ts), alongside focus-delegation, selection, and anchor — all six trait surfaces ship; the block defines them as contracts, exactly as the family already does for anchor's positioning strategy."
+  ],
+  "webStandards": {
+    "ariaCombobox": {
+      "usage": "An `<input role=\"combobox\">` with `aria-autocomplete=\"list\"`, `aria-expanded`, and `aria-controls` bound to a separate `role=\"listbox\"`; the active option is tracked with `aria-activedescendant` as the input filters.",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/combobox/"
+    }
+  }
+}

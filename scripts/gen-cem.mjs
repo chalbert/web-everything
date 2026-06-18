@@ -12,9 +12,12 @@
  *
  * The emit is a *projection* of the block-protocol fields that already exist — it never
  * invents data. A block is emitted as a CEM `custom-element` declaration (customElement:
- * true + tagName) ONLY when the block carries an explicit `tagName` field; otherwise it is
- * a plain `class` declaration (no tag is ever fabricated — `registryName` is a DI registry
- * class name, NOT a custom-element tag). Events and exports map directly; WE-specific fields
+ * true + tagName) ONLY when the block opts in — either `element: true` (the derived-default
+ * marker, #843/#841 sub-shape B → tag = `<prefix>-<id>`) or an explicit `tagName` (a string,
+ * or a list of `{ tag, class }` for multi-element blocks like `router` → `we-route-view` +
+ * `we-route-outlet`). Element-ness is opt-in and orthogonal to `type` — never derived from it.
+ * Otherwise it is a plain `class` declaration (no tag is ever fabricated — `registryName` is a
+ * DI registry class name, NOT a custom-element tag). Events and exports map directly; WE-specific fields
  * (implementsIntent, traits, webStandards) are carried under a namespaced `x-webeverything`
  * extension so the core manifest stays spec-valid for external tooling.
  *
@@ -24,17 +27,19 @@
  * Run: `npm run gen:cem`  (writes custom-elements.json at the repo root — the canonical
  * CEM location, discoverable via package.json "customElements").
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { resolvedComponentGroups, componentTokenGroups } from './lib/component-tokens.mjs';
+import { loadBlocks } from './lib/blocks-loader.cjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DATA = join(ROOT, 'src/_data');
 const OUT = join(ROOT, 'custom-elements.json');
 const SCHEMA_VERSION = '2.1.0';
 
-const blocks = JSON.parse(readFileSync(join(DATA, 'blocks.json'), 'utf8'));
+// Assembled from the per-block specs (src/_data/blocks/<id>.json), #882 — was a single blocks.json.
+const blocks = loadBlocks();
 
 /** The webtheme component-token tier, resolved once and shared across every block module (#802). */
 const tokenGroups = await resolvedComponentGroups();
@@ -148,6 +153,34 @@ const cemCssParts = (b) =>
     ...(p.description ? { description: p.description } : {}),
   }));
 
+/**
+ * The custom-element tag prefix. `we-` is the platform default (Config-Extends-Platform-Default,
+ * #841); a consumer override (pretty legacy names like `page-nav`) lives consumer-side, not in the
+ * WE value — see #844 (parameterized registration). WE authors only the derived default here.
+ */
+const TAG_PREFIX = 'we-';
+
+/**
+ * The custom-element tag(s) a block registers, normalized to `{ tag, className }[]` (#843).
+ * - `element: true`  → one derived tag `<prefix>-<id>` (the authored default, sub-shape B).
+ * - `tagName: "x"`   → one explicit tag (a non-derivable / override name).
+ * - `tagName: [...]`  → N tags (multi-element blocks); each entry is a string (className paired by
+ *   order from the block's element `exports`) or `{ tag, class }`.
+ * - none             → not a custom element (a plain `class` declaration; no tag fabricated).
+ */
+const elementTags = (b, declName) => {
+  const tn = b.tagName;
+  if (Array.isArray(tn)) {
+    return tn.map((e, i) =>
+      typeof e === 'string'
+        ? { tag: e, className: (b.exports && b.exports[i]) || declName }
+        : { tag: e.tag, className: e.class || (b.exports && b.exports[i]) || declName });
+  }
+  if (typeof tn === 'string') return [{ tag: tn, className: declName }];
+  if (b.element === true) return [{ tag: `${TAG_PREFIX}${b.id}`, className: declName }];
+  return [];
+};
+
 /** WE-specific block-protocol fields, namespaced so the core CEM stays spec-valid. */
 const weExtension = (b) => {
   const x = {};
@@ -164,13 +197,14 @@ const weExtension = (b) => {
 const cemModule = (b) => {
   const path = b.implementedBy || `@frontierui/blocks/${b.id}/index.ts`;
   const declName = (b.exports && b.exports[0]) || b.name.replace(/\s+/g, '');
-  const isCustomElement = Boolean(b.tagName);
+  const tags = elementTags(b, declName);
+  const primary = tags[0];
 
   const declaration = {
     kind: 'class',
-    name: declName,
+    name: primary ? primary.className : declName,
     ...(b.summary ? { description: b.summary } : {}),
-    ...(isCustomElement ? { customElement: true, tagName: b.tagName } : {}),
+    ...(primary ? { customElement: true, tagName: primary.tag } : {}),
     ...(cemAttributes(b).length ? { attributes: cemAttributes(b) } : {}),
     ...(cemMembers(b).length ? { members: cemMembers(b) } : {}),
     ...(cemSlots(b).length ? { slots: cemSlots(b) } : {}),
@@ -187,17 +221,27 @@ const cemModule = (b) => {
       .map((name) => ({ kind: 'js', name, declaration: { name, module: path } })),
   ];
 
+  // Multi-element blocks emit one extra custom-element declaration per additional tag
+  // (router → route-view on the primary, route-outlet here). The projected member surface
+  // stays on the primary declaration; the extras carry the tag + class identity.
+  const extraDecls = tags.slice(1).map(({ tag, className }) => ({
+    kind: 'class',
+    name: className,
+    customElement: true,
+    tagName: tag,
+  }));
+
   return {
     kind: 'javascript-module',
     path,
-    declarations: [declaration],
+    declarations: [declaration, ...extraDecls],
     exports: exportsDecl,
   };
 };
 
 const manifest = {
   schemaVersion: SCHEMA_VERSION,
-  readme: 'Generated from src/_data/blocks.json by scripts/gen-cem.mjs (WE block protocols → CEM). Do not edit by hand.',
+  readme: 'Generated from src/_data/blocks/*.json by scripts/gen-cem.mjs (WE block protocols → CEM). Do not edit by hand.',
   modules: [...blocks]
     .sort((a, b) => a.id.localeCompare(b.id))
     .map(cemModule),

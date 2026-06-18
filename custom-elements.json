@@ -1,6 +1,6 @@
 {
   "schemaVersion": "2.1.0",
-  "readme": "Generated from src/_data/blocks.json by scripts/gen-cem.mjs (WE block protocols → CEM). Do not edit by hand.",
+  "readme": "Generated from src/_data/blocks/*.json by scripts/gen-cem.mjs (WE block protocols → CEM). Do not edit by hand.",
   "modules": [
     {
       "kind": "javascript-module",
@@ -144,6 +144,67 @@
     },
     {
       "kind": "javascript-module",
+      "path": "@frontierui/blocks/app-shell/",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "createAppShell",
+          "description": "Chrome layout primitive that frames a page: a (sticky) header with a brand lockup and a header-controls region, an optional nav landmark, the main content region (preceded by a skip link), and an optional footer. Built for the #870 must-build set so the #865 WE-docs chrome dogfood can mount it in-document (mode C).",
+          "x-webeverything": {
+            "webStandards": {
+              "landmarkRoles": {
+                "status": "WAI-ARIA",
+                "pattern": "header / nav / main / footer landmark elements structure the page for assistive technology",
+                "adoption": "App Shell emits native <header>, <nav aria-label>, <main>, <footer> landmark regions",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/main"
+              },
+              "skipLink": {
+                "status": "WCAG 2.4.1",
+                "pattern": "A skip link as the first focusable element lets keyboard users bypass repeated chrome",
+                "adoption": "App Shell renders a skip link targeting the focusable <main> region",
+                "reference": "https://www.w3.org/WAI/WCAG21/Techniques/general/G1"
+              },
+              "positionSticky": {
+                "status": "Baseline",
+                "pattern": "position: sticky pins the header to the top on scroll without JavaScript",
+                "adoption": "Sticky header is the default; opt out via config",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/CSS/position"
+              }
+            },
+            "blockType": "Module",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "createAppShell",
+          "declaration": {
+            "name": "createAppShell",
+            "module": "@frontierui/blocks/app-shell/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "mountAppShell",
+          "declaration": {
+            "name": "mountAppShell",
+            "module": "@frontierui/blocks/app-shell/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "mountInDocument",
+          "declaration": {
+            "name": "mountInDocument",
+            "module": "@frontierui/blocks/app-shell/"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
       "path": "@frontierui/blocks/renderers/audit-timeline/renderAuditTimeline.ts",
       "declarations": [
         {
@@ -245,6 +306,8 @@
           "kind": "class",
           "name": "Autocomplete",
           "description": "The editable, filterable concrete member of the droplist family — an <input role=\"combobox\"> bound to a separate role=\"listbox\" surface (<auto-complete>). The richest member: typing narrows the collection (filter) instead of seeking within it (type-ahead), and DOM focus stays on the input while virtual focus moves through the listbox. A form-associated custom element so <form>/FormData/reset/validity work like a native control, mirroring the WAI-ARIA APG Combobox (list-autocomplete) pattern.",
+          "customElement": true,
+          "tagName": "we-autocomplete",
           "x-webeverything": {
             "implementsIntent": "selection",
             "composesIntents": [
@@ -288,6 +351,8 @@
           "kind": "class",
           "name": "BackgroundTaskSurface",
           "description": "The persistent app-shell surface that hosts long-running work after it goes async — the receiving end of a Loader's escalation:async handoff. Renders one entry per registered task with per-task progress (the Loader's own state machine, hosted off-view), per-task retry delegating to Reliability, and arms the navigation-away / before-unload guard while any task is in flight. Distinct from the Feedback Intent (transient toasts) and the Loader Intent (in-view pending state that dies with its view).",
+          "customElement": true,
+          "tagName": "we-background-task-surface",
           "events": [
             {
               "name": "background-task-register",
@@ -540,6 +605,69 @@
           "declaration": {
             "name": "BroadcastBehavior",
             "module": "@frontierui/blocks/broadcast/index.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/button/",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "createButton",
+          "description": "Chrome button family: icon-only buttons, icon links (rendered as <a> when given an href, e.g. the GitHub control), and aria-pressed/aria-expanded toggle buttons (the mobile-nav hamburger). Built for the #870 must-build set so the #865 WE-docs chrome dogfood can mount it in-document (mode C).",
+          "x-webeverything": {
+            "webStandards": {
+              "ariaPressed": {
+                "status": "WAI-ARIA",
+                "pattern": "aria-pressed turns a button into a toggle button with announced on/off state",
+                "adoption": "The toggle variant maintains aria-pressed and mirrors aria-expanded when it controls a target",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Roles/button_role"
+              },
+              "accessibleName": {
+                "status": "WAI-ARIA",
+                "pattern": "Icon-only controls need an accessible name via aria-label",
+                "adoption": "Icon buttons/links set aria-label from the configured label",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-label"
+              }
+            },
+            "blockType": "Module",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "createButton",
+          "declaration": {
+            "name": "createButton",
+            "module": "@frontierui/blocks/button/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "mountButton",
+          "declaration": {
+            "name": "mountButton",
+            "module": "@frontierui/blocks/button/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "setButtonPressed",
+          "declaration": {
+            "name": "setButtonPressed",
+            "module": "@frontierui/blocks/button/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "mountInDocument",
+          "declaration": {
+            "name": "mountInDocument",
+            "module": "@frontierui/blocks/button/"
           }
         }
       ]
@@ -1013,6 +1141,8 @@
           "kind": "class",
           "name": "DataTableModule",
           "description": "The blocks-layer home for the Collection Operations `filter`, `sort`, and `group` stages (the `page` stage is the companion Pagination block — compose, never merge). Renders a native `<table>` whose sortable column headers project `sortDirection` onto the WAI-ARIA APG `aria-sort` attribute (ascending/descending, sortable-but-unsorted = none) via button-wrapped `<th scope=\"col\">`, orders rows with `Intl.Collator` (sensitivity/numeric/caseFirst/ignorePunctuation) and SQL-style empty placement, narrows them by `filterMatch` (all/any), and partitions them into `<tbody>` groups with `groupSummary` aggregates named after the SQL functions (count/sum/average/minimum/maximum). The pipeline order is data (default filter → sort → group → page). Ships a consumable `DataTableBehavior` (and a `<data-table>` custom element) that mounts the verified renderer, wires click-to-sort + a polite live-region announcement, and emits `data-table-change`; its first enterprise consumer is the loan-origination exercise app (#317).",
+          "customElement": true,
+          "tagName": "we-data-table",
           "x-webeverything": {
             "implementsIntent": "collection-operations",
             "traits": [
@@ -2750,6 +2880,8 @@
           "kind": "class",
           "name": "PaginationModule",
           "description": "The blocks-layer home for the Collection Operations `page` stage. Renders paged controls inside a `<nav aria-label=\"pagination\">` landmark with `aria-current=\"page\"`, syncs the active page to a shareable self-canonical `?page=n` URL via the History API (Navigation API as enhancement; cross-document View Transitions for zero-JS server-rendered transitions), and wires `advance:auto` to an IntersectionObserver scroll sentinel. Numbered / prev-next / load-more presentations over the orthogonal `pageMode` × `advance` axes; infinite scroll = append + auto, never a peer mode. Ships a consumable `PaginationBehavior` (and a `<page-nav>` element) that mounts the verified renderer, delegates page / load-more clicks, clamps + advances the page state, and emits `pagination-change`; first consumer is the loan-origination pipeline (#317).",
+          "customElement": true,
+          "tagName": "we-pagination",
           "x-webeverything": {
             "implementsIntent": "collection-operations",
             "traits": [
@@ -3923,6 +4055,8 @@
           "kind": "class",
           "name": "RouteViewElement",
           "description": "Declarative client-side routing built on Navigation API, URLPattern, and ViewEngine.",
+          "customElement": true,
+          "tagName": "we-route-view",
           "x-webeverything": {
             "implementsIntent": "navigation",
             "webStandards": {
@@ -3960,6 +4094,12 @@
             "blockType": "Component",
             "status": "active"
           }
+        },
+        {
+          "kind": "class",
+          "name": "RouteOutletElement",
+          "customElement": true,
+          "tagName": "we-route-outlet"
         }
       ],
       "exports": [
@@ -4073,6 +4213,62 @@
           "declaration": {
             "name": "NavigationResult",
             "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+          }
+        }
+      ]
+    },
+    {
+      "kind": "javascript-module",
+      "path": "@frontierui/blocks/sectioned-nav/",
+      "declarations": [
+        {
+          "kind": "class",
+          "name": "createSectionedNav",
+          "description": "Sectioned-disclosure navigation panel: collapsible section heads (W3C APG Disclosure Navigation) over link lists — the sectioned counterpart of the flat nav-list block. Click toggles a section, Escape collapses the focused one, and the active link carries aria-current. Built for the #870 must-build set so the #865 WE-docs chrome dogfood can mount it in-document (mode C).",
+          "x-webeverything": {
+            "implementsIntent": "navigation",
+            "webStandards": {
+              "disclosureNavigation": {
+                "status": "W3C APG Pattern",
+                "pattern": "Disclosure Navigation Menu — section heads expose aria-expanded + aria-controls over collapsible link lists",
+                "adoption": "Each section head is a button with aria-expanded/aria-controls; Escape collapses the focused section",
+                "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/examples/disclosure-navigation/"
+              },
+              "ariaCurrent": {
+                "status": "WAI-ARIA 1.1",
+                "pattern": "aria-current='page' marks the link for the current page",
+                "adoption": "The current link in a section carries aria-current='page'",
+                "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-current"
+              }
+            },
+            "blockType": "Module",
+            "status": "active"
+          }
+        }
+      ],
+      "exports": [
+        {
+          "kind": "js",
+          "name": "createSectionedNav",
+          "declaration": {
+            "name": "createSectionedNav",
+            "module": "@frontierui/blocks/sectioned-nav/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "mountSectionedNav",
+          "declaration": {
+            "name": "mountSectionedNav",
+            "module": "@frontierui/blocks/sectioned-nav/"
+          }
+        },
+        {
+          "kind": "js",
+          "name": "mountInDocument",
+          "declaration": {
+            "name": "mountInDocument",
+            "module": "@frontierui/blocks/sectioned-nav/"
           }
         }
       ]
@@ -4826,6 +5022,8 @@
           "kind": "class",
           "name": "TransientElement",
           "description": "Base class and utilities for custom elements that replace themselves with semantically correct native HTML during connectedCallback — enabling context-aware element selection without permanent wrapper nodes.",
+          "customElement": true,
+          "tagName": "we-transient-component",
           "x-webeverything": {
             "traits": [
               {

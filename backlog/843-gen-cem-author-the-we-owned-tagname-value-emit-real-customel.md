@@ -3,10 +3,13 @@ type: issue
 workItem: story
 size: 2
 parent: "746"
-status: open
+status: resolved
 blockedBy: ["841"]
 relatedProject: webdocs
 dateOpened: "2026-06-17"
+dateStarted: "2026-06-18"
+dateResolved: "2026-06-18"
+graduatedTo: scripts/gen-cem.mjs
 crossRef: { url: /backlog/822-enrich-block-cem-with-tagname-attributes-properties-slots-so/, label: "CEM surface ruling (#822)" }
 tags: [webdocs, cem, blocks, gen-cem, tagname]
 ---
@@ -34,3 +37,24 @@ The value-bearing half of the #822 build, gated on the naming-convention decisio
 - **Override lives consumer-side, not in the WE value** — see #844 (parameterized registration). WE authors
   only the derived default (+ the N-tag list for `router`); pretty legacy names (`page-nav`, `auto-heading`)
   are consumer overrides, not WE-contract values.
+
+## Progress (resolved 2026-06-18)
+
+Implemented sub-shape **(b)** (the marker, per the stated default — a forward-adapter can regenerate the tag):
+
+- **Data** — authored `"element": true` on the 5 single-element opt-in blocks (`autocomplete`,
+  `background-task-surface`, `transient-component`, `pagination`, `data-table`) in `src/_data/blocks/*.json`.
+  For the multi-element block `router`, authored the explicit N-tag list
+  `"tagName": [{tag:"we-route-view",class:"RouteViewElement"},{tag:"we-route-outlet",class:"RouteOutletElement"}]`
+  (the documented exception — not derivable from one id). Element-ness is opt-in, **not** derived from `type`
+  (the 6 straddle `Component` + `Module`).
+- **gen-cem** — added `TAG_PREFIX = 'we-'` (Config-Extends-Platform-Default; consumer override = #844) and an
+  `elementTags(b, declName)` normalizer: `element:true` → `we-<id>`; `tagName` string → explicit; `tagName`
+  list → N `{tag,class}` pairs. `cemModule` emits the primary custom-element declaration (carrying the full
+  projected member surface) plus one extra bare custom-element declaration per additional tag.
+- **Result** — `custom-elements.json` now carries **7** real `customElement:true` declarations
+  (`we-autocomplete`, `we-background-task-surface`, `we-data-table`, `we-pagination`, `we-route-view`,
+  `we-route-outlet`, `we-transient-component`) — the surface `gen:wrapper` (#821) and api-viewer/Storybook
+  need. Behaviors (`attributes.define`) stay plain class declarations (no tagName). 503 scripts tests green,
+  `check:standards` green except the pre-existing concurrent AGENTS.md-inventory error (not from this change).
+  Unblocks #839 (qualifying set = these tagged blocks) and the #753/#892 wrapper line.

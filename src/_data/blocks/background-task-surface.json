@@ -1,0 +1,154 @@
+{
+  "id": "background-task-surface",
+  "element": true,
+  "name": "Background Task Surface",
+  "status": "draft",
+  "type": "Component",
+  "summary": "The persistent app-shell surface that hosts long-running work after it goes async — the receiving end of a Loader's escalation:async handoff. Renders one entry per registered task with per-task progress (the Loader's own state machine, hosted off-view), per-task retry delegating to Reliability, and arms the navigation-away / before-unload guard while any task is in flight. Distinct from the Feedback Intent (transient toasts) and the Loader Intent (in-view pending state that dies with its view).",
+  "implementsIntent": "background-task",
+  "composesIntents": [
+    "loader",
+    "reliability",
+    "layout",
+    "feedback"
+  ],
+  "fuiDemo": {
+    "file": "background-task-surface-demo.html",
+    "title": "Background Task Surface — escalation, retry, durability invariants",
+    "height": 560
+  },
+  "webStandards": {
+    "customEvent": {
+      "status": "Baseline",
+      "pattern": "Bubbling CustomEvent as the registration handoff",
+      "adoption": "A Loader at escalation:async dispatches a bubbling background-task-register event carrying its loader-state handle; the surface listens and adopts it. A one-shot, fire-and-handoff registration that decouples the surface from the (possibly torn-down) originating element — chosen over an injector/DI registry because the task must outlive its originating view.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/CustomEvent"
+    },
+    "beforeunload": {
+      "status": "Baseline",
+      "pattern": "beforeunload prompt for cross-document leave / close",
+      "adoption": "While navigationGuard:warn and any task is active, the surface arms beforeunload so closing the tab or a full reload prompts the user. Cleared automatically when the last in-flight task resolves. This guard is why the route-only baseline is safe: a hard reload that would lose in-flight work is gated, not silently dropped.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Window/beforeunload_event"
+    },
+    "navigationApi": {
+      "status": "Baseline 2024",
+      "pattern": "Navigation API navigate event intercept for same-document route-leave",
+      "adoption": "The SPA route-leave confirm half of navigationGuard:warn intercepts the Navigation API's navigate event (preventing/confirming same-document navigations) — the same-document counterpart to beforeunload. The two primitives present as one guard contract (harvested as the navigation-guard intent, #129).",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Navigation/navigate_event"
+    },
+    "backgroundFetch": {
+      "status": "Limited availability (opt-in enhancement)",
+      "pattern": "Background Fetch API + service worker for reload-durable work",
+      "adoption": "The durability:reload tier — work that genuinely survives a full reload or tab close — is delegated here, NOT baked into the baseline. The intent borrows Background Fetch's vocabulary 'without requiring a service worker', so this surface stays usable as a route-only in-memory baseline and treats reload-durability as an opt-in adapter (see backlog spin-off).",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Background_Fetch_API"
+    },
+    "ariaStatusRegion": {
+      "status": "WAI-ARIA",
+      "pattern": "Live status region for off-view progress announcement",
+      "adoption": "Because the surface is off the user's current view, task completion and failure are announced via a polite live region (role=status) so a screen-reader user learns a backgrounded task finished without watching the rail. Reuses the Live Region Status paradigm rather than redefining it.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Roles/status_role"
+    }
+  },
+  "events": {
+    "background-task-register": {
+      "description": "The handoff IN. A Loader (or any producer) dispatches this when work goes async; the nearest ancestor surface adopts the carried task handle and begins rendering its entry. This is the block's registration mechanism.",
+      "taxonomy": "command",
+      "detail": {
+        "id": "string",
+        "label": "string",
+        "progress": "'determinate' | 'indeterminate'",
+        "loaderState": "object (the Loader state-machine handle, subscribed to off-view)"
+      },
+      "bubbles": true,
+      "cancelable": false
+    },
+    "background-task-state-change": {
+      "description": "Re-emitted by the surface as a task entry moves through the intent lifecycle. Surfaces the Background Task Intent's registered → active → success → error → dismissed states as a single observable event.",
+      "taxonomy": "notification",
+      "detail": {
+        "id": "string",
+        "from": "BackgroundTaskState",
+        "to": "BackgroundTaskState"
+      },
+      "bubbles": true,
+      "cancelable": false
+    },
+    "background-task-retry": {
+      "description": "Fired when the user activates retry on a failed entry. The surface only exposes the affordance; recovery policy is delegated to the Reliability Intent. Cancelable so a host can intercept and run its own recovery.",
+      "taxonomy": "command",
+      "detail": {
+        "id": "string"
+      },
+      "bubbles": true,
+      "cancelable": true
+    },
+    "background-task-dismiss": {
+      "description": "Fired when an entry is removed — by the user, or by auto-clear for a transient entry that resolved successfully. Cancelable to allow a host to keep a sticky entry.",
+      "taxonomy": "command",
+      "detail": {
+        "id": "string",
+        "reason": "'user' | 'auto-clear'"
+      },
+      "bubbles": true,
+      "cancelable": true
+    }
+  },
+  "designDecisions": {
+    "registrationEventBus": {
+      "description": "Tasks are registered via a bubbling background-task-register CustomEvent, NOT an injector/DI registry.",
+      "rationale": "Registration must outlive the originating view, and it is a one-shot handoff rather than an ongoing dependency. An event decouples the surface from the (possibly already torn-down) originating element; the event carries the Loader's existing state machine, so the surface subscribes to a handle it did not create — the intent's 'same machine, hosted off-view'. This is a fixed mechanic, not a configurable choice: two registration protocols would mean no protocol."
+    },
+    "nearestAncestorResolution": {
+      "description": "A register event routes to the nearest ancestor surface; an app places one <background-tasks> in its shell, giving a single global instance by default while allowing a composable per-shell surface.",
+      "rationale": "Falls straight out of the bubbling-event choice — exactly like event bubbling finds the first listener. The platform analog (Background Fetch UI, a download manager) is one global surface, but an embedded sub-app can drop in its own surface with no extra config. Also a fixed mechanic, not an offered choice."
+    },
+    "durabilityRouteBaseline": {
+      "description": "The baseline surface is route-only (survives SPA route changes, in-memory); reload-durability is an opt-in durability:reload dimension delegated to the Background Fetch / service-worker adapter.",
+      "rationale": "Native-first: the platform's durable answer (Background Fetch) is a documented enhancement, not the baseline dependency — the intent explicitly borrows its vocabulary 'without requiring a service worker'. The navigationGuard:warn prompt covers the gap a hard reload would otherwise leave. Unlike the two mechanics above, this IS a legitimate per-product choice, so it is exposed as a dimension."
+    },
+    "fixedMechanicsVsConfigurableDimensions": {
+      "description": "Internal mechanics (registration via event bus, nearest-ancestor resolution) are fixed; user-facing axes are exposed as dimensions: aggregation (single/batch), persistence (transient/sticky), navigationGuard (none/warn), and the block-added durability (route/reload).",
+      "rationale": "A fork becomes a configurable axis only when both branches are legitimate end-states for different products; it stays a fixed decision when one branch is simply the correct way to build the contract and variants would fragment interop. The three intent dimensions plus durability meet that bar; the two registration mechanics do not."
+    },
+    "reusesLoaderStateMachine": {
+      "description": "Per-task progress is the Loader Intent's determinate/indeterminate indicator, version/generation token, and lifecycle — the same state machine, hosted off-view — not a reimplementation.",
+      "rationale": "A backgrounded task is a Loader that crossed the escalation:async threshold; reusing its machine keeps progress semantics identical on- and off-view and means the handoff transfers a live handle rather than snapshotting state."
+    },
+    "distinctFromFeedbackAndLoader": {
+      "description": "This surface is neither the Feedback Intent (transient fire-and-forget toasts) nor the Loader Intent (in-view pending state that dies with its view); it owns ongoing off-view task state and may emit a Feedback toast downstream on completion.",
+      "rationale": "Keeps the three surfaces from collapsing: Feedback does not track ongoing state, the Loader does not outlive its view, and only this surface aggregates concurrent tasks with per-task retry."
+    }
+  },
+  "traits": [
+    {
+      "name": "withBatchAggregation",
+      "description": "Present multiple concurrent tasks, each with its own progress and retry, where one task's failure does not abort the others (default is single — one entry at a time)",
+      "intentDimension": "background-task.aggregation.batch"
+    },
+    {
+      "name": "withStickyEntries",
+      "description": "Keep a resolved entry until explicitly dismissed instead of auto-clearing on success (error entries are sticky regardless, so a failure that happened off-view is still reviewable)",
+      "intentDimension": "background-task.persistence.sticky"
+    },
+    {
+      "name": "withNavigationGuard",
+      "description": "While any task is active, arm the beforeunload prompt (cross-document close/reload) and the Navigation API route-leave confirm (same-document); cleared when the last in-flight task resolves",
+      "intentDimension": "background-task.navigationGuard.warn"
+    },
+    {
+      "name": "withCompletionToast",
+      "description": "Emit a transient Feedback Intent toast when a task completes, for the case where the user is on another view and the rail entry auto-clears",
+      "intentDimension": "background-task.persistence.transient"
+    },
+    {
+      "name": "withPerTaskRetry",
+      "description": "Expose a retry affordance on a failed entry that delegates recovery to the Reliability Intent (the surface owns the affordance, not the policy)",
+      "intentDimension": "background-task.recovery.manual"
+    },
+    {
+      "name": "withReloadDurability",
+      "description": "Opt into reload-durable work via the Background Fetch / service-worker adapter so an in-flight task survives a full page reload or tab close (default is route-only, in-memory)",
+      "intentDimension": "background-task.durability.reload"
+    }
+  ]
+}

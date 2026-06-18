@@ -1,0 +1,122 @@
+{
+  "id": "data-table",
+  "element": true,
+  "name": "Data Table",
+  "status": "active",
+  "type": "Module",
+  "summary": "The blocks-layer home for the Collection Operations `filter`, `sort`, and `group` stages (the `page` stage is the companion Pagination block — compose, never merge). Renders a native `<table>` whose sortable column headers project `sortDirection` onto the WAI-ARIA APG `aria-sort` attribute (ascending/descending, sortable-but-unsorted = none) via button-wrapped `<th scope=\"col\">`, orders rows with `Intl.Collator` (sensitivity/numeric/caseFirst/ignorePunctuation) and SQL-style empty placement, narrows them by `filterMatch` (all/any), and partitions them into `<tbody>` groups with `groupSummary` aggregates named after the SQL functions (count/sum/average/minimum/maximum). The pipeline order is data (default filter → sort → group → page). Ships a consumable `DataTableBehavior` (and a `<data-table>` custom element) that mounts the verified renderer, wires click-to-sort + a polite live-region announcement, and emits `data-table-change`; its first enterprise consumer is the loan-origination exercise app (#317).",
+  "exports": [
+    "DataTableModule",
+    "DataTableBehavior",
+    "registerDataTable"
+  ],
+  "implementsIntent": "collection-operations",
+  "dependsOn": [
+    "resource-loader"
+  ],
+  "implementedBy": "@frontierui/blocks/renderers/data-table/",
+  "webStandards": {
+    "apgSortableTable": {
+      "status": "W3C WAI-ARIA APG",
+      "pattern": "Tabular data in a native `<table>` with `<th scope=\"col\">` headers; sortable headers wrap their label in a `<button>` and the active column carries `aria-sort`",
+      "adoption": "DataTableBehavior renders the table and projects the primary sort key onto `aria-sort` on its `<th>`; sortable-but-unsorted headers are `aria-sort=\"none\"`, non-sortable headers carry none",
+      "reference": "https://www.w3.org/WAI/ARIA/apg/patterns/table/"
+    },
+    "ariaSort": {
+      "status": "WAI-ARIA 1.1",
+      "pattern": "aria-sort = ascending | descending | none | other, on one header at a time",
+      "adoption": "The intent's `sortDirection` projects verbatim onto `aria-sort`; only the primary sort key's header is marked (APG: one sorted header at a time), even under a multi-key sort",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-sort"
+    },
+    "intlCollator": {
+      "status": "ECMA-402 (Baseline)",
+      "pattern": "Locale-aware comparison via `sensitivity`, `numeric`, `caseFirst`, `ignorePunctuation` options",
+      "adoption": "The reference comparator is `Intl.Collator`; the intent's text-comparison dimensions adopt its option names verbatim, so `numeric:true` gives natural order (img2 before img10) with no bespoke comparator",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Collator"
+    },
+    "arrayToSorted": {
+      "status": "Baseline 2023",
+      "pattern": "`Array.prototype.sort` is guaranteed stable (ES2019); `toSorted()` is non-mutating (ES2023)",
+      "adoption": "Stable sort makes multi-key tiebreaking and `sortKeys:single` (which preserves prior order) well-defined without extra bookkeeping",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/toSorted"
+    },
+    "rowgroupScope": {
+      "status": "HTML / WAI-ARIA",
+      "pattern": "A `<th scope=\"rowgroup\">` associates a header with all cells in its row group",
+      "adoption": "Each group renders as its own `<tbody>` led by a `scope=\"rowgroup\"` summary row carrying the group key + its aggregate, so assistive tech announces the grouping",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/th#scope"
+    }
+  },
+  "designDecisions": {
+    "sortableTableOverGrid": {
+      "description": "Realized as the APG Sortable Table recipe (`<table>` + button-wrapped `<th scope=\"col\">` + `aria-sort`), not the interactive `role=\"grid\"` pattern",
+      "rationale": "filter/sort/group is a read-and-reorder concern; the verified-today accessible pattern is the APG Sortable Table. `role=\"grid\"` layers cell-level keyboard navigation — a separate interactivity axis that composes later, not a prerequisite for the data operations.",
+      "default": "native <table> semantics"
+    },
+    "intlCollatorComparator": {
+      "description": "`Intl.Collator` is the reference comparator; the intent's comparison dimensions are its option names verbatim",
+      "rationale": "Native-first: the platform already standardizes locale-aware comparison. The block never invents a comparator vocabulary — `numericOrdering`/`textSensitivity`/`caseFirst`/`ignorePunctuation` are passed straight through. A different comparator strategy (numeric-only, decorate-sort-undecorate, server-delegated ORDER BY) is a Frontier UI / app concern, catalogued in the Technical Configurator's Sorting Strategy domain."
+    },
+    "emptyPlacementDirectionIndependent": {
+      "description": "`emptyPlacement` (first/last) is applied independently of sort direction, mirroring SQL NULLS FIRST/LAST",
+      "rationale": "The web platform has no native term for null ordering, so the intent borrows SQL's. Empties do not flip with ascending/descending — `NULLS LAST` stays last in both, which matches every SQL engine and user expectation."
+    },
+    "ariaSortOneHeader": {
+      "description": "Only the primary sort key's header is marked aria-sort != none, even under a multi-key sort",
+      "rationale": "WAI-ARIA defines aria-sort as one-header-at-a-time. Multi-key sorting still orders rows by the full key list, but the projected state names the primary column; surfacing secondary keys is a presentational affordance, not an aria-sort value."
+    },
+    "sortHeaderProjectionSeam": {
+      "description": "The sortDirection → aria-sort header projection is exposed as a named `sort:header` behavior seam, realized inside this block",
+      "rationale": "It is the one piece plausibly reusable outside a table (e.g. a sortable card-list header bar). Naming the seam keeps the door open, but extracting a standalone behavior block now would be speculative — defer until a second, non-table consumer actually exists.",
+      "openQuestion": "Promote `sort:header` to a standalone behavior block when a non-table consumer appears; tracked as a follow-up rather than built speculatively."
+    },
+    "composeNotMerge": {
+      "description": "Pagination (page stage) and Windowed Collection (virtualization) are composed on the same collection, never merged into this block",
+      "rationale": "This block owns only filter/sort/group — selecting and ordering the set. Pagination owns the page slice + URL/advance; Windowed Collection owns which rows are realized in the DOM. They co-reside on one collection as orthogonal axes; folding any of them in here would entangle independent contracts."
+    },
+    "contractsOnly": {
+      "description": "This block defines the contract (table structure, aria-sort projection, comparator/aggregate seams, observable events); concrete strategy implementations live in Frontier UI",
+      "rationale": "Web Everything is the standard. The block names the seams; competing implementations (an alternate comparator, server-side execution, a virtualization provider) register against them without changing the contract."
+    }
+  },
+  "frameworkComparison": {
+    "react": {
+      "patterns": [
+        "TanStack Table row-model pipeline (filter → sort → group → paginate)",
+        "React Aria useTable / aria-sort wiring"
+      ],
+      "notes": "TanStack models the four operations as ordered, optional row-model transforms — the architecture this block's configurable pipeline mirrors; React Aria supplies the aria-sort / scope a11y wiring."
+    },
+    "agGrid": {
+      "patterns": [
+        "Column sort state",
+        "Row grouping with aggregations"
+      ],
+      "notes": "Prior art for multi-column sort and per-group aggregate summaries; we name the aggregates after SQL rather than a bespoke set."
+    },
+    "vue": {
+      "patterns": [
+        "Vuetify v-data-table sort/group",
+        "Quasar QTable"
+      ],
+      "notes": "Component-level sortable/groupable tables; no shared comparison vocabulary — we anchor to Intl.Collator instead."
+    }
+  },
+  "traits": [
+    {
+      "name": "withSortableHeader",
+      "description": "Projects the active sort key's direction onto `aria-sort` on a button-wrapped `<th scope=\"col\">` (the `sort:header` seam). Sortable-but-unsorted headers are `aria-sort=\"none\"`.",
+      "intentDimension": "sortDirection"
+    },
+    {
+      "name": "withFilter",
+      "description": "Narrows the rows by combining call-site predicates per `filterMatch` (all = AND, any = OR).",
+      "intentDimension": "filterMatch"
+    },
+    {
+      "name": "withGrouping",
+      "description": "Partitions rows into `<tbody>` groups, each led by a `scope=\"rowgroup\"` summary row carrying the `groupSummary` aggregate (count/sum/average/minimum/maximum).",
+      "intentDimension": "groupSummary"
+    }
+  ]
+}

@@ -1,0 +1,115 @@
+{
+  "id": "transient-component",
+  "element": true,
+  "name": "Transient Component",
+  "status": "active",
+  "type": "Module",
+  "implementedBy": "@frontierui/blocks/transient/TransientElement.ts",
+  "summary": "Base class and utilities for custom elements that replace themselves with semantically correct native HTML during connectedCallback — enabling context-aware element selection without permanent wrapper nodes.",
+  "exports": [
+    "TransientElement",
+    "AutoHeading",
+    "SmartLink",
+    "withSelfReplacement",
+    "calculateHeadingLevel"
+  ],
+  "webStandards": {
+    "replaceWith": {
+      "status": "Baseline",
+      "pattern": "Element.replaceWith() replaces an element in its parent's child list with new nodes",
+      "adoption": "Core mechanism — transient element calls queueMicrotask(() => this.replaceWith(replacement)) from connectedCallback to safely self-replace after callback stack completes",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Element/replaceWith"
+    },
+    "customElements": {
+      "status": "Baseline",
+      "pattern": "Autonomous custom elements with connectedCallback lifecycle",
+      "adoption": "Transient elements are autonomous custom elements that run initialization logic in connectedCallback, then replace themselves with native elements",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Web_Components/Using_custom_elements"
+    },
+    "queueMicrotask": {
+      "status": "Baseline",
+      "pattern": "Schedules a microtask to run after current script completes but before rendering",
+      "adoption": "Defers replaceWith() out of connectedCallback stack to avoid re-entrancy with disconnectedCallback",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/API/Window/queueMicrotask"
+    },
+    "headingElements": {
+      "status": "Standard",
+      "pattern": "<h1>–<h6> provide document heading hierarchy; WHATWG outline algorithm removed from spec",
+      "adoption": "AutoHeading replaces itself with the correct <hN> element based on nesting depth or injector-provided level",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/Heading_Elements"
+    },
+    "ariaHeadingRole": {
+      "status": "Standard",
+      "pattern": "role='heading' with aria-level for non-native heading semantics",
+      "adoption": "Fallback only — MDN recommends native <hN> elements over role='heading'. Self-replacement produces native elements.",
+      "reference": "https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Roles/heading_role"
+    }
+  },
+  "designDecisions": {
+    "microtaskDeferral": {
+      "description": "Self-replacement uses queueMicrotask() to defer replaceWith() outside the connectedCallback stack",
+      "rationale": "Calling replaceWith() synchronously inside connectedCallback triggers disconnectedCallback re-entrantly. The microtask runs after connectedCallback completes but before paint — zero visual flash, clean lifecycle."
+    },
+    "attributeTransfer": {
+      "description": "All attributes except internal ones (is, data-transient-*) are transferred to the replacement element",
+      "rationale": "Authors expect class, id, style, aria-* and custom attributes to carry over. The transient element is a stand-in, not a wrapper."
+    },
+    "childNodeTransfer": {
+      "description": "All child nodes are moved to the replacement element via append(...this.childNodes)",
+      "rationale": "Children belong to the semantic target, not the transient host. Moving (not cloning) preserves event listeners on children."
+    },
+    "eventListenerWarning": {
+      "description": "Event listeners attached to the transient element itself are lost on replacement. This is by design.",
+      "rationale": "Transient elements are meant to be replaced before user interaction. Listeners should be on children (which survive) or on the replacement (added post-replacement via event delegation)."
+    },
+    "noCustomizedBuiltins": {
+      "description": "Does NOT use customized built-in elements (is='' attribute / extends: 'h1')",
+      "rationale": "Safari refuses to implement customized built-ins and has stated it never will. The polyfill is unreliable. Autonomous custom elements that self-replace are the portable alternative."
+    },
+    "injectorHeadingLevel": {
+      "description": "AutoHeading resolves heading level from InjectorRoot ('headingLevel' provider) first, falls back to DOM traversal (counting sectioning ancestors)",
+      "rationale": "InjectorRoot mirrors React's HeadingLevelContext pattern — a section component increments the level in its injector scope. All descendants read the correct level without DOM traversal. Fallback to DOM traversal covers cases without explicit section contexts."
+    },
+    "ssrStrategy": {
+      "description": "SSR must compute the correct element server-side (e.g., Eleventy shortcode). Client-side transient element upgrades the fallback.",
+      "rationale": "Custom elements require JS to connectedCallback. Crawlers and screen readers see the pre-upgrade HTML. The server must emit the correct <hN> for accessibility and SEO. The client-side element is progressive enhancement."
+    }
+  },
+  "frameworkComparison": {
+    "react": {
+      "patterns": [
+        "HeadingLevelContext + useContext",
+        "React.createElement(Tag) dynamic element"
+      ],
+      "notes": "React's context-based heading level is the canonical reference; components render the correct JSX element directly"
+    },
+    "angular": {
+      "patterns": [
+        "<ng-container> (no DOM output)",
+        "structural directives (*ngIf on <ng-container>)"
+      ],
+      "notes": "ng-container removes itself at compile time — different mechanism but same goal (no wrapper node)"
+    },
+    "vue": {
+      "patterns": [
+        "<component :is='tag'> for dynamic element",
+        "<template> as no-output wrapper"
+      ],
+      "notes": "Dynamic component tag selection; template element renders no DOM"
+    },
+    "svelte": {
+      "patterns": [
+        "<svelte:element this={tag}>",
+        "compile-time element selection"
+      ],
+      "notes": "Dynamic element tag at compile time; no runtime wrapper node"
+    }
+  },
+  "traits": [
+    {
+      "name": "withSelfReplacement",
+      "description": "Base mixin that handles the microtask-deferred replaceWith() lifecycle, attribute transfer, and child node migration",
+      "intentDimension": null
+    }
+  ]
+}
