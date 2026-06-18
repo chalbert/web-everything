@@ -19,7 +19,7 @@ Fork 1 of #933. Add a check:standards gate validateBlockComposesTraits beside va
 - **Arm (i) already shipped via #936**, not re-implemented. #936 §3b in
   [we:scripts/check-standards.mjs](../scripts/check-standards.mjs) already asserts declared
   `composesBehaviors` resolve against the de-facto behavior registry (the union of provided
-  `traits[].name`; `src/_data/traits.json` is prose, not a flat list). Duplicating it here would just
+  `traits[].name`; `we:src/_data/traits.json` is prose, not a flat list). Duplicating it here would just
   collide — so #937 delivers **arm (ii)** as the new named gate the card asks for.
 - **Arm (ii) — `validateBlockComposesTraits`** added in
   [we:scripts/check-standards-rules.mjs](../scripts/check-standards-rules.mjs) (sibling of
