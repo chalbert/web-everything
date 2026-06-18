@@ -14,7 +14,7 @@
     "registerForEach"
   ],
   "extendsClass": "CustomAttribute",
-  "implementedBy": "@frontierui/blocks/for-each/ForEachBehavior.ts",
+  "implementedBy": "@frontierui/blocks/for-each/index.ts",
   "dependsOn": [
     "handler-expression-parser"
   ],

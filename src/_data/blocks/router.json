@@ -140,7 +140,7 @@
     "MatchedRoute",
     "NavigationResult"
   ],
-  "implementedBy": "@frontierui/blocks/router/elements/RouteViewElement.ts",
+  "implementedBy": "@frontierui/blocks/router/index.ts",
   "implementsIntent": "navigation",
   "intentDimensions": {
     "structure": "hierarchical",

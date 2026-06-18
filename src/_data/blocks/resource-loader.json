@@ -5,7 +5,7 @@
   "type": "Module",
   "summary": "Trait-based async state management orchestrator handling loading lifecycle with timing, abort, and composable UI traits.",
   "implementsIntent": "loader",
-  "implementedBy": "@frontierui/blocks/resource-loader/ResourceLoader.ts",
+  "implementedBy": "@frontierui/blocks/resource-loader/index.ts",
   "dependsOn": [],
   "exports": [
     "ResourceLoader",

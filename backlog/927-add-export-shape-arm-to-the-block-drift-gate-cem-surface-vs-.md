@@ -38,3 +38,29 @@ modeling **aligned** first — either point `implementedBy` at an enumerable mod
 (a TS program, not regex) that follows package + `export type *` re-exports. Reverted the prototype
 (the gate must not ship false positives). **Re-scoped to size 8**; should carry a prereq to first fix
 the `implementedBy`↔`exports` alignment (its own cleanup item) before the resolver lands. Released.
+
+## Post-#948 map (alignment prereq done — what the resolver will meet)
+
+#948 re-pointed every deep-file `implementedBy` (in the block JSON under `we:src/_data/blocks/`) at the
+enumerable index barrel (e.g. `fui:blocks/router/index.ts`; CEM `path` regenerated to match). When the
+real TS resolver lands here, it will partition into three groups — only the first is "clean", the rest
+are **genuine findings the gate SHOULD surface**, not modeling artifacts to suppress:
+
+- **Clean (barrel re-exports the full declared surface):** `router`, `for-each`, `type-ahead`,
+  `resource-loader`. These were the true modeling artifacts #948 fixed — the resolver should pass them
+  (note `resource-loader`/`type-ahead` still need the `export type *`/package re-export following, the (b)
+  resolver work — regex can't prove them but a TS program will).
+- **Real export drift — needs a source-of-truth call, NOT a modeling fix** (the barrel sees all siblings,
+  has no wildcard, yet these declared symbols are absent from `fui:blocks/<block>/` entirely):
+  - `tabs` — declares `TabsComponent`/`TabListAttribute`/`TabTriggerAttribute`/`TabPanelAttribute`; FUI
+    ships only `TabGroupBehavior` (+ types). A contract(component+attributes)↔impl(single behavior)
+    divergence. Resolve by either correcting `we:` `exports` to the `TabGroupBehavior` shape **or** filing
+    a FUI build for the component+attribute surface.
+  - `transient-component` — declares `SmartLink`, `withSelfReplacement` (absent from `fui:blocks/transient/`).
+  - `view` — declares `ViewEngineOptions`, `ViewShowBehavior`, `ViewIfDirective`, `ViewSwitchDirective`
+    (absent from `fui:blocks/view/`).
+- **Renderer blocks have no barrel** — `collection-operations`, `data-grid`, `data-table`, `pagination`,
+  `reorderable-list` keep a dir-style `implementedBy` (under `fui:blocks/renderers/`) but the dir holds
+  only leaf modules (no index barrel). The resolver's gather must either walk the dir or require FUI to
+  add a barrel — a design point #948 left untouched (it's FUI/gather scope, not WE `implementedBy`↔`exports`
+  modeling). Decide it when (b) lands.

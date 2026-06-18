@@ -8,7 +8,7 @@
   "name": "View",
   "status": "active",
   "type": "Module",
-  "implementedBy": "@frontierui/blocks/view/ViewEngine.ts",
+  "implementedBy": "@frontierui/blocks/view/index.ts",
   "summary": "Foundation for all show/hide/render patterns. Provides a shared engine and specialized blocks (behaviors + directives) that higher-level components build on.",
   "blocks": {
     "ViewEngine": {

@@ -2500,7 +2500,7 @@
     },
     {
       "kind": "javascript-module",
-      "path": "@frontierui/blocks/for-each/ForEachBehavior.ts",
+      "path": "@frontierui/blocks/for-each/index.ts",
       "declarations": [
         {
           "kind": "class",
@@ -2524,7 +2524,7 @@
           "name": "ForEachBehavior",
           "declaration": {
             "name": "ForEachBehavior",
-            "module": "@frontierui/blocks/for-each/ForEachBehavior.ts"
+            "module": "@frontierui/blocks/for-each/index.ts"
           }
         },
         {
@@ -2532,7 +2532,7 @@
           "name": "registerForEach",
           "declaration": {
             "name": "registerForEach",
-            "module": "@frontierui/blocks/for-each/ForEachBehavior.ts"
+            "module": "@frontierui/blocks/for-each/index.ts"
           }
         }
       ]
@@ -4015,7 +4015,7 @@
     },
     {
       "kind": "javascript-module",
-      "path": "@frontierui/blocks/resource-loader/ResourceLoader.ts",
+      "path": "@frontierui/blocks/resource-loader/index.ts",
       "declarations": [
         {
           "kind": "class",
@@ -4150,7 +4150,7 @@
           "name": "ResourceLoader",
           "declaration": {
             "name": "ResourceLoader",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4158,7 +4158,7 @@
           "name": "LoadResult",
           "declaration": {
             "name": "LoadResult",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4166,7 +4166,7 @@
           "name": "withSoftBlocking",
           "declaration": {
             "name": "withSoftBlocking",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4174,7 +4174,7 @@
           "name": "SoftBlockingOptions",
           "declaration": {
             "name": "SoftBlockingOptions",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4182,7 +4182,7 @@
           "name": "withReplacement",
           "declaration": {
             "name": "withReplacement",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4190,7 +4190,7 @@
           "name": "ReplacementOptions",
           "declaration": {
             "name": "ReplacementOptions",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4198,7 +4198,7 @@
           "name": "withIndeterminate",
           "declaration": {
             "name": "withIndeterminate",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4206,7 +4206,7 @@
           "name": "IndeterminateOptions",
           "declaration": {
             "name": "IndeterminateOptions",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4214,7 +4214,7 @@
           "name": "LoaderIntent",
           "declaration": {
             "name": "LoaderIntent",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4222,7 +4222,7 @@
           "name": "LoaderState",
           "declaration": {
             "name": "LoaderState",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4230,7 +4230,7 @@
           "name": "BlockingStrategy",
           "declaration": {
             "name": "BlockingStrategy",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4238,7 +4238,7 @@
           "name": "LoaderScope",
           "declaration": {
             "name": "LoaderScope",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4246,7 +4246,7 @@
           "name": "LoaderProgress",
           "declaration": {
             "name": "LoaderProgress",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4254,7 +4254,7 @@
           "name": "LoaderContext",
           "declaration": {
             "name": "LoaderContext",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4262,7 +4262,7 @@
           "name": "TraitHandle",
           "declaration": {
             "name": "TraitHandle",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4270,7 +4270,7 @@
           "name": "TraitFactory",
           "declaration": {
             "name": "TraitFactory",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4278,7 +4278,7 @@
           "name": "ResourceLoaderOptions",
           "declaration": {
             "name": "ResourceLoaderOptions",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4286,7 +4286,7 @@
           "name": "ResourceLoadStartDetail",
           "declaration": {
             "name": "ResourceLoadStartDetail",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4294,7 +4294,7 @@
           "name": "ResourceLoadEndDetail",
           "declaration": {
             "name": "ResourceLoadEndDetail",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4302,7 +4302,7 @@
           "name": "ResourceLoadErrorDetail",
           "declaration": {
             "name": "ResourceLoadErrorDetail",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4310,7 +4310,7 @@
           "name": "ResourceStateChangeDetail",
           "declaration": {
             "name": "ResourceStateChangeDetail",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4318,7 +4318,7 @@
           "name": "DEFAULT_INTENT",
           "declaration": {
             "name": "DEFAULT_INTENT",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         },
         {
@@ -4326,7 +4326,7 @@
           "name": "DEFAULT_TIMINGS",
           "declaration": {
             "name": "DEFAULT_TIMINGS",
-            "module": "@frontierui/blocks/resource-loader/ResourceLoader.ts"
+            "module": "@frontierui/blocks/resource-loader/index.ts"
           }
         }
       ]
@@ -4390,7 +4390,7 @@
     },
     {
       "kind": "javascript-module",
-      "path": "@frontierui/blocks/router/elements/RouteViewElement.ts",
+      "path": "@frontierui/blocks/router/index.ts",
       "declarations": [
         {
           "kind": "class",
@@ -4625,7 +4625,7 @@
           "name": "RouteViewElement",
           "declaration": {
             "name": "RouteViewElement",
-            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+            "module": "@frontierui/blocks/router/index.ts"
           }
         },
         {
@@ -4633,7 +4633,7 @@
           "name": "RouteOutletElement",
           "declaration": {
             "name": "RouteOutletElement",
-            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+            "module": "@frontierui/blocks/router/index.ts"
           }
         },
         {
@@ -4641,7 +4641,7 @@
           "name": "RouteLinkBehavior",
           "declaration": {
             "name": "RouteLinkBehavior",
-            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+            "module": "@frontierui/blocks/router/index.ts"
           }
         },
         {
@@ -4649,7 +4649,7 @@
           "name": "RoutePrefetchBehavior",
           "declaration": {
             "name": "RoutePrefetchBehavior",
-            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+            "module": "@frontierui/blocks/router/index.ts"
           }
         },
         {
@@ -4657,7 +4657,7 @@
           "name": "registerRouter",
           "declaration": {
             "name": "registerRouter",
-            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+            "module": "@frontierui/blocks/router/index.ts"
           }
         },
         {
@@ -4665,7 +4665,7 @@
           "name": "RouteContext",
           "declaration": {
             "name": "RouteContext",
-            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+            "module": "@frontierui/blocks/router/index.ts"
           }
         },
         {
@@ -4673,7 +4673,7 @@
           "name": "RouteNavigationTarget",
           "declaration": {
             "name": "RouteNavigationTarget",
-            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+            "module": "@frontierui/blocks/router/index.ts"
           }
         },
         {
@@ -4681,7 +4681,7 @@
           "name": "RouteGuardFn",
           "declaration": {
             "name": "RouteGuardFn",
-            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+            "module": "@frontierui/blocks/router/index.ts"
           }
         },
         {
@@ -4689,7 +4689,7 @@
           "name": "RouteGuardResult",
           "declaration": {
             "name": "RouteGuardResult",
-            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+            "module": "@frontierui/blocks/router/index.ts"
           }
         },
         {
@@ -4697,7 +4697,7 @@
           "name": "RouteLoaderFn",
           "declaration": {
             "name": "RouteLoaderFn",
-            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+            "module": "@frontierui/blocks/router/index.ts"
           }
         },
         {
@@ -4705,7 +4705,7 @@
           "name": "RouteLoaderParams",
           "declaration": {
             "name": "RouteLoaderParams",
-            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+            "module": "@frontierui/blocks/router/index.ts"
           }
         },
         {
@@ -4713,7 +4713,7 @@
           "name": "RouteDefinition",
           "declaration": {
             "name": "RouteDefinition",
-            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+            "module": "@frontierui/blocks/router/index.ts"
           }
         },
         {
@@ -4721,7 +4721,7 @@
           "name": "MatchedRoute",
           "declaration": {
             "name": "MatchedRoute",
-            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+            "module": "@frontierui/blocks/router/index.ts"
           }
         },
         {
@@ -4729,7 +4729,7 @@
           "name": "NavigationResult",
           "declaration": {
             "name": "NavigationResult",
-            "module": "@frontierui/blocks/router/elements/RouteViewElement.ts"
+            "module": "@frontierui/blocks/router/index.ts"
           }
         }
       ]
@@ -5533,7 +5533,7 @@
     },
     {
       "kind": "javascript-module",
-      "path": "@frontierui/blocks/transient/TransientElement.ts",
+      "path": "@frontierui/blocks/transient/index.ts",
       "declarations": [
         {
           "kind": "class",
@@ -5626,7 +5626,7 @@
           "name": "TransientElement",
           "declaration": {
             "name": "TransientElement",
-            "module": "@frontierui/blocks/transient/TransientElement.ts"
+            "module": "@frontierui/blocks/transient/index.ts"
           }
         },
         {
@@ -5634,7 +5634,7 @@
           "name": "AutoHeading",
           "declaration": {
             "name": "AutoHeading",
-            "module": "@frontierui/blocks/transient/TransientElement.ts"
+            "module": "@frontierui/blocks/transient/index.ts"
           }
         },
         {
@@ -5642,7 +5642,7 @@
           "name": "SmartLink",
           "declaration": {
             "name": "SmartLink",
-            "module": "@frontierui/blocks/transient/TransientElement.ts"
+            "module": "@frontierui/blocks/transient/index.ts"
           }
         },
         {
@@ -5650,7 +5650,7 @@
           "name": "withSelfReplacement",
           "declaration": {
             "name": "withSelfReplacement",
-            "module": "@frontierui/blocks/transient/TransientElement.ts"
+            "module": "@frontierui/blocks/transient/index.ts"
           }
         },
         {
@@ -5658,7 +5658,7 @@
           "name": "calculateHeadingLevel",
           "declaration": {
             "name": "calculateHeadingLevel",
-            "module": "@frontierui/blocks/transient/TransientElement.ts"
+            "module": "@frontierui/blocks/transient/index.ts"
           }
         }
       ]
@@ -5771,7 +5771,7 @@
     },
     {
       "kind": "javascript-module",
-      "path": "@frontierui/blocks/type-ahead/TypeAheadBehavior.ts",
+      "path": "@frontierui/blocks/type-ahead/index.ts",
       "declarations": [
         {
           "kind": "class",
@@ -5855,7 +5855,7 @@
           "name": "TypeAheadBehavior",
           "declaration": {
             "name": "TypeAheadBehavior",
-            "module": "@frontierui/blocks/type-ahead/TypeAheadBehavior.ts"
+            "module": "@frontierui/blocks/type-ahead/index.ts"
           }
         },
         {
@@ -5863,7 +5863,7 @@
           "name": "TypeAheadOptions",
           "declaration": {
             "name": "TypeAheadOptions",
-            "module": "@frontierui/blocks/type-ahead/TypeAheadBehavior.ts"
+            "module": "@frontierui/blocks/type-ahead/index.ts"
           }
         },
         {
@@ -5871,7 +5871,7 @@
           "name": "TypeAheadMatching",
           "declaration": {
             "name": "TypeAheadMatching",
-            "module": "@frontierui/blocks/type-ahead/TypeAheadBehavior.ts"
+            "module": "@frontierui/blocks/type-ahead/index.ts"
           }
         },
         {
@@ -5879,7 +5879,7 @@
           "name": "TypeAheadIntent",
           "declaration": {
             "name": "TypeAheadIntent",
-            "module": "@frontierui/blocks/type-ahead/TypeAheadBehavior.ts"
+            "module": "@frontierui/blocks/type-ahead/index.ts"
           }
         },
         {
@@ -5887,14 +5887,14 @@
           "name": "TypeAheadMatchDetail",
           "declaration": {
             "name": "TypeAheadMatchDetail",
-            "module": "@frontierui/blocks/type-ahead/TypeAheadBehavior.ts"
+            "module": "@frontierui/blocks/type-ahead/index.ts"
           }
         }
       ]
     },
     {
       "kind": "javascript-module",
-      "path": "@frontierui/blocks/view/ViewEngine.ts",
+      "path": "@frontierui/blocks/view/index.ts",
       "declarations": [
         {
           "kind": "class",
@@ -5962,7 +5962,7 @@
           "name": "ViewEngine",
           "declaration": {
             "name": "ViewEngine",
-            "module": "@frontierui/blocks/view/ViewEngine.ts"
+            "module": "@frontierui/blocks/view/index.ts"
           }
         },
         {
@@ -5970,7 +5970,7 @@
           "name": "ViewEngineOptions",
           "declaration": {
             "name": "ViewEngineOptions",
-            "module": "@frontierui/blocks/view/ViewEngine.ts"
+            "module": "@frontierui/blocks/view/index.ts"
           }
         },
         {
@@ -5978,7 +5978,7 @@
           "name": "ViewBehavior",
           "declaration": {
             "name": "ViewBehavior",
-            "module": "@frontierui/blocks/view/ViewEngine.ts"
+            "module": "@frontierui/blocks/view/index.ts"
           }
         },
         {
@@ -5986,7 +5986,7 @@
           "name": "ViewShowBehavior",
           "declaration": {
             "name": "ViewShowBehavior",
-            "module": "@frontierui/blocks/view/ViewEngine.ts"
+            "module": "@frontierui/blocks/view/index.ts"
           }
         },
         {
@@ -5994,7 +5994,7 @@
           "name": "ViewIfDirective",
           "declaration": {
             "name": "ViewIfDirective",
-            "module": "@frontierui/blocks/view/ViewEngine.ts"
+            "module": "@frontierui/blocks/view/index.ts"
           }
         },
         {
@@ -6002,7 +6002,7 @@
           "name": "ViewSwitchDirective",
           "declaration": {
             "name": "ViewSwitchDirective",
-            "module": "@frontierui/blocks/view/ViewEngine.ts"
+            "module": "@frontierui/blocks/view/index.ts"
           }
         }
       ]

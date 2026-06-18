@@ -5,7 +5,7 @@
   "type": "Behavior",
   "summary": "Keyboard type-ahead navigation for listboxes, menus, selects, and trees: buffer typed characters, move focus to the matching item, then reset after an idle timeout. Moves focus — never filters.",
   "implementsIntent": "type-ahead",
-  "implementedBy": "@frontierui/blocks/type-ahead/TypeAheadBehavior.ts",
+  "implementedBy": "@frontierui/blocks/type-ahead/index.ts",
   "dependsOn": [],
   "exports": [
     "TypeAheadBehavior",

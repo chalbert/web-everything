@@ -30,7 +30,7 @@
   "name": "Transient Component",
   "status": "active",
   "type": "Module",
-  "implementedBy": "@frontierui/blocks/transient/TransientElement.ts",
+  "implementedBy": "@frontierui/blocks/transient/index.ts",
   "summary": "Base class and utilities for custom elements that replace themselves with semantically correct native HTML during connectedCallback — enabling context-aware element selection without permanent wrapper nodes.",
   "exports": [
     "TransientElement",
