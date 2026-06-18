@@ -4,12 +4,22 @@ workItem: story
 size: 3
 status: open
 parent: "746"
+locus: frontierui
 relatedProject: webdocs
-blockedBy: ["753"]
+blockedBy: ["753", "954"]
 relatedReport: reports/2026-06-18-backlog-split-analysis.md
 dateOpened: "2026-06-16"
 tags: [webdocs, adapters, polyglot, generation, component-emit]
 ---
+
+> **Claimed in batch-2026-06-18, then re-blocked + released (NOT built).** The "rides what already ships"
+> re-scope missed a placement seam: this slice renders source via WE's `serve()` core
+> (`we:blocks/renderers/module-service/moduleService.ts`), but the polyglot panel is FUI-owned
+> (`fui:workbench/mount.ts`) and #753's consume-mode uses FUI's own `genWrapper`, never importing WE's
+> `serve()`/`moduleService` (the #700 cross-repo-impl boundary). So "render via serve()" can't be wired as
+> written — it needs a placement call. Filed **[#954](/backlog/954-decide-how-polyglot-author-mode-source-reaches-the-fui-workb/)**
+> (`type: decision`, `blockedBy: 954` added; also set the missing `locus: frontierui` to match its #746
+> siblings). The bold demand-gate (appetite for idiomatic source) is also unresolved and folded into #954.
 
 # Author-mode emit foundation — wire an output-tabs author mode onto the existing `serve(){form}` forms over the declarative `<component>` subset
 

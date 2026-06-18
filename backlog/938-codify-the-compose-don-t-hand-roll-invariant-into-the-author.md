@@ -16,7 +16,7 @@ Codification spawn of #933 (complement to the #937 gate, never the enforcement).
 ## Progress (batch-2026-06-18) — resolved
 
 The skills (`new-standard`, `new-demo`) are thin trigger+pointers, so the pre-flight landed in the
-**method docs they point at**, plus the AGENTS.md hard-rule list:
+**method docs they point at**, plus the `we:AGENTS.md` hard-rule list:
 
 - **[we:docs/agent/design-first.md](../docs/agent/design-first.md)** "Before implementing" — new step 4:
   compose the existing WE trait for any covered capability (search `registerNavigation`/provided

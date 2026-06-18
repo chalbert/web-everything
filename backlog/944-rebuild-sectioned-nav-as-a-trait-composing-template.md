@@ -33,7 +33,7 @@ Retire the hand-rolled per-section accordion toggle in fui:blocks/sectioned-nav/
 - **Escape moved into the trait.** Added Escape→collapse+refocus to `fui:.../NavSectionBehavior.ts` (it's
   intrinsic to a single disclosure, so both sectioned-nav and the #943 menubar inherit it from the trait
   rather than hand-rolling). +2 NavSection tests.
-- **Tests.** `SectionedNav.test.ts` re-pointed to assert the trait *markup* + that an un-upgraded head
+- **Tests.** `fui:blocks/__tests__/unit/sectioned-nav/SectionedNav.test.ts` re-pointed to assert the trait *markup* + that an un-upgraded head
   click is inert (proof the hand-rolled toggle is gone); behavior lives in NavSectionBehavior's suite.
   62/62 across nav + sectioned-nav; FUI `check:standards` green. (jsdom can't upgrade the colon attr, so
   real-browser activation is #946's e2e.) Unblocks #945.

@@ -23,7 +23,7 @@ Emit `<button nav:section=…>` + coordinator-trait markup and keep the presenta
 - **`wireDisclosure()` deleted.** `fui:blocks/disclosure-nav/DisclosureNav.ts` now emits declarative
   trait markup: `nav:menubar` on the `<nav>` container (#943 coordinator — sibling-exclusivity, outside
   dismiss, Escape, desktop-gating) and `nav:section="#panelId"` on each head (#941 per-section disclosure
-  — toggle, aria, show/hide). `createDisclosureNav` builds markup only; the ~55-line ported `reveal-nav.js`
+  — toggle, aria, show/hide). `createDisclosureNav` builds markup only; the ~55-line hand-rolled reveal logic (ported from WE-docs)
   function is gone.
 - **Reveal CSS adapted to the trait's state, kept presentational.** `nav:section` toggles the panel's
   `hidden` attribute (display-mode ViewEngine), so the reveal keys off `.panel:not([hidden])` instead of

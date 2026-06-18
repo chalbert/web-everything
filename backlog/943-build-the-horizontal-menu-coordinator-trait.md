@@ -22,7 +22,7 @@ New webbehaviors trait capturing what nav:section/nav:list lack: sibling-exclusi
 
 New trait **`nav:menubar`** (`fui:blocks/navigation/NavMenubarBehavior.ts`), registered in
 `fui:blocks/navigation/registerNavigation.ts` + exported from the index, declared in FUI
-`blocks.json` `nav-list.registeredNames`.
+`fui:src/_data/blocks.json` `nav-list.registeredNames`.
 
 - **Applied to the container** of a row of `nav:section` heads; carries all four coordinator behaviors
   hand-rolled in `wireDisclosure()`: sibling-exclusive open, outside click/focus dismiss (`composedPath`,

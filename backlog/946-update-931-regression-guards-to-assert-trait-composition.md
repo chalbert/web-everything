@@ -21,12 +21,12 @@ Update the 4 guard files (unit fui:blocks/__tests__/unit/disclosure-nav/Disclosu
 
 All 4 guards now assert **trait composition**, not hand-rolled DOM:
 
-- **Unit (`DisclosureNav.test.ts`, `SectionedNav.test.ts`)** — re-pointed during #945/#944 to assert the
+- **Unit (`fui:blocks/__tests__/unit/disclosure-nav/DisclosureNav.test.ts`, `fui:.../sectioned-nav/SectionedNav.test.ts`)** — re-pointed during #945/#944 to assert the
   declarative trait markup (`nav:menubar` on the container, `nav:section="#panel"` on heads, default-hidden
   panels) and that an *un-upgraded* head click is **inert** (proof the hand-rolled toggle is gone).
-- **Integration (`chrome-in-document.test.ts`)** — the #931 collapsed-by-default guard now asserts
+- **Integration (`fui:embed/__tests__/chrome-in-document.test.ts`)** — the #931 collapsed-by-default guard now asserts
   `nav:section` markup + `panel.hidden` (the declarative collapsed state the trait reads on upgrade).
-- **E2E (`navigation.spec.ts`)** — new `menubar coordinator` describe over the #943 demo fixture, proving
+- **E2E (`fui:plugs/__tests__/e2e/navigation.spec.ts`)** — new `menubar coordinator` describe over the #943 demo fixture, proving
   trait composition **in a real browser** (the half jsdom can't reach — it strips the colon-attr prefix):
   asserts `nav:menubar` + `nav:section` are registry-**upgraded** (aria-controls/aria-expanded wired), then
   the four coordinator behaviors — **open**, **sibling-exclusive close**, **Escape→collapse**, **outside
