@@ -3,13 +3,15 @@ type: decision
 workItem: story
 size: 3
 parent: "746"
-status: open
+status: resolved
+codifiedIn: docs/agent/platform-decisions.md#we-fui-embed-boundary
 relatedProject: webdocs
 relatedReport: reports/2026-06-17-887-plateau-creator-fui-switcher-transport.md
 preparedDate: "2026-06-17"
 crossRef: { url: /backlog/881-decide-the-we-fui-mode-c-host-config-transport-for-dogfooded/, label: "Rhyming fork — WE→FUI chrome-config transport (#881)" }
 dateOpened: "2026-06-17"
 dateStarted: "2026-06-17"
+dateResolved: "2026-06-18"
 tags: [webdocs, block-explorer, design-system, theme-creator, plateau-embed, fui, transport, cross-origin]
 ---
 
@@ -71,3 +73,7 @@ The creator build itself (#886 scaffold, #888 authoring, #889 import) is Plateau
 - **Consumed by:** #751 (the "Your theme" embed capstone this transport feeds — `blockedBy: [887, …]`).
 - **Rhymes with:** #881 (same-origin/static → DOM-data); this is the cross-origin/runtime case → `postMessage`.
 - **Prepared 2026-06-17:** prior-art survey + classification done; `/research/plateau-creator-fui-switcher-transport/` published (report `we:reports/2026-06-17-887-plateau-creator-fui-switcher-transport.md`). One genuine fork at DoR with a bold default; three forced invariants recorded — `✓ ready to ratify`. Making the call is `/next decision`'s job.
+
+## Resolution — ratified 2026-06-18 (A)
+
+The Plateau-creator → FUI-switcher manifest is applied over **FUI's existing origin-validated postMessage bus** — the sanctioned direct Plateau→FUI channel, with no new hosted infra in a free loop (option B put paid infra in a free path — the defect). Confirmed by the we-fui-embed-boundary rule + the monetization linear-cost rule. Unblocks #751. Reversible.

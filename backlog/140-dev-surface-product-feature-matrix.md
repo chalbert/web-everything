@@ -86,3 +86,10 @@ This is the [#089](/backlog/089-monetization-product-ideas/) "AI proposes, the s
 - **This is a planning artifact, not a build.** The genuinely-new features with no owning item yet — **state & action explorer (6)**, **designer→PR (2)**, **in-context test status (3/4/5)**, **error replay + in-context bug report (9/10)**, **translation-strategy picker (12)** — each warrants its own backlog item when it's picked up; captured here as rows first to avoid 8 thin siblings.
 - **Surface bet:** extensions as funnel/proving-ground, dev browser (+ selective SaaS) as the monetizable product — confirm before investing.
 - **Sequencing:** the three shared mechanisms above should be built before the features that ride them; the trace/replay artifact unblocks the most features (6, 9, 10).
+
+## Direction (provisional, 2026-06-18)
+
+Proceeding on the stated bet — **extensions-as-funnel + dev-browser as the monetizable product** — as
+*provisional* sequencing, explicitly revisitable per the soft-monetization treatment (never priced on a
+shifting category). The 12-feature triage is **not funded yet** — revisit with real funnel data. This card
+stays **open** as the durable planning artifact, not resolved.

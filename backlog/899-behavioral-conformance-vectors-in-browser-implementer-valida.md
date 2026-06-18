@@ -2,9 +2,11 @@
 type: decision
 workItem: story
 size: 5
-status: open
+status: resolved
+codifiedIn: docs/agent/platform-decisions.md#constellation-placement
 dateOpened: "2026-06-18"
 dateStarted: "2026-06-18"
+dateResolved: "2026-06-18"
 preparedDate: "2026-06-18"
 relatedReport: reports/2026-06-18-behavioral-conformance-vectors-kit.md
 relatedProject: webvalidation
@@ -98,3 +100,7 @@ Coherent options that coexist — record and move on, don't spend the decider's 
 ### Graduation (after the call)
 
 A ratified ruling yields agent-ready builds via a `blockedBy` chain in composition order — vector schema → corpus (extending the MaaS conformance pattern) → assertion-semantics verifier (WE) → binding interface (WE) → FUI reference backend → plateau hosted exerciser. Spin out a **Technical Configurator** card only if a documented technical setting emerges (e.g. driver-backend selection); none is required by the layer split itself.
+
+## Resolution — ratified 2026-06-18 (A)
+
+Behavioral conformance **vectors (corpus + schema + verifier) stay WE**; the **in-browser runtime driver/tool moves to FUI**. Avoids minting a second WE-repo distribution surface; the WPT-style separate reference backend (B) is coherent but unforced — defer unless an independent implementer needs a neutral runnable proof. Confirmed by constellation-placement (contract/vectors→WE, runtime→FUI). Reversible.

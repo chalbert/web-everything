@@ -3,10 +3,12 @@ type: decision
 workItem: story
 size: 3
 parent: "777"
-status: open
+status: resolved
+codifiedIn: docs/agent/platform-decisions.md#we-fui-embed-boundary
 relatedProject: webdocs
 dateOpened: "2026-06-17"
 dateStarted: "2026-06-17"
+dateResolved: "2026-06-18"
 preparedDate: "2026-06-17"
 relatedReport: reports/2026-06-17-881-mode-c-host-config-transport.md
 tags: [webdocs, dogfooding, mode-c, embed, config-transport]
@@ -59,3 +61,7 @@ One mount point for the whole shell (`we:app-shell.js` composes nav + buttons in
 ## Out of scope (follow-on build, this card only decides)
 
 Progressive-enhancement fallback for no-JS / pre-mount (the hand-written `we:base.njk` chrome must remain the SSR baseline so the page is navigable before/without the mount) is an implementation concern of #865, constrained by — not decided by — this fork.
+
+## Resolution — ratified 2026-06-18 (A)
+
+Mode-C host chrome config is passed as **DOM data on the mount point** (a `data-chrome-config` JSON read via `root.host`), not baked into FUI. Keeps WE from importing FUI and needs no contract change; revisit only if a config outgrows an attribute. Confirmed by the we-fui-embed-boundary rule (WE never imports FUI; config rides the mount). Unblocks #865. Reversible; ratified under the standing authorization for non-critical movable calls.

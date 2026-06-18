@@ -2,9 +2,11 @@
 type: decision
 workItem: story
 size: 3
-status: open
+status: resolved
+codifiedIn: docs/agent/platform-decisions.md#constellation-placement
 dateOpened: "2026-06-18"
 dateStarted: "2026-06-18"
+dateResolved: "2026-06-18"
 preparedDate: "2026-06-18"
 relatedReport: reports/2026-06-18-903-guard-validity-validator-runtime-placement-recheck.md
 tags: [constellation, plugs, port, frontierui, standard-impl-boundary]
@@ -143,3 +145,7 @@ of #730; #903 confirms B1's *placement* survives the false-premise finding and l
 its we:check.ts consumer; define-vs-deliver per symbol), **#649** (plugs are impl, port DOWN to FUI),
 **#606** (plugs = FUI-owned implementation), **#239/#170/#694** (npm-scope-mirrors-layer; `@webeverything`
 = standard artifacts only; byte-replication is interim only), **#817 B1** (the ruling under review).
+
+## Resolution — ratified 2026-06-18 (runtime stays WE; corrects #817-B1 premise)
+
+The three planes (guard, validity-merge, validator-resolution) keep **both contract and runtime in WE** as #817 exceptions. The constellation-placement consumer test applies: WE's own (WE-only) webguards/webvalidation plugs consume these runtime values directly, so there *is* a WE-side consumer — unlike capability-manifest this is not a no-consumer plane. Only the **contract types** are exported as the `@webeverything/*` package (#239); FUI's ported plug wrappers (#725) import the runtime from WE (FUI→WE is allowed). This **corrects the mechanical premise of #817-B1** ("no WE-side consumer → move all runtime to FUI") for these three planes without changing the rule's direction. #893 implements the contract-type export; #725 ports the plug wrappers. **Confidence ~75%** — residual: confirm per-plane at build time that no individual runtime value must instead live FUI-side. The destructive deletion (#449) stays separately gated. Reversible (move-cost accepted).

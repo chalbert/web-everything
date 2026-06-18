@@ -3,9 +3,11 @@ type: decision
 workItem: story
 size: 3
 parent: "076"
-status: open
+status: resolved
+codifiedIn: docs/agent/platform-decisions.md#component-dc
 dateOpened: "2026-06-17"
 dateStarted: "2026-06-17"
+dateResolved: "2026-06-18"
 relatedProject: webcomponents
 relatedReport: reports/2026-06-17-component-behavior-extends-resolution.md
 preparedDate: "2026-06-17"
@@ -156,3 +158,7 @@ whether its hierarchy semantics leak into a contract that wants to stay flat.
 - Unblocks the **manual slot assignment** defer in #076 (it needs this JS layer to supply `slot.assign()`).
 - Determinism: new members keep the static → `#internals` → `#root` → constructor → `connectedCallback`
   order.
+
+## Resolution — ratified 2026-06-18 (Fork 1 = build-time inline; Fork 2 = reuse webinjectors)
+
+Fork 1 → **build-time inline**: the import-seam branch breaks the no-import-seam invariant (high confidence). Fork 2 → **reuse webinjectors DI** (~70%): per the runtime-DI-vs-devtools-provider rule a new CustomXRegistry is justified only when the running standard consults it, and nothing here does — so the behavior/extends tier-2 hook composes over webinjectors rather than minting a new global registry. Governed by the component-dc table. Reversible.

@@ -2,11 +2,13 @@
 type: decision
 workItem: story
 size: 3
-status: open
+status: resolved
+codifiedIn: docs/agent/platform-decisions.md#constellation-placement
 preparedDate: "2026-06-18"
 relatedReport: reports/2026-06-18-905-trait-enforcer-relocation-surgery.md
 dateOpened: "2026-06-18"
 dateStarted: "2026-06-18"
+dateResolved: "2026-06-18"
 tags: [constellation, trait-enforcer, frontierui, standard-impl-boundary]
 ---
 
@@ -102,3 +104,7 @@ The two end-states (Web Traits is a WE standard / Web Traits is wholly FUI's) ca
   `registerTraits` + the runtime `traitManifest` type, a marginal relocation that strips the `trait`-attribute
   vocabulary from the WE standard set. *The residual the decider should weigh:* whether "Web Traits" earns
   standard status or is just a usage pattern over the generic registry plug.
+
+## Resolution — ratified 2026-06-18 (A; supersedes #779 for the contract half)
+
+WE's trait-enforcer **manifest contract stays WE** and the **webbehaviors protocol surface stays WE**; only runtime/emitter impl moves to FUI. Moving the contract would force a forbidden WE→FUI import (the traitServePath consumes it; #239) — the contract-vs-emitter distinction handles the "#779 FUI-shaped" worry. This **supersedes #779's "whole enforcer incl. the contract → FUI"** for the contract half (lineage recorded; #779's emitter/runtime direction stands). **Confidence ~75%.** Gates the #894 relocation surgery, which stays separately gated and verified. Reversible (move-cost accepted).

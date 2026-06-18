@@ -2,9 +2,11 @@
 type: decision
 workItem: story
 size: 3
-status: open
+status: resolved
+codifiedIn: docs/agent/platform-decisions.md#constellation-placement
 dateOpened: "2026-06-18"
 dateStarted: "2026-06-18"
+dateResolved: "2026-06-18"
 preparedDate: "2026-06-18"
 relatedReport: reports/2026-06-18-conformance-validator-home.md
 relatedProject: webdocs
@@ -130,3 +132,7 @@ On ratification of (A + invariants): file **(1)** a build item for the `@webever
 data package (or fold into #891's vectors-package scope if that's where the first vectors land), and **(2)** a
 Plateau-suite item to bootstrap the open-core validator CLI (complete standalone floor) + optional hosted
 service. Neither is filed during prep — making the call is `/next decision`'s job.
+
+## Resolution — ratified 2026-06-18 (A, provisional/revisitable)
+
+The generic conformance / schema-validation service is homed in the **Plateau suite as open-core**, with an **open CLI floor** preserving zero-lock-in; the vectors stay WE (not WE-hosted, not FUI). No separate neutral-governance OSS repo is warranted yet — revisit if independent-governance demand appears. Confirmed by constellation-placement (managed offering → served product = Plateau) + the soft monetization rule. Tagged soft/revisitable.
