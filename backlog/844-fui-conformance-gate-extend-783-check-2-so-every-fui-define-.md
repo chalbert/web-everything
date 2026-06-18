@@ -2,10 +2,12 @@
 type: issue
 workItem: story
 size: 3
-status: open
+status: resolved
 dateOpened: "2026-06-17"
 blockedBy: ["908"]
 dateStarted: "2026-06-18"
+dateResolved: "2026-06-18"
+graduatedTo: scripts/check-standards.mjs
 locus: frontierui
 crossRef: { url: /backlog/783-decide-the-fui-catalog-block-family-denominator-dir-we-spec-/, label: "Check-2 home (#783)" }
 tags: [frontierui, cem, conformance, drift-gate]
@@ -34,6 +36,23 @@ The drift backstop from the #822 ruling, in its correct home (FUI-side, the #783
   pass a different tag at the use-site.
 - **Scope:** custom *attributes* (`attributes.define` — `nav:list`, `grid:*`) are **out** (no tagName; they
   stay plain `class` declarations per #822). This gate covers `customElements.define` element tags only.
+
+## Progress — built (2026-06-18)
+
+#908 ratified A (build as written: default arg == spec, flag literals; the FUI migration is downstream).
+Built **Check 2b** in `fui:frontierui/scripts/check-standards.mjs` (extends #783 Check 2, the WE→impl
+direction): for every WE-spec `tagName` (read from `we:custom-elements.json`, the #838/#839 authored CEM —
+7 `we-*` tags), assert a FUI element registers it as its **default**, and flag any hard-coded
+`customElements.define('literal')` for a catalog element as non-parameterized (must be `register*(tag = …)`
+per #841 so the tag is a consumer-overridable default; JSDoc example lines excluded; custom *attributes*
+out per #822).
+
+**Staged warn-first** (`TAGNAME_GATE_ENFORCED = false`, mirroring #659's drift gate): FUI still registers the
+pretty defaults (`page-nav`, `auto-heading`) that #843 ruled are overrides, so the binding is unmet by design
+until the downstream migration — the gate WARNs now (verified: **0 errors**, 5 parameterization warns for the
+hard-coded literals + 7 cross-binding warns for the unmatched `we-*` tags). Flip the flag to ERROR once the
+migration lands. Scaffolded that follow-on as **#929** (flip FUI defaults to `we-*` + flip the enforce flag,
+`locus: frontierui`). FUI `check:standards` green.
 
 ## Blocked — gate premise conflicts with #843 (batch-2026-06-17 pre-flight)
 
