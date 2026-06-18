@@ -5,11 +5,16 @@ size: 8
 parent: "170"
 status: open
 locus: frontierui
-blockedBy: ["725"]
+blockedBy: ["725", "950"]
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-14"
 tags: [plugs, dedup, migration, frontierui, plateau-app]
 ---
+
+> **blockedBy `950` added 2026-06-18 (batch pre-flight).** This terminal dedup packages the FUI plugs
+> tree as `@frontierui/plugs` and deletes WE's `plugs/` — but active **#950** is mid-porting
+> `webguards` *into* that same FUI tree. Packaging/deleting it now is a direct two-session collision.
+> Unblocks when #950 resolves (also coordinate with #726's test backfill before the WE-side delete).
 
 # Package `frontierui/plugs` as `@frontierui/plugs`, delete `webeverything/plugs`, repoint WE + plateau-app
 

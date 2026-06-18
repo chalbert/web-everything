@@ -3,10 +3,15 @@ type: issue
 workItem: story
 size: 5
 status: open
-blockedBy: ["725"]
+blockedBy: ["725", "950"]
 dateOpened: "2026-06-15"
 tags: []
 ---
+
+> **blockedBy `950` added 2026-06-18 (batch pre-flight).** The flag only flips green once **all 6**
+> domains ship an unplugged test — including `webguards`, whose FUI home is being created right now by
+> active **#950** (port webguards guard runtime into FUI). Its unplugged test can't be placed until that
+> port lands, so the flag-flip can't complete. Unblocks when #950 resolves.
 
 # Backfill remaining unplugged-mode plug tests and flip PLUG_UNPLUGGED_TEST_ENFORCED to error
 

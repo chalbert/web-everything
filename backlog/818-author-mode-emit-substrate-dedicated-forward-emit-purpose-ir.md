@@ -2,7 +2,7 @@
 type: issue
 workItem: story
 size: 3
-status: open
+status: parked
 parent: "746"
 locus: frontierui
 relatedProject: webdocs
@@ -11,6 +11,14 @@ relatedReport: reports/2026-06-18-backlog-split-analysis.md
 dateOpened: "2026-06-16"
 tags: [webdocs, adapters, polyglot, generation, component-emit]
 ---
+
+> **PARKED 2026-06-18 (batch pre-flight) — DEMAND-GATED, not agent-ready.** The body's own gate is
+> "build only after #753's consume-mode ships **and** appetite for idiomatic source is shown." #753's
+> consume-mode is resolved (`graduatedTo frontierui/workbench/mount.ts`), but the appetite half is
+> unmet — no demand signal exists, and the cheap data-emit foundation is explicitly meant to ride the
+> existing channel *when* it's shown. Parked so the selector stops surfacing it as Tier-A batchable;
+> un-park (→ `status: open`) the moment appetite for author-mode source appears.
+
 
 > **Claimed in batch-2026-06-18, then re-blocked + released (NOT built).** The "rides what already ships"
 > re-scope missed a placement seam: this slice renders source via WE's `serve()` core
