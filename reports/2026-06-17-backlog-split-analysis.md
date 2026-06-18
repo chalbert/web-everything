@@ -135,3 +135,80 @@ E (vision) — parked: blocked on a non-existent vision-token-extraction capabil
 | Piece | Failed condition | Unblocking action |
 |---|---|---|
 | **E — screenshot→theme** | (1) foundation absent — no vision **token-extraction** capability (the #086/#382 pipeline yields `ComponentIR`, not tokens) | Land a vision token-extraction capability (a Plateau service per #475, no-leakage client seam) first; then E becomes a buildable paid slice. Parked in the meantime. |
+
+---
+
+# Focused run: `/slice 736`
+
+## Candidate
+
+**#736 — temporal block impl — variant traits + build-chunk assertion (re-slice)** (`workItem: story`,
+`size: 13`, `status: open`, `parent: 315`, `locus: frontierui`, `blockedBy: [359, 735]`). Both blockers
+**resolved** (→ WE `blocks.json` contracts). The two forks that previously held it back are settled:
+ownership (#779 → **FUI-locus end-to-end**, resolved 2026-06-17) and scope (#713 → option C, one abstract
+core + named shallow presets, resolved). What remains is **pure impl volume**: author the three variant
+trait modules + wire the presets + the build-chunk dogfood. #736 already has a parent (#315), so per the
+parented-item edge case it stays a **re-sized story for its core slice** and the rest land as **siblings
+under #315** — no epic conversion.
+
+## Work-investigation pass (real tree, frontierui repo)
+
+| Surface | Where | State |
+|---|---|---|
+| Trait module pattern | `frontierui/blocks/traits/Sortable.ts` (+ `Highlight`/`Polling`/`Revealable`) | **proven** — `CustomAttribute` mixin w/ `activationSurface`, `connectedCallback`, activate/deactivate lifecycle; the exact shape each variant trait clones |
+| The Map (runtime) | `frontierui/plugs/webbehaviors/traitManifest.ts` (`registerTraits`, lazy/eager/preload entries) · `plugs/bootstrap.ts:218` | **shipped** — `attribute → trait` table, `defineLazy` per entry; manifest is enforcer-generated (`virtual:trait-manifest`) |
+| The Enforcer (build) | `frontierui/tools/trait-enforcer/vite-plugin.ts` (scan + codegen, pure fns) · `__tests__/trait-enforcer.test.ts` | **shipped** — scans template usage, code-splits a chunk per trait; wired via `traitEnforcer({ traitMap })` |
+| Temporal impl dir | `frontierui/blocks/temporal/` | **greenfield** — does not exist yet; slices create `blocks/temporal/traits/*` |
+| Family contracts | WE `src/_data/blocks.json` — `temporal` core + 4 presets (`date-picker`, `time-picker`, `datetime-picker`, `date-range-picker`) `:4443-4571` | **shipped** (#359/#735) — each preset's presentation×granularity pin + trait bindings are spec'd |
+| Chunk-isolation test precedent | `tools/trait-enforcer/__tests__` (unit) + `plugs/__tests__/e2e/preload-traits.spec.ts` (dev Playwright) | exists at unit/dev level; the **#713 production-build "time-only fixture pulls no calendar chunk" dogfood** is new |
+
+**Trait→preset binding map (from the contracts):** `calendar-grid` → date-picker, datetime-picker,
+date-range-picker · `clock` → time-picker, datetime-picker · `range-coordination` → date-range-picker.
+Locale parse/format + keyboard roving are **composed from other intents** (Locale Intent, Focus
+Delegation) per the core contract — **not** new traits authored here, so out of #736's scope (no slice for
+them).
+
+## Could split — #736 → 4 slices (1 kept + 3 siblings under #315)
+
+| Slice | workItem / size | Scope | Home |
+|---|---|---|---|
+| **#736 (kept, re-sized)** | story · **3** | **`calendar-grid` trait + date-picker preset.** Author `blocks/temporal/traits/CalendarGrid.ts` (`CustomAttribute`: render a `role=grid` calendar surface over `<input type=date>`), add to the enforcer `traitMap`, wire a date-picker fixture/demo that binds `calendar-grid` (lazy-loads on appearance). Demo: date-picker shows the grid; chunk fetched on first appearance. | frontierui |
+| **A — `clock` trait + time-picker preset** | story · **3** | Author `blocks/temporal/traits/Clock.ts` (spatial clock surface over `<input type=time>`), add to `traitMap`, time-picker fixture binds `clock`. Independent of calendar-grid. Demo: time-picker shows the clock, lazy-loaded. | frontierui |
+| **B — `range-coordination` trait + date-range-picker preset** | story · **3** | Author `blocks/temporal/traits/RangeCoordination.ts` (start ≤ end ordering across two bound `<input type=date>` anchors, reported as a pair), date-range-picker fixture binds `calendar-grid` + `range-coordination`. Demo: range stays ordered; both chunks present. | frontierui |
+| **C — datetime-picker preset + #713 build-chunk dogfood** | story · **3** | Wire the datetime-picker preset (composes `calendar-grid` + `clock` over `<input type=datetime-local>`), then author the **production-build** assertion: a **time-only fixture pulls no calendar chunk** (and a date-only fixture pulls no clock chunk). Capstone proving per-preset trait isolation. Demo: green chunk-isolation test on a real build. | frontierui |
+
+**Slice DAG (A/#736 parallel roots; incremental):**
+
+```
+#736 (calendar-grid + date-picker) ──┬──▶ B (range-coordination: date-range-picker binds calendar-grid)
+                                      └──▶ C (datetime-picker composes calendar-grid + clock; build-chunk test)
+A (clock + time-picker) ───────────────────▶ C
+```
+
+- **#736** and **A** are **independent roots** — calendar-grid and clock traits share no code; batch in parallel.
+- **B** `blockedBy #736` — the date-range-picker preset binds `calendar-grid`, so the grid must exist first.
+- **C** `blockedBy #736, A` — datetime-picker composes both surfaces, and the "time-only pulls no calendar
+  chunk" assertion needs both chunks to exist to prove isolation.
+- Genuine incremental delivery: each of #736/A/B ships a working, lazily-loaded picker preset; C adds the
+  composed preset + the dogfood gate. Every slice leaves a valid demoable state.
+
+**Batchable:** #736 and A immediately (both unblocked roots); B after #736; C after #736 + A. Run
+`/slice 736` → approve → `/batch` the FUI chain.
+
+## Rubric check (all five hold)
+
+1. **Volume, not uncertainty** ✓ — the 13 pts are 3 independent trait authorings + preset wiring + a
+   build assertion. Both forks (ownership #779, scope #713) are **already resolved** — none buried in a
+   child.
+2. **≥2 nameable slices, real home** ✓ — four, all home = `frontierui/blocks/temporal/traits/` +
+   `tools/trait-enforcer`.
+3. **Slices land small** ✓ — 3 / 3 / 3 / 3 (≈ the original 13), each `file:line`-grounded against the
+   existing `traits` family + enforcer.
+4. **Clean DAG** ✓ — acyclic; two parallel roots, two incremental dependents; each ships a valid demo.
+5. **No coherence loss** ✓ — the traits are genuinely separable (distinct surfaces, distinct native
+   anchors); C re-integrates them and proves the isolation the family's whole "scale without weight"
+   premise rests on.
+
+## Could not split
+
+_None._ #736 is fully splittable now that #779 + #713 are resolved.
