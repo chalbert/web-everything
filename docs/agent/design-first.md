@@ -89,6 +89,12 @@ A standard often spans layers: an **intent** declares it, a **block** implements
 
 This keeps the standard lean, stable, and extensible. Implementations compete/vary; the contract stays fixed.
 
+> **The full constellation placement test** (WE / Frontier UI / Plateau — the per-file
+> define-vs-deliver cut, the contract-package end-state, managed-offering decomposition) is the
+> named rule in [platform-decisions.md → Constellation placement](platform-decisions.md#constellation-placement).
+> The "is it a Project/Protocol or just an intent?" bar lives there too. Cite the rule — don't
+> re-derive it per decision.
+
 ## Data files (canonical specs — query per-entry, don't load whole)
 
 | File | Holds |

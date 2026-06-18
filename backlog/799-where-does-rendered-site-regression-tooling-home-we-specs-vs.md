@@ -2,6 +2,7 @@
 type: decision
 workItem: task
 status: resolved
+codifiedIn: docs/agent/platform-decisions.md#constellation-placement
 dateOpened: "2026-06-16"
 dateStarted: "2026-06-17"
 dateResolved: "2026-06-17"

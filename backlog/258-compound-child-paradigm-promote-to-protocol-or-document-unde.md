@@ -3,6 +3,7 @@ type: decision
 workItem: story
 size: 2
 status: resolved
+codifiedIn: docs/agent/platform-decisions.md#project-protocol-bar
 dateOpened: "2026-06-10"
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"

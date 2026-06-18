@@ -4,6 +4,7 @@ workItem: story
 size: 3
 parent: "746"
 status: resolved
+codifiedIn: docs/agent/platform-decisions.md#we-fui-embed-boundary
 locus: webeverything
 relatedProject: webdocs
 relatedReport: reports/2026-06-16-plateau-we-embed-seed-transport.md

@@ -4,6 +4,7 @@ workItem: story
 size: 3
 parent: "728"
 status: resolved
+codifiedIn: docs/agent/platform-decisions.md#we-fui-embed-boundary
 blockedBy: ["732"]
 dateOpened: "2026-06-16"
 dateStarted: "2026-06-16"

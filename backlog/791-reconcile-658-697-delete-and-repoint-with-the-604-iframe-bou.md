@@ -3,6 +3,7 @@ type: decision
 workItem: story
 size: 3
 status: resolved
+codifiedIn: docs/agent/platform-decisions.md#we-fui-embed-boundary
 relatedReport: reports/2026-06-16-we-demos-blocks-deletion-boundary-reconciliation.md
 dateOpened: "2026-06-16"
 dateStarted: "2026-06-16"

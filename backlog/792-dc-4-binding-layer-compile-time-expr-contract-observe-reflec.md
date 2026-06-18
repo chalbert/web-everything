@@ -4,6 +4,7 @@ workItem: story
 size: 3
 parent: "076"
 status: resolved
+codifiedIn: docs/agent/platform-decisions.md#component-dc
 preparedDate: "2026-06-16"
 dateOpened: "2026-06-16"
 dateStarted: "2026-06-17"

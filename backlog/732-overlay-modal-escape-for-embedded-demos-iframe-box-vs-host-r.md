@@ -4,6 +4,7 @@ workItem: story
 size: 2
 parent: "728"
 status: resolved
+codifiedIn: docs/agent/platform-decisions.md#we-fui-embed-boundary
 dateOpened: "2026-06-16"
 dateStarted: "2026-06-16"
 dateResolved: "2026-06-16"

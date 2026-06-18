@@ -3,6 +3,7 @@ type: decision
 workItem: story
 size: 3
 status: resolved
+codifiedIn: docs/agent/platform-decisions.md#constellation-placement
 blockedBy: []
 dateOpened: "2026-06-16"
 dateStarted: "2026-06-17"

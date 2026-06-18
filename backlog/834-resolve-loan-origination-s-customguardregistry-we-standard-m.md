@@ -4,6 +4,7 @@ workItem: story
 size: 2
 parent: "823"
 status: resolved
+codifiedIn: docs/agent/platform-decisions.md#constellation-placement
 dateOpened: "2026-06-17"
 dateStarted: "2026-06-17"
 dateResolved: "2026-06-17"

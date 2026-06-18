@@ -4,6 +4,7 @@ workItem: story
 size: 3
 parent: "666"
 status: resolved
+codifiedIn: docs/agent/platform-decisions.md#monetization
 dateOpened: "2026-06-15"
 dateStarted: "2026-06-15"
 dateResolved: "2026-06-15"

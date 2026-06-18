@@ -37,11 +37,13 @@
 - Run `npm run check:standards` — it must pass (it also fails if the inventory is stale).
 - Run affected tests (`npx vitest run <path>`); for broad changes, `npm test`.
 - Learned something durable (new pattern, gotcha, decision)? Add it to the **specific** `docs/agent/*.md` file it belongs to — not here.
+- **Ratified a `type: decision` that establishes (or refines) a reusable rule?** Promote the *rule* into [docs/agent/platform-decisions.md](docs/agent/platform-decisions.md) (or the topical doc it belongs to) and set `codifiedIn:` on the item pointing there — or set `codifiedIn: one-off` for a narrow call with no reusable rule. The decision keeps the *lineage*; the guideline carries the *rule* (don't make the next person re-derive it). `check:health` flag **G6** surfaces resolved decisions still missing `codifiedIn`.
 
 ## Where to look (read on demand)
 
 | Task | Read |
 |------|------|
+| **Where does X live? / a placement, naming, monetization, or WE↔FUI-boundary question** — the standing cross-cutting rulings (the "statute" promoted from ratified decisions); **cite a named rule instead of re-opening a decision** | [docs/agent/platform-decisions.md](docs/agent/platform-decisions.md) |
 | Naming, glossary, code style, icons | [docs/agent/conventions.md](docs/agent/conventions.md) |
 | Writing/changing tests, web cases | [docs/agent/testing.md](docs/agent/testing.md) |
 | Plugs/blocks, injectors, registries, parsers, debugging | [docs/agent/architecture.md](docs/agent/architecture.md) |
@@ -62,7 +64,7 @@
 - **Plugs** 51 — 31 active · 18 concept · 2 experimental
 - **Blocks** 78 — 32 active · 14 concept · 32 draft
 - **Intents** 56 — 1 active · 14 concept · 41 draft
-- **Glossary terms** 194 · **Research topics** 112 (108 open)
+- **Glossary terms** 194 · **Research topics** 117 (113 open)
 - **Projects** 40: webadapters, webanalytics, webaudit, webbehaviors, webblocks, webcases, webcharts, webcompliance, webcomponents, webcontexts, webdecisions, webdirectives, webdocs, webediting, webevents, webexpressions, webguards, webidentity, webinjectors, webintents, webintl, weblifecycle, webmanifests, webnotifications, webplugs, webpolicy, webportals, webpositioning, webprocess, webrealtime, webregistries, webreliability, webreporting, webresources, webstates, webtheme, webtraces, webtraits, webvalidation, webworkflows
 <!-- /AUTO-GENERATED:inventory -->
 

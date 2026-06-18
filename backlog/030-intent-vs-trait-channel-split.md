@@ -4,6 +4,7 @@ workItem: story
 size: 3
 parent: "023"
 status: resolved
+codifiedIn: docs/agent/platform-decisions.md#intents-ux-only
 dateOpened: '2026-06-02'
 dateResolved: '2026-06-07'
 tags:

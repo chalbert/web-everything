@@ -4,6 +4,7 @@ workItem: story
 size: 8
 parent: "382"
 status: resolved
+codifiedIn: docs/agent/platform-decisions.md#no-leakage-client
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-13"
 dateResolved: "2026-06-13"

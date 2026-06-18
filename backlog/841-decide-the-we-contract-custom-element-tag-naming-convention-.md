@@ -4,6 +4,7 @@ workItem: story
 size: 3
 parent: "746"
 status: resolved
+codifiedIn: docs/agent/platform-decisions.md#tagname-naming
 relatedProject: webdocs
 dateOpened: "2026-06-17"
 dateStarted: "2026-06-17"

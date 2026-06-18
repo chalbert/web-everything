@@ -3,6 +3,7 @@ type: decision
 workItem: story
 size: 5
 status: resolved
+codifiedIn: docs/agent/platform-decisions.md#guard-gate
 blockedBy: ["288"]
 dateOpened: "2026-06-07"
 dateStarted: "2026-06-11"

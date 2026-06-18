@@ -4,6 +4,7 @@ workItem: story
 size: 2
 parent: "315"
 status: resolved
+codifiedIn: docs/agent/platform-decisions.md#constellation-placement
 blockedBy: []
 relatedReport: reports/2026-06-16-backlog-split-analysis.md
 dateOpened: "2026-06-16"

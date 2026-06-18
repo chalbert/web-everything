@@ -1174,7 +1174,7 @@ export const REPO_LOCUS_PREFIX_ENFORCED = true;
 // `json` (not `js` + leftover `on`).
 const PATHLIKE_RE = /[\w./-]+\.(?:tsx|ts|json|mjs|cjs|js|md|njk|css|html|yaml|yml)(?![a-z])(?::\d+(?:-\d+)?)?/g;
 const LOCUS_MARKER_RE = /(?:we|fui|plateau|webeverything|frontierui|plateau-app):$/;
-const EXEMPT_FIELD_RE = /^\s*(?:relatedReport|graduatedTo|crossRef)\s*:/;
+const EXEMPT_FIELD_RE = /^\s*(?:relatedReport|graduatedTo|crossRef|codifiedIn)\s*:/;
 // #885 false-positive carve-outs (these are NOT repo code-path references): JS-ecosystem product
 // names (`Node.js`/`Next.js`/`Three.js` — a single Capitalized word + `.js`) and bare type-suffix
 // fragments (`.d.ts`/`.spec.ts` — an extension chain with no name segment). Glob masks (`*.test.ts`)

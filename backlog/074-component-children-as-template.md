@@ -3,6 +3,7 @@ type: decision
 workItem: story
 size: 3
 status: resolved
+codifiedIn: docs/agent/platform-decisions.md#component-dc
 dateOpened: '2026-06-06'
 dateResolved: '2026-06-07'
 tags:

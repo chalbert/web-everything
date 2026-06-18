@@ -4,6 +4,7 @@ workItem: story
 size: 2
 parent: "125"
 status: resolved
+codifiedIn: docs/agent/platform-decisions.md#component-dc
 dateOpened: "2026-06-06"
 blockedBy: ["125"]
 dateStarted: "2026-06-09"
