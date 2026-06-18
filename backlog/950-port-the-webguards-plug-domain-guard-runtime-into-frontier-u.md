@@ -3,9 +3,11 @@ type: decision
 workItem: story
 size: 3
 parent: "170"
-status: open
+status: resolved
 dateOpened: "2026-06-18"
 dateStarted: "2026-06-18"
+dateResolved: "2026-06-18"
+graduatedTo: frontierui/plugs/webguards/CustomGuardRegistry.ts
 preparedDate: "2026-06-18"
 relatedReport: reports/2026-06-18-webguards-reconciliation-grounding.md
 tags: []
@@ -60,6 +62,32 @@ the standalone table (A), refactor the standalone to extend `CustomRegistry` (B)
 WE's own header on [we:guard/registry.ts:33](../guard/registry.ts#L33) and the just-landed `webvalidation`
 sibling both show the pair is the intended shape, and each of A and B *breaks* one half of it. So this is a
 **forced invariant**, not a weigh.
+
+## Ruling — RATIFIED 2026-06-18
+
+**Fork 1 resolved → replicate WE's two-model pair** (neither A nor B). Crux claims verified against the
+tree before ratifying: FUI has **no** `plugs/webguards/` dir (collision premise confirmed false), WE
+ships the standalone seam (`we:guard/registry.ts` extends nothing) + the plug (`extends CustomRegistry`)
+disambiguated by the barrel, FUI's `blocks/guard/` byte-twin is present (#875), and the `webvalidation`
+sibling shipped the same `extends CustomRegistry` family today. Red-team landed on neither alternative
+(A breaks injector-chain parity #207 D6; B destroys the #606 unplugged seam). Confidence **High**.
+Build executed in this same session (see Progress).
+
+## Progress
+
+- **Status:** done — ratified + ported, FUI gates green.
+- **Branch:** main (FUI repo).
+- **Done:** `fui:plugs/webguards/CustomGuardRegistry.ts` (verbatim WE, `../../guard/*`→`../../blocks/guard/*`)
+  + barrel `fui:plugs/webguards/index.ts` + ported test `fui:plugs/webguards/__tests__/CustomGuardRegistry.test.ts`
+  (8/8 pass); bootstrap wiring (`import … from './webguards'`, Window-interface `CustomGuardRegistry`/`customGuards`
+  decls, seed block after the validator-resolution block); `fui:src/_data/plugs.json` `webguards` entry
+  **+ backfilled the missing `webvalidation` entry** (both dirs were drifting — check:standards was red 2, now 0).
+- **Gates:** FUI `check:standards` 0 errors (was 2), `vitest` 1987 passed / 8 skipped. `tsc --noEmit`
+  shows a pre-existing TS2416 on the value-first `define` override that fires identically on the
+  `webvalidation` siblings (not introduced here) — FUI's shipping gates are esbuild build + vitest, not
+  bare tsc, so the port is at exact parity with the green sibling.
+- **Next:** none — WE-side `plugs/webguards` + `plugs/webvalidation` deletion stays #449's job (gated by
+  this + #725).
 
 ## Recommended path at a glance
 
@@ -129,6 +157,50 @@ the landed `webvalidation` port:
 3. `fui:src/_data/plugs.json` `webguards` catalog entry (and backfill the missing `webvalidation`
    entry while there).
 4. Re-point the ported guard tests at `fui:plugs/webguards`; FUI build + vitest green.
+
+### Worked example — the actual port shape
+
+Verified against the tree (FUI has **no** `plugs/webguards/` dir yet → the revert's collision premise is
+confirmed false). The port is a near-verbatim copy with a **single import remap**.
+
+**Plug file** — `fui:plugs/webguards/CustomGuardRegistry.ts`, copied from
+`we:plugs/webguards/CustomGuardRegistry.ts` with only the standalone-module paths remapped:
+
+```ts
+import CustomRegistry from '../core/CustomRegistry';        // unchanged (plug-core, same in both repos)
+import {
+  assertGuardDecision, NativeGuardProvider,
+  type CustomGuardProvider, /* …GuardContext/Decision/Event/Region */
+} from '../../blocks/guard/provider.js';                    // WE: ../../guard/provider.js
+import { UnknownGuardProviderError } from '../../blocks/guard/registry.js'; // WE: ../../guard/registry.js
+
+export default class CustomGuardRegistry extends CustomRegistry<CustomGuardProvider> {
+  localName = 'customGuards';
+  // …define(provider, asDefault?) / resolve(key?) / evaluateRegion(...) — verbatim
+}
+
+export function createDefaultGuardRegistry(): CustomGuardRegistry {
+  const registry = new CustomGuardRegistry();
+  registry.define(new NativeGuardProvider(), true);          // native-first default
+  return registry;
+}
+```
+
+The **only** edit vs WE is `../../guard/*` → `../../blocks/guard/*` (FUI keeps the standalone seam under
+`blocks/`). `../core/CustomRegistry` is unchanged.
+
+**Bootstrap wiring** — mirrors the `validityMerge` block at `fui:plugs/bootstrap.ts:215` line-for-line:
+
+```ts
+// Setup guard registry (#289): one guard policy resolved per-scope through the injector chain.
+const guards = createDefaultGuardRegistry();
+window.customGuards = guards;
+documentInjector?.set('customGuards', guards);
+```
+
+*Build-time note:* the sibling imports `../../validator-resolution/*` (not `../../blocks/…`), while guard's
+standalone is confirmed at `fui:blocks/guard/`. Confirm the exact relative depth (`../../blocks/guard/*`)
+when writing the file rather than trusting the string — doesn't change the ruling.
 
 **Relationships:** parent #170 (plugs-platform migration). Sibling `webvalidation` port = #725 (same
 reconciliation, already landed — its registries are the precedent). WE-side deletion of the `plugs/` copies
