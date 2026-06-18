@@ -1,0 +1,61 @@
+name: Publish @webeverything/contracts
+
+# Publishes the type-only contract distribution package (#872/#874 — the FUI→WE arrow's single source of
+# truth) to npm on a version bump. Stood up per #877: the piece that makes the publish/version ceremony
+# cheap ("publication is not that complex with correct CI", #834). Lower priority / no hurry — this is
+# risk-mitigation for the #872 epic, not a release gate.
+#
+# Bump + release:
+#   cd contracts && npm version <patch|minor|major>   # writes contracts/package.json "version"
+#   git tag contracts-v$(node -p "require('./contracts/package.json').version")
+#   git push origin --tags
+# The publish step refuses the placeholder version 0.0.0 (prepublishOnly guard) and refuses a tag that
+# doesn't match the package version, so an accidental or stale tag can't push junk. A `workflow_dispatch`
+# run defaults to --dry-run so the pipeline can be exercised without uploading.
+
+on:
+  push:
+    tags:
+      - 'contracts-v*'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Run npm publish with --dry-run (no upload)'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  id-token: write # required for npm provenance (Sigstore OIDC)
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - name: Install
+        run: npm ci
+
+      - name: Repo health gate
+        run: npm run check:standards
+
+      - name: Verify tag matches contracts version
+        if: github.event_name == 'push'
+        run: |
+          PKG_VERSION="$(node -p "require('./contracts/package.json').version")"
+          TAG_VERSION="${GITHUB_REF_NAME#contracts-v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} (${TAG_VERSION}) does not match contracts/package.json version (${PKG_VERSION})."
+            exit 1
+          fi
+
+      - name: Publish
+        working-directory: contracts
+        run: npm publish --provenance --access public ${{ (github.event_name == 'workflow_dispatch' && inputs.dry-run) && '--dry-run' || '' }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
