@@ -85,10 +85,20 @@ display (its own site + demos, FUI branding).
    *is* that standard's reference runtime); a block-impl demo moves to FUI and is iframe-embedded.
 5. **Chrome / workbench is FUI-owned**, decoupled from distribution; WE keeps only its
    standards-panel overlay.
+6. **The WE *website* ≠ the WE *standard*.** The boundary constrains the *standard artifacts* and
+   the *`webeverything` package* (no FUI **source** dependency; unidirectional WE→FUI) — **not** the
+   WE-docs *website*, which is a downstream product/consumer free to render FUI **and** to run WE
+   standard runtimes (e.g. booting the webbehaviors `CustomAttributeRegistry` in a mode-C shadow
+   mount), exactly like any app. The test is **source-dependency direction, not runtime execution or
+   rendered pixels**: a consumer page running FUI impl + a WE standard together is the dogfood, not a
+   crossing. The one guard — the site consumes FUI by **runtime URL bundle** (mode C), *never* a
+   build-time `import '@frontierui'` into its build; that import would invert the direction (#700/#239)
+   and is the only thing that actually violates the boundary. So "does running a WE runtime in-document
+   cross the boundary?" is answered *no* by construction — don't re-open it.
 
 **Lineage:** #604 #701 #707 (iframe boundary; "WE renders real FUI blocks" is mis-framed) · #700 ·
 #705 · #732 (escape SDK) · #765 (mode-C relaxation) · #788 (seed transport) · #791 (reference-vs-impl
-partition) · #809 (workbench locus).
+partition) · #809 (workbench locus) · #932 (website≠standard; consumer may run WE runtimes in-document).
 
 ### Is it a Project / Protocol — or just an intent? {#project-protocol-bar}
 
