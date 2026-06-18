@@ -1,6 +1,13 @@
 /**
  * genWrapper.mjs — consume-mode per-framework wrapper generator (#821).
  *
+ * ⚠ REFERENCE FIXTURE, NOT A STANDARD (#855 B2 / #892). The canonical generator was re-homed to
+ * Frontier UI (`frontierui/tools/gen-wrapper/`) — codegen is impl/tooling, never a `@webeverything`
+ * standard; only the CEM *contract* crosses the WE→FUI seam, code never does. This WE copy is kept
+ * solely as a CEM-subordinate reference (the #461 "reference impl, not the definition" pattern) that
+ * lets WE materialize + diff sample wrappers; the WE-owned conformance is the generator-agnostic
+ * behavioral vectors + runner (`wrapper-conformance/`, #891), which judge ANY generator's output.
+ *
  * Pure: `(declaration, target) => wrapperSource` (a string). No DOM, no FUI import — the
  * output is a code artifact that crosses the layer seam to the FUI Block Explorer panel
  * (#753, locus:frontierui) and the #506 conformance gate.

@@ -84,3 +84,11 @@ badge grades.
   the CEM shape and unit-tested with a fixture). FUI panel that consumes this is **#753**.
 - **Notes:** all 17 tests green; `gen:wrapper` reports 0 emitted today (honest — see #822);
   `check:standards` green.
+
+## Framing correction (#892, 2026-06-18)
+
+Per #855 B2, the generator is **impl/tooling, not a `@webeverything` standard**. #892 re-homed the canonical
+generator to Frontier UI (`frontierui/tools/gen-wrapper/`); the WE-side `scripts/gen-wrapper/` copy this item
+produced is now a **demoted reference fixture** subordinate to the CEM (the #461 pattern), not a shipped
+standard. WE's owned conformance is the generator-agnostic behavioral vectors + runner (`wrapper-conformance/`,
+#891). Only the CEM contract crosses the WE→FUI seam; the generator code does not.

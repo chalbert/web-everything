@@ -3,6 +3,10 @@
  * gen-wrapper CLI (#821) — emit consume-mode per-framework wrappers for every
  * custom-element declaration in the WE CEM (custom-elements.json, derived by gen:cem).
  *
+ * ⚠ REFERENCE-FIXTURE materializer (#855 B2 / #892). The canonical generator lives in Frontier UI
+ * (`frontierui/tools/gen-wrapper/`); this WE driver only materializes sample wrappers off WE's own CEM
+ * so the contract is demonstrably generatable — it is NOT a shipped `@webeverything` standard.
+ *
  * Writes `generated/wrappers/<target>/<TagName>.<ext>` per declaration × target. The
  * heavy lifting is the pure generator (genWrapper.mjs); this is the convenience driver the
  * FUI panel (#753) does NOT need (it imports `generateWrapper` directly) but that lets us
