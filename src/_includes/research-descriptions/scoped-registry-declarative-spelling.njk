@@ -1,0 +1,117 @@
+<h2>The Question</h2>
+<p>
+  The <a href="/blocks/component/"><code>&lt;component&gt;</code></a> element lowers to a custom element
+  that registers into the <strong>global</strong> registry
+  (<code>customElements.get(tag) ?? customElements.define(tag, Cls)</code>). Decision
+  <a href="/backlog/854-scope-declarative-scoped-registration-spelling-on-component/">#854</a> (carved
+  from epic <a href="/backlog/076-component-declarative-wc-apis/">#076</a>) asks: <strong>how does a
+  <code>&lt;component&gt;</code> declare it registers into a <em>scoped</em>
+  <code>CustomElementRegistry</code> instead</strong>, and how does that align with the native
+  scoped-registry direction? The runtime is already fixed
+  (<a href="/backlog/228-scoped-autonomous-element-construct-and-lifecycle/">#228</a>); only the
+  author-facing spelling is open. The item entered prep presuming a <code>scope="&lt;registry-id&gt;"</code>
+  string attribute. This survey runs design-first step&nbsp;1 over the native proposal + the leading WC
+  libraries — and it reshapes the framing.
+</p>
+
+<h2>What the survey found</h2>
+
+<h3>1 · The native proposal shipped — and keys on objects, not strings</h3>
+<p>
+  Scoped Custom Element Registries <strong>merged into the WHATWG DOM/HTML Living Standard on
+  2025-04-14</strong> (<a href="https://github.com/whatwg/dom/pull/1341">whatwg/dom#1341</a>; revamp
+  <a href="https://github.com/whatwg/html/issues/10854">whatwg/html#10854</a>). A registry is
+  <code>new CustomElementRegistry()</code> — a <strong>JS object with no name/id</strong>. You bind it to a
+  subtree at <code>element.attachShadow({ mode, customElementRegistry })</code> (the option is
+  <code>customElementRegistry</code>, <em>not</em> <code>registry</code>), read it back via
+  <code>shadowRoot.customElementRegistry</code>, and late-bind via <code>registry.initialize(root)</code>.
+  No option ⇒ the global registry. Scoped registries reject customized built-ins
+  (<code>define(…, {extends})</code>).
+</p>
+<p>
+  <strong>Browser status (early 2026):</strong> Chrome/Edge&nbsp;146 and Safari&nbsp;26 shipped; Firefox is
+  in progress (<a href="https://bugzilla.mozilla.org/show_bug.cgi?id=1874414">bug #1874414</a>,
+  Interop&nbsp;2026). Two of three engines — not yet Baseline.
+</p>
+
+<h3>2 · There is a declarative form — but it is boolean-only, by design</h3>
+<p>
+  The declarative attribute is <strong><code>shadowrootcustomelementregistry</code></strong> on
+  <code>&lt;template shadowrootmode&gt;</code>
+  (<a href="https://developer.chrome.com/blog/scoped-registries">Chrome blog</a>; serialization
+  <a href="https://github.com/whatwg/html/issues/11892">whatwg/html#11892</a>). It is
+  <strong>presence-only</strong> — it marks a declarative shadow root's registry as <code>null</code>
+  (awaiting init) rather than global. It <strong>cannot name a registry</strong>; you bind one afterwards
+  from JS with <code>registry.initialize(shadowRoot)</code>. The platform shipped a declarative form and
+  <em>deliberately declined to put a registry identifier in markup</em> — the single most important finding
+  for #854, because it directly contradicts the presumed string-valued <code>scope=</code>.
+</p>
+
+<h3>3 · No library uses a string-id scope</h3>
+<table>
+  <thead><tr><th>Library</th><th>Declaration</th><th>Keys on</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><a href="https://open-wc.org/docs/development/scoped-elements/">@open-wc/scoped-elements</a></td>
+      <td><code>static scopedElements = { 'my-el': MyEl }</code></td>
+      <td>a per-host registry <strong>object</strong></td>
+    </tr>
+    <tr>
+      <td><a href="https://www.npmjs.com/package/@lit-labs/scoped-registry-mixin">Lit <code>scoped-registry-mixin</code></a></td>
+      <td><code>static elementDefinitions = { 'my-el': MyEl }</code></td>
+      <td>a registry <strong>object</strong> on the render root</td>
+    </tr>
+    <tr>
+      <td><a href="https://www.npmjs.com/package/@webcomponents/scoped-custom-element-registry">@webcomponents polyfill</a></td>
+      <td>(polyfill, not a declaration API)</td>
+      <td>the WICG polyfill, loaded first</td>
+    </tr>
+  </tbody>
+</table>
+<p>
+  Every one keys on a JS object reachable via the host class. None expose a string-named scope.
+</p>
+
+<h3>4 · Consumption vs definition-placement — the split <code>scope=</code> fused</h3>
+<p>
+  Native scoping is two distinct concerns. <strong>Consumption</strong> — which registry the markup inside
+  resolves against — has a declarative form (the boolean above) and an imperative one
+  (<code>attachShadow({customElementRegistry})</code>). <strong>Definition placement</strong> — which
+  registry a definition lands in — is <strong>imperative only</strong>
+  (<code>registry.define(tag, cls)</code>), with no declarative spelling at all.
+  <code>&lt;component&gt;</code> is a <em>definition</em> element, so its instinctive scope question is the
+  placement concern — exactly the one the platform gives no declarative form. A string
+  <code>scope="&lt;id&gt;"</code> would invent a global string namespace (the very thing scoping removes),
+  match no library, and fail to survive a native DSD round-trip.
+</p>
+
+<h2>How it grounds against the WE tree</h2>
+<p>
+  WE's runtime is already object-keyed: the scoped-registry plug constructs with
+  <code>new CustomElementRegistry({ extends: [...] })</code> and #228's
+  <code>ensureNativelyConstructible</code> registers the real class under a private tag — no string id
+  anywhere. <a href="/backlog/242-auto-define-registry-extends-customregistry-platform-config-/">#242</a>
+  already reserved a <code>RegistryScope</code> token and <code>define(tag, ctor, scope?)</code> for
+  imperative scoped placement, so the lowering just passes a registry to <code>define</code>. (That reserved
+  token's optional <code>id: string</code> tension was reconciled by
+  <a href="/backlog/902-reconcile-pre-existing-scope-presumptions-to-the-854-ruling-/">#902</a>: the
+  <code>define</code> third argument now takes the registry <em>object</em>
+  (<code>CustomElementRegistry</code>) directly, never a string id.) #854/#900 ruled scoped registration
+  lives <em>off</em> <code>&lt;component&gt;</code> as a runtime declared-registry
+  (<code>&lt;script type="registry"&gt;</code>) bound by a <code>registry="&lt;id&gt;"</code> association
+  attribute; the block page's former "Tier-2 <code>scope</code> attribute" wording was reconciled to that
+  model by #902.
+</p>
+
+<h2>How it reshapes the decision</h2>
+<p>
+  The three original bullets collapse to <strong>one genuine fork</strong> (the author surface); native
+  alignment is the deciding criterion (not a fork), and lowering is a consequence (seam-ready via #242).
+  The survey <strong>flips the presumed default</strong>: the title's string <code>scope=</code> is the
+  branch native-first <em>excludes</em>. The recommended default is a <strong>presence-only boolean
+  marker</strong> forwarding the native <code>shadowrootcustomelementregistry</code> /
+  <code>customElementRegistry</code> path, with the registry object bound imperatively via the #242 seam
+  (~80% confidence; residual: whether ergonomics justify a human-readable string handle as opt-in sugar
+  layered on top). Full grounding in
+  <code>reports/2026-06-17-854-scope-declarative-scoped-registration-spelling.md</code>.
+</p>

@@ -463,9 +463,12 @@ interface AutoDefineStrategy {
   // (the author/generator already imported the module). Present on the
   // inferring strategies (DOM-presence, build-parse, manifest, convention).
   resolve?(tag: string): Promise<DefiningModule> | DefiningModule | undefined;
-  // Perform the registration. Default scope is the global registry; a scope
-  // token is reserved for the Scoped Custom Element Registries proposal.
-  define(tag: string, ctor: CustomElementConstructor, scope?: RegistryScope): void;
+  // Perform the registration. Absent ⇒ the global registry; to register into a
+  // subtree-scoped registry, pass the scoped CustomElementRegistry OBJECT itself
+  // (the native Scoped Custom Element Registries key — attachShadow({ customElementRegistry })),
+  // never a string id (#854/#900: a scope is a runtime registry-object reference,
+  // not a global string namespace — the same object every library keys on).
+  define(tag: string, ctor: CustomElementConstructor, registry?: CustomElementRegistry): void;
 }
 
 // The native baseline, expressed safely. Idempotent + collision-safe +

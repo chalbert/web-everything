@@ -103,7 +103,7 @@ customElements.define('user-card', UserCard);
         <tr>
             <td><a href="https://github.com/WICG/webcomponents/blob/gh-pages/proposals/Scoped-Custom-Element-Registries.md">Scoped Registries</a></td>
             <td>Stage 2 Proposal</td>
-            <td>Tier-2 <code>scope</code> attribute composes with the project's Scoped Registries section; global by default.</td>
+            <td>Lives <strong>off</strong> <code>&lt;component&gt;</code> (#854): a runtime declared-registry (<code>&lt;script type="registry"&gt;</code>) bound by a <code>registry="&lt;id&gt;"</code> association attribute (#900) on the consumer — mirroring <code>&lt;script type="injector"&gt;</code> ↔ <code>injector=</code> — not a <code>&lt;component&gt;</code> attribute. Global by default (no <code>registry=</code>).</td>
         </tr>
         <tr>
             <td><a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_components/Using_custom_elements#responding_to_attribute_changes">Observed attributes</a></td>
@@ -148,7 +148,7 @@ customElements.define('user-card', UserCard);
         <tr><td>Build-time AST transform → class</td><td>adapter</td><td>1</td></tr>
         <tr><td>Observed attributes → reflect to template (<code>observe=</code> → <code>observedAttributes</code> + <code>{% raw %}{{ }}{% endraw %}</code> text holes, one-way)</td><td>built-in (DC-4 B1)</td><td>2</td></tr>
         <tr><td>Reactive bindings in template (event/output, nested paths, <code>if</code>/<code>each</code>)</td><td>compose (<a href="/blocks/for-each/">for-each</a> / Web Expressions)</td><td>2</td></tr>
-        <tr><td>Scoped registration (<code>scope</code>)</td><td>compose (Scoped Registries)</td><td>2</td></tr>
+        <tr><td>Scoped registration (<code>registry="&lt;id&gt;"</code> assoc + <code>&lt;script type="registry"&gt;</code>, <strong>off</strong> <code>&lt;component&gt;</code> — #854/#900)</td><td>compose (Scoped Registries)</td><td>2</td></tr>
         <tr><td>Script enhancement hook (<code>behavior</code>/<code>extends</code>)</td><td>design-pending (DC-5 policy ratified; resolution mechanism <a href="/backlog/852-behavior-extends-tier-2-enhancement-hook-on-component-dc-5-r/">#852</a>)</td><td>2</td></tr>
         <tr><td>Live in-browser transform in the toggle</td><td>defer</td><td>2</td></tr>
         <tr><td>Inherit / extend another <code>&lt;component&gt;</code></td><td>compose</td><td>3</td></tr>
