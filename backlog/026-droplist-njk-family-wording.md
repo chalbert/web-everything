@@ -16,6 +16,6 @@ crossRef:
   label: droplist block page
 ---
 
-# Fix droplist.njk: 'dropdown' family wording should say 'droplist'
+# Fix we:droplist.njk: 'dropdown' family wording should say 'droplist'
 
-src/_includes/block-descriptions/droplist.njk opens with "A 'dropdown' is not one behavior but a composition…" — the block is the abstract family, so that sentence should say 'droplist'. The dropdown is one concrete member.
+we:src/_includes/block-descriptions/droplist.njk opens with "A 'dropdown' is not one behavior but a composition…" — the block is the abstract family, so that sentence should say 'droplist'. The dropdown is one concrete member.

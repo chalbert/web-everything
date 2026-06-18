@@ -3,7 +3,7 @@
 **Date:** 2026-06-12
 **Backlog:** #346 (phase 2 of epic #315)
 **Research topic:** [/research/benchmark-capabilities/](/research/benchmark-capabilities/)
-**Data:** `src/_data/benchmarkCapabilities.json` · **Corpus:** `src/_data/benchmarkCorpus.json` (#316)
+**Data:** `we:src/_data/benchmarkCapabilities.json` · **Corpus:** `we:src/_data/benchmarkCorpus.json` (#316)
 
 ## What this is
 

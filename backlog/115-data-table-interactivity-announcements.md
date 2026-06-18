@@ -44,14 +44,14 @@ contract does.
 - **Status:** resolved — pieces 1 + 2 shipped; piece 3 carved out as a follow-up.
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
-  - **Piece 1 (click-to-sort):** shared, CI-tested helpers in `renderDataTable.ts` — `nextSortState`
+  - **Piece 1 (click-to-sort):** shared, CI-tested helpers in `we:renderDataTable.ts` — `nextSortState`
     (none→ascending→descending→none), `sortStateOf`, `applySortClick`. The `sort:header` seam stays
     realized in-block (still no second, non-table consumer to justify extraction).
   - **Piece 2 (announcements):** `announce(rows, config)` — one polite `aria-live` region carrying a
     clause-joined status string ("Sorted by Name, ascending; 3 of 6 shown"). Reconciled with #059:
     both blocks land on the same region+clause shape (note added to #059); the *focus* half and any
     hoist into gap-6 stay open there.
-  - **Demo:** live interactive card in `data-table-demo.ts` (clickable headers + filter toggle +
+  - **Demo:** live interactive card in `we:data-table-demo.ts` (clickable headers + filter toggle +
     visible live region), counted in the playground tally (9/9). Unit tests (toggle cycle +
     announcement wording) + an E2E (click → aria-sort cycles + region announces) cover it.
 - **Next:** piece 3 (`role="grid"` cell navigation) → [#123 Data Grid cell-navigation block](/backlog/123-data-grid-cell-navigation-block/)

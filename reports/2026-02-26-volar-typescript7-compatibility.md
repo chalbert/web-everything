@@ -76,6 +76,6 @@
 
 | File | Action |
 |------|--------|
-| `src/_data/researchTopics.json` | Added `volar-typescript7-compatibility` entry |
-| `src/_includes/research-descriptions/volar-typescript7-compatibility.njk` | Created research description |
-| `reports/2026-02-26-volar-typescript7-compatibility.md` | Created this report |
+| `we:src/_data/researchTopics.json` | Added `volar-typescript7-compatibility` entry |
+| `we:src/_includes/research-descriptions/volar-typescript7-compatibility.njk` | Created research description |
+| `we:reports/2026-02-26-volar-typescript7-compatibility.md` | Created this report |

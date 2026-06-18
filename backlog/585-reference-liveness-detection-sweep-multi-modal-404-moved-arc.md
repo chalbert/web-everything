@@ -19,8 +19,8 @@ Build the active sweep that fetches every external reference the project cites a
 
 ## Progress
 
-- **Resolved 2026-06-17.** Built `scripts/sweep-reference-liveness.mjs` (`npm run sweep:references`):
-  reads the #597 `referenceIndex.json` (1182 URLs) and classifies each into one multi-modal class —
+- **Resolved 2026-06-17.** Built `we:scripts/sweep-reference-liveness.mjs` (`npm run sweep:references`):
+  reads the #597 `we:referenceIndex.json` (1182 URLs) and classifies each into one multi-modal class —
   `live / gone / moved / archived / paywall / server-error / unreachable / content-drift / superseded /
   retired`. Curated #584 markers (`supersededBy` / `retired`) take precedence over the live probe and
   skip the network entirely; `moved` vs `archived` is decided by whether the redirect's final host is a
@@ -29,9 +29,9 @@ Build the active sweep that fetches every external reference the project cites a
   concurrency pool with per-URL timeouts and never throws on a dead host (→ `unreachable`).
 - **Boundaries kept clean:** this slice only **detects** — class→backlog-item routing is #861,
   axis-vacancy alerting is #863, snapshot pinning is #862. The point-in-time report is written to
-  `reports/reference-liveness-latest.json` (**gitignored** — it changes every run, no committed drift).
+  `we:reports/reference-liveness-latest.json` (**gitignored** — it changes every run, no committed drift).
 - **Tested + verified:** `classify()` is a pure, clock-free function and `runSweep()` takes an
-  injectable fetch — 16-case offline unit suite (`scripts/__tests__/sweep-reference-liveness.test.mjs`,
+  injectable fetch — 16-case offline unit suite (`we:scripts/__tests__/sweep-reference-liveness.test.mjs`,
   green) covers every class, marker precedence, the same-host-redirect-≠-moved edge, and the
   no-throw-on-error path. A live `--limit=8` run classified 8/8 `live`. Documented in
-  `docs/agent/reference-retirement.md` (§ "Detecting decay").
+  `we:docs/agent/reference-retirement.md` (§ "Detecting decay").

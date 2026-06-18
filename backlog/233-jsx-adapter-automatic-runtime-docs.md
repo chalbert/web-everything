@@ -25,7 +25,7 @@ package actually exists.
 
 - Update the `/adapters/jsx-adapter/` page to lead with the `automatic` config (`jsxImportSource`),
   showing the real installable package name, and mention `classic` as the in-repo / no-package fallback.
-- Update report §7 (`reports/2026-06-06-adapter-real-project-integration.md`) integration narrative to
+- Update report §7 (`we:reports/2026-06-06-adapter-real-project-integration.md`) integration narrative to
   match — a real project's `tsconfig`/bundler snippet using `jsxImportSource`.
 
 **Blocked on #125** (package extraction) — the `@webeverything/jsx-runtime` package must be published/

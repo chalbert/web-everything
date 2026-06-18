@@ -23,16 +23,16 @@ unbuilt exposure surfaces and became an epic), **plateau-app's built content is 
 audit + a small hygiene carve, not a build.
 
 **Plateau site:** a Vite custom-element SPA. Routing + nav are **hand-wired** (not data-driven): routes are
-inline `<template route="...">` in `plateau-app/index.html`, nav is a hardcoded sidebar there, mounts are
-imperative `path ===` checks in `plateau-app/src/main.ts`. Adding a surface = 4 edits (route template, nav
+inline `<template route="...">` in `plateau:plateau-app/index.html`, nav is a hardcoded sidebar there, mounts are
+imperative `path ===` checks in `plateau:plateau-app/src/main.ts`. Adding a surface = 4 edits (route template, nav
 link, mount fn, breadcrumb).
 
 **Inventory-vs-published diff (built content):**
 
 | Surface | In repo | Published | Status |
 |---|---|---|---|
-| Technical Configurator domains | 9 (`src/technical-configurator/provider.ts` → `listDomains()`) | all 9 selectable in `/technical-configurator` | **PUBLISHED** |
-| Governance personas/charters | 7 (`src/profiles/roster.ts`) | all 7 on `/profiles` | **PUBLISHED** |
+| Technical Configurator domains | 9 (`plateau:src/technical-configurator/provider.ts` → `listDomains()`) | all 9 selectable in `/technical-configurator` | **PUBLISHED** |
+| Governance personas/charters | 7 (`plateau:src/profiles/roster.ts`) | all 7 on `/profiles` | **PUBLISHED** |
 | Applications / Libraries | 5 / 6 (mocks) | `/apps`(+`/apps/:id`) / `/libraries` | **PUBLISHED** |
 | Platform-manager surfaces | 4 (impact-analysis, contract-drift, platform-map, governance) | 4 routes, all in nav | **PUBLISHED** |
 | Compatibility map, Learn, Intent-configurator, Component-assembler, Web-docs | each built | each routed + navved | **PUBLISHED** |

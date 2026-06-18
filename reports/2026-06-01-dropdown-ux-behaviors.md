@@ -30,7 +30,7 @@ A "dropdown" is not one component but a family, and choosing the right member is
 | **5 already existed** | Anchored surface + Edge-aware placement → `anchor`; Selection model → `selection`; Type-ahead seek → `type-ahead`; Validation surface → `validation` |
 
 Also done:
-- **Composition manifest** — the `droplist` block (`src/_data/blocks.json` + `block-descriptions/droplist.njk`) declares a `composesIntents` manifest of all 9 composed intents, with a variant matrix (menu-button / custom-select / multi-select / combobox / native) and keyboard contract.
+- **Composition manifest** — the `droplist` block (`fui:src/_data/blocks.json` + `we:block-descriptions/droplist.njk`) declares a `composesIntents` manifest of all 9 composed intents, with a variant matrix (menu-button / custom-select / multi-select / combobox / native) and keyboard contract.
 - **Bidirectional navigation** — each composed intent's page lists `droplist` under "Implementing & Composing Blocks"; the droplist page links back to every intent.
 - **Glossary** — added terms: Virtual Focus, Selection Follows Focus, Live Region, Windowing, Set Size / Position in Set, Truncation, Clearable Value, Option Group.
 - **Validated** — `check:standards` passes (0 errors); full `vitest` suite green; pages render on the dev server.
@@ -224,7 +224,7 @@ The real payoff of studying a dropdown is that almost none of its hard parts are
 
 ### Materialization status (intents)
 
-As these paradigms get promoted, they materialize as real intents in `src/_data/intents.json` (catalog at `/intents/`):
+As these paradigms get promoted, they materialize as real intents in `we:src/_data/intents.json` (catalog at `/intents/`):
 
 | Paradigm | Intent | Status |
 |---|---|---|

@@ -3,7 +3,7 @@ type: issue
 workItem: task
 parent: "081"
 status: parked
-blockedBy: ["451"]
+blockedBy: []
 dateOpened: "2026-06-11"
 dateStarted: "2026-06-13"
 tags: []
@@ -20,7 +20,7 @@ tags: []
 
 # Clean up maas-consumer-demo importmap to package-exports resolution
 
-The WE demos/maas-consumer-demo.html importmap maps @frontierui/jsx-runtime to a raw WE source path (/blocks/renderers/jsx/index.ts), which the #274 module-resolution exports-lock flags as a cross-layer leak. The lint scopes to shipped config and skips sandbox demos, so it does not gate; but the demo should resolve the bare specifier to the package exports (the form #265 established for frontierui) — a URL override or node_modules path — not WE source. Small follow-on to #265/#274; part of the #081 MaaS orbit.
+The WE we:demos/maas-consumer-demo.html importmap maps @frontierui/jsx-runtime to a raw WE source path (we:/blocks/renderers/jsx/index.ts), which the #274 module-resolution exports-lock flags as a cross-layer leak. The lint scopes to shipped config and skips sandbox demos, so it does not gate; but the demo should resolve the bare specifier to the package exports (the form #265 established for frontierui) — a URL override or node_modules path — not WE source. Small follow-on to #265/#274; part of the #081 MaaS orbit.
 
 ## What to do
 

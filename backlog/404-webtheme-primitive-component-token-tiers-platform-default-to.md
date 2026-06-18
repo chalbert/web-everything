@@ -16,4 +16,4 @@ tags: []
 
 Fork 3 of the #364 ruling: author the primitive tier (raw spacing/radius/elevation/type-ramp/color scales) and the component tier (per-component overrides) of webtheme, plus the complete platform default token set projects extend via 'extends'. The semantic tier stays the existing intents (surface/density/typography/motion/theme-color) — tokens supply the concrete values those intents resolve into; no parallel semantic vocabulary. Blocked on #403 (project + DTCG-CSS mapping must exist first).
 
-**Graduated to** `webtheme/` — tokens.ts + compile.ts + defaultTokens.ts.
+**Graduated to** `webtheme/` — we:tokens.ts + we:compile.ts + we:defaultTokens.ts.

@@ -17,11 +17,11 @@ crossRef: { url: /blocks/autocomplete/, label: Autocomplete block }
 > **Retargeted 2026-06-07 — corrected context.** This was originally written against the **legacy
 > `plateau` repo** (continuation of #160). Plateau is now confirmed **abandoned** — do not work it or
 > consult it. The live platform runtime is **`webeverything/plugs/`**, which is *more* complete than
-> plateau ever was: a quick audit shows `plugs/webcomponents/CustomElement.ts` +
-> `plugs/webregistries/CustomElementRegistry.ts` already define `connectedCallback`,
+> plateau ever was: a quick audit shows `we:plugs/webcomponents/CustomElement.ts` +
+> `we:plugs/webregistries/CustomElementRegistry.ts` already define `connectedCallback`,
 > `disconnectedCallback`, `attributeChangedCallback`, `observedAttributes`, `formAssociated`, and
-> `formResetCallback`; `plugs/webcomponents/Element.insertion.patch.ts` already patches the insertion
-> path; and WE already has a Playwright harness (`playwright.config.ts`) — so the plateau prerequisites
+> `formResetCallback`; `we:plugs/webcomponents/Element.insertion.patch.ts` already patches the insertion
+> path; and WE already has a Playwright harness (`we:playwright.config.ts`) — so the plateau prerequisites
 > (#168 harness, #162 insertion fix, #160 connect half) are all moot in the live repo.
 
 So this is no longer a *build*; it is a **verification task against `plugs/`**: confirm the autonomous
@@ -45,7 +45,7 @@ the live runtime covers the lifecycle. Any genuine gap becomes its own scoped `p
 ## Resolution — verified 2026-06-09 (real Chromium)
 
 **Finding: the gap is deeper than this item assumed.** New guard spec
-`plugs/__tests__/e2e/autonomous-element-lifecycle.spec.ts` (5 tests, green) proves that the **scoped
+`we:plugs/__tests__/e2e/autonomous-element-lifecycle.spec.ts` (5 tests, green) proves that the **scoped
 `CustomElementRegistry` autonomous-element path is non-functional in a real browser before any of the
 three callbacks can even be reached**:
 
@@ -68,7 +68,7 @@ three callbacks can even be reached**:
   attributeChanged, form-associated). Root blocker; the three callbacks are enumerated as its
   acceptance, gated behind construction. The new guard spec flips to require callbacks fire when #228
   lands.
-- **#229** — `webcomponents.spec.ts` is itself non-functional (its `page.setContent` fixtures load at
+- **#229** — `we:webcomponents.spec.ts` is itself non-functional (its `page.setContent` fixtures load at
   about:blank, so `/plugs/*.ts` imports never resolve and all 8 tests time out). Found in passing.
 
 This verification item is resolved; the work it surfaced lives in #228/#229.

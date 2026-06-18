@@ -16,13 +16,13 @@ tags: [devtools, composition, assembler, authoring, served-surface, plateau-app]
 
 # Assembler authoring canvas — pick + wire primitives into a live composition
 
-Slice B of the #646 composition assembler (sibling of #669 slice A). Adds the build-your-own authoring half to the plateau-app assembler shell: a primitive palette read cross-locus from blocks.json + intents.json (same import pattern as intent-configurator), letting an author select and assemble primitives into composed markup with live preview. Canvas UX is POC-mode latitude (the emit format + home were settled by #652). Demoable: pick nav-list + disclosure + anchor(strategy=escape) + hover-intent and see the composed widget render live. Blocked on #669 (the read-only shell). If it re-estimates above size 3 in plateau-app context, sub-slice into palette+select and compose+preview.
+Slice B of the #646 composition assembler (sibling of #669 slice A). Adds the build-your-own authoring half to the plateau-app assembler shell: a primitive palette read cross-locus from fui:blocks.json + we:intents.json (same import pattern as intent-configurator), letting an author select and assemble primitives into composed markup with live preview. Canvas UX is POC-mode latitude (the emit format + home were settled by #652). Demoable: pick nav-list + disclosure + anchor(strategy=escape) + hover-intent and see the composed widget render live. Blocked on #669 (the read-only shell). If it re-estimates above size 3 in plateau-app context, sub-slice into palette+select and compose+preview.
 
 ## Progress
 
-- **2026-06-15 — built + verified.** New `plateau-app/src/component-assembler/authoring.ts` (+ CSS appended
-  to `assembler.css`), mounted by `mountComponentAssembler` above the read-only preset catalog. The
-  palette reads `blocks.json` (69) + `intents.json` (56) cross-locus via the same relative import the
+- **2026-06-15 — built + verified.** New `plateau:plateau-app/src/component-assembler/authoring.ts` (+ CSS appended
+  to `plateau:assembler.css`), mounted by `mountComponentAssembler` above the read-only preset catalog. The
+  palette reads `fui:blocks.json` (69) + `we:intents.json` (56) cross-locus via the same relative import the
   read-only shell + Intent Configurator use — fully data-driven, no parallel copy. Selecting primitives
   toggles them into the composition; each selected intent's dimensions surface as registry-derived
   `<select>`s; the scaffold generator lowers blocks → nested custom-element tags and intents → boolean

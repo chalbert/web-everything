@@ -31,7 +31,7 @@ Surfaced authoring the Background Task Intent (#113).
 
 ## Progress
 
-- **Status:** resolved — graduated to `blocks.json#background-task-surface` + `src/_includes/block-descriptions/background-task-surface.njk`.
+- **Status:** resolved — graduated to `fui:blocks.json#background-task-surface` + `we:src/_includes/block-descriptions/background-task-surface.njk`.
 - **Branch:** docs/standard-authoring-workflow
 - **Done:** Authored the `background-task-surface` block (status `draft`, type `Component`) — implementsIntent `background-task`; composesIntents loader/reliability/layout/feedback; webStandards, events, designDecisions, traits. Wrote its description page. Resolved all three open questions (see below). check:standards green (0 errors); page renders 200 at /blocks/background-task-surface/ and appears in the intent's reverse-lookup.
 - **Next:** Done. Follow-ons split out: #135 (runtime implementation, draft→active) and #134 (reload-durable tier).

@@ -27,7 +27,7 @@ hygiene sweep to catch those.
 ## The test (the lens to apply)
 
 For every place the standard *fixes a single answer*, ask the codified questions (already in
-[backlog-workflow.md](../docs/agent/backlog-workflow.md) → *Standing test* / *fork-is-not-a-prioritization-tool* /
+[we:backlog-workflow.md](../docs/agent/backlog-workflow.md) → *Standing test* / *fork-is-not-a-prioritization-tool* /
 *Config-Extends-Platform-Default* / *Most-flexible-default*):
 
 1. **Is a coherent alternative excluded?** If a competing approach *works* and isn't broken, mandating one is
@@ -43,7 +43,7 @@ For every place the standard *fixes a single answer*, ask the codified questions
 
 ## Scope (where to look)
 
-- `src/_data/*.json` registries: `intents.json`, `protocols.json`, `adapters.json`, `capabilityMatrix.json`,
+- `src/_data/*.json` registries: `we:intents.json`, `we:protocols.json`, `we:adapters.json`, `we:capabilityMatrix.json`,
   block/plug definitions — any single-valued field that reads as "the standard says X" where X is one of
   several coherent options.
 - Block / intent / plug / protocol / adapter authored docs (`src/**`) asserting one impl/strategy/format.
@@ -52,7 +52,7 @@ For every place the standard *fixes a single answer*, ask the codified questions
 
 ## Deliverable
 
-- A `reports/{date}-fork-existence-test-sweep.md` findings report: each candidate leak with its location
+- A `reports/{date}we:-fork-existence-test-sweep.md` findings report: each candidate leak with its location
   (`file:line`), which test question it fails, and the recommended reshape (registry / open config /
   most-permissive default / or "legitimate invariant — no action").
 - **File each real violation as its own fix item** (per *Closing out*), `blockedBy` this sweep where the fix
@@ -63,5 +63,5 @@ For every place the standard *fixes a single answer*, ask the codified questions
 
 - Swept `src/_data/*.json` registries (intents/protocols/adapters/capabilityMatrix/blocks/plugs + render-strategy) and the authored `project-*.njk` standard docs / SSR-contract mandate language.
 - **Result: clean sweep — 0 genuine leaks, 3 legitimate invariants confirmed.** No mandated single solution wrongly excludes a coherent alternative; every single-valued mandate is either a proven-external-standard adoption, a broken-alternative invariant (test #4), or already an open provider seam / config-extends-platform-default flavor.
-- Findings report: [reports/2026-06-14-fork-existence-test-sweep.md](/reports/2026-06-14-fork-existence-test-sweep.md) — the 3 confirmed invariants (`webcomponents` autonomous-only / Safari, `webtheme` native-CSS-only runtime, `webanalytics` fixed Segment-Spec vocabulary) at verified `file:line`, plus the verified open-provider patterns.
+- Findings report: [we:reports/2026-06-14-fork-existence-test-sweep.md](/reports/2026-06-14-fork-existence-test-sweep.md) — the 3 confirmed invariants (`webcomponents` autonomous-only / Safari, `webtheme` native-CSS-only runtime, `webanalytics` fixed Segment-Spec vocabulary) at verified `file:line`, plus the verified open-provider patterns.
 - **No fix items filed** — a clean sweep is an explicitly valid outcome (per Deliverable).

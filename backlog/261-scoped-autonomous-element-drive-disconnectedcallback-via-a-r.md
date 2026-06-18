@@ -12,7 +12,7 @@ tags: []
 
 # Scoped autonomous element: drive disconnectedCallback via a removal-path patch
 
-Patch the DOM removal path (removeChild/remove, and the disconnect half of replaceChildren) so removing a scoped autonomous element fires disconnectedCallback — no listener/effect leak. Sibling of #228 (which makes scoped construction legal first). Flips the disconnect guard in plugs/__tests__/e2e/autonomous-element-lifecycle.spec.ts.
+Patch the DOM removal path (removeChild/remove, and the disconnect half of replaceChildren) so removing a scoped autonomous element fires disconnectedCallback — no listener/effect leak. Sibling of #228 (which makes scoped construction legal first). Flips the disconnect guard in we:plugs/__tests__/e2e/autonomous-element-lifecycle.spec.ts.
 
 ## Progress
 
@@ -25,7 +25,7 @@ genuinely native-upgraded custom element, so the browser drives its removal reac
 added.
 
 Changes: the shared "construction succeeds" probe for `disconnectedCallback` in
-`autonomous-element-lifecycle.spec.ts` is replaced with a **driving** test that appends a scoped
+`we:autonomous-element-lifecycle.spec.ts` is replaced with a **driving** test that appends a scoped
 `Probe` (with connected/disconnected callbacks), removes it, and asserts `disconnectedCallback` fired
 — then repeats via `replaceChildren()` and asserts it fired again. The `beforeEach` now also applies
 the **webinjectors** patch before the components patch (bootstrap order): `replaceChildren`/`remove`

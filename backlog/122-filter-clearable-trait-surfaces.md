@@ -47,17 +47,17 @@ invariant tracked in [#023](/backlog/023-droplist-composition-open-contracts/): 
 > 2026-06-07 "reopened as a fresh build" note below was wrong — it checked only the abandoned `plateau`
 > repo, not the live Frontier UI tree, and concluded no reference implementation existed. It does:
 >
-> - `frontierui/blocks/droplist/Filter.ts` (265 lines) — the loader-intent async orchestrator this item
+> - `fui:frontierui/blocks/droplist/Filter.ts` (265 lines) — the loader-intent async orchestrator this item
 >   specs: `async` (debounce ~250ms, loading state, stale-cancel, inject options) + `client` modes,
 >   diacritic-insensitive folding, the `controller` (focus host ≠ collection) split, and the ONE shared
 >   `status` aria-live region per the [#023](/backlog/023-droplist-composition-open-contracts/) invariant.
-> - `frontierui/blocks/droplist/Clearable.ts` (81 lines) — the input-side X affordance (reveal when
+> - `fui:frontierui/blocks/droplist/Clearable.ts` (81 lines) — the input-side X affordance (reveal when
 >   non-empty, clear + re-run `filter`, return focus).
 > - `<auto-complete>` is registered and runs end-to-end composed over `focus-delegation`+`selection`+
->   `anchor`; **26 tests pass** (`AutoComplete.test.ts` + `behaviors.test.ts`), covering async source,
+>   `anchor`; **26 tests pass** (`fui:AutoComplete.test.ts` + `fui:behaviors.test.ts`), covering async source,
 >   client filter, clearable, live-status, windowed, and positioning.
 >
-> So `src/_data/blocks.json`'s autocomplete design decision ("all now built and tested in Frontier UI's
+> So `fui:src/_data/blocks.json`'s autocomplete design decision ("all now built and tested in Frontier UI's
 > reference implementation") was **correct** — no change needed there; the spec-desync was this item's own
 > stale note, now removed. The original `## Progress` (the abandoned plateau build) is retained below as
 > history only. The cross-cutting `live-status`/`windowed` surfaces and `anchor` remained tracked
@@ -68,17 +68,17 @@ invariant tracked in [#023](/backlog/023-droplist-composition-open-contracts/): 
 - **Status:** resolved
 - **Branch:** work landed in the `plateau` repo (`src/blocks/attributes/`), not webeverything.
 - **Done:**
-  - `Filter.ts` — async + client modes. Async runs the loader-intent lifecycle (debounce ~250ms,
+  - `fui:Filter.ts` — async + client modes. Async runs the loader-intent lifecycle (debounce ~250ms,
     `aria-busy`, `filter` CustomEvent carrying `{ query, signal, respond }`, inject
     `<li role="option" composite-descendant>`), with stale responses dropped via AbortController/signal.
     Client mode hides non-matching options in place. Counts route to ONE shared `role="status"` region
     (`status=<id>` option) per the #023 invariant.
-  - `Clearable.ts` — input-side X affordance: reveals only when non-empty, clears + fires a bubbling
+  - `fui:Clearable.ts` — input-side X affordance: reveals only when non-empty, clears + fires a bubbling
     `input` so `filter` re-runs, returns focus, and emits `clear`; decoupled from Escape.
   - Composition fixes (symmetry, kept existing tests green): added `controller` to `Selection` (commit
     reads Enter/Space from the input host) and suppressed `FocusDelegation` type-ahead when a
     `controller` is set (printable keys belong to the input/filter — they're mutually exclusive).
-  - Tests: `Filter.test.ts`, `Clearable.test.ts`, and `Autocomplete.trace.test.ts` (full
+  - Tests: `we:Filter.test.ts`, `we:Clearable.test.ts`, and `we:Autocomplete.trace.test.ts` (full
     "par → arrow → enter" trace against a live, cancellable async source). 101/101 plateau tests pass.
 - **Leftovers → new backlog items:** `anchor` is not actually built (the trace fakes open/dismiss with
   glue) → **#136**; `live-status` + `windowed` cross-cutting surfaces → **#137**; register a real

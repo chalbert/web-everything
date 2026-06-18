@@ -33,6 +33,6 @@ Core injector hierarchy, HTMLInjector, InjectorRoot lifecycle, HTMLRegistry, get
 ## Files Created/Modified
 | File | Action |
 |------|--------|
-| `src/_data/researchTopics.json` | Added `injector-migration-gaps` entry |
-| `src/_includes/research-descriptions/injector-migration-gaps.njk` | Created — detailed gap analysis |
-| `reports/2026-02-24-injector-migration-gaps.md` | This report |
+| `we:src/_data/researchTopics.json` | Added `injector-migration-gaps` entry |
+| `we:src/_includes/research-descriptions/injector-migration-gaps.njk` | Created — detailed gap analysis |
+| `we:reports/2026-02-24-injector-migration-gaps.md` | This report |

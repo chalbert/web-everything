@@ -17,7 +17,7 @@ A 'doc coverage' tool measuring the fraction of code exports that are documented
 
 ## Progress (2026-06-13) — resolved
 
-New [webdocs/coverage.ts](../webdocs/coverage.ts): `computeDocCoverage(site, expected?)` — a pure, dependency-free metric over the generated [`DocsSite`](../webdocs/generator.ts) (the complement of `generateDocsSite`). A block/standard is **documented** when its page carries ≥1 extracted case, **undocumented** when its page is empty or absent. Returns `DocCoverageReport { total, documented, coverage (0..1), undocumented[], totalCases }`.
+New [fui:webdocs/coverage.ts](../webdocs/coverage.ts): `computeDocCoverage(site, expected?)` — a pure, dependency-free metric over the generated [`DocsSite`](../webdocs/generator.ts) (the complement of `generateDocsSite`). A block/standard is **documented** when its page carries ≥1 extracted case, **undocumented** when its page is empty or absent. Returns `DocCoverageReport { total, documented, coverage (0..1), undocumented[], totalCases }`.
 
 The `expected?` surface is the key generalization that honours the "% of *exports*" framing: with no argument it measures the site's own pages (does every generated page actually carry cases?); pass an id list — every block a manifest *claims*, or a full export inventory — and the denominator widens so a claimed-but-undocumented id counts as a gap (sorted in `undocumented`). `totalCases` counts only the measured surface; an empty surface is vacuously complete (coverage 1, no divide-by-zero). 6 unit tests; gate green; typecheck clean.
 

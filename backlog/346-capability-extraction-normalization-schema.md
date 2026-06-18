@@ -28,7 +28,7 @@ Blocked by #316 — there is no per-source extraction without a settled corpus +
   - Borrow the platform's existing **intent / block / protocol / capability taxonomy** for `kind` rather than inventing one.
 - **Extraction method, not just a dump.** Document *how* a source is read into the schema (which docs sections count, how a "component" vs. a "pattern" is decided, how variants/states roll up) so the **next run extracts the same way** — reproducibility is the program's requirement, and an undocumented method makes re-runs incomparable.
 - **First full pass over the corpus** — populate the schema for every #316 source. De-duplicate *across sources* into shared capability ids (MD3's "Menu", Fluent's "Menu", Radix's "Dropdown Menu" → one `menu` capability with three `sourceName`s), so the matrix is capability-keyed, not source-keyed.
-- **Store as a normalized data file** backing a `/research/` topic (the [#192](/backlog/192-longitudinal-research-freshness-system/) dated-revision model), with the session `reports/{date}-capability-extraction.md` linked via `relatedReport`. Keep the file diffable — a re-run should produce a clean diff of added/removed/changed capabilities, not a rewritten blob (the same mixed-escaping/splice discipline the other registries use).
+- **Store as a normalized data file** backing a `/research/` topic (the [#192](/backlog/192-longitudinal-research-freshness-system/) dated-revision model), with the session `reports/{date}we:-capability-extraction.md` linked via `relatedReport`. Keep the file diffable — a re-run should produce a clean diff of added/removed/changed capabilities, not a rewritten blob (the same mixed-escaping/splice discipline the other registries use).
 
 ## Acceptance
 
@@ -40,4 +40,4 @@ Blocked by #316 — there is no per-source extraction without a settled corpus +
 
 > Likely a split candidate: if the first pass sprawls, fan out per-source-batch extraction under #315 and keep this as the method + schema + reconciliation story.
 
-**Graduated to** `src/_data/benchmarkCapabilities.json` — capability matrix + /research/benchmark-capabilities topic.
+**Graduated to** `we:src/_data/benchmarkCapabilities.json` — capability matrix + /research/benchmark-capabilities topic.

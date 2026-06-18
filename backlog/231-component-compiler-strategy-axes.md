@@ -56,33 +56,33 @@ home tracked by #150.
 - **Status:** resolved 2026-06-09 — both strategy axes shipped over the existing #048 core transform, all
   acceptance criteria met. Built in **Frontier UI** (impl repo) per #125.
 - **Files (frontierui/compiler/src/component-transform/):**
-  - `surfaces.ts` — **source-surface axis**. `lowerSurface(code, surface)` with two statically-analyzable
+  - `fui:surfaces.ts` — **source-surface axis**. `lowerSurface(code, surface)` with two statically-analyzable
     match rules: `html` (a `<component>…</component>` element in markup) and `tsx` (a `<component>` inside an
     `` html`…` `` tagged template — the `html` tag is the anchor, `(?<![\w$.])` guards against `myhtml`` /
     `.html``). A bare JSX `<component>` outside `` html`` `` is intentionally not matched (no arbitrary-string
     scanning — deferred to #232). Both surfaces route through the same `parseDeclarative → emitImperative`
     pair, so the two lower to byte-identical output.
-  - `compile.ts` — the **config-home** seam. `ComponentCompilerOptions { surfaces?: ('html'|'tsx')[] }`,
+  - `we:compile.ts` — the **config-home** seam. `ComponentCompilerOptions { surfaces?: ('html'|'tsx')[] }`,
     `DEFAULT_SURFACES = ['html']` (native-first), `surfaceForId(id)` (`.html`→html, `.tsx`/`.jsx`→tsx, strips
     `?query`), and `compile(code, id, options)` → rewritten code or `null`.
-  - `plugins.ts` — the **toolchain-depth axis** (pre-transform baseline). `componentVitePlugin` (`enforce:
+  - `fui:plugins.ts` — the **toolchain-depth axis** (pre-transform baseline). `componentVitePlugin` (`enforce:
     'pre'`, also Rollup-shape-compatible) and `componentEsbuildPlugin` (`onLoad`), both thin over `compile()`.
-  - `STRATEGY-AXES.md` — documents both axes, the options/defaults, and the **`tsc`-only "a bundler is
+  - `fui:STRATEGY-AXES.md` — documents both axes, the options/defaults, and the **`tsc`-only "a bundler is
     required"** note (lowering is a build step; `ts-patch` transformer deferred to #232).
-  - `index.ts` re-exports the new public API alongside the core `transform`.
-- **Conformance (mirrors the component-transform suite):** `surfaces.test.ts` (10) + `plugins.test.ts` (4).
+  - `we:index.ts` re-exports the new public API alongside the core `transform`.
+- **Conformance (mirrors the component-transform suite):** `fui:surfaces.test.ts` (10) + `fui:plugins.test.ts` (4).
   Proves acceptance: html-fixture and tsx-fixture lower byte-identically (#1); a **real `esbuild.build`** plus
   the Vite `transform` hook emit the same lowered component (#2); omitting options yields html-only and
-  `surfaces:['tsx']` flips it (#3). Full frontierui compiler suite **74/74 green**; `tsc -p tsconfig.json`
+  `surfaces:['tsx']` flips it (#3). Full frontierui compiler suite **74/74 green**; `tsc -p we:tsconfig.json`
   clean (added `@types/node` devDep — the esbuild plugin's first Node `fs` use). webeverything
   `check:standards` **0/0**.
-- **#125 seam (still open):** the API is exported from `component-transform/index.ts` but **not** wired as a
-  `package.json` subpath export / standalone `@webeverything/component-compiler` package — that packaging is
+- **#125 seam (still open):** the API is exported from `fui:component-transform/index.ts` but **not** wired as a
+  `we:package.json` subpath export / standalone `@webeverything/component-compiler` package — that packaging is
   #125's job. In-repo + tests work today; external `import` waits on #125.
 - **`.tsx` auto-enable:** implemented as explicit opt-in (`surfaces: ['html','tsx']`); the "auto-enable when a
   JSX adapter is configured" behaviour belongs in the adapter's own wiring / the #150 config domain, which
-  passes the option — documented in `STRATEGY-AXES.md`, not a separate gap.
+  passes the option — documented in `fui:STRATEGY-AXES.md`, not a separate gap.
 - **Leftover spun out → #234:** baseline Rollup/webpack/Babel pre-transform wrappers (the remaining bundlers
   from #127's list; "same few lines over `compile()`"). Distinct from #232's native-depth opt-ins.
 
-**Graduated to** `frontierui/compiler/src/component-transform/compile.ts` — surface-aware compile() + Vite/esbuild pre-transform wrappers (surfaces.ts, plugins.ts), configurable strategy axes.
+**Graduated to** `fui:frontierui/compiler/src/component-transform/compile.ts` — surface-aware compile() + Vite/esbuild pre-transform wrappers (fui:surfaces.ts, fui:plugins.ts), configurable strategy axes.

@@ -15,19 +15,19 @@ crossRef: { url: /backlog/370-candidate-standard-expressive-symbols-reactions-em
 
 # Decision — Rich-text / contenteditable editing: how WE standardizes the editor
 
-No design exists yet. The repo has no rich-text/contenteditable/WYSIWYG editing standard — only `input` ([intents.json:1108](src/_data/intents.json#L1108)) and `type-ahead` ([intents.json:1439](src/_data/intents.json#L1439)) cover single-line text + search (whitespace surfaced by [#370](/backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke/) Fork 4). The seven forks below are grounded in a prior-art survey **published as [/research/rich-text-editing/](/research/rich-text-editing/)** (report via `relatedReport`). The load-bearing result: **the web ships no monolithic editor** — only orthogonal primitives — and leaves the **document model** to incompatible vendor engines, so WE decomposes editing into **separate composable standards**, with the model as the **one Protocol** (the only swappable-vendor axis). Each fork carries a **bold** default; only Fork 2 needs real judgment.
+No design exists yet. The repo has no rich-text/contenteditable/WYSIWYG editing standard — only `input` ([we:intents.json:1108](src/_data/intents.json#L1108)) and `type-ahead` ([we:intents.json:1439](src/_data/intents.json#L1439)) cover single-line text + search (whitespace surfaced by [#370](/backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke/) Fork 4). The seven forks below are grounded in a prior-art survey **published as [/research/rich-text-editing/](/research/rich-text-editing/)** (report via `relatedReport`). The load-bearing result: **the web ships no monolithic editor** — only orthogonal primitives — and leaves the **document model** to incompatible vendor engines, so WE decomposes editing into **separate composable standards**, with the model as the **one Protocol** (the only swappable-vendor axis). Each fork carries a **bold** default; only Fork 2 needs real judgment.
 
 ## Axis framing
 
 The survey decomposes "rich-text editing" into orthogonal axes along a **surface → engine → formatting → serialization** seam, each pinned to the real tree and to the platform primitive that fixes its layer:
 
-- **Editing surface** — the substrate keystrokes/IME land on. `contenteditable` (Baseline 2015) is the floor; EditContext (Chromium 121, *not* Baseline) is a capability-upgrade. None of these are in `capabilities.json` yet (only `popover`/`anchor-positioning`/`field-sizing`/… exist — see [capabilities.json](src/_data/capabilities.json)), so they are **net-new capabilities**.
-- **Document model** — the data. *No platform standard* — every engine differs (ProseMirror schema, Lexical nodes, Slate tree, Quill Delta, ADF). This is the swappable-vendor axis → a Protocol mirroring `CustomPositioningRegistry` ([plugs.json:293](src/_data/plugs.json#L293)).
+- **Editing surface** — the substrate keystrokes/IME land on. `contenteditable` (Baseline 2015) is the floor; EditContext (Chromium 121, *not* Baseline) is a capability-upgrade. None of these are in `we:capabilities.json` yet (only `popover`/`anchor-positioning`/`field-sizing`/… exist — see [we:capabilities.json](src/_data/capabilities.json)), so they are **net-new capabilities**.
+- **Document model** — the data. *No platform standard* — every engine differs (ProseMirror schema, Lexical nodes, Slate tree, Quill Delta, ADF). This is the swappable-vendor axis → a Protocol mirroring `CustomPositioningRegistry` ([we:plugs.json:293](src/_data/plugs.json#L293)).
 - **Operation vocabulary** — the commands. W3C Input Events already standardizes them as `InputEvent.inputType` (`formatBold`, `insertOrderedList`, …); `execCommand` is deprecated. Reuse, don't coin.
-- **Formatting UX** — the toolbar/controls. A declarative axis composing the `droplist` ([blocks.json:17](src/_data/blocks.json#L17)) / `autocomplete` ([blocks.json:82](src/_data/blocks.json#L82)) blocks + the `popover` capability.
+- **Formatting UX** — the toolbar/controls. A declarative axis composing the `droplist` ([fui:blocks.json:17](src/_data/blocks.json#L17)) / `autocomplete` ([fui:blocks.json:82](src/_data/blocks.json#L82)) blocks + the `popover` capability.
 - **Paste / sanitization** — ingestion. HTML Sanitizer `setHTML` (emerging) is the native primitive; a cross-cutting security concern (any HTML sink needs it), so a standalone plug, not an editor method.
 - **Serialization** — the output boundary (HTML / Markdown / portable JSON). A config-extends-platform-default registry, default-less core.
-- **Decorations** (CSS Custom Highlight API, Baseline 2024) and **collaboration** (Yjs/CRDT, cross-ref [webrealtime](src/_data/projects.json) — `projects.json:325`) are **not forks** — supported-by-default and out-of-scope respectively (see Context).
+- **Decorations** (CSS Custom Highlight API, Baseline 2024) and **collaboration** (Yjs/CRDT, cross-ref [webrealtime](src/_data/projects.json) — `we:projects.json:325`) are **not forks** — supported-by-default and out-of-scope respectively (see Context).
 
 ## Recommended path at a glance
 
@@ -57,7 +57,7 @@ Forks 1, 4, 6 are near-ratification (High). 3, 5, 7 lean clearly (Med-high). **F
 **Crux:** is the document model a **Protocol** independent engines satisfy (so a project swaps ProseMirror ⇄ Lexical ⇄ the native default behind one contract), or a single baked WE model with libraries as optional enhancements?
 
 - **A — Baked single model.** WE defines one document model; libraries, if used at all, are bolted on. *Tradeoff:* simplest to specify, but forecloses the interop the whole field demonstrates — every serious editor has its own incompatible model, and a project that outgrows the native default (e.g. needs ProseMirror for collab) would have to abandon the standard rather than swap a provider.
-- **B — Engine-provider Protocol + adapters.** A `CustomEditorEngine` contract + `CustomEditorEngineRegistry` (mirroring `CustomPositioner`/`CustomPositioningRegistry`, [plugs.json:293-306](src/_data/plugs.json#L293-L306)); the native-first default drives `contenteditable` + `InputEvent`; thin adapters bridge ProseMirror/Lexical/Slate/Quill. The editor block resolves the registry — the app ships *one* engine, never bundles per-vendor. *Merit:* this is the exact "many vendors must interoperate or swap engines" condition design-first §Q2 reserves a Protocol for, and the adapter-as-normalization-hub philosophy (a lossy internal pivot the project never sees raw) fits editor models precisely.
+- **B — Engine-provider Protocol + adapters.** A `CustomEditorEngine` contract + `CustomEditorEngineRegistry` (mirroring `CustomPositioner`/`CustomPositioningRegistry`, [we:plugs.json:293-306](src/_data/plugs.json#L293-L306)); the native-first default drives `contenteditable` + `InputEvent`; thin adapters bridge ProseMirror/Lexical/Slate/Quill. The editor block resolves the registry — the app ships *one* engine, never bundles per-vendor. *Merit:* this is the exact "many vendors must interoperate or swap engines" condition design-first §Q2 reserves a Protocol for, and the adapter-as-normalization-hub philosophy (a lossy internal pivot the project never sees raw) fits editor models precisely.
 
 **Recommended: B — engine-provider Protocol.** Editors are the textbook swappable-vendor axis, and WE already proved the pattern for positioning. *Rejected:* A — a baked model re-invents one engine and forecloses the swap that is the only reason to standardize the model layer at all. *(The "ship native-only first, add the Protocol later" worry is **prioritization, not a fork** — the on-merit end-state is the Protocol; build sequencing is normal burndown ordering.)*
 
@@ -68,9 +68,9 @@ Forks 1, 4, 6 are near-ratification (High). 3, 5, 7 lean clearly (Med-high). **F
 **Crux:** which substrate does the editor edit on — and is it fixed or negotiated?
 
 - **A — Mandate EditContext.** Cleanest model-decoupling and best IME story. *Tradeoff:* Chromium-only (Chrome/Edge 121, Jan 2024) — **drops Safari and Firefox entirely**; not Baseline. A mandated EditContext substrate is a broken end-state for a cross-browser standard.
-- **B — contenteditable floor + EditContext capability-upgrade, auto-negotiated.** `contenteditable` (Baseline since 2015) is the universal floor; where `editcontext` is present the engine upgrades to it for IME/decoupled input; graceful degradation otherwise. *Merit:* most-permissive default (the floor works everywhere, the restriction/upgrade is opt-in/auto), and it mirrors the **webrealtime transport-negotiation pattern** ([projects.json:325](src/_data/projects.json#L325)) — declare the capability, let the provider pick the best available.
+- **B — contenteditable floor + EditContext capability-upgrade, auto-negotiated.** `contenteditable` (Baseline since 2015) is the universal floor; where `editcontext` is present the engine upgrades to it for IME/decoupled input; graceful degradation otherwise. *Merit:* most-permissive default (the floor works everywhere, the restriction/upgrade is opt-in/auto), and it mirrors the **webrealtime transport-negotiation pattern** ([we:projects.json:325](src/_data/projects.json#L325)) — declare the capability, let the provider pick the best available.
 
-**Recommended: B — capability-negotiated, contenteditable floor.** `contenteditable` (+ `editcontext`, `sanitizer-api`, `highlight-api`) are added to `capabilities.json` and tiered in `capabilityMatrix.json`. *Rejected:* A — mandating a Chromium-only surface fails the cross-browser invariant.
+**Recommended: B — capability-negotiated, contenteditable floor.** `contenteditable` (+ `editcontext`, `sanitizer-api`, `highlight-api`) are added to `we:capabilities.json` and tiered in `we:capabilityMatrix.json`. *Rejected:* A — mandating a Chromium-only surface fails the cross-browser invariant.
 
 ## Fork 4 — Command vocabulary: reuse the platform's, or coin WE's?
 
@@ -106,7 +106,7 @@ Forks 1, 4, 6 are near-ratification (High). 3, 5, 7 lean clearly (Med-high). **F
 - **A — Editor-owned.** The editor block sanitizes pasted HTML itself. *Tradeoff:* convenient, but sanitization is a cross-cutting **security** primitive — *any* HTML sink needs it (a comment renderer, a CMS preview, a markdown-to-HTML pipeline), not just editors — so burying it inside the editor hides a reusable concern.
 - **B — Standalone sanitization plug.** A `CustomSanitizerRegistry` (native `Element.setHTML()` default — its config *further restricts* a safe-by-default baseline — + a DOMPurify adapter as the production floor while `setHTML` is still emerging), composed by the editor on the `insertFromPaste` path. *Merit:* separation bias (recurs without an editor → own home), native-first default, and an escapable single lock (adapter-swappable).
 
-**Recommended: B — standalone plug, composed on paste.** *Rejected:* A — owning sanitization inside the editor duplicates a security primitive every HTML sink needs. *(Ownership: the plug likely lives under a security/validation neighbour — `webvalidation` exists at [projects.json:168](src/_data/projects.json#L168) — to be confirmed at graduation; default is a dedicated sanitization seam either way.)*
+**Recommended: B — standalone plug, composed on paste.** *Rejected:* A — owning sanitization inside the editor duplicates a security primitive every HTML sink needs. *(Ownership: the plug likely lives under a security/validation neighbour — `webvalidation` exists at [we:projects.json:168](src/_data/projects.json#L168) — to be confirmed at graduation; default is a dedicated sanitization seam either way.)*
 
 ---
 
@@ -130,11 +130,11 @@ Forks 1, 4, 6 are near-ratification (High). 3, 5, 7 lean clearly (Med-high). **F
 
 | Element | Layer | Home |
 |---|---|---|
-| Editing surface (contenteditable/EditContext/Sanitizer/Highlight) | **Capability** (net-new ids) | `capabilities.json` + `capabilityMatrix.json` |
+| Editing surface (contenteditable/EditContext/Sanitizer/Highlight) | **Capability** (net-new ids) | `we:capabilities.json` + `we:capabilityMatrix.json` |
 | Document model / engine | **Protocol + adapters** | `CustomEditorEngine` + registry; owned by proposed new `webediting` project |
-| The editor element | **Block** | `blocks.json` + `block-descriptions/` |
-| Formatting toolbar/controls | **Intent** (`text-formatting`) | `intents.json` |
-| Editable-surface UX (editable/multiline/read-only) | **Intent** (`rich-text`) | `intents.json` |
+| The editor element | **Block** | `fui:blocks.json` + `block-descriptions/` |
+| Formatting toolbar/controls | **Intent** (`text-formatting`) | `we:intents.json` |
+| Editable-surface UX (editable/multiline/read-only) | **Intent** (`rich-text`) | `we:intents.json` |
 | Serialization | **Config-extends-platform-default** registry | `CustomSerializerRegistry` plug + flavor default |
 | Paste sanitization | **Plug** | `CustomSanitizerRegistry` (native `setHTML` + DOMPurify adapter) |
 
@@ -143,7 +143,7 @@ Forks 1, 4, 6 are near-ratification (High). 3, 5, 7 lean clearly (Med-high). **F
 - **IME / composition** — handled by the editing surface (EditContext's reason to exist); a capability concern, not a separate fork.
 
 **Out of scope (cross-referenced):**
-- **Collaboration** (multi-cursor, presence/awareness, CRDT/Yjs) is a transport+sync concern, **non-fungible** with the editing surface — it belongs to [webrealtime](/projects/webrealtime/) (collaborative cursors are already named in its scope, [projects.json:325](src/_data/projects.json#L325)). Cross-ref and defer, exactly as [#370](/backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke/) cross-ref'd sync-transport.
+- **Collaboration** (multi-cursor, presence/awareness, CRDT/Yjs) is a transport+sync concern, **non-fungible** with the editing surface — it belongs to [webrealtime](/projects/webrealtime/) (collaborative cursors are already named in its scope, [we:projects.json:325](src/_data/projects.json#L325)). Cross-ref and defer, exactly as [#370](/backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke/) cross-ref'd sync-transport.
 
 **At graduation** (after ratification, via a `blockedBy` chain in composition order): Capability ids → engine Protocol + native default → editor Block → `text-formatting` / `rich-text` intents → serializer + sanitizer plugs. **Technical Configurator cards** (plateau-app) for engine choice, serialization format, and substrate-negotiation policy; collaboration transport cross-ref'd to webrealtime. The proposed new `webediting` project (owning the engine Protocol) is itself ratified as part of Fork 2.
 

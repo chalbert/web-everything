@@ -30,16 +30,16 @@ Critically, **WE already consumes it in three separate places**, each correctly 
 *different* intent:
 
 - **Auto-advance / infinite scroll** — the Collection Operations `advance:auto` dimension
-  ([intents.json:1622](../src/_data/intents.json#L1622)) fetches the next slice at a zero-height
-  *scroll sentinel* observed by IntersectionObserver ([semantics.json:783](../src/_data/semantics.json#L783),
-  [blocks.json:2354](../src/_data/blocks.json#L2354)).
+  ([we:intents.json:1622](../src/_data/intents.json#L1622)) fetches the next slice at a zero-height
+  *scroll sentinel* observed by IntersectionObserver ([we:semantics.json:783](../src/_data/semantics.json#L783),
+  [fui:blocks.json:2354](../src/_data/blocks.json#L2354)).
 - **Viewport-eager prefetch** — the Prefetch intent's `eagerness: viewport`
-  ([intents.json:419](../src/_data/intents.json#L419)) triggers a speculative fetch when a link
-  scrolls into a `rootMargin` band ([blocks.json:1484](../src/_data/blocks.json#L1484)).
+  ([we:intents.json:419](../src/_data/intents.json#L419)) triggers a speculative fetch when a link
+  scrolls into a `rootMargin` band ([fui:blocks.json:1484](../src/_data/blocks.json#L1484)).
 - **Visibility-gated trait activation** — a trait can activate *when its host enters the
   viewport* rather than on `connectedCallback`, driven by IntersectionObserver and framed
   explicitly as the scripting analogue of `content-visibility: auto`
-  ([traits.json:78](../src/_data/traits.json#L78), [traits.json:83](../src/_data/traits.json#L83)).
+  ([we:traits.json:78](../src/_data/traits.json#L78), [we:traits.json:83](../src/_data/traits.json#L83)).
 
 This is the crux of fork 1: **IntersectionObserver is a shared mechanism, not a domain.** Three
 intents already use it without sharing an owner, and that is *correct* — each expresses a
@@ -70,9 +70,9 @@ future carousel block, not a scroll domain.
 `content-visibility: auto` + `contain-intrinsic-size` lets the browser skip rendering
 off-screen subtrees while preserving correct scroll height — native, zero-JS "virtualization
 lite". WE's [Windowed Collection](/intents/windowed-collection/) intent
-([intents.json:332](../src/_data/intents.json#L332)) is the JS-virtualization escalation above
-this native floor. traits.json explicitly names `content-visibility: auto` as the rendering
-analogue of its visibility-gated activation ([traits.json:83](../src/_data/traits.json#L83)).
+([we:intents.json:332](../src/_data/intents.json#L332)) is the JS-virtualization escalation above
+this native floor. we:traits.json explicitly names `content-visibility: auto` as the rendering
+analogue of its visibility-gated activation ([we:traits.json:83](../src/_data/traits.json#L83)).
 **Virtualization already has a home** (Windowed Collection); a scroll project would duplicate it.
 
 ### 5. Scroll restoration — `History.scrollRestoration`, the navigation seam
@@ -82,7 +82,7 @@ hands the app control of scroll position across history navigation — the class
 back-button problem (the listing snaps to the bottom of a too-short page before items rehydrate;
 [Chrome blog](https://developer.chrome.com/blog/history-api-scroll-restoration)). This is a
 **navigation/routing** concern. Collection Operations already binds the related URL-state seam
-to the History API via its `urlSync` dimension ([intents.json:1630](../src/_data/intents.json#L1630)),
+to the History API via its `urlSync` dimension ([we:intents.json:1630](../src/_data/intents.json#L1630)),
 warning that `advance:auto` is "only advisable when this is on, else the footer and back button
 break". Scroll restoration is the routing layer's job (a Router/Navigation concern), not a new
 scroll standard.
@@ -106,7 +106,7 @@ It is a low-level event primitive, not a domain — consumed by whichever concer
 
 Every cell already maps to an existing or clearly-adjacent home. **No residual surface justifies
 a `webscroll` project or a monolithic scroll intent.** A project is a top-level *standard* with a
-single owner and a `/projects/` tile ([projects.json](../src/_data/projects.json)); webpositioning
+single owner and a `/projects/` tile ([we:projects.json](../src/_data/projects.json)); webpositioning
 qualified because anchoring is *one* coherent provider-shaped problem. "Scroll" is not — it is
 six unrelated problems that happen to share a scrollbar.
 
@@ -116,8 +116,8 @@ six unrelated problems that happen to share a scrollbar.
 
 **Crux:** does "Scroll / Observation" become a project, an intent, or get decomposed onto its
 native seams? The survey shows IntersectionObserver is a *shared mechanism* used by three
-already-separated intents ([intents.json:1622](../src/_data/intents.json#L1622),
-[intents.json:419](../src/_data/intents.json#L419), [traits.json:78](../src/_data/traits.json#L78)),
+already-separated intents ([we:intents.json:1622](../src/_data/intents.json#L1622),
+[we:intents.json:419](../src/_data/intents.json#L419), [we:traits.json:78](../src/_data/traits.json#L78)),
 and every other scroll primitive already has a home (table above).
 
 - **(A) `webscroll` project.** A top-level standard owning the whole surface. *Rejected:* there
@@ -134,8 +134,8 @@ and every other scroll primitive already has a home (table above).
 ### Fork 2 — The shared IntersectionObserver mechanism: extract a `viewport-presence` intent, or leave it triplicated?
 
 **Crux:** three intents independently wire IntersectionObserver
-([blocks.json:1484](../src/_data/blocks.json#L1484), [blocks.json:2354](../src/_data/blocks.json#L2354),
-[traits.json:81](../src/_data/traits.json#L81)) with the same `root`/`rootMargin`/`threshold`
+([fui:blocks.json:1484](../src/_data/blocks.json#L1484), [fui:blocks.json:2354](../src/_data/blocks.json#L2354),
+[we:traits.json:81](../src/_data/traits.json#L81)) with the same `root`/`rootMargin`/`threshold`
 vocabulary. Is that duplication worth a shared low-level intent?
 
 - **(A — recommended) Extract a thin `viewport-presence` intent** — a *mechanism* intent owning
@@ -155,8 +155,8 @@ inline — would be the regression.)
 
 **Crux:** the dated seam note (2026-06-03) on this item asked whether the Collection Operations
 `advance:auto` IntersectionObserver scroll-trigger
-([intents.json:1622](../src/_data/intents.json#L1622), wired at
-[blocks.json:2354](../src/_data/blocks.json#L2354)) stays in `collection-operations` or moves to
+([we:intents.json:1622](../src/_data/intents.json#L1622), wired at
+[fui:blocks.json:2354](../src/_data/blocks.json#L2354)) stays in `collection-operations` or moves to
 this domain. Folds 1+2 answer it cleanly.
 
 - **(A — recommended) `advance:auto` stays a Collection Operations dimension; only the *trigger*
@@ -184,6 +184,6 @@ without two homes.
 - Seam: [#062 pagination ↔ windowed-collection](/backlog/062-pagination-windowed-collection-seam/) + 2026-06-03 pagination research
 - Composes / adjacent: [Collection Operations](/intents/collection-operations/) ·
   [Windowed Collection](/intents/windowed-collection/) · [Prefetch](/intents/prefetch/) ·
-  [Loader](/intents/loader/) · visibility-gated trait activation ([traits.json:78](../src/_data/traits.json#L78))
+  [Loader](/intents/loader/) · visibility-gated trait activation ([we:traits.json:78](../src/_data/traits.json#L78))
 - Sibling gap projects: [#015 view-transitions](/backlog/015-gap-8-view-transitions-protocol/) ·
   [#016 webcommands](/backlog/016-gap-9-webcommands-project/)

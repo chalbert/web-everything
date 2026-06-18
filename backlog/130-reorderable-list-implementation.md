@@ -44,7 +44,7 @@ not an add-on.
 - **Commit-strategy shape** — start as the `commit` attribute; promote to a `CustomReorderCommitRegistry`
   only if multiple persistence backends emerge.
 
-See `reports/2026-06-06-reorder-paradigms.md` for prior art, the native-substrate analysis, and the
+See `we:reports/2026-06-06-reorder-paradigms.md` for prior art, the native-substrate analysis, and the
 full Open Points register.
 
 ## Progress
@@ -52,17 +52,17 @@ full Open Points register.
 - **Status:** resolved
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
-  - `blocks/renderers/reorderable-list/renderReorderableList.ts` — pure DOM-free `reduceReorder`
+  - `we:blocks/renderers/reorderable-list/renderReorderableList.ts` — pure DOM-free `reduceReorder`
     grab-then-move engine, `renderReorderableList` reference renderer, `reconcileOrder` (atomic
     `Element.moveBefore()` relocation with `insertBefore` fallback), `announce` live-region wording,
     `auditReorderableList` conformance audit.
-  - `__fixtures__/reorderable-list-cases.ts` — 8 shared fixtures (rove, grab, move, End, commit,
+  - `we:__fixtures__/reorderable-list-cases.ts` — 8 shared fixtures (rove, grab, move, End, commit,
     cancel/revert, edge-clamp) driving both the demo and CI.
-  - `blocks/__tests__/unit/renderers/reorderable-list.test.ts` — 26 conformance + unit tests (all pass).
+  - `we:blocks/__tests__/unit/renderers/reorderable-list.test.ts` — 26 conformance + unit tests (all pass).
   - `demos/reorderable-list-demo.{ts,html,css}` — playground: 8 fixture cards + a live interactive
     card (real keyboard grab-and-move, pointer drag, live region, cancelable `reorder-commit`).
-    Registered in `demos.json`; E2E playground spec green.
-  - `blocks.json` — block status `concept` → `draft`, added `sourcePath` + `exports`. AGENTS.md
+    Registered in `we:demos.json`; E2E playground spec green.
+  - `fui:blocks.json` — block status `concept` → `draft`, added `sourcePath` + `exports`. we:AGENTS.md
     inventory regenerated.
 - **Decisions settled:** keyboard keymap = grab-then-move (Space grab, arrows move, Space/Enter drop,
   Esc cancel); commit-strategy = `commit` attribute + cancelable `reorder-commit` event (no registry).

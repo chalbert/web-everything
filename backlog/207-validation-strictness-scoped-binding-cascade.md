@@ -51,17 +51,17 @@ binding/resolution layer; bundled because each is small and they share the base-
 - **Status:** resolved — both knobs built, tested, and surfaced on `/capabilities/`.
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
-  - **D5** `capabilities/strictness.ts` — one orthogonal `silent|warn|error` knob (default `warn`),
+  - **D5** `we:capabilities/strictness.ts` — one orthogonal `silent|warn|error` knob (default `warn`),
     `conformanceTierFor`/`strictnessForTier` (error↔strict, warn↔standard, silent↔lenient),
     `validateSlot()` reporting the same problem for a **rejected pin** and an **unresolvable policy**
     with `severity === strictness`, and `applyStrictness()` (throw/onWarn/swallow). 12 tests.
-  - **D6** `capabilities/cascade.ts` — `cascade()` nearest-scope-wins over base→app→view→fragment;
+  - **D6** `we:capabilities/cascade.ts` — `cascade()` nearest-scope-wins over base→app→view→fragment;
     inheritance carries the slot **as written** (policy stays a policy); `resolveScoped()`
     re-resolves the inherited slot in the leaf's own provider context + validates under the effective
     strictness. 13 tests incl. the DoD demo (Chrome view → native `base-select`, Safari view → custom
     `face` from the *same* inherited `native-first`) and a fragment pin override.
-  - Exported both from `capabilities/index.ts`; added **Validation strictness** + **Scoped binding
-    cascade** sections to `src/capabilities.njk` (render live on `/capabilities/`).
+  - Exported both from `we:capabilities/index.ts`; added **Validation strictness** + **Scoped binding
+    cascade** sections to `we:src/capabilities.njk` (render live on `/capabilities/`).
 - **Verify:** capability suite 48/48 green; `check:standards` 0 errors; tsc clean; page returns 200.
 - **Notes:** demo sections on the page are descriptive prose (consistent with the existing native-first
   section) — making the resolver demo *computed not authored* is already tracked as open item #213.

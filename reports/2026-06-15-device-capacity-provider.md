@@ -46,8 +46,8 @@ standardizes the *contract + routing*, never the detection algorithm.
 The load-bearing new insight: **signal availability is not uniform across venues.** `hardwareConcurrency`
 and GPU-tier are runtime-only (no header carries them); `deviceMemory` and `Save-Data` also resolve at
 the edge. This is precisely why the capacity axis should *reuse* the existing `Venue` dimension
-(`capabilities/venues.ts:38`) and the `undefined`-means-unknown degrade contract
-(`capabilities/venues.ts:51` `PlatformSupport`), rather than invent a parallel resolution path — and is
+(`we:capabilities/venues.ts:38`) and the `undefined`-means-unknown degrade contract
+(`we:capabilities/venues.ts:51` `PlatformSupport`), rather than invent a parallel resolution path — and is
 an argument **for** a sibling provider on the same machinery (Fork 1 A1), not against it.
 
 ### Battery is the "exclude what's broken" case, not a fork
@@ -82,9 +82,9 @@ clear default (both). This is the expected "research adds a fork" effect (#64 pr
 
 | File | Action |
 |---|---|
-| `reports/2026-06-15-device-capacity-provider.md` | created (this report) |
-| `src/_data/researchTopics.json` | added `device-capacity-provider` entry |
-| `src/_includes/research-descriptions/device-capacity-provider.njk` | created (write-up) |
+| `we:reports/2026-06-15-device-capacity-provider.md` | created (this report) |
+| `we:src/_data/researchTopics.json` | added `device-capacity-provider` entry |
+| `we:src/_includes/research-descriptions/device-capacity-provider.njk` | created (write-up) |
 | `backlog/729-*.md` | rewritten to prepared-fork shape; `preparedDate` stamped |
 
 ## Sources

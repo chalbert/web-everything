@@ -22,7 +22,7 @@ Claimed in a batch; traced the real import closure before copying anything. The 
 *"~1900 LOC, 18 files, 3 new FUI dirs (`guard/`/`validity-merge/`/`validator-resolution/`)"* is about
 **half** the graph. `webguards`/`webvalidation` also hard-depend on **two large subsystems FUI lacks and
 the audit never named**: `capability-manifest/` (907 LOC — the #266 capability *spec*; imported at
-[plugs/webvalidation/index.ts:82](../plugs/webvalidation/index.ts#L82) + `:169`) and
+[we:plugs/webvalidation/index.ts:82](../plugs/webvalidation/index.ts#L82) + `:169`) and
 `validation-generation/` (1466 LOC — neutral contract + zod/pydantic/jsonSchema/nativeHtml adapters). Real
 closure ≈ **3,400 LOC across 5 absent subsystems**, and it crosses the **standard ↔ implementation
 boundary** — a mechanical copy-into-FUI would put a WE *standard* (`capability-manifest`) into the impl
@@ -62,8 +62,8 @@ Claimed in a batch after #804/#814 landed the `@webeverything/*` export surface;
 they exported only **two** of the closure's **five** subsystems. The plugs also hard-import three more that
 #730 never classified and #814 never exported:
 
-- `plugs/webguards/index.ts:23-31` → `guard/{provider,registry}` (#288/#289)
-- `plugs/webvalidation/index.ts` → `validity-merge/{provider,registry}` (#212) +
+- `we:plugs/webguards/index.ts:23-31` → `guard/{provider,registry}` (#288/#289)
+- `we:plugs/webvalidation/index.ts` → `validity-merge/{provider,registry}` (#212) +
   `validator-resolution/{provider,registry,index}` (#214)
 
 These three are provider+registry **strategy planes** — and the #730 report itself cites validity-merge /

@@ -31,23 +31,23 @@ composition, deferred to #018**. Net: `<Resource>` becomes a declarative composi
 Loader Intent — no new intent, no parallel async model. Stays `open` pending ratification.
 
 The directive-sugar layer (#070) shipped `<For>`/`<Show>`/`<Resource>` through **one registry**
-([directives.ts:54](../blocks/renderers/jsx/directives.ts#L54)) as reversible spellings of
+([we:directives.ts:54](../blocks/renderers/jsx/directives.ts#L54)) as reversible spellings of
 `<template is="for-each|if|resource">`. But unlike `for-each` and `if` — which map to **real,
 existing** directives the lowering compiler (#078) already round-trips
-([crossStrategy.ts:88,107,153,167](../blocks/renderers/jsx/render-strategy/crossStrategy.ts#L88))
+([we:crossStrategy.ts:88,107,153,167](../blocks/renderers/jsx/render-strategy/crossStrategy.ts#L88))
 — **`is="resource"` is net-new and appears in NONE of those rules**. `Resource`
-([directives.ts:57](../blocks/renderers/jsx/directives.ts#L57), `from` prop) is currently pure
-spelling: `makeDirective` ([directives.ts:173](../blocks/renderers/jsx/directives.ts#L173))
+([we:directives.ts:57](../blocks/renderers/jsx/directives.ts#L57), `from` prop) is currently pure
+spelling: `makeDirective` ([we:directives.ts:173](../blocks/renderers/jsx/directives.ts#L173))
 builds the inert `<template is="resource" from="…">` DOM the canonical form builds, and nothing
 more — nothing says what a resource *resolves to*, what surfaces it owns, or what it lowers to.
 
 The platform already owns the missing pieces; they are simply unwired. The **Loader Intent**
-([intents.json:439](../src/_data/intents.json#L439)) is a full async state machine —
+([we:intents.json:439](../src/_data/intents.json#L439)) is a full async state machine —
 `idle | pending | success | error | stale | filtering | loadingMore`, with `escalation`,
 version-token stale-resolve prevention, and hierarchy aggregation — and it explicitly names a
 `loadingMore` state that "composes the Windowed Collection Intent" and a `stale` state for
 "showing previous data while a refresh is in progress." The **Resource Loader** block
-([blocks.json:203](../src/_data/blocks.json#L203), `implementsIntent: "loader"`) already
+([fui:blocks.json:203](../src/_data/blocks.json#L203), `implementsIntent: "loader"`) already
 implements that machine. So this is a **wiring decision**, not an invention. The
 `from="@…"` injector ref resolves through Loader; the directive contributes a declarative
 trigger + slot surface.
@@ -69,7 +69,7 @@ Ratify all four rows, or override just the one you'd change. The **confidence** 
 asks: child `<template is="if">`-style branches, or named slots `loading`/`error`? Refs:
 SolidJS [`<Suspense>`+`<ErrorBoundary>`](https://docs.solidjs.com/guides/fetching-data),
 React 19 [`<Suspense>`](https://react.dev/reference/react/Suspense)+error boundary; the Loader
-Intent's lifecycle states ([intents.json:439](../src/_data/intents.json#L439)).
+Intent's lifecycle states ([we:intents.json:439](../src/_data/intents.json#L439)).
 
 - **(A — recommended) Named-slot branches whose names are Loader lifecycle states.**
   `<template slot="loading">` / `<template slot="error">`, default (unslotted) children =
@@ -89,8 +89,8 @@ Intent's lifecycle states ([intents.json:439](../src/_data/intents.json#L439)).
 **Crux:** does `from="@…"` resolve through the **Loader Intent** (pending/determinate/
 escalation) and the async-collection lifecycle, or is the resource its own thing? The item's own
 guidance: "cross-reference, don't duplicate." Refs: Loader Intent
-([intents.json:439](../src/_data/intents.json#L439)); Resource Loader block
-([blocks.json:203](../src/_data/blocks.json#L203), `implementsIntent: "loader"`).
+([we:intents.json:439](../src/_data/intents.json#L439)); Resource Loader block
+([fui:blocks.json:203](../src/_data/blocks.json#L203), `implementsIntent: "loader"`).
 
 - **(A — recommended) Resolve through the Loader Intent + Resource Loader block.** The directive
   contributes the *declarative trigger + slot surface* (Fork 1); all state transitions,
@@ -106,11 +106,11 @@ guidance: "cross-reference, don't duplicate." Refs: Loader Intent
 
 **Crux:** what vdom-strategy form does `is="resource"` lift to, so `crossStrategy` can carry it?
 The compiler lowers `for-each`→`.map()` and `if`→`&&`
-([crossStrategy.ts:88,107](../blocks/renderers/jsx/render-strategy/crossStrategy.ts#L88)) but has
+([we:crossStrategy.ts:88,107](../blocks/renderers/jsx/render-strategy/crossStrategy.ts#L88)) but has
 **no resource rule**. Refs: React [`use()`](https://react.dev/blog/2024/12/05/react-19), SolidJS
 [`createResource`](https://docs.solidjs.com/reference/basic-reactivity/create-resource) — the
 read suspends; the lossy-diagnostic mechanism at
-[crossStrategy.ts:124](../blocks/renderers/jsx/render-strategy/crossStrategy.ts#L124).
+[we:crossStrategy.ts:124](../blocks/renderers/jsx/render-strategy/crossStrategy.ts#L124).
 
 - **(A — recommended) Suspending-read form + boundary slots.** `is="resource" from="E"` lifts to
   a `use()`-style suspending read (`const data = use(E)` — the cross-library primitive), with the
@@ -128,7 +128,7 @@ read suspends; the lossy-diagnostic mechanism at
 
 **Crux:** how does a resource that *paginates* relate to this contract and the windowed-collection
 seam? Refs: #018 (async pagination beyond load-more); the Loader Intent's `loadingMore` state
-"composes the Windowed Collection Intent" ([intents.json:439](../src/_data/intents.json#L439));
+"composes the Windowed Collection Intent" ([we:intents.json:439](../src/_data/intents.json#L439));
 TanStack [`useInfiniteQuery`/loaders](https://tanstack.com/router/v1/docs/framework/react/guide/data-loading).
 
 - **(A — recommended) Pagination is a composition, deferred to #018.** A paginated resource is
@@ -172,5 +172,5 @@ the Loader Intent — no new intent, no parallel async model.
 Until built, `<Resource>` remains a documented spelling with no runtime semantics beyond
 building the inert `<template is="resource">` element (declarative-static, like every other
 directive in the parked Axis-2 world). Surfaced while implementing #070. The four rulings are now
-ratified (above); nothing is authored into the registries (intents.json / blocks.json /
-crossStrategy.ts) by this resolution — that is the follow-on build. `blockedBy: ["070"]` is retained.
+ratified (above); nothing is authored into the registries (we:intents.json / fui:blocks.json /
+we:crossStrategy.ts) by this resolution — that is the follow-on build. `blockedBy: ["070"]` is retained.

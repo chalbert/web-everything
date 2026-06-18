@@ -30,12 +30,12 @@ Un-parked 2026-06-16 as a prioritization call (build ahead of demand). Previousl
 "deferred until a concrete consumer needs intrinsic container-scoped flow" — kept for trace.
 
 ## Progress (resolved 2026-06-16)
-- Added the `flex-row` block to [`src/_data/blocks.json`](../src/_data/blocks.json) — `status: concept`,
+- Added the `flex-row` block to [`fui:src/_data/blocks.json`](../src/_data/blocks.json) — `status: concept`,
   `implementsIntent: breakpoint`, `intentDimensions: { scope: container }`; `designDecisions` capture the
   container-scoped reflow, native-first CSS `@container`/`flex-wrap` default, and the ResizeObserver
   fallback contract; `webStandards` cite container queries, `flex-wrap`, and `ResizeObserver`.
-- Authored [`src/_includes/block-descriptions/flex-row.njk`](../src/_includes/block-descriptions/flex-row.njk)
+- Authored [`we:src/_includes/block-descriptions/flex-row.njk`](../src/_includes/block-descriptions/flex-row.njk)
   documenting the standard-worthy surface (semantic vocabulary + container-query wiring + ResizeObserver
   fallback contract — **not** the flex CSS), framing ResizeObserver as the impl substrate
   (impl-is-not-a-standard, parallel to CSS Anchor Positioning under Web Positioning).
-- Regenerated AGENTS.md inventory (blocks 74→75); 11ty builds clean; `/blocks/flex-row/` renders; gate green.
+- Regenerated we:AGENTS.md inventory (blocks 74→75); 11ty builds clean; `/blocks/flex-row/` renders; gate green.

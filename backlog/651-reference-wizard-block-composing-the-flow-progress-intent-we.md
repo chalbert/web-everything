@@ -18,15 +18,15 @@ Umbrella for the reference wizard/flow Block that composesIntents over the Flow 
 
 Originally a `story·13`. Both heavy substrates are shipped — the `CustomWorkflowEngine` (#650, resolved;
 `customWorkflowEngine.resolve().start(graph)` → `WorkflowInstance` with `send/back/onTransition/onComplete`),
-the ratified `flow-progress` intent (#634, `src/_data/intents.json`), and `StepperBehavior`
-(`blocks/stepper/StepperBehavior.ts`) — so the `size` was wiring-of-shipped-pieces, not a buried fork. The
+the ratified `flow-progress` intent (#634, `we:src/_data/intents.json`), and `StepperBehavior`
+(`we:blocks/stepper/StepperBehavior.ts`) — so the `size` was wiring-of-shipped-pieces, not a buried fork. The
 card's own body named the seam: **the wizard Block, then its runtime demo.** Split along that seam (analysis:
-[reports/2026-06-15-backlog-split-analysis.md](../reports/2026-06-15-backlog-split-analysis.md)):
+[we:reports/2026-06-15-backlog-split-analysis.md](../reports/2026-06-15-backlog-split-analysis.md)):
 
 - **A — #691** (`story·3`) — the interactive wizard **Block** (NEW `blocks/wizard/` custom element wiring
   the engine + StepperBehavior into a Flow-Progress UX). Unblocked (#650 ✓).
 - **B — #692** (`story·3`, blockedBy #691) — the **runtime demo** proving it end-to-end (new demo page +
-  `demos.json` registration + dev-server fallback + e2e/render check). new-demo-class work.
+  `we:demos.json` registration + dev-server fallback + e2e/render check). new-demo-class work.
 
 DAG: **A → B** (incremental; the demo consumes the Block element). Watch-item: if A re-estimates >3 in
 webworkflows context, sub-slice A1 element+stepper / A2 status+back/undo.

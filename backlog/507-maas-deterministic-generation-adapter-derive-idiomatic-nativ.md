@@ -17,7 +17,7 @@ Ratified in #463 (fork a): build the deterministic generation-adapter that deriv
 
 ## Sliced into agent-ready children (epic — 2026-06-14)
 
-Split analysis: [reports/2026-06-14-backlog-split-analysis.md](../reports/2026-06-14-backlog-split-analysis.md). Pure volume — the fork was settled in #463 fork a; both inputs (#505 neutral-contract IR, #506 conformance suite) are resolved.
+Split analysis: [we:reports/2026-06-14-backlog-split-analysis.md](../reports/2026-06-14-backlog-split-analysis.md). Pure volume — the fork was settled in #463 fork a; both inputs (#505 neutral-contract IR, #506 conformance suite) are resolved.
 
 - **#547** — Generation-adapter core: deterministic IR→emit engine + core/shell split (proof: regenerate the JS reference origin byte-identically). *No blocker.*
 - **#548** — First foreign native target: **.NET** backend. *blocked-by #547.*

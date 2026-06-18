@@ -7,10 +7,10 @@ research topic: [/research/design-ref-taxonomy/](https://webeverything — `desi
 ## Why this survey
 
 [#382](../backlog/382-design-reference-screenshot-corpus-collect-dedup-codify.md) shipped a working,
-idempotent screenshot-collection pipeline (`scripts/design-refs.mjs`, content-addressed WebP, inclusion
+idempotent screenshot-collection pipeline (`we:scripts/design-refs.mjs`, content-addressed WebP, inclusion
 gate, browse gallery). Its only remaining open fork is **Fork 3 — first-run scope & taxonomy seed**
 (carved out as #394): _which app categories and design registers to cover, how many shots each, and how
-to grow `design-refs/targets.json` beyond the 16-app proof set._ The proof set is heavily skewed —
+to grow `we:design-refs/targets.json` beyond the 16-app proof set._ The proof set is heavily skewed —
 12 of 16 are dev-tools / editors / code-playgrounds — so the corpus is thin everywhere else.
 
 Before authoring the seed we surveyed how the established reference-screenshot galleries and the
@@ -38,7 +38,7 @@ dashboards. This is the dominant organising axis of flow-oriented galleries.
 
 ### 2. "Design register" conflates two orthogonal things
 
-Our current `targets.json` `designRegister` values mix **product archetypes** (`enterprise-dense`,
+Our current `we:targets.json` `designRegister` values mix **product archetypes** (`enterprise-dense`,
 `modern-saas`, `utilitarian`) with **visual aesthetics** (`minimal`, `dark-dev`, `minimal-hand-drawn`,
 `friendly-minimal`). The design literature treats these as a separate, well-named vocabulary of
 **visual styles**: skeuomorphism → flat → material → minimalism → neumorphism → glassmorphism →
@@ -57,7 +57,7 @@ behave exactly this way: G2 (2,000+ categories), Capterra (~1,000), Crozdesk (37
 **evolving, keyed** category taxonomy and add categories monthly — and each is _different_, so reuse means
 borrowing a coarse top level, not adopting 2,000 leaves.
 
-> **Repo precedent:** this is the same shape as `src/_data/benchmarkCorpus.json` — a keyed corpus whose
+> **Repo precedent:** this is the same shape as `we:src/_data/benchmarkCorpus.json` — a keyed corpus whose
 > entries carry stable ids so a re-run produces a clean diff (added / dropped / re-categorised) rather than
 > a rewritten list. The taxonomy seed should live in the same kind of keyed, append-friendly registry.
 
@@ -67,7 +67,7 @@ borrowing a coarse top level, not adopting 2,000 leaves.
    time) and `visualStyle` (named aesthetic — perceptual, _deferred to the vision pass_ per #382 Fork 2).
    This both honours bias-toward-separation and _reduces_ collect-time curation.
 2. **Vocabulary = open-growing controlled vocabulary**, seeded canonical values in a keyed
-   `design-refs/taxonomy.json` registry (mirrors `benchmarkCorpus.json`), new values allowed but registered.
+   `we:design-refs/taxonomy.json` registry (mirrors `we:benchmarkCorpus.json`), new values allowed but registered.
    Not a closed schema enum (blocks new domains mid-run), not free-text (synonym noise).
 3. **First-run scope = scarcity-weighted grow-targets**, not a flat per-category count: drive the corpus
    toward ≥K shots per under-covered cell, prioritising the registers thin today (everything outside

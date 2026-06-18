@@ -26,24 +26,24 @@ Origin: traced while picking up #786 in batch-2026-06-16 — #786's premise assu
 
 Built the FUI-owned embed SDK skeleton in `frontierui/embed/`:
 
-- **`contract.ts`** — the wire contract: `EMBED_PROTOCOL_VERSION`, the `RenderMode` enum
+- **`we:contract.ts`** — the wire contract: `EMBED_PROTOCOL_VERSION`, the `RenderMode` enum
   (`contained`/A, `host-restyle`/B1 implemented; `host-backdrop`/B2 + `in-document`/C reserved
   enum slots so adding them is non-breaking, per #732), the `MODE_PARAM`/alias map, the
   guest↔host message shapes (`ready`/`init`/`resize`/`overlay-open`/`overlay-close`), and the
   origin-validated `isEmbedMessage` guard + `envelope` helper.
-- **`embed-host.ts`** — runs in WE's docs page (the FUI-published bundle WE loads). Finds
+- **`fui:embed-host.ts`** — runs in WE's docs page (the FUI-published bundle WE loads). Finds
   `iframe[data-embed-mode]`, matches messages to a frame by live `contentWindow` + validated
   origin, and realizes the mode: `resize` → grow the frame (mode A, shared); `overlay-open`/
   `-close` → mode B1 promote the frame to fixed/full-viewport via an SDK-injected style. Auto-boots.
-- **`embed-guest.ts`** — runs in the demo iframe. **Self-gates on `?embed-mode=`** (absent →
+- **`fui:embed-guest.ts`** — runs in the demo iframe. **Self-gates on `?embed-mode=`** (absent →
   fully dormant, so legacy static embeds are byte-identical). Reports content height (mode A) and,
   for B1, auto-detects native overlays (`<dialog>[open]` via MutationObserver + Popover `toggle`)
   plus a manual `window.fuiEmbed` API; posts to the validated host origin. Auto-boots.
-- **`index.ts`** + **`README.md`**; guest injected into every demo by a new `embedGuestInject`
+- **`we:index.ts`** + **`we:README.md`**; guest injected into every demo by a new `embedGuestInject`
   Vite plugin (`vite.config.mts`), mirroring `bootstrapPatches`.
-- **WE `fuiDemo` shortcode** (`webeverything/.eleventy.js`) gained a 4th `mode` arg: no mode =
+- **WE `fuiDemo` shortcode** (`we:webeverything/.eleventy.js`) gained a 4th `mode` arg: no mode =
   legacy static iframe (unchanged); a mode appends `?embed-mode=`, tags the frame
-  `data-embed-mode`, and loads `embed-host.ts` once (module-deduped). WE passes only the token —
+  `data-embed-mode`, and loads `fui:embed-host.ts` once (module-deduped). WE passes only the token —
   the impl stays in FUI (impl→FUI; no #700 source import).
 
 **Verified:** FUI `check:standards` 0 err; WE `check:standards` 0 err; WE 11ty `--dryrun` build

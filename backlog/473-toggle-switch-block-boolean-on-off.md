@@ -17,9 +17,9 @@ Native-first block over `<input type=checkbox>` with role=switch: a boolean on/o
 
 ## Resolved 2026-06-13 (batch-2026-06-13)
 
-Authored the `toggle-switch` block standard: [blocks.json](../src/_data/blocks.json) entry (status
+Authored the `toggle-switch` block standard: [fui:blocks.json](../src/_data/blocks.json) entry (status
 `draft`, type Component, `implementsIntent: input`) + required
-[block-descriptions/toggle-switch.njk](../src/_includes/block-descriptions/toggle-switch.njk) (renders
+[we:block-descriptions/toggle-switch.njk](../src/_includes/block-descriptions/toggle-switch.njk) (renders
 live at `/blocks/toggle-switch/`).
 
 - **Native-first**: `<input type="checkbox" role="switch">` + label, zero JS (a pure-action variant may

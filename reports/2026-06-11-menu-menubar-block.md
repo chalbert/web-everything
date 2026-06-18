@@ -8,7 +8,7 @@
 
 ## Question
 
-A Menu block is named as a harvest candidate but no design exists. Before authoring it, survey prior art per [design-first.md](../docs/agent/design-first.md) step 1, so the trait selections for the three shapes, focus model, checkable items, submenus, and command invocation reuse platform vocabulary instead of coining terms — and so the menu vs. value-selection boundary is drawn correctly.
+A Menu block is named as a harvest candidate but no design exists. Before authoring it, survey prior art per [we:design-first.md](../docs/agent/design-first.md) step 1, so the trait selections for the three shapes, focus model, checkable items, submenus, and command invocation reuse platform vocabulary instead of coining terms — and so the menu vs. value-selection boundary is drawn correctly.
 
 ## Recommendation (to ratify in #173)
 
@@ -18,7 +18,7 @@ A Menu block is named as a harvest candidate but no design exists. Before author
 4. **Fork D — checkable items reuse Selection, gated to a `checkable` trait.** `menuitemcheckbox`/`menuitemradio` are genuine `aria-checked` state. **Default: plain `menuitem` = `command` only; checkable items opt in via a `checkable` trait composing Selection (`single`→radio group, `multiple`→checkboxes).**
 5. **Fork E — submenu nesting reuses Disclosure, NOT the tree-select `hierarchy` intent.** A submenu is a *transient cascading popup* (Right opens a fresh anchored surface, Left closes), not a *navigable data hierarchy* (no flatten-to-visible-rows, no `aria-level/setsize/posinset`). **Default: submenu = parent `menuitem` with `aria-haspopup=menu` + Disclosure (`aria-expanded`) + a nested anchored Menu surface; no `hierarchy` composition.**
 6. **Fork F (item omitted) — separator & group semantics.** `role=separator` and `role=group` (labelled section) are first-class APG menu roles every library ships. **Default: the Menu block owns them directly; the labelled-group case may lean on Selection's existing `grouping` dimension.**
-7. **Fork G (item didn't notice) — "Menu button" is mis-filed in the droplist family.** `blocks.json:21,36` lists "Menu button" as a droplist (listbox/combobox value-selector) member, but a true menu button opens a `role=menu` of *commands*. **Default: #173 claims the menu-button trigger; remove/demote the droplist "Menu button" entry to "trigger shape only, surface owned by the Menu block."**
+7. **Fork G (item didn't notice) — "Menu button" is mis-filed in the droplist family.** `fui:blocks.json:21,36` lists "Menu button" as a droplist (listbox/combobox value-selector) member, but a true menu button opens a `role=menu` of *commands*. **Default: #173 claims the menu-button trigger; remove/demote the droplist "Menu button" entry to "trigger shape only, surface owned by the Menu block."**
 
 ## Key findings
 
@@ -53,14 +53,14 @@ Every surveyed library models **menu (action invocation) as a separate component
 
 | Paradigm | Reuse which WE intent | Net-new? |
 | --- | --- | --- |
-| Anchored surface / edge-aware placement / dismissal & focus return | **Anchor Intent** (`type=menu`, [intents.json:1197](../src/_data/intents.json#L1197)) | No |
-| Focus delegation (roving, one active item) | **Focus Delegation** ([intents.json:54](../src/_data/intents.json#L54)) — override family default to `roving` | No |
-| Type-ahead seek | **Type-Ahead** ([intents.json:1432](../src/_data/intents.json#L1432)) | No |
-| Selection (checkable items) | **Selection** ([intents.json:1059](../src/_data/intents.json#L1059)), under a `checkable` trait | No |
-| Submenu open/closed state | **Disclosure** ([intents.json:1809](../src/_data/intents.json#L1809)) | No |
+| Anchored surface / edge-aware placement / dismissal & focus return | **Anchor Intent** (`type=menu`, [we:intents.json:1197](../src/_data/intents.json#L1197)) | No |
+| Focus delegation (roving, one active item) | **Focus Delegation** ([we:intents.json:54](../src/_data/intents.json#L54)) — override family default to `roving` | No |
+| Type-ahead seek | **Type-Ahead** ([we:intents.json:1432](../src/_data/intents.json#L1432)) | No |
+| Selection (checkable items) | **Selection** ([we:intents.json:1059](../src/_data/intents.json#L1059)), under a `checkable` trait | No |
+| Submenu open/closed state | **Disclosure** ([we:intents.json:1809](../src/_data/intents.json#L1809)) | No |
 | **Command invocation (the action)** | **`command` intent** (#016 — not yet built) | **Yes — the one net-new dependency** |
 | Separator / group sectioning | Menu block owns directly (group label overlaps Selection `grouping`) | Partly (Fork F) |
-| Action prominence (`destructive`) | **Action Intent** ([intents.json:854](../src/_data/intents.json#L854)) — orthogonal to command | No |
+| Action prominence (`destructive`) | **Action Intent** ([we:intents.json:854](../src/_data/intents.json#L854)) — orthogonal to command | No |
 
 The single net-new dependency is the `command` intent (#016); everything else the constellation already owns. The menu block is a thin composition manifest, as the item anticipated.
 
@@ -68,7 +68,7 @@ The single net-new dependency is the `command` intent (#016); everything else th
 
 | File | Action |
 | --- | --- |
-| `reports/2026-06-11-menu-menubar-block.md` | Created (this report) |
-| `src/_data/researchTopics.json` | Added `menu-menubar-context-menu` topic |
-| `src/_includes/research-descriptions/menu-menubar-context-menu.njk` | Created (research write-up) |
-| `backlog/173-menu-menubar-block.md` | Reshaped to the prepared-fork shape |
+| `we:reports/2026-06-11-menu-menubar-block.md` | Created (this report) |
+| `we:src/_data/researchTopics.json` | Added `menu-menubar-context-menu` topic |
+| `we:src/_includes/research-descriptions/menu-menubar-context-menu.njk` | Created (research write-up) |
+| `we:backlog/173-menu-menubar-block.md` | Reshaped to the prepared-fork shape |

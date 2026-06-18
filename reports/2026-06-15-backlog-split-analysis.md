@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-15
 **Scope:** Focused run, `/slice 646`. Re-runs the #646 row of
-[2026-06-14-backlog-split-analysis.md](2026-06-14-backlog-split-analysis.md) (run 6), which deferred the
+[we:2026-06-14-backlog-split-analysis.md](2026-06-14-backlog-split-analysis.md) (run 6), which deferred the
 slice pending the shape decision **#652** — now **resolved 2026-06-15** (Fork 1: plain-markup ejectable
 payload, CEM descriptor + `registry-item` wrapper as coexisting exports; Fork 2: standalone devtools
 surface reading the shared `workbench*` vocabulary + a WE-owned preset registry in the shadcn
@@ -13,12 +13,12 @@ now decomposable.
 
 | Piece | State | Evidence |
 |---|---|---|
-| Composed primitives (preset #1) | **EXISTS, ratified** | nav-list [blocks.json:2082](../src/_data/blocks.json#L2082) · disclosure [intents.json:1868](../src/_data/intents.json#L1868) · anchor `strategy=escape` [intents.json:1256](../src/_data/intents.json#L1256) · hover-intent [intents.json:2671](../src/_data/intents.json#L2671) |
-| Reveal-nav recipe (the payload to eject) | **EXISTS, live dogfood** | markup [base.njk:32-69](../src/_layouts/base.njk#L32) + hover-intent CSS wiring [style.css:241-276](../src/css/style.css#L241) — "a page you could have hand-written" |
-| Shared `workbench*` vocabulary (read-only input) | **EXISTS** | [workbenchFeatures.json](../src/_data/workbenchFeatures.json) (271 ln) · [workbenchTools.json](../src/_data/workbenchTools.json) (73 ln) |
-| Auto-render surface pattern (`/protocols/`, `/intents/`) | **EXISTS, copyable** | [src/protocols.njk](../src/protocols.njk) · [src/intents.njk](../src/intents.njk) (page + nav + validator pattern) |
-| WE-owned preset registry (`registry-item` shape) | **GREENFIELD** | no `presets.json`/`assemblerPresets.json`; only research refs in [researchTopics.json:1910](../src/_data/researchTopics.json#L1910) |
-| CEM protocol (optional descriptor export target) | **GREENFIELD, pending #653** | not in [protocols.json](../src/_data/protocols.json); registration tracked by #653 |
+| Composed primitives (preset #1) | **EXISTS, ratified** | nav-list [fui:blocks.json:2082](../src/_data/blocks.json#L2082) · disclosure [we:intents.json:1868](../src/_data/intents.json#L1868) · anchor `strategy=escape` [we:intents.json:1256](../src/_data/intents.json#L1256) · hover-intent [we:intents.json:2671](../src/_data/intents.json#L2671) |
+| Reveal-nav recipe (the payload to eject) | **EXISTS, live dogfood** | markup [we:base.njk:32-69](../src/_layouts/base.njk#L32) + hover-intent CSS wiring [we:style.css:241-276](../src/css/style.css#L241) — "a page you could have hand-written" |
+| Shared `workbench*` vocabulary (read-only input) | **EXISTS** | [we:workbenchFeatures.json](../src/_data/workbenchFeatures.json) (271 ln) · [we:workbenchTools.json](../src/_data/workbenchTools.json) (73 ln) |
+| Auto-render surface pattern (`/protocols/`, `/intents/`) | **EXISTS, copyable** | [we:src/protocols.njk](../src/protocols.njk) · [we:src/intents.njk](../src/intents.njk) (page + nav + validator pattern) |
+| WE-owned preset registry (`registry-item` shape) | **GREENFIELD** | no `we:presets.json`/`we:assemblerPresets.json`; only research refs in [we:researchTopics.json:1910](../src/_data/researchTopics.json#L1910) |
+| CEM protocol (optional descriptor export target) | **GREENFIELD, pending #653** | not in [we:protocols.json](../src/_data/protocols.json); registration tracked by #653 |
 | Interactive "build-your-own-component" workbench UI | **GREENFIELD, cross-locus** | no composition-builder surface; served surface → plateau-app per #091 |
 | Additional-preset primitives | **MIXED** | command-palette / filter / hovercard / toolbar appear in intents/blocks (unverified depth); **date-range / date-picker: NONE** (no intent yet) |
 
@@ -29,7 +29,7 @@ agent-ready, demoable slices fall out cleanly; the DAG is A → B.
 
 | Slice | type / workItem / size | blockedBy | Files / seam (file:line-citable) | Demoable state |
 |---|---|---|---|---|
-| **A — Preset registry standard + `/presets/` surface + reveal-nav preset #1** | issue · **story** · **3** | — (#652 ✓) | NEW `src/_data/assemblerPresets.json` in the decided `registry-item` shape `{name, type, composesBlocks/Intents, files:[{path,content}]}`, reveal-nav as entry #1 with `files[].content` = the plain payload from [base.njk:32-69](../src/_layouts/base.njk#L32) + [style.css:241-276](../src/css/style.css#L241); NEW `src/presets.njk` copying the [protocols.njk](../src/protocols.njk) pattern + nav entry in [base.njk](../src/_layouts/base.njk); a `check:standards` validator for the new registry | `/presets/` renders the reveal-nav recipe; payload round-trips into the live header (it *is* the header) |
+| **A — Preset registry standard + `/presets/` surface + reveal-nav preset #1** | issue · **story** · **3** | — (#652 ✓) | NEW `we:src/_data/assemblerPresets.json` in the decided `registry-item` shape `{name, type, composesBlocks/Intents, files:[{path,content}]}`, reveal-nav as entry #1 with `files[].content` = the plain payload from [we:base.njk:32-69](../src/_layouts/base.njk#L32) + [we:style.css:241-276](../src/css/style.css#L241); NEW `we:src/presets.njk` copying the [we:protocols.njk](../src/protocols.njk) pattern + nav entry in [we:base.njk](../src/_layouts/base.njk); a `check:standards` validator for the new registry | `/presets/` renders the reveal-nav recipe; payload round-trips into the live header (it *is* the header) |
 | **B — Optional per-preset CEM descriptor export** | issue · **task** · — | **A, #653** | Emit a CEM entry describing each preset's composed meta-component **API surface** (riding #653's CEM protocol, never re-minting it); extends the registry from A with an optional `cem` field/export | A preset additionally exposes a valid CEM descriptor; reveal-nav's descriptor renders alongside its recipe |
 
 Both are batchable once unblocked (story·3 and task). Slice A delivers standalone value (the ejectable
@@ -69,14 +69,14 @@ against the real tree below before being drawn.
 
 | Surface a slice would need | State | Evidence (file:line) |
 |---|---|---|
-| Research-topic home (step-tree doc) | **EXISTS** | registry [researchTopics.json:1933](../src/_data/researchTopics.json#L1933) (`self-driven-project` entry) · renderer [research-topic-pages.njk](../src/research-topic-pages.njk) · per-topic include [self-driven-project.njk](../src/_includes/research-descriptions/self-driven-project.njk) |
-| Protocol registry + `/protocols/` surface | **EXISTS, copyable** | [protocols.json:1](../src/_data/protocols.json#L1) (concept entries, `{id,name,summary,status,ownedByProject,realizesIntent,anchor}`) · [src/protocols.njk](../src/protocols.njk) |
-| Ground-truth gate (the conformance state) | **EXISTS** | 3-state matrix [capabilityMatrix.json:1](../src/_data/capabilityMatrix.json#L1) (`native-ok`/`polyfill-ok`/`capability-hard`) |
-| Gate-severity enum + persona views (control-plane substrate) | **EXISTS, in plateau-app** | `GateType` advisory/validating/blocking/escalating [plateau-app profiles/schema.ts:60](../../plateau-app/src/profiles/schema.ts#L60) · `Profile` [schema.ts:128](../../plateau-app/src/profiles/schema.ts#L128) · enforcement [gate-enforcement.ts:1](../../plateau-app/src/profiles/gate-enforcement.ts#L1) · page [profiles-page.ts](../../plateau-app/src/profiles/profiles-page.ts) |
+| Research-topic home (step-tree doc) | **EXISTS** | registry [we:researchTopics.json:1933](../src/_data/researchTopics.json#L1933) (`self-driven-project` entry) · renderer [we:research-topic-pages.njk](../src/research-topic-pages.njk) · per-topic include [we:self-driven-project.njk](../src/_includes/research-descriptions/self-driven-project.njk) |
+| Protocol registry + `/protocols/` surface | **EXISTS, copyable** | [we:protocols.json:1](../src/_data/protocols.json#L1) (concept entries, `{id,name,summary,status,ownedByProject,realizesIntent,anchor}`) · [we:src/protocols.njk](../src/protocols.njk) |
+| Ground-truth gate (the conformance state) | **EXISTS** | 3-state matrix [we:capabilityMatrix.json:1](../src/_data/capabilityMatrix.json#L1) (`native-ok`/`polyfill-ok`/`capability-hard`) |
+| Gate-severity enum + persona views (control-plane substrate) | **EXISTS, in plateau-app** | `GateType` advisory/validating/blocking/escalating [plateau-app plateau:profiles/schema.ts:60](../../plateau-app/src/profiles/schema.ts#L60) · `Profile` [plateau:schema.ts:128](../../plateau-app/src/profiles/schema.ts#L128) · enforcement [plateau:gate-enforcement.ts:1](../../plateau-app/src/profiles/gate-enforcement.ts#L1) · page [plateau:profiles-page.ts](../../plateau-app/src/profiles/profiles-page.ts) |
 | Non-technical "trip planner" / escalation-inbox shell | **GREENFIELD** | no goal-planner or escalation-inbox page in plateau-app; profiles/platform-manager surfaces exist to host one |
-| Tool-agnostic artefact-contract Protocol entry | **GREENFIELD** | not in [protocols.json](../src/_data/protocols.json); #665 invariant says it *is* a Protocol, white-space per prior-art §7.4 |
+| Tool-agnostic artefact-contract Protocol entry | **GREENFIELD** | not in [we:protocols.json](../src/_data/protocols.json); #665 invariant says it *is* a Protocol, white-space per prior-art §7.4 |
 | Methodology home for the developer-role thesis | **EXISTS** | [#563](../backlog/563-ai-driven-agile-methodology-as-a-shareable-approach.md) (the shareable methodology this thesis belongs in) |
-| Public approach page + "Project"-overload context | **PARKED / EXISTS** | #143 approach page is parked; project names live in [projects.json:1](../src/_data/projects.json#L1) (39 `web*` entries; "Self-Driven Project" is **not** one — it's a mode, not a standards Project) |
+| Public approach page + "Project"-overload context | **PARKED / EXISTS** | #143 approach page is parked; project names live in [we:projects.json:1](../src/_data/projects.json#L1) (39 `web*` entries; "Self-Driven Project" is **not** one — it's a mode, not a standards Project) |
 
 ## Could split
 
@@ -86,8 +86,8 @@ candidates do **not** slice cleanly yet — see *Could not split*.
 
 | Slice | type / workItem / size | blockedBy | Files / seam (file:line-citable) | Demoable state |
 |---|---|---|---|---|
-| **A — Step-tree artifact** (every SDLC step × automatable data-driven gate × ceiling autonomy level) | idea · **story** · **3** | — | Author the full step-tree (seed: epic body §A table) as the body of the existing research topic — extend [self-driven-project.njk](../src/_includes/research-descriptions/self-driven-project.njk) (or a sibling `self-driven-step-tree.njk` + [researchTopics.json](../src/_data/researchTopics.json) entry); each row = outcome property · data-driven gate · automatable-today bucket · ceiling level, against #665's ratified scale | `/research/…` renders the complete step-tree table |
-| **D — Artefact-contract Protocol** (the no-lock-in foundation) | idea · **story** · **3** | — | NEW entry in [protocols.json](../src/_data/protocols.json) (`id: self-driven-artefact`, `status: concept`, `ownedByProject`, citing GitOps/OSCAL/SPDX + the work-tracker white space §7.4) + a first-cut spec report defining the declarative artefact shape (goal · tolerance/ODD · per-step gate defs · dimension-registry ref · run evidence) a foreign PM tool could drive | `/protocols/` lists the artefact-contract Protocol; spec report defines its shape |
+| **A — Step-tree artifact** (every SDLC step × automatable data-driven gate × ceiling autonomy level) | idea · **story** · **3** | — | Author the full step-tree (seed: epic body §A table) as the body of the existing research topic — extend [we:self-driven-project.njk](../src/_includes/research-descriptions/self-driven-project.njk) (or a sibling `we:self-driven-step-tree.njk` + [we:researchTopics.json](../src/_data/researchTopics.json) entry); each row = outcome property · data-driven gate · automatable-today bucket · ceiling level, against #665's ratified scale | `/research/…` renders the complete step-tree table |
+| **D — Artefact-contract Protocol** (the no-lock-in foundation) | idea · **story** · **3** | — | NEW entry in [we:protocols.json](../src/_data/protocols.json) (`id: self-driven-artefact`, `status: concept`, `ownedByProject`, citing GitOps/OSCAL/SPDX + the work-tracker white space §7.4) + a first-cut spec report defining the declarative artefact shape (goal · tolerance/ODD · per-step gate defs · dimension-registry ref · run evidence) a foreign PM tool could drive | `/protocols/` lists the artefact-contract Protocol; spec report defines its shape |
 | **C — Developer-role thesis note** | idea · **task** · 1 | — | Author the developer-role inversion (planner/validator/L3-operator/gate-author; *value concentrates in gate authoring*) as a positioning section in [#563](../backlog/563-ai-driven-agile-methodology-as-a-shareable-approach.md) — its named home per the epic body §C | #563 carries the thesis section |
 
 DAG: **A**, **D**, **C** are all independent roots (≥2 independent — rubric (4) ✓). Re-estimates: A=3,
@@ -135,7 +135,7 @@ reliably.
 
 ### Work-investigation pass (read before slicing)
 
-Ran `node scripts/normalize-graduated.mjs --json` and read [scripts/normalize-graduated.mjs](../scripts/normalize-graduated.mjs)
+Ran `node we:scripts/normalize-graduated.mjs --json` and read [we:scripts/normalize-graduated.mjs](../scripts/normalize-graduated.mjs)
 to learn what the tool decides vs. what needs a human. Live bucket counts (today, not the body's stale ~74/99):
 
 | bucket | count | nature |
@@ -153,7 +153,7 @@ the size is pure volume, not a buried decision.
 
 **Caveat found during investigation (raises the per-item bar, not a blocker):** the tool's precomputed
 `canonical` takes the *leading* token, which is wrong where the real entity sits in a parenthetical —
-e.g. #459 `webintents (intents.json#system-notification)` graduated to `intent:system-notification`,
+e.g. #459 `webintents (we:intents.json#system-notification)` graduated to `intent:system-notification`,
 **not** `project:webintents`. So even the "mechanical" tranche is *pick-the-in-value-candidate*, not
 blind-apply — low-judgment (the candidate is present in the value) but not scriptable. No slice is
 "run the tool and walk away."
@@ -246,18 +246,18 @@ The forks are already settled, so this is volume, not an unresolved decision:
   Fork 1 = plain-markup `registry-item` payload; Fork 2 = standalone devtools surface reading the preset
   registry read-only; served home → plateau-app (#091).
 - **Registry standard landed by [#667](../backlog/667-preset-registry-standard-presets-surface-reveal-nav-preset-1.md) (resolved).**
-  [src/_data/assemblerPresets.json](../src/_data/assemblerPresets.json) (shadcn `registry-item` shape:
+  [we:src/_data/assemblerPresets.json](../src/_data/assemblerPresets.json) (shadcn `registry-item` shape:
   `{name, type, composesBlocks/Intents, files:[{path,content}]}`, reveal-nav preset #1, status `active`),
-  the static [src/presets.njk](../src/presets.njk) catalog render, and the
+  the static [we:src/presets.njk](../src/presets.njk) catalog render, and the
   [`validatePreset`](../scripts/check-standards-rules.mjs#L474) gate (required fields, ref-resolution into
   blocks/intents/projects, non-empty `files[].content`).
 - **plateau-app served-tool pattern is proven and reusable.** A served interactive tool = a
   `src/<tool>/` dir with a `mountXxx(mount)` + full-re-render shell + `.css`, registered in
-  [src/main.ts](../../plateau-app/src/main.ts) and given a nav link + `route` template in
-  [index.html](../../plateau-app/index.html). The decisive precedent:
-  [intent-configurator/configurator.ts:18](../../plateau-app/src/intent-configurator/configurator.ts#L18)
-  **already imports WE `_data` cross-locus** (`import intentsData from '../../../webeverything/src/_data/intents.json'`)
-  — the exact mechanism this workbench uses to read `assemblerPresets.json` / `blocks.json` / `intents.json`.
+  [plateau:src/main.ts](../../plateau-app/src/main.ts) and given a nav link + `route` template in
+  [we:index.html](../../plateau-app/index.html). The decisive precedent:
+  [plateau:intent-configurator/configurator.ts:18](../../plateau-app/src/intent-configurator/configurator.ts#L18)
+  **already imports WE `_data` cross-locus** (`import intentsData from 'we:../../../webeverything/src/_data/intents.json'`)
+  — the exact mechanism this workbench uses to read `we:assemblerPresets.json` / `fui:blocks.json` / `we:intents.json`.
   No `src/component-assembler/` exists yet → greenfield, as the card says.
 - **Canvas interaction UX is not a fork.** "How you pick/wire primitives in the UI" is tool-design /
   POC-mode latitude, not a standards decision — #652 already fixed the *format* and the *home*. So no
@@ -272,9 +272,9 @@ eject"); the investigation confirms it against the tree. Three slices, all in pl
 
 | Slice | workItem / size | What it is | Named surface |
 |---|---|---|---|
-| **A (= re-scoped #669)** | story · 3 | **Read-only interactive assembler surface** — clone the intent-configurator shell; list presets from `assemblerPresets.json` (cross-locus import) and render each `files[].content` **live** + show the recipe | new `src/component-assembler/assembler.ts` + `.css`; `mountComponentAssembler` in `src/main.ts`; nav link + `route` template in `index.html` |
-| **B** | story · 3 | **Authoring canvas — pick + wire primitives into a live composition** — a primitive palette read from `blocks.json` + `intents.json` (same import pattern); select + assemble into composed markup with live preview | extends `src/component-assembler/assembler.ts` (palette + canvas) |
-| **C** | task | **Eject the `registry-item` recipe** — serialize the live composition → the shadcn shape `validatePreset` enforces, with copy/download (output-panel pattern) | extends `src/component-assembler/assembler.ts` (eject panel) |
+| **A (= re-scoped #669)** | story · 3 | **Read-only interactive assembler surface** — clone the intent-configurator shell; list presets from `we:assemblerPresets.json` (cross-locus import) and render each `files[].content` **live** + show the recipe | new `plateau:src/component-assembler/assembler.ts` + `.css`; `mountComponentAssembler` in `plateau:src/main.ts`; nav link + `route` template in `we:index.html` |
+| **B** | story · 3 | **Authoring canvas — pick + wire primitives into a live composition** — a primitive palette read from `fui:blocks.json` + `we:intents.json` (same import pattern); select + assemble into composed markup with live preview | extends `plateau:src/component-assembler/assembler.ts` (palette + canvas) |
+| **C** | task | **Eject the `registry-item` recipe** — serialize the live composition → the shadcn shape `validatePreset` enforces, with copy/download (output-panel pattern) | extends `plateau:src/component-assembler/assembler.ts` (eject panel) |
 
 **DAG:** `A → B → C` (chain). Rigid order, but **incremental delivery holds** — each slice leaves
 standalone demoable value: A = a served preset gallery with live preview; B = working build-your-own
@@ -327,10 +327,10 @@ task, `parent: 646`, `blockedBy: 688`). Net flow **+2**. `check:standards` green
 
 | Piece | State | Evidence |
 |---|---|---|
-| web-identity intent (auth-state signal + identity descriptor) | **EXISTS, live** | [intents.json:2500](../src/_data/intents.json#L2500) — its own copy names **#379 as a near-term consumer** |
-| Guard protocol + access-control member (#178) | **EXISTS, live** | [protocols.json:118](../src/_data/protocols.json#L118) — `hide\|redirect\|forbid\|cloak` deny family; render-or-hide / edit-readonly / action gate machinery |
-| App lifecycle, **role-scoped transitions** (S2 #380) | **EXISTS, resolved** | [lifecycle.ts:25-37](../demos/loan-origination/domain/lifecycle.ts#L25) — each edge has an `actor` |
-| Signed-in user (identity source) | **PLACEHOLDER** | [app.ts:95](../demos/loan-origination/app.ts#L95) hardcodes `ACTOR = { role: 'underwriter' }` |
+| web-identity intent (auth-state signal + identity descriptor) | **EXISTS, live** | [we:intents.json:2500](../src/_data/intents.json#L2500) — its own copy names **#379 as a near-term consumer** |
+| Guard protocol + access-control member (#178) | **EXISTS, live** | [we:protocols.json:118](../src/_data/protocols.json#L118) — `hide\|redirect\|forbid\|cloak` deny family; render-or-hide / edit-readonly / action gate machinery |
+| App lifecycle, **role-scoped transitions** (S2 #380) | **EXISTS, resolved** | [we:lifecycle.ts:25-37](../demos/loan-origination/domain/lifecycle.ts#L25) — each edge has an `actor` |
+| Signed-in user (identity source) | **PLACEHOLDER** | [we:app.ts:95](../demos/loan-origination/app.ts#L95) hardcodes `ACTOR = { role: 'underwriter' }` |
 | Any role / permission / auth / identity domain file | **GREENFIELD** | no `*role*`/`*perm*`/`*auth*` file in `demos/loan-origination/` |
 | 5k seeded apps spread across lifecycle states | **EXISTS** | S0 #378 (resolved) — gives S1b real states to gate against |
 
@@ -347,8 +347,8 @@ Fork 3 / Guard #272). The seam is architectural, not arbitrary.
 
 | Slice | type / workItem / size | Consumes | blockedBy | Seam (file-citable) | Demoable state |
 |---|---|---|---|---|---|
-| **S1a — Identity & roles + auth-state signal** | idea · **story** · **3** | web-identity intent | — (#378 ✓, #380 ✓) | NEW `demos/loan-origination/domain/identity.ts` (user account + role set + auth-state signal in the [intents.json:2500](../src/_data/intents.json#L2500) shape); replace the `ACTOR` placeholder at [app.ts:95](../demos/loan-origination/app.ts#L95); add a demo **role-switcher**; point the lifecycle `actor` check at the signal | Switch acting role → chrome shows who you're signed in as; available lifecycle moves change to match the role (vs. the fixed underwriter today) |
-| **S1b — Field/action/state permission predicates** | idea · **task** · — | Guard protocol | **S1a** | NEW `demos/loan-origination/domain/permissions.ts` mapping scopes onto Guard members: **state-scoped** edit/read-only (borrower draft-only), **field-scoped** render-or-hide (HMDA wall-off, hidden from LO pricing, never read by rules), **action-scoped** authority (UW-only decision/condition-clear, Admin-only threshold edit), + define `ownsApplication(role, app)` (the **ownership predicate**; the pipeline UI that applies it is S10, not here); wire into `app.ts` | As different roles on seeded apps: fields hide/show, edit↔read-only flips by state, restricted actions are gated |
+| **S1a — Identity & roles + auth-state signal** | idea · **story** · **3** | web-identity intent | — (#378 ✓, #380 ✓) | NEW `we:demos/loan-origination/domain/identity.ts` (user account + role set + auth-state signal in the [we:intents.json:2500](../src/_data/intents.json#L2500) shape); replace the `ACTOR` placeholder at [we:app.ts:95](../demos/loan-origination/app.ts#L95); add a demo **role-switcher**; point the lifecycle `actor` check at the signal | Switch acting role → chrome shows who you're signed in as; available lifecycle moves change to match the role (vs. the fixed underwriter today) |
+| **S1b — Field/action/state permission predicates** | idea · **task** · — | Guard protocol | **S1a** | NEW `we:demos/loan-origination/domain/permissions.ts` mapping scopes onto Guard members: **state-scoped** edit/read-only (borrower draft-only), **field-scoped** render-or-hide (HMDA wall-off, hidden from LO pricing, never read by rules), **action-scoped** authority (UW-only decision/condition-clear, Admin-only threshold edit), + define `ownsApplication(role, app)` (the **ownership predicate**; the pipeline UI that applies it is S10, not here); wire into `we:app.ts` | As different roles on seeded apps: fields hide/show, edit↔read-only flips by state, restricted actions are gated |
 
 ### DAG
 
@@ -368,7 +368,7 @@ scope here.
 | Condition | Verdict |
 |---|---|
 | Size is volume, not an unresolved decision | ✅ all forks for both surfaces resolved (#012/#482, #009/#457, #272/#178); this is wiring |
-| ≥2 nameable slices, each a real home | ✅ both in `demos/loan-origination/domain/` + `app.ts` |
+| ≥2 nameable slices, each a real home | ✅ both in `demos/loan-origination/domain/` + `we:app.ts` |
 | Each slice ≤ 3 / `task` | ✅ story·3 + task |
 | Clean DAG, real independence or incremental delivery | ✅ incremental: S1a demoable alone, S1b builds on it |
 | Every slice leaves a valid demoable state | ✅ role-switch (S1a); gated edit/visibility/actions (S1b) |
@@ -410,11 +410,11 @@ volume, not an unresolved decision.
 
 | Surface a slice would need | State | Evidence (file:line) |
 |---|---|---|
-| Flow Progress intent (the UX semantics to compose) | **EXISTS, ratified** | [intents.json:2702](../src/_data/intents.json#L2702) (`flow-progress`), #634 |
-| `CustomWorkflowEngine` runtime + registry (the orchestration) | **EXISTS, shipped** | [blocks/workflow-engine/registry.ts:34](../blocks/workflow-engine/registry.ts#L34) (`customWorkflowEngine.resolve()`) · `WorkflowInstance` exported [index.ts:34](../blocks/workflow-engine/index.ts#L34); graduated from **#650** (resolved 2026-06-15) |
-| `StepperBehavior` (stepper UX to reuse, not reinvent) | **EXISTS** | [blocks/stepper/StepperBehavior.ts:35](../blocks/stepper/StepperBehavior.ts#L35) — already does sequencing, locked-progression, `aria-current="step"` ([:108](../blocks/stepper/StepperBehavior.ts#L108)), Step N of M, `registerStepper()` ([:123](../blocks/stepper/StepperBehavior.ts#L123)) |
+| Flow Progress intent (the UX semantics to compose) | **EXISTS, ratified** | [we:intents.json:2702](../src/_data/intents.json#L2702) (`flow-progress`), #634 |
+| `CustomWorkflowEngine` runtime + registry (the orchestration) | **EXISTS, shipped** | [we:blocks/workflow-engine/registry.ts:34](../blocks/workflow-engine/registry.ts#L34) (`customWorkflowEngine.resolve()`) · `WorkflowInstance` exported [we:index.ts:34](../blocks/workflow-engine/index.ts#L34); graduated from **#650** (resolved 2026-06-15) |
+| `StepperBehavior` (stepper UX to reuse, not reinvent) | **EXISTS** | [we:blocks/stepper/StepperBehavior.ts:35](../blocks/stepper/StepperBehavior.ts#L35) — already does sequencing, locked-progression, `aria-current="step"` ([:108](../blocks/stepper/StepperBehavior.ts#L108)), Step N of M, `registerStepper()` ([:123](../blocks/stepper/StepperBehavior.ts#L123)) |
 | The wizard **Block** itself (custom element) | **GREENFIELD** | no `blocks/wizard/`; no wizard custom element defined |
-| Demo registry + dev-server fallback + e2e pattern | **EXISTS, copyable** | [src/_data/demos.json](../src/_data/demos.json) (id/path/entry entries) · existing demos under [demos/](../demos/) |
+| Demo registry + dev-server fallback + e2e pattern | **EXISTS, copyable** | [we:src/_data/demos.json](../src/_data/demos.json) (id/path/entry entries) · existing demos under [demos/](../demos/) |
 
 **The `size: 13` is wiring-of-shipped-pieces, not cross-project build.** Both heavy substrates — the
 engine (#650) and the stepper UX (`StepperBehavior`) — are shipped. The Block *composes* them over the
@@ -430,14 +430,14 @@ the demo consumes the Block element).
 | Slice | type / workItem / size | blockedBy | Files / seam (file:line-citable) | Demoable state |
 |---|---|---|---|---|
 | **A — Wizard Block** (the interactive custom element) | issue · **story** · **3** | — (#650 ✓) | NEW `blocks/wizard/` custom element wiring `customWorkflowEngine.resolve().start(graph)` → a Flow-Progress UX: composes [StepperBehavior](../blocks/stepper/StepperBehavior.ts#L35) for current position + `aria-current="step"` + Step N of M; maps engine `onTransition` to per-step status (`wait`/`process`/`finish`/`error`); back/undo via the instance `back()`; defaults to the wizard register; reuses navigation's `structure:linear`/`guard`/`history`. composesIntents over [`flow-progress`](../src/_data/intents.json#L2702). Plus a unit/render test. | The wizard Block element drives a graph through its steps with per-step status, `aria-current=step`, and back/undo — proven by its unit/render test; droppable onto any page |
-| **B — Runtime demo** (the end-to-end browser proof) | issue · **story** · **3** | **A** | NEW demo page under [demos/](../demos/) mounting slice A's wizard Block against a real `CustomWorkflowEngine` graph; register in [src/_data/demos.json](../src/_data/demos.json) (id/path/entry); dev-server fallback; an e2e/render check asserting step advance + back + `aria-current`. new-demo-class work. | `/demos/…` renders a working wizard in a browser, proving Web Workflows protocol + Flow Progress intent compose end-to-end |
+| **B — Runtime demo** (the end-to-end browser proof) | issue · **story** · **3** | **A** | NEW demo page under [demos/](../demos/) mounting slice A's wizard Block against a real `CustomWorkflowEngine` graph; register in [we:src/_data/demos.json](../src/_data/demos.json) (id/path/entry); dev-server fallback; an e2e/render check asserting step advance + back + `aria-current`. new-demo-class work. | `/demos/…` renders a working wizard in a browser, proving Web Workflows protocol + Flow Progress intent compose end-to-end |
 
 ### Rubric check
 
 | Condition | Verdict |
 |---|---|
 | Size is volume, not an unresolved decision | ✅ #634 ratified the intent + engine seam; #650 shipped the engine; `StepperBehavior` shipped — this is composition/wiring |
-| ≥2 nameable slices, each a real home | ✅ A → `blocks/wizard/` (standard artifact); B → `demos/` + `demos.json` (runtime proof) |
+| ≥2 nameable slices, each a real home | ✅ A → `blocks/wizard/` (standard artifact); B → `demos/` + `we:demos.json` (runtime proof) |
 | Each slice ≤ 3 / `task` | ✅ A story·3 (wires two shipped substrates), B story·3 (new-demo-class) |
 | Clean DAG, real independence or incremental delivery | ✅ incremental: A is unit-testable + droppable on its own; B consumes A's element |
 | Every slice leaves a valid demoable state | ✅ A = tested wizard element; B = browser e2e proof |
@@ -484,7 +484,7 @@ Every claim in #658's body was confirmed against the real tree:
 | Claim | Verified |
 |-------|----------|
 | `@frontierui/blocks` does **not** exist as a package | ✓ No `name: "@frontierui/blocks"` anywhere in FUI; `blocks/` is a plain dir. Packages present: `compiler`, `@frontierui/{component-compiler,auto-update-orchestrator,esbuild-plugin,maas-check,rollup-plugin,vite-plugin,jsx-runtime,webdocs-ui}`. |
-| FUI uses `packages/*` + `compiler` workspaces; no `plugs/package.json` | ✓ Root `workspaces: ["compiler", "packages/*"]`; `blocks/` and `plugs/` are both bare dirs, no package.json. So S1 follows the **`compiler` precedent** (top-level workspace entry), not `packages/*`. |
+| FUI uses `packages/*` + `compiler` workspaces; no `we:plugs/package.json` | ✓ Root `workspaces: ["compiler", "packages/*"]`; `blocks/` and `plugs/` are both bare dirs, no we:package.json. So S1 follows the **`compiler` precedent** (top-level workspace entry), not `packages/*`. |
 | 9 WE-only families carry real impl, absent in FUI | ✓ `audit, background-task-surface, data-grid, lifecycle, master-detail, selection, stepper, tree-select, type-ahead` all present in WE, **0 files** each in `../frontierui/blocks/`. |
 | Shared families are byte-identical (the #170 drift hazard) | ✓ `navigation, tabs, transient, for-each, view` all `diff -rq` clean against FUI. |
 | The 9 families are mutually independent | ✓ No cross-family imports among them (only `background-task-surface` self-imports via alias) → they migrate in **parallel**, not a chain. |
@@ -499,7 +499,7 @@ Every claim in #658's body was confirmed against the real tree:
 - **`data-grid`** — `DataGridBehavior` + `DataGridEditBehavior` + 2 registers + ~2 tests.
 - **`type-ahead`** — `TypeAheadBehavior` + index + register + types + 1 test.
 
-All 9 families are registered in WE's `plugs/bootstrap.ts` and consumed by WE demos
+All 9 families are registered in WE's `we:plugs/bootstrap.ts` and consumed by WE demos
 (`loan-origination`, `auto-insurance`, `background-task-surface-demo`) — so during S2 (migrate-up,
 **no delete**) WE keeps its copies + registration and FUI gains copies: a sanctioned **dual-copy
 interim** (#170 guard: content-equal upstream *first*, delete only in S3).
@@ -511,7 +511,7 @@ and scaffold:
 
 | Slice | workItem · size | What | blockedBy | Batchable now? |
 |-------|-----------------|------|-----------|----------------|
-| **S1** | story · **3** | Create `@frontierui/blocks` as a canonical FUI workspace sub-package: `package.json` + `exports` map (the 14 FUI-owned families), add `"blocks"` to root `workspaces` (the `compiler` precedent), wire `build`. FUI-only, **no WE change, no delete**. | — (#657 ✓) | ✅ yes |
+| **S1** | story · **3** | Create `@frontierui/blocks` as a canonical FUI workspace sub-package: `we:package.json` + `exports` map (the 14 FUI-owned families), add `"blocks"` to root `workspaces` (the `compiler` precedent), wire `build`. FUI-only, **no WE change, no delete**. | — (#657 ✓) | ✅ yes |
 | **S2a** | task · **3** | Migrate the **6 single-file** WE-only families (`audit, lifecycle, master-detail, selection, stepper, tree-select`) UP — impl + register + unit tests, **byte-verified**, WE copies **kept**. | S1 | ✅ yes |
 | **S2b** | story · **3** | Migrate **`background-task-surface`** UP (element + index + register + types + `reloadDurabilityAdapter` + 6 `traits/` + `__fixtures__` + tests), byte-verified, WE copy kept. | S1 | ✅ yes |
 | **S2c** | story · **3** | Migrate **`data-grid` + `type-ahead`** UP (behaviors + registers + types + tests), byte-verified, WE copies kept. | S1 | ✅ yes |
@@ -575,10 +575,10 @@ Every claim in #479's body confirmed against the real tree:
 
 | Claim | Verified |
 |-------|----------|
-| `EdgeChunkCache.serve` returns a `Resolution`, not bytes | ✓ [edge.ts:169](../capabilities/edge.ts#L169) builds `EdgeChunk = { resolution: Resolution, caps }`; no HTTP server / bundler in the package |
-| `BaselineLookup` is an injected seam | ✓ [edge-io.ts:69](../capabilities/edge-io.ts#L69) `(brand: UaBrand, platform?) => number \| undefined`; production impl already named at [edge-io.ts:20](../capabilities/edge-io.ts#L20) (web-features / Baseline data); seam unit-tested with a fake at [edge-io.test.ts:47](../capabilities/__tests__/edge-io.test.ts#L47) |
-| `web-features` npm package is absent | ✓ no mention in `package.json`; no `node_modules/web-features` |
-| #219 delivered the I/O + caching shell and defers live serving here | ✓ [#219](../backlog/219-edge-venue-i-o-caching-shell-client-hints-parsing-baseline-l.md) `resolved`, `graduatedTo: capabilities/edge-io.ts (… live serving → #479)` |
+| `EdgeChunkCache.serve` returns a `Resolution`, not bytes | ✓ [we:edge.ts:169](../capabilities/edge.ts#L169) builds `EdgeChunk = { resolution: Resolution, caps }`; no HTTP server / bundler in the package |
+| `BaselineLookup` is an injected seam | ✓ [we:edge-io.ts:69](../capabilities/edge-io.ts#L69) `(brand: UaBrand, platform?) => number \| undefined`; production impl already named at [we:edge-io.ts:20](../capabilities/edge-io.ts#L20) (web-features / Baseline data); seam unit-tested with a fake at [we:edge-io.test.ts:47](../capabilities/__tests__/edge-io.test.ts#L47) |
+| `web-features` npm package is absent | ✓ no mention in `we:package.json`; no `node_modules/web-features` |
+| #219 delivered the I/O + caching shell and defers live serving here | ✓ [#219](../backlog/219-edge-venue-i-o-caching-shell-client-hints-parsing-baseline-l.md) `resolved`, `graduatedTo: we:capabilities/edge-io.ts (… live serving → #479)` |
 
 The body's framing holds: one **pure-build** piece (BaselineLookup) settled on direction, and one piece
 (live serve runtime) that carries an unresolved **placement** decision. They cleave along the
@@ -591,7 +591,7 @@ digest, keep NNN, keep `status: open` + `blockedBy: ["219"]`) and scaffold:
 
 | Slice | type / workItem / size | What | blockedBy | Batchable now? |
 |-------|------------------------|------|-----------|----------------|
-| **A — web-features-backed `BaselineLookup`** | idea · **story** · **2** | NEW `capabilities/edge-baseline.ts` impl of [edge-io.ts:69](../capabilities/edge-io.ts#L69) `BaselineLookup`; add `web-features` to `package.json`; map its Baseline epochs to a `(brand, platform?) => year`; unit test against the injection seam (mirror [edge-io.test.ts:47](../capabilities/__tests__/edge-io.test.ts#L47)). Data-only dep, no runtime lock-in, **no fork**. | — | ✅ yes |
+| **A — web-features-backed `BaselineLookup`** | idea · **story** · **2** | NEW `we:capabilities/edge-baseline.ts` impl of [we:edge-io.ts:69](../capabilities/edge-io.ts#L69) `BaselineLookup`; add `web-features` to `we:package.json`; map its Baseline epochs to a `(brand, platform?) => year`; unit test against the injection seam (mirror [we:edge-io.test.ts:47](../capabilities/__tests__/edge-io.test.ts#L47)). Data-only dep, no runtime lock-in, **no fork**. | — | ✅ yes |
 | **Decision — live-serve runtime placement** | decision · story · **parked** | De-buries #479's inline "Open decision" into its own `type:decision` card, **parked** under defer-live-serve: **A (default)** WE emits a pure-logic build-plan, plateau-app serves (honours defer-live-serve + no-leakage layering) · **B** WE hosts a reference esbuild server in-repo as a throwaway demo. | — | n/a (ratify-when-worked) |
 
 **DAG:** Slice A and the decision card are independent roots; the serve-runtime build (below) waits on
@@ -644,16 +644,16 @@ so any split is the **sibling-under-049** edge case — never nest, never renumb
 
 ## Work-investigation pass (read the real surface before drawing seams)
 
-- **The transform lives in frontierui, not WE.** `frontierui/compiler/src/component-transform/index.ts`
+- **The transform lives in frontierui, not WE.** `fui:frontierui/compiler/src/component-transform/index.ts`
   exports `transform(source, direction)` (bidirectional via a neutral IR). The fixtures the page must
   share are `frontierui/compiler/__tests__/component-transform/fixtures/` (`x-empty`, `user-card`,
   `x-shadow-closed` — paired `.html` + `.ts`).
 - **WE has no import path to frontierui.** `vite.config.mts` has no `frontierui` alias and the proxy
-  block doesn't reach it. The existing `demos/component-adapter-demo.ts` deliberately imports WE's own
+  block doesn't reach it. The existing `we:demos/component-adapter-demo.ts` deliberately imports WE's own
   *one-way runtime twin* (`/blocks/renderers/component/declarativeComponent`), **not** frontierui's
   bidirectional compiler. The cross-repo "symlink mechanism" the body names does not exist.
 - **frontierui has its own demos surface + dev server** (`frontierui/demos/`, vite :3001) right next to
-  the compiler and its fixtures — a native import (`../compiler/src/component-transform/index.js`) and a
+  the compiler and its fixtures — a native import (`we:../compiler/src/component-transform/index.js`) and a
   sibling-dir fixture read, **zero** cross-repo machinery.
 - **The two directions split cleanly on TS-in-browser.** `toImperative` (declarative→class) uses
   `parseDeclarative` + `emitImperative` (the minimal tag reader — no heavy dep). Only `toDeclarative`
@@ -726,10 +726,10 @@ shape against the real frontierui tree.
 | Surface a slice needs | State | Evidence (file:line) |
 |---|---|---|
 | Demos surface + dev server (the home) | **EXISTS** | 40+ paired `.html`+`.ts` demos in `frontierui/demos/`; vite port 3001 [vite.config.mts:88](../../frontierui/vite.config.mts#L88); new demo = drop a `.html`+`.ts` pair, bootstrap auto-injected [vite.config.mts:14](../../frontierui/vite.config.mts#L14) |
-| Bidirectional transform (the engine) | **EXISTS, shipped (#048 ✓)** | `transform(source, direction): {output, errors}` [compiler/src/component-transform/index.ts:28](../../frontierui/compiler/src/component-transform/index.ts#L28); `direction: 'toImperative'\|'toDeclarative'` |
-| Light direction — declarative→class (no TS dep) | **EXISTS** | `parseDeclarative` regex tag reader [declarative.ts:27](../../frontierui/compiler/src/component-transform/declarative.ts#L27) + `emitImperative` string builder [imperative.ts:93](../../frontierui/compiler/src/component-transform/imperative.ts#L93) — zero external deps |
-| Heavy direction — class→declarative (TS Compiler API) | **EXISTS, isolated** | `parseImperative` walks the TS AST [imperative.ts:25](../../frontierui/compiler/src/component-transform/imperative.ts#L25); `import ts from 'typescript'` [imperative.ts:18](../../frontierui/compiler/src/component-transform/imperative.ts#L18) — the **only** file pulling the ~23MB TS bundle |
-| Shared fixtures (anti-drift) | **EXISTS** | paired `.html`+`.ts` in `compiler/__tests__/component-transform/fixtures/` (`x-empty`, `user-card`, `x-shadow-closed`); contract harness [transform.test.ts:15](../../frontierui/compiler/__tests__/component-transform/transform.test.ts#L15) |
+| Bidirectional transform (the engine) | **EXISTS, shipped (#048 ✓)** | `transform(source, direction): {output, errors}` [fui:compiler/src/component-transform/index.ts:28](../../frontierui/compiler/src/component-transform/index.ts#L28); `direction: 'toImperative'\|'toDeclarative'` |
+| Light direction — declarative→class (no TS dep) | **EXISTS** | `parseDeclarative` regex tag reader [fui:declarative.ts:27](../../frontierui/compiler/src/component-transform/declarative.ts#L27) + `emitImperative` string builder [fui:imperative.ts:93](../../frontierui/compiler/src/component-transform/imperative.ts#L93) — zero external deps |
+| Heavy direction — class→declarative (TS Compiler API) | **EXISTS, isolated** | `parseImperative` walks the TS AST [fui:imperative.ts:25](../../frontierui/compiler/src/component-transform/imperative.ts#L25); `import ts from 'typescript'` [fui:imperative.ts:18](../../frontierui/compiler/src/component-transform/imperative.ts#L18) — the **only** file pulling the ~23MB TS bundle |
+| Shared fixtures (anti-drift) | **EXISTS** | paired `.html`+`.ts` in `compiler/__tests__/component-transform/fixtures/` (`x-empty`, `user-card`, `x-shadow-closed`); contract harness [fui:transform.test.ts:15](../../frontierui/compiler/__tests__/component-transform/transform.test.ts#L15) |
 | Converter playground page itself | **GREENFIELD** | no `component-converter*` demo in `frontierui/demos/` |
 
 The two directions split cleanly on the TS-in-browser axis exactly as the prospective shape predicted:
@@ -745,8 +745,8 @@ it is **re-scoped in place** to its core slice (the one-way page), and the secon
 
 | Slice | workItem · size | What | blockedBy | Files / seam (file:line-citable) | Demoable state |
 |---|---|---|---|---|---|
-| **A (= re-scoped #038)** | story · **3** | **One-way converter page** (declarative→class): fixture picker over the sibling `__tests__/component-transform/fixtures/`, single-pane lowered output, inline named-rule errors from `transform().errors`. No TS-in-browser. | — (#048 ✓, #700 ✓) | NEW `frontierui/demos/component-converter.html` + `.ts` (the [vite.config.mts:14](../../frontierui/vite.config.mts#L14) auto-wire pattern) importing `../compiler/src/component-transform/index.js` [index.ts:28](../../frontierui/compiler/src/component-transform/index.ts#L28), calling `toImperative` ([declarative.ts:27](../../frontierui/compiler/src/component-transform/declarative.ts#L27)+[imperative.ts:93](../../frontierui/compiler/src/component-transform/imperative.ts#L93)); enumerate fixtures from the sibling dir | `/component-converter` on :3001 picks a fixture, shows its lowered class + named-rule errors |
-| **B** | story · **3** | **Reverse direction + two-pane bidirectional editor** (class→declarative): add the `toDeclarative` direction via `parseImperative`, bundle the **TS Compiler API**, two-pane live editor syncing both ways. | **A** | extends the slice-A page: wires `toDeclarative` ([imperative.ts:25](../../frontierui/compiler/src/component-transform/imperative.ts#L25), `import ts` [imperative.ts:18](../../frontierui/compiler/src/component-transform/imperative.ts#L18)); two-pane editor; vite bundles `typescript` | edit either pane → the other updates live, both directions, fixtures still selectable |
+| **A (= re-scoped #038)** | story · **3** | **One-way converter page** (declarative→class): fixture picker over the sibling `__tests__/component-transform/fixtures/`, single-pane lowered output, inline named-rule errors from `transform().errors`. No TS-in-browser. | — (#048 ✓, #700 ✓) | NEW `fui:frontierui/demos/component-converter.html` + `.ts` (the [vite.config.mts:14](../../frontierui/vite.config.mts#L14) auto-wire pattern) importing `we:../compiler/src/component-transform/index.js` [we:index.ts:28](../../frontierui/compiler/src/component-transform/index.ts#L28), calling `toImperative` ([fui:declarative.ts:27](../../frontierui/compiler/src/component-transform/declarative.ts#L27)+[fui:imperative.ts:93](../../frontierui/compiler/src/component-transform/imperative.ts#L93)); enumerate fixtures from the sibling dir | `/component-converter` on :3001 picks a fixture, shows its lowered class + named-rule errors |
+| **B** | story · **3** | **Reverse direction + two-pane bidirectional editor** (class→declarative): add the `toDeclarative` direction via `parseImperative`, bundle the **TS Compiler API**, two-pane live editor syncing both ways. | **A** | extends the slice-A page: wires `toDeclarative` ([fui:imperative.ts:25](../../frontierui/compiler/src/component-transform/imperative.ts#L25), `import ts` [fui:imperative.ts:18](../../frontierui/compiler/src/component-transform/imperative.ts#L18)); two-pane editor; vite bundles `typescript` | edit either pane → the other updates live, both directions, fixtures still selectable |
 
 ### Slice DAG
 
@@ -810,18 +810,18 @@ reporters"** is **off by one against the tree** — the "standalone burndown" is
 
 | Reporter | File | Structured-output shape on disk today | Maps to model |
 |---|---|---|---|
-| `check:standards` | [scripts/check-standards.mjs](../scripts/check-standards.mjs) (835 ln) | `--json` already emits `{message, descriptor}` error/warn entries ([:45](../scripts/check-standards.mjs#L45), #089/#095/#196) | `findings[]` (+ `sources`) |
-| `check:readiness` | [scripts/check-readiness.mjs](../scripts/check-readiness.mjs) (270 ln) | `--json`/`--select` emit a ranked **selection** + batch pack ([:60-74](../scripts/check-readiness.mjs#L60)) | a `section` with `scores[]` (the ranked selection) |
-| `check:app-conformance` | [scripts/check-app-conformance.mjs](../scripts/check-app-conformance.mjs) (205 ln) | `--json` emits `{ok, score, layer1_conformance, layer1_queue, layer2_candidates, counts}` ([:180](../scripts/check-app-conformance.mjs#L180)); **`--burndown` writes the series** `reports/app-conformance-burndown.json` **inside this same script** ([:170-174](../scripts/check-app-conformance.mjs#L170)) | a coverage-matrix `section` (`scores[]`) **+ `series[]`** |
-| capability-manifest adherence | [capability-manifest/report.ts](../capability-manifest/report.ts) | already a structured `AdherenceReport` + `formatAdherenceReport` ([report.ts:27](../capability-manifest/report.ts#L27)) | a `section` partitioning declared/used/honoured/unused/outOfCapability |
+| `check:standards` | [we:scripts/check-standards.mjs](../scripts/check-standards.mjs) (835 ln) | `--json` already emits `{message, descriptor}` error/warn entries ([:45](../scripts/check-standards.mjs#L45), #089/#095/#196) | `findings[]` (+ `sources`) |
+| `check:readiness` | [we:scripts/check-readiness.mjs](../scripts/check-readiness.mjs) (270 ln) | `--json`/`--select` emit a ranked **selection** + batch pack ([:60-74](../scripts/check-readiness.mjs#L60)) | a `section` with `scores[]` (the ranked selection) |
+| `check:app-conformance` | [we:scripts/check-app-conformance.mjs](../scripts/check-app-conformance.mjs) (205 ln) | `--json` emits `{ok, score, layer1_conformance, layer1_queue, layer2_candidates, counts}` ([:180](../scripts/check-app-conformance.mjs#L180)); **`--burndown` writes the series** `we:reports/app-conformance-burndown.json` **inside this same script** ([:170-174](../scripts/check-app-conformance.mjs#L170)) | a coverage-matrix `section` (`scores[]`) **+ `series[]`** |
+| capability-manifest adherence | [we:capability-manifest/report.ts](../capability-manifest/report.ts) | already a structured `AdherenceReport` + `formatAdherenceReport` ([we:report.ts:27](../capability-manifest/report.ts#L27)) | a `section` partitioning declared/used/honoured/unused/outOfCapability |
 
 **Correction the tree forces:** there is **no standalone burndown reporter** — `grep burndown scripts/`
-hits only `check-app-conformance.mjs` (the `--burndown` flag) and `check-standards.mjs` (a comment). So
+hits only `we:check-app-conformance.mjs` (the `--burndown` flag) and `we:check-standards.mjs` (a comment). So
 the **5-reporter umbrella collapses to 4 real homes**; the burndown **series** is part of the
 app-conformance slice (its second output shape), not its own increment.
 
 **The fork is already dissolved (confirmed):** the report model is a **plain-object contract**
-([renderReport.ts:13](../blocks/renderers/report/renderReport.ts#L13) — "the report model IS the
+([we:renderReport.ts:13](../blocks/renderers/report/renderReport.ts#L13) — "the report model IS the
 contract; producers emit it, renderers/adapters read it"). A `.mjs` reporter constructs a matching plain
 object and emits it as JSON with **no TS import**; the #432 renderers + #434 `toSarif`/`toJUnit`
 adapters are downstream consumers. So each slice is a **pure-JS producer-emit**; terminal/ANSI output
@@ -835,10 +835,10 @@ shape, `check:standards`) and reused by the rest. DAG: **A → {B ∥ C ∥ D}**
 
 | Slice | type / workItem / size | blockedBy | Files / seam (file:line-citable) | Demoable state |
 |---|---|---|---|---|
-| **A (= re-scoped #435) — `check:standards` → report model + shared `buildReport()` helper** | idea · **story** · **3** | — (#431 ✓, #432 ✓) | NEW `scripts/lib/buildReport.mjs` (plain-object constructor matching the [#431 model](../blocks/renderers/report/renderReport.ts#L19)); extend [check-standards.mjs](../scripts/check-standards.mjs) `--json` to emit a `Report` (`sources` + a findings `section` from the existing `{message, descriptor}` entries at [:45](../scripts/check-standards.mjs#L45)); terminal path untouched | `check:standards --json` emits a model-valid report; pipes through #432 findings-table / #434 SARIF |
-| **B — `check:readiness` → report model** | idea · **story** · **2** | **A** | Extend [check-readiness.mjs](../scripts/check-readiness.mjs) `--json` to emit a `Report` (ranked selection + batch pack as a `section` with `scores[]`), reusing `buildReport()` from A | `check:readiness --json` emits a model-valid report of the ranked selection |
-| **C — `check:app-conformance` (+ burndown series) → report model** | idea · **story** · **3** | **A** | Extend [check-app-conformance.mjs](../scripts/check-app-conformance.mjs) `--json` to emit a `Report`: coverage-matrix `section` (`scores[]` from `layer1_conformance`) **+ a `series[]`** sourced from the `--burndown` log at [:170](../scripts/check-app-conformance.mjs#L170), reusing `buildReport()` | `--json` emits a model-valid coverage-matrix **+ trend series**; pipes through #432 coverage-matrix renderer |
-| **D — capability-manifest adherence → report model** | idea · **story** · **2** | **A** | Map the existing `AdherenceReport` ([report.ts:27](../capability-manifest/report.ts#L27)) into a `Report` `section` (declared/used/honoured/unused/outOfCapability buckets), reusing the model shape; `formatAdherenceReport` plain-text path stays | The adherence artifact also emits a model-valid report alongside its plain-text render |
+| **A (= re-scoped #435) — `check:standards` → report model + shared `buildReport()` helper** | idea · **story** · **3** | — (#431 ✓, #432 ✓) | NEW `we:scripts/lib/buildReport.mjs` (plain-object constructor matching the [#431 model](../blocks/renderers/report/renderReport.ts#L19)); extend [we:check-standards.mjs](../scripts/check-standards.mjs) `--json` to emit a `Report` (`sources` + a findings `section` from the existing `{message, descriptor}` entries at [:45](../scripts/check-standards.mjs#L45)); terminal path untouched | `check:standards --json` emits a model-valid report; pipes through #432 findings-table / #434 SARIF |
+| **B — `check:readiness` → report model** | idea · **story** · **2** | **A** | Extend [we:check-readiness.mjs](../scripts/check-readiness.mjs) `--json` to emit a `Report` (ranked selection + batch pack as a `section` with `scores[]`), reusing `buildReport()` from A | `check:readiness --json` emits a model-valid report of the ranked selection |
+| **C — `check:app-conformance` (+ burndown series) → report model** | idea · **story** · **3** | **A** | Extend [we:check-app-conformance.mjs](../scripts/check-app-conformance.mjs) `--json` to emit a `Report`: coverage-matrix `section` (`scores[]` from `layer1_conformance`) **+ a `series[]`** sourced from the `--burndown` log at [:170](../scripts/check-app-conformance.mjs#L170), reusing `buildReport()` | `--json` emits a model-valid coverage-matrix **+ trend series**; pipes through #432 coverage-matrix renderer |
+| **D — capability-manifest adherence → report model** | idea · **story** · **2** | **A** | Map the existing `AdherenceReport` ([we:report.ts:27](../capability-manifest/report.ts#L27)) into a `Report` `section` (declared/used/honoured/unused/outOfCapability buckets), reusing the model shape; `formatAdherenceReport` plain-text path stays | The adherence artifact also emits a model-valid report alongside its plain-text render |
 
 ### Slice DAG
 
@@ -858,7 +858,7 @@ and ships standalone.
 | Condition | Verdict |
 |---|---|
 | (1) Size is volume, not an unresolved decision | ✅ the mjs-consumes-TS-model "fork" is dissolved (plain-object emit, no import); #431/#432 resolved; this is producer-emit wiring × 4 |
-| (2) ≥2 nameable slices, each a real home | ✅ 4, each homed on a concrete reporter file + `scripts/lib/buildReport.mjs` |
+| (2) ≥2 nameable slices, each a real home | ✅ 4, each homed on a concrete reporter file + `we:scripts/lib/buildReport.mjs` |
 | (3) Each ≤ size 3 / batchable, named files | ✅ A=3 (richest + helper), B=2, C=3 (two shapes: matrix + series), D=2 — all file:line-cited, no buried fork |
 | (4) Acyclic DAG, real independence or incremental | ✅ A → {B ∥ C ∥ D}; 3 independent leaves; each ships standalone |
 | (5) Every slice leaves a valid demoable state | ✅ per-reporter `--json` emits a model-valid report consumable by #432/#434; terminal output unchanged throughout — gate stays green |
@@ -906,7 +906,7 @@ none.
 
 | Surface a slice would need | State | Evidence |
 |---|---|---|
-| Managed-inbox / programmable-email tooling | **GREENFIELD** | no `*inbox*`/`mailslurp`/`mailosaur`/catch-all anywhere outside this card; only [scripts/design-refs.mjs](../scripts/design-refs.mjs) uses Playwright, for **logged-out** capture |
+| Managed-inbox / programmable-email tooling | **GREENFIELD** | no `*inbox*`/`mailslurp`/`mailosaur`/catch-all anywhere outside this card; only [we:scripts/design-refs.mjs](../scripts/design-refs.mjs) uses Playwright, for **logged-out** capture |
 | Authenticated-state capture (login/signup driver) | **GREENFIELD** | no auth/login Playwright flow; current capture is public-page only |
 | Credential vault / rotation | **GREENFIELD** | none |
 | Boundary ruling (is this a WE concern at all?) | **UNRESOLVED FORK** | the card defers it explicitly; precedent is the resolved #475 decision — *vision/impl capability is never a WE standard; it's a Plateau service WE consumes no-leakage* ([[project_vision_is_plateau_service_no_leakage]]) |
@@ -942,7 +942,7 @@ instruction, just "not scoped yet"), so it's a Tier-B `/prepare` candidate, not 
 
 **No split, no epic conversion, no slices.** #611 stays a `story`. The only mutations:
 
-1. **Scaffold the decision card:** `node scripts/backlog.mjs scaffold --type=decision --workitem=story
+1. **Scaffold the decision card:** `node we:scripts/backlog.mjs scaffold --type=decision --workitem=story
    --size=5 --title="Managed-inbox / auth-capture capability — boundary (Plateau service vs repo-local
    devtooling)" --digest="…"` (no `--parent`; it's the unblocker, a sibling). Its prepare scope folds in
    the build-vs-buy survey (Mailosaur / MailSlurp / Postmark inbound / self-hosted catch-all + IMAP) and
@@ -988,7 +988,7 @@ pool); this run re-verifies that against the real tree.
 
 | Surface a slice would need | State | Evidence |
 |---|---|---|
-| webcases suite (the machine-checkable target) | **BARELY SCAFFOLDED** | [webcases/driftCheck.ts](../webcases/driftCheck.ts) + its test are the *only* files — the #334 mock-vs-real drift check. No requirement layer, no case-compiler. |
+| webcases suite (the machine-checkable target) | **BARELY SCAFFOLDED** | [we:webcases/driftCheck.ts](../webcases/driftCheck.ts) + its test are the *only* files — the #334 mock-vs-real drift check. No requirement layer, no case-compiler. |
 | Requirement **meta-schema** (the BDD-like format) | **GREENFIELD + UNRATIFIED** | no `requirementSchema`/`requirement-as-code` anywhere in `src/`/`blocks/`/`plugs/`; the body lists it under *"Design notes (**recommended**)"* — proposed, not decided. No `type:decision` card exists for it. |
 | Authoring + validation editor (slice A) | **GREENFIELD** | no requirement editor / contradiction-ambiguity linter surface anywhere. |
 | Auto-testing loop (slice B) | **GREENFIELD** | the propose-and-verify loop (#095) is not applied to requirements; no requirement→case generator. |
@@ -996,7 +996,7 @@ pool); this run re-verifies that against the real tree.
 | AI-as-swappable-provider placement | **RESOLVED** (not a fork) | settled by [#475](../backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/) no-leakage ruling — these AI impl capabilities are Plateau-served; only the meta-schema + webcases reach the standard. |
 
 So the body's A→B→C staging is a **framing, not a tree** — none of A/B/C has a `file:line`-citable
-surface to slice against. The single piece on disk (`driftCheck.ts`) is downstream of #334, unrelated to
+surface to slice against. The single piece on disk (`we:driftCheck.ts`) is downstream of #334, unrelated to
 the requirement layer.
 
 ## Why no on-disk split (not "no seam") — #100
@@ -1031,7 +1031,7 @@ slice A is pulled into the near term.
 
 Minimal, no on-disk split (there's nothing batchable to scaffold):
 
-1. **Scaffold the decision card**: `node scripts/backlog.mjs scaffold --type=decision --workitem=story
+1. **Scaffold the decision card**: `node we:scripts/backlog.mjs scaffold --type=decision --workitem=story
    --parent=099 --title="Requirement meta-schema — BDD-like format & relationship to webcases"
    --digest="…"`, then edit `status: open → parked` (vision-tier deferral). (Sibling under #099, since
    #100 already has that parent.)
@@ -1063,11 +1063,11 @@ delegated from the resolved form-control inventory #468** (2026-06-13).
 
 | Surface a slice would need | State | Evidence (file:line) |
 |---|---|---|
-| `intent:temporal` (the UX axis the block implements) | **EXISTS but `concept`** | [intents.json:1389-1411](../src/_data/intents.json#L1389) — `presentation: media\|linear\|input` × `granularity: point\|range\|multi`; not yet `active` |
-| `intent:locale` (the formatting layer to compose) | **EXISTS, `concept`** | [intents.json:1527](../src/_data/intents.json#L1527) — locale/direction/numbering/**calendar** overrides; date/time would be its first consumer |
-| Any date / time / picker / calendar block | **GREENFIELD** | no `blocks/*date*`, `*time*`, `*picker*`, `*calendar*`; zero hits in [blocks.json](../src/_data/blocks.json) |
-| Native-anchor precedent (the pattern this block would follow) | **EXISTS** | slider IS `input[type=range]`, single+dual-thumb as **one block over the native element** [blocks.json:3175-3192](../src/_data/blocks.json#L3175); `input[type=date\|time\|datetime-local]` are the unused baseline anchors |
-| Fixture-driven demo machine | **EXISTS, copyable** | shared-fixture → playground badge + CI test pattern ([demos/data-grid-demo.html](../demos/data-grid-demo.html), bootstrap-fixture variant) |
+| `intent:temporal` (the UX axis the block implements) | **EXISTS but `concept`** | [we:intents.json:1389-1411](../src/_data/intents.json#L1389) — `presentation: media\|linear\|input` × `granularity: point\|range\|multi`; not yet `active` |
+| `intent:locale` (the formatting layer to compose) | **EXISTS, `concept`** | [we:intents.json:1527](../src/_data/intents.json#L1527) — locale/direction/numbering/**calendar** overrides; date/time would be its first consumer |
+| Any date / time / picker / calendar block | **GREENFIELD** | no `blocks/*date*`, `*time*`, `*picker*`, `*calendar*`; zero hits in [fui:blocks.json](../src/_data/blocks.json) |
+| Native-anchor precedent (the pattern this block would follow) | **EXISTS** | slider IS `input[type=range]`, single+dual-thumb as **one block over the native element** [fui:blocks.json:3175-3192](../src/_data/blocks.json#L3175); `input[type=date\|time\|datetime-local]` are the unused baseline anchors |
+| Fixture-driven demo machine | **EXISTS, copyable** | shared-fixture → playground badge + CI test pattern ([we:demos/data-grid-demo.html](../demos/data-grid-demo.html), bootstrap-fixture variant) |
 | The variants-vs-own-blocks scope call | **OPEN, delegated here** | [#468:18](../backlog/468-form-control-block-inventory-datepicker-timepicker-input-fam.md) resolved and handed the datepicker/timepicker scope to #359 "to settle in #359's own split" |
 
 **What the tree shows:** the intent that defines the axis exists but is still `concept`; there is **no
@@ -1104,10 +1104,10 @@ candidate, not parked.
 - **Fork:** Single-value date & time pickers — **variants of the #359 picker block, or their own blocks?**
 - **A (default) — one temporal block, variants by dimension.** A date picker is `point`+`media`(grid), a
   time picker is `point`+`linear/media`(clock), range is `granularity:range` — `intent:temporal` already
-  models all of these as **one protocol** ([intents.json:1389](../src/_data/intents.json#L1389)). One
+  models all of these as **one protocol** ([we:intents.json:1389](../src/_data/intents.json#L1389)). One
   block consuming temporal, configured by `granularity`/`presentation` over the native
   `input[type=date\|time\|datetime-local]` anchor, mirrors the **slider precedent** (single + dual-thumb
-  = one block over `input[type=range]`, not two — [blocks.json:3175](../src/_data/blocks.json#L3175)).
+  = one block over `input[type=range]`, not two — [fui:blocks.json:3175](../src/_data/blocks.json#L3175)).
 - **B — separate datepicker / timepicker blocks.** Distinct registry entries (matches #468's original
   inventory listing and some design-system catalogs). Cost: duplicates the calendar-grid / keyboard / i18n
   machinery across blocks and diverges from temporal's single-protocol model.
@@ -1118,7 +1118,7 @@ candidate, not parked.
 
 **No split, no epic conversion, no slices.** #359 stays a `story` under #315. The only mutations:
 
-1. **Scaffold the decision card:** `node scripts/backlog.mjs scaffold --type=decision --workitem=story
+1. **Scaffold the decision card:** `node we:scripts/backlog.mjs scaffold --type=decision --workitem=story
    --size=2 --title="Date/time picker scope — single-value pickers as #359 variants vs. their own blocks"
    --blocked-by= --digest="…"` (no `--parent`; it's the unblocker sibling). Body states fork A (default)
    / B with the file:line refs above.
@@ -1154,17 +1154,17 @@ the size:13 is stale, not deferred.**
 
 The decisive finding: #086's headline "two seams" — analyzer registry → neutral structure → verify-gated
 generation — **was already built by its resolved sibling #094** (same parent #097, `graduatedTo:
-blocks/renderers/upgrader/upgraderEngine.ts`), for the inverse direction (legacy code → standard).
+we:blocks/renderers/upgrader/upgraderEngine.ts`), for the inverse direction (legacy code → standard).
 
 | #086 body claim / "open design work" | State on disk | Evidence |
 |---|---|---|
 | Neutral structural-description schema (the body's "hard, lasting design work") | **BUILT + the fork is RESOLVED in code** | [`ComponentIR`](../blocks/renderers/upgrader/upgraderEngine.ts#L38) — comment at [:36](../blocks/renderers/upgrader/upgraderEngine.ts#L36): *"Expressed in the standard's OWN `<component>` vocabulary … (#086 open decision, resolved)"* — the exact decision #086's body lists as recommended-not-ratified |
 | Analyzer provider registry (swappable AI) | **BUILT** | [`CustomAnalyzer` / `CustomAnalyzerRegistry`](../blocks/renderers/upgrader/upgraderEngine.ts#L60) with `handles()`-routed [`SourceInput`](../blocks/renderers/upgrader/upgraderEngine.ts#L53) input-adapter seam |
-| First reference provider + a BYO-model provider | **BUILT** | [analyzers/legacyWebComponent.ts](../blocks/renderers/upgrader/analyzers/legacyWebComponent.ts) (deterministic) · [analyzers/modelComponent.ts](../blocks/renderers/upgrader/analyzers/modelComponent.ts) (BYO-key model) |
+| First reference provider + a BYO-model provider | **BUILT** | [we:analyzers/legacyWebComponent.ts](../blocks/renderers/upgrader/analyzers/legacyWebComponent.ts) (deterministic) · [we:analyzers/modelComponent.ts](../blocks/renderers/upgrader/analyzers/modelComponent.ts) (BYO-key model) |
 | Code generator reusing the existing core (not a parallel one) | **BUILT** | engine lowers `ComponentIR` → the declarative `<component>` MaaS `serve()` consumes ([:104+](../blocks/renderers/upgrader/upgraderEngine.ts#L104)) |
 | Quality / verify gate (the moat) | **BUILT** | the `offered: false` round-trip gate, documented [:27-29](../blocks/renderers/upgrader/upgraderEngine.ts#L27) |
 | "Static vs interactive as input *kinds* behind one registry" | **Seam BUILT** | `SourceInput.language` is the input-adapter hint; a mockup kind is one more `handles()` branch — **the registry already models this** |
-| The mockup **vision** analyzer (image/Figma/prototype → structure) | **Plateau service, not WE** | #475 ruling ([[project_vision_is_plateau_service_no_leakage]]): the vision *impl capability* is a Plateau-served no-leakage service WE consumes; only the neutral contract + output are WE artifacts. The shared `customVisionProvider`/`customMockupAnalyzerRegistry` pattern is named in [researchTopics.json:205](../src/_data/researchTopics.json#L205) |
+| The mockup **vision** analyzer (image/Figma/prototype → structure) | **Plateau service, not WE** | #475 ruling ([[project_vision_is_plateau_service_no_leakage]]): the vision *impl capability* is a Plateau-served no-leakage service WE consumes; only the neutral contract + output are WE artifacts. The shared `customVisionProvider`/`customMockupAnalyzerRegistry` pattern is named in [we:researchTopics.json:205](../src/_data/researchTopics.json#L205) |
 | Analyzer-as-runtime-registry framing in #086's body | **Already corrected** | engine doc-comment [:13-22](../blocks/renderers/upgrader/upgraderEngine.ts#L13) reframes it as a **devtools provider seam** (explicit-input, no global singleton — #191/#494), per [[feedback_runtime_di_vs_devtools_provider_seam]] |
 
 So #086's residual **WE-resident** work, after the #094 carve-out (engine + schema fork resolved) and
@@ -1183,7 +1183,7 @@ nameable independent WE slices remain) and would not benefit from a split.
 
 | Which condition failed | Why | Unblocking action |
 |---|---|---|
-| **(2) no ≥2 nameable WE slices** — and the size:13 is **stale**, not "deferred-because-not-batchable" as the body's split-status note says | The "two independent seams + hard schema foundation" that justified size·13 are **already built** (#094, `upgraderEngine.ts`) or **placed in Plateau** (#475 vision service). What's left WE-side is one contract-extension (mockup `SourceInput` kind → existing `ComponentIR` + a thin Plateau-client analyzer + a demo) — a single `story·≈3`, not a multi-slice epic. | **Re-investigate + re-size #086 in place against the #094 engine and #475 placement, *before* any split** — it almost certainly re-sizes `story·13 → story·≈3` and **de-stales the body** (mark the neutral-schema decision resolved-in-#094 with the file:line; point the analyzer impl at the Plateau vision service per #475; drop the obsolete "hard lasting design work" framing). At `≈3` it is **directly `/batch`-able — no split needed.** |
+| **(2) no ≥2 nameable WE slices** — and the size:13 is **stale**, not "deferred-because-not-batchable" as the body's split-status note says | The "two independent seams + hard schema foundation" that justified size·13 are **already built** (#094, `we:upgraderEngine.ts`) or **placed in Plateau** (#475 vision service). What's left WE-side is one contract-extension (mockup `SourceInput` kind → existing `ComponentIR` + a thin Plateau-client analyzer + a demo) — a single `story·≈3`, not a multi-slice epic. | **Re-investigate + re-size #086 in place against the #094 engine and #475 placement, *before* any split** — it almost certainly re-sizes `story·13 → story·≈3` and **de-stales the body** (mark the neutral-schema decision resolved-in-#094 with the file:line; point the analyzer impl at the Plateau vision service per #475; drop the obsolete "hard lasting design work" framing). At `≈3` it is **directly `/batch`-able — no split needed.** |
 
 The earlier "splittable but deferred" verdict is superseded: the staging seam it described (schema → analyzer
 → generator) no longer maps to *unbuilt WE work* — those pieces shipped via #094. Splitting #086 now would
@@ -1203,7 +1203,7 @@ auto-applying (it's outside the split-mutation a "go" authorizes). Proposed in-p
    keep `NNN`.
 2. **De-stale the body:** replace the "Split status" note + the "Design decisions (recommended)" /
    "hard, lasting design work" framing with: *the analyzer↔generator engine + neutral `ComponentIR`
-   schema are shipped (#094, `blocks/renderers/upgrader/upgraderEngine.ts`); #086 = add a **mockup input
+   schema are shipped (#094, `we:blocks/renderers/upgrader/upgraderEngine.ts`); #086 = add a **mockup input
    adapter** feeding that engine, with the vision analyzer as a Plateau-served client (#475)*.
 3. Then the item is directly `/batch`-able. **Net flow: 0** (no new items; one item re-sized + de-staled).
 
@@ -1221,14 +1221,14 @@ below, not drawn from the body.
 ## Work-investigation pass (what the code actually says)
 
 - **The WE-side per-block work is a one-liner.** A block page hosts a demo by adding a single
-  `{% fuiDemo "X.html", "title", h %}` line to its description partial
-  (`src/_includes/block-descriptions/{id}.njk`), rendered by [block-pages.njk:35](../src/block-pages.njk#L35).
-  The shortcode already ships ([.eleventy.js:38](../.eleventy.js#L38)) and is **already live** on
-  [component.njk:235](../src/_includes/block-descriptions/component.njk#L235) (`/blocks/component/`
-  embeds `component-converter.html`) — so **acceptance #1 is already partly met** and rollout is
+  `{% fuiDemo "we:X.html", "title", h %}` line to its description partial
+  (`src/_includes/block-descriptions/{id}.njk`), rendered by [we:block-pages.njk:35](../src/block-pages.njk#L35).
+  The shortcode already ships ([we:.eleventy.js:38](../.eleventy.js#L38)) and is **already live** on
+  [we:component.njk:235](../src/_includes/block-descriptions/component.njk#L235) (`/blocks/component/`
+  embeds `fui:component-converter.html`) — so **acceptance #1 is already partly met** and rollout is
   *extending a working pattern*, not building a seam.
 - **The real gate per block is external: a FUI-hosted demo must exist.** The iframe targets
-  `${FUI_DEMO_BASE}/demos/${demoFile}` ([.eleventy.js:37-39](../.eleventy.js#L37)) — a FUI deliverable.
+  `${FUI_DEMO_BASE}/demos/${demoFile}` ([we:.eleventy.js:37-39](../.eleventy.js#L37)) — a FUI deliverable.
   WE cannot author it (no `frontierui` alias in `vite.config.mts`; the #700 boundary).
 - **WE blocks (71 partials) ↔ existing FUI demos (23 `.html`): exact-id intersection is empty; the real
   mapping is ~7.** FUI's demos are mostly trait/infra surfaces (lazy-traits, positioning, visibility-gate,
@@ -1237,13 +1237,13 @@ below, not drawn from the body.
 
   | WE block | FUI demo (exists) | note |
   |---|---|---|
-  | `autocomplete` | `autocomplete-unplugged.html` | title *"<auto-complete> — droplist demo"* — a **droplist-family member** → the real POC (the body's `/blocks/dropdown/` has **no** FUI demo) |
-  | `for-each` | `for-each-demo.html` | |
-  | `tabs` | `view-tabs-demo.html` | |
-  | `interpolation-text-node` | `text-interpolation-demo.html` | |
-  | `nav-list` / `nav-section` | `navigation-demo.html` | |
-  | `conditional-view` | `visibility-gate.html` | activate-on-view (#280) |
-  | `tooltip` | `positioning-shift.html` / `anchored-resize.html` | |
+  | `autocomplete` | `fui:autocomplete-unplugged.html` | title *"<auto-complete> — droplist demo"* — a **droplist-family member** → the real POC (the body's `/blocks/dropdown/` has **no** FUI demo) |
+  | `for-each` | `we:for-each-demo.html` | |
+  | `tabs` | `we:view-tabs-demo.html` | |
+  | `interpolation-text-node` | `we:text-interpolation-demo.html` | |
+  | `nav-list` / `nav-section` | `we:navigation-demo.html` | |
+  | `conditional-view` | `fui:visibility-gate.html` | activate-on-view (#280) |
+  | `tooltip` | `fui:positioning-shift.html` / `fui:anchored-resize.html` | |
 
 - **Consequence.** The original `size: 8` was scoped *"every block,"* but the WE-authorable surface is a
   handful of one-line adds gated on demos that already exist. The bulk of *"every block"* is
@@ -1257,7 +1257,7 @@ POC onto `autocomplete` (a droplist-family member whose FUI demo exists). DAG: *
 
 | Slice | type / workItem / size | blockedBy | Files / seam (file:line-citable) | Demoable state |
 |---|---|---|---|---|
-| **A — POC + repeatable pattern + per-block demo-mapping metadata** | idea · **story** · **2** | — | Embed the autocomplete droplist demo on `/blocks/autocomplete/`: add `{% fuiDemo "autocomplete-unplugged.html", … %}` to [autocomplete.njk](../src/_includes/block-descriptions/autocomplete.njk); document the one-line pattern + the demo→block mapping table (a `demoFile` convention in [blocks.json](../src/_data/blocks.json) or the partial); mirror [component.njk:235](../src/_includes/block-descriptions/component.njk#L235) | `/blocks/autocomplete/` shows a live FUI droplist demo next to its code sample (additive — static sample retained) |
+| **A — POC + repeatable pattern + per-block demo-mapping metadata** | idea · **story** · **2** | — | Embed the autocomplete droplist demo on `/blocks/autocomplete/`: add `{% fuiDemo "fui:autocomplete-unplugged.html", … %}` to [we:autocomplete.njk](../src/_includes/block-descriptions/autocomplete.njk); document the one-line pattern + the demo→block mapping table (a `demoFile` convention in [fui:blocks.json](../src/_data/blocks.json) or the partial); mirror [we:component.njk:235](../src/_includes/block-descriptions/component.njk#L235) | `/blocks/autocomplete/` shows a live FUI droplist demo next to its code sample (additive — static sample retained) |
 | **B — Roll out to the remaining existing-demo blocks** | idea · **story** · **3** | **A** | One `{% fuiDemo … %}` line each for `for-each`, `tabs`, `interpolation-text-node`, `nav-list`/`nav-section`, `conditional-view`, `tooltip` (~6 blocks) in their description partials, each pointing at the mapped existing FUI demo above | each page gains a live demo next to its code sample |
 
 **Rubric:** (1) volume not a fork — mechanism shipped (#701), boundary settled (#707/#700); the only
@@ -1318,17 +1318,17 @@ land and the first WE trait establishes the pattern).
 
 | Surface a slice would need | State | Evidence (file:line) |
 |---|---|---|
-| `intent:temporal` (the UX axis to realize) | **EXISTS, `status: concept`** | [intents.json:1389-1411](../src/_data/intents.json#L1389) — dimensions `presentation: media\|linear\|input` × `granularity: point\|range\|multi` already modeled; **no block realizes it** |
-| The `temporal` core block + any date/time/range block | **GREENFIELD** | no `date`/`time`/`calendar`/`temporal`/`picker` block in [blocks.json](../src/_data/blocks.json); `picker-surface` (3460) is the unrelated symbol-picker grid |
+| `intent:temporal` (the UX axis to realize) | **EXISTS, `status: concept`** | [we:intents.json:1389-1411](../src/_data/intents.json#L1389) — dimensions `presentation: media\|linear\|input` × `granularity: point\|range\|multi` already modeled; **no block realizes it** |
+| The `temporal` core block + any date/time/range block | **GREENFIELD** | no `date`/`time`/`calendar`/`temporal`/`picker` block in [fui:blocks.json](../src/_data/blocks.json); `picker-surface` (3460) is the unrelated symbol-picker grid |
 | Native anchors (the native-first baseline) | **EXISTS (platform)** | `input[type=date\|time\|datetime-local]` — three distinct anchors (the concrete platform reason #713 C gives for named presets that slider's single anchor lacked) |
-| Sibling gap-fix pattern (the precedent shape) | **STANDARDS-ONLY** | drawer [blocks.json:3311](../src/_data/blocks.json#L3311) · dialog [:3286](../src/_data/blocks.json#L3286) · notification [:3241](../src/_data/blocks.json#L3241) · breadcrumb [:3268](../src/_data/blocks.json#L3268) · carousel [:3330](../src/_data/blocks.json#L3330) · slider [:3175](../src/_data/blocks.json#L3175) — **all `blocks.json` entries, zero impl dirs** (`block:<id>` graduations, sizes 2-5, one story each) |
-| Slider precedent (native-first, variants over one anchor) | **EXISTS** | [blocks.json:3175-3192](../src/_data/blocks.json#L3175) — single + dual-thumb = one block over `input[type=range]` |
+| Sibling gap-fix pattern (the precedent shape) | **STANDARDS-ONLY** | drawer [fui:blocks.json:3311](../src/_data/blocks.json#L3311) · dialog [:3286](../src/_data/blocks.json#L3286) · notification [:3241](../src/_data/blocks.json#L3241) · breadcrumb [:3268](../src/_data/blocks.json#L3268) · carousel [:3330](../src/_data/blocks.json#L3330) · slider [:3175](../src/_data/blocks.json#L3175) — **all `fui:blocks.json` entries, zero impl dirs** (`block:<id>` graduations, sizes 2-5, one story each) |
+| Slider precedent (native-first, variants over one anchor) | **EXISTS** | [fui:blocks.json:3175-3192](../src/_data/blocks.json#L3175) — single + dual-thumb = one block over `input[type=range]` |
 | Trait infra (the impl substrate #713 names) | **SHIPPED but EMPTY** | `traitEnforcer({ traitMap: {} })` [vite.config.mts:104](../vite.config.mts#L104) — Enforcer is live (#448/#484 ✓) but **zero traits are authored in WE**; no `blocks/temporal/`, no `CustomAttribute` trait module to model seams against |
-| Demo registry + dev-server fallback pattern | **EXISTS, copyable** | [demos.json](../src/_data/demos.json) + [demos/](../demos/) |
+| Demo registry + dev-server fallback pattern | **EXISTS, copyable** | [we:demos.json](../src/_data/demos.json) + [demos/](../demos/) |
 
 **The decisive read: #359's gap-fix deliverable is the *standards layer*, matching its resolved
 siblings.** Every sibling gap-fix under #315 (drawer #360, dialog #376, notification #358, breadcrumb
-#362, carousel #363, slider #361) graduated as a `blocks.json` entry **with no impl dir** — a `block:<id>`
+#362, carousel #363, slider #361) graduated as a `fui:blocks.json` entry **with no impl dir** — a `block:<id>`
 standards artifact, single story, size 2-5. #713's "variant traits in `traitMap` + build-chunk
 assertion" describes the *eventual impl build property* (it reasoned about bundle isolation), not the
 gap-fix's standards deliverable. So the standards entries (the activated intent + the core + named
@@ -1341,8 +1341,8 @@ stays a re-sized `story` for its core slice, with the rest added as **siblings u
 
 | Slice | type / workItem / size | blockedBy | Files / seam (file:line-citable) | Demoable state |
 |---|---|---|---|---|
-| **A (= re-scoped #359)** — activate `intent:temporal` + abstract `temporal` core block + first native anchor (`date-picker`) | idea · **story** · **3** | — (#713 ✓) | Flip [intents.json:1391](../src/_data/intents.json#L1391) `status: concept → active`; NEW abstract `temporal` block entry in [blocks.json](../src/_data/blocks.json) (`implementsIntent: temporal`, `composesIntents: [temporal, locale, input, focus-delegation]`, native-input anchoring, design decisions citing #713 C + the slider precedent [:3175](../src/_data/blocks.json#L3175)); NEW `date-picker` shallow preset pinning `presentation: media`/`granularity: point` over `input[type=date]` | `/intents/temporal/` renders active; `/blocks/` lists the `temporal` core + `date-picker` preset (same render path the sibling gap-blocks use) |
-| **B** — the remaining named preset blocks | idea · **task** · **2** | **A** | NEW `time-picker` (`input[type=time]`, `presentation: media\|linear`), `datetime-picker` (`input[type=datetime-local]`), `date-range-picker` (`granularity: range`) preset entries in [blocks.json](../src/_data/blocks.json), each pinning dims + binding its native anchor, design decision = "thin preset over the `temporal` core, not a re-impl" | `/blocks/` lists all four named presets; catalog parity with #468's inventory + design-system `DatePicker`/`TimePicker` |
+| **A (= re-scoped #359)** — activate `intent:temporal` + abstract `temporal` core block + first native anchor (`date-picker`) | idea · **story** · **3** | — (#713 ✓) | Flip [we:intents.json:1391](../src/_data/intents.json#L1391) `status: concept → active`; NEW abstract `temporal` block entry in [fui:blocks.json](../src/_data/blocks.json) (`implementsIntent: temporal`, `composesIntents: [temporal, locale, input, focus-delegation]`, native-input anchoring, design decisions citing #713 C + the slider precedent [:3175](../src/_data/blocks.json#L3175)); NEW `date-picker` shallow preset pinning `presentation: media`/`granularity: point` over `input[type=date]` | `/intents/temporal/` renders active; `/blocks/` lists the `temporal` core + `date-picker` preset (same render path the sibling gap-blocks use) |
+| **B** — the remaining named preset blocks | idea · **task** · **2** | **A** | NEW `time-picker` (`input[type=time]`, `presentation: media\|linear`), `datetime-picker` (`input[type=datetime-local]`), `date-range-picker` (`granularity: range`) preset entries in [fui:blocks.json](../src/_data/blocks.json), each pinning dims + binding its native anchor, design decision = "thin preset over the `temporal` core, not a re-impl" | `/blocks/` lists all four named presets; catalog parity with #468's inventory + design-system `DatePicker`/`TimePicker` |
 
 ### Slice DAG
 
@@ -1359,10 +1359,10 @@ WE trait pattern.
 | Condition | Verdict |
 |---|---|
 | Size is volume, not an unresolved decision | ✅ #713 ratified C (the whole decomposition); no fork survives in A/B |
-| ≥2 nameable slices, each a real home | ✅ both land in `blocks.json`/`intents.json` (the catalog) — the exact home every sibling gap-fix used |
+| ≥2 nameable slices, each a real home | ✅ both land in `fui:blocks.json`/`we:intents.json` (the catalog) — the exact home every sibling gap-fix used |
 | Each slice ≤ 3 / `task`, named files | ✅ A=3 (intent flip + core + 1 preset), B=2 (3 preset entries); files citable |
 | Acyclic DAG, real independence or incremental delivery | ✅ A→B incremental, each demoable alone |
-| Every slice leaves a valid demoable state | ✅ A: intent active + core/date-picker in catalog; B: full preset set in catalog (sibling precedent proves blocks.json-entry-only is a complete graduation) |
+| Every slice leaves a valid demoable state | ✅ A: intent active + core/date-picker in catalog; B: full preset set in catalog (sibling precedent proves fui:blocks.json-entry-only is a complete graduation) |
 | Split doesn't cost quality | ✅ seam mirrors #713 C (one core machinery, named native-anchored presets) and the sibling standards-first pattern; no cohesive unit fragmented |
 
 ## Could not split (yet) — #359 impl (variant traits + build-chunk assertion)

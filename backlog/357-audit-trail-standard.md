@@ -11,8 +11,8 @@ crossRef: { url: /backlog/351-web-compliance-project/, label: "Related: Web Comp
 ---
 
 > **Resolved 2026-06-12 — codified.** Graduated to the **Web Audit** project (`webaudit`,
-> `projects.json`) owning the **Audit Trail** protocol (`audit-trail`, `protocols.json`, draft; body in
-> `src/_includes/project-webaudit.njk` §`protocol-audit-trail`). The contract: a normalized `AuditEvent`
+> `we:projects.json`) owning the **Audit Trail** protocol (`audit-trail`, `we:protocols.json`, draft; body in
+> `we:src/_includes/project-webaudit.njk` §`protocol-audit-trail`). The contract: a normalized `AuditEvent`
 > ({ target, action, actor, at, before?, after?, correlationId? }) appended through a swappable
 > `CustomAuditProvider` registry, append-only by guarantee; before/after **reuse the Web States
 > `ChangeRecord` shape**, and the headline composition wires a Web Lifecycle provider's events straight

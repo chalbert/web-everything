@@ -19,7 +19,7 @@ tags: [decision, lifecycle, weblifecycle, protocol, layer-placement, governance,
 Grounding: the placement test codified by [#409](/backlog/409-decision-master-detail-intent-vs-project/)
 (re-run by #467), plus a focused prior-art
 survey published at [`/research/domain-entity-lifecycle/`](/research/domain-entity-lifecycle/) (session
-report `reports/2026-06-14-domain-entity-lifecycle-placement.md`). **2 forks**, each carrying a **bold**
+report `we:reports/2026-06-14-domain-entity-lifecycle-placement.md`). **2 forks**, each carrying a **bold**
 recommended default; both default to *ratify-as-shipped*, both high-confidence — the survey **confirmed**
 the design rather than reshaping it, which is the expected outcome for a ratification.
 
@@ -40,13 +40,13 @@ The single open question (*Project + Protocol, or an intent?*) decomposes into t
 each pinned to the shipped artifacts and the codified test:
 
 - **Is it a Project at all, or does it fold into `webstates`?** `webstates` is reactive state *primitives*
-  (signals/stores/schemas, [src/_data/projects.json:58](../src/_data/projects.json#L58)); the shipped
-  `weblifecycle` ([src/_data/projects.json:253](../src/_data/projects.json#L253)) is *domain workflow state* —
+  (signals/stores/schemas, [we:src/_data/projects.json:58](../src/_data/projects.json#L58)); the shipped
+  `weblifecycle` ([we:src/_data/projects.json:253](../src/_data/projects.json#L253)) is *domain workflow state* —
   a different altitude with its own provider/interchange contract. → **Fork 1**.
 - **Is the contract a Protocol, or an Intent?** The `lifecycle` protocol
-  ([src/_data/protocols.json:143](../src/_data/protocols.json#L143)) fixes a `CustomLifecycleProvider` registry
+  ([we:src/_data/protocols.json:143](../src/_data/protocols.json#L143)) fixes a `CustomLifecycleProvider` registry
   + a portable transition map (status set; each transition `from → to` + optional guard + actor/role) + an
-  observable `{ entity, from, to, actor, at }` event ([src/_includes/project-weblifecycle.njk](../src/_includes/project-weblifecycle.njk)
+  observable `{ entity, from, to, actor, at }` event ([we:src/_includes/project-weblifecycle.njk](../src/_includes/project-weblifecycle.njk)
   §`protocol-lifecycle`). That is a technical interchange contract, not a UX preference. → **Fork 2**.
 
 The **placement test** (the lens) is codified by #409: a Project+Protocol is justified iff there is a real
@@ -69,8 +69,8 @@ persistence → the entity's own concern; audit → composes via the event ([#35
 ## Fork 1 — Standalone project, or fold into `webstates`?
 
 **Crux:** does a domain entity's guarded status machine earn its own project, or is it part of the reactive-state
-project? Refs: `webstates` ("reactive state primitives", [src/_data/projects.json:58](../src/_data/projects.json#L58));
-`weblifecycle` ([src/_data/projects.json:253](../src/_data/projects.json#L253), self-described as *"distinct from
+project? Refs: `webstates` ("reactive state primitives", [we:src/_data/projects.json:58](../src/_data/projects.json#L58));
+`weblifecycle` ([we:src/_data/projects.json:253](../src/_data/projects.json#L253), self-described as *"distinct from
 Web States … the domain object's workflow state"*).
 
 - **A — Standalone `weblifecycle` project. ✅ default.**
@@ -87,8 +87,8 @@ Web States … the domain object's workflow state"*).
 ## Fork 2 — Protocol, or intent?
 
 **Crux:** is the lifecycle contract a technical interchange (Protocol) or a UX concern (Intent)? Refs:
-`lifecycle` protocol summary ([src/_data/protocols.json:143](../src/_data/protocols.json#L143)); the boundary
-table in [src/_includes/project-weblifecycle.njk](../src/_includes/project-weblifecycle.njk) (*Transition event →
+`lifecycle` protocol summary ([we:src/_data/protocols.json:143](../src/_data/protocols.json#L143)); the boundary
+table in [we:src/_includes/project-weblifecycle.njk](../src/_includes/project-weblifecycle.njk) (*Transition event →
 Protocol; Status display → Status Indicator intent*).
 
 **What the protocol covers — the smallest interoperable core, NOT a full workflow engine.** The contract
@@ -140,8 +140,8 @@ thin portable contract in the middle; everything else composes around it.
 
 ## What ratifying this means (plan of record, for the decision turn)
 
-- Ratify the placement **as shipped**: `weblifecycle` stays a standalone **Project** ([projects.json:253](../src/_data/projects.json#L253))
-  owning the `lifecycle` **Protocol** ([protocols.json:143](../src/_data/protocols.json#L143)). No fold into
+- Ratify the placement **as shipped**: `weblifecycle` stays a standalone **Project** ([we:projects.json:253](../src/_data/projects.json#L253))
+  owning the `lifecycle` **Protocol** ([we:protocols.json:143](../src/_data/protocols.json#L143)). No fold into
   `webstates`, no demotion to an intent. **No artifact change required** — this is a governance ratification.
 - This item → `resolved`, `graduatedTo: weblifecycle` (the governed project), at the decision turn. **No reversal
   of #353.**

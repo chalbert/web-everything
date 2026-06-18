@@ -21,8 +21,8 @@ Author the Menu block — a composition manifest for action invocation (not valu
 
 Authored the **Menu block** as a composition manifest (modeled on the droplist family page), per design-first "Adding a block":
 
-- `src/_data/blocks.json` — new `menu` entry: `implementsIntent: command`, `composesIntents: [command, focus-delegation, anchor, type-ahead, selection, disclosure, action]`, and the seven ratified #173 forks captured verbatim as `designDecisions`.
-- `src/_includes/block-descriptions/menu.njk` — the canonical page (contracts only): menu-vs-select distinction, the `shape: menubar|menu|context` table, composed-intents table, item-role/trait-surface map, "why a submenu is not a tree", keyboard contract, Web Standards Alignment (APG / Invoker Commands / Popover+Anchor / contextmenu), and Framework Research (Radix/Headless/MUI/Fluent/Carbon/Ant/Shoelace).
+- `fui:src/_data/blocks.json` — new `menu` entry: `implementsIntent: command`, `composesIntents: [command, focus-delegation, anchor, type-ahead, selection, disclosure, action]`, and the seven ratified #173 forks captured verbatim as `designDecisions`.
+- `we:src/_includes/block-descriptions/menu.njk` — the canonical page (contracts only): menu-vs-select distinction, the `shape: menubar|menu|context` table, composed-intents table, item-role/trait-surface map, "why a submenu is not a tree", keyboard contract, Web Standards Alignment (APG / Invoker Commands / Popover+Anchor / contextmenu), and Framework Research (Radix/Headless/MUI/Fluent/Carbon/Ant/Shoelace).
 
 Faithful to all seven forks: command-invocation home (A), roving-fixed focus (B), one block + shape dimension (C), checkable via Selection `checkable` trait (D), submenu = Disclosure+Anchor not hierarchy (E), block owns separator/group (F), claims the menu-button trigger (G). No new glossary terms — menu/menuitem/separator/group are established ARIA roles, reused not redefined.
 

@@ -29,6 +29,6 @@ Surfaced while extending the Loader Intent for #106 (loading & waiting).
 
 - **Status:** resolved — graduated to the [Background Task Intent](/intents/background-task/).
 - **Branch:** docs/standard-authoring-workflow
-- **Done:** Authored the Background Task Intent (`background-task` in `intents.json`, dimensions `aggregation` / `persistence` / `navigationGuard`, lifecycle + interface, composition cross-refs to Loader / Reliability / Layout / Feedback). Added the `Background Task` glossary term. Cross-linked the Loader Intent's `escalation: async` bullet to the new surface. `gen:inventory` + `check:standards` green; `/intents/background-task/` renders.
+- **Done:** Authored the Background Task Intent (`background-task` in `we:intents.json`, dimensions `aggregation` / `persistence` / `navigationGuard`, lifecycle + interface, composition cross-refs to Loader / Reliability / Layout / Feedback). Added the `Background Task` glossary term. Cross-linked the Loader Intent's `escalation: async` bullet to the new surface. `gen:inventory` + `check:standards` green; `/intents/background-task/` renders.
 - **Next:** Implementation + the harvested guard tracked as their own items (#128, #129).
 - **Notes:** Decided **both** (intent now, block deferred) per user. Loader's `escalation: async` is the handoff point *into* this surface — they compose, not a Loader dimension. Navigation-guard harvested as a separate candidate intent (#129).

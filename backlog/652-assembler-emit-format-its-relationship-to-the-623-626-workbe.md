@@ -19,7 +19,7 @@ crossRef: { url: /backlog/646-devtools-composition-assembler-build-your-own-comp
 
 **Prepared, ready to ratify.** Two coupled forks that **gate the whole #646 epic** — it cannot be sliced
 until they settle (surfaced by `/slice 646`, run 6 of
-[reports/2026-06-14-backlog-split-analysis.md](../reports/2026-06-14-backlog-split-analysis.md)). No fresh
+[we:reports/2026-06-14-backlog-split-analysis.md](../reports/2026-06-14-backlog-split-analysis.md)). No fresh
 design exists; the call is grounded in the published `/research/` topic
 [ejectable-composition-recipes](/research/ejectable-composition-recipes/) (report linked via
 `relatedReport`). [#609](/backlog/609-candidate-standard-reveal-navigation-menus-mega-menu-hover-d/) ratified only
@@ -55,25 +55,25 @@ decided format → one `task` per additional preset).
 ## The axes (what the survey decomposed)
 
 The shadcn/ui distribution model — *"not a component library, a code-**distribution** platform"*: you copy
-plain source into your repo and own it (no runtime dep), and a thin `registry-item.json` wrapper is the CLI
+plain source into your repo and own it (no runtime dep), and a thin `we:registry-item.json` wrapper is the CLI
 *transport* that **carries** the code, never replaces it — splits the emit concern into three orthogonal
 layers, each pinned to the real tree:
 
 - **The ejectable payload** (what the author owns) — plain markup + WE declarative wiring composing the
-  primitives: nav-list ([blocks.json:2082](../src/_data/blocks.json#L2082)) + disclosure
-  ([intents.json:1868](../src/_data/intents.json#L1868)) + anchor `strategy=escape`
-  ([intents.json:1256](../src/_data/intents.json#L1256)) + hover-intent
-  ([intents.json:2664](../src/_data/intents.json#L2664), minted by #643). The dogfood reveal-nav header
-  ([base.njk:32-69](../src/_layouts/base.njk#L32), [style.css:241-276](../src/css/style.css#L241)) is a live
+  primitives: nav-list ([fui:blocks.json:2082](../src/_data/blocks.json#L2082)) + disclosure
+  ([we:intents.json:1868](../src/_data/intents.json#L1868)) + anchor `strategy=escape`
+  ([we:intents.json:1256](../src/_data/intents.json#L1256)) + hover-intent
+  ([we:intents.json:2664](../src/_data/intents.json#L2664), minted by #643). The dogfood reveal-nav header
+  ([we:base.njk:32-69](../src/_layouts/base.njk#L32), [we:style.css:241-276](../src/css/style.css#L241)) is a live
   proof that "a page you could have hand-written" *is* the recipe.
 - **The API descriptor** (an optional export of the result) — **CEM**, already ratified-recommended as WE's
   component-API-metadata protocol by [#626](/backlog/626-map-workbench-features-to-we-standards-which-intents-blocks-/)
   (the manifest-as-protocol precedent is `changelog-manifest`,
-  [protocols.json:94](../src/_data/protocols.json#L94)). Describes the composed meta-component's *API surface*,
+  [we:protocols.json:94](../src/_data/protocols.json#L94)). Describes the composed meta-component's *API surface*,
   never its internal wiring → an additional export, not the recipe body.
 - **The distribution wrapper / preset store** (how presets are stored & shared, the *input* side) — a WE-owned
   registry the assembler reads, sibling to the feature vocabulary in
-  [workbenchFeatures.json](../src/_data/workbenchFeatures.json) / [workbenchTools.json](../src/_data/workbenchTools.json)
+  [we:workbenchFeatures.json](../src/_data/workbenchFeatures.json) / [we:workbenchTools.json](../src/_data/workbenchTools.json)
   (#624/#625) that the catalog pipeline (#623–627) also consumes. This is the same artifact Fork 2's
   shared-registry question is really about.
 
@@ -120,8 +120,8 @@ that must not drift. Classification: the assembler is **devtools** (a tool consu
 running-app seam) → zero lock-in, no protocol; the preset store is a **registry** it reads.
 
 - **A — stand-alone devtools surface, consumes the shared registries read-only. ✅ recommended.** The
-  assembler is its own authoring tool (devtools), reading [workbenchFeatures.json](../src/_data/workbenchFeatures.json)
-  / [workbenchTools.json](../src/_data/workbenchTools.json) as the shared source of truth for feature
+  assembler is its own authoring tool (devtools), reading [we:workbenchFeatures.json](../src/_data/workbenchFeatures.json)
+  / [we:workbenchTools.json](../src/_data/workbenchTools.json) as the shared source of truth for feature
   vocabulary, plus a new **WE-owned preset registry in the shadcn `registry-item` shape**
   (`{name, type, composesBlocks/Intents, files:[{path, content}]}`) for the presets themselves — rather than
   minting a rival preset registry. One vocabulary, two consumers (catalog renders it; assembler authors

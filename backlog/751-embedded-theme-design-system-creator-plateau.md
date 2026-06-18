@@ -56,4 +56,4 @@ carved out into siblings; this card was re-scoped to the embed capstone (size 13
   fixed gallery). Previously buried in this body; now its own card. **This slice blocks on it.**
 
 `blockedBy: [887, 886, 888]` — needs the transport decided, a creator to embed, and a manifest to feed.
-Full analysis: `reports/2026-06-17-backlog-split-analysis.md`.
+Full analysis: `we:reports/2026-06-17-backlog-split-analysis.md`.

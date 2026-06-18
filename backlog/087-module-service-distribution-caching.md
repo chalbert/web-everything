@@ -51,15 +51,15 @@ grounded in #088's ratified content-hash protocol. Fork **4 (hosted-tier pricing
 product-decision **#451**.
 
 Fork **3 (self-hosted core) amended.** The item framed this as "factor the resolver out of Vite," but
-the resolver core is **already standalone** ([moduleService.ts:118-195](../blocks/renderers/module-service/moduleService.ts#L118-L195)) —
-the Vite plugin ([tools/maas/vite-plugin.ts:107-114](../tools/maas/vite-plugin.ts#L107-L114)) is only
+the resolver core is **already standalone** ([we:moduleService.ts:118-195](../blocks/renderers/module-service/moduleService.ts#L118-L195)) —
+the Vite plugin ([we:tools/maas/vite-plugin.ts:107-114](../tools/maas/vite-plugin.ts#L107-L114)) is only
 one delivery wrapper. So the real call is the **deployable origin's interface**, and the decision is:
 the self-hosted origin is a **Web-standard `(Request) => Response` Fetch handler** wrapping the
 standalone core — **not** a bespoke Node `http` server. *Self-hosted is deliberately not locked to
 Node.js:* the same handler runs on Node, Deno, and Workers/edge unchanged, which makes the self-hosted
 and hosted-CDN (#451) shapes literally the same handler behind different infra. Wiring note: fold the
 #088 content hash into the existing `ServedArtifactCache` key
-([definitionRegistry.ts](../blocks/renderers/module-service/definitionRegistry.ts)) so the in-process
+([we:definitionRegistry.ts](../blocks/renderers/module-service/definitionRegistry.ts)) so the in-process
 and HTTP caches agree on identity.
 
 **Spun off as build slices:** **#461** (the Fetch-handler origin + content-hash identity + cache/ETag/SRI

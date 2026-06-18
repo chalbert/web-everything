@@ -30,7 +30,7 @@ control that drives the runner so a stale in-flight check is reconciled and the
 surviving answer flows into the `async` source of #215's `<validity-merge-field>`.
 
 **Build:**
-- A runtime plug (mirroring #215's `CustomValidityMergeRegistry.ts` runtime plug) that
+- A runtime plug (mirroring #215's `we:CustomValidityMergeRegistry.ts` runtime plug) that
   exposes `customValidatorResolution`, extends the shared `CustomRegistry`, and
   participates in nearest-scope-wins resolution.
 - Wire the `AsyncValidationRunner`'s `emit` sink into the #215 `ValiditySourceOrchestrator`
@@ -45,12 +45,12 @@ Sibling to #215; consumes the #214 model unchanged. See #004 OP-1/OP-11.
 ## Progress
 
 - **Status:** resolved (2026-06-10)
-- **Runtime plug — `plugs/webvalidation/CustomValidatorResolutionRegistry.ts`:** mirrors #215's
+- **Runtime plug — `we:plugs/webvalidation/CustomValidatorResolutionRegistry.ts`:** mirrors #215's
   `CustomValidityMergeRegistry` exactly — extends the core `CustomRegistry<CustomValidatorResolution>`
   (so it is injector-chain-resolvable + inheritable via `extends`), with `define(strategy, asDefault?)`
   / `defaultKey` / `resolve(key?)` (throws `UnknownResolutionError`). `createDefaultValidatorResolutionRegistry()`
   ships **versioning** (native-first default) + **cancellation**. Consumes the #214 model unchanged.
-- **Async-field element — `plugs/webvalidation/AsyncValidatorField.ts` (`<async-validator-field>`):**
+- **Async-field element — `we:plugs/webvalidation/AsyncValidatorField.ts` (`<async-validator-field>`):**
   resolves `customValidatorResolution` per-scope (`InjectorRoot.getProviderOf` → `window` fallback,
   same path as the merge field), builds an `AsyncValidationRunner`, and wires the runner's `emit` sink
   into a target `<validity-merge-field>`'s `async` source (`setSource('async', {state,message,version})`)
@@ -58,10 +58,10 @@ Sibling to #215; consumes the #214 model unchanged. See #004 OP-1/OP-11.
   generation token preserved. Target is resolved explicitly (`useTargetField`), or via `for=` id-ref /
   `closest` / descendant. `validate(input)` drives a check; `notifyInputChange` supersedes/aborts; an
   inner control's `input`/`change` auto-drives when a validator is assigned.
-- **Bootstrap:** `plugs/bootstrap.ts` now creates the resolution registry (window + document injector)
+- **Bootstrap:** `we:plugs/bootstrap.ts` now creates the resolution registry (window + document injector)
   and defines `async-validator-field`, alongside the #215 merge plug.
-- **Conformance tests (peers to #215's):** `CustomValidatorResolutionRegistry.test.ts` (9) +
-  `AsyncValidatorField.test.ts` (6) — versioning drops a superseded generation; cancellation aborts the
+- **Conformance tests (peers to #215's):** `we:CustomValidatorResolutionRegistry.test.ts` (9) +
+  `we:AsyncValidatorField.test.ts` (6) — versioning drops a superseded generation; cancellation aborts the
   in-flight request (signal torn down); emitted source conforms to the cross-plane contract; registry
   resolution + `UnknownResolutionError`; no-registry / no-validator guards. Full unit suite green (1993).
 - **Demo (live-verified):** extended the Validity Merge Playground with two checks — async answer feeds

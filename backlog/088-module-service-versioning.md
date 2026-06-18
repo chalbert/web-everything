@@ -18,7 +18,7 @@ crossRef: { url: /adapters/, label: Rendering Adapters }
 # Versioning for served modules — what makes two served artifacts "the same"?
 
 MaaS (#081) serves a component over `/_maas/…` in many forms but a served URL has **no version identity**
-([tools/maas/vite-plugin.ts:80-118](tools/maas/vite-plugin.ts#L80-L118) resolves `name × form × target`
+([we:tools/maas/vite-plugin.ts:80-118](tools/maas/vite-plugin.ts#L80-L118) resolves `name × form × target`
 and serves with no hash, no cache header). Bytes can change underneath a consumer. **This is the
 prerequisite for caching + distribution ([#087](/backlog/087-module-service-distribution-caching/))** —
 you cannot cache-immutably something whose identity is undefined.
@@ -65,7 +65,7 @@ constrains them.
 - **What the consumer pins** — floating tag *and* exact semver *and* content hash all supported, resolving
   floating → exact → content-addressed URL. Pin however you develop.
 - **Provenance** — the service emits the producing core/compiler version (a response header beside
-  `X-MaaS-Lossy`/`X-MaaS-Diagnostic` at [vite-plugin.ts:111](tools/maas/vite-plugin.ts#L111)) and folds it
+  `X-MaaS-Lossy`/`X-MaaS-Diagnostic` at [we:vite-plugin.ts:111](tools/maas/vite-plugin.ts#L111)) and folds it
   into the hash. Pure added metadata; consumers may ignore it.
 
 ---

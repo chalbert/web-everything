@@ -6,7 +6,7 @@
 facet of *observability in general* (not form dirty-state); a classification taxonomy; a
 *provisional* canonical change-record + interop sketch; an attribution model; and a placement
 recommendation for where a Change Tracking standard should live in Web Everything.
-**Companion**: working plan `~/.claude/plans/i-think-change-tracking-recursive-wind.md` (Stage 1 of a
+**Companion**: working plan `~we:/.claude/plans/i-think-change-tracking-recursive-wind.md` (Stage 1 of a
 two-stage, research-first effort; Stage 2 designs the Protocol/Intent and is gated on review of this
 report).
 **Method**: `deep-research` harness — 5 search angles, 24 primary/secondary sources fetched, 118
@@ -24,7 +24,7 @@ claims extracted, top 25 adversarially verified (3-vote, 2/3-to-kill); **25 conf
 ## 1. The question, reframed
 
 Change tracking is today modeled in this repo in exactly one place: the **dirty/pristine** model
-inside the Validation Intent, with two DI concerns already named in `semantics.json`
+inside the Validation Intent, with two DI concerns already named in `we:semantics.json`
 (`customValidation:dirty-check`, `customValidation:change-detection`). The user's thesis — which this
 research supports — is that change tracking is **not a form concern but a facet of observability**:
 the general problem of *detecting, representing, and attributing a mutation to state over time*. That
@@ -323,10 +323,10 @@ Track/Identify — downstream consumer only).
 
 | File | Action | Purpose |
 |---|---|---|
-| `reports/2026-05-31-change-tracking-observability.md` | created | This report (not in 11ty build) |
-| `src/_data/researchTopics.json` | modified | Added `change-tracking-observability` topic |
-| `src/_includes/research-descriptions/change-tracking-observability.njk` | created | Renders `/research/change-tracking-observability/` |
-| `src/_data/semantics.json` | modified | Added **Change Tracking**, **Change Record**, **Change Source** terms |
+| `we:reports/2026-05-31-change-tracking-observability.md` | created | This report (not in 11ty build) |
+| `we:src/_data/researchTopics.json` | modified | Added `change-tracking-observability` topic |
+| `we:src/_includes/research-descriptions/change-tracking-observability.njk` | created | Renders `/research/change-tracking-observability/` |
+| `we:src/_data/semantics.json` | modified | Added **Change Tracking**, **Change Record**, **Change Source** terms |
 
 **Next**: Stage 2 (gated on review of this report) designs the `change-tracking` Protocol (+ optional
 Intent), resolving the §9 register. See the working plan for the Stage-2 manifest.

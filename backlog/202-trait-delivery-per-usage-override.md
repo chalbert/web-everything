@@ -60,30 +60,30 @@ The per-usage delivery override shipped — **eager-only, build-time, syntax `<t
 Spec documented in webeverything; machinery + demo + e2e in Frontier UI. Full Frontier UI suite green
 (1285 passed); `tsc` clean; webeverything `check:standards` 0 errors.
 
-- **Enforcer (`frontierui tools/trait-enforcer/vite-plugin.ts`).** New `scanTraitDeliveryOverrides`
+- **Enforcer (`frontierui we:tools/trait-enforcer/vite-plugin.ts`).** New `scanTraitDeliveryOverrides`
   finds `<trait>-delivery="eager"` usages (eager-only; `lazy`/other values ignored). The plugin
   collects a preload set and `generateManifestModule` emits a preloaded lazy trait as
   `{ delivery: "lazy", preload: true, load: () => import(spec) }` (still code-split). Preload implies
   emitted, so a trait used *only* via its override is still in the manifest.
-- **Runtime manifest (`frontierui plugs/webbehaviors/traitManifest.ts`).** New `LazyTraitEntry`
+- **Runtime manifest (`frontierui we:plugs/webbehaviors/traitManifest.ts`).** New `LazyTraitEntry`
   object form `{ delivery: 'lazy', load, preload? }`; `registerTraits` `defineLazy`s it and, when
   `preload`, calls `registry.preload(name)`. Backward-compatible — the bare `() => import()`
   shorthand is unchanged.
-- **Runtime registry (`frontierui plugs/webbehaviors/CustomAttributeRegistry.ts`).** New
+- **Runtime registry (`frontierui we:plugs/webbehaviors/CustomAttributeRegistry.ts`).** New
   `preload(name)` warms a pending lazy attribute's chunk immediately (reusing the existing
   `#loadLazy` dedup/cache), without waiting for first DOM appearance. No-op for unknown/eager names.
-- **Spec (`webeverything src/_data/traits.json` + `project-webtraits.njk`).** New *The Per-usage
+- **Spec (`webeverything we:src/_data/traits.json` + `we:project-webtraits.njk`).** New *The Per-usage
   Override — page-author preload* section: syntax, eager-only + build-time semantics, why the inverse
   is out of scope, and the `<link rel="modulepreload">` production note. The stale "deferred" line on
   *The Delivery Dimension* now points to it.
-- **Conformance demo + e2e.** New lazy reference trait `frontierui blocks/traits/Revealable.ts`
+- **Conformance demo + e2e.** New lazy reference trait `frontierui fui:blocks/traits/Revealable.ts`
   (module-eval marker proves *when* the chunk loaded); `demos/lazy-traits-preload.{html,ts}` warms it
   at bootstrap from a `revealable-delivery="eager"` inside a not-yet-mounted `<template>` — the case
-  only the build-time scan can see. `plugs/__tests__/e2e/preload-traits.spec.ts` asserts the chunk
+  only the build-time scan can see. `fui:plugs/__tests__/e2e/preload-traits.spec.ts` asserts the chunk
   evaluated before any element mounted, then applied instantly on mount. `revealable` wired into the
   Enforcer `traitMap` in `vite.config.mts`.
-- **Tests.** +11 `trait-enforcer.test.ts` (override scan + preload codegen + plugin), +6
-  `traitManifest.test.ts` (object-form lazy, preload-at-bootstrap, `registry.preload` dedup), +1 e2e.
+- **Tests.** +11 `we:trait-enforcer.test.ts` (override scan + preload codegen + plugin), +6
+  `we:traitManifest.test.ts` (object-form lazy, preload-at-bootstrap, `registry.preload` dedup), +1 e2e.
 
 **Semantics ruling (the design call this item carried):** The override is **eager-only** and a
 **build-time** capability. A usage-site attribute changes only *load timing*, never *bundling*
@@ -135,10 +135,10 @@ layer, runtime proof is the load-timing difference).
 
 **Next:** (1) runtime `registry.preload` + `LazyTraitEntry`/`registerTraits` wiring; (2) Enforcer
 scan + codegen; (3) unit tests; (4) `lazy-traits-preload` demo + e2e; (5) spec section in
-`traits.json` + `project-webtraits.njk`.
+`we:traits.json` + `we:project-webtraits.njk`.
 
 **Notes:** harvest at close-out — a *visibility/interaction-gated lazy* capability (defer in-DOM-but-
 hidden traits until visible/opened; the observer currently loads them at bootstrap regardless) is a
 genuine future item, distinct from the dropped eager→lazy.
 
-**Graduated to** `frontierui/plugs/webbehaviors/CustomAttributeRegistry.ts` — per-usage <trait>-delivery=eager preload override — trait-enforcer + traitManifest.ts + CustomAttributeRegistry.preload + traits.json spec + Revealable.ts demo.
+**Graduated to** `fui:frontierui/plugs/webbehaviors/CustomAttributeRegistry.ts` — per-usage <trait>-delivery=eager preload override — trait-enforcer + we:traitManifest.ts + CustomAttributeRegistry.preload + we:traits.json spec + fui:Revealable.ts demo.

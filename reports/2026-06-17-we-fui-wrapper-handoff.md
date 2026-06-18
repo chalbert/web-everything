@@ -3,7 +3,7 @@
 > Prep research for decision **#855** (the cross-repo seam blocking the polyglot adapter panel
 > [#753](/backlog/753-polyglot-adapter-panel/), under Block Explorer epic [#746](/backlog/746-block-explorer-interactive-fui-block-workbench/)).
 > #821 shipped a **WE**-owned consume-mode wrapper generator
-> ([`scripts/gen-wrapper/genWrapper.mjs`](../scripts/gen-wrapper/genWrapper.mjs)): a pure
+> ([`we:scripts/gen-wrapper/genWrapper.mjs`](../scripts/gen-wrapper/genWrapper.mjs)): a pure
 > `generateWrapper(declaration, target) => wrapperSourceString` over a block's Custom Elements
 > Manifest. The panel that *displays + live-tests* that source is **FUI** (`locus: frontierui`, per the
 > docs-rendering boundary). So *how the FUI panel obtains and live-tests the WE-generated wrapper source*
@@ -20,15 +20,15 @@ The item filed three options cold:
 Two facts from the tree shrink this before any survey:
 
 1. **The generator is already a pure, importable, no-DOM/no-FUI function.**
-   [`genWrapper.mjs:202`](../scripts/gen-wrapper/genWrapper.mjs) exports `generateWrapper(declaration,
-   target)`; [`genWrapper.mjs:6`](../scripts/gen-wrapper/genWrapper.mjs) states the output "crosses the
+   [`we:genWrapper.mjs:202`](../scripts/gen-wrapper/genWrapper.mjs) exports `generateWrapper(declaration,
+   target)`; [`we:genWrapper.mjs:6`](../scripts/gen-wrapper/genWrapper.mjs) states the output "crosses the
    layer seam to the FUI Block Explorer panel (#753)." #821's CLI note is explicit that the FUI panel
    "does NOT need [the CLI] (it imports `generateWrapper` directly)"
-   ([`cli.mjs:8`](../scripts/gen-wrapper/cli.mjs)). So the codebase was already authored toward FUI
+   ([`we:cli.mjs:8`](../scripts/gen-wrapper/cli.mjs)). So the codebase was already authored toward FUI
    consuming the *generator*, not a file dump.
 2. **Consume-mode output is a pure function of the CEM** — deterministic in `(declaration, target)` with
    no per-user input. The wrapper for `<we-button>`/React is byte-identical every time
-   ([`genWrapper.mjs:69-139`](../scripts/gen-wrapper/genWrapper.mjs)). So "regenerate on demand" produces
+   ([`we:genWrapper.mjs:69-139`](../scripts/gen-wrapper/genWrapper.mjs)). So "regenerate on demand" produces
    output that never varies — the freshness argument for (C) evaporates for consume mode (author-mode
    #818, with an emit-purpose IR, is the separate deferred case).
 
@@ -40,8 +40,8 @@ has no production precedent.**
 
 | Tool | Generation locus | Reads the CEM? | Distribution | Build- or run-time |
 |---|---|---|---|---|
-| **Stencil output targets** (`@stencil/react-output-target`, `-vue`, `-angular`) | The **component library's** build (`stencil.config.ts`) | No — uses Stencil's internal component metadata | A **separately published npm package** (monorepo + Lerna publish is canonical) | Build-time codegen |
-| **Lit Labs `@lit-labs/gen-wrapper-react`/`-vue`/`-angular`** | The **element library's** build, via `@lit-labs/cli` | **Yes** — consumes `custom-elements.json` (CEM from `gen-manifest`/cem-analyzer) | Published wrapper source/package | Build-time codegen |
+| **Stencil output targets** (`@stencil/react-output-target`, `-vue`, `-angular`) | The **component library's** build (`we:stencil.config.ts`) | No — uses Stencil's internal component metadata | A **separately published npm package** (monorepo + Lerna publish is canonical) | Build-time codegen |
+| **Lit Labs `@lit-labs/gen-wrapper-react`/`-vue`/`-angular`** | The **element library's** build, via `@lit-labs/cli` | **Yes** — consumes `we:custom-elements.json` (CEM from `gen-manifest`/cem-analyzer) | Published wrapper source/package | Build-time codegen |
 | **`@lit/react` `createComponent`** | n/a — **runtime** wrapper, hand-wired per element, needs the element *class* | No | Imported at app render time | Runtime (not codegen) |
 
 Takeaways that drive the call:
@@ -91,13 +91,13 @@ After the survey the three filed options collapse to **one forced invariant + on
   via #701; the sandbox tech is FUI impl (guidance: esm.sh/import-maps or Sandpack), not a WE fork.
 - **The real fork — what crosses the WE→FUI boundary:**
   - **A1 — WE publishes the *derived wrapper artifact*.** WE runs `gen:wrapper`
-    ([`cli.mjs`](../scripts/gen-wrapper/cli.mjs) → `generated/wrappers/<target>/<Name>.<ext>`) and publishes
+    ([`we:cli.mjs`](../scripts/gen-wrapper/cli.mjs) → `generated/wrappers/<target>/<Name>.<ext>`) and publishes
     the wrapper source set as a versioned `@webeverything/*` artifact; FUI imports dumb strings. Matches the
     Stencil/Lit "publish a wrapper package" precedent. Con: a *third* published thing that is only a pure
     function of two already-published WE things (the CEM + the generator), re-published on every CEM change.
   - **A2 — WE publishes the *generator + CEM contract*; FUI derives at its own build.** WE packages
     `generateWrapper` as `@webeverything/gen-wrapper` (it is already a pure, no-DOM export) alongside the
-    ratified CEM (#626, derived by [`gen-cem.mjs`](../scripts/gen-cem.mjs)); the FUI demo build calls it
+    ratified CEM (#626, derived by [`we:gen-cem.mjs`](../scripts/gen-cem.mjs)); the FUI demo build calls it
     over the CEM to materialize wrappers into its own build. Single source of truth = generator + CEM (no
     third derived artifact, no stale-publish window). Matches the existing #821 authoring intent ("the FUI
     panel imports `generateWrapper` directly"). Con: WE codegen runs inside FUI's build (FUI imports +
@@ -113,7 +113,7 @@ just not the consume-mode-probe default.
 
 ## Sequencing note (not a fork)
 
-Today `blocks.json` carries no `tagName`, so the CEM emits 0 custom-element declarations and `gen:wrapper`
-emits nothing ([`cli.mjs:35-41`](../scripts/gen-wrapper/cli.mjs)) — block-data enrichment is **#822**. So
+Today `fui:blocks.json` carries no `tagName`, so the CEM emits 0 custom-element declarations and `gen:wrapper`
+emits nothing ([`we:cli.mjs:35-41`](../scripts/gen-wrapper/cli.mjs)) — block-data enrichment is **#822**. So
 the panel build (#753) is gated on **both** this handoff decision (#855) *and* #822; this decision only
 settles the mechanism, it does not require #822 to be done first to ratify.

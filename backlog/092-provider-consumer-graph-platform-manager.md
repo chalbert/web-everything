@@ -27,7 +27,7 @@ prepared defaults:
   follow-on, edges marked *potential* until trace-confirmed), not first-cut scope.
 - **Fork 2 (seam-contract): RATIFIED — reuse the protocol conformance contract, bidirectional.** No
   parallel Pact-style format. **Caveat recorded:** only the *provider* side exists today
-  ([protocols.json](src/_data/protocols.json)); the **consumer-driven projection** (consumer declares the
+  ([we:protocols.json](src/_data/protocols.json)); the **consumer-driven projection** (consumer declares the
   capability subset it depends on) is **net-new schema**, not free reuse — the downstream build must scope
   it as new work.
 - **Fork 3 (home): RATIFIED — split per the constellation** (precedent, not a fresh call — same answer
@@ -52,7 +52,7 @@ provider↔consumer relationships** that makes Plateau an *enterprise web platfo
 [#089](/backlog/089-monetization-product-ideas/) idea 5). Not a package registry — **npm + git stay the
 source of bytes**; Plateau tracks *relationships*. The three forks below are grounded in a prior-art survey
 published as [`/research/provider-consumer-graph/`](/research/provider-consumer-graph/) (session report
-`reports/2026-06-12-provider-consumer-graph.md`) covering Backstage's software catalog, consumer-driven
+`we:reports/2026-06-12-provider-consumer-graph.md`) covering Backstage's software catalog, consumer-driven
 contract testing (Pact), CycloneDX SBOM, and OpenTelemetry service maps. Each fork carries a **bold**
 default; the survey surfaced a decisive WE-specific reframe (introspection *is* the graph → the build-time
 manifest is auto-derived, not hand-authored).
@@ -64,10 +64,10 @@ populated), **seam-contract** (how a contract at each edge is declared), and **h
 Plateau product). The survey's anchor: **everything in the standard resolves through introspectable
 registries, injectors, contexts ([webcontexts](src/_data/projects.json)), and events
 ([webevents](src/_data/projects.json)) — that introspection *is* the graph.** Backstage requires
-hand-authored `catalog-info.yaml`; WE can auto-derive the same `providesApis`/`consumesApis` relations
+hand-authored `we:catalog-info.yaml`; WE can auto-derive the same `providesApis`/`consumesApis` relations
 from its own introspection, which removes the staleness that bottlenecks the build-time model elsewhere
 and makes "build-first" the natural default. The provider-side contract already exists as **protocol
-conformance contracts + tiers** ([protocols.json](src/_data/protocols.json)); the seam-contract reuses it
+conformance contracts + tiers** ([we:protocols.json](src/_data/protocols.json)); the seam-contract reuses it
 rather than coining a second format.
 
 ### Per-fork classification (the 7-question pass, recorded)
@@ -99,7 +99,7 @@ rather than coining a second format.
 runs two mature patterns with a documented "both" consensus, but WE's introspection changes the economics.
 
 - **A. Build-time export, auto-derived from WE introspection.** Each project emits its
-  provider/consumer manifest at build — but unlike Backstage's hand-authored `catalog-info.yaml`, WE
+  provider/consumer manifest at build — but unlike Backstage's hand-authored `we:catalog-info.yaml`, WE
   *derives* it from the introspectable registries/injectors/contexts/events. Static, auditable, no live
   agent, and not hand-maintained.
 - **B. Runtime agent.** A live agent observes the running platform (OpenTelemetry service-graph model) and
@@ -126,11 +126,11 @@ definition. The mature pattern is consumer-driven contract testing (Pact): the c
 it depends on; a broker is the source of truth for "safe to deploy together."
 
 - **A. Reuse the protocol conformance contract, recorded bidirectionally.** Provider declares the
-  conformance tier it implements ([protocols.json](src/_data/protocols.json) already models this); consumer
+  conformance tier it implements ([we:protocols.json](src/_data/protocols.json) already models this); consumer
   declares the dimensions/capabilities subset it depends on (the consumer-driven projection). One
   definition, shared with verification + drift detection.
 - **B. A separate Pact-style contract format** dedicated to the graph. *Rejected* — a second contract
-  format to keep in sync with the conformance contracts; duplicates what protocols.json already defines
+  format to keep in sync with the conformance contracts; duplicates what we:protocols.json already defines
   (minimize-lock-in + separate-and-decouple cut the other way here: don't fork a parallel contract).
 
 **Recommended default: A — reuse the protocol conformance contract, recorded bidirectionally.** The

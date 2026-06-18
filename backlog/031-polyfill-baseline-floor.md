@@ -26,6 +26,6 @@ Polyfills become an **opt-in enhancement layer**: a consumer who needs older-bro
 
 Chosen over (a) requiring a global polyfill baseline — taxes every spec with a dual-substrate contract, contradicts native-first; and (b) per-feature floors — distributes the uncertainty instead of removing it. We can name a sub-Baseline exception later for a specific consumer if one ever needs it; that's cheaper than slowing every spec down now.
 
-Recorded as **Hard rule #6** in [AGENTS.md](../AGENTS.md) so every author/agent inherits it; substrate detail stays in the related report.
+Recorded as **Hard rule #6** in [we:AGENTS.md](../AGENTS.md) so every author/agent inherits it; substrate detail stays in the related report.
 
 This unblocks the substrate-dependent items, which can now drop their "...but what if the browser lacks X" branches: #024, #025, #030, #032, and all anchor-positioning / popover / `:state()`-based block work.

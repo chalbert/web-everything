@@ -16,7 +16,7 @@ tags: [background-task, durability, background-fetch, service-worker, verificati
 
 Verify the #134 durability:reload tier end-to-end in a real browser: register a service worker, arm a Background Fetch transfer, hard-reload, and assert the surface re-hydrates the in-flight task (and that the navigation guard re-arms when Background Fetch is unavailable). The unit harness (happy-dom/Playwright) cannot exercise a real SW + Background Fetch, so this is the SW-registered demo page that closes the durability claim #134 deliberately did not assert.
 
-**Blocked on its test harness (#684).** Per the agent-runnable-verification rule (`docs/agent/testing.md`), this verification cannot be *correctly tested* until the real-Chromium SW + Background Fetch E2E lane exists — `blockedBy: ["684"]`. Build the demo page against that lane so the rehydration assertion is a reproducible green, not an eyeballed claim.
+**Blocked on its test harness (#684).** Per the agent-runnable-verification rule (`we:docs/agent/testing.md`), this verification cannot be *correctly tested* until the real-Chromium SW + Background Fetch E2E lane exists — `blockedBy: ["684"]`. Build the demo page against that lane so the rehydration assertion is a reproducible green, not an eyeballed claim.
 
 ## Surfaced fork — verification approach (2026-06-15, batch-2026-06-15; refined 2026-06-15)
 
@@ -24,9 +24,9 @@ Claimed in a batch, released unworked on an approach fork; re-examined against t
 The fork is **narrower than first framed** — two verified facts collapse the original A/B/C into a clean
 2-way, and a third fact pins down a piece that's irreducible in *every* option:
 
-- **#684 already proved the generic SW-rehydrate mechanism.** `service-worker-rehydrate.sw.spec.ts` drives
+- **#684 already proved the generic SW-rehydrate mechanism.** `we:service-worker-rehydrate.sw.spec.ts` drives
   register → arm → hard-reload → rehydrate green, but against a **plain-JS fixture** (`sw-fixtures/public/
-  index.html`) that *re-implements* the durable contract — it never runs the real TS. So #675's **only**
+  we:index.html`) that *re-implements* the durable contract — it never runs the real TS. So #675's **only**
   distinct job is to make the real `reloadDurabilityAdapter` the unit under test. (This kills the old
   option B — re-implementing the contract in JS just re-does #684 — and demotes old option C, which is real
   but proves little past the existing unit tests.)
@@ -36,7 +36,7 @@ The fork is **narrower than first framed** — two verified facts collapse the o
   SW, and why this adapter's own "NOTE ON VERIFICATION" lists true-network survival as a manual residual.
   So a deterministic spec **must** double the `getRegistration().backgroundFetch` manager regardless of
   origin. True-network-transfer survival stays the documented manual residual in every option.
-- **The #684 static server can't transform TS.** `sw-fixtures/serve.mjs` is a zero-dep `node:http` static
+- **The #684 static server can't transform TS.** `we:sw-fixtures/serve.mjs` is a zero-dep `node:http` static
   server — to run the *real* adapter on it you must compile-emit the adapter into `public/` first.
 
 **The fork (pick where the real adapter runs — the Background-Fetch double is thin and identical in both):**
@@ -53,7 +53,7 @@ The fork is **narrower than first framed** — two verified facts collapse the o
   home and doubles as living documentation, with zero build machinery (Vite serves the real TS).
 
 - **D — Build the real adapter onto the #684 static lane.** esbuild/tsc the real adapter into the existing
-  fixture's `public/`, reuse `sw.js` + `rehydrate-helper.ts` unchanged. Honours "against that [#684] lane"
+  fixture's `public/`, reuse `we:sw.js` + `we:rehydrate-helper.ts` unchanged. Honours "against that [#684] lane"
   literally and keeps one SW surface. Cost: a compile-emit step + the emitted-JS tree-pollution footgun (cf.
   `build:plugs` shadow-emit). Same thin Background-Fetch double as A′.
 

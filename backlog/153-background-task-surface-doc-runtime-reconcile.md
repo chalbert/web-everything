@@ -13,7 +13,7 @@ crossRef: { url: /blocks/background-task-surface/, label: Background Task Surfac
 
 # Reconcile the Background Task Surface block page with the shipped baseline runtime
 
-The [Background Task Surface](/blocks/background-task-surface/) block page (`src/_includes/block-descriptions/background-task-surface.njk`) was authored as the full spec (#128); the runtime (#135) ships the **route-only baseline**, so a few illustrative types/exports on the page no longer match what is exported.
+The [Background Task Surface](/blocks/background-task-surface/) block page (`we:src/_includes/block-descriptions/background-task-surface.njk`) was authored as the full spec (#128); the runtime (#135) ships the **route-only baseline**, so a few illustrative types/exports on the page no longer match what is exported.
 
 Drift to reconcile (page → shipped):
 - **Interface block** documents `BackgroundTaskSurfaceConfig` with `navigationGuard: 'none' | 'warn'` and a `durability` axis; the shipped `BackgroundTasksConfig` is the baseline — boolean `navigationGuard` / `completionToast` / `retry`, `aggregation`, `persistence`, and **no `durability`** (that is the #134 reload tier). Progress is documented as `value?: number // 0-100`; the shipped `LoaderSnapshot.progress` is `0..1` (fed to native `<progress max=1>`).
@@ -28,7 +28,7 @@ Spun off from #135 close-out.
 Resolved by making the **runtime canonical** (the route-only baseline #135 is the deliberate shipped
 shape; #128 over-documented the full spec). The page now matches `blocks/background-task-surface/`
 exactly, with the spec-vs-baseline distinction kept explicit. Edits to
-`src/_includes/block-descriptions/background-task-surface.njk`:
+`we:src/_includes/block-descriptions/background-task-surface.njk`:
 
 - **Interface block** — replaced the speculative `BackgroundTaskSurfaceConfig` (with `navigationGuard:
   'none' | 'warn'` and a `durability` axis) with the shipped `BackgroundTasksConfig` (boolean

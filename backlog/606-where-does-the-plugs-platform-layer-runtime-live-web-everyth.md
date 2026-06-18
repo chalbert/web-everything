@@ -28,20 +28,20 @@ shared-substrate) and recommended **A — WE owns the reference runtime**. Discu
 three grounds, each killing A's premise:
 
 1. **plugs implements a *theoretical future* standard that mostly/never lands natively** — the **polyfill**
-   archetype (`plugs/README.md` itself says "polyfills and patches"), *not* a reference implementation of a ratified
+   archetype (`we:plugs/README.md` itself says "polyfills and patches"), *not* a reference implementation of a ratified
    spec. A polyfill is implementation that lives *outside* the spec. And because these speculative platform APIs
    (`CustomAttributeRegistry`, `CustomContext`, `CustomStore`, injectors, `CustomElementRegistry`) likely never become
    native, the "polyfill" is in fact the **permanent, canonical implementation** — still implementation, never a
    standard artifact.
 2. **The real product surface is the *unplugged*, non-invasive library — not the global-patching runtime.** Every
-   plug must be usable unplugged (`plugs/index.ts` / `plugs/unplugged.ts` — `register`/`upgrade`/`downgrade`, no
-   `window`/prototype mutation); the plugged `plugs/bootstrap.ts` (patches `window`/`Node`/`Element`) is a POC/demo.
+   plug must be usable unplugged (`we:plugs/index.ts` / `we:plugs/unplugged.ts` — `register`/`upgrade`/`downgrade`, no
+   `window`/prototype mutation); the plugged `we:plugs/bootstrap.ts` (patches `window`/`Node`/`Element`) is a POC/demo.
    A non-invasive library is the `@lit/reactive-element` archetype — a package, not spec content.
 3. **FUI is an umbrella of granular impl sub-packages**, not a monolith — a `workspaces` monorepo already publishing
    `@frontierui/compiler`, `@frontierui/vite-plugin`, `@frontierui/jsx-runtime`, `@frontierui/component-compiler`, …
    (and `frontierui/plugs` + `frontierui/blocks` dirs exist today). So "FU owns it" = **`@frontierui/plugs` as a
    sibling sub-package**, not plugs buried in a component library. plateau-app already consumes `@we/plugs`
-   (`../plateau-app/vite.config.mts:119`, `src/main.ts:9`) with **zero `@frontierui` *code* imports** (its only
+   (`../plateau-app/vite.config.mts:119`, `plateau:src/main.ts:9`) with **zero `@frontierui` *code* imports** (its only
    `@frontierui` reference is configurator seed-data), so it could depend on `@frontierui/plugs` alone — **no layer
    inversion, no forced dependency on blocks** (the `@lit/reactive-element`-under-`@lit/*` precedent).
 
@@ -52,7 +52,7 @@ runtime*" — retired by (1).
 ## Ruling — B: Frontier UI owns the runtime; WE keeps only the contracts
 
 plugs becomes **`@frontierui/plugs`** (unplugged library + plugged showcase), a granular sub-package in the FUI impl
-umbrella, sibling of `@frontierui/blocks` / `@frontierui/compiler` / adapters. **WE keeps the contracts** (`plugs.json`,
+umbrella, sibling of `@frontierui/blocks` / `@frontierui/compiler` / adapters. **WE keeps the contracts** (`we:plugs.json`,
 intents, protocols, block protocols) and **consumes `@frontierui/plugs` as a client** in its demos/site — the WE→FUI
 direction already ratified by **#604** ("WE consumes Frontier UI as a client"). The "WE imports nothing from FU" rule
 binds published **`@webeverything/*` standard artifacts**, not the docs site, so the demos-need-a-runtime objection
@@ -101,17 +101,17 @@ Spin-off builds to file at resolve:
 
 **What is "the runtime".** `plugs/` is ~124 files in two tiers: a **kernel** (`core/` + `web*/` registries +
 `window`/`Node`/`Element` patches + base classes `CustomElement`/`CustomAttribute`/`InjectorRoot`/`CustomStore`; pure,
-no `blocks/` dependency) and a **default-config** entry `bootstrap.ts:42-55` that wires concrete blocks
+no `blocks/` dependency) and a **default-config** entry `we:bootstrap.ts:42-55` that wires concrete blocks
 (`registerRouter`, `registerDataGrid`, `CallParser`, …) from `../blocks/`. Under B the whole tree (both tiers) lives in
 `@frontierui/plugs`; the plugged showcase ships inside the package, WE references it.
 
 **Blocks boundary (related, surfaced during this review).** WE's top-level `blocks/` are currently **byte-identical
-duplicates** of `frontierui/blocks/` (e.g. `navigation/NavListBehavior.ts`, `registerNavigation.ts` diff-clean). The
+duplicates** of `frontierui/blocks/` (e.g. `we:navigation/NavListBehavior.ts`, `we:registerNavigation.ts` diff-clean). The
 intended target (per the user) is **WE blocks = protocols, FUI blocks = implementation**; that consolidation is #170 /
 #604 territory, not this item — noted here so the runtime ruling stays consistent with it.
 
 **Blast radius (refs).** Blocks **#449** (in its `blockedBy`). Premise-dependent: **#170, #447, #448, #580**. Adjacent
-ruling: **#239** (npm scope — *supports* B). Mental-model source: `AGENTS.md:9`, `docs/agent/architecture.md:18`.
+ruling: **#239** (npm scope — *supports* B). Mental-model source: `we:AGENTS.md:9`, `we:docs/agent/architecture.md:18`.
 
 **Brand / marketing (deferred, non-blocking).** Whether to stand "webplugs" up as a separately-marketed product is a
 positioning call, independent of code home. `@frontierui/plugs` does not preclude a later brand; decide at product time.

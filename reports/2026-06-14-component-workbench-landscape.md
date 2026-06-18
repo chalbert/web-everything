@@ -4,7 +4,7 @@
 > (under the Web Docs feature-pipeline epic [#623](/backlog/623-web-docs-feature-pipeline-inventory-workbench-tools-derive-i/),
 > sibling of the served product [#398](/backlog/398-build-the-web-docs-product-fui-open-primitives-plateau-app-o/)).
 > Published as the `/research/` topic **component-workbench-landscape**; the registry lives in
-> [`src/_data/workbenchTools.json`](../src/_data/workbenchTools.json). Prior art = the live state of each
+> [`we:src/_data/workbenchTools.json`](../src/_data/workbenchTools.json). Prior art = the live state of each
 > tool plus the two already-named ingest targets (Storybook, Mintlify, in
 > [#426](/backlog/426-incumbent-ingestion-adapters-storybook-mintlify-to-the-webca/)); not a greenfield
 > standards survey. Mirrors the benchmark-corpus precedent: a registry + a report + a research topic, with
@@ -22,7 +22,7 @@ across these tools, and the derivation decision
 ([#626](/backlog/626-map-workbench-features-to-we-standards-which-intents-blocks-/)) classifies each
 capability mint-new vs reuse-existing against WE standards.
 
-**This corpus is complementary to, not a duplicate of, `benchmarkCorpus.json`.** That corpus is the set of
+**This corpus is complementary to, not a duplicate of, `we:benchmarkCorpus.json`.** That corpus is the set of
 *design systems* (what Web Docs would render and benchmark for coverage). This one is the set of *tools
 that document design systems* (what Web Docs competes with as a product and ingests from as adapters). One
 is the content; this is the container.

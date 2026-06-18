@@ -25,7 +25,7 @@ parallel build; it consumes their render pipeline.
 ## Quick-win first slice (workable before the full chain) — DONE
 
 - [x] A **`/blocks/` index page** — a sibling of `/intents/` + `/protocols/`, enumerating
-      [blocks.json](../src/_data/blocks.json) with intent/trait filters. This is the missing "browse all components"
+      [fui:blocks.json](../src/_data/blocks.json) with intent/trait filters. This is the missing "browse all components"
       surface and can ship independently of #624–#626 as the catalog skeleton.
 
 ## Full surface (after #626) — carved to #727 (blocked on #604)
@@ -36,11 +36,11 @@ parallel build; it consumes their render pipeline.
 
 ## Progress (2026-06-15, batch-2026-06-15) — catalog skeleton shipped; live surface carved out
 
-- **Shipped the `/blocks/` index** [`src/blocks.njk`](../src/blocks.njk) — the Storybook-equivalent browse
-  surface, sibling of `/intents/` + `/protocols/`, auto-rendering from `blocks.json` (69 cards). Filters:
+- **Shipped the `/blocks/` index** [`we:src/blocks.njk`](../src/blocks.njk) — the Storybook-equivalent browse
+  surface, sibling of `/intents/` + `/protocols/`, auto-rendering from `fui:blocks.json` (69 cards). Filters:
   **trait surface** (`type`) + **status** checkboxes + a text search over name/summary/intent; each card links
-  to `/blocks/{id}/`. Wired into the Standards nav ([base.njk](../src/_layouts/base.njk)) and documented in the
-  catalog-auto-render note ([docs/agent/design-first.md](../docs/agent/design-first.md)). `check:standards` 0
+  to `/blocks/{id}/`. Wired into the Standards nav ([we:base.njk](../src/_layouts/base.njk)) and documented in the
+  catalog-auto-render note ([we:docs/agent/design-first.md](../docs/agent/design-first.md)). `check:standards` 0
   errors (incl. §9 Vite-proxy coverage — `/blocks/` was already proxied for the per-block pages); renders on the
   11ty build.
 - **Full per-component live surface carved to [#727](/backlog/727-web-docs-blocks-per-component-live-surface-fui-render-props-/)**

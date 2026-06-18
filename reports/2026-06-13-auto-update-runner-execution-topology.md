@@ -12,9 +12,9 @@ the item stays `open + preparedDate`.
 ## The gap
 
 #101 resolved the *policy* and *gate model* and graduated to the `update-policy` protocol
-([protocols.json:110-115](../src/_data/protocols.json#L110-L115)), explicitly leaving the **runner** as
+([we:protocols.json:110-115](../src/_data/protocols.json#L110-L115)), explicitly leaving the **runner** as
 "the deferred build" — *"the orchestration runner that executes it is a swappable Plateau/reliability
-service"* ([protocols.json:112](../src/_data/protocols.json#L112), which names #497 as the build). The
+service"* ([we:protocols.json:112](../src/_data/protocols.json#L112), which names #497 as the build). The
 batch pre-flight that opened #497 flagged two blockers: **(1)** no build home for "disposable infra, not a
 WE artifact," and **(2)** epic-scope with zero existing scaffold. This survey targets the part #101's
 [auto-update-pipeline survey](../src/_includes/research-descriptions/auto-update-pipeline.njk) did *not*
@@ -38,7 +38,7 @@ standalone service the vendor operates:
 - **Renovate ships the same runner three ways from one codebase:** the Mend-hosted GitHub App (the
   convenience tier most users start on), the self-hosted Mend Renovate App (a stateful app you operate),
   and a **self-hosted GitHub Action** ("little configuration, no additional resources… runs on a
-  schedule"). Same `renovate.json` grammar; the runner is swappable infrastructure.
+  schedule"). Same `we:renovate.json` grammar; the runner is swappable infrastructure.
   ([Running Renovate](https://docs.renovatebot.com/getting-started/running/),
   [renovatebot/github-action](https://github.com/renovatebot/github-action),
   [Mend deployment guide](https://docs.mend.io/wsk/renovate-deployment-guide-self-hosted-integrations))
@@ -83,15 +83,15 @@ get to the one part that is actually new. Native-first + minimize-lock-in both p
 incumbents as swappable execution primitives and authoring only the WE-net-new policy evaluation + the
 #092 pre-test edge.**
 
-### 4 · A pure compile-to-`renovate.json` adapter is lossy — the WE policy semantics don't fully map
+### 4 · A pure compile-to-`we:renovate.json` adapter is lossy — the WE policy semantics don't fully map
 
 The `update-policy` protocol carries semantics incumbents don't model: severity read from #102's
-**changelog-manifest** with *strictest-wins* derivation ([protocols.json:94-99](../src/_data/protocols.json#L94-L99)),
-migration linkage run by the **upgrader engine** ([blocks/renderers/upgrader/upgraderEngine.ts](../blocks/renderers/upgrader/upgraderEngine.ts), #094),
+**changelog-manifest** with *strictest-wins* derivation ([we:protocols.json:94-99](../src/_data/protocols.json#L94-L99)),
+migration linkage run by the **upgrader engine** ([we:blocks/renderers/upgrader/upgraderEngine.ts](../blocks/renderers/upgrader/upgraderEngine.ts), #094),
 a *unified* gate axis spanning pre-merge **and** post-deploy, and the #092 pre-test edge. Renovate's
 `minimumReleaseAge` + Merge Confidence cover the cool-off + auto-merge-boundary slice, but not the
 manifest-driven severity, the migration linkage, or the cross-consumer pre-test. So a *thin* adapter that
-only compiles `update-policy` → `renovate.json` would silently drop the WE-specific half — the
+only compiles `update-policy` → `we:renovate.json` would silently drop the WE-specific half — the
 normalization-hub lossiness pattern, but here the lost cells are the whole point of the standard.
 
 **Implication:** the runner can't be *only* a config emitter. It needs a thin WE orchestrator that **owns
@@ -103,7 +103,7 @@ solved parts, own the WE-specific parts. That is the recommended synthesis.
 
 | Element | Classification | Home (per constellation-layering precedent #091/#092) |
 |---|---|---|
-| `update-policy` protocol (the lock) | Protocol — **already shipped** | WE ([protocols.json:110](../src/_data/protocols.json#L110)) |
+| `update-policy` protocol (the lock) | Protocol — **already shipped** | WE ([we:protocols.json:110](../src/_data/protocols.json#L110)) |
 | Pre-merge orchestration (gate eval + drive engine) | Reusable impl | Frontier UI package (next to the upgrader engine) |
 | Engine execution primitive (fetch/test/PR) | Composed incumbent | consumer CI: Renovate / Dependabot |
 | Post-deploy staged rollout | Composed incumbent | deploy cluster: Argo Rollouts / Flagger |

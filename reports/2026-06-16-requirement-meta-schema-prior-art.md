@@ -57,7 +57,7 @@ where does it leak?*
   source, the test is the derived artifact, and the documentation stays true because it runs. This is fork 2.
 
 ### 5. The constellation's own precedent — "standardize the meta-schema, not the list"
-- **Intents** (`intents.json`) are an explicitly open system: WE standardizes the intent meta-schema and lets
+- **Intents** (`we:intents.json`) are an explicitly open system: WE standardizes the intent meta-schema and lets
   projects author custom intents that coexist conflict-free, rather than freezing a list. #714's fork 1 is the
   *same move one level up*: standardize the requirement grammar, not a catalog of requirements.
 
@@ -69,10 +69,10 @@ truth" — is real and concrete in today's tree:
 | BDD slot | Binds to (existing artifact) | Concrete shape in repo |
 |---|---|---|
 | **Role / persona** | governance personas (#141/#166) | one persona family, charter-scoped lenses |
-| **Given** (precondition / state) | an **intent dimension value** | `intents.json` → `dimensions.<axis>.values[]` (e.g. `motion.physics ∈ {natural, immediate, reduced}`) |
-| **When** (trigger / action) | a **semantic term / event** | `semantics.json` terms (e.g. "Viewport Presence" enter/leave transitions) |
-| **Then** (observable outcome) | a **protocol's observable state/event** | `protocols.json` → conformance tiers, `realizesIntent` (e.g. `validation` L1/L2 observable states) |
-| **executable check** | a **webcase** | `webcases/driftCheck.ts` — structural/contract verification, the machine-checkable target |
+| **Given** (precondition / state) | an **intent dimension value** | `we:intents.json` → `dimensions.<axis>.values[]` (e.g. `motion.physics ∈ {natural, immediate, reduced}`) |
+| **When** (trigger / action) | a **semantic term / event** | `we:semantics.json` terms (e.g. "Viewport Presence" enter/leave transitions) |
+| **Then** (observable outcome) | a **protocol's observable state/event** | `we:protocols.json` → conformance tiers, `realizesIntent` (e.g. `validation` L1/L2 observable states) |
+| **executable check** | a **webcase** | `we:webcases/driftCheck.ts` — structural/contract verification, the machine-checkable target |
 
 So a requirement in this grammar is not free prose: each slot is a *typed reference* into an existing
 registry. That typing is the ground truth Gherkin lacks — an outcome clause that names a protocol-observable

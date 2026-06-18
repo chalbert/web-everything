@@ -15,9 +15,9 @@ crossRef: { url: /blocks/data-grid/, label: Data Grid block }
 # Realize the `grid:cell-navigation` behavior in Frontier UI
 
 The [Data Grid block](/blocks/data-grid/) (#123) shipped the **contract** and a reference renderer +
-movement engine (`blocks/renderers/data-grid/renderDataGrid.ts`): `nextCellPosition` (the pure APG
+movement engine (`fui:blocks/renderers/data-grid/renderDataGrid.ts`): `nextCellPosition` (the pure APG
 keyboard model), `setActiveCell` (roving tabindex), and `auditDataGrid`. The conformance demo wires
-those into a live grid *inline* in `demos/data-grid-demo.ts`. What does **not** exist yet is the
+those into a live grid *inline* in `we:demos/data-grid-demo.ts`. What does **not** exist yet is the
 production **CustomAttribute behavior** — a real `<table role="grid" grid:cell-navigation>` anywhere
 in an app does not become keyboard-navigable on its own.
 
@@ -44,16 +44,16 @@ the standard, Frontier UI the implementation), mirroring how the Data Table beha
   proves against the *same* audit in one repo. Frontier UI is the downstream consolidation that copies
   WE's implementation.
 - **Done:**
-  - `blocks/data-grid/DataGridBehavior.ts` — `grid:cell-navigation` CustomAttribute: seeds the roving
+  - `fui:blocks/data-grid/DataGridBehavior.ts` — `grid:cell-navigation` CustomAttribute: seeds the roving
     tabindex, binds keydown → `nextCellPosition` + `setActiveCell` + `.focus()`, **scrolls the active
     cell into view** each move, reads dims live from the DOM (survives windowing), clamps by default
     and layers opt-in `wrap` (`grid:cell-navigation="wrap"`), click-to-focus, emits `grid-cell-change`.
-  - `blocks/data-grid/registerDataGrid.ts` + wired into `plugs/bootstrap.ts`.
-  - Demo `demos/data-grid-demo.ts` interactive card **graduated** onto the real behavior (was inline
-    glue) + a wrap toggle; `demos/data-grid-demo.css` wrap-toggle style.
-  - Unit test `blocks/__tests__/unit/data-grid/DataGridBehavior.test.ts` (24 tests) — incl. driving the
+  - `fui:blocks/data-grid/registerDataGrid.ts` + wired into `we:plugs/bootstrap.ts`.
+  - Demo `we:demos/data-grid-demo.ts` interactive card **graduated** onto the real behavior (was inline
+    glue) + a wrap toggle; `we:demos/data-grid-demo.css` wrap-toggle style.
+  - Unit test `fui:blocks/__tests__/unit/data-grid/DataGridBehavior.test.ts` (24 tests) — incl. driving the
     **same `auditDataGrid` green** over every shared fixture through the attribute.
-  - Block page `data-grid.njk` updated (scroll-into-view, opt-in wrap, live-from-DOM dims).
+  - Block page `we:data-grid.njk` updated (scroll-into-view, opt-in wrap, live-from-DOM dims).
   - Gates: vitest 1468 pass; `check:standards` 0 errors; vite build clean; data-grid e2e playground
     green; live Playwright check (arrow nav + wrap toggle) verified, zero console errors.
 - **Leftover captured:** [#144](/backlog/144-data-grid-behavior-auto-upgrade-e2e/) — no test yet proves

@@ -16,14 +16,14 @@ Migrate the development-guide / learn-pathway surface off its interim configurat
 
 ## Progress
 
-- **2026-06-15 — migrated (plateau-app).** `src/development-guide/learn-pathway.ts` no longer hand-builds
+- **2026-06-15 — migrated (plateau-app).** `plateau:src/development-guide/learn-pathway.ts` no longer hand-builds
   DOM imperatively; it now server-renders to complete static HTML through the `@frontierui/webdocs-ui`
   SSR primitives — the `Nav` landmark for the topic switcher + the `createElement`/`renderToString` from
   `@frontierui/jsx-runtime/server` for the content — the same static-first substrate the served Web Docs
   site (#427) uses (Fork 3 end-state). The in-page topic switch is now a progressive enhancement (one
   delegated listener over `#<domainId>` links) layered over the JS-off-complete HTML. Content still flows
   from the single `seedProvider` (drift-free by construction); the curated-path layer + localStorage
-  last-topic are preserved. `.wd-nav` styled in `learn-pathway.css` (webdocs-ui ships no CSS), reusing the
-  prior switcher tokens. New `learn-pathway.test.ts` locks the migration (Nav primitive renders,
+  last-topic are preserved. `.wd-nav` styled in `plateau:learn-pathway.css` (webdocs-ui ships no CSS), reusing the
+  prior switcher tokens. New `plateau:learn-pathway.test.ts` locks the migration (Nav primitive renders,
   single-source content, `aria-current`, in-page switch). Full plateau-app suite green (142/142).
   graduatedTo: the webdocs-rendered `learn-pathway.ts`.

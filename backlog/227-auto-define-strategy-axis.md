@@ -23,8 +23,8 @@ incidental behavior.
 
 What exists today is only a partial, implicit realization: generated component modules end in a
 top-level `customElements.define(...)` side effect
-(`blocks/renderers/component/declarativeComponent.ts:151`,
-`blocks/renderers/functional/functionalComponent.ts:71`), and one adapter doc shows
+(`we:blocks/renderers/component/declarativeComponent.ts:151`,
+`we:blocks/renderers/functional/functionalComponent.ts:71`), and one adapter doc shows
 `await import('…?form=functional'); // self-registers <user-card>`. That's a convention by
 accident, not a designed concept.
 
@@ -93,13 +93,13 @@ This is a well-precedented design space; the strategies above map onto real impl
   is the on-first-use strategy: a MutationObserver dynamic-`import()`s an element's impl when its tag
   appears in the DOM; the browser then upgrades it. (css-tricks.com/an-approach-to-lazy-loading-custom-elements/)
 - **Custom Elements Manifest** — `webcomponents/custom-elements-manifest` (+ the `customElements`
-  field in package.json) is a standard file format describing a package's elements. It's the natural
+  field in we:package.json) is a standard file format describing a package's elements. It's the natural
   substrate for the build-time-parse and declarative-tag→module strategies (tag → defining module
   resolution). (github.com/webcomponents/custom-elements-manifest, custom-elements-manifest.open-wc.org)
 - **Scoped Custom Element Registries** — WICG proposal, shipped in Safari, Chromium implementing;
   `attachShadow({ customElementRegistry })` associates a registry with a shadow root. This is the
   "scope" sub-dimension (global vs per-shadow-root) and motivates why tag→constructor isn't global.
-  (wicg.github.io/webcomponents/proposals/Scoped-Custom-Element-Registries.html; open-wc.org scoped-elements)
+  (we:wicg.github.io/webcomponents/proposals/Scoped-Custom-Element-Registries.html; open-wc.org scoped-elements)
 - **Stencil output targets prove the consumer-chooses model** — `dist` (lazy: a small entry registers
   all components and defers loading each impl until rendered) vs `dist-custom-elements` (standalone:
   consumer imports and calls `defineCustomElement`). Same source, both shipped, *the consumer picks
@@ -129,13 +129,13 @@ shape. Surfaced as a close-out leftover from #072.
 ## Resolution (2026-06-09)
 
 Graduated to the **Auto-Define Strategy Protocol**
-(`/projects/webcomponents/#protocol-auto-define-strategy`, `protocols.json#auto-define-strategy`),
+(`/projects/webcomponents/#protocol-auto-define-strategy`, `we:protocols.json#auto-define-strategy`),
 owned by the webcomponents project — the same Protocol-not-Intent path render-strategy took.
 
 Rulings:
 
 1. **Strategy axis, mirroring render-strategy's framing** but built on the canonical registry idiom —
-   the registry **extends core `CustomRegistry`** (`plugs/core/CustomRegistry.ts`), not a bespoke
+   the registry **extends core `CustomRegistry`** (`we:plugs/core/CustomRegistry.ts`), not a bespoke
    `#defaultName` registry.
 2. **No tool-baked default.** The native baseline is *explicit* registration (the platform has no
    auto-registration). The default-strategy selection is a value in the **platform config a project

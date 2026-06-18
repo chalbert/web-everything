@@ -17,6 +17,6 @@ tags: []
 
 ## Progress
 
-- Added `src/_data/plugs.json` (9 plug domains: 8 web* + core, each id/name/type/status/summary).
-- Added `src/plugs.njk` index/catalog page mirroring the blocks.njk grid pattern.
-- Added a "Plugs" nav entry in `src/_layouts/base.njk` (between Blocks and About).
+- Added `we:src/_data/plugs.json` (9 plug domains: 8 web* + core, each id/name/type/status/summary).
+- Added `fui:src/plugs.njk` index/catalog page mirroring the we:blocks.njk grid pattern.
+- Added a "Plugs" nav entry in `we:src/_layouts/base.njk` (between Blocks and About).

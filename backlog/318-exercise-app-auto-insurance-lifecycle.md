@@ -122,4 +122,4 @@ standards above are consumed first (cross-app check); each new gap gets its own 
 
 Driven by the shared conformance loop — [#377](/backlog/377-conformance-loop-tooling/)
 (`check:app-conformance` benchmark, `/exercise-app` skill, the workflow doc + blockers view). Method:
-[exercise-app-workflow.md](/docs/agent/exercise-app-workflow/) (Claude: `/exercise-app auto-insurance`).
+[we:exercise-app-workflow.md](/docs/agent/exercise-app-workflow/) (Claude: `/exercise-app auto-insurance`).

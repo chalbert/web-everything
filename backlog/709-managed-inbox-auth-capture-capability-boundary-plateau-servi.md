@@ -53,8 +53,8 @@ blocked in practice on a target we actually need.
   capability graduates into the *product* (as vision does: design-ref QC → MaaS). It doesn't — it's an
   internal forcing-function for the exercise-app / design-ref loop, never a sold surface. So: no
   no-leakage seam, no Plateau hand-off, no graduation. Devtools = zero lock-in. *If* it ever becomes
-  product-facing, repoint then (YAGNI). (The `vision.mjs` seam at
-  [scripts/design-refs/vision.mjs:1-14](scripts/design-refs/vision.mjs#L1-L14) remains the precedent for
+  product-facing, repoint then (YAGNI). (The `we:vision.mjs` seam at
+  [we:scripts/design-refs/vision.mjs:1-14](scripts/design-refs/vision.mjs#L1-L14) remains the precedent for
   capabilities that *do* graduate — this one simply isn't one.)
 - **Fork 2 (build vs buy) → simplest reader, not an owned-domain build.** The linear-cost rule that
   forced the fixed-cost owned floor only bites when cost reaches a paying surface; internal dev tooling
@@ -94,7 +94,7 @@ traffic stays isolated and filterable — a fresh per-site alias per run.
 - **Origin.** Carved out of
   [#611](/backlog/611-app-screenshot-access-system-managed-email-inbox-for-logged-/) (its `size: 13` was
   an unresolved decision, not volume — so it could not be sliced; see
-  [reports/2026-06-15-backlog-split-analysis.md](/reports/2026-06-15-backlog-split-analysis.md), the
+  [we:reports/2026-06-15-backlog-split-analysis.md](/reports/2026-06-15-backlog-split-analysis.md), the
   `/split 611` run). **At resolution #611 is unblocked** — `blockedBy: ["709"]` dropped; it becomes a
   plain build (read mail per the ruling, drive signup with Playwright, capture authenticated states) and
   re-enters `/split` if its volume warrants slicing. **No Plateau-side spinout** — the ruling needs no

@@ -44,7 +44,7 @@ So neither owns a private copy of the value set, and it never lands in Focus Del
 
 ## Done when
 
-- [x] `autofocus-on-activation` registered in `src/_data/intents.json` with the closed value set (`landing`: heading | target | preserve | auto) + APG-grounded description (status `concept`).
+- [x] `autofocus-on-activation` registered in `we:src/_data/intents.json` with the closed value set (`landing`: heading | target | preserve | auto) + APG-grounded description (status `concept`).
 - [x] Focus Containment's "where focus lands when it opens" re-expressed as *composing* this atom — its `initialFocus` prose now names the atom as the canonical landing question and frames its own values as the overlay profile (the atom's `target` = this dimension's `explicit`), no duplicated value set.
 - [x] Navigation references it as a composed contract — the `<em>autofocus-on-activation</em>` placeholder + "Extraction tracked in #287" pointer replaced with a live `/intents/autofocus-on-activation/` link.
 - [ ] Implementation reference — deferred: none exists today (greps for `focusReset`/route-change focus in `plugs` and Frontier UI came back empty); the intent ships at `concept` status, impl lands with a consumer (#055).
@@ -54,6 +54,6 @@ So neither owns a private copy of the value set, and it never lands in Focus Del
 
 - **Status:** resolved 2026-06-11 (batch `batch-2026-06-11`). Spec-only authoring item; the atom is now a first-class intent the catalog auto-renders. The two non-build "Done when" boxes (impl ref, #055 consumption) are deferred-by-design — this item only extracts the contract; consumption lands with #055.
 - **Done:**
-  - Registered `autofocus-on-activation` (status `concept`, one `landing` dimension, `target?` reference field) in `src/_data/intents.json` with an APG-/native-grounded description and three `designSystemResearch` entries (WAI-ARIA APG, HTML native autofocus/dialog-focusing, React Aria/Radix FocusScope). Catalog page auto-renders at `/intents/autofocus-on-activation/`.
+  - Registered `autofocus-on-activation` (status `concept`, one `landing` dimension, `target?` reference field) in `we:src/_data/intents.json` with an APG-/native-grounded description and three `designSystemResearch` entries (WAI-ARIA APG, HTML native autofocus/dialog-focusing, React Aria/Radix FocusScope). Catalog page auto-renders at `/intents/autofocus-on-activation/`.
   - Wired the two composers to reference (not duplicate) the atom: Navigation's Focus-reset pointer is now a live link; Focus Containment's Initial-focus section frames its `initialFocus` values as the overlay profile of the shared landing contract.
   - Gate: full suite + `check:standards` green (see batch ledger).

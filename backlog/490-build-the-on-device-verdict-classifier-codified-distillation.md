@@ -24,8 +24,8 @@ build now against the corpus *format*; the trained student needs accumulated *da
   knowledge distillation (VL2Lite / PAND / VLM-KD) from the big-model labels in #489. Not a VLM — that's
   the separate Tier-2 build.
 - **Runtime (F3):** an in-browser **ONNX Runtime Web + WebGPU** provider that self-registers behind the
-  existing seam (`scripts/design-refs/vision.mjs` → `registerVisionProvider`) — same no-leakage boundary
-  as `anthropic-vision.mjs`.
+  existing seam (`we:scripts/design-refs/vision.mjs` → `registerVisionProvider`) — same no-leakage boundary
+  as `we:anthropic-vision.mjs`.
 - **Codified training (F5):** a versioned, model-agnostic artifact — **corpus + distillation recipe +
   benchmark suite** — so a base-model switch *re-runs the recipe*, never re-labels. Keep it reproducible
   (config + dated-revision log).

@@ -18,13 +18,13 @@ Item #717 shipped the bundler-agnostic core (buildTraitManifestSource) + the Rol
 
 ## Resolved (2026-06-16): webpack adapter shipped; Parcel carved to #756 (surfaced a fork)
 
-**Delivered — the webpack adapter** (`tools/trait-enforcer/webpack-plugin.ts`):
+**Delivered — the webpack adapter** (`we:tools/trait-enforcer/webpack-plugin.ts`):
 `traitEnforcerWebpack(options)` follows the shared `traitEnforcerX(options)` factory shape of the other
 three adapters. webpack has no Rollup-style `resolveId`/`load`, so it intercepts the virtual id in
 `normalModuleFactory.beforeResolve` and rewrites it to a `data:text/javascript` URI carrying the
 `buildTraitManifestSource` output — webpack 5 parses such modules natively, so each lazy `() => import()`
 still code-splits and an unused trait emits zero chunk. Verified by a **real `webpack(...)` build** added
-to `__tests__/multi-bundler.test.ts` (used trait → split chunk; unused trait absent entirely). `webpack`
+to `we:__tests__/multi-bundler.test.ts` (used trait → split chunk; unused trait absent entirely). `webpack`
 added as a dev-dep. Three of four installable baseline bundlers now real-build verified
 (Rollup + esbuild + webpack).
 

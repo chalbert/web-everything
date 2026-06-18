@@ -55,9 +55,9 @@ trigger in a real browser (not just emits the fallbacks) — validated in the
 - **Fix:** native strategy emits `position: fixed` instead of `absolute`. No popover/top-layer
   coordination needed (top-layer "alone" failed earlier because the `anchor` behavior shows via the
   `hidden` toggle, never `showPopover()`, so the surface never actually entered the top layer).
-- **Done:** root-cause probe (absolute vs fixed) in real Chromium; `native.ts` now emits
-  `position: fixed`; docstring + demo card-4 copy + `anchor.md` note updated; unit assertion
-  added (`strategies.test.ts`) + e2e flip test added (`e2e/auto-complete-demo.spec.ts`).
+- **Done:** root-cause probe (absolute vs fixed) in real Chromium; `fui:native.ts` now emits
+  `position: fixed`; docstring + demo card-4 copy + `we:anchor.md` note updated; unit assertion
+  added (`fui:strategies.test.ts`) + e2e flip test added (`we:e2e/auto-complete-demo.spec.ts`).
   All green: **199 unit + 4 e2e** (Chromium 148), `check:standards` 0 errors.
 - **Leftovers filed:** #179 (native `resize` is a no-op), #180 (native `shift` maps to the
   wrong `flip-start` semantics) — both adjacent gaps in the native strategy, out of #161's scope.
@@ -66,7 +66,7 @@ trigger in a real browser (not just emits the fallbacks) — validated in the
 
 The original fix landed in the abandoned `plateau` prototype. It has since been carried into the
 **live reference implementation, Frontier UI**, where the droplist family + `<auto-complete>` now
-live: `frontierui/blocks/droplist/positioning/native.ts` emits `position: fixed`. Validated there by
-a unit assertion (`positioning/__tests__/strategies.test.ts`) and a real-Chromium e2e flip test
-(`blocks/droplist/__tests__/e2e/auto-complete.spec.ts`). The native flip is proven in Frontier UI,
+live: `fui:frontierui/blocks/droplist/positioning/native.ts` emits `position: fixed`. Validated there by
+a unit assertion (`fui:positioning/__tests__/strategies.test.ts`) and a real-Chromium e2e flip test
+(`fui:blocks/droplist/__tests__/e2e/auto-complete.spec.ts`). The native flip is proven in Frontier UI,
 not only plateau.

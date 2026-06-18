@@ -23,7 +23,7 @@ The cross-list reorder engine shipped in [#146](/backlog/146-cross-list-reorder-
 (`withCrossListReorder`) already **handles** empty lists — `reduceCrossListReorder` guards a grab on an
 empty focused list (`id === undefined` → no-op), `relocate` clamps the drop index into a zero-length
 target (inserts at 0), and the playground's pointer path hit-tests an empty column and defaults the
-slot to the end. But the shared fixtures (`cross-list-reorder-cases.ts`) don't cover those edges, so
+slot to the end. But the shared fixtures (`we:cross-list-reorder-cases.ts`) don't cover those edges, so
 the conformance suite doesn't pin them.
 
 ## Scope
@@ -40,7 +40,7 @@ Add fixture cases (which the CI suite and the playground both run) for:
 ## Notes
 
 - Pure test/fixture work — the engine, renderer, announcer, and audit in
-  `blocks/renderers/reorderable-list/renderCrossListReorder.ts` already implement the behavior; this
+  `we:blocks/renderers/reorderable-list/renderCrossListReorder.ts` already implement the behavior; this
   hardens the verified contract against regressions.
 - Mirror the fixture-driven anti-drift pattern: each case is a per-list order model + key sequence +
   expected state + expected announcement, double-entered against the reducer and the audit.

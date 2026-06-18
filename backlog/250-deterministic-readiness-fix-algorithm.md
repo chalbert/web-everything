@@ -39,7 +39,7 @@ Depends on **#248** and **#249**.
 ## Build
 
 - A `check:readiness` (or `fix:readiness`) script reusing the loader's derived `tier`
-  and `blockers` from [src/_data/backlog.js](src/_data/backlog.js).
+  and `blockers` from [we:src/_data/backlog.js](src/_data/backlog.js).
 - Default **dry-run**: prints the cascade result + normalization findings; `--apply`
   only performs the mechanical, reversible edits (splice frontmatter, never rewrite
   bodies).
@@ -56,6 +56,6 @@ Depends on **#248** and **#249**.
 
 - **Status:** resolved
 - **Branch:** docs/standard-authoring-workflow
-- **Done:** pure engine [scripts/readiness/engine.mjs](scripts/readiness/engine.mjs) (`computeReadiness` + `spliceStaleEdges`); CLI [scripts/check-readiness.mjs](scripts/check-readiness.mjs) (dry-run default, `--apply`, `--json`); 12 unit tests in [scripts/readiness/__tests__/engine.test.mjs](scripts/readiness/__tests__/engine.test.mjs); `check:readiness` + `fix:readiness` npm scripts.
+- **Done:** pure engine [we:scripts/readiness/engine.mjs](scripts/readiness/engine.mjs) (`computeReadiness` + `spliceStaleEdges`); CLI [we:scripts/check-readiness.mjs](scripts/check-readiness.mjs) (dry-run default, `--apply`, `--json`); 12 unit tests in [we:scripts/readiness/__tests__/engine.test.mjs](scripts/readiness/__tests__/engine.test.mjs); `check:readiness` + `fix:readiness` npm scripts.
 - **Next:** — (resolved). Follow-up #252 = the quarantined LLM spec-gap proposer.
 - **Notes:** Reuses the loader-derived `tier`/`blockers` (#248/#249) — never recomputes the rubric. Cascade reports open issue/idea with ≥1 blocker now all resolved → Tier A, plus still-blocked items + their open blockers. Normalization: `stale-edge` (resolved edge in `blockedBy`) is the ONLY `--apply` class (frontmatter splice, body untouched); `missing-date-started` (active w/o `dateStarted`) and `missing-size` (story w/o `size`, scoped to stories to match the validator) are flag-only. Verified splice on a fixture: drops the line, leaves body `["NNN"]` + sibling fields intact. check:standards green; one pre-existing unrelated JSX-renderer test failure (untouched by this work).

@@ -39,18 +39,18 @@ Precedent: **Stagewise** (Express+WS in the extension host). Registers as the to
 - **2026-06-15 — built the testable spine (plateau-app).** Landed under
   `src/dev-browser/ide-bridge/vscode-extension/`, filling the `VSCODE_EXTENSION` precedence slot #576
   reserved:
-  - **`protocol.ts`** — the transport-agnostic browser↔extension wire contract (versioned `hello`
+  - **`plateau:protocol.ts`** — the transport-agnostic browser↔extension wire contract (versioned `hello`
     handshake, `listActiveProjects`, `jump`, two-way `patch` with an optional `baselineHash` for conflict
     detection), one source of truth for both halves.
-  - **`provider.ts`** — the browser-side `createVscodeExtensionProvider` (precedence 40, `['jump','patch']`),
+  - **`we:provider.ts`** — the browser-side `createVscodeExtensionProvider` (precedence 40, `['jump','patch']`),
     forwarding over an injected `BridgeTransport` (HTTP/WS-agnostic); `isAvailable()` is the `hello`
     round-trip so the registry degrades to the substrate when the extension isn't running. Plus
     `listActiveProjects` (the "emit active projects" capability beyond jump/patch).
-  - **`host.ts`** — the extension-host handler core `handleBridgeRequest(req, host)`: `WorkspaceEdit`
+  - **`plateau:host.ts`** — the extension-host handler core `handleBridgeRequest(req, host)`: `WorkspaceEdit`
     patching (undoable, event-firing, not a raw write), workspace-folder emit, and **conflict arbitration**
     (refuses a patch when the live document's hash no longer matches the browser's `baselineHash` — the
     two-way coordination the substrate can't offer). Pure aside from the host calls; never throws.
-  - **`host-adapter.ts`** — `createVscodeHost(vscode, version)` binding the live API through a structural
+  - **`plateau:host-adapter.ts`** — `createVscodeHost(vscode, version)` binding the live API through a structural
     `VscodeApi` seam (imports NO `vscode` module, so it compiles + tests inside plateau-app), plus
     `createBridgeHandler` and the `djb2` conflict hash.
   - **Wiring:** `createDefaultIdeBridge({ vscodeExtension: { transport } })` registers it on top,

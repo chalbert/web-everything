@@ -42,10 +42,10 @@ A new **block + intent** standard — *not* a mode of the `autocomplete` block, 
 
 | File | Action |
 |---|---|
-| `reports/2026-06-14-inline-trigger-mention-pattern.md` | created (this report) |
-| `src/_data/researchTopics.json` | added `inline-trigger-mention-pattern` topic |
-| `src/_includes/research-descriptions/inline-trigger-mention-pattern.njk` | created (full write-up) |
-| `backlog/591-candidate-standard-mention-trigger-character-inline-picker.md` | rewritten into prepared-fork shape (`preparedDate`) |
+| `we:reports/2026-06-14-inline-trigger-mention-pattern.md` | created (this report) |
+| `we:src/_data/researchTopics.json` | added `inline-trigger-mention-pattern` topic |
+| `we:src/_includes/research-descriptions/inline-trigger-mention-pattern.njk` | created (full write-up) |
+| `we:backlog/591-candidate-standard-mention-trigger-character-inline-picker.md` | rewritten into prepared-fork shape (`preparedDate`) |
 
 ## Sources
 

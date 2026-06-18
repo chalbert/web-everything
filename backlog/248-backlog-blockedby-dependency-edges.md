@@ -28,9 +28,9 @@ until NNN is `resolved`." It needs its own field.
 ## Build
 
 - **Schema:** add optional `blockedBy: ["NNN", "NNN"]` (quoted, leading-zero-safe)
-  to the content-item frontmatter in [docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md)
+  to the content-item frontmatter in [we:docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md)
   (*Adding an item*).
-- **Loader:** parse it in [src/_data/backlog.js](src/_data/backlog.js) and expose a
+- **Loader:** parse it in [we:src/_data/backlog.js](src/_data/backlog.js) and expose a
   resolved `blockers` array on each item (the referenced item objects, so pages can
   link them).
 - **Validator:** in the `check:standards` backlog rules, **error** if a `blockedBy`
@@ -51,14 +51,14 @@ until NNN is `resolved`." It needs its own field.
 
 ## Outcome (resolved 2026-06-09)
 
-- **Schema:** `blockedBy: ["NNN", …]` documented in [docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md)
+- **Schema:** `blockedBy: ["NNN", …]` documented in [we:docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md)
   (*Authoring an item*), with a note on why it's distinct from `crossRef`/`parent`.
-- **Loader:** [src/_data/backlog.js](src/_data/backlog.js) resolves the edge into a lightweight
+- **Loader:** [we:src/_data/backlog.js](src/_data/backlog.js) resolves the edge into a lightweight
   `blockers` array (`{ id, num, slug, title, status }`) for linking, dropping any NNN that doesn't
   resolve so a page never renders a dead link.
 - **Validator:** `check:standards` (§6d-ter) errors on an unresolvable, self-referential, or cyclic
   `blockedBy` (DFS cycle walk) — verified by negative test.
-- **Detail page:** [src/backlog-pages.njk](src/backlog-pages.njk) renders a *Blocked by* section
+- **Detail page:** [we:src/backlog-pages.njk](src/backlog-pages.njk) renders a *Blocked by* section
   linking each prerequisite with its status badge.
 - **Migration scope — 23, not 32.** The `grep` heuristic in *Build* over-counts: it also catches soft
   sequencing ("after", "pairs with"), "benefits-from", open questions ("is it blocked on #140?"),

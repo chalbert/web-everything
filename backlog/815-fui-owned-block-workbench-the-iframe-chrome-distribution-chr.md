@@ -41,18 +41,18 @@ The FUI-hosted, FUI-owned interactive block workbench ratified by #809: chrome (
 **Status:** resolved · **Locus:** `frontierui` · the shell is built; slices fill it in.
 
 **Done.** Built the block-agnostic workbench shell in `frontierui/workbench/`:
-- `registry.ts` — the `WorkbenchBlock` seam slices extend: each declares loader + themeable `tokens`
+- `we:registry.ts` — the `WorkbenchBlock` seam slices extend: each declares loader + themeable `tokens`
   (custom properties) + toggleable `traits` (attributes) + optional block CSS. One concrete entry
   (`auto-complete`) ships so the shell is exercised end-to-end.
-- `mount.ts` — `mountWorkbench(root, block)`: theme switcher sets `--token` custom properties on the
+- `fui:mount.ts` — `mountWorkbench(root, block)`: theme switcher sets `--token` custom properties on the
   stage; trait panel sets/toggles attributes (re-mounts so construct-time traits like `windowed`
   take effect); inspector reads the rendered tree (`querySelector`/`getComputedStyle`) on demand.
   **All host-side DOM — no postMessage manipulation protocol, no WE↔FUI channel.**
-- `demos/workbench.html` + `workbench.ts` — the FUI-hosted page, addressable via `?block=<id>`.
-- `demos/workbench-host.html` — host harness standing in for WE's block "do" page: a plain `<iframe>`
+- `fui:demos/workbench.html` + `fui:workbench.ts` — the FUI-hosted page, addressable via `?block=<id>`.
+- `fui:demos/workbench-host.html` — host harness standing in for WE's block "do" page: a plain `<iframe>`
   embeds the workbench, wrapped by a **WE-standards overlay** rendered from WE's own data (the #755
   split — that overlay is WE-docs chrome, NOT part of this FUI product).
-- e2e: `workbench/__tests__/e2e/workbench.spec.ts` (registered in `playwright.config.ts` testMatch)
+- e2e: `fui:workbench/__tests__/e2e/workbench.spec.ts` (registered in `we:playwright.config.ts` testMatch)
   proves all three acceptance criteria — 3 specs green.
 
 Gates: `check:standards` 0 errors; `tsc --noEmit` clean for the new files; e2e 3/3 green.

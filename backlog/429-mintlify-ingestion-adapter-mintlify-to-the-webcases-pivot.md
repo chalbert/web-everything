@@ -28,8 +28,8 @@ FUI slice of #398 (per-incumbent sub-split of the former combined adapters story
 ## Progress
 
 Resolved 2026-06-14 (batch). Built the Mintlify ingestion adapter as a sibling of
-the Storybook adapter (#552), reusing `webdocs/adapters/types.ts`:
-- `webdocs/adapters/mintlify.ts` — `mintlifyAdapter` takes `{ path, source }` MDX pages and does its own light parsing (no MDX-runtime dep): YAML-ish frontmatter (`title`/`description`/`id`) + fenced code blocks. Emits `WebCase`s directly, bypassing `parseWebCase`. Block id ← frontmatter `id`/slugified last path segment; one case per fenced block (title ← ```lang title="…"`` meta / nearest preceding heading / synthesized; description ← frontmatter on the first case only; code ← block body).
-- `webdocs/adapters/__tests__/mintlify.test.ts` — 5 tests (heading vs meta title, frontmatter id, synthesized title, prose-only drop, no-frontmatter fallback).
+the Storybook adapter (#552), reusing `fui:webdocs/adapters/types.ts`:
+- `fui:webdocs/adapters/mintlify.ts` — `mintlifyAdapter` takes `{ path, source }` MDX pages and does its own light parsing (no MDX-runtime dep): YAML-ish frontmatter (`title`/`description`/`id`) + fenced code blocks. Emits `WebCase`s directly, bypassing `parseWebCase`. Block id ← frontmatter `id`/slugified last path segment; one case per fenced block (title ← ```lang title="…"`` meta / nearest preceding heading / synthesized; description ← frontmatter on the first case only; code ← block body).
+- `fui:webdocs/adapters/__tests__/mintlify.test.ts` — 5 tests (heading vs meta title, frontmatter id, synthesized title, prose-only drop, no-frontmatter fallback).
 
 Lossy normalization-hub direction (prose/components dropped, runnable examples survive). FUI `check:standards` green + type-clean. Further incumbents (Docusaurus, …) drop in as more size-3 siblings under #398. Per #426 Fork 2 = A.

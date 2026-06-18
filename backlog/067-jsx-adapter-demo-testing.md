@@ -14,12 +14,12 @@ Kept as the `relatedReport` pointer so the testing-plan report stays reachable (
 the work itself graduated into the `jsx-adapter-demo` playground plus the test suites + the
 `check:standards` shadowing guard:
 
-- `blocks/__tests__/unit/renderers/mapping-conformance.test.tsx`
-- `blocks/__tests__/unit/renderers/directiveSugar.test.tsx`
-- `blocks/renderers/jsx/__fixtures__/mapping-cases.tsx`
-- `plugs/__tests__/e2e/playgrounds.spec.ts`
-- `blocks/__tests__/e2e/source-toggle.spec.ts`
-- `scripts/check-standards.mjs` (§8 shadowing guard)
+- `we:blocks/__tests__/unit/renderers/mapping-conformance.test.tsx`
+- `we:blocks/__tests__/unit/renderers/directiveSugar.test.tsx`
+- `we:blocks/renderers/jsx/__fixtures__/mapping-cases.tsx`
+- `we:plugs/__tests__/e2e/playgrounds.spec.ts`
+- `we:blocks/__tests__/e2e/source-toggle.spec.ts`
+- `we:scripts/check-standards.mjs` (§8 shadowing guard)
 
 ## Resolution
 

@@ -22,7 +22,7 @@ Built in **plateau-app** `src/technical-configurator/` (locus plateau-app):
 - **Registered the no-key keyword NL provider** (`keywordNLProvider`) as the default seam fallback at
   module load, so the NL box is exercisable with zero configuration (a BYO-AI-key provider supersedes it
   via `{ active: true }`). `hasNLProvider()` now returns true.
-- **`renderNLBox()`** in `configurator.ts` — a plain-language input + "Interpret" button inserted at the
+- **`renderNLBox()`** in `plateau:configurator.ts` — a plain-language input + "Interpret" button inserted at the
   top of the Requirements card, gated on `hasNLProvider()` (shows a manual-only note otherwise). Submit
   (click or Enter) calls **`applyNLDescription()`**, which runs `describeRequirements(nl, currentDomain())`
   through the seam, sets `state.requirements` to the returned **partial** map, marks the config Custom, and
@@ -31,12 +31,12 @@ Built in **plateau-app** `src/technical-configurator/` (locus plateau-app):
   rest below", or the degrade-to-manual message when nothing mapped / a provider errors. The seam's
   closed-vocabulary normalization keeps a description from ever widening the decision space.
 - `nlHint` is module-scoped (survives re-render, not persisted); cleared on preset apply + domain switch.
-- **`configurator.css`** — styles for the NL box.
+- **`plateau:configurator.css`** — styles for the NL box.
 
 **Verification:** plateau-app's `npm test` gate (`vitest run`) is not runnable here — vitest is not
 installed (pre-existing repo state, same as #502). Verified instead by **`tsc --noEmit`** (new code
 type-clean) and an **esbuild-bundled integration run**: registering the keyword provider →
 `describeRequirements` partial-fills the matched axis, and an off-vocabulary description normalizes to `{}`
-(the manual-mode degrade). The seam itself is covered by the existing `nl-provider.test.ts`.
+(the manual-mode degrade). The seam itself is covered by the existing `plateau:nl-provider.test.ts`.
 
-**Graduated to** `plateau-app/src/technical-configurator/configurator.ts` — NL box — keyword no-key provider + renderNLBox/applyNLDescription wired to describeRequirements seam; partial-fill populates Requirements state; unset axes degrade to manual fine-tune (#096).
+**Graduated to** `plateau:plateau-app/src/technical-configurator/configurator.ts` — NL box — keyword no-key provider + renderNLBox/applyNLDescription wired to describeRequirements seam; partial-fill populates Requirements state; unset axes degrade to manual fine-tune (#096).

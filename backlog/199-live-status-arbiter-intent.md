@@ -55,11 +55,11 @@ identified as its first implementation; the cross-cutting consumers above are cr
 - **Status:** resolved — graduated into the existing `live-region-status` intent (dedup finding below);
   no `live-status` sibling minted.
 - **Branch:** docs/standard-authoring-workflow
-- **Done:** enriched `live-region-status` in `src/_data/intents.json` — added **Precedence & coalescing**
+- **Done:** enriched `live-region-status` in `we:src/_data/intents.json` — added **Precedence & coalescing**
   (single winner `error > loading > count`, polite-only, ~150 ms debounce), **Through-the-DOM coordination**
   (`statuschange` event-in + adopt-region-by-reference / no-double-announce invariant), extended the
   Interface Protocol (`StatusChangeDetail` + the dispatch contract), added `statuschange` to `events`,
-  added a **Reference implementation** section (frontierui `LiveStatus.ts`) + cross-cutting consumers
+  added a **Reference implementation** section (frontierui `fui:LiveStatus.ts`) + cross-cutting consumers
   #013/#056/#059/#115; promoted the debounce researchGap into the contract. check:standards 0/0; clean
   11ty build renders all new sections on `/intents/live-region-status/`.
 - **Next:** —

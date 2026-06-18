@@ -16,7 +16,7 @@ tags: [webdocs, storybook, inventory, landscape, benchmark, registry]
 
 Consolidated landscape of Storybook-like tools — **no such inventory exists today** (only Storybook + Mintlify were
 named in [#426](/backlog/426-incumbent-ingestion-adapters-storybook-mintlify-to-the-webca/)/#429). Publish a `reports/`
-landscape + `src/_data/workbenchTools.json` registry, mirroring the
+landscape + `we:src/_data/workbenchTools.json` registry, mirroring the
 [benchmarkCorpus](../src/_data/benchmarkCorpus.json) pattern (registry + report + research topic).
 
 ## Categorize on axes (not one flat list)
@@ -29,8 +29,8 @@ landscape + `src/_data/workbenchTools.json` registry, mirroring the
 
 ## Deliverables
 
-- [ ] `src/_data/workbenchTools.json` — one entry per tool: id, name, category axis, model (local/hosted), input format (CSF/MDX/CEM/MDX-docs), notable features, OSS/commercial, URL.
-- [ ] `reports/2026-06-…-component-workbench-landscape.md` — the prose landscape + how each maps to the WE constellation (ingest target? feature donor? format to emit?).
+- [ ] `we:src/_data/workbenchTools.json` — one entry per tool: id, name, category axis, model (local/hosted), input format (CSF/MDX/CEM/MDX-docs), notable features, OSS/commercial, URL.
+- [ ] `reports/2026-06-…we:-component-workbench-landscape.md` — the prose landscape + how each maps to the WE constellation (ingest target? feature donor? format to emit?).
 - [ ] A `/research/` topic entry so it surfaces on the site (follow the benchmark-corpus precedent).
 
 ## Notes
@@ -44,12 +44,12 @@ Storybook/Mintlify.
 - **Status:** resolved
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
-  - `src/_data/workbenchTools.json` — 26 sources across 5 category axes (local-workbench / docs-platform /
+  - `we:src/_data/workbenchTools.json` — 26 sources across 5 category axes (local-workbench / docs-platform /
     hosted-catalog / visual-test / inventory-format), governed by selectionCriteria + inclusionRule, each with
-    model/inputFormat/license/status/weRoles/notableFeatures. Mirrors the benchmarkCorpus.json pattern.
-  - `reports/2026-06-14-component-workbench-landscape.md` — the prose landscape + per-axis WE-constellation
+    model/inputFormat/license/status/weRoles/notableFeatures. Mirrors the we:benchmarkCorpus.json pattern.
+  - `we:reports/2026-06-14-component-workbench-landscape.md` — the prose landscape + per-axis WE-constellation
     mapping (ingest-target / format-to-emit / feature-donor / benchmark).
-  - `/research/` topic `component-workbench-landscape` added to `src/_data/researchTopics.json`.
+  - `/research/` topic `component-workbench-landscape` added to `we:src/_data/researchTopics.json`.
 - **Next:** #625 (feature-surface matrix) is unblocked.
 - **Notes:** Two load-bearing priors handed to #626 — (a) **CEM is the format to emit** (web-component-native,
   already tool-consumed; api-viewer is the zero-build proof); (b) the **open-core seam is market-validated**

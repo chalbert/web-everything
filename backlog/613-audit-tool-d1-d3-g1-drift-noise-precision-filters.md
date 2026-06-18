@@ -12,22 +12,22 @@ tags: []
 
 # Audit tool: D1/D3/G1 drift+noise precision filters
 
-Tighten the drift and edge-gap checks in scripts/audit-backlog-health.mjs, per the #607 audit (D1: 9 hits / 0 true dead-refs; G1: 104 hits / 0 slips). D1: suppress paths governed by negation (assertion-of-absence, 'there is no plugs/package.json'), a write/emit verb (runtime output), or build-card deliverable prose ('a page at X' = will-create); resolve bare suffixes against the dir named nearby and split slash-joined enumerations against src/_data/. D3: aggregate per-project (resolved count + live surface) not per-item, and separate intentionally-pending status (webplugs correctly 'concept' pending #606) from stale drift. G1: drop per/ruled-by/after/once, keep gated-on/depends-on/requires/builds-on — 104 to single digits.
+Tighten the drift and edge-gap checks in we:scripts/audit-backlog-health.mjs, per the #607 audit (D1: 9 hits / 0 true dead-refs; G1: 104 hits / 0 slips). D1: suppress paths governed by negation (assertion-of-absence, 'there is no we:plugs/package.json'), a write/emit verb (runtime output), or build-card deliverable prose ('a page at X' = will-create); resolve bare suffixes against the dir named nearby and split slash-joined enumerations against src/_data/. D3: aggregate per-project (resolved count + live surface) not per-item, and separate intentionally-pending status (webplugs correctly 'concept' pending #606) from stale drift. G1: drop per/ruled-by/after/once, keep gated-on/depends-on/requires/builds-on — 104 to single digits.
 
 ## Progress
 
-**Resolved 2026-06-14.** All three precision filters landed in `scripts/audit-backlog-health.mjs`;
+**Resolved 2026-06-14.** All three precision filters landed in `we:scripts/audit-backlog-health.mjs`;
 measured against the real backlog (602 items):
 
 - **D1: 8 → 0** (every hit was a false positive, now resolved or suppressed). Two new resolution
-  gaps — `resolvesAsEnumeration` (slash-joined `blocks/intents/plugs/protocols/projects.json` → five
-  real `src/_data/*.json`) and `resolvesAgainstDir` (a bare suffix like `adapters/eslint.mjs` joined
+  gaps — `resolvesAsEnumeration` (slash-joined `we:blocks/intents/plugs/protocols/projects.json` → five
+  real `src/_data/*.json`) and `resolvesAgainstDir` (a bare suffix like `we:adapters/eslint.mjs` joined
   to a dir named in the *same section*, `scripts/validation-normalize/`; caught #236 and #449) — plus
-  `suppressionReason` over the 60 chars before the path: **absence** (`no \`plugs/package.json\``, #606),
-  **generated** (`writes \`reports/…burndown.json\``, #435), **planned** (`a page at \`demos/converter.html\``,
+  `suppressionReason` over the 60 chars before the path: **absence** (`no \`we:plugs/package.json\``, #606),
+  **generated** (`writes \`reports/…we:burndown.json\``, #435), **planned** (`a page at \`we:demos/converter.html\``,
   #038). Sections are split heading-by-heading so a dir only resolves a ref in its own section.
 - **D3: 18 per-item → 6 per-project.** Now aggregated by `relatedProject` after the loop: a project
-  missing from `projects.json` is a dangling ref; a `concept` project with ≥ `STALE_RESOLVED_MIN` (5)
+  missing from `we:projects.json` is a dangling ref; a `concept` project with ≥ `STALE_RESOLVED_MIN` (5)
   resolved items is stale drift (webblocks/webadapters/webintents/webtraits/webdocs/webvalidation).
   Intentionally-pending concept projects with little resolved work are excluded — `webplugs` (0
   resolved, pending #606) and `webcases` (3 resolved, too thin) no longer flag. Candidate pool; the

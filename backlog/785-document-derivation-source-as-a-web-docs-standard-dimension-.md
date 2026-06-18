@@ -17,7 +17,7 @@ Document in the WE webdocs standard that catalog derivation-source is a supporte
 
 ## Progress (2026-06-16, batch-2026-06-16) — built
 
-- Added a **"Dimension — Derivation source"** section to the Web Docs project page body ([src/_includes/project-webdocs.njk](../src/_includes/project-webdocs.njk)), right after the Custom Elements Manifest protocol section.
+- Added a **"Dimension — Derivation source"** section to the Web Docs project page body ([we:src/_includes/project-webdocs.njk](../src/_includes/project-webdocs.njk)), right after the Custom Elements Manifest protocol section.
 - Documents the #706 ruling: derivation-source is a **supported dimension**, not a mandated mechanism. Authored → CEM (#626) = **default/reference**; impl-scan/CEM-from-source = **opt-in**; hybrid = scan-structure + author-prose. All three emit the **same CEM contract**.
 - Notes the source-independent **completeness gate** (#706 invariant): the manifest must cover every implemented block family regardless of source.
 - Doc-only, no code. **Verified:** `check:standards` green; the section renders at `/projects/webdocs/` (`:8080`).

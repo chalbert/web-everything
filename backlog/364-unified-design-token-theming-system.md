@@ -47,8 +47,8 @@ curated-override path (Fork 4). `graduatedTo: webtheme`.
 [#010](/backlog/010-gap-3-theme-color-intent/) deferred as *"the technical half — token elaboration, not
 an intent dimension."* The four forks below are grounded in a prior-art survey published as
 [`/research/design-token-theming-system/`](/research/design-token-theming-system/) (session report
-`reports/2026-06-12-design-token-theming-system.md`) covering the native CSS substrate + the
-`references.json` benchmark design systems. Each fork carries a **bold** recommended default; the survey
+`we:reports/2026-06-12-design-token-theming-system.md`) covering the native CSS substrate + the
+`we:references.json` benchmark design systems. Each fork carries a **bold** recommended default; the survey
 *dissolved* a latent fork (does the token project re-name semantic roles? — no, intents already do) and
 *sharpened* the real one (Fork&nbsp;4, accent derivation). Gap #4 `design-tokens-theming` from the
 [#347](/backlog/347-capability-mapping-gap-detection/) coverage sweep.
@@ -56,11 +56,11 @@ an intent dimension."* The four forks below are grounded in a prior-art survey p
 ## The axis
 
 WE already owns the **semantic tier** of a token system as Intents — `surface`
-([intents.json:997](src/_data/intents.json#L997)) names elevation (a `0-5` semantic scale) + texture;
-`density` ([intents.json:20](src/_data/intents.json#L20)), `typography`
-([intents.json:960](src/_data/intents.json#L960)), `motion` ([intents.json:3](src/_data/intents.json#L3)),
+([we:intents.json:997](src/_data/intents.json#L997)) names elevation (a `0-5` semantic scale) + texture;
+`density` ([we:intents.json:20](src/_data/intents.json#L20)), `typography`
+([we:intents.json:960](src/_data/intents.json#L960)), `motion` ([we:intents.json:3](src/_data/intents.json#L3)),
 and the still-unauthored theme-color intent (#010 resolved its dimensions `scheme`/`contrast`/`accent`
-but it is **not yet in [intents.json](src/_data/intents.json)**) name the rest. What WE lacks is the
+but it is **not yet in [we:intents.json](src/_data/intents.json)**) name the rest. What WE lacks is the
 **concrete-value layer** those semantic roles resolve into — the primitive scales (spacing, radius,
 elevation/shadow, type ramp, color palette) and the per-component overrides. The benchmark systems are
 unanimous that this layer is a **primitive → semantic → component** taxonomy (MD3 ref/sys/comp; Fluent
@@ -104,7 +104,7 @@ rules out Block + Intent: there is no single runnable UX and the layer carries *
 declarative "what" intents own. The realistic homes:
 
 - **A. New Web Project — `webtheme` (or `webtokens`).** A peer of `webintents`
-  ([projects.json](src/_data/projects.json) lists 26 projects; no token/theme project exists yet) owning
+  ([we:projects.json](src/_data/projects.json) lists 26 projects; no token/theme project exists yet) owning
   the token taxonomy, the DTCG↔CSS mapping, and the platform default token set. Matches #010's "design-token
   *project*" language and keeps the concern out of the intents.
 - **B. A Capability**, tiered per impl in the capabilityMatrix. Fits "platform feature, varies per impl,"
@@ -145,7 +145,7 @@ native-first-of-formats choice: align to the platform standard, don't fork it.
 the semantic roles.** The field is unanimous on **primitive → semantic → component** (MD3 ref/sys/comp,
 Spectrum global/alias/component; Fluent collapses to global/alias). The WE-specific reframe the survey
 surfaced: WE *already* names semantic roles as Intents — `surface.elevation` (a `0-5` scale,
-[intents.json:997](src/_data/intents.json#L997)), `density`, `typography`, `motion`, theme-color's
+[we:intents.json:997](src/_data/intents.json#L997)), `density`, `typography`, `motion`, theme-color's
 `scheme`/`contrast`/`accent`. They **are** WE's semantic/system tier.
 
 - **A. 3-tier, semantic tier owned by the existing intents.** Tokens own the **primitive** scale (raw
@@ -161,7 +161,7 @@ surfaced: WE *already* names semantic roles as Intents — `surface.elevation` (
 **Recommended default: A — 3-tier, with the semantic tier owned by the existing intents; tokens own
 primitive + component.** This is the structural answer to "relationship to #010": the intent stays the
 semantic "what," the token project supplies the concrete values it resolves to. *Sub-decision:* authoring
-the theme-color intent itself (still absent from `intents.json`) remains #010's separate `/new-standard`
+the theme-color intent itself (still absent from `we:intents.json`) remains #010's separate `/new-standard`
 build — this project provides the values that intent's `accent` points into, and should land after it.
 
 ## Fork 4 — Scheme + accent-derivation model

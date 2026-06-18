@@ -24,10 +24,10 @@ lifecycle, rating (S0), audit.
 
 Added the endorsement (mid-term change) sub-flow to exercise app B:
 
-- **`domain/endorsement.ts`** (pure core) — an applicable-change registry (add/remove Collision & Comprehensive coverage, add/remove a driver, change garaging territory), `previewEndorsement` (re-rate a clone + **prorate** the 6-month premium delta over the unexpired term via `remainingFraction`), and `applyEndorsement` (mutate the policy, append an immutable `Endorsement` record + audit entry, **re-issue** the declarations page + ID cards). Role-gated via `canEndorse` (agent/underwriter) — the Web Guards stand-in (PLATFORM-GAP #289).
-- **`domain/types.ts`** — `Endorsement` / `EndorsementChange` types + `endorsements?` on `Policy`.
-- **`app.ts`** — `renderEndorsement(p)` on an in-force policy: a picker whose options carry each change's prorated impact, an apply button, and the endorsement history; the apply handler reuses the rating engine (#411), appends to the Web Audit trail, and re-renders. The policy STATE stays in-force — an endorsement is a within-state sub-flow (Web Lifecycle owns the state machine).
-- **`app.css`** — endorsement section styling (mirrors `.bind-body`).
+- **`we:domain/endorsement.ts`** (pure core) — an applicable-change registry (add/remove Collision & Comprehensive coverage, add/remove a driver, change garaging territory), `previewEndorsement` (re-rate a clone + **prorate** the 6-month premium delta over the unexpired term via `remainingFraction`), and `applyEndorsement` (mutate the policy, append an immutable `Endorsement` record + audit entry, **re-issue** the declarations page + ID cards). Role-gated via `canEndorse` (agent/underwriter) — the Web Guards stand-in (PLATFORM-GAP #289).
+- **`we:domain/types.ts`** — `Endorsement` / `EndorsementChange` types + `endorsements?` on `Policy`.
+- **`we:app.ts`** — `renderEndorsement(p)` on an in-force policy: a picker whose options carry each change's prorated impact, an apply button, and the endorsement history; the apply handler reuses the rating engine (#411), appends to the Web Audit trail, and re-renders. The policy STATE stays in-force — an endorsement is a within-state sub-flow (Web Lifecycle owns the state machine).
+- **`we:app.css`** — endorsement section styling (mirrors `.bind-body`).
 
 **Reuse, not new bypass:** consumes the already-conformant lifecycle / rating / audit standards (no active standard-bypass; the only GAP is the pre-existing draft `notification`).
 

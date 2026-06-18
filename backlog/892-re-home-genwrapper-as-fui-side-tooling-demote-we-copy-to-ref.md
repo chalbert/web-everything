@@ -22,12 +22,12 @@ gives WE the generator-agnostic behavioral conformance — so a WE reference gen
 demonstration, not a redundant second standard. (~75% confidence; residual = pure move-out per #507, which
 stays available and reversible.)
 
-- **Re-homed (canonical → FUI):** copied the pure generator `genWrapper.mjs` + its self-contained test into
+- **Re-homed (canonical → FUI):** copied the pure generator `we:genWrapper.mjs` + its self-contained test into
   `frontierui/tools/gen-wrapper/` (beside the trait-enforcer — FUI's `tools/` is its build-tooling home), with
-  a CANONICAL-HOME header. Wired FUI's `vitest.config.ts` to run `tools/**/__tests__/**/*.test.mjs`. **FUI: 17
-  gen-wrapper tests green, `check:standards` green.** The `cli.mjs` materializer stayed WE-side (it reads WE's
-  own `custom-elements.json`; the FUI panel #753 imports `generateWrapper` directly, not the CLI).
-- **Demoted (WE copy):** `scripts/gen-wrapper/genWrapper.mjs` + `cli.mjs` carry a prominent ⚠ REFERENCE-FIXTURE
+  a CANONICAL-HOME header. Wired FUI's `we:vitest.config.ts` to run `tools/**/__tests__/**/*.test.mjs`. **FUI: 17
+  gen-wrapper tests green, `check:standards` green.** The `we:cli.mjs` materializer stayed WE-side (it reads WE's
+  own `we:custom-elements.json`; the FUI panel #753 imports `generateWrapper` directly, not the CLI).
+- **Demoted (WE copy):** `we:scripts/gen-wrapper/genWrapper.mjs` + `we:cli.mjs` carry a prominent ⚠ REFERENCE-FIXTURE
   header — the canonical generator is FUI's; this WE copy is a CEM-subordinate reference that materializes +
   diffs sample wrappers, NOT a shipped `@webeverything` standard. WE's owned conformance is `wrapper-conformance/`
   (#891).

@@ -15,17 +15,17 @@ There is **no single neutral cross-tool standard**. Preferences scatter across ~
 | Layer | Where it lives | Cross-tool? |
 |---|---|---|
 | Whitespace / editor | `.editorconfig` | ✅ the only truly universal one — deliberately narrow (indent, EOL, charset, final newline). Prettier and most editors read it natively |
-| Formatting | `.prettierrc`, `biome.json`, dprint | ❌ per-tool |
-| Linting | `eslint.config.js` (flat), Biome, Oxlint | ❌ per-tool |
-| Language | `tsconfig.json` / `jsconfig.json` | partial — VS Code honours it |
+| Formatting | `.prettierrc`, `we:biome.json`, dprint | ❌ per-tool |
+| Linting | `we:eslint.config.js` (flat), Biome, Oxlint | ❌ per-tool |
+| Language | `we:tsconfig.json` / `we:jsconfig.json` | partial — VS Code honours it |
 | VCS | `.gitattributes` | overlaps EditorConfig on line endings |
 | Toolchain / runtime | `.nvmrc`, `.node-version`, `.tool-versions`, `mise.toml`, corepack `packageManager`, Volta | ❌ per-manager (mise is the 2026 consolidator, asdf-plugin-compatible, also does tasks) |
-| Environment | `devcontainer.json` (containers.dev) | ✅ ambitious but heavyweight |
-| Editor | `.vscode/settings.json`, JetBrains `.idea/` | ❌ editor-locked |
+| Environment | `we:devcontainer.json` (containers.dev) | ✅ ambitious but heavyweight |
+| Editor | `we:.vscode/settings.json`, JetBrains `.idea/` | ❌ editor-locked |
 
 Two structural facts:
 
-- **The 2026 trend is consolidation under one *vendor's* config, not a shared neutral schema.** Biome (v2.3, Jan 2026) replaces ESLint + Prettier with a single `biome.json` and is becoming the default for new projects. EditorConfig stays the lone cross-tool standard *precisely because* it stays tiny.
+- **The 2026 trend is consolidation under one *vendor's* config, not a shared neutral schema.** Biome (v2.3, Jan 2026) replaces ESLint + Prettier with a single `we:biome.json` and is becoming the default for new projects. EditorConfig stays the lone cross-tool standard *precisely because* it stays tiny.
 - **None of them express *intent* — they encode *mechanics.*** `singleQuote: true`, `indent: 2`, `rule X: error`. There is no "I prefer concise native HTML names" that lowers into the right ESLint rule **and** codegen flag **and** formatter option together. `class`-vs-`className` is the perfect specimen: an **adapter codegen-dialect preference** with no home in any of these files.
 
 ## 2. The adapter-over-tools principle — don't reinvent, lower into incumbents

@@ -30,13 +30,13 @@ the #730 precedent keeps in WE:
 
 1. **The native-first default strategies** (`NativeGuardProvider`, `SourceReductionStrategy` /
    `LastWriteWinsStrategy`, `VersioningResolution` / `CancellationResolution`) — interwoven with the contract
-   types *inside* `provider.ts`. By native-first these defaults *are* the standard's behaviour; splitting them
-   to FUI forks `provider.ts` mid-file, the same cost #730 declined for `cel.ts` ("splitting a 241-line file
+   types *inside* `we:provider.ts`. By native-first these defaults *are* the standard's behaviour; splitting them
+   to FUI forks `we:provider.ts` mid-file, the same cost #730 declined for `we:cel.ts` ("splitting a 241-line file
    mid-function costs more than it buys").
 2. **The reference runtimes** (`ValiditySourceOrchestrator`, `AsyncValidationRunner`) — dependency-free
    mechanism (auto-stamp generation tokens, drive an async check, enforce the surface guard); **no fs / net /
-   transport / host**. These are the structural twins of capability-manifest's `guard.ts` (dev warner) /
-   `check.ts` (build gate) — reference tooling #730 kept in WE as "part of the spec, not the plug runtime."
+   transport / host**. These are the structural twins of capability-manifest's `we:guard.ts` (dev warner) /
+   `we:check.ts` (build gate) — reference tooling #730 kept in WE as "part of the spec, not the plug runtime."
 
 The thing that *implements against* the contract and ports to FUI is the **plug** (`plugs/webguards`,
 `plugs/webvalidation`) — the `CustomRegistry`-extending runtime DI wiring — which is exactly what #725 already
@@ -48,34 +48,34 @@ ports. The standalone plane models stay WE.
 **not** bite (burden-of-proof-on-combining doesn't apply to planes that were never two things): each is one
 cohesive spec plane, like capability-manifest.
 
-### `guard/` (#288/#289 guard-protocol provider+predicate seam) — imported by `plugs/webguards/index.ts:23-31`
+### `guard/` (#288/#289 guard-protocol provider+predicate seam) — imported by `we:plugs/webguards/index.ts:23-31`
 
 | file | LOC | role | layer |
 |---|---|---|---|
-| `provider.ts` | 121 | `GuardRegion`/`GuardEvent`/`GuardDecision` surface + `assertGuardDecision` trust-boundary guard + `NativeGuardProvider` (permissive native default) | **WE** |
-| `registry.ts` | 96 | `CustomGuardRegistry` swap point + `evaluateRegion` (validates the crossing answer) | **WE** |
-| `accessControl.ts` | 132 | #178 access-control member intent — restates the ratified design (types + pure `resolveDenyOutcome`/`evaluateAccess`), built *on* the seam, not a new contract | **WE** |
-| `index.ts` | 20 | default wiring barrel (`createDefaultRegistry`) | **WE** |
+| `we:provider.ts` | 121 | `GuardRegion`/`GuardEvent`/`GuardDecision` surface + `assertGuardDecision` trust-boundary guard + `NativeGuardProvider` (permissive native default) | **WE** |
+| `we:registry.ts` | 96 | `CustomGuardRegistry` swap point + `evaluateRegion` (validates the crossing answer) | **WE** |
+| `we:accessControl.ts` | 132 | #178 access-control member intent — restates the ratified design (types + pure `resolveDenyOutcome`/`evaluateAccess`), built *on* the seam, not a new contract | **WE** |
+| `we:index.ts` | 20 | default wiring barrel (`createDefaultRegistry`) | **WE** |
 
 No separable emitter. The only "impl" is the permissive `NativeGuardProvider` (native default). **Whole → WE (A1).**
 
-### `validity-merge/` (#212 strategy plane) — imported by `plugs/webvalidation/index.ts` (`:17,:18,:19,:24,:25,:52,:57`)
+### `validity-merge/` (#212 strategy plane) — imported by `we:plugs/webvalidation/index.ts` (`:17,:18,:19,:24,:25,:52,:57`)
 
 | file | LOC | role | layer |
 |---|---|---|---|
-| `provider.ts` | 206 | `MergedValidity` surface contract (#004 OP-1) + `assertMergedValidity` guard + `SourceReductionStrategy` (native default) + `LastWriteWinsStrategy` | **WE** |
-| `registry.ts` | 120 | `CustomValidityMergeRegistry` swap + `ValiditySourceOrchestrator` (auto-stamp reference runtime, dependency-free) | **WE** |
-| `index.ts` | 24 | default wiring (`createDefaultRegistry` / `createDefaultOrchestrator`) | **WE** |
+| `we:provider.ts` | 206 | `MergedValidity` surface contract (#004 OP-1) + `assertMergedValidity` guard + `SourceReductionStrategy` (native default) + `LastWriteWinsStrategy` | **WE** |
+| `we:registry.ts` | 120 | `CustomValidityMergeRegistry` swap + `ValiditySourceOrchestrator` (auto-stamp reference runtime, dependency-free) | **WE** |
+| `we:index.ts` | 24 | default wiring (`createDefaultRegistry` / `createDefaultOrchestrator`) | **WE** |
 
 Both shipped strategies are native-first defaults, not third-party emitters. **Whole → WE (A1).**
 
-### `validator-resolution/` (#214 async-resolution plane) — imported by `plugs/webvalidation/index.ts` (`:19,:20,:23,:24,:34,:40`)
+### `validator-resolution/` (#214 async-resolution plane) — imported by `we:plugs/webvalidation/index.ts` (`:19,:20,:23,:24,:34,:40`)
 
 | file | LOC | role | layer |
 |---|---|---|---|
-| `provider.ts` | 161 | `ResolvedSource` cross-plane contract + `assertResolvedSource` guard + `VersioningResolution` (native default) + `CancellationResolution` | **WE** |
-| `registry.ts` | 136 | `CustomValidatorResolutionRegistry` swap + `AsyncValidationRunner` (reference runtime; no host/transport) | **WE** |
-| `index.ts` | 24 | default wiring (`createDefaultRegistry` / `createDefaultRunner`) | **WE** |
+| `we:provider.ts` | 161 | `ResolvedSource` cross-plane contract + `assertResolvedSource` guard + `VersioningResolution` (native default) + `CancellationResolution` | **WE** |
+| `we:registry.ts` | 136 | `CustomValidatorResolutionRegistry` swap + `AsyncValidationRunner` (reference runtime; no host/transport) | **WE** |
+| `we:index.ts` | 24 | default wiring (`createDefaultRegistry` / `createDefaultRunner`) | **WE** |
 
 Same shape. **Whole → WE (A1).**
 
@@ -83,9 +83,9 @@ Same shape. **Whole → WE (A1).**
 
 - **→ WE (standard):** all of `guard/` (4 files), all of `validity-merge/` (3 files), all of
   `validator-resolution/` (3 files). Each gains **one new `@webeverything/*` export** — a
-  capability-manifest-style **single `.` barrel** (`"." : "./index.ts"`), *not* validation-generation's
+  capability-manifest-style **single `.` barrel** (`"." : "we:./index.ts"`), *not* validation-generation's
   curated-subpath list, because nothing is excluded. The barrel-vs-subpath export shape is the clean A1-vs-B1
-  tell (cf. `capability-manifest/package.json` `"."` barrel vs `validation-generation/package.json` excluding
+  tell (cf. `we:capability-manifest/package.json` `"."` barrel vs `we:validation-generation/package.json` excluding
   `crossField`/`adapters`/handler).
 - **→ FUI (ports with the plug):** **nothing from these three.** Only the plugs (`plugs/webguards`,
   `plugs/webvalidation`) port — already #725's job — importing the three WE-resident contracts.
@@ -95,9 +95,9 @@ Same shape. **Whole → WE (A1).**
 
 ## Export-surface delta (the #814-style follow-up once ruled)
 
-Three new `package.json` + `exports` maps, mirroring #814, each a single `.` barrel:
-`@webeverything/guard` → `guard/index.ts`, `@webeverything/validity-merge` → `validity-merge/index.ts`,
-`@webeverything/validator-resolution` → `validator-resolution/index.ts`. Then #725 resumes, importing the
+Three new `we:package.json` + `exports` maps, mirroring #814, each a single `.` barrel:
+`@webeverything/guard` → `we:guard/index.ts`, `@webeverything/validity-merge` → `we:validity-merge/index.ts`,
+`@webeverything/validator-resolution` → `we:validator-resolution/index.ts`. Then #725 resumes, importing the
 contracts and copying none of the three.
 
 ## Confidence
@@ -108,4 +108,4 @@ contracts and copying none of the three.
   could carve the native-default strategy classes to FUI as "impls that satisfy the standard." That is the
   red-team to answer at ratify — rebutted here by (a) the #730 capability-manifest precedent these planes
   anchor, (b) native-first (the shipped default *is* the standard), and (c) the mid-file fork cost #730 itself
-  declined for `cel.ts`.
+  declined for `we:cel.ts`.

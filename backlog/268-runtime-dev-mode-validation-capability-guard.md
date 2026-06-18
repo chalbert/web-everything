@@ -18,8 +18,8 @@ A dev-mode runtime guard that warns when validation usage exceeds the active imp
 ## Progress
 
 **Resolved 2026-06-10.** Authored the guard at
-[capability-manifest/guard.ts](../capability-manifest/guard.ts), re-exported from the
-`capability-manifest` barrel and from [plugs/webvalidation/index.ts](../plugs/webvalidation/index.ts)
+[we:capability-manifest/guard.ts](../capability-manifest/guard.ts), re-exported from the
+`capability-manifest` barrel and from [we:plugs/webvalidation/index.ts](../plugs/webvalidation/index.ts)
 (alongside the #266 vocabulary). API:
 
 - **`guardCapability(manifest, feature)`** — returns `true` if `feature` is out of capability (used but
@@ -35,7 +35,7 @@ dedup (a module Set, resettable via `__resetCapabilityGuardWarnings()` for tests
 spamming. **Independent** of #267/#269: it reuses only the #266 model and the #270 `outOfCapability`
 diff.
 
-Tests ([__tests__/guard.test.ts](../capability-manifest/__tests__/guard.test.ts), 6): in-capability is
+Tests ([we:__tests__/guard.test.ts](../capability-manifest/__tests__/guard.test.ts), 6): in-capability is
 silent, out-of-capability warns once, repeated use warns once, malformed manifest flagged, bulk variant
 returns each #270 fixture's expected out-of-capability set, and the prod path computes the diff but emits
 no warning. All 27 capability-manifest + 73 webvalidation tests pass; gate green.

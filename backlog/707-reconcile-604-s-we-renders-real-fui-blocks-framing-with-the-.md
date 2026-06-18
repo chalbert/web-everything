@@ -35,7 +35,7 @@ day later by the **docs-rendering boundary**, established across three items (al
   *placement* decision. Its ruling **DC-7** said WE must **not** build a cross-repo import path into FUI;
   it embeds FUI-hosted demos through an **iframe** instead.
 - **[#701](/backlog/701-iframe-based-component-viewer-embed-fui-hosted-standard-demo/)** — *built* that
-  mechanism: the `fuiDemo` Eleventy shortcode (`.eleventy.js:38`) renders a sandboxed, **FUI-branded**
+  mechanism: the `fuiDemo` Eleventy shortcode (`we:.eleventy.js:38`) renders a sandboxed, **FUI-branded**
   `<iframe>` pointing at FUI's own surface — no import, FUI keeps provenance.
 - **[#705](/backlog/705-fui-site-s-own-block-surface-7-of-21-its-relationship-to-the/)** — *applied* the same
   iframe boundary to FUI's **own** block catalog, where the strong "render the impl" dogfooding signal now
@@ -47,10 +47,10 @@ The net rule (the standing docs-rendering boundary): WE never imports or renders
 - **Direction (Fork 1) — is there any coherent exception?** The exception ("WE genuinely renders FUI
   source") needs exactly the import seam #700 ruled out. **There is none in the tree:** `vite.config.mts:167-180`
   aliases only `@core`/`@web*` → `/plugs/*`, with no `frontierui` alias in `vite.config.mts` or
-  `.eleventy.js`. So WE cannot resolve FUI block source today, by design.
-- **Realisation already exists.** The `fuiDemo` shortcode (`.eleventy.js:38`) renders a sandboxed,
-  FUI-branded iframe to `FUI_DEMO_BASE`; `src/_includes/block-descriptions/component.njk:235` **already
-  calls it** (`{% fuiDemo "component-converter.html", … %}`). Since `src/block-pages.njk:35` includes
+  `we:.eleventy.js`. So WE cannot resolve FUI block source today, by design.
+- **Realisation already exists.** The `fuiDemo` shortcode (`we:.eleventy.js:38`) renders a sandboxed,
+  FUI-branded iframe to `FUI_DEMO_BASE`; `we:src/_includes/block-descriptions/component.njk:235` **already
+  calls it** (`{% fuiDemo "fui:component-converter.html", … %}`). Since `we:src/block-pages.njk:35` includes
   `block-descriptions/{id}.njk`, every block page can host a FUI demo via the same one-liner. Realigning
   #604 is *extending a working pattern*, not building a seam.
 - **Shape (Fork 2) — what's left of #604 once "render the impl" is removed?** The strong dogfooding
@@ -76,7 +76,7 @@ The net rule (the standing docs-rendering boundary): WE never imports or renders
 `vite.config.mts:167-180` (no `frontierui` alias).
 
 - **A — Realign #604 to the iframe boundary.** Rewrite #604 so its block-page "live demo" is a
-  FUI-hosted demo embedded via the `fuiDemo` iframe (`.eleventy.js:38`), exactly as #705 ruled for FUI's
+  FUI-hosted demo embedded via the `fuiDemo` iframe (`we:.eleventy.js:38`), exactly as #705 ruled for FUI's
   catalog. Consistent with the constellation (impl + its display → FUI), reuses the already-built #701
   mechanism, no new WE→FUI seam.
 - **B — Carve a justified exception where WE renders FUI source.** Keep #604's "render the real
@@ -90,7 +90,7 @@ which is out of scope here.
 ## Fork 2 — What #604 becomes after realignment
 
 **Crux:** Once "WE renders the real impl" is struck, #604's surviving deliverable is "embed a FUI-hosted
-demo next to each block's code sample" — already proven small by `component.njk:235`. Is that still a
+demo next to each block's code sample" — already proven small by `we:component.njk:235`. Is that still a
 13-point epic, or a thin story?
 
 - **A — Rescope #604 in place as the iframe-embedding epic.** Keep #604's number/history and its
@@ -103,7 +103,7 @@ demo next to each block's code sample" — already proven small by `component.nj
 - **B — Resolve #604 as superseded; graduate a thin follow-on story.** Treat the rendering premise as
   the whole point of #604; with it gone, file one small story ("embed `fuiDemo` on `/blocks/{id}/` pages,
   starting with droplist") and mark #604 `resolved`, `graduatedTo` that story. Cleaner if the residual is
-  judged too thin to be an epic and the per-block rollout is seen as routine repetition of `component.njk:235`.
+  judged too thin to be an epic and the per-block rollout is seen as routine repetition of `we:component.njk:235`.
 
 **Default: A — rescope in place.** It preserves #604 as the planning bucket for "live demos on every
 block page" (its original coverage intent survives the realignment intact — only the *mechanism* changed

@@ -1,6 +1,6 @@
 # Research Report — Configurable Loading Threshold via Intents
 
-**Plan file**: `plans/configurable-debounced.md`
+**Plan file**: `we:plans/configurable-debounced.md`
 **Research page**: `/research/configurable-loading-threshold/`
 **Date**: 2026-02-23
 
@@ -77,5 +77,5 @@ Configuration flows through the injector hierarchy: app-level default → per-ro
 
 | File | Action |
 |------|--------|
-| `src/_data/researchTopics.json` | Added `configurable-loading-threshold` entry |
-| `src/_includes/research-descriptions/configurable-loading-threshold.njk` | New file (~430 lines) |
+| `we:src/_data/researchTopics.json` | Added `configurable-loading-threshold` entry |
+| `we:src/_includes/research-descriptions/configurable-loading-threshold.njk` | New file (~430 lines) |

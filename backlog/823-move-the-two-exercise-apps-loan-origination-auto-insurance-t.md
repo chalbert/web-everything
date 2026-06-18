@@ -16,9 +16,9 @@ tags: []
 
 ## Sliced into 5 children (2026-06-17, `/slice 823`)
 
-Verified against both real trees (see `reports/2026-06-16-backlog-split-analysis.md`). The move is
-near-mechanical — FUI already has the router shell (`plugs/bootstrap.ts:204`), auto-scans `demos/*.html`,
-and holds all 5 block-impl families (#694); import paths (`../../blocks/…`, `/plugs/bootstrap.ts`) survive
+Verified against both real trees (see `we:reports/2026-06-16-backlog-split-analysis.md`). The move is
+near-mechanical — FUI already has the router shell (`we:plugs/bootstrap.ts:204`), auto-scans `demos/*.html`,
+and holds all 5 block-impl families (#694); import paths (`../../blocks/…`, `we:/plugs/bootstrap.ts`) survive
 unchanged. The investigation surfaced **two gaps the original body missed**: the 5 renderer-impl deps
 aren't in FUI yet, and **loan composes `CustomGuardRegistry`** — a WE *standard model* (not a block-impl
 family) with no FUI home — a buried boundary fork now carved to its own decision card. This card is a

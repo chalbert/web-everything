@@ -18,7 +18,7 @@ Define the adherence report format that the build-time check (and runtime guard)
 ## Progress
 
 **Resolved 2026-06-10.** Authored the report format at
-[capability-manifest/report.ts](../capability-manifest/report.ts), re-exported from the
+[we:capability-manifest/report.ts](../capability-manifest/report.ts), re-exported from the
 `capability-manifest` barrel. The format makes conformance a *relationship*, not pass/fail:
 
 - **`AdherenceReport`** — structured, partitioning declared-vs-used into four buckets a reader cares
@@ -33,7 +33,7 @@ Define the adherence report format that the build-time check (and runtime guard)
   L1+ claim is missing Core features.
 
 Pure data → report (no I/O, no dev/prod gating — that's the guard's concern). Tests
-([__tests__/report.test.ts](../capability-manifest/__tests__/report.test.ts), 6): the four-bucket
+([we:__tests__/report.test.ts](../capability-manifest/__tests__/report.test.ts), 6): the four-bucket
 partition, the Core-defect flag, the conformant case, the rendering of both headlines + the defect
 warning, and parity of `report.outOfCapability` with every #270 fixture's pinned diff. All 33
 capability-manifest tests pass; gate green. This completes the agent-ready slices of #005's validation

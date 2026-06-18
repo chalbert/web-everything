@@ -17,20 +17,20 @@ the **conformity layer** the apps are measured against. Built and in use (status
 apps surface needs, per the program's "improve the tools as needed" mandate).
 
 Delivered:
-- **`scripts/check-app-conformance.mjs`** (`npm run check:app-conformance`) — the strict, two-layer
+- **`we:scripts/check-app-conformance.mjs`** (`npm run check:app-conformance`) — the strict, two-layer
   benchmark. **Layer 1 conformance** (per standard the app touches: conformant / reimplemented / gap /
   claimed-unused, keyed to the registry — an intent is conformable when an active block implements it).
   **Layer 2 missing-standard discovery** (concepts with no standard → candidate standards). Manifest-driven
-  for our apps (`demos/<id>/conformance.json`); designed for manifest-less inference against real apps.
-- **`/exercise-app` skill** + **`docs/agent/exercise-app-workflow.md`** — the platform-first loop
+  for our apps (`demos/<id>we:/conformance.json`); designed for manifest-less inference against real apps.
+- **`/exercise-app` skill** + **`we:docs/agent/exercise-app-workflow.md`** — the platform-first loop
   (scan → fill top gap in WE → app consumes → rescan) and the conformance-vs-compliance definition.
-- **`src/_data/demoBlockers.js`** — the per-demo blockers view on the demo detail pages.
-- **`scripts/check-demos.mjs`** (`npm run check:demos`) — the complementary **operational-wiring** gate
+- **`we:src/_data/demoBlockers.js`** — the per-demo blockers view on the demo detail pages.
+- **`we:scripts/check-demos.mjs`** (`npm run check:demos`) — the complementary **operational-wiring** gate
   (vs. `check:app-conformance`'s *standard-use* dimension). Static checks fold into `check:standards`:
   every folder demo registered; every routed demo sets `<route-view base/entry>`, carries no
   origin-root-absolute link/redirect literal, and has a `routerDemoFallback` entry (caught the
   loan/auto base-path reload-404 bug). `--live` probes a running server (entry + each deep route = 200);
-  `--write-checklist` generates `demos/<id>/CHECKLIST.md` from metadata. Method in `demo-workflow.md`
+  `--write-checklist` generates `demos/<id>we:/CHECKLIST.md` from metadata. Method in `we:demo-workflow.md`
   §6–§8; scaffolding via the `/new-demo` skill.
 
 ## Relationships & open work

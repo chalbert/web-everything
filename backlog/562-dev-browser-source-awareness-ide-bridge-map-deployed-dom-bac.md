@@ -54,15 +54,15 @@ The original framing ("source-awareness is a provider set") was right but confla
 the survey separates: a **resolver chain** (DOM node → `file:line`) and an **IDE-bridge chain** (act on the
 repo). Any resolver composes with any bridge. Both are registry seams in the same provider-set shape the
 standard already uses — the runtime analogue of the dev-server `/__dev-panel/selection` bridge that already
-writes a browser selection back to disk ([tools/dev-panel/vite-plugin.ts:11](../tools/dev-panel/vite-plugin.ts#L11),
+writes a browser selection back to disk ([we:tools/dev-panel/vite-plugin.ts:11](../tools/dev-panel/vite-plugin.ts#L11),
 [:260-281](../tools/dev-panel/vite-plugin.ts#L260)) and the verify-gated autofix engine the PR step reuses
-([scripts/autofix/engine.mjs:229-247](../scripts/autofix/engine.mjs#L229)). The hard constraint is the
+([we:scripts/autofix/engine.mjs:229-247](../scripts/autofix/engine.mjs#L229)). The hard constraint is the
 **cold deployed/minified** case: nearly all convenient tooling (React `__source`, LocatorJS, dev-server
 `launch-editor`) is dev-build-injected and **stripped in prod**, and the *only* resolver family that survives
 a stripped build is a **build-emitted string-literal `data-*` anchor** — which makes the anchor the keystone,
 and its representation the one genuine on-merit fork. The anchor is a no-leakage **extension of the app's
 introspectable self-description** (the #141 gate reads registries/intents/contexts/traces +
-[capabilityMatrix.json:1](../src/_data/capabilityMatrix.json#L1)) — so, per #475/#091, the WE standard owns
+[we:capabilityMatrix.json:1](../src/_data/capabilityMatrix.json#L1)) — so, per #475/#091, the WE standard owns
 the *anchor contract* and the Plateau dev-browser owns the *resolver + bridge* that consume it.
 
 ### Recommended path at a glance
@@ -194,7 +194,7 @@ first-cut classification so the later filing isn't mis-scoped.
   *(near-invariant; the principle the rest of Cluster A hangs on)*. A generated fix passes the project's full
   pipeline — **lint, tests, type-check, static analysis / SonarQube (quality gate, coverage, no new code
   smells), branch protection, required human review/approval** — with **no bypass path**. The autofix
-  **verify gate** ([scripts/autofix/engine.mjs:229-247](../scripts/autofix/engine.mjs#L229)) is *necessary but
+  **verify gate** ([we:scripts/autofix/engine.mjs:229-247](../scripts/autofix/engine.mjs#L229)) is *necessary but
   not sufficient*: it proves the fix cleared the failure locally; the org's CI + review still gate the merge.
   Which gates apply is **read from the compliance layer** (same source as Cluster B), not asserted by the bot.
   Couples to #410's autonomy ladder — *auto-merge is only ever reachable after every gate is green.*

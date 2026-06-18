@@ -27,7 +27,7 @@ invented: the runner, the JS reference target, and the byte-locked C# origin all
 subprocess transport is settled in code. The one open dimension — **where the foreign-toolchain
 conformance run is enforced** — is grounded in the published research topic
 [**MaaS execution-conformance gate policy**](/research/) (session report
-[reports/2026-06-14-maas-conformance-gate-policy.md](../reports/2026-06-14-maas-conformance-gate-policy.md)),
+[we:reports/2026-06-14-maas-conformance-gate-policy.md](../reports/2026-06-14-maas-conformance-gate-policy.md)),
 which surveyed Protobuf / Connect / OpenXR / IPFS-gateway conformance suites and this repo's own
 Playwright precedent. **1 fork, carrying a bold recommended default.** (`blockedBy: ["548"]` dropped —
 #548 resolved 2026-06-14.)
@@ -36,12 +36,12 @@ Playwright precedent. **1 fork, carrying a bold recommended default.** (`blocked
 
 The concern decomposes into two orthogonal axes; only the second is a fork.
 
-- **Transport (SETTLED, not a fork).** `runner.ts` defines a clean target seam —
+- **Transport (SETTLED, not a fork).** `we:runner.ts` defines a clean target seam —
   `interface ConformanceTarget { run(vector): Promise<ActualResponse> }` at
-  [runner.ts:88](../blocks/renderers/module-service/conformance/runner.ts#L88-L91) — and its header
+  [we:runner.ts:88](../blocks/renderers/module-service/conformance/runner.ts#L88-L91) — and its header
   pre-commits the mechanism: *"a generated origin is driven via a **subprocess target** that reads the
-  very same `golden.json`"* ([runner.ts:17](../blocks/renderers/module-service/conformance/runner.ts#L17)).
-  The JS reference is one such target ([referenceTarget.ts:59](../blocks/renderers/module-service/conformance/referenceTarget.ts#L59)),
+  very same `we:golden.json`"* ([we:runner.ts:17](../blocks/renderers/module-service/conformance/runner.ts#L17)).
+  The JS reference is one such target ([we:referenceTarget.ts:59](../blocks/renderers/module-service/conformance/referenceTarget.ts#L59)),
   already driven in the default vitest gate via `runConformance(referenceTarget, committed)`. So #549's
   build is mechanical: a subprocess `ConformanceTarget` + a `dotnet` host harness around the #548
   `GeneratedMaaSOrigin` ([GeneratedMaaSOrigin.cs:1](../blocks/renderers/module-service/generation/__goldens__/csharp/GeneratedMaaSOrigin.cs#L1-L3)),
@@ -51,22 +51,22 @@ The concern decomposes into two orthogonal axes; only the second is a fork.
 - **Gate policy (OPEN — Fork 1).** Driving the C# target compiles + executes C# via `dotnet`, a heavy
   toolchain that is not universally present. Today the C# origin's only drift gate is a **string-match
   snapshot** in the default vitest run — `expect(a.shell.source).toBe(readCsGolden('GeneratedMaaSOrigin.cs'))`
-  ([generate.test.ts:91](../blocks/__tests__/unit/renderers/generation/generate.test.ts#L91)), whose own
+  ([we:generate.test.ts:91](../blocks/__tests__/unit/renderers/generation/generate.test.ts#L91)), whose own
   label says *"string-match — execution conformance is #549"*
-  ([generate.test.ts:94](../blocks/__tests__/unit/renderers/generation/generate.test.ts#L94)). #549 adds
+  ([we:generate.test.ts:94](../blocks/__tests__/unit/renderers/generation/generate.test.ts#L94)). #549 adds
   the *executed-behaviour* layer; the only question is **where that layer is enforced**.
 
 ## Recommended path at a glance
 
 | Fork | Recommended default | Main alternative | Confidence |
 |---|---|---|---|
-| **1 — Gate policy** | **B. Separate opt-in suite** (`check:maas-conformance`, detect `dotnet` / skip-with-notice) | A. Fold into the default gate (every run compiles + drives C#) | **High** — matches the canonical protobuf/Connect pattern *and* the repo's Playwright precedent ([package.json:17-18](../package.json#L17-L18)); A stays available as a CI posture layered on B |
+| **1 — Gate policy** | **B. Separate opt-in suite** (`check:maas-conformance`, detect `dotnet` / skip-with-notice) | A. Fold into the default gate (every run compiles + drives C#) | **High** — matches the canonical protobuf/Connect pattern *and* the repo's Playwright precedent ([we:package.json:17-18](../package.json#L17-L18)); A stays available as a CI posture layered on B |
 
 ## Fork 1 — Gate policy: where is the foreign-toolchain conformance run enforced?
 
 **Crux.** Running the C# target needs `dotnet` (compile + execute). The default fast loop — `vitest run`
-([package.json:17](../package.json#L17)) and the structural `check:standards`
-([package.json:24](../package.json#L24), a pure linter that runs no tests) — is `dotnet`-free today.
+([we:package.json:17](../package.json#L17)) and the structural `check:standards`
+([we:package.json:24](../package.json#L24), a pure linter that runs no tests) — is `dotnet`-free today.
 Adding the executed-behaviour layer forces a choice: make every run carry the toolchain, or gate the run
 on the toolchain's presence. Note `dotnet` exists locally at `/usr/local/share/dotnet/dotnet` but is
 **not on `PATH`** — so even here, the run needs explicit toolchain discovery, and a naive `dotnet` call
@@ -87,7 +87,7 @@ fails.
   connectrpc/conformance is a standalone `connectconformance` binary integrated as a *separate CI
   workflow*, not each library's default unit suite (research topic, finding 1). It is also how this repo
   already treats heavy toolchains — `test:integration` (Playwright) is a separate script from `test:unit`
-  ([package.json:17-18](../package.json#L17-L18)).
+  ([we:package.json:17-18](../package.json#L17-L18)).
 
 **Recommended default: B (separate opt-in suite).** It is the industry-standard shape for
 foreign-toolchain conformance and the shape this repo already uses for heavy toolchains, and it keeps the
@@ -97,7 +97,7 @@ CI guarantees `dotnet` promotes the same suite into a *required* gate (one line 
 either way; choosing B as the default loses nothing that a strict project can't re-add.
 
 *Independent of this fork:* the free byte-level **source** snapshot
-([generate.test.ts:91](../blocks/__tests__/unit/renderers/generation/generate.test.ts#L91)) stays in the
+([we:generate.test.ts:91](../blocks/__tests__/unit/renderers/generation/generate.test.ts#L91)) stays in the
 default vitest run regardless — it needs no toolchain and catches the common case.
 
 ### Per-fork classification (the 7-question pass)
@@ -121,7 +121,7 @@ default vitest run regardless — it needs no toolchain and catches the common c
 ## What #549 builds once the fork is ratified (mechanical)
 
 1. A subprocess `ConformanceTarget` adapter that spawns a `dotnet`-hosted C# harness around
-   `GeneratedMaaSOrigin`, feeding it `golden.json` vectors and normalizing its responses to
+   `GeneratedMaaSOrigin`, feeding it `we:golden.json` vectors and normalizing its responses to
    `ActualResponse`.
 2. The C# host harness: C# impls of the injected `identity` / `transform` / `resolveDefinition` seams,
    with `identity` reproducing the JS reference's `sha256-<base64url>` byte-for-byte.
@@ -139,7 +139,7 @@ not rejected, just not the default). The free byte-level **source** snapshot sta
 
 ### What shipped
 
-- **Subprocess target** — [dotnetTarget.ts](../blocks/renderers/module-service/conformance/dotnetTarget.ts):
+- **Subprocess target** — [we:dotnetTarget.ts](../blocks/renderers/module-service/conformance/dotnetTarget.ts):
   the generated origin as a `ConformanceTarget`, spawned once over the whole vector set, held to the same
   byte-identical / identity-stable bar by the one neutral runner.
 - **C# host harness** — [dotnet/Program.cs](../blocks/renderers/module-service/conformance/dotnet/Program.cs)
@@ -148,10 +148,10 @@ not rejected, just not the default). The free byte-level **source** snapshot sta
   `identity` / `transform` / `resolveDefinition` seams. The `identity` impl reproduces the #088
   `sha256-<base64url>` id + `sha256-<base64>` SRI **byte-for-byte** (verified against the golden ETag/integrity).
   The form **catalog** 400 is host-supplied (it is impl, not neutral contract).
-- **Gate** — [scripts/check-maas-conformance.mjs](../scripts/check-maas-conformance.mjs) +
+- **Gate** — [we:scripts/check-maas-conformance.mjs](../scripts/check-maas-conformance.mjs) +
   `check:maas-conformance` npm script, driving
-  [vitest.maas-conformance.config.ts](../vitest.maas-conformance.config.ts) →
-  [maasDotnetConformance.test.ts](../blocks/renderers/module-service/conformance/dotnet/maasDotnetConformance.test.ts)
+  [we:vitest.maas-conformance.config.ts](../vitest.maas-conformance.config.ts) →
+  [we:maasDotnetConformance.test.ts](../blocks/renderers/module-service/conformance/dotnet/maasDotnetConformance.test.ts)
   (outside the default `include`; self-skips without `MAAS_DOTNET`).
 
 ### First findings (the gate works) — filed as spin-offs
@@ -161,7 +161,7 @@ gate stays green). Compiling the byte-locked goldens AS-IS surfaced two genuine 
 would block a green execution run on a capable toolchain — captured, not silently absorbed:
 
 - **#661** — generated origin won't compile: `NameValueCollection.TryGetValue` doesn't exist (one-line
-  csharp.ts fix). Blocks any execution run.
+  we:csharp.ts fix). Blocks any execution run.
 - **#662** — generated origin needs an injected form-catalog seam (it can't mint the unknown-form 400 itself;
   the host supplies it). Blocked by #661.
 

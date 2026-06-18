@@ -16,7 +16,7 @@ Inventory every plug in the runtime tree and produce a per-plug matrix: does it 
 
 ## Progress
 
-- Audited all 10 plug domains in `plugs/` vs `../frontierui/plugs/` (unplugged form / plugged form / dual-mode tests / WE-vs-FUI drift). Report: [reports/2026-06-14-plugs-runtime-audit.md](/reports/2026-06-14-plugs-runtime-audit.md) with the per-domain matrix.
+- Audited all 10 plug domains in `plugs/` vs `../frontierui/plugs/` (unplugged form / plugged form / dual-mode tests / WE-vs-FUI drift). Report: [we:reports/2026-06-14-plugs-runtime-audit.md](/reports/2026-06-14-plugs-runtime-audit.md) with the per-domain matrix.
 - **Key finding:** the #170 reversal is **not** a clean delete-WE-point-at-FUI — WE holds canonical fixes FUI is missing (`cloneHandlers` #454, `Injector` #400 graph + `declarativeInjector`, `CustomElementRegistry.ensureNativelyConstructible`), two domains are **WE-only** (webguards, webvalidation), and only `webbehaviors` has dual-mode test coverage.
 - **Open questions registered:** the 6 unknowns blocking the reversal are tracked in scaffolded **[#649](/backlog/649-reconcile-plugs-we-fui-drift-dual-mode-test-backfill-ahead-o/)** (reconcile drift + dual-mode test backfill, `blockedBy #170`, `relatedReport` → the audit).
 - Discovery-only (no runtime change). Gate: `check:standards` 0 errors. Commit → webeverything.

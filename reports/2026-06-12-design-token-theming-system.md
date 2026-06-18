@@ -4,13 +4,13 @@
 · **Published as:** `/research/design-token-theming-system/`
 
 / prep pass (`/prepare 364`) — the autonomous research half of an open decision. Surveys the native
-web-platform token substrate + the `references.json` benchmark design systems so #364's forks are
+web-platform token substrate + the `we:references.json` benchmark design systems so #364's forks are
 grounded in prior art before the human call. No ruling is made here; the item stays `open + preparedDate`.
 
 ## The gap
 
 Phase-3 coverage detection ([#347](../backlog/347-capability-mapping-gap-detection.md),
-`reports/2026-06-12-coverage-gap-detection.md`) ranked **gap #4 `design-tokens-theming`** — "no unified
+`we:reports/2026-06-12-coverage-gap-detection.md`) ranked **gap #4 `design-tokens-theming`** — "no unified
 token system (spacing / radius / elevation / semantic color / dark)" — as a fileable miss. WE already
 ships intents that touch *slices* of this concern (`typography`, `density`, `surface`, `motion`), and
 [#010](../backlog/010-gap-3-theme-color-intent.md) resolved a **theme-color *intent*** (`scheme` /
@@ -27,7 +27,7 @@ The **W3C Design Tokens Community Group** reached its **first stable version, [D
 Module 2025.10](https://www.designtokens.org/tr/2025.10/format/)**, on
 [2025-10-28](https://www.w3.org/community/design-tokens/2025/10/28/design-tokens-specification-reaches-first-stable-version/).
 It is a vendor-neutral JSON interchange format (`$type` / `$value` / `$description`, aliasing via
-`{group.token}` references, media type `application/design-tokens+json`, `.tokens`/`.tokens.json`
+`{group.token}` references, media type `application/design-tokens+json`, `.tokens`/`we:.tokens.json`
 extensions). **10+ tools** implement it (Figma, Penpot, Sketch, Framer, Supernova, zeroheight) with
 reference implementations in **[Style Dictionary](https://styledictionary.com/info/dtcg/)**, Tokens
 Studio, and Terrazzo. This is the strongest "adopt-don't-coin" signal in the survey: an interop format
@@ -86,9 +86,9 @@ validate** (A′) vs curate-by-default" — and moves the recommended default to
 ### 4 · The WE-specific reframe the survey surfaced
 
 WE is not a from-scratch design system — it **already owns the semantic tier** as Intents. `surface`
-([intents.json:997](../src/_data/intents.json)) names elevation (a `0-5` semantic scale) + texture;
-`density` ([intents.json:20](../src/_data/intents.json)), `typography`
-([intents.json:960](../src/_data/intents.json)), `motion` ([intents.json:3](../src/_data/intents.json)),
+([we:intents.json:997](../src/_data/intents.json)) names elevation (a `0-5` semantic scale) + texture;
+`density` ([we:intents.json:20](../src/_data/intents.json)), `typography`
+([we:intents.json:960](../src/_data/intents.json)), `motion` ([we:intents.json:3](../src/_data/intents.json)),
 and the deferred theme-color intent name the rest. These intents *are* WE's "system/alias" tier in
 MD3 terms. So the relationship-to-#010 question answers itself structurally: **the token project should
 own the primitive tier + the component tier, and let the existing Intents remain the semantic tier** —

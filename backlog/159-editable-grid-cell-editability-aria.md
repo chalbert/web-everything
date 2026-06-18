@@ -37,7 +37,7 @@ Make editability **declared and announced**, not implicit:
 - Pure engine — `editAction(mode, key, cellRole, readonly = false)` now gates entry on `!readonly`
   alongside the headers-never-edit rule; new DOM helper `cellIsReadonly(cell, grid)` resolves the
   declaration (own `aria-readonly` wins; `"false"` is an explicit editable override; else inherit the
-  grid's `aria-readonly="true"`). Both in `blocks/renderers/data-grid/editableGrid.ts`.
+  grid's `aria-readonly="true"`). Both in `fui:blocks/renderers/data-grid/editableGrid.ts`.
 - Behavior — `DataGridEditBehavior` reads `cellIsReadonly` and passes `readonly` to `editAction`, so a
   read-only cell never opens an editor.
 - Audit — `auditEditableGrid` adds "the edited cell is not aria-readonly".
@@ -51,4 +51,4 @@ Make editability **declared and announced**, not implicit:
 *editor kind* to [#158](/backlog/158-editable-grid-typed-editors-validation/). Did not auto-stamp every editable cell
 with `aria-readonly="false"`: authoring stays authoritative, the behavior honors what's declared.
 
-**Graduated to** `block:data-grid` — editAction(readonly) + cellIsReadonly() in blocks/renderers/data-grid/editableGrid.ts; DataGridEditBehavior gates on aria-readonly.
+**Graduated to** `block:data-grid` — editAction(readonly) + cellIsReadonly() in fui:blocks/renderers/data-grid/editableGrid.ts; DataGridEditBehavior gates on aria-readonly.

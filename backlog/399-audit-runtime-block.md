@@ -13,13 +13,13 @@ crossRef: { url: /backlog/357-audit-trail-standard/, label: "Audit Trail standar
 ---
 
 > **Resolved 2026-06-12 — shipped.** Two active blocks satisfy the Web Audit protocol + Audit Timeline
-> intent: **`audit-trail`** (`blocks/audit/AuditProvider.ts` — `DefaultAuditProvider` [append-only,
+> intent: **`audit-trail`** (`fui:blocks/audit/AuditProvider.ts` — `DefaultAuditProvider` [append-only,
 > frozen events] / `CustomAuditRegistry` / `registerAudit` / `auditLifecycle`) and **`audit-timeline`**
-> (`blocks/renderers/audit-timeline/renderAuditTimeline.ts`). 11 new unit tests (incl. the
+> (`we:blocks/renderers/audit-timeline/renderAuditTimeline.ts`). 11 new unit tests (incl. the
 > lifecycle→audit composition), all green. The loan app consumes them: `auditLifecycle(loanLifecycle,
 > loanAudit, 'loan')` wires every transition into the log, the trace panel renders the selected loan's
 > timeline, and **actionable advance buttons** (status-indicator `actionable` affordance) fire real
-> `loanLifecycle.transition()` calls that auto-append to audit and re-render. `conformance.json` declares
+> `loanLifecycle.transition()` calls that auto-append to audit and re-render. `we:conformance.json` declares
 > it → **`check:app-conformance` = 100% (8/8), 0 GAP, compliant**. Live smoke test: advancing
 > Underwriting → Approved-w/-Conditions grows the timeline 1→2, zero console errors. This is the first
 > live cross-standard composition (lifecycle → audit → timeline).
@@ -27,10 +27,10 @@ crossRef: { url: /backlog/357-audit-trail-standard/, label: "Audit Trail standar
 # Build the audit runtime block (make the loan app conformant against Web Audit)
 
 The **Web Audit** standard is now codified — the project `webaudit`, the `audit-trail` protocol (draft,
-`src/_includes/project-webaudit.njk` §`protocol-audit-trail`), and the `audit-timeline` intent ([#357]
+`we:src/_includes/project-webaudit.njk` §`protocol-audit-trail`), and the `audit-timeline` intent ([#357]
 resolved). The contract exists; **no runtime ships yet**, so the loan-origination app
 ([#317](/backlog/317-exercise-app-loan-origination/)) still has only an ad-hoc `AuditEvent` shape in
-`domain/seed.ts`. This is the next `/exercise-app` loop turn: build the reference runtime so the app
+`we:domain/seed.ts`. This is the next `/exercise-app` loop turn: build the reference runtime so the app
 becomes the standard's first conformant consumer.
 
 ## Scope
@@ -43,8 +43,8 @@ becomes the standard's first conformant consumer.
   shipped `lifecycle` block) straight into `auditProvider.append(...)`, so every transition auto-logs.
 - An **`audit-timeline`** reference render (the intent's `density`/`grouping`/`detail` dimensions),
   surfaced in the trace panel as the selected loan's history.
-- Register both in `src/_data/blocks.json` (+ `block-descriptions/*.njk`), run `gen:inventory`.
-- Move `audit-trail` from a Layer-1 gap to a declared standard in `demos/loan-origination/conformance.json`
+- Register both in `fui:src/_data/blocks.json` (+ `block-descriptions/*.njk`), run `gen:inventory`.
+- Move `audit-trail` from a Layer-1 gap to a declared standard in `we:demos/loan-origination/conformance.json`
   with an `evidence` regex.
 
 ## Done when

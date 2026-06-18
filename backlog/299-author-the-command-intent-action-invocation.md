@@ -16,14 +16,14 @@ Author the command intent — the declarative UX surface for invoking actions (w
 
 ## Delivery (2026-06-11)
 **Prep pass:** the prior art was already surveyed in
-`reports/2026-06-11-menu-menubar-block.md` (Fork A) — no new survey needed, and **no
+`we:reports/2026-06-11-menu-menubar-block.md` (Fork A) — no new survey needed, and **no
 design fork surfaced**. The boundary is settled: the existing **Action Intent** owns
 visual weight (`destructive`) and stays orthogonal; this new **`command`** intent
 owns *invocation*, grounded on the now-Baseline **Invoker Commands API**
 (`command`/`commandfor` + `CommandEvent`; app commands use a `--`-prefixed value).
 Keybinding engines (Mousetrap, tinykeys) are **adapters**, never the baseline (#016).
 
-Authored the **`command`** intent (`status: draft`) in `src/_data/intents.json`
+Authored the **`command`** intent (`status: draft`) in `we:src/_data/intents.json`
 (single-entry splice; renders at `/intents/command/`, verified via `build:check`):
 
 - **Dimensions** (UX-only, defaults in prose): `binding` (`none` default · `chord` ·
@@ -34,4 +34,4 @@ Authored the **`command`** intent (`status: draft`) in `src/_data/intents.json`
 - **Composition**: the net-new dependency the Menu family (#173) composes (each
   `menuitem` invokes a command); a toggle command composes Selection/Disclosure for
   its state; visual weight composes Action; palette is a surface listing `listed`
-  commands. `AGENTS.md` inventory regenerated (+1 intent).
+  commands. `we:AGENTS.md` inventory regenerated (+1 intent).

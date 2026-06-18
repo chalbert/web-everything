@@ -35,7 +35,7 @@ re-derivation of it.
 
 ## Build (skeleton)
 
-- A `priority-graph` panel/tab in [src/backlog.njk](src/backlog.njk) rendering nodes (items) + directed
+- A `priority-graph` panel/tab in [we:src/backlog.njk](src/backlog.njk) rendering nodes (items) + directed
   edges (`blockedBy`), driven by the #254 `dependents`/leverage data exposed to the template or a small
   JSON the loader emits.
 - Tier-coloured, leverage-sized nodes; directed edges; click-through to the item page; a legend.
@@ -62,18 +62,18 @@ re-derivation of it.
 - **Status:** resolved (2026-06-09)
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
-  - **Graph data** ([src/_data/backlogGraph.js](src/_data/backlogGraph.js)): emits `{ nodes, edges, layer }`
+  - **Graph data** ([we:src/_data/backlogGraph.js](src/_data/backlogGraph.js)): emits `{ nodes, edges, layer }`
     from the #254 reverse-edge/leverage fields — nodes = items with a `blockedBy` edge, `layer` = longest
     prerequisite-chain depth (cycle-safe memoised DFS), edges directed prerequisite → dependent. Pure +
     deterministic.
-  - **Renderer** ([src/assets/js/backlog-graph.js](src/assets/js/backlog-graph.js)): hand-rolled SVG (no
+  - **Renderer** ([we:src/assets/js/backlog-graph.js](src/assets/js/backlog-graph.js)): hand-rolled SVG (no
     lib) — connected-component grouping, layered column layout, tier-coloured + leverage-sized nodes,
     arrowhead edges, `<a>` click-through to each item, hover `<title>` with unblock counts.
-  - **Graph tab** ([src/backlog.njk](src/backlog.njk)): 4th `data-bd-tab="graph"` tab + `#panel-graph` with
+  - **Graph tab** ([we:src/backlog.njk](src/backlog.njk)): 4th `data-bd-tab="graph"` tab + `#panel-graph` with
     legend + SVG + JSON blob; wired into the tab switcher
-    ([src/assets/js/backlog-burndown.js](src/assets/js/backlog-burndown.js)) via one `panels` entry.
-  - **Tests:** 5 model-invariant tests ([src/_data/__tests__/backlogGraph.test.ts](src/_data/__tests__/backlogGraph.test.ts))
-    + 5 happy-dom render tests ([src/assets/js/__tests__/backlog-graph-render.test.ts](src/assets/js/__tests__/backlog-graph-render.test.ts)) —
+    ([we:src/assets/js/backlog-burndown.js](src/assets/js/backlog-burndown.js)) via one `panels` entry.
+  - **Tests:** 5 model-invariant tests ([we:src/_data/__tests__/backlogGraph.test.ts](src/_data/__tests__/backlogGraph.test.ts))
+    + 5 happy-dom render tests ([we:src/assets/js/__tests__/backlog-graph-render.test.ts](src/assets/js/__tests__/backlog-graph-render.test.ts)) —
     all green. `check:standards` 0 errors.
   - Verified visually via a headless Playwright screenshot of the real data (40 nodes / 29 edges) — the
     readiness chains (248→249→250→252→253, 248→254→255) and 125's fan-out render correctly.

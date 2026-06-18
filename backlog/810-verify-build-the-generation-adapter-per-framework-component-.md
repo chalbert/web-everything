@@ -19,14 +19,14 @@ The polyglot adapter panel (#753) generates a block across frameworks and live-t
 Verified against the tree: the forward per-framework **component** emitters #753 needs **do not exist**,
 and no existing neutral substrate forward-emits to them.
 
-- **#547's core is the wrong axis** — [languageBackend.ts](../blocks/renderers/module-service/generation/languageBackend.ts)
+- **#547's core is the wrong axis** — [we:languageBackend.ts](../blocks/renderers/module-service/generation/languageBackend.ts)
   is `(ServePathIR) => GeneratedOrigin`: it emits a **MaaS server origin** (core + HTTP shell) from a
   serve-path IR, `javascript`/`csharp` backends. Server-side polyglot (#463/#505/#507), not UI components.
-- **`ComponentIR` is ingest-only** — [upgraderEngine.ts:38](../blocks/renderers/upgrader/upgraderEngine.ts#L38)
-  + [frameworkAnalyzers.ts](../blocks/renderers/upgrader/analyzers/frameworkAnalyzers.ts) normalize
-  frameworks *into* it; the only forward emit ([upgraderEngine.ts:135](../blocks/renderers/upgrader/upgraderEngine.ts#L135))
+- **`ComponentIR` is ingest-only** — [we:upgraderEngine.ts:38](../blocks/renderers/upgrader/upgraderEngine.ts#L38)
+  + [we:frameworkAnalyzers.ts](../blocks/renderers/upgrader/analyzers/frameworkAnalyzers.ts) normalize
+  frameworks *into* it; the only forward emit ([we:upgraderEngine.ts:135](../blocks/renderers/upgrader/upgraderEngine.ts#L135))
   renders the WE declarative form, not React/Vue/Svelte/Angular source.
-- **`htmlToJsx`** ([htmlToJsx.ts](../blocks/renderers/jsx/htmlToJsx.ts), #235) is a tree-level JSX-*pane*
+- **`htmlToJsx`** ([we:htmlToJsx.ts](../blocks/renderers/jsx/htmlToJsx.ts), #235) is a tree-level JSX-*pane*
   mirror (React/JSX only), not a runnable component emitter.
 
 The "build the missing subset" framing is falsified: it's a new forward-emit architecture gated on a

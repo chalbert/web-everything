@@ -17,7 +17,7 @@ Explicit deprecation lifecycle pattern: flag a component → ship new version �
 
 ## Progress (2026-06-13) — resolved
 
-Wrote the pattern as a **Component Deprecation Lifecycle** section on the webmanifests project page ([src/_includes/project-webmanifests.njk](../src/_includes/project-webmanifests.njk) `#pattern-deprecation-lifecycle`), the home where the companion `changelog-manifest` protocol (#102) is already anchored — so the pattern sits beside the standards it composes rather than minting a new schema (bias-toward-separation). Surfaces at `/projects/webmanifests/`.
+Wrote the pattern as a **Component Deprecation Lifecycle** section on the webmanifests project page ([we:src/_includes/project-webmanifests.njk](../src/_includes/project-webmanifests.njk) `#pattern-deprecation-lifecycle`), the home where the companion `changelog-manifest` protocol (#102) is already anchored — so the pattern sits beside the standards it composes rather than minting a new schema (bias-toward-separation). Surfaces at `/projects/webmanifests/`.
 
 The four stages, each mapped to an existing standard:
 

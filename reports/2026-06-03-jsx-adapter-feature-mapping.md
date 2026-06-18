@@ -3,7 +3,7 @@
 **Date**: 2026-06-03
 **Adapter page**: `/adapters/jsx-adapter/`
 **Scope**: The Axis-1 (syntax) contract for the JSX adapter — a complete, reversible feature mapping between the canonical HTML adapter and a JSX *mirror dialect*, plus the source-toggle that renders the same element tree both ways. Rendering strategy (Axis 2) is out of scope and parked.
-**Companion**: backlog `jsx-rendering-strategy-axis` (Axis 2 — binding/vdom/directives, parked); `adapters.json` declares HTML canonical and "all formats interconvertible via AST transformers".
+**Companion**: backlog `jsx-rendering-strategy-axis` (Axis 2 — binding/vdom/directives, parked); `we:adapters.json` declares HTML canonical and "all formats interconvertible via AST transformers".
 
 ---
 
@@ -16,7 +16,7 @@ The goal is to define **any** element as HTML *or* JSX and toggle losslessly. Th
 - Reactive text (`{{ }}`) is **not** eager JSX `{js}` — eager evaluation has no inverse to a runtime path. Reactive text is therefore deferred to Axis 2; the Axis-1 reversible binding form is the `bind-*` attribute (row 10).
 - Directives are spelled as the literal `<template is="…">` element form (row 7), the one spelling JSX can carry and reverse.
 
-The existing `JSXRenderer.ts` is React-flavored (`onclick={fn}`→`addEventListener`, `className`→`class`). **Realigning it to the mirror dialect is the implementation task that follows this spec.**
+The existing `we:JSXRenderer.ts` is React-flavored (`onclick={fn}`→`addEventListener`, `className`→`class`). **Realigning it to the mirror dialect is the implementation task that follows this spec.**
 
 ## 2. Two axes (recap)
 
@@ -49,9 +49,9 @@ Rows 1–4, 6, 10–13 are mechanical. The design work is rows 5, 7–9.
 
 ## 4. Resolutions for the contested cells
 
-**Events (row 5).** Canonical/reversible form is the string behavior `on:click="inc($event)"`; the renderer also accepts function props `onclick={inc}`. A **named** function reference round-trips (`onclick={inc}` ⇄ `on:click="inc($event)"`, resolved through the injector handler context — exactly how `declarative-spa-jsx.tsx` already works). An **inline closure** has no string path and is one-way; the transform either synthesizes a handler name or flags it lossy. Default authoring now = function-style; the string⇄function *display* choice becomes a UI sub-toggle later (→ backlog `jsx-event-style-toggle`).
+**Events (row 5).** Canonical/reversible form is the string behavior `on:click="inc($event)"`; the renderer also accepts function props `onclick={inc}`. A **named** function reference round-trips (`onclick={inc}` ⇄ `on:click="inc($event)"`, resolved through the injector handler context — exactly how `we:declarative-spa-jsx.tsx` already works). An **inline closure** has no string path and is one-way; the transform either synthesizes a handler name or flags it lossy. Default authoring now = function-style; the string⇄function *display* choice becomes a UI sub-toggle later (→ backlog `jsx-event-style-toggle`).
 
-**Directives (row 7–8).** Canonical JSX directive spelling is the literal `<template is="for-each">` element — it is the one form JSX can both express and reverse. The pretty `<For>`/`<Show>`/`<Resource>` components are optional sugar mapped through the same directive registry. **Implemented (#070):** `blocks/renderers/jsx/directives.ts` — `desugar()` lowers the sugar to `<template is>`, `sugarize()` lifts it back, and the runtime `For`/`Show`/`Resource` components build the same DOM as the canonical form. Both spellings are equivalent; the component layer is purely an alternative spelling, not a different runtime. Comment-form directives (`<!-- control:for-each -->`) are an HTML-only spelling; their JSX mirror is the template-element form, and choosing which HTML spelling reversal emits is Tier-2.
+**Directives (row 7–8).** Canonical JSX directive spelling is the literal `<template is="for-each">` element — it is the one form JSX can both express and reverse. The pretty `<For>`/`<Show>`/`<Resource>` components are optional sugar mapped through the same directive registry. **Implemented (#070):** `we:blocks/renderers/jsx/directives.ts` — `desugar()` lowers the sugar to `<template is>`, `sugarize()` lifts it back, and the runtime `For`/`Show`/`Resource` components build the same DOM as the canonical form. Both spellings are equivalent; the component layer is purely an alternative spelling, not a different runtime. Comment-form directives (`<!-- control:for-each -->`) are an HTML-only spelling; their JSX mirror is the template-element form, and choosing which HTML spelling reversal emits is Tier-2.
 
 **Interpolation (row 9).** Bare `{js}` in JSX is eager evaluation; `{{ }}` in HTML is a runtime reactive path. They look alike and mean opposite things, and `{{x}}` isn't even valid JSX text. So Axis-1 does **not** map reactive text — it uses the `bind-*` attribute form (row 10), and reactive `{{ }}` is owned by Axis 2.
 
@@ -59,7 +59,7 @@ Rows 1–4, 6, 10–13 are mechanical. The design work is rows 5, 7–9.
 
 Two tiers; only Tier 1 is in scope now:
 
-- **Tier 1 (now):** a reusable `source-toggle.njk` macro (`html`/`jsx` panes) reusing the global `mode-selector.js` (same `.mode-selector-container` / `.mode-tab[data-mode]` / `[data-mode-content][data-mode]` structure as `component-source-toggle.njk`). Panes hold **authored** HTML/JSX pairs that follow §3. The mapping table *is* the spec these pairs conform to. First applied on the JSX Adapter page as the canonical demonstrator.
+- **Tier 1 (now):** a reusable `we:source-toggle.njk` macro (`html`/`jsx` panes) reusing the global `we:mode-selector.js` (same `.mode-selector-container` / `.mode-tab[data-mode]` / `[data-mode-content][data-mode]` structure as `we:component-source-toggle.njk`). Panes hold **authored** HTML/JSX pairs that follow §3. The mapping table *is* the spec these pairs conform to. First applied on the JSX Adapter page as the canonical demonstrator.
 - **Tier 2 (later):** the live bidirectional AST transform (`htmlToJsx` / `jsxToHtml`) the adapter page already advertises — driven by a directive/behavior registry so it is not hardcoded — which can auto-populate the JSX pane for every block from its HTML.
 
 ## 6. Open questions (registered in `/backlog/`)

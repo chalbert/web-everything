@@ -47,7 +47,7 @@ exists; this is the declarative binding glue on top.
   `EffectiveBinding.venue`/`venueSource`; new `effectiveProvider()` resolves the context with precedence
   **explicit provider › venue→`providerForVenue` › fallback** (the reconcile call: explicit provider is
   the escape hatch, venue picks the impl class otherwise); `resolveScoped`/`resolveScopedSlot` take an
-  optional `VenueConfig`; 5 new venue tests in `cascade.test.ts` (88 capabilities tests green);
+  optional `VenueConfig`; 5 new venue tests in `we:cascade.test.ts` (88 capabilities tests green);
   `/capabilities/` documents the authored field. check:standards 0/0; tsc clean; 11ty build green.
 - **Next:** —
 - **Notes:** `venue: edge` flips the winner through the `DegradingProvider` with no code change (proven);

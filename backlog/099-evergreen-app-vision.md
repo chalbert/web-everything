@@ -10,7 +10,7 @@ crossRef: { url: /protocols/, label: Conformance protocols }
 
 # The evergreen app — the self-updating, always-current app as the constellation's north star
 
-The **evergreen app** is an application that keeps *itself* current — staying on the latest libraries, platform standards, and practices with little or no manual migration, so it never rots. It is the unifying "Holy Grail" of the archived design essay (`reports/2026-06-06-front-end-platform-book.md`, section *"The evergreen app"*) and the implicit target most of the existing monetization/tooling cluster (#086–#096) already points at. This item names it as an explicit **north-star vision** so the scattered mechanisms (versioning, distribution, upgraders, verification, the relationship graph) are understood as *parts of one machine*, not unrelated products.
+The **evergreen app** is an application that keeps *itself* current — staying on the latest libraries, platform standards, and practices with little or no manual migration, so it never rots. It is the unifying "Holy Grail" of the archived design essay (`we:reports/2026-06-06-front-end-platform-book.md`, section *"The evergreen app"*) and the implicit target most of the existing monetization/tooling cluster (#086–#096) already points at. This item names it as an explicit **north-star vision** so the scattered mechanisms (versioning, distribution, upgraders, verification, the relationship graph) are understood as *parts of one machine*, not unrelated products.
 
 ## The picture (from the essay, mapped to today's constellation)
 

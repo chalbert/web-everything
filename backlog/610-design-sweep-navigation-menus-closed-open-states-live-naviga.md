@@ -69,7 +69,7 @@ hover-intent), and the divergences that are genuine forks — handed to #609 to 
   facts (`<button>` vs `<a>`, `aria-expanded`/`aria-controls`/`role`) + the **measured reveal method**
   (hover vs click, by which interaction flipped `aria-expanded`).
 - Materialized: research topic [`/research/design-sweep-navigation-menus/`](/research/design-sweep-navigation-menus/)
-  + report [reports/2026-06-14-design-sweep-navigation-menus.md](/reports/2026-06-14-design-sweep-navigation-menus.md).
+  + report [we:reports/2026-06-14-design-sweep-navigation-menus.md](/reports/2026-06-14-design-sweep-navigation-menus.md).
 - **Handoff to #609:** invariants (disclosure-not-menu, overlay-no-reflow, Esc/outside-click + focus-return);
   the central **fork = hover vs click** (configurable; click is the touch-safe most-permissive default, hover
   an opt-in with mandatory tap-to-toggle fallback); panel width/anchor + density are open config dimensions.

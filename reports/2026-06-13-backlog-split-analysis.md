@@ -52,7 +52,7 @@ remains their open tracker until the call is made.
 > **Supersedes the prior `/slice 483` analysis on this date.** That run recorded *could not split* on
 > conditions **(1)** open build-forks and **(5)** providers not demoable, with the unblocking action
 > "run `/prepare 483`." That action has since landed: the prepare pass became build-design decision
-> **#496**, now **ratified** ([reports/2026-06-13-credential-acquisition-protocol-build-design.md](2026-06-13-credential-acquisition-protocol-build-design.md)).
+> **#496**, now **ratified** ([we:reports/2026-06-13-credential-acquisition-protocol-build-design.md](2026-06-13-credential-acquisition-protocol-build-design.md)).
 > #496 settled all three build forks and **mandated a mock conformance provider in the first slice** —
 > so the two prior blockers are gone. This re-run re-evaluates against the now-clean forks.
 
@@ -77,12 +77,12 @@ partial, validated by `check:standards`):
 
 | Artifact | File | Status today |
 |---|---|---|
-| Project entry (`webidentity`) | [src/_data/projects.json](../src/_data/projects.json) — twin `webguards` at **235–242** | absent — ~8 lines to add |
-| Protocol entry (`credential-management`) | [src/_data/protocols.json](../src/_data/protocols.json) — twin `guard` at **102–108** (`realizesIntent`, `ownedByProject`, `anchor`) | absent — ~7 lines to add |
-| Spec partial (mission · feature-surface table · `CustomCredentialProvider` TS interface · the 3 members · 2-D family×member dispatch · trust boundary · composition · status) | `src/_includes/project-webidentity.njk` — twin [project-webguards.njk](../src/_includes/project-webguards.njk) is **166 lines** | absent — the one substantial piece |
+| Project entry (`webidentity`) | [we:src/_data/projects.json](../src/_data/projects.json) — twin `webguards` at **235–242** | absent — ~8 lines to add |
+| Protocol entry (`credential-management`) | [we:src/_data/protocols.json](../src/_data/protocols.json) — twin `guard` at **102–108** (`realizesIntent`, `ownedByProject`, `anchor`) | absent — ~7 lines to add |
+| Spec partial (mission · feature-surface table · `CustomCredentialProvider` TS interface · the 3 members · 2-D family×member dispatch · trust boundary · composition · status) | `we:src/_includes/project-webidentity.njk` — twin [we:project-webguards.njk](../src/_includes/project-webguards.njk) is **166 lines** | absent — the one substantial piece |
 
 Adjacent, **already authored** (not in scope): the shipped `web-identity` intent
-([intents.json](../src/_data/intents.json) **2434–2475**, `realizesIntent` target) and both research
+([we:intents.json](../src/_data/intents.json) **2434–2475**, `realizesIntent` target) and both research
 topics ([credential-acquisition-protocol](../src/_includes/research-descriptions/credential-acquisition-protocol.njk),
 [web-identity-project](../src/_includes/research-descriptions/web-identity-project.njk)). `check:standards`
 requires the protocol entry's `ownedByProject`/`realizesIntent` to resolve and an `id="<anchor>"` to exist
@@ -99,7 +99,7 @@ against the *investigated* surface, the only structural seam still fails — on 
 
 | Failed condition | Detail |
 |---|---|
-| **(4) no real independence; no incremental gain** | The sole seam is **by member**. But all three members are additive sections of **one file** — `project-webidentity.njk`. The "enrollment" and "session-mediation" slices both *edit the partial the first slice creates*; they are serialized edits to one ~160-line document, not independent files. There is no parallelism to unlock and no second independent leaf — a member slice cannot start until the partial exists, and two member slices contend on the same file. A by-member DAG is a rigid `A→B→C` chain dressed up as `A→{B,C}`. |
+| **(4) no real independence; no incremental gain** | The sole seam is **by member**. But all three members are additive sections of **one file** — `we:project-webidentity.njk`. The "enrollment" and "session-mediation" slices both *edit the partial the first slice creates*; they are serialized edits to one ~160-line document, not independent files. There is no parallelism to unlock and no second independent leaf — a member slice cannot start until the partial exists, and two member slices contend on the same file. A by-member DAG is a rigid `A→B→C` chain dressed up as `A→{B,C}`. |
 | **(5) first slice recreates the rejected thin state** | A "foundational" slice = project + protocol + seam + **`credential-request` only**. That is *acquisition-only* — the exact shape #496's Fork-2 **rejected as "too thin… leaves passkey registration homeless; you cannot demo passkey sign-in without first enrolling one."** Shipping it as an intermediate reproduces the half-a-protocol state the ruling argued against; the three members were decided as one coherent set. |
 
 **Why not slice anyway.** A by-member split is *technically* rubric-legal as incremental delivery (each
@@ -139,11 +139,11 @@ band** (`story · ≤8` is already batchable), so the bar for splitting is *high
 
 | Spec part | Real surface (cited) | Kind | ~size |
 |---|---|---|---|
-| (1) per-locus **registry** | [check-standards-rules.mjs:26](../scripts/check-standards-rules.mjs#L26) `export const LOCI = new Set([...])` → record map `{repoPath, gateCommand, devServerProbe, commitTarget, closeoutDiscipline?}`; update validation [check-standards-rules.mjs:105-108](../scripts/check-standards-rules.mjs#L105-L108) (`LOCI.has` → keys) | code | ~2 |
-| (2) cross-locus **packing** | remove the filter [engine.mjs:230](../scripts/readiness/engine.mjs#L230) + drop the `otherLocus` return; collapse the display [check-readiness.mjs:175-178](../scripts/check-readiness.mjs#L175-L178); update [engine.test.mjs:227-231](../scripts/readiness/__tests__/engine.test.mjs#L227-L231) (the "repo-locus filter" describe block) | code | ~2 |
-| (3) per-item **in-locus gating** loop + per-repo commit | agent-prose, not code: rewrite [backlog-workflow.md:426](../docs/agent/backlog-workflow.md#L426) future-capability-(a) into the built mechanic + the batch loop steps + [batch SKILL.md](../.claude/skills/batch-backlog-items/SKILL.md) | doc | ~2 |
+| (1) per-locus **registry** | [we:check-standards-rules.mjs:26](../scripts/check-standards-rules.mjs#L26) `export const LOCI = new Set([...])` → record map `{repoPath, gateCommand, devServerProbe, commitTarget, closeoutDiscipline?}`; update validation [we:check-standards-rules.mjs:105-108](../scripts/check-standards-rules.mjs#L105-L108) (`LOCI.has` → keys) | code | ~2 |
+| (2) cross-locus **packing** | remove the filter [we:engine.mjs:230](../scripts/readiness/engine.mjs#L230) + drop the `otherLocus` return; collapse the display [we:check-readiness.mjs:175-178](../scripts/check-readiness.mjs#L175-L178); update [we:engine.test.mjs:227-231](../scripts/readiness/__tests__/engine.test.mjs#L227-L231) (the "repo-locus filter" describe block) | code | ~2 |
+| (3) per-item **in-locus gating** loop + per-repo commit | agent-prose, not code: rewrite [we:backlog-workflow.md:426](../docs/agent/backlog-workflow.md#L426) future-capability-(a) into the built mechanic + the batch loop steps + [batch we:SKILL.md](../.claude/skills/batch-backlog-items/SKILL.md) | doc | ~2 |
 | (4) **exercise-app** closeoutDiscipline | `closeoutDiscipline` field on the registry's exercise-app entry (`check:standards + check:app-conformance` + non-skippable GAP-tagging) + doc | data+doc | ~1–2 |
-| (5) **doc** rewrite | the [backlog-workflow.md:420-426](../docs/agent/backlog-workflow.md#L420-L426) Repo-locus section | doc | folded |
+| (5) **doc** rewrite | the [we:backlog-workflow.md:420-426](../docs/agent/backlog-workflow.md#L420-L426) Repo-locus section | doc | folded |
 
 Re-estimated total ≈ **6–8** — `size: 8` is honest; "likely > 8" is plausible if the doc rigor is high.
 Borderline-batchable, borderline-split.
@@ -154,7 +154,7 @@ The split-safety rubric fails on **(4) independence/incremental delivery** and *
 intermediate**. The cause is structural, not a fixable gap:
 
 **The whole item enforces one invariant — `packable ⟺ honestly-gateable-in-its-locus`.** Today that
-invariant is upheld by the *fails-open filter* at [engine.mjs:230](../scripts/readiness/engine.mjs#L230):
+invariant is upheld by the *fails-open filter* at [we:engine.mjs:230](../scripts/readiness/engine.mjs#L230):
 only WE items pack, and the WE gate honestly closes them. The build's job is to move the invariant to a
 new equilibrium (all loci packable, each gated in its own repo). The two halves are inseparable:
 
@@ -200,9 +200,9 @@ Read the real tree, not the body's framing:
 
 | Surface | Cited | Finding |
 |---|---|---|
-| Corpus sources | [src/_data/benchmarkCorpus.json](../src/_data/benchmarkCorpus.json) `sources[]` | **26 sources**, each with `id` + `docsUrl` (material-3, carbon, fluent-2, …, open-ui). |
-| Capabilities | [src/_data/benchmarkCapabilities.json](../src/_data/benchmarkCapabilities.json) | **96 capabilities** to test presence for, per source. |
-| Join table | [src/_data/benchmarkCapabilityPresence.json](../src/_data/benchmarkCapabilityPresence.json) `rows[]` | **145 seed rows**, all `provenance: notable-inference`, across **19** of the 26 sources (~8/source); **0** `verified`. The `method` field + the `verified`-without-`url` warn-check already exist (#352). |
+| Corpus sources | [we:src/_data/benchmarkCorpus.json](../src/_data/benchmarkCorpus.json) `sources[]` | **26 sources**, each with `id` + `docsUrl` (material-3, carbon, fluent-2, …, open-ui). |
+| Capabilities | [we:src/_data/benchmarkCapabilities.json](../src/_data/benchmarkCapabilities.json) | **96 capabilities** to test presence for, per source. |
+| Join table | [we:src/_data/benchmarkCapabilityPresence.json](../src/_data/benchmarkCapabilityPresence.json) `rows[]` | **145 seed rows**, all `provenance: notable-inference`, across **19** of the 26 sources (~8/source); **0** `verified`. The `method` field + the `verified`-without-`url` warn-check already exist (#352). |
 
 Each slice's mechanical contract (from the `method` field): for one `sourceId S`, walk `S.docsUrl`,
 decide presence for each of the 96 capabilities, and **splice** rows — upgrade the ~8 `notable-inference`
@@ -217,7 +217,7 @@ capabilities resolve to absent fast).
 |---|---|
 | (1) volume not a fork | ✅ method/schema/validator settled by #352; nothing to decide. |
 | (2) ≥2 nameable slices w/ a real home | ✅ **26** — one per `sourceId`, each a `task` under the epic (sub-work, not standalone-value stories). |
-| (3) each ≤3 / task, named files, no buried fork | ✅ each = one source's docs → splice `benchmarkCapabilityPresence.json` rows; ~`task`. |
+| (3) each ≤3 / task, named files, no buried fork | ✅ each = one source's docs → splice `we:benchmarkCapabilityPresence.json` rows; ~`task`. |
 | (4) acyclic DAG, real independence | ✅ **26 fully-independent leaves** — different `sourceId`, no inter-slice edges; the row-splice discipline means two slices touching the same file don't conflict (disjoint `sourceId` row sets). Maximal parallelism. |
 | (5) every slice leaves a valid demoable state | ✅ each slice upserts only its source's rows; the file stays valid + the gap step (#348) gets that source's verified citations immediately; the `verified`-without-`url` check guards each. |
 
@@ -275,11 +275,11 @@ does not yet exist:
 
 | Surface | Cited | Finding |
 |---|---|---|
-| Vision provider seam | [scripts/design-refs/vision.mjs:55-97](../scripts/design-refs/vision.mjs#L55-L97) — `registerVisionProvider` / `resolveVisionProvider` / `DESIGN_REFS_VISION_PROVIDER_MODULE` | The swap point is built (#480/#485). Adding the on-device model is **registering another provider**, no new plumbing — confirmed by the report's "it's a provider swap, not new plumbing." |
-| Reference provider (twin) | [scripts/design-refs/providers/anthropic-vision.mjs](../scripts/design-refs/providers/anthropic-vision.mjs) — pure `buildVisionRequest`/`mapVisionResponse` + a thin `classifyCandidate` wrapper, unit-tested without the SDK | The on-device provider (slice D) mirrors this shape: pure I/O functions + a thin runtime wrapper, registering behind the seam. |
-| Corpus collector + format | [scripts/design-refs.mjs:386-405](../scripts/design-refs.mjs#L386-L405) `archiveQuarantinedFrame`; `items/<id>/meta.json` carries `visionVerdict` + `reviewState`; `quarantine/<hash>/`; `verdicts.json` (line 49) | The `{frame, verdict}` labeled set is **materialised on disk by design** (#489 resolved). The export (slice A) and benchmark (slice B) read this format. |
-| Fixture-test pattern | [scripts/design-refs/__tests__/archive-quarantine.test.mjs](../scripts/design-refs/__tests__/archive-quarantine.test.mjs) | The collector is unit-tested against a **synthetic fixture corpus** — so A & B can be built + demoed against fixtures now, no real data needed. |
-| Corpus data on disk | `design-refs/` directory | **Absent** — no `items/`, `quarantine/`, or `verdicts.json` exist yet. No dev runs have accumulated training frames. **This is the seam:** the *tooling* is buildable now; the *trained model* needs accumulated volume. |
+| Vision provider seam | [we:scripts/design-refs/vision.mjs:55-97](../scripts/design-refs/vision.mjs#L55-L97) — `registerVisionProvider` / `resolveVisionProvider` / `DESIGN_REFS_VISION_PROVIDER_MODULE` | The swap point is built (#480/#485). Adding the on-device model is **registering another provider**, no new plumbing — confirmed by the report's "it's a provider swap, not new plumbing." |
+| Reference provider (twin) | [we:scripts/design-refs/providers/anthropic-vision.mjs](../scripts/design-refs/providers/anthropic-vision.mjs) — pure `buildVisionRequest`/`mapVisionResponse` + a thin `classifyCandidate` wrapper, unit-tested without the SDK | The on-device provider (slice D) mirrors this shape: pure I/O functions + a thin runtime wrapper, registering behind the seam. |
+| Corpus collector + format | [we:scripts/design-refs.mjs:386-405](../scripts/design-refs.mjs#L386-L405) `archiveQuarantinedFrame`; `items/<id>we:/meta.json` carries `visionVerdict` + `reviewState`; `quarantine/<hash>/`; `we:verdicts.json` (line 49) | The `{frame, verdict}` labeled set is **materialised on disk by design** (#489 resolved). The export (slice A) and benchmark (slice B) read this format. |
+| Fixture-test pattern | [we:scripts/design-refs/__tests__/archive-quarantine.test.mjs](../scripts/design-refs/__tests__/archive-quarantine.test.mjs) | The collector is unit-tested against a **synthetic fixture corpus** — so A & B can be built + demoed against fixtures now, no real data needed. |
+| Corpus data on disk | `design-refs/` directory | **Absent** — no `items/`, `quarantine/`, or `we:verdicts.json` exist yet. No dev runs have accumulated training frames. **This is the seam:** the *tooling* is buildable now; the *trained model* needs accumulated volume. |
 
 **The split is the tooling/model seam.** Slices A (export + codified recipe artifact) and B (benchmark
 harness) are pure tooling over the *format* — buildable and fixture-demoable today, exactly like the
@@ -292,10 +292,10 @@ re-benchmark) is the body's explicit spin-out off B.
 
 | Slice | workItem · size | Scope | DAG |
 |---|---|---|---|
-| **A — Corpus export + codified distillation recipe artifact** (F5) | story · 3 | New `design-refs export` step + a versioned, model-agnostic recipe (config + dated-revision log) that reads `items/*/meta.json` + `quarantine/*` → a `{frame, verdict}` training manifest with a held-out split. Fixture-tested like `archive-quarantine.test.mjs`. | **independent** — ready now (collector format exists) |
+| **A — Corpus export + codified distillation recipe artifact** (F5) | story · 3 | New `design-refs export` step + a versioned, model-agnostic recipe (config + dated-revision log) that reads `items/*/meta.json` + `quarantine/*` → a `{frame, verdict}` training manifest with a held-out split. Fixture-tested like `we:archive-quarantine.test.mjs`. | **independent** — ready now (collector format exists) |
 | **B — On-device verdict benchmark harness** (F1/F4) | story · 3 | A provider-agnostic benchmark: run any registered vision provider over a held-out labeled slice → verdict-agreement % + per-class quarantine-recall vs the graduation thresholds (≥95% agreement). Demoable against the `anthropic`/`manual` provider on a fixture — useful immediately to measure the *hosted* provider. | blocked-by **A** (consumes the manifest/held-out format) |
 | **C — Train + quantize the distilled verdict classifier** (F1/F2) | story · 5 | Run A's recipe against the accumulated corpus → a ≲10 MB quantized ONNX MobileNet/ViT student; gated by B's benchmark. | blocked-by **A, B** — **+ needs corpus volume (operational)**; not batchable until data accumulates |
-| **D — In-browser ONNX Runtime Web + WebGPU vision provider** (F3) | story · 3 | Register the on-device provider behind the [vision.mjs](../scripts/design-refs/vision.mjs) seam, wrapping C's model; mirrors `anthropic-vision.mjs`'s pure-fn + thin-wrapper shape. | blocked-by **C** |
+| **D — In-browser ONNX Runtime Web + WebGPU vision provider** (F3) | story · 3 | Register the on-device provider behind the [we:vision.mjs](../scripts/design-refs/vision.mjs) seam, wrapping C's model; mirrors `we:anthropic-vision.mjs`'s pure-fn + thin-wrapper shape. | blocked-by **C** |
 | **E — Scheduled small-model re-benchmark** (stay-current, F5) | task | A recurring re-benchmark of the small-model frontier (#192 cadence) on B's harness. The body says it "may spin out as its own recurring task once the benchmark suite exists." | blocked-by **B** |
 
 **Slice DAG:** `A → B → {C, E}`, `C → D`. **A is ready now**; **B is ready the moment A lands**. Condition
@@ -320,7 +320,7 @@ as **blocked, not batchable**:
 | Sub-item | Failed condition | Unblocking action |
 |---|---|---|
 | **C — train the classifier** | (3) scope not investigable to depth — the achievable architecture/accuracy/size is unknown until the corpus has enough labeled volume; `design-refs/` is empty on disk today. | **Accumulate corpus volume** — run the dev gate with a real vision provider over many captures so #489's collector fills `items/`/`quarantine/`. A & B landing first is what *exposes* whether there's enough data and whether C clears the graduation bar. |
-| **D — WebGPU provider** | (5) nothing to demo — wrapping a model artifact that doesn't exist yet would ship a half-provider. | Land **C** (a real `.onnx` student) first; then D is a thin provider mirroring `anthropic-vision.mjs`. |
+| **D — WebGPU provider** | (5) nothing to demo — wrapping a model artifact that doesn't exist yet would ship a half-provider. | Land **C** (a real `.onnx` student) first; then D is a thin provider mirroring `we:anthropic-vision.mjs`. |
 
 These stay as scaffolded blocked children under the #490 epic (the umbrella tracks them); they are **not**
 batchable until A/B land and the corpus accumulates.

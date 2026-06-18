@@ -50,7 +50,7 @@ tree / shadow DOM — a reach the cross-origin `fuiDemo` iframe (#727) forbids. 
 the *channel*; surveyed the live-workbench prior art (Storybook's manager↔preview iframe + postMessage
 channel; open-wc's in-document `api-viewer`; the platform's custom-property/`getComputedStyle`/same-origin
 mechanics) and published [`/research/block-explorer-manipulation-channel/`](/research/block-explorer-manipulation-channel/)
-(report [`2026-06-16-block-explorer-manipulation-channel.md`](../reports/2026-06-16-block-explorer-manipulation-channel.md)).
+(report [`we:2026-06-16-block-explorer-manipulation-channel.md`](../reports/2026-06-16-block-explorer-manipulation-channel.md)).
 **Two genuine forks** below, each with a **bold** recommended default. This is a wiring + ownership call
 over **already-built** substrate (mode C shipped in #786 on the #807 embed SDK, sanctioned by #765) — it
 mints no new WE entity.
@@ -61,17 +61,17 @@ Two orthogonal axes the decider rules on, pinned to the real tree:
 
 - **Channel (Fork 1)** — how the control surfaces drive *and inspect* the block. The escape need is
   already solved (modes A/B1/B2, #732/#807); this is the *manipulation + inspection* channel.
-  In-document **mode C** is built: `frontierui/embed/in-document.ts:63` (`mountInDocumentPoint` →
+  In-document **mode C** is built: `fui:frontierui/embed/in-document.ts:63` (`mountInDocumentPoint` →
   `attachShadow` at `:76`/`:82`, demo opts in via `mountInDocument`, origin trust-gate `setTrustedOrigins`
-  at `:40`); the `EmbedMountModule` contract lives in `frontierui/embed/contract.ts`; WE's `fuiDemo`
-  shortcode already emits a mode-C **mount-point `<div>`** (`.eleventy.js:65-72`,
+  at `:40`); the `EmbedMountModule` contract lives in `fui:frontierui/embed/contract.ts`; WE's `fuiDemo`
+  shortcode already emits a mode-C **mount-point `<div>`** (`we:.eleventy.js:65-72`,
   `data-embed-mode="in-document"` + `data-embed-src`) vs the default sandboxed **iframe**
-  (`.eleventy.js:81`, `sandbox="allow-scripts allow-same-origin"`, cross-origin to `FUI_DEMO_BASE`). The
+  (`we:.eleventy.js:81`, `sandbox="allow-scripts allow-same-origin"`, cross-origin to `FUI_DEMO_BASE`). The
   iframe-message alternative would instead grow the embed SDK's guest↔host postMessage contract
-  (`frontierui/embed/embed-guest.ts` / `embed-host.ts`) into a full bidirectional manipulation protocol.
+  (`fui:frontierui/embed/embed-guest.ts` / `fui:embed-host.ts`) into a full bidirectional manipulation protocol.
 - **Locus (Fork 2)** — who *owns* the control chrome (switcher, trait panel, inspect panels). #746 says
   the workbench "lives in FUI"; the four slices are filed **WE-locus**. The boundary rule is `impl→FUI`
-  (`docs/agent/demo-workflow.md:31`), sharpened by #765 to an *ownership* rule (FUI owns the impl **and**
+  (`we:docs/agent/demo-workflow.md:31`), sharpened by #765 to an *ownership* rule (FUI owns the impl **and**
   its rendering) — *not* an iframe-mechanism mandate. This sets where #749/#750/#755/#806 live and whether
   they need re-homing.
 
@@ -104,7 +104,7 @@ squarely the standard's domain.
 **Crux:** all four slices reach *into* the running block. CSS **custom properties pierce the shadow
 boundary by design** and `getComputedStyle()` returns resolved values — so host-side, theming (#749) is
 "set `--token` on the mount" and inspection (#755 "why this token") is "read the resolved value," both
-**zero protocol**. But the `fuiDemo` iframe is **cross-origin** (`.eleventy.js:81`, `FUI_DEMO_BASE` :3001);
+**zero protocol**. But the `fuiDemo` iframe is **cross-origin** (`we:.eleventy.js:81`, `FUI_DEMO_BASE` :3001);
 under the **same-origin policy** the host cannot read its DOM/computed-styles/ARIA at all — only a
 cooperating guest can marshal each datum over postMessage, and a computed-style cascade / full ARIA tree /
 token-provenance trace barely survive the wire. Storybook proves an iframe channel works for *pushing
@@ -113,15 +113,15 @@ workbench (live knobs over props/attrs/slots + CSS-custom-property + shadow-part
 design for A.
 
 - **A — standardize the workbench on mode C (in-document mount)** *(recommended)*. The block renders in
-  WE's own DOM behind a shadow root (`frontierui/embed/in-document.ts:76`, built #786, ratified #765,
+  WE's own DOM behind a shadow root (`fui:frontierui/embed/in-document.ts:76`, built #786, ratified #765,
   WE↔FUI-only). WE sets theme via CSS custom properties on the shadow host, toggles traits via attributes,
   and inspects via shadow-DOM queries + `getComputedStyle` — all host-side, **zero new protocol**. *Merit:*
   maximal fidelity, simplest channel, reuses the just-built mode C, and is the *only* branch that satisfies
   the inspection subset (#755/#806) the cross-origin wall otherwise forbids. *Cost:* every manipulable demo
-  must be mode-C capable (export `mountInDocument`, `frontierui/embed/in-document.ts:20`), and it leans on
+  must be mode-C capable (export `mountInDocument`, `fui:frontierui/embed/in-document.ts:20`), and it leans on
   the trust-gated #765 exception rather than the default iframe.
 - **B — keep the iframe and grow an explicit manipulation protocol.** Extend the embed SDK contract
-  (`frontierui/embed/contract.ts`, `embed-guest.ts`/`embed-host.ts`) with `set-theme` / `set-trait` /
+  (`fui:frontierui/embed/contract.ts`, `fui:embed-guest.ts`/`fui:embed-host.ts`) with `set-theme` / `set-trait` /
   `inspect` host→guest messages over the origin-validated channel #807 built. *Merit:* keeps the default
   isolation boundary; works for any embedder. *Cost:* a much larger bidirectional protocol, and — the
   decisive flaw — inspection (computed styles / ARIA / token trace) is **awkward-to-impractical** to
@@ -143,7 +143,7 @@ Two representative slices — **#749 "set the theme"** and **#755 "why is this t
 make the structural difference visible.
 
 **A (mode C).** The block is mounted in WE's own DOM behind a shadow root
-(`frontierui/embed/in-document.ts:82`), so WE's docs JS holds a real element reference:
+(`fui:frontierui/embed/in-document.ts:82`), so WE's docs JS holds a real element reference:
 
 ```js
 // WE docs chrome, host-side. `host` is the shadow-root mount.
@@ -180,7 +180,7 @@ That's why B serves #749/#750 (push args in) but structurally cannot serve #755/
 ## Fork 2 — manipulation-UI locus: WE docs chrome vs FUI-owned workbench component
 
 **Crux:** #746 states the workbench "lives in FUI"; the slices are filed WE-locus. The constellation rule
-is `impl→FUI` (`docs/agent/demo-workflow.md:31`) — but #765 sharpened it to an **ownership** rule (FUI owns
+is `impl→FUI` (`we:docs/agent/demo-workflow.md:31`) — but #765 sharpened it to an **ownership** rule (FUI owns
 the *impl and its rendering*), *not* a mandate that every adjacent surface be FUI-owned. Both Storybook
 (manager chrome vs preview render) and `api-viewer` separate the tool's **control chrome** from the
 **documented component** — the chrome is the *tool's* product, distinct from the artifact it documents.
@@ -246,7 +246,7 @@ the impl repo reaches into standard internals.
 
 - **Mode C stays a per-demo opt-in; iframe stays the default** (#765). Fork 1-A standardizes the
   *workbench's* channel on mode C — it does **not** make mode C the default for non-manipulable demos;
-  those stay sandboxed iframes (`.eleventy.js:81`). A demo becomes manipulable by opting into mode C and
+  those stay sandboxed iframes (`we:.eleventy.js:81`). A demo becomes manipulable by opting into mode C and
   exporting `mountInDocument`.
 - **Runtime SDK only — never the #700 source import** (#765/#700). Mode C is a render mode of the
   FUI-published embed SDK; no `frontierui` alias, no cross-repo source import. The manipulation is host-side
@@ -283,7 +283,7 @@ This decision unblocks the four `blockedBy: 809` slices. As ruled:
   panels (intent→ARIA mapping, token provenance #747/#364, the #092 provider↔consumer graph) stay a
   **WE-docs overlay** rendered around the embedded workbench from WE's own data (a small focus/selection
   sync from workbench→overlay is a #755 build detail, not a new manipulation protocol).
-- **Distribution:** `docs/agent/demo-workflow.md` records the two FUI distributions — *iframe + chrome*
+- **Distribution:** `we:docs/agent/demo-workflow.md` records the two FUI distributions — *iframe + chrome*
   (the workbench, embeddable anywhere) and *in-document mode C, no chrome* (#765/#786, the bare component
   inline). A WE block "do" page embeds the iframe-workbench and wraps it with the WE-standards overlay.
 - **Filing:** the FUI-owned workbench is an **FUI build**; file/track it FUI-side before the re-homed

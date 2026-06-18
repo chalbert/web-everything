@@ -24,7 +24,7 @@ productionizes it into a real edge service.
 - **Real Client-Hints header parsing** — map the actual request headers (`Sec-CH-UA`,
   `Sec-CH-UA-Platform`, `Sec-CH-UA-Full-Version-List`, `Sec-CH-UA-Mobile`) to the `ClientHints`
   declared-profile shape `clientHintsSupport()` already consumes — and advertise them via
-  `Accept-CH` / `Critical-CH`. This is the boundary `capabilities/edge.ts` deliberately stubbed: the
+  `Accept-CH` / `Critical-CH`. This is the boundary `we:capabilities/edge.ts` deliberately stubbed: the
   POC takes the resolved profile; production has to *derive* it from headers server-side (still **not**
   UA sniffing — use the structured hints).
 - **Build-time / edge chunk emission** — wire `EdgeChunkCache` to actually emit and serve the resolved
@@ -49,7 +49,7 @@ shell around them.
 ## Progress
 
 Delivered the **I/O + caching shell** (the item's own framing) as a pure, dependency-free module
-[capabilities/edge-io.ts](../capabilities/edge-io.ts) + [test](../capabilities/__tests__/edge-io.test.ts)
+[we:capabilities/edge-io.ts](../capabilities/edge-io.ts) + [test](../capabilities/__tests__/edge-io.test.ts)
 (9 cases; full capabilities suite 97/97, tsc clean, check:standards green) — 2026-06-13:
 
 - **Real Client-Hints parsing** — `parseBrandList` reads the Structured-Headers brand list and drops

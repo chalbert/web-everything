@@ -35,7 +35,7 @@ All four forks ratified **as recommended — B / C / B / A**:
    aesthetic — *deferred to the phase-3 vision pass* per #382 Fork 2). Re-key the 16 existing
    `designRegister` values → `productRegister` (mechanical, no recapture).
 2. **Fork 2 — Vocabulary openness → C (open-growing controlled vocab).** Canonical values live in a
-   keyed **`design-refs/taxonomy.json`** (the `benchmarkCorpus.json` pattern). New values allowed but
+   keyed **`we:design-refs/taxonomy.json`** (the `we:benchmarkCorpus.json` pattern). New values allowed but
    must be registered → clean re-run diffs, synonyms gated at add-time.
 3. **Fork 3 — First-run scope → B (scarcity-weighted grow-targets, ~30–50).** Drive toward **≥3 shots
    per under-covered (productRegister × category) cell**, prioritising registers thin today
@@ -47,7 +47,7 @@ All four forks ratified **as recommended — B / C / B / A**:
    interiors. The scarcity cells are an aspirational worklist target; the first run may fall short on
    the thinnest cells without #397, and that is acceptable (grow-target, not cap).
 4. **Fork 4 — Category vocab source → A (coarse hand-roll, lightly anchored).** A **~10-domain seed**
-   recorded in `taxonomy.json`, cross-referencing G2/Capterra top-level names where they map — without
+   recorded in `we:taxonomy.json`, cross-referencing G2/Capterra top-level names where they map — without
    inheriting their depth.
 
 **Build follow-through** (mechanical, agent-ready) carved to
@@ -56,19 +56,19 @@ open fork of the **#382** epic, which resolves alongside.
 
 ## The axis being decided
 
-The corpus worklist `design-refs/targets.json` carries author-supplied curated fields per app —
-`category`, `designRegister`, `theme` ([targets.json:5](../design-refs/targets.json)) — which
-`scripts/design-refs.mjs` copies onto each shot's `meta.json`
-([design-refs.mjs:194-196](../scripts/design-refs.mjs)) and the `report` command aggregates "by category /
-register / theme" ([design-refs.mjs:7](../scripts/design-refs.mjs)). The decision decomposes into **four
+The corpus worklist `we:design-refs/targets.json` carries author-supplied curated fields per app —
+`category`, `designRegister`, `theme` ([we:targets.json:5](../design-refs/targets.json)) — which
+`we:scripts/design-refs.mjs` copies onto each shot's `we:meta.json`
+([we:design-refs.mjs:194-196](../scripts/design-refs.mjs)) and the `report` command aggregates "by category /
+register / theme" ([we:design-refs.mjs:7](../scripts/design-refs.mjs)). The decision decomposes into **four
 orthogonal axes**:
 
 1. **Register structure** — is "design register" _one_ field or _two_? Today `designRegister` conflates
    product archetypes (`enterprise-dense`, `modern-saas`) with visual aesthetics (`minimal`, `dark-dev`,
-   `minimal-hand-drawn`) in the same column ([targets.json:5-20](../design-refs/targets.json)). The survey
+   `minimal-hand-drawn`) in the same column ([we:targets.json:5-20](../design-refs/targets.json)). The survey
    shows these are independent axes.
 2. **Vocabulary openness** — closed schema enum, free-text folksonomy, or open-growing controlled
-   vocabulary in a keyed registry (the shape of `src/_data/benchmarkCorpus.json`)?
+   vocabulary in a keyed registry (the shape of `we:src/_data/benchmarkCorpus.json`)?
 3. **First-run scope** — how many shots, distributed how? The proof set is **16 apps, all dev/tool-flavored**
    (developer-tools ×4, code-playground ×3, the rest editors/diagramming) — thin everywhere else.
 4. **Category vocabulary source** — hand-roll coarse domains (today's `whiteboard-diagramming`,
@@ -96,7 +96,7 @@ visual tagging (surface, refined register, theme) to the phase-3 vision pass
 | Fork | Recommended default | Main alternative | Confidence |
 |---|---|---|---|
 | 1 · Register structure | **Split → `productRegister` (deterministic) + `visualStyle` (vision-pass)** | Keep one `designRegister` field | High |
-| 2 · Vocabulary openness | **Open-growing controlled vocab in keyed `taxonomy.json`** | Closed schema enum | High |
+| 2 · Vocabulary openness | **Open-growing controlled vocab in keyed `we:taxonomy.json`** | Closed schema enum | High |
 | 3 · First-run scope | **Scarcity-weighted grow-targets, ~30–50 shots filling thin registers** | Flat N-per-category | Medium |
 | 4 · Category vocab source | **Coarse ~10-domain hand-roll, lightly anchored to G2/Capterra** | Adopt external taxonomy wholesale | Medium |
 
@@ -105,7 +105,7 @@ visual tagging (surface, refined register, theme) to the phase-3 vision pass
 ## Fork 1 — Register structure: one field or two
 
 **Crux.** `designRegister` today mixes two things that vary independently
-([targets.json:5-20](../design-refs/targets.json)): a **product archetype** (`enterprise-dense`,
+([we:targets.json:5-20](../design-refs/targets.json)): a **product archetype** (`enterprise-dense`,
 `modern-saas`, `utilitarian` — a property of _what the product is_, knowable deterministically) and a
 **visual aesthetic** (`minimal`, `dark-dev`, `minimal-hand-drawn`, `friendly-minimal` — a property of
 _how the pixels look_). A modern-SaaS product can render flat or glassmorphic; the two are orthogonal.
@@ -137,9 +137,9 @@ rigid; a **folksonomy** (free-text) is flexible but drowns in synonym/polysemy n
 - **Option B — free-text tags.** Anything goes. Flexible but accrues synonyms (`dev-tools` vs
   `developer-tools`) and defeats the "counts by register" report.
 - **Option C — open-growing controlled vocabulary in a keyed registry.** Seed canonical values in
-  `design-refs/taxonomy.json`; new values are allowed but must be registered (keyed, append-friendly), so
+  `we:design-refs/taxonomy.json`; new values are allowed but must be registered (keyed, append-friendly), so
   re-runs diff cleanly and synonyms are caught at add-time. This is exactly the
-  `src/_data/benchmarkCorpus.json` pattern already used by the gap-analysis program.
+  `we:src/_data/benchmarkCorpus.json` pattern already used by the gap-analysis program.
 
 **Default: C (open-growing controlled vocab).** The documented faceted-classification resolution, and it
 mirrors a pattern the repo already runs. Most-flexible-yet-safe: growth is allowed, noise is gated.
@@ -173,20 +173,20 @@ from the 16-app set.
 Crozdesk 377) each maintain a _different_, evolving, keyed taxonomy — so reuse means borrowing a coarse top
 level, not adopting leaves.
 
-- **Option A — hand-roll coarse domains.** What `targets.json` does now (`whiteboard-diagramming`,
+- **Option A — hand-roll coarse domains.** What `we:targets.json` does now (`whiteboard-diagramming`,
   `code-playground`…). Fits the corpus's small scale; risks idiosyncratic, un-comparable labels.
 - **Option B — adopt an external directory taxonomy wholesale.** Comparable to industry segmentation, but
   2,000 G2 categories are wildly too fine for a ~50-shot corpus — over-engineering.
 
 **Default: A, lightly anchored.** Hand-roll a coarse **~10-domain seed** recorded in the Fork-2
-`taxonomy.json` registry, **cross-referencing G2/Capterra top-level names where they map** (so it isn't
+`we:taxonomy.json` registry, **cross-referencing G2/Capterra top-level names where they map** (so it isn't
 idiosyncratic) without inheriting their depth. _Rejected: B_ — taxonomy depth the corpus will never use.
 
 ---
 
 ## Build follow-through (once ratified)
 
-Mechanical, no further design: (1) add `design-refs/taxonomy.json` seeded with the productRegister +
+Mechanical, no further design: (1) add `we:design-refs/taxonomy.json` seeded with the productRegister +
 category canonical lists; (2) re-key the 16 `designRegister` → `productRegister`; (3) append scarcity-cell
-targets to `targets.json` and run `design-refs collect`; (4) point `report` at the new keyed vocab. None of
+targets to `we:targets.json` and run `design-refs collect`; (4) point `report` at the new keyed vocab. None of
 this is blocked — the phase-1 pipeline already supports the fields.

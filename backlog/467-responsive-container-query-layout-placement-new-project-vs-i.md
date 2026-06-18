@@ -21,11 +21,11 @@ crossRef: { url: /research/responsive-container-query-layout/, label: "Prep surv
 > - **Fork 2 → A:** one `breakpoint` intent + a `scope: viewport | container` dimension (the genuine call — shared `steps`/`change` model + CSS treating `@container` as a syntactic sibling of `@media` outweigh the substrate difference, which is an impl detail, not a second user-facing concern).
 > - **Fork 3 → A:** a deferred `webblocks` FlexRow block (ResizeObserver = impl substrate), carved to [#508](/backlog/508-flexrow-intrinsic-auto-flow-block-webblocks-realizes-breakpo/). Not built now.
 >
-> Applied: `breakpoint` gained `scope: { values: [viewport, container] }` + a Reference Scope doc section in [src/_data/intents.json](../src/_data/intents.json); `layout` left as-is. Graduated to the `breakpoint` intent.
+> Applied: `breakpoint` gained `scope: { values: [viewport, container] }` + a Reference Scope doc section in [we:src/_data/intents.json](../src/_data/intents.json); `layout` left as-is. Graduated to the `breakpoint` intent.
 
 **Prepared 2026-06-13 — ready to ratify.** Grounding: a prior-art survey
 ([`/research/responsive-container-query-layout/`](/research/responsive-container-query-layout/),
-session report `reports/2026-06-13-responsive-container-query-layout.md`). No greenfield design is
+session report `we:reports/2026-06-13-responsive-container-query-layout.md`). No greenfield design is
 proposed — the survey found the concern is **already substantially modeled by two existing intents**,
 which reshaped the original fork (*new project vs new intent vs `webpositioning`*) into the three forks
 below. Each carries a **bold** recommended default.
@@ -34,7 +34,7 @@ below. Each carries a **bold** recommended default.
 
 The book candidate (FlexRow-style flow, `ResizeObserver`, container vs media queries) was filed as
 *homeless*, but it decomposes onto two intents already in
-[src/_data/intents.json](../src/_data/intents.json):
+[we:src/_data/intents.json](../src/_data/intents.json):
 
 - **`breakpoint`** (status `draft`) — `strategy` (`mobile-first` | `desktop-first` | `strict-range`) +
   semantic `steps` (`compact` | `medium` | `expanded`); its own description already states the steps are
@@ -60,9 +60,9 @@ CSS container size queries are Baseline since 2023 (`container-type: inline-size
 ## Fork 1 — Placement of the responsive-adaptation concern
 
 **Crux:** where does a constraint-based responsive-layout standard live? Refs:
-`breakpoint`/`layout` in [src/_data/intents.json](../src/_data/intents.json); the
+`breakpoint`/`layout` in [we:src/_data/intents.json](../src/_data/intents.json); the
 `webpositioning` project ("anchoring a floating element to another element") in
-[src/_data/projects.json](../src/_data/projects.json).
+[we:src/_data/projects.json](../src/_data/projects.json).
 
 - **A — Fold into the existing `breakpoint` + `layout` intents (extend, don't create). ✅ default.**
   The two intents already own viewport-tier adaptation and app-shell regions; the candidate adds
@@ -82,7 +82,7 @@ CSS container size queries are Baseline since 2023 (`container-type: inline-size
 
 **Crux:** `breakpoint` today abstracts viewport tiers. CSS distinguishes `@media` (viewport) from
 `@container` (an element's container). Is container scope the *same* axis or a *different* standard? Ref:
-`breakpoint.dimensions` in [src/_data/intents.json](../src/_data/intents.json) (currently `strategy`,
+`breakpoint.dimensions` in [we:src/_data/intents.json](../src/_data/intents.json) (currently `strategy`,
 `steps` — no scope dimension).
 
 - **A — One `breakpoint` intent; add a `scope` dimension (`viewport` | `container`). ✅ default.**
@@ -100,8 +100,8 @@ CSS container size queries are Baseline since 2023 (`container-type: inline-size
 
 **Crux:** FlexRow = a container that flows/wraps its children by available space (intrinsic), using
 `ResizeObserver` where declarative CSS can't express the switch. Refs: `layout` intent regions
-(shell/pane/dock) in [src/_data/intents.json](../src/_data/intents.json); `webblocks` project (status
-`concept`) in [src/_data/projects.json](../src/_data/projects.json).
+(shell/pane/dock) in [we:src/_data/intents.json](../src/_data/intents.json); `webblocks` project (status
+`concept`) in [we:src/_data/projects.json](../src/_data/projects.json).
 
 - **A — A small deferred `webblocks` block (intrinsic auto-flow container). ✅ default.**
   Realizes `breakpoint` at `scope: container`; native-first default is CSS `@container` / `flex-wrap`,
@@ -117,7 +117,7 @@ CSS container size queries are Baseline since 2023 (`container-type: inline-size
 
 ## What ratifying this means (plan of record, for the decision turn)
 
-- Extend `breakpoint` (intents.json): add `scope: { values: [viewport, container] }`, status stays
+- Extend `breakpoint` (we:intents.json): add `scope: { values: [viewport, container] }`, status stays
   `draft`; document container-query resolution. No new project, no new intent.
 - Leave `layout` as-is.
 - Open/keep a deferred `webblocks` FlexRow block item (Fork 3-A) — not built now.

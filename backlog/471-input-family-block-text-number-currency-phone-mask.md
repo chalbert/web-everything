@@ -17,9 +17,9 @@ Native-first block over `<input>` for the text-ish family (text/number/currency/
 
 ## Resolved 2026-06-13 (batch-2026-06-13)
 
-Authored the `input-family` block standard: [blocks.json](../src/_data/blocks.json) entry (status
+Authored the `input-family` block standard: [fui:blocks.json](../src/_data/blocks.json) entry (status
 `draft`, type Component, `implementsIntent: input`) + required
-[block-descriptions/input-family.njk](../src/_includes/block-descriptions/input-family.njk) (renders live
+[we:block-descriptions/input-family.njk](../src/_includes/block-descriptions/input-family.njk) (renders live
 at `/blocks/input-family/`).
 
 - **Native-first**: always a native `<input>` with the most specific platform `type`

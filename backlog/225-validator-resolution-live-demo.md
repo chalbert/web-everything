@@ -26,7 +26,7 @@ statically because it is a *race*: it only shows its value when answers arrive o
 order. A demo makes that visible.
 
 **Build (depends on #224's runtime plug):**
-- A standalone demo (registered in `src/_data/demos.json`, mirroring `validity-merge-demo`)
+- A standalone demo (registered in `we:src/_data/demos.json`, mirroring `validity-merge-demo`)
   with a debounced async field whose validator resolves on a controllable delay, so a
   user can fire overlapping checks and watch which answer wins.
 - A strategy toggle: **versioning** ↔ **cancellation**, swapped with zero field edits,
@@ -38,4 +38,4 @@ order. A demo makes that visible.
 
 Sibling to the validity-merge demo. Best done after #224.
 
-**Graduated to** `demo:validator-resolution-demo` — Validator Resolution Playground — live race surface for the runtime customValidatorResolution plug (#224); 7-check runtime-conformance via playgrounds.spec.ts.
+**Graduated to** `demo:validator-resolution-demo` — Validator Resolution Playground — live race surface for the runtime customValidatorResolution plug (#224); 7-check runtime-conformance via we:playgrounds.spec.ts.

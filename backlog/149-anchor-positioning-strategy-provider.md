@@ -47,7 +47,7 @@ for real); a conformance-playground autocomplete is the natural home.
 
 ## Correction (reopened 2026-06-07)
 
-> **Was resolved in error.** The only implementation of this surface was built in the **legacy `plateau` repo**, since confirmed **abandoned** — the initial single-repo prototype, superseded by Web Everything + Frontier UI + plateau-app. It is **not in the live project**: the WE *spec* exists, but there is **no reference implementation** in Frontier UI or the WE `plugs/`, and the (now-removed) `graduatedTo` pointed into dead code. Reopened as a **fresh build** against the live reference implementation (Frontier UI / WE `plugs/`, per AGENTS.md) — **do not migrate or consult plateau** (explicitly not a model). The original `## Progress` below describes the void plateau build and is retained only as history.
+> **Was resolved in error.** The only implementation of this surface was built in the **legacy `plateau` repo**, since confirmed **abandoned** — the initial single-repo prototype, superseded by Web Everything + Frontier UI + plateau-app. It is **not in the live project**: the WE *spec* exists, but there is **no reference implementation** in Frontier UI or the WE `plugs/`, and the (now-removed) `graduatedTo` pointed into dead code. Reopened as a **fresh build** against the live reference implementation (Frontier UI / WE `plugs/`, per we:AGENTS.md) — **do not migrate or consult plateau** (explicitly not a model). The original `## Progress` below describes the void plateau build and is retained only as history.
 
 ## Progress
 
@@ -57,18 +57,18 @@ for real); a conformance-playground autocomplete is the natural home.
 **Done — `anchored` declares intent and delegates to a swappable `positioningStrategy`
 provider (the open fork from #023/open-Q#2):**
 - New `plateau/src/blocks/attributes/positioning/` module:
-  - `types.ts` — `PositioningStrategy` (`place(context) → teardown`), `PlacementContext`,
+  - `we:types.ts` — `PositioningStrategy` (`place(context) → teardown`), `PlacementContext`,
     shared `PLACEMENT_AREA`, and the `customContexts:positioningStrategy` provider key.
-  - `native.ts` — the native CSS Anchor Positioning strategy (the path #136 shipped,
+  - `fui:native.ts` — the native CSS Anchor Positioning strategy (the path #136 shipped,
     extracted unchanged: `anchor-name` ↔ `position-anchor`, `position-area`,
     `position-try-fallbacks`).
-  - `js.ts` — a self-contained, dependency-free JS placement loop (rects → side →
+  - `fui:js.ts` — a self-contained, dependency-free JS placement loop (rects → side →
     `flip`/`shift` → `position: fixed` + inset; re-runs on scroll/resize/show). The
     shape a Floating UI adapter would implement; intentionally no new dependency.
-  - `resolve.ts` — `resolveStrategy(surface)`: an injected provider wins, else the
+  - `fui:resolve.ts` — `resolveStrategy(surface)`: an injected provider wins, else the
     **feature-detected** default (native where `CSS.supports('anchor-name', …)`, else js).
     Guarded so a surface mounted outside any injector root doesn't throw.
-- Refactored `Anchored.ts` — resolves a strategy, builds the intent context, delegates
+- Refactored `fui:Anchored.ts` — resolves a strategy, builds the intent context, delegates
   `place()`, stores teardown; reflects `data-positioning-strategy`. Native output and all
   9 existing `Anchored` tests unchanged.
 - Wired `Anchored` into `AutoComplete` — the listbox was composed with `anchor`
@@ -76,7 +76,7 @@ provider (the open fork from #023/open-Q#2):**
 - Demo `src/auto-complete-demo.{html,ts}` — composes anchored; a strategy toggle swaps
   the provider via **one injector line** (`injector.set('customContexts:positioningStrategy', …)`)
   and rebuilds the cards. Added a near-edge flip card.
-- Docs: `src/definitions/anchor.md` gained a "Positioning strategy" section.
+- Docs: `we:src/definitions/anchor.md` gained a "Positioning strategy" section.
 
 **Verification:**
 - Full plateau suite green — 188 tests (was 147 at #136 close): +10 strategy/resolve, +3
@@ -97,12 +97,12 @@ plainly rather than overclaiming.
 ## Progress (Frontier UI rebuild — 2026-06-08)
 
 The provider mechanism was built in **Frontier UI** (`frontierui/blocks/droplist/positioning/`):
-`types.ts` (`PositioningStrategy`, `PlacementContext`, `PLACEMENT_AREA`, the
-`customContexts:positioningStrategy` key), `native.ts` (CSS Anchor Positioning — now `position: fixed`
-so flip works at the viewport edge, #161), `js.ts` (dependency-free placement loop), and `resolve.ts`
+`we:types.ts` (`PositioningStrategy`, `PlacementContext`, `PLACEMENT_AREA`, the
+`customContexts:positioningStrategy` key), `fui:native.ts` (CSS Anchor Positioning — now `position: fixed`
+so flip works at the viewport edge, #161), `fui:js.ts` (dependency-free placement loop), and `fui:resolve.ts`
 (`resolveStrategy` — injected provider wins, else feature-detected native/js; reads off Frontier UI's
-`InjectorRoot.getProviderOf`). `Anchored.ts` delegates to the resolved strategy and reflects
-`data-positioning-strategy`. 11 unit tests (`positioning/__tests__/strategies.test.ts`).
+`InjectorRoot.getProviderOf`). `fui:Anchored.ts` delegates to the resolved strategy and reflects
+`data-positioning-strategy`. 11 unit tests (`fui:positioning/__tests__/strategies.test.ts`).
 
 **Native path validated in a real browser** (Chromium 148, Frontier UI e2e): the listbox is placed
 and **flips above its trigger** near the viewport bottom (`data-positioning-strategy=native`).
@@ -124,7 +124,7 @@ so `resolveStrategy` re-reads the injected provider — flipping `data-positioni
 `native` and `js` app-wide. The initial mount injects nothing, demonstrating the feature-detected
 default.
 
-A new e2e (`frontierui/blocks/droplist/positioning/__tests__/e2e/strategy-swap.spec.ts`, 3 tests, real
+A new e2e (`fui:frontierui/blocks/droplist/positioning/__tests__/e2e/strategy-swap.spec.ts`, 3 tests, real
 Chromium) asserts: the no-injection default resolves `native` (Chromium supports CSS Anchor
 Positioning); injecting the JS strategy swaps `anchored` to `js`; and the strategy flips back
 `native↔js` as the provider is re-set — the surface placed below its trigger and on-screen under both.

@@ -52,7 +52,7 @@ design call (that is exactly the failure #607 exists to catch).
 - The deterministic + judgment audit runs over the full open pool; every flagged item is either remediated to
   DoR or escalated as a ready-to-ratify residual.
 - A standing hook so `/batch` pre-flight and `/check` apply principle conformance, not just mechanics
-  (folds into [backlog-workflow.md](/docs/agent/backlog-workflow.md) selection + the batch skill).
+  (folds into [we:backlog-workflow.md](/docs/agent/backlog-workflow.md) selection + the batch skill).
 - D3-class readiness honored: an open build whose `relatedProject` is still `concept` is flagged as
   not-truly-ready (the project must exist first).
 
@@ -66,12 +66,12 @@ Blocked on #607 (the audit must be hardened on resolved items before it gates li
   DoR. Result: **9 pure-agent remediations applied** (#595, #611, #481, #487, #513, #504, #134, #086,
   #100); **10 exercise-app phase edges cleared on verification** (loop-managed convention — every resolved
   sibling is `blockedBy`-free, so lifting them would be a quiet design call); **zero genuine new forks**.
-  Ledger: [`audits/608-remediation-ledger.md`](../audits/608-remediation-ledger.md).
-- **Standing forward gate** — D3-readiness is now automatic in the loader (`src/_data/backlog.js`:
+  Ledger: [`we:audits/608-remediation-ledger.md`](../audits/608-remediation-ledger.md).
+- **Standing forward gate** — D3-readiness is now automatic in the loader (`we:src/_data/backlog.js`:
   `projectPending` demotes open builds behind a no-surface `concept` project out of Tier A; holds #604/#170
   on `webplugs`); `npm run check:health` added; surfaced in `check:readiness --select` (*"Held — project
   pending"*) and `check:standards` (aggregate warning); documented in
-  [backlog-workflow.md](../docs/agent/backlog-workflow.md) → *Principle-conformance pre-flight* (the
+  [we:backlog-workflow.md](../docs/agent/backlog-workflow.md) → *Principle-conformance pre-flight* (the
   three-layer gate + remediate-don't-escalate flow) and cross-ref'd from the batch skill.
 - **Residual escalation** — only the 3 soft nods already inside prepared decisions (#606 timing, #564 F2,
   #584 F3); they ratify through the normal decision path, unchanged.

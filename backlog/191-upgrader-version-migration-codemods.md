@@ -20,7 +20,7 @@ crossRef: { url: /backlog/094-ai-upgrader-tools/, label: "AI upgrader MVP (#094)
 
 Grounded in the [version-migration codemods prior-art survey](/research/version-migration-codemods/)
 ([report](../reports/2026-06-12-upgrader-version-migration-codemods.md)) — Angular `ng update` /
-`migrations.json`, OpenRewrite, jscodeshift. **No design exists yet, but both prerequisites this item
+`we:migrations.json`, OpenRewrite, jscodeshift. **No design exists yet, but both prerequisites this item
 named already shipped:** the migration *descriptor format* is the resolved `changelog-manifest` protocol
 ([#102](/backlog/102-changelog-manifest-standard/)) and the *verify gate + provider registry* is
 [#094](/backlog/094-ai-upgrader-tools/)'s `upgraderEngine`. So the decision reshapes from "build the
@@ -34,12 +34,12 @@ principle). The descriptor format and the verify gate are **ratifies, not forks*
 This is the *second* upgrade kind — "across standard/dependency versions" — vs #094's shipped
 "legacy → standard" kind. The concern decomposes into three axes; the survey collapses one to a ratify and
 leaves two real forks. The **descriptor axis is closed**: the "machine-readable change/migration descriptor
-per release" #191 waited on *is* the `changelog-manifest` protocol ([protocols.json:86](../src/_data/protocols.json#L86)),
+per release" #191 waited on *is* the `changelog-manifest` protocol ([we:protocols.json:86](../src/_data/protocols.json#L86)),
 which already carries per-module entries keyed to semver severity **plus a migration linkage** referencing
 the codemod with author/integrity trust — "consumed by upgraders (#094)" by its own ruling; #266 added the
-semver-range axis (`compareSpecVersions` [capability-manifest/provider.ts:182](../capability-manifest/provider.ts#L182),
+semver-range axis (`compareSpecVersions` [we:capability-manifest/provider.ts:182](../capability-manifest/provider.ts#L182),
 `featureAvailableIn` :193). The **engine/gate axis is closed**: #094 shipped `verifyUpgrade`
-([upgraderEngine.ts:142](../blocks/renderers/upgrader/upgraderEngine.ts#L142)), the `upgrade()` orchestrator
+([we:upgraderEngine.ts:142](../blocks/renderers/upgrader/upgraderEngine.ts#L142)), the `upgrade()` orchestrator
 (:216), and `CustomAnalyzerRegistry` (:72). What remains open is **placement** (Fork 1: a mode of that
 engine vs a distinct tool) and **transform authoring** (Fork 2: declarative descriptor vs imperative codemod
 reference). Angular's `ng update` supplies the version-gated, ordered, intermediate-spanning run loop that
@@ -60,11 +60,11 @@ actually needed.
 ## Ratify (not forks) — the descriptor format and the verify gate
 
 - **Descriptor = the `changelog-manifest` protocol** ([#102](/backlog/102-changelog-manifest-standard/),
-  resolved → [protocols.json:86](../src/_data/protocols.json#L86)). It already defines per-module change
+  resolved → [we:protocols.json:86](../src/_data/protocols.json#L86)). It already defines per-module change
   entries (severity + Keep-a-Changelog type) **and a migration linkage** (a breaking entry references the
   codemod that applies it, with author + integrity-hash trust). Designing a second descriptor would fork the
   single-source-of-truth and contradict #102's explicit "consumed by upgraders (#094)." *Consume it.*
-- **Verify gate = #094's `verifyUpgrade`** ([upgraderEngine.ts:142](../blocks/renderers/upgrader/upgraderEngine.ts#L142)).
+- **Verify gate = #094's `verifyUpgrade`** ([we:upgraderEngine.ts:142](../blocks/renderers/upgrader/upgraderEngine.ts#L142)).
   A migrated call site is *offered* only if it re-parses, round-trips, and conforms — the propose-and-verify
   moat ([#089](/backlog/089-monetization-product-ideas/)) over Angular schematics / jscodeshift, which apply
   transforms without verifying. *Reuse it; don't build a new gate.*
@@ -72,7 +72,7 @@ actually needed.
 ## Fork 1 — placement: a mode of the existing engine, or a distinct tool?
 
 **Crux.** #094's `upgraderEngine` is `analyze → generate → verifyUpgrade`, with a provider-injection seam
-([upgraderEngine.ts:72](../blocks/renderers/upgrader/upgraderEngine.ts#L72)) and a neutral `ComponentIR`
+([we:upgraderEngine.ts:72](../blocks/renderers/upgrader/upgraderEngine.ts#L72)) and a neutral `ComponentIR`
 (:32). The version-migration kind has the *same arc*; it differs only in **input** — an already-conformant
 source plus a `changelog-manifest` delta, rather than legacy code. #094's own open follow-on already asked
 this and leaned the same way ("upgraders are a *mode* of the same engine … likely shared core, different
@@ -87,7 +87,7 @@ standard's surface. The analyzer is consulted once, by a tool. The provider-inje
 devtools-appropriate (swap a deterministic reference analyzer for a BYO-key model analyzer), but the
 *concept* is a **devtools provider seam**, not a runtime-registry standard — it must not drift into being
 presented as a protocol or a standard registry. The engine's own doc comment
-([upgraderEngine.ts:13-16](../blocks/renderers/upgrader/upgraderEngine.ts#L13)) markets it as "the SAME
+([we:upgraderEngine.ts:13-16](../blocks/renderers/upgrader/upgraderEngine.ts#L13)) markets it as "the SAME
 inject-a-provider shape as `CustomCompilerRegistry` / `CustomRenderStrategyRegistry`" — that kinship framing
 is the thing to correct. Separately, the global mutable singleton (`analyzerRegistry`, :93) is a
 runtime-registry habit a devtools doesn't need — a tool more naturally takes its providers as an explicit

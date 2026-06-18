@@ -6,9 +6,9 @@ tooling — adopts the Web Everything **JSX adapter** and the **declarative `<co
 it installs, what it configures, what it authors, and what ships to the browser. The deliverable is a
 build-system × tooling matrix (the canonical question "how does this slot into my pipeline?") plus two
 worked narratives and the packaging work this exposes.
-**Related**: [adapters.json](../src/_data/adapters.json) (`jsx-adapter` `draft`, `declarative-component`
-`concept`), [reports/2026-06-03-jsx-adapter-feature-mapping.md](2026-06-03-jsx-adapter-feature-mapping.md)
-(the mirror-dialect contract), [reports/2026-06-03-declarative-component-element.md](2026-06-03-declarative-component-element.md)
+**Related**: [we:adapters.json](../src/_data/adapters.json) (`jsx-adapter` `draft`, `declarative-component`
+`concept`), [we:reports/2026-06-03-jsx-adapter-feature-mapping.md](2026-06-03-jsx-adapter-feature-mapping.md)
+(the mirror-dialect contract), [we:reports/2026-06-03-declarative-component-element.md](2026-06-03-declarative-component-element.md)
 (the `<component>` lowering), backlog `jsx-rendering-strategy-axis` (Axis 2, parked).
 
 ---
@@ -31,9 +31,9 @@ plugin.** Every row in the matrix below is really answering those two sub-questi
 
 ## 2. What WE must publish for this to be real (the prerequisite)
 
-Today these transforms live *inside this monorepo* (`blocks/renderers/jsx/JSXRenderer.ts`,
-`blocks/renderers/jsx/{htmlToJsx,jsxToHtml}.ts`, `blocks/renderers/component/declarativeComponent.ts`)
-and are wired only into *our* esbuild/Vite/Vitest config (`jsxInject`, the `.eleventy.js` filter). A real
+Today these transforms live *inside this monorepo* (`we:blocks/renderers/jsx/JSXRenderer.ts`,
+`blocks/renderers/jsx/{htmlToJsx,jsxToHtml}.ts`, `we:blocks/renderers/component/declarativeComponent.ts`)
+and are wired only into *our* esbuild/Vite/Vitest config (`jsxInject`, the `we:.eleventy.js` filter). A real
 external project can't `import` from our repo. Adoption therefore depends on extracting three installable
 artifacts — this is the **first work item** any real integration blocks on:
 
@@ -42,7 +42,7 @@ artifacts — this is the **first work item** any real integration blocks on:
    - automatic: a `@frontierui/jsx-runtime/jsx-runtime` entry exporting `jsx`, `jsxs`, `Fragment`
      (the ergonomic path for real projects — no per-file import, just `jsxImportSource`).
 2. **`@frontierui/component-compiler`** — the pure `<component>` → class transform
-   (`declarativeComponent.ts`), framework-agnostic (string in → string out), plus the HTML⇄JSX transforms
+   (`we:declarativeComponent.ts`), framework-agnostic (string in → string out), plus the HTML⇄JSX transforms
    for tooling/source-toggle use.
 3. **Thin bundler-plugin wrappers** around #2 — `@frontierui/vite-plugin`, `/esbuild-plugin`,
    `/rollup-plugin`, a webpack loader, etc. Each is ~30 lines: match the source, call the compiler, return
@@ -68,7 +68,7 @@ wiring** = where our compiler plugin hooks. **Runtime** = what WE-specific code 
 | **Next.js** | `next.config` JSX is SWC-driven; set `compiler`/`jsxImportSource` (App Router: server components complicate a DOM factory) | SWC limitation (above) → pre-transform `<component>` sources, or a webpack-loader escape hatch | JSX factory (client only) | **Caveat:** our JSX factory builds *DOM*, so it's client-only — incompatible with RSC server rendering. Use `'use client'`, or treat WE output as islands. |
 | **Astro** | per-island JSX via the chosen framework integration; or raw esbuild opts | a Vite plugin (Astro is Vite-based) — reuse `@frontierui/vite-plugin` | JSX factory (island) | Natural fit: `<component>` lowers to a custom element = a perfect Astro island with zero island-runtime. |
 | **Bun** | `bunfig`/`tsconfig` `jsxImportSource` (Bun honors tsconfig JSX) | a Bun bundler plugin (`Bun.plugin`, `onLoad`) | JSX factory only | Bun's native JSX + plugin API make this one of the lightest integrations. |
-| **Deno** | `deno.json` `compilerOptions.jsx: 'react-jsx'`, `jsxImportSource` (+ import-map to the npm/JSR package) | an `esbuild-deno-loader`-style plugin, or pre-transform | JSX factory only | JSR-publish `@frontierui/jsx-runtime` for first-class Deno consumption. |
+| **Deno** | `we:deno.json` `compilerOptions.jsx: 'react-jsx'`, `jsxImportSource` (+ import-map to the npm/JSR package) | an `esbuild-deno-loader`-style plugin, or pre-transform | JSX factory only | JSR-publish `@frontierui/jsx-runtime` for first-class Deno consumption. |
 
 **Reading the matrix:** the JSX column collapses to *one idea expressed in each tool's dialect* —
 "automatic runtime, importSource = our package." The `<component>` column is *one plugin re-wrapped per
@@ -81,13 +81,13 @@ A team has a plain Vite + TS single-page app and wants to start authoring some U
 *without rewriting the app*.
 
 1. **Install:** `npm i @frontierui/jsx-runtime @frontierui/vite-plugin`.
-2. **Type-checked JSX** — `tsconfig.json`:
+2. **Type-checked JSX** — `we:tsconfig.json`:
    ```jsonc
    { "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "@frontierui/jsx-runtime" } }
    ```
    Now `.tsx` files type-check against the mirror dialect (`class`, `for`, `on:*`) — `className` is a
    tolerated alias, function `onclick={fn}` is allowed-but-lossy (per the feature-mapping contract).
-3. **`<component>` support** — `vite.config.ts`:
+3. **`<component>` support** — `we:vite.config.ts`:
    ```ts
    import { webEverything } from '@frontierui/vite-plugin'
    export default { plugins: [webEverything()] }

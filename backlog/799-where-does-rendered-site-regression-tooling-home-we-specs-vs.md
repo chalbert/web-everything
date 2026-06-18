@@ -22,12 +22,12 @@ title **dissolves** under the standing test — the real call is *who owns the g
 one slice that needs hosting (visual) is built*, not "which repo."
 
 The rendered WE-docs site is accreting regression checks across three orthogonal axes the survey
-surfaced — each pinned to the real tree: **a11y** (shipped: [tests/a11y/rendered-site-a11y.spec.ts](../tests/a11y/rendered-site-a11y.spec.ts),
-axe over the [route-allowlist.ts](../tests/a11y/route-allowlist.ts) set, run in the existing Playwright
-lane at [playwright.config.ts:6-9](../playwright.config.ts#L6-L9)); **content/data-binding correctness**
-(#796 — assert the rendered surface against the loader projection in [src/_data/backlog.js:102](../src/_data/backlog.js#L102)
-`deriveTier`, unit-pinned by [src/_data/__tests__/tier.test.ts](../src/_data/__tests__/tier.test.ts) but
-not yet at the rendered level — `check:standards` skips the 11ty build, [scripts/check-standards.mjs:627](../scripts/check-standards.mjs#L627));
+surfaced — each pinned to the real tree: **a11y** (shipped: [we:tests/a11y/rendered-site-a11y.spec.ts](../tests/a11y/rendered-site-a11y.spec.ts),
+axe over the [we:route-allowlist.ts](../tests/a11y/route-allowlist.ts) set, run in the existing Playwright
+lane at [we:playwright.config.ts:6-9](../playwright.config.ts#L6-L9)); **content/data-binding correctness**
+(#796 — assert the rendered surface against the loader projection in [we:src/_data/backlog.js:102](../src/_data/backlog.js#L102)
+`deriveTier`, unit-pinned by [we:src/_data/__tests__/tier.test.ts](../src/_data/__tests__/tier.test.ts) but
+not yet at the rendered level — `check:standards` skips the 11ty build, [we:scripts/check-standards.mjs:627](../scripts/check-standards.mjs#L627));
 and a later **visual-regression** slice (no baseline store exists). The prior-art seam is decisive: across
 every tool family, **CI owns the pass/fail gate; a hosted service owns only baseline storage + the
 diff-review UI + historical dashboards** — and visual regression is the *one* category that needs that
@@ -56,7 +56,7 @@ layer is WE-resident and they are deterministic pass/fail needing no service.
   The fixtures branch is broken (brittle, re-derives loader logic), so this is a forced invariant, not a
   fork — already mandated by #796/#800.
 - **One harness, additive slices.** a11y/content/visual share the existing Playwright lane
-  ([playwright.config.ts:6-9](../playwright.config.ts#L6-L9)) and its `reuseExistingServer` wiring — no new
+  ([we:playwright.config.ts:6-9](../playwright.config.ts#L6-L9)) and its `reuseExistingServer` wiring — no new
   runner or server (the #770 precedent).
 - **Extract the harness to FUI when a 2nd consumer or the visual slice forces it.** End-state home is
   FUI (open primitive, per #091); *when* to extract is prioritization, filed as its own build — not a

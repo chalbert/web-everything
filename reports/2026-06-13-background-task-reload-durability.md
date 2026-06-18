@@ -11,10 +11,10 @@ guard [#129](../backlog/129-navigation-guard-intent.md)
 The Background Task Surface ships a **route-only** baseline: a task survives SPA route changes
 in-memory, but a full reload or tab close loses in-flight work; `navigationGuard` arms a
 beforeunload + Navigation-API confirm to *gate* that loss rather than recover from it
-([types.ts:119-139](../blocks/background-task-surface/types.ts#L119),
-[BackgroundTasksElement.ts:332-359](../blocks/background-task-surface/BackgroundTasksElement.ts#L332)).
+([we:types.ts:119-139](../blocks/background-task-surface/types.ts#L119),
+[fui:BackgroundTasksElement.ts:332-359](../blocks/background-task-surface/BackgroundTasksElement.ts#L332)).
 The `durability` dimension is explicitly deferred to the #134 reload tier
-([types.ts:117](../blocks/background-task-surface/types.ts#L117)). #450 carves the two forks that gate
+([we:types.ts:117](../blocks/background-task-surface/types.ts#L117)). #450 carves the two forks that gate
 that build: **(OP-1) durable scope — transfers-only vs a non-fetch durable path; (OP-2) does arming
 `durability: reload` relax `navigationGuard: warn`?**
 
@@ -82,7 +82,7 @@ Applied to the `durability: reload` tier:
 
 1. **Layer:** the `durability` dimension + `withReloadDurability` trait = standard (WE
    `blocks/background-task-surface` + the background-task intent); the Background-Fetch/SW adapter (real
-   impl) → Frontier UI. ([types.ts:117](../blocks/background-task-surface/types.ts#L117) already scopes
+   impl) → Frontier UI. ([we:types.ts:117](../blocks/background-task-surface/types.ts#L117) already scopes
    `durability` to the #134 tier.)
 2. **Protocol or intent dimension?** A **dimension** of the background-task intent (`durability: route`
    baseline → `reload` tier → future `resumable`). The Background-Fetch substrate is an

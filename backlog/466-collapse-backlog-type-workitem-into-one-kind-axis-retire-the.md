@@ -16,7 +16,7 @@ tags: [backlog, taxonomy, convention, type, workitem, tooling-refactor, design-d
 
 **Prepared — ready to ratify.** No new design is invented here; this is a data-model call over shipped
 tooling. The prior-art survey ([/research/backlog-kind-axis/](/research/backlog-kind-axis/), report
-`reports/2026-06-13-backlog-kind-axis.md`) found that **no mature tracker runs WE's two-axis model** —
+`we:reports/2026-06-13-backlog-kind-axis.md`) found that **no mature tracker runs WE's two-axis model** —
 GitHub, Jira, Linear, and GitLab each keep exactly one structural type/kind axis, hold size separately,
 and demote fix-vs-feature to an optional label. That moves the core call from "lean A" to **strong A**.
 **2 forks**, each with a **bold** recommended default: (1) unify vs keep two axes; (2) the field name +
@@ -41,7 +41,7 @@ absorbs it, so it is not a fork.
   `tags: [feature]` entry — never a required field.
 
 **Successor build:** the migration across the touch-list (loader / validator / scaffold / render
-/ `backlog-workflow.md` + a one-pass rewrite of every `backlog/*.md` frontmatter) is carved to
+/ `we:backlog-workflow.md` + a one-pass rewrite of every `backlog/*.md` frontmatter) is carved to
 **#487** (agent-ready now that the call is made). This decision item is resolved.
 
 ## The axis being decided
@@ -50,25 +50,25 @@ The concern decomposes into three sub-axes that the current schema conflates acr
 
 - **Nature** — "what kind of work is this" — today `type ∈ {idea, issue, decision}`. Only `decision` is
   load-bearing: the loader tiers `idea` and `issue` **identically** to Tier A and only `decision` to
-  Tier B ([backlog.js:206-209](src/_data/backlog.js#L206-L209)); the buried-fork lint keys on
-  `type === 'decision'` ([check-standards-rules.mjs:219-237](scripts/check-standards-rules.mjs#L219-L237));
+  Tier B ([we:backlog.js:206-209](src/_data/backlog.js#L206-L209)); the buried-fork lint keys on
+  `type === 'decision'` ([we:check-standards-rules.mjs:219-237](scripts/check-standards-rules.mjs#L219-L237));
   and the resolved-without-`graduatedTo` nudge special-cases `issue`/`review`/`decision`
-  ([check-standards-rules.mjs:120](scripts/check-standards-rules.mjs#L120)). The validator does **not**
+  ([we:check-standards-rules.mjs:120](scripts/check-standards-rules.mjs#L120)). The validator does **not**
   even enum-gate the value the way it gates `workItem`. `idea` vs `issue` is a badge colour
-  ([backlog.njk:48-51](src/backlog.njk#L48-L51)) + a `typeOrder` filter chip
-  ([backlog.njk:141](src/backlog.njk#L141)) whose claimed selection ranking is never implemented.
+  ([we:backlog.njk:48-51](src/backlog.njk#L48-L51)) + a `typeOrder` filter chip
+  ([we:backlog.njk:141](src/backlog.njk#L141)) whose claimed selection ranking is never implemented.
 - **Hierarchy role + sizing** — today `workItem ∈ {story, epic, task}` + `size`. This axis is genuinely
   load-bearing: `story` requires a Fibonacci `size`, `task` forbids one, `epic` rolls up children
-  ([check-standards-rules.mjs:139-148](scripts/check-standards-rules.mjs#L139-L148)); scaffold emits both
-  fields ([scaffold.mjs:42-44](scripts/backlog/scaffold.mjs#L42-L44)) from `--type`/`--workitem` flags
-  ([backlog.mjs:156](scripts/backlog.mjs#L156)).
+  ([we:check-standards-rules.mjs:139-148](scripts/check-standards-rules.mjs#L139-L148)); scaffold emits both
+  fields ([we:scaffold.mjs:42-44](scripts/backlog/scaffold.mjs#L42-L44)) from `--type`/`--workitem` flags
+  ([we:backlog.mjs:156](scripts/backlog.mjs#L156)).
 - **Effort** — `size` (Fibonacci) — the only axis that is genuinely **orthogonal** to the others, and
   stays a separate field in every option below.
 
 The crux: `type ∈ {idea, issue}` and `workItem ∈ {story, task}` are **correlated, not independent** (an
 idea is a buildable story; an issue is a small fix-task), so the schema states an item's nature twice.
 The lingering `review` enum string still sits in `BACKLOG_TYPES`
-([check-standards-rules.mjs:21](scripts/check-standards-rules.mjs#L21)) though no item uses it — cleanup
+([we:check-standards-rules.mjs:21](scripts/check-standards-rules.mjs#L21)) though no item uses it — cleanup
 the unification absorbs.
 
 ## Recommended path at a glance
@@ -89,7 +89,7 @@ field, never a parallel required nature field.
   task` keep the sizing/hierarchy semantics; `decision` keeps Tier-B + fork validation. `idea`/`issue`
   dissolve (a build is just a `story`); `size` stays a separate orthogonal field. One field, no
   double-statement, matches the universal tracker model. Cost: a one-pass migration across `backlog/*.md`
-  + the loader / readiness / validator / scaffold / render / `backlog-workflow.md`.
+  + the loader / readiness / validator / scaffold / render / `we:backlog-workflow.md`.
 - **B — keep two axes, accept the redundancy.** `type` = nature, `workItem` = role/sizing. Zero
   migration; permanent cost is the double-statement + a cosmetic, unimplemented idea/issue split. The
   status quo (minus the already-retired `review`).
@@ -128,15 +128,15 @@ now means more than it used to.
 ## Touch-list (for the build, once ratified)
 
 `backlog/*.md` frontmatter (drop the retired field; rename per Fork 2) ·
-[backlog.js:206-209](src/_data/backlog.js#L206-L209) (tiering keys on the new field) ·
-[check-standards-rules.mjs:21](scripts/check-standards-rules.mjs#L21) (enum set + drop dead `review`),
+[we:backlog.js:206-209](src/_data/backlog.js#L206-L209) (tiering keys on the new field) ·
+[we:check-standards-rules.mjs:21](scripts/check-standards-rules.mjs#L21) (enum set + drop dead `review`),
 [:120](scripts/check-standards-rules.mjs#L120) (graduatedTo nudge),
 [:139-148](scripts/check-standards-rules.mjs#L139-L148) (sizing rules),
 [:219-237](scripts/check-standards-rules.mjs#L219-L237) (fork-shape lint keys on `=== 'decision'`) ·
-[scaffold.mjs:42-44](scripts/backlog/scaffold.mjs#L42-L44) + [backlog.mjs:156](scripts/backlog.mjs#L156)
+[we:scaffold.mjs:42-44](scripts/backlog/scaffold.mjs#L42-L44) + [we:backlog.mjs:156](scripts/backlog.mjs#L156)
 (scaffold flags + frontmatter emit) ·
-[backlog.njk:48-51](src/backlog.njk#L48-L51) / [:66](src/backlog.njk#L66) / [:141](src/backlog.njk#L141)
-+ [backlog-pages.njk:12-15](src/backlog-pages.njk#L12-L15) (badges, `typeOrder`) ·
-`docs/agent/backlog-workflow.md` (the normative enum + agile-sizing table) ·
-`scripts/check-readiness.mjs` (reuses the loader tier — no change if the loader field is renamed in
+[we:backlog.njk:48-51](src/backlog.njk#L48-L51) / [:66](src/backlog.njk#L66) / [:141](src/backlog.njk#L141)
++ [we:backlog-pages.njk:12-15](src/backlog-pages.njk#L12-L15) (badges, `typeOrder`) ·
+`we:docs/agent/backlog-workflow.md` (the normative enum + agile-sizing table) ·
+`we:scripts/check-readiness.mjs` (reuses the loader tier — no change if the loader field is renamed in
 place).

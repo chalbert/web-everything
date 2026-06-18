@@ -23,8 +23,8 @@ is an explicitly valid outcome for this item — recorded here, no fix items fil
 
 ## Scope swept
 
-- `src/_data/*.json` registries: `intents.json`, `protocols.json`, `adapters.json`, `capabilityMatrix.json`,
-  `blocks.json`, `plugs.json`, render-strategy registry.
+- `src/_data/*.json` registries: `we:intents.json`, `we:protocols.json`, `we:adapters.json`, `we:capabilityMatrix.json`,
+  `fui:blocks.json`, `we:plugs.json`, render-strategy registry.
 - Authored standard docs: `src/_includes/project-*.njk` and block/protocol/SSR contract prose; mandate language
   (`MUST` / `SHALL` / `only` / `canonical` / `required`).
 
@@ -32,9 +32,9 @@ is an explicitly valid outcome for this item — recorded here, no fix items fil
 
 | Location | What it fixes | Why it's a legitimate invariant |
 |---|---|---|
-| [project-webcomponents.njk:217](/src/_includes/project-webcomponents.njk#L217) | **Autonomous custom elements only** — never `customElements.define(..., { extends })` | Safari refuses `is=""` for customized built-ins ([:213](/src/_includes/project-webcomponents.njk#L213)); the alternative is non-portable. Transient Components are the documented portable substitute. |
-| [project-webtheme.njk:124](/src/_includes/project-webtheme.njk#L124) | **Native CSS is the only runtime** (custom properties + `@property`) | Explicit rationale ([:19–21](/src/_includes/project-webtheme.njk#L19)): no build-time theming engine to lock into; the output is plain Baseline-2024 CSS. Token *authoring* stays vendor-portable (DTCG). |
-| [project-webanalytics.njk](/src/_includes/project-webanalytics.njk#L14) | **Fixed Segment-Spec event vocabulary** (the Analytics Event Vocabulary Protocol) | A stable call-site vocabulary is what enables the no-touch backend swap ([:5–9](/src/_includes/project-webanalytics.njk#L5)) — Segment/Mixpanel/etc. remain swappable behind it. The vocabulary's fixity *is* the open seam's contract, not a lock. |
+| [we:project-webcomponents.njk:217](/src/_includes/project-webcomponents.njk#L217) | **Autonomous custom elements only** — never `customElements.define(..., { extends })` | Safari refuses `is=""` for customized built-ins ([:213](/src/_includes/project-webcomponents.njk#L213)); the alternative is non-portable. Transient Components are the documented portable substitute. |
+| [we:project-webtheme.njk:124](/src/_includes/project-webtheme.njk#L124) | **Native CSS is the only runtime** (custom properties + `@property`) | Explicit rationale ([:19–21](/src/_includes/project-webtheme.njk#L19)): no build-time theming engine to lock into; the output is plain Baseline-2024 CSS. Token *authoring* stays vendor-portable (DTCG). |
+| [we:project-webanalytics.njk](/src/_includes/project-webanalytics.njk#L14) | **Fixed Segment-Spec event vocabulary** (the Analytics Event Vocabulary Protocol) | A stable call-site vocabulary is what enables the no-touch backend swap ([:5–9](/src/_includes/project-webanalytics.njk#L5)) — Segment/Mixpanel/etc. remain swappable behind it. The vocabulary's fixity *is* the open seam's contract, not a lock. |
 
 ## Correct open-provider patterns verified (not leaks)
 

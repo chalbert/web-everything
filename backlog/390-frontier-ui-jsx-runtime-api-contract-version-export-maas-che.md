@@ -21,7 +21,7 @@ The Frontier UI implementation half of #088 option B (WE defines the contract; F
 
 Built in **frontierui** (locus frontierui):
 
-- **`__API_VERSION__` export** — `packages/jsx-runtime/src/apiVersion.ts` (`export const __API_VERSION__ = 1`)
+- **`__API_VERSION__` export** — `fui:packages/jsx-runtime/src/apiVersion.ts` (`export const __API_VERSION__ = 1`)
   re-exported from the package root. A single monotonic integer **decoupled from package semver**, bumped
   only on a public-API change an already-served artifact could observe — the runtime's advertised
   contract version (maas-versioning §4).
@@ -36,10 +36,10 @@ Built in **frontierui** (locus frontierui):
   - `runMaasCheck` — the CI entry: checks every artifact against the runtime, throws an aggregated
     `MaasCompatError` naming the incompatible artifact(s); `failOnMissingRange` opt-in for undeclared
     ranges. **Inert unless a consumer wires it in.**
-  - package.json (jsx-runtime an optional peer) + tsconfig, added to the root `build:packages`.
-- **Tests** — `packages/maas-check/__tests__/maas-check.test.ts` (12, all green): range math, all parse
+  - we:package.json (jsx-runtime an optional peer) + tsconfig, added to the root `build:packages`.
+- **Tests** — `fui:packages/maas-check/__tests__/maas-check.test.ts` (12, all green): range math, all parse
   forms, assert/guard, header read, injected-fetch, the aggregated-throw + missing-range paths, and a
   cross-leg check that `__API_VERSION__` is a usable positive integer.
 - Gates: `tsc` clean (jsx-runtime + maas-check), `vitest` 12/12, frontierui `check:standards` 0 errors.
 
-**Graduated to** `frontierui/packages/maas-check/` — new @frontierui/maas-check package (satisfiesCompatRange/parseRange/assertCompat/guardCompat/runMaasCheck, header-read + injected fetch) + jsx-runtime __API_VERSION__ export (packages/jsx-runtime/src/apiVersion.ts); 12 vitest green.
+**Graduated to** `frontierui/packages/maas-check/` — new @frontierui/maas-check package (satisfiesCompatRange/parseRange/assertCompat/guardCompat/runMaasCheck, header-read + injected fetch) + jsx-runtime __API_VERSION__ export (fui:packages/jsx-runtime/src/apiVersion.ts); 12 vitest green.

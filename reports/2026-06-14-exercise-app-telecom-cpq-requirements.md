@@ -9,8 +9,8 @@ a real carrier's catalog is optional — requirements need only be full and comp
 platform.
 
 Tracked by epic [#314](/backlog/314-flagship-exercise-apps/) (candidate G). Companion to the loan-app
-(`reports/2026-06-11-exercise-app-loan-origination-requirements.md`) and auto-insurance
-(`reports/2026-06-12-exercise-app-auto-insurance-requirements.md`) PRDs. This story ends at a scoped,
+(`we:reports/2026-06-11-exercise-app-loan-origination-requirements.md`) and auto-insurance
+(`we:reports/2026-06-12-exercise-app-auto-insurance-requirements.md`) PRDs. This story ends at a scoped,
 sliced requirement set; the build is the follow-on functional-phase cards.
 
 ## Scope
@@ -20,7 +20,7 @@ real-carrier fidelity, rich enough that the **constraint graph** is the hard par
 **configure → price → quote → order** flow, a self-serve and an assisted (sales-rep) path, saved/revisable
 quotes, and order capture. Built **platform-first**: every UI/behavior need resolves against Web Everything
 (consume active blocks/intents; where a surface is draft/uncodified, that gap *is* the WE work this app
-drives — see [exercise-app-workflow.md](../docs/agent/exercise-app-workflow.md)).
+drives — see [we:exercise-app-workflow.md](../docs/agent/exercise-app-workflow.md)).
 
 **Visual register (proposed): consumer telco-commerce / carrier-retail** — a bright, storefront-style
 register distinct from the enterprise-finance (loan) and modern-SaaS insurtech (auto) registers already

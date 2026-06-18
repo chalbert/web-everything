@@ -14,7 +14,7 @@ crossRef: { url: /research/, label: "/research/ topic index" }
 # Longitudinal research freshness — keep research current over time without losing history, and surface new axes to evaluate
 
 Research in this repo is a point-in-time snapshot: a topic is investigated once, written
-to a dated `reports/YYYY-MM-DD-topic.md`, and (optionally) promoted to a `/research/{id}/`
+to a dated `we:reports/YYYY-MM-DD-topic.md`, and (optionally) promoted to a `/research/{id}/`
 topic. Nothing today re-evaluates a topic as the web platform and the framework landscape
 move. A survey of "what frameworks provide for i18n" written 2026-02 silently rots; a
 finding can be overtaken by a shipped standard; and **whole new subjects or evaluation axes
@@ -53,7 +53,7 @@ entity). Delivery trail:
 
 - **Foundation forks → #441** (resolved): history model, freshness-metadata home, staleness
   enforcement, scope-of-"research" — all four ratified at their bold defaults on the shared
-  surfaces (`researchTopics.json` + the `/research/` renders + `check:standards`).
+  surfaces (`we:researchTopics.json` + the `/research/` renders + `check:standards`).
 - **Capability 1 — refresh without losing history → #478** (resolved): refresh = a new dated
   report + bidirectional `supersedes`/`supersededBy`, prior revisions rendered as history.
 - **Capability 2 — freshness signals → #477** (resolved, on the #476 schema/badge foundation):

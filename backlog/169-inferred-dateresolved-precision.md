@@ -18,7 +18,7 @@ backfilled programmatically from the **git last-commit date** of each item's fil
 but not authoritative.
 
 This matters only if someone later treats those specific dates as precise (e.g. fine-grained velocity
-analysis on the early period). Going forward the gap closes itself: `docs/agent/backlog-workflow.md`
+analysis on the early period). Going forward the gap closes itself: `we:docs/agent/backlog-workflow.md`
 now **requires** `dateResolved` at close-out and `check:standards` errors without it, so newly-resolved
 items carry an exact date.
 
@@ -42,7 +42,7 @@ Closed via the second acceptance path: **accept the commit-date proxy; no dates 
   `git log -S'status: resolved' -- backlog/<id>.md` finding the commit that flipped each item. At
   close-out time **all 57 resolved items are uncommitted** in the working tree, so the flips aren't
   in history yet — a git-inferred "exact" date would be no more authoritative than the proxy.
-- **The gap is self-closing.** `docs/agent/backlog-workflow.md` now requires `dateResolved` at
+- **The gap is self-closing.** `we:docs/agent/backlog-workflow.md` now requires `dateResolved` at
   close-out and `check:standards` errors without it, so every newly-resolved item carries an exact
   date. The 26 backfilled values are a one-time bootstrap artifact, not an ongoing source of drift.
 

@@ -20,9 +20,9 @@ Author the portable mock/contract schema that is the standard artifact for the m
 
 Authored the **Mock Contract** protocol as a conformance-only standard owned by the **Web Cases** project (the verification home per #107 fork 3):
 
-- `src/_data/protocols.json` — new `mock-contract` entry (`ownedByProject: webcases`, `anchor: protocol-mock-contract`).
-- `src/_includes/project-webcases.njk` — created the Web Cases project page (mission + feature-surface table + normative `#protocol-mock-contract` body + composition + status). The schema interfaces (`MockContract` / `Interaction` / `ResponseSpec` / `BehaviorLayer` / `FaultInjection` / `ConditionalRule`) are contracts-only per design-first; concrete servers are providers.
-- `src/_data/semantics.json` — added terms: Mock Contract, Consumer Interaction, Response-Kind, Contract Drift.
+- `we:src/_data/protocols.json` — new `mock-contract` entry (`ownedByProject: webcases`, `anchor: protocol-mock-contract`).
+- `we:src/_includes/project-webcases.njk` — created the Web Cases project page (mission + feature-surface table + normative `#protocol-mock-contract` body + composition + status). The schema interfaces (`MockContract` / `Interaction` / `ResponseSpec` / `BehaviorLayer` / `FaultInjection` / `ConditionalRule`) are contracts-only per design-first; concrete servers are providers.
+- `we:src/_data/semantics.json` — added terms: Mock Contract, Consumer Interaction, Response-Kind, Contract Drift.
 
 Design faithful to the ratified forks: OpenAPI-anchored response shape; WE behavior layer (latency / fault / first-that-matches conditionals / `mock|proxy|record` response-kind / stateless-by-default auth); interaction-bearing so one contract drives the mock **and** the webcases drift-check (schema-validation ≠ contract-verification); proxy is a response-kind, not a sibling standard; runtime overrides (CORS-bypass, per-service toggle, forced status) stay out of the portable artifact. Open questions (conditional-rule predicate language, case-format reuse, latency-distribution vocabulary) carried into the Status section.
 

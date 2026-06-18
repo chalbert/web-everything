@@ -23,6 +23,6 @@ navigation intent only mentions breadcrumb in a passing truncation note). Native
 `nav[aria-label="Breadcrumb"]` + ordered list with `aria-current="page"` on the current crumb; the block
 adds only overflow-collapse and responsible truncation. 4 design decisions (native landmark+list ·
 presentational separators · collapse-not-wrap overflow · location-vs-menu/tabs/stepper boundary).
-`blocks.json` + `block-descriptions/breadcrumb.njk` (Web Standards + Framework Research tables, structure,
+`fui:blocks.json` + `we:block-descriptions/breadcrumb.njk` (Web Standards + Framework Research tables, structure,
 behaviour, boundaries) + semantics term *Breadcrumb*. Coverage data corrected (breadcrumb → covered).
 `check:standards` green; page verified at `/blocks/breadcrumb/`.

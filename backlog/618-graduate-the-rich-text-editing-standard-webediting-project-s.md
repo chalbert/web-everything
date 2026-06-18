@@ -16,10 +16,10 @@ Umbrella epic materializing the seven ratified forks from #590 into standards, i
 
 ## Composition order (the `blockedBy` chain to carve into child stories)
 
-1. **Capabilities** — add `contenteditable` / `editcontext` / `sanitizer-api` / `highlight-api` ids to `capabilities.json` + tier them in `capabilityMatrix.json`.
-2. **Engine Protocol + native default** — `CustomEditorEngine` contract + `CustomEditorEngineRegistry` (mirror `CustomPositioner`/`CustomPositioningRegistry`), native-first `contenteditable`+`InputEvent` default, **structured-node-tree** internal pivot; thin adapters bridge ProseMirror/Lexical/Slate/Quill. Stand up the new `webediting` project (`projects.json`) as the Protocol's home.
-3. **Editor Block** — `blocks.json` + `block-descriptions/`; resolves the engine registry.
-4. **Intents** — `text-formatting` (controls axis, composes `droplist`/`popover`/button) + `rich-text` (editable/multiline/read-only surface UX) in `intents.json`.
+1. **Capabilities** — add `contenteditable` / `editcontext` / `sanitizer-api` / `highlight-api` ids to `we:capabilities.json` + tier them in `we:capabilityMatrix.json`.
+2. **Engine Protocol + native default** — `CustomEditorEngine` contract + `CustomEditorEngineRegistry` (mirror `CustomPositioner`/`CustomPositioningRegistry`), native-first `contenteditable`+`InputEvent` default, **structured-node-tree** internal pivot; thin adapters bridge ProseMirror/Lexical/Slate/Quill. Stand up the new `webediting` project (`we:projects.json`) as the Protocol's home.
+3. **Editor Block** — `fui:blocks.json` + `block-descriptions/`; resolves the engine registry.
+4. **Intents** — `text-formatting` (controls axis, composes `droplist`/`popover`/button) + `rich-text` (editable/multiline/read-only surface UX) in `we:intents.json`.
 5. **Plugs** — `CustomSerializerRegistry` (default-less core, HTML flavor default) + `CustomSanitizerRegistry` (native `setHTML` + DOMPurify adapter, composed on the `insertFromPaste` path; confirm `webvalidation` ownership).
 6. **Technical Configurator cards** (plateau-app) — engine choice, serialization format, substrate-negotiation policy.
 

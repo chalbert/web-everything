@@ -21,12 +21,12 @@ changed circumstance. See the [requirements report](/reports/2026-06-11-exercise
 
 ## Progress — resolved 2026-06-13
 
-- **`domain/disclosures.ts`** — pure domain core: TRID business-day math (`addBusinessDays` /
+- **`we:domain/disclosures.ts`** — pure domain core: TRID business-day math (`addBusinessDays` /
   `businessDaysRemaining` skip weekends), `generateInitialDisclosures` (idempotent — Loan Estimate +
   initial-package envelope, 3-business-day clock), `tridClock` (due / remaining / overdue),
   `signDisclosure`, `initialPackageSigned` (the lifecycle gate), `addRedisclosure` (changed
   circumstance).
-- **`app.ts`** — a "Disclosures & e-sign · TRID" surface in the master-detail trace panel: the package
+- **`we:app.ts`** — a "Disclosures & e-sign · TRID" surface in the master-detail trace panel: the package
   is materialized + audited on first inspect, the TRID clock renders as a Status-Indicator chip
   (caution → countdown, critical → overdue, positive → signed), each disclosure shows a signed/awaiting
   chip, and an unsigned package shows a typed borrower e-sign form. Signing stamps every disclosure +
@@ -36,7 +36,7 @@ changed circumstance. See the [requirements report](/reports/2026-06-11-exercise
   (the advance gate), and **status-indicator** (every chip) standards; check:app-conformance stays
   **100% (0 FAIL, 0 GAP)**. The genuinely-new surfaces — **e-signature capture**, **business-day
   deadline clock**, **disclosure/document-package generation** — have no governing WE standard yet and
-  are tagged in `conformance.json` `candidateStandards` (the Layer-2 /new-standard feed).
+  are tagged in `we:conformance.json` `candidateStandards` (the Layer-2 /new-standard feed).
 - Gates: `tsc` clean, `check:app-conformance` compliant, `check:demos` + `check:standards` green.
 
-**Graduated to** `demos/loan-origination/domain/disclosures.ts` — loan demo S9: TRID clock + e-sign gate + trace-panel surface; 3 candidate standards tagged (e-signature, deadline-clock, doc-generation).
+**Graduated to** `we:demos/loan-origination/domain/disclosures.ts` — loan demo S9: TRID clock + e-sign gate + trace-panel surface; 3 candidate standards tagged (e-signature, deadline-clock, doc-generation).

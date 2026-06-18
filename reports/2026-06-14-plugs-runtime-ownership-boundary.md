@@ -15,7 +15,7 @@
 
 ## Question
 
-`plugs/` is an executable runtime tree (registries + browser-API patches: `plugs/webregistries/`, `plugs/webinjectors/`, `plugs/bootstrap.ts`) that lives in **Web Everything**, the *standard* layer. That placement was inherited from epic #170's consolidation premise ("WE owns the plugs runtime; FU aliases via `@we/plugs`"), never ratified on its own merits. #606 settles whether the executable substrate belongs in the standard layer (WE), the impl layer (Frontier UI), or its own published package — against the one adjacent ruling, #239, which says "`@webeverything/*` is reserved for standard artifacts and never depends on Frontier UI."
+`plugs/` is an executable runtime tree (registries + browser-API patches: `plugs/webregistries/`, `plugs/webinjectors/`, `we:plugs/bootstrap.ts`) that lives in **Web Everything**, the *standard* layer. That placement was inherited from epic #170's consolidation premise ("WE owns the plugs runtime; FU aliases via `@we/plugs`"), never ratified on its own merits. #606 settles whether the executable substrate belongs in the standard layer (WE), the impl layer (Frontier UI), or its own published package — against the one adjacent ruling, #239, which says "`@webeverything/*` is reserved for standard artifacts and never depends on Frontier UI."
 
 ## Recommendation
 
@@ -31,7 +31,7 @@ The survey verified how real ecosystems split a standard from its runtime. Three
 
 **The two patterns are not mutually exclusive** (TC39 ships tests-not-runtime; CommonMark ships both a spec and a reference impl) — so "specs ship no runtime" is a *tendency of mature multi-vendor standards*, not a law that binds a young standard whose reference runtime *is* its demonstration vehicle.
 
-**WE's plugs are a reference implementation, not a polyfill.** They are the runtime that makes WE standards runnable in a real browser (`bootstrap.ts` patches `window` in plugged mode); WE demos exist to *exercise the standard itself*. That is precisely the CommonMark/dart-sass role — the executable embodiment of the spec, co-located with it. Frontier UI's `blocks/` are the *application* implementations built on top; those are the polyfill/impl analogue, correctly outside the standard.
+**WE's plugs are a reference implementation, not a polyfill.** They are the runtime that makes WE standards runnable in a real browser (`we:bootstrap.ts` patches `window` in plugged mode); WE demos exist to *exercise the standard itself*. That is precisely the CommonMark/dart-sass role — the executable embodiment of the spec, co-located with it. Frontier UI's `blocks/` are the *application* implementations built on top; those are the polyfill/impl analogue, correctly outside the standard.
 
 **The #239 reading in the item was incomplete — and the correction strengthens A.** The item argued "#239 governs *published* packages; `@we/plugs` is an unpublished path alias, so #239's letter doesn't bind." But #239 re-scoped `jsx-runtime` to `@frontierui/*` **despite it having no `@frontierui` import** — purely because "it **is** implementation." So #239's load-bearing principle is **standard-artifact vs implementation**, *not* published-vs-unpublished. The unpublished-alias argument is a red herring. The real question #239 poses is the *classification* — and a reference implementation of the standard is a standard artifact (an artifact *of* the project), categorically unlike `jsx-runtime` (application glue). So plugs satisfies #239's letter (it imports nothing from FU — the only dependency #239 forbids) **and** its spirit (it is not application implementation masquerading as a standard artifact). #239 does not extend to plugs.
 
@@ -41,7 +41,7 @@ The survey verified how real ecosystems split a standard from its runtime. Three
 
 | File | Action |
 |------|--------|
-| `reports/2026-06-14-plugs-runtime-ownership-boundary.md` | Created (this report) |
-| `src/_data/researchTopics.json` | Added `spec-reference-runtime-boundary` topic |
-| `src/_includes/research-descriptions/spec-reference-runtime-boundary.njk` | Created write-up |
-| `backlog/606-where-does-the-plugs-platform-layer-runtime-live-web-everyth.md` | Rewritten to prepared-fork shape; `preparedDate` stamped |
+| `we:reports/2026-06-14-plugs-runtime-ownership-boundary.md` | Created (this report) |
+| `we:src/_data/researchTopics.json` | Added `spec-reference-runtime-boundary` topic |
+| `we:src/_includes/research-descriptions/spec-reference-runtime-boundary.njk` | Created write-up |
+| `we:backlog/606-where-does-the-plugs-platform-layer-runtime-live-web-everyth.md` | Rewritten to prepared-fork shape; `preparedDate` stamped |

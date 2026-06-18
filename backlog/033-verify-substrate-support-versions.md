@@ -20,7 +20,7 @@ The native-substrate support table marks several rows approximate against a Jan 
 
 ## Progress (2026-06-13) — resolved
 
-Verified the bleeding-edge rows of [reports/2026-06-02-native-platform-substrate.md](../reports/2026-06-02-native-platform-substrate.md) against caniuse/MDN (the version table lives only in that report — grep-confirmed no duplicate). Corrections:
+Verified the bleeding-edge rows of [we:reports/2026-06-02-native-platform-substrate.md](../reports/2026-06-02-native-platform-substrate.md) against caniuse/MDN (the version table lives only in that report — grep-confirmed no duplicate). Corrections:
 
 - **CSS Anchor Positioning** — Safari `❌`→**26.0**, Firefox `🚩`→**147** (Jan 2026). Now interoperable → **Baseline 2026** (`❌`→`✅ '26`).
 - **`command`/`commandfor` (invokers)** — Safari `26`→**26.2**, Firefox `🚩`→**144**. Now interoperable → **Baseline 2026**.

@@ -17,7 +17,7 @@ Stand up the `@vscode/test-electron` runner in plateau-app that downloads a thro
 
 ## Why this is its own item (the agent-runnable-verification rule)
 
-#676 ("VS Code extension publishable shell — activate() + localhost HTTP/WS server + URI handler") is explicitly *"the only part that needs a real extension host to run."* plateau-app's `npm test` is Vitest — it never loads an extension host, so it cannot execute `activate()`, the `contributes`/`engines.vscode` manifest, or `registerUriHandler` routing. Per the **"every verification must be agent-runnable"** rule (`docs/agent/testing.md`), that end-to-end claim needs a harness that actually launches an Extension Development Host, declared as a resolved `blockedBy`. This card *is* that harness; #676 now `blockedBy: ["685"]`.
+#676 ("VS Code extension publishable shell — activate() + localhost HTTP/WS server + URI handler") is explicitly *"the only part that needs a real extension host to run."* plateau-app's `npm test` is Vitest — it never loads an extension host, so it cannot execute `activate()`, the `contributes`/`engines.vscode` manifest, or `registerUriHandler` routing. Per the **"every verification must be agent-runnable"** rule (`we:docs/agent/testing.md`), that end-to-end claim needs a harness that actually launches an Extension Development Host, declared as a resolved `blockedBy`. This card *is* that harness; #676 now `blockedBy: ["685"]`.
 
 ## Scope
 
@@ -34,10 +34,10 @@ A smoke integration test that activates a **trivial** extension and asserts one 
 Resolved 2026-06-15. plateau-app locus (commit → plateau-app). The runner downloads a throwaway VS Code, launches the Extension Development Host with a trivial fixture extension, and goes **green** — exactly the agent-runnable proof #676 needs.
 
 All under `src/dev-browser/ide-bridge/vscode-extension/__host-tests__/`:
-- **`fixture-extension/`** — a trivial extension (`package.json` with `engines.vscode`, `main`, `activationEvents: ["*"]`, `contributes.commands`) + `extension.cjs` whose `activate()` registers a URI handler (capturing whether `registerUriHandler` returned a live Disposable) and three runtime commands.
-- **`runner.mjs`** — `@vscode/test-electron`'s `runTests({ version: 'stable', extensionDevelopmentPath, extensionTestsPath, launchArgs: ['--disable-extensions'] })`.
-- **`suite/index.cjs`** — mocha entry (TDD ui) discovering `*.test.cjs` via `fs` (no `glob` dep); **`suite/extension.test.cjs`** — 4 host-only assertions: real `vscode.version`, `activate()` runs + exposes its public API, runtime command dispatch (`fixture.ping` → `pong`), and `registerUriHandler` returned a live Disposable (the #676 surface).
-- **`package.json`** — `test:extension-host` script (separate from the fast Vitest `npm test`); dev deps `@vscode/test-electron@^3.0.0`, `mocha`, `@types/vscode`. **`.gitignore`** — `.vscode-test/` (the 238 MB downloaded VS Code + throwaway profiles).
+- **`fixture-extension/`** — a trivial extension (`we:package.json` with `engines.vscode`, `main`, `activationEvents: ["*"]`, `contributes.commands`) + `plateau:extension.cjs` whose `activate()` registers a URI handler (capturing whether `registerUriHandler` returned a live Disposable) and three runtime commands.
+- **`plateau:runner.mjs`** — `@vscode/test-electron`'s `runTests({ version: 'stable', extensionDevelopmentPath, extensionTestsPath, launchArgs: ['--disable-extensions'] })`.
+- **`plateau:suite/index.cjs`** — mocha entry (TDD ui) discovering `*.test.cjs` via `fs` (no `glob` dep); **`plateau:suite/extension.test.cjs`** — 4 host-only assertions: real `vscode.version`, `activate()` runs + exposes its public API, runtime command dispatch (`fixture.ping` → `pong`), and `registerUriHandler` returned a live Disposable (the #676 surface).
+- **`we:package.json`** — `test:extension-host` script (separate from the fast Vitest `npm test`); dev deps `@vscode/test-electron@^3.0.0`, `mocha`, `@types/vscode`. **`.gitignore`** — `.vscode-test/` (the 238 MB downloaded VS Code + throwaway profiles).
 
 Two real-world footguns hit and fixed (so it's green on a clean checkout, not just locally):
 1. **test-electron 2.4.x couldn't launch VS Code 1.124.2** — every launch flag came back `bad option`. Bumped to `@vscode/test-electron@^3.0.0`.

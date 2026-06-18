@@ -17,7 +17,7 @@ Add a mock-vs-real drift check in `webcases`: verify the same interaction-bearin
 
 ## Progress (2026-06-13) — resolved
 
-Both blockers resolved (#331 → `protocol:mock-contract` owned by the `webcases` project; #332 → `frontierui/tools/mock-server`). New [webcases/driftCheck.ts](../webcases/driftCheck.ts) — `webcases`' first code home, wired into the vitest include ([vitest.config.ts](../vitest.config.ts)):
+Both blockers resolved (#331 → `protocol:mock-contract` owned by the `webcases` project; #332 → `frontierui/tools/mock-server`). New [we:webcases/driftCheck.ts](../webcases/driftCheck.ts) — `webcases`' first code home, wired into the vitest include ([we:vitest.config.ts](../vitest.config.ts)):
 
 - **`detectDrift(expected, actual) → DriftReport`** compares the contract's **declared** response (what the mock returns) against the **recorded real** response, reporting every divergence with a JSON-Pointer: `status`, body **shape** (`missing-field` / `extra-field` / `type-mismatch`, walking nested objects + arrays against the contract's first exemplar element), and `content-type` (charset params ignored).
 - **Structural, not value-level** — a real API legitimately returns different *values*; what must not silently change is the *shape*. That distinction is exactly "schema-validation ≠ contract-verification" the #107 Fork-3 ruling names. **One contract, two uses**: the same artifact that mocks an endpoint is the one verified here.

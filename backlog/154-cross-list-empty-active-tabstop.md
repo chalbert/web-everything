@@ -22,7 +22,7 @@ crossRef: { url: /blocks/reorderable-list/, label: Reorderable List block }
 
 Surfaced while pinning the empty-list fixtures in
 [#151](/backlog/151-cross-list-empty-list-fixtures/). The group-wide roving-tabindex model
-(`renderCrossListReorder.ts`) puts the single `tabindex="0"` tabstop on the **active list's focused
+(`we:renderCrossListReorder.ts`) puts the single `tabindex="0"` tabstop on the **active list's focused
 item**. When the active list is **empty**, there is no item to carry it, so the **whole group has
 zero focusable items** — a user who Tabs in while focus rests on an empty column skips the entire
 widget, and the `auditCrossListReorder` invariant *"exactly one item across the whole group is
@@ -62,4 +62,4 @@ the focused item, or the empty active list's container") and promote the #151 ta
 - **Branch:** docs/standard-authoring-workflow
 - **Done:** `listEl` + `reconcileCrossList` put/clear `tabindex="0"` on the active list's container when empty; `auditCrossListReorder` tightened to the conditional contract; fixture case 12 (`rest-on-empty`) pins the resting state for the playground + CI; the #151 unit test promoted from "zero focusable" to "tabstop preserved", plus a reconcile guard. Full suite (1579) + check:standards (0 err) + build all green.
 - **Next:** done.
-- **Notes:** `blocks/renderers/reorderable-list/renderCrossListReorder.ts`, fixtures `__fixtures__/cross-list-reorder-cases.ts`, test `blocks/__tests__/unit/renderers/cross-list-reorder.test.ts`.
+- **Notes:** `we:blocks/renderers/reorderable-list/renderCrossListReorder.ts`, fixtures `we:__fixtures__/cross-list-reorder-cases.ts`, test `we:blocks/__tests__/unit/renderers/cross-list-reorder.test.ts`.

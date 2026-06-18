@@ -29,7 +29,7 @@ focused option is far from the viewport.
 - Position the off-window active row so it doesn't visually overlap a spacer region (it's currently
   rendered inline at the slice edge; consider `position: absolute` translate or visually-hidden while
   off-window, since it exists only to keep `aria-activedescendant` resolvable).
-- Add a real-layout assertion to `plateau/e2e/windowed-scroll.spec.ts`: with the active row scrolled far
+- Add a real-layout assertion to `we:plateau/e2e/windowed-scroll.spec.ts`: with the active row scrolled far
   off-screen, `scrollHeight === total * itemHeight` exactly.
 
 Acceptance: `scrollHeight` equals the full model height even while the always-mounted active row is
@@ -37,7 +37,7 @@ outside the visible window.
 
 ## Resolution — spacer subtracts the off-window active row
 
-Fixed in `plateau/src/blocks/attributes/Windowed.ts`:
+Fixed in `we:plateau/src/blocks/attributes/Windowed.ts`:
 
 - **Pure math.** `spacerHeights()` gained an optional `activeIndex`. When the active row sits outside
   `[start, end)` it is an extra in-flow row the spacer already reserves a slot for (double-counted), so
@@ -52,11 +52,11 @@ Fixed in `plateau/src/blocks/attributes/Windowed.ts`:
   marker is an available polish hook, not a deferred requirement.
 
 **Tests (all green):**
-- `Windowed.test.ts` — added pure `spacerHeights` cases (active below → bottom spacer −1 row; active
+- `we:Windowed.test.ts` — added pure `spacerHeights` cases (active below → bottom spacer −1 row; active
   above → top spacer −1 row; active inside → unchanged) and extended the scroll-path off-window test to
   assert `top + mounted*ITEM + bottom === total*ITEM` and the marker toggles. 22/22 pass.
-- `e2e/windowed-scroll.spec.ts` — the real-layout "active row stays mounted far out of view" test now
+- `fui:e2e/windowed-scroll.spec.ts` — the real-layout "active row stays mounted far out of view" test now
   asserts `scrollHeight === TOTAL * ITEM` exactly (would have been `(TOTAL+1)*ITEM` before). 5/5 pass.
 
 Typecheck clean for the changed file (the 2 pre-existing `tsc` errors are in unrelated
-`proposals/` / `QueryProperty.ts`). No new leftovers — the visual hook is in place, acceptance met.
+`proposals/` / `we:QueryProperty.ts`). No new leftovers — the visual hook is in place, acceptance met.

@@ -33,5 +33,5 @@ extension** (two-way, if installed) → **FS Access** → **`vscode://file`** �
 The richest provider — the **deep two-way VS Code extension** — is carved to
 [#577](/backlog/577-deep-two-way-vs-code-extension-emit-active-projects-coordina/) (separation bias). The runtime
 analogue already in-tree is the dev-server `/__dev-panel/selection` bridge
-([tools/dev-panel/vite-plugin.ts:260-281](../tools/dev-panel/vite-plugin.ts#L260)). **Constellation:** Plateau
+([we:tools/dev-panel/vite-plugin.ts:260-281](../tools/dev-panel/vite-plugin.ts#L260)). **Constellation:** Plateau
 dev-browser product (#475/#091). Grounded in [`source-awareness-substrate`](/research/source-awareness-substrate/).

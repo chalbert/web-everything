@@ -41,24 +41,24 @@ Spun off from #128 (implementing the Background Task surface as a block).
 - **2026-06-15 — built (in-harness slice) + adapter coded.** Shipped on the
   [Background Task Surface](/blocks/background-task-surface/) block (webintents):
   - **`durability` config dimension** (`route | reload`, default `route`) on `BackgroundTasksConfig` +
-    `DEFAULT_CONFIG` ([types.ts](../blocks/background-task-surface/types.ts)); enum stays `route | reload`
+    `DEFAULT_CONFIG` ([we:types.ts](../blocks/background-task-surface/types.ts)); enum stays `route | reload`
     (`resumable` reserved in docs only, per #450 ruling 1). Read from the `durability` attribute; unknown
     values fall back to `route`.
-  - **`withReloadDurability` trait** ([traits/withReloadDurability.ts](../blocks/background-task-surface/traits/withReloadDurability.ts))
+  - **`withReloadDurability` trait** ([fui:traits/withReloadDurability.ts](../blocks/background-task-surface/traits/withReloadDurability.ts))
     wiring `route → reload`, with cleanup reverting to baseline.
   - **Guard derivation + observable fallback re-arm** in
-    [BackgroundTasksElement.ts](../blocks/background-task-surface/BackgroundTasksElement.ts): `durability`
+    [fui:BackgroundTasksElement.ts](../blocks/background-task-surface/BackgroundTasksElement.ts): `durability`
     *derives* the navigation-guard default (relaxed when durable + available; author may force on) and the
     tier **feature-detects Background Fetch at arm-time** (#450 ruling 3), degrading to route-only and
     **re-arming the guard observably** (`data-durability-fallback`) when unavailable.
   - **Background Fetch + service-worker adapter**
-    ([reloadDurabilityAdapter.ts](../blocks/background-task-surface/reloadDurabilityAdapter.ts)):
+    ([fui:reloadDurabilityAdapter.ts](../blocks/background-task-surface/reloadDurabilityAdapter.ts)):
     `isBackgroundFetchAvailable`, `registerDurableTransfer` (registers a Background Fetch transfer),
     `rehydrateDurableTasks` (recovers in-progress transfers on the next load and maps each to a surface
     register detail — the reconnect-to-surface-entry seam). All paths degrade gracefully (never throw on
     an unsupported browser).
   - **Tests:** 12 new in-harness tests
-    ([reloadDurability.test.ts](../blocks/__tests__/unit/background-task-surface/reloadDurability.test.ts)) —
+    ([fui:reloadDurability.test.ts](../blocks/__tests__/unit/background-task-surface/reloadDurability.test.ts)) —
     config dimension, trait, feature detection, the durability-derived guard + observable fallback, and
     adapter degradation/registration/rehydration with stubbed Background Fetch. 30/30 block tests green.
   - **Verification strategy (pre-flight point 2).** The trait/config/feature-detection/graceful-degradation

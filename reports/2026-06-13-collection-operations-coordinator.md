@@ -25,18 +25,18 @@ collection-operations research covered the four-op vocabulary, not the orchestra
 
 - `applyPipeline(rows, config)` runs filter→sort→group in `config.order ?? DEFAULT_ORDER` and returns
   normalized groups; **the page stage is a deliberate no-op** — "it is the Pagination block's job
-  (compose, never merge)" — [blocks/renderers/data-table/renderDataTable.ts:143-196](../blocks/renderers/data-table/renderDataTable.ts#L143).
+  (compose, never merge)" — [we:blocks/renderers/data-table/renderDataTable.ts:143-196](../blocks/renderers/data-table/renderDataTable.ts#L143).
 - `DataTableBehavior` is a **headless instance**: mounts into a host, delegates header clicks to
   `applySortClick`, re-renders, emits `data-table-change` so a consumer can re-window —
-  [blocks/renderers/data-table/DataTableBehavior.ts:26-75](../blocks/renderers/data-table/DataTableBehavior.ts#L26).
+  [we:blocks/renderers/data-table/DataTableBehavior.ts:26-75](../blocks/renderers/data-table/DataTableBehavior.ts#L26).
   A `DataTableElement` custom-element wrapper drives the behavior over itself
   ([:82-104](../blocks/renderers/data-table/DataTableBehavior.ts#L82)).
 - `PaginationBehavior` is the same shape: owns `PageState`, emits `pagination-change` "so a consumer
-  can re-window its collection" — [blocks/renderers/pagination/PaginationBehavior.ts:1-12](../blocks/renderers/pagination/PaginationBehavior.ts#L1).
+  can re-window its collection" — [we:blocks/renderers/pagination/PaginationBehavior.ts:1-12](../blocks/renderers/pagination/PaginationBehavior.ts#L1).
   `PageState = { pageIndex, pageSize, total }`, range "Showing 21–40 of 500" —
-  [renderPagination.ts:26-57](../blocks/renderers/pagination/renderPagination.ts#L26).
+  [we:renderPagination.ts:26-57](../blocks/renderers/pagination/renderPagination.ts#L26).
 - The intent already declares `pipelineOrder` (configurable, default filter→sort→group→page) and is
-  **UX-only** — `src/_data/intents.json` `collection-operations`.
+  **UX-only** — `we:src/_data/intents.json` `collection-operations`.
 
 So the gap is purely the **missing seam owner** between two existing headless behaviors. The
 coordinator re-runs `applyPipeline` over the full set on any `data-table-change`, then feeds the

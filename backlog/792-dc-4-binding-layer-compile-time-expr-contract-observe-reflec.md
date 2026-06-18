@@ -90,25 +90,25 @@ ships (see report §1). Meanwhile the high-value, low-complexity piece (`observe
 
 ## Concrete code refs
 
-- [declarativeComponent.ts](../blocks/renderers/component/declarativeComponent.ts) — `generateClassSource`,
+- [we:declarativeComponent.ts](../blocks/renderers/component/declarativeComponent.ts) — `generateClassSource`,
   the existing build-time lowering Option B extends (emitting `static observedAttributes` /
   `attributeChangedCallback` is a localized addition).
 - [#076](/backlog/076-component-declarative-wc-apis/) lines 34, 37–38 — the DC-4 block framing this resolves.
-- [component.njk](../src/_includes/block-descriptions/component.njk) — Feature-Inventory row + Composition note tying DC-4 to `<for-each>`.
+- [we:component.njk](../src/_includes/block-descriptions/component.njk) — Feature-Inventory row + Composition note tying DC-4 to `<for-each>`.
 
 ## ⚠ Premise hole — re-grounding needed before ratification (2026-06-17)
 
 A grounding pass during the decision turn found that **WE already ships a `{{expr}}` binding layer** the
 prepared item and its report missed entirely. The `webexpressions` plug family is `status: active` (ratified
-contracts) in `src/_data/plugs.json`:
+contracts) in `we:src/_data/plugs.json`:
 
 - `CustomTextNodeRegistry` / `CustomTextNodeParser` / `CustomTextNodeParserRegistry` /
-  `CustomExpressionParserRegistry` — the parse→evaluate pipeline (contracts in plugs.json; runtime impl
+  `CustomExpressionParserRegistry` — the parse→evaluate pipeline (contracts in we:plugs.json; runtime impl
   vendored in `plugs/webexpressions/`, FUI-owned pending #170).
-- `blocks/parsers/text-node/double-curly/DoubleCurlyBracketParser.ts` (`{{ }}`) **and**
-  `…/double-square/DoubleSquareBracketParser.ts` (`[[ ]]`) — the Polymer one-way/two-way spelling split is
+- `we:blocks/parsers/text-node/double-curly/DoubleCurlyBracketParser.ts` (`{{ }}`) **and**
+  `…we:/double-square/DoubleSquareBracketParser.ts` (`[[ ]]`) — the Polymer one-way/two-way spelling split is
   *already implemented*, not merely "prior art to borrow" (report §2 is wrong on this).
-- `blocks/text-nodes/interpolation/InterpolationTextNode.ts` — a **runtime expression interpreter**
+- `we:blocks/text-nodes/interpolation/InterpolationTextNode.ts` — a **runtime expression interpreter**
   (parses + evaluates on `connectedCallback` via the injector-resolved `CustomExpressionParserRegistry`).
   "Phase 1 limitation: evaluates once on connect, no reactive auto-update."
 
@@ -161,6 +161,6 @@ collapsed sub-decision 4 and reframed B from greenfield to unplugged-twin. (Less
 report must be traced to the real tree before ratifying — the report's "prior art to borrow" was already built.)
 
 **Layer placement:** the *contract* (`observe=` + the shared `{{ }}` grammar + the lowering guarantee) is WE's
-(`component.njk` + the `webexpressions`/component block spec). The *lowering impl* (`generateClassSource`
+(`we:component.njk` + the `webexpressions`/component block spec). The *lowering impl* (`generateClassSource`
 emitting `observedAttributes`/`attributeChangedCallback`) and the *runtime interpreter* are FUI-owned. The B1
 build slice is filed as its own item under #076.

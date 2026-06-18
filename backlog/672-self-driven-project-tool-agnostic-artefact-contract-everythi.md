@@ -15,14 +15,14 @@ tags: [self-driven-project, artefact-contract, protocol, everything-as-code, no-
 
 # Self-Driven Project tool-agnostic artefact contract (everything-as-code, no-lock-in Protocol)
 
-The load-bearing decoupling foundation (per #665 invariant): codify the methodology as tool-agnostic, version-controlled, declarative artefacts — autonomy level, tolerance/risk envelope, per-step gate definitions, value/risk dimensions, run evidence — so a third-party PM/CI tool could read and drive the same files. Register as a concept Protocol in protocols.json + a first-cut spec report; prior art GitOps/OSCAL/SPDX + the work-tracker white space (report §7.4). Non-blocking consumers only (control plane, dev-browser).
+The load-bearing decoupling foundation (per #665 invariant): codify the methodology as tool-agnostic, version-controlled, declarative artefacts — autonomy level, tolerance/risk envelope, per-step gate definitions, value/risk dimensions, run evidence — so a third-party PM/CI tool could read and drive the same files. Register as a concept Protocol in we:protocols.json + a first-cut spec report; prior art GitOps/OSCAL/SPDX + the work-tracker white space (report §7.4). Non-blocking consumers only (control plane, dev-browser).
 
 ## Surfaced prerequisite (2026-06-15 — claim-time pre-flight, batch-2026-06-15)
 
 Claimed during a batch, then released on a closer read: **registering the Protocol needs an owning
-project that does not yet exist.** `protocols.json` hard-requires an `ownedByProject` that resolves in
-`projects.json` *and* a `src/_includes/project-<owner>.njk` partial containing the protocol's anchor
-(`check-standards-rules.mjs` §6b). No self-driven-project / methodology project exists (the constellation
+project that does not yet exist.** `we:protocols.json` hard-requires an `ownedByProject` that resolves in
+`we:projects.json` *and* a `src/_includes/project-<owner>.njk` partial containing the protocol's anchor
+(`we:check-standards-rules.mjs` §6b). No self-driven-project / methodology project exists (the constellation
 is all `web*` platform-standard projects), and #665's ratified framing names "the no-lock-in artefact
 Protocol" but **not an owning project**. So a real decision precedes this build: **is the self-driven-project
 methodology a first-class constellation project** (its own `web…` project + npm scope + layer, per the #091
@@ -59,8 +59,8 @@ This build now carries:
   - `webautonomy` — foregrounds the autonomy/ODD *dial* (the novel thesis); most distinctive, but narrows
     to the dial and underplays the gate + everything-as-code.
 
-  Minting the node (projects.json entry + `project-<id>.njk` partial carrying the anchor) is part of this
-  build, satisfying the protocols.json invariant. Reclassify if a real scope-divergence surfaces (then it
+  Minting the node (we:projects.json entry + `project-<id>.njk` partial carrying the anchor) is part of this
+  build, satisfying the we:protocols.json invariant. Reclassify if a real scope-divergence surfaces (then it
   becomes a `type:decision`); none is known.
 - **Value framing:** lead on open / no-lock-in / composable everything-as-code + the ground-truth gate —
   not the (trodden) concept.
@@ -70,15 +70,15 @@ This build now carries:
 Larger than the `size·3` label (project-mint scale, comparable to the webworkflows node) but **fork-free**
 (the slug was settled at DoR, #690 ratified the scope) — so delivered the Layer-1 concept registration:
 
-- **Minted the `webprocess` node** (default slug, "Web Process"): `src/_data/projects.json` entry
-  (status `concept`), `src/assets/icons/webprocess.svg`, and `src/_includes/project-webprocess.njk` — mission,
+- **Minted the `webprocess` node** (default slug, "Web Process"): `we:src/_data/projects.json` entry
+  (status `concept`), `src/assets/icons/webprocess.svg`, and `we:src/_includes/project-webprocess.njk` — mission,
   the artefact-contract Protocol section carrying the anchor `id="protocol-self-driven-project"` + the
-  four-meta-schema table, composition, and status. Satisfies the protocols.json §6b invariant
+  four-meta-schema table, composition, and status. Satisfies the we:protocols.json §6b invariant
   (`ownedByProject` resolves + the partial carries the anchor).
-- **Registered the concept Protocol** in `src/_data/protocols.json`:
+- **Registered the concept Protocol** in `we:src/_data/protocols.json`:
   `self-driven-project-artefact-contract` (status `concept`, owned by `webprocess`).
 - **First-cut spec report**
-  [reports/2026-06-15-self-driven-project-artefact-contract-spec.md](../reports/2026-06-15-self-driven-project-artefact-contract-spec.md):
+  [we:reports/2026-06-15-self-driven-project-artefact-contract-spec.md](../reports/2026-06-15-self-driven-project-artefact-contract-spec.md):
   the everything-as-code discoverable file/metadata structure, the **four composable meta-schemas each with a
   default flavor** (autonomy-level registry [NEW], value/risk-ODD dimension registry [NEW], gate-definition
   schema [composes webcompliance+webpolicy], step schema [composes webworkflows]), the **one fully-defined

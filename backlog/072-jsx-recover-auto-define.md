@@ -14,7 +14,7 @@ crossRef: { url: /adapters/jsx-adapter/, label: JSX Adapter }
 
 # Decide whether to recover the JSX renderer's auto-define tracking from the plateau prototype
 
-The old `plateau/src/blocks/renderers/jsx-renderer.ts` tracked "undetermined" elements/attributes/comments in WeakMaps so an AutoDefineService could auto-register custom elements discovered in a JSX-rendered tree. The current `blocks/renderers/jsx/JSXRenderer.ts` rewrite deliberately dropped this — it creates plain DOM and leaves registration to the author.
+The old `we:plateau/src/blocks/renderers/jsx-renderer.ts` tracked "undetermined" elements/attributes/comments in WeakMaps so an AutoDefineService could auto-register custom elements discovered in a JSX-rendered tree. The current `we:blocks/renderers/jsx/JSXRenderer.ts` rewrite deliberately dropped this — it creates plain DOM and leaves registration to the author.
 
 Current recommendation: leave it dropped for the mirror-dialect POC (authors register elements explicitly, matching how HTML works). Alternative held open: reintroduce a lightweight auto-define pass so a JSX tree self-registers its custom elements. This is a sibling to the `injector-domain-concept-carry-forward` decision — both ask whether a plateau concept should be carried into Web Everything.
 
@@ -32,8 +32,8 @@ not at render time inside the renderer:
   *importing the module registers the element*. This is renderer-agnostic and serves HTML string
   tags (`<user-card>`) and the JSX class path (`<UserCard/>` → `new UserCard()`) identically.
 - WE already realizes this: generated modules end in `customElements.define`
-  (`blocks/renderers/component/declarativeComponent.ts:151`,
-  `blocks/renderers/functional/functionalComponent.ts:71`), and the functional-component-adapter
+  (`we:blocks/renderers/component/declarativeComponent.ts:151`,
+  `we:blocks/renderers/functional/functionalComponent.ts:71`), and the functional-component-adapter
   doc shows `await import('…?form=functional'); // self-registers <user-card>`.
 - What JSX uniquely makes easier is *instantiation from the class*, not registration — and even
   that requires the class to be defined first (custom-element constructors throw if unregistered).

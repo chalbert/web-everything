@@ -25,13 +25,13 @@ with a **bold** recommended default; B and C are named-rejected branches.
 
 ## The axis — how the loan app's guard dependency resolves in FUI
 
-Loan's guard footprint is exactly two modules: the dispatching table `guard/registry.ts:39`
-(`CustomGuardRegistry`, imported at `demos/loan-origination/app.ts:29`, composed at
-`app.ts:99-102`) and the contract `guard/provider.ts` (`CustomGuardProvider` / `ALLOW`, imported at
-`demos/loan-origination/domain/permissions.ts:30-31`). It does **not** touch `guard/accessControl.ts` or
-`guard/index.ts`. The registry is *composed and exposed but not yet applied* — the consuming UI is the
-future S10 slice (`app.ts:101`). `guard/` is a **closed set, internal deps only** (`provider.ts` is a
-leaf; the other three import only `./provider.js`) — the same property that made the #694 family
+Loan's guard footprint is exactly two modules: the dispatching table `we:guard/registry.ts:39`
+(`CustomGuardRegistry`, imported at `we:demos/loan-origination/app.ts:29`, composed at
+`we:app.ts:99-102`) and the contract `we:guard/provider.ts` (`CustomGuardProvider` / `ALLOW`, imported at
+`we:demos/loan-origination/domain/permissions.ts:30-31`). It does **not** touch `we:guard/accessControl.ts` or
+`we:guard/index.ts`. The registry is *composed and exposed but not yet applied* — the consuming UI is the
+future S10 slice (`we:app.ts:101`). `guard/` is a **closed set, internal deps only** (`we:provider.ts` is a
+leaf; the other three import only `we:./provider.js`) — the same property that made the #694 family
 migration mechanical. The single question: where does that import resolve once the app lives in FUI,
 which has no `guard/` dir.
 
@@ -39,7 +39,7 @@ which has no `guard/` dir.
 
 | Fork | Recommended default | Main alternative | Confidence |
 |---|---|---|---|
-| 1 — guard's FUI resolution | **A — copy the guard closed-set up to `@frontierui/blocks` byte-identical (#694 + #170 pattern); WE's copy stays drift-source until #658 flips canonicality to FUI; `protocol:guard` spec stays WE-only & canonical** | A′ contract-split (copy only dispatch/member impl, keep `provider.ts` WE-canonical) | High (~90%) |
+| 1 — guard's FUI resolution | **A — copy the guard closed-set up to `@frontierui/blocks` byte-identical (#694 + #170 pattern); WE's copy stays drift-source until #658 flips canonicality to FUI; `protocol:guard` spec stays WE-only & canonical** | A′ contract-split (copy only dispatch/member impl, keep `we:provider.ts` WE-canonical) | High (~90%) |
 
 ## Fork 1 — how does loan's guard dependency resolve in FUI?
 
@@ -52,8 +52,8 @@ contract module either lives byte-copied in FUI or it doesn't).
 **First — "WE-resident impl" is a transitional fact, not WE's charter.** WE's end-state role is
 standard-only: specs, protocols, intents, and the `plugs/` platform substrate. WE does **not** own
 component/handler *implementation* as a matter of charter. But the repo still physically hosts un-migrated
-impl today — `blocks/`, `guard/`, and the runtime guard classes (`registry.ts`, `accessControl.ts`, and the
-concrete `NativeGuardProvider`/`assertGuardDecision`/`ALLOW` in `provider.ts`) are **implementation living in
+impl today — `blocks/`, `guard/`, and the runtime guard classes (`we:registry.ts`, `we:accessControl.ts`, and the
+concrete `NativeGuardProvider`/`assertGuardDecision`/`ALLOW` in `we:provider.ts`) are **implementation living in
 the WE repo pending migration**, not standard artifacts. Draining that impl up to `@frontierui/blocks` is the
 explicit job of the open epic **#658** (6 of 9 families already moved byte-identical by #694). The genuine
 standard artifact that stays WE-canonical is the **`protocol:guard` spec** (the `/protocols/` page) — never
@@ -85,13 +85,13 @@ the end-state mechanism to a new epic** (see Context), rather than re-litigating
   The `protocol:guard` spec stays WE-only and canonical. (recommended default.)** Loan's import resolves in
   FUI unchanged; mechanically a near-clone of #694 (closed set, no external deps, byte-verified). Drift is
   gated by the same byte-equality check #694 relies on. Merit cost: places the contract module
-  (`provider.ts`) in FUI — see A′.
-- **A′ — contract-split: copy only the dispatch/member impl (`registry.ts`, `accessControl.ts`), keep
-  `provider.ts` WE-canonical.** Honours *npm-scope-mirrors-layer* most literally (FUI holds no standard
+  (`we:provider.ts`) in FUI — see A′.
+- **A′ — contract-split: copy only the dispatch/member impl (`we:registry.ts`, `we:accessControl.ts`), keep
+  `we:provider.ts` WE-canonical.** Honours *npm-scope-mirrors-layer* most literally (FUI holds no standard
   contract). But the FUI registry copy must then reach the WE contract; *without* a published-contract
   mechanism (= C, deferred to the new epic) that means a copy of the contract too (= A). As a same-repo
-  file-level split it's also incoherent — both `registry.ts` and `accessControl.ts` import the **runtime**
-  `assertGuardDecision` from `provider.ts`, and `provider.ts` is a **mixed module** (types + runtime), so the
+  file-level split it's also incoherent — both `we:registry.ts` and `we:accessControl.ts` import the **runtime**
+  `assertGuardDecision` from `we:provider.ts`, and `we:provider.ts` is a **mixed module** (types + runtime), so the
   type half can't be cleanly held WE while its co-located runtime moves (#170 forbids splitting one migrated
   file). Superseded by C-as-end-state, not by A.
 - **B — decouple: inline a minimal registry in loan's domain code.** *Rejected — conformance bypass.* The
@@ -118,7 +118,7 @@ understood as *deferred, not excluded*.
 
 Decided in discussion. **Ratified: A — byte-copy the guard closed-set up to `@frontierui/blocks`** as the
 reversible short-term interim; built under **#836**. Rationale: near-mechanical #694 clone, unblocks loan now,
-fully reversible. **A′ is refuted on the facts** — `provider.ts` is a *mixed module* (contract types +
+fully reversible. **A′ is refuted on the facts** — `we:provider.ts` is a *mixed module* (contract types +
 runtime `assertGuardDecision`/`ALLOW`/`GuardDecisionError`/`NativeGuardProvider`), so the type half can't be
 cleanly held WE while its co-located runtime moves; #170 forbids splitting one migrated file. **B rejected**
 (active-bypass = FAIL).
@@ -145,5 +145,5 @@ implementation." Per the user's call, **this is not deferred indefinitely** — 
 - The **runtime** guard form is a separate plug (`plugs/webguards/`, extends core `CustomRegistry`,
   injector-chain); loan uses the **standalone model** (`guard/`), not the plug — so the plug's WE home is
   not in scope here.
-- Full trace + concrete refs in `reports/2026-06-17-loan-guard-fui-resolution.md` (linked via
+- Full trace + concrete refs in `we:reports/2026-06-17-loan-guard-fui-resolution.md` (linked via
   `relatedReport`).

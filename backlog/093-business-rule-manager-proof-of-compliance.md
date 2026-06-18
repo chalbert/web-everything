@@ -54,7 +54,7 @@ version, govern, and enforce business rules declaratively — and emit an audita
 that the rules were applied** (the differentiator: not "the rule exists," but "here is the record proving
 it ran"). The three forks below are grounded in a prior-art survey published as
 [`/research/business-rule-proof-of-compliance/`](/research/business-rule-proof-of-compliance/) (session
-report `reports/2026-06-12-business-rule-proof-of-compliance.md`) covering DMN, Open Policy Agent, the
+report `we:reports/2026-06-12-business-rule-proof-of-compliance.md`) covering DMN, Open Policy Agent, the
 tamper-evident-audit ladder, and OSCAL. Each fork carries a **bold** default; the survey's key finding is
 that two open standards answer *different* forks (DMN = authoring vocabulary; OPA PDP/PEP = enforcement +
 proof), so WE adopts rather than coins.

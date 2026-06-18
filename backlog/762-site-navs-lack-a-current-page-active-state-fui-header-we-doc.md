@@ -19,15 +19,15 @@ Drove the live page: the `<nav>` has 7 links; the one for the page we're on (`Ad
 
 ## Where
 
-- **FUI header** — `frontierui/src/_layouts/base.njk:21-29`: hardcoded `<a>` list with inline styles, no current-page logic.
-- **WE docs header** — `webeverything/src/_layouts/base.njk`: disclosure menu (#645), also no current-page state on links or section heads.
+- **FUI header** — `fui:frontierui/src/_layouts/base.njk:21-29`: hardcoded `<a>` list with inline styles, no current-page logic.
+- **WE docs header** — `we:webeverything/src/_layouts/base.njk`: disclosure menu (#645), also no current-page state on links or section heads.
 
 ## The fix (approach is settled — dogfood our own spec)
 
 The repo already ships the correct pattern; the sites just don't use it:
 
-- Block spec: `src/_includes/block-descriptions/nav-list.njk` — `aria-current="page"` + `.active`, indicator = left-border + weight (not color alone).
-- Working impl: `demos/navigation-demo.css:55-66`.
+- Block spec: `we:src/_includes/block-descriptions/nav-list.njk` — `aria-current="page"` + `.active`, indicator = left-border + weight (not color alone).
+- Working impl: `we:demos/navigation-demo.css:55-66`.
 
 In each layout, mark the link whose `href` is a **prefix** of `page.url` (not exact-equality, or top-level items go dark on every child page) with `aria-current="page"`, then style off `a[aria-current="page"]` with a border/weight cue (WCAG 1.4.1 — never color alone) and keep a distinct `:focus-visible` ring. Best practice: WCAG 2.4.8, ARIA APG current-page.
 

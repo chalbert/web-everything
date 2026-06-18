@@ -18,13 +18,13 @@ The six #694-migrated block families (audit, lifecycle, master-detail, selection
 
 ## Progress
 
-Done (lockstep, byte-identical WE + FUI). For each of the six families a sibling `contract.ts` now holds the pure-contract half (types/interfaces only, fully compile-erased), following the #873 file-seam precedent — the runtime file `import type`s what it uses and re-exports the whole surface (`export type * from './contract'`) so every existing importer keeps one import site (public surface unchanged):
+Done (lockstep, byte-identical WE + FUI). For each of the six families a sibling `we:contract.ts` now holds the pure-contract half (types/interfaces only, fully compile-erased), following the #873 file-seam precedent — the runtime file `import type`s what it uses and re-exports the whole surface (`export type * from './contract'`) so every existing importer keeps one import site (public surface unchanged):
 
-- `blocks/audit/contract.ts` — `AuditChange`, `AuditEvent`, `AuditQuery`, `CustomAuditProvider` (runtime: `DefaultAuditProvider`, `CustomAuditRegistry`, `registerAudit`, `auditLifecycle`).
-- `blocks/lifecycle/contract.ts` — `StatusTone`, `EntityRef`, `ActorRef`, `LifecycleTransition`, `LifecycleStateMeta`, `LifecycleDefinition`, `LifecycleEvent`, `GuardResolver`, `CustomLifecycleProvider`.
-- `blocks/master-detail/contract.ts` — `FocusFlow`, `EmptyState`, `MasterDetailOptions`.
-- `blocks/selection/contract.ts` — `SelectionModel`, `SelectionOptions`, `SelectionChange`.
-- `blocks/stepper/contract.ts` — `Progression`, `StepperOptions`.
-- `blocks/tree-select/contract.ts` — `TreeNode`, `TreeModel`, `TreeSelectOptions` (internal `Flat` stays runtime-side).
+- `we:blocks/audit/contract.ts` — `AuditChange`, `AuditEvent`, `AuditQuery`, `CustomAuditProvider` (runtime: `DefaultAuditProvider`, `CustomAuditRegistry`, `registerAudit`, `auditLifecycle`).
+- `we:blocks/lifecycle/contract.ts` — `StatusTone`, `EntityRef`, `ActorRef`, `LifecycleTransition`, `LifecycleStateMeta`, `LifecycleDefinition`, `LifecycleEvent`, `GuardResolver`, `CustomLifecycleProvider`.
+- `we:blocks/master-detail/contract.ts` — `FocusFlow`, `EmptyState`, `MasterDetailOptions`.
+- `we:blocks/selection/contract.ts` — `SelectionModel`, `SelectionOptions`, `SelectionChange`.
+- `we:blocks/stepper/contract.ts` — `Progression`, `StepperOptions`.
+- `we:blocks/tree-select/contract.ts` — `TreeNode`, `TreeModel`, `TreeSelectOptions` (internal `Flat` stays runtime-side).
 
-Byte-identity preserved: the 12 files (6 `contract.ts` + 6 edited runtime) are byte-for-byte identical in `webeverything/blocks/` and `frontierui/blocks/` (the #170 drift guard). Verified: 37 family unit tests green, standalone `tsc --noEmit` clean on both repos' copies (incl. FUI's extra `lifecycle/AttributeLifecycle.ts`), `check:standards` 0 errors. These six `contract.ts` entries are the family contracts #874 packages under `@webeverything/contracts/<family>` and #875 imports.
+Byte-identity preserved: the 12 files (6 `we:contract.ts` + 6 edited runtime) are byte-for-byte identical in `webeverything/blocks/` and `frontierui/blocks/` (the #170 drift guard). Verified: 37 family unit tests green, standalone `tsc --noEmit` clean on both repos' copies (incl. FUI's extra `fui:lifecycle/AttributeLifecycle.ts`), `check:standards` 0 errors. These six `we:contract.ts` entries are the family contracts #874 packages under `@webeverything/contracts/<family>` and #875 imports.

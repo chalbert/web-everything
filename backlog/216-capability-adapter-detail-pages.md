@@ -16,8 +16,8 @@ crossRef: { url: /backlog/206-capability-adapter-registration-table/, label: "Fo
 
 Follow-up surfaced closing out
 [#206](/backlog/206-capability-adapter-registration-table/). The registered capability adapter table
-(`capabilityMatrix.json` → `impls[]`, rendered on `/capabilities/`) currently exposes each adapter
-only as a **column header + inline `summary`** in the matrix grid. The `adapters.json` pattern that
+(`we:capabilityMatrix.json` → `impls[]`, rendered on `/capabilities/`) currently exposes each adapter
+only as a **column header + inline `summary`** in the matrix grid. The `we:adapters.json` pattern that
 #206's scope explicitly invokes goes one step further: each registered item has a
 `adapter-descriptions/{id}.njk` **detail page** explaining what it bridges.
 
@@ -36,9 +36,9 @@ only as a **column header + inline `summary`** in the matrix grid. The `adapters
 ## Progress
 - **Status:** resolved — per-adapter detail pages live at `/capabilities/adapters/{id}/`, linked from the matrix.
 - **Branch:** docs/standard-authoring-workflow
-- **Done:** `src/capability-adapter-pages.njk` paginates `capabilityMatrix.impls` → detail page (prose partial + data-driven tier breakdown grouped by state + sibling-adapter cross-links); `capability-adapter-descriptions/{face,base-select}.njk` prose partials (what it is / why each tier / native serve-can/can't); matrix column headers in `capabilities.njk` + `capability-pages.njk` now link to the adapter page; `check-standards.mjs` requires a partial per registered adapter row. check:standards 0/0; clean 11ty build emits both pages.
+- **Done:** `we:src/capability-adapter-pages.njk` paginates `capabilityMatrix.impls` → detail page (prose partial + data-driven tier breakdown grouped by state + sibling-adapter cross-links); `capability-adapter-descriptions/{face,base-select}.njk` prose partials (what it is / why each tier / native serve-can/can't); matrix column headers in `we:capabilities.njk` + `we:capability-pages.njk` now link to the adapter page; `we:check-standards.mjs` requires a partial per registered adapter row. check:standards 0/0; clean 11ty build emits both pages.
 - **Next:** —
-- **Notes:** mirrors the `adapter-descriptions/{id}.njk` + `adapter-pages.njk` convention; tier facts render from the single source (`capabilityMatrix.json`), prose lives in the partial.
+- **Notes:** mirrors the `adapter-descriptions/{id}.njk` + `we:adapter-pages.njk` convention; tier facts render from the single source (`we:capabilityMatrix.json`), prose lives in the partial.
 
 ## Notes
 
@@ -46,4 +46,4 @@ Optional / discovery-polish — the #206 DoD (registration + query + single-row-
 validator) is already met without this. Pairs with #211 (per-capability detail pages): #211 is the
 *capability* (row) detail, this is the *adapter* (column) detail.
 
-**Graduated to** `src/capability-adapter-pages.njk` — /capabilities/adapters/{id}/ detail pages + capability-adapter-descriptions/{id}.njk partials + per-adapter description validator.
+**Graduated to** `we:src/capability-adapter-pages.njk` — /capabilities/adapters/{id}/ detail pages + capability-adapter-descriptions/{id}.njk partials + per-adapter description validator.

@@ -18,7 +18,7 @@ Slice #085-B: a CustomValidationAdapter that materializes the validation intents
 
 ## Progress
 
-**Resolved 2026-06-11.** Shipped `validation-generation/adapters/nativeHtml.ts` — `nativeHtmlAdapter`
+**Resolved 2026-06-11.** Shipped `we:validation-generation/adapters/nativeHtml.ts` — `nativeHtmlAdapter`
 (`key: 'native-html'`, `language: 'html'`) mapping the neutral intents to native constraint attributes:
 `required`, `minlength`/`maxlength`, `pattern`, `min`/`max`/`step`, and `type`/`format` → input `type`
 (`email`/`url`/`number`/`date`/…). Honestly scoped: collection sizing (`min-items`/`max-items`), `enum`
@@ -26,9 +26,9 @@ Slice #085-B: a CustomValidationAdapter that materializes the validation intents
 **not** in `intents[]`, so `emit()` reports them via `unsupported[]` — never a silent drop. Attribute
 values are HTML-escaped.
 
-Also added `validation-generation/adapters/index.ts` — the shipped-adapters barrel +
+Also added `we:validation-generation/adapters/index.ts` — the shipped-adapters barrel +
 `createDefaultValidationAdapterRegistry()` (native-first: native-HTML is the default), which the Zod
 (#306) / Pydantic (#307) / JSON-Schema (#308) slices extend as they land. Re-exported from the
 `webvalidation` plug.
 
-**Gate:** `adapters/nativeHtml.test.ts` 5 green; `tsc` clean; `check:standards` 0 errors (run at batch close).
+**Gate:** `we:adapters/nativeHtml.test.ts` 5 green; `tsc` clean; `check:standards` 0 errors (run at batch close).

@@ -31,24 +31,24 @@ deterministic walk with no judgement:
 
 | Home | File | Field(s) | ~URLs |
 |---|---|---|---|
-| Corpus sources | `src/_data/benchmarkCorpus.json` (sources) | `docsUrl`, `repoUrl` | 51 |
-| Design reference library | `src/_data/references.json` | `links[].url` | 28 ext |
-| Web-standard refs | `src/_data/blocks.json` | `webStandards.*.reference` | 94 |
-| Capability-presence rows | `src/_data/benchmarkCapabilityPresence.json` | `rows[].url` | 1,266 |
-| Intent docs | `src/_data/intents.json` | URLs in HTML `description` | 70 |
+| Corpus sources | `we:src/_data/benchmarkCorpus.json` (sources) | `docsUrl`, `repoUrl` | 51 |
+| Design reference library | `we:src/_data/references.json` | `links[].url` | 28 ext |
+| Web-standard refs | `fui:src/_data/blocks.json` | `webStandards.*.reference` | 94 |
+| Capability-presence rows | `we:src/_data/benchmarkCapabilityPresence.json` | `rows[].url` | 1,266 |
+| Intent docs | `we:src/_data/intents.json` | URLs in HTML `description` | 70 |
 
 Emit **one deduped index** `{ url, home, sourceId, label }` (a generated `src/_data/*` data file +
 the extractor under `scripts/`). Dedup by canonical URL — the same `docsUrl` recurs across corpus,
-references.json, and capability-presence rows. Demoable state: a count-by-home render / the generated
+we:references.json, and capability-presence rows. Demoable state: a count-by-home render / the generated
 index file.
 
 ## Explicitly out of scope (keeps this fork-free at size 3)
 
-- **Freeform homes** — `reports/*.md` (~550 links, lossy markdown), `researchTopics.json` (prose, 0
+- **Freeform homes** — `reports/*.md` (~550 links, lossy markdown), `we:researchTopics.json` (prose, 0
   structured URLs). A markdown-citation parser is a separate, lossy concern — file as a follow-on slice
   if the dogfood proves it's needed.
 - **Internal-only refs** — `backlog/*.md` `crossRef` (263, all internal `/backlog`·`/research` paths)
-  and `adapters.json`/`protocols.json` (no URLs). Not external references; nothing to monitor.
+  and `we:adapters.json`/`we:protocols.json` (no URLs). Not external references; nothing to monitor.
 - **Liveness fetching** (#585's job) and **the retirement-shape convention** (#584's decision). This
   slice only *indexes* — it doesn't fetch or classify.
 
@@ -57,9 +57,9 @@ retirement shape is #584's decision, not this build's.
 
 ## Progress
 
-- **Resolved 2026-06-14.** Built `scripts/gen-reference-index.mjs` (`npm run gen:reference-index`) —
+- **Resolved 2026-06-14.** Built `we:scripts/gen-reference-index.mjs` (`npm run gen:reference-index`) —
   a deterministic walk of the five structured homes that emits the deduped index to
-  `src/_data/referenceIndex.json`. **1182 unique URLs from 1460 occurrences** (corpus 51, references
+  `we:src/_data/referenceIndex.json`. **1182 unique URLs from 1460 occurrences** (corpus 51, references
   28, blocks 93, capability 1266, intents 22 — matching the scope table). Dedup is by canonical URL
   (lowercase proto/host, strip trailing slash; query + fragment kept so deep-link demos stay
   distinct); each row is `{ url, home, sourceId, label, homes[], occurrences }` — `homes[]` records

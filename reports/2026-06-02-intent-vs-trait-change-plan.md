@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-02
 **Decision:** "Intent" was being used for two things — an ambient, design-owned *behavioral preference* propagated via DI, and a local, developer-owned *structural construction* of a component. Keep the name **intent** for the first; rename the second to **trait selection**. Structural dimensions never travel on the intent channel — so `customContexts:droplistIntent="single"` goes away.
-**Worked example:** [`2026-06-02-droplist-trait-language.md`](./2026-06-02-droplist-trait-language.md).
+**Worked example:** [`we:2026-06-02-droplist-trait-language.md`](./2026-06-02-droplist-trait-language.md).
 
 ---
 
@@ -19,7 +19,7 @@ Resolution per dimension: `explicit ⊕ ambient intent (behavioral only) ⊕ def
 
 ## What changes
 
-### A. Design doc — `2026-06-02-dropdown-trait-composition.md` (primary)
+### A. Design doc — `we:2026-06-02-dropdown-trait-composition.md` (primary)
 
 1. **Rename the `DropdownIntent` interface → `DroplistTraits`** (or `DroplistConfig`). Drop all "intent" framing for the per-instance bundle.
 2. **Strip `customContexts:droplistIntent="…"` wrappers** from the Step 1 / Step 3 markup. Move structural values onto the behavior attributes directly (`selection="model=single"`, `selection="model=multiple"`).
@@ -31,13 +31,13 @@ Resolution per dimension: `explicit ⊕ ambient intent (behavioral only) ⊕ def
 
 ### B. Standard artifacts (flag now, apply when promoting)
 
-8. **`src/_includes/block-descriptions/droplist.njk`** — note that variant differences are *trait selections*; only behavioral defaults come from an injected intent. (Also still carries the earlier "dropdown→droplist" wording fix.)
-9. **Glossary** (`src/_data/semantics.json` or includes) — add **Trait selection / composition** and **Ambient intent**; cross-link.
-10. **Intents catalog framing** (`src/_data/intents.json` design notes / `/intents/` intro) — state explicitly that an intent is an *ambient behavioral-preference vocabulary*, distinct from per-instance trait composition. No per-intent data shape change required.
+8. **`we:src/_includes/block-descriptions/droplist.njk`** — note that variant differences are *trait selections*; only behavioral defaults come from an injected intent. (Also still carries the earlier "dropdown→droplist" wording fix.)
+9. **Glossary** (`we:src/_data/semantics.json` or includes) — add **Trait selection / composition** and **Ambient intent**; cross-link.
+10. **Intents catalog framing** (`we:src/_data/intents.json` design notes / `/intents/` intro) — state explicitly that an intent is an *ambient behavioral-preference vocabulary*, distinct from per-instance trait composition. No per-intent data shape change required.
 
 ### C. Code — Plateau (light; mostly already aligned)
 
-11. **`FocusDelegation.ts` / `Selection.ts`** already take options *locally* — that is trait selection, so no API change. Add only: a documented fallback where *behavioral* options (e.g. `strategy`) resolve from an injected `droplistIntent` when not passed; structural options never do.
+11. **`fui:FocusDelegation.ts` / `fui:Selection.ts`** already take options *locally* — that is trait selection, so no API change. Add only: a documented fallback where *behavioral* options (e.g. `strategy`) resolve from an injected `droplistIntent` when not passed; structural options never do.
 12. **Add `controller` to `FocusDelegation`** (already its own flagged prototype — the autocomplete focus-host case). Independent of this rename but lands in the same pass.
 13. **(Future) `composeDroplist(host, traits[])` helper** + `withFilter` / `withClearable` / `withLiveStatus` / `withAnchoredSurface` factories — the TS trait surface shown in the worked example. Not built yet.
 

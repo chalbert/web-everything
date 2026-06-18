@@ -18,7 +18,7 @@ tags: [webdocs, adapters, polyglot, generation, conformance, wrapper, cem]
 The WE-owned substrate for the polyglot panel **#753** consume-mode, split out at the layer seam per
 **#811**. Generate thin per-framework **wrapper source** (React/Vue/Svelte/Angular) for a block from its
 **custom-elements-manifest** — the ratified CEM protocol WE already derives via
-[gen-cem.mjs](../scripts/gen-cem.mjs). The wrapper forwards props → attributes/properties and wires
+[we:gen-cem.mjs](../scripts/gen-cem.mjs). The wrapper forwards props → attributes/properties and wires
 events/slots, keyed off the CEM (Lit-Labs `gen-wrapper-*` / Stencil output-target precedent). This is a
 **forward-adapter / author-time devtools artifact** (the #463/#505/#507 polyglot family): WE owns the
 neutral contract + the generation, and **emits code only**. The live-test render and the panel UI are
@@ -39,7 +39,7 @@ Block Explorer panel that *displays + live-tests* it lives in FUI (#746 homes th
 ## Build
 
 - A generator module: `(cem, target) => wrapperSource`, consuming the CEM that
-  [gen-cem.mjs](../scripts/gen-cem.mjs) derives from `blocks.json`. Targets: **React + Vue** to start
+  [we:gen-cem.mjs](../scripts/gen-cem.mjs) derives from `fui:blocks.json`. Targets: **React + Vue** to start
   (the ≥2 the panel needs), structured so Svelte/Angular slot in.
 - Per target, emit a thin wrapper: render the custom-element tag; map reactive props → properties (vs
   attributes) per the CEM's property/attribute split; forward events (`addEventListener` ↔ `on*`); pass
@@ -68,18 +68,18 @@ badge grades.
 - **Status:** resolved
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
-  - [scripts/gen-wrapper/genWrapper.mjs](../scripts/gen-wrapper/genWrapper.mjs) — pure
+  - [we:scripts/gen-wrapper/genWrapper.mjs](../scripts/gen-wrapper/genWrapper.mjs) — pure
     `generateWrapper(declaration, target)` over a CEM `custom-element` declaration; React (`.tsx`) +
     Vue (`.ts`) emitters. Forwards attributes as element bindings, reactive properties onto the
     instance (React via ref/effect, Vue via `.prop`), events as `onPascal` handlers / Vue `emit`,
     children → default slot. Drops private/method/static members. "Flag, don't fake": throws on a
     non-custom-element (class) declaration. Also exports `customElementDeclarations(manifest)`,
     `TARGETS`, `wrapperExtension`.
-  - [scripts/gen-wrapper/cli.mjs](../scripts/gen-wrapper/cli.mjs) + `npm run gen:wrapper` (`--check`
-    mode) — materializes `generated/wrappers/<target>/<Name>.<ext>` from `custom-elements.json`.
-  - [scripts/gen-wrapper/__tests__/genWrapper.test.mjs](../scripts/gen-wrapper/__tests__/genWrapper.test.mjs)
+  - [we:scripts/gen-wrapper/cli.mjs](../scripts/gen-wrapper/cli.mjs) + `npm run gen:wrapper` (`--check`
+    mode) — materializes `generated/wrappers/<target>/<Name>.<ext>` from `we:custom-elements.json`.
+  - [we:scripts/gen-wrapper/__tests__/genWrapper.test.mjs](../scripts/gen-wrapper/__tests__/genWrapper.test.mjs)
     — 17 vitest cases (React + Vue forwarding, flag-don't-fake, manifest extraction, metadata).
-- **Next:** none — done. Real-block wrapping waits on **#822** (blocks.json carries no `tagName`/
+- **Next:** none — done. Real-block wrapping waits on **#822** (fui:blocks.json carries no `tagName`/
   attributes today, so the CEM emits 0 custom-element declarations; the generator is contracted against
   the CEM shape and unit-tested with a fixture). FUI panel that consumes this is **#753**.
 - **Notes:** all 17 tests green; `gen:wrapper` reports 0 emitted today (honest — see #822);

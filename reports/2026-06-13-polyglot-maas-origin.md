@@ -5,8 +5,8 @@
 (decision, size 8) · blockedBy [#461](../backlog/461-maas-distribution-origin-framework-agnostic-web-standard-fet.md)
 (the canonical JS Fetch-standard origin = reference implementation) · parent
 [#081](../backlog/081-module-as-a-service-provider.md) (MaaS)
-**Authority seed:** `protocols.json#maas-versioning` (MaaS Served-Artifact Versioning) · serve core
-`blocks/renderers/module-service/moduleService.ts`
+**Authority seed:** `we:protocols.json#maas-versioning` (MaaS Served-Artifact Versioning) · serve core
+`we:blocks/renderers/module-service/moduleService.ts`
 
 ## The question
 
@@ -43,7 +43,7 @@ and treats *each* language — including the original — as an output. Generati
 privilege JS and make it non-portable. For an HTTP-GET-returning-a-content-addressed-artifact contract,
 **OpenAPI is the most shape-matched describable form** (HTTP verbs, response headers — Cache-Control,
 ETag/SRI — media types), while a **protocol-agnostic IDL (Smithy-style) is the better *authority*** that
-can *project* to OpenAPI. WE already has the seed: `protocols.json#maas-versioning` is the serve
+can *project* to OpenAPI. WE already has the seed: `we:protocols.json#maas-versioning` is the serve
 contract elevated to a protocol — the natural SoT, with #461's JS origin as its **reference
 implementation**, not its definition.
 
@@ -51,7 +51,7 @@ implementation**, not its definition.
 
 The decisive finding: **a shared spec alone does NOT guarantee interoperability — only a conformance
 suite does.** Protobuf ships 2,000+ tests via a stdin/stdout runner; its scoreboard shows the *same
-spec* yielding 0 failures (protobuf-es) to 1,847 (protobuf.js)
+spec* yielding 0 failures (protobuf-es) to 1,847 (we:protobuf.js)
 ([bufbuild/protobuf-conformance](https://github.com/bufbuild/protobuf-conformance)). The Connect/gRPC
 conformance suite found **22+ bugs in Google's own v1.0 gRPC implementations**
 ([Buf deep dive](https://buf.build/blog/grpc-conformance-deep-dive)). The model: **golden vectors +
@@ -76,7 +76,7 @@ own inverse-direction framing maps cleanly onto Smithy's "model → generated ta
    once .NET/Java host SDKs leave preview — it is the one mechanism that dissolves fidelity drift, but
    its 2026 host toolchains are preview-grade, so it is the *future*, not the *first* build.
 2. **(b) Source of truth: a language-neutral contract is the authority — JS is just another target.**
-   Elevate `protocols.json#maas-versioning` (+ a small IR/spec of the serve path) to the authority;
+   Elevate `we:protocols.json#maas-versioning` (+ a small IR/spec of the serve path) to the authority;
    #461's JS Fetch handler is the **reference implementation**, not the SoT. Project to OpenAPI for the
    HTTP-GET shape.
 3. **(c) Conformance: a shared cross-language conformance suite (golden vectors = #088 content-hash

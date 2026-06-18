@@ -16,4 +16,4 @@ Current-state fix surfaced by the #607 audit (strictness finding #045, fake-inva
 
 ## Progress
 
-Resolved 2026-06-14. Amended the `<component>` block's `shadowAttribute` entry in `src/_data/blocks.json` (the DC-2 open point): `shadowrootmode="open|closed"` is now documented as a recognized alias that desugars identically to `shadow="open|closed"`, with `shadow=` kept as the default solely for the light-DOM `none` case DSD has no word for. Authoring vocabulary only — no lowering/behavior change. Closes the #607 audit strictness finding #045 (the withheld-native-spelling fake-invariant).
+Resolved 2026-06-14. Amended the `<component>` block's `shadowAttribute` entry in `fui:src/_data/blocks.json` (the DC-2 open point): `shadowrootmode="open|closed"` is now documented as a recognized alias that desugars identically to `shadow="open|closed"`, with `shadow=` kept as the default solely for the light-DOM `none` case DSD has no word for. Authoring vocabulary only — no lowering/behavior change. Closes the #607 audit strictness finding #045 (the withheld-native-spelling fake-invariant).

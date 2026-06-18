@@ -12,7 +12,7 @@ family stays the open call in [#007](/backlog/007-gap-11-clipboard-dnd-files-int
 Reordering the backlog itself surfaced the need. Rather than build a one-off drag-and-drop widget,
 we define the standard first — the same move as the droplist, where a "dropdown" turned out to be a
 composition of paradigms, not a single component (see
-[`reports/2026-06-02-droplist-trait-language.md`](2026-06-02-droplist-trait-language.md)).
+[`we:reports/2026-06-02-droplist-trait-language.md`](2026-06-02-droplist-trait-language.md)).
 
 ## The split: reorder vs. data transfer
 
@@ -131,8 +131,8 @@ Lifecycle events (high level): `reorder-start`, `reorder-move`, `reorder-commit`
 
 ## Next steps
 
-1. `reorder` intent in `intents.json` (done in this pass).
-2. `reorderable-list` block + traits in `blocks.json` + `block-descriptions/reorderable-list.njk` (done).
+1. `reorder` intent in `we:intents.json` (done in this pass).
+2. `reorderable-list` block + traits in `fui:blocks.json` + `we:block-descriptions/reorderable-list.njk` (done).
 3. Semantics terms (done).
 4. Cross-reference #007 and #084; mirror this report from #022 via `relatedReport` (done).
 5. Implementation + fixture-driven conformance demo (keyboard-reorder is the headline case) — a future

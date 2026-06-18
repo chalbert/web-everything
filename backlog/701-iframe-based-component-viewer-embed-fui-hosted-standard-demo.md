@@ -38,7 +38,7 @@ A reusable iframe-embed viewer so WE docs pages can surface a frontierui-hosted 
 ## Progress
 
 - **2026-06-15 — built + verified (the #038 first consumer unblocked it).** Added a reusable `fuiDemo`
-  Nunjucks shortcode in `.eleventy.js`: `{% fuiDemo "<file>", "<title>", <height> %}` renders a sandboxed
+  Nunjucks shortcode in `we:.eleventy.js`: `{% fuiDemo "<file>", "<title>", <height> %}` renders a sandboxed
   (`allow-scripts allow-same-origin`), lazy-loaded, responsive `<iframe>` pointing at a FUI demo, wrapped
   in **FUI-branded chrome** (a "Frontier UI demo" badge + an "Open in Frontier UI ↗" link). No cross-repo
   import — pure iframe (the #700 DC-7 ruling). Generalises to any FUI demo via the file-name argument.
@@ -49,5 +49,5 @@ A reusable iframe-embed viewer so WE docs pages can surface a frontierui-hosted 
 - **First consumer:** embedded the #038 component-converter on `/blocks/component/` (a new "Try it live"
   section). The demo itself stays in `frontierui/demos/` (#700).
 - **Verified:** `eleventy --dryrun` clean; rendered `/blocks/component/` on :8080 shows the branded embed
-  with the iframe `src` → `localhost:3001/demos/component-converter.html` + sandbox attrs. `check:standards`
-  0 errors. CSS in `src/css/style.css`.
+  with the iframe `src` → `localhost:we:3001/demos/component-converter.html` + sandbox attrs. `check:standards`
+  0 errors. CSS in `we:src/css/style.css`.

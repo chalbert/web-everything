@@ -28,7 +28,7 @@ historical record of the old term.
 **Prepared decision — ready to ratify.** A single binary terminology fork over existing repo state (no
 greenfield design, so no web survey — the prepared shape here is the concrete-refs check). The
 `**Native anchor**` triage label means "the native platform API the standard grounds in," and collides
-with the positioning **Anchor Intent** ([intents.json:anchor](src/_data/intents.json)) — a real readability
+with the positioning **Anchor Intent** ([we:intents.json:anchor](src/_data/intents.json)) — a real readability
 snag on any page mentioning both. One fork, **bold** default below.
 
 ## The axis — what a rename actually touches (concrete scope)
@@ -49,12 +49,12 @@ anchor**` in **12 backlog files**: the gap-* set —
 
 **Key concrete finding (sharpens the call):** a repo-wide `grep` of `scripts/` shows **no tooling parses
 the literal `Native anchor` string** — it is prose, not a field a generator/validator reads. The separate
-`nativeAnchor` **camelCase JSON key** in [benchmarkCoverage.json](src/_data/benchmarkCoverage.json) /
-[benchmarkCapabilities.json](src/_data/benchmarkCapabilities.json) is an *independent* coverage-matrix
+`nativeAnchor` **camelCase JSON key** in [we:benchmarkCoverage.json](src/_data/benchmarkCoverage.json) /
+[we:benchmarkCapabilities.json](src/_data/benchmarkCapabilities.json) is an *independent* coverage-matrix
 field that a label rename would **not** touch and need not change. So the rename is a **bounded
 prose-only edit of 12 markdown files** — cheaper and lower-risk than the original "13 files + any tooling"
 framing implied. The collection-operations research page already renamed it *locally* to "Native
-Grounding" / "native primitive" ([collection-operations.njk](src/_includes/research-descriptions/collection-operations.njk)),
+Grounding" / "native primitive" ([we:collection-operations.njk](src/_includes/research-descriptions/collection-operations.njk)),
 establishing the preferred replacement term.
 
 ## Recommended path at a glance

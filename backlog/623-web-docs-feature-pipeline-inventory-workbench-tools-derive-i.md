@@ -24,7 +24,7 @@ the intents/blocks needed for a WE-native docs surface are unknown. This epic su
 
 | # | Item | Output | Blocked by |
 |---|---|---|---|
-| 1 | **[#624](/backlog/624-inventory-the-component-workbench-docs-tool-landscape-storyb/)** — inventory the tool landscape | `reports/` landscape + `src/_data/workbenchTools.json` registry | — |
+| 1 | **[#624](/backlog/624-inventory-the-component-workbench-docs-tool-landscape-storyb/)** — inventory the tool landscape | `reports/` landscape + `we:src/_data/workbenchTools.json` registry | — |
 | 2 | **[#625](/backlog/625-inventory-the-full-feature-surface-across-workbench-tools/)** — inventory the full feature surface | cross-tabbed feature matrix (tool × capability) | #624 |
 | 3 | **[#626](/backlog/626-map-workbench-features-to-we-standards-which-intents-blocks-/)** — map features → WE standards (decision) | build plan: which intents/blocks/adapters to mint vs reuse | #625 |
 | 4 | **[#627](/backlog/627-assemble-the-web-docs-component-catalog-surface-from-the-der/)** — assemble the docs/catalog surface | the navigable Storybook-equivalent surface | #626 |
@@ -47,7 +47,7 @@ covered only Storybook + Mintlify; #624's landscape says **which other adapters*
 
 ## Acceptance (epic done when)
 
-- [ ] #624 — workbench landscape published as a registry + report.
-- [ ] #625 — feature matrix covers every tool in the registry.
-- [ ] #626 — every feature classified mint-new vs reuse-existing, with the build plan filed.
-- [ ] #627 — a navigable catalog surface exists, starting with `/blocks/`, converged with #604/#398.
+- [x] #624 — workbench landscape published as a registry + report.
+- [x] #625 — feature matrix covers every tool in the registry.
+- [x] #626 — every feature classified mint-new vs reuse-existing, with the build plan filed.
+- [x] #627 — a navigable catalog surface exists, starting with `/blocks/`, converged with #604/#398.

@@ -3,6 +3,7 @@ type: decision
 workItem: story
 size: 3
 parent: "089"
+blockedBy: ["554"]
 status: parked
 dateOpened: "2026-06-12"
 dateStarted: "2026-06-14"
@@ -50,7 +51,7 @@ differentiator per [#091:206](/backlog/091-web-docs-as-a-service-plateau/#L206) 
 conformance*, so the value-action to meter is the **conformance-verified regeneration** — and the meter
 already exists: [#089](/backlog/089-monetization-product-ideas/) idea-1's continuous-verification re-runs
 the suite over time ([089:57-101](/backlog/089-monetization-product-ideas/#L57)), and the build-time
-ingestion it would meter is `cases.js` ([src/_data/cases.js](../src/_data/cases.js)). The **threshold** is
+ingestion it would meter is `we:cases.js` ([we:src/_data/cases.js](../src/_data/cases.js)). The **threshold** is
 downstream of the unit and genuinely a number-to-tune, pinned only by the self-host floor invariant
 ([#091:48-49](/backlog/091-web-docs-as-a-service-plateau/#L48), "cancel and self-host always holds"). The
 **billing surface** is *not* open: [#183](/backlog/183-payments-merchant-of-record/) (resolved) ruled MoR
@@ -87,7 +88,7 @@ mutually exclusive as the *primary* primitive. Web Docs' stated edge is that the
 that edge. Chromatic is the precedent: it meters the **snapshot** — the unit of work that produces its
 value — with a free allotment, metered overage, and a graceful pause at the ceiling. The Web Docs analog
 is the **conformance-verified regeneration** (re-verify the suite + re-publish the site), whose machinery
-already exists as #089 idea-1's continuous verification and `cases.js` ingestion.
+already exists as #089 idea-1's continuous verification and `we:cases.js` ingestion.
 
 - **(A — recommended) Meter the conformance-verified regeneration.** Free tier = one site + N verified
   builds/month with a **graceful pause** (last good site stays served; self-host stays unlimited and

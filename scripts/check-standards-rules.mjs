@@ -1168,13 +1168,19 @@ export function validatePlugDualMode(domains) {
 // carries the locus — `[we:path](path)`), `@scope/pkg` npm specifiers, URLs, and the WE-relative
 // frontmatter fields (`relatedReport`/`graduatedTo`/`crossRef`). WARN-level until the #885 corpus
 // migration, then it flips to ERROR (flip REPO_LOCUS_PREFIX_ENFORCED). Pure: docs read by the caller.
-export const REPO_LOCUS_PREFIX_ENFORCED = false;
+export const REPO_LOCUS_PREFIX_ENFORCED = true;
 
 // Longer/prefix-conflicting extensions first + a no-trailing-letter guard so `blocks.json` matches
 // `json` (not `js` + leftover `on`).
 const PATHLIKE_RE = /[\w./-]+\.(?:tsx|ts|json|mjs|cjs|js|md|njk|css|html|yaml|yml)(?![a-z])(?::\d+(?:-\d+)?)?/g;
 const LOCUS_MARKER_RE = /(?:we|fui|plateau|webeverything|frontierui|plateau-app):$/;
 const EXEMPT_FIELD_RE = /^\s*(?:relatedReport|graduatedTo|crossRef)\s*:/;
+// #885 false-positive carve-outs (these are NOT repo code-path references): JS-ecosystem product
+// names (`Node.js`/`Next.js`/`Three.js` — a single Capitalized word + `.js`) and bare type-suffix
+// fragments (`.d.ts`/`.spec.ts` — an extension chain with no name segment). Glob masks (`*.test.ts`)
+// are caught separately by a `*` immediately before the token.
+const PRODUCT_JS_RE = /^[A-Z][a-z]+\.js$/;
+const TYPE_FRAGMENT_RE = /^\.(?:d|test|spec|stories|sw\.spec)\.[a-z]+$/;
 
 /**
  * Scan docs (`[{ file, content }]`) for code-path tokens lacking a `<repo>:` locus marker. Returns
@@ -1195,6 +1201,9 @@ export function scanRepoLocusPrefixes(docs) {
         if (/\]\($/.test(before)) continue;                // markdown link target — text carries the locus
         if (/@$/.test(before)) continue;                   // @scope/pkg npm specifier (scope sits in the token)
         if (/https?:\/*$/.test(before)) continue;          // URL (the `//…` is consumed into the token)
+        if (/\*$/.test(before)) continue;                  // glob mask (`*.test.ts`) — a file-type pattern, not a path
+        if (PRODUCT_JS_RE.test(m[0])) continue;            // JS-ecosystem product name (`Node.js`), not a repo file
+        if (TYPE_FRAGMENT_RE.test(m[0])) continue;         // bare type-suffix fragment (`.d.ts`), not a path
         unmarked.push(m[0]);
       }
     }

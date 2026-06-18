@@ -17,7 +17,7 @@ Slice #085-C: a CustomValidationAdapter that emits a Zod schema from the validat
 
 ## Progress
 
-**Resolved 2026-06-11.** Shipped `validation-generation/adapters/zod.ts` — `zodAdapter`
+**Resolved 2026-06-11.** Shipped `we:validation-generation/adapters/zod.ts` — `zodAdapter`
 (`key: 'zod'`, `language: 'typescript'`) emitting a `z.…` schema expression. Zod carries the **whole**
 vocabulary, so all 13 intents are declared: string base with `.min`/`.max`/`.regex`/`.email`/`.url`/
 `.uuid`/`.datetime`; numeric base (`type`) with `.min`/`.max`/`.multipleOf`; `enum` → `z.enum([…])`;
@@ -26,4 +26,4 @@ message)`; and `.optional()` for any field without a `required` intent. Emits so
 declaration), not a live schema — generation is the job, running it is the consumer's. Added to the
 shipped-adapters barrel + plug re-export.
 
-**Gate:** `adapters/zod.test.ts` 6 green; `tsc` clean; `check:standards` 0 errors (run at batch close).
+**Gate:** `we:adapters/zod.test.ts` 6 green; `tsc` clean; `check:standards` 0 errors (run at batch close).

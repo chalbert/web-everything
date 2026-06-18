@@ -18,7 +18,7 @@ Ratified in #009 Fork B: a system-notification intent for the OS-surface render 
 ## Resolved 2026-06-13 (batch-2026-06-13)
 
 Authored the `system-notification` intent as a new entry in
-[src/_data/intents.json](../src/_data/intents.json) (the /intents/ catalog auto-renders it — verified
+[we:src/_data/intents.json](../src/_data/intents.json) (the /intents/ catalog auto-renders it — verified
 live at `/intents/system-notification/`). Mirrors the sibling `feedback` / `background-task` /
 `permission` entries:
 

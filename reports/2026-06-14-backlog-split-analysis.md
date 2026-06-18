@@ -10,8 +10,8 @@ Focused run: `/slice 507`.
 **oversized story (kind a)**.
 
 Both blockers are **resolved**: #505 shipped the language-neutral serve-path IR + OpenAPI projection +
-JS reference impl ([servePathIR.ts](../blocks/renderers/module-service/servePathIR.ts),
-[servePathOpenAPI.ts](../blocks/renderers/module-service/servePathOpenAPI.ts)); #506 shipped the
+JS reference impl ([we:servePathIR.ts](../blocks/renderers/module-service/servePathIR.ts),
+[we:servePathOpenAPI.ts](../blocks/renderers/module-service/servePathOpenAPI.ts)); #506 shipped the
 cross-language conformance suite — golden vectors, reference target, runner
 ([conformance/](../blocks/renderers/module-service/conformance/)). So 507's inputs exist on disk and it
 is unblocked.
@@ -33,7 +33,7 @@ emit engine, **(b)** a first foreign-language target backend, **(c)** wiring tha
 
 | Slice | workItem · size | Scope | Home | DAG |
 |---|---|---|---|---|
-| **1 · Generation-adapter core — deterministic IR→emit engine + core/shell split** | story · 3 | The engine that reads [servePathIR.ts](../blocks/renderers/module-service/servePathIR.ts) and emits an origin deterministically (same source → byte-identical), codifying the **deterministic-core / HTTP-shell** architectural split and a **language-backend interface**. Proof backend = **regenerate the existing JS reference origin** byte-for-byte against a checked-in golden — validating the interface against an already-conformance-covered target before any foreign language. | new `blocks/renderers/module-service/generation/` | depends on 505 ✓, 506 ✓ |
+| **1 · Generation-adapter core — deterministic IR→emit engine + core/shell split** | story · 3 | The engine that reads [we:servePathIR.ts](../blocks/renderers/module-service/servePathIR.ts) and emits an origin deterministically (same source → byte-identical), codifying the **deterministic-core / HTTP-shell** architectural split and a **language-backend interface**. Proof backend = **regenerate the existing JS reference origin** byte-for-byte against a checked-in golden — validating the interface against an already-conformance-covered target before any foreign language. | new `blocks/renderers/module-service/generation/` | depends on 505 ✓, 506 ✓ |
 | **2 · First foreign native target — .NET backend** | story · 3 | A language-backend implementing the slice-1 interface, emitting an **idiomatic native .NET MaaS origin** (own output tree) from the neutral contract. Runtime = AI-free pure-native; Wasm out of scope. | `generation/targets/dotnet/` | blocked-by **1** |
 | **3 · Conformance-gate the generated target through #506** | story · 2 | Wire the generated .NET origin as a target the [#506 runner](../blocks/renderers/module-service/conformance/runner.ts) drives against the golden vectors; enforce byte-identical / identity-stable fidelity as the release gate for the generated origin. | `conformance/` + `generation/` | blocked-by **2** |
 | **4 · Adapter dev-time regression corpus (no AI automation)** | story · 3 | The regression corpus + snapshot gate the deterministic adapter is improved against — the substrate any improver (human now, AI later) edits rules/templates against and re-runs. Explicitly **excludes** the full-AI improvement cycle (out of scope per #463). | `generation/corpus/` | blocked-by **1** (parallel to 2/3) |
@@ -170,11 +170,11 @@ every slice still verified against the real tree.
 Unlike #563, the scaffolding surface **exists** — adding a new standard touches established registries
 and templates:
 
-- **Project node** — `src/_data/projects.json` (shape per `webregistries` [projects.json:3-10](../src/_data/projects.json#L3-L10)) + icon `src/assets/icons/webcharts.svg` + partial `src/_includes/project-webcharts.njk` (pattern: `project-webvalidation.njk`). `check-standards.mjs` needs only unique `id` + valid `status` for a project.
-- **Protocol** — `src/_data/protocols.json` (shape per `anchor-positioning` [protocols.json:21-27](../src/_data/protocols.json#L21-L27)); required `id/name/summary/status/ownedByProject/anchor`. **Hard coupling:** `anchor` must exist as `<section id>` in the owning partial or `check:standards` errors, and `ownedByProject` must resolve — so the protocol row + its body land together, after the project exists.
-- **Schema** — no dedicated dir; the Vega-Lite L1 profile lives as TS/pseudocode in `project-webcharts.njk` (precedent: the Mock Contract schema in `project-webcases.njk`) + glossary terms in `semantics.json`.
+- **Project node** — `we:src/_data/projects.json` (shape per `webregistries` [we:projects.json:3-10](../src/_data/projects.json#L3-L10)) + icon `src/assets/icons/webcharts.svg` + partial `we:src/_includes/project-webcharts.njk` (pattern: `we:project-webvalidation.njk`). `we:check-standards.mjs` needs only unique `id` + valid `status` for a project.
+- **Protocol** — `we:src/_data/protocols.json` (shape per `anchor-positioning` [we:protocols.json:21-27](../src/_data/protocols.json#L21-L27)); required `id/name/summary/status/ownedByProject/anchor`. **Hard coupling:** `anchor` must exist as `<section id>` in the owning partial or `check:standards` errors, and `ownedByProject` must resolve — so the protocol row + its body land together, after the project exists.
+- **Schema** — no dedicated dir; the Vega-Lite L1 profile lives as TS/pseudocode in `we:project-webcharts.njk` (precedent: the Mock Contract schema in `we:project-webcases.njk`) + glossary terms in `we:semantics.json`.
 - **Conformance suite** — self-contained cases under `src/cases/webcharts/*.html` (precedent: `src/cases/resource-loader/`, `src/cases/for-each/`); free-form, no required-field validation.
-- **Deferred per #105** — renderer adapters (Vega/Plotly/ECharts → `adapters.json` "lib") and the thin chart-description intent (`intents.json`). Not sliced; filed as follow-ons when L1 lands.
+- **Deferred per #105** — renderer adapters (Vega/Plotly/ECharts → `we:adapters.json` "lib") and the thin chart-description intent (`we:intents.json`). Not sliced; filed as follow-ons when L1 lands.
 
 The one sub-fork #105 noted ("how thin the L1 core is") **dissolves** rather than blocks: the ratified
 contract is a *tiered* Vega-Lite subset/superset, so L1 = the minimal core (`data/mark/encoding` +
@@ -187,9 +187,9 @@ No buried decision; no `type:decision` card warranted.
 
 | Slice | workItem · size | Scope | Named surface | blockedBy |
 |---|---|---|---|---|
-| **a · project node + skeleton page** | task · 2 | webcharts entry (category `standard`, status `concept`) + icon + umbrella partial (mission/scope, no protocol yet) | `projects.json`, `src/assets/icons/webcharts.svg`, `src/_includes/project-webcharts.njk` | — |
-| **b · Vega-Lite L1 profile schema** | task · 3 | L1 profile: semantic plane (`data→encoding`) kept separate from presentation/theme plane (webtheme tokens); thin L1 core, L2+ tiers additive; color/size mapping semantic, resolved values theme | `project-webcharts.njk` (schema section), `semantics.json` | a |
-| **c · CustomChartRenderer protocol** | task · 3 | `protocols.json` entry + anchor `<section>` in the partial: renderer-swap registry contract, native-first SVG default, tiered-conformance framing | `protocols.json`, `project-webcharts.njk` (`#protocol-custom-chart-renderer`) | a |
+| **a · project node + skeleton page** | task · 2 | webcharts entry (category `standard`, status `concept`) + icon + umbrella partial (mission/scope, no protocol yet) | `we:projects.json`, `src/assets/icons/webcharts.svg`, `we:src/_includes/project-webcharts.njk` | — |
+| **b · Vega-Lite L1 profile schema** | task · 3 | L1 profile: semantic plane (`data→encoding`) kept separate from presentation/theme plane (webtheme tokens); thin L1 core, L2+ tiers additive; color/size mapping semantic, resolved values theme | `we:project-webcharts.njk` (schema section), `we:semantics.json` | a |
+| **c · CustomChartRenderer protocol** | task · 3 | `we:protocols.json` entry + anchor `<section>` in the partial: renderer-swap registry contract, native-first SVG default, tiered-conformance framing | `we:protocols.json`, `we:project-webcharts.njk` (`#protocol-custom-chart-renderer`) | a |
 | **d · conformance suite + a11y axis** | task · 3 | `src/cases/webcharts/*.html` scoring two independent axes (semantic fidelity, theme application) + first-class a11y (description channel, derived data-`<table>`, WAI-ARIA Graphics roles; required at L1, graceful degradation) | `src/cases/webcharts/` | b, c |
 
 **Slice DAG:**
@@ -202,7 +202,7 @@ a ──> b ──┐
 `b ∥ c` are independent (both depend only on `a`) → satisfies ≥2-independent; the chain also delivers
 incrementally — `a` ships a live tile + page, `b` adds the spec, `c` surfaces the protocol on
 `/protocols/`, `d` adds scoreable conformance. Every slice is batchable (`task`, ≤3, named files, no
-fork). Note: `a/b/c` all edit `project-webcharts.njk`, so sequence them through that shared file
+fork). Note: `a/b/c` all edit `we:project-webcharts.njk`, so sequence them through that shared file
 (logical independence, not concurrent-edit independence).
 
 ## Could not split
@@ -241,15 +241,15 @@ home:
 
 | Home | File | URLs | Structured? | `retired` shape? |
 |---|---|---|---|---|
-| Corpus sources | `src/_data/benchmarkCorpus.json` (sources ~L48-73) | 51 (`docsUrl`+`repoUrl`, 26 sources) | ✅ JSON | ✅ #546 seed (`retired`/`retiredDate`/`retiredReason`) |
-| Design reference library | `src/_data/references.json` (`links[].url`) | 28 ext | ✅ JSON | ❌ |
-| Web-standard refs | `src/_data/blocks.json` (`webStandards.*.reference`) | 94 ext | ✅ JSON (nested) | ❌ |
-| Capability-presence rows | `src/_data/benchmarkCapabilityPresence.json` (`rows[].url`) | 1,266 ext | ✅ JSON | ❌ |
-| Intent docs | `src/_data/intents.json` (URLs in HTML `description`) | 70 | ⚠️ embedded HTML | ❌ |
+| Corpus sources | `we:src/_data/benchmarkCorpus.json` (sources ~L48-73) | 51 (`docsUrl`+`repoUrl`, 26 sources) | ✅ JSON | ✅ #546 seed (`retired`/`retiredDate`/`retiredReason`) |
+| Design reference library | `we:src/_data/references.json` (`links[].url`) | 28 ext | ✅ JSON | ❌ |
+| Web-standard refs | `fui:src/_data/blocks.json` (`webStandards.*.reference`) | 94 ext | ✅ JSON (nested) | ❌ |
+| Capability-presence rows | `we:src/_data/benchmarkCapabilityPresence.json` (`rows[].url`) | 1,266 ext | ✅ JSON | ❌ |
+| Intent docs | `we:src/_data/intents.json` (URLs in HTML `description`) | 70 | ⚠️ embedded HTML | ❌ |
 | Report citations | `reports/*.md` | ~375 md links / ~550 bare | ❌ freeform md | ❌ |
-| Research topics | `src/_data/researchTopics.json` | 0 structured (prose) | ❌ | ❌ |
+| Research topics | `we:src/_data/researchTopics.json` | 0 structured (prose) | ❌ | ❌ |
 | Backlog crossRefs | `backlog/*.md` frontmatter | 263 — **all internal** | ✅ but internal → out of scope | n/a |
-| adapters / protocols | `src/_data/adapters.json`, `protocols.json` | 0 | — | — |
+| adapters / protocols | `we:src/_data/adapters.json`, `we:protocols.json` | 0 | — | — |
 
 **No URL-liveness validator exists** (`scripts/` has no fetch/http/link/404/liveness utility). The
 reference registry **does not exist** — built from scratch.
@@ -264,7 +264,7 @@ an internal "prerequisite, detailed in the body."
 
 | Epic candidate | Proposed new child | workItem · size | Files (file-citable) | Batchable? |
 |---|---|---|---|---|
-| **7** reference-registry substrate | **Reference-registry substrate — index the structured reference homes** | story · **3** | `benchmarkCorpus.json`, `references.json`, `blocks.json`, `benchmarkCapabilityPresence.json`, `intents.json`; new extractor `scripts/*` + a generated index data file | ✅ |
+| **7** reference-registry substrate | **Reference-registry substrate — index the structured reference homes** | story · **3** | `we:benchmarkCorpus.json`, `we:references.json`, `fui:blocks.json`, `we:benchmarkCapabilityPresence.json`, `we:intents.json`; new extractor `scripts/*` + a generated index data file | ✅ |
 
 Scope: a deterministic extractor that walks the five **structured** homes and emits one deduped index
 (`{ url, home, sourceId, label }`) — the substrate #585's sweep and #584's convention both stand on.
@@ -332,13 +332,13 @@ established registry with an existing entry to mirror. Confirmed none of the new
 
 | Layer | Home file | Mirror shape | New ids |
 |---|---|---|---|
-| Capabilities | [capabilities.json](../src/_data/capabilities.json) (`popover` L51) + [capabilityMatrix.json](../src/_data/capabilityMatrix.json) (`impls[].tiers`) | `{id,label,webFeaturesKey,baseline,polyfill,summary}` + tier map | `contenteditable`, `editcontext`, `sanitizer-api`, `highlight-api` |
-| Project | [projects.json](../src/_data/projects.json) (`webvalidation` L168) | `{id,name,description,status,category,icon,isSvg,openQuestions?}` | `webediting` |
-| Protocol | [protocols.json](../src/_data/protocols.json) (`validation` L3) | `{id,name,summary,status,ownedByProject,realizesIntent?,anchor}` | rich-text-editing |
-| Engine plug | [plugs.json:293-307](../src/_data/plugs.json#L293) (`CustomPositioningRegistry`/`CustomPositioner`) | registry+contract pair `{id,name,status,type,summary,projects}` | `CustomEditorEngine` + `CustomEditorEngineRegistry` |
-| Intents | [intents.json](../src/_data/intents.json) (`type-ahead` L1491) | `{id,name,status,summary,dimensions,description,requiresCapabilities?,events?}` | `text-formatting`, `rich-text` |
-| Block | [blocks.json](../src/_data/blocks.json) (`droplist` L17) + `src/_includes/block-descriptions/<id>.njk` | `{id,name,status,type,summary,implementsIntent?,composesIntents?,designDecisions?}` | editor block |
-| Serializer/sanitizer plugs | [plugs.json](../src/_data/plugs.json) (same registry+contract pair) | `projects:["webediting"]` | `CustomSerializerRegistry`, `CustomSanitizerRegistry` (+contracts) |
+| Capabilities | [we:capabilities.json](../src/_data/capabilities.json) (`popover` L51) + [we:capabilityMatrix.json](../src/_data/capabilityMatrix.json) (`impls[].tiers`) | `{id,label,webFeaturesKey,baseline,polyfill,summary}` + tier map | `contenteditable`, `editcontext`, `sanitizer-api`, `highlight-api` |
+| Project | [we:projects.json](../src/_data/projects.json) (`webvalidation` L168) | `{id,name,description,status,category,icon,isSvg,openQuestions?}` | `webediting` |
+| Protocol | [we:protocols.json](../src/_data/protocols.json) (`validation` L3) | `{id,name,summary,status,ownedByProject,realizesIntent?,anchor}` | rich-text-editing |
+| Engine plug | [we:plugs.json:293-307](../src/_data/plugs.json#L293) (`CustomPositioningRegistry`/`CustomPositioner`) | registry+contract pair `{id,name,status,type,summary,projects}` | `CustomEditorEngine` + `CustomEditorEngineRegistry` |
+| Intents | [we:intents.json](../src/_data/intents.json) (`type-ahead` L1491) | `{id,name,status,summary,dimensions,description,requiresCapabilities?,events?}` | `text-formatting`, `rich-text` |
+| Block | [fui:blocks.json](../src/_data/blocks.json) (`droplist` L17) + `src/_includes/block-descriptions/<id>.njk` | `{id,name,status,type,summary,implementsIntent?,composesIntents?,designDecisions?}` | editor block |
+| Serializer/sanitizer plugs | [we:plugs.json](../src/_data/plugs.json) (same registry+contract pair) | `projects:["webediting"]` | `CustomSerializerRegistry`, `CustomSanitizerRegistry` (+contracts) |
 | Config cards | plateau-app Technical Configurator (seed + provider entry per domain) | — | engine / serialization / substrate-negotiation |
 
 #590's Context table fixes these homes verbatim; prior multi-layer graduations (#136→#149 positioning:
@@ -355,11 +355,11 @@ each a registry splice (+description) that renders on its catalog page and keeps
 
 | Slice | workItem · size | Scope | Named surface | blockedBy |
 |---|---|---|---|---|
-| **S1 · editing capabilities** | story · 2 | `contenteditable`/`editcontext`/`sanitizer-api`/`highlight-api` ids + capabilityMatrix tiers | `capabilities.json`, `capabilityMatrix.json` | — |
-| **S2 · `webediting` project + engine Protocol** | story · 3 | project node + rich-text-editing protocol + `CustomEditorEngine`+`CustomEditorEngineRegistry` plugs (native-first contenteditable+InputEvent default, structured-node-tree pivot, thin ProseMirror/Lexical/Slate/Quill adapters) | `projects.json`, `protocols.json`, `plugs.json` | S1 |
-| **S3 · `text-formatting` + `rich-text` intents** | story · 3 | controls axis (composes droplist/popover/button) + editable/multiline/read-only surface UX (`requiresCapabilities` the surface caps) | `intents.json` | S1 |
-| **S4 · serializer + sanitizer plugs** | story · 3 | `CustomSerializerRegistry` (default-less core, HTML flavor default) + `CustomSanitizerRegistry` (native `setHTML` + DOMPurify, `webvalidation`-owned), composed on `insertFromPaste` | `plugs.json` | S1 |
-| **S5 · editor Block** | story · 3 | blocks.json entry + block-description; resolves the engine registry, implements `rich-text`, composes `text-formatting` | `blocks.json`, `block-descriptions/` | S2, S3 |
+| **S1 · editing capabilities** | story · 2 | `contenteditable`/`editcontext`/`sanitizer-api`/`highlight-api` ids + capabilityMatrix tiers | `we:capabilities.json`, `we:capabilityMatrix.json` | — |
+| **S2 · `webediting` project + engine Protocol** | story · 3 | project node + rich-text-editing protocol + `CustomEditorEngine`+`CustomEditorEngineRegistry` plugs (native-first contenteditable+InputEvent default, structured-node-tree pivot, thin ProseMirror/Lexical/Slate/Quill adapters) | `we:projects.json`, `we:protocols.json`, `we:plugs.json` | S1 |
+| **S3 · `text-formatting` + `rich-text` intents** | story · 3 | controls axis (composes droplist/popover/button) + editable/multiline/read-only surface UX (`requiresCapabilities` the surface caps) | `we:intents.json` | S1 |
+| **S4 · serializer + sanitizer plugs** | story · 3 | `CustomSerializerRegistry` (default-less core, HTML flavor default) + `CustomSanitizerRegistry` (native `setHTML` + DOMPurify, `webvalidation`-owned), composed on `insertFromPaste` | `we:plugs.json` | S1 |
+| **S5 · editor Block** | story · 3 | fui:blocks.json entry + block-description; resolves the engine registry, implements `rich-text`, composes `text-formatting` | `fui:blocks.json`, `block-descriptions/` | S2, S3 |
 | **S6 · Technical Configurator cards** | story · 2 | engine choice + serialization format + substrate-negotiation policy cards (plateau-app, seed + provider per domain) | plateau-app (cross-repo) | S2, S4 |
 
 **Slice DAG:**
@@ -429,7 +429,7 @@ two are genuine forks, the third is volume that is itself downstream of those fo
 The assembler is an explicitly **deferred build**: #609 ratified *"the tool is a deferred build; the
 recipe it emits is the standard."* Confirmed **nothing on disk to investigate** — no composition
 assembler, recipe-emit, or build-your-own-component tool exists under `src/`/`scripts/` (the only
-"workbench" surface is the *#623–626 catalog* data — `workbenchTools.json`, `workbenchFeatures.json` —
+"workbench" surface is the *#623–626 catalog* data — `we:workbenchTools.json`, `we:workbenchFeatures.json` —
 which is a different pipeline). No subsystem to grep, no registry the tool owns, no fixture a slice
 could cite at `file:line`. Any slice drawn now would be "straight from the body."
 
@@ -445,8 +445,8 @@ That absence is **structural, not incidental** — the tool's shape is determine
 2. **Relationship to the #623–626 workbench landscape (genuine fork — home + shared registries).** The
    epic itself: *"reconcile homes and shared registries so they don't drift."* The assembler is an
    **authoring** surface; #623–626 is the **catalog/story** pipeline. Open: does the assembler live
-   inside the Web Docs surface (#627) or stand alone? Does it consume `workbenchFeatures.json` /
-   `workbenchTools.json`, or own its own preset registry? This decides *where the tool lives and what it
+   inside the Web Docs surface (#627) or stand alone? Does it consume `we:workbenchFeatures.json` /
+   `we:workbenchTools.json`, or own its own preset registry? This decides *where the tool lives and what it
    shares* — the precondition for naming any slice's home (rubric (2)).
 3. **Preset taxonomy** (reveal-nav #1, then command palette / filter bar / hovercard / toolbar /
    date-range). This is **volume + prioritization, not a fork** — each candidate is a legitimate preset

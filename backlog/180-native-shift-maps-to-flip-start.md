@@ -40,7 +40,7 @@ inline/block extent would spill off one edge slides back on-screen along that ax
 ## Resolution (2026-06-09)
 
 Native `shift` no longer emits `flip-start`. The native strategy
-(`blocks/droplist/positioning/native.ts` in Frontier UI) now derives a `shift`
+(`fui:blocks/droplist/positioning/native.ts` in Frontier UI) now derives a `shift`
 fallback set of **same-side `position-area` variants** that slide the surface
 along the axis *perpendicular* to its placement side, and lets the browser pick
 the first that fits — a discrete slide, not a diagonal flip:
@@ -58,9 +58,9 @@ along the axis." Centered variant is listed first (most balanced, fits most ofte
 then the opposite extreme.
 
 Validated:
-- Unit — `blocks/droplist/positioning/__tests__/strategies.test.ts`: asserts
+- Unit — `fui:blocks/droplist/positioning/__tests__/strategies.test.ts`: asserts
   `shift` emits axis-slide `position-area`s and **never** `flip-start`.
-- Real browser — `blocks/droplist/positioning/__tests__/e2e/shift.spec.ts` +
-  `demos/positioning-shift.html`: a `bottom-start` surface parked against the right
+- Real browser — `fui:blocks/droplist/positioning/__tests__/e2e/shift.spec.ts` +
+  `fui:demos/positioning-shift.html`: a `bottom-start` surface parked against the right
   viewport edge slides back on-screen along the inline axis and **stays below** its
   trigger (no diagonal flip) under **both** the native and JS strategies.

@@ -26,7 +26,7 @@ Filed the missing foundational build as **#807** (the FUI embed-SDK skeleton + r
 #807 shipped the SDK substrate (with `in-document` reserved as an enum slot in the
 `RenderMode` contract); built mode C on top:
 
-- **`frontierui/embed/in-document.ts`** — the mode-C mount path. For a non-iframe mount point
+- **`fui:frontierui/embed/in-document.ts`** — the mode-C mount path. For a non-iframe mount point
   (`[data-embed-mode="in-document"]` with `data-embed-src` = the demo module URL): a **trust
   gate** (origin allowlist, default `[location.origin]`, widenable via `setTrustedOrigins` —
   belt-and-braces on top of the per-demo opt-in), then `attachShadow({mode:'open'})`,
@@ -34,17 +34,17 @@ Filed the missing foundational build as **#807** (the FUI embed-SDK skeleton + r
   (a shadow-root notice) when the origin is untrusted, the module lacks the export, or the import
   fails — never breaks the host page. Runtime FUI bundle only; **no #700 source import / no
   `frontierui` alias** (impl→FUI intact, per #765's sharpened crux).
-- **`contract.ts`** — added the `EmbedMountModule { mountInDocument(root: ShadowRoot) }` contract
+- **`we:contract.ts`** — added the `EmbedMountModule { mountInDocument(root: ShadowRoot) }` contract
   + `hasMountInDocument` guard; `in-document` moved from reserved → `IMPLEMENTED_MODES`.
-- **`embed-host.ts`** — its scan now also mounts mode-C points (idempotent, re-runs on DOM
+- **`fui:embed-host.ts`** — its scan now also mounts mode-C points (idempotent, re-runs on DOM
   mutation alongside the iframe wiring).
-- **WE `fuiDemo` shortcode** (`.eleventy.js`) — `mode: "C"`/`"in-document"` emits a **mount-point
+- **WE `fuiDemo` shortcode** (`we:.eleventy.js`) — `mode: "C"`/`"in-document"` emits a **mount-point
   `<div>`** (not an iframe) carrying `data-embed-mode="in-document"` + `data-embed-src`, and loads
   the host SDK. The iframe stays the default for every other mode (#765's "opt-in + iframe-default"
   guard rail). WE passes only the token; the mount impl lives entirely in FUI.
 
 **Verified:** FUI `check:standards` 0 err; WE `check:standards` 0 err; WE 11ty `--dryrun` clean;
-`tsc --noEmit` (strict, bundler res, dom lib) clean on `embed/`; :3001 serves `in-document.ts`.
+`tsc --noEmit` (strict, bundler res, dom lib) clean on `embed/`; :3001 serves `fui:in-document.ts`.
 
 **Follow-up:** a concrete mode-C demo exporting `mountInDocument` + a Playwright proof that a
 `<dialog>` escapes natively to the host top layer — folded into the #808 end-to-end proof item

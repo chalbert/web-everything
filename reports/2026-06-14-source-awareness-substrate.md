@@ -36,7 +36,7 @@ The two genuine forks left for ratification:
 
 | File | Action |
 |---|---|
-| `src/_data/researchTopics.json` | Added `source-awareness-substrate` registry entry |
-| `src/_includes/research-descriptions/source-awareness-substrate.njk` | New research write-up |
+| `we:src/_data/researchTopics.json` | Added `source-awareness-substrate` registry entry |
+| `we:src/_includes/research-descriptions/source-awareness-substrate.njk` | New research write-up |
 | `backlog/562-…md` | Rewritten to prepared-fork shape; `preparedDate` set |
-| `reports/2026-06-14-source-awareness-substrate.md` | This report |
+| `we:reports/2026-06-14-source-awareness-substrate.md` | This report |

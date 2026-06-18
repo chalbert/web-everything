@@ -29,17 +29,17 @@ item is largely overtaken by work landed since it was filed**, so the forks belo
 each with a recommended default in **bold**.
 
 The key reframing: this is **not** "design a new async-pagination contract." Cursor-vs-offset already lives in
-the [Custom Pagination](/resources/pagination/) protocol ([resources.json:31](../src/_data/resources.json#L31)):
+the [Custom Pagination](/resources/pagination/) protocol ([we:resources.json:31](../src/_data/resources.json#L31)):
 `strategy: 'offset' | 'page' | 'cursor'`, with the cross-layer constraint baked in (jump-to-page and a range
 label need a known `total`, so they pair only with offset/page; cursor forces append/prev-next). "Windowing +
 async" is already a *composition* of two existing intents that name each other: Windowed Collection's
-`dataSource: infinite` ([intents.json:351](../src/_data/intents.json#L351)) "composes the Loader `loadingMore`
-state", and Loader's `loadingMore` ([intents.json:505](../src/_data/intents.json#L505)) "composes the Windowed
+`dataSource: infinite` ([we:intents.json:351](../src/_data/intents.json#L351)) "composes the Loader `loadingMore`
+state", and Loader's `loadingMore` ([we:intents.json:505](../src/_data/intents.json#L505)) "composes the Windowed
 Collection Intent". The autocomplete member already declares **both** in its `composesIntents`
-([blocks.json:88](../src/_data/blocks.json#L88), `loader` at L94, `windowed-collection` at L95) and describes
-`filter` as "a thin composition over loader + live-region-status" ([blocks.json:101](../src/_data/blocks.json#L101)).
+([fui:blocks.json:88](../src/_data/blocks.json#L88), `loader` at L94, `windowed-collection` at L95) and describes
+`filter` as "a thin composition over loader + live-region-status" ([fui:blocks.json:101](../src/_data/blocks.json#L101)).
 The bidirectional API exists too: `CustomPagination.previous()` + `hasPrevious`
-([resources.json:35](../src/_data/resources.json#L35)). So the genuinely-open surface is three small
+([we:resources.json:35](../src/_data/resources.json#L35)). So the genuinely-open surface is three small
 *family-specific* gaps, not a new standard.
 
 ### Recommended path at a glance
@@ -59,19 +59,19 @@ actually needed vs. where to nod.
 The item's premise ("the deeper combined paradigm would need its own contract if the standard requires it") is
 the crux. The survey's answer is **no**: every named gap is already owned. Cursor/offset is a *technical*
 resource concern, correctly modeled in the [Custom Pagination](/resources/pagination/) protocol
-([resources.json:31](../src/_data/resources.json#L31)) — not a UX intent, per the repo's intents-are-UX-only
+([we:resources.json:31](../src/_data/resources.json#L31)) — not a UX intent, per the repo's intents-are-UX-only
 rule. Windowing+async is a composition of Windowed Collection (`dataSource:infinite`,
-[intents.json:351](../src/_data/intents.json#L351)) over Loader (`loadingMore`,
-[intents.json:505](../src/_data/intents.json#L505)), and the autocomplete member already composes both. The
+[we:intents.json:351](../src/_data/intents.json#L351)) over Loader (`loadingMore`,
+[we:intents.json:505](../src/_data/intents.json#L505)), and the autocomplete member already composes both. The
 two async states a combobox fires — `filtering` (re-query on new text) vs `loadingMore` (next page of same
-query) — are both already Loader lifecycle states ([intents.json:505](../src/_data/intents.json#L505)), and
+query) — are both already Loader lifecycle states ([we:intents.json:505](../src/_data/intents.json#L505)), and
 React Aria's `useAsyncList` (`load({signal, cursor, filterText})`) is the reference implementation of exactly
 that split.
 
 - **(A — recommended) No new standard.** The dropdown *composes* the existing three (CustomPagination protocol
   + Windowed Collection `infinite` + Loader `loadingMore`); #018 resolves by reference, graduating only to
   thin touch-ups on existing standards (forks 2 & 4). Matches "composition over monolith"
-  ([blocks.json:35](../src/_data/blocks.json#L35)).
+  ([fui:blocks.json:35](../src/_data/blocks.json#L35)).
 - **(B) Author a dedicated "dropdown async pagination" intent/contract.** Duplicates three axes the repo
   already owns, re-homes a technical concern (cursor/offset) into a UX intent against the rules, and adds a
   standards artifact for no new behavior. *Rejected.*
@@ -80,7 +80,7 @@ that split.
 
 Collection Operations already has the right dimension — `advance: manual | auto` ("infinite scroll = append +
 auto"; `manual` = clicked load-more row, `auto` = IntersectionObserver at the scroll boundary)
-([blocks.json:1651](../src/_data/blocks.json#L1651)) — but it lives on grids/data tables and was never wired
+([fui:blocks.json:1651](../src/_data/blocks.json#L1651)) — but it lives on grids/data tables and was never wired
 onto the autocomplete member. The family has never ruled whether an async combobox auto-loads on
 scroll-near-bottom or shows an explicit affordance. Every surveyed library defaults to scroll-triggered
 auto-load (React Aria `onLoadMore`; the MUI/Fluent/SAP feature-requests all assume infinite scroll), with a
@@ -94,7 +94,7 @@ manual "Load more" row as the accessible fallback.
 
 ## Fork 3 — "load earlier" / bidirectional in a dropdown
 
-The protocol exposes `previous()` + `hasPrevious` ([resources.json:35](../src/_data/resources.json#L35)), so
+The protocol exposes `previous()` + `hasPrevious` ([we:resources.json:35](../src/_data/resources.json#L35)), so
 bidirectional is *possible*. But "load earlier" (loading at the **top** as you scroll up, preserving the scroll
 anchor) is a **feed / chat / inbox** paradigm — the WAI-ARIA APG models it under the
 [Feed pattern](https://www.w3.org/WAI/ARIA/apg/patterns/feed/), not listbox/combobox. No surveyed dropdown
@@ -113,7 +113,7 @@ fight hardest to avoid ([MUI #30249](https://github.com/mui/material-ui/issues/3
 ## Fork 4 — unknown-total accessibility (`aria-setsize` during progressive load)
 
 Windowed Collection mandates every rendered option carry `aria-setsize` = full count + `aria-posinset`
-([intents.json:359](../src/_data/intents.json#L359)) — but that assumes the count is *known*. Under cursor
+([we:intents.json:359](../src/_data/intents.json#L359)) — but that assumes the count is *known*. Under cursor
 pagination the total is unknown until the last page, so the spec has no answer for the progressive case. The
 WAI-ARIA [Feed pattern](https://www.w3.org/WAI/ARIA/apg/patterns/feed/) gives the platform convention:
 `aria-setsize="-1"` (the standard "size unknown" sentinel) while the total is indeterminate, and

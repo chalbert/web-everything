@@ -13,7 +13,7 @@ crossRef: { url: /blocks/resource-loader/, label: Resource Loader }
 
 # Dispose the handoff handle's loader listeners when its task is dismissed
 
-`ResourceLoaderHandle` (`blocks/resource-loader/backgroundHandoff.ts`, wired in
+`ResourceLoaderHandle` (`we:blocks/resource-loader/backgroundHandoff.ts`, wired in
 [#152](/backlog/152-loader-background-task-handoff-wiring/)) attaches three listeners to the loader's
 target (`resource-state-change` / `resource-load-end` / `resource-load-error`) and keeps them for the
 loader's lifetime. It exposes `dispose()` but **nothing calls it** — there is no producer-side signal

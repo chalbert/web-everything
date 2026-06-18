@@ -11,7 +11,7 @@ tags: [gap-analysis, protocol, view-transitions, motion]
 
 # Decide on View Transitions protocol (gap #8)
 
-`motion` covers physics but not the View Transitions API (same- and cross-document). The `semantics.json` PopoverController entry already references "View Transitions integration." Likely a **protocol under a motion/navigation project** rather than its own project.
+`motion` covers physics but not the View Transitions API (same- and cross-document). The `we:semantics.json` PopoverController entry already references "View Transitions integration." Likely a **protocol under a motion/navigation project** rather than its own project.
 
 ## Triage context
 

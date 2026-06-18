@@ -25,7 +25,7 @@ So `el.setAttribute('sortable-active', '')` on an element already inside an iner
 re-activate the dormant trait until the next `inert` flip. The common cases work (override present at
 upgrade; region flips live/inert), but dynamically toggling the override alone is a gap.
 
-**Scope (when picked up — Frontier UI `plugs/webbehaviors/CustomAttributeRegistry.ts`):**
+**Scope (when picked up — Frontier UI `we:plugs/webbehaviors/CustomAttributeRegistry.ts`):**
 
 - The per-root observer's `attributeFilter` is fixed at `upgrade()` time to `[...trait names, 'inert']`.
   A `<name>-active` suffix is dynamic per registered trait — either add each registered name's
@@ -41,7 +41,7 @@ already exist; this only widens *when* they re-run. Harvested from the #223 clos
 
 ## Progress
 
-**Status:** resolved (2026-06-09) — Frontier UI `plugs/webbehaviors/CustomAttributeRegistry.ts`.
+**Status:** resolved (2026-06-09) — Frontier UI `we:plugs/webbehaviors/CustomAttributeRegistry.ts`.
 
 **Done:**
 - Observer `attributeFilter` (`#observe`) now unions each registered + lazy name's `<name>-active`
@@ -51,11 +51,11 @@ already exist; this only widens *when* they re-run. Harvested from the #223 clos
   `#shouldBeActivated`/`#setActivated` — no new lifecycle.
 - New `#isActiveOverride` guard: only routes a `-active` attr to the override path when its base
   resolves to a defined trait; a trait whose own name ends in `-active` falls through to `#update`.
-- 3 new unit tests in `CustomAttributeRegistry.inert.test.ts`: add `toggle-active` inside `inert`
+- 3 new unit tests in `fui:CustomAttributeRegistry.inert.test.ts`: add `toggle-active` inside `inert`
   → activates; remove it → deactivates (both with no `inert` flip); toggle outside `inert` is an
   idempotent no-op (no callback re-fire).
 
 **Verified:** 96/96 webbehaviors unit tests pass; `tsc --noEmit` clean for the file;
 `check:standards` 0 errors.
 
-**Graduated to** `frontierui/plugs/webbehaviors/CustomAttributeRegistry.ts` — runtime <name>-active re-evaluation (#observe widened with -active suffix; #onActiveChanged + #isActiveOverride; 3 inert-suite unit tests).
+**Graduated to** `fui:frontierui/plugs/webbehaviors/CustomAttributeRegistry.ts` — runtime <name>-active re-evaluation (#observe widened with -active suffix; #onActiveChanged + #isActiveOverride; 3 inert-suite unit tests).

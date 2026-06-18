@@ -24,10 +24,10 @@ found FAST has **removed its component library**, so the call is a near-forced *
 genuine convention choice. Two forks below, each with a **bold** default.
 
 The concern decomposes into two orthogonal axes. **(1) Source fate** — does `fast` stay in the corpus at
-all? Its entry ([benchmarkCorpus.json:63](../src/_data/benchmarkCorpus.json#L63)) sits in the
-`web-component-system` category ([benchmarkCorpus.json:42](../src/_data/benchmarkCorpus.json#L42)) and is
-gated by the corpus's own `inclusionRule` ([benchmarkCorpus.json:38](../src/_data/benchmarkCorpus.json#L38))
-against the `docs-quality` + `currency` criteria ([benchmarkCorpus.json:28-36](../src/_data/benchmarkCorpus.json#L28-L36)) — both of which `fast` now fails as a component source (docs 404; component library removed → repo is now `fast-element`/`fast-html`/`fast-router` tooling; its former components folded into Fluent UI Web Components = the existing `fluent-2` source at [benchmarkCorpus.json:50](../src/_data/benchmarkCorpus.json#L50)). **(2) Retirement mechanism** — *if* retired, do we delete the row or mark it retired? `fast` has **0** rows in [benchmarkCapabilityPresence.json](../src/_data/benchmarkCapabilityPresence.json) (shoelace 49 / spectrum-web-components 51 / lion 33 keep the axis covered), and the only corpus-source validator ([check-standards-rules.mjs:735](../scripts/check-standards-rules.mjs#L735)) merely forbids a presence row pointing at an unknown source — so both delete and mark-retired are validator-safe; the choice is about the longitudinal audit trail, not correctness.
+all? Its entry ([we:benchmarkCorpus.json:63](../src/_data/benchmarkCorpus.json#L63)) sits in the
+`web-component-system` category ([we:benchmarkCorpus.json:42](../src/_data/benchmarkCorpus.json#L42)) and is
+gated by the corpus's own `inclusionRule` ([we:benchmarkCorpus.json:38](../src/_data/benchmarkCorpus.json#L38))
+against the `docs-quality` + `currency` criteria ([we:benchmarkCorpus.json:28-36](../src/_data/benchmarkCorpus.json#L28-L36)) — both of which `fast` now fails as a component source (docs 404; component library removed → repo is now `fast-element`/`fast-html`/`fast-router` tooling; its former components folded into Fluent UI Web Components = the existing `fluent-2` source at [we:benchmarkCorpus.json:50](../src/_data/benchmarkCorpus.json#L50)). **(2) Retirement mechanism** — *if* retired, do we delete the row or mark it retired? `fast` has **0** rows in [we:benchmarkCapabilityPresence.json](../src/_data/benchmarkCapabilityPresence.json) (shoelace 49 / spectrum-web-components 51 / lion 33 keep the axis covered), and the only corpus-source validator ([we:check-standards-rules.mjs:735](../scripts/check-standards-rules.mjs#L735)) merely forbids a presence row pointing at an unknown source — so both delete and mark-retired are validator-safe; the choice is about the longitudinal audit trail, not correctness.
 
 ## Recommended path at a glance
 
@@ -42,7 +42,7 @@ against the `docs-quality` + `currency` criteria ([benchmarkCorpus.json:28-36](.
 fixed: FAST is no longer a component system. The repo ([github.com/microsoft/fast](https://github.com/microsoft/fast))
 is live and unarchived (pushed 2026-06-12), but `packages/` now holds only `fast-element`, `fast-html`,
 `fast-router`, `fast-build`, `fast-test-harness` — the `fast-foundation`/`fast-components` library was
-removed and folded into Fluent UI Web Components ([benchmarkCorpus.json:50](../src/_data/benchmarkCorpus.json#L50), `fluent-2`).
+removed and folded into Fluent UI Web Components ([we:benchmarkCorpus.json:50](../src/_data/benchmarkCorpus.json#L50), `fluent-2`).
 
 - **A — Retire `fast` from the corpus. ✅ default.** It fails `docs-quality` (docs decommissioned) and
   `currency`-as-a-component-set (component library removed), and no longer occupies the
@@ -61,7 +61,7 @@ removed and folded into Fluent UI Web Components ([benchmarkCorpus.json:50](../s
 ## Fork 2 — how to retire it (the reusable convention)
 
 **Crux:** `fast` is the corpus's *first* dead source, and won't be the last — abandonment/currency is an
-explicit selection criterion ([benchmarkCorpus.json:28-36](../src/_data/benchmarkCorpus.json#L28-L36)),
+explicit selection criterion ([we:benchmarkCorpus.json:28-36](../src/_data/benchmarkCorpus.json#L28-L36)),
 and the corpus is a longitudinal dataset (the [#192](/backlog/192-longitudinal-research-freshness-system/)
 freshness model; `lastSwept`/`lastChecked`). So the mechanism chosen here becomes the convention every
 future dead source follows.
@@ -92,9 +92,9 @@ reproducibility under #192 (a re-run must see why a source was dropped) — whic
 mark-over-delete.
 
 **On resolution** (the `/next decision` turn, not now): apply the ratified branches to
-`benchmarkCorpus.json`'s `fast` source, update the `/research/benchmark-corpus/` rendering if `retired`
+`we:benchmarkCorpus.json`'s `fast` source, update the `/research/benchmark-corpus/` rendering if `retired`
 sources should be visually separated, and reconcile epic #495 (one fewer slice). No
-`benchmarkCapabilityPresence.json` change is needed (`fast` has 0 rows).
+`we:benchmarkCapabilityPresence.json` change is needed (`fast` has 0 rows).
 
 ---
 
@@ -107,18 +107,18 @@ sources should be visually separated, and reconcile epic #495 (one fewer slice).
   `web-component-system` axis (ships tooling, not elements). Axis stays covered by shoelace /
   spectrum-web-components / lion; FAST's former coverage already lives in `fluent-2`.
 - **Fork 2 → A — marked retired, row kept.** Added `retired: true` + `retiredDate` + `retiredReason` to the
-  `fast` source ([benchmarkCorpus.json:63](../src/_data/benchmarkCorpus.json#L63)). Preserves the
+  `fast` source ([we:benchmarkCorpus.json:63](../src/_data/benchmarkCorpus.json#L63)). Preserves the
   longitudinal audit trail so a re-run sees *why* `fast` left and won't naïvely re-add it.
 
 **Applied:**
 
-- `fast` source marked retired in [benchmarkCorpus.json](../src/_data/benchmarkCorpus.json) (`lastChecked`
+- `fast` source marked retired in [we:benchmarkCorpus.json](../src/_data/benchmarkCorpus.json) (`lastChecked`
   bumped to 2026-06-14); the `retired`/`retiredDate`/`retiredReason` shape is the seed convention.
-- [benchmark-corpus.njk](../src/_includes/research-descriptions/benchmark-corpus.njk) excludes `retired`
+- [we:benchmark-corpus.njk](../src/_includes/research-descriptions/benchmark-corpus.njk) excludes `retired`
   sources from the active per-axis tables and renders a new **Retired sources** section (with reasons).
 - Epic [#495](/backlog/495-exhaustive-per-source-capability-presence-deep-doc-urls-fan-/) reconciled — the
   fan-out is now over **non-retired** sources; the `fast` slice is closed (0 rows).
-- No `benchmarkCapabilityPresence.json` change (`fast` has 0 rows) — validator-safe.
+- No `we:benchmarkCapabilityPresence.json` change (`fast` has 0 rows) — validator-safe.
 
 **Generalisation spun off (kept #546 narrow).** The general "what to do when *any* cited reference retires"
 strategy and the **monitoring/detection** capability (this finding surfaced only by tripping over a 404)

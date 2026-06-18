@@ -25,7 +25,7 @@ The two ingestion models are mature, named industry patterns with a documented c
 
 - **Build-time / declared** — [Backstage software
   catalog](https://backstage.io/docs/features/software-catalog/well-known-relations/): components declare
-  `spec.providesApis` / `spec.consumesApis` in `catalog-info.yaml`; the catalog derives `apiProvidedBy` /
+  `spec.providesApis` / `spec.consumesApis` in `we:catalog-info.yaml`; the catalog derives `apiProvidedBy` /
   `apiConsumedBy` **relations**. [CycloneDX SBOM](https://cyclonedx.org/guides/sbom/generation/) is the
   same shape for dependencies. *Strength:* complete, auditable, pre-ship. *Weakness:* "all dependency
   information is lost at runtime"; hand-authored manifests drift; phantom (lock-file-only) edges.
@@ -38,7 +38,7 @@ The two ingestion models are mature, named industry patterns with a documented c
   with runtime data, marking dependencies as 'potential' until confirmed by traces or mesh metrics."*
 
 **The WE-specific reframe (the decisive finding):** Backstage's build-time model is bottlenecked on
-*hand-authored* `catalog-info.yaml`. WE doesn't have that bottleneck — **everything resolves through
+*hand-authored* `we:catalog-info.yaml`. WE doesn't have that bottleneck — **everything resolves through
 introspectable registries, injectors, contexts (webcontexts), and events (webevents); that introspection
 *is* the graph.** WE can **auto-derive** the provider/consumer manifest at build time from its own
 introspection, eliminating the manual-authoring weakness that makes Backstage's build-time tier stale. So
@@ -59,7 +59,7 @@ contract testing** ([Pact](https://docs.pact.io/) / [Pactflow](https://pactflow.
   recorded consumer expectation before it ships.
 
 WE already has the provider-side half: **protocol conformance contracts + tiers**
-([protocols.json](../src/_data/protocols.json), the capabilityMatrix). The reframe: the seam-contract is
+([we:protocols.json](../src/_data/protocols.json), the capabilityMatrix). The reframe: the seam-contract is
 the **protocol conformance contract recorded bidirectionally** — provider declares the tier it implements;
 consumer declares the subset (dimensions/capabilities) it depends on (the consumer-driven projection). One
 definition, shared with verification (#089 idea 1) and drift detection — no second contract format.

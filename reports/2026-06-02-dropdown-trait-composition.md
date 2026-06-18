@@ -3,8 +3,8 @@
 **Date:** 2026-06-02
 **Status (2026-06-03):** Partially graduated. The terminology table, "three faces of a trait", "from markup to traits" mapping, and "droplist substrate" definition now live on the [Droplist block](/blocks/droplist/); the Step 1 (single dropdown) markup is on the [Dropdown block](/blocks/dropdown/). The "Autocomplete in detail" section remains here as seed content for the [autocomplete block](/backlog/035-autocomplete-block/) backlog item; the open contracts in §"Open questions" are tracked in [droplist-composition-open-contracts](/backlog/023-droplist-composition-open-contracts/).
 **Original status:** Design exploration — step 1 (interface only, no runnable implementation yet)
-**Builds on:** [`reports/2026-06-01-dropdown-ux-behaviors.md`](./2026-06-01-dropdown-ux-behaviors.md) — "Cross-cutting paradigms", and the `droplist` composition manifest (`src/_includes/block-descriptions/droplist.njk`).
-**Real idioms it leans on:** `type-ahead` behavior (`blocks/type-ahead/TypeAheadBehavior.ts`), Plateau's `composite-widget` attribute (`plateau/src/blocks/attributes/CompositeWidget.ts`), the injector chain (`customContexts:*`), and the `with*` traits in `blocks/resource-loader/traits/`.
+**Builds on:** [`we:reports/2026-06-01-dropdown-ux-behaviors.md`](./2026-06-01-dropdown-ux-behaviors.md) — "Cross-cutting paradigms", and the `droplist` composition manifest (`we:src/_includes/block-descriptions/droplist.njk`).
+**Real idioms it leans on:** `type-ahead` behavior (`fui:blocks/type-ahead/TypeAheadBehavior.ts`), Plateau's `composite-widget` attribute (`we:plateau/src/blocks/attributes/CompositeWidget.ts`), the injector chain (`customContexts:*`), and the `with*` traits in `blocks/resource-loader/traits/`.
 
 ---
 
@@ -20,7 +20,7 @@ The deliverable is the **interface and the walkthrough**, not an implementation.
 
 ### Terminology (corrected)
 
-The earlier draft of this doc — and the current `droplist.njk` — use "dropdown" loosely to mean the whole family. Tightening it, per how the team actually uses the words:
+The earlier draft of this doc — and the current `we:droplist.njk` — use "dropdown" loosely to mean the whole family. Tightening it, per how the team actually uses the words:
 
 | Term | Meaning |
 |---|---|
@@ -29,7 +29,7 @@ The earlier draft of this doc — and the current `droplist.njk` — use "dropdo
 | **Autocomplete** | A concrete droplist member — editable input, filterable. |
 | **Multi-dropdown** | A concrete droplist member — `multiple` selection. |
 
-> 🔧 **Doc fix flagged:** `src/_includes/block-descriptions/droplist.njk` opens with *"A 'dropdown' is not one behavior but a composition…"* — that sentence should say **droplist**. The block is the abstract family; the dropdown is one instance of it. (Not done in this pass — see [Open questions](#open-questions).)
+> 🔧 **Doc fix flagged:** `we:src/_includes/block-descriptions/droplist.njk` opens with *"A 'dropdown' is not one behavior but a composition…"* — that sentence should say **droplist**. The block is the abstract family; the dropdown is one instance of it. (Not done in this pass — see [Open questions](#open-questions).)
 
 ---
 
@@ -46,11 +46,11 @@ But the app author never writes that call. A trait surfaces in HTML as one of th
 
 | Face | What it is | When a trait takes this face | Real precedent |
 |---|---|---|---|
-| **Component** | A custom element that owns a subtree | The trait needs to own structure/children (the popup surface, the option template) | `<route-view>` (`blocks/router/elements/RouteViewElement.ts`) |
+| **Component** | A custom element that owns a subtree | The trait needs to own structure/children (the popup surface, the option template) | `<route-view>` (`we:blocks/router/elements/RouteViewElement.ts`) |
 | **Behavior** | A custom attribute stacked on semantic HTML | The trait enhances an element you already have; multiple stack on one node | `<ul role="listbox" type-ahead>`; `<… composite-widget>` |
 | **Provider** | A value/service set on the injector chain, consumed down-tree | The trait is config or a shared service many nodes read (intent profile, positioning strategy, the announcer) | `injector.set('customContexts:loaderIntent', …)` |
 
-The decision rule is the repo's own (`docs/agent/architecture.md`: *"Behaviors are implementations: custom attributes attach functionality"*; components own subtrees; injector providers feed config/services down the tree). Most dropdown traits are **behaviors**, two own structure as **components**, and three are best delivered as **providers**.
+The decision rule is the repo's own (`we:docs/agent/architecture.md`: *"Behaviors are implementations: custom attributes attach functionality"*; components own subtrees; injector providers feed config/services down the tree). Most dropdown traits are **behaviors**, two own structure as **components**, and three are best delivered as **providers**.
 
 ---
 
@@ -152,8 +152,8 @@ The substrate is plain semantic HTML — a trigger and a listbox — with **beha
 
 Read it as a composition of named paradigms:
 
-- `focus-delegation` — **Focus Delegation** (real behavior, `FocusDelegation.ts`): one tab stop, arrow-within, Home/End, type-ahead seek, `aria-activedescendant`. Owns *movement* only.
-- `selection` — **Selection** (real behavior, `Selection.ts`): `aria-selected`, Enter/Space commit, and `selectionFollowsFocus` (default `true` for single-select) — implemented by listening to the `activedescendantchange` event `focus-delegation` emits, so the two never reference each other. (`composite-widget` remains available as a one-attribute bundle that composes both.)
+- `focus-delegation` — **Focus Delegation** (real behavior, `fui:FocusDelegation.ts`): one tab stop, arrow-within, Home/End, type-ahead seek, `aria-activedescendant`. Owns *movement* only.
+- `selection` — **Selection** (real behavior, `fui:Selection.ts`): `aria-selected`, Enter/Space commit, and `selectionFollowsFocus` (default `true` for single-select) — implemented by listening to the `activedescendantchange` event `focus-delegation` emits, so the two never reference each other. (`composite-widget` remains available as a one-attribute bundle that composes both.)
 - `type-ahead` — **Type-Ahead** (this behavior already exists): seek option by typed prefix. Configurable via `type-ahead-reset`, `type-ahead-match`, `type-ahead-wrap`.
 - `anchor` / `anchored` — **Anchor**: the trigger binds to its surface; the surface declares placement + collision. Dismissal & focus-return ride along.
 - `customContexts:droplistIntent` — the **provider** that the behaviors read to resolve their dimension values.
@@ -229,7 +229,7 @@ Autocomplete looks heavy, but it decomposes cleanly once two things are clear. (
 
 ### The idea that unlocks it: focus host ≠ collection
 
-In the **dropdown** (Step 1), one element played two roles: the `<ul role="listbox">` was *both* the focus host (it had `tabindex=0` and received keydown) *and* the collection holding the options. `FocusDelegation.ts` quietly assumes that — it attaches keydown to `this.target`, sets `this.target.tabIndex = 0`, and puts `aria-activedescendant` on `this.target`.
+In the **dropdown** (Step 1), one element played two roles: the `<ul role="listbox">` was *both* the focus host (it had `tabindex=0` and received keydown) *and* the collection holding the options. `fui:FocusDelegation.ts` quietly assumes that — it attaches keydown to `this.target`, sets `this.target.tabIndex = 0`, and puts `aria-activedescendant` on `this.target`.
 
 **Autocomplete breaks that assumption.** DOM focus must stay on the `<input>` so typing is never interrupted — so the input is the *focus host*, while the `<ul>` is still the *collection*. They are now two different elements. That single separation is the whole story of how autocomplete differs; everything else follows from it.
 
@@ -239,7 +239,7 @@ So the behaviors split onto two elements by the role they serve:
 
 ### What `controller` does to FocusDelegation
 
-The `controller=city-input` value is a small generalization the current `FocusDelegation.ts` does **not** have yet — and trying to compose autocomplete is exactly what surfaces the need for it. When a controller is set, three things change versus the dropdown:
+The `controller=city-input` value is a small generalization the current `fui:FocusDelegation.ts` does **not** have yet — and trying to compose autocomplete is exactly what surfaces the need for it. When a controller is set, three things change versus the dropdown:
 
 | | Dropdown (host = collection) | Autocomplete (`controller` set) |
 |---|---|---|
@@ -285,9 +285,9 @@ Every attribute / element / provider above is the surface of exactly one intent'
 | Intent | Trait (`with*`) | HTML surface | Markup | Status |
 |---|---|---|---|---|
 | [Anchor](/intents/anchor/) | `withAnchoredSurface` | **behavior** (binding) + **provider** (positioning strategy / Floating UI adapter) | `anchor="…"` / `anchored="bottom-start;flip"` | proposed; anchor intent exists |
-| [Focus Delegation](/intents/focus-delegation/) | `withFocusDelegation` | **behavior** | `focus-delegation="orientation=vertical"` | **real, split** (`FocusDelegation.ts`) |
-| [Selection](/intents/selection/) | `withSelection` | **behavior** | `selection="multiSelectable"` | **real, split** (`Selection.ts`) |
-| [Type-Ahead](/intents/type-ahead/) | `withTypeAhead` | **behavior** | `type-ahead` | **real** (`TypeAheadBehavior.ts`) |
+| [Focus Delegation](/intents/focus-delegation/) | `withFocusDelegation` | **behavior** | `focus-delegation="orientation=vertical"` | **real, split** (`fui:FocusDelegation.ts`) |
+| [Selection](/intents/selection/) | `withSelection` | **behavior** | `selection="multiSelectable"` | **real, split** (`fui:Selection.ts`) |
+| [Type-Ahead](/intents/type-ahead/) | `withTypeAhead` | **behavior** | `type-ahead` | **real** (`fui:TypeAheadBehavior.ts`) |
 | [Input](/intents/input/) | `withClearable` | **behavior** | `clearable` | proposed |
 | [Live Region Status](/intents/live-region-status/) | `withLiveStatus` | **provider** (one announcer per app) + behavior trigger | `live-status` + `customContexts:announcer` | proposed |
 | [Windowed Collection](/intents/windowed-collection/) | `withWindowing` | **behavior** on the listbox | `windowed` | proposed |
@@ -370,7 +370,7 @@ A single line makes "every dropdown here is virtual-focus, edge-aware, truncatin
 
 The seams the HTML walkthrough exposed — to resolve *before* building any trait:
 
-1. **Split `composite-widget` into `focus-delegation` + `selection`? — Prototyped ✅.** Plateau folded both into `CompositeWidget.ts`. The split was built as two independent behaviors — `plateau/src/blocks/attributes/FocusDelegation.ts` and `Selection.ts` — that coordinate **only** through the DOM (`aria-activedescendant`/`aria-current`) and the `activedescendantchange` event; neither references the other. A green test (`__tests__/FocusDelegationSelection.split.test.ts`, 14 cases) proves each works standalone *and* that stacking both reproduces the old bundle (init-follows-focus, single-select arrowing, multi-select decoupling). Two findings fell out of the experiment: (a) the keyboard model **partitions cleanly** — arrows/Home/End/type-ahead-seek belong to focus, Enter/Space-commit to selection, with *no key handled by both* (Space is excluded from type-ahead so selection owns it); (b) **activation order is load-bearing** — `selection` must connect before `focus`, so its `activedescendantchange` listener is live when `focus` stamps the initial active item (this is open question #5, observed for real). **Recommendation:** keep `composite-widget` as a thin *bundle* that composes the two (single source of truth), not duplicated logic. That collapse + retiring the bundle's (already-red, internals-coupled) test is the remaining step — not yet done.
+1. **Split `composite-widget` into `focus-delegation` + `selection`? — Prototyped ✅.** Plateau folded both into `we:CompositeWidget.ts`. The split was built as two independent behaviors — `we:plateau/src/blocks/attributes/FocusDelegation.ts` and `fui:Selection.ts` — that coordinate **only** through the DOM (`aria-activedescendant`/`aria-current`) and the `activedescendantchange` event; neither references the other. A green test (`we:__tests__/FocusDelegationSelection.split.test.ts`, 14 cases) proves each works standalone *and* that stacking both reproduces the old bundle (init-follows-focus, single-select arrowing, multi-select decoupling). Two findings fell out of the experiment: (a) the keyboard model **partitions cleanly** — arrows/Home/End/type-ahead-seek belong to focus, Enter/Space-commit to selection, with *no key handled by both* (Space is excluded from type-ahead so selection owns it); (b) **activation order is load-bearing** — `selection` must connect before `focus`, so its `activedescendantchange` listener is live when `focus` stamps the initial active item (this is open question #5, observed for real). **Recommendation:** keep `composite-widget` as a thin *bundle* that composes the two (single source of truth), not duplicated logic. That collapse + retiring the bundle's (already-red, internals-coupled) test is the remaining step — not yet done.
 
 2. **Anchor: behavior, provider, or both?** Placement binding (`anchor="surface-id"`) is a behavior, but the *positioning strategy* (JS Floating UI vs. CSS anchor positioning) is a swappable service better delivered as a DI provider / adapter. The split between "bind these two elements" and "compute the position" needs a clean line.
 
@@ -382,5 +382,5 @@ The seams the HTML walkthrough exposed — to resolve *before* building any trai
 
 6. **First prototype target.** `withAnchoredSurface` is the highest-leverage, most-reused candidate (menu/popover/tooltip/datepicker all need it) and the one paradigm with *no* existing behavior yet (`type-ahead` and `composite-widget` already exist). Building it against a real Frontier UI surface — or first formalizing the substrate's `DropdownContext`/`TraitHandle` contract as a project-owned **Protocol** — is the fork in the road.
 
-7. **Doc fix.** Correct the "dropdown" → "droplist" wording in `droplist.njk` (flagged above) so the abstract-family vs. concrete-member distinction holds across the standard.
+7. **Doc fix.** Correct the "dropdown" → "droplist" wording in `we:droplist.njk` (flagged above) so the abstract-family vs. concrete-member distinction holds across the standard.
 ```

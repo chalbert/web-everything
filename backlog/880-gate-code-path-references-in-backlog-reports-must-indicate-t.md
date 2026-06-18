@@ -10,16 +10,16 @@ crossRef: { url: /backlog/841-decide-the-we-contract-custom-element-tag-naming-c
 
 # Gate: code-path references in backlog & reports must indicate their repo locus
 
-Umbrella for establishing a repo-locus convention on code-path references in `backlog/*.md` and `reports/*.md` — every path carries a `<repo>:` prefix (`we:`/`fui:`/`plateau:`; in-repo links keep a clickable relative target, `[we:path](path)`) so a reader in chat/raw-md can tell which constellation repo it names. Surfaced as real confusion in #841, which this finishes. **Sliced (2026-06-17) into #883 (convention clause) → #884 (detection gate, warn-level) → #885 (mass migration + hard gate)** — see [reports/2026-06-17-backlog-split-analysis.md](reports/2026-06-17-backlog-split-analysis.md). The detail sections below are the seed reference for the slices.
+Umbrella for establishing a repo-locus convention on code-path references in `backlog/*.md` and `reports/*.md` — every path carries a `<repo>:` prefix (`we:`/`fui:`/`plateau:`; in-repo links keep a clickable relative target, `[we:path](path)`) so a reader in chat/raw-md can tell which constellation repo it names. Surfaced as real confusion in #841, which this finishes. **Sliced (2026-06-17) into #883 (convention clause) → #884 (detection gate, warn-level) → #885 (mass migration + hard gate)** — see [we:reports/2026-06-17-backlog-split-analysis.md](reports/2026-06-17-backlog-split-analysis.md). The detail sections below are the seed reference for the slices.
 
 ## Why
 
 The constellation has three repos: **webeverything** (the standard), **frontierui**
 (the impl), **plateau-app** (the product). A backlog item routinely cites files in all three. A bare relative
-path like `src/_data/blocks.json` resolves *as a link* in the WE docs site (the backlog lives in WE), so a
+path like `fui:src/_data/blocks.json` resolves *as a link* in the WE docs site (the backlog lives in WE), so a
 reader on the rendered page is fine — but in chat, in raw markdown, and especially when the *same* relative
-path exists in two repos (WE has `src/_data/blocks.json`; FUI has its own `blocks.json`), the locus is
-genuinely ambiguous. #841 hit this: "when you say `src/_data/blocks.json` it's not clear which repo."
+path exists in two repos (WE has `fui:src/_data/blocks.json`; FUI has its own `fui:blocks.json`), the locus is
+genuinely ambiguous. #841 hit this: "when you say `fui:src/_data/blocks.json` it's not clear which repo."
 
 ## The convention (the rule)
 
@@ -61,7 +61,7 @@ WE-relative by construction — exempt or auto-prefixed).
 
 ## Scope / done-when
 
-- [ ] Convention clause added to [docs/agent/conventions.md](docs/agent/conventions.md) (the machine-checked
+- [ ] Convention clause added to [we:docs/agent/conventions.md](docs/agent/conventions.md) (the machine-checked
   naming authority #841 also targets).
 - [ ] `check:standards` check implemented with the false-positive carve-outs above; green on a migrated corpus.
 - [ ] One-time migration of existing `backlog/*.md` + `reports/*.md` (includes finishing #841, partially

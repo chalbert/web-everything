@@ -52,7 +52,7 @@ tiering** (on-device floor + API upgrade vs per-usage-only). Each is now indepen
 ### Architecture fit — it's a provider swap, not new plumbing
 
 The on-device model is an **implementation behind the existing swappable vision-provider seam**
-(`scripts/design-refs/vision.mjs` → `registerVisionProvider`), the same seam #475 ruled and #480/#485
+(`we:scripts/design-refs/vision.mjs` → `registerVisionProvider`), the same seam #475 ruled and #480/#485
 built. So adding an on-device classifier is registering another provider; the WE standard never imports
 it and the **no-leakage invariant holds** (only verdicts/outputs flow on). Per the #091 layering, the
 *served capability* is a Plateau/impl concern, not a WE-standard artifact.
@@ -61,7 +61,7 @@ it and the **no-leakage invariant holds** (only verdicts/outputs flow on). Per t
 
 | File | Action |
 |---|---|
-| `src/_data/researchTopics.json` | Added `on-device-ui-vision` topic |
-| `src/_includes/research-descriptions/on-device-ui-vision.njk` | Wrote the research write-up |
+| `we:src/_data/researchTopics.json` | Added `on-device-ui-vision` topic |
+| `we:src/_includes/research-descriptions/on-device-ui-vision.njk` | Wrote the research write-up |
 | `backlog/488-…md` | Rewrote to prepared-fork shape (4 forks), set `preparedDate` |
-| `reports/2026-06-13-on-device-ui-vision-capability.md` | This report |
+| `we:reports/2026-06-13-on-device-ui-vision-capability.md` | This report |

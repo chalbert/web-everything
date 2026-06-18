@@ -66,7 +66,7 @@ the *other* activation gate). Harvested from the #202 discussion (2026-06-08).
 ## Resolution (2026-06-10)
 
 The four open design questions are decided; recorded as the **Visibility Gate** section of the
-webtraits spec (`src/_data/traits.json` → `visibility_gate`, rendered on `/projects/webtraits/`).
+webtraits spec (`we:src/_data/traits.json` → `visibility_gate`, rendered on `/projects/webtraits/`).
 Mirrors the #222 → #223 split: this `decision` item carries the rulings; the build is spun off as an
 agent-ready item.
 

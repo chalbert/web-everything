@@ -21,11 +21,11 @@ ID cards (mock). See the [requirements PRD](/reports/2026-06-12-exercise-app-aut
 
 ## Progress — resolved 2026-06-13
 
-- **`domain/binding.ts`** — pure core: `collectPayment` (stamps the premium payment + a mock
+- **`we:domain/binding.ts`** — pure core: `collectPayment` (stamps the premium payment + a mock
   confirmation ref), `paymentReceived` (the `payment-received` guard predicate), `issuePolicyDocuments`
   (idempotent — a mock declarations page + one ID card per insured vehicle, mock VIN). New
   `PremiumPayment` / `IdCard` / `IssuedDocuments` types on `Policy`.
-- **`app.ts`** — the `payment-received` guard now reads the policy's payment record (was permissively
+- **`we:app.ts`** — the `payment-received` guard now reads the policy's payment record (was permissively
   `true`), so `quoted → bound` is genuinely gated. The policy-detail panel gains a state-driven
   **Bind & issue** surface: `quoted` → collect-payment-and-bind form, `bound` → issue button,
   `in-force` → the rendered declarations page + ID cards. Payment fires the guarded `quoted→bound`
@@ -35,7 +35,7 @@ ID cards (mock). See the [requirements PRD](/reports/2026-06-12-exercise-app-aut
   blocks; check:app-conformance stays **100% (0 FAIL, 0 GAP)**. The guarded-transition seam stays the
   in-app lifecycle GuardResolver (Web Guards stand-in, candidate **#289**) and the issued documents are
   app-generated artifacts (richer file-handling block uncodified, candidate **#028**) — both already in
-  `conformance.json` candidateStandards.
+  `we:conformance.json` candidateStandards.
 - Gates: `tsc` clean, `check:app-conformance` compliant, `check:demos` + `check:standards` green.
 
-**Graduated to** `demos/auto-insurance/domain/binding.ts` — insurance demo S4 — payment-received guard, mock declarations + ID cards, bind/pay/issue surface; consumes lifecycle/audit/status-indicator; drives guards #289 + file-handling #028.
+**Graduated to** `we:demos/auto-insurance/domain/binding.ts` — insurance demo S4 — payment-received guard, mock declarations + ID cards, bind/pay/issue surface; consumes lifecycle/audit/status-indicator; drives guards #289 + file-handling #028.

@@ -60,11 +60,11 @@ resolution work (#203–#207) for the per-scope resolution. See #004 OP-1/OP-11.
       `InjectorRoot.getProviderOf` (nearest-wins), feeding the four named sources into the
       orchestrator and pushing each merged result to `setValidity`. Emits `validity-merge`.
   - Wired `window.customValidityMerge` (source-reduction default + last-write-wins) and the element
-    into `plugs/bootstrap.ts`.
-  - `demos/validity-merge-demo.html/.ts/.css` — a conformance playground: 6 green invariant badges
+    into `we:plugs/bootstrap.ts`.
+  - `we:demos/validity-merge-demo.html/.ts/.css` — a conformance playground: 6 green invariant badges
     (strictest-wins, pending-beats-valid, strategy swap, native validity binding, per-scope
     resolution, default registry) **plus** a live sandbox feeding the four sources and swapping
-    source-reduction ↔ last-write-wins with zero control edits. Registered in `src/_data/demos.json`.
+    source-reduction ↔ last-write-wins with zero control edits. Registered in `we:src/_data/demos.json`.
   - 26 unit tests green; full plugs + validity-merge suite (698) green; `check:standards` 0 errors;
     e2e `playgrounds.spec` covers the demo (loads green, no console errors).
 - **Notes / findings:**

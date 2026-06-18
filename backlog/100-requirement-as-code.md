@@ -27,16 +27,16 @@ app ([#099](/backlog/099-evergreen-app-vision/)); it produces the corpus everyth
 > **Sliced 2026-06-16 (`/split 100`, after #714 ratified the format).** #100 was a `story·13` staging
 > three capabilities; with the gating meta-schema fork resolved it split into this re-scoped slice A plus
 > two siblings under #099 — see *Sibling slices* below. Report:
-> `reports/2026-06-16-backlog-split-analysis.md`.
+> `we:reports/2026-06-16-backlog-split-analysis.md`.
 
 ## Slice A — what ships here
 
 The WE-resident, **deterministic** core of capability 1 (authoring + validation):
 
 1. **The meta-schema** — a typed requirement-record type (per #714's worked YAML example): `role` →
-   governance persona; `given` → an intent-dimension value (`intents.json`); `when` → a `semantics.json`
-   event; `then` → a `protocols.json` observable state/event at a conformance tier.
-2. **The validator** — a pure, dependency-free resolver (the `webcases/driftCheck.ts` pattern) that walks
+   governance persona; `given` → an intent-dimension value (`we:intents.json`); `when` → a `we:semantics.json`
+   event; `then` → a `we:protocols.json` observable state/event at a conformance tier.
+2. **The validator** — a pure, dependency-free resolver (the `we:webcases/driftCheck.ts` pattern) that walks
    a requirement record and checks every slot against `src/_data/{intents,semantics,protocols}.json` plus
    the persona roster, reporting each unresolvable reference with a pointer to the offending slot.
 
@@ -78,18 +78,18 @@ meta-schema (this slice) and the webcases it compiles to (#797) are WE-resident.
 
 ## Progress (resolved 2026-06-16)
 - Shipped the typed meta-schema + deterministic validator at
-  [`webcases/requirementValidator.ts`](../webcases/requirementValidator.ts) (the pure, dependency-free
-  `driftCheck.ts` pattern): a `RequirementRecord` type for #714's `role`/`given`/`when`/`then` shape, and
+  [`we:webcases/requirementValidator.ts`](../webcases/requirementValidator.ts) (the pure, dependency-free
+  `we:driftCheck.ts` pattern): a `RequirementRecord` type for #714's `role`/`given`/`when`/`then` shape, and
   `validateRequirement(req, registries)` resolving every typed slot, returning a **slot-pointed finding**
   for each unresolved reference.
 - **Registries are injected, never imported** — keeps the core free of `_data` coupling and the governance
   **persona roster** a no-leakage injected input (#475; roster is plateau-app-owned, #141/#166). `role` is
   optional; resolved only when a roster is passed.
-- Grounding coverage today: `given.{intent,dimension,value}` → intents.json, `when.event` → semantics.json
-  term, `then.protocol` → protocols.json id, `then.tier` → the fixed L1/L2/L3 vocabulary — all **hard**
-  (error on miss). `then.observe` grounds to an **info** finding (protocols.json models no observable states
+- Grounding coverage today: `given.{intent,dimension,value}` → we:intents.json, `when.event` → we:semantics.json
+  term, `then.protocol` → we:protocols.json id, `then.tier` → the fixed L1/L2/L3 vocabulary — all **hard**
+  (error on miss). `then.observe` grounds to an **info** finding (we:protocols.json models no observable states
   yet — minting that registry is a separate future artifact), so protocol + tier still ground hard.
-- Tests ([`webcases/__tests__/requirementValidator.test.ts`](../webcases/__tests__/requirementValidator.test.ts))
+- Tests ([`we:webcases/__tests__/requirementValidator.test.ts`](../webcases/__tests__/requirementValidator.test.ts))
   run against the **live** registries: the #714 worked example (grounded to real terms — validation intent's
   `execution: blur`, the `Commit Policy` semantic term, the `validation` protocol at L1) validates green; a
   variant naming nonexistent terms fails with findings on exactly `given.dimension`, `when.event`,

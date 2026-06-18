@@ -21,9 +21,9 @@ Claimed in a batch; ran the inventory-vs-published audit (the first half of the 
 this audit as their shared input. Reclassified `story·5 → epic` (it conflated five deliverables) and
 `locus: frontierui` set.
 
-**FUI public site:** a hand-curated **Eleventy** site (`frontierui/.eleventy.js`, source `frontierui/src/`)
-driven by one hand-authored registry, `frontierui/src/_data/blocks.json`. Pages: `/`, `/blocks/` (catalog,
-iterates `blocks.json`), `/blocks/{id}/` (paginated detail), `/about/`. Nav (`src/_layouts/base.njk`):
+**FUI public site:** a hand-curated **Eleventy** site (`fui:frontierui/.eleventy.js`, source `frontierui/src/`)
+driven by one hand-authored registry, `fui:frontierui/src/_data/blocks.json`. Pages: `/`, `/blocks/` (catalog,
+iterates `fui:blocks.json`), `/blocks/{id}/` (paginated detail), `/about/`. Nav (`we:src/_layouts/base.njk`):
 Blocks · About · Web Everything (external). **Mechanism:** add an entry to a `_data/*.json` → a `.njk`
 template auto-renders it; there is **no filesystem auto-discovery**, so anything not in a registry is invisible.
 
@@ -31,8 +31,8 @@ template auto-renders it; there is **no filesystem auto-discovery**, so anything
 
 | Surface | In repo | Published | Status | Gap |
 |---|---|---|---|---|
-| Blocks | 19 impl dirs | 7 in `blocks.json` | **PARTIAL** | 12 blocks unregistered (data-grid, droplist, type-ahead, tree-select, stepper, navigation, master-detail, selection, for-each, lifecycle, audit, attributes, background-task-surface, resource-loader, transient). Note: `blocks.json` ids are **curated, not dir-names** (`simple-store`→`stores/`, `handler-expression-parser`→`parsers/`), so each needs an authored `{id,name,type,summary,protocol,weSpecPath}` + a `/blocks/{id}/` page. |
-| Demos | 24 `demos/*.html` | 0 | **GAP** | No `/demos/` catalog/gallery, no nav. Most mechanical to expose (scan `demos/*.html` → `demos.json` → catalog page; titles from H1/filename). |
+| Blocks | 19 impl dirs | 7 in `fui:blocks.json` | **PARTIAL** | 12 blocks unregistered (data-grid, droplist, type-ahead, tree-select, stepper, navigation, master-detail, selection, for-each, lifecycle, audit, attributes, background-task-surface, resource-loader, transient). Note: `fui:blocks.json` ids are **curated, not dir-names** (`simple-store`→`stores/`, `handler-expression-parser`→`parsers/`), so each needs an authored `{id,name,type,summary,protocol,weSpecPath}` + a `/blocks/{id}/` page. |
+| Demos | 24 `demos/*.html` | 0 | **GAP** | No `/demos/` catalog/gallery, no nav. Most mechanical to expose (scan `demos/*.html` → `we:demos.json` → catalog page; titles from H1/filename). |
 | Traits | 13+ (`blocks/**/traits/`) | 0 | **GAP** | No public trait catalog (the #713 trigger). Needs a registry + page; some are internal infra — curate. |
 | Plugs | 9 `web*` domains | 0 | **GAP** | No plugs index describing each domain. |
 | Adapters | 2 (`webdocs/adapters/`: storybook, mintlify) | 0 | **GAP** | No extensibility/adapters reference. |

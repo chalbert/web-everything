@@ -38,14 +38,14 @@ recipe rather than re-labelling. Decisions are targets, not rejections.**
 Five orthogonal axes, each pinned to the real tree:
 
 - **Which capability *tiers* to build on-device, and their *graduation benchmarks*** — the verdict is a
-  6-class problem (`scripts/design-refs/vision.mjs:15` `VERDICTS`); a classifier clears it, a VLM is a
+  6-class problem (`we:scripts/design-refs/vision.mjs:15` `VERDICTS`); a classifier clears it, a VLM is a
   separate tier. *Fork 1.*
 - **How the model is *built*** — distil from the corpus, fine-tune an open model, or train from scratch.
   The labeled set is collected by [#489](489-archive-quarantined-frames-persist-frame-verdict-pairs-as-a-/).
   *Fork 2.*
 - **Where it *runs*** — in-browser (WebGPU) vs native/local-process. *Fork 3.*
 - **Pricing *tiering* and the bridge** — on-device floor + API upgrade vs per-usage-only; the API
-  provider already exists (`scripts/design-refs/providers/anthropic-vision.mjs`) as the bridge. *Fork 4.*
+  provider already exists (`we:scripts/design-refs/providers/anthropic-vision.mjs`) as the bridge. *Fork 4.*
 - **Staying current — *re-assessment cadence* + *codified, re-applicable training*** — the frontier
   moves; the durable assets are the corpus + recipe + benchmark, not any one model. *Fork 5.*
 
@@ -97,7 +97,7 @@ never "rejected."
 
 - **A — In-browser via ONNX Runtime Web + WebGPU (recommended).** The truest "on-device, no install, no
   hosting" shape (the open-core *self-run* ideal, [#089](/backlog/089-monetization-product-ideas/)). A
-  ≲10 MB quantized classifier runs everywhere; transformers.js/ORT-Web is mature.
+  ≲10 MB quantized classifier runs everywhere; we:transformers.js/ORT-Web is mature.
 - **B — Native / local-process** (Core ML / llama.cpp / ONNX native). *Kept for the Tier-2 VLM* if it
   needs more than WebGPU gives on weaker devices; not needed for the classifier.
 
@@ -109,7 +109,7 @@ never "rejected."
 linear-cost rule?
 
 - **A — On-device floor + API/BYO-key bridge & upgrade (recommended).** Each tier ships on the hosted
-  API/BYO-key provider (`anthropic-vision.mjs`) immediately; as a tier graduates (Fork 1 benchmark), its
+  API/BYO-key provider (`we:anthropic-vision.mjs`) immediately; as a tier graduates (Fork 1 benchmark), its
   on-device model becomes the bundled, fixed-cost default, with the API staying as an optional
   higher-quality upgrade. Linear-safe at the floor, premium path on top, never blocked on the model.
 - **B — Per-usage / BYO-key only.** *Rejected as the end state:* can't underpin a flat subscription and
@@ -138,7 +138,7 @@ them config + a dated-revision log, not constants.)*
 ## Per-fork classification (recorded)
 
 Not a WE standard — an **implementation behind the existing swappable vision-provider seam**
-(`scripts/design-refs/vision.mjs` → `registerVisionProvider`), so the **no-leakage invariant holds**
+(`we:scripts/design-refs/vision.mjs` → `registerVisionProvider`), so the **no-leakage invariant holds**
 (only verdicts/outputs reach the standard). DI-injectable: the model *is* a registered provider.
 Whole-axis exposed: tiered + swappable. Most-permissive default: the in-browser classifier runs for
 everyone; richer/API is opt-in. Separate-and-decouple: classifier-tier and VLM-tier are distinct

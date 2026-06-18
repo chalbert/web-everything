@@ -4,7 +4,7 @@ workItem: story
 size: 8
 status: open
 parent: "746"
-blockedBy: ["851", "855"]
+blockedBy: ["843", "851", "855", "892"]
 locus: frontierui
 dateOpened: "2026-06-16"
 relatedProject: webdocs
@@ -75,7 +75,7 @@ Claimed in batch-2026-06-17; the pre-build trace surfaced two genuine blockers, 
    third-party components. Filed as **#851** (incumbent-component ingest adapter) and added as a
    `blockedBy` edge — the substrate this criterion needs before it can be built.
 2. **The WE→FUI wrapper-handoff is an open design seam (gates acceptance #1).** #821's generator
-   (`scripts/gen-wrapper/genWrapper.mjs`) is a **WE** script; this panel is **FUI**. *How* the FUI panel
+   (`we:scripts/gen-wrapper/genWrapper.mjs`) is a **WE** script; this panel is **FUI**. *How* the FUI panel
    obtains + live-tests the WE-generated React/Vue wrappers — build-time artifact handoff, a generated
    bundle the `fuiDemo` iframe loads, or a sandbox runtime — is **undecided**, and per *decisions-are-work-items*
    it should be settled in a decision item, not chosen mid-batch. The live-test sandbox (running generated
@@ -94,3 +94,24 @@ and added it as a `blockedBy` edge (*decisions-are-work-items*: the cross-repo h
 not a mid-batch improvisation). This item stays `open`, blocked on #855; once #855 ratifies, the consume-mode
 panel (criteria #1/#2) + the #851 reverse-ingest demo (#3) are buildable. Still locus:frontierui, story·8 —
 not a batch tail.
+
+### Update (2026-06-17, `/next 753`) — two more substrate blockers were unfiled; edge corrected
+
+#855 ratified (B2), so its prose blocker cleared — but the panel still kept surfacing Tier-A on the satisfied
+`blockedBy: [851, 855]` edge while **two real substrate prerequisites named in the #822/#855 rulings were
+never edges**:
+
+1. **`gen:wrapper` emits nothing today.** No block in `fui:blocks.json` carries a `tagName`, so `gen-cem`
+   projects **0 `customElement` declarations** and `gen:wrapper` emits nothing — verified by running both.
+   Authoring the `tagName` values is **[#843](/backlog/843-gen-cem-author-the-we-owned-tagname-value-emit-real-customel/)**
+   (the value-bearing half of #822, ratified by #841, now `blockedBy:[841]`-satisfied → **unblocked, size·2,
+   in WE**). Until #843 lands, the panel (criterion #1) has no generated wrappers to show. Added as a
+   `blockedBy` edge.
+2. **The generator is not FUI-side.** Per #855 B2 the FUI panel runs a generator (its own, or WE's reference
+   one vendored); `genWrapper` still lives in WE `scripts/`. Re-homing it is
+   **[#892](/backlog/892-re-home-genwrapper-as-fui-side-tooling-demote-we-copy-to-ref/)** — added as a
+   `blockedBy` edge.
+
+Net: the **real next slice on this line is #843** (in WE, unblocked, ratified, ~mechanical). #753 itself stays
+`open`, blocked on `[843, 851, 855, 892]`; it is the FUI capstone, not the next build. (fix-real-state, not a
+silent skip.)

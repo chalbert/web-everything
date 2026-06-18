@@ -32,7 +32,7 @@ Web-verified this pass: ASDLC.io (micro-commits, merge-to-main governance bounda
 
 | File | Action |
 |---|---|
-| `src/_data/researchTopics.json` | Added `agentic-sdlc-opinionated-practices` registry entry |
-| `src/_includes/research-descriptions/agentic-sdlc-opinionated-practices.njk` | Created the write-up (survey + classification catalog + findings) |
-| `reports/2026-06-15-agentic-sdlc-opinionated-practices.md` | This report |
+| `we:src/_data/researchTopics.json` | Added `agentic-sdlc-opinionated-practices` registry entry |
+| `we:src/_includes/research-descriptions/agentic-sdlc-opinionated-practices.njk` | Created the write-up (survey + classification catalog + findings) |
+| `we:reports/2026-06-15-agentic-sdlc-opinionated-practices.md` | This report |
 | `backlog/703-…md` | Resolved (graduatedTo the research topic) |

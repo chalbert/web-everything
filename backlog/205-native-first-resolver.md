@@ -43,15 +43,15 @@ and the [#025](/backlog/025-droplist-native-substrate-fork/) ruling.
 - **Status:** resolved (2026-06-08)
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
-  - **Resolver** — [capabilities/resolver.ts](../capabilities/resolver.ts): `Slot` (pin vs
+  - **Resolver** — [we:capabilities/resolver.ts](../capabilities/resolver.ts): `Slot` (pin vs
     `{policy:'native-first'}`), `resolveSlot()`, `evaluate()` (pure per-impl eligibility reports),
     `pickNativeFirst()` (eligible → lightest → native-tiebreak), `requiredCapabilitiesFor()` (intent
     union), `NoEligibleImplError` / `UnknownPolicyError`. Check-before-choose: eligibility computed for
-    every impl before a winner is picked. Re-exported from `capabilities/index.ts`.
-  - **Native marker** — `capabilityMatrix.json` `base-select` row gets `"native": true`; provider gains
+    every impl before a winner is picked. Re-exported from `we:capabilities/index.ts`.
+  - **Native marker** — `we:capabilityMatrix.json` `base-select` row gets `"native": true`; provider gains
     `isNative(impl)` (added to the `CapabilityProvider` interface + `StaticMatrixProvider`); the
     polyfill-ok count is the lightness cost proxy.
-  - **Both DoD branches proven** — [capabilities/__tests__/resolver.test.ts](../capabilities/__tests__/resolver.test.ts)
+  - **Both DoD branches proven** — [we:capabilities/__tests__/resolver.test.ts](../capabilities/__tests__/resolver.test.ts)
     (10 tests): native branch resolves the droplist slot to `base-select` on the shipped matrix; fallback
     branch resolves to `face` against a constrained-target provider (a required cap `capability-hard` on
     native) — the venue-agnostic point. Plus lightest, native-wins-ties, pin short-circuit,

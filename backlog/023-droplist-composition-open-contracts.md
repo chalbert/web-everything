@@ -35,8 +35,8 @@ specs should reflect distinct-element framing, not attribute configs of one elem
 ## Resolved — remaining contracts (1), (3), (2) (2026-06-08)
 
 **(1) Anchor split — settled by the [#136](/backlog/136-anchor-trait-behavior/) build.** The line is
-drawn: surface **binding is a behavior** (`Anchor.ts` — open/dismiss, `aria-expanded`), **positioning
-is a provider** (`Anchored.ts`, native CSS Anchor Positioning by default). The residual "which
+drawn: surface **binding is a behavior** (`fui:Anchor.ts` — open/dismiss, `aria-expanded`), **positioning
+is a provider** (`fui:Anchored.ts`, native CSS Anchor Positioning by default). The residual "which
 strategy engine for non-supporting browsers" question is *not* part of this contract — it's its own
 open item [#149](/backlog/149-anchor-positioning-strategy-provider/) (swappable DI strategy / Floating
 UI fallback).

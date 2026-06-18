@@ -37,7 +37,7 @@ The fork's apparent A-vs-B tension dissolves once the two cons are recognised as
   `readdirSync('blocks')`, **implementer-agnostic**, mirrors `check-demos`. **This is [#784](/backlog/784/)**
   (unblocked by this ratification). Green today with zero new entries.
 - **Check 2 — FUI-internal registered-name→spec gate (the value of Option B, re-homed).** Denominator = every
-  registered public name (`attributes.define(…)`); each must map to a `blocks.json` entry / WE spec. Catches
+  registered public name (`attributes.define(…)`); each must map to a `fui:blocks.json` entry / WE spec. Catches
   same-dir **sibling drift** that Check 1 is blind to (`nav:section`). **This is the build this story now
   carries** (see *Build* below).
 
@@ -47,7 +47,7 @@ FUI depending on FUI's `attributes.define` convention is legitimate (it's FUI ch
 portable standard reaching into FUI's habits). So the split yields **A's portability *and* B's drift-catching,
 each in its correct home, neither downside.** Precedent for FUI carrying its own drift gate alongside the
 WE-owned one already exists in the same file: `traits/` is excluded from the WE gate precisely because it is
-*"already governed by the separate `traits.json` drift gate"* (`check-standards.mjs:95-116`). Check 2 is that
+*"already governed by the separate `we:traits.json` drift gate"* (`we:check-standards.mjs:95-116`). Check 2 is that
 same pattern for registered blocks.
 
 I1 (sourcePath-anchored mapping) and I2 (`{__tests__, traits, renderers}` exclude-set) ratify as written — both
@@ -55,13 +55,13 @@ were forced invariants, not weighable. The full fork analysis is retained below 
 
 ## The mapping is already mechanized — `sourcePath`, not dir-name
 
-FUI's impl manifest (`frontierui/src/_data/blocks.json`, 23 entries, filled by the resolved
+FUI's impl manifest (`fui:frontierui/src/_data/blocks.json`, 23 entries, filled by the resolved
 [#737](/backlog/737/)) carries a **`sourcePath`** on every entry pointing at the dir it realizes
-(`src/_data/blocks.json:10` → `"sourcePath": "blocks/stores/simple"`). So coverage is *"does ≥1 manifest entry's
+(`fui:src/_data/blocks.json:10` → `"sourcePath": "blocks/stores/simple"`). So coverage is *"does ≥1 manifest entry's
 `sourcePath` fall within this dir?"* — and the item's "tricky" cases dissolve, because the mapping is **authored
 on the entry, never inferred from the dirname**:
 
-| Concern from the item | Handled by `sourcePath` — already true in `blocks.json` |
+| Concern from the item | Handled by `sourcePath` — already true in `fui:blocks.json` |
 |---|---|
 | name-mismatch (`navigation→nav-list`, `stores→simple-store`, `transient→transient-component`, `text-nodes→interpolation-text-node`, `audit→audit-trail`) | each entry's `sourcePath` points into the real dir; the `id` is decoupled from the dirname (exactly how CEM resolves tag names from `customElements.define()`, never the path — survey) |
 | multi-block (`parsers→` `handler-expression-parser` + `double-curly-bracket-parser` + `double-square-bracket-parser`) | three entries with `sourcePath` `blocks/parsers/handler-expression`, `…/text-node/double-curly`, `…/text-node/double-square` — many entries per dir is normal |
@@ -87,9 +87,9 @@ closest standard, resolves a unit's name from its `define()` marker, never its d
 **I2 — Infra exclude-set = `{__tests__, traits, renderers}`.** Each is *broken* to include:
 - `__tests__/` — tests.
 - `traits/` — FUI **trait** impls (`Highlight`/`Polling`/`Revealable`/`Sortable`), already governed by the
-  **separate** `traits.json` drift gate (`frontierui/scripts/check-standards.mjs:95-116`, the `walkTraits`
+  **separate** `we:traits.json` drift gate (`fui:frontierui/scripts/check-standards.mjs:95-116`, the `walkTraits`
   bidirectional check). No catalog block lives here; including it double-governs the same files.
-- `renderers/` — `blocks/renderers/index.ts:11` re-exports the **published** `@frontierui/jsx-runtime` package
+- `renderers/` — `we:blocks/renderers/index.ts:11` re-exports the **published** `@frontierui/jsx-runtime` package
   (#265); `renderers/data-grid/` is the data-grid block's internal render helpers. No standalone catalog block.
 
 House style for the exclusion is an explicit set (cf. `TRAIT_NON_TRAIT = {index, types}` in the same gate). The
@@ -102,8 +102,8 @@ The genuine on-merit either/or: what *unit* does the gate iterate to demand cove
 
 - **Option A — flat top-level dir + explicit infra exclude-set (recommended).** Denominator = each top-level
   `frontierui/blocks/<dir>` minus `{__tests__, traits, renderers}`; covered iff ≥1 manifest `sourcePath`
-  resolves within it. Implemented as a `readdirSync('blocks')` check in `frontierui/scripts/check-standards.mjs`
-  (#784), mirroring `check-demos` (`scripts/check-demos.mjs:42-77`) — the precedent #706 explicitly named.
+  resolves within it. Implemented as a `readdirSync('blocks')` check in `fui:frontierui/scripts/check-standards.mjs`
+  (#784), mirroring `check-demos` (`we:scripts/check-demos.mjs:42-77`) — the precedent #706 explicitly named.
   *Merit pros:* pure-filesystem and therefore **implementer-agnostic** (the completeness invariant is
   WE-standard-owned per #706 and must read any implementer's tree, not FUI's registration convention);
   deterministic; **green today**. *Merit con:* blind to **same-dir sibling drift** — a second registered
@@ -157,19 +157,19 @@ going finer. If you want siblings caught, go to B; otherwise flat-dir is simpler
 The ratified decision spins off the WE-owned dir gate to #784 and keeps the FUI-internal registered-name gate
 here. Scope:
 
-1. **Add Check 2 to `frontierui/scripts/check-standards.mjs`** — an FUI-internal drift rule that walks every
+1. **Add Check 2 to `fui:frontierui/scripts/check-standards.mjs`** — an FUI-internal drift rule that walks every
    registered public name (`attributes.define(…)` / `customElements.define(…)` across `blocks/`) and FAILS if a
-   name has no matching `src/_data/blocks.json` entry. Modeled on the sibling `traits.json` drift gate already in
-   the same file (`check-standards.mjs:95-116`); carries its own internal-name exclusion set (the
+   name has no matching `fui:src/_data/blocks.json` entry. Modeled on the sibling `we:traits.json` drift gate already in
+   the same file (`we:check-standards.mjs:95-116`); carries its own internal-name exclusion set (the
    `call`/`pipe`/`value` sub-parsers and trait registrations) as that gate does.
-2. **Resolve its first finding — `nav:section`.** `frontierui/blocks/navigation/NavSectionBehavior.ts` is a real,
-   registered (`nav:section` — `registerNavigation.ts:18`) **W3C-APG Disclosure Navigation** behavior with no WE
-   `blocks.json` entry — the exact sibling drift Check 2 exists to catch (invisible to #784's dir gate because
+2. **Resolve its first finding — `nav:section`.** `fui:frontierui/blocks/navigation/NavSectionBehavior.ts` is a real,
+   registered (`nav:section` — `we:registerNavigation.ts:18`) **W3C-APG Disclosure Navigation** behavior with no WE
+   `fui:blocks.json` entry — the exact sibling drift Check 2 exists to catch (invisible to #784's dir gate because
    `navigation/` is already covered by `nav-list`). Author the WE `nav-section` / disclosure-navigation block
-   spec + the FUI `blocks.json` entry so Check 2 goes green.
+   spec + the FUI `fui:blocks.json` entry so Check 2 goes green.
 
 **Acceptance:** Check 2 added; it red-flags `nav:section` before the spec lands and goes green after; no
-regression to Check 1 (#784) or the `traits.json` gate; `check:standards` green in frontierui.
+regression to Check 1 (#784) or the `we:traits.json` gate; `check:standards` green in frontierui.
 
 ---
 
@@ -178,7 +178,7 @@ regression to Check 1 (#784) or the `traits.json` gate; `check:standards` green 
 **Per-fork classification (against the architecture).** The gate is a **build-time devtools/check** (a
 `check-standards` rule) — no runtime, no DI, no Protocol; no new Block/Intent. The *completeness invariant* is
 WE-standard-owned (#706); the *denominator/gate code* is FUI's instantiation, living in
-`frontierui/scripts/check-standards.mjs` (built by [#784](/backlog/784/)). The most-flexible/least-coupling
+`fui:frontierui/scripts/check-standards.mjs` (built by [#784](/backlog/784/)). The most-flexible/least-coupling
 default (flat-dir, filesystem-only) is the most implementer-agnostic denominator that satisfies the invariant.
 
 **Where this sits.** Slice (b) of epic [#731](/backlog/731/). Ratified — unblocked #784 (Check 1: the WE-owned
@@ -188,13 +188,13 @@ behind (*"Impls with no WE spec id stay unregistered … those belong to the #73
 
 **Prior art** (full survey: report + `/research/fui-catalog-family-denominator/`): CEM analyzer (per
 module→declaration, tag name from `define()` not dirname), Storybook (`*.stories.*` file-glob marker), Nx
-(`project.json` marker files) — all key discovery off an explicit **marker** with the name **decoupled from the
+(`we:project.json` marker files) — all key discovery off an explicit **marker** with the name **decoupled from the
 directory path**, infra excluded by absence-of-marker. This confirms I1 and steelmans Fork-1 B.
 
 ## Build progress (resolved 2026-06-16)
 
-**Check 2 added** to `frontierui/scripts/check-standards.mjs` — the FUI-internal registered-name→spec drift gate. It walks every public name registered on disk (`attributes.define` / `customElements.define` across `blocks/`, skipping `__tests__`) and fails if a name isn't declared by some `blocks.json` entry's new `registeredNames` field; bidirectional (a declared name nothing registers is a phantom), modeled on the `traits.json` gate. 17 registered names now covered. Negative-tested: removing `nav:section` from `registeredNames` red-flags it ("sibling drift #783 Check 2"); restoring goes green. No regression to Check 1 (#784) or the traits gate; `check:standards` green in frontierui.
+**Check 2 added** to `fui:frontierui/scripts/check-standards.mjs` — the FUI-internal registered-name→spec drift gate. It walks every public name registered on disk (`attributes.define` / `customElements.define` across `blocks/`, skipping `__tests__`) and fails if a name isn't declared by some `fui:blocks.json` entry's new `registeredNames` field; bidirectional (a declared name nothing registers is a phantom), modeled on the `we:traits.json` gate. 17 registered names now covered. Negative-tested: removing `nav:section` from `registeredNames` red-flags it ("sibling drift #783 Check 2"); restoring goes green. No regression to Check 1 (#784) or the traits gate; `check:standards` green in frontierui.
 
 - Populated `registeredNames` on the 9 FUI entries that register public names (router, data-grid, background-task-surface, droplist, transient-component, for-each, event-behaviors, type-ahead, nav-list).
 
-**`nav:section` finding — resolved by mapping, not a new block (corrects a stale build premise).** The build text assumed `nav:section` had *no* WE spec and called for authoring a *new standalone nav-section block*. Traced to the tree, that premise is stale: **WE already specs `nav:section` as a behavior of the navigation module** — the WE `nav-list` entry's `blocks` map carries `NavSectionBehavior` (`attribute: "nav:section"`, disclosure-navigation `webStandards`), and `src/_includes/block-descriptions/nav-section.njk` documents it, explicitly "part of the Navigation module." So the correct, non-divergent resolution honoring WE's existing single-navigation-block model is to **declare `nav:section` on the existing FUI nav-list entry's `registeredNames`** (`["nav:list", "nav:section"]`), whose `weSpecPath` `/blocks/nav-list/` resolves. Promoting `nav:section` to a standalone block would split the navigation module for no benefit and create two FUI entries sharing `sourcePath blocks/navigation`. Check 2's goal — every registered name maps to a spec, caught at *name* granularity — is fully met. (Orphan `nav-section.njk` left as-is: pre-existing, harmless, out of scope.)
+**`nav:section` finding — resolved by mapping, not a new block (corrects a stale build premise).** The build text assumed `nav:section` had *no* WE spec and called for authoring a *new standalone nav-section block*. Traced to the tree, that premise is stale: **WE already specs `nav:section` as a behavior of the navigation module** — the WE `nav-list` entry's `blocks` map carries `NavSectionBehavior` (`attribute: "nav:section"`, disclosure-navigation `webStandards`), and `we:src/_includes/block-descriptions/nav-section.njk` documents it, explicitly "part of the Navigation module." So the correct, non-divergent resolution honoring WE's existing single-navigation-block model is to **declare `nav:section` on the existing FUI nav-list entry's `registeredNames`** (`["nav:list", "nav:section"]`), whose `weSpecPath` `/blocks/nav-list/` resolves. Promoting `nav:section` to a standalone block would split the navigation module for no benefit and create two FUI entries sharing `sourcePath blocks/navigation`. Check 2's goal — every registered name maps to a spec, caught at *name* granularity — is fully met. (Orphan `we:nav-section.njk` left as-is: pre-existing, harmless, out of scope.)

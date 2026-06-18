@@ -14,7 +14,7 @@ crossRef: { url: /adapters/jsx-adapter/, label: JSX Adapter }
 
 `demos/declarative-spa-jsx.{html,tsx}` predates the mirror-dialect decision: it is React-flavored
 (uses `className`, function event handlers throughout) and is **not registered** in
-`src/_data/demos.json`, so it is unsurfaced and out of step with the JSX adapter's current conventions.
+`we:src/_data/demos.json`, so it is unsurfaced and out of step with the JSX adapter's current conventions.
 
 Decide its fate: either **migrate** it to the mirror dialect (`class`, `on:*` string behaviors,
 `bind-*`) and register it as a proper demo, or **retire** it as superseded by the
@@ -26,6 +26,6 @@ the supported style.
 **Retired.** Deleted `demos/declarative-spa-jsx.{html,tsx}`. The JSX adapter is now better
 demonstrated by the mirror-dialect `jsx-adapter-demo` playground (and the SPA narrative by the
 existing `declarative-spa` / `declarative-spa-router` HTML demos), so the React-flavored file was
-redundant and a misleading-style risk. It was unregistered in `demos.json`, so nothing linked to it.
-The dated report `reports/2026-06-03-jsx-adapter-feature-mapping.md` still cites the file as a
+redundant and a misleading-style risk. It was unregistered in `we:demos.json`, so nothing linked to it.
+The dated report `we:reports/2026-06-03-jsx-adapter-feature-mapping.md` still cites the file as a
 historical example — left as-is, being a point-in-time snapshot.

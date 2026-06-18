@@ -33,7 +33,7 @@ epic conversion.
 - **#228 — the textbook safe split.** A concrete bug-fix with a named root cause; the root fix legally
   constructs a scoped autonomous element (flips the "upstream blocker" guard), then three *independent*
   lifecycle callbacks (remove / setAttribute / form-reset) each flip their own guard in
-  `autonomous-element-lifecycle.spec.ts`. Real parallelism among B/C/D. `blockedBy`/`parent` #167 carry to all slices.
+  `we:autonomous-element-lifecycle.spec.ts`. Real parallelism among B/C/D. `blockedBy`/`parent` #167 carry to all slices.
 - **#240 — a foundation slice that batches *now*, plus a decision-gated tail.** Slice A is a real
   decision-free regression fix: the published package copy is *missing* WE-canonical features (#241
   auto-define path, #245 inline string-event-handler branch), so re-syncing it from canonical + adding a

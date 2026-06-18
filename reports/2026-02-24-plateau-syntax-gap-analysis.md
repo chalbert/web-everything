@@ -7,7 +7,7 @@
 
 ## Question
 
-Does the current research page (`injector-syntax-proposals.njk`) fully capture all DSL syntax explored in the plateau-app, or has functionality been dropped?
+Does the current research page (`we:injector-syntax-proposals.njk`) fully capture all DSL syntax explored in the plateau-app, or has functionality been dropped?
 
 ## Recommendation
 
@@ -180,7 +180,7 @@ Registries are about **what kind of provider** (elements, contexts, stores). Dom
 
 ### Phase 1: Update Research Page (Documentation)
 
-Update `injector-syntax-proposals.njk` to include:
+Update `we:injector-syntax-proposals.njk` to include:
 
 1. Add new section **"Domain Concept"** between Layer 3 and Layer 4 (or as a subsection of Layer 4) explaining:
    - Registry vs Domain distinction
@@ -231,4 +231,4 @@ customScriptTypes.define('injector', InjectorScriptHandler);
 
 | File | Action |
 |------|--------|
-| `reports/2026-02-24-plateau-syntax-gap-analysis.md` | Created — this report |
+| `we:reports/2026-02-24-plateau-syntax-gap-analysis.md` | Created — this report |

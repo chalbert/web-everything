@@ -14,7 +14,7 @@ scaffold creates a new item as status:open, so an agent-scaffolded spin-off is b
 
 ## The hole (verified)
 
-`scaffold()` ([scripts/backlog.mjs:155](../scripts/backlog.mjs#L155)) renders a new item via `renderItem(...)`
+`scaffold()` ([we:scripts/backlog.mjs:155](../scripts/backlog.mjs#L155)) renders a new item via `renderItem(...)`
 with **`status: open`**, and the CLI's own success message says *"fill the digest (TODO line) and body, then
 re-run check:standards"* — i.e. authoring happens **after** the file exists. So there is a window —
 scaffold → (write digest, set `blockedBy`/`parent`, write body) — during which the item is already in every
@@ -34,7 +34,7 @@ authored**:
 1. **`scaffold` creates `status: active`** (+ stamp the creating session, the same way `reserve` records a
    `--session`), NOT `open`. An `active` item is excluded from every other session's batch pool, exactly
    like a claimed item.
-2. **An explicit `settle` verb flips `active -> open`** (`node scripts/backlog.mjs settle <NNN>`) once the
+2. **An explicit `settle` verb flips `active -> open`** (`node we:scripts/backlog.mjs settle <NNN>`) once the
    digest + `blockedBy`/`parent` edges + body are written — *that* is what publishes it. Explicit, not
    auto-on-digest-fill, because only the author knows the edges are final (auto would re-introduce the race
    for a digest-but-no-edges state).
@@ -60,7 +60,7 @@ authored**:
 
 This closes the **born-public, half-authored-item** race only. It is **complementary to**, not a replacement
 for, the deeper agent-separation gap: a shared working tree + single git index with **no file-level lock**
-(two sessions can still edit `blocks.json`/`intents.json`/configs concurrently and clobber). That is
+(two sessions can still edit `fui:blocks.json`/`we:intents.json`/configs concurrently and clobber). That is
 [#083](/backlog/083-agent-file-lock-coordination/) (resolved as a *design* — JIT ownership + queue — but with no
 running enforcement in the `claim`/`scaffold` path); the durable fix there is **git-worktree isolation per
 session**. Cross-ref #083; consider whether this item should fold into a re-opened #083 or stay its own

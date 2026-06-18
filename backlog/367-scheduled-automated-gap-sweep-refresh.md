@@ -4,7 +4,7 @@ workItem: story
 size: 3
 parent: "315"
 status: parked
-blockedBy: ["192", "366"]
+blockedBy: []
 dateOpened: "2026-06-12"
 tags: []
 ---
@@ -19,7 +19,7 @@ This item's graduation is gated on a **soft precondition the readiness loader ca
 cadence has proven stable manually*" (its own body), reaffirmed by #349's
 ruling — "*a manual skill first … graduate to scheduled only if it proves stable.*" Both hard blockers
 (#192 freshness engine, #366 manual skill) are resolved, so the DAG shows it ready — but #366 **resolved
-on 2026-06-13** (graduated to the `gap-sweep-rerun` skill + `/gap-sweep` + `scripts/gap-sweep-status.mjs`),
+on 2026-06-13** (graduated to the `gap-sweep-rerun` skill + `/gap-sweep` + `we:scripts/gap-sweep-status.mjs`),
 so there is **no manual-cadence track record yet** to prove stability. Automating now would contradict the
 #349 ruling.
 

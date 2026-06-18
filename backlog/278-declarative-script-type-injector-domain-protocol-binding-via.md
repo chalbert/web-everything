@@ -17,7 +17,7 @@ Pull-forward slice from #002's ruling (@domain = Protocol). Implement the runtim
 ## Progress
 
 **Resolved 2026-06-11.** Implemented at
-[plugs/webinjectors/declarativeInjector.ts](../plugs/webinjectors/declarativeInjector.ts), re-exported
+[we:plugs/webinjectors/declarativeInjector.ts](../plugs/webinjectors/declarativeInjector.ts), re-exported
 from the webinjectors barrel.
 
 **Note on the premise:** there is no existing `customScriptTypes` hook — `<script type="context">`
@@ -40,12 +40,12 @@ WeakSet, skips one malformed block with a warning rather than throwing), `resolv
 (explicit-then-implicit resolution). No module resolution — impl binding rides the module-resolution
 axis (#264/#271/#274), not this code. Build-time `provide`/`consume` DSL excluded (#279).
 
-**Demo-First:** [demos/declarative-injector-demo.html](../demos/declarative-injector-demo.html) —
+**Demo-First:** [we:demos/declarative-injector-demo.html](../demos/declarative-injector-demo.html) —
 Region A declares `@date/core` and a descendant resolves it (✓); Region B implicit resolve misses
 (isolation ✗); a Region-B element with `injector="dateProvider"` resolves despite being outside the
 subtree (✓). Verified in-browser against the live dev server (no page errors).
 
-**Tests:** [__tests__/unit/declarativeInjector.test.ts](../plugs/webinjectors/__tests__/unit/declarativeInjector.test.ts),
+**Tests:** [we:__tests__/unit/declarativeInjector.test.ts](../plugs/webinjectors/__tests__/unit/declarativeInjector.test.ts),
 14 tests — parse valid/falsy/6× malformed, subtree install keyed by domain, descendant inheritance,
 sibling isolation, explicit `injector="id"`, idempotency, one-bad-block resilience. All 185
 webinjectors tests pass; gate green.

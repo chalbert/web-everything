@@ -14,7 +14,7 @@
 > entirely open.
 
 A batch audit of every open backlog decision against the **prepared-fork shape**
-(Definition of Ready, `docs/agent/backlog-workflow.md` → *The prepared-fork shape*). Five
+(Definition of Ready, `we:docs/agent/backlog-workflow.md` → *The prepared-fork shape*). Five
 parallel review agents, clustered by subsystem. Read-only — no items were edited.
 
 ## Rubric (a decision is READY to ratify when its body has ALL of)
@@ -25,7 +25,7 @@ parallel review agents, clustered by subsystem. Read-only — no items were edit
 3. **"Recommended path at a glance" table** — one row per fork (default · alternative · confidence).
 4. **One `## Fork N` per fork** — crux+refs → options A/B with tradeoffs → **bold** default →
    *Rejected* branches with reason.
-5. **Research published** — `researchTopics.json` entry + `research-descriptions/{id}.njk`,
+5. **Research published** — `we:researchTopics.json` entry + `research-descriptions/{id}.njk`,
    linked via `relatedReport`, and `preparedDate` set.
 
 ## Headline
@@ -36,7 +36,7 @@ parallel review agents, clustered by subsystem. Read-only — no items were edit
   #173 menu/menubar) were both prepared *and resolved today* — they are the template, not open work.
 - Verdict split: **9 PARTIAL · 15 BARE.**
 - The near-universal missing step is the **`relatedReport` → `/research/` topic graduation**: many
-  items link the shared essay book report (`2026-06-06-front-end-platform-book.md`) rather than a
+  items link the shared essay book report (`we:2026-06-06-front-end-platform-book.md`) rather than a
   per-topic survey; and none has the glance table or `preparedDate`.
 
 ## Verdict table

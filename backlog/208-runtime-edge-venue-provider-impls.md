@@ -56,20 +56,20 @@ demonstrable first per POC pragmatism.
 - **Status:** resolved (2026-06-08)
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
-  - **Venue dimension + shared `degrade` primitive** — [capabilities/venues.ts](../capabilities/venues.ts):
+  - **Venue dimension + shared `degrade` primitive** — [we:capabilities/venues.ts](../capabilities/venues.ts):
     `Venue` (`build` default) + `VENUES`; `degrade(architecturalTier, support, polyfillClass)` lowers a
     static-matrix ceiling by live platform reality (native-ok → polyfill-ok, or → capability-hard for
     `capability`-class features; `undefined` support → fall back to the matrix; only ever lowers, never
     promotes); `DegradingProvider` overrides only `tier()` and defers all structure to a base provider;
     `providerForVenue` routing + `resolveAtVenue` (proves the **unchanged #205 resolver** runs in every venue).
-  - **Runtime feature-detection venue** — [capabilities/runtime.ts](../capabilities/runtime.ts):
+  - **Runtime feature-detection venue** — [we:capabilities/runtime.ts](../capabilities/runtime.ts):
     `BROWSER_DETECTORS` (13/14 caps; `cross-root-aria` deliberately undetectable → matrix fallback),
     `browserFeatureSupport` (injectable for deterministic tests), `createRuntimeProvider`.
-  - **Edge module-as-a-service venue** — [capabilities/edge.ts](../capabilities/edge.ts): `ClientHints`
+  - **Edge module-as-a-service venue** — [we:capabilities/edge.ts](../capabilities/edge.ts): `ClientHints`
     declared-profile (server-side, **not** UA sniffing) → `clientHintsSupport`; `equivalenceClass` (keys on
     the supported subset of requested caps, not the raw UA); `componentUrl` (`/c/droplist@1?caps=…`,
     URL-serializable ids); `EdgeChunkCache` (one chunk per equivalence class, shared across UAs);
-    `createEdgeProvider`. Wired defaults in [capabilities/index.ts](../capabilities/index.ts).
+    `createEdgeProvider`. Wired defaults in [we:capabilities/index.ts](../capabilities/index.ts).
   - **Tests** — 32 new (venues 15 / runtime 7 / edge 10): the `degrade` truth table, venue routing,
     feature-detection tiering + matrix fallback, equivalence-class cache sharing, the URL, and
     PE-degradation on a wrong guess (DoD).

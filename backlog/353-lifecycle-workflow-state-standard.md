@@ -11,8 +11,8 @@ crossRef: { url: /backlog/314-flagship-exercise-apps/, label: "Surfaced by exerc
 ---
 
 > **Resolved 2026-06-12 — codified.** Graduated to the **Web Lifecycle** project (`weblifecycle`,
-> `projects.json`) owning the **Lifecycle** protocol (`lifecycle`, `protocols.json`, draft;
-> normative body in `src/_includes/project-weblifecycle.njk` §`protocol-lifecycle`). The contract:
+> `we:projects.json`) owning the **Lifecycle** protocol (`lifecycle`, `we:protocols.json`, draft;
+> normative body in `we:src/_includes/project-weblifecycle.njk` §`protocol-lifecycle`). The contract:
 > declarative status set + transition map (`from→to` + guard + actor), a `CustomLifecycleProvider`
 > registry, and an observable transition event. Authorization is delegated to Web Guards; the event is
 > the composition seam for audit ([#357]). The runtime block that makes the loan app *conformant* is

@@ -17,7 +17,7 @@ Slice #085-D: a CustomValidationAdapter that emits a Pydantic model from the val
 
 ## Progress
 
-**Resolved 2026-06-11.** Shipped `validation-generation/adapters/pydantic.ts` — `pydanticAdapter`
+**Resolved 2026-06-11.** Shipped `we:validation-generation/adapters/pydantic.ts` — `pydanticAdapter`
 (`key: 'pydantic'`, `language: 'python'`) emitting a Pydantic v2 field line: constraints → `Field(...)`
 args (`min_length`/`max_length`/`pattern=r"…"`/`ge`/`le`/`multiple_of`), and `format`/`enum`/collection
 intents → the field *type* (`EmailStr`/`HttpUrl`/`Literal[…]`/`list`); a non-`required` field becomes
@@ -25,4 +25,4 @@ intents → the field *type* (`EmailStr`/`HttpUrl`/`Literal[…]`/`list`); a non
 separate `@field_validator`, so it is reported via `unsupported[]` rather than faked onto the field line.
 Added to the barrel + plug re-export.
 
-**Gate:** `adapters/pydantic.test.ts` 5 green; `tsc` clean; `check:standards` 0 errors (run at batch close).
+**Gate:** `we:adapters/pydantic.test.ts` 5 green; `tsc` clean; `check:standards` 0 errors (run at batch close).

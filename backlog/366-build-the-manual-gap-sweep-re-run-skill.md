@@ -19,19 +19,19 @@ Build a manual /-skill that re-runs the competitive coverage gap sweep (corpus #
 
 Delivered, agent-ready and idempotent. Three artifacts:
 
-- **`scripts/gap-sweep-status.mjs`** — the helper (no data mutation): bare run prints corpus/capability/
+- **`we:scripts/gap-sweep-status.mjs`** — the helper (no data mutation): bare run prints corpus/capability/
   coverage status + runs an **invariant gate** (capability-id uniqueness, coverage ids resolve to
   capabilities or declare `capabilityRefs`, summary counts match, triage present); `--snapshot` writes a
   dated baseline under `reports/gap-sweep-snapshots/`; `--baseline=PATH` prints the delta (corpus ±,
   capabilities ±, re-kinded, fileable-gaps ±, newly-tracked) and reports **no-op = idempotent**.
-- **`.claude/skills/gap-sweep-rerun/SKILL.md`** — the 7-step re-run procedure (snapshot → refresh corpus →
+- **`we:.claude/skills/gap-sweep-rerun/SKILL.md`** — the 7-step re-run procedure (snapshot → refresh corpus →
   re-extract → re-map + re-dedup → delta+gate → file NEW gaps only → stamp revision), encoding the #349
   contract (dated revisions, client-of-#192, idempotent).
-- **`.claude/commands/gap-sweep.md`** — the `/gap-sweep` alias routing to the skill.
+- **`we:.claude/commands/gap-sweep.md`** — the `/gap-sweep` alias routing to the skill.
 
 The invariant gate immediately earned its keep: it caught 4 coverage-gap ids that didn't match the
 capability matrix (`notification-toast`→`toast`, `date-time-picker`→`date-picker`, `drawer-sheet`→`drawer`,
 and `design-tokens-theming` as a synthetic gap now carrying `capabilityRefs`) — fixed. Verified: status +
 snapshot + a no-op self-diff all green; `check:standards` green. Scheduled/automated version is #367.
 
-**Graduated to** `.claude/skills/gap-sweep-rerun/` — gap-sweep-rerun skill + /gap-sweep command + scripts/gap-sweep-status.mjs.
+**Graduated to** `.claude/skills/gap-sweep-rerun/` — gap-sweep-rerun skill + /gap-sweep command + we:scripts/gap-sweep-status.mjs.

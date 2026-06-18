@@ -1,6 +1,6 @@
 # Research Report — Scoped Event Discrimination for Resource Loaders
 
-**Plan file**: `plans/scoped-event-resource.md`
+**Plan file**: `we:plans/scoped-event-resource.md`
 **Research page**: `/research/scoped-event-discrimination/`
 **Date**: 2026-02-23
 
@@ -62,5 +62,5 @@ The connection point is the `operation` key — events and trace spans share it,
 
 | File | Action |
 |------|--------|
-| `src/_data/researchTopics.json` | Added `scoped-event-discrimination` entry |
-| `src/_includes/research-descriptions/scoped-event-discrimination.njk` | New file (~300 lines) |
+| `we:src/_data/researchTopics.json` | Added `scoped-event-discrimination` entry |
+| `we:src/_includes/research-descriptions/scoped-event-discrimination.njk` | New file (~300 lines) |

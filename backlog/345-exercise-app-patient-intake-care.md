@@ -53,7 +53,7 @@ agent-ready slices.
 ## Progress
 
 - **Resolved 2026-06-14.** Derived the full requirements + scope for app E (patient intake & care
-  coordination) → [reports/2026-06-14-exercise-app-patient-intake-requirements.md](../reports/2026-06-14-exercise-app-patient-intake-requirements.md),
+  coordination) → [we:reports/2026-06-14-exercise-app-patient-intake-requirements.md](../reports/2026-06-14-exercise-app-patient-intake-requirements.md),
   mirroring the loan / auto-insurance / telecom-CPQ PRD shape. **Two headline exercises:** the strict
   **PHI permission / privacy / consent model** (role × resource × patient-relationship, redact/deny-by-
   default, break-the-glass + audit — primary webpermissions/webidentity + governance-persona exercise)

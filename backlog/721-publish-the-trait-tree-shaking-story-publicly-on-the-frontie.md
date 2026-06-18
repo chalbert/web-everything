@@ -20,6 +20,6 @@ Public documentation of the trait code-splitting / tree-shaking model on the Fro
 ## Progress
 
 - #716 (neutral trait-manifest contract) is resolved, so the page describes the bundler-agnostic model, not Vite specifics.
-- Added `src/traits.njk` (permalink `/traits/`) on the Frontier UI website covering all five required points: traits as the code-splitting unit, the scan → manifest → per-trait-chunk pipeline, lazy/eager/lazy+preload delivery, the composed-component "declare only the traits you bind" pattern, and the cross-bundler + MaaS reach.
-- Added a "Traits" nav entry in `src/_layouts/base.njk`. (locus set to frontierui — work lives on the FUI site per the docs-rendering boundary.)
+- Added `fui:src/traits.njk` (permalink `/traits/`) on the Frontier UI website covering all five required points: traits as the code-splitting unit, the scan → manifest → per-trait-chunk pipeline, lazy/eager/lazy+preload delivery, the composed-component "declare only the traits you bind" pattern, and the cross-bundler + MaaS reach.
+- Added a "Traits" nav entry in `we:src/_layouts/base.njk`. (locus set to frontierui — work lives on the FUI site per the docs-rendering boundary.)
 - Note: #739 (fui-traits catalog) will extend `/traits/` with the per-trait catalog and reuse this Traits nav entry.

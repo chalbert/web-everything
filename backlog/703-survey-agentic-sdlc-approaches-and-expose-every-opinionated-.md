@@ -73,7 +73,7 @@ practice shows up as a knob a project can dial, which is itself the differentiat
 ## Progress
 
 - **Resolved 2026-06-15 (batch-2026-06-15).** Published `/research/agentic-sdlc-opinionated-practices/`
-  (registry entry in `researchTopics.json` + write-up partial + report). Surveyed the field
+  (registry entry in `we:researchTopics.json` + write-up partial + report). Surveyed the field
   (web-verified: ASDLC.io, Tessl, CodeRabbit, Swarmia, arXiv 2509.06216; candidate-only: GitOps/OSCAL/SPDX,
   arXiv 2510.19692, Forrester/HCLTech/PwC, Dash0/Augment — flagged in the topic, no over-claiming) and
   classified every opinionated practice per the WE fork-existence + dimension-vs-fixed-mechanic tests.
@@ -84,4 +84,4 @@ practice shows up as a knob a project can dial, which is itself the differentiat
   squash/merge), each defaulting most-flexible. No classification is a blocking fork; all are defaults to
   ratify when #672 builds the registries.
 - **Verified:** 11ty real build wrote the page (37KB, title renders); research-topic count 89→90;
-  `check:standards` green (AGENTS.md inventory regenerated).
+  `check:standards` green (we:AGENTS.md inventory regenerated).

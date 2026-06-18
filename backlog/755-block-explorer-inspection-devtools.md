@@ -44,7 +44,7 @@ Hard-blocked on **#727** (the live render to inspect). The wiring graph shares d
 
 Resolved 2026-06-16 (locus: frontierui — the half built here). Per the #809 layer split, this story carried the **FUI-workbench rendered-component inspectors half**; the **WE-docs standards-overlay half** is carved to **#832** (its substrate #747/#364/#092 is all resolved, so it's ready).
 
-FUI half (`frontierui/workbench/mount.ts` + `registry.ts`), all host-side DOM, no protocol:
+FUI half (`fui:frontierui/workbench/mount.ts` + `we:registry.ts`), all host-side DOM, no protocol:
 - **Source pane** — the rendered tree's markup (host-side `outerHTML`) + live attributes.
 - **ARIA pane** — the resolved roles + `aria-*` the intent attributes produce, host + key descendants (the intent→platform-vocab mapping made legible).
 - **Computed pane** — key computed styles (display, the token-driven listbox max-height/overflow, input value/aria-expanded).

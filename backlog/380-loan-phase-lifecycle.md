@@ -22,12 +22,12 @@ with role-scoped, guarded transitions. Drives the **lifecycle/workflow-state** c
 ## Progress (resolved 2026-06-14)
 
 The standard ([#353] → `weblifecycle`/`lifecycle`) and its runtime block ([#391] →
-`blocks/lifecycle/LifecycleProvider.ts`) already exist and the loan app already *registered* and
+`fui:blocks/lifecycle/LifecycleProvider.ts`) already exist and the loan app already *registered* and
 *transitioned* against them. S2 completed the two functional gaps that made it a real guarded,
 role-scoped state machine rather than a permissive one:
 
 - **Real guard resolution** — wired a `GuardResolver` into the loan's `DefaultLifecycleProvider`
-  ([demos/loan-origination/app.ts](../demos/loan-origination/app.ts)) that evaluates the definition's
+  ([we:demos/loan-origination/app.ts](../demos/loan-origination/app.ts)) that evaluates the definition's
   named guards against live domain state: `meets-eligibility` → the rules engine has not found the file
   `ineligible` (gates underwriting → approved-with-conditions); `conditions-cleared` → every PTD/PTC
   condition is `cleared`/`waived` (gates approved → clear-to-close). Unknown entity/guard → deny (safe).

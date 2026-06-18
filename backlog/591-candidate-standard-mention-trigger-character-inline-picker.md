@@ -21,12 +21,12 @@ No design exists yet. The generic inline-trigger surface — an editable region 
 
 The survey decomposes the inline-trigger pattern into orthogonal axes, each pinned to the real tree. Only the first two are genuine either/ors; the rest are *exposed axes / composed primitives*, listed under **Supported by default**.
 
-- **Home & shape** (Fork 1) — does the pattern live as a mode of the `autocomplete` block ([blocks.json:82](src/_data/blocks.json#L82)), or as its own standard, and if its own, intent-only or **block + intent**? The trigger-detection engine is runnable behavior beside the declarative dimensions.
+- **Home & shape** (Fork 1) — does the pattern live as a mode of the `autocomplete` block ([fui:blocks.json:82](src/_data/blocks.json#L82)), or as its own standard, and if its own, intent-only or **block + intent**? The trigger-detection engine is runnable behavior beside the declarative dimensions.
 - **Scope boundary** (Fork 2, divergent) — does the standard own the *insertion* (commit into a document model), or stop at *detection* and emit the resolved selection for the consumer to commit? This decides whether it depends on the rich-text standard ([#590](/backlog/590-candidate-standard-rich-text-contenteditable-editing/)).
-- **Trigger set & boundary/query policy** — trigger chars, `startOfLine`, `allowedPrefixes`, `allowSpaces`, `minQueryLength`, `maxLength`. Open config + dimensions (mirrors the `type-ahead` intent's matching/reset/wrap dimensions at [intents.json:1439](src/_data/intents.json#L1439)).
-- **Caret anchoring** — the popover tethers to the caret (a *virtual element*), composing the `anchor` intent ([intents.json:1204](src/_data/intents.json#L1204)).
-- **Results UI** — a filtered listbox, composing the general picker surface ([#588](/backlog/588-build-the-general-picker-surface-composed-browse-search/)) / `autocomplete` ([blocks.json:82](src/_data/blocks.json#L82)) / `type-ahead` ([blocks.json:109](src/_data/blocks.json#L109)) blocks.
-- **A11y** — APG editable combobox over the editable region (`input` at [intents.json:1108](src/_data/intents.json#L1108)), match counts via `live-region-status` ([intents.json:155](src/_data/intents.json#L155)).
+- **Trigger set & boundary/query policy** — trigger chars, `startOfLine`, `allowedPrefixes`, `allowSpaces`, `minQueryLength`, `maxLength`. Open config + dimensions (mirrors the `type-ahead` intent's matching/reset/wrap dimensions at [we:intents.json:1439](src/_data/intents.json#L1439)).
+- **Caret anchoring** — the popover tethers to the caret (a *virtual element*), composing the `anchor` intent ([we:intents.json:1204](src/_data/intents.json#L1204)).
+- **Results UI** — a filtered listbox, composing the general picker surface ([#588](/backlog/588-build-the-general-picker-surface-composed-browse-search/)) / `autocomplete` ([fui:blocks.json:82](src/_data/blocks.json#L82)) / `type-ahead` ([fui:blocks.json:109](src/_data/blocks.json#L109)) blocks.
+- **A11y** — APG editable combobox over the editable region (`input` at [we:intents.json:1108](src/_data/intents.json#L1108)), match counts via `live-region-status` ([we:intents.json:155](src/_data/intents.json#L155)).
 
 ## Ruling — RATIFIED 2026-06-14
 
@@ -85,7 +85,7 @@ The A snippet runs in any editable region today and *composes* #590 (token adapt
 
 **Crux:** is the inline-trigger pattern a mode of an existing block, or its own standard — and if its own, intent-only or block + intent?
 
-- **A — Mode of the `autocomplete` block** ([blocks.json:82](src/_data/blocks.json#L82)). *Rejected:* couples a text-region-watching/detection concern into a menu block; no surveyed system folds them; violates the separation bias.
+- **A — Mode of the `autocomplete` block** ([fui:blocks.json:82](src/_data/blocks.json#L82)). *Rejected:* couples a text-region-watching/detection concern into a menu block; no surveyed system folds them; violates the separation bias.
 - **B — Intent-only separate standard.** Declares the dimensions, ships no engine. *Rejected:* the trigger engine (boundary match → query slice → caret anchor → route) is genuinely runnable behavior, so intent-only leaves every consumer to re-implement the mechanics inconsistently — it under-specifies the thing that makes the pattern a pattern.
 - **C — New block + intent.** A runnable trigger-detection block (the "Suggestion utility" equivalent) backed by an intent for the declarative dimensions, composing the general picker surface ([#588](/backlog/588-build-the-general-picker-surface-composed-browse-search/)) for results. *Merit:* matches all prior art — ProseMirror/Tiptap `Suggestion`, GitHub `<text-expander>`, Lexical `useBasicTypeaheadTriggerMatch` all ship a detection engine + config; lets the standard own the mechanics once.
 
@@ -109,8 +109,8 @@ These are *support-all / expose-the-axis / compose-existing* — recorded so the
 - **Trigger set → open config registry.** `@` (people), `:` (emoji), `#` (channels/tags), `/` (commands) are UX *conventions* no body standardizes (Slack/Discord/Notion/GitHub converge). Per Config-Extends-Platform-Default + Intents-open-design: the platform flavor ships the convention chars; a project extends them; the standard hardcodes no enum.
 - **Boundary / query policy → dimensions, most-permissive defaults.** `startOfLine`, `allowedPrefixes` (null = any), `allowSpaces`, `minQueryLength`, `maxLength` — the orthogonal knobs every engine exposes (Tiptap `Suggestion`; Lexical `{minLength: 1, maxLength: 75, allowWhitespace}`). The restriction is the author's opt-in.
 - **Insertion modes → both supported** (downstream of Fork 2-A). `text` (works in any editable region — the default) and `token` (composes #590's document model). The standard provides reference adapters for both; the consumer chooses.
-- **Caret anchoring → composes the `anchor` intent** ([intents.json:1204](src/_data/intents.json#L1204)) via a **virtual/caret anchor element** ([/research/virtual-elements/](/research/virtual-elements/)). `Range.getBoundingClientRect()` in `contenteditable`; a mirror-div caret measurement in `<input>`/`<textarea>`. Collision (flip/shift) is load-bearing, not cosmetic.
-- **Results UI → composes the general picker surface** ([#588](/backlog/588-build-the-general-picker-surface-composed-browse-search/)) / `autocomplete` ([blocks.json:82](src/_data/blocks.json#L82)); never reinvented.
+- **Caret anchoring → composes the `anchor` intent** ([we:intents.json:1204](src/_data/intents.json#L1204)) via a **virtual/caret anchor element** ([/research/virtual-elements/](/research/virtual-elements/)). `Range.getBoundingClientRect()` in `contenteditable`; a mirror-div caret measurement in `<input>`/`<textarea>`. Collision (flip/shift) is load-bearing, not cosmetic.
+- **Results UI → composes the general picker surface** ([#588](/backlog/588-build-the-general-picker-surface-composed-browse-search/)) / `autocomplete` ([fui:blocks.json:82](src/_data/blocks.json#L82)); never reinvented.
 
 ## Forced invariants (ratify, not weigh)
 
@@ -130,7 +130,7 @@ These are *support-all / expose-the-axis / compose-existing* — recorded so the
 
 - **Status:** RESOLVED 2026-06-14 — both forks ratified (Fork 1 → C block + intent; Fork 2 → A detection-only). Graduated to build [#620](/backlog/620-build-the-inline-trigger-detection-block-intent/) (`blockedBy` #588).
 - **Branch:** docs/standard-authoring-workflow
-- **Done:** prior-art survey (GitHub `<text-expander>`, ProseMirror/Tiptap `Suggestion`, Lexical typeahead, WAI-ARIA APG editable combobox) → published as `/research/inline-trigger-mention-pattern/` (researchTopics.json entry + njk write-up) + session report `reports/2026-06-14-inline-trigger-mention-pattern.md`. Item rewritten to prepared-fork shape, then added an **Examples** section (four instances + the Fork 2-A vs 2-B code asymmetry). Both forks ratified — see `## Ruling`.
+- **Done:** prior-art survey (GitHub `<text-expander>`, ProseMirror/Tiptap `Suggestion`, Lexical typeahead, WAI-ARIA APG editable combobox) → published as `/research/inline-trigger-mention-pattern/` (we:researchTopics.json entry + njk write-up) + session report `we:reports/2026-06-14-inline-trigger-mention-pattern.md`. Item rewritten to prepared-fork shape, then added an **Examples** section (four instances + the Fork 2-A vs 2-B code asymmetry). Both forks ratified — see `## Ruling`.
 - **Next:** work the build [#620](/backlog/620-build-the-inline-trigger-detection-block-intent/) once #588 (general picker surface) lands.
 - **Notes:** key decoupling finding — detection-only keeps #591 independent of #590 (composed, not blocked). The build is `blockedBy` #588; the decision needed nothing resolved.
 </content>

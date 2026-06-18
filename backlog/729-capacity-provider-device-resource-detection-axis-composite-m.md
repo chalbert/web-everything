@@ -16,7 +16,7 @@ tags: [capabilities, provider-seam, device-capacity, client-hints, composite, de
 
 **Prepared — ready to ratify.** No new design exists yet; the **three** forks below are grounded in a
 prior-art survey published as the [`device-capacity-provider`](/research/device-capacity-provider/)
-research topic (session report `reports/2026-06-15-device-capacity-provider.md`). Each fork carries a
+research topic (session report `we:reports/2026-06-15-device-capacity-provider.md`). Each fork carries a
 **bold** recommended default; the glance table says where judgment is actually needed. The survey
 **reshaped** the original framing — it added Fork 2 (the scalar-vs-bucket output shape) and excluded
 battery as a broken branch rather than an option.
@@ -34,22 +34,22 @@ The concern decomposes into three orthogonal axes, each pinned to the real tree:
 1. **Where the device-capacity axis lives** — capacity signals (`navigator.hardwareConcurrency`,
    `navigator.deviceMemory`, `navigator.connection.*`, GPU tier) are *scalar runtime measurements*,
    categorically unlike the 3-state polyfill `Tier` union the feature provider uses
-   ([`capabilities/provider.ts:20`](../capabilities/provider.ts#L20)). Do they get their own
+   ([`we:capabilities/provider.ts:20`](../capabilities/provider.ts#L20)). Do they get their own
    contract beside [`CapabilityProvider`](../capabilities/provider.ts#L73), or overload it?
 2. **The output shape of a capacity read** — a raw scalar (`deviceMemory: 8`), a normalized coarse
    bucket (`device-tier: 'high'`), or both? The feature provider answers with a single `Tier`
-   ([`provider.ts:75`](../capabilities/provider.ts#L75)); capacity has no equivalent settled shape,
+   ([`we:provider.ts:75`](../capabilities/provider.ts#L75)); capacity has no equivalent settled shape,
    and the prior-art combinators all derive a bucket from a raw measurement.
 3. **How multiple providers combine** — the resolver consults exactly one provider per scope today
-   ([`venues.ts:150` `providerForVenue`](../capabilities/venues.ts#L150)); the user wants different
+   ([`we:venues.ts:150` `providerForVenue`](../capabilities/venues.ts#L150)); the user wants different
    check-domains to route to different sources (feature→runtime, capacity→GPU lib, network→edge).
 
 The decisive survey finding tying these together: **signal availability is not uniform across venues.**
 `hardwareConcurrency` and GPU-tier are runtime-only (no request header carries them), while
 `deviceMemory` (`Sec-CH-Device-Memory`) and `Save-Data` also resolve at the **edge**. That is exactly
 the `Venue` dimension the feature provider already models
-([`venues.ts:38`](../capabilities/venues.ts#L38)) and the `undefined`-means-unknown degrade contract
-([`venues.ts:51` `PlatformSupport`](../capabilities/venues.ts#L51)) — so the capacity axis should
+([`we:venues.ts:38`](../capabilities/venues.ts#L38)) and the `undefined`-means-unknown degrade contract
+([`we:venues.ts:51` `PlatformSupport`](../capabilities/venues.ts#L51)) — so the capacity axis should
 **reuse** that machinery, which is itself an argument for a sibling provider over a parallel path.
 
 **Detection locus is itself a flexible dimension — capacity reads can run *in* or *out of* the
@@ -90,7 +90,7 @@ mandated):
 ## Fork 1 — where the device-capacity axis lives
 
 **Crux.** Device signals are scalar measurements; the feature provider's `Tier` union
-([`provider.ts:20`](../capabilities/provider.ts#L20)) is a 3-state polyfillability class. A capacity
+([`we:provider.ts:20`](../capabilities/provider.ts#L20)) is a 3-state polyfillability class. A capacity
 read (`deviceMemory: 8`) doesn't fit a feature tier. Do they share one registry or get two?
 
 - **A — separate `CapacityProvider` contract, same registration pattern.** *(recommended)* A sibling
@@ -102,7 +102,7 @@ read (`deviceMemory: 8`) doesn't fit a feature tier. Do they share one registry 
   not a Protocol (DI-injectable provider seam, no multi-vendor wire format); DI-injectable = yes.
 - B — overload the existing `CapabilityProvider` with new capability ids for device signals. One
   registry, but conflates measured scalars with feature tiers — the `tier()` method
-  ([`provider.ts:75`](../capabilities/provider.ts#L75)) returns a `Tier`, which can't carry
+  ([`we:provider.ts:75`](../capabilities/provider.ts#L75)) returns a `Tier`, which can't carry
   `deviceMemory: 8` without widening the union for every feature consumer. *Rejected* unless A's
   second contract proves to duplicate the first — the value semantics genuinely differ, so the burden
   of proof on combining is not met.
@@ -127,7 +127,7 @@ keeps a raw measurement *and* derives a coarse bucket the call site actually con
 
 ## Fork 3 — how multiple providers combine
 
-**Crux.** `providerForVenue` ([`venues.ts:150`](../capabilities/venues.ts#L150)) returns exactly one
+**Crux.** `providerForVenue` ([`we:venues.ts:150`](../capabilities/venues.ts#L150)) returns exactly one
 provider per scope; the user wants per-check routing (feature checks → runtime feature-detection,
 capacity → the GPU lib, network → edge `Save-Data`).
 
@@ -136,7 +136,7 @@ branch on this ballot; it composes with whichever wins. See "Not a branch" after
 
 - **A — a `CompositeProvider` that routes by check-domain.** *(recommended)* A provider holding a
   `{ domain → provider }` map that dispatches each query to its configured source, satisfying the
-  **same** interface so the `native-first` resolver ([`resolver.ts:180`](../capabilities/resolver.ts#L180))
+  **same** interface so the `native-first` resolver ([`we:resolver.ts:180`](../capabilities/resolver.ts#L180))
   and venue selection run unchanged. Deterministic, declarative routing table; composes cleanly with
   Fork 1's sibling provider (feature domain → `CapabilityProvider`, capacity domain → `CapacityProvider`).
   *Sub-decision:* route by **coarse domain** (feature / capacity / network as the registration unit)
@@ -155,13 +155,13 @@ domain needs fallback. It is listed here only to record that "we might want fall
 reason to reject the simple by-domain map now.
   - *Considered & set aside as the primary router: a `canDetect(dimension)` predicate on each provider*
     (the chain-of-responsibility / capability-introspection shape; idiomatic here — `isNative(impl)`
-    at [`provider.ts:86`](../capabilities/provider.ts#L86) is already a `can*` predicate). It looks
+    at [`we:provider.ts:86`](../capabilities/provider.ts#L86) is already a `can*` predicate). It looks
     like a more granular alternative to the by-domain map, but it is **not a rival to 3-A** — it is a
     *spelling of this 3-B fallback chain* (ask each provider in turn, first that claims the dimension
     wins), not a routing-granularity choice. Two reasons it doesn't displace the by-domain map as the
     primary mechanic: **(1)** the case it would buy — non-uniform signal availability across venues
     (edge answers `deviceMemory` but not `cores`/GPU) — is *already* covered by the orthogonal
-    `undefined`-means-unknown / `PlatformSupport` degrade contract ([`venues.ts:51`](../capabilities/venues.ts#L51)):
+    `undefined`-means-unknown / `PlatformSupport` degrade contract ([`we:venues.ts:51`](../capabilities/venues.ts#L51)):
     by-domain decides *ownership*, the degrade contract decides *availability in this venue*, and
     folding them into one predicate conflates two axes. **(2)** A by-domain map is statically
     inspectable (read one line → know the source) and unambiguous by construction; `canDetect` makes

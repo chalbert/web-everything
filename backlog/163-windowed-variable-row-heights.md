@@ -17,11 +17,11 @@ crossRef: { url: /backlog/145-windowed-scroll-height-driven-path/, label: "#145 
 # Add variable per-row height support to `windowed`
 
 > **Premise corrected (2026-06-10, after #145's live build).** #145 shipped against the live Frontier
-> UI impl (`frontierui/blocks/droplist/Windowed.ts`) with a **fixed `itemHeight` option only** — there
+> UI impl (`fui:frontierui/blocks/droplist/Windowed.ts`) with a **fixed `itemHeight` option only** — there
 > is *no* measured-uniform fallback (the `#itemHeightPx()` measure-one-row path described below was the
 > abandoned plateau design, never built live). So this item also covers the *measured* case from
 > scratch. Generalise the pure helpers `computeScrollWindow` / `spacerHeights`, and extend the
-> real-layout harness **`frontierui/blocks/droplist/__tests__/e2e/windowed-scroll.spec.ts` +
+> real-layout harness **`fui:frontierui/blocks/droplist/__tests__/e2e/windowed-scroll.spec.ts` +
 > `frontierui/demos/windowed-scroll.{html,ts}`** (NOT the dead `plateau/…` paths referenced below).
 
 #145 built the scroll/height-driven path on a **uniform** row-height assumption: a fixed `itemHeight`
@@ -40,7 +40,7 @@ Build the variable-height path:
   rows, refining as they scroll into view (the standard "estimated size + correction" approach).
 - Keep the keyboard/active path coherent with the variable offsets (scroll-active-into-view uses the
   row's real cumulative offset, not `index * itemHeight`).
-- Verify with the same real-layout Playwright harness #145 added (`plateau/e2e/windowed-scroll.spec.ts`
+- Verify with the same real-layout Playwright harness #145 added (`we:plateau/e2e/windowed-scroll.spec.ts`
   + the `__demos__/windowed-scroll` demo) — extend it with rows of mixed heights.
 
 Acceptance: `windowed` renders the correct visible slice and a faithful scrollbar for a long list whose
@@ -49,7 +49,7 @@ rows have **different** heights, with the active-always-mounted invariant intact
 ## Progress (2026-06-10)
 
 - **Status:** resolved — built against the live Frontier UI impl
-  (`frontierui/blocks/droplist/Windowed.ts`), extending #145's scroll path.
+  (`fui:frontierui/blocks/droplist/Windowed.ts`), extending #145's scroll path.
 - **Done:**
   - New opt-in **`measure`** mode (enables the scroll path on its own — no `itemHeight` needed; when
     both set, `measure` wins). Options: `estimatedItemHeight` (fallback for unmeasured rows, default
@@ -67,14 +67,14 @@ rows have **different** heights, with the active-always-mounted invariant intact
     stays mounted out-of-flow at its real cumulative offset.
   - Render refactor: factored `#syncWindowNodes` (mount/unmount + active backstop) shared by the fixed
     `#renderScroll` and the new `#renderVariable`; #145's fixed path is behaviourally unchanged.
-  - Unit tests (`__tests__/behaviors.test.ts`, 28→37): 5 pure variable-math cases + 4 synthetic-layout
+  - Unit tests (`fui:__tests__/behaviors.test.ts`, 28→37): 5 pure variable-math cases + 4 synthetic-layout
     integration tests (via a `measureRow` override: visible-slice-only, **windows on measured offsets
     not the uniform estimate**, active-mounted-off-window, keyboard-scrolls-far-row-into-view).
   - Real-layout proof: demo `demos/windowed-variable.{html,ts}` (500 rows, every 5th double-height) +
-    `blocks/droplist/__tests__/e2e/windowed-variable.spec.ts` (4 tests): visible-slice-only, **scrollbar
+    `fui:blocks/droplist/__tests__/e2e/windowed-variable.spec.ts` (4 tests): visible-slice-only, **scrollbar
     converges to the true summed height (18000px = 100×60 + 400×30) after a full measure pass**,
     active-off-window stays mounted (`position:absolute`), zero console errors.
 - **Gate:** FUI unit **1366 passed / 7 skipped (88 files)**, windowed e2e **10/10** (fixed + variable),
   WE `check:standards` **0 errors**.
 
-**Graduated to** `frontierui/blocks/droplist/Windowed.ts` — variable/measured scroll path — measure mode; buildOffsets/computeVariableWindow; cumulative-offset binary search; e2e/windowed-variable.spec.ts.
+**Graduated to** `fui:frontierui/blocks/droplist/Windowed.ts` — variable/measured scroll path — measure mode; buildOffsets/computeVariableWindow; cumulative-offset binary search; fui:e2e/windowed-variable.spec.ts.

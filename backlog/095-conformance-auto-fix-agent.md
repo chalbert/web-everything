@@ -64,22 +64,22 @@ there.
 - **Status:** resolved (MVP shipped 2026-06-08)
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
-  - `check-standards.mjs` gained a `--json` mode emitting structured failure
+  - `we:check-standards.mjs` gained a `--json` mode emitting structured failure
     descriptors (the #089-idea-1 machine-readable feed); `deprecated-status`
     enriched with `{ kind, entity, id, file, field, from, to }`. Human output
     unchanged when the flag is absent.
-  - `scripts/autofix/engine.mjs` — pure, fs-free engine mirroring
-    `upgraderEngine.ts`: `CustomFixer` contract + `CustomFixerRegistry`
+  - `we:scripts/autofix/engine.mjs` — pure, fs-free engine mirroring
+    `we:upgraderEngine.ts`: `CustomFixer` contract + `CustomFixerRegistry`
     (replace-by-id) + the bounded, verify-gated `autofix()` loop (propose →
     apply → re-verify → accept / revert-and-give-up / skip).
   - Deterministic reference fixer `reference:deprecated-status` — surgical
     string edit (anchors on the id, rewrites only the one field value, so the
     diff stays reviewable).
-  - `scripts/conformance-autofix.mjs` CLI + `npm run autofix` (and `--dry-run`),
+  - `we:scripts/conformance-autofix.mjs` CLI + `npm run autofix` (and `--dry-run`),
     wiring the engine to the live suite via spawned `check:standards --json`.
-  - vitest (`scripts/autofix/__tests__/engine.test.mjs`, 6 tests): green path,
+  - vitest (`we:scripts/autofix/__tests__/engine.test.mjs`, 6 tests): green path,
     both revert paths (target not cleared / new failure introduced), skipped
-    (no fixer), surgical-edit byte-fidelity. `vitest.config.ts` include widened
+    (no fixer), surgical-edit byte-fidelity. `we:vitest.config.ts` include widened
     for `scripts/**/__tests__`.
   - Verified end-to-end against the real repo: seeded a `wip` synonym → `npm run
     autofix` repaired it to `draft` in 2 verify rounds with a clean one-line

@@ -20,18 +20,18 @@ emits structured failure descriptors, but the MVP enriches **only the
 `deprecated-status` class** — every other error is still `{ message }` text. The
 auto-fix agent can only target a failure that carries a descriptor, so the set of
 fixable classes is gated by this enrichment. This item widens descriptor coverage
-across the other `check-standards.mjs` error classes so each becomes
+across the other `we:check-standards.mjs` error classes so each becomes
 agent-targetable.
 
 ## Scope
 
-- Walk the `err(...)` call sites in `scripts/check-standards.mjs` and add a
+- Walk the `err(...)` call sites in `we:scripts/check-standards.mjs` and add a
   `descriptor` to each fixable class: `missing-description`, `invalid-status`
   (non-synonym), `missing-sourcePath`, `missing-required-field` (protocol /
   intent / backlog), `unresolved-ref` (ownedByProject / realizesIntent /
   relatedProject / parent), etc.
 - For each, decide **mechanically fixable** (a reference fixer in
-  `scripts/autofix/engine.mjs`) vs **content-generation** (deferred to the model
+  `we:scripts/autofix/engine.mjs`) vs **content-generation** (deferred to the model
   fixer, [#196](/backlog/196-ai-model-fixer-provider/)). Record the call in the
   descriptor's `kind`.
 
@@ -47,7 +47,7 @@ agent-targetable.
 
 - **Status:** resolved (2026-06-09).
 - **Done:**
-  - **Descriptors broadened** in `scripts/check-standards.mjs`. Every fixable error class now emits a
+  - **Descriptors broadened** in `we:scripts/check-standards.mjs`. Every fixable error class now emits a
     structured descriptor carrying a `kind` plus a `fix` routing call: `reference` (mechanically
     fixable) vs `model` (content-generation, deferred to #196). Three small builders
     (`dMissingField` / `dUnresolvedRef` / `dMissingDescription`) + a `FILE` map keep the call sites
@@ -58,11 +58,11 @@ agent-targetable.
       `unresolved-ref` (protocol ownedByProject + realizesIntent, intent requiresCapabilities,
       capability-adapter tiers, backlog relatedProject/parent/relatedReport, block sourcePath) →
       `fix:'model'`.
-  - **Hardening (carried from #095):** the reference fixer in `scripts/autofix/engine.mjs` no longer
+  - **Hardening (carried from #095):** the reference fixer in `we:scripts/autofix/engine.mjs` no longer
     searches "forward from the id" — a new string-aware `topLevelObjectSpans()` bounds the field
     rewrite to the target row's OWN brace-span, so the edit is order-independent (field may precede
     the id) and sibling-safe (can't bleed into the next row). The id anchor is now whitespace-tolerant.
-  - **Tests:** 3 new cases in `scripts/autofix/__tests__/engine.test.mjs` (field-before-id,
+  - **Tests:** 3 new cases in `we:scripts/autofix/__tests__/engine.test.mjs` (field-before-id,
     sibling-safety with a reordered field, braces-inside-strings). 9/9 green. `check:standards` green;
     `--json` emission verified live via a throwaway broken item (descriptors emit with full shape).
 - **Notes:** behavior is purely additive — `fix:'model'` descriptors have no registered deterministic

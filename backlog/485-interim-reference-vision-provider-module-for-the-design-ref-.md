@@ -19,16 +19,16 @@ The #480 vision-gate seam ships vendor-free: it resolves a provider by name from
 ## Progress
 
 - **Status:** resolved 2026-06-13.
-- **Done:** `scripts/design-refs/providers/anthropic-vision.mjs` — a no-leakage interim provider that
+- **Done:** `we:scripts/design-refs/providers/anthropic-vision.mjs` — a no-leakage interim provider that
   self-registers as `anthropic` (loaded via `DESIGN_REFS_VISION_PROVIDER_MODULE`, so the design-refs
   core still names no vendor). Calls a vision model with the base64-PNG image message format and
   `output_config.format` json-schema structured output constrained to the 6-verdict taxonomy; model
   defaults to `claude-opus-4-8` (vision-capable), operator-overridable via `DESIGN_REFS_VISION_MODEL`.
-  `@anthropic-ai/sdk` is a **runtime-only optional** dynamic import (not added to package.json — same
+  `@anthropic-ai/sdk` is a **runtime-only optional** dynamic import (not added to we:package.json — same
   no-extra-dep posture as #486) with a clear "npm i + ANTHROPIC_API_KEY" error when absent. Request
   building (`buildVisionRequest`) and response mapping (`mapVisionResponse`, incl. refusal/malformed →
   safe quarantine) are pure exported functions.
-- **Tests:** `scripts/design-refs/providers/__tests__/anthropic-vision.test.mjs` — 11 tests: self-
+- **Tests:** `we:scripts/design-refs/providers/__tests__/anthropic-vision.test.mjs` — 11 tests: self-
   registration, base64 image message shape, schema/enum = taxonomy, model default + override, response
   mapping, and the Photopea/Grafana/clean acceptance mapping. No SDK / network / key needed.
 - **Gate:** full vitest **2560 pass** (11 new); `check:standards` **0 errors**.

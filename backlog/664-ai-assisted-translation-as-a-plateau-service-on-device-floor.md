@@ -96,7 +96,7 @@ verify loop* is worth carrying: the moat is the verifiable target, not the model
 
 - **2026-06-15 — codified (design story, materialized; verification-only in @webeverything).** The
   no-leakage standard-side contract is now part of the Localization protocol summary
-  (`src/_data/protocols.json` — `localization`): a produced catalog verifies MF2 placeholder/selector/markup
+  (`we:src/_data/protocols.json` — `localization`): a produced catalog verifies MF2 placeholder/selector/markup
   preservation, CLDR plural/gender category coverage, and no untranslated-claimed-keys / no arity drift,
   with production (the model) explicitly held out as a Plateau service the WE project consumes as a
   no-leakage client (#475/#488). Design rationale + the three translation-specific open questions published

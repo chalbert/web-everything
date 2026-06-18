@@ -33,7 +33,7 @@ conformance target.
 - **Same registry, different provider.** Mirror the upgrader's `modelComponent`
   analyzer (#188): a thin `ModelClient` seam (Anthropic/OpenAI is config, not
   architecture; BYO key; no model-hosting cost on us). Register ahead of / beside
-  the reference fixers in `scripts/autofix/engine.mjs`.
+  the reference fixers in `we:scripts/autofix/engine.mjs`.
 - **The engine is ready.** `autofix()` already loops, applies, re-verifies, and
   reverts non-accepted patches with an explanation — a model fixer is just another
   `{ id, handles, fix }` whose `fix` is async and does a network call.

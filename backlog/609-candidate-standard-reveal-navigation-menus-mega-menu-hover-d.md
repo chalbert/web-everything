@@ -18,7 +18,7 @@ crossRef: { url: /backlog/610-design-sweep-navigation-menus-closed-open-states-l
 
 **Prepared, ready to ratify.** The reveal-navigation paradigm — top-level nav whose sections disclose
 a panel of links on hover/focus (dropdown nav, mega-menus, the WE header) — is **not greenfield**: the
-base is the **nav-list** block ([blocks.json:2082](src/_data/blocks.json#L2082), W3C APG *Disclosure
+base is the **nav-list** block ([fui:blocks.json:2082](src/_data/blocks.json#L2082), W3C APG *Disclosure
 Navigation*), and the panel surface is the existing **anchor** intent. The prior-art survey (published
 as [/research/reveal-navigation-menus/](/research/reveal-navigation-menus/)) collapses the concern to
 **two genuine forks**, each with a **bold** recommended default; everything else is a forced invariant
@@ -29,8 +29,8 @@ invariants — not decisions.
 
 **Fork 1 → A (composition recipe, no new block), homed on nav-list.** The reveal-panel layer is *not*
 a new block. The discriminator is **own design thesis**, not "borrowed machinery": `menu`
-([blocks.json:3181](src/_data/blocks.json#L3181)) and `drawer`
-([blocks.json:3277](src/_data/blocks.json#L3277)) each earned a block because each draws a *new* line
+([fui:blocks.json:3181](src/_data/blocks.json#L3181)) and `drawer`
+([fui:blocks.json:3277](src/_data/blocks.json#L3277)) each earned a block because each draws a *new* line
 (invocation-not-value; the edge-anchored member of the dialog family) — both also borrow all their
 machinery via `composesIntents`, so "borrowed machinery" can't be what justifies a block. **reveal-nav
 draws no new line:** disclosure-not-menu is already nav-list's ruling, the out-of-flow panel is already
@@ -61,7 +61,7 @@ reveal-nav is its first preset. Filed separately (motivated by, not contained in
 ## The axes (what the survey decomposed)
 
 Reveal nav is **composition, not invention**. The orthogonal axes, each pinned to the real tree:
-**disclosure** (expand/collapse) is owned by the disclosure intent ([intents.json:1816](src/_data/intents.json#L1816)) and nav-list's `nav:section` ([blocks.json:2099](src/_data/blocks.json#L2099)); **panel surface** (placement / collision / no-reflow strategy / dismissal) is owned by the anchor intent ([intents.json:1204](src/_data/intents.json#L1204), `strategy: inline|escape`, `type: menu/popover`); **landmark + current** by the navigation intent ([intents.json:1146](src/_data/intents.json#L1146)). The only genuinely *new* concern the survey isolated is **hover-intent** (the open/close-delay + safe-area corridor) — homed in Fork 2. The dogfood header ([base.njk:32-69](src/_layouts/base.njk#L32), [style.css:241-276](src/css/style.css#L241)) proves the recipe and is the conform-to reference.
+**disclosure** (expand/collapse) is owned by the disclosure intent ([we:intents.json:1816](src/_data/intents.json#L1816)) and nav-list's `nav:section` ([fui:blocks.json:2099](src/_data/blocks.json#L2099)); **panel surface** (placement / collision / no-reflow strategy / dismissal) is owned by the anchor intent ([we:intents.json:1204](src/_data/intents.json#L1204), `strategy: inline|escape`, `type: menu/popover`); **landmark + current** by the navigation intent ([we:intents.json:1146](src/_data/intents.json#L1146)). The only genuinely *new* concern the survey isolated is **hover-intent** (the open/close-delay + safe-area corridor) — homed in Fork 2. The dogfood header ([we:base.njk:32-69](src/_layouts/base.njk#L32), [we:style.css:241-276](src/css/style.css#L241)) proves the recipe and is the conform-to reference.
 
 ### Recommended path at a glance
 
@@ -73,9 +73,9 @@ Reveal nav is **composition, not invention**. The orthogonal axes, each pinned t
 ## Fork 1 — Where does the reveal-panel layer live?
 
 **Crux.** A header reveal menu = a nav-list section (disclosure) whose disclosed content is an *anchored,
-out-of-flow* panel. nav-list's `nav:section` ([blocks.json:2099](src/_data/blocks.json#L2099)) today
+out-of-flow* panel. nav-list's `nav:section` ([fui:blocks.json:2099](src/_data/blocks.json#L2099)) today
 discloses *in-flow* (sidebar accordion); the anchor intent already expresses the out-of-flow popover
-(`strategy=escape`, [intents.json:1204](src/_data/intents.json#L1204)). So the standards artifacts to
+(`strategy=escape`, [we:intents.json:1204](src/_data/intents.json#L1204)). So the standards artifacts to
 express it **already exist** — the question is whether the composition gets a *named home*.
 
 - **A — Composition recipe (no new block). ✅ Default.** Document "header reveal nav = nav-list section +
@@ -83,7 +83,7 @@ express it **already exist** — the question is whether the composition gets a 
   mint **no** new block. *Tradeoff:* lowest lock-in, honours *impl-is-not-a-standard* and the
   separation/compose bias, and the only new concern (hover-intent) is homed separately in Fork 2 — so
   there's little own-machinery left to justify a block. The recipe is the standard; the demo proves it.
-- **B — Named "reveal-nav" composition block.** A thin block (à la `menu` [blocks.json:3181](src/_data/blocks.json#L3181) and `drawer` [blocks.json:3277](src/_data/blocks.json#L3277), both *composition manifests*) that composes nav-list + disclosure + anchor. *Tradeoff:* matches the house style for "a family realized by composing intents" and gives the conformance demo a first-class home — but adds a surface whose machinery is entirely borrowed, which the compose bias argues against.
+- **B — Named "reveal-nav" composition block.** A thin block (à la `menu` [fui:blocks.json:3181](src/_data/blocks.json#L3181) and `drawer` [fui:blocks.json:3277](src/_data/blocks.json#L3277), both *composition manifests*) that composes nav-list + disclosure + anchor. *Tradeoff:* matches the house style for "a family realized by composing intents" and gives the conformance demo a first-class home — but adds a surface whose machinery is entirely borrowed, which the compose bias argues against.
 
 *Rejected — a new mega-menu **widget** with its own positioning/disclosure machinery:* re-implements
 what anchor + disclosure already own (cite-don't-reinvent). *Demoted to support-all — the multi-column
@@ -104,13 +104,13 @@ anchor, which is the separation-bias tell.
   separation bias (a concept that recurs without its neighbour earns its own home) and keeps anchor
   focused on tethering; cost is one more small entity.
 - **B — `hoverIntent` dimension on the anchor intent.** Fold open/close-delay + safe-area onto the
-  anchor intent ([intents.json:1204](src/_data/intents.json#L1204)) alongside its `dismissal` axis.
+  anchor intent ([we:intents.json:1204](src/_data/intents.json#L1204)) alongside its `dismissal` axis.
   *Tradeoff:* one fewer entity and anchor already owns surface lifecycle — but couples a
   trigger-transition behavior to the tethered-surface contract and leaves non-anchored hover-reveals
   uncovered.
 
 *Not a fork — the mechanic.* delay-only (Radix/Headless) · CSS safe-area bridge (the WE dogfood,
-[style.css:263-270](src/css/style.css#L263)) · JS pointer-direction polygon (jQuery-menu-aim /
+[we:style.css:263-270](src/css/style.css#L263)) · JS pointer-direction polygon (jQuery-menu-aim /
 safe-triangle) is **unsettled across libraries** (Radix ships delay-only with open polygon requests) →
 a **Technical Configurator** setting at graduation, never a UX dimension or WE mandate.
 
@@ -137,12 +137,12 @@ a **Technical Configurator** setting at graduation, never a UX dimension or WE m
   enhancement (hover-intent / Esc / touch tap-toggle).
 
 ### Composition seam (cite, don't reinvent)
-nav-list ([blocks.json:2082](src/_data/blocks.json#L2082)) · disclosure ([intents.json:1816](src/_data/intents.json#L1816)) · navigation ([intents.json:1146](src/_data/intents.json#L1146)) · anchor ([intents.json:1204](src/_data/intents.json#L1204)). Disambiguate from: menu block ([blocks.json:3181](src/_data/blocks.json#L3181), commands) and drawer block ([blocks.json:3277](src/_data/blocks.json#L3277), off-canvas).
+nav-list ([fui:blocks.json:2082](src/_data/blocks.json#L2082)) · disclosure ([we:intents.json:1816](src/_data/intents.json#L1816)) · navigation ([we:intents.json:1146](src/_data/intents.json#L1146)) · anchor ([we:intents.json:1204](src/_data/intents.json#L1204)). Disambiguate from: menu block ([fui:blocks.json:3181](src/_data/blocks.json#L3181), commands) and drawer block ([fui:blocks.json:3277](src/_data/blocks.json#L3277), off-canvas).
 
 ### Graduation follow-ons (after the call — blocked on this decision)
 - **Conform the dogfood header.** It is **not yet APG-conformant**: heads are `<span aria-hidden>`
-  ([base.njk:33](src/_layouts/base.njk#L33)) with the panel on `:hover`/`:focus-within` only
-  ([style.css:271-276](src/css/style.css#L271)) — no `aria-expanded`/`aria-controls`, no keyboard toggle,
+  ([we:base.njk:33](src/_layouts/base.njk#L33)) with the panel on `:hover`/`:focus-within` only
+  ([we:style.css:271-276](src/css/style.css#L271)) — no `aria-expanded`/`aria-controls`, no keyboard toggle,
   no Esc/outside-click dismissal. A build item, not a fork.
 - **Technical Configurator card** for the hover-intent mechanic (delay ms / close-delay / safe-area
   strategy / touch behavior) per *intent-UX-only, technical→configurator*.

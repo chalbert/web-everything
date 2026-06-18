@@ -21,7 +21,7 @@ default model so the default-strategy selection lives in config, never in the to
 
 ## Scope
 
-- **Registry extends core `CustomRegistry`** (`plugs/core/CustomRegistry.ts`) — own → extended chain,
+- **Registry extends core `CustomRegistry`** (`we:plugs/core/CustomRegistry.ts`) — own → extended chain,
   **no `#defaultName` baked into the tool**. Do NOT copy `CustomRenderStrategyRegistry`'s
   first-registered-wins default (that's the anti-pattern #243 fixes).
 - **Platform config flavors** — ship fully-defined flavors a project extends:
@@ -50,7 +50,7 @@ Manifest / `unplugin`-style) can be its own follow-up if it grows past this item
 ## Progress
 
 - **Status:** resolved (2026-06-10)
-- **Registry — `blocks/renderers/auto-define/CustomAutoDefineRegistry.ts`:** `CustomAutoDefineRegistry`
+- **Registry — `we:blocks/renderers/auto-define/CustomAutoDefineRegistry.ts`:** `CustomAutoDefineRegistry`
   extends the core `CustomRegistry<AutoDefineStrategy>` (own → extended chain), `localName =
   'customAutoDefine'`. **No tool-baked default** — deliberately NOT the `CustomRenderStrategyRegistry`
   shape: `define(strategy, asDefault?)` only touches the default when `asDefault` is passed (no
@@ -61,19 +61,19 @@ Manifest / `unplugin`-style) can be its own follow-up if it grows past this item
   (default `lazy-dom`, explicit still available), `createBuildParsedFlavor` (default `build-parsed`) —
   each a fully-defined registry a project extends (`new CustomAutoDefineRegistry({ extends: [flavor] })`)
   to inherit strategies **and** default. `AUTO_DEFINE_FLAVORS` exposes the three by name for discovery.
-- **lazy-dom reference inferring strategy — `lazyDomStrategy.ts`:** the CSS-Tricks MutationObserver
+- **lazy-dom reference inferring strategy — `we:lazyDomStrategy.ts`:** the CSS-Tricks MutationObserver
   pattern (cited in #227) reified — `key 'lazy-dom'`, `trigger 'first-use'`, a `resolve` (convention
   `./{tag}.js`, overridable) plus `createDomPresenceObserver(strategy, root, { import })` that scans the
   initial tree and watches for undefined custom-element tags, importing each tag's defining module on
   first DOM presence. Importer is injectable (testable without a real module graph); a non-inferring
   strategy yields a no-op observer.
-- **build-parsed — `buildParsedStrategy.ts`:** kept thin (per the item note) — `resolve` looks a tag up
+- **build-parsed — `we:buildParsedStrategy.ts`:** kept thin (per the item note) — `resolve` looks a tag up
   in a build-emitted manifest (`createBuildParsedAutoDefine(manifest)`); unknown → `undefined`.
 - **Open extension:** a custom `AutoDefineStrategy` (e.g. server-driven) registers and resolves through
   the same chain conflict-free, and a project can make it the default by extension — coexistence tested.
 - **Scope token:** the `RegistryScope` reserved by #241 is threaded through each strategy's
   `define(tag, ctor, scope?)`; default scope stays global (thin, per scope).
-- **Tests:** `blocks/__tests__/unit/renderers/autoDefineRegistry.test.ts` (16) — no-default / extends-a-flavor
+- **Tests:** `we:blocks/__tests__/unit/renderers/autoDefineRegistry.test.ts` (16) — no-default / extends-a-flavor
   default inheritance / per-scope override / custom-strategy coexistence / lazy-dom DOM-presence (initial
   + MutationObserver-added) / build-parsed manifest. Full unit suite green (2009).
 

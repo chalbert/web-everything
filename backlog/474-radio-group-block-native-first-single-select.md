@@ -17,9 +17,9 @@ Native-first block over an `<input type=radio>` group: single-select choice comp
 
 ## Resolved 2026-06-13 (batch-2026-06-13)
 
-Authored the `radio-group` block standard: [blocks.json](../src/_data/blocks.json) entry (status
+Authored the `radio-group` block standard: [fui:blocks.json](../src/_data/blocks.json) entry (status
 `draft`, type Component, `implementsIntent: selection` + `composesIntents: [focus-delegation]`) +
-required [block-descriptions/radio-group.njk](../src/_includes/block-descriptions/radio-group.njk)
+required [we:block-descriptions/radio-group.njk](../src/_includes/block-descriptions/radio-group.njk)
 (renders live at `/blocks/radio-group/`).
 
 - **Native-first**: N `<input type=radio>` sharing a `name`, in `<fieldset>`/`<legend>` — exclusivity +

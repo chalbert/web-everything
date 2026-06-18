@@ -36,7 +36,7 @@ sort value.
 
 ## Progress (2026-06-13) — resolved
 
-Added `format?: (value: Cell, row: Row) => string | Node` to `Column` in [renderDataTable.ts](../blocks/renderers/data-table/renderDataTable.ts). Sort/filter/group are untouched — they still run on the raw `field` value, so `Intl.Collator` order is unaffected; `format` only changes the rendered cell. Extracted `cellContent(col, row)` (string|Node) used by `dataRow` — a **string** is set as `textContent` (never `innerHTML`, so escape-safe), a **Node** is appended (rich cells) — and `cellDisplayText(col, row)`, which the conformance audit's expected-text projection now uses so a formatter can't false-fail the row-order check.
+Added `format?: (value: Cell, row: Row) => string | Node` to `Column` in [we:renderDataTable.ts](../blocks/renderers/data-table/renderDataTable.ts). Sort/filter/group are untouched — they still run on the raw `field` value, so `Intl.Collator` order is unaffected; `format` only changes the rendered cell. Extracted `cellContent(col, row)` (string|Node) used by `dataRow` — a **string** is set as `textContent` (never `innerHTML`, so escape-safe), a **Node** is appended (rich cells) — and `cellDisplayText(col, row)`, which the conformance audit's expected-text projection now uses so a formatter can't false-fail the row-order check.
 
 **Design-note resolution:** rich-cell content stays *composed*, not owned — the formatter returns a `Node`, and that node is produced by the consumer / the status-indicator standard (#354, now resolved). The block owns only the `format` seam, not a chip vocabulary — bias-toward-separation holds. Escaping is settled (textContent path).
 

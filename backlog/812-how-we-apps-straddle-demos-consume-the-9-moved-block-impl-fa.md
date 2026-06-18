@@ -16,7 +16,7 @@ tags: [blocks, demos, boundary, constellation, decision-prep]
 
 **Prepared 2026-06-16 — ready to ratify.** Grounded in a prior-art survey published as
 [`/research/we-fui-runtime-block-composition/`](/research/we-fui-runtime-block-composition/) (report
-[`2026-06-16-812-runtime-block-composition-boundary.md`](../reports/2026-06-16-812-runtime-block-composition-boundary.md)).
+[`we:2026-06-16-812-runtime-block-composition-boundary.md`](../reports/2026-06-16-812-runtime-block-composition-boundary.md)).
 The survey **dissolved one of the four options** (option c — see Fork 1) and the standing test
 **re-scoped the affected set** (one demo was mis-listed — see *Pass-0 re-scope*), leaving **two genuine
 forks**, each with a **bold** recommended default grounded in the real tree. Resolving this turns the
@@ -37,8 +37,8 @@ to the tree:
   aliases only `@core`/`@web*`), by design.
 - **Can't get classes from #765** — [#765](/backlog/765-relax-the-we-fui-isolation-boundary-for-an-in-document-di-mo/)'s
   in-document mount is "runtime SDK only — mount a *rendered* FUI thing." It hands the host an opaque
-  element, **never a block class** to wire (`docs/agent/demo-workflow.md:31` states the boundary; the only
-  embed seam is the `fuiDemo` shortcode, `.eleventy.js:38`).
+  element, **never a block class** to wire (`we:docs/agent/demo-workflow.md:31` states the boundary; the only
+  embed seam is the `fuiDemo` shortcode, `we:.eleventy.js:38`).
 
 **The survey settles the one tempting escape (option c).** "Extend #765's SDK to expose composable block
 *factories/classes*" looks like a principled third path. It is not: across Module Federation, ESM-CDN
@@ -52,10 +52,10 @@ below.
 ### Pass-0 re-scope — `durable-tier-verification` is not a straddle
 
 It imports **only** `background-task-surface` (a moved family) —
-`demos/durable-tier-verification/durable-tier-verification.ts:28,32` — with **no** retained family. So it
+`we:demos/durable-tier-verification/durable-tier-verification.ts:28,32` — with **no** retained family. So it
 is a plain **block-impl demo** (its subject *is* the block), already dispositioned by #791 (→ FUI,
 iframe-embed) + the B1 FUI-hosting prerequisite. Its only wrinkle is a service-worker + Background-Fetch
-dependency (`durable-sw.js`); a FUI-hosted page registers the SW on FUI's own origin, so the iframe embed
+dependency (`we:durable-sw.js`); a FUI-hosted page registers the SW on FUI's own origin, so the iframe embed
 is feasible — a **footnote on #791/B1, not a B3 fork**. It is dropped from this decision's scope. The
 genuine B3 surface is the **two exercise apps** (Fork 1) + the **one true straddle demo**
 `loader-background-handoff` (Fork 2).
@@ -70,8 +70,8 @@ genuine B3 surface is the **two exercise apps** (Fork 1) + the **one true stradd
 ## Fork 1 — the two exercise apps' consumption path
 
 `loan-origination` and `auto-insurance` compose **4–5 moved families as classes** —
-`demos/loan-origination/app.ts:22-31` (`MasterDetailBehavior`, `LifecycleProvider`, `AuditProvider`) +
-`wizard/applicationWizard.ts:21` (`StepperBehavior`); `demos/auto-insurance/app.ts:14-21` adds
+`we:demos/loan-origination/app.ts:22-31` (`MasterDetailBehavior`, `LifecycleProvider`, `AuditProvider`) +
+`we:wizard/applicationWizard.ts:21` (`StepperBehavior`); `we:demos/auto-insurance/app.ts:14-21` adds
 `TreeSelectBehavior` — **plus** WE-only reference-runtime renderers FUI lacks
 (`renderers/{data-table,pagination,status-indicator,audit-timeline,decision-trace}`; FUI's `renderers/`
 holds only `data-grid`). They need block **classes** to wire behaviors with domain logic — exactly what the
@@ -108,10 +108,10 @@ impls; WE keeps the renderer demos).
 
 This demo composes `resource-loader` (a **STAY** reference-runtime family) + `background-task-surface`
 (a **MOVE** family) **live in one context** to prove the escalation handoff —
-`demos/loader-background-handoff-demo.ts:20-26` (`registerBackgroundTasks` from the moved surface +
+`we:demos/loader-background-handoff-demo.ts:20-26` (`registerBackgroundTasks` from the moved surface +
 `ResourceLoader`/`backgroundLoad` from the retained loader). Its producer half exercises a **WE-standard**
 concern: the loader's `escalation:async` debounce threshold and the bubbling `background-task-register`
-event contract (`src/_data/demos.json:82`).
+event contract (`we:src/_data/demos.json:82`).
 
 - **(d) Decouple onto the escalation contract.** *(recommended)* Keep a WE demo that exercises the WE-standard
   half — a real `ResourceLoader` emitting the `background-task-register` handoff event when it crosses the

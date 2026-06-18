@@ -10,9 +10,9 @@
 
 ## The shipped artifacts (what we're ratifying)
 
-- **Project** — `weblifecycle` / "Web Lifecycle", status `concept`, in [src/_data/projects.json:253](../src/_data/projects.json#L253). Self-described as *"a domain entity's lifecycle … distinct from Web States (reactive state primitives) and from a region's lifecycle (Web Guards): the domain object's workflow state."*
-- **Protocol** — `lifecycle`, status `draft`, `ownedByProject: weblifecycle`, `realizesIntent: status-indicator`, in [src/_data/protocols.json:143](../src/_data/protocols.json#L143). Contract: *declarative status set + transition map (each transition: `from → to`, optional guard predicate, permitted actor/role), resolved by a swappable `CustomLifecycleProvider` registry; the transition map is the only lock — data-defined and portable, so a workflow engine (XState, a BPM server, a hand-rolled switch) plugs in behind the provider.* Every transition emits an observable `{ entity, from, to, actor, at }` event — the composition seam for audit-trail (#357) and reporting.
-- **Normative body** — [src/_includes/project-weblifecycle.njk](../src/_includes/project-weblifecycle.njk) §`protocol-lifecycle`, with the boundary table: Transition event → Protocol; Authorization → 🔗 compose Web Guards; Status display → 🔗 Status Indicator intent.
+- **Project** — `weblifecycle` / "Web Lifecycle", status `concept`, in [we:src/_data/projects.json:253](../src/_data/projects.json#L253). Self-described as *"a domain entity's lifecycle … distinct from Web States (reactive state primitives) and from a region's lifecycle (Web Guards): the domain object's workflow state."*
+- **Protocol** — `lifecycle`, status `draft`, `ownedByProject: weblifecycle`, `realizesIntent: status-indicator`, in [we:src/_data/protocols.json:143](../src/_data/protocols.json#L143). Contract: *declarative status set + transition map (each transition: `from → to`, optional guard predicate, permitted actor/role), resolved by a swappable `CustomLifecycleProvider` registry; the transition map is the only lock — data-defined and portable, so a workflow engine (XState, a BPM server, a hand-rolled switch) plugs in behind the provider.* Every transition emits an observable `{ entity, from, to, actor, at }` event — the composition seam for audit-trail (#357) and reporting.
+- **Normative body** — [we:src/_includes/project-weblifecycle.njk](../src/_includes/project-weblifecycle.njk) §`protocol-lifecycle`, with the boundary table: Transition event → Protocol; Authorization → 🔗 compose Web Guards; Status display → 🔗 Status Indicator intent.
 
 ## The placement test (internal precedent)
 
@@ -42,7 +42,7 @@ The protocol's load-bearing claim is that the **transition map is a portable int
 - **Protocol or intent dimension?** Protocol — it fixes a provider contract and a data-defined interchange, the same test that made realtime-transport "a Protocol, not an Intent."
 - **DI-injectable?** Yes — `CustomLifecycleProvider` is a runtime-DI seam consulted by the running app, the legitimate registry pattern (not a devtools-only provider).
 - **Seam between concerns / bias-to-separation?** Authorization → Web Guards; persistence → the entity's own concern; audit → composes via the transition event; status render → `status-indicator` intent. Each is a separate home; lifecycle owns only the transition map + event. Honours separation bias.
-- **vs `webstates`?** Separate project. `webstates` is reactive state *primitives* (signals/stores/schemas, [projects.json:58](../src/_data/projects.json#L58)); a domain-entity lifecycle is *domain workflow state*, a layer above with a distinct provider/interchange contract. Folding would conflate two altitudes — separation bias says keep apart, and the contract shapes differ.
+- **vs `webstates`?** Separate project. `webstates` is reactive state *primitives* (signals/stores/schemas, [we:projects.json:58](../src/_data/projects.json#L58)); a domain-entity lifecycle is *domain workflow state*, a layer above with a distinct provider/interchange contract. Folding would conflate two altitudes — separation bias says keep apart, and the contract shapes differ.
 
 ## Recommended ruling (for the decision turn)
 

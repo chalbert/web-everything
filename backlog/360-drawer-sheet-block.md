@@ -38,13 +38,13 @@ user toward the **abstract-family / concrete-member** pattern WE already uses fo
 
 ## Build (once #376 lands)
 
-- Add `drawer` to `blocks.json` (type Component) as a concrete member: prose "the edge-anchored, sliding
+- Add `drawer` to `fui:blocks.json` (type Component) as a concrete member: prose "the edge-anchored, sliding
   concrete member of the dialog family", `implementsIntent: modal`, composing surface + motion, extending
   the dialog substrate (per the droplist→dropdown prose convention; WE expresses abstract/concrete in the
   summary, not a structured field).
 - Fix the configuration: `placement: start | end` (side, RTL-aware), slide-in/out motion, swipe-to-dismiss
   in addition to the inherited escape/outside/backdrop dismissal.
-- `block-descriptions/drawer.njk` — overview, what it inherits from the dialog substrate vs. what it adds
+- `we:block-descriptions/drawer.njk` — overview, what it inherits from the dialog substrate vs. what it adds
   (edge placement + slide + swipe), Web Standards + Framework Research tables.
 - Semantics term *Drawer* (a concrete dialog-family member). Cross-ref the sibling future members (bottom
   `sheet`, centered `modal`).
@@ -61,8 +61,8 @@ Authored the `drawer` block as the edge-anchored concrete member of the dialog f
 type Component, `implementsIntent: modal`, composes surface + motion). It extends the abstract dialog
 substrate (#376) and re-implements none of its machinery — only fixes `placement: start|end` (RTL-aware
 via logical insets), adds slide motion + swipe-to-dismiss. 4 design decisions (extends-not-reimplements ·
-edge=Modal placement start/end · swipe layered on inherited dismissal · member-not-flag). `blocks.json` +
-`block-descriptions/drawer.njk` (what-it-fixes-vs-inherits table, standards, framework research, family) +
+edge=Modal placement start/end · swipe layered on inherited dismissal · member-not-flag). `fui:blocks.json` +
+`we:block-descriptions/drawer.njk` (what-it-fixes-vs-inherits table, standards, framework research, family) +
 semantics term *Drawer*. Coverage: drawer → covered. `check:standards` green; page at `/blocks/drawer/`.
 The dialog→drawer chain (the user's abstract-family design) is complete; sheet + centered-modal are future
 siblings.

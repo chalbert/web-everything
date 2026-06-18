@@ -1,6 +1,6 @@
 # Research Report — Internationalization & Translation
 
-**Plan file**: `plans/translations.md`
+**Plan file**: `we:plans/translations.md`
 **Research page**: `/research/internationalization/`
 **Date**: 2026-02-23
 
@@ -65,5 +65,5 @@ Consumer API: `<span>@t.greeting</span>`, `<span>@t.itemCount({ count: $store.it
 
 | File | Action |
 |------|--------|
-| `src/_data/researchTopics.json` | Added `internationalization` entry |
-| `src/_includes/research-descriptions/internationalization.njk` | New file (~391 lines) |
+| `we:src/_data/researchTopics.json` | Added `internationalization` entry |
+| `we:src/_includes/research-descriptions/internationalization.njk` | New file (~391 lines) |

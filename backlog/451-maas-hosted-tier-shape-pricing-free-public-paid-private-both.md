@@ -39,7 +39,7 @@ product-side in plateau-app if/when built).
 decision, not an engineering one… needs a real product owner — do not let an agent ratify it."* This is
 prepared, not decided: the owed economics pass is published at
 [/research/maas-hosted-tier-economics](/research/maas-hosted-tier-economics/) (report:
-[2026-06-13-maas-hosted-tier-economics.md](reports/2026-06-13-maas-hosted-tier-economics.md)), and **it
+[we:2026-06-13-maas-hosted-tier-economics.md](reports/2026-06-13-maas-hosted-tier-economics.md)), and **it
 reshaped the framing** — the A/B/C "which tiers do we host" question is the wrong axis; the dominant fork
 is **build-vs-ride**, because the "free public" function is already a commodity someone else pays for.
 **Two forks below, each with a recommended default the product owner ratifies or overrides** (confidence
@@ -134,7 +134,7 @@ genuine open content here is the two business-model forks above.
 
 ## Concrete refs
 
-- Parent: [087-module-service-distribution-caching.md](/backlog/087-module-service-distribution-caching/)
+- Parent: [we:087-module-service-distribution-caching.md](/backlog/087-module-service-distribution-caching/)
   — "Hosted-tier shape & pricing" decision ([:34](/backlog/087-module-service-distribution-caching/)),
   phasing ([:42](/backlog/087-module-service-distribution-caching/), phase d), "don't reinvent the
   wheel" note ([:33](/backlog/087-module-service-distribution-caching/)).

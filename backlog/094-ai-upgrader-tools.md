@@ -69,10 +69,10 @@ breadth from there. Lots of room to improve post-MVP.
 - **Status:** resolved — MVP shipped: shared engine (analyze → generate → verify-gate), reference analyzer (one source path), playground green (5/5), 16 unit tests, full suite + check:standards + build all green.
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
-  - Engine `blocks/renderers/upgrader/upgraderEngine.ts` — `ComponentIR` neutral structure, `CustomAnalyzerRegistry` provider seam, `generateComponentSource` (→ declarative `<component>`), `verifyUpgrade` gate (parses + fidelity round-trip + intent conformance), `upgrade()` orchestrator (never throws; gates on verify).
-  - Reference analyzer `blocks/renderers/upgrader/analyzers/legacyWebComponent.ts` — deterministic, no-key, lifts vanilla web components (one source path); rejects out-of-subset input rather than guessing.
-  - Shared fixtures `blocks/renderers/upgrader/__fixtures__/upgrader-cases.ts` (demo + suite, no drift); unit suite `blocks/__tests__/unit/renderers/upgrader.test.ts` (16 tests).
-  - Playground `demos/code-upgrader-demo.{html,ts,css}` + `src/_data/demos.json` entry — full pipeline per card, verify badge, live element, form toggle reusing MaaS `serve()`. Verified live via Playwright: `playgroundReady`, 5/5, elements registered, no console errors.
+  - Engine `we:blocks/renderers/upgrader/upgraderEngine.ts` — `ComponentIR` neutral structure, `CustomAnalyzerRegistry` provider seam, `generateComponentSource` (→ declarative `<component>`), `verifyUpgrade` gate (parses + fidelity round-trip + intent conformance), `upgrade()` orchestrator (never throws; gates on verify).
+  - Reference analyzer `we:blocks/renderers/upgrader/analyzers/legacyWebComponent.ts` — deterministic, no-key, lifts vanilla web components (one source path); rejects out-of-subset input rather than guessing.
+  - Shared fixtures `we:blocks/renderers/upgrader/__fixtures__/upgrader-cases.ts` (demo + suite, no drift); unit suite `we:blocks/__tests__/unit/renderers/upgrader.test.ts` (16 tests).
+  - Playground `demos/code-upgrader-demo.{html,ts,css}` + `we:src/_data/demos.json` entry — full pipeline per card, verify badge, live element, form toggle reusing MaaS `serve()`. Verified live via Playwright: `playgroundReady`, 5/5, elements registered, no console errors.
 - **Leftovers captured:** [#188](/backlog/188-upgrader-byo-ai-model-analyzer/) BYO-AI model provider, [#189](/backlog/189-upgrader-intent-inference/) intent inference, [#190](/backlog/190-upgrader-additional-input-adapters/) more input adapters, [#191](/backlog/191-upgrader-version-migration-codemods/) version-migration codemods.
 - **Notes — design decisions (POC):**
   - **One source path:** legacy vanilla Web Component (`class … extends HTMLElement` + `customElements.define`) → neutral IR. A deterministic *reference* analyzer (no model key) handles a structured subset; the registry is the swap-in point where a BYO-AI provider drops in for messier input.

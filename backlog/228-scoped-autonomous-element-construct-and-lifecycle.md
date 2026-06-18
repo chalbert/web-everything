@@ -19,7 +19,7 @@ crossRef: { url: /blocks/autocomplete/, label: Autocomplete block }
 **Core slice of the scoped-autonomous-element work** — this item now owns the *root construction fix*;
 the three lifecycle drivers it gates are spun out as sibling tasks under #167: **#261** (disconnectedCallback),
 **#262** (attributeChangedCallback), **#263** (form-associated callbacks), each `blockedBy` this item.
-Verification of #167 (real Chromium, `plugs/__tests__/e2e/autonomous-element-lifecycle.spec.ts`)
+Verification of #167 (real Chromium, `we:plugs/__tests__/e2e/autonomous-element-lifecycle.spec.ts`)
 found the scoped autonomous-element path is **non-functional in a real browser before any lifecycle
 question even arises**:
 
@@ -29,7 +29,7 @@ question even arises**:
 - The same barrier hits `Reflect.construct(RealClass, [options])` in `pathInsertionMethods`'
   upgrade flow — the registry only natively registers a **no-op stand-in** (`class extends
   HTMLElement {}`), never the real class, so the real class can never be legally constructed.
-- The existing jsdom **unit** tests (`webregistries/__tests__/unit/CustomElementRegistry.test.ts`)
+- The existing jsdom **unit** tests (`we:webregistries/__tests__/unit/CustomElementRegistry.test.ts`)
   pass only because **jsdom permits constructing unregistered custom-element classes**; Chromium
   does not. So the green unit suite masks a hard real-browser failure.
 
@@ -52,7 +52,7 @@ autonomous scoped element can exist at all.
 - **#263 — Form-associated callbacks** — stand-in lacks `static formAssociated = true`, so
   `formResetCallback`/`formStateRestoreCallback`/`formDisabledCallback` never fire.
 
-**Acceptance (this slice):** the **"upstream blocker"** guard in `autonomous-element-lifecycle.spec.ts`
+**Acceptance (this slice):** the **"upstream blocker"** guard in `we:autonomous-element-lifecycle.spec.ts`
 inverts from "throws Illegal constructor" to "defines successfully" — the scoped registry produces a
 legally-constructed real-class instance. Native control test stays green. (The three per-callback guards
 flip in #261/#262/#263, which build on this construction fix.)
@@ -63,7 +63,7 @@ contract these fixes must overturn.
 ## Progress
 
 **Resolved 2026-06-10.** Root construction fix landed in
-[plugs/webregistries/CustomElementRegistry.ts](../plugs/webregistries/CustomElementRegistry.ts):
+[we:plugs/webregistries/CustomElementRegistry.ts](../plugs/webregistries/CustomElementRegistry.ts):
 a new `ensureNativelyConstructible()` registers the **real autonomous class natively under a unique
 private tag** (`scoped-ctor-N-el`), memoised per constructor via a `WeakMap`. Because the class is
 now a *registered* constructor, both `new element()` in `define()` and `Reflect.construct(element, …)`
@@ -72,7 +72,7 @@ user's tag (which keeps its no-op stand-in) or the customized-built-in path (gua
 `!options?.extends`, this slice's exact scope).
 
 The e2e contract in
-[plugs/__tests__/e2e/autonomous-element-lifecycle.spec.ts](../plugs/__tests__/e2e/autonomous-element-lifecycle.spec.ts)
+[we:plugs/__tests__/e2e/autonomous-element-lifecycle.spec.ts](../plugs/__tests__/e2e/autonomous-element-lifecycle.spec.ts)
 **inverted as specified**: the former "upstream blocker → throws Illegal constructor" guard now
 asserts `define()` succeeds and produces a legally-constructed real-class instance; the native
 control stays green; the three per-callback probes now assert construction succeeds (driving the

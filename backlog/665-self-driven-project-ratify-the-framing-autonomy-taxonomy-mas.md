@@ -30,20 +30,20 @@ The research surfaced **four orthogonal axes**; three are genuine calls, one dis
 - **Autonomy level** — *already substantially ratified.* The dev-browser fix-loop ladder
   (report-only → propose → live-verify → open-PR, **default open-PR**) was ratified in
   [#141 Fork 2](/backlog/141-dev-browser-vision/), riding the verify-gated autofix engine
-  ([scripts/autofix/engine.mjs:15](../scripts/autofix/engine.mjs#L15) — the gate; `maxRounds` backstop
-  [engine.mjs:242](../scripts/autofix/engine.mjs#L242); the human `decide` hook
-  [engine.mjs:247](../scripts/autofix/engine.mjs#L247)). The open part is only *how to express it for
+  ([we:scripts/autofix/engine.mjs:15](../scripts/autofix/engine.mjs#L15) — the gate; `maxRounds` backstop
+  [we:engine.mjs:242](../scripts/autofix/engine.mjs#L242); the human `decide` hook
+  [we:engine.mjs:247](../scripts/autofix/engine.mjs#L247)). The open part is only *how to express it for
   the whole SDLC* → **Fork 1**.
 - **Tolerance envelope (the ODD)** — the value/risk dimensions that throttle autonomy per step. The
   *model* (value/risk-as-ODD) is our novel flag (ratify, below); the open part is the dimension
   *set/shape* → **Fork 2**.
 - **The artefact contract** — everything-as-code, tool-agnostic, so a foreign tool can drive it. The
   ground-truth gate already exists as the 3-state capability matrix
-  ([capabilityMatrix.json:1](../src/_data/capabilityMatrix.json#L1)) and the gate-severity seam lives in
-  plateau-app (`Gate.blocksDeployment`, [profiles.ts:34](../../plateau-app/src/profiles/profiles.ts#L34)).
+  ([we:capabilityMatrix.json:1](../src/_data/capabilityMatrix.json#L1)) and the gate-severity seam lives in
+  plateau-app (`Gate.blocksDeployment`, [plateau:profiles.ts:34](../../plateau-app/src/profiles/profiles.ts#L34)).
   This is a **forced invariant**, not a fork (below).
 - **The brand** — the load-bearing positioning call, complicated by "Project" already naming a WE
-  entity ([projects.json:1](../src/_data/projects.json#L1)) → **Fork 3**.
+  entity ([we:projects.json:1](../src/_data/projects.json#L1)) → **Fork 3**.
 
 ## Recommended path at a glance
 
@@ -215,7 +215,7 @@ at the first SaaS surface — not left open, held with a trigger.
 **Sub-decisions surfaced by the brand survey (report §7.5):**
 - **Avoid "self-driving" — it's strongly Oracle's** (self-driving database). Use "self-**driven**"; keep
   away from "self-driving database/infra/SDLC" in copy.
-- **"Project" overloads a WE entity** ([projects.json:1](../src/_data/projects.json#L1) — webregistries,
+- **"Project" overloads a WE entity** ([we:projects.json:1](../src/_data/projects.json#L1) — webregistries,
   webinjectors… are each a "Project"). Resolve by either accepting the overload (context disambiguates:
   a *Self-Driven* Project is a mode of working, not a standards Project) **(default)** or choosing a
   non-"Project" noun for the brand. *This is the one place a human's taste genuinely decides.*
@@ -247,6 +247,6 @@ human is fallback; L4: system is its own fallback).
 - The **brand rollout** (§D) — propagate the Fork-3 decision; publish the value/risk-ODD framing.
 - Umbrella links over the existing children (#141/#095/#099/#100/#562/#578/#410/#166/#089/#563).
 
-> Working scratch that seeded this (delete on file): `SELF-DRIVEN-PROJECT-DRAFT.md` at repo root.
+> Working scratch that seeded this (delete on file): `we:SELF-DRIVEN-PROJECT-DRAFT.md` at repo root.
 
 **Graduated to** `none` — ratification — spawned #666 Self-Driven Project epic (+ no-lock-in artefact Protocol).

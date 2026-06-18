@@ -44,13 +44,13 @@ note) so downstream adopters can bring their own vendor.
 - **Status:** resolved (2026-06-10, in a batch). The two concrete deliverables shipped; the two
   *decisions* among the open points were deferred, not built (they're forks, not work — see below).
 - **Done — second vendor (objective 2):** `createOpenAIClient` in
-  `blocks/renderers/upgrader/analyzers/modelComponent.ts` — a thin OpenAI Chat-Completions `fetch`
+  `we:blocks/renderers/upgrader/analyzers/modelComponent.ts` — a thin OpenAI Chat-Completions `fetch`
   client implementing the same `ModelClient` contract (`id: 'openai'`, structured
   `response_format: json_schema`, BYO `OPENAI_API_KEY`, fails loudly with no key). The analyzer,
   engine, and verify gate are untouched, proving the vendor is config not architecture. A deterministic
-  no-key unit test (`upgrader-model.test.ts`) covers it (drops into the registry, surfaces a
+  no-key unit test (`we:upgrader-model.test.ts`) covers it (drops into the registry, surfaces a
   `model:openai` diagnostic with no key) — hermetic, no network.
-- **Done — keyed live run (objective 1):** `upgrader-model.live.test.ts` runs one real end-to-end
+- **Done — keyed live run (objective 1):** `we:upgrader-model.live.test.ts` runs one real end-to-end
   `upgrade()` per available vendor and asserts the **unchanged verify gate accepts** the live model's
   output (`model:<id>` handled it, `offered === true`, hyphenated tag, no leftover `${…}`). Resolved
   the *smoke-test-placement* open point in favour of **`describe.skipIf(!key)`** (the env-gated form):

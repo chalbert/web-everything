@@ -51,19 +51,19 @@ See the [adapter-as-normalization-hub] paradigm and the no-lock-in principle rec
 **`see` leg shipped (2026-06-11).** The epic was scoped to its first, genuinely-buildable leg —
 `see` — with `re-export` and `shop` spun out as children. Delivered:
 
-- **Pivot model + knowledge base** — `scripts/validation-normalize/knowledge.mjs`: tool-agnostic
+- **Pivot model + knowledge base** — `we:scripts/validation-normalize/knowledge.mjs`: tool-agnostic
   `concerns`, a cross-tool `mappings` table graded by confidence (`exact`/`partial`/`approx`), and
   the implicit `none` grade where a tool has *no equivalent* (the valuable shopping cells).
-- **Adapters** — `adapters/eslint.mjs` + `adapters/oxlint.mjs`, each `ingest(config)` →
+- **Adapters** — `we:adapters/eslint.mjs` + `we:adapters/oxlint.mjs`, each `ingest(config)` →
   normalized rules. They only ever read the incumbent's own config (zero lock-in).
-- **Merge engine** — `normalize.mjs` joins ingested configs against the knowledge base into a
+- **Merge engine** — `we:normalize.mjs` joins ingested configs against the knowledge base into a
   comparative model (one cell per concern×tool, with `active`/`severity` from the loaded project),
-  plus a `summarize()`. Entry point `index.mjs` exposes `see(configsByTool)`.
-- **Catalog page** — `/validation-rules/` (`src/validation-rules.njk` + `src/_data/validationRules.js`)
+  plus a `summarize()`. Entry point `we:index.mjs` exposes `see(configsByTool)`.
+- **Catalog page** — `/validation-rules/` (`we:src/validation-rules.njk` + `we:src/_data/validationRules.js`)
   auto-renders the comparative table from fixture configs, highlighting divergences and no-equivalent
   cells. Nav entry added under Explore; Vite proxy allowlist updated.
-- **Tests + authoring note** — 9 vitest cases (`__tests__/normalize.test.mjs`) green;
-  `scripts/validation-normalize/README.md` documents the pivot model + how to add an adapter.
+- **Tests + authoring note** — 9 vitest cases (`we:__tests__/normalize.test.mjs`) green;
+  `we:scripts/validation-normalize/README.md` documents the pivot model + how to add an adapter.
 
 Resolutions of the four "resolve at build time" forks (POC defaults):
 

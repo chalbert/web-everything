@@ -29,7 +29,7 @@ How to supersede an old document with new findings *without destroying the dated
 - **W3C TR** — Two-URI split: an immutable dated `this version` snapshot vs a moving
   `latest version` pointer. The snapshot is the permanent trail; the pointer is the head.
   [W3C reports guide](https://www.w3.org/OldGuide/Reports)
-- **Keep a Changelog** (the living-file alternative) — one `CHANGELOG.md`, dated headings
+- **Keep a Changelog** (the living-file alternative) — one `we:CHANGELOG.md`, dated headings
   accumulate; trail lives *inside* one file rather than as discrete snapshots.
   [keepachangelog.com](https://keepachangelog.com/en/1.1.0/)
 

@@ -13,7 +13,7 @@ tags: []
 
 # FUI catalog data: auto-derive or drift-check blocks/plugs/traits from disk
 
-`blocks.json` (23), `plugs.json` (9), and `traits.json` (13) are hand-maintained lists. They are in sync with the on-disk artifacts *today*, but nothing enforces that — the same drift hazard that left `adapters.njk` (#758) showing a hardcoded set. Close the gap so these catalogs can't silently rot: either auto-derive the data from disk (the `src/_data/demos.js` glob pattern) or add a `check:standards`-style guard that fails when the JSON and the real `blocks/` / plug / trait files disagree.
+`fui:blocks.json` (23), `we:plugs.json` (9), and `we:traits.json` (13) are hand-maintained lists. They are in sync with the on-disk artifacts *today*, but nothing enforces that — the same drift hazard that left `fui:adapters.njk` (#758) showing a hardcoded set. Close the gap so these catalogs can't silently rot: either auto-derive the data from disk (the `fui:src/_data/demos.js` glob pattern) or add a `check:standards`-style guard that fails when the JSON and the real `blocks/` / plug / trait files disagree.
 
 ## Recommended approach — derive vs. check
 
@@ -23,11 +23,11 @@ Go with a **drift-check guard**: keep the curated JSON (it carries human summari
 
 Per the recommended approach: keep the curated JSON and add a `check:standards` guard that diffs each
 catalog's ids against the real on-disk artifacts. Implemented in
-`frontierui/scripts/check-standards.mjs`:
+`fui:frontierui/scripts/check-standards.mjs`:
 - **plugs** — 1:1 with `plugs/<id>/`, bidirectional (phantom + missing both error).
 - **traits** — globbed from `blocks/**/traits/*.ts` (filename = trait name, first char lower-cased),
-  bidirectional against `traits.json` names.
-- **blocks** — the grouped dirs don't map 1:1 (the caveat), so each `blocks.json` entry now declares a
+  bidirectional against `we:traits.json` names.
+- **blocks** — the grouped dirs don't map 1:1 (the caveat), so each `fui:blocks.json` entry now declares a
   `sourcePath` (the real id↔path map); the guard errors if a `sourcePath` is missing on disk (phantom /
   renamed). A genuinely new on-disk block surfaces when its entry + `sourcePath` are added.
 
@@ -39,5 +39,5 @@ catalog's ids against the real on-disk artifacts. Implemented in
 ## Notes
 
 - Lowest-priority slice of #757 — the catalogs are correct now; this is rot-prevention.
-- Reference: `src/_data/demos.js` is the existing auto-derived catalog to mirror.
-- Mapping caveat for a guard: `blocks/` dirs are grouped (e.g. `stores/`, `parsers/`) and don't 1:1 match `blocks.json` ids — the check needs the real id↔path mapping, not a naive dir-name compare.
+- Reference: `fui:src/_data/demos.js` is the existing auto-derived catalog to mirror.
+- Mapping caveat for a guard: `blocks/` dirs are grouped (e.g. `stores/`, `parsers/`) and don't 1:1 match `fui:blocks.json` ids — the check needs the real id↔path mapping, not a naive dir-name compare.

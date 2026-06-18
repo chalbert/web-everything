@@ -12,4 +12,4 @@ tags: []
 
 # Command-palette assembler preset
 
-Add a command-palette preset to assemblerPresets.json following the #667 reveal-nav precedent (resolved foundation). Unblocked batch-time volume — registry + eject pipeline already shipped (#688/#689). A composed command-palette block configuration the assembler can drop onto the canvas and eject.
+Add a command-palette preset to we:assemblerPresets.json following the #667 reveal-nav precedent (resolved foundation). Unblocked batch-time volume — registry + eject pipeline already shipped (#688/#689). A composed command-palette block configuration the assembler can drop onto the canvas and eject.

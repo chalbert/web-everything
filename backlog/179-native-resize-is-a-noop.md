@@ -39,7 +39,7 @@ in a real browser alongside the JS strategy.
 ## Resolution (2026-06-09)
 
 The native strategy's `resize` branch in
-[native.ts](frontierui/blocks/droplist/positioning/native.ts) now caps the surface
+[fui:native.ts](frontierui/blocks/droplist/positioning/native.ts) now caps the surface
 with a **fill-available** `max-block-size` instead of the dead
 `var(--anchored-available-block-size, auto)`. Under `position-area` the surface's
 containing block *is* the grid-area cell — the space between the anchor edge and the
@@ -50,11 +50,11 @@ The `--anchored-available-block-size` custom property is kept as a host override
 but its fallback is now a real available-space keyword rather than `auto`.
 
 Validated:
-- Unit — `blocks/droplist/positioning/__tests__/strategies.test.ts` asserts the
+- Unit — `fui:blocks/droplist/positioning/__tests__/strategies.test.ts` asserts the
   native `resize` styles are the available-space cap, not the `auto` no-op, and tear
   down cleanly.
-- Real browser — `blocks/droplist/positioning/__tests__/e2e/anchored-resize.spec.ts`
-  on `/demos/anchored-resize.html` opens a 24-option surface in a short (520px)
+- Real browser — `fui:blocks/droplist/positioning/__tests__/e2e/anchored-resize.spec.ts`
+  on `fui:/demos/anchored-resize.html` opens a 24-option surface in a short (520px)
   viewport with the **native** and **JS** strategies side by side; both clamp to ~the
   room below the trigger, stay within the viewport, and scroll internally.
 

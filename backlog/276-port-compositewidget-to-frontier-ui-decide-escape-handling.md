@@ -23,7 +23,7 @@ tags: []
 
 `CompositeWidget` was not carried into Frontier UI because `<auto-complete>` does not need it
 (`Windowed` — its companion in the same plateau bullet — *was* already ported and lives at
-`frontierui/blocks/droplist/Windowed.ts`). This item ports `CompositeWidget` when a consumer needs it.
+`fui:frontierui/blocks/droplist/Windowed.ts`). This item ports `CompositeWidget` when a consumer needs it.
 
 Split from [#193](/backlog/193-droplist-frontierui-migration-followups/) (bullet 3).
 
@@ -49,8 +49,8 @@ Resolve this fork before/with the port, and add the Escape test that was missing
 
 ## Resolution (2026-06-16) — already satisfied by the droplist decomposition; traced, not re-built
 Picked this up to build and **traced the real Frontier UI tree first** (the legacy `plateau` repo is abandoned, never opened): the work is **already done**, the way the resolved fork prescribes. `CompositeWidget` was not ported as a monolith — it was **decomposed** into composable droplist behaviors, exactly the "stays free of keyboard policy" end-state:
-- `frontierui/blocks/droplist/FocusDelegation.ts:26` — *"the **focus** half of the former CompositeWidget."*
-- `frontierui/blocks/droplist/Selection.ts:21` — *"the **selection** half of the former CompositeWidget."* (owns `clearSelection`).
-- `frontierui/blocks/droplist/Anchor.ts:44` — the anchor/disclosure layer *"owns exactly: open on the configured interactions; **dismiss on Escape**, focus-out, commit"* — the resolved Escape-to-dismiss policy, off `CompositeWidget`.
+- `fui:frontierui/blocks/droplist/FocusDelegation.ts:26` — *"the **focus** half of the former CompositeWidget."*
+- `fui:frontierui/blocks/droplist/Selection.ts:21` — *"the **selection** half of the former CompositeWidget."* (owns `clearSelection`).
+- `fui:frontierui/blocks/droplist/Anchor.ts:44` — the anchor/disclosure layer *"owns exactly: open on the configured interactions; **dismiss on Escape**, focus-out, commit"* — the resolved Escape-to-dismiss policy, off `CompositeWidget`.
 
-**The owed "missing Escape test" exists and passes:** `frontierui/blocks/droplist/__tests__/ported-suites.test.ts:205` — *"Escape dismisses an open surface"* asserts the surface closes, `aria-expanded=false`, listbox hidden. Ran the suite: **12/12 green**. `clearSelection`-on-Escape was *intentionally* dropped per the fork (Escape is dismiss, not clear; `Clearable.ts:17` is "deliberately decoupled from Escape"). No `<auto-complete>` regression (`auto-complete.spec.ts` present). Acceptance — *"CompositeWidget in Frontier UI with a chosen, tested Escape behavior; no regression"* — is **met by prior migration work** (the #193 droplist migration, after this card was written). No new code; resolving against the existing decomposed behaviors.
+**The owed "missing Escape test" exists and passes:** `fui:frontierui/blocks/droplist/__tests__/ported-suites.test.ts:205` — *"Escape dismisses an open surface"* asserts the surface closes, `aria-expanded=false`, listbox hidden. Ran the suite: **12/12 green**. `clearSelection`-on-Escape was *intentionally* dropped per the fork (Escape is dismiss, not clear; `fui:Clearable.ts:17` is "deliberately decoupled from Escape"). No `<auto-complete>` regression (`fui:auto-complete.spec.ts` present). Acceptance — *"CompositeWidget in Frontier UI with a chosen, tested Escape behavior; no regression"* — is **met by prior migration work** (the #193 droplist migration, after this card was written). No new code; resolving against the existing decomposed behaviors.

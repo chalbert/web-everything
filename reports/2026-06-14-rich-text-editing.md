@@ -2,14 +2,14 @@
 
 **Date**: 2026-06-14
 **Point**: The web has *no* monolithic "rich-text editor" platform standard — it ships orthogonal primitives (the editing **surface**, an **operation vocabulary**, **sanitization**, **decorations**) and leaves the **document model** to incompatible vendor engines. So WE should standardize rich-text editing as *separate, composable* standards along a substrate → engine → formatting → serialization seam — not one editor component — with the document model as an **engine-provider Protocol** (the one place "many vendors interoperate / swap engines" is genuinely true).
-**Backlog item**: [backlog/590-candidate-standard-rich-text-contenteditable-editing.md](../backlog/590-candidate-standard-rich-text-contenteditable-editing.md)
+**Backlog item**: [we:backlog/590-candidate-standard-rich-text-contenteditable-editing.md](../backlog/590-candidate-standard-rich-text-contenteditable-editing.md)
 **Research page**: `/research/rich-text-editing/`
 
 ---
 
 ## Question
 
-Whitespace surfaced by [#370](../backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke.md) Fork 4: the repo has no rich-text / contenteditable / WYSIWYG editing standard — only the `input` intent ([intents.json:1108](../src/_data/intents.json#L1108)) and `type-ahead` ([intents.json:1439](../src/_data/intents.json#L1439)) cover single-line text + search. How does WE standardize rich-text editing — the editing substrate, the document model, the format/command vocabulary, the toolbar UX, paste/sanitization, and serialization — and where does each piece live in the constellation (intent / block / protocol / capability / plug)?
+Whitespace surfaced by [#370](../backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke.md) Fork 4: the repo has no rich-text / contenteditable / WYSIWYG editing standard — only the `input` intent ([we:intents.json:1108](../src/_data/intents.json#L1108)) and `type-ahead` ([we:intents.json:1439](../src/_data/intents.json#L1439)) cover single-line text + search. How does WE standardize rich-text editing — the editing substrate, the document model, the format/command vocabulary, the toolbar UX, paste/sanitization, and serialization — and where does each piece live in the constellation (intent / block / protocol / capability / plug)?
 
 ## Recommendation (the prepared default, not a ratified ruling)
 
@@ -26,7 +26,7 @@ Whitespace surfaced by [#370](../backlog/370-candidate-standard-expressive-symbo
 | **Decorations** (non-destructive marks) | CSS Custom Highlight API (Baseline 2024) | supported by default | engine uses Highlight API for collab cursors / search / spellcheck without DOM mutation |
 | **Collaboration** (multi-cursor sync) | CRDT (Yjs) + awareness | **out of scope** | cross-ref [webrealtime](../src/_data/projects.json) — non-fungible with editing, like #370 cross-ref'd sync-transport |
 
-The load-bearing finding: **the document model is the only axis with a genuine swappable-vendor story**, and therefore the only one that earns a Protocol (design-first §"which layer" Q2: a Protocol is justified *only* when many vendors must interoperate or swap engines). Every other axis is either a native primitive WE reuses (surface, commands, decorations), a thin composition (formatting UX, sanitization), or an open config setting (serialization). This mirrors [#370](../backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke.md)'s provider→consumer split and the `CustomPositioningRegistry` precedent ([plugs.json:293](../src/_data/plugs.json#L293)) exactly.
+The load-bearing finding: **the document model is the only axis with a genuine swappable-vendor story**, and therefore the only one that earns a Protocol (design-first §"which layer" Q2: a Protocol is justified *only* when many vendors must interoperate or swap engines). Every other axis is either a native primitive WE reuses (surface, commands, decorations), a thin composition (formatting UX, sanitization), or an open config setting (serialization). This mirrors [#370](../backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke.md)'s provider→consumer split and the `CustomPositioningRegistry` precedent ([we:plugs.json:293](../src/_data/plugs.json#L293)) exactly.
 
 ## Key findings
 
@@ -72,7 +72,7 @@ No general design system (MD3, Carbon, Fluent base) ships a first-class rich-tex
 
 Running design-first §"which layer" + the 7-question per-fork classification on each axis:
 
-- **Editing surface → Capability.** `contenteditable` (Baseline), `editcontext` (Chromium), plus `sanitizer-api` and `highlight-api` are net-new `capabilities.json` ids (none exist today — confirmed by grep). Tiered per impl in `capabilityMatrix.json`; the editor declares `requiresCapabilities`. Default = most-permissive floor (`contenteditable`) + capability-gated upgrade.
+- **Editing surface → Capability.** `contenteditable` (Baseline), `editcontext` (Chromium), plus `sanitizer-api` and `highlight-api` are net-new `we:capabilities.json` ids (none exist today — confirmed by grep). Tiered per impl in `we:capabilityMatrix.json`; the editor declares `requiresCapabilities`. Default = most-permissive floor (`contenteditable`) + capability-gated upgrade.
 - **Document model / engine → Protocol** (owned by a **new `webediting` project** — rich-text editing is cross-cutting and attracts its own registries/plugs/blocks, passing the design-first "could it apply outside a host's domain?" test). `CustomEditorEngine` contract + `CustomEditorEngineRegistry`, native-first default, library adapters. *Litmus passed:* genuine multi-vendor swap story → Protocol, not a baked model.
 - **Editor → Block.** The runnable element wiring surface + engine + `beforeinput` command handling. Ships code → Block.
 - **Formatting UX → Intent** (`text-formatting`): declarative toolbar/controls axis (which `format*` ops are exposed, toolbar placement/overflow) — UX "what" only. Composes droplist/popover/button. Separate from the editing intent (separation bias).
@@ -96,10 +96,10 @@ Running design-first §"which layer" + the 7-question per-fork classification on
 
 | File | Action |
 |---|---|
-| `reports/2026-06-14-rich-text-editing.md` | Created (this report) |
-| `src/_data/researchTopics.json` | Added `rich-text-editing` topic entry |
-| `src/_includes/research-descriptions/rich-text-editing.njk` | Created research write-up |
-| `backlog/590-candidate-standard-rich-text-contenteditable-editing.md` | Rewritten to prepared-fork shape; `preparedDate` set |
+| `we:reports/2026-06-14-rich-text-editing.md` | Created (this report) |
+| `we:src/_data/researchTopics.json` | Added `rich-text-editing` topic entry |
+| `we:src/_includes/research-descriptions/rich-text-editing.njk` | Created research write-up |
+| `we:backlog/590-candidate-standard-rich-text-contenteditable-editing.md` | Rewritten to prepared-fork shape; `preparedDate` set |
 
 ## Sources
 

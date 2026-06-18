@@ -17,7 +17,7 @@ Slice #085-E: a CustomValidationAdapter that emits JSON Schema from the validati
 
 ## Progress
 
-**Resolved 2026-06-11.** Shipped `validation-generation/adapters/jsonSchema.ts` — `jsonSchemaAdapter`
+**Resolved 2026-06-11.** Shipped `we:validation-generation/adapters/jsonSchema.ts` — `jsonSchemaAdapter`
 (`key: 'json-schema'`, `language: 'json'`) emitting a JSON Schema fragment `{ properties: { <field>:
 <schema> }, required: [<field>] }` (`required` placed where JSON Schema carries it — on the object).
 Constraints → standard keywords: `minLength`/`maxLength`/`pattern`, `minimum`/`maximum`/`multipleOf`,
@@ -26,4 +26,4 @@ is **not** declared (no standard keyword for an arbitrary predicate) — reporte
 Added to the barrel + plug re-export — this completes the four-adapter cluster, so
 `createDefaultValidationAdapterRegistry()` now ships native-HTML (default) + Zod + Pydantic + JSON-Schema.
 
-**Gate:** `adapters/jsonSchema.test.ts` 5 green; `tsc` clean; `check:standards` 0 errors (run at batch close).
+**Gate:** `we:adapters/jsonSchema.test.ts` 5 green; `tsc` clean; `check:standards` 0 errors (run at batch close).

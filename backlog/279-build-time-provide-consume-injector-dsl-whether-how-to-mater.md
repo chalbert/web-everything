@@ -12,7 +12,7 @@ tags: []
 
 # Build-time provide/consume injector DSL — whether/how to materialize the deferred surface
 
-Deferred sibling of #002 (ruling: @domain = Protocol). The build-time injector DSL — provide/consume with three prepositions (`as` = replace registry, `in` = extend/merge, `to` = target a @domain/Protocol), `consume … of` for domains vs `from` for registries, and `import.injector` comma source-lists for priority/fallback — needs build tooling WE lacks, and #271 ruled resolution is native-implied (a generator hint, not a resolver). Open decision: whether to build it at all, on which build-tooling foundation, and how to keep it a thin generator over native importmap/alias. Surface is documented-as-intended in #002's gap analysis (reports/2026-02-24-injector-syntax-spec.md); this item decides build, not concept.
+Deferred sibling of #002 (ruling: @domain = Protocol). The build-time injector DSL — provide/consume with three prepositions (`as` = replace registry, `in` = extend/merge, `to` = target a @domain/Protocol), `consume … of` for domains vs `from` for registries, and `import.injector` comma source-lists for priority/fallback — needs build tooling WE lacks, and #271 ruled resolution is native-implied (a generator hint, not a resolver). Open decision: whether to build it at all, on which build-tooling foundation, and how to keep it a thin generator over native importmap/alias. Surface is documented-as-intended in #002's gap analysis (we:reports/2026-02-24-injector-syntax-spec.md); this item decides build, not concept.
 
 ## Decision (2026-06-10) — don't build now; cap the ceiling at Tier 1/2 + the declarative form
 
@@ -26,7 +26,7 @@ substance out, what remains in #279 is purely **Tier-3 sugar** that desugars to 
 - **Tier 1.5** — the no-build `<script type="injector">` declarative form (pulled forward as #278).
 
 The `provide/consume … to/of/as/in` keyword forms and the `import.injector` comma source-lists stay
-**Tier-3 documented-as-intended** (in `reports/2026-02-24-injector-syntax-spec.md` and #002's gap
+**Tier-3 documented-as-intended** (in `we:reports/2026-02-24-injector-syntax-spec.md` and #002's gap
 analysis) — not built.
 
 **Reasoning (settled in discussion):**

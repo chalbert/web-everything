@@ -33,7 +33,7 @@ Phase (c) of the #087 distribution ruling: make distribution mode a per-artifact
 
 Built the distribution-policy module on the #461 origin:
 
-- **New [blocks/renderers/module-service/prewarm.ts](../blocks/renderers/module-service/prewarm.ts)** —
+- **New [we:blocks/renderers/module-service/prewarm.ts](../blocks/renderers/module-service/prewarm.ts)** —
   `prewarmHotSet(cache, policy, log?)` over the existing `ServedArtifactCache` (#311). A `PrewarmPolicy`
   declares `ids` + a `hotSet` of `(form, target, strategy)` tuples; the eager path resolves +
   cache-fills exactly those through the SAME `cache.serve` a real request uses (so a warmed tuple is a
@@ -46,7 +46,7 @@ Built the distribution-policy module on the #461 origin:
   `esnext` × `declarative-static`; widen `targets`/`strategies` to the project's real compile set.
 - **Immutable invariant unchanged** — warming only fills the cache; invalidation stays "re-point the
   floating pointer, never purge an immutable artifact" (the cache's existing `invalidate`).
-- **Tests** — [prewarm.test.ts](../blocks/__tests__/unit/renderers/prewarm.test.ts) (5 cases): warms
+- **Tests** — [we:prewarm.test.ts](../blocks/__tests__/unit/renderers/prewarm.test.ts) (5 cases): warms
   exactly the hot set, reports the lazy remainder, real cache-fill (later request is a hit), unknown-id
   → `unresolved` (no throw), log summary, default-matrix accounting. Gate green.
 
@@ -55,4 +55,4 @@ Built the distribution-policy module on the #461 origin:
 `prewarmHotSet` warm the very cache the handler reads — a small wiring change tracked with the hosted
 origin work (#451).
 
-**Graduated to** `blocks/renderers/module-service/prewarm.ts` — webadapters distribution pre-warm path.
+**Graduated to** `we:blocks/renderers/module-service/prewarm.ts` — webadapters distribution pre-warm path.

@@ -20,10 +20,10 @@ lifts the single-locus wall that today drops ~32 of 44 batchable items as out-of
 ## Spec (ratified — #498 Ruling)
 
 1. **Declarative per-locus registry** — `{ repoPath, gateCommand, devServerProbe, commitTarget,
-   closeoutDiscipline? }` extending the `LOCI` set (`check-standards-rules.mjs`). Config, not loop logic.
+   closeoutDiscipline? }` extending the `LOCI` set (`we:check-standards-rules.mjs`). Config, not loop logic.
 2. **Cross-locus packing** — readiness stops filtering the pack to `BATCH_LOCUS`
-   ([scripts/readiness/engine.mjs:212-213](../scripts/readiness/engine.mjs#L212-L213),
-   [scripts/check-readiness.mjs:70-93](../scripts/check-readiness.mjs#L70-L93)); the `Other locus`
+   ([we:scripts/readiness/engine.mjs:212-213](../scripts/readiness/engine.mjs#L212-L213),
+   [we:scripts/check-readiness.mjs:70-93](../scripts/check-readiness.mjs#L70-L93)); the `Other locus`
    section collapses (every batchable item is now packable). Keep the soft-reservation logic.
 3. **Per-item in-locus gating (Fork 2 fixed mechanic)** — after each item the loop runs that locus's
    `gateCommand` in its `repoPath`, **green-at-every-seam preserved**; commits per-repo (never
@@ -32,7 +32,7 @@ lifts the single-locus wall that today drops ~32 of 44 batchable items as out-of
 4. **exercise-app via `closeoutDiscipline` (Fork 4)** — its gate is `check:standards +
    check:app-conformance` (both webeverything scripts); the `/exercise-app` GAP-tagging rule
    (platform-first build, else tag a GAP) is a **required, non-skippable** close-out step.
-5. **Doc** — rewrite the `Repo-locus` section of [docs/agent/backlog-workflow.md](../docs/agent/backlog-workflow.md)
+5. **Doc** — rewrite the `Repo-locus` section of [we:docs/agent/backlog-workflow.md](../docs/agent/backlog-workflow.md)
    to describe the registry (it currently codifies the single-locus wall).
 
 **Recommended `/split`** (likely > 8 as one piece): (A) registry config + cross-locus packing; (B) the
@@ -48,21 +48,21 @@ Decision #498 is resolved, so all three are unblocked once carved.
 
 All five spec points landed in one pass:
 
-1. **Registry** — `LOCI` in [check-standards-rules.mjs](../scripts/check-standards-rules.mjs) is now a
+1. **Registry** — `LOCI` in [we:check-standards-rules.mjs](../scripts/check-standards-rules.mjs) is now a
    record map `{repoPath, gateCommand, devServerProbe, commitTarget, closeoutDiscipline?}` (was a `Set`);
    validation switched to `Object.hasOwn`/`Object.keys`.
-2. **Cross-locus packing** — `computeBatchPack` ([engine.mjs](../scripts/readiness/engine.mjs)) dropped the
+2. **Cross-locus packing** — `computeBatchPack` ([we:engine.mjs](../scripts/readiness/engine.mjs)) dropped the
    single-locus filter + `otherLocus` bucket + `batchLocus` param; packs every locus together. CLI
-   ([check-readiness.mjs](../scripts/check-readiness.mjs)) dropped `--locus`/"Other locus", flags each
+   ([we:check-readiness.mjs](../scripts/check-readiness.mjs)) dropped `--locus`/"Other locus", flags each
    cross-repo item `⌂ <locus>` and prints a per-locus gate legend. Verified: #425/#449 (frontierui) +
    #335 (plateau-app) now pack alongside WE items.
 3. **Per-item in-locus gating + per-repo commit** — documented in
-   [backlog-workflow.md](../docs/agent/backlog-workflow.md) *Repo-locus* (rewritten from "future
-   capability" to BUILT) + the batch loop step 2, and [batch SKILL.md](../.claude/skills/batch-backlog-items/SKILL.md).
+   [we:backlog-workflow.md](../docs/agent/backlog-workflow.md) *Repo-locus* (rewritten from "future
+   capability" to BUILT) + the batch loop step 2, and [batch we:SKILL.md](../.claude/skills/batch-backlog-items/SKILL.md).
 4. **exercise-app `closeoutDiscipline`** — `check:standards && check:app-conformance` gate + non-skippable
    GAP-tagging, in its `LOCI` entry + the doc.
 5. **Doc** — *Repo-locus* rewritten; `out-of-locus` removed as a drop-reason (folds into `blocked-in-fact`
    only when a locus repo isn't checked out).
 
-Tests: `engine.test.mjs` repo-locus block rewritten to assert locus-agnostic packing (40 vitest green);
+Tests: `we:engine.test.mjs` repo-locus block rewritten to assert locus-agnostic packing (40 vitest green);
 `check:standards` 0 errors.

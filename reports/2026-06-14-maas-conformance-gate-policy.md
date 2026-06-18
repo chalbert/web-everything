@@ -11,19 +11,19 @@
 ## The narrow question
 
 #506 ships a deterministic, language-neutral conformance runner
-([`runner.ts`](../blocks/renderers/module-service/conformance/runner.ts)) that drives any origin —
+([`we:runner.ts`](../blocks/renderers/module-service/conformance/runner.ts)) that drives any origin —
 expressed as a `ConformanceTarget` = `(vector) => Promise<ActualResponse>` — against frozen golden
 vectors and asserts byte-identical / identity-stable fidelity. The JS reference target
-([`referenceTarget.ts`](../blocks/renderers/module-service/conformance/referenceTarget.ts)) passes by
+([`we:referenceTarget.ts`](../blocks/renderers/module-service/conformance/referenceTarget.ts)) passes by
 construction (the goldens are generated from it). #548 added the **first foreign target**: a
 byte-locked C# origin ([`GeneratedMaaSOrigin.cs`](../blocks/renderers/module-service/generation/__goldens__/csharp/GeneratedMaaSOrigin.cs)),
 whose generation is drift-gated today only by a **string-match** snapshot test
-(`generate.test.ts`), *not* by compiling and running it. #549 is the slice that closes that gap:
+(`we:generate.test.ts`), *not* by compiling and running it. #549 is the slice that closes that gap:
 wire the C# origin as a live `ConformanceTarget` (a `dotnet`-hosted subprocess) so divergence in
 *executed behaviour*, not just source bytes, is caught.
 
 The runner's own doc-comment already pre-commits the transport: *"a generated origin is driven via a
-**subprocess target** that reads the very same `golden.json`."* So the wiring is mechanical. The one
+**subprocess target** that reads the very same `we:golden.json`."* So the wiring is mechanical. The one
 real decision is **gate policy**: running the C# target requires a `dotnet` toolchain (compile + execute),
 which is heavy and not universally present. Fold it into the default gate (maximum drift safety, hard
 toolchain dependency everywhere) or run it as an opt-in suite (portable/fast default, drift can land if
@@ -39,7 +39,7 @@ as a *separate*, toolchain-gated job, not inside each implementation's default u
   implementation as a **sub-process communicating over a pipe** (`ConformanceRequest` →
   `ConformanceResponse`). The suite is a standalone runner, gated per-implementation in its own job;
   it is famously the lesson that *a shared spec guarantees nothing without a shared executable suite*
-  (same spec, 0 vs 1,847 failures across libraries) — already cited in our `runner.ts` header.
+  (same spec, 0 vs 1,847 failures across libraries) — already cited in our `we:runner.ts` header.
 - **Connect / gRPC / gRPC-Web conformance** ([connectrpc/conformance](https://github.com/connectrpc/conformance))
   ships `connectconformance`, a **standalone binary** that orchestrates the client/server under test as
   subprocesses over **stdin/stdout**, with all test-case data embedded in the binary (language-agnostic).
@@ -62,7 +62,7 @@ stricter posture a project picks when its CI is guaranteed to carry the toolchai
 
 `test:integration` (Playwright — a heavy browser toolchain) is already a **separate npm script** from
 `test:unit` (`vitest run`), *not* folded into the default fast gate. The `check:standards` gate
-(`scripts/check-standards.mjs`) is a pure structural/standards linter that does **not** run vitest at
+(`we:scripts/check-standards.mjs`) is a pure structural/standards linter that does **not** run vitest at
 all; vitest is the unit gate and `verify` chains `vitest run && build:check`. So this repo already
 expresses "heavy/optional toolchain ⇒ its own script" — the same shape option B proposes for the
 `dotnet` conformance run.

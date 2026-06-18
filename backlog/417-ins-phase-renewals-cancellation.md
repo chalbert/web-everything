@@ -24,10 +24,10 @@ lifecycle, Web Guards, audit.
 
 Added the end-of-term + termination flows to exercise app B, all as **guarded Web Lifecycle transitions**:
 
-- **`domain/renewal.ts`** (pure core) — `renewalOffer` (re-rate the next term), `acceptRenewal` (carry into a new term, stays in-force; resets per-term payment/issuance), `recordNonRenewal` (→ expired), `recordCancellation` (earned/unearned split + prorated refund; **short-rate on non-pay**, pro-rata on insured-request/UW), and reinstatement. Reuses the S5 `remainingFraction` so endorsement + cancellation share one proration basis.
+- **`we:domain/renewal.ts`** (pure core) — `renewalOffer` (re-rate the next term), `acceptRenewal` (carry into a new term, stays in-force; resets per-term payment/issuance), `recordNonRenewal` (→ expired), `recordCancellation` (earned/unearned split + prorated refund; **short-rate on non-pay**, pro-rata on insured-request/UW), and reinstatement. Reuses the S5 `remainingFraction` so endorsement + cancellation share one proration basis.
 - **Guards made real** — the previously default-true `cancel-reason` and `reinstate` Web Lifecycle guards now resolve through `cancellationRecorded` / `reinstateEligible` (the Web Guards stand-in, PLATFORM-GAP #289): in-force → cancelled requires a recorded reason; lapsed → in-force requires a lapsed policy.
-- **`domain/types.ts`** — `Cancellation` / `Renewal` / `CancellationReason` types + `cancellation?` / `renewals?` on `Policy`.
-- **`app.ts` / `app.css`** — `renderPolicyActions(p)`: in-force shows the renewal offer (re-rated, accept / non-renew), a cancellation reason picker, and a lapse action; lapsed shows reinstate + cancel; cancelled shows the refund summary. Handlers fire the guarded transitions, append to Web Audit, and notify (#421).
+- **`we:domain/types.ts`** — `Cancellation` / `Renewal` / `CancellationReason` types + `cancellation?` / `renewals?` on `Policy`.
+- **`we:app.ts` / `we:app.css`** — `renderPolicyActions(p)`: in-force shows the renewal offer (re-rated, accept / non-renew), a cancellation reason picker, and a lapse action; lapsed shows reinstate + cancel; cancelled shows the refund summary. Handlers fire the guarded transitions, append to Web Audit, and notify (#421).
 
 **Verified:** `tsc` 0 errors; `check:standards` green; `check:app-conformance` compliant (92%, 0 FAIL); live on :3000 — cancellation produces the cancelled badge + prorated refund, lapse→reinstate returns the policy to in-force, renewal-accept is audited; no console errors.
 

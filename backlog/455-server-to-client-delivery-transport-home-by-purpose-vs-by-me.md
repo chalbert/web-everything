@@ -20,7 +20,7 @@ preparedDate: "2026-06-12"
 
 | Transport | Direction / lifecycle | Home today |
 |---|---|---|
-| Request/response (fetch; polling = repeated fetch) | client-initiated, one-shot | ✅ `webresources` ([projects.json:22](../src/_data/projects.json#L22)) |
+| Request/response (fetch; polling = repeated fetch) | client-initiated, one-shot | ✅ `webresources` ([we:projects.json:22](../src/_data/projects.json#L22)) |
 | **Web Push** | server→client, **closed-app** (SW + push service + VAPID) | ⏳ provisional → `webnotifications` (#009 Fork C/D) |
 | **WebSocket** | bidirectional, open-app | ❌ unowned |
 | **SSE / EventSource** | server→client stream, open-app | ❌ unowned |

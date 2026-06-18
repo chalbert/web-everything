@@ -12,7 +12,7 @@ crossRef: { url: /intents/collection-operations/, label: collection-operations i
 
 # Wire the Custom Pagination resource to the Collection Operations page dimension
 
-> **Resolved 2026-06-06.** The Custom Pagination resource in `resources.json` now links to the Collection
+> **Resolved 2026-06-06.** The Custom Pagination resource in `we:resources.json` now links to the Collection
 > Operations `page` dimension and encodes the pairing constraint on the protocol side: `offset`/`page` expose
 > a `total` (enabling jump-to-page + `rangeLabel`), while `cursor` exposes none and forces `append`/prev-next —
 > the same fact the intent states from the UX side, now kept consistent here. Original narrative below.

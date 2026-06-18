@@ -105,7 +105,7 @@ machinery, possibly with an extension; altitude note from #690):
 ## The one default recipe (config-extends-platform-default)
 
 The node ships **one fully-defined default recipe** so a project's recipe is a *flavor on top*, never authored
-from nothing: every autonomy ceiling, tolerance dial, and gate selection is named. `process.config.json`
+from nothing: every autonomy ceiling, tolerance dial, and gate selection is named. `we:process.config.json`
 **extends** it:
 
 ```json
@@ -137,7 +137,7 @@ emit the everything-as-code config); the *format* is the standard, the *authorin
 
 - **Domain-general schema** (no hard-coded "web"), web apps as the first consumer — later generalization is
   free (#672 scope).
-- **Concept** Protocol registered in `protocols.json` (`self-driven-project-artefact-contract`, owned by
+- **Concept** Protocol registered in `we:protocols.json` (`self-driven-project-artefact-contract`, owned by
   `webprocess`). Non-blocking consumers only (control plane, dev-browser) — never gates the running app.
 - **Separately-prioritized builds** on top of this contract: the full meta-schema registries, the default
   recipe as shipped config, and the Plateau recipe configurator (Layer 2).

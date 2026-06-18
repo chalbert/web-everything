@@ -74,5 +74,5 @@ Five independently-deliverable phases, now carved into child stories (points liv
 All five phase children have landed (`status: resolved`): #436 (policy/rule model), #437 (gates),
 #438 (waivers), #439 (audit/evidence trail, emitting through #350), #440 (retrofit
 `check:standards` + readiness as declared policies). The epic graduated to the **`webcompliance`**
-project entity (`project:webcompliance` in `projects.json`). Nothing further is owned at the epic
+project entity (`project:webcompliance` in `we:projects.json`). Nothing further is owned at the epic
 level — future work attaches to the project, not here.

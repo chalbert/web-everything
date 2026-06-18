@@ -34,8 +34,8 @@ is reliable, but full screenshot→structure recovery is hard* (Design2Code SOTA
 ## The axis being decided
 
 - **What the pass *emits* per shot** (the output contract) — the corpus already carries deferred
-  fields (`surface`, refined `designRegister`) per #382 Fork 2, read fresh from the `meta.json`
-  sidecars by `src/_data/designRefs.js`; codification fills them plus a structural description.
+  fields (`surface`, refined `designRegister`) per #382 Fork 2, read fresh from the `we:meta.json`
+  sidecars by `we:src/_data/designRefs.js`; codification fills them plus a structural description.
   *Fork 1.*
 - **Which vision capability it *uses*** — **settled by #475 Fork 1 (ruled):** the shared **Plateau
   vision service**; this pass is its second, richer client (no-leakage). *Fork 2.*

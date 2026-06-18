@@ -19,8 +19,8 @@ S2c of #658. Migrate the data-grid (DataGridBehavior, DataGridEditBehavior, regi
 ## Blocker — missing precursor (2026-06-15, batch — attempted, released unworked)
 
 Attempted in a batch and **released, not resolved** — a **dependency-ordering** blocker the card's scope
-doesn't cover. `blocks/data-grid/DataGridBehavior.ts` imports `../renderers/data-grid/renderDataGrid`, and
-the `renderers/data-grid/` render family (`renderDataGrid.ts`, `editableGrid.ts`, `__fixtures__`) is
+doesn't cover. `fui:blocks/data-grid/DataGridBehavior.ts` imports `../renderers/data-grid/renderDataGrid`, and
+the `renderers/data-grid/` render family (`fui:renderDataGrid.ts`, `fui:editableGrid.ts`, `__fixtures__`) is
 **WE-only — not yet in `@frontierui/blocks`** (`../frontierui/blocks/renderers/data-grid/` is absent). A
 byte-identical copy of data-grid would therefore have a **dangling import** and fail FUI's build, breaking
 "leaves both trees valid". (The other deps — `plugs/webbehaviors/CustomAttribute{,Registry}` — *do* exist
@@ -44,11 +44,11 @@ flags one.
   `diff`-verified byte-identical; WE copies untouched (#170). data-grid's `../renderers/data-grid/...`
   import now resolves (the #704 precursor); the `plugs/webbehaviors` deps already existed in FUI.
 - **Exports map:** added named + wildcard entries for both new top-level families (`./data-grid` →
-  `registerDataGrid.ts`, `./type-ahead` → `index.ts`, plus `./data-grid/*`, `./type-ahead/*`), per #694.
+  `fui:registerDataGrid.ts`, `./type-ahead` → `we:index.ts`, plus `./data-grid/*`, `./type-ahead/*`), per #694.
 - **Type-harden (#695 option-A, as the card anticipated):** FUI's stricter `strictFunctionTypes` flagged
-  `DataGridEditBehavior.ts` — `editor` is an `EditorElement` union, so the typed `keydown` overload
+  `fui:DataGridEditBehavior.ts` — `editor` is an `EditorElement` union, so the typed `keydown` overload
   doesn't resolve and `addEventListener` falls back to the base `EventListener` signature, which a
   `(KeyboardEvent)=>void` handler isn't assignable to. Cast the handler `as EventListener` at the
   add/remove sites, applied **byte-identically to both copies** (WE + FUI). Runtime-identical.
-- **Gate:** FUI `tsc -p blocks/tsconfig.json --noEmit` clean; FUI data-grid + type-ahead suites 63/63
+- **Gate:** FUI `tsc -p fui:blocks/tsconfig.json --noEmit` clean; FUI data-grid + type-ahead suites 63/63
   green; WE `check:standards` 0 errors + WE DataGridEditBehavior 31/31 green. Both trees valid.

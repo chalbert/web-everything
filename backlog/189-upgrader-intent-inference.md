@@ -35,14 +35,14 @@ are worth shipping first so the field is exercised end-to-end without a key.
 - **Status:** resolved — deterministic intent inference shipped + demonstrated end-to-end.
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
-  - `inferIntents(template, code)` in `legacyWebComponent.ts` — two conservative rules:
+  - `inferIntents(template, code)` in `we:legacyWebComponent.ts` — two conservative rules:
     `role="listbox"` + `aria-selected` → `selection`; `prefers-reduced-motion` guard → `motion`. Both
     require unambiguous signals, each adds an analyzer note, and `analyze()` now populates `ir.intents`.
-  - Shared fixtures (`upgrader-cases.ts`): added `expectIntents` + two cases (`listbox-selection-intent`,
+  - Shared fixtures (`we:upgrader-cases.ts`): added `expectIntents` + two cases (`listbox-selection-intent`,
     `reduced-motion-intent`); the suite loop now asserts `expectIntents`.
-  - `upgrader.test.ts`: +6 cases incl. the conservative-omission guard (listbox without aria-selected
+  - `we:upgrader.test.ts`: +6 cases incl. the conservative-omission guard (listbox without aria-selected
     infers nothing) and an inferred-intent passing the verify gate. Suite 23/23 green.
-  - Demo (`code-upgrader-demo.ts`): reference cards now pass `knownIntents` so the inferred intent
+  - Demo (`we:code-upgrader-demo.ts`): reference cards now pass `knownIntents` so the inferred intent
     shows a green `✓ intents — N resolve` check. Playground verified live on :3000 — 13/13, both new
     cards `✓ upgraded`, IR panes show the inferred intents, no page errors.
   - `check:standards` 0 errors.

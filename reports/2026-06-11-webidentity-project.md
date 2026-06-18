@@ -29,7 +29,7 @@ All four are invoked through the **same** `navigator.credentials.get({ password,
 
 Every credential family terminates in **server-side verification**: the RP server validates the WebAuthn assertion signature, exchanges the FedCM token with the IdP, or decrypts/validates the mDoc response. The browser API only *gathers* a credential. Sessions, token storage, refresh, and authorization are entirely off-platform (cookies / `Authorization` headers / app logic).
 
-This is the **identical trust-boundary** already stated for the Guard protocol: *"enforcement is server-side; the front-end is a UX mirror, never the enforcement point"* ([protocols.json:96](../src/_data/protocols.json#L96)) and for #178 access-control ([backlog/178:22](../backlog/178-access-control-authorization-gate.md#L22)). WE's job is therefore **not** to standardize auth (a security domain it must not own) but to standardize the *UX-only declarative surface* over the platform's gather-a-credential seam.
+This is the **identical trust-boundary** already stated for the Guard protocol: *"enforcement is server-side; the front-end is a UX mirror, never the enforcement point"* ([we:protocols.json:96](../src/_data/protocols.json#L96)) and for #178 access-control ([backlog/178:22](../backlog/178-access-control-authorization-gate.md#L22)). WE's job is therefore **not** to standardize auth (a security domain it must not own) but to standardize the *UX-only declarative surface* over the platform's gather-a-credential seam.
 
 ## Finding 3 — the boundary with #009, #178, #129 is clean (three distinct gaps, do not merge)
 
@@ -56,7 +56,7 @@ Most of identity is technical (ceremonies, token verification, session storage) 
 - **credential-request declaration** — *which* families a sign-in surface will accept (passkey / federated / digital / password), driving the browser chooser.
 - **auth-state presence** — signed-in / signed-out / pending as a gate predicate (this is where identity feeds #178's access provider).
 
-These are thin and compose existing intents (Loader for the in-flight ceremony; Feedback for failure tone — [intents.json:1022](../src/_data/intents.json#L1022)). They do **not** justify a heavy standalone project up front.
+These are thin and compose existing intents (Loader for the in-flight ceremony; Feedback for failure tone — [we:intents.json:1022](../src/_data/intents.json#L1022)). They do **not** justify a heavy standalone project up front.
 
 ## Forks (carried into #012)
 
@@ -64,7 +64,7 @@ These are thin and compose existing intents (Loader for the in-flight ceremony; 
 
 **Crux:** the triage said "Project + Protocol." Finding 1 shows the platform already factored identity into *one dispatcher seam + N swappable credential mechanisms* — a provider/predicate contract whose only lock is that seam.
 
-- **(A — recommended) A `webidentity` *project* that owns one `credential-acquisition` Protocol** (the `navigator.credentials.get` dispatcher + mediation model as the normalized seam; WebAuthn / FedCM / Digital Credentials / password as swappable credential providers behind a `CustomCredentialProvider` contract). Mirrors `webvalidation`→Validation protocol and `webguards`→Guard protocol ([projects.json:168](../src/_data/projects.json#L168); [protocols.json:94](../src/_data/protocols.json#L94)). The project is the *home*; the protocol is the *lock*; ceremony libs are providers.
+- **(A — recommended) A `webidentity` *project* that owns one `credential-acquisition` Protocol** (the `navigator.credentials.get` dispatcher + mediation model as the normalized seam; WebAuthn / FedCM / Digital Credentials / password as swappable credential providers behind a `CustomCredentialProvider` contract). Mirrors `webvalidation`→Validation protocol and `webguards`→Guard protocol ([we:projects.json:168](../src/_data/projects.json#L168); [we:protocols.json:94](../src/_data/protocols.json#L94)). The project is the *home*; the protocol is the *lock*; ceremony libs are providers.
 - **(B) A bare intent, no project.** Too small — discards the swappable-mechanism interop story that is the whole point of the platform's dispatcher design. Rejected.
 - **(C) A heavy "auth project" with a baked method + session/token management.** Crosses into security/enforcement WE must not own (Finding 2); maximizes lock-in. Rejected per [[feedback_minimize_lock_in_protocol_only_lock]].
 
@@ -84,7 +84,7 @@ These are thin and compose existing intents (Loader for the in-flight ceremony; 
 
 **Crux:** "signed-in / signed-out" is both an *identity* state and an *authorization* predicate. Risk of two homes both gating presence.
 
-- **(A — recommended) Identity *produces* an auth-state signal; #178's Guard access-gate *consumes* it.** No new gate in `webidentity`. The Guard protocol's predicate/provider seam already gates presence ([protocols.json:96](../src/_data/protocols.json#L96)); auth-state is just one predicate feeding it. Bias toward separation/decoupling [[feedback_bias_separation_decoupling]].
+- **(A — recommended) Identity *produces* an auth-state signal; #178's Guard access-gate *consumes* it.** No new gate in `webidentity`. The Guard protocol's predicate/provider seam already gates presence ([we:protocols.json:96](../src/_data/protocols.json#L96)); auth-state is just one predicate feeding it. Bias toward separation/decoupling [[feedback_bias_separation_decoupling]].
 - **(B) `webidentity` ships its own `<signed-in>`/`<signed-out>` gate element.** Duplicates Guard's machinery; React's `SignInGate` is exactly the case #272 folded into the access-gate member. Rejected.
 
 **Default: A** — identity emits the predicate, Guard gates on it.

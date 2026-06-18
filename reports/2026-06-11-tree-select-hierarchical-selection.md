@@ -7,7 +7,7 @@
 
 ## Question
 
-Tree-select is named as a concrete droplist member ([blocks.json:21](../src/_data/blocks.json#L21)) but no design exists. Before authoring an intent/block standard, survey prior art per [design-first.md](../docs/agent/design-first.md) step 1, so the trait selections for hierarchy, expand/collapse, focus, and commit-depth reuse platform vocabulary instead of coining terms.
+Tree-select is named as a concrete droplist member ([fui:blocks.json:21](../src/_data/blocks.json#L21)) but no design exists. Before authoring an intent/block standard, survey prior art per [we:design-first.md](../docs/agent/design-first.md) step 1, so the trait selections for hierarchy, expand/collapse, focus, and commit-depth reuse platform vocabulary instead of coining terms.
 
 ## Key findings
 
@@ -17,7 +17,7 @@ WAI-ARIA APG **Tree View pattern** ([w3.org APG](https://www.w3.org/WAI/ARIA/apg
 
 - **Disclosure** (open/closed, `aria-expanded`): the pure expand/collapse paradigm. Shared with native `<details>`/`<summary>` (which nests arbitrarily but has *no* selection model), accordions, disclosure widgets. APG names this pattern "disclosure".
 - **Hierarchy** (the nesting structure): `role=tree` › `treeitem` › `role=group` › child `treeitem`s. A parent's children are wrapped in a `group`, not direct descendants. Carries `aria-level`, `aria-setsize`, `aria-posinset`.
-- **Selection** (`aria-selected` / `aria-multiselectable`): already owned by WE's Selection Intent ([intents.json:1059](../src/_data/intents.json#L1059)).
+- **Selection** (`aria-selected` / `aria-multiselectable`): already owned by WE's Selection Intent ([we:intents.json:1059](../src/_data/intents.json#L1059)).
 
 **Implication for fork #1:** the hierarchy concept is real and distinct, but it decomposes — disclosure is a reusable paradigm in its own right (details, accordion, tree all compose it), and selection already has a home. A `hierarchy` intent should own the *nesting structure + traversal*, delegate selection to Selection, and either fold in or compose a separate `disclosure` axis.
 
@@ -29,7 +29,7 @@ From the APG keyboard table:
 - **Up/Down**: move through the *focusable (visible)* set without opening/closing.
 - **Home/End, type-ahead, `*` (expand siblings)**: standard.
 
-So Right/Left carry BOTH expand/collapse and horizontal traversal; Up/Down never change disclosure. Type-ahead is the existing Type-Ahead intent, already noted as reused by trees ([blocks.json:125](../src/_data/blocks.json#L125)).
+So Right/Left carry BOTH expand/collapse and horizontal traversal; Up/Down never change disclosure. Type-ahead is the existing Type-Ahead intent, already noted as reused by trees ([fui:blocks.json:125](../src/_data/blocks.json#L125)).
 
 ### 3. Selection allows ANY node, not just leaves — leaf-only is opt-in (grounds fork #3)
 
@@ -46,8 +46,8 @@ The universal virtualization technique (react-arborist, TanStack Table+Virtual, 
 So Windowed Collection needs **zero tree-specific changes** — tree-ness is a projection step the hierarchy intent owns.
 
 **But research relocated the hard part.** The load-bearing question is the **focus model under virtualization**:
-- The droplist family uses **`virtual` focus** (`aria-activedescendant`) ([intents.json:62-85](../src/_data/intents.json#L62-L85)). Under windowing, `aria-activedescendant` must reference a **real, owned, mounted** DOM element, and the browser does **not** auto-scroll to it — JS must keep it mounted and scroll it into view ([MDN](https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-activedescendant), [w3c/aria-practices#2052](https://github.com/w3c/aria-practices/issues/2052)).
-- This is **exactly** the active-always-mounted invariant Windowed Collection already mandates ([intents.json:358](../src/_data/intents.json#L358); proven in [#163](../backlog/163-windowed-variable-row-heights.md)/[#145](../backlog/145-windowed-scroll-height-driven-path.md)). So virtual focus *is* viable under windowing — the invariant the item worried about is the very thing that makes it work.
+- The droplist family uses **`virtual` focus** (`aria-activedescendant`) ([we:intents.json:62-85](../src/_data/intents.json#L62-L85)). Under windowing, `aria-activedescendant` must reference a **real, owned, mounted** DOM element, and the browser does **not** auto-scroll to it — JS must keep it mounted and scroll it into view ([MDN](https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Reference/Attributes/aria-activedescendant), [w3c/aria-practices#2052](https://github.com/w3c/aria-practices/issues/2052)).
+- This is **exactly** the active-always-mounted invariant Windowed Collection already mandates ([we:intents.json:358](../src/_data/intents.json#L358); proven in [#163](../backlog/163-windowed-variable-row-heights.md)/[#145](../backlog/145-windowed-scroll-height-driven-path.md)). So virtual focus *is* viable under windowing — the invariant the item worried about is the very thing that makes it work.
 - Counterpoint ([Sarah Higley](https://sarahmhigley.com/writing/activedescendant/)): for giant virtualized trees, **roving tabindex** is more robust (browser handles scroll-into-view; focus dies only if the row unmounts). Trade is family-inconsistency.
 - **Collapse-with-focused-descendant**: APG specs Left-Arrow → focus to *parent*, but does **not** cover collapsing a node while a *deep* descendant holds focus. Library convention (react-arborist) moves focus up to the collapsing ancestor. This guarantees the focused node is always in the visible projection, so "deep leaf in a collapsed branch" cannot arise — answering the item's worry.
 
@@ -80,4 +80,4 @@ This belongs in #064's scope as a fourth decision (a dimension on the multi-sele
 
 | File | Action |
 | --- | --- |
-| `reports/2026-06-11-tree-select-hierarchical-selection.md` | Created (this report) |
+| `we:reports/2026-06-11-tree-select-hierarchical-selection.md` | Created (this report) |

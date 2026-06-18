@@ -45,7 +45,7 @@ forks sit in its body (its 2026-06-10 pre-flight note released it from a batch f
 "unresolved design fork, no lean … needs a decision before building"). The owed platform-substrate pass
 is published at
 [/research/background-task-reload-durability](/research/background-task-reload-durability/) (report:
-[2026-06-13-background-task-reload-durability.md](reports/2026-06-13-background-task-reload-durability.md)),
+[we:2026-06-13-background-task-reload-durability.md](reports/2026-06-13-background-task-reload-durability.md)),
 and **it dissolves OP-1's "no-lean" framing**: the survey shows the two branches aren't "small vs big
 scope of one token" — they are **two different durability *guarantees*** (durable *execution* vs durable
 *state*) that deserve two different tokens. That converts OP-1 into a clean default. **Both forks below
@@ -58,15 +58,15 @@ The decision decomposes into two coupled axes, both grounded in the shipped base
 - **Axis 1 — durable scope.** `durability` is a config dimension of the background-task intent,
   deliberately deferred to this tier — the baseline `BackgroundTasksConfig` carries no `durability` key
   ("`durability` lives in the #134 reload tier, not here" —
-  [types.ts:114-139](blocks/background-task-surface/types.ts#L114)). The crux: the only native
+  [we:types.ts:114-139](blocks/background-task-surface/types.ts#L114)). The crux: the only native
   continue-while-closed substrate is [Background Fetch](https://developer.mozilla.org/en-US/docs/Web/API/Background_Fetch_API),
   which models **transfers** only. The survey confirms **no native API runs arbitrary client-side
   compute in the background across a reload** (SW killed ~30s idle / 5min per event; Workers die with
   the page). The non-fetch option (checkpoint→IndexedDB→resume) is a **categorically weaker, different
   guarantee** — durable *state*, not durable *execution*.
 - **Axis 2 — guard interaction.** The route-only baseline arms a beforeunload + Navigation-API confirm
-  while tasks are active ([BackgroundTasksElement.ts:332-359](blocks/background-task-surface/BackgroundTasksElement.ts#L332));
-  `navigationGuard` is an independent boolean dimension ([types.ts:125](blocks/background-task-surface/types.ts#L125)).
+  while tasks are active ([fui:BackgroundTasksElement.ts:332-359](blocks/background-task-surface/BackgroundTasksElement.ts#L332));
+  `navigationGuard` is an independent boolean dimension ([we:types.ts:125](blocks/background-task-surface/types.ts#L125)).
   The crux: when work provably survives a reload, the warn-on-leave prompt (#129) double-signals — does
   arming `durability: reload` relax it?
 
@@ -156,12 +156,12 @@ Applied to the `durability: reload` tier (full detail in the
 
 ## Concrete refs
 
-- Parent tier: [134-background-task-reload-durable-tier.md](/backlog/134-background-task-reload-durable-tier/)
+- Parent tier: [we:134-background-task-reload-durable-tier.md](/backlog/134-background-task-reload-durable-tier/)
   (open questions, lines 26-28; pre-flight fork note, lines 35-48; `blockedBy: ["128","135","450"]`).
 - Baseline config (no `durability` key) + guard boolean:
-  [types.ts:114-139](blocks/background-task-surface/types.ts#L114).
+  [we:types.ts:114-139](blocks/background-task-surface/types.ts#L114).
 - Route-only guard impl (beforeunload + Navigation-API confirm):
-  [BackgroundTasksElement.ts:327-359](blocks/background-task-surface/BackgroundTasksElement.ts#L327).
+  [fui:BackgroundTasksElement.ts:327-359](blocks/background-task-surface/BackgroundTasksElement.ts#L327).
 - Baseline & guard items: [#128](/backlog/128-background-task-status-bar-block/) (route-only baseline),
   [#129](/backlog/129-navigation-guard-intent/) (`navigationGuard: warn` → navigation-guard intent).
 - Prior-art survey: [report](reports/2026-06-13-background-task-reload-durability.md) ·

@@ -23,7 +23,7 @@ Drives the unbuilt **webpermissions/webidentity** projects (#009/#012) — likel
 The **2026-06-14 re-size 5 → 13** rationale ("must stand up a permission model *and* an identity/roles
 model that drive two **unbuilt** WE projects — webpermissions #009, webidentity #012") is now **stale**:
 both standard surfaces have since shipped. The **web-identity thin intent** is live
-([intents.json](/intents/web-identity/) — graduated from #012/#482, and its own copy names #379 as a
+([we:intents.json](/intents/web-identity/) — graduated from #012/#482, and its own copy names #379 as a
 near-term consumer), the cross-cutting `permission` browser-API intent is live (#009/#457 — a *different*
 concern, Permissions-API state, not app RBAC), and the **Guard protocol** + access-control member are
 live (#272/#178). The S2 lifecycle (#380, resolved) already carries **role-scoped transitions** (each
@@ -31,13 +31,13 @@ edge's `actor`). So #379 is **no longer cross-project standard-building — it's
 of two shipping surfaces, and it cleaves along exactly those two surfaces (the constellation's own
 factoring: *identity produces an auth-state signal; Guard consumes it as a predicate*).
 
-Analysis: [reports/2026-06-15-backlog-split-analysis.md](/reports/2026-06-15-backlog-split-analysis.md).
+Analysis: [we:reports/2026-06-15-backlog-split-analysis.md](/reports/2026-06-15-backlog-split-analysis.md).
 
 ### Slices (DAG: #378 ✓ + #380 ✓ → #686 → #687)
 
 - **[#686](/backlog/686-loan-s1a-identity-roles-auth-state-signal-consume-web-identi/)** — S1a: identity
   & roles + auth-state signal (consume the web-identity intent). Replaces the `ACTOR` placeholder at
-  `app.ts:95` with a real signed-in user + role set + a demo role-switcher. Story · 3. Immediately
+  `we:app.ts:95` with a real signed-in user + role set + a demo role-switcher. Story · 3. Immediately
   batchable.
 - **[#687](/backlog/687-loan-s1b-field-action-state-permission-predicates-consume-gu/)** — S1b:
   field/action/state permission predicates (consume the Guard protocol). State-scoped edit/read-only,

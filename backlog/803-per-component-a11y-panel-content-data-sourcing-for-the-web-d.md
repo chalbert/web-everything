@@ -26,29 +26,29 @@ Web Docs feature-pipeline epic [#623](/backlog/623-web-docs-feature-pipeline-inv
 **Prepared 2026-06-16; collapsed under the fork checklist 2026-06-17.** Prior art surveyed, `/research/`
 topic [`component-a11y-panel-sourcing`](/research/#component-a11y-panel-sourcing) published. The prep stamp
 framed this as **three forks** — running the *fork-existence test* + *fork-is-not-prioritization* checklist
-(backlog-workflow.md) over them, **all three fail to be genuine either/or choices**: this is a #088-shape
+(we:backlog-workflow.md) over them, **all three fail to be genuine either/or choices**: this is a #088-shape
 decision — **one merit ruling (the layered model) + a supported/deferred list, zero A/B**. Full grounding:
-[`reports/2026-06-16-component-a11y-panel-sourcing.md`](../reports/2026-06-16-component-a11y-panel-sourcing.md).
+[`we:reports/2026-06-16-component-a11y-panel-sourcing.md`](../reports/2026-06-16-component-a11y-panel-sourcing.md).
 
 ## Grounding digest (verified 2026-06-17)
 
 - **Authored a11y metadata already exists on the block — and is unrendered.**
-  [`src/_data/blocks.json`](../src/_data/blocks.json) carries an optional `webStandards` field on
-  **29 of 75** blocks (first at `blocks.json:25`), shaped `{<concern>: {usage, reference}}` —
+  [`fui:src/_data/blocks.json`](../src/_data/blocks.json) carries an optional `webStandards` field on
+  **29 of 75** blocks (first at `fui:blocks.json:25`), shaped `{<concern>: {usage, reference}}` —
   e.g. `wizard.webStandards.ariaCurrentStep` = `{usage: "…carry aria-current=\"step\"…", reference: <MDN aria-current>}`.
   Across all entries the `reference` field points at the **contract** (95 MDN + 12 W3C/WAI incl. APG, a few
-  Open-UI/WHATWG). **[`src/block-pages.njk`](../src/block-pages.njk) renders none of it** (`grep webStandards`
+  Open-UI/WHATWG). **[`we:src/block-pages.njk`](../src/block-pages.njk) renders none of it** (`grep webStandards`
   → 0) — the realization layer is authored but has no panel.
-- **Intents carry no a11y field.** [`src/_data/intents.json`](../src/_data/intents.json) has no
+- **Intents carry no a11y field.** [`we:src/_data/intents.json`](../src/_data/intents.json) has no
   `a11y`/`aria`/`wcag` slot (verified — intent keys: `id, name, status, summary, dimensions, description,
   requiresCapabilities, designSystemResearch, uxResearch, researchGaps, events`). An intent a11y contract is
   a **new field**, not a projection.
 - **Axe is route-level, not per-component.** #770 (resolved) ships
-  [`tests/a11y/rendered-site-a11y.spec.ts`](../tests/a11y/rendered-site-a11y.spec.ts) +
-  [`tests/a11y/route-allowlist.ts`](../tests/a11y/route-allowlist.ts); `GATED_ROUTES` include the `/blocks/`
+  [`we:tests/a11y/rendered-site-a11y.spec.ts`](../tests/a11y/rendered-site-a11y.spec.ts) +
+  [`we:tests/a11y/route-allowlist.ts`](../tests/a11y/route-allowlist.ts); `GATED_ROUTES` include the `/blocks/`
   **index** but **not** `/blocks/{id}/`, and store no per-component metadata.
 - **The documented component renders inside a cross-origin FUI iframe.** The `fuiDemo` shortcode
-  ([`.eleventy.js:54`](../.eleventy.js)) embeds a FUI-hosted demo via a sandboxed cross-origin `<iframe>`.
+  ([`we:.eleventy.js:54`](../.eleventy.js)) embeds a FUI-hosted demo via a sandboxed cross-origin `<iframe>`.
   Per #732, axe run from the WE lane **cannot traverse** into the frame — it would audit the WE doc-page
   chrome, not the FUI component. FUI owns the impl *and* its rendered display (the no-leakage boundary;
   #701/#700/#732).
@@ -101,7 +101,7 @@ Why each apparent "fork" is **not** a genuine A/B (checklist applied):
 
 1. **Render the panel** → **[#826](/backlog/826-render-the-accessibility-web-standards-panel-on-blocks-id-fr/)** (filed, agent-ready, blockedBy this item).
    Add an "Accessibility & Web Standards" `section-card` to
-   [`src/block-pages.njk`](../src/block-pages.njk) rendering `block.webStandards` (concern → `usage` +
+   [`we:src/block-pages.njk`](../src/block-pages.njk) rendering `block.webStandards` (concern → `usage` +
    "Reference ↗" link), with graceful absence (no field → no panel, same as `fuiDemo`/`composesIntents`).
    The primary agent-ready slice.
 2. **Backfill `webStandards`** on the 46/75 blocks still missing it → **[#827](/backlog/827-backfill-webstandards-a11y-metadata-on-the-blocks-still-miss/)**
@@ -118,7 +118,7 @@ Why each apparent "fork" is **not** a genuine A/B (checklist applied):
 ## Context — why the prep framing was wrong
 
 The prep pass stamped `preparedDate` over a **three-fork** template without first running the
-fork-existence test (backlog-workflow.md: *"Run the fork-existence test first and let it shrink the item… a
+fork-existence test (we:backlog-workflow.md: *"Run the fork-existence test first and let it shrink the item… a
 prepared decision that lists five 'forks' where four are 'support all' is verbose, not thorough"*). Under the
 checklist the three forks collapse: two are **forced invariants** (one broken branch each — intent-derived
 realization; cross-origin axe), one is **prioritization** wearing a fork's clothing (link-out + intent

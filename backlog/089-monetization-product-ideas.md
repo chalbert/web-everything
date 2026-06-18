@@ -223,7 +223,7 @@ carry zero model-hosting cost or support — the ideal solo-founder shape:*
 
 ## Candidate products surfaced from the Plateau repos (to catalogue)
 
-plateau-app's `CLAUDE.md` scopes Plateau over: relationships/dependency graphs,
+plateau-app's `we:CLAUDE.md` scopes Plateau over: relationships/dependency graphs,
 code standards, design systems, intents, CI, compliance, micro-frontends, **feature
 flags, A/B testing, translations, versioning, deployment**. Each is a candidate
 offering. Named so far:
@@ -258,9 +258,9 @@ White-space tools, each uncovered *because* they need the formal standard:
   against *your* protocol contracts, gated by the suite).
 - **NL → Technical Configurator (#096)** — vs. generic codegen (no registry of
   swappable strategies to target; we navigate a formal decision space).
-- **Conformance-case generator** *(candidate, no item yet)* — generate `webcases`
+- **Conformance-case generator** → **[#868](/backlog/868-conformance-case-generator-ai-proposes-standard-verifies/)** — generate `webcases`
   (source of truth) from a description; output feeds docs + tests + badge at once.
-- **Platform impact narrator** *(candidate, folds into #092)* — NL Q&A over the
+- **Platform impact narrator** → **[#869](/backlog/869-platform-impact-narrator-over-the-092-relationship-graph/)** — NL Q&A over the
   relationship graph; vs. dependency tools that lack the provider↔consumer
   *protocol* graph.
 
@@ -271,6 +271,6 @@ White-space tools, each uncovered *because* they need the formal standard:
 
 - **Roadmap to MVP → [#097](/backlog/097-roadmap-to-mvp/)** (product choice, CI,
   auth/licensing, payments, distribution, marketing, legal/brand/insurance).
-- Optional later items: **conformance-case generator** and **platform impact
-  narrator** (candidates above).
+- Optional later items: **conformance-case generator** (#868) and **platform impact
+  narrator** (#869) — now filed.
 - For the chosen MVP tool, a short productization note as it starts.

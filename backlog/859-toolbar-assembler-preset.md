@@ -12,4 +12,4 @@ tags: []
 
 # Toolbar assembler preset
 
-Add a toolbar preset to assemblerPresets.json following the #667 reveal-nav precedent (resolved foundation). Unblocked batch-time volume — registry + eject pipeline already shipped (#688/#689). A composed toolbar block configuration the assembler can drop onto the canvas and eject.
+Add a toolbar preset to we:assemblerPresets.json following the #667 reveal-nav precedent (resolved foundation). Unblocked batch-time volume — registry + eject pipeline already shipped (#688/#689). A composed toolbar block configuration the assembler can drop onto the canvas and eject.

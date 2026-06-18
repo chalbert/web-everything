@@ -17,8 +17,8 @@ Generate webcases source-of-truth from a natural-language description, feeding d
 
 ## Progress
 
-- **Resolved 2026-06-17.** Built `webcases/generateCase.ts` — the AI-proposes front-end that
-  `compileRequirement.ts` explicitly defers to (*"requirements that don't ground are the AI
+- **Resolved 2026-06-17.** Built `we:webcases/generateCase.ts` — the AI-proposes front-end that
+  `we:compileRequirement.ts` explicitly defers to (*"requirements that don't ground are the AI
   test-generator's domain, a Plateau-served provider, #475 no-leakage"*). `generateCase(nl, { propose,
   registries, maxAttempts })` runs the loop: a NL description → a candidate `RequirementRecord` from an
   **injected** proposer → the deterministic `validateRequirement` (slice A #100) grounds it → only a
@@ -31,6 +31,6 @@ Generate webcases source-of-truth from a natural-language description, feeding d
   generation. `heuristicProposer` is a dependency-free offline fallback (not the AI) that grounds a
   description naming real registry ids — for the demo + tests.
 - **Tested:** pure orchestration over injected pieces — 9-case offline suite
-  (`webcases/__tests__/generateCase.test.ts`, green): compiles-when-grounded, rejects-and-never-compiles
+  (`we:webcases/__tests__/generateCase.test.ts`, green): compiles-when-grounded, rejects-and-never-compiles
   the ungrounded, findings-steer-the-retry, stops-after-maxAttempts, awaits an async (Plateau) proposer,
   and the heuristic-proposer end-to-end ground+compile.

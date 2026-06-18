@@ -42,14 +42,14 @@ whole story for fork 1:
   can become the source of record, which is exactly the lock-in WE refuses.
 
 The WE differentiator is that **the source of truth already exists and is not prose**: a
-customer's `webmanifest` ([projects.json:217](../src/_data/projects.json#L217)) +
-`webcases` ([projects.json:208](../src/_data/projects.json#L208)) are the same artifacts
+customer's `webmanifest` ([we:projects.json:217](../src/_data/projects.json#L217)) +
+`webcases` ([we:projects.json:208](../src/_data/projects.json#L208)) are the same artifacts
 that drive their tests and their conformance signal. `webdocs`
-([projects.json:226](../src/_data/projects.json#L226)) is described in the registry as
+([we:projects.json:226](../src/_data/projects.json#L226)) is described in the registry as
 "the meta-standard that orchestrates Web Manifests and Web Cases to generate
 comprehensive documentation sites." So WE is structurally a **docs-as-code** platform
 where the OpenAPI-spec equivalent is the manifest+cases pair — the Mintlify model, not
-ReadMe's. This repo's own `cases.js` loader ([src/_data/cases.js](../src/_data/cases.js))
+ReadMe's. This repo's own `we:cases.js` loader ([we:src/_data/cases.js](../src/_data/cases.js))
 already does exactly this ingestion at build time: read a directory of HTML/TS cases per
 block and render them into pages. The serve-time offering is that loader, hosted and
 parameterized per customer.
@@ -71,10 +71,10 @@ validates the demand:
   red/orange/green compliance dashboards (the X-Ray Chrome extension).
 
 The whole category bolts a conformance/coverage view *onto* docs after the fact. WE has
-it natively: the `/protocols/` index ([src/protocols.njk](../src/protocols.njk)) already
+it natively: the `/protocols/` index ([we:src/protocols.njk](../src/protocols.njk)) already
 renders, per protocol, what implementations must agree on and is filterable by project +
-status; the `capabilityMatrix` ([src/_data/capabilityMatrix.json](../src/_data/capabilityMatrix.json),
-rendered by [src/capabilities.njk](../src/capabilities.njk)) is the static build-matrix
+status; the `capabilityMatrix` ([we:src/_data/capabilityMatrix.json](../src/_data/capabilityMatrix.json),
+rendered by [we:src/capabilities.njk](../src/capabilities.njk)) is the static build-matrix
 mapping each impl to a 3-state tier (native-ok / polyfill-ok / capability-hard); and
 #089's idea 1 (continuous verification) re-runs the open suite over time. The
 dashboard fork is therefore *reuse vs rebuild*, not *build from scratch* — the machinery

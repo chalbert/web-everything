@@ -22,14 +22,14 @@ The external identity landscape (WebAuthn L3 / FedCM / Digital Credentials / Cre
 | **`store()`** | persist after auth | ❌ (authenticator self-stores) | ✅ | ❌ | ❌ |
 | **`preventSilentAccess()`** | sign-out (origin-global flag, blocks auto re-login) | n/a (origin-wide) | ✅ | ✅ | n/a |
 
-**The load-bearing finding:** the lifecycle is **asymmetric by family**. Acquisition (`get`) is universal; **enrollment (`create`) exists only for passkey + password**; FedCM and Digital Credentials are **get-only** (enrollment happens off-platform at the IdP/issuer); `preventSilentAccess()` is an origin-global sign-out switch. So a protocol that fixed a single flat "credential" contract would force get-only families to stub out `create`/`store`. This is exactly the shape Guard solved with **members** — *"deny-outcomes are NOT unified; each member owns its own family"* ([protocols.json:96](../src/_data/protocols.json#L96)).
+**The load-bearing finding:** the lifecycle is **asymmetric by family**. Acquisition (`get`) is universal; **enrollment (`create`) exists only for passkey + password**; FedCM and Digital Credentials are **get-only** (enrollment happens off-platform at the IdP/issuer); `preventSilentAccess()` is an origin-global sign-out switch. So a protocol that fixed a single flat "credential" contract would force get-only families to stub out `create`/`store`. This is exactly the shape Guard solved with **members** — *"deny-outcomes are NOT unified; each member owns its own family"* ([we:protocols.json:96](../src/_data/protocols.json#L96)).
 
 ## Finding 2 — every WE project owns a protocol with one swappable `CustomXProvider` seam
 
 The internal precedent is uniform and load-bearing for Fork 1. Across the constellation, a project owns **one** protocol that fixes **one** seam resolved by a swappable provider, *native-first default → project override → custom plug*:
 
-- **Guard** — *"resolved by a swappable `CustomGuardProvider` (default → project override → custom plug)… async, server-authoritative (the front-end is a UX mirror, never enforcement), and revocable"* ([protocols.json:94-96](../src/_data/protocols.json#L94)). The **identical trust boundary** identity carries.
-- **Lifecycle** — *"resolved by a swappable `CustomLifecycleProvider` registry… the transition map is the only lock: data-defined and portable, so a workflow engine plugs in behind the provider"*, and it **delegates** authorization to Guard and persistence to its own concern ([protocols.json lifecycle entry](../src/_data/protocols.json)).
+- **Guard** — *"resolved by a swappable `CustomGuardProvider` (default → project override → custom plug)… async, server-authoritative (the front-end is a UX mirror, never enforcement), and revocable"* ([we:protocols.json:94-96](../src/_data/protocols.json#L94)). The **identical trust boundary** identity carries.
+- **Lifecycle** — *"resolved by a swappable `CustomLifecycleProvider` registry… the transition map is the only lock: data-defined and portable, so a workflow engine plugs in behind the provider"*, and it **delegates** authorization to Guard and persistence to its own concern ([we:protocols.json lifecycle entry](../src/_data/protocols.json)).
 - **Validation** (`CustomValidation`), **Change Tracking** (`CustomChangeStrategy`, *"a strategy registry with per-scope selection"*), **Localization** (`CustomTranslationProvider`, *"a provider registry with namespace + fallback-chain resolution"*), **Anchor Positioning** (`CustomPositioner`), **Render Strategy** (`CustomRenderStrategy`).
 
 **Implication:** `CustomCredentialProvider` is not greenfield — it is the same registry+provider pattern, with Guard's *async, server-authoritative, revocable* contract shape (identity, like Guard, crosses the trust boundary; the front-end only *gathers* a credential the server then verifies — #012 Finding 2). The only genuinely open design is **what the contract's method set is** (Finding 1's lifecycle) and **how the demo stays server-less** (Finding 3).
@@ -40,7 +40,7 @@ The internal precedent is uniform and load-bearing for Fork 1. Across the conste
 
 ## Finding 4 — "Configurator domain" is a separable, possibly-omittable scope
 
-#012 Fork-2 lumped "the full protocol + provider contract + **Configurator domain**" into the deferral. But the Configurator is a **plateau-app** (product-layer) concern, a different repo/layer in the constellation, and the platform already has a **config-flavors** mechanism for technical defaults: the Auto-Define-Strategy protocol explicitly states *"the tool carries no default: the default-strategy selection comes from the platform config a project extends, shipped in flavors"* ([protocols.json auto-define entry](../src/_data/protocols.json)). So a technical mediation/provider default can ride config-flavors without a bespoke Configurator domain. Whether identity warrants its *own* Configurator domain (a guided ceremony-config authoring surface) is a real, separable question — not automatically in-scope for the standard-layer build.
+#012 Fork-2 lumped "the full protocol + provider contract + **Configurator domain**" into the deferral. But the Configurator is a **plateau-app** (product-layer) concern, a different repo/layer in the constellation, and the platform already has a **config-flavors** mechanism for technical defaults: the Auto-Define-Strategy protocol explicitly states *"the tool carries no default: the default-strategy selection comes from the platform config a project extends, shipped in flavors"* ([we:protocols.json auto-define entry](../src/_data/protocols.json)). So a technical mediation/provider default can ride config-flavors without a bespoke Configurator domain. Whether identity warrants its *own* Configurator domain (a guided ceremony-config authoring surface) is a real, separable question — not automatically in-scope for the standard-layer build.
 
 ## The three build-level forks (carried into #496)
 
@@ -73,7 +73,7 @@ The internal precedent is uniform and load-bearing for Fork 1. Across the conste
 
 - Decision: [#496 build-design](../backlog/496-webidentity-build-design-credential-acquisition-protocol-con.md) → blocks [#483 deferred epic](../backlog/483-webidentity-project-credential-acquisition-protocol-deferred.md)
 - Upstream meta-decision: [#012](../backlog/012-gap-5-webidentity-project.md) (Forks 1/3/4 + timing settled) · shipped thin intent [#482](../backlog/482-web-identity-thin-intent-mediation-credential-request-auth-s.md)
-- Provider-seam precedent: [Guard #272](../backlog/272-guard-protocol-predicate-gated-transitions-and-presence-open.md) · Lifecycle · Validation · Change Tracking ([protocols.json](../src/_data/protocols.json))
+- Provider-seam precedent: [Guard #272](../backlog/272-guard-protocol-predicate-gated-transitions-and-presence-open.md) · Lifecycle · Validation · Change Tracking ([we:protocols.json](../src/_data/protocols.json))
 - Distinct gaps (do not merge): [#009 `webpermissions`](../backlog/009-gap-13-webpermissions-project.md) · [#178 access-control](../backlog/178-access-control-authorization-gate.md) (downstream consumer of the auth-state predicate)
 
 ## Sources
@@ -81,4 +81,4 @@ The internal precedent is uniform and load-bearing for Fork 1. Across the conste
 - [CredentialsContainer — MDN](https://developer.mozilla.org/en-US/docs/Web/API/CredentialsContainer) (`get`/`create`/`store`/`preventSilentAccess`)
 - [Web Authentication API — MDN](https://developer.mozilla.org/en-US/docs/Web/API/Web_Authentication_API) · [WebAuthn L3 — W3C](https://www.w3.org/TR/webauthn-3/) (the `create()` registration vs `get()` authentication ceremony)
 - [FedCM API — MDN](https://developer.mozilla.org/en-US/docs/Web/API/FedCM_API) · [Digital Credentials — W3C](https://www.w3.org/TR/digital-credentials/) (get-only families; enrollment off-platform)
-- Internal precedent: `src/_data/protocols.json` (Guard, Lifecycle, Validation, Change Tracking, Auto-Define-Strategy) · `src/_data/projects.json` (webguards, weblifecycle, webvalidation)
+- Internal precedent: `we:src/_data/protocols.json` (Guard, Lifecycle, Validation, Change Tracking, Auto-Define-Strategy) · `we:src/_data/projects.json` (webguards, weblifecycle, webvalidation)

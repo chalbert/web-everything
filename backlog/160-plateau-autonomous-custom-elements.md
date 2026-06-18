@@ -16,9 +16,9 @@ crossRef: { url: /blocks/autocomplete/, label: Autocomplete block }
 
 Surfaced while registering the real `<auto-complete>` element (#138). Plateau replaces
 `window.customElements` with an injector-based `CustomElementRegistry`
-(`plateau/src/plugs/custom-elements/CustomElementRegistry.ts`). On `define(name, Class)` it
+(`we:plateau/src/plugs/custom-elements/CustomElementRegistry.ts`). On `define(name, Class)` it
 stores the class's callbacks in a definition **and** registers a native *stand-in*
-(`getStandInElement.ts`) under that tag. The stand-in only re-hydrates the real class when the
+(`we:getStandInElement.ts`) under that tag. The stand-in only re-hydrates the real class when the
 element carries an `is=` attribute (the customized-built-in path, e.g. `<template is="for-each">`).
 For an **autonomous** custom element (`class extends HTMLElement` + `customElements.define('auto-complete', …)`,
 exactly what the [autocomplete block](/blocks/autocomplete/) spec authors), there is no `is`, so the
@@ -27,7 +27,7 @@ stand-in's lifecycle wrappers resolve back to themselves and the real class's `c
 plateau's bootstrap does not connect; `<auto-complete>` stays an empty shell.
 
 Consequence for #138: `<auto-complete>` is correct, portable, standards-only custom-element code and
-runs perfectly in a native registry — its conformance demo (`auto-complete-demo.html`, frontierui dev server)
+runs perfectly in a native registry — its conformance demo (`we:auto-complete-demo.html`, frontierui dev server)
 boots **natively** (no plateau bootstrap) and the full "par → arrow → enter" trace + diacritic match
 pass. But it cannot yet run inside plateau's full runtime. The demo documents this and stubs the one
 runtime hook the composed behaviors need (`node.injectors()`).
@@ -35,25 +35,25 @@ runtime hook the composed behaviors need (`node.injectors()`).
 Build autonomous-element support into plateau's element model so a `customElements.define('x-foo', Foo)`
 autonomous element upgrades and receives `connectedCallback`/`disconnectedCallback`/`attributeChangedCallback`/
 form-association callbacks through the stand-in (mirroring the `is=` path, but keyed on the tag rather
-than `is`). Then `<auto-complete>` can be registered in `bootstrap.tsx` and the demo can boot the real
+than `is`). Then `<auto-complete>` can be registered in `we:bootstrap.tsx` and the demo can boot the real
 runtime instead of native + shim.
 
-Already landed as groundwork (same investigation): a guard in `Document.patch.ts` so
+Already landed as groundwork (same investigation): a guard in `we:Document.patch.ts` so
 `document.createElement('<autonomous-tag>')` no longer throws `Object prototype may only be an Object
 or null` — native `createElement` already gives the upgraded element its correct prototype, so the
 patch now only re-pins the prototype when a matching `window[ctor.name]` global exists.
 
 Acceptance: an autonomous custom element defined under plateau's bootstrap upgrades and runs its
-lifecycle callbacks; `<auto-complete>` is registered in `bootstrap.tsx` and its demo boots the real
+lifecycle callbacks; `<auto-complete>` is registered in `we:bootstrap.tsx` and its demo boots the real
 plateau runtime with the full trace green.
 
 ## Findings (code-traced 2026-06-07) — this is net-new core plumbing, not a one-line patch
 
 Plateau drives element lifecycle **manually** through its patched insertion methods
-(`pathInsertionMethods.ts`, wired by `Node.patch.ts` / `Element.patch.ts` onto
+(`we:pathInsertionMethods.ts`, wired by `we:Node.patch.ts` / `we:Element.patch.ts` onto
 `appendChild`/`insertBefore`/`replaceChild`/`replaceWith`/`prepend`/`after`/…). That code upgrades
 *undetermined* nodes (`updateElement`/`upgradeDeep`) and then fires `connectedCallback` **only for
-text nodes and comments** (`pathInsertionMethods.ts:194`). A grep of every `connectedCallback()`
+text nodes and comments** (`we:pathInsertionMethods.ts:194`). A grep of every `connectedCallback()`
 invocation in the repo confirms: custom **elements** have no generic connect path — lifecycle is
 delivered only by *specialized* registries (CustomComment, CustomAttribute, CustomTextNode,
 CustomScriptType, CustomContext, CustomTemplateDirective). The familiar `for-each`/`render-if`/
@@ -61,7 +61,7 @@ CustomScriptType, CustomContext, CustomTemplateDirective). The familiar `for-eac
 autonomous elements — which is why they work and `<auto-complete>` does not.
 
 Two entry points that must learn autonomous elements:
-1. **Browser-parser / `createElement`** → the native stand-in (`getStandInElement.ts`). Its
+1. **Browser-parser / `createElement`** → the native stand-in (`we:getStandInElement.ts`). Its
    constructor only rehydrates the real class when an `is=` attribute is present. For autonomous
    elements it must rehydrate by **tag name** (`this.localName`) via
    `getValueInProviderByLocalNameOf(this, 'customElements', this.localName)`. `HTMLRegistry.get`
@@ -81,8 +81,8 @@ Scope to make autonomous elements first-class:
 - Regression budget: this touches the hot insertion path — keep the full plateau suite (188) green and
   re-verify the existing template-directive/comment/attribute paths.
 
-A `Document.patch.ts` guard already landed (no-throw `createElement` for autonomous tags). When this is
-done: register `<auto-complete>` in `bootstrap.tsx` and flip `auto-complete-demo.ts` from native+shim
+A `we:Document.patch.ts` guard already landed (no-throw `createElement` for autonomous tags). When this is
+done: register `<auto-complete>` in `we:bootstrap.tsx` and flip `we:auto-complete-demo.ts` from native+shim
 to a real `import './main'` boot.
 
 ## Progress
@@ -90,19 +90,19 @@ to a real `import './main'` boot.
 - **Status:** resolved (user gave the go to implement on the platform core, behind the test suite).
 
 **Done — the connect half of autonomous-element support, browser-verified:**
-- `getStandInElement.ts` — the stand-in now rehydrates **autonomous** elements (no `is`) by tag name,
+- `we:getStandInElement.ts` — the stand-in now rehydrates **autonomous** elements (no `is`) by tag name,
   not just customized built-ins. Guarded on `this.constructor !== Element` (NOT `instanceof`: the
   patched `HTMLElement` carries a static `[Symbol.hasInstance]` that reports true for any element).
-- `Document.patch.ts` — `createElement('<autonomous-tag>')` now returns the **real** class instance
+- `we:Document.patch.ts` — `createElement('<autonomous-tag>')` now returns the **real** class instance
   (via `Reflect.construct`, which the patched `HTMLElement` maps to a stand-in body + real prototype),
   so callers hold the actual element with no stale reference after connection.
-- `pathInsertionMethods.ts` — drives `connectedCallback` for autonomous elements on insertion (both the
+- `we:pathInsertionMethods.ts` — drives `connectedCallback` for autonomous elements on insertion (both the
   JSX/`updateElement` path and the determined-element/`createElement`+append path), via a new
   `isAutonomousElement` guard that excludes customized built-ins / template-directives (so their
   existing paths are untouched — no double-fire).
-- `CustomElementRegistry.ts` — propagates `formAssociated` + `observedAttributes` to the natively
+- `we:CustomElementRegistry.ts` — propagates `formAssociated` + `observedAttributes` to the natively
   registered stand-in so the real element's `ElementInternals`/`setFormValue` participate in forms.
-- `bootstrap.tsx` — registers `<auto-complete>`; `auto-complete-demo.ts` now boots the **real** plateau
+- `we:bootstrap.tsx` — registers `<auto-complete>`; `we:auto-complete-demo.ts` now boots the **real** plateau
   runtime (`import './main'`, no native shim) and routes the #149 positioning-strategy swap through the
   real root injector.
 
@@ -122,4 +122,4 @@ to a real `import './main'` boot.
 - [#168](/backlog/168-plateau-in-browser-test-harness/) — a plateau Playwright/e2e harness so the
   autonomous lifecycle + autocomplete demo are guarded in CI, not by hand.
 
-**Graduated to** `none` — autonomous custom-element lifecycle fix in the legacy plateau repo (now abandoned): getStandInElement.ts + Document.patch.ts + pathInsertionMethods.ts + CustomElementRegistry.ts; superseded in the live constellation by frontierui/plugs/webregistries/CustomElementRegistry.ts + frontierui/plugs/core/utils/pathInsertionMethods.ts.
+**Graduated to** `none` — autonomous custom-element lifecycle fix in the legacy plateau repo (now abandoned): we:getStandInElement.ts + we:Document.patch.ts + we:pathInsertionMethods.ts + we:CustomElementRegistry.ts; superseded in the live constellation by fui:frontierui/plugs/webregistries/CustomElementRegistry.ts + fui:frontierui/plugs/core/utils/pathInsertionMethods.ts.

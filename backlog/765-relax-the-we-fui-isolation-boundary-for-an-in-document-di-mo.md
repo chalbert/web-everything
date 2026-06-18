@@ -26,14 +26,14 @@ tags: [embedding, isolation-boundary, shadow-dom, in-document-mount, constellati
 > boundary, duplicate runtime, one-shot `customElements.define` collisions) are accepted as bounded by
 > opt-in + iframe-default + single SDK load — they cost fidelity-surface hygiene, not correctness.
 > **Spin-off:** the mode-C build is filed as a separately-prioritized child under #728, gated `blockedBy`
-> this item; `docs/agent/demo-workflow.md` and the constellation boundary memory record the exception.
+> this item; `we:docs/agent/demo-workflow.md` and the constellation boundary memory record the exception.
 
 **Prepared — ready to ratify.** No new design exists yet; this is a **boundary-policy** call, grounded in
 a prior-art survey published as [`/research/we-fui-in-document-mount/`](/research/we-fui-in-document-mount/)
-(report [`2026-06-16-we-fui-in-document-mount.md`](../reports/2026-06-16-we-fui-in-document-mount.md)). The
+(report [`we:2026-06-16-we-fui-in-document-mount.md`](../reports/2026-06-16-we-fui-in-document-mount.md)). The
 constellation states an **absolute** docs-rendering boundary — *"WE never imports or renders FUI block code
-in its own document"* (`docs/agent/demo-workflow.md:31`); WE surfaces a FUI block only by embedding its
-FUI-hosted demo through the sandboxed `fuiDemo` iframe (`.eleventy.js:38`). [#732](/backlog/732-overlay-modal-escape-for-embedded-demos-iframe-box-vs-host-r/)
+in its own document"* (`we:docs/agent/demo-workflow.md:31`); WE surfaces a FUI block only by embedding its
+FUI-hosted demo through the sandboxed `fuiDemo` iframe (`we:.eleventy.js:38`). [#732](/backlog/732-overlay-modal-escape-for-embedded-demos-iframe-box-vs-host-r/)
 ruled overlay escape is solved *host-side over the iframe* (modes A / B1 / B2 of a FUI-owned embed SDK) and
 recorded a fourth mode — **C, an in-document / DI mount** — as *"no longer never: a future trust-gated
 option for the WE↔FUI pair only,"* deferred here. This item carries **one genuine fork** with a **bold**
@@ -42,12 +42,12 @@ recommended default, plus a guard-invariant list; it is *not* an escape need (A/
 
 The concern decomposes into one orthogonal axis the decider actually rules on — **the boundary policy** —
 with everything else forced or settled upstream. Pinned to the real tree: the boundary statement lives at
-`docs/agent/demo-workflow.md:31` (*"per the docs-rendering boundary, WE never imports or renders FUI…"*);
-the only embed seam today is the `fuiDemo` shortcode (`.eleventy.js:38`) — a sandboxed iframe
-(`sandbox="allow-scripts allow-same-origin"`, fixed `style="height:${h}px"`, `.eleventy.js:48`) whose
-`.fui-demo` wrapper clips with `overflow:hidden` (`src/css/style.css:1657`); there is **no `frontierui`
+`we:docs/agent/demo-workflow.md:31` (*"per the docs-rendering boundary, WE never imports or renders FUI…"*);
+the only embed seam today is the `fuiDemo` shortcode (`we:.eleventy.js:38`) — a sandboxed iframe
+(`sandbox="allow-scripts allow-same-origin"`, fixed `style="height:${h}px"`, `we:.eleventy.js:48`) whose
+`.fui-demo` wrapper clips with `overflow:hidden` (`we:src/css/style.css:1657`); there is **no `frontierui`
 alias** in WE's build (the #700-ruled-out source import). The trigger block is the Dialog family
-(`src/_data/blocks.json:3286`), whose native top-layer overlays are what an in-document mount would let
+(`fui:src/_data/blocks.json:3286`), whose native top-layer overlays are what an in-document mount would let
 escape natively — the fidelity gain. Mode C rides a **runtime, FUI-published SDK bundle** (a render mode of
 the same embed SDK #732 settled), never that build-time source import.
 
@@ -59,7 +59,7 @@ the same embed SDK #732 settled), never that build-time source import.
 
 ## Fork 1 — relax the isolation boundary, or keep the iframe wall absolute
 
-**Crux:** the constellation's boundary is stated as an **absolute** (`docs/agent/demo-workflow.md:31`). #732
+**Crux:** the constellation's boundary is stated as an **absolute** (`we:docs/agent/demo-workflow.md:31`). #732
 already realized the embed SDK that escapes overlays *over* the iframe (A/B1/B2) — so escape is solved. Mode
 C drops the iframe and mounts the FUI component **directly in WE's host DOM** (Shadow-DOM / DI): overlays
 then escape *natively* (a `<dialog>`/popover inside a shadow root promotes to the **host document's top
@@ -138,5 +138,5 @@ This is a *boundary-policy* ruling; it produces no code itself. If ratified **A*
 **separately-prioritized** child build under [#728](/backlog/728-component-embedding-capability-embed-a-live-component-exampl/),
 filed at ratification time and gated `blockedBy` this decision — its *priority*, not its existence, is the
 open knob (build timing is prioritization, never a fork branch). The constellation boundary memory and
-`docs/agent/demo-workflow.md:31` are updated to record the WE↔FUI exception. If ratified **B**, #732's "no
+`we:docs/agent/demo-workflow.md:31` are updated to record the WE↔FUI exception. If ratified **B**, #732's "no
 longer never" softens back to "never," and the boundary note is hardened to say so.

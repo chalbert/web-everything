@@ -9,7 +9,7 @@
 ## Question
 
 `#732` (a carved fork of the embed-mechanism epic `#728`): a demo embedded via the `fuiDemo`
-shortcode (`.eleventy.js:38`) renders in a sandboxed, fixed-height `<iframe>`. A component that opens a
+shortcode (`we:.eleventy.js:38`) renders in a sandboxed, fixed-height `<iframe>`. A component that opens a
 modal/popover/toast can't escape that box to cover the host docs page. Decide the escape mechanism among
 (A) oversized/auto-resizing frame, (B) postMessage-to-parent overlay protocol, (C) defer to the DI-mount
 path — and name the concrete first trigger.
@@ -25,7 +25,7 @@ The survey reshaped the A/B/C-as-equals framing into **one genuine fork plus thr
   iframe-resizer / oEmbed `postMessage` height shape, never mint a WE resize protocol.
 - **Forced invariant** — origin-validated `postMessage` (allowlist the FUI demo host).
 - **Settled by #728** — the overlay message contract stays shortcode-local/unregistered until a *second*
-  embed consumer appears (today there is one: `component.njk:235`), then registers as a `webembed`-style
+  embed consumer appears (today there is one: `we:component.njk:235`), then registers as a `webembed`-style
   protocol.
 
 ## Key Findings
@@ -33,7 +33,7 @@ The survey reshaped the A/B/C-as-equals framing into **one genuine fork plus thr
 1. **The blocker is the per-document top layer — a security boundary, not effort.** `<dialog>.showModal()`
    + `::backdrop` and the Popover API paint into a *document's* top layer; an iframe is its own document,
    so its top layer is confined to the frame. No bigger frame or extra code overcomes this.
-2. **The Dialog block is the concrete trigger.** `blocks.json:3286` — the Dialog family's thesis is
+2. **The Dialog block is the concrete trigger.** `fui:blocks.json:3286` — the Dialog family's thesis is
    "native-first top-layer mount via `<dialog>` `showModal`/`::backdrop`, never `position:fixed`." Run it
    inside `fuiDemo` and the backdrop dims only the iframe. So the Dialog family (modal/drawer/sheet) is
    the first `#604` block that visibly breaks — the trigger #732's acceptance asks to name.
@@ -47,8 +47,8 @@ The survey reshaped the A/B/C-as-equals framing into **one genuine fork plus thr
    collapsed both into one "B".
 5. **Origin validation is mandatory.** Overlay + postMessage-spoof are active payment-skimmer vectors
    (The Hacker News, Sep 2025). A fixed rule under every fork, not a branch.
-6. **Protocol home is premature today.** One overlay consumer (`component.njk:235`;
-   `autocomplete.njk:10` is a *contained* droplist). #728's slicing note already rules: carve the generic
+6. **Protocol home is premature today.** One overlay consumer (`we:component.njk:235`;
+   `we:autocomplete.njk:10` is a *contained* droplist). #728's slicing note already rules: carve the generic
    embed primitive only when a real second consumer appears. So the contract stays shortcode-local now.
 
 ## Classification (per-fork pass)
@@ -65,7 +65,7 @@ The survey reshaped the A/B/C-as-equals framing into **one genuine fork plus thr
 
 | File | Action |
 |------|--------|
-| `src/_data/researchTopics.json` | Added `iframe-overlay-escape` registry entry |
-| `src/_includes/research-descriptions/iframe-overlay-escape.njk` | New research write-up |
-| `reports/2026-06-16-iframe-overlay-escape.md` | This report |
+| `we:src/_data/researchTopics.json` | Added `iframe-overlay-escape` registry entry |
+| `we:src/_includes/research-descriptions/iframe-overlay-escape.njk` | New research write-up |
+| `we:reports/2026-06-16-iframe-overlay-escape.md` | This report |
 | `backlog/732-…overlay-modal-escape….md` | Rewritten to prepared-fork shape; `preparedDate` stamped |

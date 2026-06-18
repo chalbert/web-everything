@@ -29,38 +29,38 @@ and the existing tree; the rest is concrete-refs work.
 ## The tree as it actually is (verified 2026-06-16)
 
 - **Component token tier exists but is tiny and archetype-keyed.**
-  `webtheme/defaultTokens.ts:90-117` carries a component tier — but only two groups, **`button`** and
+  `we:webtheme/defaultTokens.ts:90-117` carries a component tier — but only two groups, **`button`** and
   **`card`**, each a handful of DTCG nodes that *alias* a primitive
-  (`button.radius: { $value: '{radius.md}' }`, `card.elevation: { $value: '{elevation.1}' }`). That is
+  (`button.radius: { $value: '{we:radius.md}' }`, `card.elevation: { $value: '{elevation.1}' }`). That is
   **2 of 69** blocks, and `button`/`card` are **not block ids** — the closest blocks are `action-button`
   (a Behavior) and there is no `card` block at all. The tier names *generic component archetypes*, not WE
   blocks.
 
 - **A clean flatten/resolve pipeline already projects these to renderable rows.**
-  `webtheme/tokens.ts:78-140` exposes `flattenTokens()` → `FlatToken { path, type, value, description }`
+  `we:webtheme/tokens.ts:78-140` exposes `flattenTokens()` → `FlatToken { path, type, value, description }`
   and `resolveTokens()` → `ResolvedToken { …, aliasOf, resolved }`. So for `button.radius` the pipeline
-  already yields `path=['button','radius']`, `aliasOf='radius.md'`, `resolved='0.5rem'` — exactly the
-  three columns a token table wants (name · alias · resolved literal). `compile.ts:44-48` emits the same
+  already yields `path=['button','radius']`, `aliasOf='we:radius.md'`, `resolved='0.5rem'` — exactly the
+  three columns a token table wants (name · alias · resolved literal). `we:compile.ts:44-48` emits the same
   as CSS: `--button-radius: var(--radius-md)` (the #403 example).
 
 - **CEM already has a first-class per-component CSS-custom-property slot — and it is empty.**
   The Custom Elements Manifest schema (2.1.0) carries a **`cssProperties`** array per declaration
   (alongside `attributes`/`members`/`events`/`slots`/`cssParts`). WE already emits CEM
-  (`custom-elements.json`, generated from `blocks.json` by `scripts/gen-cem.mjs`, #653). The props-table
+  (`we:custom-elements.json`, generated from `fui:blocks.json` by `we:scripts/gen-cem.mjs`, #653). The props-table
   block's own write-up says it "projects its members/attributes/events/slots/**cssProperties** into table
-  rows" (`block-descriptions/props-table.njk:17`). **But `gen-cem.mjs` emits no `cssProperties` today**
-  (`scripts/gen-cem.mjs:71-82` maps only events + exports + `x-webeverything`), and **0** blocks carry
+  rows" (`we:block-descriptions/props-table.njk:17`). **But `we:gen-cem.mjs` emits no `cssProperties` today**
+  (`we:scripts/gen-cem.mjs:71-82` maps only events + exports + `x-webeverything`), and **0** blocks carry
   token/css-property data. So the renderer slot exists and is wired into the same manifest the props table
   consumes — the data path is simply unpopulated.
 
 - **The mapping precedent is the `fuiDemo` field (#727).** #727 added an *optional* `fuiDemo: {file,
-  title, height}` field to a block's `blocks.json` entry to point at its FUI-hosted demo
-  (`src/block-pages.njk` reads it). The consumer-declares-its-source pattern is the in-tree precedent for
+  title, height}` field to a block's `fui:blocks.json` entry to point at its FUI-hosted demo
+  (`we:src/block-pages.njk` reads it). The consumer-declares-its-source pattern is the in-tree precedent for
   associating a block with a sibling data source.
 
 ## Prior art — how component catalogs source & display per-component tokens
 
-Surveyed the `references.json` benchmark systems + the relevant specs (design-first step 1):
+Surveyed the `we:references.json` benchmark systems + the relevant specs (design-first step 1):
 
 - **Material Design 3 — three-tier ref/sys/comp tokens, component tokens shown as an alias chain.**
   M3 defines *reference* (primitive) → *system* (semantic) → *component* tokens; a component token like
@@ -100,7 +100,7 @@ decision is to wire them, not to invent.
 - **Which layer?** Build-time devtools/docs surface. The *invariant* (a per-component token table is a
   projection of an existing source of truth, never a second hand-kept metadata shape) is **WE-standard**
   owned (mirrors #626 Fork 1). The *gen code* and the `cssProperties` emit are an **FUI/build**
-  instantiation — but here it lives in WE's own `scripts/gen-cem.mjs` since the CEM is WE-emitted.
+  instantiation — but here it lives in WE's own `we:scripts/gen-cem.mjs` since the CEM is WE-emitted.
 - **Protocol or intent dimension?** Neither new. The token table rides the **existing DTCG↔CSS protocol**
   (#403) and the **existing CEM protocol** (#653); no new protocol/intent is coined.
 - **Expose the whole axis?** Fork 3 (scope) is a display axis — expose the alias *and* resolved, the most
@@ -112,16 +112,16 @@ decision is to wire them, not to invent.
   same graceful-absence rule as #727's `fuiDemo`).
 - **Seam between intents?** None; this is a docs projection, not an intent boundary.
 
-Standing bias honoured (separate & decouple): the mapping lives on the **consumer** (`blocks.json`),
+Standing bias honoured (separate & decouple): the mapping lives on the **consumer** (`fui:blocks.json`),
 keeping `webtheme/` pure and docs-agnostic.
 
 ## Recommendations (to ratify in #802)
 
-1. **Fork 1 — source the table from CEM `cssProperties`, projected by `gen-cem.mjs`** (not a parallel
+1. **Fork 1 — source the table from CEM `cssProperties`, projected by `we:gen-cem.mjs`** (not a parallel
    `src/_data` token feed). The component token tier flows into each block's CEM declaration as
    `cssProperties` rows; the existing props-table/token renderer consumes the one manifest. Re-opens
    nothing — it *applies* #626 Fork 1's "one manifest, many consumers" to tokens.
-2. **Fork 2 — explicit optional `componentTokens` field on the `blocks.json` entry**, naming the
+2. **Fork 2 — explicit optional `componentTokens` field on the `fui:blocks.json` entry**, naming the
    `defaultTokens` component group(s) a block draws from (e.g. `"componentTokens": "button"`). Mirrors the
    `fuiDemo` precedent; keeps `webtheme/` unaware of `block.id`. Name-convention is the *broken* branch
    (`button`≠`action-button`).

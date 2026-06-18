@@ -16,7 +16,7 @@ tags: [webdocs, cem, blocks, gen-cem, tagname]
 
 # gen-cem: author the WE-owned tagName value + emit real customElement declarations (per the ratified naming convention)
 
-The value-bearing half of the #822 build, gated on the naming-convention decision (#841): once WE's tag naming convention is ratified, author the tagName value on each type:Component block (registered via customElements.define) in src/_data/blocks.json and let gen-cem emit customElement:true + tagName declarations — the real custom-element surface the wrapper generator (#821) and api-viewer/Storybook need. Behaviors (attributes.define) stay plain class declarations (no tagName). Blocked by #841 because gen-cem only emits a custom-element declaration when an explicit tagName is present, and the tag value is exactly what #841 decides.
+The value-bearing half of the #822 build, gated on the naming-convention decision (#841): once WE's tag naming convention is ratified, author the tagName value on each type:Component block (registered via customElements.define) in fui:src/_data/blocks.json and let gen-cem emit customElement:true + tagName declarations — the real custom-element surface the wrapper generator (#821) and api-viewer/Storybook need. Behaviors (attributes.define) stay plain class declarations (no tagName). Blocked by #841 because gen-cem only emits a custom-element declaration when an explicit tagName is present, and the tag value is exactly what #841 decides.
 
 ## Per #841 ratification (2026-06-17)
 
@@ -52,9 +52,9 @@ Implemented sub-shape **(b)** (the marker, per the stated default — a forward-
   `elementTags(b, declName)` normalizer: `element:true` → `we-<id>`; `tagName` string → explicit; `tagName`
   list → N `{tag,class}` pairs. `cemModule` emits the primary custom-element declaration (carrying the full
   projected member surface) plus one extra bare custom-element declaration per additional tag.
-- **Result** — `custom-elements.json` now carries **7** real `customElement:true` declarations
+- **Result** — `we:custom-elements.json` now carries **7** real `customElement:true` declarations
   (`we-autocomplete`, `we-background-task-surface`, `we-data-table`, `we-pagination`, `we-route-view`,
   `we-route-outlet`, `we-transient-component`) — the surface `gen:wrapper` (#821) and api-viewer/Storybook
   need. Behaviors (`attributes.define`) stay plain class declarations (no tagName). 503 scripts tests green,
-  `check:standards` green except the pre-existing concurrent AGENTS.md-inventory error (not from this change).
+  `check:standards` green except the pre-existing concurrent we:AGENTS.md-inventory error (not from this change).
   Unblocks #839 (qualifying set = these tagged blocks) and the #753/#892 wrapper line.

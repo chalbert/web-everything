@@ -18,7 +18,7 @@ Build slice (c) of the ratified #191 version-migration upgrader (Fork 1A). Wire 
 ## Progress
 
 Resolved 2026-06-13 — slice (c) built as
-[analyzers/versionMigration.ts](../blocks/renderers/upgrader/analyzers/versionMigration.ts), completing
+[we:analyzers/versionMigration.ts](../blocks/renderers/upgrader/analyzers/versionMigration.ts), completing
 the #191 version-migration trio (a=#491 planner, b=#492 interpreter, c=#493 this).
 
 **Second input adapter on one engine.** `makeVersionMigrationAnalyzer(config)` /

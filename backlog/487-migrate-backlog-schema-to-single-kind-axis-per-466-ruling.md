@@ -10,7 +10,7 @@ tags: [stop-the-world]
 
 # Migrate backlog schema to single kind axis (per #466 ruling)
 
-Execute the #466 ruling: collapse type + workItem into one fresh kind field (story|epic|task|decision), dropping both old fields. One-pass rewrite of every backlog/*.md frontmatter, plus the tooling that reads them — loader tiering (backlog.js:243-256), validator enum/sizing/fork-lint (check-standards-rules.mjs:21,120,139-148,219-237), scaffold flags + emit (scripts/backlog/scaffold.mjs:42-44, scripts/backlog.mjs:155-177), render badges + typeOrder (backlog.njk, backlog-pages.njk), and the normative enum + agile-sizing table in docs/agent/backlog-workflow.md. fix-vs-feature becomes an optional tag, not a field. Gate: check:standards green after the rewrite.
+Execute the #466 ruling: collapse type + workItem into one fresh kind field (story|epic|task|decision), dropping both old fields. One-pass rewrite of every backlog/*.md frontmatter, plus the tooling that reads them — loader tiering (we:backlog.js:243-256), validator enum/sizing/fork-lint (we:check-standards-rules.mjs:21,120,139-148,219-237), scaffold flags + emit (we:scripts/backlog/scaffold.mjs:42-44, we:scripts/backlog.mjs:155-177), render badges + typeOrder (we:backlog.njk, we:backlog-pages.njk), and the normative enum + agile-sizing table in we:docs/agent/backlog-workflow.md. fix-vs-feature becomes an optional tag, not a field. Gate: check:standards green after the rewrite.
 
 ## Run precondition — execute on a quiescent backlog (stop-the-world)
 
@@ -20,7 +20,7 @@ Because all sessions share one working tree, the real hazard isn't schema drift 
 the same file. So before claiming this item, **confirm the backlog is quiescent**:
 
 - **No other `status: active` claims** held by another session (scan `backlog/*.md`), and
-- **No live batch reservations** (`.claude/skills/batch-backlog-items/reservations.json` empty/expired).
+- **No live batch reservations** (`we:.claude/skills/batch-backlog-items/reservations.json` empty/expired).
 
 If a batch is mid-run, wait for it to drain (or coordinate a stop) — don't run this alongside it. A
 global freeze can't be *enforced* (reservations are advisory, #083), so the migration also defends
@@ -31,5 +31,5 @@ itself:
 - **Validator is the backstop (the #466 Fork-2 "loud break" payoff)** — after the cutover,
   `check:standards` must **error** on any leftover `type:`/`workItem:`. Any item a parallel session
   births with the old schema then fails the gate loudly instead of silently drifting.
-- **Single atomic commit** for data + tooling together — no window where the new `scaffold.mjs` emits
+- **Single atomic commit** for data + tooling together — no window where the new `we:scaffold.mjs` emits
   the old schema, or vice-versa.

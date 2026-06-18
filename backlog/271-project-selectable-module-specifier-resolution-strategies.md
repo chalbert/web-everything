@@ -31,7 +31,7 @@ four "strategies" are just those native manifests, not a WE-dispatched set:
 
 | Strategy | Native manifest that does the resolving | When |
 |---|---|---|
-| `node_modules` + `exports` (**default**) | the installed package's `package.json#exports` | bundler / dev-server / node |
+| `node_modules` + `exports` (**default**) | the installed package's `we:package.json#exports` | bundler / dev-server / node |
 | importmap → src or dist | the page's `<script type="importmap">` | raw browser, no bundler |
 | CDN / served URL (**override**) | importmap entry pointing at a URL | build-less / CDN delivery |
 | dev-server alias | the project's existing `vite`/bundler alias | dev convenience |

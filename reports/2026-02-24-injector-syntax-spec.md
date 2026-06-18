@@ -71,6 +71,6 @@ Angular is the closest analog (hierarchical DI with decorators + compiler). Vue'
 
 | File | Action |
 |------|--------|
-| `src/_data/researchTopics.json` | Added `injector-syntax-spec` entry |
-| `src/_includes/research-descriptions/injector-syntax-spec.njk` | Created — full draft specification |
-| `reports/2026-02-24-injector-syntax-spec.md` | Created — this report |
+| `we:src/_data/researchTopics.json` | Added `injector-syntax-spec` entry |
+| `we:src/_includes/research-descriptions/injector-syntax-spec.njk` | Created — full draft specification |
+| `we:reports/2026-02-24-injector-syntax-spec.md` | Created — this report |

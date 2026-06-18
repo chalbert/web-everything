@@ -13,10 +13,10 @@ skips the should-we-decompose question; the test is only whether ≥2 agent-read
 
 - **v1 is already shipped.** The iframe mechanism (`fuiDemo`) is built and resolved under
   [#701](../backlog/701-iframe-based-component-viewer-embed-fui-hosted-standard-demo.md):
-  `.eleventy.js:38` defines the `fuiDemo` Eleventy shortcode (sandboxed, lazy, FUI-branded `<iframe>` at
-  `FUI_DEMO_BASE`), with CSS in `src/css/style.css` (`.fui-demo*`). There is **no v1 build slice left to
+  `we:.eleventy.js:38` defines the `fuiDemo` Eleventy shortcode (sandboxed, lazy, FUI-branded `<iframe>` at
+  `FUI_DEMO_BASE`), with CSS in `we:src/css/style.css` (`.fui-demo*`). There is **no v1 build slice left to
   carve** — the epic's "v1 = iframe" section describes shipped code.
-- **One consumer, no second.** Only `src/_includes/block-descriptions/component.njk:235` calls
+- **One consumer, no second.** Only `we:src/_includes/block-descriptions/component.njk:235` calls
   `{% fuiDemo … %}`. Tree-wide grep for a third-party-embed surface (`oembed`, `youtube`) and for any
   other `addShortcode(...)` embed primitive → **none**. The body's "many use cases (YouTube/Facebook-style
   third-party embeds)" axis has **zero consumers in the tree**.
@@ -42,7 +42,7 @@ set exists.
 
 | Candidate (from body) | Failing rubric condition | Unblocking action |
 |---|---|---|
-| **Generic embed primitive** ("reusable embed component generalised beyond `fuiDemo`") | (2)/(3) no real home — one consumer (`component.njk:235`), no second; abstraction with no forcing consumer = premature, fake agent-ready work | Lands when a **real second embed consumer** appears (a marketing/protocol page, or the third-party case below) — then refactor `fuiDemo` into a generic primitive + FUI-branded wrapper |
+| **Generic embed primitive** ("reusable embed component generalised beyond `fuiDemo`") | (2)/(3) no real home — one consumer (`we:component.njk:235`), no second; abstraction with no forcing consumer = premature, fake agent-ready work | Lands when a **real second embed consumer** appears (a marketing/protocol page, or the third-party case below) — then refactor `fuiDemo` into a generic primitive + FUI-branded wrapper |
 | **Per-use-case third-party adapter** (YouTube/Facebook-style `<iframe>` + oEmbed) | (2)/(3) no consumer surface in the tree (zero `oembed`/`youtube` references) | File only when a docs/marketing page actually needs a third-party embed |
 | **DI / Shadow-DOM component mount** (v2) | (5)/(1) gated on an unresolved external decision — needs the cross-repo import seam **#700 ruled out** | **Reopen #700** (the cross-repo-import ruling); out of scope until then |
 | **Overlay/modal escape** (oversized frame · postMessage · defer-to-DI) | (1) it *is* a fork — you can't split a build slice away from it | **File it as a `type:decision` card** (below) — the post-decision build slice becomes carve-able once it rules |

@@ -18,7 +18,7 @@ Port FU's `tools/trait-enforcer/` — the Vite plugin that scans template usage 
 ## Scope
 
 - Add the trait-enforcer Vite plugin under WE `tools/trait-enforcer/`.
-- Swap the `virtual:trait-manifest` `resolve.alias` empty-manifest fallback in [vite.config.mts](../vite.config.mts) for the plugin (vitest **keeps** the empty-alias fallback — the Enforcer is a Vite plugin, absent under vitest; tsc keeps the ambient `plugs/virtual-trait-manifest.d.ts`).
+- Swap the `virtual:trait-manifest` `resolve.alias` empty-manifest fallback in [vite.config.mts](../vite.config.mts) for the plugin (vitest **keeps** the empty-alias fallback — the Enforcer is a Vite plugin, absent under vitest; tsc keeps the ambient `we:plugs/virtual-trait-manifest.d.ts`).
 - Prove a scanned `<el trait>` usage emits its own chunk, loaded on first appearance.
 
 Behaviourally a no-op until a trait is authored into the manifest, but the wiring (#448) is empty until this lands.

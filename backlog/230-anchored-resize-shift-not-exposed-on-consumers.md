@@ -20,7 +20,7 @@ strategies now honor `resize` (native caps the surface at the `position-area` ce
 via a fill-available `max-block-size`; JS computes the pixel room) and `shift`, and
 each is covered by a standalone demo + e2e. But the only shipping consumer,
 `<auto-complete>`, hardcodes its `Anchored` options to `{ placement: 'bottom-start',
-flip: true }` ([AutoComplete.ts](frontierui/blocks/droplist/AutoComplete.ts) ~L215)
+flip: true }` ([fui:AutoComplete.ts](frontierui/blocks/droplist/AutoComplete.ts) ~L215)
 and never passes `resize` or `shift`. So through the real element those flags are
 unreachable — they are exercised only by direct `strategy.place(...)` calls in the
 demos.
@@ -39,18 +39,18 @@ the bottom edge shrinks and scrolls internally rather than overflowing.
 Wired the flags through the only shipping consumer (`<auto-complete>` is the sole
 `new Anchored()` site — no other surface needed touching):
 
-- `frontierui/blocks/droplist/AutoComplete.ts` — `resize`/`shift` added to
+- `fui:frontierui/blocks/droplist/AutoComplete.ts` — `resize`/`shift` added to
   `observedAttributes`; the initial `Anchored.options` now reads them off the
   attributes; `attributeChangedCallback` re-applies on runtime toggle; reflecting
   `resize`/`shift` boolean **properties** added.
-- `frontierui/blocks/droplist/Anchored.ts` — new `update(patch)` that merges option
+- `fui:frontierui/blocks/droplist/Anchored.ts` — new `update(patch)` that merges option
   flags and tears-down + re-places when already connected (the strategy `place()`
   ran once on connect, so a live flag change needs a re-place to take effect).
-- **Demo + e2e (DoD):** `demos/autocomplete-unplugged.ts` Card 6 (`resize`+`shift`
+- **Demo + e2e (DoD):** `fui:demos/autocomplete-unplugged.ts` Card 6 (`resize`+`shift`
   near the viewport bottom, long list, static cap lifted so the fill-available
-  `max-block-size` binds); `blocks/droplist/__tests__/e2e/auto-complete.spec.ts`
+  `max-block-size` binds); `fui:blocks/droplist/__tests__/e2e/auto-complete.spec.ts`
   asserts the wire-through on the surface (inline `max-block-size` fill-available +
   axis-slide `position-try-fallbacks`) and that it stays on-screen.
-- **Unit:** `AutoComplete.test.ts` — attribute, runtime-toggle, and property paths.
+- **Unit:** `fui:AutoComplete.test.ts` — attribute, runtime-toggle, and property paths.
 
-Green: frontierui `tsc`, 1304 unit, 6 e2e (`auto-complete.spec.ts`), `check:standards`.
+Green: frontierui `tsc`, 1304 unit, 6 e2e (`fui:auto-complete.spec.ts`), `check:standards`.

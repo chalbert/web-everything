@@ -19,7 +19,7 @@ Give each block page an **anatomy panel** that lists every piece the block is co
 
 ## Build
 
-- Anatomy panel on the block page: enumerate the block's traits/plugs/intents/tokens/providers from the existing registries (intents.json, plugs, CEM manifest from #626) — each row cross-links to its catalog detail page.
+- Anatomy panel on the block page: enumerate the block's traits/plugs/intents/tokens/providers from the existing registries (we:intents.json, plugs, CEM manifest from #626) — each row cross-links to its catalog detail page.
 - Exploded layer view: visual stack of the composition layers; hover a layer → highlight its contribution in the rendered block.
 - "Used-by" backlinks: from a trait/plug detail page, list every block that composes it (bidirectional graph).
 - Toggle-to-degrade: turn a trait/plug off in the live render and show the degraded result.
@@ -36,7 +36,7 @@ Give each block page an **anatomy panel** that lists every piece the block is co
 Static listing can be built off the registries without the live render, so this is not hard-blocked on #727; the toggle-to-degrade and hover-highlight features layer on once #727's live render lands. Provider↔consumer edges overlap with #092 / inspection devtools (#755) — share the graph data, don't duplicate it.
 
 ## Progress (resolved 2026-06-16) — static composition graph shipped; interactive half carved to #806
-Delivered the **registry-driven, buildable-now half**: an **Anatomy** `section-card` on [`src/block-pages.njk`](../src/block-pages.njk) rendering the block's composition graph straight from `blocks.json` —
+Delivered the **registry-driven, buildable-now half**: an **Anatomy** `section-card` on [`we:src/block-pages.njk`](../src/block-pages.njk) rendering the block's composition graph straight from `fui:blocks.json` —
 - **Built on:** `block.dependsOn` (a clean block→block graph; 17/18 values are block ids), each linking to `/blocks/{id}/`; the one capability dep (`error-recovery`) renders as a labelled non-link.
 - **Used by:** the reverse edge — every block whose `dependsOn` names this one — computed inline over the `blocks` collection, each cross-linked. Verified bidirectional (wizard *Built on* → stepper/workflow-engine; stepper *Used by* → wizard).
 - Sits alongside the existing **Implements / Composes Intents** and **Traits** sections (already cross-linked from #627/#727) to form the full browsable piece list. 11ty builds clean; gate green.

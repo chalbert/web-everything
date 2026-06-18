@@ -113,12 +113,12 @@ mode, lazy view loading (eagerness → `prefetch`; pending UX → `loader`).
 
 | File | Action |
 |---|---|
-| `reports/2026-06-03-navigation-intent-vocabulary.md` | Created — this report |
-| `src/_data/researchTopics.json` | Added `navigation-intent-vocabulary` topic |
-| `src/_includes/research-descriptions/navigation-intent-vocabulary.njk` | Created — research write-up |
-| `src/_data/intents.json` | `navigation`: split `structure`, added `history`/`scroll`/`transition`/`guard`/`persistence`, status `concept → draft`, summary + description rewrite |
-| `src/_data/semantics.json` | Added `deep link`, `view transition`, `history disposition` |
-| `src/_data/blocks.json` | Router cross-check (no change needed / dimension-attribute map noted) |
-| `backlog/057-nav-persistence-grounding.md` | Created — open point |
-| `backlog/058-nav-transition-vs-motion.md` | Created — open point |
-| `backlog/056-nav-focus-reset-home.md` | Created — open point |
+| `we:reports/2026-06-03-navigation-intent-vocabulary.md` | Created — this report |
+| `we:src/_data/researchTopics.json` | Added `navigation-intent-vocabulary` topic |
+| `we:src/_includes/research-descriptions/navigation-intent-vocabulary.njk` | Created — research write-up |
+| `we:src/_data/intents.json` | `navigation`: split `structure`, added `history`/`scroll`/`transition`/`guard`/`persistence`, status `concept → draft`, summary + description rewrite |
+| `we:src/_data/semantics.json` | Added `deep link`, `view transition`, `history disposition` |
+| `fui:src/_data/blocks.json` | Router cross-check (no change needed / dimension-attribute map noted) |
+| `we:backlog/057-nav-persistence-grounding.md` | Created — open point |
+| `we:backlog/058-nav-transition-vs-motion.md` | Created — open point |
+| `we:backlog/056-nav-focus-reset-home.md` | Created — open point |

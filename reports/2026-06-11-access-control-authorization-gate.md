@@ -7,7 +7,7 @@
 
 ## Question
 
-`access-control` is the settled *entry* mirror of the *exit* guard (#129→#273): built **on** the Guard protocol's predicate-provider seam, not as its own project ([protocols.json:94](../src/_data/protocols.json#L94), [backlog/178:38](../backlog/178-access-control-authorization-gate.md#L38)). What remains open is *how to author the member*. Before authoring, survey prior art per [design-first.md](../docs/agent/design-first.md) step 1 so the surfaces, deny-outcomes, and authority vocabulary reuse platform/ecosystem terms instead of coining new ones — and so the trust boundary is stated identically to the #012 identity finding (front-end is a UX mirror; the back-end is authoritative).
+`access-control` is the settled *entry* mirror of the *exit* guard (#129→#273): built **on** the Guard protocol's predicate-provider seam, not as its own project ([we:protocols.json:94](../src/_data/protocols.json#L94), [backlog/178:38](../backlog/178-access-control-authorization-gate.md#L38)). What remains open is *how to author the member*. Before authoring, survey prior art per [we:design-first.md](../docs/agent/design-first.md) step 1 so the surfaces, deny-outcomes, and authority vocabulary reuse platform/ecosystem terms instead of coining new ones — and so the trust boundary is stated identically to the #012 identity finding (front-end is a UX mirror; the back-end is authoritative).
 
 ## Key findings
 
@@ -16,7 +16,7 @@
 Every surveyed stack keeps **navigation-entry** authorization separate from **render-time** authorization, with one shared ability/policy source feeding both:
 
 - **Route guard (entry):** Angular `CanActivate` returns `true | false | UrlTree` — a `UrlTree`/`RedirectCommand` cancels the navigation and starts a redirect ([angular.dev route-guards](https://angular.dev/guide/routing/route-guards)). React Router resolves authorization in a route **loader** that `throw redirect('/login')` before the route renders ([react-router #9327](https://github.com/remix-run/react-router/discussions/9327)); v7 hoists it into route **middleware** that runs before loaders. Vue Router uses **navigation guards** (`router.beforeEach`, per-route `beforeEnter`) reading declarative `meta: { requiresAuth }` and returning a redirect location ([Vue Router navigation-guards](https://router.vuejs.org/guide/advanced/navigation-guards.html), [meta fields](https://router.vuejs.org/guide/advanced/meta.html)).
-- **Element gate (render):** CASL's `<Can I="update" a="Post">…</Can>` component (React) / `$can` + `<Can>` (Vue) conditionally renders a subtree from the same `Ability` instance used server-side ([casl.js.org](https://casl.js.org/v6/en/package/casl-vue/), [stalniy/casl](https://github.com/stalniy/casl)).
+- **Element gate (render):** CASL's `<Can I="update" a="Post">…</Can>` component (React) / `$can` + `<Can>` (Vue) conditionally renders a subtree from the same `Ability` instance used server-side ([we:casl.js.org](https://casl.js.org/v6/en/package/casl-vue/), [stalniy/casl](https://github.com/stalniy/casl)).
 
 **Implication:** the member is genuinely **two surfaces off one authz provider** — a routing entry guard (deny → navigation outcome) and a rendering access gate (deny → render-or-hide a subtree). They are not the same control; they share only the predicate. This is exactly the two-surface split #178 already sketched.
 
@@ -25,11 +25,11 @@ Every surveyed stack keeps **navigation-entry** authorization separate from **re
 Across frameworks the entry-deny outcomes collapse to: **redirect** (to login / fallback — Angular `UrlTree`, RR `redirect`, Vue redirect location), **block/cancel** (Angular `false` cancels navigation in place), or **render a forbidden/not-found view**. The load-bearing one is the **forbidden-vs-not-found** choice:
 
 - RFC 9110 explicitly sanctions existence hiding: *"An origin server that wishes to 'hide' the current existence of a forbidden target resource MAY instead respond with a status code of 404."* Returning **403 confirms the resource exists**, which is information leakage an attacker can use to enumerate protected resources ([lockmedown](https://lockmedown.com/when-should-you-return-404-instead-of-403-http-status-code/), [authress](https://authress.io/knowledge-base/articles/choosing-the-right-http-error-code-401-403-404)).
-- So the UX-only intent should name the *intent* outcomes (`hide | redirect | forbid | cloak`), but **which one fires — especially forbid (403) vs cloak (404) — is a security decision that belongs behind the guard provider**, not a UX-author dimension. This is exactly what the Guard protocol summary already states: *"the 403-vs-404 disclosure call lives behind the provider"* ([protocols.json:96](../src/_data/protocols.json#L96)).
+- So the UX-only intent should name the *intent* outcomes (`hide | redirect | forbid | cloak`), but **which one fires — especially forbid (403) vs cloak (404) — is a security decision that belongs behind the guard provider**, not a UX-author dimension. This is exactly what the Guard protocol summary already states: *"the 403-vs-404 disclosure call lives behind the provider"* ([we:protocols.json:96](../src/_data/protocols.json#L96)).
 
 ### 3. The trust boundary is identical to the identity finding — the front-end gate is a UX mirror, never enforcement
 
-Every source repeats the warning, unprompted: Angular — *"Never rely on client-side guards as the sole source of access control… Always enforce user authorization server-side"* ([angular.dev](https://angular.dev/guide/routing/route-guards)). CASL is *isomorphic* precisely so the **same** ability object runs on the server (the enforcement point) and the client (the mirror) ([stalniy/casl](https://github.com/stalniy/casl)). This is the same boundary the Guard protocol already fixes (*"async, server-authoritative… the front-end is a UX mirror, never enforcement, and revocable"* — [protocols.json:96](../src/_data/protocols.json#L96)) and the same one the #012 identity survey landed on ([backlog/012:25](../backlog/012-gap-5-webidentity-project.md#L25)). The member must restate it, not re-decide it.
+Every source repeats the warning, unprompted: Angular — *"Never rely on client-side guards as the sole source of access control… Always enforce user authorization server-side"* ([angular.dev](https://angular.dev/guide/routing/route-guards)). CASL is *isomorphic* precisely so the **same** ability object runs on the server (the enforcement point) and the client (the mirror) ([stalniy/casl](https://github.com/stalniy/casl)). This is the same boundary the Guard protocol already fixes (*"async, server-authoritative… the front-end is a UX mirror, never enforcement, and revocable"* — [we:protocols.json:96](../src/_data/protocols.json#L96)) and the same one the #012 identity survey landed on ([backlog/012:25](../backlog/012-gap-5-webidentity-project.md#L25)). The member must restate it, not re-decide it.
 
 ### 4. Policy engines (OPA) are the back-end provider impl, not a front-end concern — they validate the provider seam
 
@@ -47,14 +47,14 @@ A widely-cited argument holds that feature flags and authorization **abstract th
 
 ### 6. No native authorization primitive — but the Navigation API is the native route-guard substrate
 
-There is no browser authorization API (the Permissions API is a *different* concern — camera/geolocation, owned by #009, explicitly not this — [backlog/178:14](../backlog/178-access-control-authorization-gate.md#L14)). But the **Navigation API**'s `navigate` event (`intercept()` / `event.preventDefault()` + redirect) is the native substrate for the route-guard surface — the same primitive the Navigation Intent already names as its SPA-grade enhancement over the History API ([intents.json:1696](../src/_data/intents.json#L1696)) and that the exit guard's `route` scope already intercepts ([intents.json:2037](../src/_data/intents.json#L2037)). So the entry guard composes the existing navigation machinery; it does not invent it.
+There is no browser authorization API (the Permissions API is a *different* concern — camera/geolocation, owned by #009, explicitly not this — [backlog/178:14](../backlog/178-access-control-authorization-gate.md#L14)). But the **Navigation API**'s `navigate` event (`intercept()` / `event.preventDefault()` + redirect) is the native substrate for the route-guard surface — the same primitive the Navigation Intent already names as its SPA-grade enhancement over the History API ([we:intents.json:1696](../src/_data/intents.json#L1696)) and that the exit guard's `route` scope already intercepts ([we:intents.json:2037](../src/_data/intents.json#L2037)). So the entry guard composes the existing navigation machinery; it does not invent it.
 
 ## Recommendation (to ratify in #178)
 
 The home fork stays ruled (entry member of the Guard protocol #272/#288, not its own project). The member-design forks:
 
 1. **Two surfaces, one provider (Fork A).** Author *both* the routing entry guard and the rendering access gate as one member sharing one authz provider — don't split into two members or collapse to one surface.
-2. **Deny-outcome: UX names the family, the provider owns 403-vs-404 (Fork B).** The intent exposes `hide | redirect | forbid | cloak`; the forbid(403)-vs-cloak(404) existence-hiding choice is decided **behind the provider** (security, not UX), per [protocols.json:96](../src/_data/protocols.json#L96).
+2. **Deny-outcome: UX names the family, the provider owns 403-vs-404 (Fork B).** The intent exposes `hide | redirect | forbid | cloak`; the forbid(403)-vs-cloak(404) existence-hiding choice is decided **behind the provider** (security, not UX), per [we:protocols.json:96](../src/_data/protocols.json#L96).
 3. **Feature flags = an authority kind, not separate machinery (Fork C).** A flag source is one `CustomGuardProvider`; it inherits the UX-mirror trust boundary. Default the authority taxonomy to the open set (`authorization | feature-flag | process | validity`).
 4. **Restate, don't re-decide, the trust boundary (Fork D).** The member declares the front-end is a UX mirror and the back-end is authoritative — inherited verbatim from the Guard protocol and the #012 identity finding.
 
@@ -62,6 +62,6 @@ The home fork stays ruled (entry member of the Guard protocol #272/#288, not its
 
 | File | Action |
 | --- | --- |
-| `reports/2026-06-11-access-control-authorization-gate.md` | Created (this report) |
-| `src/_includes/research-descriptions/access-control-authorization-gate.njk` | Created (research-topic description) |
-| `backlog/178-access-control-authorization-gate.md` | Restructured into prepared-fork shape (home ruling preserved) |
+| `we:reports/2026-06-11-access-control-authorization-gate.md` | Created (this report) |
+| `we:src/_includes/research-descriptions/access-control-authorization-gate.njk` | Created (research-topic description) |
+| `we:backlog/178-access-control-authorization-gate.md` | Restructured into prepared-fork shape (home ruling preserved) |

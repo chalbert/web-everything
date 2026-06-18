@@ -16,7 +16,7 @@ crossRef: { url: /backlog/099-evergreen-app-vision/, label: "Evergreen app / boo
 # Book — further candidate standards (triaged to real gaps)
 
 Holding item for the **remaining ideas** in the archived "Front-End Platform" essay
-(`reports/2026-06-06-front-end-platform-book.md`) not promoted in the first mining pass
+(`we:reports/2026-06-06-front-end-platform-book.md`) not promoted in the first mining pass
 (#099–#107). **Triaged 2026-06-13** against the live backlog: most candidates turned out to
 be already homed (built, drafted, or folded into a project), and the real gaps were promoted to
 their own cards. **This epic is RESOLVED** — every surviving candidate now has a tracking item

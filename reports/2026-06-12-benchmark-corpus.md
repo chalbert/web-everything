@@ -3,7 +3,7 @@
 **Date:** 2026-06-12
 **Backlog:** #316 (phase 1 of epic #315, the competitive coverage gap-analysis program)
 **Research topic:** [/research/benchmark-corpus/](/research/benchmark-corpus/)
-**Data:** `src/_data/benchmarkCorpus.json`
+**Data:** `we:src/_data/benchmarkCorpus.json`
 
 ## What this is
 
@@ -42,10 +42,10 @@ anchor positioning, `Intl.*`).
 
 ## How it integrates
 
-- **`src/_data/benchmarkCorpus.json`** is the single source of truth: criteria, axes, and per-source
+- **`we:src/_data/benchmarkCorpus.json`** is the single source of truth: criteria, axes, and per-source
   metadata (`id`, `name`, `vendor`, `category`, `docsUrl`, `repoUrl`, `philosophy`, `nativeAlignment`,
   `inReferences`, `lastChecked`).
-- **`references.json` "Reference Design Systems"** was *extended* (added WAI-ARIA APG, Open UI, React Aria,
+- **`we:references.json` "Reference Design Systems"** was *extended* (added WAI-ARIA APG, Open UI, React Aria,
   Shoelace) — it remains the curated docs-surface subset, flagged `inReferences: true` in the corpus. The
   corpus is the superset; neither is a blind copy of the other.
 - **`/research/benchmark-corpus/`** renders the criteria, axes, and corpus table directly from the data

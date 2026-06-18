@@ -33,7 +33,7 @@ The "several valid ways to do workflows" (wizard / single-page / conversational 
 
 | File | Action |
 | --- | --- |
-| `backlog/634-meta-intent-workflow-as-composable-intent.md` | Rewritten to prepared-fork shape; `preparedDate` + `relatedReport` set |
-| `src/_data/researchTopics.json` | Added `workflow-meta-intent` registry entry |
-| `src/_includes/research-descriptions/workflow-meta-intent.njk` | New research write-up |
-| `reports/2026-06-14-workflow-meta-intent.md` | This report |
+| `we:backlog/634-meta-intent-workflow-as-composable-intent.md` | Rewritten to prepared-fork shape; `preparedDate` + `relatedReport` set |
+| `we:src/_data/researchTopics.json` | Added `workflow-meta-intent` registry entry |
+| `we:src/_includes/research-descriptions/workflow-meta-intent.njk` | New research write-up |
+| `we:reports/2026-06-14-workflow-meta-intent.md` | This report |

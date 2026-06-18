@@ -19,7 +19,7 @@ Per #370 Fork 5: add a Technical Configurator option (plateau-app) for the react
 
 ## Progress
 
-- Added the `reaction-update-strategy` Technical Configurator domain in plateau-app (`src/technical-configurator/seed-reaction-update-strategy.ts`) — 3 outcome axes (perceived responsiveness, on-failure handling, connection assumption) and the two strategies **optimistic** (`optimisticallyUpdated: true` — reflect now, roll back on failure) vs **pessimistic** (`false` — confirm, then reflect). Modeled per the seed pattern (developer expresses outcomes; strategy is the answer).
-- Registered it in `provider.ts` (the DOMAINS list) and wired 3 presets in `presets.ts` + `configurator.ts` (snappy-toggle / never-show-unconfirmed / flaky-network).
+- Added the `reaction-update-strategy` Technical Configurator domain in plateau-app (`plateau:src/technical-configurator/seed-reaction-update-strategy.ts`) — 3 outcome axes (perceived responsiveness, on-failure handling, connection assumption) and the two strategies **optimistic** (`optimisticallyUpdated: true` — reflect now, roll back on failure) vs **pessimistic** (`false` — confirm, then reflect). Modeled per the seed pattern (developer expresses outcomes; strategy is the answer).
+- Registered it in `we:provider.ts` (the DOMAINS list) and wired 3 presets in `plateau:presets.ts` + `plateau:configurator.ts` (snappy-toggle / never-show-unconfirmed / flaky-network).
 - Scope honored: the reaction **sync transport** is explicitly NOT modeled here — left to the webrealtime domain (noted in the seed doc + tagline).
 - Gate: `npm test` in plateau-app green (113/113). Code commits to plateau-app; this tracker entry to webeverything.

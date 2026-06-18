@@ -20,7 +20,7 @@ Now that #073 (htmlToJsx attribute quote-escaping) is resolved, JSON-valued attr
 
 Known candidates (not exhaustive):
 
-- `broadcast.njk` — "With a different trigger event" (`broadcast.njk:76`, the `<form broadcast=… broadcast-on="submit">` snippet) and "With dynamic detail from a store" (`broadcast.njk:86`, the `broadcast-from="filterStore"` button). Both are clean parseable HTML.
+- `we:broadcast.njk` — "With a different trigger event" (`we:broadcast.njk:76`, the `<form broadcast=… broadcast-on="submit">` snippet) and "With dynamic detail from a store" (`we:broadcast.njk:86`, the `broadcast-from="filterStore"` button). Both are clean parseable HTML.
 
 Constraint (unchanged from #069): skip pseudo-HTML, reactive `{{ }}`/`[[ ]]` interpolation (Axis-2 unmapped), and comment-heavy snippets where comments would drop in JSX (e.g. broadcast's "Complete Example" with `<script>` + comments). Those correctly stay on the manual `sourceToggle`.
 
@@ -31,16 +31,16 @@ Verify each conversion the same way #069 did: real `htmlToJsx` run / build-smoke
 - **Status:** resolved 2026-06-07 — swept all block-description pages; 5 secondary snippets converted to `autoToggle`, generated JSX panes verified well-formed, 11ty build green (491 files), `check:standards` 0 errors.
 - **Branch:** docs/standard-authoring-workflow
 - **Done (5 conversions):**
-  - `broadcast.njk` — "With a different trigger event" (`broadcast-trigger`) and "With dynamic detail from a store" (`broadcast-from`).
-  - `resource-action.njk` — "Delete with Confirmation" (`resource-action-confirm`); JSON-valued `resource-action-detail` attr — escaping confirmed byte-identical to the #069-shipped `broadcast-detail` pane (post-073 fix), so consistent, not a regression.
-  - `prefetch-behavior.njk` — "Hover Prefetch with Router" nav (`prefetch-nav`).
-  - `background-task-surface.njk` — usage snippet (`background-tasks-surface`); added the `source-toggle.njk` `autoToggle` import (page had none).
-  - Verified via real `htmlToJsx` run (shared transform) + `build:check`: all 5 generated JSX panes well-formed; single leading comments drop in the JSX pane as expected (matches the `broadcast.njk:50-54` "Basic" precedent).
+  - `we:broadcast.njk` — "With a different trigger event" (`broadcast-trigger`) and "With dynamic detail from a store" (`broadcast-from`).
+  - `we:resource-action.njk` — "Delete with Confirmation" (`resource-action-confirm`); JSON-valued `resource-action-detail` attr — escaping confirmed byte-identical to the #069-shipped `broadcast-detail` pane (post-073 fix), so consistent, not a regression.
+  - `we:prefetch-behavior.njk` — "Hover Prefetch with Router" nav (`prefetch-nav`).
+  - `we:background-task-surface.njk` — usage snippet (`background-tasks-surface`); added the `we:source-toggle.njk` `autoToggle` import (page had none).
+  - Verified via real `htmlToJsx` run (shared transform) + `build:check`: all 5 generated JSX panes well-formed; single leading comments drop in the JSX pane as expected (matches the `we:broadcast.njk:50-54` "Basic" precedent).
 - **Deliberately skipped (correct end-state, not leftover work — they fall under the item's stated constraint):**
-  - `action-button.njk` (3 snippets) — each carries a **load-bearing** comment (mutation behavior, `macOS/Windows` ordering, `<!-- form fields -->` placeholder) that silently drops in the JSX pane; converting would degrade that pane. Stays on manual `{% highlight %}`.
-  - `multi-select-dropdown.njk`, `autocomplete.njk` — comments **inside** start tags (annotated pseudo-HTML); stay on manual.
+  - `we:action-button.njk` (3 snippets) — each carries a **load-bearing** comment (mutation behavior, `macOS/Windows` ordering, `<!-- form fields -->` placeholder) that silently drops in the JSX pane; converting would degrade that pane. Stays on manual `{% highlight %}`.
+  - `we:multi-select-dropdown.njk`, `we:autocomplete.njk` — comments **inside** start tags (annotated pseudo-HTML); stay on manual.
   - `workflow`, `router`, `component`, `dropdown`, `interpolation-text-node` — already excluded by #069 (comment-heavy / reactive `{{ }}`/`[[ ]]` / own track).
 - **Next:** _(done)_
 - **Notes:** No follow-up backlog item filed — every un-converted snippet is excluded by the documented constraint, not blocked. The single-leading-comment convention (drops in JSX) is now used on broadcast (×3 incl. Basic), background-task-surface.
 
-**Graduated to** `adapter:jsx-adapter` — autoToggle rolled onto 5 secondary snippets: broadcast.njk, resource-action.njk, prefetch-behavior.njk, background-task-surface.njk.
+**Graduated to** `adapter:jsx-adapter` — autoToggle rolled onto 5 secondary snippets: we:broadcast.njk, we:resource-action.njk, we:prefetch-behavior.njk, we:background-task-surface.njk.

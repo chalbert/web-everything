@@ -57,13 +57,13 @@ into four orthogonal axes, each pinned to concrete code:
 
 - **Rendering contract.** A docs floor's load-bearing need is **static HTML** (host-anywhere, SEO,
   readable JS-off). WE's reference impl already is static: `/protocols/` renders via 11ty Nunjucks
-  ([src/protocols.njk](../src/protocols.njk), [src/capability-pages.njk](../src/capability-pages.njk)).
+  ([we:src/protocols.njk](../src/protocols.njk), [we:src/capability-pages.njk](../src/capability-pages.njk)).
   But every FUI content path is **client-runtime DOM**:
-  [frontierui `packages/jsx-runtime/src/JSXRenderer.ts`](https://github.com/) `createElement` builds DOM
-  nodes, and `blocks/view/ViewEngine.ts` is `document`-only. So this is the real tension, and **Fork 1**.
-- **Authoring form.** `@frontierui/jsx-runtime` (`packages/jsx-runtime/package.json`: "HTML-mirror-dialect
+  [frontierui `fui:packages/jsx-runtime/src/JSXRenderer.ts`](https://github.com/) `createElement` builds DOM
+  nodes, and `we:blocks/view/ViewEngine.ts` is `document`-only. So this is the real tension, and **Fork 1**.
+- **Authoring form.** `@frontierui/jsx-runtime` (`fui:packages/jsx-runtime/package.json`: "HTML-mirror-dialect
   JSX factory that builds real DOM") **is** FUI's content-authoring primitive — used by
-  `blocks/renderers/index.ts` and `demos/declarative-spa-jsx.tsx`, *not* dormant. The gap is that it has
+  `we:blocks/renderers/index.ts` and `we:demos/declarative-spa-jsx.tsx`, *not* dormant. The gap is that it has
   **no server string-emit** (grep of `packages/jsx-runtime/src` finds only `document`/`createElement`).
   That's **Fork 2**.
 - **Interactivity / hydration.** FUI's behavior blocks — `blocks/droplist/`, `blocks/tabs/`,
@@ -91,8 +91,8 @@ output. At ratification, carve it as its own prerequisite item and set #425 `blo
 ## Fork 1 — Rendering contract: static-first or client-runtime?
 
 **Crux.** "Cancel and self-host always holds" means a self-hoster gets a working docs site on any static
-host. The reference impl ([src/protocols.njk](../src/protocols.njk)) is server-static today; FUI's content
-runtime ([frontierui `JSXRenderer.ts`](https://github.com/)) is client-only. Which contract do the
+host. The reference impl ([we:src/protocols.njk](../src/protocols.njk)) is server-static today; FUI's content
+runtime ([frontierui `we:JSXRenderer.ts`](https://github.com/)) is client-only. Which contract do the
 primitives expose?
 
 - **A — Static-first islands** *(recommended)*. Primitives server-render to static HTML; only interactive
@@ -107,7 +107,7 @@ primitives expose?
 ## Fork 2 — Authoring form: JSX-on-jsx-runtime, custom-elements+DSD, or server-template?
 
 **Crux.** Given static-first (Fork 1), how is a primitive *written*? jsx-runtime is FUI's HTML-mirror JSX
-factory ([`packages/jsx-runtime/package.json`](https://github.com/)) but builds **light DOM** with no
+factory ([`fui:packages/jsx-runtime/package.json`](https://github.com/)) but builds **light DOM** with no
 string-emit; WE's reference is Nunjucks.
 
 - **A — JSX on `@frontierui/jsx-runtime`, plus a new server render-to-string emit** *(recommended)*.

@@ -17,7 +17,7 @@ Build slice (a) of the ratified #191 version-migration upgrader. Consume the cha
 
 ## Progress (2026-06-13) — resolved
 
-New [blocks/renderers/upgrader/versionMigrationPlanner.ts](../blocks/renderers/upgrader/versionMigrationPlanner.ts) — `planVersionMigration(installed, target, manifests, pkg?)` → `MigrationPlan { steps, spannedVersions, reachedTarget }`. The *across-versions* counterpart of #094's *legacy→standard* upgrade:
+New [we:blocks/renderers/upgrader/versionMigrationPlanner.ts](../blocks/renderers/upgrader/versionMigrationPlanner.ts) — `planVersionMigration(installed, target, manifests, pkg?)` → `MigrationPlan { steps, spannedVersions, reachedTarget }`. The *across-versions* counterpart of #094's *legacy→standard* upgrade:
 
 - **Consumes the changelog-manifest (#102) verbatim** — the `ChangelogManifest` / `ChangelogEntry` / `MigrationRef` shapes mirror the resolved protocol (per-module entries keyed to semver `severity` + Keep-a-Changelog `type`; `migration` linkage on breaking entries). Mirrored locally so the planner is self-contained, not a new schema.
 - **Version-gated + intermediate-spanning** — walks the `previous → release` chain from `installed`, at each hop taking the manifest with the **smallest** `release` in `(current, target]` (using #266's `compareSpecVersions`), so a `1→3` shortcut never skips the `2.x` deprecation window. Collects only entries carrying a `migration` ref (breaking + mechanically applicable), ordered installed→target — the `ng update` run loop.

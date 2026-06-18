@@ -34,11 +34,11 @@ Spun off from #135 close-out (the surface adopts a handle; this produces one).
 - **Status:** resolved — producer handoff wired, tested, demoed, verified in a real browser.
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
-  - `blocks/resource-loader/backgroundHandoff.ts` — `ResourceLoaderHandle` (adapts the Loader's events into the surface's `LoaderStateHandle`) + `backgroundLoad(loader, fn, { id, label })` driver + `BACKGROUND_TASK_REGISTER_EVENT`; exported from `blocks/resource-loader/index.ts` and `blocks.json`.
+  - `we:blocks/resource-loader/backgroundHandoff.ts` — `ResourceLoaderHandle` (adapts the Loader's events into the surface's `LoaderStateHandle`) + `backgroundLoad(loader, fn, { id, label })` driver + `BACKGROUND_TASK_REGISTER_EVENT`; exported from `we:blocks/resource-loader/index.ts` and `fui:blocks.json`.
   - `retry()` re-runs the original `load(fn, traits)` on the same handle (surface's per-task retry delegates to it).
-  - Shared fixture `blocks/resource-loader/__fixtures__/handoff-scenarios.ts` (deferred lever + scenarios) imported by both the test and the demo (anti-drift).
-  - Unit test `blocks/__tests__/unit/resource-loader/backgroundHandoff.test.ts` drives a **real** Loader → **real** `<background-tasks>` (3 invariants).
-  - Demo `demos/loader-background-handoff-demo.{html,ts,css}` registered in `demos.json`; producer note added to `resource-loader.njk`.
+  - Shared fixture `we:blocks/resource-loader/__fixtures__/handoff-scenarios.ts` (deferred lever + scenarios) imported by both the test and the demo (anti-drift).
+  - Unit test `we:blocks/__tests__/unit/resource-loader/backgroundHandoff.test.ts` drives a **real** Loader → **real** `<background-tasks>` (3 invariants).
+  - Demo `demos/loader-background-handoff-demo.{html,ts,css}` registered in `we:demos.json`; producer note added to `we:resource-loader.njk`.
   - Gate: full vitest **1582 pass**, `check:standards` **0 errors**, 11ty build green, demo verified headless **3/3 invariants** (no console errors).
 - **Decision — escalation:async trigger:** reuse the Loader's existing debounce — escalate (dispatch `background-task-register`) **once, when the loader crosses into `loading`**. Fast ops that resolve before the threshold never enter `loading`, so they never escalate. Backgrounding is opt-in via `backgroundLoad()`. No new threshold invented (native-first).
 - **Notes:** Type-only import of the surface's contract types into resource-loader (no runtime coupling — handoff is a bubbling DOM `CustomEvent`). State map: `loading`→active (`resource-state-change`), `success`/`empty`→success (`resource-load-end`), `error`→error w/ Error (`resource-load-error`); `idle`/`pending`/`stale` ignored. Numeric progress stays undefined (Loader has no progress events) → follow-up [#171](/backlog/171-loader-determinate-progress-forwarding/). Handle keeps loader listeners for the loader's lifetime (`dispose()` exposed but uncalled) → follow-up [#172](/backlog/172-handoff-handle-dispose-on-dismiss/).

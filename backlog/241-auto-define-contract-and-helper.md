@@ -24,8 +24,8 @@ mechanics — the parts that need no strategy object.
 - **`defineElement(tag, ctor)` helper** — idempotent + collision-safe + HMR-safe
   (`customElements.get(tag) ?? customElements.define(tag, ctor)`). This is the one call every module
   makes. Replace the bare top-level `customElements.define(...)` the generators emit today
-  (`blocks/renderers/component/declarativeComponent.ts:151`,
-  `blocks/renderers/functional/functionalComponent.ts:71`) with a call to it, so re-import / duplicate
+  (`we:blocks/renderers/component/declarativeComponent.ts:151`,
+  `we:blocks/renderers/functional/functionalComponent.ts:71`) with a call to it, so re-import / duplicate
   tag / HMR re-run stop throwing.
 - **`static tagName`** — generated classes carry `static tagName` as the single source of truth for
   tag↔class binding. The JSX class path resolves `<UserCard/>` → `tagName` →

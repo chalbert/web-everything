@@ -19,7 +19,7 @@ Build the forge provider registry ruled by #578: "open a PR" abstracted behind a
 
 - **Resolved 2026-06-14.** Built the forge provider registry (#578) — the **"open a PR" twin of #576's
   IDE-bridge registry** — in `plateau-app/src/dev-browser/forge/` (mirrors the IdeBridgeRegistry layout:
-  `types.ts` / `registry.ts` / `providers.ts` / `index.ts` / `forge.test.ts`). A runtime-DI registry the
+  `we:types.ts` / `we:registry.ts` / `plateau:providers.ts` / `we:index.ts` / `plateau:forge.test.ts`). A runtime-DI registry the
   dev-browser consults to open a PR once a resolver (#575) yields the `file:line`.
   - **`ForgeProviderRegistry`** resolves the highest-precedence provider that `handles(repo)` (host match)
     **and** `isAvailable()` (configured), skipping the rest and degrading to a clear reason when none

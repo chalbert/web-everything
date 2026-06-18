@@ -46,10 +46,10 @@ batch drop-reason classifier).
 The guiding-principle catalog, organized around the meta-principle **"mandate nothing / offer choice, but be
 strict on correctness invariants — strictness allocated by kind."** Full catalog with sources:
 
-- **A — Mandate-nothing / offer-choice:** support-all-coherent + fork-existence test (`backlog-workflow.md:243`),
-  most-flexible default, dimension-vs-fixed-mechanic, native-first default (`AGENTS.md` hard-rule 6),
+- **A — Mandate-nothing / offer-choice:** support-all-coherent + fork-existence test (`we:backlog-workflow.md:243`),
+  most-flexible default, dimension-vs-fixed-mechanic, native-first default (`we:AGENTS.md` hard-rule 6),
   config-extends-platform-default, intent-UX-only→Configurator, conventions-never-mandated (#436/#437),
-  don't-reimplement (registry+provider, `design-first.md:133`).
+  don't-reimplement (registry+provider, `we:design-first.md:133`).
 - **B — Strict-where-it-matters:** forced-invariant=ratify (`:243a`), design-first / website-is-the-spec,
   term-first + naming, conformance-demo-required, single-substrate / Baseline-2024 (#031).
 - **C — Lock-in & escape hatches:** minimize-lock-in / protocol-is-the-only-lock, adapter-as-normalization-hub
@@ -66,8 +66,8 @@ The subtle class to hunt hardest: **mis-allocated strictness** — a mandate whe
 
 ## Method (two layers, the apparatus already exists)
 
-1. **Deterministic sweep** — `scripts/audit-backlog-health.mjs` (read-only, regenerable to
-   `audits/backlog-health-audit.md`). Catches what the gate can't: G1 edge-gaps, G2 built-ahead-of-ruling,
+1. **Deterministic sweep** — `we:scripts/audit-backlog-health.mjs` (read-only, regenerable to
+   `we:audits/backlog-health-audit.md`). Catches what the gate can't: G1 edge-gaps, G2 built-ahead-of-ruling,
    G3 ungoverned-build candidate pool, D1 dead-file-refs, D2 dangling-item-refs, D3 stale-project. First run
    (2026-06-14, 591 items): **G1=104 (0 HIGH), G2=7, G3=219, D1=8, D2=0, D3=18**.
 2. **Judgment layer** — read each resolved item *and what it graduated to* against catalog A–E, confirm/clear
@@ -79,7 +79,7 @@ The subtle class to hunt hardest: **mis-allocated strictness** — a mandate whe
 1. **Slips ledger** — confirmed slips, each tagged + dated + with the violated rule and the *current-state* fix
    it implies. Real fixes are filed as their own backlog items (separately prioritized), **never applied here**.
 2. **Audit-improvement log** — every weakness in the audit tooling found while running it (the stress-test
-   half). Confirmed improvements spin out as small items against `scripts/audit-backlog-health.mjs`.
+   half). Confirmed improvements spin out as small items against `we:scripts/audit-backlog-health.mjs`.
 
 ### Audit-improvement log — seeded from building the deterministic sweep (2026-06-14)
 
@@ -88,7 +88,7 @@ Already collected while standing the tool up (these ARE the stress-test's first 
 - **id normalization** — filenames are zero-padded (`064-…`) but body refs vary (`#64`/`#064`); ref-matching
   must `parseInt`-normalize both. *(found + fixed; keep as a regression note.)*
 - **D1 false positives** — three sub-classes still leak: (a) **planned files** an open build card describes as
-  *to-create* read as "dead"; (b) **assertions of absence** (`#606` citing "no `plugs/package.json`"); (c)
+  *to-create* read as "dead"; (b) **assertions of absence** (`#606` citing "no `we:plugs/package.json`"); (c)
   shorthand include-dir prefixes (partially handled). Improvement: distinguish *should-exist* refs (past-tense /
   "see") from *will-create* refs.
 - **G2 date-trust** — `dateResolved` on early-era items may be backfilled, so "built ahead of ruling" can be a
@@ -115,9 +115,9 @@ conformance gate). This item is closed-item retrospective; #608 is open-item pre
 
 - **Status:** resolved — both ledgers delivered, follow-ons filed.
 - **Deliverables:**
-  - [`audits/607-slips-ledger.md`](../audits/607-slips-ledger.md) — judgment-confirmed findings, post-verification.
-  - [`audits/607-audit-improvement-log.md`](../audits/607-audit-improvement-log.md) — tool weaknesses (the stress-test half).
-  - Deterministic input: [`audits/backlog-health-audit.md`](../audits/backlog-health-audit.md).
+  - [`we:audits/607-slips-ledger.md`](../audits/607-slips-ledger.md) — judgment-confirmed findings, post-verification.
+  - [`we:audits/607-audit-improvement-log.md`](../audits/607-audit-improvement-log.md) — tool weaknesses (the stress-test half).
+  - Deterministic input: [`we:audits/backlog-health-audit.md`](../audits/backlog-health-audit.md).
 - **What the sweep found** (596 items; deterministic G1=104/0-HIGH, G2=7, G3=219, D1=9, D2=0, D3=18):
   - **G2 ×7 → 0 slips** (all date artifacts — backfilled/born-resolved-at-import frontmatter, false lineage, or correctly-deferred forward-ref).
   - **G3 → 1 drift, 2 refuted.** Judgment proposed 3 ungoverned-arch slips (#353/#355/#357); **adversarial verification killed 2** (#355 governed by decision #409, #357 by the #314 charter — both prose/epic links invisible to the frontmatter-only tool) and **downgraded #353** (weblifecycle) slip→drift (carve-rule co-dated the commit). ~40 other arch candidates cleared.

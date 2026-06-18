@@ -14,15 +14,15 @@ iterator protocol) the codebase's own generic `Registry` interface already mirro
 ## Correction to #582's framing (found by reading the tree)
 
 The item's prose names the divergent class **`CustomContextRegistry`** and cites
-`plugs/webcontexts/CustomContext.ts:64`. The **file ref is right; the class name is wrong.**
-`CustomContextRegistry.ts` is **byte-identical** between WE and FU (`diff` → no output). The actual
-divergence is in **`CustomContext.ts`** — the abstract base class that `implements Registry<…>`. The
+`we:plugs/webcontexts/CustomContext.ts:64`. The **file ref is right; the class name is wrong.**
+`we:CustomContextRegistry.ts` is **byte-identical** between WE and FU (`diff` → no output). The actual
+divergence is in **`we:CustomContext.ts`** — the abstract base class that `implements Registry<…>`. The
 prepared item is corrected to name `CustomContext` (the base), not `CustomContextRegistry` (the
 HTMLRegistry subclass, which does not diverge).
 
 ## The three divergent surfaces (verified diffs)
 
-### 1. `CustomContext` (webcontexts/CustomContext.ts) — the fork proper
+### 1. `CustomContext` (we:webcontexts/CustomContext.ts) — the fork proper
 
 | Axis | WE | FU |
 |---|---|---|
@@ -70,7 +70,7 @@ every subclass across WE + FU + plateau-app:
 
 The shared generic interface is `Registry<Definition, Key = string>` with `get(name): Definition |
 undefined`, `delete(name): boolean`, and `keys()/values()/entries(): IterableIterator<…>`
-([Registry.ts](../plugs/webinjectors/Registry.ts)).
+([we:Registry.ts](../plugs/webinjectors/Registry.ts)).
 
 - **WE's `CustomContext` does not actually satisfy it:** it omits `values()` and `entries()` and its
   `delete(): void` violates the `boolean` return. It also passes the *whole record* `ContextValue` into

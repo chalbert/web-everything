@@ -30,7 +30,7 @@ Fork 3 rather than deferring it:
 
 | Layer | Web Docs piece | Repo |
 |---|---|---|
-| **Standard** | the `webdocs` meta-standard (`webmanifest`+`webcases` → docs) | **WE** — exists ([projects.json:226](../src/_data/projects.json#L226)) |
+| **Standard** | the `webdocs` meta-standard (`webmanifest`+`webcases` → docs) | **WE** — exists ([we:projects.json:226](../src/_data/projects.json#L226)) |
 | **Open primitives** | enough free, composable parts to assemble a *self-hosted* Web Docs UI — the "cancel and self-host always holds" floor (load-bearing, not a nicety) | **Frontier UI** |
 | **Adapters / impl** | ingest incumbents (Storybook/Mintlify → the `webcases` pivot, lossy normalization-hub) + generator impl | **Frontier UI** |
 | **Complete product** | the tested, flexible, polished served site + per-customer conformance/coverage report | **`plateau-app`** |
@@ -71,15 +71,15 @@ keeps the source of truth in the customer's repo (Mintlify generates pages from 
 OpenAPI spec and re-publishes on commit; Docusaurus is the open self-hosted end) vs **platform-first**
 (ReadMe/GitBook can become the source of record — the lock-in WE refuses). WE is structurally
 docs-as-code: `webdocs` is registered as "the meta-standard that orchestrates Web Manifests and Web
-Cases to generate documentation sites" ([projects.json:226](../src/_data/projects.json#L226)), so the
-OpenAPI-spec equivalent is the customer's `webmanifest` ([projects.json:217](../src/_data/projects.json#L217))
-+ `webcases` ([projects.json:208](../src/_data/projects.json#L208)) pair — artifacts they already
-maintain for their tests. This repo's own `cases.js` loader ([src/_data/cases.js](../src/_data/cases.js))
+Cases to generate documentation sites" ([we:projects.json:226](../src/_data/projects.json#L226)), so the
+OpenAPI-spec equivalent is the customer's `webmanifest` ([we:projects.json:217](../src/_data/projects.json#L217))
++ `webcases` ([we:projects.json:208](../src/_data/projects.json#L208)) pair — artifacts they already
+maintain for their tests. This repo's own `we:cases.js` loader ([we:src/_data/cases.js](../src/_data/cases.js))
 performs exactly this ingestion at build time; the serve-time offering is that loader, hosted. The
 conformance-dashboard edge over Storybook/Chromatic is already on disk: the `/protocols/` index
-([src/protocols.njk](../src/protocols.njk)) renders what implementations must agree on (filterable by
-project + status), the `capabilityMatrix` ([src/_data/capabilityMatrix.json](../src/_data/capabilityMatrix.json),
-rendered by [src/capabilities.njk](../src/capabilities.njk)) maps each impl to a 3-state tier, and
+([we:src/protocols.njk](../src/protocols.njk)) renders what implementations must agree on (filterable by
+project + status), the `capabilityMatrix` ([we:src/_data/capabilityMatrix.json](../src/_data/capabilityMatrix.json),
+rendered by [we:src/capabilities.njk](../src/capabilities.njk)) maps each impl to a 3-state tier, and
 #089 idea 1 re-runs the suite over time — so fork 2 is reuse-vs-rebuild, not build-from-scratch.
 The home follow-on is verbatim the open "home decision" MaaS parks
 ([backlog/081:75](/backlog/081-module-as-a-service-provider/#L75): "stays under `webadapters` or graduates
@@ -93,7 +93,7 @@ judgment is actually needed vs. where to nod.
 
 | Fork | Recommended default | Main alternative | Confidence |
 |---|---|---|---|
-| **1 · ingestion contract** | docs-as-code: customer's `webmanifest`+`webcases` are the source, Plateau never owns content | platform-first dashboard authoring *(rejected)* | **High** — Mintlify model + open-premise + existing `cases.js` |
+| **1 · ingestion contract** | docs-as-code: customer's `webmanifest`+`webcases` are the source, Plateau never owns content | platform-first dashboard authoring *(rejected)* | **High** — Mintlify model + open-premise + existing `we:cases.js` |
 | **2 · dashboard surface** | reuse `/protocols/` + `capabilityMatrix` + #089-idea-1 verification, one pipeline | bespoke bolt-on a11y/coverage dashboard *(rejected)* | **High** — the machinery already renders; one source of truth |
 | **3 · home** | managed *offering* under Plateau; resolve home in lockstep with MaaS (#081) | graduate to own project entry now | **Med** — defer-until-second-consumer; tied to #081's ruling |
 
@@ -102,9 +102,9 @@ judgment is actually needed vs. where to nod.
 **Crux.** The market's whole identity is its ingestion model (report finding 1). Docs-as-code
 (Mintlify/Docusaurus) keeps the source of truth in the customer's repo and generates from an artifact
 they already maintain; platform-first (ReadMe/GitBook) lets the vendor become the source of record.
-WE's source already exists and is not prose: `webmanifest` ([projects.json:217](../src/_data/projects.json#L217))
-+ `webcases` ([projects.json:208](../src/_data/projects.json#L208)) are the same artifacts that drive
-the customer's tests and conformance signal, and `cases.js` ([src/_data/cases.js](../src/_data/cases.js))
+WE's source already exists and is not prose: `webmanifest` ([we:projects.json:217](../src/_data/projects.json#L217))
++ `webcases` ([we:projects.json:208](../src/_data/projects.json#L208)) are the same artifacts that drive
+the customer's tests and conformance signal, and `we:cases.js` ([we:src/_data/cases.js](../src/_data/cases.js))
 already ingests them at build time.
 
 - **(A — recommended) Docs-as-code: the customer supplies their `webmanifest` + `webcases`; Plateau
@@ -112,7 +112,7 @@ already ingests them at build time.
   (Git repo, uploaded bundle, or registry URL), runs the open `webdocs` generator serve-time, and
   hosts the output. Mirrors Mintlify's spec-driven generation; preserves the open premise (the
   generator + standards stay self-hostable, "cancel and self-host" always holds — report finding 5);
-  reuses `cases.js` rather than a parallel ingestion path. Cost: must pin the resolve/serve contract
+  reuses `we:cases.js` rather than a parallel ingestion path. Cost: must pin the resolve/serve contract
   (repo vs bundle vs URL) and the single-source guarantee with the open generator, so served docs
   can't drift from self-hosted output.
 - **(B) Platform-first authoring** — a hosted editor/dashboard where docs are authored in Plateau.
@@ -132,8 +132,8 @@ three outputs").
 component satisfies and at which tier, because the docs are generated from the fixtures that *are*
 the conformance suite. The market bolts a conformance view onto docs after the fact (axe-core in
 Chromatic; Gestalt's "A11y readiness indicator"; VPAT/ACR — report finding 3). WE has the surface
-natively: `/protocols/` ([src/protocols.njk](../src/protocols.njk)), `capabilityMatrix`
-([src/capabilities.njk](../src/capabilities.njk), data [capabilityMatrix.json](../src/_data/capabilityMatrix.json)),
+natively: `/protocols/` ([we:src/protocols.njk](../src/protocols.njk)), `capabilityMatrix`
+([we:src/capabilities.njk](../src/capabilities.njk), data [we:capabilityMatrix.json](../src/_data/capabilityMatrix.json)),
 and #089 idea 1's continuous verification.
 
 - **(A — recommended) Reuse the existing surface as one pipeline.** The hosted docs render the
@@ -157,7 +157,7 @@ longer prove anything).
 verbatim the open home decision MaaS parks ([backlog/081:75](/backlog/081-module-as-a-service-provider/#L75)).
 Both are managed providers on one Plateau serve-time host sharing one billing/auth/hosting surface
 (#089 puts ideas 2/4/5 under "Plateau as the enterprise web platform"). `webdocs` exists today as a
-`concept` project entry ([projects.json:226](../src/_data/projects.json#L226)); the question is
+`concept` project entry ([we:projects.json:226](../src/_data/projects.json#L226)); the question is
 whether the *service* is a sibling offering or earns its own entry now.
 
 - **(A — recommended) A managed *offering* under the Plateau umbrella; resolve the home in lockstep

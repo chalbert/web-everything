@@ -21,14 +21,14 @@ relatedReport: reports/2026-06-13-polyglot-maas-origin.md
 (#461) forces a JS sidecar into those shops. #463 decides whether/how WE projects a **native** origin
 outward via a **forward/codegen adapter** — the inverse of WE's *ingest* adapters. The owed prior-art pass is published at
 [/research/polyglot-maas-origin](/research/polyglot-maas-origin/) (report:
-[2026-06-13-polyglot-maas-origin.md](reports/2026-06-13-polyglot-maas-origin.md)), and **it reshaped
+[we:2026-06-13-polyglot-maas-origin.md](reports/2026-06-13-polyglot-maas-origin.md)), and **it reshaped
 fork (a) from three options to four** (adding compile-once-to-Wasm) and turned (b) and (c) into
 near-ratifications. **Three forks below, each with a bold recommended default.** This is a project-goal-
 level call (browser/JS-first → polyglot enterprise); confidence flags mark where judgment is genuinely
 needed.
 
 **Sequencing:** was blocked by **#461** — now **resolved** (the framework-agnostic Fetch origin
-`createMaaSFetchHandler` shipped at [fetchHandler.ts](blocks/renderers/module-service/fetchHandler.ts),
+`createMaaSFetchHandler` shipped at [we:fetchHandler.ts](blocks/renderers/module-service/fetchHandler.ts),
 graduated to `webadapters`), so the reference implementation any generated origin is conformance-tested
 against now exists.
 
@@ -39,7 +39,7 @@ enterprise) is **affirmed** — enacted by building a native origin rather than 
 rejected). Spin-off builds: **#505** (fork b), **#506** (fork c), **#507** (fork a).
 
 - **Fork (b) — source of truth → ratified as written, with a sharpening.** A language-neutral contract
-  (`protocols.json#maas-versioning` + a serve-path IR, projectable to OpenAPI) is the authority; #461 is
+  (`we:protocols.json#maas-versioning` + a serve-path IR, projectable to OpenAPI) is the authority; #461 is
   the reference implementation, not the definition. **Sharpening:** "authority" means that when the
   contract and #461 disagree, the **contract wins and #461 is fixed** — that is what keeps JS just-
   another-target rather than the privileged source. → **#505**.
@@ -85,10 +85,10 @@ The served contract is small and sharp — serve a versioned, content-addressed 
   (generation adapter), hand-maintained per-language re-implementations, JS-sidecar-only (decline
   polyglot), or **compile-once-to-Wasm + host bindings** (the survey's fourth option). The crux is
   **fidelity** (every language behaves identically) vs **maintenance burden**. The serve core lives at
-  [moduleService.ts](blocks/renderers/module-service/moduleService.ts) (`serve()`/`serveCompiled()`);
+  [we:moduleService.ts](blocks/renderers/module-service/moduleService.ts) (`serve()`/`serveCompiled()`);
   #461 wraps it as a framework-free `(Request)=>Response`.
 - **Axis (b) — source of truth.** Generate *from what*? The #461 JS source, a language-neutral IR/spec
-  of the serve path, or the **protocol contract** (`protocols.json#maas-versioning`) treated as the
+  of the serve path, or the **protocol contract** (`we:protocols.json#maas-versioning`) treated as the
   authority. Picking the protocol/IR keeps JS as just another target, not the privileged one.
 - **Axis (c) — conformance.** How does a generated .NET/Java origin *prove* it serves byte-identical,
   identity-stable artifacts (same #088 hash, same SRI, same cache semantics) as the JS origin?
@@ -141,7 +141,7 @@ reach GA (it then likely supersedes codegen for the deterministic core).
 **Crux.** Generating from the JS source privileges JS and makes it non-portable; the SoT should be the
 contract, with every language (including JS) an output.
 
-- **A language-neutral contract is the authority (default).** Elevate `protocols.json#maas-versioning`
+- **A language-neutral contract is the authority (default).** Elevate `we:protocols.json#maas-versioning`
   (+ a small IR/spec of the serve path) to the authority; project it to **OpenAPI** for the HTTP-GET
   shape (verbs, response headers — Cache-Control, ETag/SRI). #461's JS Fetch handler is the **reference
   implementation**, not the definition.
@@ -193,13 +193,13 @@ per-target divergence; the spec alone never delivers it.
 
 ## Concrete refs
 
-- Blocker / reference impl: [461-maas-distribution-origin-framework-agnostic-web-standard-fet.md](/backlog/461-maas-distribution-origin-framework-agnostic-web-standard-fet/)
+- Blocker / reference impl: [we:461-maas-distribution-origin-framework-agnostic-web-standard-fet.md](/backlog/461-maas-distribution-origin-framework-agnostic-web-standard-fet/)
   (the JS Fetch origin + #088/#389 identity; explicitly names this as the "single source of truth a
   generation-adapter would project").
-- Serve core: [moduleService.ts](blocks/renderers/module-service/moduleService.ts)
+- Serve core: [we:moduleService.ts](blocks/renderers/module-service/moduleService.ts)
   (`serve()`/`serveCompiled()`), cache key
-  [definitionRegistry.ts](blocks/renderers/module-service/definitionRegistry.ts).
-- SoT authority seed: `protocols.json#maas-versioning` (MaaS Served-Artifact Versioning).
+  [we:definitionRegistry.ts](blocks/renderers/module-service/definitionRegistry.ts).
+- SoT authority seed: `we:protocols.json#maas-versioning` (MaaS Served-Artifact Versioning).
 - Adapter philosophy (inverse direction): the adapter-as-normalization-hub pattern (ingest incumbents into a lossy internal pivot); parent MaaS
   [#081](/backlog/081-module-as-a-service-provider/).
 - Prior-art survey: [report](reports/2026-06-13-polyglot-maas-origin.md) ·

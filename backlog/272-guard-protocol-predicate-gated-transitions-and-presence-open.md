@@ -33,7 +33,7 @@ Settled in the #129 discussion (2026-06-10). #129 started as a "navigation guard
 - **Deny-outcome families diverge per member** (confirm-dialog vs hide/redirect/forbid/cloak), which is exactly why these are *sibling members over one protocol*, not one merged intent.
 - **#178 already converged independently** on this shape — "authorities" + denial strategies (ignore/block/redirect/error/retry) + an explicit trust boundary (back-end authoritative; front-end is a UX mirror). The protocol generalises #178's strategy enum and trust boundary as the provider seam + deny-outcome.
 
-## Scope to design (via [design-first.md](../docs/agent/design-first.md) / [new-standard](../.claude/skills/new-standard/SKILL.md))
+## Scope to design (via [we:design-first.md](../docs/agent/design-first.md) / [new-standard](../.claude/skills/new-standard/SKILL.md))
 
 - **Is the umbrella a `protocol`** (likely — "the only lock is the protocol/provider contract" fits Protocol-is-first-class), and are members **intents** that reference it? Define the provider interface (the seam) term-first before any JSON.
 - Confirm the rendering member's name lands on **Gate** vs **Guard** (prior art: Guard = transition, Gate = presence). Lock the entry-deny enum (`hide | redirect | forbid | cloak`) and flag the 404-cloak existence-hiding case.

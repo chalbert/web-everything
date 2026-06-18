@@ -7,7 +7,7 @@
 monitoring); this is the **dogfood layer (now)** slice — a self-run convention over *this* repo's references, not
 the later WE platform-strategy setting (#583 layer 2).
 **Seeded by:** [#546](../backlog/546-corpus-source-fast-has-a-dead-docsurl-fast-docs-decommission.md) — the
-`retired`/`retiredDate`/`retiredReason`, keep-not-delete shape added to `benchmarkCorpus.json`'s `fast` source.
+`retired`/`retiredDate`/`retiredReason`, keep-not-delete shape added to `we:benchmarkCorpus.json`'s `fast` source.
 
 ## The question
 
@@ -21,14 +21,14 @@ where does it live, and how does it mesh with #192's existing `supersedes`/`supe
 
 | # | Home | File | Container | External URLs | Already has retire/supersede? |
 |---|---|---|---|---|---|
-| 1 | Benchmark corpus sources | `src/_data/benchmarkCorpus.json` | JSON rows | `docsUrl`, `repoUrl` | ✅ `retired`/`retiredDate`/`retiredReason` (#546), `fast` at [benchmarkCorpus.json:63](../src/_data/benchmarkCorpus.json#L63) |
-| 2 | Library references | `src/_data/references.json` | JSON link rows | `links[].url` ([references.json:19](../src/_data/references.json#L19)) | ❌ none |
-| 3 | Block design-system refs | `src/_data/blocks.json` | `designSystemResearch[].reference` | spec URLs | ❌ none |
-| 4 | Intent design-system refs | `src/_data/intents.json` | `designSystemResearch[].reference` ([intents.json:97](../src/_data/intents.json#L97)) | spec URLs | ❌ none |
-| 5 | Capability-presence rows | `src/_data/benchmarkCapabilityPresence.json` | join-table rows | `rows[].url` ([benchmarkCapabilityPresence.json:27](../src/_data/benchmarkCapabilityPresence.json#L27)) | ❌ none (has `provenance`) |
-| 6 | Research topics | `src/_data/researchTopics.json` | JSON topic rows | — (metadata only) | ✅ `supersedes`/`supersededBy` + `lastReviewed`/`reviewHorizon` (#192/#441/#477/#478), e.g. [researchTopics.json:60-85](../src/_data/researchTopics.json#L60-L85) |
+| 1 | Benchmark corpus sources | `we:src/_data/benchmarkCorpus.json` | JSON rows | `docsUrl`, `repoUrl` | ✅ `retired`/`retiredDate`/`retiredReason` (#546), `fast` at [we:benchmarkCorpus.json:63](../src/_data/benchmarkCorpus.json#L63) |
+| 2 | Library references | `we:src/_data/references.json` | JSON link rows | `links[].url` ([we:references.json:19](../src/_data/references.json#L19)) | ❌ none |
+| 3 | Block design-system refs | `fui:src/_data/blocks.json` | `designSystemResearch[].reference` | spec URLs | ❌ none |
+| 4 | Intent design-system refs | `we:src/_data/intents.json` | `designSystemResearch[].reference` ([we:intents.json:97](../src/_data/intents.json#L97)) | spec URLs | ❌ none |
+| 5 | Capability-presence rows | `we:src/_data/benchmarkCapabilityPresence.json` | join-table rows | `rows[].url` ([we:benchmarkCapabilityPresence.json:27](../src/_data/benchmarkCapabilityPresence.json#L27)) | ❌ none (has `provenance`) |
+| 6 | Research topics | `we:src/_data/researchTopics.json` | JSON topic rows | — (metadata only) | ✅ `supersedes`/`supersededBy` + `lastReviewed`/`reviewHorizon` (#192/#441/#477/#478), e.g. [we:researchTopics.json:60-85](../src/_data/researchTopics.json#L60-L85) |
 | 7 | Backlog `crossRef` | `backlog/*.md` frontmatter | YAML | internal `/` links only | ❌ n/a (no external URLs) |
-| 8 | Adapters / protocols | `src/_data/adapters.json`, `protocols.json` | JSON | — (no spec URLs yet) | ❌ none |
+| 8 | Adapters / protocols | `we:src/_data/adapters.json`, `we:protocols.json` | JSON | — (no spec URLs yet) | ❌ none |
 | 9 | Report citations | `reports/*.md` | freeform markdown | inline `[text](url)` | ❌ none |
 | 10 | Research descriptions | `src/_includes/research-descriptions/*.njk` | freeform HTML/prose | inline `<a href>` | ❌ none |
 
@@ -37,9 +37,9 @@ tracking (the convention's real target); homes **9–10** are freeform prose whe
 only a documented style. Home 6 already has the *replacement* (supersede) half of the model; home 7 cites only
 internal links; home 8 has no external URLs yet.
 
-**Validation today:** the only relevant rule is [check-standards-rules.mjs:740](../scripts/check-standards-rules.mjs#L740),
+**Validation today:** the only relevant rule is [we:check-standards-rules.mjs:740](../scripts/check-standards-rules.mjs#L740),
 warning when a `verified` presence row lacks a `url`. Nothing validates `retired*`, `docsUrl`, or
-`supersededBy`. There are **no JSON Schema files** — validation is imperative in `check-standards-rules.mjs`.
+`supersededBy`. There are **no JSON Schema files** — validation is imperative in `we:check-standards-rules.mjs`.
 
 ## Prior art — how standards bodies mark retired / replaced references
 
@@ -54,7 +54,7 @@ separate "dead" from "replaced."**
   *separate* **Historic** status for "no longer current." It deliberately does **not** distinguish obsolete from
   deprecated ([RFC 7805](https://www.rfc-editor.org/rfc/rfc7805.html); [IESG Historic statement](https://www.ietf.org/about/groups/iesg/statements/designating-rfcs-historic-2011-06-27/)).
 - **Python PEP** — `Superseded-By:`. **ADR** — `Supersedes` / `SupersededBy`. (Already cited in
-  [research-freshness-model.njk](../src/_includes/research-descriptions/research-freshness-model.njk).)
+  [we:research-freshness-model.njk](../src/_includes/research-descriptions/research-freshness-model.njk).)
 - **JSON Schema / OpenAPI** — a single `deprecated: true` boolean *annotation* keyword: keep-not-delete,
   advisory, no behavioural change ([Learn JSON Schema: deprecated](https://www.learnjsonschema.com/2020-12/meta-data/deprecated/)).
 
@@ -91,7 +91,7 @@ sequence is N/A. The principles that *do* bind:
 1. **Uniform shape vs per-home shapes** → **uniform** (one field-set wherever a home is structured JSON;
    prior art is document-type-agnostic).
 2. **Where it lives** → **one documented convention + one shared validator helper** in
-   `check-standards-rules.mjs` that each home's validator calls (no JSON Schema files exist; don't duplicate
+   `we:check-standards-rules.mjs` that each home's validator calls (no JSON Schema files exist; don't duplicate
    field definitions per home).
 3. **Retirement vs supersession** → **two orthogonal markers** (`retired`+`retiredDate`+`retiredReason` for
    death; reuse #192's `supersededBy` pointer for replacement) rather than a single W3C-style `status` enum.

@@ -27,9 +27,9 @@ have wrongly pushed stable public methods (`.show()`, public getters) out to imp
 **Prepared, ready to ratify.** Decide where structured per-component API data
 (attributes/properties/slots/CSS custom-properties/parts) for the [`/blocks/` props table](/blocks/props-table/)
 originates. The renderer ([`block:props-table`, #654](/backlog/654-mint-the-props-table-block-render-custom-elements-manifest-a/))
-and the CEM protocol + emit pipeline ([`scripts/gen-cem.mjs`, #653](/backlog/653-register-custom-elements-manifest-cem-as-a-we-protocol-emit-/))
-already ship, but `gen-cem.mjs:43-93` projects only **events / exports / tagName** and the emitted
-`custom-elements.json` carries **0 attributes / 0 slots / 0 cssProperties** for all 74 blocks — so four of the
+and the CEM protocol + emit pipeline ([`we:scripts/gen-cem.mjs`, #653](/backlog/653-register-custom-elements-manifest-cem-as-a-we-protocol-emit-/))
+already ship, but `we:gen-cem.mjs:43-93` projects only **events / exports / tagName** and the emitted
+`we:custom-elements.json` carries **0 attributes / 0 slots / 0 cssProperties** for all 74 blocks — so four of the
 table's six member columns have no data. Grounded in a prior-art survey (CEM analyzer · Shoelace/Lit · the spec)
 published as `/research/per-component-api-data-sourcing/` (report linked via `relatedReport`). After the
 fork-existence test against the governing precedent, the item's framed A/B source-fork reduces to **two forced
@@ -49,19 +49,19 @@ own props-table — the default is already named: **authored**.
 
 | # | The call | Recommended | Main alternative | Confidence |
 |---|---|---|---|---|
-| I1 | Data **source** | **Authored WE-side `blocks.json` → `gen-cem` → CEM** | FUI analyzer output as WE's canonical SoT | Forced invariant — alt is broken for WE's own docs (boundary violation; delivers no authoring saving) |
+| I1 | Data **source** | **Authored WE-side `fui:blocks.json` → `gen-cem` → CEM** | FUI analyzer output as WE's canonical SoT | Forced invariant — alt is broken for WE's own docs (boundary violation; delivers no authoring saving) |
 | I2 | Field **shapes** | **Mirror the CEM 2.1.0 member kinds** (no bespoke schema) | a props-table-specific shape | Forced invariant — #654's `consumesCemNotBespoke`; the spec dictates it |
 | 1 | Authored contract **scope** | **B — public API surface** (declarative API + deliberately-public JS members; assume private otherwise → defer to opt-in impl-scan) | A — full member set incl. private/internal JS members/methods | **~90%** (↑ from med-high after the public-API refinement) — the one real call |
 
 ## Forced invariants (ratify, not weigh)
 
-**I1 — Source = authored WE-side `blocks.json` fields → `gen-cem` → CEM.** The #626/#706 default/reference
-source, consistent with how `events`/`exports` are *already* authored WE-side (#653): `blocks.json` declares
+**I1 — Source = authored WE-side `fui:blocks.json` fields → `gen-cem` → CEM.** The #626/#706 default/reference
+source, consistent with how `events`/`exports` are *already* authored WE-side (#653): `fui:blocks.json` declares
 `implementedBy: @frontierui/blocks/…` and structured `events` (e.g. `type-ahead` → three events with
-`description`/`taxonomy`/`detail`/`bubbles`/`cancelable`), which `gen-cem.mjs:48-53` projects. Attributes,
+`description`/`taxonomy`/`detail`/`bubbles`/`cancelable`), which `we:gen-cem.mjs:48-53` projects. Attributes,
 slots, CSS custom-properties and CSS parts are the **same nature of declared-contract data** — adding them is
 the consistent continuation of the shipped pattern, not a new mechanism. The alternative (an FUI-emitted
-`custom-elements.json` consumed as WE's *canonical* props-table SoT) is **broken for WE's own reference docs**:
+`we:custom-elements.json` consumed as WE's *canonical* props-table SoT) is **broken for WE's own reference docs**:
 it violates the docs-rendering boundary (`@webeverything` never imports/consumes FUI artifacts as canonical;
 WE renders its *own* standard pages — #700/#701/#732/#765) and inverts contract-first (WE *declares* the API,
 FUI *implements* it). The survey also shows it delivers **no authoring saving** for the fields that matter
@@ -70,8 +70,8 @@ future annotated-source implementer) and the engine of a future **conformance ga
 
 **I2 — Field shapes mirror the CEM 2.1.0 member kinds; no bespoke schema.** `attributes`, `members`
 (fields/methods), `slots`, `cssProperties`, `cssParts` — the kinds the renderer already projects
-(`block-descriptions/props-table.njk:16-19`) and `gen-cem` already targets. This is #654's ratified
-`consumesCemNotBespoke` design decision; the shape is the spec's, so it is a *fixed mechanic*. `gen-cem.mjs` is
+(`we:block-descriptions/props-table.njk:16-19`) and `gen-cem` already targets. This is #654's ratified
+`consumesCemNotBespoke` design decision; the shape is the spec's, so it is a *fixed mechanic*. `we:gen-cem.mjs` is
 extended to project the chosen fields (the post-ratification build the item names).
 
 ## Fork 1 — scope of the authored contract: full member set vs platform-facing surface
@@ -119,13 +119,13 @@ the programmatic surface — not relocating the *contract* surface out of the st
 
 ## Decision (ratified 2026-06-17)
 
-- **I1 — Source = authored WE-side `blocks.json` → `gen-cem` → CEM.** Ratified as written. The
+- **I1 — Source = authored WE-side `fui:blocks.json` → `gen-cem` → CEM.** Ratified as written. The
   FUI-analyzer-as-canonical-SoT alternative is broken for WE's own reference docs (docs-rendering boundary +
   contract-first inversion) and the survey shows it saves no authoring for the fields that matter.
 - **I2 — Field shapes mirror CEM 2.1.0 member kinds, no bespoke schema.** Ratified as written (#654's
   `consumesCemNotBespoke`; the spec dictates the shape). Grounding verified against
-  [`gen-cem.mjs:67-95`](/scripts/gen-cem.mjs) (projects only tagName/events/exports today) and
-  [`props-table.njk:12-19`](/src/_includes/block-descriptions/props-table.njk) (consumes
+  [`we:gen-cem.mjs:67-95`](/scripts/gen-cem.mjs) (projects only tagName/events/exports today) and
+  [`we:props-table.njk:12-19`](/src/_includes/block-descriptions/props-table.njk) (consumes
   members/attributes/events/slots/cssProperties, omits empty kinds).
 - **Fork 1 — scope = B, on the public-API line (~90%).** WE authors the **public API surface**: declarative
   API (attributes/reflected properties/events/slots/cssProperties/cssParts) **plus deliberately-public JS
@@ -145,7 +145,7 @@ the programmatic surface — not relocating the *contract* surface out of the st
 
 - **[#838](/backlog/838-extend-gen-cem-to-project-the-public-api-cem-member-set-attr/) — Extend `gen-cem` +
   props-table page-integration build** (the spin-out #801 names): project the public-API member kinds in
-  `scripts/gen-cem.mjs` and wire the per-block page so `<props-table tag="…">` resolves real data. *(ready)*
+  `we:scripts/gen-cem.mjs` and wire the per-block page so `<props-table tag="…">` resolves real data. *(ready)*
 - **[#839](/backlog/839-backfill-authored-public-api-member-fields-attributes-proper/) — Backfill authored
   public-API member fields** across the blocks (start with blocks that have a `/blocks/` page + a registered
   tag), completeness-gated the way #706's invariant gates the FUI catalog. *(blockedBy #838)*
@@ -160,7 +160,7 @@ the programmatic surface — not relocating the *contract* surface out of the st
 ## Context
 
 **Per-fork classification (against the architecture).** No new runtime/DI/Protocol and no new Block/Intent —
-the data is authored onto the **existing `custom-elements-manifest` protocol** (#653) via `blocks.json` (the
+the data is authored onto the **existing `custom-elements-manifest` protocol** (#653) via `fui:blocks.json` (the
 WE-side declared contract) and projected by the existing `gen-cem` devtool. The *contract* is WE-standard-owned;
 the *authoring* is WE-side data; the *opt-in scan / conformance gate* is the implementer's (FUI's) instantiation.
 Source-of-truth is the #706 *dimension* (authored default, impl-scan opt-in) — this item picks WE's

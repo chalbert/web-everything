@@ -3,7 +3,7 @@
 **Date**: 2026-05-30
 **Status**: Brief for a future agent / workstream. Self-contained; depends on the Feature & Capability
 model in the validation interop design.
-**Parent**: `reports/2026-05-30-form-validation-standard-assessment.md` (§4 capability model).
+**Parent**: `we:reports/2026-05-30-form-validation-standard-assessment.md` (§4 capability model).
 
 ---
 
@@ -28,7 +28,7 @@ and make non-conformant / out-of-capability usage detectable and reportable.
 
 1. **Spec version scheme** — semver over the vocabulary: additive atoms/features → minor; deprecation
    then removal → major. Encode the *deprecate-don't-rename* rule (stable ids are append-only). Record the
-   current spec version (e.g. `validation.specVersion` in `intents.json`).
+   current spec version (e.g. `validation.specVersion` in `we:intents.json`).
 2. **Capability manifest schema** — formalize `{ specVersion, conformanceLevel, features[], concerns{} }`
    and define how an implementation publishes it. Options to evaluate: a static export; a property on the
    element / `ElementInternals`; an injector provider resolved via `InjectorRoot.getProviderOf(...)`.
@@ -95,7 +95,7 @@ and make non-conformant / out-of-capability usage detectable and reportable.
 - ✅ Core feature set explicitly defined and justified
 - ✅ `npm run check:validation-adherence` catches undeclared feature usage in test fixtures
 - ✅ Runtime guard throws helpful diagnostic: "Validation async used but not declared in manifest; add `validation.feature.async` to fixes"
-- ✅ Spec version (e.g., `validation.specVersion = "1.0.0"`) recorded in intents.json
+- ✅ Spec version (e.g., `validation.specVersion = "1.0.0"`) recorded in we:intents.json
 
 ### Effort Estimate
 

@@ -17,7 +17,7 @@ An unescaped raw HTML tag in backlog markdown (e.g. a literal `<select>` in #020
 ## Progress
 
 - **Status:** resolved — lint added and gating (as a warning).
-- **Done:** new pure rule `findRawHtmlInMarkdown` in `scripts/check-standards-rules.mjs` (strips fenced + inline code, flags only recognised HTML element names so `<NNN>`/`<date>` placeholders and hyphenated custom elements don't noise); composed in `scripts/check-standards.mjs` as one aggregated warning per item; 8 unit cases in `scripts/__tests__/check-standards-rules.test.mjs` (66 pass).
+- **Done:** new pure rule `findRawHtmlInMarkdown` in `we:scripts/check-standards-rules.mjs` (strips fenced + inline code, flags only recognised HTML element names so `<NNN>`/`<date>` placeholders and hyphenated custom elements don't noise); composed in `we:scripts/check-standards.mjs` as one aggregated warning per item; 8 unit cases in `we:scripts/__tests__/check-standards-rules.test.mjs` (66 pass).
 - **Severity = warning, not error:** balanced raw HTML (e.g. #028's deliberate `<h3>/<p>/<ul>` block) renders fine, so an error would red-gate a working item. The warning surfaces every raw tag — including the dangerous unclosed ones — without failing the gate.
 - **Surfaced (out of scope, left for their owners):** the lint already flags real raw-HTML digests — #002 + #296 carry an unclosed `<script>`/`<select>` in their lead paragraph (the #020-class swallow bug), and #281 embeds a full raw-HTML table. One-backtick fixes, but they're separate items.
 - **Gate:** `check:standards` green (0 errors, 14 warnings); `vitest run scripts/__tests__/` 77 pass.

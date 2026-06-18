@@ -20,7 +20,7 @@ decision.
 
 | # | Slice | Repo | workItem · size | Scope (one line) | blockedBy |
 |---|---|---|---|---|---|
-| **A** | `webdocs` generator impl | FUI | story · 5 | Serve-time generator: a `webmanifest`+`webcases` pair → a generated docs site; generalizes this repo's build-time `cases.js` loader to a hostable generator. Defines the `webcases` pivot the adapters target. | — |
+| **A** | `webdocs` generator impl | FUI | story · 5 | Serve-time generator: a `webmanifest`+`webcases` pair → a generated docs site; generalizes this repo's build-time `we:cases.js` loader to a hostable generator. Defines the `webcases` pivot the adapters target. | — |
 | **B** | Self-host Web Docs UI primitives | FUI | story · 5 | The free, composable component floor to assemble a self-hosted docs UI — page shell + nav + the protocol/conformance panels (the "cancel and self-host always holds" floor). Reference impl = WE's own `/protocols/` + `capabilityMatrix` rendering. | — |
 | **C** | Incumbent-ingestion adapters | FUI | story · 5 | Bottom-up adapters Storybook/Mintlify → the `webcases` pivot (lossy normalization-hub, per [[adapter-normalization-hub]]). Lets a non-WE customer onboard. Could later sub-split per-incumbent (Storybook·3, Mintlify·3). | A |
 | **D** | plateau-app served site + per-customer conformance report | plateau-app | story · 5 | The tested, hosted product: serve one customer's generated site + their per-customer conformance/coverage dashboard (the parameterized-per-customer generalization of WE's static matrix). Open-core **free tier**. May later sub-split served-site vs. conformance-report. | A, B |
@@ -199,18 +199,18 @@ items before next pickup**. A prior session's assessment ("just fix the size, do
 **On-disk drift re-measured this run** (`webeverything/plugs/` vs `frontierui/plugs/`, excl. tests):
 **15 drifted · 38 identical · 9 WE-only · 3 FU-only**. Directionality (`<`=WE-unique, `>`=FU-unique):
 
-- **FU ahead (merge UP into WE):** `CustomAttributeRegistry.ts` 362→892 (FU+541 / WE+11 — asymmetric
-  merge; #221/#280/#222/#226 visibility-gating + lazy fetch-on-view) · `Node.injectors.patch.ts` (FU+14) ·
+- **FU ahead (merge UP into WE):** `we:CustomAttributeRegistry.ts` 362→892 (FU+541 / WE+11 — asymmetric
+  merge; #221/#280/#222/#226 visibility-gating + lazy fetch-on-view) · `we:Node.injectors.patch.ts` (FU+14) ·
   `webbehaviors/index` (FU+5) · `webexpressions/index` (FU+2 cloneHandlers) · `HTMLInjector` (FU+1).
 - **Bidirectional (true merge, but tiny):** `webcontexts/CustomContext` (FU+24/WE+9) ·
   `Node.contexts.patch` (FU+9/WE+4) · `CustomTextNodeRegistry` (FU+6/WE+2) · `core/CustomRegistry`
   (FU+2 GetterValue / WE+2 `entries()`) · `CustomTextNodeParser` · `UndeterminedTextNode` (1/side).
 - **WE ahead (reach FU via the alias — no work):** `webregistries/CustomElementRegistry` (WE+42) ·
   `webinjectors/Injector` (WE+44) · `webinjectors/index` (WE+13, #278 declarative-injector exports) ·
-  9 WE-only files: `webvalidation/*`×6, `webguards/*`×2, `declarativeInjector.ts`.
+  9 WE-only files: `webvalidation/*`×6, `webguards/*`×2, `we:declarativeInjector.ts`.
 - **bootstrap.ts** — bidirectional: WE has validation/guards registration; FU has trait-manifest (#116).
-- **3 FU-only** (`globals.d.ts`, `virtual-trait-manifest.d.ts`, `traitManifest.ts`) — stay FU-local
-  (only `traitManifest.ts` rides up if slice B needs it).
+- **3 FU-only** (`fui:globals.d.ts`, `we:virtual-trait-manifest.d.ts`, `we:traitManifest.ts`) — stay FU-local
+  (only `we:traitManifest.ts` rides up if slice B needs it).
 
 **Rubric — all five hold.** (1) Volume, not a fork — the strategy fork (alias vs sync) is **resolved**
 (2026-06-11: FU imports `@we/plugs/*`, WE single-source); the residual trait-manifest build-portability is
@@ -224,8 +224,8 @@ boots with empty manifest; C = FU de-duplicated and building on WE's tree.
 
 | # | Slice | type · size | Scope | blockedBy |
 |---|---|---|---|---|
-| **A** | Merge FU's attribute-lifecycle + runtime advances **up into WE** | story · 5 | Adopt FU's `CustomAttributeRegistry.ts` (visibility-gating + lazy fetch-on-view, #221/#280/#222/#226) preserving WE's 11 unique lines; fold the FU-ahead/bidirectional reconciles across `webbehaviors/index`, `webexpressions/*` (incl. cloneHandlers), `webcontexts/*`, `core/CustomRegistry` (GetterValue ← / `entries()` →), `Node.injectors.patch`+`HTMLInjector`. WE becomes the runtime superset. | — |
-| **B** | Bring trait-manifest lazy-loading into WE's bootstrap, build-portably | story · 3 | Move `traitManifest.ts`(+`.d.ts`) up; wire `bootstrap.ts` `registerTraits(virtual:trait-manifest)` with the tsc ambient stub + vitest empty-alias (FU's 3-way pattern). WE bootstrap = superset incl. #116. | — |
+| **A** | Merge FU's attribute-lifecycle + runtime advances **up into WE** | story · 5 | Adopt FU's `we:CustomAttributeRegistry.ts` (visibility-gating + lazy fetch-on-view, #221/#280/#222/#226) preserving WE's 11 unique lines; fold the FU-ahead/bidirectional reconciles across `webbehaviors/index`, `webexpressions/*` (incl. cloneHandlers), `webcontexts/*`, `core/CustomRegistry` (GetterValue ← / `entries()` →), `Node.injectors.patch`+`HTMLInjector`. WE becomes the runtime superset. | — |
+| **B** | Bring trait-manifest lazy-loading into WE's bootstrap, build-portably | story · 3 | Move `we:traitManifest.ts`(+`.d.ts`) up; wire `we:bootstrap.ts` `registerTraits(virtual:trait-manifest)` with the tsc ambient stub + vitest empty-alias (FU's 3-way pattern). WE bootstrap = superset incl. #116. | — |
 | **C** | Wire `@we/plugs/*` alias in Frontier UI + delete the vendored tree | task · 3 | Point FU at `@we/plugs/*`; delete `frontierui/plugs/`. WE-ahead files reach FU via the alias — **no copy-down** (folds in the body's old step (b), which would have been throwaway). Verify FU build + tests green. | A, B |
 
 ```

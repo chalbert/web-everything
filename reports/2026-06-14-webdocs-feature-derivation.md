@@ -1,7 +1,7 @@
 # Web Docs feature derivation — placement of the workbench feature surface against WE standards
 
 > Prep research for decision **#626** (stage 3 of the Web Docs feature-pipeline epic #623). Takes the
-> 20-feature matrix from #625 ([`src/_data/workbenchFeatures.json`](../src/_data/workbenchFeatures.json),
+> 20-feature matrix from #625 ([`we:src/_data/workbenchFeatures.json`](../src/_data/workbenchFeatures.json),
 > published as [/research/workbench-feature-surface/](../src/_includes/research-descriptions/workbench-feature-surface.njk))
 > and classifies every feature against the live registry — reuse / extend / mint, and at what layer.
 > Published as the `/research/webdocs-feature-derivation/` topic.
@@ -29,11 +29,11 @@ they are placements ratified as written. The whole surface collapses to:
 
 ### Custom Elements Manifest (CEM) — the component-metadata interchange
 
-CEM (`custom-elements.json`) is the community spec for describing custom elements: a JSON file of
+CEM (`we:custom-elements.json`) is the community spec for describing custom elements: a JSON file of
 modules → declarations, each carrying attributes, properties, events, slots, CSS parts, CSS custom
 properties, and methods. Current schema **2.1.0**, with a top-level `schemaVersion` for evolution; the
 `@custom-elements-manifest/analyzer` emits it from source, and authors advertise it via a
-`"customElements": "./custom-elements.json"` pointer in `package.json`.
+`"customElements": "we:./custom-elements.json"` pointer in `we:package.json`.
 
 The load-bearing fact for #626 is its **consumer set**: api-viewer renders API tables + a live demo +
 auto-generated controls off one manifest; Storybook (web-components) ingests it; VS Code custom-data /
@@ -41,8 +41,8 @@ auto-generated controls off one manifest; Storybook (web-components) ingests it;
 from it. That is a **manifest consumed by many independent vendors that do not share an engine** — which
 is exactly WE's litmus for a **Protocol** (classification Q2: reach for a protocol only when many
 vendors must interoperate). WE already hosts this exact shape: the `changelog-manifest` protocol
-([`protocols.json:94`](../src/_data/protocols.json)) is a declarative manifest consumed by multiple
-independent tools off one seam (the MF2 `mf-manifest.json` one-seam-many-consumers lesson). CEM is the
+([`we:protocols.json:94`](../src/_data/protocols.json)) is a declarative manifest consumed by multiple
+independent tools off one seam (the MF2 `we:mf-manifest.json` one-seam-many-consumers lesson). CEM is the
 same pattern for component API metadata.
 
 Crucially: WE has **no `formats` registry**. The matrix's `format:custom-elements-manifest` /
@@ -66,7 +66,7 @@ The stories/examples question's *ingestion* half is fully surveyed in the
 [#426 webdocs-incumbent-ingestion-adapters](../src/_includes/research-descriptions/webdocs-incumbent-ingestion-adapters.njk)
 topic: CSF3 = one Meta default + N named Story exports; a webcases adapter reads it via
 `@storybook/csf-tools` and emits the webcases pivot `WebCase = {id,title,description,code}`
-(`webdocs/generator.ts:27-46`). That topic already establishes the **webcases pivot is the normalization
+(`fui:webdocs/generator.ts:27-46`). That topic already establishes the **webcases pivot is the normalization
 target** for incumbent stories — which is the strongest evidence for Fork 2's recommended branch (docs
 examples ARE webcases): the ingestion path already lands stories *in webcases*.
 

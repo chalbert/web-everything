@@ -43,7 +43,7 @@ Frontier UI implementation. So the call is to **correct the scope, not patch the
 ## Scope
 
 - Re-scope the four import-inverted packages `@webeverything/* → @frontierui/*` (`component-compiler`,
-  `vite-plugin`, `esbuild-plugin`, `rollup-plugin`): `package.json` `name`, plus internal cross-references.
+  `vite-plugin`, `esbuild-plugin`, `rollup-plugin`): `we:package.json` `name`, plus internal cross-references.
 - Re-scope the fifth, `jsx-runtime`, on the same "no implementation under `@webeverything`" principle
   (approved in discussion). It has no `@frontierui` import, but it **is** implementation, and its package
   name doubles as the JSX adapter's **contract specifier** (`jsxImportSource` target / `JSX_RUNTIME_SPECIFIER`)
@@ -71,9 +71,9 @@ Frontier UI implementation. So the call is to **correct the scope, not patch the
   `compiler/__tests__/component-transform/*`). `prepublishOnly` added to each; root `build:packages` builds
   `@frontierui/compiler` first, then the five. Lockfile refreshed; `build:packages` + 24 tests green.
 - **Done** (webeverything): JSX adapter contract moved to `@frontierui/jsx-runtime` — `JSX_RUNTIME_SPECIFIER`,
-  the `jsx/index.ts` comment, `demos/maas-consumer-demo.html` importmap, and the two adapter-description njk
+  the `we:jsx/index.ts` comment, `we:demos/maas-consumer-demo.html` importmap, and the two adapter-description njk
   partials. Full blocks suite (1013 tests) + `check:standards` green.
 - **Leftover** (captured): markdown references to the old package names persist in several backlog items and
   one report — spun off as its own doc-sweep item (see close-out).
 - **Note**: jsx-runtime is still duplicated between WE source and the frontierui package (importmap resolves
-  the new name to WE's own `blocks/renderers/jsx/index.ts`) — pre-existing, tracked by #240/#170, untouched here.
+  the new name to WE's own `we:blocks/renderers/jsx/index.ts`) — pre-existing, tracked by #240/#170, untouched here.

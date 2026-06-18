@@ -24,7 +24,7 @@ crossRef: { url: /research/research-freshness-model/, label: "Research-freshness
   in-place overwrite. Bidirectional (not one-way) is the explicit sub-call — the reverse-lookup ("what
   superseded this?") earns its second field given the audit-trail goal.
 - **Fork 2 — Metadata home: A (registry).** `lastReviewed`/`reviewHorizon` live on the topic in
-  [researchTopics.json](src/_data/researchTopics.json), the render+validator source. Three **distinct**
+  [we:researchTopics.json](src/_data/researchTopics.json), the render+validator source. Three **distinct**
   dates kept separate: `dateOpened` ≠ last-changed ≠ `lastReviewed` — never one overloaded field.
 - **Fork 3 — Scope: A.** Freshness applies to promoted `/research/` topics only; ad-hoc `reports/*.md`
   stay frozen by design (opt-in by promotion, so most-permissive default holds).
@@ -47,19 +47,19 @@ axis-discovery *trigger* concern stays open with #192.
 none of `lastReviewed` / `supersedes` / `reviewHorizon` are in the tree; this defines the schema they
 add. The four forks below are grounded in a prior-art survey published as
 **[/research/research-freshness-model/](/research/research-freshness-model/)** (report
-`reports/2026-06-12-research-freshness-model.md`), each carrying a **bold** default. **Two are genuine
+`we:reports/2026-06-12-research-freshness-model.md`), each carrying a **bold** default. **Two are genuine
 calls (history model, review horizon), two near-ratifications (metadata home, scope); the survey added
 Fork 4 and dissolved the item's old "staleness enforcement" fork into "support both."**
 
 ## Why these are one decision
 
 They all land on the **same three surfaces**, so they can't be settled independently without churn: the
-research-topic registry [src/_data/researchTopics.json](src/_data/researchTopics.json) (the schema home,
+research-topic registry [we:src/_data/researchTopics.json](src/_data/researchTopics.json) (the schema home,
 e.g. an entry's field block at [:1](src/_data/researchTopics.json#L1)); the renders
-[src/research.njk:21-44](src/research.njk#L21-L44) (the `/research/` card grid) and
-[src/research-topic-pages.njk:41](src/research-topic-pages.njk#L41) (`Opened: {{ topic.dateOpened }}` —
+[we:src/research.njk:21-44](src/research.njk#L21-L44) (the `/research/` card grid) and
+[we:src/research-topic-pages.njk:41](src/research-topic-pages.njk#L41) (`Opened: {{ topic.dateOpened }}` —
 the only date surfaced today); and the validator
-[scripts/check-standards.mjs:73](scripts/check-standards.mjs#L73) (`RESEARCH_STATUSES`) /
+[we:scripts/check-standards.mjs:73](scripts/check-standards.mjs#L73) (`RESEARCH_STATUSES`) /
 [:156](scripts/check-standards.mjs#L156) (the registry dup-check), which today never looks at a date.
 The orthogonal axes the survey surfaced map one-to-one onto the forks: *revision/history* · *metadata
 location* · *scope* · *review-horizon expression* (staleness *surfacing* turned out not to be an axis —
@@ -101,9 +101,9 @@ dimension. Survey sharpened the default from a one-way pointer to a bidirectiona
 
 Where do `lastReviewed` + `reviewHorizon` live?
 
-- **A — Registry ([researchTopics.json](src/_data/researchTopics.json)) (DEFAULT).** It is the render
-  source for `/research/` ([src/research.njk:25](src/research.njk#L25)) and the validator's input
-  ([scripts/check-standards.mjs:84](scripts/check-standards.mjs#L84)), so it naturally owns the surfaced
+- **A — Registry ([we:researchTopics.json](src/_data/researchTopics.json)) (DEFAULT).** It is the render
+  source for `/research/` ([we:src/research.njk:25](src/research.njk#L25)) and the validator's input
+  ([we:scripts/check-standards.mjs:84](scripts/check-standards.mjs#L84)), so it naturally owns the surfaced
   topic-level date — one place to read for badges and the `check:standards` rule, no join.
 - **B — Report frontmatter (per-doc)** (*Rejected as the topic-level home*). This is the *prevailing*
   prior-art convention (Microsoft `ms.date`, Hugo `lastmod`) — but it fits a mutable per-document model,
@@ -122,7 +122,7 @@ What does freshness apply to?
 
 - **A — Promoted `/research/` topics only (DEFAULT).** The registry entry is the unit that carries a
   date and a render; ad-hoc `reports/*.md` (including backlog-mirrored pointer reports, loaded via
-  [src/_data/backlog.js:106](src/_data/backlog.js#L106)) stay frozen by design — point-in-time session
+  [we:src/_data/backlog.js:106](src/_data/backlog.js#L106)) stay frozen by design — point-in-time session
   artifacts, not living surveys, with no registry entry to hang `lastReviewed` on.
 - **B — Every `reports/*.md`** (*Rejected*). Broader, but most reports are not meant to be re-evaluated
   and have no registry row; it would demand a parallel date store for documents that are correct to
@@ -136,7 +136,7 @@ to promote, not a cap.
 
 How is "overdue for review" computed and made actionable? The item originally folded this into
 enforcement; the survey shows it is the genuinely divergent axis. The warning would slot beside the
-existing registry checks at [scripts/check-standards.mjs:156](scripts/check-standards.mjs#L156).
+existing registry checks at [we:scripts/check-standards.mjs:156](scripts/check-standards.mjs#L156).
 
 - **A — Per-topic `reviewHorizon` + global default + grace band (DEFAULT).** Each topic may declare a
   `reviewHorizon` (e.g. months); absent one, a global fallback applies. "Overdue" derives from
@@ -167,14 +167,14 @@ design**. So, ratified by default rather than chosen:
   `check:standards` rule — both, not either/or.
 - **The `check:standards` staleness rule is warn-only, never an error** (forced invariant — Vale's norm:
   only `error` severity fails CI; stale research is a nudge, not a build break). It slots beside the
-  registry checks at [scripts/check-standards.mjs:156](scripts/check-standards.mjs#L156).
+  registry checks at [we:scripts/check-standards.mjs:156](scripts/check-standards.mjs#L156).
 
 ---
 
 ## Context — what ratifying this unblocks
 
 Build slices, authored after the ruling (per the carve in
-[docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md) → "flip *or* carve"):
+[we:docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md) → "flip *or* carve"):
 
 - **A — foundation:** add `lastReviewed` + `reviewHorizon` + the revision-chain fields
   (`supersedes`/`supersededBy`/`superseded` status) to the registry schema; render "current + history"

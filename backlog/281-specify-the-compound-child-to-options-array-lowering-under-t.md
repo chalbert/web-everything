@@ -22,7 +22,7 @@ Each example is **authored HTML (left) ⇄ lowered JSX `options` (right)** — t
 
 ### Strict compound-child — positional children declare the options
 
-**Segmented Control** ✓ — each child → one `options[]` entry: `value` attr → value, text → label, `disabled` → state; `selected`/pressed child lifts to the parent's `value`. *(`src/_includes/block-descriptions/segmented-control.njk`)*
+**Segmented Control** ✓ — each child → one `options[]` entry: `value` attr → value, text → label, `disabled` → state; `selected`/pressed child lifts to the parent's `value`. *(`we:src/_includes/block-descriptions/segmented-control.njk`)*
 
 <table>
 <thead><tr><th>Authored HTML</th><th>Lowered JSX (<code>options</code>)</th></tr></thead>
@@ -251,7 +251,7 @@ Each example is **authored HTML (left) ⇄ lowered JSX `options` (right)** — t
 
 These blocks already data-bind an `options` array (rendered via `<template for-each>`); the substrate below shows the equivalent authored shape. They confirm the lowered form is the *native* shape here, and the authored children are the lift target.
 
-**Dropdown** ✓ (`single`) — `data-value` → value, text → label. *(`dropdown.njk`)*
+**Dropdown** ✓ (`single`) — `data-value` → value, text → label. *(`we:dropdown.njk`)*
 
 <table>
 <thead><tr><th>Authored HTML (substrate)</th><th>Lowered JSX (<code>options</code>)</th></tr></thead>
@@ -279,7 +279,7 @@ These blocks already data-bind an `options` array (rendered via `<template for-e
 </tr></tbody>
 </table>
 
-**Multi-Select Dropdown** ✓ (`multiple`) — selection set lifts to an array. *(`multi-select-dropdown.njk`)*
+**Multi-Select Dropdown** ✓ (`multiple`) — selection set lifts to an array. *(`we:multi-select-dropdown.njk`)*
 
 <table>
 <thead><tr><th>Authored HTML (substrate)</th><th>Lowered JSX (<code>options</code>)</th></tr></thead>
@@ -348,9 +348,9 @@ These blocks already data-bind an `options` array (rendered via `<template for-e
 
 ### Authoring preference — the lowered child *dialect*
 
-The `options` array is not the only valid JSX target. React authors typically expect **compound components** — `<Stepper.Option>` subcomponents authored as children — over a flat data prop. Both are faithful lowerings of the same authored HTML; which one the adapter emits should be a **soft authoring preference** — a second axis of the dev-authoring-preferences program (#150), the way its first shipped preference, the JSX `dialect` (#235, [`dialect.ts`](../blocks/renderers/jsx/dialect.ts)), already lets `html` vs `react` govern attribute *spelling*. The difference: that axis only changes attribute names ("the tree is identical"); this one changes the **child tree's shape**, so it is a *new, orthogonal* structural dialect, not covered by today's `JsxDialect`.
+The `options` array is not the only valid JSX target. React authors typically expect **compound components** — `<Stepper.Option>` subcomponents authored as children — over a flat data prop. Both are faithful lowerings of the same authored HTML; which one the adapter emits should be a **soft authoring preference** — a second axis of the dev-authoring-preferences program (#150), the way its first shipped preference, the JSX `dialect` (#235, [`we:dialect.ts`](../blocks/renderers/jsx/dialect.ts)), already lets `html` vs `react` govern attribute *spelling*. The difference: that axis only changes attribute names ("the tree is identical"); this one changes the **child tree's shape**, so it is a *new, orthogonal* structural dialect, not covered by today's `JsxDialect`.
 
-The value space is `options` (flat data prop) vs `compound` (subcomponents). Crucially, **the default is not baked into the adapter** — like intents, and because defaults live in a project config that extends the platform default, the adapter stays default-less and *resolves* the dialect from a development-preference config the project extends in a chain (`team → business line → company → one of many base configs offered online`). `options` is what a sensible base config sets at the root of that chain (native-/static-first), not a constant in the adapter; any layer can override it, and a project can pick a different base config entirely. It is a *soft* preference, not a protocol — by #150's test (breaks interop → Protocol/enforced; merely offends a convention → soft preference/adapter-lowered, opt-in, never forced), so any enforcement lowers into an incumbent linter, never a WE-specific "sheriff". (Today's `DEFAULT_DIALECT = 'html'` constant in `dialect.ts` is exactly the baked-in shortcut this model dissolves into a base config — the same registry-alignment cleanup tracked in #243, where render-strategy is the known outlier.)
+The value space is `options` (flat data prop) vs `compound` (subcomponents). Crucially, **the default is not baked into the adapter** — like intents, and because defaults live in a project config that extends the platform default, the adapter stays default-less and *resolves* the dialect from a development-preference config the project extends in a chain (`team → business line → company → one of many base configs offered online`). `options` is what a sensible base config sets at the root of that chain (native-/static-first), not a constant in the adapter; any layer can override it, and a project can pick a different base config entirely. It is a *soft* preference, not a protocol — by #150's test (breaks interop → Protocol/enforced; merely offends a convention → soft preference/adapter-lowered, opt-in, never forced), so any enforcement lowers into an incumbent linter, never a WE-specific "sheriff". (Today's `DEFAULT_DIALECT = 'html'` constant in `we:dialect.ts` is exactly the baked-in shortcut this model dissolves into a base config — the same registry-alignment cleanup tracked in #243, where render-strategy is the known outlier.)
 
 <table>
 <thead><tr><th><code>options</code> dialect (base-config default)</th><th><code>compound</code> dialect (opt-in via config)</th></tr></thead>
@@ -429,7 +429,7 @@ Take the same rich-content authored child and lower it under each dialect:
 
 ### Contrast — Tabs does *not* lower to options (out of scope)
 
-Tabs binds triggers and panels by **attribute** (`tab-trigger`/`tab-panel`) across arbitrary, separated elements — a panel needn't be a direct child. So it keeps **structural children** under the adapter and does **not** collapse to an `options` array. It maps markup to a value model, but it is a related-but-distinct shape, not an instance of this lowering. *(`tabs.njk`)*
+Tabs binds triggers and panels by **attribute** (`tab-trigger`/`tab-panel`) across arbitrary, separated elements — a panel needn't be a direct child. So it keeps **structural children** under the adapter and does **not** collapse to an `options` array. It maps markup to a value model, but it is a related-but-distinct shape, not an instance of this lowering. *(`we:tabs.njk`)*
 
 <table>
 <thead><tr><th>Authored HTML</th><th>JSX — children preserved (no options array)</th></tr></thead>
@@ -481,7 +481,7 @@ Tabs binds triggers and panels by **attribute** (`tab-trigger`/`tab-panel`) acro
 ## Progress
 
 - **Status:** resolved 2026-06-11 (batch `batch-2026-06-11`). Spec-only authoring item; the contract is ratified into the semantics glossary (the canonical home, since the paradigm "lives as a semantics term" per #258), with the worked authoring⇄JSX examples above preserved here as the design record.
-- **Done — specified the contract as two new semantics terms (`src/_data/semantics.json`), auto-rendered at `/semantics/`:**
+- **Done — specified the contract as two new semantics terms (`we:src/_data/semantics.json`), auto-rendered at `/semantics/`:**
   - **`Compound-Child Lowering`** — the conformance contract: the authoring→value-model field mapping (`value`/`label`/`disabled`, `selected`/`checked`/`pressed` → lifted parent `value`, array when `model=multiple`), the grouping/hierarchy second structural axis, the lowering rule, round-trip reversibility (plain-text reversible; rich-markup lossy → render slot / `compound` form), the explicit Tabs-out-of-scope note, and the protocol-graduation condition (proven multi-vendor interop demand; owner = render-strategy / component-compiler path, not Selection).
   - **`Child-Materialization Dialect`** — the *new structural* authoring-preference axis: `options` (flat data prop) vs `compound` (`<Parent.Option>` subcomponents), distinct from the attribute-spelling JSX dialect (#235, which leaves the tree identical); default-less (resolved from a project-extended config chain, `options` set by the base config not the adapter); a soft preference not a protocol (#150 test → enforcement lowers into an incumbent linter); input accepts either form (round-trip); alignment task to fold `DEFAULT_DIALECT` into the base config noted (#243).
   - Updated the existing **`Compound Child`** term's pointer from "tracked separately as the latent protocol seed" to link the two new terms.

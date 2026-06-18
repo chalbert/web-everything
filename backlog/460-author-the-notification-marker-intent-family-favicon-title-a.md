@@ -18,7 +18,7 @@ Spun out of #009: a notification-marker intent for unread-count indicators acros
 ## Resolved 2026-06-13 (batch-2026-06-13)
 
 Authored the `notification-marker` intent as a new entry in
-[src/_data/intents.json](../src/_data/intents.json) (catalog auto-renders it — verified live at
+[we:src/_data/intents.json](../src/_data/intents.json) (catalog auto-renders it — verified live at
 `/intents/notification-marker/`).
 
 - **Framing** — a *marker* (ambient count/dot on app chrome), explicitly **not** a message surface like

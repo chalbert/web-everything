@@ -24,7 +24,7 @@ The four prior exercise-app standards (lifecycle #353, status-indicator #354, au
 each became a **Project + Protocol** because each had a real **contract**: a provider seam
 (`CustomLifecycleProvider`, `CustomAuditProvider`) or an interchange **schema** (`DecisionRecord`).
 Master-detail has **none of those** — it is pure UX coordination between a collection and a coupled detail
-region, and it *composes intents that already exist* in `intents.json`: `selection` (pick), `layout`
+region, and it *composes intents that already exist* in `we:intents.json`: `selection` (pick), `layout`
 (region), `loader` (pending detail), `live-region-status` (announce), `focus-delegation` (focus flow),
 `navigation` (deep-link).
 
@@ -54,12 +54,12 @@ contrast to the prior four — judgment, not reflex.
 
 ## Implementation (the plan of record)
 
-- `src/_data/intents.json` — splice `master-detail`. `scripts/check-app-conformance.mjs` — repoint the
+- `we:src/_data/intents.json` — splice `master-detail`. `we:scripts/check-app-conformance.mjs` — repoint the
   `master-detail coordination` concept (`standardId: master-detail`, evidence `MasterDetailBehavior`).
-- `blocks/master-detail/MasterDetailBehavior.ts` (+ `block-descriptions/master-detail.njk`, `blocks.json`
+- `fui:blocks/master-detail/MasterDetailBehavior.ts` (+ `we:block-descriptions/master-detail.njk`, `fui:blocks.json`
   entry, unit tests).
-- `demos/loan-origination/app.ts` — replace the hand-wired `SelectionBehavior` + `current` tracking with
-  `MasterDetailBehavior`; `conformance.json` — declare `master-detail`, widen `selection` evidence to also
+- `we:demos/loan-origination/app.ts` — replace the hand-wired `SelectionBehavior` + `current` tracking with
+  `MasterDetailBehavior`; `we:conformance.json` — declare `master-detail`, widen `selection` evidence to also
   match `MasterDetailBehavior` (selection is now consumed *through* the coordinator).
 - [#356](/backlog/356-master-detail-coordination-standard/) → resolved, `graduatedTo: master-detail`.
 

@@ -30,11 +30,11 @@ structured `errors` for unsupported syntax. No TS-in-browser — this direction 
 reader.
 
 - **Home (decided #700 → A):** lives in `frontierui/demos/` native. The bidirectional compiler is a pure
-  frontierui artifact (impl → FUI); the page imports `../compiler/src/component-transform/index.js`
+  frontierui artifact (impl → FUI); the page imports `we:../compiler/src/component-transform/index.js`
   directly and reads fixtures from the sibling `__tests__` dir — **no cross-repo import path, no drift
-  surface.** New demo = drop a `.html`+`.ts` pair; the vite plugin auto-injects `/plugs/bootstrap.ts`.
+  surface.** New demo = drop a `.html`+`.ts` pair; the vite plugin auto-injects `we:/plugs/bootstrap.ts`.
 - **Direction (light):** call `transform(source, 'toImperative')`
-  ([`index.ts`](../../frontierui/compiler/src/component-transform/index.ts) → `parseDeclarative`
+  ([`we:index.ts`](../../frontierui/compiler/src/component-transform/index.ts) → `parseDeclarative`
   regex tag reader + `emitImperative` string builder) — zero heavy deps. The reverse direction
   (`toDeclarative` via `parseImperative` → the full TS Compiler API) + the two-pane bidirectional editor
   is **slice B** (sibling under #049, blocked by this).
@@ -51,11 +51,11 @@ named-rule errors.
   page can't drift from the passing corpus), a source pane + lowered-class output pane, and an inline
   named-rule error list bound to the transform's structured `errors`.
 - **Module-boundary fix (mechanical, not a fork).** Importing the barrel `transform` into a browser failed:
-  the barrel re-exports `plugins.ts` (`node:fs`) and `parseImperative` (`typescript`), neither browser-safe
+  the barrel re-exports `fui:plugins.ts` (`node:fs`) and `parseImperative` (`typescript`), neither browser-safe
   — contradicting this slice's explicit *"No TS-in-browser, zero heavy deps."* Extracted the pure string
   builder `emitImperative` (+ `toTemplateLiteral`) into a new typescript-free leaf
-  `compiler/src/component-transform/emit-imperative.ts`; `imperative.ts` re-exports it so `index.ts` /
-  `surfaces.ts` are unchanged. The demo composes `parseDeclarative` + `emitImperative` (exactly what
+  `fui:compiler/src/component-transform/emit-imperative.ts`; `fui:imperative.ts` re-exports it so `we:index.ts` /
+  `fui:surfaces.ts` are unchanged. The demo composes `parseDeclarative` + `emitImperative` (exactly what
   `transform(src,'toImperative')` runs internally) with zero heavy deps.
 - **Verified:** all 3 fixtures lower correctly in a headless browser (no page errors, error panel hidden);
   `component-transform` vitest 32/32 green; `tsc --noEmit` clean.

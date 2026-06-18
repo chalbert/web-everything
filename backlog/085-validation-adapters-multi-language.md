@@ -16,7 +16,7 @@ crossRef: { url: /projects/webvalidation/, label: Web Validation project }
 
 A **protocol-and-adapter system whose only job is to *generate* validation** from the Web Validation vocabulary — not to render UI, not to wire it into any component, not to be a runtime engine. You declare validation once against the standard's **intents**; **adapters** materialize those intents as runnable constraints. As with every Web Everything standard, we **do not enforce a single way** — we enumerate the possible intents and offer **at least two delivery modes**, each backed by adapters/formats that declare *which* intents they comply with.
 
-**Sliced 2026-06-10** (per `relatedReport: reports/2026-06-10-backlog-split-analysis.md`, executed via #259) into a foundation + a per-language adapter fan-out + a Mode-2 service: **#304** intent enumeration + `CustomValidationAdapterRegistry` (`story·3`, the foundation — gates the rest); then the independent adapters **#305** native-HTML constraints (`story·2`), **#306** Zod, **#307** Pydantic, **#308** JSON-Schema (each a `task`), and finally **#309** the Mode-2 generation service + one delivery format (`story·3`). The old `blockedBy: ["004", "005"]` is **re-pointed onto the foundation slice #304 as `["004", "266"]`** — #085 only ever needed #005's capability-manifest slice (#266), not all of #005. Slices #305–#309 are `blockedBy: ["304"]`, otherwise independent. The cross-field rule-language fork stays explicitly out of v1, so it doesn't gate the split.
+**Sliced 2026-06-10** (per `relatedReport: we:reports/2026-06-10-backlog-split-analysis.md`, executed via #259) into a foundation + a per-language adapter fan-out + a Mode-2 service: **#304** intent enumeration + `CustomValidationAdapterRegistry` (`story·3`, the foundation — gates the rest); then the independent adapters **#305** native-HTML constraints (`story·2`), **#306** Zod, **#307** Pydantic, **#308** JSON-Schema (each a `task`), and finally **#309** the Mode-2 generation service + one delivery format (`story·3`). The old `blockedBy: ["004", "005"]` is **re-pointed onto the foundation slice #304 as `["004", "266"]`** — #085 only ever needed #005's capability-manifest slice (#266), not all of #005. Slices #305–#309 are `blockedBy: ["304"]`, otherwise independent. The cross-field rule-language fork stays explicitly out of v1, so it doesn't gate the split.
 
 ## Scope — and explicit non-goals
 
@@ -57,7 +57,7 @@ Like many WE standards, this **standardizes the meta-schema, not a fixed list**.
 
 ## Research (2026-06-06) — both modes are shipped patterns; actions
 
-Full survey in [reports/2026-06-06-validation-generation-protocol-adapters.md](../reports/2026-06-06-validation-generation-protocol-adapters.md) (also at [/research/](/research/) → *Validation Generation*). Key findings:
+Full survey in [we:reports/2026-06-06-validation-generation-protocol-adapters.md](../reports/2026-06-06-validation-generation-protocol-adapters.md) (also at [/research/](/research/) → *Validation Generation*). Key findings:
 
 - **The two-mode framing is correct and both modes already ship** — WE's job is to unify them under one intent vocabulary with declared compliance, not invent them.
   - **Mode 1 exemplar: protovalidate** (CEL on Protobuf → identical rules in Go/TS/Java/Python/C++) — the gold standard for "declare once, run in your language." Pragmatic lossier variant: JSON-Schema-as-source + codegen (`datamodel-code-generator`, `quicktype`). TS-only interface variant: **Standard Schema** (reduces adapters N×M → N+M).

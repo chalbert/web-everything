@@ -13,9 +13,9 @@ The evergreen app ([#099](/backlog/099-evergreen-app-vision/)) wants an app to s
 
 ### 1. The ecosystem already splits "policy declaration" from "the runner" — two homes, not one
 
-Every automated-update tool separates a **declarative policy file** (committed to the consumer repo) from the **engine that executes it**. Renovate reads `renovate.json` / `renovate.config.js`; Dependabot reads `.github/dependabot.yml`; changesets reads `.changeset/config.json`; semantic-release reads `.releaserc`. The policy is the portable, version-controlled contract; the bot/CI runner is swappable infrastructure (Mend-hosted Renovate, self-hosted Renovate CLI, GitHub-native Dependabot — same config grammar, different runner) ([Renovate Bot comparison](https://docs.renovatebot.com/bot-comparison/), [Mend Renovate](https://www.mend.io/renovate/)).
+Every automated-update tool separates a **declarative policy file** (committed to the consumer repo) from the **engine that executes it**. Renovate reads `we:renovate.json` / `we:renovate.config.js`; Dependabot reads `we:.github/dependabot.yml`; changesets reads `we:.changeset/config.json`; semantic-release reads `.releaserc`. The policy is the portable, version-controlled contract; the bot/CI runner is swappable infrastructure (Mend-hosted Renovate, self-hosted Renovate CLI, GitHub-native Dependabot — same config grammar, different runner) ([Renovate Bot comparison](https://docs.renovatebot.com/bot-comparison/), [Mend Renovate](https://www.mend.io/renovate/)).
 
-**Implication for fork #1:** this is exactly the WE shape — the **declared policy is the protocol (the only lock)**, the **orchestration runner is a disposable/leverage service**. It is the same split the existing Guard protocol uses (a predicate/policy attached to a region, resolved by a swappable provider — [protocols.json:94](../src/_data/protocols.json#L94)) and that render-strategy uses (a declared strategy, a swappable resolver — [protocols.json:70](../src/_data/protocols.json#L70)). The runner belongs in the reliability/Plateau-service lane ([projects.json:159](../src/_data/projects.json#L159)), not in the conformance contract.
+**Implication for fork #1:** this is exactly the WE shape — the **declared policy is the protocol (the only lock)**, the **orchestration runner is a disposable/leverage service**. It is the same split the existing Guard protocol uses (a predicate/policy attached to a region, resolved by a swappable provider — [we:protocols.json:94](../src/_data/protocols.json#L94)) and that render-strategy uses (a declared strategy, a swappable resolver — [we:protocols.json:70](../src/_data/protocols.json#L70)). The runner belongs in the reliability/Plateau-service lane ([we:projects.json:159](../src/_data/projects.json#L159)), not in the conformance contract.
 
 ### 2. The gate model is a spectrum the tools expose as graded config — not one fixed mechanic
 
@@ -42,7 +42,7 @@ Beyond merge-time, progressive delivery (Argo Rollouts, Flagger, Spinnaker) grad
 
 ### 5. Codemod migration delivery is a *consumer* of the manifest, already homed in WE
 
-Breaking-change migration is delivered as **codemods shipped alongside the release** (jscodeshift / Codemod.com / Hypermod; TypeORM's `@typeorm/codemod`, Next.js / Storybook upgrade transforms) ([Fowler: codemods for API refactoring](https://martinfowler.com/articles/codemods-api-refactoring.html), [Hypermod](https://www.hypermod.io/blog/7-automating-design-system-evolution)). In WE this is **already built**: the upgrader engine #094 (`upgraderEngine.ts`, analyze → generate → verify-gate) runs the codemods, and the changelog-manifest protocol #102 ([protocols.json:86](../src/_data/protocols.json#L86)) is the per-module change descriptor that links a breaking entry to its migration script with author + integrity-hash trust. The pipeline **consumes** these; it does not re-own migration. That is why #101 is `blockedBy` #102/#094 — the descriptors and the codemod runner are upstream of the orchestration.
+Breaking-change migration is delivered as **codemods shipped alongside the release** (jscodeshift / Codemod.com / Hypermod; TypeORM's `@typeorm/codemod`, Next.js / Storybook upgrade transforms) ([Fowler: codemods for API refactoring](https://martinfowler.com/articles/codemods-api-refactoring.html), [Hypermod](https://www.hypermod.io/blog/7-automating-design-system-evolution)). In WE this is **already built**: the upgrader engine #094 (`we:upgraderEngine.ts`, analyze → generate → verify-gate) runs the codemods, and the changelog-manifest protocol #102 ([we:protocols.json:86](../src/_data/protocols.json#L86)) is the per-module change descriptor that links a breaking entry to its migration script with author + integrity-hash trust. The pipeline **consumes** these; it does not re-own migration. That is why #101 is `blockedBy` #102/#094 — the descriptors and the codemod runner are upstream of the orchestration.
 
 ### 6. Platform-side pre-testing is WE's net-new edge (no industry analogue surveyed)
 
@@ -57,7 +57,7 @@ Renovate/Dependabot test an update *after* a release lands, against the consumer
 
 - Decision: [#101 — auto-update pipeline](/backlog/101-auto-update-pipeline/)
 - Blocked by / consumes: [#102 — changelog manifest](/backlog/102-changelog-manifest-standard/) · [#094 — AI upgrader tools](/backlog/094-ai-upgrader-tools/)
-- Shape precedents: Guard protocol · render-strategy protocol ([protocols.json](../src/_data/protocols.json))
+- Shape precedents: Guard protocol · render-strategy protocol ([we:protocols.json](../src/_data/protocols.json))
 - Vision: [#099 — evergreen app](/backlog/099-evergreen-app-vision/) · pre-testing edge: #092 relationship graph
 
 ## Sources

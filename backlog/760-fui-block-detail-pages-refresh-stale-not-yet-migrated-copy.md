@@ -13,7 +13,7 @@ tags: []
 
 # FUI block detail pages: refresh stale not-yet-migrated copy
 
-Every block detail page (`src/block-pages.njk`, paginated over all 23 blocks) carries a static "Implementation" section reading: *"Implementation details will appear here once the code is migrated to FrontierUI. For now, the implementation lives in the Web Everything repository."* That is stale — `blocks/` in the FrontierUI repo already contains real implementations (e.g. `background-task-surface/BackgroundTasksElement.ts`). The copy tells every visitor the impl still lives in WE, which is no longer true. Refresh the section to reflect that FrontierUI is the implementation, and ideally link to the actual source path for the block.
+Every block detail page (`we:src/block-pages.njk`, paginated over all 23 blocks) carries a static "Implementation" section reading: *"Implementation details will appear here once the code is migrated to FrontierUI. For now, the implementation lives in the Web Everything repository."* That is stale — `blocks/` in the FrontierUI repo already contains real implementations (e.g. `fui:background-task-surface/BackgroundTasksElement.ts`). The copy tells every visitor the impl still lives in WE, which is no longer true. Refresh the section to reflect that FrontierUI is the implementation, and ideally link to the actual source path for the block.
 
 ## Acceptance
 
@@ -24,4 +24,4 @@ Every block detail page (`src/block-pages.njk`, paginated over all 23 blocks) ca
 ## Notes
 
 - Pure content fix; smallest slice of the #757 epic.
-- Don't assert "all migrated" blindly — a few `blocks.json` entries may still be spec-only; check first.
+- Don't assert "all migrated" blindly — a few `fui:blocks.json` entries may still be spec-only; check first.

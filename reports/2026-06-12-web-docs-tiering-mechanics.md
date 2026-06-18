@@ -72,7 +72,7 @@ so the forks reuse incumbent vocabulary rather than coining a model cold.
 
 | File | Action |
 |---|---|
-| `reports/2026-06-12-web-docs-tiering-mechanics.md` | created (this report) |
-| `src/_data/researchTopics.json` | added `web-docs-open-core-tiering` entry |
-| `src/_includes/research-descriptions/web-docs-open-core-tiering.njk` | created (write-up) |
-| `backlog/428-web-docs-open-core-tiering-mechanics-metered-unit-threshold-.md` | rewritten to prepared-fork shape; `preparedDate` set |
+| `we:reports/2026-06-12-web-docs-tiering-mechanics.md` | created (this report) |
+| `we:src/_data/researchTopics.json` | added `web-docs-open-core-tiering` entry |
+| `we:src/_includes/research-descriptions/web-docs-open-core-tiering.njk` | created (write-up) |
+| `we:backlog/428-web-docs-open-core-tiering-mechanics-metered-unit-threshold-.md` | rewritten to prepared-fork shape; `preparedDate` set |

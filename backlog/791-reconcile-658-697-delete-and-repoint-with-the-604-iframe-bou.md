@@ -67,8 +67,8 @@ FUI-hosted demos through an iframe"). Neither ruling actually settled WE's **dev
 the vendored `blocks/` is deleted. That gap factors cleanly into two orthogonal axes:
 
 - **Axis 1 — the end-state for the 41 demo files that import `/blocks/…` today** (`grep -rlE "blocks/"
-  demos/` → 41 on 2026-06-16, incl. `demos/declarative-spa.html`, `demos/jsx-adapter-demo.tsx`,
-  `demos/view-tabs-demo.html`, `demos/data-grid-demo.ts`, and the `loan-origination/` + `auto-insurance/`
+  demos/` → 41 on 2026-06-16, incl. `we:demos/declarative-spa.html`, `we:demos/jsx-adapter-demo.tsx`,
+  `we:demos/view-tabs-demo.html`, `we:demos/data-grid-demo.ts`, and the `loan-origination/` + `auto-insurance/`
   exercise apps). #697 deletes WE's vendored copies and repoints every import to `@frontierui/blocks` —
   and that repoint **is** the WE→FUI import seam the boundary forbids. There is **no `frontierui` alias**
   in [vite.config.mts:167-179](../vite.config.mts#L167-L179) (only `@core`/`@web*` → `/plugs/*`), so WE

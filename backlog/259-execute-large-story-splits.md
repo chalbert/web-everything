@@ -77,7 +77,7 @@ explicitly deferred with a reason.
   `/split` when the item is picked up or its urgency rises.
 
 **Gate.** `check:standards` is green for every #259-touched item (no new errors/warnings introduced).
-The one remaining `error` (orphaned report `reports/2026-06-01-dropdown-ux-behaviors.md`) is **pre-existing
+The one remaining `error` (orphaned report `we:reports/2026-06-01-dropdown-ux-behaviors.md`) is **pre-existing
 and out of scope** — it predates this work, no #259 item references it, and fixing it would mean editing
 the unrelated reports/research-topics subsystem. Flagged, not touched.
 

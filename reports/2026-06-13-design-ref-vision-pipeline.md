@@ -7,7 +7,7 @@
 ## Question
 
 The phase-1 capture pipeline (backlog #382, shipped) admits screenshots through a **deterministic,
-hand-authored** inclusion gate (`scripts/design-refs.mjs:145` — a per-target `readySelector` +
+hand-authored** inclusion gate (`we:scripts/design-refs.mjs:145` — a per-target `readySelector` +
 optional `enterAction`). It doesn't generalise to new targets and can't tell a clean app surface
 from a marketing splash, a modal-obstructed view, or a stale error panel (Photopea's splash and
 Grafana's error panel both slipped through). Two open items want **vision** in this pipeline —
@@ -42,7 +42,7 @@ inventing overlay dismissal.
 | **ScreenAI** (Google, arXiv 2402.04615) | VLM that identifies UI element *type + location*; auto-generates QA/navigation/summarization from screen annotation. | Coarse screen/surface classification is a mature VLM capability — the QC verdict is a *cheap* call, not research-grade. |
 | **Ferret-UI** (Apple, arXiv 2404.05719) | MLLM for mobile UI: referring/grounding/reasoning, widget & icon classification; beats GPT-4V on elementary UI tasks. | Same — element/screen classification is reliable; supports a structured verdict over a screenshot. |
 | **Design2Code** (Stanford, NAACL 2025) + **WebSight** (2M synthetic screenshot↔HTML pairs) | Real-world screenshot→code benchmark; SOTA Claude-4-Sonnet **76.3**, open VLMs **<45**; models struggle with visual-element recall and layout fidelity. | The *codification* half is hard → keep #396 human-in-the-loop (neutral structure as editable surface), do **not** trust autonomous screenshot→component output. The *gate* half (yes/no/remediate) is far easier → safe to automate. |
-| **VLM-as-a-Judge** protocol; structured-output VLM eval at scale | Evaluation cast as conditional multimodal classification driven by *model output + user-specified criteria*; structured outputs make it scalable. | The QC gate is literally a VLM-as-judge: fixed criteria ("is this an unobstructed app surface?") → structured verdict. Cache verdicts by content hash (mirror the `ledger.json` sha256 skip) for idempotent re-runs. |
+| **VLM-as-a-Judge** protocol; structured-output VLM eval at scale | Evaluation cast as conditional multimodal classification driven by *model output + user-specified criteria*; structured outputs make it scalable. | The QC gate is literally a VLM-as-judge: fixed criteria ("is this an unobstructed app surface?") → structured verdict. Cache verdicts by content hash (mirror the `we:ledger.json` sha256 skip) for idempotent re-runs. |
 | **autoconsent** (DuckDuckGo, npm) + Consent-O-Matic rules | Rule library to navigate consent popups; **runs in a Playwright-orchestrated headless browser** without user input. | `obstructed` remediation reuses this — Playwright-native, no bespoke overlay dismissal. |
 | **#086 mockup-to-code** (in-repo) | `customMockupAnalyzerRegistry`: vision is a swappable provider behind a stable contract; no provider name in core; neutral structure is the contract. | The architectural anchor — the design-ref vision provider is the **same pattern** applied to the corpus pipeline. One registry, swap any model. |
 
@@ -69,8 +69,8 @@ model key; nothing about the corpus or its consumers depends on which model grad
 
 | File | Action |
 |---|---|
-| `src/_data/researchTopics.json` | Added `design-ref-vision` topic entry |
-| `src/_includes/research-descriptions/design-ref-vision.njk` | Wrote the research write-up |
+| `we:src/_data/researchTopics.json` | Added `design-ref-vision` topic entry |
+| `we:src/_includes/research-descriptions/design-ref-vision.njk` | Wrote the research write-up |
 | `backlog/475-…md` | Converted to `type: decision`, authored prepared-fork shape, `preparedDate` |
 | `backlog/396-…md` | Converted to `type: decision`, authored prepared-fork shape, `preparedDate` |
-| `reports/2026-06-13-design-ref-vision-pipeline.md` | This report |
+| `we:reports/2026-06-13-design-ref-vision-pipeline.md` | This report |

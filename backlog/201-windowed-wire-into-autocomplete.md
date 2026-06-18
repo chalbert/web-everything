@@ -16,7 +16,7 @@ crossRef: { url: /blocks/autocomplete/, label: Autocomplete block }
 
 # Wire `windowed` into `<auto-complete>` as an opt-in
 
-#137 built `Windowed.ts` (frontierui `blocks/droplist/`) as a standalone, test-proven behavior:
+#137 built `fui:Windowed.ts` (frontierui `blocks/droplist/`) as a standalone, test-proven behavior:
 it virtualizes a long option set, mounts only a window slice as `[composite-descendant]`, and keeps
 the active option always mounted while coordinating with `filter`'s inject path on `filter-resolved`.
 #138 wired the other seven droplist traits into the shipping `<auto-complete>` element but **not**
@@ -26,7 +26,7 @@ The wiring is small but has two real constraints, both already established by #1
 
 - **Attach order:** `windowed` must be attached **before** `focus-delegation`, so the collection is
   already collapsed to its window when focus initialises on the slice (otherwise focus initialises on
-  the full set and its active reference is stale after the collapse). In `AutoComplete.ts` the current
+  the full set and its active reference is stale after the collapse). In `fui:AutoComplete.ts` the current
   order is selection → focus → filter → …; `windowed` goes ahead of focus.
 - **Enable gate (the open call):** how does an author turn it on? Realistic options — a `windowed`
   attribute (explicit), a `windowed="<size>"` that also sets the window size, or auto-enable above an
@@ -48,7 +48,7 @@ real layout exists — coordinate with the scroll/height-driven path in #145).
 - **Status:** Resolved (2026-06-08)
 - **Branch:** docs/standard-authoring-workflow (impl in `frontierui`)
 - **Done:**
-  - `AutoComplete.ts`: `Windowed` attached **before** `FocusDelegation` when enabled, so focus
+  - `fui:AutoComplete.ts`: `Windowed` attached **before** `FocusDelegation` when enabled, so focus
     initialises on the collapsed window slice (the #137 attach-order constraint).
   - **Enable gate:** explicit `windowed` boolean attribute (chose explicit over auto-threshold —
     auto surprises authors); `windowed="<n>"` also sets the window size. Helpers `#isWindowed()` /
@@ -57,13 +57,13 @@ real layout exists — coordinate with the scroll/height-driven path in #145).
     harvest would swallow hidden nodes and `filterClient` would only see the window — needs
     model-level filtering. Deferred as **#209**; `windowed` is inert in client mode (gate returns
     false), pinned by a unit test.
-  - Demo Card 5 (`autocomplete-unplugged.ts`): async source returning 60 rows + `windowed`.
-  - Tests: 4 unit tests in `AutoComplete.test.ts` (async collapse to a window, active-always-mounted
+  - Demo Card 5 (`fui:autocomplete-unplugged.ts`): async source returning 60 rows + `windowed`.
+  - Tests: 4 unit tests in `fui:AutoComplete.test.ts` (async collapse to a window, active-always-mounted
     while arrowing deep = #023, explicit `windowed="5"` size, client-mode inert) + an e2e in
-    `auto-complete.spec.ts` (60-result set renders ≤10, active stays mounted/connected arrowing,
+    `fui:auto-complete.spec.ts` (60-result set renders ≤10, active stays mounted/connected arrowing,
     absolute aria-setsize=60, head unmounted deep, commit). All unit (32) + e2e (5) green;
     `check:standards` clean in both repos.
 - **Leftover captured:** [#209](/backlog/209-windowed-client-mode-model-filtering/) — windowing in
   `filter="client"` mode (model-level filtering).
 
-**Graduated to** `frontierui/blocks/droplist/AutoComplete.ts` — windowed opt-in wired into <auto-complete> (attached before FocusDelegation) + e2e.
+**Graduated to** `fui:frontierui/blocks/droplist/AutoComplete.ts` — windowed opt-in wired into <auto-complete> (attached before FocusDelegation) + e2e.

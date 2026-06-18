@@ -44,12 +44,12 @@ Supporting facts:
 - **The web-component axis stays covered without FAST.** After retiring `fast`, the
   `web-component-system` category still holds **shoelace** (49 presence rows), **spectrum-web-components**
   (51 rows), and **lion** (33 rows). `fast` itself has **0** rows in
-  `benchmarkCapabilityPresence.json` — so retiring it (even by deletion) breaks no presence-row reference
-  (the only corpus-source check, `check-standards-rules.mjs:735`, is satisfied).
+  `we:benchmarkCapabilityPresence.json` — so retiring it (even by deletion) breaks no presence-row reference
+  (the only corpus-source check, `we:check-standards-rules.mjs:735`, is satisfied).
 
 ## How this maps to the corpus's own rules
 
-`benchmarkCorpus.json`'s `inclusionRule`: *a source qualifies if it scores on ≥3 selection criteria AND
+`we:benchmarkCorpus.json`'s `inclusionRule`: *a source qualifies if it scores on ≥3 selection criteria AND
 occupies a category axis.* Two criteria FAST now fails outright **as a component-benchmark source**:
 
 - **`docs-quality`** ("browsable, citable per-component docs — the source material extraction reads") —

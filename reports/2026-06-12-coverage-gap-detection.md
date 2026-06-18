@@ -3,7 +3,7 @@
 **Date:** 2026-06-12
 **Backlog:** #347 (phase 3 of epic #315)
 **Research topic:** [/research/benchmark-coverage/](/research/benchmark-coverage/)
-**Data:** `src/_data/benchmarkCoverage.json` · joins `benchmarkCapabilities.json` (#346) against the WE inventory
+**Data:** `we:src/_data/benchmarkCoverage.json` · joins `we:benchmarkCapabilities.json` (#346) against the WE inventory
 
 ## What this is
 

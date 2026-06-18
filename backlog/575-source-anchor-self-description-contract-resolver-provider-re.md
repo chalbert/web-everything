@@ -39,20 +39,20 @@ resolver composes with any bridge.
 - **Resolved 2026-06-14.** Built the `source-resolution/` model dir (standalone, dependency-free —
   sibling of `validator-resolution/` (#214); the runtime plug / dev-browser consumer fulfils the same
   shape). Two coupled pieces, both ratified-as-written from #562 Fork 1 (ruling A):
-  - **Source-anchor self-description contract** (`provider.ts`) — `SOURCE_ANCHOR_ATTR`
+  - **Source-anchor self-description contract** (`we:provider.ts`) — `SOURCE_ANCHOR_ATTR`
     (`data-we-source-id`, the opaque-id `data-*` attribute a minifier won't rename) + the
     `SourceAnchorManifest` sidecar shape (`specVersion` reused from the capability-manifest vocabulary,
     `anchors: id → file:line`, served separately/access-gated). **Opt-in, off by default** is encoded:
     no manifest → every resolve is a clean `null`, never an error. Not a protocol (one shape, opaque ids).
-  - **Resolver provider set + registry** (`registry.ts`, `index.ts`) — `CustomSourceResolverRegistry`
+  - **Resolver provider set + registry** (`we:registry.ts`, `we:index.ts`) — `CustomSourceResolverRegistry`
     walks resolvers in **precedence (insertion) order**, returning the first hit and **degrading to
     inert** (`null`) when all miss; a throwing resolver is treated as a miss. Three shipped resolvers in
     the ratified order: `SourceAnchorResolver` (only cold-deployed-capable) → `FrameworkDebugResolver`
     (reads `__source` defensively; dev-only, never builds on framework internals — React-19 removed
     `_debugSource`) → `SourceMapResolver` (inert placeholder, wrong granularity). `resolveNodeSource()`
     is the one-call entry the Plateau dev-browser uses; composes with any IDE bridge (#576).
-  - Wired `source-resolution/` into `vitest.config.ts`; **16 tests** (provider + registry/chain) pass,
+  - Wired `source-resolution/` into `we:vitest.config.ts`; **16 tests** (provider + registry/chain) pass,
     `tsc --noEmit --strict` clean. The build-side anchor emitter (Sentry-style plugin) is downstream
     implementation, not this standard slice.
 
-**Graduated to** `source-resolution/` — provider.ts anchor contract + registry.ts resolver chain + index.ts.
+**Graduated to** `source-resolution/` — we:provider.ts anchor contract + we:registry.ts resolver chain + we:index.ts.

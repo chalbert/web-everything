@@ -31,7 +31,7 @@ Parsing rule: a lone direct-child `<template>` is the explicit wrapper; anything
 
 ## Resolution (2026-06-07)
 
-**Ratified: the component's children ARE the template.** The recommendation above is the rule. This was already canonical in the [Component block](/blocks/component/) authoring contract ([component.njk](../src/_includes/block-descriptions/component.njk) — headline + authoring contract document both the implicit default and the inert-`<template>` escape hatch); this item just formalizes it. The report's Open Points Register (DC-11) is flipped `🔶 DECIDE` → `✅ RESOLVED`.
+**Ratified: the component's children ARE the template.** The recommendation above is the rule. This was already canonical in the [Component block](/blocks/component/) authoring contract ([we:component.njk](../src/_includes/block-descriptions/component.njk) — headline + authoring contract document both the implicit default and the inert-`<template>` escape hatch); this item just formalizes it. The report's Open Points Register (DC-11) is flipped `🔶 DECIDE` → `✅ RESOLVED`.
 
 The "Open edge" is carried forward as a **deferred reversal trigger**, not a present fork: revisit only if a native declarative-custom-element standard ships that *mandates* a `<template>` child.
 

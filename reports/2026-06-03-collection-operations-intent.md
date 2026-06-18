@@ -2,7 +2,7 @@
 
 **Date**: 2026-06-03
 **Point**: There is no sorting (or filter/page/group) standard yet; this is the research that feeds gap #10. Finding: model the four operations as one *Collection Operations Intent* with four pipeline-stage dimensions, anchoring sort to the native semantics the platform already standardizes.
-**Plan file**: — (initiated from `backlog/006-gap-10-collection-ops-intent.md`, no `plans/` inbox file)
+**Plan file**: — (initiated from `we:backlog/006-gap-10-collection-ops-intent.md`, no `plans/` inbox file)
 **Research page**: `/research/collection-operations/`
 
 ---
@@ -47,15 +47,15 @@ These convert gap-10's open call into settled positions; the research page now r
 
 | File | Action |
 |---|---|
-| `src/_data/intents.json` | **Authored the `collection-operations` intent** (status `concept`, 11 dimensions, initial vocabulary) — pending owner review |
-| `src/_data/researchTopics.json` | Added `collection-operations` registry entry |
-| `src/_includes/research-descriptions/collection-operations.njk` | New full research write-up |
-| `reports/2026-06-03-collection-operations-intent.md` | This report |
-| `backlog/006-gap-10-collection-ops-intent.md` | Added `relatedReport` + recorded decisions in the open call |
-| `AGENTS.md` | Regenerated inventory (`npm run gen:inventory`) for new topic count |
-| `plateau-app: src/technical-configurator/seed-sorting-strategy.ts` | New — Sorting Strategy domain (8 axes, 7 strategies) |
-| `plateau-app: .../provider.ts` | Registered `sortingStrategyDomain` |
-| `plateau-app: .../presets.ts` | Added `sortingStrategyPresets` (5 use-case presets) |
-| `plateau-app: .../configurator.ts` | Wired presets + requirement axes for `sorting-strategy` |
+| `we:src/_data/intents.json` | **Authored the `collection-operations` intent** (status `concept`, 11 dimensions, initial vocabulary) — pending owner review |
+| `we:src/_data/researchTopics.json` | Added `collection-operations` registry entry |
+| `we:src/_includes/research-descriptions/collection-operations.njk` | New full research write-up |
+| `we:reports/2026-06-03-collection-operations-intent.md` | This report |
+| `we:backlog/006-gap-10-collection-ops-intent.md` | Added `relatedReport` + recorded decisions in the open call |
+| `we:AGENTS.md` | Regenerated inventory (`npm run gen:inventory`) for new topic count |
+| `plateau-app: plateau:src/technical-configurator/seed-sorting-strategy.ts` | New — Sorting Strategy domain (8 axes, 7 strategies) |
+| `plateau-app: we:.../provider.ts` | Registered `sortingStrategyDomain` |
+| `plateau-app: we:.../presets.ts` | Added `sortingStrategyPresets` (5 use-case presets) |
+| `plateau-app: we:.../configurator.ts` | Wired presets + requirement axes for `sorting-strategy` |
 
 Build verified (`npx @11ty/eleventy` wrote `/research/collection-operations/`); `npm run check:standards` passes with 0 errors. plateau-app: `tsc --noEmit` reports 0 new errors in the four touched files; the live dev server (`:4000`) serves the new module (HMR reload surfaces the domain at `/technical-configurator`).

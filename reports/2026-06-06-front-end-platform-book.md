@@ -1271,10 +1271,10 @@ Extensions
 Using a special extension to identify the nature of some files.
 
 Examples:
-- MyComponent.ts
-- MyComponent.constants.ts
-- MyComponent.actions.ts
-- MyComponent.test.ts
+- we:MyComponent.ts
+- we:MyComponent.constants.ts
+- we:MyComponent.actions.ts
+- we:MyComponent.test.ts
 
 Casing
 

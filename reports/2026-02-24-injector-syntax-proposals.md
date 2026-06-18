@@ -36,8 +36,8 @@ These are TS language-level proposals, not directly actionable.
 ## Files Created/Modified
 | File | Action |
 |------|--------|
-| `src/_data/researchTopics.json` | Added `injector-syntax-proposals` and `injector-migration-gaps` entries |
-| `src/_includes/research-descriptions/injector-syntax-proposals.njk` | Created — full syntax catalog across all 4 layers |
-| `src/_includes/research-descriptions/injector-migration-gaps.njk` | Created — detailed gap analysis with migration order |
-| `reports/2026-02-24-injector-syntax-proposals.md` | This report |
-| `reports/2026-02-24-injector-migration-gaps.md` | Companion report for migration gaps |
+| `we:src/_data/researchTopics.json` | Added `injector-syntax-proposals` and `injector-migration-gaps` entries |
+| `we:src/_includes/research-descriptions/injector-syntax-proposals.njk` | Created — full syntax catalog across all 4 layers |
+| `we:src/_includes/research-descriptions/injector-migration-gaps.njk` | Created — detailed gap analysis with migration order |
+| `we:reports/2026-02-24-injector-syntax-proposals.md` | This report |
+| `we:reports/2026-02-24-injector-migration-gaps.md` | Companion report for migration gaps |

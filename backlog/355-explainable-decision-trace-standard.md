@@ -12,14 +12,14 @@ crossRef: { url: /backlog/093-business-rule-manager-proof-of-compliance/, label:
 
 > **Resolved 2026-06-12 — codified AND runtime shipped (one turn).** Graduated to the **Web Decisions**
 > project (`webdecisions`) owning the **Decision Record** protocol (`decision-record`, draft; body in
-> `src/_includes/project-webdecisions.njk` §`protocol-decision-record`) and the `decision-trace` intent.
+> `we:src/_includes/project-webdecisions.njk` §`protocol-decision-record`) and the `decision-trace` intent.
 > A deliberate variation: **schema-only protocol, no provider** — the `DecisionRecord` shape
 > ({ subject, ruleSet {id,version}, criteria[], outcome, reasonCodes? }) IS the contract; the decision
 > *engine* is out of scope (proof-of-compliance #093). The **`decision-trace` block**
-> (`blocks/renderers/decision-trace/renderDecisionTrace.ts`, active, 5 unit tests) renders it and
+> (`we:blocks/renderers/decision-trace/renderDecisionTrace.ts`, active, 5 unit tests) renders it and
 > composes the status-indicator block for the outcome token. The loan app consumes it via a
-> `toDecisionRecord` mapper (`demos/loan-origination/domain/decision.ts`) — the hand-rolled
-> proof-of-compliance table is gone. `conformance.json` declares it → **`check:app-conformance` = 100%
+> `toDecisionRecord` mapper (`we:demos/loan-origination/domain/decision.ts`) — the hand-rolled
+> proof-of-compliance table is gone. `we:conformance.json` declares it → **`check:app-conformance` = 100%
 > (9/9), compliant**. Kept distinct from webvalidation (form invalidity) and webtraces (execution spans).
 
 # Candidate standard — Explainable decision / evaluation trace

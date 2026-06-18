@@ -12,7 +12,7 @@ tags: []
 
 # Promote @frontierui/blocks canonical, migrate the 9 WE-only families, delete WE's vendored blocks/
 
-Execute Fork 2+3 of the #641 ruling: promote frontierui/blocks to a canonical granular @frontierui/blocks sub-package (sibling of @frontierui/plugs). Migrate the 9 WE-only families that carry real impl (audit, background-task-surface, data-grid, lifecycle, master-detail, selection, stepper, tree-select, type-ahead) UP to @frontierui/blocks BEFORE deleting anything — the #170 migration-order guard (never delete a tree not yet content-equal upstream). Then delete WE's byte-identical vendored blocks/ and repoint WE demos/site to consume @frontierui/blocks as the #604 client. Per-family classification at build time: genuine impl migrates, aspirational/empty stays a blocks.json contract with no sourcePath.
+Execute Fork 2+3 of the #641 ruling: promote frontierui/blocks to a canonical granular @frontierui/blocks sub-package (sibling of @frontierui/plugs). Migrate the 9 WE-only families that carry real impl (audit, background-task-surface, data-grid, lifecycle, master-detail, selection, stepper, tree-select, type-ahead) UP to @frontierui/blocks BEFORE deleting anything — the #170 migration-order guard (never delete a tree not yet content-equal upstream). Then delete WE's byte-identical vendored blocks/ and repoint WE demos/site to consume @frontierui/blocks as the #604 client. Per-family classification at build time: genuine impl migrates, aspirational/empty stays a fui:blocks.json contract with no sourcePath.
 
 ## Outgrew a clean batch slice (2026-06-15, batch pre-flight) — split into ordered sub-slices, back half blocked by #604
 
@@ -20,8 +20,8 @@ Claimed in a batch and scoped against **both** real trees (`webeverything/blocks
 
 - **`@frontierui/blocks` does not exist as a package.** FUI uses a `packages/*` npm-workspace layout
   (`packages/compiler`, `packages/vite-plugin`, …); `frontierui/blocks/` is a plain dir and there is **no
-  `plugs/package.json`** either. Creating the canonical sub-package means following those conventions:
-  a `package.json` + `exports` map, the root `workspaces` array, and `build:packages` wiring. Structural
+  `we:plugs/package.json`** either. Creating the canonical sub-package means following those conventions:
+  a `we:package.json` + `exports` map, the root `workspaces` array, and `build:packages` wiring. Structural
   work in FUI's build, with its own (small) conventions to settle.
 - **The delete + repoint half is large and entangled with a held item.** It deletes WE's ~21 vendored
   families, repoints **every** WE `blocks/…` import to the cross-repo `@frontierui/blocks`, and reconfigures
@@ -33,12 +33,12 @@ Claimed in a batch and scoped against **both** real trees (`webeverything/blocks
 
 ## Sliced into 5 children (2026-06-15, `/split 658`)
 
-Verified against both real trees (see `reports/2026-06-15-backlog-split-analysis.md`) and split along the
+Verified against both real trees (see `we:reports/2026-06-15-backlog-split-analysis.md`) and split along the
 agent-ready / blocked seam. This card is now a **storied epic**; its scope lives in the children. S2 was
 refined into 3 batchable units by the real file/test surface. DAG: `S1 → {S2a ∥ S2b ∥ S2c} → S3`, and
 S3 also `blockedBy #604`.
 
-- **#693 — S1.** Create `@frontierui/blocks` as a canonical FUI workspace sub-package (package.json +
+- **#693 — S1.** Create `@frontierui/blocks` as a canonical FUI workspace sub-package (we:package.json +
   exports + the `"blocks"` workspaces entry, the top-level `compiler` precedent), exporting the 14
   FUI-owned families. FUI-only; no WE change, no delete. `story · 3` — agent-ready now.
 - **#694 — S2a.** Migrate the 6 single-file WE-only families (`audit`, `lifecycle`, `master-detail`,

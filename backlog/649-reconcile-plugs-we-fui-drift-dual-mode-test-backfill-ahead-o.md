@@ -18,7 +18,7 @@ The #635 audit ([report](../reports/2026-06-14-plugs-runtime-audit.md)) found th
 
 ## Note — promote the #636 dual-mode gate to ERROR after the backfill
 
-The #636 conformance rule (`validatePlugDualMode` in [scripts/check-standards-rules.mjs](/scripts/check-standards-rules.mjs)) already errors on a plug missing a **plugged-mode** test, and **warns** on a missing **unplugged-mode** (non-invasive) test for the 9 not-yet-backfilled domains (webbehaviors is clean). Once this item backfills the unplugged-mode tests, flip `PLUG_UNPLUGGED_TEST_ENFORCED` to `true` so "missing either mode's tests" fully fails the gate — the warns become errors and the #606 "no plug may require plugged mode" invariant is fully automated. **(Re-scoped — see Resolution: the flip needs ALL 10 domains covered, not 3, so it is carved to [#726](/backlog/726-backfill-remaining-unplugged-mode-plug-tests-and-flip-plug-u/) along with the remaining 6 tests.)**
+The #636 conformance rule (`validatePlugDualMode` in [we:scripts/check-standards-rules.mjs](/scripts/check-standards-rules.mjs)) already errors on a plug missing a **plugged-mode** test, and **warns** on a missing **unplugged-mode** (non-invasive) test for the 9 not-yet-backfilled domains (webbehaviors is clean). Once this item backfills the unplugged-mode tests, flip `PLUG_UNPLUGGED_TEST_ENFORCED` to `true` so "missing either mode's tests" fully fails the gate — the warns become errors and the #606 "no plug may require plugged mode" invariant is fully automated. **(Re-scoped — see Resolution: the flip needs ALL 10 domains covered, not 3, so it is carved to [#726](/backlog/726-backfill-remaining-unplugged-mode-plug-tests-and-flip-plug-u/) along with the remaining 6 tests.)**
 
 ## Resolution (2026-06-15)
 

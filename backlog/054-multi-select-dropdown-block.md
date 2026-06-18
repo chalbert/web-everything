@@ -17,8 +17,8 @@ graduatedTo: block:multi-select-dropdown
 # Author the multi-select-dropdown block standard
 
 > **Resolved 2026-06-06 — graduated to the `multi-select-dropdown` block.** Authored as
-> `src/_includes/block-descriptions/multi-select-dropdown.njk` with its `blocks.json` entry, mirroring the
+> `we:src/_includes/block-descriptions/multi-select-dropdown.njk` with its `fui:blocks.json` entry, mirroring the
 > dropdown block (trait selection `model=multiple`, `selectionFollowsFocus=false`; multi-value form-control
 > surface). Original narrative preserved below.
 
-The multi-dropdown variant — a different trait selection over the droplist substrate (selection `model=multiple`, `selectionFollowsFocus=false`) — needs its own block.njk and blocks.json entry, parallel to the dropdown block. Seed content already exists in the trait-language report under "Multi-dropdown — one trait flip" and in the dropdown-trait-composition report under Step 2. The block should mirror dropdown.njk's structure: trait selection table, three altitudes, worked example, public API (a multi-value form-control surface — `.values` array, `FormData` repeating the name).
+The multi-dropdown variant — a different trait selection over the droplist substrate (selection `model=multiple`, `selectionFollowsFocus=false`) — needs its own we:block.njk and fui:blocks.json entry, parallel to the dropdown block. Seed content already exists in the trait-language report under "Multi-dropdown — one trait flip" and in the dropdown-trait-composition report under Step 2. The block should mirror we:dropdown.njk's structure: trait selection table, three altitudes, worked example, public API (a multi-value form-control surface — `.values` array, `FormData` repeating the name).

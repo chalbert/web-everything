@@ -20,9 +20,9 @@ This is **not** greenfield standard authoring — it ratifies a classification o
 ## The tree as it actually is (verified 2026-06-16)
 
 `frontierui/blocks/` has **24** dirs (23 + `__tests__`). FUI's impl manifest
-(`frontierui/src/_data/blocks.json`, 23 entries — filled to completeness by the resolved #737) already
+(`fui:frontierui/src/_data/blocks.json`, 23 entries — filled to completeness by the resolved #737) already
 carries a **`sourcePath`** field on every entry pointing at the dir it realizes
-(`src/_data/blocks.json:10` `"sourcePath": "blocks/stores/simple"`, etc.). Mapping each entry's `sourcePath`
+(`fui:src/_data/blocks.json:10` `"sourcePath": "blocks/stores/simple"`, etc.). Mapping each entry's `sourcePath`
 back to a top-level dir:
 
 | Top-level `blocks/` dir | Maps to WE spec(s) via `sourcePath` | Notes |
@@ -37,7 +37,7 @@ back to a top-level dir:
 | `master-detail/` | `master-detail` | 1:1 |
 | `navigation/` | `nav-list` (`blocks/navigation`) | **name-mismatch**; also registers `nav:section` (no spec — see below) |
 | `parsers/` | `handler-expression-parser`, `double-curly-bracket-parser`, `double-square-bracket-parser` | **multi-block** (3 specs in one dir); `call/`, `pipe/`, `value/` are internal sub-parsers (no spec) |
-| `renderers/` | — | **UNMAPPED** — `index.ts:11` re-exports the published `@frontierui/jsx-runtime` (#265); `renderers/data-grid/` is data-grid-internal render helpers |
+| `renderers/` | — | **UNMAPPED** — `we:index.ts:11` re-exports the published `@frontierui/jsx-runtime` (#265); `renderers/data-grid/` is data-grid-internal render helpers |
 | `resource-loader/` | `resource-loader` | 1:1 |
 | `router/` | `router` | 1:1 |
 | `selection/` | `selection` | 1:1 |
@@ -45,7 +45,7 @@ back to a top-level dir:
 | `stores/` | `simple-store` (`blocks/stores/simple`) | **name-mismatch** (stores → simple-store) |
 | `tabs/` | `tabs` | 1:1 |
 | `text-nodes/` | `interpolation-text-node` (`blocks/text-nodes/interpolation`) | **name-mismatch** |
-| `traits/` | — | **UNMAPPED** — FUI *trait* impls (Highlight/Polling/Revealable/Sortable), governed by a **separate** catalog (`src/_data/traits.json` + the `walkTraits` drift gate, `scripts/check-standards.mjs:95-116`) |
+| `traits/` | — | **UNMAPPED** — FUI *trait* impls (Highlight/Polling/Revealable/Sortable), governed by a **separate** catalog (`we:src/_data/traits.json` + the `walkTraits` drift gate, `we:scripts/check-standards.mjs:95-116`) |
 | `transient/` | `transient-component` | **name-mismatch** |
 | `tree-select/` | `tree-select` | 1:1 |
 | `type-ahead/` | `type-ahead` | 1:1 |
@@ -59,10 +59,10 @@ already cured by #737; the gate's job is to *keep* it cured.
 
 ## The two precedents the gate sits between
 
-1. **`check-demos` (`scripts/check-demos.mjs:42-77`)** — the precedent #706 explicitly cited. It is
-   **flat dir-based**: `readdirSync(demos/)` filtered to folders containing `index.html`, then "every folder
-   must have a `demos.json` entry." One level, no recursion, no registration parsing.
-2. **The trait gate (`frontierui/scripts/check-standards.mjs:95-116`)** — `walkTraits` recurses `blocks/**`,
+1. **`check-demos` (`we:scripts/check-demos.mjs:42-77`)** — the precedent #706 explicitly cited. It is
+   **flat dir-based**: `readdirSync(demos/)` filtered to folders containing `we:index.html`, then "every folder
+   must have a `we:demos.json` entry." One level, no recursion, no registration parsing.
+2. **The trait gate (`fui:frontierui/scripts/check-standards.mjs:95-116`)** — `walkTraits` recurses `blocks/**`,
    keys off files in a dir named `traits/`, and excludes infra with an **explicit set**
    (`TRAIT_NON_TRAIT = {index, types}`, plus skipping `__tests__`). Internal precedent that an explicit
    infra-exclusion list is the house style.
@@ -78,7 +78,7 @@ Surveyed CEM analyzer, Storybook, and Nx (sources in the `/research/` topic). On
   `@custom-elements-manifest/analyzer` discovers per *module → declaration* and resolves a tag name from the
   `customElements.define('x-foo', …)` call — **never** from filename/dirname; one module may emit many
   declarations. Storybook globs `*.stories.*` files (file-presence marker); the unit is the story file.
-  Nx discovers "projects" by a **marker file** (`project.json`/`package.json`), not a dir-name convention.
+  Nx discovers "projects" by a **marker file** (`we:project.json`/`we:package.json`), not a dir-name convention.
 - **Infra is excluded by *absence of the marker*, not primarily by a denylist** (denylists appear only as a
   secondary refinement — Nx negating a `workspaces` glob, Storybook narrowing its glob).
 - **Many units per dir/file is normal and handled** (CEM many declarations/module; Storybook many stories/dir).
@@ -100,12 +100,12 @@ Most of #783's surface is **not** a decision once classified:
 - **Mapping rule = `sourcePath`-anchored, not name-matched** — *forced invariant*. Coverage = "≥1 manifest
   entry whose `sourcePath` falls within the dir." Name-mismatch (stores→simple-store, navigation→nav-list,
   transient→transient-component, text-nodes→interpolation-text-node, audit→audit-trail) and multi-block
-  (parsers→3) are handled **by construction** — already true in `blocks.json`. A dir-name==id rule would be
+  (parsers→3) are handled **by construction** — already true in `fui:blocks.json`. A dir-name==id rule would be
   *broken* (it breaks every name-mismatch). Survey-confirmed (CEM resolves names off the `define()` marker,
   not the path). **Not a branch — already the case.**
 - **Infra exclude-set = {`__tests__`, `traits/`, `renderers/`}** — *forced invariant*. Each is broken to
-  include: `__tests__` is tests; `traits/` is double-governed by the separate `traits.json` gate
-  (`check-standards.mjs:95-116`) and carries no catalog block; `renderers/` is a published-package re-export
+  include: `__tests__` is tests; `traits/` is double-governed by the separate `we:traits.json` gate
+  (`we:check-standards.mjs:95-116`) and carries no catalog block; `renderers/` is a published-package re-export
   (`@frontierui/jsx-runtime`, #265) + data-grid-internal helpers, no standalone block. House style for the
   exclusion is an explicit set (cf. `TRAIT_NON_TRAIT`).
 - **No-WE-spec *dirs*** — at dir granularity, the *only* dirs with no WE spec are the three infra dirs above →
@@ -141,8 +141,8 @@ otherwise flat-dir is simpler than leaf recursion at the same coverage.
 
 ## Captured follow-ups (not fork branches)
 
-- **`nav:section` has no WE spec.** `NavSectionBehavior` (`blocks/navigation/NavSectionBehavior.ts`) is a real,
-  registered (`nav:section`) W3C-APG **Disclosure Navigation** behavior with **no** WE `blocks.json` entry. It
+- **`nav:section` has no WE spec.** `NavSectionBehavior` (`we:blocks/navigation/NavSectionBehavior.ts`) is a real,
+  registered (`nav:section`) W3C-APG **Disclosure Navigation** behavior with **no** WE `fui:blocks.json` entry. It
   is genuine impl-ahead-of-spec drift, invisible to a dir-based gate (its dir is covered by `nav-list`). →
   file a build: author the WE `nav-section` (disclosure-navigation) block spec + FUI manifest entry. Independent
   of the granularity ruling.
@@ -153,7 +153,7 @@ otherwise flat-dir is simpler than leaf recursion at the same coverage.
 
 - **Layer:** the gate is a **build-time devtools/check** (`check-standards` rule) — no runtime, no DI, no
   Protocol. The *completeness invariant* is WE-standard-owned (#706); the *denominator/gate code* is FUI's
-  instantiation, living in `frontierui/scripts/check-standards.mjs` (#784). No new Block/Intent/Protocol.
+  instantiation, living in `fui:frontierui/scripts/check-standards.mjs` (#784). No new Block/Intent/Protocol.
 - **Fixed mechanic vs dimension:** the invariant is a fixed mechanic (always on, #706). The denominator
   granularity is a fork because both branches are coherent end-states that cannot coexist as the gate's unit.
 - **Default = most permissive / least-coupling:** flat-dir is the most implementer-agnostic, lowest-coupling

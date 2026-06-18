@@ -30,10 +30,10 @@ Two of the three S10 surfaces were already in place from earlier slices; this ph
 - **Audit (already present)** — per-policy (`bookAudit`) and per-claim (`claimAudit`) immutable trails,
   both auto-fed by `auditLifecycle` on every lifecycle transition, rendered via the audit-timeline block.
 - **Notifications (added)** — the missing surface. New
-  [demos/auto-insurance/domain/notifications.ts](../demos/auto-insurance/domain/notifications.ts): a pure
+  [we:demos/auto-insurance/domain/notifications.ts](../demos/auto-insurance/domain/notifications.ts): a pure
   event→notification mapping (`policyStateNotification` for bound/referred/…, `claimStateNotification` for
   claim status) routing each to the relevant actor (policyholder/agent/underwriter/adjuster) with a
-  severity, plus an in-memory `NotificationStore`. [app.ts](../demos/auto-insurance/app.ts) adds a topbar
+  severity, plus an in-memory `NotificationStore`. [we:app.ts](../demos/auto-insurance/app.ts) adds a topbar
   bell + dropdown (unread badge, mark-read on open) and pushes a notification on every policy transition
   (bind → bound, issue → in-force, UW decision → referred/quoted/declined) and every claim transition.
   The notifications auto-feed off the SAME lifecycle transitions the audit trail records, so the two stay
@@ -41,7 +41,7 @@ Two of the three S10 surfaces were already in place from earlier slices; this ph
 
 **PLATFORM-GAP #358** — the `notification` standard is still `draft` (no shipping runtime), so the surface
 is hand-rolled and tagged as the gap this app drives (the second consumer after loan app A's S11),
-declared in `conformance.json` so the gate registers it as a GAP rather than an untracked bypass.
+declared in `we:conformance.json` so the gate registers it as a GAP rather than an untracked bypass.
 
 Gate: `check:standards` 0 errors; `check:app-conformance --app=demos/auto-insurance` **compliant** —
 12/13 OK, 0 FAIL, the lone GAP being `notification` (gap-consuming-draft, correctly tagged). Demo

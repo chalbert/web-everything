@@ -18,18 +18,18 @@ ratification.
 ## Concrete tree findings (the framing was stale)
 
 - **FUI *does* have a content primitive.** `@frontierui/jsx-runtime`
-  (`frontierui/packages/jsx-runtime/`) is described in its own `package.json` as "an HTML-mirror-dialect
-  JSX factory that builds real DOM." `JSXRenderer.ts` `createElement(type, props, …children)` constructs
+  (`frontierui/packages/jsx-runtime/`) is described in its own `we:package.json` as "an HTML-mirror-dialect
+  JSX factory that builds real DOM." `we:JSXRenderer.ts` `createElement(type, props, …children)` constructs
   **light-DOM** nodes (no shadow root). It is **used**, not dormant: `blocks/renderers/` re-exports it,
-  `demos/declarative-spa-jsx.tsx` exercises it, and the component-compiler has JSX surface fixtures. So
+  `we:demos/declarative-spa-jsx.tsx` exercises it, and the component-compiler has JSX surface fixtures. So
   "JSX is unused for content" is wrong — JSX *is* FUI's content-authoring path.
 - **But there is no server/string render anywhere in FUI.** `jsx-runtime` only builds DOM at runtime;
   there is no `renderToString`/SSR entry (`grep` of `packages/jsx-runtime/src` finds only
-  `document`/`createElement`). `blocks/view/ViewEngine.ts` is client-only (`document.startViewTransition`).
+  `document`/`createElement`). `we:blocks/view/ViewEngine.ts` is client-only (`document.startViewTransition`).
   This is the actual gap, not the authoring model.
 - **The reference impl is a different paradigm.** WE's `/protocols/` + capabilityMatrix render is
-  **11ty Nunjucks** server templates (`webeverything/src/protocols.njk`,
-  `src/capability-pages.njk`) — server-rendered static HTML, no client runtime. So "generalize WE's
+  **11ty Nunjucks** server templates (`we:webeverything/src/protocols.njk`,
+  `we:src/capability-pages.njk`) — server-rendered static HTML, no client runtime. So "generalize WE's
   render into FUI parts" is a paradigm port, not a copy.
 - **No consumer pins the form.** plateau-app aliases `@we/*` to webeverything directly and imports no
   `@frontierui/*`, so nothing external dictates the primitive shape.

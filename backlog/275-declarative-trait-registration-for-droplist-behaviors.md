@@ -37,7 +37,7 @@ string) without `<auto-complete>`, covered by tests; the existing programmatic c
 
 The 7 behaviors today are **plain classes** instantiated programmatically by `AutoComplete`
 (`new Selection()`, `new Filter()`, …) — **not** `CustomAttribute` trait mixins like
-`blocks/traits/Sortable.ts` (the `defineLazy`/`traitManifest` model). Making them declarative is a fork:
+`fui:blocks/traits/Sortable.ts` (the `defineLazy`/`traitManifest` model). Making them declarative is a fork:
 
 - **Wrap (recommended)** — a thin `CustomAttribute` adapter per behavior that instantiates the existing
   class and feeds it parsed options. **Additive**, so the programmatic composition `AutoComplete` relies
@@ -61,7 +61,7 @@ Took the split path. **The wrap/refactor fork is moot**: all 7 behaviors already
 adapter layer is needed — the real and only gap was value-string → options parsing.
 
 Delivered (locus **frontierui**):
-- `blocks/droplist/parseOptions.ts` — the reconstructed `@withOptions`/`FieldValue` value-string parser:
+- `fui:blocks/droplist/parseOptions.ts` — the reconstructed `@withOptions`/`FieldValue` value-string parser:
   a spec-driven grammar (`;`-separated positional + bare boolean flags + `key=value` with type coercion,
   forward-compatible ignores of unknown keys).
 - **Anchored** as the reference behavior — a static `optionSpec` + a guarded
@@ -70,7 +70,7 @@ Delivered (locus **frontierui**):
   invariant, asserted by a test.
 - `anchored` registered in the `vite.config` `traitEnforcer` map, so `<ul anchored="bottom-start;flip">`
   activates declaratively without `<auto-complete>`.
-- Tests: `blocks/droplist/__tests__/declarativeOptions.test.ts` (10 — parser grammar + Anchored
+- Tests: `fui:blocks/droplist/__tests__/declarativeOptions.test.ts` (10 — parser grammar + Anchored
   declarative activation + programmatic-unchanged guard + static-spec). Existing droplist suites
   (behaviors, AutoComplete) still green.
 

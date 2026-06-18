@@ -19,7 +19,7 @@ Slice 2 of the #497 ruling (Fork 1 → A). Extend the Frontier UI orchestrator t
 ## Progress
 
 - **Resolved 2026-06-14.** Extended `@frontierui/auto-update-orchestrator` (slice 1, #558) with the
-  **post-deploy rollout axis** — a new self-contained section in `src/index.ts`. Native-first /
+  **post-deploy rollout axis** — a new self-contained section in `fui:src/index.ts`. Native-first /
   impl-is-not-a-standard: WE declares the policy, the in-cluster controller executes it; the slice only
   *emits* config.
   - **`RolloutPolicy`** declared shape — staged `steps` (canary `setWeight` + `pauseMs`), `analysis`

@@ -29,7 +29,7 @@ evergreen app. Deferral governs *when* we ratify, not *whether* the fork is trac
 when slice A (the authoring + validation editor) is picked up as a near-term standalone win — at which
 point ratify the format here, then build slice A against it.
 
-Prior-art survey backing the recommendations: [`reports/2026-06-16-requirement-meta-schema-prior-art.md`](../reports/2026-06-16-requirement-meta-schema-prior-art.md)
+Prior-art survey backing the recommendations: [`we:reports/2026-06-16-requirement-meta-schema-prior-art.md`](../reports/2026-06-16-requirement-meta-schema-prior-art.md)
 (Gherkin · EARS · formal specs · spec-by-example, mapped onto the constellation's typed vocabulary).
 
 ## Forks to ratify
@@ -70,7 +70,7 @@ then:                                # outcome = a protocol-observable state/eve
   tier: L1
 ```
 
-Every reference (`intents.json#validation`, the `timing` dimension value, the `validation` protocol's L1
+Every reference (`we:intents.json#validation`, the `timing` dimension value, the `validation` protocol's L1
 observable state) is checkable against a live registry — that is "verifiable by construction." Authors write
 this through a plain-language EARS surface ("*When* a validated control loses focus *while* timing is on-blur,
 the invalid state shall be announced"); the typed record is what the editor validates and what compiles to a
@@ -106,7 +106,7 @@ The adapter itself is a **deferred build, not a fork** — filed as [#794](/back
 
 **Recommendation: (b).** The requirement is the higher-level authored source; the webcase is the derived
 executable artifact (1:N — one requirement can imply several observable checks). The existing
-[webcases](../webcases/) suite (e.g. [`driftCheck.ts`](../webcases/driftCheck.ts)) stays the single
+[webcases](../webcases/) suite (e.g. [`we:driftCheck.ts`](../webcases/driftCheck.ts)) stays the single
 machine-checkable target; requirements sit above it as the living-documentation source. Matches
 spec-by-example precedent — the documentation stays true because it runs.
 

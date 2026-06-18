@@ -24,9 +24,9 @@ A tool that **ingests a UI mockup — static (image, Figma) or interactive (prot
 > framing assumed the analyzer↔generator engine + neutral schema were unbuilt WE work. **They are not:**
 > the whole pipeline — analyzer registry → neutral `ComponentIR` → verify-gated generation — **already
 > shipped via sibling [#094](/backlog/094-ai-upgrader-tools/)** at
-> `blocks/renderers/upgrader/upgraderEngine.ts` (for the inverse, legacy-code → standard direction). The
+> `we:blocks/renderers/upgrader/upgraderEngine.ts` (for the inverse, legacy-code → standard direction). The
 > neutral-schema decision this item calls "the hard, lasting design work" is **resolved in that code**
-> (`upgraderEngine.ts:36` — *"#086 open decision, resolved"*), and the **vision** analyzer is a
+> (`we:upgraderEngine.ts:36` — *"#086 open decision, resolved"*), and the **vision** analyzer is a
 > **Plateau-served service per [#475](/backlog/475-design-ref-vision-gated-capture-qc-candidate-surface-quality/)**,
 > not WE work. So #086's residual WE scope is narrow and single-slice (below) — re-sized to a directly
 > batchable `story·3`; nothing to split.
@@ -36,12 +36,12 @@ A tool that **ingests a UI mockup — static (image, Figma) or interactive (prot
 The narrow WE-resident residual (below) is built — **one more input adapter on the #094 engine, no
 parallel engine, no parallel generator:**
 
-- **`SourceInput` extended** ([upgraderEngine.ts](../blocks/renderers/upgrader/upgraderEngine.ts)) with an
+- **`SourceInput` extended** ([we:upgraderEngine.ts](../blocks/renderers/upgrader/upgraderEngine.ts)) with an
   optional `mockup?: MockupSource` ({ kind: image|figma|prototype, ref, description? }); `code` is now
   optional (mockup-only inputs carry no code). The existing code analyzers got a one-line `input.code != null`
   routing guard each — clean, `tsc --noEmit` green repo-wide.
 - **Mockup analyzer + the no-leakage vision seam**
-  [`analyzers/mockupAnalyzer.ts`](../blocks/renderers/upgrader/analyzers/mockupAnalyzer.ts): `mockupAnalyzer(provider)`
+  [`we:analyzers/mockupAnalyzer.ts`](../blocks/renderers/upgrader/analyzers/mockupAnalyzer.ts): `mockupAnalyzer(provider)`
   routes on the `mockup` payload and lifts it to the **existing `ComponentIR`** via a swappable
   **`CustomVisionProvider`** — the same `customVisionProvider` seam #475/#396 share. Ships three providers:
   `createReferenceVisionProvider()` (deterministic, keyless **stand-in until the Plateau vision service ships**),
@@ -51,12 +51,12 @@ parallel engine, no parallel generator:**
 - **Generation + verify gate reused as-is.** The IR lowers through `generateComponentSource` and is gated by the
   unchanged `verifyUpgrade` (parse + fidelity round-trip + intent conformance) — a hallucinating provider is
   never `offered`.
-- **Unit tests** [`upgrader-mockup.test.ts`](../blocks/__tests__/unit/renderers/upgrader-mockup.test.ts) (5
+- **Unit tests** [`we:upgrader-mockup.test.ts`](../blocks/__tests__/unit/renderers/upgrader-mockup.test.ts) (5
   green): mockup → IR → generated → **offered**; routes without a language hint; omits an unknown intent
   ("flag, don't fake"); the verify gate refuses a hallucinated intent; a provider error is a diagnostic, never
   an exception. No regression across the existing upgrader suites (64 green).
-- **Demo** [`demos/mockup-to-standard-demo.html`](../demos/mockup-to-standard-demo.html) + `.ts` (registered in
-  demos.json): four mockup cards run **mockup → IR → generated `<component>` → verify badge → live custom
+- **Demo** [`we:demos/mockup-to-standard-demo.html`](../demos/mockup-to-standard-demo.html) + `.ts` (registered in
+  we:demos.json): four mockup cards run **mockup → IR → generated `<component>` → verify badge → live custom
   element**. Browser-verified green on :3000 (4/4 cards, 4 verify-OK, live elements mounted, no console errors).
 
 **Placement honored (#475 no-leakage):** the vision *impl capability* stays a Plateau-served service the tool
@@ -69,7 +69,7 @@ addition behind the same provider seam — added, never migrated to.
 The engine, registry, generator, and verify gate are reused as-is from #094. #086 adds a **mockup input
 adapter** to that existing pipeline:
 
-1. **Extend `SourceInput`** (`blocks/renderers/upgrader/upgraderEngine.ts`) to admit a **mockup** input
+1. **Extend `SourceInput`** (`we:blocks/renderers/upgrader/upgraderEngine.ts`) to admit a **mockup** input
    kind (static image / Figma / interactive prototype) alongside the existing `code`/`language` shape —
    one more `handles()`-routed branch on the existing `CustomAnalyzerRegistry`, *not* a new registry.
 2. **Register a mockup analyzer** that emits the **existing `ComponentIR`** — implemented as a **thin
@@ -104,8 +104,8 @@ Most design-to-code tools emit framework code and stop. The value here is that o
 These were "recommended" when authored; the #094 engine and the #475 placement have since **settled
 every one**, which is why the size dropped:
 
-- **Provider contract granularity** → **resolved in code.** The analyzer↔generator split is built; the analyzer is a registry-backed provider, generation reuses the shipped core (`upgraderEngine.ts`).
-- **Neutral structure schema** → **resolved in code.** Expressed in the standard's own `<component>` vocabulary as `ComponentIR` (`upgraderEngine.ts:36` flags this as the resolved #086 decision) — not a bespoke IR.
+- **Provider contract granularity** → **resolved in code.** The analyzer↔generator split is built; the analyzer is a registry-backed provider, generation reuses the shipped core (`we:upgraderEngine.ts`).
+- **Neutral structure schema** → **resolved in code.** Expressed in the standard's own `<component>` vocabulary as `ComponentIR` (`we:upgraderEngine.ts:36` flags this as the resolved #086 decision) — not a bespoke IR.
 - **Static vs. interactive as input adapters** → **seam built.** `SourceInput` + `handles()` routing already models input kinds behind one registry; the mockup kind is one more branch (see "What's left").
 - **Quality gate** → **built.** The `offered: false` round-trip/conformance verify gate is the shipped moat.
 - **Human-in-the-loop** → **placed by #475.** The neutral structure as the editable review surface is the #475 ruling (shared `customVisionProvider` review surface).

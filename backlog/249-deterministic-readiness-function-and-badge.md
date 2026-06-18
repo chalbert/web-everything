@@ -25,7 +25,7 @@ deterministically).
 
 ## The deterministic function
 
-The four-signal rubric in [docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md)
+The four-signal rubric in [we:docs/agent/backlog-workflow.md](docs/agent/backlog-workflow.md)
 splits into a deterministic core and two prose-only signals that cannot be made
 deterministic without lifting them to data:
 
@@ -43,10 +43,10 @@ tierA(item) =
 
 ## Build
 
-- [src/_data/backlog.js](src/_data/backlog.js): add a derived `tier` (`A`/`B`/`C`)
+- [we:src/_data/backlog.js](src/_data/backlog.js): add a derived `tier` (`A`/`B`/`C`)
   per the function above; `B` = `type: decision` that states a recommendation, `C` =
   everything else not-ready.
-- [src/backlog.njk](src/backlog.njk): render `tier` as a chip on each card and add a
+- [we:src/backlog.njk](src/backlog.njk): render `tier` as a chip on each card and add a
   filter facet ("agent-ready") alongside the existing type/status filters.
 
 ## Acceptance criteria
@@ -58,7 +58,7 @@ tierA(item) =
 
 ## Outcome (resolved 2026-06-09)
 
-- **Loader** ([src/_data/backlog.js](src/_data/backlog.js)): derives `item.tier` (`A`/`B`/`C`) right
+- **Loader** ([we:src/_data/backlog.js](src/_data/backlog.js)): derives `item.tier` (`A`/`B`/`C`) right
   after the `blockers` array is resolved, from **structured fields only** — `status`, `type`, and each
   blocker's `status` — so there is no body-text parsing in the path and the result is identical across
   rebuilds (verified by a double-build diff). The two prose signals from the rubric (body verbs, whether
@@ -71,11 +71,11 @@ tierA(item) =
   - A — `issue`/`idea` with every blocker `resolved` (nothing structural blocks a start).
   - B — a `decision` (the "states a recommendation" nuance is prose, so the structural proxy is the type).
   - C — everything else open: an `issue`/`idea` with an unresolved blocker, or a `review`.
-- **Index UI** ([src/backlog.njk](src/backlog.njk)): a `tierBadge` macro renders the chip in each card's
+- **Index UI** ([we:src/backlog.njk](src/backlog.njk)): a `tierBadge` macro renders the chip in each card's
   badge row (green `Agent-ready` / amber `Decision-ready` / slate `Not ready`), with a `title` tooltip
   stating it's a heuristic from structured fields, **not authoritative**. A new "agent-readiness" filter
   group (`data-tier-chip`) sits alongside status/type/size; toggling off B and C filters to Tier A.
-- **Filter JS** ([src/assets/js/home-display.js](src/assets/js/home-display.js)): wired `data-tier-chip`
+- **Filter JS** ([we:src/assets/js/home-display.js](src/assets/js/home-display.js)): wired `data-tier-chip`
   parallel to the existing size facet (own localStorage key, default all-on). A card with no `data-tier`
   (non-open) always passes the tier facet, so filtering to Tier A narrows the open pool without hiding
   active/resolved cards.

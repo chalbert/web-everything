@@ -19,7 +19,7 @@ The shape decision [#652](/backlog/652-assembler-emit-format-its-relationship-to
 2026-06-15** (Fork 1: plain-markup ejectable payload, CEM descriptor + `registry-item` wrapper as
 coexisting exports; Fork 2: standalone devtools surface reading the shared `workbench*` vocabulary + a
 WE-owned preset registry in the shadcn `registry-item` shape; served tool surface → plateau-app per #091),
-and `/slice 646` (run [reports/2026-06-15-backlog-split-analysis.md](../reports/2026-06-15-backlog-split-analysis.md))
+and `/slice 646` (run [we:reports/2026-06-15-backlog-split-analysis.md](../reports/2026-06-15-backlog-split-analysis.md))
 then decomposed the epic into:
 
 - **[#667](/backlog/667-preset-registry-standard-presets-surface-reveal-nav-preset-1/)** — slice A, foundational
@@ -32,6 +32,7 @@ then decomposed the epic into:
 - **[#660](/backlog/660-optional-assembler-team-component-library-integration-submit/)** — future, optional
   assembler↔team-library integration (submit PRs, update components in place); blocked on #667.
 
-**Preset taxonomy is not a fork** — reveal-nav is preset #1 (#667); the rest (command palette, filter bar,
-hovercard, toolbar, date-range) is batch-time volume authored one `task` each *after* #667 establishes the
-pattern. **date-range needs a date primitive (intent) minted first** — none exists yet.
+**Preset taxonomy is not a fork** — reveal-nav is preset #1 (#667); the rest is batch-time volume authored
+one `task` each *after* #667 establishes the pattern. Now carved (2026-06-17): command palette **#856**,
+filter bar **#857**, hovercard **#858**, toolbar **#859**, date-range **#860**. **date-range (#860) needs a
+date primitive (intent) minted first** — verify at build (the #713 temporal-block decision has since resolved).

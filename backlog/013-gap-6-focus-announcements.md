@@ -57,7 +57,7 @@ re-point `modal`.
 
 - **Status:** resolved — `focus-containment` intent authored; `modal` re-pointed; validator green.
 - **Branch:** docs/standard-authoring-workflow
-- **Done:** Added the `focus-containment` intent to `src/_data/intents.json` (dimensions
+- **Done:** Added the `focus-containment` intent to `we:src/_data/intents.json` (dimensions
   `trap` / `background` (native `inert`) / `initialFocus` / `restore`, with research + interface
   protocol). Re-pointed the `modal` intent to compose it (dropped its inline trap/restore block and
   inline `FocusStrategy` interface; `mode: modal` defaults to trap+inert, `modeless` to none).

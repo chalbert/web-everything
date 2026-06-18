@@ -12,7 +12,7 @@ The essay (§ *Mocks*, report lines 786–808) lays down a hard rule — **no mo
 
 | Tool | Layer | Definition artifact | Portable? | Contract role |
 |---|---|---|---|---|
-| **MSW** (Mock Service Worker) | Service Worker (browser) / Node interceptor — in-process, no server | JS/TS handlers (`http.get(...)` → `HttpResponse.json()`) | **No** — handlers are code, not data | none (pure mock) |
+| **MSW** (Mock Service Worker) | Service Worker (browser) / Node interceptor — in-process, no server | JS/TS handlers (`http.get(...)` → `we:HttpResponse.json()`) | **No** — handlers are code, not data | none (pure mock) |
 | **Mockoon** | Standalone local HTTP server (desktop GUI + CLI) | A single **Mockoon JSON** environment file (routes, latency, rules, proxy) | **Yes** — JSON committed to repo | imports OpenAPI; no drift check |
 | **Prism** (Stoplight) | Standalone HTTP server (Docker) | **OpenAPI 2/3.0/3.1** spec — mock is *derived*, not authored | **Yes, but it IS OpenAPI** | validation proxy mode (request/response vs spec) |
 | **WireMock** | Standalone Java server / Docker / JUnit lib | **Stub mappings** JSON (request match → response, delays, faults, templating) | **Yes** — JSON stub files | record/playback; no consumer contract |

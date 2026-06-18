@@ -47,7 +47,7 @@ with a per-usage re-enable. The disable-counterpart to #202's per-usage enable.
 - **`<trait>-active` override** — runtime honouring of the per-usage re-enable; conflict-free with the
   value slot and `<trait>-delivery`.
 - **Spec** — a *The `inert` Dead-Zone* section on `/projects/webtraits/`
-  (`src/_data/traits.json` + `project-webtraits.njk`): native `inert` rationale, auto-dormant scoping,
+  (`we:src/_data/traits.json` + `we:project-webtraits.njk`): native `inert` rationale, auto-dormant scoping,
   the `<trait>-active` override, and the shared activation lifecycle.
 - **Conformance demo + e2e (DoD)** — an interaction-driven trait inside an `inert` region that stays
   dormant, re-enabled by `<trait>-active`, and reactivates when the region flips live; an
@@ -78,7 +78,7 @@ trait honours the dead-zone.
   these hooks, so a bare `activate()` would have wrongly invoked the tab method. State flag is
   `isActivated` (the `RouteLinkBehavior.isActive` getter is left untouched).
 
-**Registry machinery — Frontier UI `plugs/webbehaviors/CustomAttributeRegistry.ts` (the impl fork; WE
+**Registry machinery — Frontier UI `we:plugs/webbehaviors/CustomAttributeRegistry.ts` (the impl fork; WE
 registry stays the clean base).** `#addAttribute` decides activated state right after connect via
 `#shouldBeActivated`; `#removeAttribute` deactivates before teardown. `#shouldBeActivated`: ambient →
 always activated; interaction-driven → dormant inside `inert` (`closest('[inert]') !== null`, since
@@ -96,12 +96,12 @@ won't mis-match the `-active` suffix.
 `Polling` trait (`activationSurface = 'ambient'`, ticks `data-poll-count` on an interval) as the
 "unaffected" counter-example. `polling` wired into the Enforcer `traitMap`. Demo
 `demos/inert-dead-zone.{html,ts}` (zone starts `inert`: plain `sortable` dormant, `sortable sortable-active`
-live, `polling` ticking; a button flips `inert`). E2e `plugs/__tests__/e2e/inert-dead-zone.spec.ts`
+live, `polling` ticking; a button flips `inert`). E2e `fui:plugs/__tests__/e2e/inert-dead-zone.spec.ts`
 asserts the markers inside `inert`, re-activation on flip-live, re-dormancy on flip-back, and the
-ambient tick advancing throughout. 7 new unit tests in `CustomAttributeRegistry.inert.test.ts`.
+ambient tick advancing throughout. 7 new unit tests in `fui:CustomAttributeRegistry.inert.test.ts`.
 
 **Spec.** New *The `inert` Dead-Zone — a behaviour-activation scope* section on `/projects/webtraits/`
-(`src/_data/traits.json` + `project-webtraits.njk`): native-`inert` rationale, auto-dormant scoping by
+(`we:src/_data/traits.json` + `we:project-webtraits.njk`): native-`inert` rationale, auto-dormant scoping by
 activation surface, the `<trait>-active` override, and the connected≠activated lifecycle (noting #221
 consumes it).
 
@@ -124,7 +124,7 @@ and on `inert` flips, but not on a bare `-active` add/remove with `inert` unchan
 **Done:** (1) `activatedCallback`/`deactivatedCallback`/`isActivated`/`activationSurface` on
 `CustomAttribute` (both repos, identical); (2) active-state + inert `MutationObserver` in the FUI
 registry; (3) `Sortable` refactor + ambient `Polling` + vite `traitMap`; (4) `inert-dead-zone` demo +
-e2e; (5) 7 unit tests; (6) spec section in `traits.json` + `project-webtraits.njk`; (7) gates green —
+e2e; (5) 7 unit tests; (6) spec section in `we:traits.json` + `we:project-webtraits.njk`; (7) gates green —
 FUI 93 webbehaviors unit + 30 enforcer + 108 e2e, `tsc` clean; WE 63 unit + `check:standards` 0 errors;
 spec page renders.
 
@@ -132,4 +132,4 @@ spec page renders.
 [#221](/backlog/221-behaviour-activation-gated-on-visibility/) (visibility gate) to consume.
 Follow-up [#226](/backlog/226-trait-active-runtime-reevaluation/).
 
-**Graduated to** `frontierui/plugs/webbehaviors/CustomAttributeRegistry.ts` — activation lifecycle (activatedCallback/deactivatedCallback/isActivated/activationSurface) + inert dead-zone + Polling trait + inert-dead-zone demo/e2e + traits.json spec.
+**Graduated to** `fui:frontierui/plugs/webbehaviors/CustomAttributeRegistry.ts` — activation lifecycle (activatedCallback/deactivatedCallback/isActivated/activationSurface) + inert dead-zone + Polling trait + inert-dead-zone demo/e2e + we:traits.json spec.

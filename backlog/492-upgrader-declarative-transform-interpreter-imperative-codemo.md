@@ -16,7 +16,7 @@ Build slice (b) of the ratified #191 version-migration upgrader (Fork 2 = declar
 
 ## Progress
 
-Resolved 2026-06-13 — slice (b) built as [transformInterpreter.ts](../blocks/renderers/upgrader/transformInterpreter.ts), executing the ordered plan slice (a) produces.
+Resolved 2026-06-13 — slice (b) built as [we:transformInterpreter.ts](../blocks/renderers/upgrader/transformInterpreter.ts), executing the ordered plan slice (a) produces.
 
 **Declarative-first interpreter.** Four native change-kinds, each interpreted via a DOM round-trip
 (the engine's `normalizeHtml` model). The held-open #191 sub-decision (which vocabulary) is resolved by
@@ -40,7 +40,7 @@ author's declared hash. Missing / mismatched / throwing → refused with a diagn
 
 **Descriptor.** Restructured the planner's migration linkage `MigrationRef` into a discriminated union
 `DeclarativeMigration | ImperativeMigration` (`mode`), the declarative vocabulary types living beside the
-#102-mirrored descriptor in [versionMigrationPlanner.ts](../blocks/renderers/upgrader/versionMigrationPlanner.ts).
+#102-mirrored descriptor in [we:versionMigrationPlanner.ts](../blocks/renderers/upgrader/versionMigrationPlanner.ts).
 `applyMigrationPlan()` threads each step's output into the next — the version-gated run loop executed.
 
 Gate: `check:standards` green; 18 new/updated unit tests pass (full renderer suite 630 green, 2 skipped).

@@ -21,7 +21,7 @@ over a 5k-row collection); the build can't proceed until its home is chosen. Thi
 **ratify-shipped-code** — `applyPipeline`, `DataTableBehavior` and `PaginationBehavior` already ship;
 the only gap is the missing *seam owner* between them. The owed prior-art pass is published at
 [/research/collection-operations-coordinator](/research/collection-operations-coordinator/) (report:
-[2026-06-13-collection-operations-coordinator.md](reports/2026-06-13-collection-operations-coordinator.md)),
+[we:2026-06-13-collection-operations-coordinator.md](reports/2026-06-13-collection-operations-coordinator.md)),
 and it **reshaped the item from one fork into two**: the home question (block vs composition) is
 near-unanimous in the industry, but a second axis the item didn't name — *what shape* the standalone
 primitive takes — is where the real signal sits. **Two forks below, each with a bold recommended
@@ -63,18 +63,18 @@ The concern decomposes into two orthogonal axes plus one already-settled non-for
   documented pattern each consumer wires? The wiring is identical for every consumer and getting the
   stage order wrong *is* #369's bug: data-table's `applySortClick` sorts only the rows it was handed,
   and `applyPipeline` deliberately **no-ops the page stage** ("it is the Pagination block's job —
-  compose, never merge") — [renderDataTable.ts:143-173](blocks/renderers/data-table/renderDataTable.ts#L143).
+  compose, never merge") — [we:renderDataTable.ts:143-173](blocks/renderers/data-table/renderDataTable.ts#L143).
   So someone must run the *whole* pipeline over the full set, then hand the current slice to the table.
 - **Axis 2 — shape.** *If* it's a primitive (Axis 1 = A), is it a rendered **block** (markup of its
   own) or a headless **behavior** (no markup; orchestrates the two blocks that have markup)? WE already
   ships both halves as headless behaviors with optional element wrappers:
-  [DataTableBehavior.ts:26-104](blocks/renderers/data-table/DataTableBehavior.ts#L26) emits
-  `data-table-change`; [PaginationBehavior.ts:1-12](blocks/renderers/pagination/PaginationBehavior.ts#L1)
+  [we:DataTableBehavior.ts:26-104](blocks/renderers/data-table/DataTableBehavior.ts#L26) emits
+  `data-table-change`; [we:PaginationBehavior.ts:1-12](blocks/renderers/pagination/PaginationBehavior.ts#L1)
   owns `PageState` and emits `pagination-change` "so a consumer can re-window its collection". The
   survey found the dominant industry home is exactly this headless-instance shape (TanStack "table
   instance", AG Grid "row model"), not a rendered monolith and not docs-only.
 - **Non-fork — execution strategy.** Client (in-memory `applyPipeline`) vs server (params → Loader) is
-  **not** a decision: the collection-operations intent is **UX-only** (`src/_data/intents.json`
+  **not** a decision: the collection-operations intent is **UX-only** (`we:src/_data/intents.json`
   `collection-operations`), so the coordinator picks the strategy at runtime — it ties to the Technical
   Configurator. Both supported by default; most-permissive default (client when the full set is in
   memory, server when a Loader is wired). See *Not a fork* below.
@@ -112,7 +112,7 @@ leading library recommends.
 *Note — not a reopening of #036:* #036 (resolved → the `pagination` block,
 `graduatedTo: block:pagination`) realized only the **page** dimension; it does **not** own this
 cross-block coordinator. A is a *new* primitive, not a reopening
-([036-collection-operations-block-implementation.md](/backlog/036-collection-operations-block-implementation/)).
+([we:036-collection-operations-block-implementation.md](/backlog/036-collection-operations-block-implementation/)).
 
 ## Fork 2 — shape: headless behavior vs rendered block
 
@@ -127,7 +127,7 @@ markup) may be the wrong mold.
   `DataTableBehavior`/`DataTableElement` and `PaginationBehavior` convention exactly**, and matches the
   dominant industry home (TanStack "table instance", AG Grid "row model" — headless instances that own
   the pipeline and delegate rendering). Compose-don't-merge: the page stage stays owned by pagination's
-  `PageState` ([renderPagination.ts:26-57](blocks/renderers/pagination/renderPagination.ts#L26)); the
+  `PageState` ([we:renderPagination.ts:26-57](blocks/renderers/pagination/renderPagination.ts#L26)); the
   coordinator owns only the *order* + re-windowing.
 - **B — a rendered coordinator block.** Mint a full block (renderer + audit + DOM). Heavier, and it
   has no markup to render — it would either duplicate the table/pagination DOM (MUI's fused-monolith
@@ -176,15 +176,15 @@ Applied to the coordinator primitive (full detail in the
 
 ## Concrete refs
 
-- [369-collection-operations-coordinator.md](/backlog/369-collection-operations-coordinator/) — the
+- [we:369-collection-operations-coordinator.md](/backlog/369-collection-operations-coordinator/) — the
   gap + open questions (lines 31-37); `blockedBy: ["452"]`.
-- [036-collection-operations-block-implementation.md](/backlog/036-collection-operations-block-implementation/)
+- [we:036-collection-operations-block-implementation.md](/backlog/036-collection-operations-block-implementation/)
   — resolved; graduated to the `pagination` block (page dimension only), `graduatedTo: block:pagination`.
 - `applyPipeline` (page stage no-op by design):
-  [blocks/renderers/data-table/renderDataTable.ts:143-196](blocks/renderers/data-table/renderDataTable.ts#L143).
+  [we:blocks/renderers/data-table/renderDataTable.ts:143-196](blocks/renderers/data-table/renderDataTable.ts#L143).
 - Headless behavior convention to mirror:
-  [DataTableBehavior.ts:26-104](blocks/renderers/data-table/DataTableBehavior.ts#L26),
-  [PaginationBehavior.ts:1-12](blocks/renderers/pagination/PaginationBehavior.ts#L1).
+  [we:DataTableBehavior.ts:26-104](blocks/renderers/data-table/DataTableBehavior.ts#L26),
+  [we:PaginationBehavior.ts:1-12](blocks/renderers/pagination/PaginationBehavior.ts#L1).
 - Prior-art survey: [report](reports/2026-06-13-collection-operations-coordinator.md) ·
   [/research/ topic](/research/collection-operations-coordinator/).
 - Surfaced by app A: [#317](/backlog/317-exercise-app-loan-origination/).

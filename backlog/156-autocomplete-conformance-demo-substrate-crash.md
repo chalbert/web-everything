@@ -14,7 +14,7 @@ crossRef: { url: /blocks/autocomplete/, label: Autocomplete block }
 # Autocomplete conformance demo crashes on load — `<auto-complete>` substrate never builds in the browser
 
 The `<auto-complete>` conformance playground (`plateau/src/auto-complete-demo.{html,ts}`, served at
-`:3011/auto-complete-demo.html`) throws on first card and never finishes booting
+`:we:3011/auto-complete-demo.html`) throws on first card and never finishes booting
 (`window.autoCompleteDemoReady` stays `undefined`). The thrown error is
 `TypeError: Cannot read properties of null (reading 'addEventListener')` from `instrument()` —
 `el.querySelector('input')` returns `null` because **the element's substrate is never built**: a
@@ -26,7 +26,7 @@ after the element is connected to the document.
 This is **not** specific to any one card — it breaks card 1 (the baseline async source) first, so the
 diacritic card and the new failing-source card (#148) never render either. It surfaced while
 verifying #148 in-browser; the #148 contract itself is proven by the happy-dom unit/integration
-tests (`Filter.test.ts` + `LiveStatus.test.ts`), but the playground can't visually demonstrate any
+tests (`we:Filter.test.ts` + `we:LiveStatus.test.ts`), but the playground can't visually demonstrate any
 autocomplete behavior until this is fixed.
 
 Notable secondary symptom: creating + connecting an `<auto-complete>` from a Playwright
@@ -36,7 +36,7 @@ otherwise tear down the page rather than (or in addition to) silently failing to
 
 Close the loop:
 
-- Reproduce against `:3011/auto-complete-demo.html` and determine why `connectedCallback` doesn't
+- Reproduce against `:we:3011/auto-complete-demo.html` and determine why `connectedCallback` doesn't
   build (or its output doesn't persist): is the upgrade deferred, is connectedCallback throwing
   silently as a custom-element reaction (errors route to `window.onerror`, not the caller), or does
   connecting trigger a navigation/reload that wipes the appended substrate?
@@ -55,8 +55,8 @@ Spun off from #148 (filter error channel) during in-browser verification.
   `connectedCallback` never ran, because plateau's runtime had **no lifecycle path for autonomous
   custom elements** (the stand-in only delegated to customized built-ins via `is=`). Not a navigation/
   reload; the substrate simply was never built.
-- **Fix (#160):** tag-keyed rehydration in `getStandInElement.ts`, `createElement` returning the real
-  class (`Document.patch.ts`), and `connectedCallback` driven from `pathInsertionMethods.ts`. The demo
+- **Fix (#160):** tag-keyed rehydration in `we:getStandInElement.ts`, `createElement` returning the real
+  class (`we:Document.patch.ts`), and `connectedCallback` driven from `we:pathInsertionMethods.ts`. The demo
   now boots the real runtime green (`autoCompleteDemoReady === true`, every card renders a live input +
   listbox, zero console errors — verified via Playwright).
 - **Secondary symptom** (Playwright `evaluate` returning `undefined` for objects/arrays on patched

@@ -33,7 +33,7 @@ fix-vs-feature flavour. Confidence moved from "lean" to "strong" after the surve
 
 | File | Action |
 | --- | --- |
-| `src/_data/researchTopics.json` | Added `backlog-kind-axis` topic entry |
-| `src/_includes/research-descriptions/backlog-kind-axis.njk` | Research write-up |
-| `backlog/466-...md` | Rewritten to prepared-fork shape; `preparedDate` stamped |
-| `reports/2026-06-13-backlog-kind-axis.md` | This report |
+| `we:src/_data/researchTopics.json` | Added `backlog-kind-axis` topic entry |
+| `we:src/_includes/research-descriptions/backlog-kind-axis.njk` | Research write-up |
+| `we:backlog/466-...md` | Rewritten to prepared-fork shape; `preparedDate` stamped |
+| `we:reports/2026-06-13-backlog-kind-axis.md` | This report |

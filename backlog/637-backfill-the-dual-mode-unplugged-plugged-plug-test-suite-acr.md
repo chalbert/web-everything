@@ -19,7 +19,7 @@ Author the missing automated tests so every plug proves it works in both unplugg
 
 Claimed in a batch and inspected before any edit. This "backfill across **all** plugs" overlaps with
 **[#649](/backlog/649-reconcile-plugs-we-fui-drift-dual-mode-test-backfill-ahead-o/)**, which the dual-mode
-gate rule itself names as the backfill owner (`validatePlugDualMode` in `scripts/check-standards-rules.mjs`:
+gate rule itself names as the backfill owner (`validatePlugDualMode` in `we:scripts/check-standards-rules.mjs`:
 *"#649 backfill target"*). #649 reconciles the WE/FUI plug **drift** (porting WE-ahead canonical fixes into
 FUI, deciding the two WE-only domains' home) **and** backfills the 3 highest-impact domains' dual-mode tests —
 and it is `blockedBy #170` (the reversal). Backfilling all plugs **now**, against the current divergent
@@ -33,21 +33,21 @@ pool unworked.
 ## Progress (2026-06-15, batch-2026-06-15)
 
 After #649 resolved, the remaining domains warning under `validatePlugDualMode`
-([scripts/check-standards-rules.mjs](../scripts/check-standards-rules.mjs)) were six: `webcontexts`,
+([we:scripts/check-standards-rules.mjs](../scripts/check-standards-rules.mjs)) were six: `webcontexts`,
 `webdirectives`, `webexpressions`, `webstates` (stable shared domains) plus `webguards`, `webvalidation`.
 
 **Backfilled the four stable domains' unplugged-mode tests** (the gate detects an `*.unplugged.test.ts`
 that imports the non-invasive surface and exercises the domain):
-- [plugs/webstates/__tests__/unit/webstates.unplugged.test.ts](../plugs/webstates/__tests__/unit/webstates.unplugged.test.ts)
+- [we:plugs/webstates/__tests__/unit/webstates.unplugged.test.ts](../plugs/webstates/__tests__/unit/webstates.unplugged.test.ts)
   — scoped `CustomStoreRegistry` define/get, a store run as a plain library (state/subscribe/unsubscribe),
   two registries independent (webstates patches no global).
-- [plugs/webcontexts/__tests__/unit/webcontexts.unplugged.test.ts](../plugs/webcontexts/__tests__/unit/webcontexts.unplugged.test.ts)
+- [we:plugs/webcontexts/__tests__/unit/webcontexts.unplugged.test.ts](../plugs/webcontexts/__tests__/unit/webcontexts.unplugged.test.ts)
   — asserts `isPatched()` stays false and `Node.prototype.contexts` is absent (the `Node.contexts` patch
   is never applied), plus scoped define/get + plain context value get/set/has.
-- [plugs/webexpressions/__tests__/unit/webexpressions.unplugged.test.ts](../plugs/webexpressions/__tests__/unit/webexpressions.unplugged.test.ts)
+- [we:plugs/webexpressions/__tests__/unit/webexpressions.unplugged.test.ts](../plugs/webexpressions/__tests__/unit/webexpressions.unplugged.test.ts)
   — scoped `CustomTextNodeRegistry` define/get, a `CustomTextNode` subclass constructed as a plain `Text`
   node (clone handlers never registered), two registries independent.
-- [plugs/webdirectives/__tests__/unit/webdirectives.unplugged.test.ts](../plugs/webdirectives/__tests__/unit/webdirectives.unplugged.test.ts)
+- [we:plugs/webdirectives/__tests__/unit/webdirectives.unplugged.test.ts](../plugs/webdirectives/__tests__/unit/webdirectives.unplugged.test.ts)
   — static/deterministic: `CustomTemplateDirective` extends native `HTMLTemplateElement`, a subclass
   derives with both chains intact, and the native `HTMLTemplateElement.prototype` carries no bolted-on
   lifecycle (non-invasive). (Constructing a customized built-in needs `customElements.define`, a global

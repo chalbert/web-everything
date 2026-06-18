@@ -61,20 +61,20 @@ previousValue }); default writes the value in-place. A host `preventDefault()`s 
 mode model.
 
 **Done:**
-- Pure mode engine + audit — `blocks/renderers/data-grid/editableGrid.ts` (`editAction`,
+- Pure mode engine + audit — `fui:blocks/renderers/data-grid/editableGrid.ts` (`editAction`,
   `auditEditableGrid`, `EDIT_*` keys, event-detail types).
-- Behavior — `blocks/data-grid/DataGridEditBehavior.ts` (`grid:cell-edit`) + `registerDataGridEdit.ts`;
-  wired into `plugs/bootstrap.ts`.
-- Fixtures — `blocks/renderers/data-grid/__fixtures__/editable-grid-cases.ts` (enter→commit, F2→cancel,
+- Behavior — `fui:blocks/data-grid/DataGridEditBehavior.ts` (`grid:cell-edit`) + `fui:registerDataGridEdit.ts`;
+  wired into `we:plugs/bootstrap.ts`.
+- Fixtures — `fui:blocks/renderers/data-grid/__fixtures__/editable-grid-cases.ts` (enter→commit, F2→cancel,
   arrows-edit-field invariant, header-not-editable).
-- Tests — `blocks/__tests__/unit/renderers/editable-grid.test.ts` (12) +
-  `blocks/__tests__/unit/data-grid/DataGridEditBehavior.test.ts` (17); full suite 1547 pass / 7 skip.
+- Tests — `we:blocks/__tests__/unit/renderers/editable-grid.test.ts` (12) +
+  `fui:blocks/__tests__/unit/data-grid/DataGridEditBehavior.test.ts` (17); full suite 1547 pass / 7 skip.
 - Demo — `demos/data-grid-demo.{ts,css,html}` extended with an editable section (fixture replay cards +
   a live editable grid); verified live in-browser (14/14 badges green, commit/cancel/header all correct,
   0 console errors).
-- Docs — block page `data-grid.njk` (new "Editable cells" section + usage/scope), `blocks.json` (exports,
+- Docs — block page `we:data-grid.njk` (new "Editable cells" section + usage/scope), `fui:blocks.json` (exports,
   `apgEditableGrid` standard, `editingComposesNotForks` decision, `withEditableCells` trait),
-  `demos.json` description. `check:standards` 0 errors.
+  `we:demos.json` description. `check:standards` 0 errors.
 
 **Next:** none — resolved. Follow-ups filed as #157 (auto-upgrade e2e guard), #158 (typed editors +
 validation), #159 (aria-readonly cell editability).

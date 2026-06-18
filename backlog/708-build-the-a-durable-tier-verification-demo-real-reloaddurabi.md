@@ -18,21 +18,21 @@ Implement the A′ ruling from #675: a SW-registered demo page under demos/ (Vit
 
 ## Progress (2026-06-15, batch-2026-06-15) — A′ landed, both asserts green
 
-- **Demo** `demos/durable-tier-verification/` — `index.html` hosts the real `<background-tasks durability="reload">`;
-  `durable-tier-verification.ts` imports the **real** `reloadDurabilityAdapter`
+- **Demo** `demos/durable-tier-verification/` — `we:index.html` hosts the real `<background-tasks durability="reload">`;
+  `we:durable-tier-verification.ts` imports the **real** `reloadDurabilityAdapter`
   (`registerDurableTransfer`/`rehydrateDurableTasks`/`isBackgroundFetchAvailable`) and exposes a small
   `window.__durable` surface the spec drives. The **only** double is a `backgroundFetch` manager shadowed
-  onto the real registration via `Object.defineProperty`, backed by `durable-sw.js` (a real classic SW that
+  onto the real registration via `Object.defineProperty`, backed by `we:durable-sw.js` (a real classic SW that
   outlives the page, so a transfer survives the hard reload). `getRegistration` mirrors the adapter's own
   `defaultGetRegistration` (`navigator.serviceWorker.ready`) — it is not exported, so the one line is replicated.
-- **Spec** `blocks/__tests__/e2e/durable-tier-verification.sw.spec.ts` (runs under the `chromium-sw`
+- **Spec** `we:blocks/__tests__/e2e/durable-tier-verification.sw.spec.ts` (runs under the `chromium-sw`
   project, absolute :3000 URLs per the relaxed premise). **Green (2/2, real Chromium):**
   (1) real `bgFetchSupported === true` → `registerDurableTransfer` (`durable:true`) → `page.reload()` →
   `rehydrateDurableTasks` recovers `task-export` as a determinate entry; (2) forced-unavailable
   (`delete ServiceWorkerRegistration.prototype.backgroundFetch` via `addInitScript`) → real
   `isBackgroundFetchAvailable()===false` → adapter degrades (`durable:false, fallbackReason:'unsupported'`),
   the element re-arms via the `data-durability-fallback` observable.
-- **Wiring/gate:** registered in `src/_data/demos.json` (check:demos green); `check:standards` 0 errors;
+- **Wiring/gate:** registered in `we:src/_data/demos.json` (check:demos green); `check:standards` 0 errors;
   the /demos/ 11ty index renders the new card.
 - **Manual residual** (unchanged): a real Background-Fetch *network* transfer surviving reload — non-deterministic
   in automation — stays documented, not asserted.

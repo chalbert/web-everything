@@ -14,7 +14,7 @@ crossRef: { url: /backlog/409-decision-master-detail-intent-vs-project/, label: 
 > [#409](/backlog/409-decision-master-detail-intent-vs-project/): master-detail is a **standalone
 > `master-detail` intent + a coordinator block — NOT a new project** (no provider/schema; it composes
 > selection / layout / loader / live-region-status / focus-delegation / navigation). The **`master-detail`
-> block** (`blocks/master-detail/MasterDetailBehavior.ts`, active, 5 unit tests) COMPOSES the shipping
+> block** (`fui:blocks/master-detail/MasterDetailBehavior.ts`, active, 5 unit tests) COMPOSES the shipping
 > selection block: on select it renders the detail (async-aware Loader seam), wires the detail as a
 > labelled `role="region"`, applies focus flow + empty state, emits `detail-change`. The loan app consumes
 > it (the hand-wired `SelectionBehavior` is gone); selection is now consumed *through* the coordinator.

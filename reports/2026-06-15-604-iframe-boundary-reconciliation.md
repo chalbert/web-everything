@@ -9,14 +9,14 @@ prior art to survey: the question is purely how one constellation epic (#604) sh
 boundary **already ruled** inside the constellation (#700 DC-7, realised #701, applied in #705). Per the
 prepare rubric, a decision that only ratifies already-decided ground "skips the web survey but still
 needs the concrete-refs check." So this report is the grounding artifact; the prior art is the prior
-rulings, linked below — not a `researchTopics.json` entry.
+rulings, linked below — not a `we:researchTopics.json` entry.
 
 ## The grounding rulings
 
 - **#700 (DC-7 ruling)** — ruled out cross-repo import of FUI block code into WE. The only sanctioned
   WE→FUI surface is an iframe window onto a FUI-hosted demo.
 - **#701** — built the realisation: the `fuiDemo` Eleventy shortcode
-  (`.eleventy.js:38`), a sandboxed, FUI-branded iframe pointing at `FUI_DEMO_BASE` (`:3001` dev).
+  (`we:.eleventy.js:38`), a sandboxed, FUI-branded iframe pointing at `FUI_DEMO_BASE` (`:3001` dev).
 - **#705** — applied the boundary to FUI's own block surface, recorded the **same reconciliation flag
   against #604** that #707 now discharges ("#604's acceptance still says 'the WE site renders a live
   interactive instance of the real FUI block' … needs realigning to the iframe boundary").
@@ -26,11 +26,11 @@ rulings, linked below — not a `researchTopics.json` entry.
 ## What the real tree says
 
 - **No WE→FUI import seam exists.** `vite.config.mts:167-180` aliases only `@core` / `@web*` → `/plugs/*`;
-  there is no `frontierui` alias in `vite.config.mts` or `.eleventy.js`. WE cannot resolve FUI block
+  there is no `frontierui` alias in `vite.config.mts` or `we:.eleventy.js`. WE cannot resolve FUI block
   source today, by design.
 - **The iframe mechanism already exists and is already used on a block page.** `fuiDemo`
-  (`.eleventy.js:38`) renders a sandboxed iframe; `src/_includes/block-descriptions/component.njk:235`
-  already calls `{% fuiDemo "component-converter.html", … %}`. Block pages (`src/block-pages.njk:35`)
+  (`we:.eleventy.js:38`) renders a sandboxed iframe; `we:src/_includes/block-descriptions/component.njk:235`
+  already calls `{% fuiDemo "fui:component-converter.html", … %}`. Block pages (`we:src/block-pages.njk:35`)
   include `block-descriptions/{id}.njk`, so **every block page can already host a FUI demo via the same
   one-liner.**
 - **#604's premise is the part that's gutted, not the deliverable.** #604 wanted WE to *render the real

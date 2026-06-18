@@ -18,7 +18,7 @@ tags: [design-reference, corpus, vision, vlm-as-judge, capture-gate, quality-con
 ## Digest
 
 No vision exists in the capture pipeline yet — today's gate is a hand-authored `readySelector`
-(`scripts/design-refs.mjs:149`) that can't tell an app surface from a marketing splash / modal /
+(`we:scripts/design-refs.mjs:149`) that can't tell an app surface from a marketing splash / modal /
 error panel. **Prepared**: four forks grounded in the [`design-ref-vision`](/research/design-ref-vision/)
 topic (survey of ScreenAI / Ferret-UI / Design2Code / VLM-as-judge / autoconsent), each with a
 **bold** default. **Governing ruling (2026-06-13): vision is never a standard** — it's a *Plateau
@@ -35,7 +35,7 @@ automate.
 
 ## Governing invariant — vision is a service, never a standard (ruling 2026-06-13)
 
-Vision is implementation, not a WE standard, and it does **not** live in `scripts/design-refs.mjs`
+Vision is implementation, not a WE standard, and it does **not** live in `we:scripts/design-refs.mjs`
 as a permanent bespoke registry. It is a **Plateau service** (the #091 managed-offering layering —
 served product = plateau-app), and the WE corpus pipeline (#475 + #396) is a **client** of it. The
 one test that keeps this clean: **no leakage** — no `@webeverything` *published* artifact may import
@@ -55,9 +55,9 @@ The concern decomposes into four orthogonal axes, each pinned to the real pipeli
 
 - **Where the vision capability *lives*** (the provider seam) — **ruled:** a **Plateau service** the
   WE pipeline consumes as a no-leakage client, not a registry baked into the core
-  (`scripts/design-refs.mjs`). *Fork 1.*
+  (`we:scripts/design-refs.mjs`). *Fork 1.*
 - **When the verdict is *taken*** (gate placement) — capture currently shoots once after an
-  optional `enterAction` click-through (`scripts/design-refs.mjs:137-139`) then asserts a selector
+  optional `enterAction` click-through (`we:scripts/design-refs.mjs:137-139`) then asserts a selector
   (`:149-156`). A vision verdict can run on that final frame, and/or on a cheap pre-capture probe.
   *Fork 2.*
 - **What the verdict *says* and how a bad surface is *remediated*** — the existing machinery is a
@@ -89,7 +89,7 @@ and #086's product wants the same capability.
   it; #086's product is a third. One service, swappable model behind it, **no provider name in the
   standard**. *Interim:* a thin client seam calls a model directly until the service exists, then
   repoints (see governing invariant).
-- **B — A `customVisionProvider` registry inside `scripts/design-refs.mjs`.** *Superseded* (was the
+- **B — A `customVisionProvider` registry inside `we:scripts/design-refs.mjs`.** *Superseded* (was the
   prepared default): keeps the provider repo-local and rebuilds in WE what Plateau should own. Still
   correct as the *interim thin-seam shape*, but the target home is the Plateau service, not a
   permanent WE registry.

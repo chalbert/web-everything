@@ -13,7 +13,7 @@ tags: [self-driven-project, constellation, project, protocol, ownership, no-lock
 
 # Is the Self-Driven Project methodology a first-class constellation project (what owns its artefact Protocol)?
 
-The #672 no-lock-in artefact Protocol can't register until this is decided: protocols.json hard-requires an ownedByProject that resolves in projects.json + a project partial carrying the anchor, and no self-driven-project/methodology project exists (the constellation is all web* platform-standard projects). #665 ratified the framing + named the Protocol but not an owner. Decide whether the methodology becomes its own first-class constellation project (own project + partial + npm scope + layer, per the #091 managed-offering pattern) and what owns the Protocol — or whether it is owned differently / is not a registered Protocol at all. Blocks #672.
+The #672 no-lock-in artefact Protocol can't register until this is decided: we:protocols.json hard-requires an ownedByProject that resolves in we:projects.json + a project partial carrying the anchor, and no self-driven-project/methodology project exists (the constellation is all web* platform-standard projects). #665 ratified the framing + named the Protocol but not an owner. Decide whether the methodology becomes its own first-class constellation project (own project + partial + npm scope + layer, per the #091 managed-offering pattern) and what owns the Protocol — or whether it is owned differently / is not a registered Protocol at all. Blocks #672.
 
 > **Converged direction (refined through brainstorm 2026-06-15 — still refining; keep updating).**
 > The methodology **lives in Web Everything**, scoped to web applications initially — a "web application"
@@ -30,9 +30,9 @@ The #672 no-lock-in artefact Protocol can't register until this is decided: prot
 
 ## Why this is open (surfaced by #672, batch-2026-06-15)
 
-Registering the artefact Protocol (`#672`) tripped the protocols.json invariant
-(`check-standards-rules.mjs` §6b): every Protocol needs an `ownedByProject` that resolves in
-`projects.json` **and** a `src/_includes/project-<owner>.njk` partial containing the protocol's `anchor`.
+Registering the artefact Protocol (`#672`) tripped the we:protocols.json invariant
+(`we:check-standards-rules.mjs` §6b): every Protocol needs an `ownedByProject` that resolves in
+`we:projects.json` **and** a `src/_includes/project-<owner>.njk` partial containing the protocol's `anchor`.
 The whole constellation is `web*` **platform-standard** projects (webintents, webvalidation, webworkflows,
 …); the Self-Driven Project methodology is a *process/governance* concern, not a browser-platform standard,
 so it fits none of them and none can honestly own the Protocol. `#665` settled the methodology's framing
@@ -79,7 +79,7 @@ composes existing WE standards; the genuinely-new surface is small and specific.
 |---|---|---|
 | **Autonomy level scale** (SAE L0–L5 for the SDLC: report-only → propose → live-verify → open-PR → auto-merge → live-patch) | No — #141 has the dev-loop ladder as a backlog item, #166 has gate-*severity*, but autonomy-level-as-vocabulary is unowned | ✅ **NEW** (a vocabulary) |
 | **Value/risk-as-ODD dial** (quality dimensions as the per-step tolerance that throttles autonomy) | Partial — dimensions overlap `webcompliance`'s "which criteria enforced," but the *dial* (tolerance → autonomy ceiling) is unowned; #665's novel flag | ✅ **NEW** (the organizing model) |
-| **Per-step gate** (machine-checkable, severity, pass/fail, expiring waivers, audit) | **Yes** — `webcompliance` (the enforcement gate) + `capabilityMatrix.json` (3-state ground truth) | ❌ compose |
+| **Per-step gate** (machine-checkable, severity, pass/fail, expiring waivers, audit) | **Yes** — `webcompliance` (the enforcement gate) + `we:capabilityMatrix.json` (3-state ground truth) | ❌ compose |
 | **Step orchestration** (design→code→test→ship→monitor→upgrade as directed progression w/ guards + completion) | **Yes** — `webworkflows` Workflow Protocol (orchestration graph)¹ | ❌ compose |
 | **Run evidence / history** (what happened at each step, append-only) | **Yes** — `webaudit` (AuditEvent) + `webreporting` (report model) | ❌ compose |
 | **Decision / request-to-intervene record** (why a gate escalated; the human handoff) | **Yes** — `webdecisions` (DecisionRecord) | ❌ compose |
@@ -105,7 +105,7 @@ files); everything beneath it is already-open WE standards.
 - **A — Mint a WE-constellation node that owns the Protocol** (internal slug TBD — `webdelivery` /
   `webprocess` / `webautonomy` / …; it is a node id, not a public brand). Own project entry +
   `project-<id>.njk` partial (carrying the protocol anchor), per the #091 layering. Satisfies the
-  protocols.json invariant the clean way; matches how every other Protocol is homed. With the fit test
+  we:protocols.json invariant the clean way; matches how every other Protocol is homed. With the fit test
   above, the node is a **bounded capstone**, not a category expansion. **Chosen.**
 - **B — Home under an existing project.** False home — every existing Protocol owner standardizes *the app
   being built*; the methodology is one altitude up (*how you drive the SDLC*). **Dropped.**

@@ -17,8 +17,8 @@ plateau-app advertises two dead 'coming soon' stub routes (/components, /standar
 
 ## Resolved (2026-06-16)
 
-**Removed** both dead stubs (`index.html` `<template route>` + sidebar nav link + the orphaned breadcrumb
-labels in `src/main.ts`) rather than implement them — their content belongs to other constellation repos,
+**Removed** both dead stubs (`we:index.html` `<template route>` + sidebar nav link + the orphaned breadcrumb
+labels in `plateau:src/main.ts`) rather than implement them — their content belongs to other constellation repos,
 not plateau-app: standards live in WE and are already surfaced via the existing **/web-docs** product nav
 (the `/standards` stub was redundant), and the component catalog is FUI's (impl + rendered display), so a
 native plateau-app `/components` catalog would mis-home it. Removing routes that advertise content the

@@ -35,7 +35,7 @@ real feature, not a wiring tweak — hence deferred from #201.
 
 Today the gate in `AutoComplete.#isWindowed()` returns false in client mode, so `windowed` is inert
 there (the full seeded set just renders). A unit test pins that inert behaviour
-(`AutoComplete.test.ts` → "stays inert in client mode").
+(`fui:AutoComplete.test.ts` → "stays inert in client mode").
 
 Acceptance: `<auto-complete filter="client" windowed>` with a long inline option set renders only a
 window, typing filters against the **full** model (not just the mounted window), and the active
@@ -43,4 +43,4 @@ option stays mounted while arrowing (the #023 invariant) — proven by a unit te
 shape: `filter` filters `windowed`'s model (a new model-aware client path) rather than toggling
 `hidden` on descendants, and `windowed` windows the filtered result.
 
-**Graduated to** `frontierui/blocks/droplist/Windowed.ts` — Windowed.filterModel + Filter modelFilter hook + AutoComplete client seedItems→setModel — windowed works in filter=client (model-level filtering).
+**Graduated to** `fui:frontierui/blocks/droplist/Windowed.ts` — Windowed.filterModel + Filter modelFilter hook + AutoComplete client seedItems→setModel — windowed works in filter=client (model-level filtering).

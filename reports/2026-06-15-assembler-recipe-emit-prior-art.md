@@ -35,7 +35,7 @@ format and home open.
   *instead of* markup (the lock-in *minimize-lock-in* refuses; shadcn proves it unnecessary — the wrapper
   *carries* plain code, it does not replace it).
 - **Fork 2 → A.** A **standalone devtools surface that reads the shared registries read-only**
-  (`workbenchFeatures.json` / `workbenchTools.json` for feature vocabulary; a new WE-owned preset registry
+  (`we:workbenchFeatures.json` / `we:workbenchTools.json` for feature vocabulary; a new WE-owned preset registry
   in the shadcn `registry-item` shape for the presets themselves). Keeps the catalog/authoring split clean
   (bias-toward-separation; one-capability-many-consumers). B (a mode inside the Web Docs surface #627)
   couples an authoring tool's lifecycle to the served product; C (own rival registry) guarantees the drift
@@ -45,7 +45,7 @@ format and home open.
 
 | Source | What it emits | Lesson |
 |---|---|---|
-| **shadcn/ui** | Plain source files + a thin `registry-item.json` (`{name, type:"registry:block", files:[{path,content}], registryDependencies}`) | The owned artifact is *plain code*; the manifest is a *distribution wrapper around* it, not a rival schema. Splits Fork 1's options onto two layers. |
+| **shadcn/ui** | Plain source files + a thin `we:registry-item.json` (`{name, type:"registry:block", files:[{path,content}], registryDependencies}`) | The owned artifact is *plain code*; the manifest is a *distribution wrapper around* it, not a rival schema. Splits Fork 1's options onto two layers. |
 | **Webstudio / Webflow / Builder.io** | Clean, host-anywhere HTML/CSS/JS | Eject-to-plain-platform-code is the mainstream zero-lock-in answer for an *assembler*, not just a library. |
 | **Custom Elements Manifest** | Declarative component-*API* JSON | A descriptor of the surface, never the composition wiring → an additional export (already WE's protocol, #626), not the recipe. |
 | **Web Components / Lit** | Framework-agnostic custom elements | Reinforces #609's no-runtime-framework invariant. |
@@ -59,15 +59,15 @@ folded into Fork 2 as a sub-decision (preset-registry shape).
 
 | File | Action |
 |---|---|
-| `src/_includes/research-descriptions/ejectable-composition-recipes.njk` | Created — research write-up |
-| `src/_data/researchTopics.json` | Added `ejectable-composition-recipes` topic entry |
+| `we:src/_includes/research-descriptions/ejectable-composition-recipes.njk` | Created — research write-up |
+| `we:src/_data/researchTopics.json` | Added `ejectable-composition-recipes` topic entry |
 | `backlog/652-…md` | Rewritten to prepared-fork shape; `preparedDate: 2026-06-15` |
-| `reports/2026-06-15-assembler-recipe-emit-prior-art.md` | This report |
+| `we:reports/2026-06-15-assembler-recipe-emit-prior-art.md` | This report |
 
 ## Sources
 
 - [Why shadcn/ui is Different — Vercel Academy](https://vercel.com/academy/shadcn-ui/why-shadcn-ui-is-different)
-- [registry-item.json — shadcn/ui](https://ui.shadcn.com/docs/registry/registry-item-json)
-- [registry.json — shadcn/ui](https://ui.shadcn.com/docs/registry/registry-json)
+- [we:registry-item.json — shadcn/ui](https://ui.shadcn.com/docs/registry/registry-item-json)
+- [we:registry.json — shadcn/ui](https://ui.shadcn.com/docs/registry/registry-json)
 - [Top No-Code Tools to Export Clean Code](https://www.nocodefinder.com/blog-posts/no-code-tools-export-code)
 - [lit.dev — minimize lock-in](https://lit.dev/)

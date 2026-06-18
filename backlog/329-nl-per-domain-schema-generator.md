@@ -19,7 +19,7 @@ Derive a per-domain JSON-schema (axis-id keys, value-id enums) from the active c
 ## Progress
 
 Resolved 2026-06-14 (batch). Built the per-domain schema generator in plateau-app
-`src/technical-configurator/nl-schema.ts`:
+`plateau:src/technical-configurator/nl-schema.ts`:
 - `buildRequirementsSchema(domain)` — derives a JSON-Schema (Draft 2020-12) from the seed: axis ids → object keys, value ids → `enum`-locked `string[]` items, `additionalProperties: false`. New domains auto-track (zero hand-maintenance). This is the artifact a native structured-outputs API binds the model to.
 - `isValidRequirements(raw, domain)` — strict structural check (the hard boundary); complements the pre-existing lossy `normalizeRequirements`.
 - `makeConstrainedNLProvider({ id, label, complete })` — factory realizing "run the NL provider under constrained decoding": derives the schema, hands it to the BYO model call, and defends in depth via `normalizeRequirements`. Keeps every BYO provider a thin adapter.

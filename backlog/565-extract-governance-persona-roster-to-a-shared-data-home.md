@@ -14,7 +14,7 @@ crossRef: { url: /backlog/166-governance-persona-roster-charter-schema/, label: 
 
 # Extract governance-persona roster to a shared data home
 
-Graduated from [#166](/backlog/166-governance-persona-roster-charter-schema/) (Fork 3·A). The seven personas live as a static TypeScript array compiled into plateau-app ([profiles.ts:941](../../plateau-app/src/profiles/profiles.ts#L941)), which the dev-browser cannot import without coupling. Extract the roster into a data file (JSON/data module) both lenses read — plateau-app owned, dev-browser imports the data not the app internals — so the governance charter and the dev-browser toggle-map stay projections of one source of truth.
+Graduated from [#166](/backlog/166-governance-persona-roster-charter-schema/) (Fork 3·A). The seven personas live as a static TypeScript array compiled into plateau-app ([plateau:profiles.ts:941](../../plateau-app/src/profiles/profiles.ts#L941)), which the dev-browser cannot import without coupling. Extract the roster into a data file (JSON/data module) both lenses read — plateau-app owned, dev-browser imports the data not the app internals — so the governance charter and the dev-browser toggle-map stay projections of one source of truth.
 
 ## Scope
 
@@ -29,9 +29,9 @@ Blocks the clone-to-derive mechanism ([#567](/backlog/567-clone-to-derive-custom
 
 ## Progress
 
-Resolved 2026-06-14 (batch). Split `plateau-app/src/profiles/profiles.ts` into:
-- `schema.ts` — the `Profile`/`ReviewArea`/`Gate`/`Signal`/`PlatformArea` interfaces + `PLATFORM_AREA_LABELS` (unchanged schema).
-- `roster.ts` — the seven persona objects + `export const profiles`, importing only `type { Profile }` from `./schema` (no app imports) — the shared data home both lenses read.
-- `profiles.ts` — now a barrel re-exporting both + `getProfile`, so every existing `./profiles` import path is unchanged.
+Resolved 2026-06-14 (batch). Split `plateau:plateau-app/src/profiles/profiles.ts` into:
+- `plateau:schema.ts` — the `Profile`/`ReviewArea`/`Gate`/`Signal`/`PlatformArea` interfaces + `PLATFORM_AREA_LABELS` (unchanged schema).
+- `plateau:roster.ts` — the seven persona objects + `export const profiles`, importing only `type { Profile }` from `./schema` (no app imports) — the shared data home both lenses read.
+- `plateau:profiles.ts` — now a barrel re-exporting both + `getProfile`, so every existing `./profiles` import path is unchanged.
 
-The dev-browser toggle-map (#141) imports `roster.ts` (data) + `schema.ts` (types), not the SaaS app internals. No schema change (that is #566); no visual/behavior change — `/profiles` renders from the same data, 61 plateau-app tests green, profiles type-clean. Unblocks the clone-to-derive data home (#567).
+The dev-browser toggle-map (#141) imports `plateau:roster.ts` (data) + `plateau:schema.ts` (types), not the SaaS app internals. No schema change (that is #566); no visual/behavior change — `/profiles` renders from the same data, 61 plateau-app tests green, profiles type-clean. Unblocks the clone-to-derive data home (#567).

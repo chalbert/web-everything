@@ -7,7 +7,7 @@
 
 ## Question
 
-Where does the **reveal-navigation paradigm** live in the WE constellation, and which of its many concerns are genuine design decisions vs. forced invariants vs. support-all? The base already exists — the **nav-list** block ([blocks.json:2082](../src/_data/blocks.json#L2082), W3C APG *Disclosure Navigation*, `nav:section` toggle, roving tabindex). #609 is the **reveal-panel layer + cross-cutting concerns** on top of it. The WE site header ([base.njk:32-69](../src/_layouts/base.njk#L32), [style.css:241-276](../src/css/style.css#L241)) is a live, hand-rolled dogfood instance.
+Where does the **reveal-navigation paradigm** live in the WE constellation, and which of its many concerns are genuine design decisions vs. forced invariants vs. support-all? The base already exists — the **nav-list** block ([fui:blocks.json:2082](../src/_data/blocks.json#L2082), W3C APG *Disclosure Navigation*, `nav:section` toggle, roving tabindex). #609 is the **reveal-panel layer + cross-cutting concerns** on top of it. The WE site header ([we:base.njk:32-69](../src/_layouts/base.njk#L32), [we:style.css:241-276](../src/css/style.css#L241)) is a live, hand-rolled dogfood instance.
 
 ## Recommendation
 
@@ -22,14 +22,14 @@ Where does the **reveal-navigation paradigm** live in the WE constellation, and 
 - **W3C APG**: the [Disclosure Navigation Menu example](https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/examples/disclosure-navigation/) is the recommended pattern for "typical site navigation with expandable groups of links." The [Menubar pattern](https://www.w3.org/WAI/ARIA/apg/patterns/menubar/) requires composite-widget focus management (roving tabindex, first-character type-ahead) "unnecessary for typical site navigation."
 - Disclosure ARIA is **minimal**: keep native `<ul>`/`<a>` semantics; the only additions are `aria-expanded` + `aria-controls` on each toggle. Menu roles strip link semantics and impose desktop-menu keyboard rules.
 - Community consensus (Adrian Roselli / Terrill Thompson / evinced) mirrors APG: **"menus are not menus"** — reserve `role=menu`/`menubar` for app commands.
-- **Dogfood gap (build, not fork):** the WE header heads are `<span aria-hidden>` with the panel revealed by `:hover`/`:focus-within` only ([style.css:271-276](../src/css/style.css#L271)) — there is **no** `aria-expanded`/`aria-controls`, no keyboard toggle, no Esc/outside-click dismissal. The dogfood is **not yet APG-conformant**; conforming it is a graduation build item.
+- **Dogfood gap (build, not fork):** the WE header heads are `<span aria-hidden>` with the panel revealed by `:hover`/`:focus-within` only ([we:style.css:271-276](../src/css/style.css#L271)) — there is **no** `aria-expanded`/`aria-controls`, no keyboard toggle, no Esc/outside-click dismissal. The dogfood is **not yet APG-conformant**; conforming it is a graduation build item.
 
 ### Hover-intent / the diagonal problem (genuine, deep, divergent)
 - **Origin**: Bruce "Tog" Tognazzini & Jim Batson, Apple HID team; popularized as the "Amazon triangle" / hover-tunnel.
 - **The problem**: moving the pointer diagonally from a trigger toward the panel briefly crosses a *sibling* trigger, naïvely closing the open panel ("menu rage").
 - **Three escalating mechanics seen in the wild**:
   - **delay-only** (timeout before close) — what Radix NavigationMenu and Headless UI ship.
-  - **CSS safe-area bridge** — an invisible `::before` strip spanning the trigger→panel gap so `:hover` survives the trip (what the WE dogfood does, [style.css:263-270](../src/css/style.css#L263)).
+  - **CSS safe-area bridge** — an invisible `::before` strip spanning the trigger→panel gap so `:hover` survives the trip (what the WE dogfood does, [we:style.css:263-270](../src/css/style.css#L263)).
   - **pointer-direction polygon** ("safe triangle") — track cursor velocity, build an SVG/`pointer-events` triangle toward the panel corners, keep the panel open while the pointer stays inside it ([jQuery-menu-aim](https://github.com/kamens/jQuery-menu-aim), [Smashing 2023](https://www.smashingmagazine.com/2023/08/better-context-menus-safe-triangles/), [CSS-Tricks](https://css-tricks.com/dropdown-menus-with-more-forgiving-mouse-movement-paths/)).
 - **Divergence**: Radix deliberately ships delay-only and has *open* requests to add the polygon ([radix #1549](https://github.com/radix-ui/primitives/issues/1549), [#2437](https://github.com/radix-ui/primitives/issues/2437)); PrimeVue is adding it ([#8448](https://github.com/primefaces/primevue/issues/8448)). So the *mechanic* is unsettled across libraries → a Technical Configurator setting, while the *intent* ("tolerate diagonal travel; don't open on incidental pass-through") is a forced invariant.
 
@@ -37,15 +37,15 @@ Where does the **reveal-navigation paradigm** live in the WE constellation, and 
 - **NN/g** ["Mega Menus Work Well for Site Navigation"](https://www.nngroup.com/articles/mega-menus-work-well/): validates the pattern; guidance — show all options in a 2-D layout, avoid hover-only timing traps, give a non-hover path.
 - **Triggers** (support-all, all three mandatory): pointer (hover), keyboard (focus / `:focus-within` / Enter), **touch (no hover → first tap toggles, not navigates)**.
 - **No-reflow**: an anchored panel (`anchor.strategy=escape`, top-layer/popover) must never resize chrome. Two mechanics: absolute/popover out-of-flow (dogfood) vs. reserve-space. For header nav, popover; for an in-flow sidebar accordion, reflow is fine — *that distinction is already the `anchor.strategy` axis*, not a new dimension.
-- **Native substrate**: CSS Anchor Positioning (`anchor()`, `position-try` flip/shift) + Popover API (top-layer, light-dismiss) — already owned by the WE **Anchor** intent ([intents.json:1204](../src/_data/intents.json#L1204)). The reveal panel needs nothing new here; it composes Anchor.
+- **Native substrate**: CSS Anchor Positioning (`anchor()`, `position-try` flip/shift) + Popover API (top-layer, light-dismiss) — already owned by the WE **Anchor** intent ([we:intents.json:1204](../src/_data/intents.json#L1204)). The reveal panel needs nothing new here; it composes Anchor.
 - **i18n**: translated labels grow (DE/FI +30–40%); collapsed bar + panel columns must absorb growth without reflow/clipping (no fixed px keyed to English, no truncation). Ties Internationalization × no-reflow. Forced invariant.
 
 ### Composition seam (cite, don't reinvent)
-- **nav-list** ([blocks.json:2082](../src/_data/blocks.json#L2082)) — base; `nav:section` is the disclosure primitive.
-- **disclosure intent** ([intents.json:1816](../src/_data/intents.json#L1816)) — expand/collapse contract (native `<details>`/`<summary>`).
-- **navigation intent** ([intents.json:1146](../src/_data/intents.json#L1146)) — landmark + `aria-current`.
-- **anchor intent** ([intents.json:1204](../src/_data/intents.json#L1204)) — placement (12-way grid), collision (flip/shift), `strategy=inline|escape`, dismissal (light/explicit/modal), `type=menu/popover`.
-- **menu block** ([blocks.json:3181](../src/_data/blocks.json#L3181)) / **drawer block** ([blocks.json:3277](../src/_data/blocks.json#L3277)) — adjacent **composition-manifest** blocks to disambiguate from (command menu; off-canvas) and the house-style precedent for Fork 1's block alternative.
+- **nav-list** ([fui:blocks.json:2082](../src/_data/blocks.json#L2082)) — base; `nav:section` is the disclosure primitive.
+- **disclosure intent** ([we:intents.json:1816](../src/_data/intents.json#L1816)) — expand/collapse contract (native `<details>`/`<summary>`).
+- **navigation intent** ([we:intents.json:1146](../src/_data/intents.json#L1146)) — landmark + `aria-current`.
+- **anchor intent** ([we:intents.json:1204](../src/_data/intents.json#L1204)) — placement (12-way grid), collision (flip/shift), `strategy=inline|escape`, dismissal (light/explicit/modal), `type=menu/popover`.
+- **menu block** ([fui:blocks.json:3181](../src/_data/blocks.json#L3181)) / **drawer block** ([fui:blocks.json:3277](../src/_data/blocks.json#L3277)) — adjacent **composition-manifest** blocks to disambiguate from (command menu; off-canvas) and the house-style precedent for Fork 1's block alternative.
 
 ## Forks after research (reshaped)
 - **Fork 1 — Home & shape.** Genuine. Composition recipe (default) vs. named composition block. (Mega-menu multi-column shape demoted to support-all.)
@@ -56,7 +56,7 @@ Where does the **reveal-navigation paradigm** live in the WE constellation, and 
 ## Files Created/Modified
 | File | Action |
 |---|---|
-| `reports/2026-06-14-reveal-navigation-disclosure-pattern.md` | created (this report) |
-| `src/_data/researchTopics.json` | added `reveal-navigation-menus` entry |
-| `src/_includes/research-descriptions/reveal-navigation-menus.njk` | created (write-up) |
+| `we:reports/2026-06-14-reveal-navigation-disclosure-pattern.md` | created (this report) |
+| `we:src/_data/researchTopics.json` | added `reveal-navigation-menus` entry |
+| `we:src/_includes/research-descriptions/reveal-navigation-menus.njk` | created (write-up) |
 | `backlog/609-…reveal-navigation-menus….md` | rewritten to prepared-fork shape, `preparedDate` set |

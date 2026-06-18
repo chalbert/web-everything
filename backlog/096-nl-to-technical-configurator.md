@@ -41,35 +41,35 @@ of that machinery the NL layer reuses:
 
 - **A `Requirements` object is the only thing the AI must produce.** A domain is a set of
   capability **axes**, each with a fixed set of value ids
-  (`types.ts:21`,
-  `types.ts:14`); a `Requirements`
+  (`we:types.ts:21`,
+  `we:types.ts:14`); a `Requirements`
   is `Record<axisId, acceptableValueId[]>`
-  (`types.ts:88`) — a small,
+  (`we:types.ts:88`) — a small,
   **closed-vocabulary** map the NL layer fills.
 - **The hand-authored presets are the exact shape the AI would synthesize.** A use-case preset
   is a human-written `{label, blurb, requirements}` triple
-  (`presets.ts:15`); e.g.
+  (`plateau:presets.ts:15`); e.g.
   "Let users undo and redo" → `{reversibility: [...]}`
-  (`presets.ts:34`). The NL layer
+  (`plateau:presets.ts:34`). The NL layer
   **replaces the human authoring of that map** — same structure `applyPreset` already consumes
-  (`configurator.ts:222`).
+  (`plateau:configurator.ts:222`).
 - **The compat engine is the deterministic guardrail downstream of the AI.**
   `rankStrategies(strategies, axes, requirements)`
-  (`compat.ts:88`) folds per-axis
+  (`plateau:compat.ts:88`) folds per-axis
   verdicts (`satisfies | compromise | incompatible`) under a correctness-vs-fidelity policy that
   lives in the **axis data**, not the code
-  (`compat.ts:34`). Once the AI emits
+  (`plateau:compat.ts:34`). Once the AI emits
   a `Requirements`, strategy selection is fully deterministic and standards-bound.
 - **The provider seam already exists.** The configurator reads domains through a
   `CapabilityProvider` interface
-  (`types.ts:82`); the seed provider
-  (`provider.ts:21`) is one impl,
+  (`we:types.ts:82`); the seed provider
+  (`we:provider.ts:21`) is one impl,
   and new domains slot in with no UI change
-  (`provider.ts:14`). The NL layer
+  (`we:provider.ts:14`). The NL layer
   is a second, parallel seam — a `Requirements` *producer*, surface-agnostic.
 - **Owned by [`webregistries`](../src/_data/projects.json#L3)** — the platform layer the
   strategies are selected from. The decision-record + config-stub emitter
-  (`configurator.ts:400`) is
+  (`plateau:configurator.ts:400`) is
   the existing "emit the configured code" tail the NL layer feeds the front of.
 
 ### Recommended path at a glance
@@ -90,15 +90,15 @@ where judgment is actually needed vs. where to nod.
 end-states, but the *first* surface is a real decision: it sets how much existing machinery is
 reused. The configurator is already a rendered panel with a requirements list, a strategy
 ranking, and per-axis verdict badges
-(`configurator.ts:160`,
-`configurator.ts:239`).
+(`plateau:configurator.ts:160`,
+`plateau:configurator.ts:239`).
 
 - **(A — recommended) Panel-first: an NL box inside the configurator** that, on submit, calls
   the NL provider and **populates the existing requirements state**
-  (`configurator.ts:48`,
-  `configurator.ts:222`) —
+  (`plateau:configurator.ts:48`,
+  `plateau:configurator.ts:222`) —
   identical to clicking a preset, then the developer tunes via the fine-tune disclosure already
-  present (`configurator.ts:186`).
+  present (`plateau:configurator.ts:186`).
   Reuses ranking, verdict badges, the decision-record emitter, and the teaching definitions.
   Matches the prior-art finding that panels are the only surface that can *show* the decision,
   and Demo-First iteration. Cost: tied to the SPA; not yet scriptable.
@@ -123,11 +123,11 @@ did not fix *what it returns*. The contract sets how much trust sits with the mo
 deterministic engine.
 
 - **(A — recommended) `describe(nl, domain) → Requirements`.** The provider returns only the
-  closed `Requirements` map (`types.ts:88`);
-  `rankStrategies` (`compat.ts:88`)
+  closed `Requirements` map (`we:types.ts:88`);
+  `rankStrategies` (`plateau:compat.ts:88`)
   picks the strategy deterministically. The model translates intent and **never selects the
   implementation** — the configurator stays the guardrail, and the output is the exact shape a
-  preset already is (`presets.ts:15`).
+  preset already is (`plateau:presets.ts:15`).
   Smallest trust surface; surface-agnostic (consumed identically by the panel, a future CLI, and
   a future editor command).
 - **(B) Provider returns a chosen strategy (or emits code) directly.** Lets the model do the
@@ -148,14 +148,14 @@ scores against nothing.
 - **(A — recommended) Per-domain schema generated from the seed + constrained decoding.** For
   the active domain, derive a JSON-schema where keys are the domain's `axis.id`s and each value
   is constrained to that axis's value-id `enum`
-  (`types.ts:14`), pass the axis
+  (`we:types.ts:14`), pass the axis
   `definition` strings as grounding context, and run under native structured outputs /
   constrained generation. The model **cannot** emit an off-vocabulary key or value.
   Provider-agnostic at the contract level (BYO key); on Anthropic this is
   `output_config.format` / `messages.parse()` against the generated schema. The schema is
   *machine-derived from the seed*, so it auto-tracks any new domain or axis with zero extra
   authoring — same "new domain, no UI change" property the provider seam already has
-  (`provider.ts:14`).
+  (`we:provider.ts:14`).
 - **(B) Prompt-only "return this JSON".** Cheaper to wire, but carries the documented 5-20%
   malformed-output rate and can hallucinate axis/value ids the engine can't score. Acceptable
   only as a fallback when a chosen BYO provider lacks constrained decoding (then validate against
@@ -174,10 +174,10 @@ does then shapes whether the tool feels honest.
 - **(A — recommended) Emit a partial `Requirements` and degrade into the panel.** The model fills
   only the axes the description constrains and **leaves the rest unset**; the panel renders those
   as un-required via the existing `hasRequirements()` / fine-tune path
-  (`configurator.ts:113`,
-  `configurator.ts:186`) so
+  (`plateau:configurator.ts:113`,
+  `plateau:configurator.ts:186`) so
   the developer completes them. The compat engine already treats an absent axis as "not a
-  requirement" (`compat.ts:67`), so a
+  requirement" (`plateau:compat.ts:67`), so a
   partial map is a first-class input, not an error. Most-flexible default — and the reason
   panel-first (Fork 1) compounds: the NL layer's failure mode *is* the configurator's manual mode.
 - **(B) One-shot best-guess full fill.** Always populate every axis. Manufactures confidence the

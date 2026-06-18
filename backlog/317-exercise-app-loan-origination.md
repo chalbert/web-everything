@@ -83,7 +83,7 @@ detailed enough to break the build into agent-ready slices.
   (Fluent / Salesforce Lightning). Restyled the S0 page from the original dark/dev-tool look to a
   **light, dense, corporate** register (navy chrome, module tabs, gridlined zebra pipeline, panels with
   title bars, snapshot ribbon, status bar) implemented as a **theme-token layer** (`theme-enterprise`
-  in `app.css`) over unchanged structure — so the same components reskin for a later modern-SaaS app.
+  in `we:app.css`) over unchanged structure — so the same components reskin for a later modern-SaaS app.
   Banking is explicitly **not** modern-SaaS. App complexity/simplicity to be reassessed after more build.
 
 ## Child stories — WE-surface consumption slices
@@ -176,7 +176,7 @@ benchmark's ranked queue, mapped to the WE work it implies:
 - ad-hoc selection → selection (droplist family): **#023, #021, #024**.
 - hardcoded colors → theme/surface token system: **#010**.
 
-The loop ([docs/agent/exercise-app-workflow.md](/docs/agent/exercise-app-workflow.md), `/exercise-app`)
+The loop ([we:docs/agent/exercise-app-workflow.md](/docs/agent/exercise-app-workflow.md), `/exercise-app`)
 burns this down: each turn fills the top gap in WE, S0 consumes it, rescan. S0's value is this queue,
 not the running app.
 

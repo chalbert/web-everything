@@ -37,7 +37,7 @@ Blocked by #347 — there are no gaps to file until the matrix is labelled and r
 
 ## Outcome (2026-06-12)
 
-Ran the pipeline against the phase-3 coverage matrix (`benchmarkCoverage.json`, #347). The 11 ranked
+Ran the pipeline against the phase-3 coverage matrix (`we:benchmarkCoverage.json`, #347). The 11 ranked
 partial/missing rows were re-checked against the live backlog at file time — the dedup step that is this
 phase's whole point — which **caught 4 already tracked** that the phase-3 pass missed: menu + context-menu
 (#173 / #300), command-palette (#299 / #016), accordion (#008 disclosure intent). The coverage data was

@@ -37,7 +37,7 @@ page) and **consumes** this capability at v1 = iframe.
 ## v1 — iframe (the `fuiDemo` mechanism)
 
 - Reuse the [#701](/backlog/701-iframe-based-component-viewer-embed-fui-hosted-standard-demo/) `fuiDemo`
-  Eleventy shortcode (`.eleventy.js:38`): a sandboxed, FUI-branded `<iframe>` pointing at a
+  Eleventy shortcode (`we:.eleventy.js:38`): a sandboxed, FUI-branded `<iframe>` pointing at a
   separately-hosted demo. No cross-repo import — consistent with the docs-rendering boundary.
 - Simplest to put in place; the demo is plainly a deliverable of whoever hosts it (FUI keeps provenance).
 
@@ -61,14 +61,14 @@ until that seam is reconsidered; for first-party same-runtime embeds it may be a
 ## Slicing note
 
 Sliced umbrella (size-less; children carry the points). See
-[reports/2026-06-15-728-backlog-split-analysis.md](../reports/2026-06-15-728-backlog-split-analysis.md).
+[we:reports/2026-06-15-728-backlog-split-analysis.md](../reports/2026-06-15-728-backlog-split-analysis.md).
 
 - **Children:** [#732](/backlog/732-overlay-modal-escape-for-embedded-demos-iframe-box-vs-host-r/) —
   overlay/modal escape (`decision`). The one ready piece; the rest below are deferred, not carved.
 - **Not carved yet (premature / out of scope) — would manufacture fake agent-ready work:**
   - *Generic embed primitive* (beyond `fuiDemo`) — only one consumer in the tree
-    (`component.njk:235`); carve when a real **second** embed consumer appears.
+    (`we:component.njk:235`); carve when a real **second** embed consumer appears.
   - *Third-party oEmbed adapter* (YouTube/Facebook-style) — no consumer surface today.
   - *Post-ruling overlay build slice* — carve after #732 rules.
   - *DI / Shadow-DOM mount* — gated on **reopening [#700](/backlog/700-component-converter-playground-placement/)**.
-- **Already-shipped v1:** the `fuiDemo` iframe (`.eleventy.js:38`, [#701](/backlog/701-iframe-based-component-viewer-embed-fui-hosted-standard-demo/)) — no build slice remains for it.
+- **Already-shipped v1:** the `fuiDemo` iframe (`we:.eleventy.js:38`, [#701](/backlog/701-iframe-based-component-viewer-embed-fui-hosted-standard-demo/)) — no build slice remains for it.

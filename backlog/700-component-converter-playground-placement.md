@@ -21,11 +21,11 @@ crossRef: { url: /blocks/component/, label: Component block }
 # DC-7 — Decide the converter playground's file home
 
 The `<component>` converter playground (#038) exercises the **bidirectional** `<component>` ⇄ class
-transform, which lives entirely in **frontierui** — `frontierui/compiler/src/component-transform/index.ts`
+transform, which lives entirely in **frontierui** — `fui:frontierui/compiler/src/component-transform/index.ts`
 (`transform(source, direction)`) — and shares the test fixtures at
 `frontierui/compiler/__tests__/component-transform/fixtures/` (so the page can't drift from what passes).
 WE has **no** import path to frontierui today (`vite.config.mts` has no `frontierui` alias and the proxy
-block doesn't reach it; the existing `demos/component-adapter-demo.ts` deliberately runs WE's own *one-way
+block doesn't reach it; the existing `we:demos/component-adapter-demo.ts` deliberately runs WE's own *one-way
 runtime twin* at `/blocks/renderers/component/declarativeComponent`, not this compiler).
 
 This is a genuine binary placement, not a configurable dimension — a single page lives in one home. Both
@@ -34,7 +34,7 @@ branches are coherent (neither is flawed), so this is a decision to ratify, not 
 **Fork — where does the playground page live?**
 
 - **A. `frontierui/demos/` (native, recommended).** frontierui already has a demos surface + dev server
-  (`frontierui/demos/`, vite :3001). The page imports `../compiler/src/component-transform/index.js`
+  (`frontierui/demos/`, vite :3001). The page imports `we:../compiler/src/component-transform/index.js`
   directly and reads fixtures from the sibling `__tests__` dir — **no cross-repo mechanism, no drift
   surface**. Matches the constellation layering instinct (the bidirectional compiler is a pure frontierui
   artifact; impl → FUI per the repo constellation). Cost: the playground sits in frontierui's
@@ -69,7 +69,7 @@ page → reverse direction + two-pane editor + bundled TS Compiler API).
 ## Why this blocks #038
 
 #038's slice structure is **contingent on this fork** (see
-[2026-06-15-backlog-split-analysis.md](../reports/2026-06-15-backlog-split-analysis.md), `/split 038` run):
+[we:2026-06-15-backlog-split-analysis.md](../reports/2026-06-15-backlog-split-analysis.md), `/split 038` run):
 
 - Under **A**: 2 sibling slices under #049 — one-way page (declarative→class, no TS-in-browser) →
   reverse direction + two-pane editor + bundled TS Compiler API.

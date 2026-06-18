@@ -21,8 +21,8 @@ Implement the trait Enforcer (usage-scan → manifest of code-split trait chunks
 Established the multi-bundler baseline on a shared #716-anchored core:
 
 - **Extracted the bundler-agnostic core** — [buildTraitManifestSource](../tools/trait-enforcer/vite-plugin.ts) (scan usage → generate manifest, no bundler dep) + `DEFAULT_VIRTUAL_ID`. Refactored the Vite plugin to be thin glue over it; every adapter routes through this one function so they emit byte-identical manifests. All 30 existing trait-enforcer tests + the #719/#720 tests stay green (54 total).
-- **Rollup adapter** — [rollup-plugin.ts](../tools/trait-enforcer/rollup-plugin.ts) (`traitEnforcerRollup`). The Vite hook shape is Rollup-native, so this is the thinnest adapter.
-- **esbuild adapter** — [esbuild-plugin.ts](../tools/trait-enforcer/esbuild-plugin.ts) (`traitEnforcerEsbuild`), `onResolve`/`onLoad` over a virtual namespace.
-- **Tests** [multi-bundler.test.ts](../tools/trait-enforcer/__tests__/multi-bundler.test.ts) — a **real Rollup build** and a **real esbuild build** each prove a used trait code-splits and an unused trait ships **zero bytes**, plus the core is the single source of truth. 3/3 green.
+- **Rollup adapter** — [we:rollup-plugin.ts](../tools/trait-enforcer/rollup-plugin.ts) (`traitEnforcerRollup`). The Vite hook shape is Rollup-native, so this is the thinnest adapter.
+- **esbuild adapter** — [we:esbuild-plugin.ts](../tools/trait-enforcer/esbuild-plugin.ts) (`traitEnforcerEsbuild`), `onResolve`/`onLoad` over a virtual namespace.
+- **Tests** [we:multi-bundler.test.ts](../tools/trait-enforcer/__tests__/multi-bundler.test.ts) — a **real Rollup build** and a **real esbuild build** each prove a used trait code-splits and an unused trait ships **zero bytes**, plus the core is the single source of truth. 3/3 green.
 
 **webpack + Parcel carved to #744:** those packages aren't installed in WE, so their adapters can't be built or verified here — shipping unrunnable plugin glue would be untested-as-done. #744 adds them as dev-deps and writes the two adapters (each a thin wrapper over the same core) with real-build tests, completing the four-bundler baseline. (Byte-for-byte conformance across all four stays the separate #716-gated suite, per the card.)

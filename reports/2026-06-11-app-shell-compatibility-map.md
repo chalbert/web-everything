@@ -2,14 +2,14 @@
 
 > Prior-art survey grounding backlog **#104**'s three open forks (home, compatibility-chart
 > schema, memory-eviction model). The item descends from the archived design essay
-> (`reports/2026-06-06-front-end-platform-book.md`, *Micro Apps / Ideal micro-apps setup*,
+> (`we:reports/2026-06-06-front-end-platform-book.md`, *Micro Apps / Ideal micro-apps setup*,
 > lines 364–423) and has **no design yet** — this report gathers web-platform and industry
 > prior art per design-first step 1 so the schema reuses established vocabulary
 > (browser-compat-data, semver, the Storage eviction model) instead of coining terms.
 >
 > **Revision 2026-06-13 — deep prior-art pass.** A first cut (rev. 2026-06-11) claimed "none
 > ships a declared, introspectable compatibility chart per app." A deeper survey of
-> **Module Federation 2.0** (the `mf-manifest.json` + runtime era), **Native Federation**,
+> **Module Federation 2.0** (the `we:mf-manifest.json` + runtime era), **Native Federation**,
 > **Piral**, **qiankun**, **Luigi**, **Bit**, plus the classic declared-range resolvers
 > (**npm peerDependencies / engines**, **OSGi**, **Kubernetes version-skew**) shows that claim
 > is **wrong as stated** — declared manifests *and* rendered dependency graphs already exist.
@@ -18,8 +18,8 @@
 
 ## TL;DR — what the deep pass changed
 
-- **The novelty is narrower than "a declared chart."** MF2's `mf-manifest.json`, Native
-  Federation's `remoteEntry.json`, Piral's feed/`PiletMetadata`, and Bit's rendered dependency
+- **The novelty is narrower than "a declared chart."** MF2's `we:mf-manifest.json`, Native
+  Federation's `we:remoteEntry.json`, Piral's feed/`PiletMetadata`, and Bit's rendered dependency
   graph are all declared, introspectable manifests — *for the shared-library-version dimension*.
   The defensible white space is a **declared *coexistence* contract**: version ranges **plus**
   DOM-level claims (custom-element tag-names, global `window` claims, route ownership, CSS
@@ -50,7 +50,7 @@ whether the next page loads **in the same SPA** (compatible) or needs a **hard r
 (1) **where this lives** — a standard protocol vs. a Plateau product; (2) the
 **compatibility-chart schema** each micro-app declares; (3) the **memory/eviction model**
 for a long-lived single SPA. The essay flags all three and leaves them open
-(`reports/2026-06-06-front-end-platform-book.md:406,410–412`).
+(`we:reports/2026-06-06-front-end-platform-book.md:406,410–412`).
 
 ## Finding 1 — the gap is *coexistence* declaration, not "a declared chart"
 
@@ -64,7 +64,7 @@ that "none ships a declared, introspectable chart" — several do, *for the vers
   deps resolve via **import maps** or SystemJS. *No per-app manifest* (deps are a central import
   map), *no compatibility introspection*, *no isolation* — it deliberately delegates all
   coexistence concerns to the operator. Closest structural analog to the essay's shell.
-- **Webpack/Rspack Module Federation (MF2)** — ships **`mf-manifest.json`**, a machine-readable,
+- **Webpack/Rspack Module Federation (MF2)** — ships **`we:mf-manifest.json`**, a machine-readable,
   *introspectable* per-remote manifest (`exposes` / `shared` with `version`/`requiredVersion`/
   `singleton`/`strictVersion` / `remotes` / `metaData` / `types`), **and** a Chrome DevTools
   extension that renders the federated **dependency graph** computed from those manifests
@@ -73,8 +73,8 @@ that "none ships a declared, introspectable chart" — several do, *for the vers
   introspectable manifest + rendered graph already exists — *but only over shared library
   versions* (Finding 2/6).
 - **Native Federation** (Angular Architects) — the standards-based (ESM + import maps, esbuild,
-  bundler-agnostic) reimplementation of MF's model; emits per-remote `remoteEntry.json` + a host
-  `federation.manifest.json`, same `singleton`/`strictVersion`/`requiredVersion` negotiation
+  bundler-agnostic) reimplementation of MF's model; emits per-remote `we:remoteEntry.json` + a host
+  `we:federation.manifest.json`, same `singleton`/`strictVersion`/`requiredVersion` negotiation
   ([README](https://raw.githubusercontent.com/angular-architects/module-federation-plugin/main/libs/native-federation/README.md)).
   This is the direction most aligned with WE's native-first stance.
 - **import maps** — the native substrate: a JSON map from bare specifier → URL, with **`scopes`**
@@ -86,7 +86,7 @@ them declares is a **coexistence** contract beyond library versions. The genuine
 #104 is about is a **per-app declared coexistence contract** — required shell/provider version
 *ranges* **plus** DOM-level claims (custom-element tag-names, `window` globals, route ownership,
 CSS namespace) — that a Platform statically resolves and **renders as a compatibility map** over
-the relationship graph (**#092**, `backlog/092-provider-consumer-graph-platform-manager.md:17`).
+the relationship graph (**#092**, `we:backlog/092-provider-consumer-graph-platform-manager.md:17`).
 The tools that *negotiate versions* ignore the DOM dimension; the tools that *solve* the DOM
 dimension (qiankun, Luigi — Finding 6) do it by enforced isolation, never by a declared, mapped
 contract. That intersection — declared + DOM-dimension + mapped — is the white space.
@@ -99,7 +99,7 @@ recur across the prior art:
 
 1. **Shell/Platform API version** — the new app requires shell ≥ X; the running shell is older
    → run on an older shell or hard-refresh (the essay's exact scenario,
-   `reports/2026-06-06-front-end-platform-book.md:1426`).
+   `we:reports/2026-06-06-front-end-platform-book.md:1426`).
 2. **Shared-dependency version conflict** — two mounted apps demand incompatible singleton
    versions of the same provider (Module Federation's `singleton`/`strictVersion` failure mode).
 3. **Conflicting globals / side effects** — the essay's "avoid conflicts" requirement
@@ -136,14 +136,14 @@ WE already owns the *bytes-and-versions are npm/git* stance and the **provider�
 the control plane (#092). A compatibility chart is therefore not a new registry — it is a
 **declaration each app contributes to that graph** plus a **resolver** that computes coexistence. The
 `changelog-manifest` protocol already standardizes per-module semver severity + migration linkage
-(`src/_data/protocols.json:86`); the compatibility chart is its forward-looking dual: not *what
+(`we:src/_data/protocols.json:86`); the compatibility chart is its forward-looking dual: not *what
 changed* but *what I require to run here*.
 
 ## Finding 3a — declared-manifest shape: npm `peerDependencies` + OSGi-namespaced claims
 
 The most *directly analogous* declaration is the **npm plugin-needs-host** model — exactly "I
 require the shell/providers in range Y" ([Node.js peer-deps](https://nodejs.org/en/blog/npm/peer-dependencies);
-[npm package.json](https://docs.npmjs.com/cli/v11/configuring-npm/package-json/)):
+[npm we:package.json](https://docs.npmjs.com/cli/v11/configuring-npm/package-json/)):
 
 - **`peerDependencies`** `{ name: range }` — the plugin-needs-host relation. The exact analog of
   "required shared-provider P in range Z." Best practice: **lenient ranges** (`^1.0`, `1.x`), not
@@ -255,8 +255,8 @@ has all four**, and the DOM-dimension declaration + map is the white space:
 | Tool | Declared per-app manifest | Runtime coexistence resolution | Introspection / map | Isolation (globals/CSS/tags/routes) |
 |---|---|---|---|---|
 | **single-spa** | ✗ central import map | import-map alias only, no negotiation | ✗ (layout/route template only) | ✗ (lifecycle `unmount` cleanup only) |
-| **Module Federation 2** | ✓ `mf-manifest.json` | ✓ share-scope (singleton/strict/required) | ✓ DevTools dependency graph | ✗ (module versions only) |
-| **Native Federation** | ✓ `remoteEntry.json` | ✓ same negotiation, ESM+import-maps | ✗ machine metadata, no rendered map | ✗ (module versions only) |
+| **Module Federation 2** | ✓ `we:mf-manifest.json` | ✓ share-scope (singleton/strict/required) | ✓ DevTools dependency graph | ✗ (module versions only) |
+| **Native Federation** | ✓ `we:remoteEntry.json` | ✓ same negotiation, ESM+import-maps | ✗ machine metadata, no rendered map | ✗ (module versions only) |
 | **Piral** | ✓✓ richest: `PiletMetadata` + feed | import maps for pilets; host peer deps | 🟡 feed = catalog/listing, not a chart | 🟡 shared realm; per-pilet require; no sandbox |
 | **qiankun** | ✗ central register array | isolation-based (HTML entry) | ✗ | ✓✓ **JS sandbox (Proxy/snapshot) + Shadow-DOM/scoped CSS** |
 | **Luigi** (SAP) | ✗ host nav config | iframe (no JS sharing) | ✗ | ✓✓ **iframe** (`isolateView`/`viewGroup`) |
@@ -278,7 +278,7 @@ Where the ecosystem is heading orients the **home** fork (Fork 1):
 - **MF2 is runtime-first and bundler-agnostic** — the same runtime now spans webpack, Rspack,
   Rollup/Rolldown, Rsbuild, Vite, Metro, with framework bridges for cross-framework mounting
   ([InfoQ 2026-04](https://www.infoq.com/news/2026/04/module-federation-2-stable/)). The
-  **`mf-manifest.json` is becoming the canonical integration seam** — *both* the DevTools graph and
+  **`we:mf-manifest.json` is becoming the canonical integration seam** — *both* the DevTools graph and
   external platforms read it. That is precisely the #104 split: **one declared protocol artifact,
   consumed by (a) the runtime resolver and (b) the map view.** Don't invent a separate format per
   consumer.
@@ -319,16 +319,16 @@ Where the ecosystem is heading orients the **home** fork (Fork 1):
 ## Cross-references
 
 - Decision: **#104** — App shell + micro-app compatibility map.
-- Parent vision: **#099** — the evergreen app (`backlog/099-evergreen-app-vision.md`).
+- Parent vision: **#099** — the evergreen app (`we:backlog/099-evergreen-app-vision.md`).
 - Supplies the graph the map renders: **#092** — provider↔consumer relationship graph.
 - Schema sibling / vocabulary source: **#102** — `changelog-manifest` protocol
-  (`src/_data/protocols.json:86`); adapters-via-DI: **#094**, webinjectors.
+  (`we:src/_data/protocols.json:86`); adapters-via-DI: **#094**, webinjectors.
 
 ## Sources
 
 **Module Federation (incumbent resolver + declared manifest)**
 - [Module Federation 2.0 release discussion (#2397)](https://github.com/module-federation/core/discussions/2397) — the manifest/runtime/types/bridges pillars
-- [`mf-manifest.json` field reference](https://module-federation.io/configure/manifest-fields) · [manifest vs stats](https://module-federation.io/configure/manifest) — the declared contract shape
+- [`we:mf-manifest.json` field reference](https://module-federation.io/configure/manifest-fields) · [manifest vs stats](https://module-federation.io/configure/manifest) — the declared contract shape
 - [configure/shared](https://module-federation.io/configure/shared) · [webpack PR #10960 (sokra)](https://github.com/webpack/webpack/pull/10960) — singleton/requiredVersion/strictVersion resolution algorithm
 - [Chrome DevTool — federated dependency graph](https://module-federation.io/guide/debug/chrome-devtool) — the computed-map prior art
 - [InfoQ — MF2 reaches stable (2026-04)](https://www.infoq.com/news/2026/04/module-federation-2-stable/) — runtime-first/bundler-agnostic direction
@@ -344,7 +344,7 @@ Where the ecosystem is heading orients the **home** fork (Fork 1):
 
 **Declared-range / resolution / matrix prior art**
 - [import maps (MDN)](https://developer.mozilla.org/en-US/docs/Web/HTML/Element/script/type/importmap) · [import-map-overrides](https://github.com/single-spa/import-map-overrides)
-- [npm package.json — peerDependencies/engines/semver](https://docs.npmjs.com/cli/v11/configuring-npm/package-json/) · [Node.js peer-dependencies blog](https://nodejs.org/en/blog/npm/peer-dependencies)
+- [npm we:package.json — peerDependencies/engines/semver](https://docs.npmjs.com/cli/v11/configuring-npm/package-json/) · [Node.js peer-dependencies blog](https://nodejs.org/en/blog/npm/peer-dependencies)
 - [OSGi Core 7 §3 Module Layer (version ranges, `uses`, Require/Provide-Capability)](https://docs.osgi.org/specification/osgi.core/7.0.0/framework.module.html)
 - [browser-compat-data compat-data-schema](https://github.com/mdn/browser-compat-data/blob/main/schemas/compat-data-schema.md) · [BCD repo (curation model)](https://github.com/mdn/browser-compat-data) · [web.dev Baseline](https://web.dev/baseline)
 - [Kubernetes version-skew policy](https://kubernetes.io/releases/version-skew-policy/)

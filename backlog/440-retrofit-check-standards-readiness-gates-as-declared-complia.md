@@ -18,7 +18,7 @@ Re-express the existing hard CI gates — check:standards and the readiness gate
 
 ## Progress
 
-Delivered the seed baseline policy [webcompliance/policies/platform-default.ts](../webcompliance/policies/platform-default.ts) + [test](../webcompliance/__tests__/platform-default.test.ts) (5 cases; full webcompliance suite 23/23, tsc clean, check:standards green) — 2026-06-13:
+Delivered the seed baseline policy [we:webcompliance/policies/platform-default.ts](../webcompliance/policies/platform-default.ts) + [test](../webcompliance/__tests__/platform-default.test.ts) (5 cases; full webcompliance suite 23/23, tsc clean, check:standards green) — 2026-06-13:
 
 - **`platformDefaultPolicy`** — the root `CompliancePolicy` (extends nothing) every project policy `extends`. Three declared rules re-expressing today's enforcement as data:
   - `standards-conformance` (**block**) — `check:standards` reporting 0 errors (it exits non-zero on any error today).

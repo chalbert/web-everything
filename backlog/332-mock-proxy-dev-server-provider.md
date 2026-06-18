@@ -21,11 +21,11 @@ Build the reference self-run dev-server provider that implements the mock/contra
 
 Built a self-contained, framework-free (`node:http`) reference server reading a portable `MockContract` and serving every axis the standard names:
 
-- `contract.ts` — the consumer-view types mirroring the `mock-contract` protocol (#331); under-specified axes (predicate language, latency distribution, auth session) flagged `(open question)` with a minimal chosen shape.
-- `server.ts` — the provider. **Pure** decision core (`matchRequest`, `matchPath`, `deepPartialMatch`, `resolveInteraction`, `authSatisfied`) split from the I/O so it unit-tests with no sockets; `createMockServer(contract, options)` returns an `http.Server` + a shared `ToggleController`. Covers `mock | proxy | record`, latency (fixed + uniform distribution), fault injection (rate), first-that-matches conditionals, fake-bearer auth, CORS-bypass (incl. 204 preflight), per-service runtime toggle, and forced-status override. All I/O (`rng`, `delay`, `forward`, `onRecord`) is injectable for deterministic tests.
-- `cli.ts` — thin runnable entry (`cli.ts <contract.json> [--port] [--base]`).
-- `example.contract.json` — a contract exercising mock + conditional + fault + auth + proxy.
-- `__tests__/server.test.ts` — **24 tests**, the pure matcher/resolver plus the HTTP provider end-to-end across all four axes. Green; `tsc --noEmit --strict` clean.
-- `README.md` — the behavior-surface table + programmatic and CLI usage.
+- `we:contract.ts` — the consumer-view types mirroring the `mock-contract` protocol (#331); under-specified axes (predicate language, latency distribution, auth session) flagged `(open question)` with a minimal chosen shape.
+- `fui:server.ts` — the provider. **Pure** decision core (`matchRequest`, `matchPath`, `deepPartialMatch`, `resolveInteraction`, `authSatisfied`) split from the I/O so it unit-tests with no sockets; `createMockServer(contract, options)` returns an `http.Server` + a shared `ToggleController`. Covers `mock | proxy | record`, latency (fixed + uniform distribution), fault injection (rate), first-that-matches conditionals, fake-bearer auth, CORS-bypass (incl. 204 preflight), per-service runtime toggle, and forced-status override. All I/O (`rng`, `delay`, `forward`, `onRecord`) is injectable for deterministic tests.
+- `fui:cli.ts` — thin runnable entry (`fui:cli.ts <we:contract.json> [--port] [--base]`).
+- `fui:example.contract.json` — a contract exercising mock + conditional + fault + auth + proxy.
+- `fui:__tests__/server.test.ts` — **24 tests**, the pure matcher/resolver plus the HTTP provider end-to-end across all four axes. Green; `tsc --noEmit --strict` clean.
+- `we:README.md` — the behavior-surface table + programmatic and CLI usage.
 
 **Deliberately out of scope (the artifact stays clean):** CORS-bypass / per-service toggle / forced-status are provider-runtime overrides, not part of the portable contract — exactly the #107 ruling. The hosted broker/history is the deferred upsell. Follow-ons remain: the console (#333) writes to the `ToggleController`; the drift-check (#334) replays the same interactions against the real service inside Web Cases.

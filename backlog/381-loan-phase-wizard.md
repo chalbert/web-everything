@@ -24,18 +24,18 @@ validation. See the [requirements report](/reports/2026-06-11-exercise-app-loan-
 
 - **2026-06-15 — built (exercise app A).** The `/application` module is no longer a routed stub — it now
   mounts the S3 1003 wizard, built platform-first on the WE **stepper** block:
-  - `demos/loan-origination/wizard/applicationWizard.ts` — the working-state model + pure cross-field /
+  - `we:demos/loan-origination/wizard/applicationWizard.ts` — the working-state model + pure cross-field /
     conditional validators (`validateStep`: address-history ≥ 24mo, down-payment ≤ price, financed-amount
     sanity, self-employment income, assets cover down-payment, "yes" declaration needs an explanation) +
     `buildDraftApplication` (assembles a `draft`-state 1003).
-  - `demos/loan-origination/wizard/applicationWizardView.ts` — the URLA sections as `[data-step]` panels,
+  - `we:demos/loan-origination/wizard/applicationWizardView.ts` — the URLA sections as `[data-step]` panels,
     field bindings, repeating sections (employment / assets / liabilities / former addresses with
     add/remove), conditional declaration explanations + REO note, and the **`StepperBehavior`** wiring whose
     `canAdvance` gate runs native `checkValidity()` (the native-first per-control floor) + the cross-field
     rules, blocking advance and surfacing messages in a `role="alert"` region. `flow-complete` assembles the
     draft + shows a summary.
-  - Wired into `app.ts` (`/application` route → skeleton + mount on entry) + wizard styles in `app.css`.
-  - **Conformance:** `stepper` declared in `conformance.json` → conformant (active block, evidence
+  - Wired into `we:app.ts` (`/application` route → skeleton + mount on entry) + wizard styles in `we:app.css`.
+  - **Conformance:** `stepper` declared in `we:conformance.json` → conformant (active block, evidence
     `StepperBehavior`); `check:standards` + `check:app-conformance` both green (92%, 12/13, 0 FAIL,
     compliant). The validation/input intents are `draft`: the native constraint-validation floor is
     native-first (not a gap), and the richer cross-field form-validation runtime is recorded as a **Layer-2

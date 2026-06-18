@@ -18,7 +18,7 @@ crossRef: { url: /backlog/, label: Backlog }
 > **Reclassified `idea` → `decision` (2026-06-10, batch claim-time pre-flight).** Not an unprompted
 > build: the *meta-fork* + *Honest scope note* leave open whether to build this at all — the `/batch`
 > parallel-lanes design deliberately took the cheaper static-partition route *instead of* this JIT lock.
-> The v1 (`lock.mjs` + hook) is only worth building once that "is the residual overlap case real enough"
+> The v1 (`we:lock.mjs` + hook) is only worth building once that "is the residual overlap case real enough"
 > call is made. Surface-and-discuss (Tier B), don't auto-build.
 
 When multiple agents work on **close features that sometimes touch the same files**, and you **don't
@@ -31,19 +31,19 @@ don't cover. The six forks below are grounded in a prior-art survey published as
 recommended default in **bold**.
 
 The repo's coordination today is **not file-level** at all — it is **item-level advisory claiming**:
-`backlog.mjs claim <NNN>` flips frontmatter `status: open → active` via a guarded splice
-([scripts/backlog/frontmatter.mjs:97-116](../scripts/backlog/frontmatter.mjs#L97-L116)), gated by the
-legal `from` status so it "can't silently double-claim" ([frontmatter.mjs:102](../scripts/backlog/frontmatter.mjs#L102)),
-plus a dirty-working-tree concurrency *smell* check before claim ([scripts/backlog.mjs:80-82](../scripts/backlog.mjs#L80-L82),
-`isDirty` at [backlog.mjs:67-73](../scripts/backlog.mjs#L67-L73)). The `/batch --parallel` skill adds the
+`we:backlog.mjs claim <NNN>` flips frontmatter `status: open → active` via a guarded splice
+([we:scripts/backlog/frontmatter.mjs:97-116](../scripts/backlog/frontmatter.mjs#L97-L116)), gated by the
+legal `from` status so it "can't silently double-claim" ([we:frontmatter.mjs:102](../scripts/backlog/frontmatter.mjs#L102)),
+plus a dirty-working-tree concurrency *smell* check before claim ([we:scripts/backlog.mjs:80-82](../scripts/backlog.mjs#L80-L82),
+`isDirty` at [we:backlog.mjs:67-73](../scripts/backlog.mjs#L67-L73)). The `/batch --parallel` skill adds the
 *other* established route — **partition on provable file-disjointness into isolated git worktree lanes,
 merge one at a time, a merge conflict is the proof the partition was wrong → replay serially**
-([.claude/skills/batch-backlog-items/SKILL.md:136-143](../.claude/skills/batch-backlog-items/SKILL.md#L136-L143)).
+([we:.claude/skills/batch-backlog-items/SKILL.md:136-143](../.claude/skills/batch-backlog-items/SKILL.md#L136-L143)).
 These forks decide whether — and how — to add a fine-grained, enforced *file*-level JIT lock for the
 residual that neither item-claiming nor static worktree-partition covers.
 
 > **Observed false-positive in today's `isDirty` smell-check (2026-06-12, a batch session).** The
-> pre-claim guard ([scripts/backlog.mjs:80-82](../scripts/backlog.mjs#L80-L82)) calls `isDirty` =
+> pre-claim guard ([we:scripts/backlog.mjs:80-82](../scripts/backlog.mjs#L80-L82)) calls `isDirty` =
 > `git status --short` truthiness, which treats an **untracked (`??`) file** as "another session may be
 > on it." In this repo the backlog is **globally uncommitted** (hundreds of `M`/`??` entries are the
 > author's normal WIP), so a freshly-scaffolded item is `??` from birth and `claim` **refuses every
@@ -89,7 +89,7 @@ cannot get mandatory semantics from a convention. In an agent harness the only "
   looks up the lock, and **denies with feedback** ("`X` held by agent-3, you're queued at position 2")
   or auto-acquires; `PostToolUse` releases. The harness enforces it, not the agent's goodwill — the only
   version that is actually a lock rather than a convention.
-- **(B) Advisory.** Agents are *told* to call `lock.mjs` and check. Simpler, no hook plumbing; but it is
+- **(B) Advisory.** Agents are *told* to call `we:lock.mjs` and check. Simpler, no hook plumbing; but it is
   the `flock` model — one undisciplined agent breaks the invariant for everyone. *Rejected*: an advisory
   "lock" the harness doesn't enforce is a convention, and we already have the item-level claim convention.
 
@@ -104,7 +104,7 @@ number the resource checks). Redlock lacks one and is therefore "not for correct
 - **(A — recommended) TTL + heartbeat, log every steal.** A lease expires after N seconds unless
   refreshed; an expired lock is treated as free and the steal is logged. A dead agent never holds a lock
   forever. For this repo's scale full fencing is over-engineering — the cheap backstop is the one the
-  batch already uses: **git is the ground-truth conflict detector** ([SKILL.md:143](../.claude/skills/batch-backlog-items/SKILL.md#L143)),
+  batch already uses: **git is the ground-truth conflict detector** ([we:SKILL.md:143](../.claude/skills/batch-backlog-items/SKILL.md#L143)),
   so a stale late write surfaces as a *visible merge conflict*, not silent corruption.
 - **(B) Hold-forever / manual reaping.** No TTL; a human/merge agent reaps stale locks. *Rejected*: a
   crashed agent wedges the file indefinitely — the exact failure leases exist to prevent.
@@ -133,7 +133,7 @@ processes. But the hotspot lesson is the inverse of "lock finer": for a contenti
 
 - **(A — recommended) File-level for per-entry files; hot files single-writer by policy.** File-level
   locks fit normal per-entry `*.json`/`*.njk` files where contention is rare and short. The hottest
-  shared files (`semantics.json`, generated inventory) are append-from-everyone — one file lock there
+  shared files (`we:semantics.json`, generated inventory) are append-from-everyone — one file lock there
   serializes *all* agents. Keep those **single-writer by policy** (one merge agent), outside the lock
   mechanism, matching the repo's splice-only-changed-entries discipline.
 - **(B) Mechanical sub-file / section locking.** Lock byte ranges or JSON sub-trees so multiple agents
@@ -157,12 +157,12 @@ working dirs** convert silent runtime corruption into visible merge-time conflic
 pattern is "status flags that lock work claims + worktrees + dependency markers" — i.e. exactly this
 repo's item-level `status: active` claim + the batch skill's worktree lanes. CodeCRDT notes lock-based
 coordination introduces O(N×L) contention and argues re-read-shared-state often beats locking. The
-`/batch --parallel` static partition ([SKILL.md:136-143](../.claude/skills/batch-backlog-items/SKILL.md#L136-L143))
+`/batch --parallel` static partition ([we:SKILL.md:136-143](../.claude/skills/batch-backlog-items/SKILL.md#L136-L143))
 already covers the predictable-overlap case by construction.
 
 - **(A — recommended) Keep parked; build the v1 lock only on an observed residual collision.** The JIT
   lock earns its keep *only* for coincidental same-file overlap between fully independent sessions not
-  running under one `/batch` — a residual the static partition can't sidestep. Ship `lock.mjs` + the
+  running under one `/batch` — a residual the static partition can't sidestep. Ship `we:lock.mjs` + the
   hook once such a collision is actually observed (and worktree-partition + item-claim + single-writer
   didn't catch it).
 - **(B) Build v1 now.** Author the lock proactively. *Rejected*: most of the value is already covered by
@@ -173,14 +173,14 @@ already covers the predictable-overlap case by construction.
 
 > **BUILT 2026-06-12.** Shipped as the advisory selection-tier hint — independent of the (still-parked)
 > file-lock forks 1–6, which remain a separate build gated on observed same-file collisions. Files:
-> [scripts/readiness/reservations.mjs](../scripts/readiness/reservations.mjs) (pure lib — TTL, foreign-hold
+> [we:scripts/readiness/reservations.mjs](../scripts/readiness/reservations.mjs) (pure lib — TTL, foreign-hold
 > detection, deprioritize-not-exclude, first-holder-wins),
-> [scripts/backlog.mjs](../scripts/backlog.mjs) (`reserve`/`unreserve` verbs + clear-on-claim),
-> [scripts/check-readiness.mjs](../scripts/check-readiness.mjs) (`--select --session=<slug>` applies the
+> [we:scripts/backlog.mjs](../scripts/backlog.mjs) (`reserve`/`unreserve` verbs + clear-on-claim),
+> [we:scripts/check-readiness.mjs](../scripts/check-readiness.mjs) (`--select --session=<slug>` applies the
 > penalty after the deterministic ranking), tests in
-> [scripts/__tests__/reservations.test.mjs](../scripts/__tests__/reservations.test.mjs), registry at
-> `.claude/skills/batch-backlog-items/reservations.json`, and the batch method in
-> [docs/agent/backlog-workflow.md](../docs/agent/backlog-workflow.md) → *Cross-session reservation*. The
+> [we:scripts/__tests__/reservations.test.mjs](../scripts/__tests__/reservations.test.mjs), registry at
+> `we:.claude/skills/batch-backlog-items/reservations.json`, and the batch method in
+> [we:docs/agent/backlog-workflow.md](../docs/agent/backlog-workflow.md) → *Cross-session reservation*. The
 > penalty deliberately lives at the CLI boundary, NOT inside the byte-deterministic `computeSelection`
 > core (reservations are time- + session-dependent), mirroring the #250/#252 quarantine discipline.
 
@@ -189,11 +189,11 @@ already covers the predictable-overlap case by construction.
 > `claim`ed the open work, re-run shortly," not "backlog empty." `computeSelection` now derives an
 > **in-flight** set — `status: active` items that are batch-shaped (task or story·≤8), i.e. the items
 > that would be in the pool were they still open — exposed as `counts.inFlight` + `selection.inFlight`
-> ([scripts/readiness/engine.mjs](../scripts/readiness/engine.mjs)). `--select` surfaces it: an
+> ([we:scripts/readiness/engine.mjs](../scripts/readiness/engine.mjs)). `--select` surfaces it: an
 > `· N in flight` header tally, an explanatory line, an "In flight" listing (shown only when non-empty,
 > so single-session runs are unchanged), and a drained-not-empty note on the empty-pack message
-> ([scripts/check-readiness.mjs](../scripts/check-readiness.mjs)); test in
-> [scripts/readiness/__tests__/engine.test.mjs](../scripts/readiness/__tests__/engine.test.mjs). Unlike
+> ([we:scripts/check-readiness.mjs](../scripts/check-readiness.mjs)); test in
+> [we:scripts/readiness/__tests__/engine.test.mjs](../scripts/readiness/__tests__/engine.test.mjs). Unlike
 > the reservation penalty, in-flight is **byte-deterministic** (a pure function of on-disk `status`), so
 > it lives **in** the `computeSelection` core, not at the CLI boundary. Staleness-free by construction
 > (derived live from `status: active`, never a persisted record) — the deliberate non-fix is any blocking
@@ -234,7 +234,7 @@ Three safeties are non-negotiable (the failure modes of any soft reservation):
 This is strictly **advisory** by design — and unlike fork 1, advisory is the *right* call here: the cost
 of ignoring the hint is only redundant analysis (self-correcting at the seam), never corruption, so it
 needs no `PreToolUse` enforcement. It complements the `/batch --parallel` *intra*-session partition
-([SKILL.md:148-181](../.claude/skills/batch-backlog-items/SKILL.md#L148-L181)): partition handles items
+([we:SKILL.md:148-181](../.claude/skills/batch-backlog-items/SKILL.md#L148-L181)): partition handles items
 **within one session**; this handles items **across independent sessions** that never share a partition.
 Cheapest stopgap if this isn't built: deterministic **stride partitioning** (each session takes a disjoint
 slice of the ranked list, e.g. by `NNN` parity, or seed each via `/batch-next <NNN-slug>`) — zero new
@@ -243,15 +243,15 @@ state, but only works when sessions agree and the pool is big enough to halve.
 ## Related — propagation (separate but adjacent)
 
 Locking prevents collisions; it does not handle an in-flight agent **picking up what another just
-shipped**. That is a **pull-not-push** concern: agents re-read source-of-truth (`semantics.json`, the
+shipped**. That is a **pull-not-push** concern: agents re-read source-of-truth (`we:semantics.json`, the
 relevant `*.json`) and sibling `backlog/*.md` status notes at the **start of each step**, plus
 `git rebase` at step boundaries on branch-based work. Worth codifying alongside, but distinct from the
 lock mechanism.
 
 ## Proposed v1 (when picked up)
 
-A tiny `lock.mjs` (acquire/release/queue against `.locks/`) + a `PreToolUse`/`PostToolUse` hook in
-`settings.json` that calls it, validated on two parallel agents reaching for the same per-entry file.
+A tiny `we:lock.mjs` (acquire/release/queue against `.locks/`) + a `PreToolUse`/`PostToolUse` hook in
+`we:settings.json` that calls it, validated on two parallel agents reaching for the same per-entry file.
 Anything heavier (central broker, sub-file locks, full fencing) is over-engineering for this repo's
 scale.
 
@@ -269,7 +269,7 @@ All six forks are now ruled. The five *mechanism* forks were ratified to their b
 *roadmap/scope* fork (build-at-all) was the only genuine human call, **ratified to A (keep parked)
 on 2026-06-13**:
 
-- **Fork 6 — A: keep the JIT lock parked; build `lock.mjs` + the hook only on an observed residual
+- **Fork 6 — A: keep the JIT lock parked; build `we:lock.mjs` + the hook only on an observed residual
   same-file collision.** Rationale: (1) the 2025–26 multi-agent consensus routes *around* file
   locks — git worktrees + status-flag claims turn silent corruption into visible merge conflicts,
   which is exactly this repo's `status: active` item-claim + the `/batch` worktree lanes; a
@@ -292,4 +292,4 @@ The five mechanism forks, for the record:
 - **Fork 4 — file-level for per-entry files; hot files single-writer by policy**: file-level fits rare/short per-entry contention; append-from-everyone hot files stay single-writer outside the lock, matching the splice-only discipline (sub-file locking is brittle on hand-edited JSON).
 - **Fork 5 — FIFO by enqueue time + TTL on queued waiters**: fair ordering plus a waiter TTL so a stalled/dead waiter ages out instead of wedging the line (the queue-side analogue of the holder lease).
 
-**Closed 2026-06-13 — Fork 6 ruled A (keep parked):** it was a roadmap/scope bet, not a mechanism question — most of the value is already covered by partition-by-Project + single-writer + worktree lanes (+ the soft-reservation hint), so the residual is not yet real enough to justify building `lock.mjs` + the hook now. The mechanism design above is the ready-to-ship spec for when an actual same-file collision is observed. See the *Resolution (final)* block for the full rationale; the `isDirty` guard fix is carved to #510.
+**Closed 2026-06-13 — Fork 6 ruled A (keep parked):** it was a roadmap/scope bet, not a mechanism question — most of the value is already covered by partition-by-Project + single-writer + worktree lanes (+ the soft-reservation hint), so the residual is not yet real enough to justify building `we:lock.mjs` + the hook now. The mechanism design above is the ready-to-ship spec for when an actual same-file collision is observed. See the *Resolution (final)* block for the full rationale; the `isDirty` guard fix is carved to #510.

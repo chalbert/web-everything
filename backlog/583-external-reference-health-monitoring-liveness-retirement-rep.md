@@ -63,8 +63,8 @@ Carved as children: foundation #584/#585/#597, plus the dogfood-Layer-1 builds #
 6. **Axis-vacancy alerting** → **#863** (carved). When a retirement drops a corpus category below N live sources,
    flag "find a replacement" (feeds the backlog like #192's new-axis sweep). #546 does this check *manually* today.
 7. **Reference-registry substrate** → **#597** (carved). One index of "external references this project
-   depends on," over the five structured homes (corpus `docsUrl`/`repoUrl`, `references.json`,
-   `blocks.json` web-standard refs, `benchmarkCapabilityPresence.json` rows, `intents.json`). The
+   depends on," over the five structured homes (corpus `docsUrl`/`repoUrl`, `we:references.json`,
+   `fui:blocks.json` web-standard refs, `we:benchmarkCapabilityPresence.json` rows, `we:intents.json`). The
    foundation #585 stands on — built first; freeform reports/research-prose extraction deferred.
 8. **Cadence / trigger.** On-demand / scheduled / pre-merge gate — reuse #101/#558's orchestrator
    philosophy, don't build a new runner.

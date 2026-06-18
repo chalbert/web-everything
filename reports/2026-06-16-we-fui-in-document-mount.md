@@ -8,7 +8,7 @@
 
 ## Question
 
-`#765` (carved from the overlay-escape ruling [#732](../backlog/732-overlay-modal-escape-for-embedded-demos-iframe-box-vs-host-r.md), itself a child of the embed epic [#728](../backlog/728-component-embedding-capability-embed-a-live-component-exampl.md)): the constellation states an **absolute** docs-rendering boundary — *"WE never imports or renders FUI block code in its own document"* (`docs/agent/demo-workflow.md:31`); WE surfaces a FUI block only by embedding its FUI-hosted demo through the sandboxed `fuiDemo` iframe (`.eleventy.js:38`). #732 ruled that overlay escape is solved *host-side over the iframe* via a FUI-owned embed SDK (modes A / B1 / B2), and recorded a fourth mode — **C, an in-document / DI mount** that drops the iframe and mounts the FUI component directly in WE's host DOM — as *"no longer never: a future trust-gated option for the WE↔FUI pair only,"* explicitly deferred to its own boundary decision. #765 is that decision: **relax the boundary to sanction mode C, or keep the iframe wall absolute?**
+`#765` (carved from the overlay-escape ruling [#732](../backlog/732-overlay-modal-escape-for-embedded-demos-iframe-box-vs-host-r.md), itself a child of the embed epic [#728](../backlog/728-component-embedding-capability-embed-a-live-component-exampl.md)): the constellation states an **absolute** docs-rendering boundary — *"WE never imports or renders FUI block code in its own document"* (`we:docs/agent/demo-workflow.md:31`); WE surfaces a FUI block only by embedding its FUI-hosted demo through the sandboxed `fuiDemo` iframe (`we:.eleventy.js:38`). #732 ruled that overlay escape is solved *host-side over the iframe* via a FUI-owned embed SDK (modes A / B1 / B2), and recorded a fourth mode — **C, an in-document / DI mount** that drops the iframe and mounts the FUI component directly in WE's host DOM — as *"no longer never: a future trust-gated option for the WE↔FUI pair only,"* explicitly deferred to its own boundary decision. #765 is that decision: **relax the boundary to sanction mode C, or keep the iframe wall absolute?**
 
 ## Recommendation
 
@@ -46,7 +46,7 @@ Both branches are coherent end-states — yet this is **not** "support both," be
 
 | File | Action |
 |------|--------|
-| `src/_data/researchTopics.json` | Added `we-fui-in-document-mount` registry entry |
-| `src/_includes/research-descriptions/we-fui-in-document-mount.njk` | New research write-up |
-| `reports/2026-06-16-we-fui-in-document-mount.md` | This report |
+| `we:src/_data/researchTopics.json` | Added `we-fui-in-document-mount` registry entry |
+| `we:src/_includes/research-descriptions/we-fui-in-document-mount.njk` | New research write-up |
+| `we:reports/2026-06-16-we-fui-in-document-mount.md` | This report |
 | `backlog/765-…relax-the-we-fui-isolation-boundary….md` | Rewritten to prepared-fork shape; `preparedDate` stamped |

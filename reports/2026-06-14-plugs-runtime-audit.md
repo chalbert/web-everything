@@ -33,13 +33,13 @@ isolation.
 
 ## Load-bearing drifts — WE is ahead (the reversal can't blindly take FUI)
 
-1. **webcomponents `cloneHandlers.ts`** — WE has the select/datalist clone fix (#454, `hasOwnProperty` check); FUI
+1. **webcomponents `we:cloneHandlers.ts`** — WE has the select/datalist clone fix (#454, `hasOwnProperty` check); FUI
    still has the broken `'options' in node` form. **WE canonical.**
-2. **webinjectors `Injector.ts`** — WE has #400 consumption-edge tracking (the provider↔consumer graph) + a WE-only
-   `declarativeInjector.ts`; FUI lacks both. **WE canonical.**
-3. **webregistries `CustomElementRegistry.ts`** — WE has `ensureNativelyConstructible()` (scoped-registry autonomous
+2. **webinjectors `we:Injector.ts`** — WE has #400 consumption-edge tracking (the provider↔consumer graph) + a WE-only
+   `we:declarativeInjector.ts`; FUI lacks both. **WE canonical.**
+3. **webregistries `we:CustomElementRegistry.ts`** — WE has `ensureNativelyConstructible()` (scoped-registry autonomous
    constructor legality); FUI lacks it. **WE canonical.**
-4. **webbehaviors** — WE has a `viewportPresence.ts` abstraction; FUI inlines IntersectionObserver — *but* FUI has 3
+4. **webbehaviors** — WE has a `we:viewportPresence.ts` abstraction; FUI inlines IntersectionObserver — *but* FUI has 3
    newer test files (defineLazy, inert, visibility) not in WE.
 5. **webexpressions** — only cosmetic type differences (`parserName: null` vs `undefined`); functionally equivalent.
 
@@ -60,5 +60,5 @@ Tracked as [#649](/backlog/649-reconcile-plugs-we-fui-drift-dual-mode-test-backf
    regression?
 5. **WE-only domains** — are `webguards` + `webvalidation` WE-only by design, or not-yet-ported? If in scope, the
    reversal leaves FUI incomplete.
-6. **`viewportPresence.ts` vs inline IntersectionObserver** — converge the pattern before FUI canonicalization to
+6. **`we:viewportPresence.ts` vs inline IntersectionObserver** — converge the pattern before FUI canonicalization to
    avoid re-divergence.

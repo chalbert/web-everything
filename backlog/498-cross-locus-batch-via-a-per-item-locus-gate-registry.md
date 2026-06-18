@@ -37,7 +37,7 @@ exercise-app — gating each in its own locus.
   platform-first, else tag a **GAP**) rides along as a required `closeoutDiscipline`, not an exclusion.
 
 **Graduates to → #500** (the build). The normative `Repo-locus` section of
-[docs/agent/backlog-workflow.md](../docs/agent/backlog-workflow.md) is rewritten **as part of #500**
+[we:docs/agent/backlog-workflow.md](../docs/agent/backlog-workflow.md) is rewritten **as part of #500**
 (it currently codifies the single-locus wall this ruling lifts) — not before, so the doc never describes
 unbuilt behavior.
 
@@ -69,7 +69,7 @@ gate timing is a **fixed mechanic** (per-item, in-locus), not a configurable dim
 ### Fork 3 — Registry shape & where it lives **(default: declarative config extending the platform default)**
 
 - **A — Declarative `locus → gate` config (default).** Extend the existing `LOCI` set
-  (`check-standards-rules.mjs`, the inference markers at [src/_data/backlog.js:43-46](../src/_data/backlog.js#L43-L46))
+  (`we:check-standards-rules.mjs`, the inference markers at [we:src/_data/backlog.js:43-46](../src/_data/backlog.js#L43-L46))
   with per-locus `{ repoPath, gateCommand, devServerProbe, commitTarget, closeoutDiscipline? }` — the
   optional `closeoutDiscipline` carries the exercise-app GAP-tagging rule (Fork 4) as a required
   close-out step, so a richer locus is config, not a code branch. The batch skill reads it; no logic
@@ -83,9 +83,9 @@ gate timing is a **fixed mechanic** (per-item, in-locus), not a configurable dim
 ### Fork 4 — Include exercise-app as a registry locus? **(default: yes)**
 
 The 17 exercise-app items (~81 pts — the single biggest excluded chunk, ≈37% of the batchable pool) are
-descendants of epic #314 ([src/_data/backlog.js:38-39](../src/_data/backlog.js#L38-L39)). The earlier
+descendants of epic #314 ([we:src/_data/backlog.js:38-39](../src/_data/backlog.js#L38-L39)). The earlier
 instinct was to exclude them as "a different *workflow*." But that's weaker than it looks: their gate,
-`check:app-conformance`, is a **webeverything npm script** (`node scripts/check-app-conformance.mjs`) —
+`check:app-conformance`, is a **webeverything npm script** (`node we:scripts/check-app-conformance.mjs`) —
 *same repo, same `cd`*, just one extra check command. So they fit the `locus → gate` registry directly.
 
 - **A — Include (default).** Add `exercise-app` as a registry locus: `repoPath: webeverything`,
@@ -114,7 +114,7 @@ instinct was to exclude them as "a different *workflow*." But that's weaker than
   story builds** the same session can already edit.
 - **Why the wall exists (keep it):** one unified backlog (`backlog/*.md`) across an N-repo constellation
   but N separate gates. Without the locus tag a batch would rubber-stamp items it never validated. The
-  inference biases toward *exclusion* on purpose ([src/_data/backlog.js:248-250](../src/_data/backlog.js#L248-L250)):
+  inference biases toward *exclusion* on purpose ([we:src/_data/backlog.js:248-250](../src/_data/backlog.js#L248-L250)):
   wrongly deferring a workable item is cheap; wrongly packing an out-of-locus one resolves on the wrong
   gate, the costly failure. This item does not weaken that — it adds the *means to run the other gate*,
   so cross-locus packing stays honest.
@@ -124,6 +124,6 @@ instinct was to exclude them as "a different *workflow*." But that's weaker than
   than spinning servers (honoring [don't-kill-dev-server]). Cross-repo commits also mean per-repo commit
   streams (commit each item in *its* repo, never `git add -A` across repos).
 - **Related:** #083 (agent-file-lock-coordination / repo-locus origin); the `Repo-locus` section of
-  docs/agent/backlog-workflow.md is the normative home — any ruling here updates that doc.
+  we:docs/agent/backlog-workflow.md is the normative home — any ruling here updates that doc.
 
 **Graduated to** `none` — decision — ruling (locus→gate registry; batch becomes locus-agnostic) in body; build tracked by #500 (prior corrupt value: 500).

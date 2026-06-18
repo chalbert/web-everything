@@ -70,11 +70,11 @@ pipeline, patch catalog.
 
 #141 named the four concerns this item must answer and spun it out
 ([#141 Fork 2 resolution](/backlog/141-dev-browser-vision/)). The machinery this builds on already exists in the
-tree: the conformance-autofix engine ([scripts/conformance-autofix.mjs:3](../scripts/conformance-autofix.mjs#L3))
+tree: the conformance-autofix engine ([we:scripts/conformance-autofix.mjs:3](../scripts/conformance-autofix.mjs#L3))
 with its **verify gate** — apply → re-run → keep only if the failure cleared with no new error, else revert
-([scripts/autofix/engine.mjs:15](../scripts/autofix/engine.mjs#L15)) — bounded
-([engine.mjs:242](../scripts/autofix/engine.mjs#L242)) and with a human-review `decide` hook that reverts a
-gate-passing patch before it lands ([engine.mjs:247](../scripts/autofix/engine.mjs#L247)); and the
+([we:scripts/autofix/engine.mjs:15](../scripts/autofix/engine.mjs#L15)) — bounded
+([we:engine.mjs:242](../scripts/autofix/engine.mjs#L242)) and with a human-review `decide` hook that reverts a
+gate-passing patch before it lands ([we:engine.mjs:247](../scripts/autofix/engine.mjs#L247)); and the
 introspectable [capability matrix](../src/_data/capabilityMatrix.json#L1) the audit record can ride. v1
 already settled the local-session loop; **this item is _only_ the deployed-app delta** along four
 orthogonal axes:

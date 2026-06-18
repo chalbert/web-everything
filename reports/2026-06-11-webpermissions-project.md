@@ -70,26 +70,26 @@ multi-channel workflow with a subscriber-centric model
 [OneSignal](https://onesignal.com/)). The reusable lesson: the **delivery/orchestration**
 concern (which channel, which provider, dedupe, retry) is a swappable *provider* behind a
 stable contract — exactly the registry+provider shape WE already uses for Guard
-([protocols.json:94](../src/_data/protocols.json#L94)). It is **not** UX vocabulary; it is a
+([we:protocols.json:94](../src/_data/protocols.json#L94)). It is **not** UX vocabulary; it is a
 protocol with a `Custom…Provider` lock.
 
 ## How this maps onto the existing tree
 
-- **`feedback` intent** ([intents.json:1022](../src/_data/intents.json#L1022)) — transient,
+- **`feedback` intent** ([we:intents.json:1022](../src/_data/intents.json#L1022)) — transient,
   non-blocking *in-app* toasts/snackbars: `placement`, `severity`, `duration`
   (incl. `indefinite`). Explicitly **in-page**, fire-and-forget. The platform's "render in the
   page" tier.
-- **`background-task` intent** ([intents.json:1721](../src/_data/intents.json#L1721)) — already
+- **`background-task` intent** ([we:intents.json:1721](../src/_data/intents.json#L1721)) — already
   models a persistent surface that **outlives the originating view** and owns a
-  `navigationGuard` ([intents.json:1740](../src/_data/intents.json#L1740)). It even notes a
+  `navigationGuard` ([we:intents.json:1740](../src/_data/intents.json#L1740)). It even notes a
   completed task *may emit a `feedback` toast*. This is the closest existing neighbour to "a
   long thing that re-engages you later" — but it is in-app/in-session, not OS-level.
-- **`guard` protocol** ([protocols.json:94](../protocols.json#L94), owned by `webguards`
-  [projects.json:235](../src/_data/projects.json#L235)) — the canonical **async,
+- **`guard` protocol** ([we:protocols.json:94](../protocols.json#L94), owned by `webguards`
+  [we:projects.json:235](../src/_data/projects.json#L235)) — the canonical **async,
   server-authoritative, swappable-provider** protocol. "The front-end is a UX mirror, never
   enforcement." A permission *grant check* and a *push delivery* both have that exact
   trust-crossing shape, so guard is the structural precedent for any permissions protocol.
-- **`webmanifests` project** ([projects.json:217](../src/_data/projects.json#L217)) — the home
+- **`webmanifests` project** ([we:projects.json:217](../src/_data/projects.json#L217)) — the home
   for deployment-declared metadata; the natural owner of Permissions-Policy *as a manifest
   concern* if it lands anywhere.
 
@@ -140,7 +140,7 @@ project-level config — it is not itself the deliverable surface.
 ### The webmanifests footnote (Permissions-Policy)
 
 Permissions-Policy is a deployment gate, not UX. It is out of scope for the three forks above
-and, if it lands at all, belongs to **webmanifests** ([projects.json:217](../src/_data/projects.json#L217))
+and, if it lands at all, belongs to **webmanifests** ([we:projects.json:217](../src/_data/projects.json#L217))
 as a manifest/header concern — flagged, not decided here.
 
 ## Recommendation summary (to ratify in #009)

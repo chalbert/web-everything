@@ -40,7 +40,7 @@ full trace against a live source; the diacritic-insensitive client match lands w
 
 ## Correction (reopened 2026-06-07)
 
-> **Was resolved in error.** The only implementation of this surface was built in the **legacy `plateau` repo**, since confirmed **abandoned** — the initial single-repo prototype, superseded by Web Everything + Frontier UI + plateau-app. It is **not in the live project**: the WE *spec* exists, but there is **no reference implementation** in Frontier UI or the WE `plugs/`, and the (now-removed) `graduatedTo` pointed into dead code. Reopened as a **fresh build** against the live reference implementation (Frontier UI / WE `plugs/`, per AGENTS.md) — **do not migrate or consult plateau** (explicitly not a model). The original `## Progress` below describes the void plateau build and is retained only as history.
+> **Was resolved in error.** The only implementation of this surface was built in the **legacy `plateau` repo**, since confirmed **abandoned** — the initial single-repo prototype, superseded by Web Everything + Frontier UI + plateau-app. It is **not in the live project**: the WE *spec* exists, but there is **no reference implementation** in Frontier UI or the WE `plugs/`, and the (now-removed) `graduatedTo` pointed into dead code. Reopened as a **fresh build** against the live reference implementation (Frontier UI / WE `plugs/`, per we:AGENTS.md) — **do not migrate or consult plateau** (explicitly not a model). The original `## Progress` below describes the void plateau build and is retained only as history.
 
 ## Progress (fresh build — Frontier UI) — resolved 2026-06-08
 
@@ -48,7 +48,7 @@ The fresh build is **complete and green in the live reference implementation**. 
 section below describes the *void plateau build* and is retained only as history (per the correction);
 it is **not** what shipped. What actually shipped:
 
-- **Element** — [`frontierui/blocks/droplist/AutoComplete.ts`](../../frontierui/blocks/droplist/AutoComplete.ts):
+- **Element** — [`fui:frontierui/blocks/droplist/AutoComplete.ts`](../../frontierui/blocks/droplist/AutoComplete.ts):
   a registered, form-associated (`ElementInternals`) `<auto-complete>` autonomous custom element that
   composes the six trait behaviors (`Filter`, `Clearable`, `FocusDelegation`, `Selection`, `Anchor`,
   `Anchored`) plus `LiveStatus` over a private `<input role="combobox">` + `<ul role="listbox">` +
@@ -56,22 +56,22 @@ it is **not** what shipped. What actually shipped:
   abort-aware through filter's `respond`/`reject` channel), commit write-back, and form
   value/reset/restore. Self-registers via `customElements.define` (guarded). Async by default;
   `filter="client"` seeds an inline set via `.items`/`<option>`s. `openOn` excludes `click`.
-- **Diacritic-insensitive client match** — `frontierui/blocks/droplist/Filter.ts` folds both query
+- **Diacritic-insensitive client match** — `fui:frontierui/blocks/droplist/Filter.ts` folds both query
   and option text (NFD + strip combining marks + lowercase), so `par` matches `Pärnu` / `aero` matches
   `Aéroport`. Async stays the source's job.
 - **Conformance demo** — `frontierui/demos/autocomplete-unplugged.{html,ts}`: a 4-card runnable demo
   (async live source with the debounced/cancellable "par → arrow → enter" trace; client diacritic
   match; a failing source through the error channel; a viewport-edge flip card). Served by Frontier
-  UI's Vite (`:3001`). Impl + demo live in Frontier UI (the reference implementation per AGENTS.md);
+  UI's Vite (`:3001`). Impl + demo live in Frontier UI (the reference implementation per we:AGENTS.md);
   webeverything has no dependency path to it by design, so the demo is **not** a webeverything
   conformance-badge playground.
-- **Tests** — `frontierui/blocks/droplist/__tests__/AutoComplete.test.ts` + `behaviors.test.ts`
-  (26 unit, green) and the Playwright e2e `__tests__/e2e/auto-complete.spec.ts` (4 specs, green):
+- **Tests** — `fui:frontierui/blocks/droplist/__tests__/AutoComplete.test.ts` + `fui:behaviors.test.ts`
+  (26 unit, green) and the Playwright e2e `fui:__tests__/e2e/auto-complete.spec.ts` (4 specs, green):
   async commit + dismiss, client diacritic surfacing `Pärnu`, native-strategy viewport flip (#161),
   zero console errors.
 
 **Verification (2026-06-08):** Frontier UI `vitest run blocks/droplist/` 26/26; `playwright test
-auto-complete.spec.ts` 4/4; Frontier UI `check:standards` 0 errors; webeverything `check:standards`
+fui:auto-complete.spec.ts` 4/4; Frontier UI `check:standards` 0 errors; webeverything `check:standards`
 0 errors.
 
 **Leftover → new item:** [#198](/backlog/198-autocomplete-spec-built-status-stale/) — the webeverything
@@ -88,7 +88,7 @@ today)" and references plateau; stale now that all six traits ship in Frontier U
   playground — webeverything has no dependency path to plateau impl, by design).
 
 **Done:**
-- `plateau/src/blocks/elements/AutoComplete.ts` — registered `<auto-complete>`, a form-associated
+- `we:plateau/src/blocks/elements/AutoComplete.ts` — registered `<auto-complete>`, a form-associated
   (`ElementInternals`) autonomous custom element composing the six trait behaviors
   (filter, clearable, focus-delegation, selection, anchor, anchored) over a private
   input+listbox+status substrate. Owns the glue the trace test used to fake: source wiring
@@ -96,7 +96,7 @@ today)" and references plateau; stale now that all six traits ship in Frontier U
   commit write-back, and form value/reset/restore. Encapsulates the inner input's native
   `change`/`input` at the element boundary. `client` mode seeds an inline option set (`.items` or
   light-DOM `<option>`s). `openOn` excludes `click` (focus already opens an editable combobox).
-- Diacritic-insensitive client match — `Filter.ts#filterClient` now folds both query and option text
+- Diacritic-insensitive client match — `fui:Filter.ts#filterClient` now folds both query and option text
   (NFD + strip combining marks), so `par` matches `Pärnu` / `aero` matches `Aéroport`. Async stays
   the source's job.
 - `plateau/src/auto-complete-demo.{html,ts}` — browser demo, served by plateau's Vite: async live
@@ -104,8 +104,8 @@ today)" and references plateau; stale now that all six traits ship in Frontier U
   (error channel), and a viewport-edge flip card. (Originally booted natively with an injectors shim;
   once [#160](/backlog/160-plateau-autonomous-custom-elements/) landed autonomous-element support it
   now boots the **real** plateau runtime.)
-- Tests: `plateau/src/blocks/elements/__tests__/AutoComplete.test.ts` (element-level trace + stale-cancel
-  + client diacritic) and diacritic cases in `Filter.test.ts`. Full plateau suite **188 green**.
+- Tests: `we:plateau/src/blocks/elements/__tests__/AutoComplete.test.ts` (element-level trace + stale-cancel
+  + client diacritic) and diacritic cases in `we:Filter.test.ts`. Full plateau suite **188 green**.
 - Verified in a real browser (Playwright, headless Chromium): full async trace commits "Parma",
   surface dismisses, status announces "3 results available", client `par` → `[Pärnu, Paris, Parma]`,
   zero console errors.
@@ -116,7 +116,7 @@ today)" and references plateau; stale now that all six traits ship in Frontier U
 replaces `customElements` with an injector registry whose stand-in never delegates lifecycle to an
 **autonomous** custom element's class, so `<auto-complete>`'s `connectedCallback` can't fire under the
 full plateau bootstrap (only native hosting works today). That item lands autonomous-element support
-so the element can register in `bootstrap.tsx` and the demo can boot the real runtime. A
-`Document.patch.ts` guard (no-throw `createElement` for autonomous tags) already landed as groundwork.
+so the element can register in `we:bootstrap.tsx` and the demo can boot the real runtime. A
+`we:Document.patch.ts` guard (no-throw `createElement` for autonomous tags) already landed as groundwork.
 
-**Graduated to** `frontierui/blocks/droplist/AutoComplete.ts` — registered form-associated <auto-complete> composing all six traits; demos/autocomplete-unplugged.{html,ts}; e2e auto-complete.spec.ts; diacritic fold in Filter.ts.
+**Graduated to** `fui:frontierui/blocks/droplist/AutoComplete.ts` — registered form-associated <auto-complete> composing all six traits; demos/autocomplete-unplugged.{html,ts}; e2e fui:auto-complete.spec.ts; diacritic fold in fui:Filter.ts.

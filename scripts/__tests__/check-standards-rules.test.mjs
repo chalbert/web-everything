@@ -900,6 +900,19 @@ describe('scanRepoLocusPrefixes — #884 repo-locus prefix detection (#883 conve
     const f = scan('`a/b.ts` and `c/d.mjs` and `e/f.json`');
     expect(f[0].count).toBe(3);
   });
+
+  it('carves out JS-ecosystem product names, glob masks, and bare type fragments (#885)', () => {
+    // Product names (single Capitalized word + .js) are prose, not repo files.
+    expect(scan('Built on Node.js and shipped to Next.js / Three.js.')).toEqual([]);
+    // Glob masks are file-type patterns, not concrete paths.
+    expect(scan('Match every *.test.ts and *.d.ts under the tree.')).toEqual([]);
+    // Bare type-suffix fragments (no name segment) are extensions, not paths.
+    expect(scan('Emit `.d.ts` and `.spec.ts` files.')).toEqual([]);
+    // But a real file whose name happens to start with a dot still needs a marker.
+    expect(scan('Edit `.eleventy.js` config.').length).toBe(1);
+    // And a real lowercase .js path is still flagged.
+    expect(scan('Run `scripts/gen-cem.mjs` then `src/app.js`.')[0].count).toBe(2);
+  });
 });
 
 describe('validateTemplateA11y — static template a11y lint (#772, #762 class)', () => {

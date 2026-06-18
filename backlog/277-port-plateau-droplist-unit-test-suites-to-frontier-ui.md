@@ -34,11 +34,11 @@ UI's current behaviors. Acceptance: the listed cases exist and pass in Frontier 
 
 **Resolved 2026-06-11.** Ported the richer suites — re-derived against Frontier UI's current
 behaviors (plateau never consulted) — into a new
-`frontierui/blocks/droplist/__tests__/ported-suites.test.ts` (12 tests), complementing the focused
-`behaviors.test.ts` and the positioning `strategies.test.ts` rather than duplicating them:
+`fui:frontierui/blocks/droplist/__tests__/ported-suites.test.ts` (12 tests), complementing the focused
+`fui:behaviors.test.ts` and the positioning `fui:strategies.test.ts` rather than duplicating them:
 
 - **Filter — async stale-SETTLE guard** (the explicit gap, symmetric to the stale-*reject* already
-  in `behaviors.test.ts`): two superseded queries' `respond` callbacks captured; settling the stale
+  in `fui:behaviors.test.ts`): two superseded queries' `respond` callbacks captured; settling the stale
   one renders nothing / announces nothing / leaves the live request `aria-busy`; the live `respond`
   then renders + announces + clears busy.
 - **Anchored — delegation to the resolved positioning strategy (#149)**: spies the resolved strategy's

@@ -38,41 +38,41 @@ AI's job is constrained rather than open. Concretely:
 
 - **A `Requirements` object is the only thing the AI has to produce.** A domain is a set of
   capability **axes**, each with a fixed set of `AxisValue` ids
-  (`types.ts:21-31`, 
-  `types.ts:14-19`). A
+  (`we:types.ts:21-31`, 
+  `we:types.ts:14-19`). A
   `Requirements` is `Record<axisId, acceptableValueId[]>`
-  (`types.ts:88-94`). That is a
+  (`we:types.ts:88-94`). That is a
   small, **closed-vocabulary** structure — every key and every value is enumerable from the
   domain seed. The NL layer's whole output is this map.
 
 - **The hand-authored presets are the exact shape the AI would synthesize.** Today a
   use-case preset is a human-written `{label, blurb, requirements}` triple
-  (`presets.ts:15-22`); e.g.
+  (`plateau:presets.ts:15-22`); e.g.
   "Let users undo and redo" → `{reversibility: ['inverse-patch','replay','convergent']}`
-  (`presets.ts:34-40`). The
+  (`plateau:presets.ts:34-40`). The
   NL layer **replaces the human authoring of that `requirements` map** with model
   synthesis — it produces the same structure `applyPreset` already consumes
-  (`configurator.ts:222`).
+  (`plateau:configurator.ts:222`).
 
 - **The compat engine is the deterministic guardrail downstream of the AI.**
   `rankStrategies(strategies, axes, requirements)`
-  (`compat.ts:88-99`) folds
+  (`plateau:compat.ts:88-99`) folds
   per-axis verdicts (`satisfies | compromise | incompatible`) with a fixed
   correctness-vs-fidelity policy that lives in the **axis data**, not the code
-  (`compat.ts:34-55`). So once
+  (`plateau:compat.ts:34-55`). So once
   the AI emits a `Requirements`, strategy selection is fully deterministic and
   standards-bound — the model never picks the strategy, only translates intent into the
   requirement vector the engine ranks against.
 
 - **The provider seam already exists — and is the natural home for the NL layer.** The
   configurator reads domains through a `CapabilityProvider` interface
-  (`types.ts:82-85`); the seed
-  provider (`provider.ts:21-28`)
+  (`we:types.ts:82-85`); the seed
+  provider (`we:provider.ts:21-28`)
   is one impl, and the file header explicitly anticipates swapping it for "code
   introspection or a protocol-driven source — same interface, no UI change". The NL layer is
   a **second, parallel seam**: not a capability source but a `Requirements` *producer*. New
-  domains slot in with no UI change (`provider.ts:14-19`,
-  `presets.ts:24`, `presets.ts:72`, `presets.ts:118`),
+  domains slot in with no UI change (`we:provider.ts:14-19`,
+  `plateau:presets.ts:24`, `plateau:presets.ts:72`, `plateau:presets.ts:118`),
   so any NL provider that emits a valid `Requirements` is automatically multi-domain.
 
 - **Owned by the `webregistries` project.** #096's `relatedProject` is
@@ -80,7 +80,7 @@ AI's job is constrained rather than open. Concretely:
   purposes" — which is the platform layer the strategies are selected *from*.
 
 The decision-record + config-stub emitter
-(`configurator.ts:400`, `configurator.ts:446-477`)
+(`plateau:configurator.ts:400`, `plateau:configurator.ts:446-477`)
 is the existing "emit the configured code" tail; the NL layer feeds its front, not its end.
 
 ---
@@ -120,7 +120,7 @@ NL→config-code case studies) consistently frames the task as **mapping free te
 pre-defined slot structure**, and reports that *explicit requirement definitions improve
 extraction accuracy*. The configurator's axes already **are** that slot structure, and each
 `AxisValue` already carries a plain-language `definition`
-(`types.ts:14-19`) authored for
+(`we:types.ts:14-19`) authored for
 exactly this teaching purpose. So the NL prompt is grounded in the standard's own vocabulary
 — no coined terms — which is precisely the published accuracy lever.
 
@@ -139,7 +139,7 @@ The AI-dev-tooling surveys converge on a tradeoff triad:
   developer *seeing and tuning* the choice, not just receiving it.
 
 The load-bearing observation for #096: the configurator is **already a panel** that renders
-ranked strategies and verdicts (`configurator.ts:239`, `configurator.ts:261`).
+ranked strategies and verdicts (`plateau:configurator.ts:239`, `plateau:configurator.ts:261`).
 That asymmetry drives Fork 1 — the panel is the surface that reuses the most existing
 machinery, while CLI/editor surfaces would have to re-emit the verdict rendering as text.
 
@@ -170,13 +170,13 @@ output is constrained to, not the model.
 are not mutually exclusive end-states, but the *first* surface to build is a real decision
 because it determines how much existing machinery is reused. The configurator is already a
 rendered panel with a requirements list, a strategy ranking, and per-axis verdict badges
-(`configurator.ts:160`, `configurator.ts:239`, `configurator.ts:261`).
+(`plateau:configurator.ts:160`, `plateau:configurator.ts:239`, `plateau:configurator.ts:261`).
 
 - **(A — recommended) Panel-first: an NL box inside the configurator** that, on submit, calls
   the NL provider and **populates the existing requirements state** (`state.requirements`,
-  `configurator.ts:48`, `configurator.ts:222`)
+  `plateau:configurator.ts:48`, `plateau:configurator.ts:222`)
   — identical to clicking a preset, then the developer tunes via the fine-tune disclosure
-  already present (`configurator.ts:186-192`).
+  already present (`plateau:configurator.ts:186-192`).
   Reuses the ranking, the verdict badges, the decision-record emitter, and the teaching
   definitions — the AI just authors the requirement vector a human would otherwise pick.
   Matches Finding 4 (panels are the only surface that can *show* the decision) and Demo-First
@@ -205,12 +205,12 @@ it did not fix *what that provider returns*. The contract determines how much tr
 the model vs. the deterministic engine.
 
 - **(A — recommended) `describe(nl, domain) → Requirements`.** The provider returns only the
-  closed `Requirements` map (`types.ts:94`);
-  the existing `rankStrategies` (`compat.ts:88`)
+  closed `Requirements` map (`we:types.ts:94`);
+  the existing `rankStrategies` (`plateau:compat.ts:88`)
   picks the strategy deterministically. The model translates intent into the requirement
   vector and **never selects the implementation** — the configurator stays the guardrail
   (Finding 1-2). Smallest trust surface; the output is the exact shape a preset already is
-  (`presets.ts:21`).
+  (`plateau:presets.ts:21`).
 - **(B) Provider returns a chosen strategy (or emits code) directly.** Lets the model do the
   ranking too. Rejected: it re-introduces the open-generation problem the configurator exists
   to remove, makes the output unscoreable against the axis policy, and breaks the
@@ -232,7 +232,7 @@ axes/values — otherwise the compat engine silently scores against nothing.
 - **(A — recommended) Per-domain schema generated from the seed + constrained decoding.** For
   the active domain, derive a JSON-schema where keys are the domain's `axis.id`s and each
   value is an array constrained to that axis's `AxisValue.id` `enum`
-  (`types.ts:14-31`), pass the
+  (`we:types.ts:14-31`), pass the
   axis `definition` strings as grounding context (Finding 3), and run the model under native
   structured outputs / constrained generation (Finding 1). The model **cannot** emit an
   off-vocabulary key or value. Provider-agnostic at the contract level (BYO key); on
@@ -244,7 +244,7 @@ axes/values — otherwise the compat engine silently scores against nothing.
 
 **Default: A.** The schema is *machine-derived from the domain seed*, so it auto-tracks any
 new domain or axis with zero extra authoring — the same "new domain, no UI change" property
-the provider seam already has (`provider.ts:14-19`).
+the provider seam already has (`we:provider.ts:14-19`).
 
 *Rejected:* prompt-only generation as the default contract — statistical, not structural,
 reliability.
@@ -259,10 +259,10 @@ can't responsibly fill every axis. What it does then shapes whether the tool fee
 - **(A — recommended) Emit a partial `Requirements` and degrade into the panel.** The model
   fills only the axes it's confident the description constrains and **leaves the rest unset**;
   the panel then renders those axes as un-required (the existing `hasRequirements()` /
-  fine-tune path, `configurator.ts:113`, `configurator.ts:186`)
+  fine-tune path, `plateau:configurator.ts:113`, `plateau:configurator.ts:186`)
   so the developer completes them. Honest about uncertainty, reuses the tuning loop, and the
   compat engine already treats an absent axis as "not a requirement"
-  (`compat.ts:67-68`) — so a
+  (`plateau:compat.ts:67-68`) — so a
   partial map is a first-class input, not an error case. Most-flexible default.
 - **(B) One-shot best-guess full fill.** Always populate every axis. Rejected: it manufactures
   confidence the description doesn't support, and on a correctness axis a wrong guess flips a
@@ -282,8 +282,8 @@ correctness verdicts.
 - Decision: [#096 — NL → Technical Configurator](/backlog/096-nl-to-technical-configurator/)
 - Epic: [#097 — monetization product concepts](/backlog/089-monetization-product-ideas/) · related [#089](/backlog/089-monetization-product-ideas/)
 - Project: [Web Registries](/projects/) (`relatedProject: webregistries`)
-- Machinery (plateau-app): `technical-configurator/types.ts`, `compat.ts`, `provider.ts`,
-  `presets.ts`, `configurator.ts`
+- Machinery (plateau-app): `plateau:technical-configurator/types.ts`, `plateau:compat.ts`, `we:provider.ts`,
+  `plateau:presets.ts`, `plateau:configurator.ts`
 
 ---
 

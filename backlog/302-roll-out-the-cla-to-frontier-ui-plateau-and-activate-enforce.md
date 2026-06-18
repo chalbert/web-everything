@@ -12,19 +12,19 @@ crossRef: { url: /backlog/217-cla-before-external-contributions/, label: "CLA ar
 # Roll out the CLA to Frontier UI + Plateau and activate enforcement
 
 Spun out of [#217](/backlog/217-cla-before-external-contributions/). The CLA
-artifacts (`CLA.md` + `.github/workflows/cla.yml`, the CLA Assistant bot) now exist
+artifacts (`we:CLA.md` + `we:.github/workflows/cla.yml`, the CLA Assistant bot) now exist
 in **Web Everything**. #217 deliberately stopped at the WE artifact rather than
 reach cross-repo mid-batch; this tracks the rest so the gate is **live before any
 repo accepts its first external pull request** — the near-term trigger #217 names.
 
 ## Scope
 
-- **Frontier UI + Plateau:** copy `CLA.md` + `.github/workflows/cla.yml` into both
+- **Frontier UI + Plateau:** copy `we:CLA.md` + `we:.github/workflows/cla.yml` into both
   repos (the gradient needs the CLA on every repo that takes contributions — WE, FU,
   and Plateau per [#098](/backlog/098-licensing-strategy/)). Adjust each CLA's
   Project framing only if a repo names itself differently; the relicensing grant is
   identical across all three.
-- **Activate the bot:** replace the `OWNER/REPO` placeholders in each `cla.yml`
+- **Activate the bot:** replace the `OWNER/REPO` placeholders in each `we:cla.yml`
   `path-to-document` / `custom-notsigned-prcomment` with the real repo path once the
   repos are public, and create the `cla-signatures` branch the action writes to.
 - **Branch protection:** make the `CLA Assistant` status check **required** on each

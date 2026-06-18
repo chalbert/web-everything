@@ -26,7 +26,7 @@ A "file update" control is not one component but a composition of reusable parad
 
 ## Codification (2026-06-10) — what graduated, and the open questions resolved
 
-Codified as **one UX-only intent — [`file-revision`](/intents/file-revision/)** (`src/_data/intents.json`,
+Codified as **one UX-only intent — [`file-revision`](/intents/file-revision/)** (`we:src/_data/intents.json`,
 status `concept`), not a sprawling new family. The decomposition deliberately **composes** existing/pending
 intents rather than duplicating them, which resolves the open questions:
 

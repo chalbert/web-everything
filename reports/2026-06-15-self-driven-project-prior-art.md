@@ -2,7 +2,7 @@
 
 **Date**: 2026-06-15
 **Point**: The self-driving-car model applied to the whole SDLC (human sets goal + tolerance, AI drives the steps, gated/transparent/reversible, escalates on tolerance breach) is **already named and published** — convergently, by ~a dozen authors in 2024–2026, all citing SAE J3016 — but as **blog/community content, not a ratified standard**. We should cite that space, not claim it. What is **genuinely ours** is (a) the **value-creation vs risk-mitigation partition of all lifecycle work, bound to five NFR dimensions, used as the autonomy *dial* (risk-bucket = the ODD that throttles autonomy per step)**, and (b) a **verify gate with real ground truth** — a machine-checkable conformance standard — which the published frameworks lack (they stop at "CI green + human review").
-**Backlog item**: [backlog/665-self-driven-project-ratify-the-framing-autonomy-taxonomy-mas.md](../backlog/665-self-driven-project-ratify-the-framing-autonomy-taxonomy-mas.md) · epic [backlog/666-self-driven-project.md](../backlog/666-self-driven-project.md)
+**Backlog item**: [we:backlog/665-self-driven-project-ratify-the-framing-autonomy-taxonomy-mas.md](../backlog/665-self-driven-project-ratify-the-framing-autonomy-taxonomy-mas.md) · epic [we:backlog/666-self-driven-project.md](../backlog/666-self-driven-project.md)
 
 ---
 
@@ -180,7 +180,7 @@ escapable lock minimize-lock-in permits); our tools are non-blocking consumers o
 But **"self-driving" is strongly Oracle's** (the self-driving database, marketed verbatim
 "self-driving, self-securing, self-repairing") — so lean on "self-**driven**" and avoid "self-driving
 database / infrastructure / SDLC" in copy. "**Agentic SDLC**" is the crowded generic category (Sonar,
-Cisco, Baytech). Internal clash: **"Project" already names a WE standard entity** (projects.json —
+Cisco, Baytech). Internal clash: **"Project" already names a WE standard entity** (we:projects.json —
 webregistries, webinjectors…), so the brand overloads an existing term — a Fork-3 sub-decision.
 
 ---

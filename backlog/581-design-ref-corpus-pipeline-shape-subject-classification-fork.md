@@ -42,15 +42,15 @@ children). Fork 3 (first-run scope / taxonomy) was delegated to [#394](/backlog/
     targets.json             # the worklist we grow each run
   scripts/design-refs.mjs    # collect | dedup | index | report
   ```
-- **`meta.json` fields:** `id`, `contentHash` (sha256), `sourceUrl`, `captureMethod`
+- **`we:meta.json` fields:** `id`, `contentHash` (sha256), `sourceUrl`, `captureMethod`
   (playwright|gallery), `dateCollected`, `datePublished` (best-effort, nullable), `app`,
   `company`, `category` (domain), `surface` (dashboard/list/settings/landing/onboarding…),
   `designRegister` (enterprise-dense / modern-saas / minimal / playful…), `theme`,
   `viewport`+`dpr`, `imageDims`, `tags[]`, `attribution`/`sourceCredit`, `collectionRun`.
 - **Dedup v1:** exact sha256 + source-URL ledger → skip. Near-dup (perceptual aHash/dHash via
   `sharp`) deferred to a later consolidation pass; `sharp` not yet a dep.
-- **Tooling:** `scripts/design-refs.mjs` CLI, following the existing `scripts/*.mjs` convention
-  (backlog.mjs, check-readiness, gen-inventory).
+- **Tooling:** `we:scripts/design-refs.mjs` CLI, following the existing `scripts/*.mjs` convention
+  (we:backlog.mjs, check-readiness, gen-inventory).
 
 ## Resolved forks
 
@@ -90,6 +90,6 @@ register / theme get filled during codification.
 
 Carved to **#394** and ratified 2026-06-13 (B / C / B / A): split `designRegister` →
 `productRegister` (deterministic) + `visualStyle` (vision-pass); open-growing controlled vocab in
-keyed `design-refs/taxonomy.json`; scarcity-weighted grow-targets (~30–50, ≥3/cell); coarse
+keyed `we:design-refs/taxonomy.json`; scarcity-weighted grow-targets (~30–50, ≥3/cell); coarse
 ~10-domain hand-rolled category seed lightly anchored to G2/Capterra. The mechanical build is carved
 to [#509](/backlog/509-design-ref-taxonomy-seed-re-key-scarcity-targets-build-394-r/).

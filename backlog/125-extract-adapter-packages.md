@@ -17,7 +17,7 @@ crossRef: { url: /adapters/jsx-adapter/, label: JSX Adapter }
 
 Today the JSX and `<component>` transforms live *inside this monorepo*
 (`blocks/renderers/jsx/{JSXRenderer,htmlToJsx,jsxToHtml}.ts`,
-`blocks/renderers/component/declarativeComponent.ts`) and are wired only into *our* esbuild/Vite/Vitest
+`we:blocks/renderers/component/declarativeComponent.ts`) and are wired only into *our* esbuild/Vite/Vitest
 config. A real external project can't `import` from our repo, so every integration story in the
 real-project report blocks on extracting installable artifacts. This is the **first work item** the
 report (§2) exposes — until it exists, "integration" is copy-paste; after it, every build-system row in
@@ -30,7 +30,7 @@ Extract three artifacts:
    `jsx`, `jsxs`, `Fragment` for `jsxImportSource`). Ship JSX types so `tsc` can type-check against the
    mirror dialect.
 2. **`@webeverything/component-compiler`** — the pure `<component>` → custom-element-class transform
-   (`declarativeComponent.ts`), framework-agnostic (string in → string out), plus the HTML⇄JSX transforms
+   (`we:declarativeComponent.ts`), framework-agnostic (string in → string out), plus the HTML⇄JSX transforms
    for tooling/source-toggle.
 3. **Thin bundler-plugin wrappers** around #2 — `@webeverything/{vite,esbuild,rollup}-plugin`, a webpack
    loader, etc. Each is ~30 lines: match the source, call the compiler, return the module. (The JSX side
@@ -48,7 +48,7 @@ there.
 Companion decisions that shape the extraction: the documented JSX runtime default (#126) and the
 component-compiler toolchain reach (#127).
 
-**Unblocked 2026-06-07:** Frontier UI's `npm run build:plugs` (`tsc -p tsconfig.json`,
+**Unblocked 2026-06-07:** Frontier UI's `npm run build:plugs` (`tsc -p we:tsconfig.json`,
 `declaration: true`) now compiles **clean (0 errors)** and emits `.d.ts` — it was previously broken
 (54 type errors). Shipping these packages means shipping their types, so a clean declaration build is
 a prerequisite; that gate is now green.
@@ -60,21 +60,21 @@ a prerequisite; that gate is now green.
 - **Recalibration (the big find):** the three artifacts are *not* greenfield —
   - **Artifact 2 (`<component>` compiler)** and **Artifact 3 (bundler plugins)** are already **built and
     tested** by **#231 (resolved)** in `frontierui/compiler/src/component-transform/`:
-    `index.ts` (`transform`), `compile.ts` (`compile(code,id,opts)` surface-aware), `surfaces.ts`
-    (`lowerSurface` html+tsx), `plugins.ts` (`componentVitePlugin` + `componentEsbuildPlugin`). #231's
-    own Progress flags the leftover: *"not wired as a package.json subpath export / standalone
+    `we:index.ts` (`transform`), `we:compile.ts` (`compile(code,id,opts)` surface-aware), `fui:surfaces.ts`
+    (`lowerSurface` html+tsx), `fui:plugins.ts` (`componentVitePlugin` + `componentEsbuildPlugin`). #231's
+    own Progress flags the leftover: *"not wired as a we:package.json subpath export / standalone
     `@webeverything/component-compiler` package — that packaging is #125's job."*
   - **Artifact 1 (`@webeverything/jsx-runtime`)** does **not** exist as a package. Source lives at
-    `frontierui/blocks/renderers/jsx/JSXRenderer.ts` (classic: default `jsx`, named `createElement`,
-    `Fragment`), wired in-repo via classic `jsxInject` (`vite.config.mts` / `tsconfig.json`) per #126.
+    `we:frontierui/blocks/renderers/jsx/JSXRenderer.ts` (classic: default `jsx`, named `createElement`,
+    `Fragment`), wired in-repo via classic `jsxInject` (`vite.config.mts` / `we:tsconfig.json`) per #126.
     Missing: the **automatic** `/jsx-runtime` entry (`jsx`/`jsxs`/`Fragment`) + JSX type namespace +
-    `package.json` `exports`. This is the keystone unblocking **#233** (apply #126's automatic-default ruling).
+    `we:package.json` `exports`. This is the keystone unblocking **#233** (apply #126's automatic-default ruling).
 - **So #125 = packaging**, not transform engineering: (1) create `@webeverything/jsx-runtime` (new), and
   (2) give the already-built compiler + plugins an installable `@webeverything/*` identity with `exports`,
   types, and a clean `tsc` build. Extra bundler wrappers (Rollup/webpack/Babel) are spun out to **#234**;
   deferred opt-ins are **#232**.
 - **Done:** read all source + sibling items (#126/#127 resolved, #231 resolved, #232/#234 open); confirmed
-  jsx source + a `declarative-spa-jsx.tsx` demo exist in frontierui (a ready demo target for `jsxImportSource`).
+  jsx source + a `we:declarative-spa-jsx.tsx` demo exist in frontierui (a ready demo target for `jsxImportSource`).
 - **Status:** resolved 2026-06-09. Built in **Frontier UI** (impl repo) as an npm-workspaces monorepo.
 - **Shipped — five installable `@webeverything/*` packages under `frontierui/packages/`** (the settled
   split: runtime / compiler / plugins), wired via root `workspaces: ["compiler", "packages/*"]`:
@@ -90,7 +90,7 @@ a prerequisite; that gate is now green.
     factory) over the compiler's already-built pre-transform plugins.
 - **Verification:**
   - All 5 packages `tsc`-build clean and emit `.d.ts` (dual/subpath `exports` resolve).
-  - **`packages/__tests__/extraction-smoke.test.ts` (11 tests, green)** — imports every package by its
+  - **`fui:packages/__tests__/extraction-smoke.test.ts` (11 tests, green)** — imports every package by its
     **public `@webeverything/*` name** (through the workspace symlink → `exports` → built `dist/`) and
     exercises it: classic + automatic JSX build real DOM; `compile()` lowers a `<component>` in `.html`
     and respects the native-first default surface; HTML⇄JSX round-trips; each plugin factory returns a

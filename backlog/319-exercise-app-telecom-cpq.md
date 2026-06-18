@@ -51,7 +51,7 @@ detailed enough to break the build into agent-ready slices.
 ## Progress
 
 Resolved 2026-06-14 (batch). Derived the full telecom service-plan CPQ requirement
-set as `reports/2026-06-14-exercise-app-telecom-cpq-requirements.md` (matching the
+set as `we:reports/2026-06-14-exercise-app-telecom-cpq-requirements.md` (matching the
 loan/insurance PRD format), wired via `relatedReport`. Covers: a synthesized mobile-carrier
 catalog; the **dependency-constraint model** (requires/excludes/implies/cardinality/eligibility)
 as the headline Technical-Configurator + NL-to-config exercise; a configuration-derived pricing

@@ -13,7 +13,7 @@ tags: []
 
 # Extend the dual-mode/drift conformance check to blocks (the #606 plugs analogue for blocks)
 
-Execute the conformance arm of the #641 ruling: extend the dual-mode/drift conformance check that #606/#649 established for plugs to cover blocks. Gate that WE's blocks.json block-protocol contracts stay content-equal with their canonical @frontierui/blocks impl (no silent drift, the #170 hazard), and that each block protocol's declared shape matches the impl it points at via sourcePath/implementedBy. Catches the re-divergence Fork 2 dedup closes, as an enforced check rather than a convention.
+Execute the conformance arm of the #641 ruling: extend the dual-mode/drift conformance check that #606/#649 established for plugs to cover blocks. Gate that WE's fui:blocks.json block-protocol contracts stay content-equal with their canonical @frontierui/blocks impl (no silent drift, the #170 hazard), and that each block protocol's declared shape matches the impl it points at via sourcePath/implementedBy. Catches the re-divergence Fork 2 dedup closes, as an enforced check rather than a convention.
 
 ## Progress (resolved 2026-06-18)
 
@@ -22,11 +22,11 @@ Execute the conformance arm of the #641 ruling: extend the dual-mode/drift confo
 So the #170 drift hazard for blocks is **not** byte-divergence (the plug case) but a *contract pointing at an
 impl that has moved or does not exist*. The gate is built accordingly.
 
-- **`validateBlockImplConformance`** (`scripts/check-standards-rules.mjs`) — pure rule, mirrors
+- **`validateBlockImplConformance`** (`we:scripts/check-standards-rules.mjs`) — pure rule, mirrors
   `validatePlugDualMode`. Cross-repo + **detect-or-skip** (the `devServerProbe` pattern): when `../frontierui`
   is checked out, every `implementedBy` must resolve to a real impl path; when FUI is absent (CI without the
   sibling repo) the content arm is **skipped, never failed**.
-- **Walker** — new section 8c in `scripts/check-standards.mjs` resolves each `@frontierui/blocks/<rel>` against
+- **Walker** — new section 8c in `we:scripts/check-standards.mjs` resolves each `@frontierui/blocks/<rel>` against
   `../frontierui/blocks` (file refs by extension, dir refs by dir/index module) and feeds the pure rule.
 - **Staging** — `BLOCK_IMPL_DRIFT_ENFORCED=false` (WARN), the #636 warn→enforce shape: a contract may legitimately
   point *ahead* of an unbuilt impl, so a missing impl warns until the FUI backfill closes the gaps, then promotes

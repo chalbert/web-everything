@@ -21,16 +21,16 @@ Claimed in a batch and investigated against the real surface (frontierui `packag
 + its `/server` `renderToString` path from #544, and the WE reference render). The one-paragraph spec
 understates a focused, multi-file **published-package build**, not a batch-tail slice:
 
-- **New package from scratch** — `frontierui/packages/webdocs-ui/`: `package.json` (`@frontierui/webdocs-ui`,
+- **New package from scratch** — `frontierui/packages/webdocs-ui/`: `we:package.json` (`@frontierui/webdocs-ui`,
   `exports`, `files`), an **SSR `tsconfig`** wiring `jsxFactory: createElement` / `jsxFragmentFactory: Fragment`
   at `@frontierui/jsx-runtime/server` (distinct from the runtime DOM build), and a `dist` build step (the
   package convention is per-package `tsc`).
 - **Two data-driven renders to generalize, not one** — the body says "protocol/conformance panels." The
-  protocol panel generalizes [`src/protocols.njk`](../src/protocols.njk) (intro + a dual-axis project/status
+  protocol panel generalizes [`we:src/protocols.njk`](../src/protocols.njk) (intro + a dual-axis project/status
   filter UI + a status-coloured card grid + empty state + a filter script). The **conformance panel** is a
-  *separate* generalization of the `capabilityMatrix` render (`src/_data/capabilityMatrix.json`) — its own
+  *separate* generalization of the `capabilityMatrix` render (`we:src/_data/capabilityMatrix.json`) — its own
   table/matrix component, not yet surveyed.
-- **Plus** `PageShell` (a `base.njk` equivalent: header/nav/main/footer) and a `Nav` primitive.
+- **Plus** `PageShell` (a `we:base.njk` equivalent: header/nav/main/footer) and a `Nav` primitive.
 - **Island hydration** — interactivity (the filter, tabs) supplied by composing existing FUI behavior
   blocks (tabs, navigation, droplist, for-each) as light-DOM islands via the renderToString custom-element
   path, **hydrate-optional with a JS-off degradation guarantee** — which needs degradation tests, not just

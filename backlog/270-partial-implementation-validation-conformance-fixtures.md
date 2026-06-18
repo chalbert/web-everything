@@ -18,7 +18,7 @@ Author partial-implementation test fixtures — impls that declare a subset of f
 ## Progress
 
 **Resolved 2026-06-10.** Authored the shared fixture base at
-[capability-manifest/fixtures.ts](../capability-manifest/fixtures.ts) (re-exported from the
+[we:capability-manifest/fixtures.ts](../capability-manifest/fixtures.ts) (re-exported from the
 `capability-manifest` barrel), consuming the #266 model. Two sets:
 
 - **`CAPABILITY_FIXTURES`** — 7 valid-manifest scenarios, each pairing a contract-valid manifest with
@@ -32,7 +32,7 @@ Author partial-implementation test fixtures — impls that declare a subset of f
 - **`outOfCapability(manifest, used)`** — the canonical `used − declared` diff (via `manifestSupports`)
   defined once here with the fixtures, so #267/#268/#269 share one definition rather than re-deriving it.
 
-A self-consistency suite ([__tests__/fixtures.test.ts](../capability-manifest/__tests__/fixtures.test.ts),
+A self-consistency suite ([we:__tests__/fixtures.test.ts](../capability-manifest/__tests__/fixtures.test.ts),
 6 tests) asserts every valid fixture's manifest passes `assertCapabilityManifest`, each pinned
 `expectedOutOfCapability` equals the computed diff, every invalid fixture is rejected, the base covers
 both in- and out-of-capability shapes, and names are unique. All 21 capability-manifest tests pass;

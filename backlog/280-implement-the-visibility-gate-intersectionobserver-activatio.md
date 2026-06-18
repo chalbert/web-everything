@@ -21,7 +21,7 @@ The design is fully ruled in [#221](/backlog/221-behaviour-activation-gated-on-v
 
 ## Scope
 
-- **Registry gate** — in `plugs/webbehaviors/CustomAttributeRegistry.ts`, add an `IntersectionObserver`
+- **Registry gate** — in `we:plugs/webbehaviors/CustomAttributeRegistry.ts`, add an `IntersectionObserver`
   alongside the existing `inert` `MutationObserver`. For a host whose trait is visibility-gated, defer
   the activation path until first intersection, then toggle `activatedCallback()` (and
   `deactivatedCallback()` on exit per the re-entry policy) — never touching connectedness.
@@ -36,7 +36,7 @@ The design is fully ruled in [#221](/backlog/221-behaviour-activation-gated-on-v
   (mirror the #223 split). Keep the `CustomAttribute` base identical across both.
 - **Conformance** — a below-the-fold demo (`demos/visibility-gate*.html`) where a gated trait neither
   loads nor applies until scrolled into view, plus an e2e spec
-  (`plugs/__tests__/e2e/visibility-gate.spec.ts`). Compose-with-`content-visibility:auto` worth a demo.
+  (`fui:plugs/__tests__/e2e/visibility-gate.spec.ts`). Compose-with-`content-visibility:auto` worth a demo.
 
 ## Acceptance
 
@@ -48,18 +48,18 @@ The design is fully ruled in [#221](/backlog/221-behaviour-activation-gated-on-v
 
 ## Progress
 
-- **Status:** resolved 2026-06-11 (batch `batch-2026-06-11`). Two-repo build mirroring the #223 split — **contract** in the WE plug, **runtime** in the Frontier UI fork. The `visibility_gate` spec section already existed in `traits.json` (#221); this is the implementation, built to match it.
-- **Contract — WE plug (`plugs/webbehaviors/CustomAttribute.ts`, copied byte-identical to the FUI fork per #223):**
+- **Status:** resolved 2026-06-11 (batch `batch-2026-06-11`). Two-repo build mirroring the #223 split — **contract** in the WE plug, **runtime** in the Frontier UI fork. The `visibility_gate` spec section already existed in `we:traits.json` (#221); this is the implementation, built to match it.
+- **Contract — WE plug (`we:plugs/webbehaviors/CustomAttribute.ts`, copied byte-identical to the FUI fork per #223):**
   - `static activationWhen: 'connect' | 'visible' = 'connect'` — the trait-author manifest default (status quo `connect`, so strictly opt-in).
   - `static visibilityReentry?: 'once' | 'recurring'` — the optional trait-author re-entry override; absent, the policy derives from `activationSurface`.
   - Both added to the `ImplementedAttribute` type. WE's registry stays runtime-free (the #223 split — WE is the contract reference, FUI the runtime).
-- **Runtime — Frontier UI (`plugs/webbehaviors/CustomAttributeRegistry.ts`):**
+- **Runtime — Frontier UI (`we:plugs/webbehaviors/CustomAttributeRegistry.ts`):**
   - A single lazily-created `IntersectionObserver` (the activation analogue of the inert `MutationObserver`); **gracefully degrades** to activate-on-connect where `IntersectionObserver` is absent (SSR/jsdom).
   - **Eager (apply-on-view):** `#addAttribute` branches on `#isVisibilityGated` — a gated instance stays dormant (connected, not activated) until first intersection, then `#setActivated` runs (still inert-aware, so the two gates compose).
   - **Lazy (fetch-on-view):** both lazy-trigger sites (`#applyOnTree` add, `#update`) defer `#loadLazy` to intersection when `<name>-when="visible"` is present — the chunk is not `import()`ed below the fold.
   - **Re-entry** from `#reentryPolicy`: `interaction` → `once` (activate-and-stay, unobserve after), `ambient` → `recurring` (deactivate on exit, re-activate on re-entry); `visibilityReentry` overrides. A `#revealed` set lets a lazy `once` trait that attaches after its host is already visible activate immediately. Gate entries are cleaned on removal/downgrade.
 - **Conformance:**
-  - Unit (FUI): `CustomAttributeRegistry.visibility.test.ts` (9) — dormant-until-view, once-stays, ambient-recurring, manifest-default gating, `-when="connect"` override, inert composition, `visibilityReentry` override, lazy fetch-on-view, IO-absent fallback (mocked IntersectionObserver, since jsdom lacks it).
-  - Demo (FUI): `demos/visibility-gate.{html,ts}` + `demos/visibility-gate-heavy.ts` — below-the-fold `reveal` (eager/once), `pulse` (ambient/recurring), `heavy` (lazy fetch-on-view).
-  - E2e (FUI): `plugs/__tests__/e2e/visibility-gate.spec.ts` — real-browser proof: no lazy chunk request below the fold, activation only on intersection, recurring-pause vs once-stay, fetch-on-view on reaching `#heavy`; zero page errors.
-- **Gate:** FUI full unit suite **1389 passing** (+9 new), the new e2e green, `tsc -p tsconfig.json` clean; WE webbehaviors **114 passing**, `check:standards` 0 errors, the `/projects/webtraits/` visibility-gate section renders.
+  - Unit (FUI): `fui:CustomAttributeRegistry.visibility.test.ts` (9) — dormant-until-view, once-stays, ambient-recurring, manifest-default gating, `-when="connect"` override, inert composition, `visibilityReentry` override, lazy fetch-on-view, IO-absent fallback (mocked IntersectionObserver, since jsdom lacks it).
+  - Demo (FUI): `demos/visibility-gate.{html,ts}` + `fui:demos/visibility-gate-heavy.ts` — below-the-fold `reveal` (eager/once), `pulse` (ambient/recurring), `heavy` (lazy fetch-on-view).
+  - E2e (FUI): `fui:plugs/__tests__/e2e/visibility-gate.spec.ts` — real-browser proof: no lazy chunk request below the fold, activation only on intersection, recurring-pause vs once-stay, fetch-on-view on reaching `#heavy`; zero page errors.
+- **Gate:** FUI full unit suite **1389 passing** (+9 new), the new e2e green, `tsc -p we:tsconfig.json` clean; WE webbehaviors **114 passing**, `check:standards` 0 errors, the `/projects/webtraits/` visibility-gate section renders.

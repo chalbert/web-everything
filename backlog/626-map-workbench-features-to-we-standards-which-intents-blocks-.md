@@ -19,7 +19,7 @@ tags: [webdocs, decision, placement, intents, blocks, adapters, derivation]
 
 **Placement/derivation decision — prepared, ready to ratify.** Classify the 20-feature matrix from
 [#625](/backlog/625-inventory-the-full-feature-surface-across-workbench-tools/)
-([`workbenchFeatures.json`](../src/_data/workbenchFeatures.json)) against the live registry. No fresh design
+([`we:workbenchFeatures.json`](../src/_data/workbenchFeatures.json)) against the live registry. No fresh design
 exists; the call is grounded in the published `/research/` topic
 [webdocs-feature-derivation](/research/webdocs-feature-derivation/) (report linked via `relatedReport`).
 Applying the **fork-existence test**, the surface collapses to **~11 ratify-as-classified placements**, a
@@ -32,8 +32,8 @@ This is mostly a *classification* decision, not a fork-storm: most of #625's `we
 ratify and move on. The research decomposed the genuinely-open part into two orthogonal axes: (1) the
 **component-metadata interchange** — what artifact carries a block's API metadata, and at what *layer*
 (the matrix invented `format:*` refs against a registry that doesn't exist —
-[`projects.json`](../src/_data/projects.json) has projects, [`protocols.json`](../src/_data/protocols.json)
-has 28 protocols, there is **no `formats.json`** — so the entity-kind is a real call); and (2) the
+[`we:projects.json`](../src/_data/projects.json) has projects, [`we:protocols.json`](../src/_data/protocols.json)
+has 28 protocols, there is **no `we:formats.json`** — so the entity-kind is a real call); and (2) the
 **examples↔webcases** boundary — whether docs "stories/examples" are the existing webcases fixture or a
 sibling concept, a combine-vs-split call against the bias-toward-separation. The render triad
 (`component-isolation` / `autodocs` / `args-controls`) is *one* capability fed by one manifest (api-viewer
@@ -55,7 +55,7 @@ Both forks ratified to their recommended defaults; the 20-feature classification
 adopted as-classified.
 
 - **Fork 1 — Component-metadata interchange & layer → A.** Adopt Custom Elements Manifest (CEM,
-  `custom-elements.json`, schema 2.1.0) as a new WE `protocol` (`custom-elements-manifest`) — its cross-vendor
+  `we:custom-elements.json`, schema 2.1.0) as a new WE `protocol` (`custom-elements-manifest`) — its cross-vendor
   interop is exactly the protocol litmus, and adopting the open spec keeps the single escapable lock while
   inheriting the api-viewer/Storybook/VS Code/JetBrains consumer ecosystem. *Sub-decision:* the API-table
   renderer is a `props-table` block over CEM; the args/controls panel is the Technical Configurator fed by
@@ -81,18 +81,18 @@ These feed the catalog surface assembly [#627](/backlog/627-assemble-the-web-doc
 
 **Crux.** Autodocs, the isolation renderer, and the args panel all need a machine-readable description of a
 block's attributes/properties/events/slots/CSS-API. What artifact carries it, and what WE entity-kind does
-it become? The matrix wrote `format:custom-elements-manifest` ([`workbenchFeatures.json:39`](../src/_data/workbenchFeatures.json#L39),
+it become? The matrix wrote `format:custom-elements-manifest` ([`we:workbenchFeatures.json:39`](../src/_data/workbenchFeatures.json#L39),
 [:87](../src/_data/workbenchFeatures.json#L87)) but there is **no `formats` registry** to hold it — so the
 layer is unresolved. The relevant precedent is the `changelog-manifest` **protocol**
-([`protocols.json:94`](../src/_data/protocols.json#L94)): WE already treats a declarative manifest consumed
+([`we:protocols.json:94`](../src/_data/protocols.json#L94)): WE already treats a declarative manifest consumed
 by multiple independent tools as a protocol (the one-seam-many-consumers shape).
 
-- **A — Adopt CEM as a new WE `protocol`. ✅ recommended.** Custom Elements Manifest (`custom-elements.json`,
+- **A — Adopt CEM as a new WE `protocol`. ✅ recommended.** Custom Elements Manifest (`we:custom-elements.json`,
   schema 2.1.0) is the de-facto multi-vendor spec, consumed by api-viewer, Storybook (web-components), VS
   Code custom-data, JetBrains web-types, and linters off one file. That cross-vendor interop is *exactly*
   WE's protocol litmus (classification Q2 — reach for a protocol only when many vendors must interoperate).
   Adopting the existing spec reuses platform vocabulary (native-first), inherits its consumer ecosystem for
-  free, and keeps the protocol as the single escapable lock. A new `protocols.json` entry
+  free, and keeps the protocol as the single escapable lock. A new `we:protocols.json` entry
   (`custom-elements-manifest`) plus the emit pipeline from WE blocks; renders the API tables as a
   `props-table` block. *Tradeoff:* WE binds to an external schema's evolution — mitigated by CEM's own
   `schemaVersion` field.
@@ -105,15 +105,15 @@ by multiple independent tools as a protocol (the one-seam-many-consumers shape).
 
 *Sub-decision (settled by A):* the API-table renderer is a **`props-table` block** rendering CEM output;
 the args/controls panel is the **Technical Configurator fed by CEM**
-([`intents.json:1160`](../src/_data/intents.json#L1160) input / [:1118](../src/_data/intents.json#L1118)
+([`we:intents.json:1160`](../src/_data/intents.json#L1160) input / [:1118](../src/_data/intents.json#L1118)
 selection), *not* a new control standard.
 
 ## Fork 2 — Docs examples ↔ webcases
 
-**Crux.** Docs need "multiple states / stories per component" (`workbenchFeatures.json:42`) and
-interaction-tests (`:150`). WE already has **webcases** ([`projects.json:208`](../src/_data/projects.json#L208),
+**Crux.** Docs need "multiple states / stories per component" (`we:workbenchFeatures.json:42`) and
+interaction-tests (`:150`). WE already has **webcases** ([`we:projects.json:208`](../src/_data/projects.json#L208),
 `concept`) as the conformance-fixture artifact, and the #426 ingestion adapters already read CSF and emit
-the webcases pivot `WebCase = {id,title,description,code}` (`webdocs/generator.ts:27-46`, surveyed in
+the webcases pivot `WebCase = {id,title,description,code}` (`fui:webdocs/generator.ts:27-46`, surveyed in
 [/research/webdocs-incumbent-ingestion-adapters/](/research/webdocs-incumbent-ingestion-adapters/)). Is a
 docs "example" the same row as a conformance "case," or a sibling concept?
 
@@ -140,22 +140,22 @@ Everything here is **ratify-as-classified** — placements the fork-existence te
 | component-isolation | extend (was *new*) | webdocs capability composing CEM (api-viewer pattern) |
 | autodocs | extend (was *new*) | webdocs capability → **mint `props-table` block** (renders CEM) |
 | args-controls | extend | Technical Configurator fed by CEM |
-| source-code-view | mint | **mint `code-view` block** (+ `data-transfer` copy, [`intents.json:1990`](../src/_data/intents.json#L1990)); sandbox embed out-of-scope |
+| source-code-view | mint | **mint `code-view` block** (+ `data-transfer` copy, [`we:intents.json:1990`](../src/_data/intents.json#L1990)); sandbox embed out-of-scope |
 | multiple-states (stories) | **Fork 2** | webcases (rec.) → **mint `story-canvas` block** vs sibling `examples` |
 | interaction-tests | extend | webcases conformance fixtures (folds into Fork 2) |
 | component-metadata | **Fork 1** | CEM as a `protocol` (rec.) |
 | search | reuse + tooling (was *new*) | `autocomplete`/`type-ahead` blocks + Pagefind build step |
 | long-form-docs | extend | 11ty/markdown + block-embed directive (**not** webediting — unregistered, #618) |
-| viewport-responsive | reuse | `breakpoint` intent ([`intents.json:984`](../src/_data/intents.json#L984)) |
-| theming-switch / token-tables | reuse | webtheme ([`projects.json:280`](../src/_data/projects.json#L280)) + `data-table` block |
-| a11y-panel | reuse | webcompliance ([`projects.json:307`](../src/_data/projects.json#L307)) output (presentation) |
+| viewport-responsive | reuse | `breakpoint` intent ([`we:intents.json:984`](../src/_data/intents.json#L984)) |
+| theming-switch / token-tables | reuse | webtheme ([`we:projects.json:280`](../src/_data/projects.json#L280)) + `data-table` block |
+| a11y-panel | reuse | webcompliance ([`we:projects.json:307`](../src/_data/projects.json#L307)) output (presentation) |
 | navigation-ia | reuse | `nav-list` / `tree-select` / `breadcrumb` blocks |
-| i18n-docs | reuse | webintl ([`projects.json:181`](../src/_data/projects.json#L181)) |
-| analytics | reuse | webanalytics ([`projects.json:123`](../src/_data/projects.json#L123)) |
+| i18n-docs | reuse | webintl ([`we:projects.json:181`](../src/_data/projects.json#L181)) |
+| analytics | reuse | webanalytics ([`we:projects.json:123`](../src/_data/projects.json#L123)) |
 | access-control-metered | reuse | `access-control` + `web-identity` intents (powers #398 open-core) |
 | extensibility-addons | reuse | webplugs / webregistries |
 | versioning | extend | doc snapshots + webadapters migration content |
-| conformance-badge *(thread)* | reuse | capabilityMatrix output — presentation, like the a11y panel ([`capabilityMatrix.json`](../src/_data/capabilityMatrix.json)) |
+| conformance-badge *(thread)* | reuse | capabilityMatrix output — presentation, like the a11y panel ([`we:capabilityMatrix.json`](../src/_data/capabilityMatrix.json)) |
 | persona-lensed IA *(thread)* | reuse | persona-preset primitive (#564/#622) as a filter lens — not new docs-only nav |
 | visual-regression | out-of-scope | CI/hosted → served product #398 |
 | design-code-bridge | out-of-scope | design-tool integration → served product #398 |

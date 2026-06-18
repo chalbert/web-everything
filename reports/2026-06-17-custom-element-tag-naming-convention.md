@@ -19,9 +19,9 @@ stays totally flexible — an invariant #822 already fixed (most-flexible-defaul
 
 ### No block carries a `tagName` today
 
-`src/_data/blocks.json` (75 blocks) has **zero** `tagName` fields. `gen-cem.mjs` emits a CEM
+`fui:src/_data/blocks.json` (75 blocks) has **zero** `tagName` fields. `we:gen-cem.mjs` emits a CEM
 `custom-element` declaration (`customElement: true` + `tagName`) **only** when a block carries an explicit
-`tagName`, and **never fabricates** one ([scripts/gen-cem.mjs:68-80](scripts/gen-cem.mjs#L68-L80) — "no tag
+`tagName`, and **never fabricates** one ([we:scripts/gen-cem.mjs:68-80](scripts/gen-cem.mjs#L68-L80) — "no tag
 is ever fabricated — `registryName` is a DI registry class name, NOT a custom-element tag"). So today
 `gen:cem` emits 0 custom-element declarations. This decision authors the values that turn that on.
 
@@ -37,18 +37,18 @@ custom element — they register as **behaviors / attributes / functions**: `tab
 
 | FUI tag | kind | block id | block `type` | FUI file:line |
 |---|---|---|---|---|
-| `auto-heading` | element | `transient-component` | Module | blocks/transient/registerTransient.ts:23 |
-| `auto-complete` | element | `autocomplete` | Component | blocks/droplist/AutoComplete.ts:444 |
-| `route-view` | element | `router` | Component | blocks/router/registerRouter.ts:33 |
-| `route-outlet` | element | `router` | Component | blocks/router/registerRouter.ts:36 |
-| `background-tasks` | element | `background-task-surface` | Component | blocks/background-task-surface/registerBackgroundTasks.ts:23 |
-| `page-nav` | element | `pagination` | Module | blocks/renderers/pagination/PaginationBehavior.ts:173-175 |
-| `data-table` | element | `data-table` | Module | blocks/renderers/data-table/DataTableBehavior.ts:101-103 |
+| `auto-heading` | element | `transient-component` | Module | we:blocks/transient/registerTransient.ts:23 |
+| `auto-complete` | element | `autocomplete` | Component | fui:blocks/droplist/AutoComplete.ts:444 |
+| `route-view` | element | `router` | Component | we:blocks/router/registerRouter.ts:33 |
+| `route-outlet` | element | `router` | Component | we:blocks/router/registerRouter.ts:36 |
+| `background-tasks` | element | `background-task-surface` | Component | fui:blocks/background-task-surface/registerBackgroundTasks.ts:23 |
+| `page-nav` | element | `pagination` | Module | we:blocks/renderers/pagination/PaginationBehavior.ts:173-175 |
+| `data-table` | element | `data-table` | Module | we:blocks/renderers/data-table/DataTableBehavior.ts:101-103 |
 
 Everything else FUI registers via `attributes.define` (`type-ahead`, `for-each`, `nav:list`, `nav:section`,
 `grid:cell-navigation`, `grid:cell-edit`, `route:link`, `route:prefetch`) is a **custom attribute**, not a
 custom element — #822 already scoped those out (they stay plain `class` declarations, no tagName). FUI's
-`blocks.json` carries the names under a `registeredNames` array per entry.
+`fui:blocks.json` carries the names under a `registeredNames` array per entry.
 
 Two structural facts fall out, and both reshape the fork:
 
@@ -85,7 +85,7 @@ per-entry renaming.
 
 ### WE already has a convention authority + a config-extends-default discipline
 
-[docs/agent/conventions.md](docs/agent/conventions.md) is the canonical naming authority for **both** WE and
+[we:docs/agent/conventions.md](docs/agent/conventions.md) is the canonical naming authority for **both** WE and
 FUI, machine-checked by `check:standards` (traits `with*`, registries `Custom*Registry`, behavior
 attributes colon-namespaced like `layout:grid`). A tag-naming rule belongs here as a new clause. Separately,
 WE's standing **Config-Extends-Platform-Default** discipline (memory; `core CustomRegistry extends`) says a

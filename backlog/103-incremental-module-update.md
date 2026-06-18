@@ -41,7 +41,7 @@ The previous-version artifact lives in the **Cache API** (service worker); async
 
 ## Progress (2026-06-13) — resolved
 
-#087/#088 are resolved, so this built on them. New [blocks/renderers/module-service/incrementalUpdate.ts](../blocks/renderers/module-service/incrementalUpdate.ts) — the pure, framework-free delta-update orchestration core (the reference; WE is the standard, production binary-diff + service-worker/Cache-API wiring are app/FU-owned, **injected**). Each recommended default from the design notes is taken:
+#087/#088 are resolved, so this built on them. New [we:blocks/renderers/module-service/incrementalUpdate.ts](../blocks/renderers/module-service/incrementalUpdate.ts) — the pure, framework-free delta-update orchestration core (the reference; WE is the standard, production binary-diff + service-worker/Cache-API wiring are app/FU-owned, **injected**). Each recommended default from the design notes is taken:
 
 - **Don't reinvent binary diff** — `applyPatch` is an injected `(previous, patch) => bytes` seam; WE ships no diff algorithm, only verifies the result.
 - **On-demand patch, keyed on `(fromHash → toHash)`** — `resolvePatch(fromHash, toHash) => bytes | null`; `null` (origin hasn't computed the pair) falls back to full.

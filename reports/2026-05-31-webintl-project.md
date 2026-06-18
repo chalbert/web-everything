@@ -1,12 +1,12 @@
 # Report — Promoting Internationalization to the `webintl` Project
 
 **Date**: 2026-05-31
-**Plan**: `~/.claude/plans/i-d-like-you-to-fluffy-noodle.md`
+**Plan**: `~we:/.claude/plans/i-d-like-you-to-fluffy-noodle.md`
 **Scope**: Materialize **Web Intl (`webintl`)** as a standalone Web Project that owns
 a **Localization Protocol**, realizing a new **Locale Intent**, and re-home the existing
 `internationalization` research topic under it.
 **Prompted by**: the gap-analysis triage
-([reports/2026-05-31-standards-gap-analysis.md](2026-05-31-standards-gap-analysis.md)), which ranks
+([we:reports/2026-05-31-standards-gap-analysis.md](2026-05-31-standards-gap-analysis.md)), which ranks
 Internationalization as the **#1 missing standard** — the strongest native-aligned gap, already
 backed by open research but with no home of its own.
 
@@ -65,23 +65,23 @@ Intent), or URL *locale routing* (Router). Each composes with a neighbouring sta
 
 - No runnable TypeScript — concept phase ships contracts; the MF2 provider, lazy-namespace provider,
   and library adapters are the first planned implementations.
-- No `adapters.json` entries (FormatJS/i18next/Lingui/Paraglide noted as planned, not registered).
+- No `we:adapters.json` entries (FormatJS/i18next/Lingui/Paraglide noted as planned, not registered).
 - No separate MessageFormatter / LocaleDetector plug entries — kept as protocol-internal contracts.
 
 ## 7. Files created / modified
 
 | File | Action |
 |---|---|
-| `src/_data/projects.json` | + `webintl` entry |
+| `we:src/_data/projects.json` | + `webintl` entry |
 | `src/assets/icons/webintl.svg` | new (globe glyph, indigo gradient) |
-| `src/_includes/project-webintl.njk` | new (Mission, Feature Surface, How, Localization Protocol, Composition, Status) |
-| `src/_data/protocols.json` | + `localization` protocol (`ownedByProject: webintl`, `realizesIntent: locale`) |
-| `src/_data/plugs.json` | + `customtranslationprovider`, `customtranslationproviderregistry` |
-| `src/_includes/plug-descriptions/customtranslationprovider.njk` | new |
-| `src/_includes/plug-descriptions/customtranslationproviderregistry.njk` | new |
-| `src/_data/intents.json` | + `locale` intent |
-| `src/_data/researchTopics.json` | `internationalization` re-homed to `webintl` |
-| `src/_data/semantics.json` | + 8 terms |
+| `we:src/_includes/project-webintl.njk` | new (Mission, Feature Surface, How, Localization Protocol, Composition, Status) |
+| `we:src/_data/protocols.json` | + `localization` protocol (`ownedByProject: webintl`, `realizesIntent: locale`) |
+| `we:src/_data/plugs.json` | + `customtranslationprovider`, `customtranslationproviderregistry` |
+| `we:src/_includes/plug-descriptions/customtranslationprovider.njk` | new |
+| `we:src/_includes/plug-descriptions/customtranslationproviderregistry.njk` | new |
+| `we:src/_data/intents.json` | + `locale` intent |
+| `we:src/_data/researchTopics.json` | `internationalization` re-homed to `webintl` |
+| `we:src/_data/semantics.json` | + 8 terms |
 
 ## 8. Open questions carried forward
 

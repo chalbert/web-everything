@@ -10,7 +10,7 @@ tags: []
 
 # Placement of the live edge serve runtime — plateau-app product vs WE reference demo
 
-De-buried from #479's body (the live-serve placement fork). **Where does the live edge serve runtime live, and does the WE repo take the HTTP-server + bundler deps?** `EdgeChunkCache.serve` today returns a `Resolution`, not bytes ([edge.ts:169](../capabilities/edge.ts#L169)); standing up the runtime that actually bundles + serves real module bytes at `componentUrl` over HTTP collides with two standing positions — the open-core *defer-live-serve* operational ranking (monetization stance: self-run tooling over a hosted service) and constellation *no-leakage* layering (a served product decomposes to plateau-app, not the WE standard).
+De-buried from #479's body (the live-serve placement fork). **Where does the live edge serve runtime live, and does the WE repo take the HTTP-server + bundler deps?** `EdgeChunkCache.serve` today returns a `Resolution`, not bytes ([we:edge.ts:169](../capabilities/edge.ts#L169)); standing up the runtime that actually bundles + serves real module bytes at `componentUrl` over HTTP collides with two standing positions — the open-core *defer-live-serve* operational ranking (monetization stance: self-run tooling over a hosted service) and constellation *no-leakage* layering (a served product decomposes to plateau-app, not the WE standard).
 
 ## Fork
 

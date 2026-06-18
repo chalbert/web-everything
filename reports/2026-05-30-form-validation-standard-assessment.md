@@ -5,8 +5,8 @@
 exhaustive UX pattern catalog, and the proposed design — validation as an *interop vocabulary* composed
 from cross-cutting meta-intents.
 **Companion**: implementation roadmap and live decision register in the working plan
-(`~/.claude/plans/help-me-improve-form-dapper-manatee.md`); spec-versioning workstream in
-`reports/2026-05-30-validation-spec-versioning-adherence.md`.
+(`~we:/.claude/plans/help-me-improve-form-dapper-manatee.md`); spec-versioning workstream in
+`we:reports/2026-05-30-validation-spec-versioning-adherence.md`.
 
 ---
 
@@ -14,11 +14,11 @@ from cross-cutting meta-intents.
 
 The standard spanned two `draft` layers:
 
-- **Validation Intent** (`src/_data/intents.json`) — a solid skeleton: four dimensions (`context`,
+- **Validation Intent** (`we:src/_data/intents.json`) — a solid skeleton: four dimensions (`context`,
   `level`, `execution`, `visibility`), lifecycle events (`enter`/`exit`/`pulse`), and a `ValidationIntent`
   interface. **Missing** the `loader`-style research fields (`designSystemResearch`, `uxResearch`,
   `researchGaps`).
-- **Validation Block** (`blocks.json` + `block-descriptions/validation.njk`) — an 18-line stub: registry
+- **Validation Block** (`fui:blocks.json` + `we:block-descriptions/validation.njk`) — an 18-line stub: registry
   entry held only `id/name/status/type/summary/implementsIntent`; description had three bullet "Key
   Concepts" (Constraint Integration, State Reflection, Message Standardization). No webStandards, traits,
   events, or API.
@@ -345,9 +345,9 @@ default (must stay configurable); and the meta-intent factoring scope (touches `
 All design decisions have been distributed into real documentation and intents:
 - Assessment report (this document) — exhaustive UX catalog, philosophy landscape, interop design
 - Spec-versioning brief (companion report) — capability manifests, adherence detection tooling
-- Validation Intent (`src/_data/intents.json`) — expanded with per-level vocabulary, conformance tiers, features, research fields
-- Glossary (`src/_data/semantics.json`) — 10 new validation-specific terms
-- Block reference (`src/_data/blocks.json`, `validation.njk`) — reframed as conformance reference with traits and events
+- Validation Intent (`we:src/_data/intents.json`) — expanded with per-level vocabulary, conformance tiers, features, research fields
+- Glossary (`we:src/_data/semantics.json`) — 10 new validation-specific terms
+- Block reference (`fui:src/_data/blocks.json`, `we:validation.njk`) — reframed as conformance reference with traits and events
 - Research topic — "Validation as Composition of Meta-Intents" documenting the pattern that validation composes shared metas (Loader, Messaging, Reliability)
 
 ### Phase 2: Adapter Implementations (Pending)

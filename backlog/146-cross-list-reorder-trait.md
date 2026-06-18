@@ -50,7 +50,7 @@ pattern SortableJS exposes as cross-list groups.
 - Build on the existing `reduceReorder` engine and `reconcileOrder` relocation rather than forking
   them; the within-list reducer is the inner loop of a cross-list move.
 
-See `reports/2026-06-06-reorder-paradigms.md` (feature inventory: cross-list reorder is built-in,
+See `we:reports/2026-06-06-reorder-paradigms.md` (feature inventory: cross-list reorder is built-in,
 Tier 2) and the within-list implementation in `blocks/renderers/reorderable-list/`.
 
 ## Progress
@@ -58,10 +58,10 @@ Tier 2) and the within-list implementation in `blocks/renderers/reorderable-list
 - **Status:** resolved
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
-  - `blocks/renderers/reorderable-list/renderCrossListReorder.ts` — per-list order model + cross-list reducer that builds on `reduceReorder` (the within-list reducer is the inner loop for ArrowUp/Down); `relocate` free-movement primitive; Left/Right cross-list moves; cancel reverts across lists; commit snapshots every list's order; group-wide roving tabindex; `announceCrossList`; renderer (`<div data-reorder-group>` of `<ul scope="cross-list" reorder-group>`); `reconcileCrossList` (moveBefore across lists); `auditCrossListReorder`.
-  - Shared fixtures `__fixtures__/cross-list-reorder-cases.ts` (8 cases: initial, cross-focus, edge-clamp, cross-move, cross-then-within, cross-commit, cross-cancel, cross-append).
-  - Conformance suite `blocks/__tests__/unit/renderers/cross-list-reorder.test.ts` — 22 tests, green.
-  - Playground: appended a cross-list section + live board to `demos/reorderable-list-demo.ts` (+ CSS for the group layout, list label via `attr(aria-label)`); updated demo HTML intro and `demos.json` description.
+  - `we:blocks/renderers/reorderable-list/renderCrossListReorder.ts` — per-list order model + cross-list reducer that builds on `reduceReorder` (the within-list reducer is the inner loop for ArrowUp/Down); `relocate` free-movement primitive; Left/Right cross-list moves; cancel reverts across lists; commit snapshots every list's order; group-wide roving tabindex; `announceCrossList`; renderer (`<div data-reorder-group>` of `<ul scope="cross-list" reorder-group>`); `reconcileCrossList` (moveBefore across lists); `auditCrossListReorder`.
+  - Shared fixtures `we:__fixtures__/cross-list-reorder-cases.ts` (8 cases: initial, cross-focus, edge-clamp, cross-move, cross-then-within, cross-commit, cross-cancel, cross-append).
+  - Conformance suite `we:blocks/__tests__/unit/renderers/cross-list-reorder.test.ts` — 22 tests, green.
+  - Playground: appended a cross-list section + live board to `we:demos/reorderable-list-demo.ts` (+ CSS for the group layout, list label via `attr(aria-label)`); updated demo HTML intro and `we:demos.json` description.
 - **Verified:** 50 unit tests pass (28 within-list + 22 cross-list); `check:standards` 0 errors; browser (Playwright on the live :3000) shows 18/18 conformant, keyboard cross-list move + commit announce correctly, pointer cross-list drag relocates a card into a sibling list, no console errors.
 - **Notes:** RECONCILE point honored — move-semantics-within-the-app, composes with a future `drag-source`/`drop-target` (#007), not OS `DataTransfer`. Keyboard model: vertical arrows move within a list, Left/Right move across sibling lists (Kanban-column convention). Engine handles empty lists but fixtures don't cover them yet → spun out as **#151**. Did not touch the within-list renderer/test/njk — a concurrent agent (#147 drop-position-indicator) is editing those.
 

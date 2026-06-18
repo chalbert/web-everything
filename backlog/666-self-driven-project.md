@@ -27,12 +27,12 @@ could drive), and the **master-brand direction** ("self-driven", over #563 + the
 are all ratified — as **provisional defaults under a revision protocol** (#665's Assumptions & friction
 register), not a frozen spec. This epic is now **unblocked**; its slices can be carved. Prior art +
 novelty grounding:
-[reports/2026-06-15-self-driven-project-prior-art.md](../reports/2026-06-15-self-driven-project-prior-art.md)
+[we:reports/2026-06-15-self-driven-project-prior-art.md](../reports/2026-06-15-self-driven-project-prior-art.md)
 · [`/research/self-driven-project/`](/research/self-driven-project/).
 
 > This is largely an **umbrella over existing work** plus the missing connective tissue. Filed
 > comprehensively on purpose — split into discrete child slices once #665 settles scope (worst case
-> we split later). Working scratch that seeded it: `SELF-DRIVEN-PROJECT-DRAFT.md` at repo root.
+> we split later). Working scratch that seeded it: `we:SELF-DRIVEN-PROJECT-DRAFT.md` at repo root.
 
 ## The deep idea (why this framing earns its keep)
 
@@ -75,13 +75,13 @@ refines itself as we build (dogfooding #563). So every slice below carries a sta
 ## Net-new slices — carved 2026-06-15 (`/slice 666`)
 
 Sliced into child items after #665 ratified the framing (report:
-[reports/2026-06-15-backlog-split-analysis.md](../reports/2026-06-15-backlog-split-analysis.md)):
+[we:reports/2026-06-15-backlog-split-analysis.md](../reports/2026-06-15-backlog-split-analysis.md)):
 
 - **§A → [#671](/backlog/671-self-driven-project-step-tree-every-sdlc-step-automatable-da/)** — the step-tree artifact (story·3).
 - **§D → [#672](/backlog/672-self-driven-project-tool-agnostic-artefact-contract-everythi/)** — the tool-agnostic artefact-contract Protocol (story·3, the foundation).
 - **§C → [#673](/backlog/673-self-driven-project-developer-role-thesis-author-the-positio/)** — the developer-role thesis, authored as a positioning section into #563 (task).
 - **§B → [#674](/backlog/674-self-driven-project-non-technical-control-plane-plateau-app-/)** — the non-technical control plane (tracking story·8, `blockedBy #672`, `locus plateau-app`); **not yet sliceable** — re-`/slice` in plateau-app context once #672 lands.
-- **§E (brand rollout)** — **not carved**: its core (exact public name, #563 rename, "Project" overload) is a *deliberately deferred fork* already tracked as **#665 A4/A5**; it re-enters #665 on first-SaaS-surface friction. The publishable residual (the value/risk-ODD framing) rides #671/#672's public artefacts; the #143 approach page stays parked.
+- **§E (brand rollout)** — **deferred (tracked at #665)**: its core (exact public name, #563 rename, "Project" overload) is a *deliberately deferred fork* already tracked as **#665 A4/A5**; it re-enters #665 on first-SaaS-surface friction. The publishable residual (the value/risk-ODD framing) rides #671/#672's public artefacts; the #143 approach page stays parked.
 
 The §A–E sections below are retained as the authoring seed for each slice.
 

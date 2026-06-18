@@ -1,6 +1,6 @@
 # Research Report — Customizable Fetcher & Cache for Resource Loader
 
-**Plan file**: `plans/customizable-fetcher.md`
+**Plan file**: `we:plans/customizable-fetcher.md`
 **Research page**: `/research/customizable-fetcher/`
 **Date**: 2026-02-23
 
@@ -67,5 +67,5 @@ docInjector.set('customContexts:resourceClient', new MockClient(fixtures));  // 
 
 | File | Action |
 |------|--------|
-| `src/_data/researchTopics.json` | Added `customizable-fetcher` entry |
-| `src/_includes/research-descriptions/customizable-fetcher.njk` | New file (~360 lines) |
+| `we:src/_data/researchTopics.json` | Added `customizable-fetcher` entry |
+| `we:src/_includes/research-descriptions/customizable-fetcher.njk` | New file (~360 lines) |

@@ -10,9 +10,9 @@ complex enough to stress the platform through the permission model and the hiera
 clinical data.
 
 Tracked by epic [#314](/backlog/314-flagship-exercise-apps/) (candidate E). Companion to the loan-app
-(`reports/2026-06-11-exercise-app-loan-origination-requirements.md`), auto-insurance
-(`reports/2026-06-12-exercise-app-auto-insurance-requirements.md`), and telecom-CPQ
-(`reports/2026-06-14-exercise-app-telecom-cpq-requirements.md`) PRDs. This story ends at a scoped, sliced
+(`we:reports/2026-06-11-exercise-app-loan-origination-requirements.md`), auto-insurance
+(`we:reports/2026-06-12-exercise-app-auto-insurance-requirements.md`), and telecom-CPQ
+(`we:reports/2026-06-14-exercise-app-telecom-cpq-requirements.md`) PRDs. This story ends at a scoped, sliced
 requirement set; the build is the follow-on functional-phase cards.
 
 ## Scope
@@ -23,7 +23,7 @@ the hard parts. The app spans registration & insurance eligibility, appointment 
 clinical intake (with conditional logic), a care-plan task tree, and outbound referrals — across four
 clinical actors with strict, consent-gated PHI boundaries. Built **platform-first**: every UI/behavior need
 resolves against Web Everything (consume active blocks/intents; where a surface is draft/uncodified, that
-gap *is* the WE work this app drives — see [exercise-app-workflow.md](../docs/agent/exercise-app-workflow.md)).
+gap *is* the WE work this app drives — see [we:exercise-app-workflow.md](../docs/agent/exercise-app-workflow.md)).
 
 **Visual register (proposed): clinical / healthcare** — a calm, high-legibility, accessibility-forward
 register (generous spacing, restrained color, status-driven) distinct from the enterprise-finance (loan),

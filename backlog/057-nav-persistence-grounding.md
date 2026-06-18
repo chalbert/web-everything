@@ -24,6 +24,6 @@ The `persistence` dimension (`url` | `memory` | `session`) is the weakest-ground
 
 **Decided: keep `url | session | memory`.** The deciding factor is asymmetry of error, not option count: keeping an unexercised value costs one unused enum (reversible, caught by the review gate); collapsing a real distinction bakes a *lossy* vocabulary into an intent that implementing blocks conform to, so re-expanding it later is a breaking change — and #053 (the Wizard/Stepper block this unblocks) is the canonical `session` consumer, so the distinction is about to be exercised, not hypothetical.
 
-The one real weakness — `session` rests on the WHATWG URL-vs-History-`state` convention rather than a single platform enum — is a **grounding/documentation** gap, not a modeling error. Resolved by citing that platform basis explicitly on the dimension (`src/_data/intents.json` → `navigation.dimensions.persistence.description`).
+The one real weakness — `session` rests on the WHATWG URL-vs-History-`state` convention rather than a single platform enum — is a **grounding/documentation** gap, not a modeling error. Resolved by citing that platform basis explicitly on the dimension (`we:src/_data/intents.json` → `navigation.dimensions.persistence.description`).
 
 **Kept provisional:** the review gate stays a real checkpoint — revisit `session` if no block exercises it within two implementing blocks. Recorded on the dimension description so it can't quietly ossify.

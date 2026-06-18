@@ -4,8 +4,8 @@
 
 **Date**: 2026-06-06
 **Owning project**: Web Components (`webcomponents`)
-**Protocol**: `render-strategy` (anchor `protocol-render-strategy` in `project-webcomponents.njk`)
-**Companions**: backlog `052-jsx-rendering-strategy-axis` (this report's source item); report `2026-05-31-change-tracking-observability.md` (the **Change Strategy** sibling — detection, in Web States); report `2026-06-03-jsx-adapter-feature-mapping.md` (Axis-1 syntax contract).
+**Protocol**: `render-strategy` (anchor `protocol-render-strategy` in `we:project-webcomponents.njk`)
+**Companions**: backlog `052-jsx-rendering-strategy-axis` (this report's source item); report `we:2026-05-31-change-tracking-observability.md` (the **Change Strategy** sibling — detection, in Web States); report `we:2026-06-03-jsx-adapter-feature-mapping.md` (Axis-1 syntax contract).
 
 ---
 
@@ -26,7 +26,7 @@ A render strategy may **consume** a change strategy as its reactivity source (th
 
 ## 2. Why it is a separate axis from syntax (recap)
 
-Axis-1 (syntax: HTML ⇄ JSX ⇄ template-string) is pure *spelling* of one element tree — reversible, covered by `2026-06-03-jsx-adapter-feature-mapping.md`. Axis-2 (this report) is *semantics*: what re-runs when state changes. The **same** JSX tree can be driven by completely different update machines, and that choice is independent of the spelling. Conflating them is what made the existing `JSXRenderer.ts` quietly hard-code one strategy (eager construct-once DOM). Naming the axis makes every strategy a peer behind one contract.
+Axis-1 (syntax: HTML ⇄ JSX ⇄ template-string) is pure *spelling* of one element tree — reversible, covered by `we:2026-06-03-jsx-adapter-feature-mapping.md`. Axis-2 (this report) is *semantics*: what re-runs when state changes. The **same** JSX tree can be driven by completely different update machines, and that choice is independent of the spelling. Conflating them is what made the existing `we:JSXRenderer.ts` quietly hard-code one strategy (eager construct-once DOM). Naming the axis makes every strategy a peer behind one contract.
 
 **Corollary — directives belong to Axis-2.** `<template is="for-each">` exists *only because inert HTML can't iterate*; it is an artifact of the declarative-static strategy, not a feature of HTML-the-syntax. Under a vdom or fine-grained strategy the iteration is just `items.map(…)` and there is nothing to "spell." Directives therefore appear and disappear **with the strategy** — which is exactly why they cannot be modeled on the syntax axis.
 
@@ -46,7 +46,7 @@ interface RenderStrategy {
 ```
 
 - `RenderInput` is strategy-shaped: a parsed template + binding map (declarative-static), a `render()` thunk returning a vtree (vdom), a reactive computation (fine-grained), or an imperative builder (imperative).
-- **Capability is feature-detected by which optional methods are present** (same convention as Change Strategy): a strategy with no `update` is mount-once (the current `JSXRenderer.ts` behavior); one with `update` supports re-render.
+- **Capability is feature-detected by which optional methods are present** (same convention as Change Strategy): a strategy with no `update` is mount-once (the current `we:JSXRenderer.ts` behavior); one with `update` supports re-render.
 - The active strategy is resolved per scope through the injector chain via **`CustomRenderStrategyRegistry`** — *nearest-scope wins* — so different subtrees of one app render with different strategies simultaneously (a static marketing header on declarative-static, a live grid on fine-grained). This is the identical resolution rule as `CustomChangeStrategyRegistry`.
 - **Native-first default = `declarative-static`**: parse-once DOM + binding behaviors (`bind-*`) + text-node parsers (`{{ }}`/`[[ ]]`) + template directives (`<template is="for-each|if">`). Zero runtime framework; this is the baseline every other strategy is opt-in against.
 
@@ -105,12 +105,12 @@ A JSX tree authored against any strategy can be lowered to: (1) an HTML template
 - 🔶 **DECIDE: re-render trigger ownership** — does `update()` get *called by* the host on a Change Record, or does the strategy *subscribe* itself? Recommendation: strategy subscribes (matches fine-grained reality; mount-once strategies simply omit `update`). → backlog item.
 - ⚠ **CONFLICT (documented lossy): `{}` eager ⇄ `{{ }}` reactive** — no faithful inverse (§4). Contract declares the boundary lossy; compiler picks the `bind-*` convention. → tracked as a named lowering rule.
 - 🔨 **ROUGH: directive canonical HTML spelling on lift** — comment-form vs template-element form when lifting vdom→declarative (feature-mapping row 8). Folds here from Axis-1. → backlog item.
-- 🔶 **DECIDE: `JSXRenderer.ts` realignment** — make its implicit eager-DOM behavior an *explicit* registered `declarative-static`/`imperative` provider before adding the others. Recommendation: yes, first concrete step. → backlog item.
+- 🔶 **DECIDE: `we:JSXRenderer.ts` realignment** — make its implicit eager-DOM behavior an *explicit* registered `declarative-static`/`imperative` provider before adding the others. Recommendation: yes, first concrete step. → backlog item.
 
 ## 8. Next steps (phases)
 
-1. **Make the default explicit.** Refactor `JSXRenderer.ts` from an implicit strategy into a registered `declarative-static` provider behind `CustomRenderStrategyRegistry` (Frontier UI). No behavior change; establishes the seam.
-2. **Author the protocol body** in `project-webcomponents.njk` (done in this pass — `protocol-render-strategy`).
+1. **Make the default explicit.** Refactor `we:JSXRenderer.ts` from an implicit strategy into a registered `declarative-static` provider behind `CustomRenderStrategyRegistry` (Frontier UI). No behavior change; establishes the seam.
+2. **Author the protocol body** in `we:project-webcomponents.njk` (done in this pass — `protocol-render-strategy`).
 3. **Cross-strategy lowering compiler.** Build the §4 correspondence as a directive/strategy-registry-driven transform extending `htmlToJsx`/`jsxToHtml` to cross strategies (not just spelling). Pin the lossy `{}` boundary with a failing-by-design test.
 4. **Second (strategy) toggle in the UI.** Add the strategy selector alongside the existing html/jsx source toggle on block pages, reading the registry.
 
@@ -118,9 +118,9 @@ A JSX tree authored against any strategy can be lowered to: (1) an HTML template
 
 | File | Action | Purpose |
 |---|---|---|
-| `reports/2026-06-06-render-strategy-axis.md` | created | This report (outside 11ty build; exposed via backlog 052) |
-| `src/_data/protocols.json` | modified | Added `render-strategy` protocol (owned by `webcomponents`) |
-| `src/_includes/project-webcomponents.njk` | modified | Added `protocol-render-strategy` normative section |
-| `src/_data/semantics.json` | modified | Added **Render Strategy**, **Render Strategy Registry**, **Lowering**, **Lifting** |
-| `backlog/052-jsx-rendering-strategy-axis.md` | modified | parked → in-progress; `relatedReport` → this report; placement resolved |
+| `we:reports/2026-06-06-render-strategy-axis.md` | created | This report (outside 11ty build; exposed via backlog 052) |
+| `we:src/_data/protocols.json` | modified | Added `render-strategy` protocol (owned by `webcomponents`) |
+| `we:src/_includes/project-webcomponents.njk` | modified | Added `protocol-render-strategy` normative section |
+| `we:src/_data/semantics.json` | modified | Added **Render Strategy**, **Render Strategy Registry**, **Lowering**, **Lifting** |
+| `we:backlog/052-jsx-rendering-strategy-axis.md` | modified | parked → in-progress; `relatedReport` → this report; placement resolved |
 | `backlog/0NN-*.md` | created | Gap items spun out of §7 (see backlog) |

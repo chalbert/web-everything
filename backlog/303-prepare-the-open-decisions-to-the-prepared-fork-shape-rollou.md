@@ -24,7 +24,7 @@ builds (#320–#339)**.
 ## Why this is a program, not a touch-up
 
 The audit graded all 24 open decisions against the prepared-fork shape
-(`docs/agent/backlog-workflow.md` → *The prepared-fork shape*) and found **0/24
+(`we:docs/agent/backlog-workflow.md` → *The prepared-fork shape*) and found **0/24
 ready at the time**. This is a roll-out gap, not a quality gap: the shape is
 brand-new (proven on #064 + #173, both prepared and resolved 2026-06-11) and the 24
 open decisions simply predate it. The bottleneck is near-universal: the research

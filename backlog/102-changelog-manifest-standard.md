@@ -18,7 +18,7 @@ crossRef: { url: /backlog/101-auto-update-pipeline/, label: "Auto-update pipelin
 
 A standard for a **machine-readable changelog**: for each release, a manifest describes — **per file/module** — the *nature* of every change (major / minor / patch) and, where possible, the **migration script** that applies it. The essay calls this the *Changelog Standard* ("format for human readability + API for libs describing which files changed and the nature of each change") and makes it the linchpin of safe auto-update: risk analysis, auto-codemods, and incremental delivery all read from it.
 
-## Why a manifest, not just a CHANGELOG.md
+## Why a manifest, not just a we:CHANGELOG.md
 
 A human changelog can't be acted on by a machine. This artifact is the **contract the auto-update pipeline (#101) and upgraders (#094) consume**: it lets the pipeline classify an update's risk automatically, apply the bundled migration for breaking changes without hand-editing call sites, and lets incremental delivery (#103) compute exactly which modules changed. It is also what #088 hinted at ("the standard should publish machine-readable change/migration descriptors per release") and what #094 named as a dependency.
 

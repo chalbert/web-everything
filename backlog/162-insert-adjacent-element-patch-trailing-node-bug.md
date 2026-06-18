@@ -13,9 +13,9 @@ crossRef: { url: /backlog/145-windowed-scroll-height-driven-path/, label: "#145 
 
 # Fix the `insertAdjacentElement` DOM patch — it forwards the node as the position arg
 
-`plateau/src/plugs/custom-elements/pathInsertionMethods.ts` patches insertion methods to upgrade
+`we:plateau/src/plugs/custom-elements/pathInsertionMethods.ts` patches insertion methods to upgrade
 undetermined nodes on the way in. `insertAdjacentElement` is registered as a **trailing**-node method
-(`Element.patch.ts` → `trailingMethods`), i.e. the node is the LAST argument: `insertAdjacentElement(position, node)`.
+(`we:Element.patch.ts` → `trailingMethods`), i.e. the node is the LAST argument: `insertAdjacentElement(position, node)`.
 
 The wrapper computes the slices wrong for the trailing case. For a connected element it does:
 
@@ -49,7 +49,7 @@ Acceptance: `el.insertAdjacentElement('afterbegin'|'afterend', node)` works on a
 ## Progress
 
 - **Status:** resolved
-- **Branch:** plateau repo (`src/plugs/custom-elements/pathInsertionMethods.ts`).
+- **Branch:** plateau repo (`we:src/plugs/custom-elements/pathInsertionMethods.ts`).
 - **Root cause:** the reassembled call is `[...leadingArgs, ...determinedNodes, ...trailingArgs]`. For a
   trailing-node method (`insertAdjacentElement(position, node)`) `leadingArgs` must be the fixed args
   BEFORE the node (the position). The wrapper used `args.slice(-1)` — the node — so it called native
@@ -60,8 +60,8 @@ Acceptance: `el.insertAdjacentElement('afterbegin'|'afterend', node)` works on a
 - **Audit (other shapes):** `leadin` (`insertBefore`/`replaceChild`, node first + trailing ref) and
   `spread` (`append`/`appendChild`/…, all-nodes) were already correct — pinned by unit tests and a
   real-patch e2e "audit guard". No further off-by-slice bugs.
-- **Tests:** `pathInsertionMethods.test.ts` (8) covers all three shapes + the exact regression (position
-  stays first). Real-patch e2e `e2e/insert-adjacent-element.spec.ts` (3) bootstraps `plugs/patch` and
+- **Tests:** `we:pathInsertionMethods.test.ts` (8) covers all three shapes + the exact regression (position
+  stays first). Real-patch e2e `we:e2e/insert-adjacent-element.spec.ts` (3) bootstraps `plugs/patch` and
   proves all four position keywords on a connected element, the returned-node contract, and the sibling
   methods. Full plateau suite **196/196**, e2e **8/8**.
 - **Leftovers → new backlog items:** Playwright `evaluate` returns `undefined` for objects/arrays on

@@ -46,4 +46,4 @@ If Web Everything wanted to express URL mapping declaratively, it would be a con
 
 | File | Action |
 |------|--------|
-| `reports/2026-02-24-map-statement-analysis.md` | Created — this report |
+| `we:reports/2026-02-24-map-statement-analysis.md` | Created — this report |

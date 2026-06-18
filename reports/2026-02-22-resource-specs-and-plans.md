@@ -8,18 +8,18 @@ Completed six work streams: (1) resource-related block spec expansion, (2) resou
 
 ## 1. Resource-Related Block Specs (Plan: composed-hopping-yao)
 
-Brought 5 resource blocks up to the same documentation standard as View/Tabs/Router. Each now has `webStandards`, `events` (typed classes + provider keys), `frameworkComparison`, `designDecisions`, and `exports` in `blocks.json`, plus comprehensive njk description pages.
+Brought 5 resource blocks up to the same documentation standard as View/Tabs/Router. Each now has `webStandards`, `events` (typed classes + provider keys), `frameworkComparison`, `designDecisions`, and `exports` in `fui:blocks.json`, plus comprehensive njk description pages.
 
 ### Files Modified
 
 | File | Changes |
 |------|---------|
-| `src/_data/blocks.json` | Expanded 5 block entries (resource-loader, resource-action, error-recovery, prefetch-behavior, action-button) |
-| `src/_includes/block-descriptions/resource-loader.njk` | Added Web Standards table (6 entries), Framework Research table (5 frameworks), Infrastructure Integration section, Events section (4 typed classes), Exports table (14 items) |
-| `src/_includes/block-descriptions/resource-action.njk` | Complete rewrite from 24 lines to ~250 lines. Architecture (reads vs writes), lifecycle state machine, usage examples, events, interfaces, exports |
-| `src/_includes/block-descriptions/error-recovery.njk` | Major expansion from 10 lines to ~220 lines. HTTP status classification, retry strategies (immediate/linear/exponential), circuit breaker pattern, offline queuing, events (4 classes), TypeScript interfaces |
-| `src/_includes/block-descriptions/prefetch-behavior.njk` | Major expansion from 10 lines to ~200 lines. Eagerness-to-events mapping, condition suppression table, router integration, events (3 classes), interfaces |
-| `src/_includes/block-descriptions/action-button.njk` | Major expansion from 10 lines to ~180 lines. Busy state management, width lock, platform-aware ordering, icon integration, styling hooks, exports |
+| `fui:src/_data/blocks.json` | Expanded 5 block entries (resource-loader, resource-action, error-recovery, prefetch-behavior, action-button) |
+| `we:src/_includes/block-descriptions/resource-loader.njk` | Added Web Standards table (6 entries), Framework Research table (5 frameworks), Infrastructure Integration section, Events section (4 typed classes), Exports table (14 items) |
+| `we:src/_includes/block-descriptions/resource-action.njk` | Complete rewrite from 24 lines to ~250 lines. Architecture (reads vs writes), lifecycle state machine, usage examples, events, interfaces, exports |
+| `we:src/_includes/block-descriptions/error-recovery.njk` | Major expansion from 10 lines to ~220 lines. HTTP status classification, retry strategies (immediate/linear/exponential), circuit breaker pattern, offline queuing, events (4 classes), TypeScript interfaces |
+| `we:src/_includes/block-descriptions/prefetch-behavior.njk` | Major expansion from 10 lines to ~200 lines. Eagerness-to-events mapping, condition suppression table, router integration, events (3 classes), interfaces |
+| `we:src/_includes/block-descriptions/action-button.njk` | Major expansion from 10 lines to ~180 lines. Busy state management, width lock, platform-aware ordering, icon integration, styling hooks, exports |
 
 ### Per-Block Summary
 
@@ -56,11 +56,11 @@ Brought 5 resource blocks up to the same documentation standard as View/Tabs/Rou
 
 ## 2. Plans Review
 
-### plan.md — Router Implementation Plan
+### we:plan.md — Router Implementation Plan
 **Status: Already complete.** All 7 phases implemented. Router is `active` status with full test coverage (unit, integration, E2E) and comprehensive demo.
 
-### plans/resource-router.md — Resource-Router Integration
-**Status: Completed.** Added "Resource Pipeline Integration" section to router.njk:
+### we:plans/resource-router.md — Resource-Router Integration
+**Status: Completed.** Added "Resource Pipeline Integration" section to we:router.njk:
 - Integration map: 5-row table mapping router concerns to resource blocks
 - Error Recovery integration: retry pipeline before route:error boundary
 - Prefetch-to-Resource pipeline: condition checking before loader execution
@@ -68,7 +68,7 @@ Brought 5 resource blocks up to the same documentation standard as View/Tabs/Rou
 - Context population flow: 4-stage context building (route match → loader → error → mutation)
 - Updated router `dependsOn` to include error-recovery, prefetch-behavior, resource-action
 
-### plans/usable-title.md — Heading Hierarchy Research
+### we:plans/usable-title.md — Heading Hierarchy Research
 **Status: Research complete.** Key findings:
 - Screen readers still fundamentally rely on heading hierarchy (unchanged in 2026)
 - WCAG 2.2 strongly recommends non-skipping hierarchy (SC 1.3.1, G141, H42)
@@ -79,7 +79,7 @@ Brought 5 resource blocks up to the same documentation standard as View/Tabs/Rou
 
 ---
 
-## 3. Workflow Block Spec (Plan: worfklow-blocks.md)
+## 3. Workflow Block Spec (Plan: we:worfklow-blocks.md)
 
 Created a new Workflow block — multi-step process orchestration without URL changes. The non-route complement to Router's URL-based navigation.
 
@@ -87,8 +87,8 @@ Created a new Workflow block — multi-step process orchestration without URL ch
 
 | File | Changes |
 |------|---------|
-| `src/_data/blocks.json` | Added `workflow` block entry with full spec |
-| `src/_includes/block-descriptions/workflow.njk` | New file (~350 lines) |
+| `fui:src/_data/blocks.json` | Added `workflow` block entry with full spec |
+| `we:src/_includes/block-descriptions/workflow.njk` | New file (~350 lines) |
 
 ### Key Design Decisions
 
@@ -133,7 +133,7 @@ Created a new Workflow block — multi-step process orchestration without URL ch
 
 ---
 
-## 4. Framework Adapters Analysis (Plan: framework-adapters.md)
+## 4. Framework Adapters Analysis (Plan: we:framework-adapters.md)
 
 Comprehensive comparison of React, Angular, Vue, Svelte, Lit, Solid, and Qwik features mapped against Web Everything specs. Output is a color-coded HTML report with 74 features across 14 categories.
 
@@ -141,7 +141,7 @@ Comprehensive comparison of React, Angular, Vue, Svelte, Lit, Solid, and Qwik fe
 
 | File | Description |
 |------|-------------|
-| `reports/2026-02-22-framework-adapters.html` | Full HTML report with color-coded tables (green=covered, blue=concept, yellow=adapter, red=missing) |
+| `we:reports/2026-02-22-framework-adapters.html` | Full HTML report with color-coded tables (green=covered, blue=concept, yellow=adapter, red=missing) |
 
 ### Summary Statistics
 
@@ -184,7 +184,7 @@ Comprehensive comparison of React, Angular, Vue, Svelte, Lit, Solid, and Qwik fe
 
 ---
 
-## 5. Transient Component Spec (Plan: transient-components.md)
+## 5. Transient Component Spec (Plan: we:transient-components.md)
 
 New concept block for custom elements that replace themselves with semantically correct native HTML during `connectedCallback`. Enables context-aware element selection without permanent wrapper nodes.
 
@@ -192,8 +192,8 @@ New concept block for custom elements that replace themselves with semantically 
 
 | File | Changes |
 |------|---------|
-| `src/_data/blocks.json` | Added `transient-component` block entry with full spec |
-| `src/_includes/block-descriptions/transient-component.njk` | New file (~250 lines) |
+| `fui:src/_data/blocks.json` | Added `transient-component` block entry with full spec |
+| `we:src/_includes/block-descriptions/transient-component.njk` | New file (~250 lines) |
 
 ### Core Concept
 
@@ -238,11 +238,11 @@ A transient element calls `queueMicrotask(() => this.replaceWith(replacement))` 
 ## Plans Status
 
 All plans from `/plans` directory have been completed and removed:
-- `resource-router.md` — Done (resource pipeline integration in router.njk)
-- `usable-title.md` — Done (heading hierarchy research)
-- `worfklow-blocks.md` — Done (workflow block spec)
-- `framework-adapters.md` — Done (74-feature comparison report)
-- `transient-components.md` — Done (transient component spec + njk)
+- `we:resource-router.md` — Done (resource pipeline integration in we:router.njk)
+- `we:usable-title.md` — Done (heading hierarchy research)
+- `we:worfklow-blocks.md` — Done (workflow block spec)
+- `we:framework-adapters.md` — Done (74-feature comparison report)
+- `we:transient-components.md` — Done (transient component spec + njk)
 
 The `/plans` directory is now empty.
 

@@ -23,7 +23,7 @@ The droplist-family pattern applied to dialogs: it owns the shared modal-surface
 containment, escape/outside/backdrop dismissal, scroll-lock, modal/non-modal mode, native-first top-layer
 mount on `<dialog>.showModal()` + Popover API) so concrete members never re-implement it. 5 design
 decisions (family-substrate-not-widget · family-vs-members · native `<dialog>`-first · mode owned here ·
-implementsIntent convention). `blocks.json` + `block-descriptions/dialog.njk` (member table, Web Standards
+implementsIntent convention). `fui:blocks.json` + `we:block-descriptions/dialog.njk` (member table, Web Standards
 table, what-the-substrate-owns, contract, family-vs-members) + semantics term *Dialog (family substrate)*.
 Coverage data: `dialog` highlight now cites block:dialog. `check:standards` green; page at `/blocks/dialog/`.
 **Unblocks #360** (drawer = the edge-placement concrete member).

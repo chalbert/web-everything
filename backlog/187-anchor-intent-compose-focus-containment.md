@@ -15,7 +15,7 @@ The `focus-containment` intent (added in #013) names the [Anchor Intent](/intent
 composer — a modal-mode popover or menu adopts containment (trap + `inert`) when it opens. That link
 is currently **one-directional**: the Anchor intent's description doesn't mention focus containment.
 
-Add a reciprocal reference in the Anchor intent's "Composition" prose (`src/_data/intents.json`,
+Add a reciprocal reference in the Anchor intent's "Composition" prose (`we:src/_data/intents.json`,
 `anchor` entry) pointing at `/intents/focus-containment/` for surfaces whose `mode` is modal, so the
 relationship is discoverable from both pages. No new dimensions — wording only.
 

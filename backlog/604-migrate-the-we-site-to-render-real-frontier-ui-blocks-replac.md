@@ -25,7 +25,7 @@ relatedProject: webdocs
 Today the WE docs site **describes** blocks but never shows one **running**: block pages (`/blocks/{id}/`)
 show static code samples and the `/demos/*` playgrounds are self-contained harnesses. This epic closes that
 gap the way the boundary allows: every block page gains a **live, interactive FUI-hosted demo embedded via
-an iframe** (`fuiDemo`, `.eleventy.js:38`), next to the code sample — as `component.njk:235` already does
+an iframe** (`fuiDemo`, `we:.eleventy.js:38`), next to the code sample — as `we:component.njk:235` already does
 for the converter. WE never imports FUI code; it points an iframe at FUI's own demo surface (FUI keeps
 branding/provenance). The embed *mechanism* is owned by [#728](/backlog/728-component-embedding-capability-embed-a-live-component-exampl/);
 this epic is the WE-block-page *application* of it at v1 = iframe.
@@ -44,12 +44,12 @@ this epic is the WE-block-page *application* of it at v1 = iframe.
 
 ## Current state (from a 2026-06-14 survey, reframed for the iframe boundary)
 
-- **Block pages** — `src/block-pages.njk` paginates `src/_data/blocks.json`, pulling prose + code samples
+- **Block pages** — `we:src/block-pages.njk` paginates `fui:src/_data/blocks.json`, pulling prose + code samples
   from `src/_includes/block-descriptions/{id}.njk`. **No running component**; examples are read-only code.
-  Since `src/block-pages.njk:35` includes `block-descriptions/{id}.njk`, any block page can host a demo by
+  Since `we:src/block-pages.njk:35` includes `block-descriptions/{id}.njk`, any block page can host a demo by
   adding one `{% fuiDemo … %}` line to its description partial.
-- **The mechanism already exists.** The `fuiDemo` shortcode (`.eleventy.js:38`) renders a sandboxed,
-  FUI-branded iframe to `FUI_DEMO_BASE`; `component.njk:235` already calls it. Rolling it out is *extending
+- **The mechanism already exists.** The `fuiDemo` shortcode (`we:.eleventy.js:38`) renders a sandboxed,
+  FUI-branded iframe to `FUI_DEMO_BASE`; `we:component.njk:235` already calls it. Rolling it out is *extending
   a working pattern*, not building a seam.
 - **No import seam to FUI exists, by design.** `vite.config.mts` aliases only `@core`/`@web*` → `/plugs/*`
   (no `frontierui` alias); WE cannot resolve FUI block source, which is exactly the boundary #700 set.
@@ -91,20 +91,20 @@ The "representative set vs. every block?" question is **answered by the external
 fork**: the iframe targets a FUI-hosted demo, and only ~7 of 71 blocks have one today (the rest are gated
 on FUI publishing demos — #705/#398, not WE work). So the floor is **"a representative set across the
 blocks whose FUI demo already exists; full rollout is demand-driven as FUI demos land."** The POC repoints
-off the body's `/blocks/dropdown/` (no FUI demo) onto **`/blocks/autocomplete/`** — `autocomplete-unplugged.html`
+off the body's `/blocks/dropdown/` (no FUI demo) onto **`/blocks/autocomplete/`** — `fui:autocomplete-unplugged.html`
 is FUI's *"<auto-complete> — droplist demo"*, a droplist-family member. See
-[reports/2026-06-15-backlog-split-analysis.md](../reports/2026-06-15-backlog-split-analysis.md) (`/slice 604`).
+[we:reports/2026-06-15-backlog-split-analysis.md](../reports/2026-06-15-backlog-split-analysis.md) (`/slice 604`).
 
 ## Acceptance (epic-level — delivered across child slices)
 
-- [ ] At least one block page (recommend `/blocks/dropdown/` → FUI droplist demo) embeds a **live,
+- [x] At least one block page (recommend `/blocks/dropdown/` → FUI droplist demo) embeds a **live,
       interactive FUI-hosted demo via `fuiDemo`**, next to the existing code sample.
-- [ ] The demo is the FUI-hosted one (FUI branding/provenance visible), embedded by iframe — **no FUI
+- [x] The demo is the FUI-hosted one (FUI branding/provenance visible), embedded by iframe — **no FUI
       block code imported into WE**.
-- [ ] Block pages keep the **static code sample AND** gain the **live embedded demo** (fidelity is additive).
-- [ ] A repeatable pattern + per-block metadata (which FUI demo URL maps to which block) so remaining
+- [x] Block pages keep the **static code sample AND** gain the **live embedded demo** (fidelity is additive).
+- [x] A repeatable pattern + per-block metadata (which FUI demo URL maps to which block) so remaining
       blocks roll out as follow-on child stories.
-- [ ] Overlay/modal-heavy blocks are either covered or explicitly deferred to #728's alternatives slice.
+- [x] Overlay/modal-heavy blocks are either covered or explicitly deferred to #728's alternatives slice.
 
 ## Slicing note
 
@@ -112,4 +112,4 @@ is FUI's *"<auto-complete> — droplist demo"*, a droplist-family member. See
 child slices were carved (A → B): a POC + repeatable pattern + demo-mapping metadata story (`/blocks/autocomplete/`),
 then a rollout story across the other blocks whose FUI demo already exists. Full coverage of the ~60
 demo-less blocks stays external-gated (#705/#398, demand-driven); overlay/modal-heavy blocks stay deferred
-to #728. See [reports/2026-06-15-backlog-split-analysis.md](../reports/2026-06-15-backlog-split-analysis.md).
+to #728. See [we:reports/2026-06-15-backlog-split-analysis.md](../reports/2026-06-15-backlog-split-analysis.md).

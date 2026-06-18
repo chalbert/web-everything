@@ -29,7 +29,7 @@ Make any configured state of the Block Explorer **reproducible and shareable**. 
 
 ## Progress
 
-Done — built into the FUI workbench (`frontierui/workbench/mount.ts`), reusing the #749 switcher's state. A new **Share** chrome panel:
+Done — built into the FUI workbench (`fui:frontierui/workbench/mount.ts`), reusing the #749 switcher's state. A new **Share** chrome panel:
 
 - **Copy permalink** — `serializeState()` encodes the full view into URL params: `block`, `ds` (active design system), `traits`, `axes` (density/radius/contrast slider values), `scheme`/`hc`/`fc` (native state), `rtl`/`locale`, `cq` (container sim). On mount a restore block parses `location.search` and re-applies — traits first (so the re-render applies them pre-connect), then the design system, then axes + native-state + RTL/locale + container — reproducing the exact view. Clipboard write + echoes the URL.
 - **Export as code** — `exportAsCode()` emits a ready-to-paste snippet: a `<style> :root { --wb-*… }` block of the active design-system tokens (#747 shape) + the configured element's markup (authoring attributes; ARIA/role/tabindex stripped). Clipboard + echo.

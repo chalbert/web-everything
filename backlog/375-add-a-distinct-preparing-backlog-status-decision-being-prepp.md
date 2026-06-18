@@ -17,11 +17,11 @@ When an agent runs /prepare on a decision it claims the item to `status: active`
 
 ## Build
 
-- **Status enum** — add `preparing` to the backlog status set (`scripts/check-standards-rules.mjs`, where the `checkStatus` enum lives) so the validator accepts it. Treat it as a *non-open, in-flight* state.
-- **Loader (`src/_data/backlog.js`)** — `isOpen` already gates selection on `status === 'open'`, so a `preparing` item drops out of the ready pool automatically (same as `active`). Confirm readiness/tier code that branches on `active` (none currently special-cases it) also treats `preparing` as in-flight, not resolved.
-- **Card (`src/backlog.njk` + status styling)** — render a distinct `preparing` chip (e.g. a "prepping" badge) so a decision being researched is visually distinct from a story mid-build.
-- **Prepare skill (`.claude/skills/prepare-decision-item/SKILL.md`)** — claim to `preparing` instead of `active`; the close-out already releases to `open` + stamps `preparedDate`. Add a `backlog.mjs` verb or `--as=preparing` flag so the race-safe flip sets `preparing` (and `release` returns `preparing → open`).
-- **`scripts/backlog.mjs`** — teach `claim`/`release` (or a new `prepare`/`unprepare` pair) the `preparing` state.
+- **Status enum** — add `preparing` to the backlog status set (`we:scripts/check-standards-rules.mjs`, where the `checkStatus` enum lives) so the validator accepts it. Treat it as a *non-open, in-flight* state.
+- **Loader (`we:src/_data/backlog.js`)** — `isOpen` already gates selection on `status === 'open'`, so a `preparing` item drops out of the ready pool automatically (same as `active`). Confirm readiness/tier code that branches on `active` (none currently special-cases it) also treats `preparing` as in-flight, not resolved.
+- **Card (`we:src/backlog.njk` + status styling)** — render a distinct `preparing` chip (e.g. a "prepping" badge) so a decision being researched is visually distinct from a story mid-build.
+- **Prepare skill (`we:.claude/skills/prepare-decision-item/SKILL.md`)** — claim to `preparing` instead of `active`; the close-out already releases to `open` + stamps `preparedDate`. Add a `we:backlog.mjs` verb or `--as=preparing` flag so the race-safe flip sets `preparing` (and `release` returns `preparing → open`).
+- **`we:scripts/backlog.mjs`** — teach `claim`/`release` (or a new `prepare`/`unprepare` pair) the `preparing` state.
 
 ## Acceptance
 

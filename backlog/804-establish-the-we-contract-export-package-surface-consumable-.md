@@ -17,7 +17,7 @@ tags: [packaging, npm-scope, we-fui-boundary, contract-export]
 
 **Ruling — 1a + 2a + 3a (ratified 2026-06-16).** WE exposes its contracts as **scoped
 `@webeverything/*` packages, one per subsystem** (`@webeverything/capability-manifest` +
-`@webeverything/validation-generation`), each a `package.json` + curated `exports` at its existing
+`@webeverything/validation-generation`), each a `we:package.json` + curated `exports` at its existing
 root dir (1a). FUI **resolves them via local tsconfig `paths` + vite `alias` into the sibling
 `../webeverything` dir, keyed on the full `@webeverything/*` specifier — no registry publish** (2a);
 publishing is a later, separately-prioritized build triggered by the first external consumer. The
@@ -29,11 +29,11 @@ semantics make impl physically unresolvable and enforce the #730 split mechanica
 publish-ready scoped name, so publish is deferred not foreclosed. Implementation graduated to the
 agent-ready build **#814** (which #725 now depends on).
 
-Prerequisite blocker for the #725 webguards/webvalidation port (uncovered at claim-time, batch-2026-06-16). The #730 A1+B1+C2 ruling requires Frontier UI to import the contract halves — `capability-manifest/` and the `validation-generation` contract (`provider`/`registry`/`fieldError`/`cel`) + the `service.ts` wire-contract types — **from `@webeverything`**. That import surface **does not exist**, and *how* to create it is an unresolved packaging decision the #730 ruling presupposed but never made.
+Prerequisite blocker for the #725 webguards/webvalidation port (uncovered at claim-time, batch-2026-06-16). The #730 A1+B1+C2 ruling requires Frontier UI to import the contract halves — `capability-manifest/` and the `validation-generation` contract (`provider`/`registry`/`fieldError`/`cel`) + the `we:service.ts` wire-contract types — **from `@webeverything`**. That import surface **does not exist**, and *how* to create it is an unresolved packaging decision the #730 ruling presupposed but never made.
 
 ## The gap (verified 2026-06-16, batch claim-time)
 
-- WE's package is named **`web-everything`** (unscoped), `package.json` has **no `exports` map**.
+- WE's package is named **`web-everything`** (unscoped), `we:package.json` has **no `exports` map**.
 - Frontier UI has **no `@webeverything` (nor `web-everything`) dependency**.
 - `capability-manifest/` and `validation-generation/` sit at the repo root, on **no published/consumable path**.
 
@@ -51,7 +51,7 @@ proven, zero-publish, zero-lock-in mechanism is in production — but plateau's 
 
 Grounding rulings — all resolved: **#239** (`@webeverything/*` = standard artifacts only; package name =
 contract specifier = published name), **#730** (A1+B1+C2 per-file placement: capability-manifest whole +
-`validation-generation` contract files + `service.ts` wire-contract types → WE; impl → FUI), **#091**
+`validation-generation` contract files + `we:service.ts` wire-contract types → WE; impl → FUI), **#091**
 (constellation layering), **minimize-lock-in / protocol-is-the-only-lock**.
 
 ## The fork — how does WE expose contracts to FUI? (3 sub-forks, each bold-defaulted)
@@ -59,7 +59,7 @@ contract specifier = published name), **#730** (A1+B1+C2 per-file placement: cap
 ### Fork 1 — Package identity → **1a: scoped `@webeverything/*`, one package per contract subsystem**
 
 - **1a (default)** — `@webeverything/capability-manifest` + `@webeverything/validation-generation`, each
-  a `package.json` + `exports` added to its existing root dir. #239-aligned (name = specifier), matches
+  a `we:package.json` + `exports` added to its existing root dir. #239-aligned (name = specifier), matches
   physical layout + the #239 separate-scoped-contract-package precedent. The unscoped `web-everything`
   root stays the docs-site dev project, untouched.
 - 1b — keep unscoped `web-everything` + subpath exports. *Rejected:* a standard contract under an
@@ -83,14 +83,14 @@ contract specifier = published name), **#730** (A1+B1+C2 per-file placement: cap
 ### Fork 3 — Export surface shape → **3a: curated subpath exports; impl excluded by omission**
 
 - **3a (default)** — `exports` lists **only** the WE-resident contract: `@webeverything/capability-manifest`
-  → whole plane (its `index.ts`, A1); `@webeverything/validation-generation` subpaths `provider`,
+  → whole plane (its `we:index.ts`, A1); `@webeverything/validation-generation` subpaths `provider`,
   `registry`, `fieldError`, `cel`, `service` (**wire-contract types only**, C2). **No** entry for
   `crossField`, `adapters/*`, or the `service` handler — Node `exports` semantics make omitted subpaths
   physically unresolvable, so omission *enforces* the #730 boundary mechanically. *Implies downstream
-  (agent-ready after ratification):* split `service.ts` so only the wire types export from WE (handler
+  (agent-ready after ratification):* split `we:service.ts` so only the wire types export from WE (handler
   ports to FUI under #725); export the `.ts` source (constellation aliases resolve `.ts` directly — no
   build step for local dev).
-- 3b — barrel export of each full `index.ts`. *Rejected:* re-exports impl through the contract surface,
+- 3b — barrel export of each full `we:index.ts`. *Rejected:* re-exports impl through the contract surface,
   re-merging what #730 B1/C2 split.
 
 ## Recommended path at a glance

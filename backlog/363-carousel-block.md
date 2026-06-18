@@ -22,6 +22,6 @@ navigation). Verified genuinely uncovered (no carousel/scroll-snap block; webscr
 Native-first: substrate is a CSS scroll-snap container, with the emerging CSS carousel pseudo-elements
 (::scroll-button(), ::scroll-marker — Open UI / CSS Overflow 5) as native controls where shipped; JS paging
 is the fallback only. 4 design decisions (scroll-snap baseline + CSS-carousel frontier · mandatory APG a11y ·
-autoplay opt-in + WCAG 2.2.2 gated · equivalent-slides-not-tabs/data boundary). `blocks.json` +
-`block-descriptions/carousel.njk` + semantics term *Carousel*. Coverage: carousel → covered. `check:standards`
+autoplay opt-in + WCAG 2.2.2 gated · equivalent-slides-not-tabs/data boundary). `fui:blocks.json` +
+`we:block-descriptions/carousel.njk` + semantics term *Carousel*. Coverage: carousel → covered. `check:standards`
 green; page at `/blocks/carousel/`.

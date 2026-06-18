@@ -16,7 +16,7 @@ Decide whether the recurring **compound-child** pattern — sub-elements that ac
 
 ## Context
 
-The `Compound Child` glossary term is already seeded in `semantics.json`, and the Segmented Control block's design decisions + description page reference this open fork explicitly (it deliberately does not settle it). The pattern recurs across the standard: a parent declares its options as **authored children**, those children map to the parent's value model, and under the JSX adapter the same authoring lowers to an `options` array rather than rendered child components.
+The `Compound Child` glossary term is already seeded in `we:semantics.json`, and the Segmented Control block's design decisions + description page reference this open fork explicitly (it deliberately does not settle it). The pattern recurs across the standard: a parent declares its options as **authored children**, those children map to the parent's value model, and under the JSX adapter the same authoring lowers to an `options` array rather than rendered child components.
 
 ## The fork
 
@@ -35,11 +35,11 @@ The `Compound Child` glossary term is already seeded in `semantics.json`, and th
 
 Two pre-decision findings shaped the call:
 
-- **Selection's `grouping` is a different concern.** [`intents.json`](../src/_data/intents.json) `grouping` (`flat`/`grouped`, `<optgroup>`/`role=group`) *arranges* options into labeled sets; it does not *declare* options. So "document under Selection's grouping" was a mismatched home — Compound Child is a **sibling** of grouping, not subordinate to it.
-- **The cross-standard shape is less uniform than claimed.** Only `<segment>` (Segmented Control) and native `<option>` are the strict positional compound-child form. Tabs binds via `tab-trigger`/`tab-panel` **attributes** on arbitrary elements ([`TabGroupBehavior.ts`](../blocks/tabs/TabGroupBehavior.ts)), so it is a related-but-distinct variant, not a third instance.
+- **Selection's `grouping` is a different concern.** [`we:intents.json`](../src/_data/intents.json) `grouping` (`flat`/`grouped`, `<optgroup>`/`role=group`) *arranges* options into labeled sets; it does not *declare* options. So "document under Selection's grouping" was a mismatched home — Compound Child is a **sibling** of grouping, not subordinate to it.
+- **The cross-standard shape is less uniform than claimed.** Only `<segment>` (Segmented Control) and native `<option>` are the strict positional compound-child form. Tabs binds via `tab-trigger`/`tab-panel` **attributes** on arbitrary elements ([`we:TabGroupBehavior.ts`](../blocks/tabs/TabGroupBehavior.ts)), so it is a related-but-distinct variant, not a third instance.
 
 Rejected **promote-to-protocol** *for now*: the item's own bar — proven multi-vendor interop demand — is unmet, and a protocol is the one real lock-in. It has no UX dimensions, so it is not an intent and is a fixed mechanic, not a configurable dimension. Rejected **do-nothing**: the harvest flagged the ad-hoc status quo as the gap.
 
 The one real conformance contract — how authored children lower to an `options` array under the JSX adapter — is **unspecified anywhere** today. It is the latent protocol seed and is tracked standalone as **#281** (its natural owner is the render-strategy / component-compiler path, not Selection); a future protocol would crystallize there if interop demand appears.
 
-**Applied:** enriched the `Compound Child` term in [`semantics.json`](../src/_data/semantics.json) (settled language, Tabs corrected to related-but-distinct, lowering noted as the seed); added cross-refs from the Selection grouping description, the Tabs block description, and the Segmented Control block description (open-decision blockquote → settled).
+**Applied:** enriched the `Compound Child` term in [`we:semantics.json`](../src/_data/semantics.json) (settled language, Tabs corrected to related-but-distinct, lowering noted as the seed); added cross-refs from the Selection grouping description, the Tabs block description, and the Segmented Control block description (open-decision blockquote → settled).

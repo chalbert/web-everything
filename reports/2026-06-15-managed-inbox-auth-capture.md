@@ -15,7 +15,7 @@
 
 ## Recommendation
 
-- **Boundary → Plateau service + thin no-leakage WE client seam** (mirrors #475 exactly). The managed email identity is stateful, credential-bearing infra with an operational lifecycle — an *impl capability*, not a standard. By the #475 ruling it belongs in Plateau; WE's capture devtooling holds only a thin, swappable, vendor-free client seam (the `design-refs/vision.mjs` precedent, env-selected provider), repointed at the Plateau service when it exists. Owning the capability inside the WE standards repo (Fork 1/B) rebuilds in WE what Plateau should own and drags credential-vaulting + signup automation into the standards layer.
+- **Boundary → Plateau service + thin no-leakage WE client seam** (mirrors #475 exactly). The managed email identity is stateful, credential-bearing infra with an operational lifecycle — an *impl capability*, not a standard. By the #475 ruling it belongs in Plateau; WE's capture devtooling holds only a thin, swappable, vendor-free client seam (the `we:design-refs/vision.mjs` precedent, env-selected provider), repointed at the Plateau service when it exists. Owning the capability inside the WE standards repo (Fork 1/B) rebuilds in WE what Plateau should own and drags credential-vaulting + signup automation into the standards layer.
 - **Build vs buy → owned-domain catch-all, fixed-cost, as the floor; metered SaaS as an opt-in BYO tier.** Plateau's linear-cost-with-revenue rule excludes uncapped per-email SaaS as the *floor* (cost scales with capture volume, not revenue). The cheapest owned realization is a catch-all on an owned domain via **Cloudflare Email Routing + Email Workers (free)**; the fully-owned alternative is a small self-hosted catch-all (**Stalwart** / maddy, IMAP). Both are fixed-cost. The exact realization is a **Plateau implementation sub-choice** (delegated to the Plateau build); WE states the floor + the constraint.
 
 ## Key Findings
@@ -43,7 +43,7 @@ Automated third-party signups carry ToS risk on **both** the inbox vendor and th
 ### Classification (per-fork pass)
 
 - **Layer:** Capability (impl/infra), not Block/Intent/Protocol — *no runnable standard code*, it's a service + a tool-time client. Same class as vision (#475/#480).
-- **Protocol?** No — no independent-vendor interop/swap story at the standard level. The thin seam is a **devtools provider seam** (a plain injected client consulted by a tool at capture time), not a registry/protocol — exactly the `vision.mjs` shape (env-selected provider module), per the runtime-DI-vs-devtools-provider distinction.
+- **Protocol?** No — no independent-vendor interop/swap story at the standard level. The thin seam is a **devtools provider seam** (a plain injected client consulted by a tool at capture time), not a registry/protocol — exactly the `we:vision.mjs` shape (env-selected provider module), per the runtime-DI-vs-devtools-provider distinction.
 - **DI-injectable / default:** Yes — the identity provider is injected by name (cf. `DESIGN_REFS_VISION_PROVIDER_MODULE`); default = the fixed-cost owned provider, with SaaS opt-in.
 - **Separate-and-decouple:** capability (Plateau service) decoupled from the consumption seam (WE devtools client) — satisfied, identical to #475.
 - **Fork-existence test:** Fork 1 is close to a *forced invariant* (A is correct by #475; B is the broken branch). Fork 2's floor is forced by the linear-cost rule; the genuine remaining call is the owned realization (CF Routing vs self-host), delegated to the Plateau build.
@@ -52,7 +52,7 @@ Automated third-party signups carry ToS risk on **both** the inbox vendor and th
 
 | File | Action |
 |---|---|
-| `reports/2026-06-15-managed-inbox-auth-capture.md` | Created — this report |
-| `src/_data/researchTopics.json` | Added `managed-inbox-auth-capture` topic |
-| `src/_includes/research-descriptions/managed-inbox-auth-capture.njk` | Created — research write-up |
-| `backlog/709-managed-inbox-auth-capture-capability-boundary-plateau-servi.md` | Rewritten to prepared-fork shape; `preparedDate` set; `relatedReport` linked |
+| `we:reports/2026-06-15-managed-inbox-auth-capture.md` | Created — this report |
+| `we:src/_data/researchTopics.json` | Added `managed-inbox-auth-capture` topic |
+| `we:src/_includes/research-descriptions/managed-inbox-auth-capture.njk` | Created — research write-up |
+| `we:backlog/709-managed-inbox-auth-capture-capability-boundary-plateau-servi.md` | Rewritten to prepared-fork shape; `preparedDate` set; `relatedReport` linked |

@@ -33,20 +33,20 @@ epic's **dogfood layer** (a self-run convention over *this* repo), not the later
 The concern decomposes into four orthogonal axes, each pinned to the real tree:
 
 - **(1) Uniformity.** The project cites external URLs in five structured JSON homes — corpus
-  `docsUrl`/`repoUrl` ([benchmarkCorpus.json:63](../src/_data/benchmarkCorpus.json#L63), the only home that
+  `docsUrl`/`repoUrl` ([we:benchmarkCorpus.json:63](../src/_data/benchmarkCorpus.json#L63), the only home that
   already has `retired`/`retiredDate`/`retiredReason` from #546), library links
-  ([references.json:19](../src/_data/references.json#L19)), block & intent design-system refs
-  (`designSystemResearch[].reference`, e.g. [intents.json:97](../src/_data/intents.json#L97)), and deep
-  per-row doc URLs ([benchmarkCapabilityPresence.json:27](../src/_data/benchmarkCapabilityPresence.json#L27))
+  ([we:references.json:19](../src/_data/references.json#L19)), block & intent design-system refs
+  (`designSystemResearch[].reference`, e.g. [we:intents.json:97](../src/_data/intents.json#L97)), and deep
+  per-row doc URLs ([we:benchmarkCapabilityPresence.json:27](../src/_data/benchmarkCapabilityPresence.json#L27))
   — plus freeform prose in `reports/*.md` and `src/_includes/research-descriptions/*.njk`. One uniform
   field-set, or per-home shapes?
 - **(2) Location.** There are **no JSON Schema files** in the repo; validation is imperative in
-  [check-standards-rules.mjs](../scripts/check-standards-rules.mjs) (the only reference-touching rule today is
-  the `verified`-row-needs-`url` warning at [check-standards-rules.mjs:740](../scripts/check-standards-rules.mjs#L740)).
+  [we:check-standards-rules.mjs](../scripts/check-standards-rules.mjs) (the only reference-touching rule today is
+  the `verified`-row-needs-`url` warning at [we:check-standards-rules.mjs:740](../scripts/check-standards-rules.mjs#L740)).
   So "where the convention lives" is: one shared documented convention + one shared validator helper, vs the
   fields defined/validated separately per home.
 - **(3) Retirement vs supersession.** #546 modelled only *death* (`retired` triplet); #192 modelled only
-  *replacement* (`supersedes`/`supersededBy`, e.g. [researchTopics.json:60-85](../src/_data/researchTopics.json#L60-L85)).
+  *replacement* (`supersedes`/`supersededBy`, e.g. [we:researchTopics.json:60-85](../src/_data/researchTopics.json#L60-L85)).
   A general convention must hold both, and a reference can be both at once (FAST: dead docs **and** folded into
   Fluent). Two orthogonal markers, or one richer `status` enum?
 - **(4) Scope now.** Structured JSON homes can carry enforceable fields; freeform prose can't. Which homes does
@@ -85,8 +85,8 @@ has no JSON Schema files, so this is about the imperative validator and the docs
 
 - **A — One documented convention + one shared validator helper. ✅ default.** Add the field-set to a single
   `docs/agent/*` convention note (next to the backlog-workflow conventions), and a single
-  `validateRetirementShape(entry)` helper in [check-standards-rules.mjs](../scripts/check-standards-rules.mjs)
-  that each home's existing validator calls on its rows (corpus sources, `references.json` links, `designSystemResearch`
+  `validateRetirementShape(entry)` helper in [we:check-standards-rules.mjs](../scripts/check-standards-rules.mjs)
+  that each home's existing validator calls on its rows (corpus sources, `we:references.json` links, `designSystemResearch`
   refs, presence rows). One source of truth for the shape and its rules (e.g. `retired:true` ⇒ `retiredReason`
   present; `supersededBy` resolves). DRY; a shape change touches one place.
 - *Rejected* — **B — Define/validate the shape separately per home.** Mirrors today's per-home imperative
@@ -111,7 +111,7 @@ the general convention model both without re-litigating either?
   collapse back toward A. Two orthogonal markers represent all four states natively, honouring
   bias-toward-separation (two facts, two fields) and most-permissive-default (each marker independently optional).
   *Secondary (cost, non-deciding):* it happens to reuse shipped vocabulary (#546 + #192/#441) with no migration
-  of `researchTopics.json`'s chain and matches JSON-Schema's `deprecated`-boolean minimal model — a convenience,
+  of `we:researchTopics.json`'s chain and matches JSON-Schema's `deprecated`-boolean minimal model — a convenience,
   not the reason to choose it. The shared validator (Fork 2) cross-checks a `supersededBy` target resolves.
 - *Rejected* — **B — One richer W3C-style `status` enum** (`active`/`superseded`/`obsolete`/`rescinded`). Reads
   as the more expressive option, but (i) fuses two orthogonal facts into one mutually-exclusive field — it cannot
@@ -162,8 +162,8 @@ most-permissive default (the metadata is opt-in, never a required field).
 
 **On resolution** (the `/next decision` turn, not now): apply the ratified field-set to the structured homes,
 add the shared `validateRetirementShape` helper + call sites in
-[check-standards-rules.mjs](../scripts/check-standards-rules.mjs), document the convention, and confirm the
-freeform-style note. No `researchTopics.json` supersedes-chain migration is needed under the default (Fork 3-A
+[we:check-standards-rules.mjs](../scripts/check-standards-rules.mjs), document the convention, and confirm the
+freeform-style note. No `we:researchTopics.json` supersedes-chain migration is needed under the default (Fork 3-A
 reuses the existing field).
 
 ---
@@ -179,12 +179,12 @@ exclusive — it cannot represent the dead-*and*-superseded state (FAST). The en
 
 **Shipped:**
 - `validateRetirementShape(entry, { label, resolveSupersededBy })` in
-  [check-standards-rules.mjs](../scripts/check-standards-rules.mjs) (+ 9 unit tests).
-- Call sites in [check-standards.mjs](../scripts/check-standards.mjs) §6a-ter over the four structured homes
-  (corpus sources, `references.json` links, `designSystemResearch` refs on blocks+intents, capability-presence
-  rows); `supersededBy` resolved against corpus source ids. `researchTopics.json` keeps its own bidirectional
+  [we:check-standards-rules.mjs](../scripts/check-standards-rules.mjs) (+ 9 unit tests).
+- Call sites in [we:check-standards.mjs](../scripts/check-standards.mjs) §6a-ter over the four structured homes
+  (corpus sources, `we:references.json` links, `designSystemResearch` refs on blocks+intents, capability-presence
+  rows); `supersededBy` resolved against corpus source ids. `we:researchTopics.json` keeps its own bidirectional
   rule (richer topic-id pointer space).
-- Convention documented in [docs/agent/reference-retirement.md](../docs/agent/reference-retirement.md) (+ AGENTS.md
+- Convention documented in [we:docs/agent/reference-retirement.md](../docs/agent/reference-retirement.md) (+ we:AGENTS.md
   routing row); freeform prose = documented annotate-in-place style, structured extraction deferred to #597.
 
 ## Progress

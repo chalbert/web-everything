@@ -41,18 +41,18 @@ invariants are enforced by tests, not convention.
 - **Status:** resolved
 - **Branch:** `frontierui` working tree (droplist behavior family, `blocks/droplist/`).
 - **Done:**
-  - `live-status` (found already-landed in the live repo): `blocks/droplist/LiveStatus.ts` owns the
+  - `live-status` (found already-landed in the live repo): `fui:blocks/droplist/LiveStatus.ts` owns the
     one shared region, stamps `data-live-status` to claim it, bridges
-    `filter-request`/`filter-resolved`/`filter-error`, and exposes `announce()`. `Filter.ts` defers its
+    `filter-request`/`filter-resolved`/`filter-error`, and exposes `announce()`. `fui:Filter.ts` defers its
     inline write when the region carries the marker. One-region / no-double-announce invariant proven in
-    `__tests__/behaviors.test.ts` (LiveStatus suite + "Filter defers" test).
-  - `windowed` (built this session): `blocks/droplist/Windowed.ts` — keeps the full set as a private
+    `fui:__tests__/behaviors.test.ts` (LiveStatus suite + "Filter defers" test).
+  - `windowed` (built this session): `fui:blocks/droplist/Windowed.ts` — keeps the full set as a private
     model, mounts only a recentred window slice as `[composite-descendant]`, stamps ABSOLUTE
     `aria-setsize`/`aria-posinset`/`data-index` from the full model, and keeps the active option always
     mounted (recentre + atomic `appendChild` moves, plus an active-index removal backstop). Coordinates
     with `filter` on `filter-resolved` by harvesting the injected set into the model and collapsing to a
     window. `overscan` keeps the next/prev item mounted before focus can arrow onto it.
-  - Tests (`__tests__/behaviors.test.ts`, Windowed suite, 2): against the **real** FocusDelegation —
+  - Tests (`fui:__tests__/behaviors.test.ts`, Windowed suite, 2): against the **real** FocusDelegation —
     49 ArrowDowns over a 50-item model, active stays connected at every step, window bounded ≤ size,
     absolute posinset, head of model unmounted (genuinely virtualized); and the **real** Filter
     coordination seam — 50 injected collapse to one window of 10, no duplicate descendants. Full
@@ -68,31 +68,31 @@ invariants are enforced by tests, not convention.
 
 ## Correction (reopened 2026-06-07)
 
-> **Was resolved in error.** The only implementation of this surface was built in the **legacy `plateau` repo**, since confirmed **abandoned** — the initial single-repo prototype, superseded by Web Everything + Frontier UI + plateau-app. It is **not in the live project**: the WE *spec* exists, but there is **no reference implementation** in Frontier UI or the WE `plugs/`, and the (now-removed) `graduatedTo` pointed into dead code. Reopened as a **fresh build** against the live reference implementation (Frontier UI / WE `plugs/`, per AGENTS.md) — **do not migrate or consult plateau** (explicitly not a model). The original `## Progress` below describes the void plateau build and is retained only as history.
+> **Was resolved in error.** The only implementation of this surface was built in the **legacy `plateau` repo**, since confirmed **abandoned** — the initial single-repo prototype, superseded by Web Everything + Frontier UI + plateau-app. It is **not in the live project**: the WE *spec* exists, but there is **no reference implementation** in Frontier UI or the WE `plugs/`, and the (now-removed) `graduatedTo` pointed into dead code. Reopened as a **fresh build** against the live reference implementation (Frontier UI / WE `plugs/`, per we:AGENTS.md) — **do not migrate or consult plateau** (explicitly not a model). The original `## Progress` below describes the void plateau build and is retained only as history.
 
 ## Progress
 
 - **Status:** resolved
 - **Branch:** work landed in the `plateau` repo (`src/blocks/attributes/`), mirroring #122.
 - **Done:**
-  - `LiveStatus.ts` — the dedicated polite announcer. Adopts the SAME region node `filter`'s
+  - `fui:LiveStatus.ts` — the dedicated polite announcer. Adopts the SAME region node `filter`'s
     `status=<id>` points at (`region` option), ensures it is a configured live region, and stamps it
     `data-live-status` to **claim** it. Consumes `filter-request` → loading and `filter-resolved` →
     ready/empty with zero glue, plus a generic `live-status` event / public `announce()` for any async
     collection (loading / ready / empty / error). Text matches filter's conventions.
-  - `Filter.ts` — minimal backward-compat edit: `#announce` returns early when the region carries the
+  - `fui:Filter.ts` — minimal backward-compat edit: `#announce` returns early when the region carries the
     `data-live-status` marker, so a `live-status` owner is the single writer. All 9 existing Filter
     tests stay green (unowned region → unchanged behavior).
-  - `Windowed.ts` — model-backed virtualization. Keeps the full set as a private model, renders only a
+  - `fui:Windowed.ts` — model-backed virtualization. Keeps the full set as a private model, renders only a
     window slice as `[composite-descendant]` (the live set focus/selection read), and stamps
     `aria-setsize`/`aria-posinset`/`data-index` from the FULL model. The active option is ALWAYS
     mounted — included in the render even when it scrolls outside the pure window slice; reorders via
     atomic DOM moves so the active node never leaves the document. Shifts the window on
     `activedescendantchange` (≥overscan neighbours each side) and re-collapses on `filter-resolved`
     (injected set → new model). Public `setModel()` / `getWindow()`.
-  - Tests: `LiveStatus.test.ts` (12) proves the one-region / no-double-announce invariant against the
+  - Tests: `we:LiveStatus.test.ts` (12) proves the one-region / no-double-announce invariant against the
     **real** Filter (write counted exactly once per settle; filter resumes inline when the owner
-    releases). `Windowed.test.ts` (7) proves active-always-mounted against the **real**
+    releases). `we:Windowed.test.ts` (7) proves active-always-mounted against the **real**
     FocusDelegation (50 arrow-downs, active stays connected, window bounded, absolute posinset) and the
     filter-coordination seam (50 injected → window of 10). Full plateau suite: **147/147 pass**.
 - **Leftovers → new backlog items:** scroll / height-driven windowing (the pointer path happy-dom
@@ -101,7 +101,7 @@ invariants are enforced by tests, not convention.
   tracked by **#138**.)
 - **Notes:** behaviors are standalone modules proven by tests (filter/clearable aren't registered in
   bootstrap either). happy-dom has no layout → windowing is active-driven/count-based here, not
-  scroll/height (that's #145). The pre-existing `check:standards` "AGENTS.md inventory stale" error is
+  scroll/height (that's #145). The pre-existing `check:standards` "we:AGENTS.md inventory stale" error is
   unrelated in-flight tree work — it reproduces without this item's edits.
 
-**Graduated to** `frontierui/blocks/droplist/LiveStatus.ts` — shared-region announcer (Filter.ts defers via data-live-status) + Windowed.ts active-always-mounted virtualization; invariants in blocks/droplist/__tests__/behaviors.test.ts.
+**Graduated to** `fui:frontierui/blocks/droplist/LiveStatus.ts` — shared-region announcer (fui:Filter.ts defers via data-live-status) + fui:Windowed.ts active-always-mounted virtualization; invariants in fui:blocks/droplist/__tests__/behaviors.test.ts.

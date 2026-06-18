@@ -31,7 +31,7 @@ depends on (Plateau's FSL tier, any future fair-source seam).
 - Pick a CLA mechanism (e.g. CLA Assistant bot on GitHub, or DCO sign-off if a
   lighter touch is preferred — decide which gives the relicensing rights the
   fair-source tiers actually need; DCO alone may be insufficient for relicensing).
-- Add `CLA.md` + enforcement (bot/check) to **WE**, **FU**, and **Plateau** repos.
+- Add `we:CLA.md` + enforcement (bot/check) to **WE**, **FU**, and **Plateau** repos.
 - Gate merges on CLA acceptance before the repos are made public / accept the first
   external PR.
 
@@ -42,7 +42,7 @@ depends on (Plateau's FSL tier, any future fair-source seam).
 - Coordinate with #097's legal track.
 
 ## Note (2026-06-11)
-The *decision* content is already settled (here and in #098): a CLA is **required on WE, FU, and Plateau before the first external PR**, it preserves the relicensing optionality the fair-source gradient needs, and `webcases` stays Apache regardless. Mechanism (CLA Assistant vs DCO) and adding `CLA.md` + enforcement are **execution** — this is a build task, not an open fork. Stays open as that task.
+The *decision* content is already settled (here and in #098): a CLA is **required on WE, FU, and Plateau before the first external PR**, it preserves the relicensing optionality the fair-source gradient needs, and `webcases` stays Apache regardless. Mechanism (CLA Assistant vs DCO) and adding `we:CLA.md` + enforcement are **execution** — this is a build task, not an open fork. Stays open as that task.
 
 ## Delivery (2026-06-11)
 - **Mechanism: CLA Assistant (a real signed CLA), not DCO.** The deciding factor is
@@ -51,8 +51,8 @@ The *decision* content is already settled (here and in #098): a CLA is **require
   proprietary, plus any future FU fair-source seam) needs the Steward to hold an
   explicit right to license/relicense every contribution. The CLA's Section 2 grants
   exactly that.
-- **Authored on Web Everything:** [`CLA.md`](../CLA.md) (Individual CLA, adapted from
-  the Apache ICLA with an explicit relicensing grant) + [`.github/workflows/cla.yml`](../.github/workflows/cla.yml)
+- **Authored on Web Everything:** [`we:CLA.md`](../CLA.md) (Individual CLA, adapted from
+  the Apache ICLA with an explicit relicensing grant) + [`we:.github/workflows/cla.yml`](../.github/workflows/cla.yml)
   (the `contributor-assistant/github-action` bot gating every PR, signatures persisted
   to a `cla-signatures` branch).
 - **Cross-repo + activation deferred to [#302](/backlog/302-roll-out-the-cla-to-frontier-ui-plateau-and-activate-enforce/):**

@@ -31,4 +31,4 @@ The two dimensions are **orthogonal, not ranked**: `transition` owns *whether/wh
 
 **Invariant above all three: the route/DOM change always commits** — `physics`/`transition` gate only the decorative wrapper, never the navigation. Tabs and any future composer inherit this by reference.
 
-Documented in [Router block](/blocks/router/) → *Transition direction vs Motion feel* (`src/_includes/block-descriptions/router.njk`).
+Documented in [Router block](/blocks/router/) → *Transition direction vs Motion feel* (`we:src/_includes/block-descriptions/router.njk`).

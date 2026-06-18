@@ -13,4 +13,4 @@ tags: []
 
 # Module-as-a-Service — production runtime delivery (compiled .js + published bare-specifier package)
 
-Spun out of #081. In dev the import map points at Vite-served WE source (/blocks/renderers/jsx/index.ts); a real deploy must serve compiled .js plus a published bare-specifier package. The production hardening of the native-ESM delivery seam. Relates to the module-resolution axis (#271/#274) and importmap cleanup (#285). Independent of the other #081 follow-ons.
+Spun out of #081. In dev the import map points at Vite-served WE source (we:/blocks/renderers/jsx/index.ts); a real deploy must serve compiled .js plus a published bare-specifier package. The production hardening of the native-ESM delivery seam. Relates to the module-resolution axis (#271/#274) and importmap cleanup (#285). Independent of the other #081 follow-ons.

@@ -31,7 +31,7 @@ Mint the standard-owned conformance-evidence manifest ruled by #578 (Fork 2-A): 
     `validateConformanceEvidence` is the structural check a consuming tool runs before trusting it.
   - Built as a **sibling** of #410-4A's audit-record substrate (separation bias), not a field-set on it.
     Constellation: the manifest contract → WE standard; the PR rendering + attach → Plateau dev-browser.
-  - **Verified:** wired into `vitest.config.ts`; 9 tests pass; `tsc --noEmit --strict` clean;
+  - **Verified:** wired into `we:vitest.config.ts`; 9 tests pass; `tsc --noEmit --strict` clean;
     `check:standards` green.
 
-**Graduated to** `conformance-evidence/` — ConformanceEvidenceManifest contract (provider.ts + index.ts).
+**Graduated to** `conformance-evidence/` — ConformanceEvidenceManifest contract (we:provider.ts + we:index.ts).

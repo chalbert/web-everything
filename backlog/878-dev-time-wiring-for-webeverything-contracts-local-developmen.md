@@ -18,9 +18,9 @@ Let contracts be developed across repos without a publish on every change (per t
 
 ## Progress
 
-Done — chose **path-mapping** (the bold default; cleaner than npm link, no relink flakiness), reusing FUI's **already-proven #804-2a sibling-alias mechanism** rather than inventing one: FUI's `tsconfig.json` `paths` + `vite.config.mts` `alias` already resolve the publish-ready scoped specifiers for `@webeverything/capability-manifest`, `@webeverything/validation-generation/*`, and `@webeverything/webcases/*` into `../webeverything/<…>` source (no registry publish). I added the same for the #874 contract package — all nine per-protocol subpaths, mirroring `contracts/package.json` exports exactly:
+Done — chose **path-mapping** (the bold default; cleaner than npm link, no relink flakiness), reusing FUI's **already-proven #804-2a sibling-alias mechanism** rather than inventing one: FUI's `we:tsconfig.json` `paths` + `vite.config.mts` `alias` already resolve the publish-ready scoped specifiers for `@webeverything/capability-manifest`, `@webeverything/validation-generation/*`, and `@webeverything/webcases/*` into `../webeverything/<…>` source (no registry publish). I added the same for the #874 contract package — all nine per-protocol subpaths, mirroring `we:contracts/package.json` exports exactly:
 
-- `frontierui/tsconfig.json` — 9 `@webeverything/contracts/*` → `../webeverything/contracts/*.ts` path entries.
+- `fui:frontierui/tsconfig.json` — 9 `@webeverything/contracts/*` → `../webeverything/contracts/*.ts` path entries.
 - `frontierui/vite.config.mts` — the same 9 as Vite aliases (`join(weRoot, 'contracts/*.ts')`).
 
-Release builds still resolve the published package (#877's CI). Verified: a throwaway probe importing `@webeverything/contracts/{guard,selection,tree-select}` resolves clean under FUI's real project `tsc -p tsconfig.json --noEmit` (no "Cannot find module"); FUI `check:standards` 0 err/0 warn. This is the resolution #875 relies on to migrate FUI's byte-copied contracts to package imports.
+Release builds still resolve the published package (#877's CI). Verified: a throwaway probe importing `@webeverything/contracts/{guard,selection,tree-select}` resolves clean under FUI's real project `tsc -p we:tsconfig.json --noEmit` (no "Cannot find module"); FUI `check:standards` 0 err/0 warn. This is the resolution #875 relies on to migrate FUI's byte-copied contracts to package imports.

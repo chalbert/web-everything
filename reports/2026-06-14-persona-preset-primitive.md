@@ -58,7 +58,7 @@ This is decisive for #564·Fork 2 (the re-opened #166 RACI-vs-RBAC line):
 
 ### Finding 4 — the on-disk schema is a governance charter, not a generic preset (the unification cost)
 
-The implemented `Profile` (`plateau-app/src/profiles/schema.ts:101`) carries `mission`, `signals[]`, `reviewAreas[]` (each pinned to a `platformArea`, `schema.ts:22`), `artifactsOwned[]`, `escalation`, and `gates` with a four-type `GateType` (`schema.ts:48`, post-#566). It has **no** `preferences` or `surfaces`/`toggleMap` field — it is a *governance* charter, not the generic "preferences + surfaces" preset #564 abstracts. The dev-browser "feature toggle map" lens (#141:90) describes surfaces-lit-up but **is not yet built** (it's in #141's staged successor work).
+The implemented `Profile` (`plateau:plateau-app/src/profiles/schema.ts:101`) carries `mission`, `signals[]`, `reviewAreas[]` (each pinned to a `platformArea`, `plateau:schema.ts:22`), `artifactsOwned[]`, `escalation`, and `gates` with a four-type `GateType` (`plateau:schema.ts:48`, post-#566). It has **no** `preferences` or `surfaces`/`toggleMap` field — it is a *governance* charter, not the generic "preferences + surfaces" preset #564 abstracts. The dev-browser "feature toggle map" lens (#141:90) describes surfaces-lit-up but **is not yet built** (it's in #141's staged successor work).
 
 So "unify into one schema" is not free: it would mean either widening `Profile` with preset/preferences fields it doesn't have, or building a new shared primitive and re-expressing the governance charter as a projection of it — a sizeable refactor of resolved, shipping code, against a second lens (agile-role) that is a *methodology concept with no runtime at all*. Per bias-toward-separation, the burden of proof is on combining, and that burden isn't met: name the pattern, keep the homes separate (Recommendation 1).
 
@@ -66,14 +66,14 @@ So "unify into one schema" is not free: it would mean either widening `Profile` 
 
 | File | Action |
 |---|---|
-| `reports/2026-06-14-persona-preset-primitive.md` | Created (this report) |
-| `src/_data/researchTopics.json` | Added `persona-preset-primitive` entry |
-| `src/_includes/research-descriptions/persona-preset-primitive.njk` | Created (research write-up) |
-| `backlog/564-personas-as-a-first-class-agile-concept.md` | Rewritten to prepared-fork shape; `preparedDate` set |
+| `we:reports/2026-06-14-persona-preset-primitive.md` | Created (this report) |
+| `we:src/_data/researchTopics.json` | Added `persona-preset-primitive` entry |
+| `we:src/_includes/research-descriptions/persona-preset-primitive.njk` | Created (research write-up) |
+| `we:backlog/564-personas-as-a-first-class-agile-concept.md` | Rewritten to prepared-fork shape; `preparedDate` set |
 
 ## Sources
 
-- VS Code Profiles — [Profiles in Visual Studio Code](https://code.visualstudio.com/docs/configure/profiles); [vscode-docs/profiles.md](https://github.com/microsoft/vscode-docs/blob/main/docs/configure/profiles.md); [Visual Studio Magazine — "one of the all-time most requested features"](https://visualstudiomagazine.com/articles/2023/03/09/vs-code-profiles.aspx)
+- VS Code Profiles — [Profiles in Visual Studio Code](https://code.visualstudio.com/docs/configure/profiles); [we:vscode-docs/profiles.md](https://github.com/microsoft/vscode-docs/blob/main/docs/configure/profiles.md); [Visual Studio Magazine — "one of the all-time most requested features"](https://visualstudiomagazine.com/articles/2023/03/09/vs-code-profiles.aspx)
 - CrewAI role-based agent personas — [CrewAI Agents docs](https://docs.crewai.com/en/concepts/agents); [DigitalOcean — role-based agent orchestration](https://www.digitalocean.com/community/tutorials/crewai-crash-course-role-based-agent-orchestration); [Vadim's blog — CrewAI unique features (backstory as persistent persona)](https://vadim.blog/crewai-unique-features)
 - Persona vs RBAC / PBAC — [Knostic — Role-Based vs Persona-Based access controls](https://www.knostic.ai/blog/role-vs-persona-based-access-controls); [TrustBuilder — working with personas](https://docs.trustbuilder.com/product/defining-personas)
-- Prior governance-lens survey — `reports/2026-06-11-governance-persona-charter-schema.md` (RACI/RBAC, gate types, SaaS custom roles)
+- Prior governance-lens survey — `we:reports/2026-06-11-governance-persona-charter-schema.md` (RACI/RBAC, gate types, SaaS custom roles)

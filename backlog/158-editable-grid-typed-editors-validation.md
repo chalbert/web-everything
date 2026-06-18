@@ -40,7 +40,7 @@ select-with-options) and a commit can be **rejected**:
   `text` (default) / `number` / `date` / `select`, with `data-editor-options` for select and
   `required`/`min`/`max` passed through for native validation. `DataGridEditBehavior.#createEditor`
   builds the right `<input type>` or `<select>`. Pure helpers `resolveEditorKind` + `editorMatchesKind`
-  in `editableGrid.ts`.
+  in `fui:editableGrid.ts`.
 - Validation path — commit now gates on native `checkValidity()` **and** a new
   `detail.reject(message?)` hook on the cancelable `grid-cell-edit-commit` (distinct from
   `preventDefault()` = "I own the write"). An invalid value on **Enter** keeps the editor open, marks it
@@ -56,7 +56,7 @@ select-with-options) and a commit can be **rejected**:
 - Demo — live editable grid now shows all four: Name=text, Team=select, Salary=required number
   (validation), Location=read-only; invalid editor styled + `grid-cell-edit-invalid` surfaced in the
   read-out. Verified live: 18/18 badges green, select/number/validation/readonly all correct, 0 errors.
-- Docs — block page `data-grid.njk` (typed-editors + validation bullets), `blocks.json` (exports,
+- Docs — block page `we:data-grid.njk` (typed-editors + validation bullets), `fui:blocks.json` (exports,
   `apgEditableGrid` adoption, `withEditableCells` trait). `check:standards` 0 errors.
 
 **Decision:** kept the editor declaration **DOM-driven** (`data-editor*` on the cell) rather than a
@@ -64,4 +64,4 @@ JS column-config object — same rationale as [#159](/backlog/159-editable-grid-
 structure from the live DOM). Validation is **two-tier**: native constraint validation for the common
 cases, plus a host `reject()` seam for custom rules — persistence itself stays the Frontier UI seam.
 
-**Graduated to** `block:data-grid` — data-editor kinds (text/number/date/select) + validation seam in blocks/renderers/data-grid/editableGrid.ts (resolveEditorKind/editorMatchesKind) + DataGridEditBehavior.
+**Graduated to** `block:data-grid` — data-editor kinds (text/number/date/select) + validation seam in fui:blocks/renderers/data-grid/editableGrid.ts (resolveEditorKind/editorMatchesKind) + DataGridEditBehavior.

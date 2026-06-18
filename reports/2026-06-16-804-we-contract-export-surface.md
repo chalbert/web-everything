@@ -17,13 +17,13 @@ per-file placement.
 
 ## The gap (verified 2026-06-16, batch claim-time)
 
-- WE root `package.json` — `name: "web-everything"` (unscoped), **no `exports` map**, no
-  `main`/`module`/`types`, no `workspaces` ([package.json:2](../package.json#L2)).
-- `capability-manifest/` — 6 files, **no package.json**; `index.ts` already re-exports the whole plane
-  (`provider`/`fixtures`/`guard`/`report`/`check`) ([index.ts](../capability-manifest/index.ts)).
-- `validation-generation/` — 11 files, **no package.json**; **mixes contract and impl** in one dir:
-  contract = `provider`/`registry`/`fieldError`/`cel` + the `service.ts` wire-contract types (→ WE per
-  #730 B1/C2); impl = `crossField.ts` + `adapters/*` + the `service.ts` handler (→ FUI).
+- WE root `we:package.json` — `name: "web-everything"` (unscoped), **no `exports` map**, no
+  `main`/`module`/`types`, no `workspaces` ([we:package.json:2](../package.json#L2)).
+- `capability-manifest/` — 6 files, **no we:package.json**; `we:index.ts` already re-exports the whole plane
+  (`provider`/`fixtures`/`guard`/`report`/`check`) ([we:index.ts](../capability-manifest/index.ts)).
+- `validation-generation/` — 11 files, **no we:package.json**; **mixes contract and impl** in one dir:
+  contract = `provider`/`registry`/`fieldError`/`cel` + the `we:service.ts` wire-contract types (→ WE per
+  #730 B1/C2); impl = `we:crossField.ts` + `adapters/*` + the `we:service.ts` handler (→ FUI).
 - Frontier UI — **no `web-everything`/`@webeverything` dependency** anywhere; tsconfig + vite aliases are
   all *internal* (`@core/*`, `@webcomponents/*` → its own `plugs/*`).
 
@@ -35,8 +35,8 @@ twice, in tsconfig `paths` (for typecheck) and vite `alias` (for bundling):
 
 | Consumer | Mechanism | Evidence |
 |---|---|---|
-| plateau-app → WE | tsconfig `paths` + vite `alias` into `../webeverything` | `"@we/plugs/*": ["../webeverything/plugs/*"]`, `"@we/blocks/*": [...]` (tsconfig.json); `'@we/plugs': join(weRoot, 'plugs')` (vite.config.mts) |
-| plateau-app → FUI | vite `alias` into `../frontierui` | `'@frontierui/webdocs-ui': join(fuiRoot, 'packages/webdocs-ui/src/index.ts')` |
+| plateau-app → WE | tsconfig `paths` + vite `alias` into `../webeverything` | `"@we/plugs/*": ["../webeverything/plugs/*"]`, `"@we/blocks/*": [...]` (we:tsconfig.json); `'@we/plugs': join(weRoot, 'plugs')` (vite.config.mts) |
+| plateau-app → FUI | vite `alias` into `../frontierui` | `'@frontierui/webdocs-ui': join(fuiRoot, 'fui:packages/webdocs-ui/src/index.ts')` |
 | FUI (internal) | self-contained aliases only | `@webcomponents/*` → `plugs/webcomponents/*` — no external edges |
 
 So there is a **proven, zero-publish, zero-lock-in resolution pattern already in production**: a path
@@ -55,7 +55,7 @@ contracts).
 the contract specifier — name must equal published name to be publish-resolvable. The contract dirs are
 standard artifacts (#730 placed them in WE), so they take `@webeverything/*` identity. Two natural
 packages matching the existing physical layout: **`@webeverything/capability-manifest`** and
-**`@webeverything/validation-generation`** — add a `package.json` + `exports` to each existing root dir.
+**`@webeverything/validation-generation`** — add a `we:package.json` + `exports` to each existing root dir.
 The unscoped `web-everything` root stays the eleventy/vite *docs-site* dev project (not a publishable
 contract), untouched.
 
@@ -78,7 +78,7 @@ needs it.
 
 - **2a (default)** — FUI adds tsconfig `paths` + vite `alias` mapping the **full** specifiers
   `@webeverything/capability-manifest` / `@webeverything/validation-generation` →
-  `../webeverything/<dir>/index.ts` (or the curated entry). Mirrors plateau-app's proven mechanism but
+  `../webeverything/<dir>we:/index.ts` (or the curated entry). Mirrors plateau-app's proven mechanism but
   with publish-ready specifiers. **Import sites are written against the real scoped name**, so when an
   external consumer eventually forces a publish, the aliases drop and resolution falls through to
   `node_modules` with **zero import-site churn**.
@@ -96,16 +96,16 @@ omitted subpaths physically unresolvable — so a curated map *enforces* the bou
 convention.
 
 - **3a (default)** — curated `exports` listing **only** the WE-resident contract modules:
-  - `@webeverything/capability-manifest` → the whole plane (its `index.ts`; A1 keeps it cohesive).
+  - `@webeverything/capability-manifest` → the whole plane (its `we:index.ts`; A1 keeps it cohesive).
   - `@webeverything/validation-generation` subpaths: `provider`, `registry`, `fieldError`, `cel`, and
     `service` (**wire-contract types only**, per C2). **No** `exports` entry for `crossField`, `adapters/*`,
     or the `service` handler — they are un-importable from the package even while they physically remain in
     the dir until #725 ports them out.
-  - *Builds this implies (downstream, agent-ready after ratification):* split `service.ts` so only the
+  - *Builds this implies (downstream, agent-ready after ratification):* split `we:service.ts` so only the
     wire-contract types are exported from WE (the handler ports to FUI under #725); pick `.ts`-source vs a
     built `dist/` as the export target (default: point at `.ts` source — the constellation aliases resolve
     `.ts` directly, no build step needed for local dev).
-- 3b — single barrel export of each subsystem's full `index.ts`. *Rejected:* re-exports impl
+- 3b — single barrel export of each subsystem's full `we:index.ts`. *Rejected:* re-exports impl
   (`crossField`, `adapters`, the handler) through the contract surface — re-merges exactly what #730 B1/C2
   split, an impl-leak into a `@webeverything/*` package.
 
@@ -124,6 +124,6 @@ external consumer — not a branch of this decision.
 
 ## What ratifying this unblocks
 
-#725 re-shapes to: add the two `@webeverything/*` `package.json` + `exports` maps in WE; add the
-FUI-side tsconfig+vite aliases; split `service.ts`; then #725 copies the impl half and imports the
+#725 re-shapes to: add the two `@webeverything/*` `we:package.json` + `exports` maps in WE; add the
+FUI-side tsconfig+vite aliases; split `we:service.ts`; then #725 copies the impl half and imports the
 WE-resident contract by its scoped name. #725 is `blockedBy` this decision (and #649, #730).

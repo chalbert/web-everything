@@ -41,9 +41,9 @@ Hard-blocked on **#727** (the live render). The inspector depends on #447's life
 
 Resolved 2026-06-16 (locus: frontierui). Built the **toggle/config + live-state half** on the #815 workbench shell; carried the transition state-machine half (it needs #447's lifecycle runtime as a consumable FUI API, which doesn't exist yet — see #831).
 
-- **Per-trait config controls** (`workbench/registry.ts` + `mount.ts`): `TraitControl` gained a `config` kind (free-text value), an `observed` flag, and a `doc` catalog link. The seed `auto-complete` block now exposes a `placeholder` config trait alongside the toggles/select.
+- **Per-trait config controls** (`fui:workbench/registry.ts` + `fui:mount.ts`): `TraitControl` gained a `config` kind (free-text value), an `observed` flag, and a `doc` catalog link. The seed `auto-complete` block now exposes a `placeholder` config trait alongside the toggles/select.
 - **Live activation, in place**: live-observed traits (`resize`/`shift`/`placeholder` — in AutoComplete's `observedAttributes` + handled in its `attributeChangedCallback`) are set on the *existing* instance with no re-mount, so you watch the block adapt; construct-time traits (`windowed`/`disabled`/`filter`) re-mount. `changeTrait()` routes each.
 - **Trait-state panel** (the observability surface): lists each trait's current applied state (on/off/value) and how it applies (`· live` vs `· re-mount`), refreshed on every change.
 - **Catalog cross-links**: each trait row links to its detail page (`/blocks/autocomplete/`, `/intents/anchor/`), `target=_top` to escape the iframe. URLs verified to resolve.
-- **Fixture**: a new e2e (`workbench.spec.ts`) asserts live in-place application, the config trait, the state-panel reflection, the re-mount marker, and the doc link. All 4 workbench specs pass against :3001; `tsc --noEmit` + `check:standards` green.
+- **Fixture**: a new e2e (`fui:workbench.spec.ts`) asserts live in-place application, the config trait, the state-panel reflection, the re-mount marker, and the doc link. All 4 workbench specs pass against :3001; `tsc --noEmit` + `check:standards` green.
 - **Deferred → #831**: the per-trait transition state-machine (states + transitions over time) consuming #447's attribute-lifecycle runtime (no importable transitions API in FUI today).

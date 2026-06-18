@@ -19,7 +19,7 @@ Close-out leftover from #227. The ruling there established the canonical rule: *
 default-strategy selection comes from a platform config the project extends**, via the core
 `CustomRegistry` inheritance chain.
 
-`blocks/renderers/jsx/render-strategy/CustomRenderStrategyRegistry.ts` **violates** this: it rolls its
+`we:blocks/renderers/jsx/render-strategy/CustomRenderStrategyRegistry.ts` **violates** this: it rolls its
 own `Map` + `#defaultName` ("first registered becomes the default") + a `parent` pointer instead of
 extending `CustomRegistry`. The default is baked into the tool.
 
@@ -47,7 +47,7 @@ Pure refactor — no behavior change for a project on the default flavor. Surfac
 ## Progress
 
 - **Status:** resolved (2026-06-10)
-- **Render-strategy registry refactored — `blocks/renderers/jsx/render-strategy/CustomRenderStrategyRegistry.ts`:**
+- **Render-strategy registry refactored — `we:blocks/renderers/jsx/render-strategy/CustomRenderStrategyRegistry.ts`:**
   `CustomRenderStrategyRegistry` now **extends the core `CustomRegistry<CustomRenderStrategy>`** (own →
   extended chain, `localName = 'customRenderStrategy'`), replacing the bespoke private `Map` +
   first-registered-wins `#defaultName` + hand-rolled `parent` pointer. `register()` no longer seeds a
@@ -72,8 +72,8 @@ Pure refactor — no behavior change for a project on the default flavor. Surfac
   `define`, but it never bakes a tool default because the factory always passes `asDefault` explicitly;
   the newer auto-define registry #242 drops even that convenience.) No tool ships a non-null default
   literal — grep clean.
-- **Tests:** `renderStrategy.test.ts` updated for the new contract (bare registry has no default;
+- **Tests:** `we:renderStrategy.test.ts` updated for the new contract (bare registry has no default;
   default inherited by extending the flavor; per-scope override via `extends`) — 14 green. Full unit
   suite green (2010).
 
-**Graduated to** `protocol:render-strategy` — config-extends alignment of the CustomRenderStrategy registry (blocks/renderers/jsx/render-strategy/CustomRenderStrategyRegistry.ts).
+**Graduated to** `protocol:render-strategy` — config-extends alignment of the CustomRenderStrategy registry (we:blocks/renderers/jsx/render-strategy/CustomRenderStrategyRegistry.ts).

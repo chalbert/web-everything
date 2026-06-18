@@ -39,7 +39,7 @@ Web-Everything-native docs surface must cover or consciously omit — this is th
 
 ## Deliverables
 
-- [ ] A feature-matrix artifact (extend `workbenchTools.json` with a `features` map, or a sibling `workbenchFeatures.json`).
+- [ ] A feature-matrix artifact (extend `we:workbenchTools.json` with a `features` map, or a sibling `we:workbenchFeatures.json`).
 - [ ] For each feature: which tools have it, maturity, and a one-line "what a WE-native version would need".
 - [ ] Flag features that **already map to existing WE standards** (e.g. theming→webtheme, a11y→webcompliance,
       search/data-table→existing blocks) vs genuinely new surface — pre-work for #626's dedupe.
@@ -53,7 +53,7 @@ Mostly research; the dedupe-against-existing-registry hint here de-risks the #62
 - **Status:** resolved
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
-  - `src/_data/workbenchFeatures.json` — sibling matrix (separation bias over extending workbenchTools.json):
+  - `we:src/_data/workbenchFeatures.json` — sibling matrix (separation bias over extending we:workbenchTools.json):
     20 features in 7 groups (render/authoring/controls/testing/theming/discovery/distribution), each with the
     tools that ship it (cross-tab), ubiquity, `weNativeNeed`, and the load-bearing `weStatus` dedupe column
     (reuse-existing / extend-existing / new-surface / out-of-scope) + `weStandards` refs.

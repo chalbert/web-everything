@@ -11,9 +11,9 @@ relatedProject: webcomponents
 parent: "167"
 ---
 
-# Fix `webcomponents.spec.ts` — `page.setContent` gives an about:blank origin, so its `/plugs/*.ts` imports never load (all 8 tests time out)
+# Fix `we:webcomponents.spec.ts` — `page.setContent` gives an about:blank origin, so its `/plugs/*.ts` imports never load (all 8 tests time out)
 
-Found while verifying #167. `plugs/__tests__/e2e/webcomponents.spec.ts` builds its fixture with
+Found while verifying #167. `we:plugs/__tests__/e2e/webcomponents.spec.ts` builds its fixture with
 `page.setContent('<script type="module">import … from "/plugs/…ts"</script>')`. `setContent` yields
 an **about:blank** document origin, so the absolute `/plugs/*.ts` module specifiers resolve against
 nothing and the module never executes — every test then times out at
@@ -21,7 +21,7 @@ nothing and the module never executes — every test then times out at
 fail with `Test timeout of 30000ms exceeded` against the running dev server.
 
 The fix pattern is the one used by the #167 verification spec
-(`plugs/__tests__/e2e/autonomous-element-lifecycle.spec.ts`): `page.goto('/')` first to establish a
+(`we:plugs/__tests__/e2e/autonomous-element-lifecycle.spec.ts`): `page.goto('/')` first to establish a
 real same-origin base, then load the plug modules via dynamic `import()` inside `page.evaluate`.
 
 **Caveat to carry into the fix:** several of these tests also assume `new TestElement()` +
@@ -31,7 +31,7 @@ rebased onto either the native path or whatever #228 lands. Coordinate with #228
 reduce to "delete/rewrite the dead scoped-path assertions and keep the genuinely-portable ones
 (clone behavior, insertion ordering)".
 
-**Acceptance:** `webcomponents.spec.ts` runs green against the dev server (no timeouts), testing
+**Acceptance:** `we:webcomponents.spec.ts` runs green against the dev server (no timeouts), testing
 real behavior rather than silently dead about:blank fixtures.
 
 ## Progress
@@ -39,10 +39,10 @@ real behavior rather than silently dead about:blank fixtures.
 **Resolved 2026-06-10.** All 8 tests pass against the live dev server (chromium). Changes:
 
 - **Origin fix** — every fixture rebuilt with `page.goto('/')` + dynamic `import()` inside
-  `page.evaluate` (the `autonomous-element-lifecycle.spec.ts` pattern), replacing the `setContent`
+  `page.evaluate` (the `we:autonomous-element-lifecycle.spec.ts` pattern), replacing the `setContent`
   about:blank fixtures that silently never loaded the `/plugs/*.ts` modules.
 - **Bootstrap order** — the fixtures now apply the **webinjectors** patch before the components
-  patch (per `plugs/bootstrap.ts`): the insertion patch and the upgrade walker call
+  patch (per `we:plugs/bootstrap.ts`): the insertion patch and the upgrade walker call
   `this.getClosestInjector()`, supplied by the injectors patch.
 - **Dead scoped-path assertions rebased** (the carried caveat) — `TestElement` now holds an
   `options` data field and renders nothing via lifecycle. Writing `textContent` in the constructor

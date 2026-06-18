@@ -35,6 +35,6 @@ Decisive evidence: [Focus Containment](/intents/focus-containment/) **already** 
 - Focus Containment = that atom **+** trap **+** restore. Navigation = that atom **alone** (landing only, no trap).
 - It does **not** become a Focus Delegation axis, and Navigation does **not** own a private copy.
 
-**Applied here:** the Navigation Intent prose (`src/_data/intents.json`) had a latent bug — its "Focus reset" composition note pointed the value set at Focus Delegation. Fixed: it now points at the autofocus-on-activation contract / Focus Containment, with the trap distinction spelled out, and the `summary` line updated to match.
+**Applied here:** the Navigation Intent prose (`we:src/_data/intents.json`) had a latent bug — its "Focus reset" composition note pointed the value set at Focus Delegation. Fixed: it now points at the autofocus-on-activation contract / Focus Containment, with the trap distinction spelled out, and the `summary` line updated to match.
 
 **Graduates to → #287** (extract the shared autofocus-on-activation intent — the real design work; rewires #055's focus story).

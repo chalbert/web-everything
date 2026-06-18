@@ -33,10 +33,10 @@ Nothing here is a **protocol** — there is no swappable-vendor / engine-interop
 
 | File | Action |
 |---|---|
-| `reports/2026-06-12-expressive-symbols-reactions.md` | created (this report) |
-| `src/_data/researchTopics.json` | added `expressive-symbols-reactions` topic |
-| `src/_includes/research-descriptions/expressive-symbols-reactions.njk` | created (full write-up) |
-| `backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke.md` | rewritten into prepared-fork shape (`type: decision`, `preparedDate`) |
+| `we:reports/2026-06-12-expressive-symbols-reactions.md` | created (this report) |
+| `we:src/_data/researchTopics.json` | added `expressive-symbols-reactions` topic |
+| `we:src/_includes/research-descriptions/expressive-symbols-reactions.njk` | created (full write-up) |
+| `we:backlog/370-candidate-standard-expressive-symbols-reactions-emoji-sticke.md` | rewritten into prepared-fork shape (`type: decision`, `preparedDate`) |
 
 ## Citations
 

@@ -18,10 +18,10 @@ crossRef: { url: /research/auto-update-runner-topology/, label: "Auto-update run
 # Auto-update orchestration runner — execute the update-policy protocol
 
 **Prepared decision — ready to ratify.** The `update-policy` protocol (the *lock*) already shipped via
-[#101](/backlog/101-auto-update-pipeline/) ([protocols.json:110-115](../src/_data/protocols.json#L110-L115)),
+[#101](/backlog/101-auto-update-pipeline/) ([we:protocols.json:110-115](../src/_data/protocols.json#L110-L115)),
 which named this runner "the deferred build." No runner design exists yet. The prep survey
 ([`/research/auto-update-runner-topology/`](/research/auto-update-runner-topology/), report
-`reports/2026-06-13-auto-update-runner-execution-topology.md`) **reshaped the pre-flight's "home" framing
+`we:reports/2026-06-13-auto-update-runner-execution-topology.md`) **reshaped the pre-flight's "home" framing
 into a single genuine fork**: *build a bespoke runner vs. compose the engines the ecosystem already
 commoditized.* Everything the pre-flight called a "home decision" ratifies by precedent. The one fork
 below carries a **bold** recommended default.
@@ -29,14 +29,14 @@ below carries a **bold** recommended default.
 ## Axis framing
 
 The pre-flight flagged "no build home" because a runner was assumed to be a standalone vendor-operated
-service, and plateau-app cannot run scheduled CI/CD in its current phase (plateau-app/CLAUDE.md "THE PHASE
+service, and plateau-app cannot run scheduled CI/CD in its current phase (plateau:plateau-app/CLAUDE.md "THE PHASE
 RULE": **no backend in the MVP** — browser-only, flat-cost, revenue-first; a hosted/operated tier is a
 *parked* later phase, #554, not forbidden). The survey dissolves that premise on four findings, which
 split the concern into one real call plus a ratify-cluster:
 
 - **Execution is CI-native, not a bespoke service.** Dependabot consolidated its compute onto GitHub
   Actions (self-hosted runners + Kubernetes ARC, GA 2025-05); Renovate ships one runner three ways from
-  one codebase (hosted app / self-hosted app / self-hosted GitHub Action) off one `renovate.json`. The
+  one codebase (hosted app / self-hosted app / self-hosted GitHub Action) off one `we:renovate.json`. The
   modern shape is a **portable package + committed CI templates running in the consumer's own CI** — no
   new repo, maps onto open-core-by-usage and the self-run > service operational ranking.
 - **Pre-merge and post-deploy execute in different homes by nature.** Pre-merge (trigger → scan → cool-off
@@ -49,9 +49,9 @@ split the concern into one real call plus a ratify-cluster:
   incumbent offers is pre-testing a provider version against its *consumers'* suites before release, via
   the [#092 provider↔consumer graph](/backlog/092-provider-consumer-graph-platform-manager/) (graduated to
   `webregistries`).
-- **A pure compile-to-`renovate.json` adapter is lossy.** `update-policy` carries severity from the
+- **A pure compile-to-`we:renovate.json` adapter is lossy.** `update-policy` carries severity from the
   [changelog-manifest](../src/_data/protocols.json#L94-L99) (strictest-wins, #102), migration linkage run
-  by the upgrader engine ([blocks/renderers/upgrader/upgraderEngine.ts](../blocks/renderers/upgrader/upgraderEngine.ts), #094),
+  by the upgrader engine ([we:blocks/renderers/upgrader/upgraderEngine.ts](../blocks/renderers/upgrader/upgraderEngine.ts), #094),
   a unified pre+post gate axis, and the #092 edge — none of which Renovate models. So the runner can't be
   *only* a config emitter.
 
@@ -101,7 +101,7 @@ the *mechanics* it gates — fetch, cool-off, test-in-branch, auto-merge, metric
 - **(B) Bespoke end-to-end runner.** Re-implements trigger → scan → cool-off → test → merge → rollout from
   scratch. *Rejected* — re-invents commoditized infra for no interop gain, violates native-first +
   minimize-lock-in, and inflates the build far beyond the WE-net-new edge.
-- **(C) Pure config-emitter adapter** (compile `update-policy` → `renovate.json` + Argo config, nothing
+- **(C) Pure config-emitter adapter** (compile `update-policy` → `we:renovate.json` + Argo config, nothing
   else). *Rejected* — silently drops the WE-specific half (manifest severity, migration linkage, #092
   pre-test); the lost cells *are* the standard's value ([survey finding 4](/research/auto-update-runner-topology/)).
 

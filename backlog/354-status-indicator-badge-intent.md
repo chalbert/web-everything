@@ -11,7 +11,7 @@ crossRef: { url: /backlog/314-flagship-exercise-apps/, label: "Surfaced by exerc
 ---
 
 > **Resolved 2026-06-12 — codified.** Graduated to the **Status Indicator** intent (`status-indicator`,
-> `intents.json`, draft) — the visual member of the Web Lifecycle protocol ([#353]). Dimensions:
+> `we:intents.json`, draft) — the visual member of the Web Lifecycle protocol ([#353]). Dimensions:
 > `tone` (neutral|info|progress|positive|caution|critical), `shape` (badge|pill|dot|text), `affordance`
 > (display-only|actionable). It owns the standing visual + a11y treatment; `live-region-status` keeps the
 > announcement (they compose). Severity→token resolution is deferred to the theming/surface layer.

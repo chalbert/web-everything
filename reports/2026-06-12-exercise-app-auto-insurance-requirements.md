@@ -6,7 +6,7 @@ exercise app (#318), a forcing function for Web Everything. Fidelity to real ins
 requirements need only be full and complex enough to stress the platform.
 
 Tracked by epic [#318](/backlog/318-exercise-app-auto-insurance-lifecycle/). Companion to the loan-app
-PRD (`reports/2026-06-11-exercise-app-loan-origination-requirements.md`).
+PRD (`we:reports/2026-06-11-exercise-app-loan-origination-requirements.md`).
 
 ## Scope
 
@@ -15,7 +15,7 @@ spans the **policy lifecycle** and a coupled **claims** lifecycle, two configura
 coverage builder), a rating/underwriting rules engine, four roles, and document handling. It is built
 **platform-first**: every UI/behavior need resolves against Web Everything (consume active blocks/intents;
 where a surface is draft/uncodified, that gap *is* the WE work this app drives — see
-[exercise-app-workflow.md](../docs/agent/exercise-app-workflow.md)).
+[we:exercise-app-workflow.md](../docs/agent/exercise-app-workflow.md)).
 
 **Visual register (settled): modern-SaaS insurtech** — the distinct register held back from the loan app
 (which is enterprise-finance). Same intents/blocks, a different `theme-<register>` token layer, proving the

@@ -20,7 +20,7 @@ preparedDate: "2026-06-14"
 > (#580) take:
 > - **Fork 1 → A:** FU's method-level `get<Key>`, string-keyed, `Map`-shaped `CustomContext` (port
 >   `values()`/`entries()`/`delete(): boolean` up). Decisive: it is the *sole* form that actually satisfies
->   `Registry<Definition, Key>` ([Registry.ts:9-18](../plugs/webinjectors/Registry.ts#L9-L18)) — WE's
+>   `Registry<Definition, Key>` ([we:Registry.ts:9-18](../plugs/webinjectors/Registry.ts#L9-L18)) — WE's
 >   `implements Registry<ContextValue, keyof ContextValue>` is a false declaration (omits `values`/`entries`,
 >   `delete` returns `void`, mistypes the `Definition` slot); plus native-first and zero consumer cost (dead
 >   class param). Position-as-upstream (Fork 1-B) does not outweigh a correctness defect at zero migration cost.
@@ -28,7 +28,7 @@ preparedDate: "2026-06-14"
 >   `CustomElementRegistry` (concrete `upgrade(root: Node)`, `options?` optional) — avoids the self-referential
 >   `Parameters<>` bug and stays consistent with Fork 1.
 > - **Axis 3 (not a fork) → unconditional:** port WE's `ensureNativelyConstructible`
->   ([CustomElementRegistry.ts:10-40](../plugs/webregistries/CustomElementRegistry.ts#L10-L40)) up regardless —
+>   ([we:CustomElementRegistry.ts:10-40](../plugs/webregistries/CustomElementRegistry.ts#L10-L40)) up regardless —
 >   without it `new RealClass()` throws "Illegal constructor" in a real browser.
 >
 > No entity graduation — this is a type-contract ruling consumed by the #580 convergence build (→ #449), not a
@@ -50,9 +50,9 @@ Gates #580 → #449.
 
 ## Correction from the survey (read before the forks)
 
-The original item named the divergent class `CustomContextRegistry` and cited `CustomContext.ts:64`. The
-**file ref was right; the class name was wrong.** `CustomContextRegistry.ts` is **byte-identical** between
-the repos (`diff` → empty). The real divergence is in **`CustomContext.ts`** — the abstract base class that
+The original item named the divergent class `CustomContextRegistry` and cited `we:CustomContext.ts:64`. The
+**file ref was right; the class name was wrong.** `we:CustomContextRegistry.ts` is **byte-identical** between
+the repos (`diff` → empty). The real divergence is in **`we:CustomContext.ts`** — the abstract base class that
 `implements Registry<…>`. This item now names `CustomContext`.
 
 ## Axis-framing — three orthogonal axes, only two are forks
@@ -60,7 +60,7 @@ the repos (`diff` → empty). The real divergence is in **`CustomContext.ts`** �
 The concern decomposes into three axes, each pinned to the real tree:
 
 1. **Key-typing of `CustomContext`** (the crux). WE parameterizes the *class* with a `Key`:
-   [plugs/webcontexts/CustomContext.ts:63-66](../plugs/webcontexts/CustomContext.ts#L63-L66) —
+   [we:plugs/webcontexts/CustomContext.ts:63-66](../plugs/webcontexts/CustomContext.ts#L63-L66) —
    `class CustomContext<ContextValue extends Record<Key, unknown>, Key extends keyof ContextValue = keyof ContextValue> implements Registry<ContextValue, keyof ContextValue>`, with class-level
    [`get(key: Key)`](../plugs/webcontexts/CustomContext.ts#L139). FU drops the class param and moves the key
    to the *method*: `class CustomContext<ContextValue extends Record<string, unknown>> implements Registry<ContextValue[keyof ContextValue], string>`, with `get<Key extends keyof ContextValue>(key: Key)`,
@@ -77,7 +77,7 @@ The concern decomposes into three axes, each pinned to the real tree:
    `upgrade(root: Node)` + `(options?: …)` (optional). → **Fork 2.**
 
 3. **WE-only runtime on `CustomElementRegistry`** — `ensureNativelyConstructible`
-   ([CustomElementRegistry.ts:10-40](../plugs/webregistries/CustomElementRegistry.ts#L10-L40)): registers
+   ([we:CustomElementRegistry.ts:10-40](../plugs/webregistries/CustomElementRegistry.ts#L10-L40)): registers
    the real class natively under a private `scoped-ctor-N-el` tag so `new RealClass()` / `Reflect.construct`
    don't throw "Illegal constructor" in a real browser. FU lacks it. **Not a fork** — it is additive (like
    FU's `values()`/`entries()`); the converged tree keeps it regardless of Forks 1–2. Recorded so the #580
@@ -88,7 +88,7 @@ The concern decomposes into three axes, each pinned to the real tree:
 - **Which layer?** All three surfaces are plugs-platform primitives owned by WE (the standard layer), with
   impls compiled against them in FU (the constellation: WE standard → Frontier UI impl). The contract lives in WE.
 - **Protocol or intent dimension?** Neither — this is the TS *type contract* of a runtime registry, not a
-  protocol entry or an intent. No adapters.json / intents.json change.
+  protocol entry or an intent. No we:adapters.json / we:intents.json change.
 - **Expose the whole axis / fixed mechanic vs dimension?** Fixed mechanic. There is exactly one shared
   runtime form (a fixed mechanic, not a configurable dimension); the key-typing is not a configurable
   dimension — both branches are *candidate* end-states but only one ships (fork-existence).
@@ -101,7 +101,7 @@ The concern decomposes into three axes, each pinned to the real tree:
   typings without losing WE's native-construction runtime.
 
 Native-first (built-ins align to the web platform) is decisive: the codebase's generic
-`Registry<Definition, Key = string>` ([Registry.ts](../plugs/webinjectors/Registry.ts)) mirrors the native
+`Registry<Definition, Key = string>` ([we:Registry.ts](../plugs/webinjectors/Registry.ts)) mirrors the native
 `Map<K,V>` + iterator protocol, and **only FU's form actually conforms** to it (WE omits `values()`/
 `entries()`, returns `void` from `delete`, and mistypes the `Definition` slot as the whole record).
 

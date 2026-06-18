@@ -1,0 +1,85 @@
+{
+  "generatedAt": "2026-06-17T15:39:21.958Z",
+  "summary": {
+    "total": 6,
+    "byClass": {
+      "live": 6,
+      "gone": 0,
+      "moved": 0,
+      "archived": 0,
+      "paywall": 0,
+      "server-error": 0,
+      "unreachable": 0,
+      "content-drift": 0,
+      "superseded": 0,
+      "retired": 0
+    },
+    "byHome": {
+      "corpus": {
+        "live": 6
+      }
+    }
+  },
+  "results": [
+    {
+      "url": "https://ant.design/",
+      "home": "corpus",
+      "sourceId": "ant-design",
+      "label": "Ant Design (docs)",
+      "class": "live",
+      "status": 200,
+      "finalUrl": "https://ant.design/",
+      "detail": "ok (matches snapshot)"
+    },
+    {
+      "url": "https://ark-ui.com/",
+      "home": "corpus",
+      "sourceId": "ark-ui",
+      "label": "Ark UI (docs)",
+      "class": "live",
+      "status": 200,
+      "finalUrl": "https://ark-ui.com/",
+      "detail": "ok (matches snapshot)"
+    },
+    {
+      "url": "https://atlassian.design/",
+      "home": "corpus",
+      "sourceId": "atlassian",
+      "label": "Atlassian Design System (docs)",
+      "class": "live",
+      "status": 200,
+      "finalUrl": "https://atlassian.design/",
+      "detail": "ok (matches snapshot)"
+    },
+    {
+      "url": "https://base-ui.com/",
+      "home": "corpus",
+      "sourceId": "base-ui",
+      "label": "Base UI (docs)",
+      "class": "live",
+      "status": 200,
+      "finalUrl": "https://base-ui.com/",
+      "detail": "ok (matches snapshot)"
+    },
+    {
+      "url": "https://bitbucket.org/atlassian/atlassian-frontend-mirror",
+      "home": "corpus",
+      "sourceId": "atlassian",
+      "label": "Atlassian Design System (repo)",
+      "class": "live",
+      "status": 200,
+      "finalUrl": "https://bitbucket.org/atlassian/atlassian-frontend-mirror",
+      "detail": "ok (no drift baseline)"
+    },
+    {
+      "url": "https://carbondesignsystem.com/",
+      "home": "corpus",
+      "sourceId": "carbon",
+      "label": "Carbon Design System (docs)",
+      "class": "live",
+      "status": 200,
+      "finalUrl": "https://carbondesignsystem.com/",
+      "detail": "ok (no drift baseline)"
+    }
+  ]
+}

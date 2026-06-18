@@ -40,11 +40,11 @@ Today the assembler/generation adapter treats HTML (declarative `<component>` so
 ## Progress
 
 - **2026-06-15 — codified (design story, materialized).** Seam codified in
-  [`blocks/renderers/module-service/moduleService.ts`](../blocks/renderers/module-service/moduleService.ts)
+  [`we:blocks/renderers/module-service/moduleService.ts`](../blocks/renderers/module-service/moduleService.ts)
   — the `ServeForm` doc-comment now states source form is adapter-driven (open multi-dialect set, not a
   closed HTML-privileged enum), native-first default (plain WC → HTML), and that the assembler emit
   format (#652) inherits the adapter-resolved dialect. Design rationale published as the
-  `adapter-driven-source-form` research topic (`src/_data/researchTopics.json`). Open dimension resolved
-  toward multi-dialect (most-flexible-default). No standards-protocol/adapters.json change — this is a
+  `adapter-driven-source-form` research topic (`we:src/_data/researchTopics.json`). Open dimension resolved
+  toward multi-dialect (most-flexible-default). No we:standards-protocol/adapters.json change — this is a
   framing/codification under the open generation-adapter epic #507; the concrete build it informs is
-  #652's emit-format decision. graduatedTo: the research topic + the moduleService.ts seam note.
+  #652's emit-format decision. graduatedTo: the research topic + the we:moduleService.ts seam note.

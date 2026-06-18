@@ -4,13 +4,13 @@
 **Backlog**: [#124 — Specify the `<Resource>` directive's async contract](/backlog/124-resource-directive-async-contract/)
 **Parent**: [#070 — JSX directive sugar](/backlog/070-jsx-directive-sugar/) · **Companions**: [#078 — render-strategy lowering compiler](/backlog/078-render-strategy-lowering-compiler/), [#018 — async pagination beyond load-more](/backlog/018-dropdown-async-pagination-paradigm/)
 **Adapter page**: `/adapters/jsx-adapter/`
-**Companion report**: [reports/2026-06-03-jsx-adapter-feature-mapping.md](2026-06-03-jsx-adapter-feature-mapping.md)
+**Companion report**: [we:reports/2026-06-03-jsx-adapter-feature-mapping.md](2026-06-03-jsx-adapter-feature-mapping.md)
 
 ---
 
 ## 1. The situation (grounded in the real tree)
 
-The directive-sugar layer (#070) shipped three directives through **one registry** — `blocks/renderers/jsx/directives.ts:54`:
+The directive-sugar layer (#070) shipped three directives through **one registry** — `we:blocks/renderers/jsx/directives.ts:54`:
 
 ```ts
 export const directiveRegistry: DirectiveDef[] = [
@@ -21,22 +21,22 @@ export const directiveRegistry: DirectiveDef[] = [
 ```
 
 `For` and `Show` map to **real, existing** directives the lowering compiler understands —
-`crossStrategy.ts` has `liftForEach`/`liftConditionals`/`lowerMaps`/`lowerConditionals`
-(`crossStrategy.ts:88,107,153,167`) that round-trip `is="for-each"` ⇄ `.map()` and
+`we:crossStrategy.ts` has `liftForEach`/`liftConditionals`/`lowerMaps`/`lowerConditionals`
+(`we:crossStrategy.ts:88,107,153,167`) that round-trip `is="for-each"` ⇄ `.map()` and
 `is="if"` ⇄ `&&`. **`is="resource"` appears in NONE of them.** `Resource` is currently a
-pure spelling: `makeDirective` (`directives.ts:173`) builds the same inert
+pure spelling: `makeDirective` (`we:directives.ts:173`) builds the same inert
 `<template is="resource" from="…">` DOM the canonical form builds, and that is *all* it does.
 Nothing says what a resource *resolves to*, what surfaces it owns, or what it lowers to.
 
 The platform already owns the missing pieces — they just aren't wired:
 
-- **Loader Intent** (`intents.json:439`) is a full async state machine:
+- **Loader Intent** (`we:intents.json:439`) is a full async state machine:
   `idle | pending | success | error | stale | filtering | loadingMore`
-  (`intents.json` lifecycle-states block), with `escalation: none|warn|async`, version-token
+  (`we:intents.json` lifecycle-states block), with `escalation: none|warn|async`, version-token
   stale-resolve prevention, and hierarchy aggregation. It explicitly names a
   **`loadingMore`** state that "composes the Windowed Collection Intent" and a **`stale`**
   state ("showing previous data while a refresh is in progress").
-- **Resource Loader** block (`blocks.json:203`, `implementsIntent: "loader"`) is the
+- **Resource Loader** block (`fui:blocks.json:203`, `implementsIntent: "loader"`) is the
   trait-based orchestrator that already implements that machine
   (`withSoftBlocking`/`withReplacement`/`withIndeterminate` traits).
 
@@ -66,7 +66,7 @@ Three structural facts hold across all four:
    That read is what a vdom strategy emits; it is the lowering target.
 3. **Keeping prior content visible during a refresh is first-class** — Solid `.latest`,
    React `useTransition`, TanStack "lagged data". This is precisely WE's `stale` state
-   ("showing previous data while a refresh is in progress", `intents.json`) — so WE does not
+   ("showing previous data while a refresh is in progress", `we:intents.json`) — so WE does not
    need a new concept, it needs to *map onto* the one it has.
 
 There is **no native `<resource>` element** — like tree-select, this is an ARIA/JS-composed
@@ -82,7 +82,7 @@ each to a defensible default. Full framing lives in the backlog item; the ruling
 
 `<Resource>` owns a **loading / error / fallback surface** via named slots, NOT a bespoke
 child-directive DSL. The slot names are the **Loader Intent's existing lifecycle states**
-(`intents.json`: `pending`, `error`, `success`, `stale`/`loadingMore`) — not freshly coined
+(`we:intents.json`: `pending`, `error`, `success`, `stale`/`loadingMore`) — not freshly coined
 ones. Default surface: `<template slot="loading">`, `<template slot="error">`, default
 (unslotted) children = the resolved/success content. This mirrors Solid/React's
 Suspense-fallback + ErrorBoundary-fallback split (two separate surfaces) while reusing WE's
@@ -93,9 +93,9 @@ Suspense/ErrorBoundary separation every library keeps); a child-`<template is="i
 
 ### Fork 2 — Loader Intent wiring → **resolve THROUGH the Loader Intent; add nothing**
 
-`from="@…"` is an injector/context ref (`directives.ts:57`, the `from` prop). The resource
-resolves **through the Loader Intent's async lifecycle** (`intents.json:439`) and the
-Resource Loader block (`blocks.json:203`) that already implements it — it is **not its own
+`from="@…"` is an injector/context ref (`we:directives.ts:57`, the `from` prop). The resource
+resolves **through the Loader Intent's async lifecycle** (`we:intents.json:439`) and the
+Resource Loader block (`fui:blocks.json:203`) that already implements it — it is **not its own
 state machine**. The directive contributes the *declarative trigger + slot surface*; the
 state transitions, anti-flicker (entry-threshold + hold-floor), version-token stale-drop,
 escalation, and hierarchy aggregation are all Loader's, unchanged. "Cross-reference, don't
@@ -104,7 +104,7 @@ Loader, drifts from the Resource Loader block, fragments the async story).
 
 ### Fork 3 — lowering correspondence (#078) → **lift/lower to a `use()`-style suspending read + boundary slots**
 
-`crossStrategy.ts` lowers `is="for-each"`→`.map()` and `is="if"`→`&&` but has no resource
+`we:crossStrategy.ts` lowers `is="for-each"`→`.map()` and `is="if"`→`&&` but has no resource
 rule. The vdom equivalent `is="resource"` lifts to is the **suspending-read form**:
 `const data = use(from)` (React `use()` / Solid `createResource` accessor), with the
 `slot="loading"` / `slot="error"` branches lifting to the enclosing `<Suspense>` /
@@ -112,7 +112,7 @@ rule. The vdom equivalent `is="resource"` lifts to is the **suspending-read form
 `<template is="resource" from="E"><...slots></template>` ⇄
 `<Suspense fallback={…}><ErrorBoundary fallback={…}>{use(E)}…</ErrorBoundary></Suspense>`.
 Because the read is async, the round-trip is flagged the same way the eager/reactive
-interpolation boundary is (`crossStrategy.ts:124` `lossy` diagnostic) — a resource read has
+interpolation boundary is (`we:crossStrategy.ts:124` `lossy` diagnostic) — a resource read has
 suspense semantics with no inert HTML inverse, so it carries a `resource-suspends-on-read`
 diagnostic on lower. Rejected: a bare `await` form (no boundary correspondence for the
 loading/error slots; doesn't model suspension); leaving `is="resource"` unmapped (the item's
@@ -122,7 +122,7 @@ status quo — blocks `crossStrategy` from carrying it).
 
 A resource that paginates is **not a new directive feature** — it is the Loader Intent's
 existing `loadingMore` state ("fetching the next page… composes the Windowed Collection
-Intent", `intents.json`) composed with Windowed Collection. The `<Resource>` directive's
+Intent", `we:intents.json`) composed with Windowed Collection. The `<Resource>` directive's
 contract stays *single-resolve*; pagination is a composition the resource participates in,
 and the cursor-vs-offset / "load earlier" / windowing-plus-async design is **#018's open
 work**, not #124's. #124 only commits that the directive's resolve flows through the Loader
@@ -146,10 +146,10 @@ by this preparation.
 ## Cross-references
 
 - Decision: [#124 — `<Resource>` async contract](/backlog/124-resource-directive-async-contract/)
-- Parent: [#070 — JSX directive sugar](/backlog/070-jsx-directive-sugar/) · `blocks/renderers/jsx/directives.ts`
-- Lowering: [#078 — render-strategy lowering compiler](/backlog/078-render-strategy-lowering-compiler/) · `blocks/renderers/jsx/render-strategy/crossStrategy.ts`
+- Parent: [#070 — JSX directive sugar](/backlog/070-jsx-directive-sugar/) · `we:blocks/renderers/jsx/directives.ts`
+- Lowering: [#078 — render-strategy lowering compiler](/backlog/078-render-strategy-lowering-compiler/) · `we:blocks/renderers/jsx/render-strategy/crossStrategy.ts`
 - Pagination: [#018 — async pagination beyond load-more](/backlog/018-dropdown-async-pagination-paradigm/)
-- Composes: [Loader Intent](/intents/loader/) (`intents.json:439`) · [Resource Loader block](/blocks/resource-loader/) (`blocks.json:203`) · [Windowed Collection](/intents/windowed-collection/)
+- Composes: [Loader Intent](/intents/loader/) (`we:intents.json:439`) · [Resource Loader block](/blocks/resource-loader/) (`fui:blocks.json:203`) · [Windowed Collection](/intents/windowed-collection/)
 - Companion report: [JSX Adapter feature mapping](2026-06-03-jsx-adapter-feature-mapping.md)
 
 ### Sources (prior art)

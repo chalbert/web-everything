@@ -37,9 +37,9 @@ how to surface model diagnostics distinctly from analyzer-subset rejections in t
 - **Status:** resolved — model-backed analyzer registered into the existing `CustomAnalyzerRegistry` with NO engine-core change. Full suite (1619) + 21 new model tests + check:standards green; demo verified live (11/11, 0 console errors).
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
-  - `blocks/renderers/upgrader/analyzers/modelComponent.ts` — `ModelClient` vendor seam; thin native-`fetch` Anthropic client (BYO key from env/opts, structured `output_config.format` → guaranteed `ComponentIR` JSON, `claude-opus-4-8`); `createScriptedClient` (no-key, deterministic — drives tests + the browser playground); `parseModelIR` validator (shape + rejects leftover `${…}`); `modelComponentAnalyzer` factory + `registerModelAnalyzer`.
-  - `blocks/renderers/upgrader/__fixtures__/model-cases.ts` — shared (demo + suite): 2 good resolves (dynamic→slots; multi-`innerHTML` merge) + 4 hallucination guards, one per gate layer (model JSON validation, interpolation guard, engine intent check, engine parse check).
-  - `blocks/__tests__/unit/renderers/upgrader-model.test.ts` — 21 tests (routing, lifts, gate, parseModelIR, no-key Anthropic client).
+  - `we:blocks/renderers/upgrader/analyzers/modelComponent.ts` — `ModelClient` vendor seam; thin native-`fetch` Anthropic client (BYO key from env/opts, structured `output_config.format` → guaranteed `ComponentIR` JSON, `claude-opus-4-8`); `createScriptedClient` (no-key, deterministic — drives tests + the browser playground); `parseModelIR` validator (shape + rejects leftover `${…}`); `modelComponentAnalyzer` factory + `registerModelAnalyzer`.
+  - `we:blocks/renderers/upgrader/__fixtures__/model-cases.ts` — shared (demo + suite): 2 good resolves (dynamic→slots; multi-`innerHTML` merge) + 4 hallucination guards, one per gate layer (model JSON validation, interpolation guard, engine intent check, engine parse check).
+  - `we:blocks/__tests__/unit/renderers/upgrader-model.test.ts` — 21 tests (routing, lifts, gate, parseModelIR, no-key Anthropic client).
   - `demos/code-upgrader-demo.{ts,css,html}` — a "Model provider (BYO key — scripted here)" section surfacing `via {analyzerId}` so a model failure reads distinctly from a reference subset rejection; intro updated to point at #188.
 - **Leftovers captured:** [#194](/backlog/194-upgrader-model-providers-live-and-multi-vendor/) keyed live smoke run + a second vendor (OpenAI / `@anthropic-ai/sdk`-backed `ModelClient`).
 - **Open points resolved:**

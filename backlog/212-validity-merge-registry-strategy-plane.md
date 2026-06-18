@@ -49,13 +49,13 @@ ruling and rationale.
 - **Status:** resolved (2026-06-08)
 - **Branch:** docs/standard-authoring-workflow
 - **Done:** Shipped the `CustomValidityMergeRegistry` + `CustomValidityMergeStrategy`
-  plug pair (`src/_data/plugs.json` + two plug-descriptions) and the standalone TS
+  plug pair (`we:src/_data/plugs.json` + two plug-descriptions) and the standalone TS
   strategy plane in `validity-merge/` (mirroring `capabilities/`): surface types
   (`SourceResult`/`MergedValidity`) with `isMergedValidity`/`assertMergedValidity`
   guards enforcing the #004 OP-1 surface contract; `SourceReductionStrategy`
   (native-first default, strictest-wins + declared precedence); `LastWriteWinsStrategy`
   (degenerate single-source reduction); the registry + auto-stamping
-  `ValiditySourceOrchestrator`; default wiring in `index.ts`. 22 vitest specs (wired
+  `ValiditySourceOrchestrator`; default wiring in `we:index.ts`. 22 vitest specs (wired
   `validity-merge/**` into vitest include). `check:standards` 0 errors; both plug
   pages render 200.
 - **Next:** runtime plug + ElementInternals integration → #215; async resolution

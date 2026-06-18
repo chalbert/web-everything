@@ -49,7 +49,7 @@ OP-1/OP-11 for the surface-vs-computation split.
 - **Status:** resolved (2026-06-09)
 - **Branch:** docs/standard-authoring-workflow
 - **Done:** Shipped the `CustomValidatorResolutionRegistry` + `CustomValidatorResolution`
-  plug pair (`src/_data/plugs.json` + two plug-descriptions) and the standalone TS
+  plug pair (`we:src/_data/plugs.json` + two plug-descriptions) and the standalone TS
   strategy plane in `validator-resolution/` (mirroring `validity-merge/`): surface types
   (`ValidationHandle`/`AsyncResult`/`ResolvedSource`) with `isResolvedSource`/
   `assertResolvedSource` guards enforcing the cross-plane contract (results must feed the
@@ -57,7 +57,7 @@ OP-1/OP-11 for the surface-vs-computation split.
   from `validity-merge/provider`); `VersioningResolution` (native-first default — per-field
   generation token, drop superseded answers) and `CancellationResolution` (`AbortController`
   teardown); the registry + the `AsyncValidationRunner` (opens a generation, emits `pending`,
-  applies the terminal answer only when `shouldApplyResult`); default wiring in `index.ts`.
+  applies the terminal answer only when `shouldApplyResult`); default wiring in `we:index.ts`.
   21 vitest specs (wired `validator-resolution/**` into vitest include). `check:standards`
   0 errors (re-ran `gen:inventory`); both plug pages render 200.
 - **Next:** runtime plug + async-field element integration → #224; live stale-answer-race

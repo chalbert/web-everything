@@ -31,9 +31,9 @@ conflict, **platform wins.** Each app is built **platform-first**: consume ACTIV
 when a surface is DRAFT with no runtime, **implement it in WE** (don't hand-roll); when uncodified,
 **propose a new standard**. Silent bypass is prohibited — a temporary scaffold must be tagged
 `// PLATFORM-GAP: #NNN` against a tracked backlog item. This runs as a **self-refining loop**:
-`check:app-conformance` (the strict benchmark, `scripts/check-app-conformance.mjs`) emits a ranked WE
+`check:app-conformance` (the strict benchmark, `we:scripts/check-app-conformance.mjs`) emits a ranked WE
 work queue → fill the top gap in WE → app consumes it → rescan. Full method:
-[docs/agent/exercise-app-workflow.md](/docs/agent/exercise-app-workflow.md) (Claude: `/exercise-app`).
+[we:docs/agent/exercise-app-workflow.md](/docs/agent/exercise-app-workflow.md) (Claude: `/exercise-app`).
 Gaps found here *are* the WE roadmap, so this program doubles as a prioritization engine.
 
 ## Committed selection (2026-06-11)

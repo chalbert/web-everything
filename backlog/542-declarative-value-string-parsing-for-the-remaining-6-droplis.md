@@ -20,7 +20,7 @@ Apply the #275 parseOptions mechanism + traitEnforcer registration to the other 
 ## Context — #275 delivered the mechanism + a reference behavior
 
 #275 (the parent split's first slice) reconstructed the dropped `@withOptions`/`FieldValue` parser as
-`frontierui/blocks/droplist/parseOptions.ts` (spec-driven: positional + bare flags + `key=value` with
+`fui:frontierui/blocks/droplist/parseOptions.ts` (spec-driven: positional + bare flags + `key=value` with
 type coercion), wired it into **Anchored** as the reference behavior (a static `optionSpec` + a guarded
 `Object.assign(this.options, parseOptions(this.value, …))` in `connectedCallback`), and registered
 `anchored` in the `vite.config` `traitEnforcer` map so `<ul anchored="bottom-start;flip">` activates
@@ -37,7 +37,7 @@ For each of Anchor, Clearable, Filter, FocusDelegation, LiveStatus, Selection:
   programmatic `<auto-complete>` composition stays byte-for-byte unchanged (the #275 invariant).
 - Add the attribute to the `traitEnforcer` `traitMap`.
 - Tests: declarative activation + a programmatic-unchanged guard per behavior (mirror
-  `blocks/droplist/__tests__/declarativeOptions.test.ts`).
+  `fui:blocks/droplist/__tests__/declarativeOptions.test.ts`).
 
 ## Note — behaviors are already CustomAttribute subclasses
 
@@ -45,4 +45,4 @@ The #275 "wrap vs refactor" fork is **moot**: all 7 behaviors already extend `Cu
 was refactored after that note was written). No adapter layer is needed — the only gap is value-string →
 options parsing, which #275's mechanism already solves. This is mechanical replication across 6 files.
 
-**Graduated to** `frontierui/blocks/droplist/` — static optionSpec + parseOptions merge across {Anchor,Clearable,Filter,FocusDelegation,LiveStatus,Selection}.ts + vite.config.mts traitMap; declarativeOptions.test.ts.
+**Graduated to** `frontierui/blocks/droplist/` — static optionSpec + parseOptions merge across {Anchor,Clearable,Filter,FocusDelegation,LiveStatus,Selection}.ts + vite.config.mts traitMap; fui:declarativeOptions.test.ts.

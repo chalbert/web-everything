@@ -19,8 +19,8 @@ Build the one general picker surface per #370 Fork 4 (compose, don't reinvent): 
 ## Progress
 
 - **Resolved 2026-06-14.** Built the general picker surface as the `picker-surface` Component block
-  in [blocks.json](../src/_data/blocks.json) + its page
-  [block-descriptions/picker-surface.njk](../src/_includes/block-descriptions/picker-surface.njk),
+  in [fui:blocks.json](../src/_data/blocks.json) + its page
+  [we:block-descriptions/picker-surface.njk](../src/_includes/block-descriptions/picker-surface.njk),
   mirroring the sibling `reaction` block (#589).
 - **Promotion-trigger determination (the pinned #370 Fork 4 condition): RESOLVED → thin block.**
   The hand-off cannot be expressed as config over droplist/autocomplete: `autocomplete` is the 1-D

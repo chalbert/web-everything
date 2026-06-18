@@ -63,7 +63,7 @@ the still-undeletable families. The 9 must come out **together**, and the long p
 
 ### B1 — FUI hosts no demos for the migrated block-impl families *(prerequisite)*
 
-The `fuiDemo` shortcode ([.eleventy.js:38](../.eleventy.js#L38)) iframes
+The `fuiDemo` shortcode ([we:.eleventy.js:38](../.eleventy.js#L38)) iframes
 `${FUI_DEMO_BASE}/demos/<file>`. FUI's `demos/` hosts component-converter, declarative-spa, view-tabs,
 for-each, navigation, lazy-traits, … but **nothing** for background-task-surface, data-grid, type-ahead,
 audit, lifecycle, master-detail, selection, stepper, tree-select. So every iframe cutover points at a

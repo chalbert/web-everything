@@ -41,7 +41,7 @@ Per intent-UX-only / technical→Configurator: these are technical settings, nev
 
 Claimed in batch-2026-06-16, traced the real surfaces, found it epic-shaped (bumped 3 → 13), and `/slice`d
 it. The re-trace also corrected its own premise #1: the Plateau Configurator now has **9 domains** with a
-repeatable `seed-*.ts` + provider + presets add-pattern (`plateau-app/src/technical-configurator/provider.ts:9-31`),
+repeatable `seed-*.ts` + provider + presets add-pattern (`plateau:plateau-app/src/technical-configurator/provider.ts:9-31`),
 so adding the four WE dimensions is mechanical, not impossible. The split (siblings under #746):
 
 - **#788** *(decision)* — Plateau↔WE **embed/seed transport contract** (the only genuine open fork; was
@@ -52,28 +52,28 @@ so adding the four WE dimensions is mechanical, not impossible. The split (sibli
 
 #752 stays a `story` (already had a parent — not converted to an epic) re-scoped to the WE button + seeded
 embed + preview render, `blockedBy: [788, 789, 790]`. Full analysis:
-`reports/2026-06-16-backlog-split-analysis.md`.
+`we:reports/2026-06-16-backlog-split-analysis.md`.
 
 ## Progress — built the integration slice (2026-06-16, batch-2026-06-16)
 
 All three deps (#788 transport, #789 domains, #790 cost-preview) resolved; built the WE↔Plateau glue:
 
-- **Seed transport (#788 URL-canonical + typed)** — `scripts/lib/technical-configurator-url.cjs`:
+- **Seed transport (#788 URL-canonical + typed)** — `we:scripts/lib/technical-configurator-url.cjs`:
   `buildTechnicalConfiguratorUrl(base, config, {embed})` emits typed params mirroring the block's
   dimensions (`domain`, `strategy`, `req-<axis>`), `embed=1` for the iframe / omitted for the deep-link.
   Never an opaque blob.
-- **WE block-page surface** — a `technicalConfigurator` Eleventy shortcode (`.eleventy.js`, mirrors the
+- **WE block-page surface** — a `technicalConfigurator` Eleventy shortcode (`we:.eleventy.js`, mirrors the
   `fuiDemo` sandboxed-iframe boundary; Plateau base env-parameterised via `PLATEAU_BASE`, default
-  `:4000`) + a "Configure technical aspects" section in `src/block-pages.njk` (renders when a block
-  carries `technicalConfig`) + a teal Plateau badge variant in `style.css`. The cost preview renders
+  `:4000`) + a "Configure technical aspects" section in `we:src/block-pages.njk` (renders when a block
+  carries `technicalConfig`) + a teal Plateau badge variant in `we:style.css`. The cost preview renders
   inside the embed (Plateau's existing `/technical-configurator` cost mount, #790).
 - **Seed data** — the `wizard` block seeds a **non-default** config (render-strategy · DSD ·
-  pre-rendered/light) in `blocks.json`.
-- **Plateau receiving end** — `seedFromUrl()` in `plateau-app/.../technical-configurator/configurator.ts`
+  pre-rendered/light) in `fui:blocks.json`.
+- **Plateau receiving end** — `seedFromUrl()` in `we:plateau-app/.../technical-configurator/configurator.ts`
   overlays the URL seed over localStorage (URL wins, per #788); validates domain/strategy/axis ids
   against the provider (unknown → ignored, no dead-seed). Typechecks clean (plateau-app's 39 pre-existing
   tsc errors are unrelated — none in this file).
-- **Fixture** — `scripts/lib/__tests__/technical-configurator-url.test.mjs` (6 tests): typed-param +
+- **Fixture** — `we:scripts/lib/__tests__/technical-configurator-url.test.mjs` (6 tests): typed-param +
   embed/deep-link contract, and a real block round-tripping a non-default config. Green.
 
 Acceptance met: button opens the seeded per-block configurator + deep-link reaches the full one (✓);

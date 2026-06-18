@@ -52,7 +52,7 @@ multi-tag data-model), #844 (the FUI conformance gate). Rule home = `we:docs/age
 
 ## Axis-framing — what the real tree forces
 
-Today **no block carries a `tagName`** and `gen-cem.mjs` emits a custom-element declaration only when one is
+Today **no block carries a `tagName`** and `we:gen-cem.mjs` emits a custom-element declaration only when one is
 present, **never fabricating** ([we:scripts/gen-cem.mjs:68-80](scripts/gen-cem.mjs#L68-L80)). The survey of the
 tree decomposes the value question into two orthogonal axes plus a configurable dimension:
 
@@ -174,7 +174,7 @@ Three layers, grounded in the code as it is today:
 
 1. **Author opts in, in `we:src/_data/blocks.json`.** This file is the ratified **CEM-aligned canonical
    block-protocol shape** (#641 Fork-1 → #657 resolved: "no new schema; extend the surface that already
-   exists"), and `gen:cem` projects its contract subset into the distribution artifact `custom-elements.json`
+   exists"), and `gen:cem` projects its contract subset into the distribution artifact `we:custom-elements.json`
    (#653, CEM registered as a WE protocol; website-only fields like `fuiDemo`/`summary` stay out of the CEM).
    So `tagName` fills a slot in the standard's pinned shape — not a website-only field. Today every entry is
    element-less (no `tagName`); opting `autocomplete` in is a one-field edit — the block declares it commits a

@@ -17,5 +17,5 @@ The webdocs ingestion adapters (storybook, mintlify) are undocumented publicly; 
 
 ## Progress
 
-- Added `src/adapters.njk` — public Adapters & Extensibility reference: the `IngestionAdapter` contract, the two built-in adapters (storybook/CSF, mintlify/MDX), and a "drop in your own sibling module" guide.
-- Added an "Adapters" nav entry in `src/_layouts/base.njk` (after Plugs).
+- Added `fui:src/adapters.njk` — public Adapters & Extensibility reference: the `IngestionAdapter` contract, the two built-in adapters (storybook/CSF, mintlify/MDX), and a "drop in your own sibling module" guide.
+- Added an "Adapters" nav entry in `we:src/_layouts/base.njk` (after Plugs).

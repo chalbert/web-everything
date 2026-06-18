@@ -27,6 +27,6 @@ relatedProject: webintents
 The decision was already fully realized as the canonical standard before this close-out — nothing to build, purely a ratification:
 
 - Sibling [#027](/backlog/027-droplist-trait-language/) graduated the trait-language into [block:droplist]. The live Droplist block page already carries the **"Two channels: ambient intent vs. trait selection"** table, the resolution rule `explicit (local) ⊕ ambient intent (behavioral only) ⊕ trait default` (structural dims stop at `explicit ⊕ default`), and the narrowed behavioral-only `customContexts:droplistIntent`. Report items A1–A7, B8, B10 are reflected there.
-- Change-plan item **B9 — glossary entries** was also already present: `src/_data/semantics.json` defines **Trait Selection** and **Ambient Intent**, cross-linked.
+- Change-plan item **B9 — glossary entries** was also already present: `we:src/_data/semantics.json` defines **Trait Selection** and **Ambient Intent**, cross-linked.
 
 No code change required (report C11–C13 are future/already-aligned).

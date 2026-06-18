@@ -18,7 +18,7 @@ A conformance suite that runs one fixture (a component binding a lazy trait, an 
 
 ## Resolved (2026-06-16) — 4 of 5 bundlers; Parcel row owned by #756
 
-`tools/trait-enforcer/__tests__/cross-bundler-conformance.test.ts`. One shared fixture (a lazy + an
+`we:tools/trait-enforcer/__tests__/cross-bundler-conformance.test.ts`. One shared fixture (a lazy + an
 eager + a preload trait, plus an **unused** trait), two conformance claims:
 
 - **Part A — manifest byte-identity.** Each adapter is shown to serve the *exact* output of the one

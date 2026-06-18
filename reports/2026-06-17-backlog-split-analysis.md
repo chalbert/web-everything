@@ -12,9 +12,9 @@ self-described in its body as "three things in one (convention · gate-build · 
 
 | Surface | Where | Note |
 |---|---|---|
-| Convention doc | `docs/agent/conventions.md` (6 KB, "Naming Conventions" §) | exists; slice A appends a clause here |
-| Authoring note | `docs/agent/backlog-workflow.md` | new-item authoring guidance lives here |
-| Gate machinery | `scripts/check-standards.mjs` (843 lines) | already raw-scans `backlog/*.md` (`:443`) **and** `reports/*.md` (`:591`); slice B adds a check block into these existing loops |
+| Convention doc | `we:docs/agent/conventions.md` (6 KB, "Naming Conventions" §) | exists; slice A appends a clause here |
+| Authoring note | `we:docs/agent/backlog-workflow.md` | new-item authoring guidance lives here |
+| Gate machinery | `we:scripts/check-standards.mjs` (843 lines) | already raw-scans `backlog/*.md` (`:443`) **and** `reports/*.md` (`:591`); slice B adds a check block into these existing loops |
 | Migration surface | `backlog/*.md` (867) + `reports/*.md` (150) = **1017 files**, only **5** already carry a `we:`/`fui:`/`plateau:` prefix | slice C's bulk rewrite |
 
 Seams confirmed against real code — each slice's named files are citable, not guessed.
@@ -23,7 +23,7 @@ Seams confirmed against real code — each slice's named files are citable, not 
 
 | Slice | workItem / size | Scope | Home |
 |---|---|---|---|
-| **A — convention clause** | story · **2** | Add the `<repo>:` locus rule (alias table, in-repo `[we:path](path)` link form, cross-repo plain-text form) to `conventions.md`; add the authoring note to `backlog-workflow.md` so new items comply from creation. Ratifies the two bold-defaulted knobs (alias-vs-full → allow both, default alias; rollout → one-pass). | own story |
+| **A — convention clause** | story · **2** | Add the `<repo>:` locus rule (alias table, in-repo `[we:path](path)` link form, cross-repo plain-text form) to `we:conventions.md`; add the authoring note to `we:backlog-workflow.md` so new items comply from creation. Ratifies the two bold-defaulted knobs (alias-vs-full → allow both, default alias; rollout → one-pass). | own story |
 | **B — detection gate (warn-level)** | story · **5** | New `check:standards` check in the existing `backlog/`+`reports/` scan loops: regex for path-like tokens, with carve-outs (fenced code blocks, `@scope/pkg` specifiers, URLs, `relatedReport`/`graduatedTo`/`crossRef` frontmatter). Emits **warnings** only — build stays green on the un-migrated corpus. | own story |
 | **C — migration + hard gate** | story · **5** | One-time regex+locus-inference rewrite of all 1017 files (path-in-WE-tree → `we:`, else resolve vs FUI/plateau; log cross-repo-ambiguous paths for manual pass); flip slice B's check **warn → error**; finishes #841. | own story |
 
@@ -73,12 +73,12 @@ slice and the rest land as **siblings under #746**.
 
 | Surface | Where | State |
 |---|---|---|
-| Plateau creator surface | `plateau-app/src` | **greenfield** — no theme/design-system creator exists; only `profiles/schema.ts` mentions "design-system" as a governance enum |
-| Plateau domain-add pattern | `plateau-app/src/main.ts:14-44,218-229` (route + `mount*`) · `technical-configurator/provider.ts:24-51` (`DOMAINS[]` + `seedProvider`) | **proven** — Technical Configurator is the exact template to clone |
-| localStorage + auth seam | `technical-configurator/configurator.ts:118,126` (localStorage) · `main.ts:53-83` (`authStore`, `requireAuth()` wired-but-disabled) | **ready** — persistence pattern + dormant auth seam both exist |
-| #747 manifest shape | `design-systems/material-like.designsystem.json` · `src/_data/designSystems.json` · validator `scripts/check-standards-rules.mjs:717-771` · FUI type `frontierui/workbench/designSystems.ts:31-45` | **materialized** (#871 resolved) — `{ extends, themeTokens, intentDefaults?, traitDefaults? }`, validated |
-| #749 switcher | `frontierui/workbench/designSystems.ts` + `workbench/mount.ts` | **shipped, FUI-resident**, consumes a **fixed FUI-owned preset gallery** in the manifest *shape*; same-origin, **no WE↔FUI channel** (#809) |
-| Screenshot→tokens | `blocks/renderers/upgrader/analyzers/mockupAnalyzer.ts:36-66,143-209` | seam built, but produces **`ComponentIR`, not tokens** — screenshot→**tokens** is **not a built capability** and has no home |
+| Plateau creator surface | `plateau-app/src` | **greenfield** — no theme/design-system creator exists; only `plateau:profiles/schema.ts` mentions "design-system" as a governance enum |
+| Plateau domain-add pattern | `plateau:plateau-app/src/main.ts:14-44,218-229` (route + `mount*`) · `plateau:technical-configurator/provider.ts:24-51` (`DOMAINS[]` + `seedProvider`) | **proven** — Technical Configurator is the exact template to clone |
+| localStorage + auth seam | `plateau:technical-configurator/configurator.ts:118,126` (localStorage) · `plateau:main.ts:53-83` (`authStore`, `requireAuth()` wired-but-disabled) | **ready** — persistence pattern + dormant auth seam both exist |
+| #747 manifest shape | `we:design-systems/material-like.designsystem.json` · `we:src/_data/designSystems.json` · validator `we:scripts/check-standards-rules.mjs:717-771` · FUI type `fui:frontierui/workbench/designSystems.ts:31-45` | **materialized** (#871 resolved) — `{ extends, themeTokens, intentDefaults?, traitDefaults? }`, validated |
+| #749 switcher | `fui:frontierui/workbench/designSystems.ts` + `fui:workbench/mount.ts` | **shipped, FUI-resident**, consumes a **fixed FUI-owned preset gallery** in the manifest *shape*; same-origin, **no WE↔FUI channel** (#809) |
+| Screenshot→tokens | `we:blocks/renderers/upgrader/analyzers/mockupAnalyzer.ts:36-66,143-209` | seam built, but produces **`ComponentIR`, not tokens** — screenshot→**tokens** is **not a built capability** and has no home |
 
 **Key finding:** the creator *build* is buildable now (greenfield but on a proven plateau-app template,
 with the manifest shape + validator already shipped). Two things are NOT clean: (a) the **cross-boundary
@@ -144,7 +144,7 @@ E (vision) — parked: blocked on a non-existent vision-token-extraction capabil
 
 **#736 — temporal block impl — variant traits + build-chunk assertion (re-slice)** (`workItem: story`,
 `size: 13`, `status: open`, `parent: 315`, `locus: frontierui`, `blockedBy: [359, 735]`). Both blockers
-**resolved** (→ WE `blocks.json` contracts). The two forks that previously held it back are settled:
+**resolved** (→ WE `fui:blocks.json` contracts). The two forks that previously held it back are settled:
 ownership (#779 → **FUI-locus end-to-end**, resolved 2026-06-17) and scope (#713 → option C, one abstract
 core + named shallow presets, resolved). What remains is **pure impl volume**: author the three variant
 trait modules + wire the presets + the build-chunk dogfood. #736 already has a parent (#315), so per the
@@ -155,12 +155,12 @@ under #315** — no epic conversion.
 
 | Surface | Where | State |
 |---|---|---|
-| Trait module pattern | `frontierui/blocks/traits/Sortable.ts` (+ `Highlight`/`Polling`/`Revealable`) | **proven** — `CustomAttribute` mixin w/ `activationSurface`, `connectedCallback`, activate/deactivate lifecycle; the exact shape each variant trait clones |
-| The Map (runtime) | `frontierui/plugs/webbehaviors/traitManifest.ts` (`registerTraits`, lazy/eager/preload entries) · `plugs/bootstrap.ts:218` | **shipped** — `attribute → trait` table, `defineLazy` per entry; manifest is enforcer-generated (`virtual:trait-manifest`) |
-| The Enforcer (build) | `frontierui/tools/trait-enforcer/vite-plugin.ts` (scan + codegen, pure fns) · `__tests__/trait-enforcer.test.ts` | **shipped** — scans template usage, code-splits a chunk per trait; wired via `traitEnforcer({ traitMap })` |
+| Trait module pattern | `fui:frontierui/blocks/traits/Sortable.ts` (+ `Highlight`/`Polling`/`Revealable`) | **proven** — `CustomAttribute` mixin w/ `activationSurface`, `connectedCallback`, activate/deactivate lifecycle; the exact shape each variant trait clones |
+| The Map (runtime) | `fui:frontierui/plugs/webbehaviors/traitManifest.ts` (`registerTraits`, lazy/eager/preload entries) · `we:plugs/bootstrap.ts:218` | **shipped** — `attribute → trait` table, `defineLazy` per entry; manifest is enforcer-generated (`virtual:trait-manifest`) |
+| The Enforcer (build) | `fui:frontierui/tools/trait-enforcer/vite-plugin.ts` (scan + codegen, pure fns) · `we:__tests__/trait-enforcer.test.ts` | **shipped** — scans template usage, code-splits a chunk per trait; wired via `traitEnforcer({ traitMap })` |
 | Temporal impl dir | `frontierui/blocks/temporal/` | **greenfield** — does not exist yet; slices create `blocks/temporal/traits/*` |
-| Family contracts | WE `src/_data/blocks.json` — `temporal` core + 4 presets (`date-picker`, `time-picker`, `datetime-picker`, `date-range-picker`) `:4443-4571` | **shipped** (#359/#735) — each preset's presentation×granularity pin + trait bindings are spec'd |
-| Chunk-isolation test precedent | `tools/trait-enforcer/__tests__` (unit) + `plugs/__tests__/e2e/preload-traits.spec.ts` (dev Playwright) | exists at unit/dev level; the **#713 production-build "time-only fixture pulls no calendar chunk" dogfood** is new |
+| Family contracts | WE `fui:src/_data/blocks.json` — `temporal` core + 4 presets (`date-picker`, `time-picker`, `datetime-picker`, `date-range-picker`) `:4443-4571` | **shipped** (#359/#735) — each preset's presentation×granularity pin + trait bindings are spec'd |
+| Chunk-isolation test precedent | `tools/trait-enforcer/__tests__` (unit) + `fui:plugs/__tests__/e2e/preload-traits.spec.ts` (dev Playwright) | exists at unit/dev level; the **#713 production-build "time-only fixture pulls no calendar chunk" dogfood** is new |
 
 **Trait→preset binding map (from the contracts):** `calendar-grid` → date-picker, datetime-picker,
 date-range-picker · `clock` → time-picker, datetime-picker · `range-coordination` → date-range-picker.
@@ -172,9 +172,9 @@ them).
 
 | Slice | workItem / size | Scope | Home |
 |---|---|---|---|
-| **#736 (kept, re-sized)** | story · **3** | **`calendar-grid` trait + date-picker preset.** Author `blocks/temporal/traits/CalendarGrid.ts` (`CustomAttribute`: render a `role=grid` calendar surface over `<input type=date>`), add to the enforcer `traitMap`, wire a date-picker fixture/demo that binds `calendar-grid` (lazy-loads on appearance). Demo: date-picker shows the grid; chunk fetched on first appearance. | frontierui |
-| **A — `clock` trait + time-picker preset** | story · **3** | Author `blocks/temporal/traits/Clock.ts` (spatial clock surface over `<input type=time>`), add to `traitMap`, time-picker fixture binds `clock`. Independent of calendar-grid. Demo: time-picker shows the clock, lazy-loaded. | frontierui |
-| **B — `range-coordination` trait + date-range-picker preset** | story · **3** | Author `blocks/temporal/traits/RangeCoordination.ts` (start ≤ end ordering across two bound `<input type=date>` anchors, reported as a pair), date-range-picker fixture binds `calendar-grid` + `range-coordination`. Demo: range stays ordered; both chunks present. | frontierui |
+| **#736 (kept, re-sized)** | story · **3** | **`calendar-grid` trait + date-picker preset.** Author `fui:blocks/temporal/traits/CalendarGrid.ts` (`CustomAttribute`: render a `role=grid` calendar surface over `<input type=date>`), add to the enforcer `traitMap`, wire a date-picker fixture/demo that binds `calendar-grid` (lazy-loads on appearance). Demo: date-picker shows the grid; chunk fetched on first appearance. | frontierui |
+| **A — `clock` trait + time-picker preset** | story · **3** | Author `fui:blocks/temporal/traits/Clock.ts` (spatial clock surface over `<input type=time>`), add to `traitMap`, time-picker fixture binds `clock`. Independent of calendar-grid. Demo: time-picker shows the clock, lazy-loaded. | frontierui |
+| **B — `range-coordination` trait + date-range-picker preset** | story · **3** | Author `fui:blocks/temporal/traits/RangeCoordination.ts` (start ≤ end ordering across two bound `<input type=date>` anchors, reported as a pair), date-range-picker fixture binds `calendar-grid` + `range-coordination`. Demo: range stays ordered; both chunks present. | frontierui |
 | **C — datetime-picker preset + #713 build-chunk dogfood** | story · **3** | Wire the datetime-picker preset (composes `calendar-grid` + `clock` over `<input type=datetime-local>`), then author the **production-build** assertion: a **time-only fixture pulls no calendar chunk** (and a date-only fixture pulls no clock chunk). Capstone proving per-preset trait isolation. Demo: green chunk-isolation test on a real build. | frontierui |
 
 **Slice DAG (A/#736 parallel roots; incremental):**

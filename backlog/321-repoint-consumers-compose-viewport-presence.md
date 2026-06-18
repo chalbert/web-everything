@@ -18,13 +18,13 @@ Re-point the three current `IntersectionObserver` consumers — Collection Ops `
 ## Dependency correction (2026-06-13) — only one of the three consumers exists in WE today
 
 On pickup, a repo-wide audit found **exactly one** live `new IntersectionObserver` in WE —
-[RoutePrefetchBehavior.ts:73](../blocks/router/behaviors/RoutePrefetchBehavior.ts#L73) (Prefetch
+[we:RoutePrefetchBehavior.ts:73](../blocks/router/behaviors/RoutePrefetchBehavior.ts#L73) (Prefetch
 `eagerness:viewport`). The other two named consumers are **not yet present in WE to re-point**:
 
 - **Visibility-gated trait** — its observer is part of FU's `CustomAttributeRegistry` (the `when="visible"`
   gate, #221/#280), which only arrives in WE with the **#447** merge-up (deferred). So this consumer is
   `blockedBy #447`.
-- **Collection Ops `advance:auto`** — [renderPagination.ts](../blocks/renderers/pagination/renderPagination.ts#L112)
+- **Collection Ops `advance:auto`** — [we:renderPagination.ts](../blocks/renderers/pagination/renderPagination.ts#L112)
   only emits a `data-role="scroll-sentinel"` div; **no observer watches it in WE yet** (the auto-advance
   observer is unbuilt). Nothing to re-point until that observer exists.
 
@@ -39,11 +39,11 @@ trigger and re-point all available consumers together. (Discovered identically t
 ## Progress (2026-06-13) — resolved
 
 #447 has since merged, so the **two** live consumers now both exist: Prefetch `eagerness:viewport`
-([RoutePrefetchBehavior.ts](../blocks/router/behaviors/RoutePrefetchBehavior.ts)) and the visibility-gated
-trait observer ([CustomAttributeRegistry.ts](../plugs/webbehaviors/CustomAttributeRegistry.ts) `#getVisibilityObserver`).
+([we:RoutePrefetchBehavior.ts](../blocks/router/behaviors/RoutePrefetchBehavior.ts)) and the visibility-gated
+trait observer ([we:CustomAttributeRegistry.ts](../plugs/webbehaviors/CustomAttributeRegistry.ts) `#getVisibilityObserver`).
 The ≥2-consumer precondition is met — extracted the shared trigger.
 
-- **Shared home** — new [plugs/webbehaviors/viewportPresence.ts](../plugs/webbehaviors/viewportPresence.ts): `createViewportPresenceObserver({ root, rootMargin, threshold, onEnter, onLeave })` owns IntersectionObserver creation + the observe-vocabulary defaulting (the `rootMargin: '0px'` native default lives here once); routes each record to `onEnter`/`onLeave` by `isIntersecting`; returns `null` when IO is unavailable so each consumer keeps its own no-IO **UX** fallback.
+- **Shared home** — new [we:plugs/webbehaviors/viewportPresence.ts](../plugs/webbehaviors/viewportPresence.ts): `createViewportPresenceObserver({ root, rootMargin, threshold, onEnter, onLeave })` owns IntersectionObserver creation + the observe-vocabulary defaulting (the `rootMargin: '0px'` native default lives here once); routes each record to `onEnter`/`onLeave` by `isIntersecting`; returns `null` when IO is unavailable so each consumer keeps its own no-IO **UX** fallback.
 - **Re-pointed prefetch** — one-shot on enter with its `rootMargin: '50px'` override + prefetch-immediately no-IO fallback, now via the trigger.
 - **Re-pointed the visibility gate** — its single shared observer is now created by the trigger; both enter and leave route to the existing `#onIntersection` (recurring traits still re-close off-screen). Behaviour preserved — registry suite 29/29 green.
 - The **third** named consumer (Collection Ops `advance:auto` pagination observer) is still **unbuilt** in WE (renderPagination only emits the sentinel div); it composes the same `createViewportPresenceObserver` when that observer is built — no work to re-point today.

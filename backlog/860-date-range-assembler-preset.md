@@ -12,4 +12,4 @@ tags: []
 
 # Date-range assembler preset
 
-Add a date-range preset to assemblerPresets.json following the #667 reveal-nav precedent. Verify a date/temporal intent primitive exists first (#713 temporal-block decision resolved — likely mintable now; confirm at build). A composed date-range block configuration the assembler can drop onto the canvas and eject.
+Add a date-range preset to we:assemblerPresets.json following the #667 reveal-nav precedent. Verify a date/temporal intent primitive exists first (#713 temporal-block decision resolved — likely mintable now; confirm at build). A composed date-range block configuration the assembler can drop onto the canvas and eject.

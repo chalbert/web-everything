@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-02
 **Status:** Reference note — captures a chat walkthrough so it can be talked through in parallel.
-**Builds on:** [`reports/2026-06-02-dropdown-trait-composition.md`](./2026-06-02-dropdown-trait-composition.md) — the component/behavior/provider trait model.
+**Builds on:** [`we:reports/2026-06-02-dropdown-trait-composition.md`](./2026-06-02-dropdown-trait-composition.md) — the component/behavior/provider trait model.
 **Why it matters:** A `droplist`/`dropdown` and a form-validation standard should assume the *narrowest reliable native substrate* and progressively enhance above it. This note pins down what that substrate is, as of early 2026.
 
 ---

@@ -3,14 +3,14 @@ type: idea
 workItem: epic
 size: 13
 status: open
-blockedBy: ["410", "554"]
+blockedBy: ["554"]
 dateOpened: "2026-06-14"
 tags: [dev-browser, live-patch, deployed-app, saas, collaboration, approval, open-core, hosted]
 ---
 
 # Collaborative deployed-patch preview — hosted SaaS surface for #410 overlays
 
-Once the #410 deployed live-patch overlay exists, a hosted SaaS turns the single-session preview into a shared, governed artifact — the paid open-core surface atop the open local primitive. This epic umbrellas the collaboration + approval features: (A) shareable live-fix preview links a stakeholder opens against the deployed app; stakeholder-initiated fix requests (annotate the live view → seed the loop); async comments anchored to an overlay; (B) designer/PM approve-to-PR sign-off on the rendered result; side-by-side variant preview (pick one → PR); a designer visual/token-only patch lane. Blocked on #410 (the overlay) and #554 (the SaaS shell).
+Once the #410 deployed live-patch overlay exists, a hosted SaaS turns the single-session preview into a shared, governed artifact — the paid open-core surface atop the open local primitive. This epic umbrellas the collaboration + approval features: (A) shareable live-fix preview links a stakeholder opens against the deployed app; stakeholder-initiated fix requests (annotate the live view → seed the loop); async comments anchored to an overlay; (B) designer/PM approve-to-PR sign-off on the rendered result; side-by-side variant preview (pick one → PR); a designer visual/token-only patch lane. Blocked on #554 (the SaaS shell); the #410 overlay primitive is **resolved**. Every feature is served from the Plateau hosted product (#554-parked), so the six collaboration features stay uncarved until #554 un-parks — then carve them as `parent:555` stories (shareable preview link first, others layer on).
 
 ## Why this is the open-core line
 

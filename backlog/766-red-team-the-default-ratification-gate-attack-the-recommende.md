@@ -34,7 +34,7 @@ work the process claims to do.
 ## Proposed change — one forcing function, not more checklists
 
 Add a **red-team-the-default** step to the ratification path in
-[docs/agent/backlog-workflow.md](../docs/agent/backlog-workflow.md) (the *Fork-readiness pass* /
+[we:docs/agent/backlog-workflow.md](../docs/agent/backlog-workflow.md) (the *Fork-readiness pass* /
 *the ratification gate*, ~L224–290): **before** a decision is resolved, the deciding agent must
 
 - **argue the opposite of its own bold default** — state the strongest case for the main alternative, and
@@ -52,7 +52,7 @@ count). Do **not** impose a heavyweight two-agent prep/decide split on every mec
 
 ## Scope / acceptance
 
-- [ ] A `Red-team the default` subsection in `backlog-workflow.md`'s ratification path, cross-referenced
+- [ ] A `Red-team the default` subsection in `we:backlog-workflow.md`'s ratification path, cross-referenced
       from the *Fork-readiness pass* and *the ratification gate*, with the attack-fails/attack-lands rule.
 - [ ] The decision-mode skill steps (`next-backlog-item` 0b/3a, `prepare-decision-item`) point at it so the
       pass runs at ratify time, not just prep time.

@@ -1,6 +1,6 @@
 # Research Report — DOM-Less Composition Patterns
 
-**Plan file**: `plans/composition.md`
+**Plan file**: `we:plans/composition.md`
 **Research page**: `/research/dom-less-composition/`
 **Date**: 2026-02-23
 
@@ -49,5 +49,5 @@ The one significant gap is **context/injector providers that do not affect CSS l
 
 | File | Action |
 |------|--------|
-| `src/_data/researchTopics.json` | Added `dom-less-composition` entry |
-| `src/_includes/research-descriptions/dom-less-composition.njk` | New file (~376 lines) |
+| `we:src/_data/researchTopics.json` | Added `dom-less-composition` entry |
+| `we:src/_includes/research-descriptions/dom-less-composition.njk` | New file (~376 lines) |

@@ -13,7 +13,7 @@ tags: [exercise-app, auto-insurance, configurator, questionnaire, view-transitio
 > **Resolved 2026-06-12 — built; WE deliverable = activated the draft Stepper block.** The stepped quote
 > questionnaire (Driver → Vehicle → Coverage → Review) is live on a **newly-activated `stepper` block**:
 > the draft contract (#053) had no runtime, so per the loop *"a draft is the prize"* I shipped
-> `StepperBehavior` (`blocks/stepper/StepperBehavior.ts`, draft→active, 6 unit tests) — locked
+> `StepperBehavior` (`we:blocks/stepper/StepperBehavior.ts`, draft→active, 6 unit tests) — locked
 > progression, per-step validation gate (on the step's child controls; a `<fieldset>` is barred from
 > constraint validation), `aria-current="step"`, Step N of M announcement, step-change / flow-complete.
 > The wizard consumes it; `flow-complete` rates the assembled policy and renders the premium + UW

@@ -21,10 +21,10 @@ graduatedTo: protocol:render-strategy
 
 > **Resolved 2026-06-06 — graduated to the `render-strategy` Protocol (Web Components).** The axis is now
 > a first-class conformance contract (`CustomRenderStrategy` / `CustomRenderStrategyRegistry`), sibling to the
-> Change Tracking Protocol, designed in [reports/2026-06-06-render-strategy-axis.md](reports/2026-06-06-render-strategy-axis.md)
+> Change Tracking Protocol, designed in [we:reports/2026-06-06-render-strategy-axis.md](reports/2026-06-06-render-strategy-axis.md)
 > and specified at `/projects/webcomponents/#protocol-render-strategy`. The open placement decision below is
 > **resolved: own standard (Protocol under Web Components), not folded into the JSX adapter** — the adapter merely
-> targets it. Remaining implementation work spun out as agent-ready items: **#077** (make `JSXRenderer.ts` an
+> targets it. Remaining implementation work spun out as agent-ready items: **#077** (make `we:JSXRenderer.ts` an
 > explicit `declarative-static` provider — the seam), **#078** (cross-strategy lowering/lifting compiler),
 > **#079** (strategy toggle UI), **#080** (finalize the contract's open decisions). Kept visible to expose the
 > report and the graduation trail; the original design narrative is preserved below.
@@ -33,7 +33,7 @@ The JSX adapter has two **orthogonal** axes that the first cut deliberately keep
 
 ## Why it's a separate axis
 
-Axis 1 (syntax) is pure spelling: `<div class="x">` ⇄ `<div class="x">`, trivially reversible, and it's what the source-toggle and the feature-mapping table cover. Axis 2 (this item) is semantics — what re-runs when state changes. The same JSX tree can be driven by completely different update machines, and **that choice is independent of the spelling**. Conflating them is what made the existing `JSXRenderer.ts` quietly assume one strategy (eager construct-once DOM); naming the axis lets every strategy be a peer.
+Axis 1 (syntax) is pure spelling: `<div class="x">` ⇄ `<div class="x">`, trivially reversible, and it's what the source-toggle and the feature-mapping table cover. Axis 2 (this item) is semantics — what re-runs when state changes. The same JSX tree can be driven by completely different update machines, and **that choice is independent of the spelling**. Conflating them is what made the existing `we:JSXRenderer.ts` quietly assume one strategy (eager construct-once DOM); naming the axis lets every strategy be a peer.
 
 ## The strategies (the toggle's options — open-ended, registry-driven)
 

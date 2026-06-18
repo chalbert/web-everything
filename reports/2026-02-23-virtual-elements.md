@@ -1,6 +1,6 @@
 # Research Report â€” Virtual Elements: Directives or Components?
 
-**Plan file**: `plans/virtual-elements.md`
+**Plan file**: `we:plans/virtual-elements.md`
 **Research page**: `/research/virtual-elements/`
 **Date**: 2026-02-23
 
@@ -52,5 +52,5 @@ In JSX, function components like `AutoHeading` return native elements directly â
 
 | File | Action |
 |------|--------|
-| `src/_data/researchTopics.json` | Added `virtual-elements` entry |
-| `src/_includes/research-descriptions/virtual-elements.njk` | New file (~290 lines) |
+| `we:src/_data/researchTopics.json` | Added `virtual-elements` entry |
+| `we:src/_includes/research-descriptions/virtual-elements.njk` | New file (~290 lines) |

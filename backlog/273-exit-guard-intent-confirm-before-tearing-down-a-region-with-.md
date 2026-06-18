@@ -17,7 +17,7 @@ The exit-guard member of the Guard protocol (#272): a UX intent that confirms be
 
 Successor build of #129 (resolved 2026-06-10), which ruled that "navigation guard" is really *exit guard* — one member of the open Guard protocol (#272). Design and author this member **on top of** the protocol; do not redefine the predicate/provider/region machinery here (that lives in #272).
 
-## Shape to design (via [design-first.md](../docs/agent/design-first.md))
+## Shape to design (via [we:design-first.md](../docs/agent/design-first.md))
 
 - **The armed condition** = a `shouldBlock()` loss-of-state predicate, supplied by the guard provider (default = a dirty/in-flight tracker; custom predicates pluggable). The intent declares *that* a confirm is presented when the region would be torn down and `shouldBlock()` is true — not *how* the predicate is computed.
 - **Region scale-invariance** — same intent whether the region is the whole document, a route, or a modal. The document case is implemented via `beforeunload`; same-document route via the Navigation API `navigate`/`intercept`; in-app dismissal via the cancelable close action. All sit behind the provider.

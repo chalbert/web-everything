@@ -72,7 +72,7 @@ demoted out of the call (full detail in `## Context`):
 The anchor the rest hangs on. A generated fix runs the **identical review + code-compliance gates as a human
 PR**: lint, tests, type-check, static analysis / quality gate (coverage, no new smells), branch protection,
 required human review — **no bypass path**. The autofix **verify gate**
-([scripts/autofix/engine.mjs:229-247](../scripts/autofix/engine.mjs#L229)) is *necessary but not sufficient*:
+([we:scripts/autofix/engine.mjs:229-247](../scripts/autofix/engine.mjs#L229)) is *necessary but not sufficient*:
 it proves the fix cleared the failure locally; the org's CI + review still gate the merge. *Which* gates
 apply is **read from the compliance layer** (#579), not asserted by the bot. **Auto-merge** (the #141/#410
 autonomy ladder — [#141 Fork 2](/backlog/141-dev-browser-vision/) ratified *default = open-PR*) is reachable **only
@@ -84,13 +84,13 @@ best practice separates "analysis" from "execution" with a human approval gate).
 
 The machinery this builds on already exists in the tree: the verify-gated autofix engine (apply → re-run →
 keep only if the failure cleared with no new error, else revert —
-[scripts/autofix/engine.mjs:229-247](../scripts/autofix/engine.mjs#L229)) with its bounded, metered
-orchestrator ([scripts/conformance-autofix.mjs:3](../scripts/conformance-autofix.mjs#L3)) and the human
+[we:scripts/autofix/engine.mjs:229-247](../scripts/autofix/engine.mjs#L229)) with its bounded, metered
+orchestrator ([we:scripts/conformance-autofix.mjs:3](../scripts/conformance-autofix.mjs#L3)) and the human
 `decide` hook that reverts a gate-passing patch before it lands
-([engine.mjs:247](../scripts/autofix/engine.mjs#L247)); the introspectable
+([we:engine.mjs:247](../scripts/autofix/engine.mjs#L247)); the introspectable
 [capability matrix](../src/_data/capabilityMatrix.json#L1) the evidence payload can ride; and the
 selection→disk bridge precedent the forge action mirrors
-([tools/dev-panel/vite-plugin.ts:11](../tools/dev-panel/vite-plugin.ts#L11),
+([we:tools/dev-panel/vite-plugin.ts:11](../tools/dev-panel/vite-plugin.ts#L11),
 [:260-281](../tools/dev-panel/vite-plugin.ts#L260)). With the support-all axes demoted, **one axis remains a
 genuine call**: **the PR evidence payload** — whether WE mints a standard contract for the machine-readable
 conformance evidence the PR carries, or leaves it as Plateau formatting. (Credential source — raised as a
@@ -147,13 +147,13 @@ compliance-layer policy (#579), *read* by the bot — mirroring #562's local-vs-
 ## The sole fork — PR evidence payload: standard-owned conformance-evidence manifest vs. Plateau markdown
 
 **Crux.** The autofix gate already produces the conformance failure + the verify before/after
-([engine.mjs](../scripts/autofix/engine.mjs)), and #410 Fork 4-A already rules that an **audit record** rides
+([we:engine.mjs](../scripts/autofix/engine.mjs)), and #410 Fork 4-A already rules that an **audit record** rides
 the PR. The open call is whether WE **mints a standard contract** for the *machine-readable conformance
 evidence* the PR carries — i.e. whether this is a standards artifact or pure Plateau presentation.
 
 - **A — Mint a standard-owned conformance-evidence manifest** *(recommended)*. A contract emitted by the
   app's introspectable self-description / trace substrate (reusing the capability-manifest vocabulary,
-  [capabilityMatrix.json:1](../src/_data/capabilityMatrix.json#L1)) — the **same app-emits / tool-consumes
+  [we:capabilityMatrix.json:1](../src/_data/capabilityMatrix.json#L1)) — the **same app-emits / tool-consumes
   shape #575's source-anchor contract took**. Plateau **renders** it into the PR body. Because the manifest
   is runtime-agnostic, a **polyglot/enterprise fix-loop** (a .NET/Java conformance runner) emits the *same*
   manifest — the forward-adapter reach. Classification: a self-description extension **contract**, **not a
@@ -209,7 +209,7 @@ brought it to DoR.
 ### Near-invariant detail (the anchor, recorded in full)
 
 The org's CI + review gate the merge, not the bot. The verify gate
-([engine.mjs:229-247](../scripts/autofix/engine.mjs#L229)) proves the fix cleared *locally*; lint, tests,
+([we:engine.mjs:229-247](../scripts/autofix/engine.mjs#L229)) proves the fix cleared *locally*; lint, tests,
 type-check, static analysis / SonarQube (quality gate, coverage, no new smells), branch protection, and
 required human review still gate it. *Which* gates apply is read from the compliance layer (#579). Auto-merge
 is only reachable after every gate is green — the autonomy dial (#141/#410) *is* the merge dial.

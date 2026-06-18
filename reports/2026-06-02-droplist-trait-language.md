@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-02
 **Status (2026-06-03):** Graduated. The family-level rules (two channels, three altitudes, trait surface map) now live on the [Droplist block](/blocks/droplist/); the single-dropdown worked example (altitudes 1/1a/2/3, country example, `DropList` class) now lives on the [Dropdown block](/blocks/dropdown/). Multi-dropdown and Autocomplete sections remain here as seed content for the [multi-select-dropdown](/backlog/054-multi-select-dropdown-block/) and [autocomplete](/backlog/035-autocomplete-block/) backlog items.
-**Companion to:** [`2026-06-02-dropdown-trait-composition.md`](./2026-06-02-dropdown-trait-composition.md) and [`2026-06-02-intent-vs-trait-change-plan.md`](./2026-06-02-intent-vs-trait-change-plan.md)
+**Companion to:** [`we:2026-06-02-dropdown-trait-composition.md`](./2026-06-02-dropdown-trait-composition.md) and [`we:2026-06-02-intent-vs-trait-change-plan.md`](./2026-06-02-intent-vs-trait-change-plan.md)
 **Point:** show the dropdown re-expressed so that *structural identity* ("I am a single dropdown") is **explicit trait composition**, not an injected intent. `customContexts:droplistIntent="single"` is gone.
 
 ---

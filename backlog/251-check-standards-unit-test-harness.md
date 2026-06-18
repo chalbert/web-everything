@@ -10,16 +10,16 @@ tags: [tooling, check-standards, testing, harness, validation, coverage]
 crossRef: { url: /backlog/, label: Backlog }
 ---
 
-# Give `check-standards.mjs` a unit-test harness so validator rules get real fixtures
+# Give `we:check-standards.mjs` a unit-test harness so validator rules get real fixtures
 
 Surfaced closing out [#247](/backlog/247-graduated-to-value-resolution/) (graduatedTo value
 resolution). That item asked for "a couple of fixture cases in whatever exercises `check-standards`" —
-but **there is no such harness**: `scripts/check-standards.mjs` is a top-to-bottom script with no
+but **there is no such harness**: `we:scripts/check-standards.mjs` is a top-to-bottom script with no
 exported, individually-testable rules, and **no rule has a unit test**. The only validation today is the
 **live run** over the real registries (`npm run check:standards`), so a new rule can only be proven by
 hand-running it (#247 fell back to a throwaway negative-path script + a manual dry-run over the real
 backlog). The one unit-tested sibling is the *autofix engine*
-(`scripts/autofix/__tests__/engine.test.mjs`), not the validator itself.
+(`we:scripts/autofix/__tests__/engine.test.mjs`), not the validator itself.
 
 This is fine for a validator that's *only* ever run live, but it makes each new rule's correctness
 (false-positive safety especially) a manual, un-regressed check. As the validator grows

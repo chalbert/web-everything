@@ -38,18 +38,18 @@ This is the substance a cross-cutting intent standardizes. Most-permissive defau
 Where a control has visible text, its accessible name must contain that text. This is a constraint the naming policy must respect (don't let `aria-label` override a visible label), reinforcing "defer computation to AccName" rather than inventing precedence.
 
 ### 5. Grounding refs in the real tree
-- `src/_data/intents.json:155` — `live-region-status` (the only existing a11y intent; owns *announcement*, not naming).
-- `src/_data/intents.json:899` — `icon` intent: dimensions are size/weight/style only, **no a11y/naming axis** — the gap a cross-cutting intent would fill for icons.
-- `src/_data/intents.json:616` — `validation` intent: precedent for an intent owning its own aria surface (`aria-invalid`/`aria-describedby`) in-place — the "per-intent dimension" branch's strongest analogy.
-- `backlog/587-author-the-expressive-symbol-rendering-intent-substrate.md` — #587 currently owns its own accessible-name dimension (role=img + CLDR fallback; sticker mode requires label).
-- `backlog/370-...-expressive-symbols-...md` Fork 3 — surfaced the gap and spun out this candidate.
-- `frontierui/blocks/droplist/Clearable.ts:33`, `frontierui/blocks/tabs/TabGroupBehavior.ts:177` — existing ad-hoc `aria-label`/`aria-labelledby` wiring with no shared policy home.
+- `we:src/_data/intents.json:155` — `live-region-status` (the only existing a11y intent; owns *announcement*, not naming).
+- `we:src/_data/intents.json:899` — `icon` intent: dimensions are size/weight/style only, **no a11y/naming axis** — the gap a cross-cutting intent would fill for icons.
+- `we:src/_data/intents.json:616` — `validation` intent: precedent for an intent owning its own aria surface (`aria-invalid`/`aria-describedby`) in-place — the "per-intent dimension" branch's strongest analogy.
+- `we:backlog/587-author-the-expressive-symbol-rendering-intent-substrate.md` — #587 currently owns its own accessible-name dimension (role=img + CLDR fallback; sticker mode requires label).
+- `we:backlog/370-...-expressive-symbols-...md` Fork 3 — surfaced the gap and spun out this candidate.
+- `fui:frontierui/blocks/droplist/Clearable.ts:33`, `fui:frontierui/blocks/tabs/TabGroupBehavior.ts:177` — existing ad-hoc `aria-label`/`aria-labelledby` wiring with no shared policy home.
 
 ## Files Created/Modified
 
 | File | Action |
 | --- | --- |
-| `reports/2026-06-14-cross-cutting-accessible-name-intent.md` | Created (this report) |
-| `src/_data/researchTopics.json` | Added `accessible-name-intent` entry |
-| `src/_includes/research-descriptions/accessible-name-intent.njk` | Created (write-up) |
-| `backlog/596-candidate-cross-cutting-accessible-name-intent.md` | Rewritten to prepared-fork shape + `preparedDate` |
+| `we:reports/2026-06-14-cross-cutting-accessible-name-intent.md` | Created (this report) |
+| `we:src/_data/researchTopics.json` | Added `accessible-name-intent` entry |
+| `we:src/_includes/research-descriptions/accessible-name-intent.njk` | Created (write-up) |
+| `we:backlog/596-candidate-cross-cutting-accessible-name-intent.md` | Rewritten to prepared-fork shape + `preparedDate` |

@@ -29,10 +29,10 @@ Drag-and-drop is not one component but a composition of reusable interaction par
 - **Status:** resolved — DnD's *reorder* family codified as intent + traits + block spec + semantics + report. Implementation/demo split to #130.
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
-  - `reorder` intent in `intents.json` (dimensions: grab/movement/commit/announce/scope; keyboard parity mandatory; manual order ≠ Collection Operations' computed sort).
-  - `reorderable-list` block (`concept`) + 6 traits (`withDragHandle`, `withPointerReorder`, `withKeyboardReorder`, `withLiveAnnounce`, `withCommitStrategy`, `withCrossListReorder`) mapped to `reorder.*` dimensions; `block-descriptions/reorderable-list.njk`.
+  - `reorder` intent in `we:intents.json` (dimensions: grab/movement/commit/announce/scope; keyboard parity mandatory; manual order ≠ Collection Operations' computed sort).
+  - `reorderable-list` block (`concept`) + 6 traits (`withDragHandle`, `withPointerReorder`, `withKeyboardReorder`, `withLiveAnnounce`, `withCommitStrategy`, `withCrossListReorder`) mapped to `reorder.*` dimensions; `we:block-descriptions/reorderable-list.njk`.
   - 5 semantics terms (Reorder, Reorderable List, Drag Handle, Keyboard Reorder, Reorder Commit Strategy).
-  - `reports/2026-06-06-reorder-paradigms.md` (prior art, native substrate, feature inventory, open points) — mirrored here via `relatedReport`.
+  - `we:reports/2026-06-06-reorder-paradigms.md` (prior art, native substrate, feature inventory, open points) — mirrored here via `relatedReport`.
   - Cross-referenced #007 (it now owns only the data-transfer half) and #084 (`preserve-on-move`/`Element.moveBefore()` substrate).
   - `gen:inventory` + `check:standards` green (0 errors); eleventy build renders `/intents/reorder/` and `/blocks/reorderable-list/`.
 - **Next:** Implementation + fixture-driven conformance demo → **#130** (keyboard-reorder headline case).

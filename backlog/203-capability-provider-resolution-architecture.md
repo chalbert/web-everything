@@ -60,7 +60,7 @@ module-as-a-service thread ([#087](/backlog/087-module-service-distribution-cach
 4. **D6 — Scoped binding precedence.** app / view / fragment override + inheritance through the base
    chain — who wins, and how an unspecified scope inherits.
 5. **Adapter granularity & ownership.** Does each impl own its capability adapter, or does the
-   capability provider hold a central registered table? (Repo's existing `adapters.json` pattern
+   capability provider hold a central registered table? (Repo's existing `we:adapters.json` pattern
    leans toward registered adapters.)
 
 ## Why it matters
@@ -112,7 +112,7 @@ stories** ([#204](/backlog/204-capability-vocabulary-provider-interface-matrix/)
   meaningful per-context (native on a Chrome view, custom on a Safari view) instead of freezing the
   parent's resolution. *(Build: #207.)*
 
-- **Adapter granularity & ownership = central registered table** (the existing `adapters.json`
+- **Adapter granularity & ownership = central registered table** (the existing `we:adapters.json`
   pattern), resolved by the D4′ ruling: each impl authors its capability→tier row, but registration is
   central — the provider must enumerate all impls to resolve native-first anyway, and one table is
   discoverable. Ownership distributed, storage central. *(Build: #206.)*

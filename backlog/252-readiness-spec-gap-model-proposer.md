@@ -17,7 +17,7 @@ The deterministic readiness fixer (#250) refuses anything requiring judgment —
 acceptance criteria, invents file paths, or resolves a `decision` fork. That non-deterministic
 *assist* was explicitly carved out of #250 into its own item: a **separate `--dry-run` proposer**
 that suggests criteria/paths for a vague-but-already-decided backlog item, and **never touches the
-deterministic core** in [scripts/readiness/engine.mjs](scripts/readiness/engine.mjs).
+deterministic core** in [we:scripts/readiness/engine.mjs](scripts/readiness/engine.mjs).
 
 This is the readiness analogue of the conformance auto-fix `model` fixer (#196): AI is a swappable
 provider behind a stable contract, not architecture. It plugs into the *same* propose-and-verify
@@ -51,21 +51,21 @@ discipline (#089) — propose a patch, never auto-apply prose.
 - **Status:** resolved (2026-06-09)
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
-  - Pure quarantined engine [scripts/readiness/proposer.mjs](scripts/readiness/proposer.mjs):
+  - Pure quarantined engine [we:scripts/readiness/proposer.mjs](scripts/readiness/proposer.mjs):
     deterministic candidate selection (decided-but-thin issue/idea, both gap signals), the
     `CustomProposerRegistry` provider seam (mirrors `CustomFixerRegistry` #196), a deterministic
     reference/scaffolding proposer, and the `propose` → `renderProposalDiff` orchestration. Imports
     nothing from the #250 core (structural test guards both directions).
-  - CLI [scripts/propose-readiness.mjs](scripts/propose-readiness.mjs): BYO-key `claude-opus-4-8`
+  - CLI [we:scripts/propose-readiness.mjs](scripts/propose-readiness.mjs): BYO-key `claude-opus-4-8`
     model provider (raw `fetch`, adaptive thinking, `json_schema` output) registered only when
     `ANTHROPIC_API_KEY` is set; `--reference` swaps in the keyless scaffolding proposer; `--json`
     machine output. Dry-run only — prints a `+`-prefixed diff, writes nothing.
   - `npm run propose:readiness` script wired.
-  - 12 demo-first tests in `scripts/readiness/__tests__/proposer.test.mjs` (all 3 acceptance criteria
+  - 12 demo-first tests in `we:scripts/readiness/__tests__/proposer.test.mjs` (all 3 acceptance criteria
     + quarantine guard + provider-failure handling), all green. `check:standards` 0 errors.
   - Verified live: keyless run reports `provider: none` and lists gaps without drafting (criterion 3);
     `--reference` prints proposed criteria/paths and writes nothing (criterion 1); decision/review
     items are never selected (criterion 2).
 - **Next:** none — resolved. Follow-up #253 (model-provider retry/backoff) captured.
-- **Notes:** the pre-existing `blocks/.../mapping-conformance.test.tsx` failure is from an unrelated
+- **Notes:** the pre-existing `we:blocks/.../mapping-conformance.test.tsx` failure is from an unrelated
   uncommitted working-tree change to its JSX fixture, not this work (passes once that change is stashed).

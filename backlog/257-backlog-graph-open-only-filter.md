@@ -21,15 +21,15 @@ the live frontier (a handful of open nodes) is scattered among many muted, resol
 This adds a small filter toggle to the Graph tab: **All** (today's behaviour) vs **Open & blockers**
 (only `open`/`active` nodes plus the still-open prerequisites that gate them — drop chains where
 everything is already resolved). A bounded follow-up; it reuses the existing
-[src/_data/backlogGraph.js](src/_data/backlogGraph.js) model and
-[src/assets/js/backlog-graph.js](src/assets/js/backlog-graph.js) renderer — the toggle just filters the
+[we:src/_data/backlogGraph.js](src/_data/backlogGraph.js) model and
+[we:src/assets/js/backlog-graph.js](src/assets/js/backlog-graph.js) renderer — the toggle just filters the
 node/edge set before layout.
 
 ## Build
 
 - Emit a `subset` flag per node (or compute client-side): a node is "live" if it is `open`/`active`, or
   it is an unresolved prerequisite of a live node. Edges between two live nodes are kept.
-- A small toggle in the Graph panel ([src/backlog.njk](src/backlog.njk)) re-runs the renderer over the
+- A small toggle in the Graph panel ([we:src/backlog.njk](src/backlog.njk)) re-runs the renderer over the
   filtered set; persist the choice the same way the tab does (localStorage), default **Open & blockers**.
 
 ## Acceptance criteria
@@ -44,9 +44,9 @@ node/edge set before layout.
 - **Status:** resolved (2026-06-10)
 - **Branch:** docs/standard-authoring-workflow
 - **Done:**
-  - Added an **All / Open & blockers** segmented toggle to the Graph panel ([src/backlog.njk](src/backlog.njk)),
+  - Added an **All / Open & blockers** segmented toggle to the Graph panel ([we:src/backlog.njk](src/backlog.njk)),
     defaulting to **Open & blockers**; choice persists in `localStorage` (`we-backlog-graph-filter`).
-  - Refactored [src/assets/js/backlog-graph.js](src/assets/js/backlog-graph.js) into a `render(mode)` that
+  - Refactored [we:src/assets/js/backlog-graph.js](src/assets/js/backlog-graph.js) into a `render(mode)` that
     filters the #255 build-time model client-side (no second model) and re-lays-out the SVG in place — no
     reload. The count badge (`#bg-count`) reflects the visible set.
   - Filter rule: a node is **live** iff `status` is `open`/`active`; since an unresolved prerequisite of a
@@ -67,4 +67,4 @@ node/edge set before layout.
 - **Notes:** active/claimed nodes still render muted (the renderer colours only `open` + tier), matching the
   existing legend; no model/`_data` change was needed.
 
-**Graduated to** `src/assets/js/backlog-graph.js` — open-only client-side filter on the dependency-graph Graph tab (src/backlog.njk).
+**Graduated to** `we:src/assets/js/backlog-graph.js` — open-only client-side filter on the dependency-graph Graph tab (we:src/backlog.njk).

@@ -41,8 +41,8 @@ draw the gap, without prescribing the visuals.
 - Leave the actual visuals (line vs. shaded slot) to the implementation/theme — spec only the hook,
   per the report.
 
-See `reports/2026-06-06-reorder-paradigms.md` (Open points → "ROUGH — drop-position indicator") and
-the styling-hooks section of `src/_includes/block-descriptions/reorderable-list.njk`.
+See `we:reports/2026-06-06-reorder-paradigms.md` (Open points → "ROUGH — drop-position indicator") and
+the styling-hooks section of `we:src/_includes/block-descriptions/reorderable-list.njk`.
 
 ## Progress
 

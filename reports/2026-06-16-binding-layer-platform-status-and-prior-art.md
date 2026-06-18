@@ -46,7 +46,7 @@ contested, multi-year (or never) target. "Defer until it ships" ≈ "defer indef
 ## 3. The crux
 
 WE already lowers `<component>` to a generated class at build time
-([declarativeComponent.ts](../blocks/renderers/component/declarativeComponent.ts) → `generateClassSource`).
+([we:declarativeComponent.ts](../blocks/renderers/component/declarativeComponent.ts) → `generateClassSource`).
 It does **not** need a browser binding primitive to reflect an observed attribute into content — it can emit
 `static observedAttributes` + `attributeChangedCallback` + targeted `textContent`/attribute assignments,
 exactly like Svelte. So the real fork is **not** "wait vs build" on capability grounds (both are buildable);
