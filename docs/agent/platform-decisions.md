@@ -306,6 +306,41 @@ web-standard import-maps / Native-Federation, never webpack Module Federation (p
 **Lineage:** #963 (Slate/React optional-dep fork). Refines — does not duplicate — [constellation-placement](#constellation-placement)
 (WE/FUI/Plateau division); this is *intra-FUI* framework containment.
 
+### Runtime-DI seam vs devtools provider seam {#runtime-di-vs-devtools-provider-seam}
+
+A capability is a **runtime-DI standard seam** — a mandated `CustomXRegistry` or protocol — **only if
+the running app or standard consults it at runtime** (#052/#081). A capability consulted by a **tool at
+author / build time** (an upgrader analyzer, a version-migration *input adapter*, #094/#191) is a
+**devtools provider seam**: plain injected providers, **never** a global mutable singleton or a mandated
+protocol. The cargo-cult tells are a kinship doc-comment + a global mutable registry where a passed
+provider would do — demote build-time providers *out* of the runtime-registry surface.
+
+**Lineage:** #052/#081 (runtime registries the standard consults) · #094/#191 (upgrader analyzer / migration adapter = devtools provider seam).
+
+### A multi-strategy concern is a configurable dimension; default extends the platform {#config-extends-platform-default}
+
+When a concern has **more than one legitimate end-state** (e.g. auto-define: explicit / eager-barrel /
+on-import / on-first-use / build-parse / declarative-map / convention / SSR), model it as a
+**configurable strategy dimension** — never bake one mechanism (the *dimension-vs-fixed-mechanic* rule).
+The **default is the most-permissive / native-first** value, with the restriction as the author's opt-in.
+Defaults live in a **project config that *extends* a fully-defined platform default** (flavors); the core
+tool/registry itself stays **default-less** (core `CustomRegistry` `extends`; the JSX render-strategy axis
+is the precedent).
+
+**Lineage:** #227 (auto-define strategy axis) · #080 (render-strategy precedent). Process forms in [conventions.md](conventions.md) / [architecture.md](architecture.md).
+
+### Compose an existing intent — don't duplicate an owned model {#compose-intent-dont-duplicate}
+
+The intent-level analogue of [compose-don't-hand-roll](#compose-dont-handroll). When a standard needs
+async / lifecycle / interaction behavior a **registered intent already owns**, it **composes that intent
+and cross-references it — it never spins up a parallel model**. `<Resource>` resolves *through* the Loader
+Intent's state machine (`idle|pending|success|error|stale|loadingMore`) rather than re-implementing one
+(#124); a Menu block composes the owned anchor / focus / type-ahead / selection / disclosure intents and
+builds **only the one genuinely-missing intent** (command invocation), not a fresh interaction stack
+(#173). Build only the irreducibly-new vocabulary; wire the rest.
+
+**Lineage:** #124 (Resource → Loader Intent) · #173 (Menu → existing intents + the one missing `command`). Sibling of [compose-dont-handroll](#compose-dont-handroll).
+
 ---
 
 ## Standing process & method rules (codified in the topical docs — pointers)

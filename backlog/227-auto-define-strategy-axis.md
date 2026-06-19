@@ -6,7 +6,7 @@ dateOpened: "2026-06-09"
 dateStarted: "2026-06-09"
 dateResolved: "2026-06-09"
 graduatedTo: "protocol:auto-define-strategy"
-codifiedIn: "one-off"
+codifiedIn: "docs/agent/platform-decisions.md#config-extends-platform-default"
 size: 5
 tags: [components, custom-elements, self-registration, auto-define, strategy-axis, research]
 relatedReport: reports/2026-06-03-jsx-adapter-feature-mapping.md

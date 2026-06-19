@@ -10,7 +10,7 @@ preparedDate: "2026-06-12"
 blockedBy: ["266", "094", "102"]
 dateResolved: "2026-06-13"
 graduatedTo: none
-codifiedIn: "one-off"
+codifiedIn: "docs/agent/platform-decisions.md#runtime-di-vs-devtools-provider-seam"
 tags: [upgrader, codemod, migration, spec-versioning, breaking-change, machine-readable]
 relatedProject: webadapters
 relatedReport: reports/2026-06-12-upgrader-version-migration-codemods.md

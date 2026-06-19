@@ -6,7 +6,7 @@ status: resolved
 dateOpened: "2026-06-07"
 dateResolved: "2026-06-11"
 graduatedTo: none
-codifiedIn: "one-off"
+codifiedIn: "docs/agent/platform-decisions.md#compose-intent-dont-duplicate"
 preparedDate: "2026-06-11"
 tags: [block, menu, menubar, context-menu, command, aria, candidate, harvest]
 relatedProject: webblocks
