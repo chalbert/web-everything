@@ -26,6 +26,7 @@ import type { MergedValidity } from '../../validity-merge/provider.js';
 import InjectorRoot from '../webinjectors/InjectorRoot';
 import CustomValidityMergeRegistry from './CustomValidityMergeRegistry';
 import { applyMergedValidity } from './applyMergedValidity';
+import { InteractionStateTracker } from '../../interaction-state/model';
 
 declare global {
   interface Window {
@@ -57,6 +58,10 @@ export default class ValidityMergeField extends HTMLElement {
   #nativeInteracted = false;
   /** The control we have listeners on (re-synced when the light DOM swaps it). */
   #controlEl: NativeControl | null = null;
+
+  /** Interaction state (dirty/touched/focused/submitted) — orthogonal to validity, reflected as data-*. */
+  readonly #interaction = new InteractionStateTracker();
+  #unsubInteraction: (() => void) | null = null;
 
   /** A control `input`/`change`/`invalid` marks interaction and re-derives the `native` source. */
   readonly #onControlEvent = (): void => {
@@ -162,6 +167,10 @@ export default class ValidityMergeField extends HTMLElement {
     control.addEventListener('input', this.#onControlEvent);
     control.addEventListener('change', this.#onControlEvent);
     control.addEventListener('invalid', this.#onControlEvent);
+    // Track interaction state off the same control and reflect it as data-dirty/touched/focused.
+    this.#interaction.attach(control);
+    this.#unsubInteraction = this.#interaction.subscribe(() => this.#reflectInteraction());
+    this.#reflectInteraction();
   }
 
   #detachControlListeners(): void {
@@ -170,7 +179,28 @@ export default class ValidityMergeField extends HTMLElement {
     control.removeEventListener('input', this.#onControlEvent);
     control.removeEventListener('change', this.#onControlEvent);
     control.removeEventListener('invalid', this.#onControlEvent);
+    this.#unsubInteraction?.();
+    this.#unsubInteraction = null;
+    this.#interaction.detach();
     this.#controlEl = null;
+  }
+
+  /** Reflect the interaction flags as `data-dirty` / `data-touched` / `data-focused` (L1 observables). */
+  #reflectInteraction(): void {
+    const { dirty, touched, focused } = this.#interaction.state;
+    this.setAttribute('data-dirty', String(dirty));
+    this.setAttribute('data-touched', String(touched));
+    this.setAttribute('data-focused', String(focused));
+  }
+
+  /** Reflect merged validity as `data-validity` + `data-severity` (L1 observables, beyond-native). */
+  #reflectValidity(merged: MergedValidity): void {
+    const validity = merged.state === 'idle' ? 'unknown' : merged.state; // unknown | pending | valid | invalid
+    this.setAttribute('data-validity', validity);
+    // No per-message severity in the contract yet (#1112); derive the coarse signal from state.
+    if (merged.state === 'invalid') this.setAttribute('data-severity', 'error');
+    else if (merged.state === 'pending') this.setAttribute('data-severity', 'info');
+    else this.removeAttribute('data-severity');
   }
 
   /** Swap the active merge strategy by name (re-resolved through scope) and recompute. */
@@ -184,6 +214,7 @@ export default class ValidityMergeField extends HTMLElement {
     this.#last = merged;
     const anchor = (this.querySelector('input, select, textarea') as HTMLElement) ?? undefined;
     applyMergedValidity(this.#internals, merged, anchor);
+    this.#reflectValidity(merged);
     this.dispatchEvent(
       new CustomEvent<MergedValidity>('validity-merge', { detail: merged, bubbles: true }),
     );
