@@ -1,7 +1,6 @@
 ---
 type: idea
-workItem: story
-size: 13
+workItem: epic
 parent: "746"
 status: open
 blockedBy: ["753", "955", "977"]
@@ -13,6 +12,22 @@ tags: [webdocs, block-explorer, adapters, polyglot]
 ---
 
 # Polyglot panel — live-test sandbox: execute the generated wrapper in an embedded sandbox
+
+**Storied epic (split 2026-06-18, `/split 912`).** The live-test sandbox — serve the generated
+React/Vue wrapper, mount it live in the workbench, and surface runtime errors. With #955 (A2 same-document
+mount), #974 (the `servePathIR` wrapper-serve protocol) and #977 (`react-wrapper`/`vue-wrapper` form
+values) all resolved, no design fork remains; the build decomposes into three slices on a linear
+incremental-delivery chain (each leaves a valid demoable state). Home `fui:`. locus:frontierui. See
+the [split analysis report](../reports/2026-06-18-backlog-split-analysis.md) → *`/split 912`*.
+
+**Children (DAG: A → B → C):**
+- **A** — FUI `/_maas/` wrapper-serve endpoint (`story·5`, no blocker): Vite `configureServer` middleware
+  conforming to `servePathIR` + `maas-versioning`, running `fui:tools/gen-wrapper/genWrapper.mjs` + esbuild; own conformance test.
+- **B** — Workbench same-document live-test mount + react/vue devDeps (`story·5`, blockedBy A): `import('/_maas/…?form=react-wrapper')`,
+  same-doc mount (#955-A2), error-surfacing, wired to inspector/event/anatomy.
+- **C** — Playwright e2e for the live-test panel (`task·2`, blockedBy B).
+
+---
 
 Block Explorer polyglot-panel slice (b), sibling of #753. Build the embedded live-test sandbox that transpiles and mounts the generated React/Vue wrapper source (from #753's consume-mode tabs / genWrapper) and renders it live with runtime-error surfacing — the body's flagged non-trivial sub-build. In-browser transpile approach (esbuild-wasm / Babel-standalone) is a builder impl choice, not a fork. Home fui:workbench/. locus:frontierui.
 
