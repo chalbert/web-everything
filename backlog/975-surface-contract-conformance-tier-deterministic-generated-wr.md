@@ -23,11 +23,11 @@ Built along the #899 ownership cut:
   every surface dimension (mixed `combo-box`, attributes-only, events-only). Surface members are
   **target-neutral** (an `event` is "must forward this DOM event"); the runner maps each to its per-target
   manifestation, so WE never legislates framework specifics.
-- **FUI (runner)** — `frontierui/tools/gen-wrapper/surfaceContract.mjs` (+ `.d.ts`):
+- **FUI (runner)** — `fui:tools/gen-wrapper/surfaceContract.mjs` (+ `.d.ts`):
   `extractWrapperSurface` (pure source parse, no eval → deterministic) + `checkSurfaceContract(vector,
   target)` producing the verdict (`missing` = generator dropped a declared member; `extra` = invented a
   prop/event; slots excluded from `extra` as a benign superset). Generic, so it runs the WE vectors.
-- **FUI (badge)** — `frontierui/workbench/surfaceContractBadge.ts`: builds + renders a workbench badge
+- **FUI (badge)** — `fui:workbench/surfaceContractBadge.ts`: builds + renders a workbench badge
   with the label fixed to the string `surface-contract` (the #913 honesty rule), pass iff every target's
   verdict is ok, with a per-target gap detail.
 

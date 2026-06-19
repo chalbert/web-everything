@@ -7,7 +7,7 @@ status: open
 locus: frontierui
 blockedBy: ["725", "950"]
 dateOpened: "2026-06-12"
-dateStarted: "2026-06-14"
+dateStarted: "2026-06-19"
 tags: [plugs, dedup, migration, frontierui, plateau-app]
 ---
 
@@ -17,6 +17,30 @@ tags: [plugs, dedup, migration, frontierui, plateau-app]
 > Unblocks when #950 resolves (also coordinate with #726's test backfill before the WE-side delete).
 
 # Package `frontierui/plugs` as `@frontierui/plugs`, delete `webeverything/plugs`, repoint WE + plateau-app
+
+## Claimed + released — outgrew a batch slice (batch-2026-06-18)
+
+Blockers verified resolved (#725, #950 both `resolved`), so the item is genuinely **unblocked** — the
+collision warnings above are stale. Released anyway: scoping the actual work at claim shows it exceeds a
+batch slice and wants a dedicated session (`/next 449`), where the dev server can be restarted. Concrete
+scope measured on-disk:
+
+- **WE has 61 runtime consumers of `../plugs/`** (excl. demos/tests; +tests +demos on top) — every one
+  must repoint to the package. WE's `blocks/*` reference runtime (parsers, stores, behaviors,
+  registries) consumes plugs directly; this is the bulk.
+- **`frontierui/plugs` has no `fui:plugs/package.json` yet** — Scope §1 (dual `.`/`/bootstrap` exports) is greenfield.
+- **152 files** to delete under `webeverything/plugs/`, plus the plateau-app alias repoint (3rd repo) and
+  the #726 test relocation (`webguards`/`webvalidation` unplugged tests → FUI canonical home).
+- **Dev-server-restart blocker (same as #960):** the 61 imports resolve only once `@frontierui/plugs` is
+  added as a path alias in WE's `we:tsconfig.json` + `we:vite.config.mts` — a vite-config change forces a dev
+  server restart, which the batch must not do to the user's running server.
+
+Direction is settled (#606: plugs is FUI's; WE consumes it as a no-leakage client — WE is unpublished
+`web-everything`, so the runtime import is a client seam, not a `@webeverything` standard-artifact dep).
+No new fork — purely an execution-size + toolchain-restart deferral. **Resume via `/next 449`** in a
+focused session; land the FUI `fui:plugs/package.json` first, then the alias (accepting the restart), then the
+import sweep + delete + plateau-app repoint + #726 test move.
+
 
 Terminal dedup of [#170](/backlog/170-plugs-duplicated-across-webeverything-frontierui/). The **relocation** in the
 direction [#606](/backlog/606-where-does-the-plugs-platform-layer-runtime-live-web-everyth/) ratified (2026-06-14):

@@ -18,9 +18,9 @@ Per #974 (A1 ruling): the MaaS wrapper-serve need rides the existing catalog-gat
 
 ## Progress — resolved (batch-2026-06-18)
 
-Built the injected catalog as a FUI module — `frontierui/tools/gen-wrapper/wrapperFormCatalog.mjs`
+Built the injected catalog as a FUI module — `fui:tools/gen-wrapper/wrapperFormCatalog.mjs`
 (+ `.d.ts` + unit test). Per #974 invariant #5 / #855, this lives in **FUI, not WE**: the
-genWrapper-backed forms can't be wired into WE's reference `moduleService.ts` (genWrapper is
+genWrapper-backed forms can't be wired into WE's reference `we:moduleService.ts` (genWrapper is
 FUI-owned, never `@webeverything`), and the FUI endpoint is its own runtime conforming to the
 type-only IR. So WE's reference catalog is untouched (A1 yields no WE artifact, as ratified).
 
