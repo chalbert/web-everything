@@ -74,12 +74,18 @@ the per-item chat-rename — a batch labels the session **once**.
    reserves flow back; `claim` already dropped the worked ones), then emit the **standard closure block**
    (*backlog-workflow.md → Stopping*): the fixed terse shape — header (`cost X/budget · stop: <rule>`), one
    `✓`/`~`/`→` line per item (carry-forwards tagged with a drop-reason), the Next line, the single calibration
-   line. **No bespoke essay**; expand only for a red gate or on request. **Calibrate:** the closure's last
-   line is always the standard ask **verbatim** — `Context %? — for calibrate; skip if you can't read it.`
-   (never the `AskUserQuestion` popup, never re-ask/block/guess) — then `node scripts/backlog.mjs calibrate
-   --points=<cost resolved> --context-pct=<reading> --stop-reason=<which stop>`. Only a capacity stop
-   (`budget`/`context`) trains the estimate; work-bound (`empty-pool`/`fork`/`gate`) is recorded but
-   **excluded** (#553). No reading → **skip** calibration (closing-session runs it for you otherwise).
+   line. **No bespoke essay**; expand only for a red gate or on request. **Calibrate — SERIAL `/batch` ONLY:**
+   calibration maps a context-% reading → points resolved, which only holds when the **main loop does the
+   work**. A `/workflow` (parallel) batch resolves its points in **subagent contexts** (worktree lanes), so
+   the orchestrator's context-% measures only pack/plan/land overhead — it is **decoupled** from throughput
+   and a reading there is meaningless (and would pollute the estimate). So for **`/workflow` (parallel): SKIP
+   calibration entirely** — no context-% ask, no `calibrate` call; its ceiling is the token/agent budget, not
+   context. For **serial `/batch`**, calibrate as normal: the closure's last line is the standard ask
+   **verbatim** — `Context %? — for calibrate; skip if you can't read it.` (never the `AskUserQuestion` popup,
+   never re-ask/block/guess) — then `node scripts/backlog.mjs calibrate --points=<cost resolved>
+   --context-pct=<reading> --stop-reason=<which stop>`. Only a capacity stop (`budget`/`context`) trains the
+   estimate; work-bound (`empty-pool`/`fork`/`gate`) is recorded but **excluded** (#553). No reading → **skip**
+   calibration (closing-session runs it for you otherwise).
 
 **The stop rule (solid by construction)** — the **points budget is the sole driver**; stop the batch at a
 seam if (and ONLY if) ANY of these **four** holds (full text in *Running a batch* → *The stop rule*):

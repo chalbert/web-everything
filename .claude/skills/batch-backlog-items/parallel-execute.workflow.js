@@ -16,8 +16,9 @@ export const meta = {
 //   1. Serial is the safe baseline. Anything not PROVABLY independent runs in the serial lane.
 //   2. Partition only on provable independence: an item runs concurrently ONLY if its predicted touch-set is
 //      disjoint from EVERY other item's AND it is on no blockedBy edge with another item. Anything else → serial.
-//   3. Each item is its OWN agent — concurrent items in their OWN git worktree, serial items one-at-a-time on
-//      the integration branch. Per-item full single-item arc (claim → work → gate).
+//   3. Each item is its OWN agent — concurrent items in their OWN git worktree; serial items one-at-a-time
+//      INSIDE a dedicated integration worktree (never the user's shared checkout). Per-item full single-item
+//      arc (claim → work → gate). The workflow NEVER runs `git switch` on the live checkout (#1147 promise).
 //   4. Git is the conflict detector: merge worktrees ONE AT A TIME; a conflict ⇒ the partition was wrong, so
 //      abort that item's merge and replay it serially on the merged result. Never force-merge.
 //   5. No silent speculation: every partition decision + every replay is logged (per item).
@@ -70,9 +71,9 @@ const PROBE_SCHEMA = {
     },
     touchesMonolith: {
       type: 'array', items: { type: 'string' },
-      description: 'still-monolithic shared files it must edit (e.g. src/_data/projects.json) — these force the serial lane, list them explicitly.',
+      description: 'still-monolithic shared files it must edit (e.g. src/_data/projects.json) — these force the serial lane, list them explicitly. Per-entry registry files (src/_data/<reg>/<id>.json) are NOT monolithic — never list them.',
     },
-    confident: { type: 'boolean', description: 'false if the touch-set is uncertain — the item is then forced into the serial lane (safe default).' },
+    confident: { type: 'boolean', description: 'TRUE when every predicted file is one this item OWNS (its own impl/code, its own demo page, its own backlog/NNN.md, its own per-entry registry entries, its own test file). FALSE *only* when work plausibly spills into a SHARED surface another item could also touch: a still-monolithic registry, shared runtime (plugs/bootstrap.ts), a shared *.njk include, shared test specs, build config (tsconfig/vite/package.json), or a broad cross-file refactor. Routine uncertainty about the exact file COUNT is NOT a reason for false; only genuine shared-surface risk is. Per-entry registry writes do NOT lower confidence. False forces the serial lane.' },
   },
 };
 
@@ -161,9 +162,16 @@ const probes = await parallel(items.map((it) => () =>
       `its impl/code files, its own we:backlog/${it.num}.md, and any per-entry registry file it would add`,
       `(src/_data/<registry>/<id>.json — registries are one-file-per-entry since #1145/#1146).`,
       `Frontmatter declares: ${JSON.stringify(it.declaredFiles || [])} — treat that as a LOWER BOUND only.`,
-      `List still-monolithic shared files it must edit separately in touchesMonolith.`,
-      `Set confident=false if you are at all unsure of the touch-set — a missed file corrupts a merge, so`,
-      `uncertainty must fall back to serial. Return ONLY the structured object.`,
+      `Per-entry registry files (src/_data/<registry>/<id>.json) are DISJOINT by construction (#1145/#1146):`,
+      `writing your OWN new/edited entry never collides with another item, so do NOT list them in touchesMonolith`,
+      `and they do NOT lower your confidence. List in touchesMonolith ONLY still-monolithic shared files`,
+      `(projects/capabilities/adapters/capabilityMatrix/designSystems registries, plugs/bootstrap.ts, build config).`,
+      `Set confident=TRUE when every file you'll touch is one this item clearly OWNS — its own impl/code, its own`,
+      `demo page, its own we:backlog/${it.num}.md, its own per-entry registry entries, its own test file.`,
+      `Set confident=FALSE *only* when the work plausibly SPILLS into a shared surface another item could also`,
+      `touch (a monolithic registry, plugs/bootstrap.ts, a shared *.njk include, a shared test spec, tsconfig/vite/`,
+      `package.json, or a broad cross-file refactor). Routine uncertainty about the exact file COUNT is NOT a reason`,
+      `for false — only genuine shared-surface risk is; default disjoint-looking work to TRUE. Return ONLY the structured object.`,
     ].join(' '),
     { label: `probe:${it.num}`, phase: 'Probe', schema: PROBE_SCHEMA, effort: 'low' },
   ).then((p) => {
@@ -248,39 +256,47 @@ const concurrentResults = await parallel(concurrent.map((it) => () =>
 ));
 
 // ── Phase 3 — Integrate: serial lane FIRST, then merge worktrees one at a time, replay on conflict ─
-// SAFETY (#1147): ALL of this happens on a throwaway INTEGRATION BRANCH off HEAD — the workflow NEVER writes
-// the user's live working branch. It returns the integration branch ref; the main agent does the single
-// landing merge after a green return (smallest write-window on the shared branch, a natural abort point).
+// SAFETY (#1147): ALL of this happens in a throwaway INTEGRATION WORKTREE on a throwaway branch off HEAD —
+// the workflow NEVER switches or writes the user's live checkout. The integration branch is assembled in its
+// OWN worktree directory (git worktree add), so the user's branch + working tree stay exactly as they were
+// for the whole run. The workflow returns the integration branch ref AND its worktree path; the main agent
+// does the single landing merge after a green return, then removes the worktree.
 phase('Integrate');
 
 const ledger = [];
 let conflictsReplayed = 0;
 const integrationBranch = `batch-parallel/${batchSlug}`;
+const integrationWorktree = `.claude/worktrees/integrate-${batchSlug}`;
 
-// 3.0 — Cut the integration branch off the current HEAD. Everything below works on it.
+// 3.0 — Cut the integration branch in its OWN worktree off the current HEAD. NEVER `git switch` the shared
+// checkout — that would move the user's branch out from under them. Everything below works inside the worktree.
 await agent(
-  `Create and switch to a throwaway integration branch "${integrationBranch}" off the current HEAD ` +
-  `(git switch -c ${integrationBranch}). This branch is where the whole parallel batch is assembled; the ` +
-  `user's live working branch must stay untouched. Just create+switch and confirm. Never push.`,
+  `Create a throwaway integration WORKTREE for assembling a parallel batch, WITHOUT touching the user's ` +
+  `current checkout or branch. Run exactly: \`git worktree add ${integrationWorktree} -b ${integrationBranch} HEAD\` ` +
+  `(this creates branch "${integrationBranch}" checked out in the NEW directory ${integrationWorktree}; the ` +
+  `user's live working tree + branch are left completely untouched — do NOT run \`git switch\`/\`git checkout\` ` +
+  `in the main checkout). Then make gates runnable in the worktree: \`ln -sfn "$(pwd)/node_modules" ` +
+  `${integrationWorktree}/node_modules\`. Confirm the worktree exists and is on ${integrationBranch}. Never push.`,
   { label: 'integrate:setup', phase: 'Integrate' },
 ).catch(() => null);
 
-// 3a. The serial lane runs FIRST, on the INTEGRATION branch (no worktree), ONE item per agent so each lands
-// its own progress line. These items could not be PROVEN independent, so they're the safe baseline the
-// concurrent worktrees merge on top of.
+// 3a. The serial lane runs FIRST, inside the INTEGRATION WORKTREE, ONE item per agent so each lands its own
+// progress line. These items could not be PROVEN independent, so they're the safe baseline the concurrent
+// worktrees merge on top of.
 if (serialItems.length > 0) {
-  log(`Serial lane: working ${serialItems.length} item(s) sequentially on the integration branch…`);
+  log(`Serial lane: working ${serialItems.length} item(s) sequentially in the integration worktree…`);
   let sIdx = 0;
   for (const it of serialItems) {
     sIdx++;
     const r = await agent(
       [
         `You are the SERIAL segment of a parallel batch (slug ${batchSlug}), working item #${it.num}`,
-        `("${it.slug}") on the integration branch "${integrationBranch}" (already checked out; no worktree).`,
-        `It is here because it could not be PROVEN independent (uncertain touch-set, touches a monolithic`,
-        `registry, or shares files / a blockedBy edge with another item). Work the FULL single-item arc:`,
-        `claim → work → FULL whole-repo gate (npm run check:standards) → commit this item's files on this`,
-        `branch (never push). Resolve only after green. Return the structured ITEM result (include changedFiles).`,
+        `("${it.slug}"). Do ALL work INSIDE the integration worktree: \`cd ${integrationWorktree}\` first (it is`,
+        `on branch "${integrationBranch}"); never touch the user's main checkout. This item is here because it`,
+        `could not be PROVEN independent (uncertain touch-set, touches a monolithic registry, or shares files /`,
+        `a blockedBy edge with another item). Work the FULL single-item arc: claim → work → FULL whole-repo gate`,
+        `(npm run check:standards, run from inside the worktree) → commit this item's files on this branch`,
+        `(never push). Resolve only after green. Return the structured ITEM result (include changedFiles).`,
       ].join(' '),
       { label: `serial:#${it.num}`, phase: 'Integrate', schema: ITEM_RESULT_SCHEMA },
     ).catch(() => null);
@@ -306,7 +322,8 @@ for (let i = 0; i < concurrentResults.length; i++) {
     log(`  merging #${it.num} (${i + 1}/${concurrentResults.length})…`);
     integrated = await agent(
       [
-        `Integrate parallel batch item #${it.num} (branch "${cr.branch}") into the current integration branch.`,
+        `Inside the integration worktree (\`cd ${integrationWorktree}\`, on branch "${integrationBranch}"; never`,
+        `touch the user's main checkout), integrate parallel batch item #${it.num} (branch "${cr.branch}").`,
         `Merge it: attempt the merge; if git reports a CONFLICT, ABORT the merge (git merge --abort) and report`,
         `conflicted:true — DO NOT force it. On a clean merge, run the FULL gate (npm run check:standards) on the`,
         `merged tree and report gate green/red. Never push. Return { num:"${it.num}", merged, conflicted, gate, notes }.`,
@@ -322,7 +339,8 @@ for (let i = 0; i < concurrentResults.length; i++) {
     log(`#${it.num} could not land clean (${reason}) — replaying it serially.`);
     const replay = await agent(
       [
-        `Replay parallel batch item #${it.num} ("${it.slug}") SERIALLY on the current integration branch (its`,
+        `Inside the integration worktree (\`cd ${integrationWorktree}\`, on branch "${integrationBranch}"; never`,
+        `touch the user's main checkout), replay parallel batch item #${it.num} ("${it.slug}") SERIALLY (its`,
         `worktree merge was aborted/failed). Work it as an ordinary serial item: claim if not already active,`,
         `redo the edits on THIS tree, FULL whole-repo gate (npm run check:standards), commit (never push).`,
         `Return the structured ITEM result (include changedFiles).`,
@@ -346,7 +364,8 @@ if (derived.size > 0) {
   log(`Regenerating ${derived.size} derived artifact(s) once on the merged tree: ${[...derived].join(', ')}`);
   const regen = await agent(
     [
-      `On the current integration branch, regenerate the derived artifacts the items deferred:`,
+      `Inside the integration worktree (\`cd ${integrationWorktree}\`, on branch "${integrationBranch}"; never`,
+      `touch the user's main checkout), regenerate the derived artifacts the items deferred:`,
       `${[...derived].join(', ')}. Run the canonical generators (e.g. npm run gen:inventory for AGENTS.md,`,
       `npm run gen:reference-index for src/_data/referenceIndex.json), then run the FULL gate`,
       `(npm run check:standards) and commit the regenerated artifacts in ONE commit. Report gate green/red.`,
@@ -374,11 +393,13 @@ if (multiLaneFiles.length > 0) {
 
 const resolved = ledger.filter((l) => l.status === 'resolved');
 const spent = resolved.reduce((s, l) => s + (Number(l.cost) || 0), 0);
-log(`Parallel batch assembled on ${integrationBranch}: ${resolved.length}/${ledger.length} resolved, ${conflictsReplayed} item(s) replayed serially, ${multiLaneFiles.length} multi-item file(s), ${spent}/${budgetPoints} points. The MAIN AGENT now lands ${integrationBranch} onto the live branch.`);
+log(`Parallel batch assembled on ${integrationBranch} (in worktree ${integrationWorktree}): ${resolved.length}/${ledger.length} resolved, ${conflictsReplayed} item(s) replayed serially, ${multiLaneFiles.length} multi-item file(s), ${spent}/${budgetPoints} points. The user's checkout was never touched. The MAIN AGENT now lands ${integrationBranch} onto the live branch, then removes the worktree (git worktree remove ${integrationWorktree}).`);
 
 return {
-  // The workflow never touched the live branch. The main agent lands this (single merge) after a green return.
+  // The workflow never touched the user's checkout/branch — it assembled everything in its own worktree.
+  // The main agent lands this (single merge from the live branch) after a green return, then removes the worktree.
   integrationBranch,
+  integrationWorktree,  // the isolated worktree holding the assembled branch; main agent removes it after landing
   ledger,
   concurrentItems: concurrent.length,
   serialItems: serialItems.length,

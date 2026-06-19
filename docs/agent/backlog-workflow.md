@@ -458,7 +458,7 @@ Two shapes:
 - A chain item that turns out to be a **decision/fork** (not a clean build) breaks the cascade at that link — **stop rule 4**. Its successors stay blocked behind it; surface the fork and stop. (So a chain of `type: decision` items is *not* a cascade batch — those are Tier-B, discussed one at a time.)
 - The **budget** still caps total cost and a **red gate** still halts before the next link — so a long chain can neither run away nor paper over a failure.
 
-**Throughput order across the modes:** **`--parallel`** (independent, concurrent) > **serial pack** (independent, sequential) > **cascade** (dependent, sequential). Cascade can't have the parallel speedup — the items are chained by construction — so it trades that for the thing that actually matters here: running the whole chain unattended in one session instead of as a string of one-item handoffs.
+**Throughput order across the modes:** **`--parallel`** (reached via **`/workflow`**; independent, concurrent) > **serial pack** (the **`/batch`** default; independent, sequential) > **cascade** (dependent, sequential). Cascade can't have the parallel speedup — the items are chained by construction — so it trades that for the thing that actually matters here: running the whole chain unattended in one session instead of as a string of one-item handoffs.
 
 ### The stop rule — solid by construction
 
@@ -547,6 +547,8 @@ Every carry-forward line carries one **drop-reason** (`taken` / `blocked-in-fact
 ### Calibrating the budget — fold each session back into the estimate
 
 The budget is only as good as `capacityPoints`, and a fixed guess goes stale (the seed was extrapolated from one batch). So **at the end of a batch session, record what actually happened** and let it correct the estimate. This is the feedback loop the count cap never had — with no count cap, the budget *must* learn what a session really fits.
+
+> **Calibration is SERIAL `/batch` only — never `/workflow` (parallel).** The whole mechanism maps a context-% reading → points resolved, which holds *only when the main loop does the work*. A `/workflow` batch resolves its points in **subagent contexts** (the worktree lanes), so the orchestrator's context-% measures only pack/plan/land overhead and is **decoupled** from throughput — a reading there is meaningless and pollutes the mean. So under `/workflow` (parallel): **skip calibration entirely** — no context-% ask, no `calibrate` call. Its ceiling is the token/agent budget, not context. Everything below applies to the serial `/batch` path.
 
 Run, once, at close-out (the **closing-session** skill does this automatically when a batch ran; do it by hand otherwise). The agent can't read the context meter, so the closure's **last line is always the one standard ask — `Context %? — for calibrate; skip if you can't read it.`** — verbatim, nothing longer. Rules baked into that line: never the `AskUserQuestion` popup (it's data, not a decision); never re-ask or block; if no reading comes back (the user may not see the meter either), **skip calibration** and move on. Then run:
 
