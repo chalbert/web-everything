@@ -172,3 +172,37 @@ When the ready pool has no provably-disjoint pair (everything touches the same s
 `--parallel` **degenerates to the serial batch** — that's correct, not a failure. The speed win only
 materializes when the batchable list genuinely spans independent subsystems; reliability is identical
 either way. Full design + rationale: backlog **#083 agent-file-lock-coordination**.
+
+### Execute phase runs on the Workflow tool (#1147)
+
+For `--parallel`, the **main loop still does the conversational part unchanged** — pack, plan, the single
+"go", the reserve, and the close-out/calibration. It then hands the **execute phase** to the `Workflow`
+tool, which enforces the five non-negotiables above deterministically:
+
+```
+Workflow({
+  scriptPath: ".claude/skills/batch-backlog-items/parallel-execute.workflow.js",
+  args: { batchSlug, budgetPoints, items: [ { num, slug, file, locus, cost, declaredFiles, blockedBy } … ] },
+})
+```
+
+The script (read its header for the full contract): per-item **effect-probe** (frontmatter files are a
+lower bound, so an agent predicts the real touch-set; low-confidence → forced serial) → pure-JS **partition**
+into a serial fallback lane + provably-disjoint parallel lanes → `parallel()` **lane agents in
+`isolation:'worktree'`** that gate locally with `check:standards --local --files=…` (#1144) → a serial
+**integrate** loop that merges clean lanes one at a time, runs the **full** gate per merge, and **replays a
+conflicted/red lane serially** (the JS loop's single thread is the merge mutex) → regenerates **derived
+artifacts once** at the end. It returns a ledger the main loop folds into the standard closure block.
+
+**What the registry split (#1145/#1146) changed:** shared registries are now per-entry files
+(`src/_data/<reg>/<id>.json`), so a lane that adds/edits a registry entry just writes its OWN file — disjoint,
+merges clean, **no integrator-applied manifest**. The lane **effects-manifest** is therefore narrow: it only
+covers what a lane must *not* commit itself — **derived artifacts** (`AGENTS.md`, `referenceIndex.json`,
+regenerated once by the integrator) and rare edits to a still-**monolithic** low-churn registry
+(projects/capabilities/adapters/capabilityMatrix/designSystems), which the integrator applies serially.
+
+> **Validation status:** the orchestrator script is structurally verified (parses as a Workflow body, schemas
+> valid, sandbox-safe — no fs/`child_process`/`Date`). It has **not** yet been exercised by a live multi-lane
+> run (that needs a real `--parallel` batch spanning independent subsystems, which mutates worktrees). Treat
+> the first real `--parallel` run as the live validation; until then `--parallel` degrading to serial is the
+> safe expectation.
