@@ -3,9 +3,12 @@ type: idea
 workItem: story
 size: 3
 parent: "1040"
-status: open
+status: resolved
 blockedBy: ["1087"]
 dateOpened: "2026-06-19"
+dateStarted: "2026-06-19"
+dateResolved: "2026-06-19"
+graduatedTo: docs/agent/block-standard.md
 tags: []
 ---
 
