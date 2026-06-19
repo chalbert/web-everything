@@ -98,6 +98,10 @@ const LANE_RESULT_SCHEMA = {
       },
     },
     branch: { type: 'string', description: 'the git branch/worktree ref holding this lane\'s commits, for the integrator to merge.' },
+    changedFiles: {
+      type: 'array', items: { type: 'string' },
+      description: 'EVERY repo-relative file this lane actually changed (git diff --name-only against the base). Used to surface files touched by more than one lane — the residual silent-merge risk a human should eyeball.',
+    },
     derivedArtifacts: {
       type: 'array', items: { type: 'string' },
       description: 'derived files this lane WOULD have regenerated but deliberately did NOT (AGENTS.md, src/_data/referenceIndex.json) — the integrator regenerates once.',
@@ -223,8 +227,9 @@ function laneAgentPrompt(laneId, laneItems) {
     `• Commit each resolved item's own files inside this worktree (git add <explicit paths>; never -A; never`,
     `  push). Resolve only after its local gate is green.`,
     ``,
-    `Report the branch ref holding your commits, each item's status, derivedArtifacts you deferred, and any`,
-    `monolithEdits. Return ONLY the structured object.`,
+    `Report: the branch ref holding your commits, each item's status, the full list of files you changed`,
+    `(changedFiles = git diff --name-only against the base — used to flag files touched by >1 lane),`,
+    `derivedArtifacts you deferred, and any monolithEdits. Return ONLY the structured object.`,
   ].join('\n');
 }
 
@@ -238,23 +243,37 @@ const laneResults = await parallel(parallelLanes.map((laneItems, idx) => () =>
 ));
 
 // ── Phase 3 — Integrate: merge clean lanes ONE AT A TIME, full gate per merge, replay on conflict ─
+// SAFETY (#1147 refinement): ALL of this happens on a throwaway INTEGRATION BRANCH off HEAD — the
+// workflow NEVER writes the user's live working branch. It returns the integration branch ref; the main
+// agent does the single landing merge after the workflow returns green (smallest possible write-window on
+// the shared branch, a natural abort point, and any concurrent-session divergence handled by ONE merge).
 phase('Integrate');
 
 const ledger = [];
 let conflictsReplayed = 0;
+const integrationBranch = `batch-parallel/${batchSlug}`;
 
-// 3a. The serial fallback lane runs FIRST, directly on the main branch (no worktree) — it is the safe
-// baseline the parallel lanes merge on top of. Delegated to one agent that works it as an ordinary serial
-// batch segment.
+// 3.0 — Cut the integration branch off the current HEAD. Everything below works on it.
+await agent(
+  `Create and switch to a throwaway integration branch "${integrationBranch}" off the current HEAD ` +
+  `(git switch -c ${integrationBranch}). This branch is where the whole parallel batch is assembled; the ` +
+  `user's live working branch must stay untouched. Just create+switch and confirm. Never push.`,
+  { label: 'integrate:setup', phase: 'Integrate' },
+).catch(() => null);
+
+// 3a. The serial fallback lane runs FIRST, on the INTEGRATION branch (no worktree) — the safe baseline the
+// parallel lanes merge on top of. Delegated to one agent that works it as an ordinary serial batch segment.
 if (serialLane.length > 0) {
-  log(`Serial fallback lane: working ${serialLane.length} item(s) directly on the integration branch…`);
+  log(`Serial fallback lane: working ${serialLane.length} item(s) on the integration branch…`);
   const serial = await agent(
     [
-      `You are the SERIAL segment of a parallel batch (slug ${batchSlug}). Work these items one-after-another`,
-      `on the CURRENT branch (no worktree), full single-item arc each, gating + committing per item exactly`,
-      `like a normal serial batch: ${serialLane.map((e) => `#${e.num} (${e.slug})`).join(' → ')}.`,
+      `You are the SERIAL segment of a parallel batch (slug ${batchSlug}), working on the integration branch`,
+      `"${integrationBranch}" (already checked out; no worktree). Work these items one-after-another, full`,
+      `single-item arc each, gating + committing per item exactly like a normal serial batch:`,
+      `${serialLane.map((e) => `#${e.num} (${e.slug})`).join(' → ')}.`,
       `These were placed here because they could not be PROVEN independent. Use the full whole-repo gate`,
-      `(npm run check:standards) before each resolve. Return the structured lane result.`,
+      `(npm run check:standards) before each resolve. Commit per item on this branch (never push). Return the`,
+      `structured lane result (include changedFiles).`,
     ].join(' '),
     { label: 'serial-lane', phase: 'Integrate', schema: LANE_RESULT_SCHEMA },
   ).catch(() => null);
@@ -329,15 +348,33 @@ if (derived.size > 0) {
   if (regen && regen.gate === 'red') log('Derived-artifact regen left the gate RED — surface this at close-out; do not mark the batch clean.');
 }
 
+// 3d. Surface files touched by MORE THAN ONE lane — the residual silent-merge risk (a clean merge that's
+// semantically wrong). git already flags textual conflicts; this flags the files where two lanes' changes
+// COULD interact even when the merge was clean, so the close-skill audit (and a human) can eyeball them.
+// After #1145/#1146 this list is usually empty (per-entry registries make lane changesets disjoint).
+const fileLaneCount = new Map();
+const allLaneResults = [...laneResults, /* serial lane is on-branch, its files can't cross-lane-conflict */];
+for (const lr of allLaneResults) {
+  if (!lr || !Array.isArray(lr.changedFiles)) continue;
+  for (const f of new Set(lr.changedFiles)) fileLaneCount.set(f, (fileLaneCount.get(f) || 0) + 1);
+}
+const multiLaneFiles = [...fileLaneCount.entries()].filter(([, n]) => n > 1).map(([f]) => f);
+if (multiLaneFiles.length > 0) {
+  log(`⚠ ${multiLaneFiles.length} file(s) were changed by more than one lane — eyeball for a silent clean-but-wrong merge: ${multiLaneFiles.join(', ')}`);
+}
+
 const resolved = ledger.filter((l) => l.status === 'resolved');
 const spent = resolved.reduce((s, l) => s + (Number(l.cost) || 0), 0);
-log(`Parallel batch execute complete: ${resolved.length}/${ledger.length} resolved, ${conflictsReplayed} lane(s) replayed serially, ${spent}/${budgetPoints} points.`);
+log(`Parallel batch assembled on ${integrationBranch}: ${resolved.length}/${ledger.length} resolved, ${conflictsReplayed} lane(s) replayed serially, ${multiLaneFiles.length} multi-lane file(s), ${spent}/${budgetPoints} points. The MAIN AGENT now lands ${integrationBranch} onto the live branch.`);
 
 return {
+  // The workflow never touched the live branch. The main agent lands this (single merge) after a green return.
+  integrationBranch,
   ledger,
   lanes: parallelLanes.length,
   serialItems: serialLane.length,
   conflictsReplayed,
+  multiLaneFiles,       // files touched by >1 lane — the close-skill audit surfaces these for a human glance
   derivedRegenerated,
   pointsSpent: spent,
   budgetPoints,
