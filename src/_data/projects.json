@@ -49,7 +49,7 @@
     "id": "webcontexts",
     "name": "Web Contexts",
     "description": "Protocol enabling hierarchical data flow and service provision across component trees, effectively solving prop-drilling natively.",
-    "status": "concept",
+    "status": "poc",
     "category": "standard",
     "icon": "/assets/icons/webcontexts.svg",
     "isSvg": true
@@ -58,7 +58,7 @@
     "id": "webstates",
     "name": "Web States",
     "description": "Standard primitives for observability and state management (signals, stores, and schemas).",
-    "status": "concept",
+    "status": "poc",
     "category": "standard",
     "icon": "/assets/icons/webstates.svg",
     "isSvg": true
@@ -235,7 +235,7 @@
     "id": "webguards",
     "name": "Web Guards",
     "description": "Standard for <strong>guarding a region's lifecycle against a predicate</strong>: a policy attached to a region (document, route, modal, element), evaluated at a lifecycle event, whose deny-branch resolves to a member-specific outcome. The predicate is resolved by a swappable <strong>guard provider</strong> (native-first default &rarr; project override &rarr; custom plug), so swapping a policy engine leaves the guarded surface untouched. Generalizes navigation/exit guards (unsaved-state) and access control (authorization) onto one provider seam.",
-    "status": "concept",
+    "status": "poc",
     "category": "standard",
     "icon": "/assets/icons/webguards.svg",
     "isSvg": true
@@ -253,7 +253,7 @@
     "id": "weblifecycle",
     "name": "Web Lifecycle",
     "description": "Standard for a <strong>domain entity's lifecycle</strong>: a declared <strong>status set</strong> with <strong>guarded, role-scoped transitions</strong> and a canonical status presentation. A loan, a policy, a claim, an order, a ticket &mdash; each is a state machine (<code>draft &rarr; submitted &rarr; &hellip; &rarr; closed</code>) whose legal moves depend on the actor and on guard predicates. The transition map is declarative; <em>whether</em> an actor may fire a transition is delegated to a <strong>guard provider</strong> (Web Guards), and each transition is an observable event other standards (audit, reporting) compose on. Distinct from Web States (reactive state <em>primitives</em>) and from a region's lifecycle (Web Guards): this is the <em>domain object's</em> workflow state.",
-    "status": "concept",
+    "status": "poc",
     "category": "standard",
     "icon": "/assets/icons/weblifecycle.svg",
     "isSvg": true
@@ -262,7 +262,7 @@
     "id": "webaudit",
     "name": "Web Audit",
     "description": "Standard for an <strong>immutable, actor-attributed history</strong> of consequential actions on a domain entity &mdash; who did what, when, and before&rarr;after. Every state transition, cleared condition, accepted/rejected document, and issued decision is recorded append-only and surfaced as a queryable <strong>timeline</strong>. It fixes the <strong>AuditEvent</strong> schema and a swappable <strong>audit provider</strong> (in-memory, event-sourced, or an OSCAL backend behind one seam), and <em>composes</em>: a lifecycle (Web Lifecycle) transition becomes one audit event automatically. Distinct from Web States change-tracking (reactive, transient mutation observation) and from Web Compliance's enforcement-evidence trail (the platform twin, same schema, different subject): this is the <em>domain object's</em> operational record.",
-    "status": "concept",
+    "status": "poc",
     "category": "standard",
     "icon": "/assets/icons/webaudit.svg",
     "isSvg": true
@@ -271,7 +271,7 @@
     "id": "webdecisions",
     "name": "Web Decisions",
     "description": "Standard for an <strong>explainable, reproducible decision record</strong> &mdash; <em>why</em> a rules/criteria evaluation reached its outcome. For each criterion: its input, operator, threshold, and the outcome it contributed, aggregated into a finding against a <strong>versioned ruleset</strong> the record carries so the explanation replays. A schema-only interchange contract: the <strong>DecisionRecord</strong> shape <em>is</em> the lock (no provider) &mdash; an underwriting engine, an eligibility engine, a pricing or moderation engine all emit the same record, so Web Reporting and Web Compliance consume any of them and audit-trail logs each as one event. Distinct from the rule <em>engine + proof</em> machinery (proof-of-compliance, #093), from Web Validation (form-field invalidity), and from Web Traces (execution spans): this is the <em>decision's explanation artifact</em>.",
-    "status": "concept",
+    "status": "poc",
     "category": "standard",
     "icon": "/assets/icons/webdecisions.svg",
     "isSvg": true
@@ -280,7 +280,7 @@
     "id": "webtheme",
     "name": "Web Theme",
     "description": "Standard for the <strong>concrete-value layer</strong> of a design system &mdash; the primitive scales (spacing, radius, elevation, type ramp, color palette) and per-component overrides that the semantic <a href=\"/projects/webintents/\">Web Intents</a> (density, surface, typography, motion, theme-color) resolve into. Authored and interchanged as <strong>DTCG 2025.10</strong> (the stable W3C design-token format &mdash; the one legitimate Protocol here, adopted not coined) and compiled to the <strong>native CSS runtime</strong>: custom properties + <code>@property</code>, with <code>light-dark()</code>/<code>color-scheme</code> for schemes and relative-color/<code>color-mix()</code> for derived accent scales, validated against WCAG/APCA per step. Ships a <strong>complete default token set</strong>; a consuming project overrides via <code>extends</code> rather than authoring from scratch. A <strong>3-tier</strong> taxonomy (primitive &middot; semantic &middot; component) where the <em>semantic</em> tier stays owned by the intents &mdash; no parallel vocabulary. Distinct from Web Intents (the UX-&ldquo;what&rdquo;): Web Theme supplies the values that &ldquo;what&rdquo; points into.",
-    "status": "concept",
+    "status": "poc",
     "category": "standard",
     "icon": "/assets/icons/webtheme.svg",
     "isSvg": true
@@ -352,7 +352,7 @@
     "id": "webworkflows",
     "name": "Web Workflows",
     "description": "Standard for a <strong>workflow</strong> &mdash; a set of smaller UX intents arranged in <strong>directed progression toward one goal</strong> (<code>checkout = collect-address &rarr; pay &rarr; confirm</code>), with threaded state, a single completion criterion, and one current position. The missing <strong>third composition mode</strong> (after simultaneous and cross-cutting): <em>directed/temporal</em> composition of step-intents. It defines the <strong>Workflow Protocol</strong> &mdash; the orchestration graph (steps + transitions + guards + parallel/fork-join + completion) as a portable, data-defined SCXML-style interchange, resolved by a swappable <strong>CustomWorkflowEngine</strong> registry (XState, SCION, a hand-rolled switch plug in behind it), emitting a step-transition event. The UX (current position, per-step status, register) is the <a href=\"/intents/flow-progress/\">Flow Progress intent</a>; the concrete wizard is a Block. Distinct sibling of <a href=\"/projects/weblifecycle/\">Web Lifecycle</a>: a workflow is the user's ephemeral traversal (process orchestration, may occupy many states), not a persisted entity's status (an FSM, one state). Graduated from <a href=\"/backlog/634-meta-intent-workflow-as-composable-intent/\">#634</a> (A / A ratified); subsumes <a href=\"/backlog/369-collection-operations-coordinator/\">#369</a>.",
-    "status": "concept",
+    "status": "poc",
     "category": "standard",
     "icon": "/assets/icons/webworkflows.svg",
     "isSvg": true
