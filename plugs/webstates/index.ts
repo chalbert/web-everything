@@ -29,3 +29,15 @@ export type {
   CustomChangeStrategy,
   Disposable,
 } from './CustomChangeStrategy';
+
+export {
+  LocalStorageStrategy,
+  IndexedDBStrategy,
+  nativeStoragePersistence,
+  pickStorageStrategy,
+} from './CustomStorageStrategy';
+export type {
+  CustomStorageStrategy,
+  StoragePersistence,
+  StorageBulkOp,
+} from './CustomStorageStrategy';
