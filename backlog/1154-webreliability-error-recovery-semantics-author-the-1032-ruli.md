@@ -85,9 +85,11 @@ const handler = new CircuitBreakerHandler(
 registry.register(handler);
 ```
 
-A protocol-level `'continue'` outcome was rejected (#1032 Fork 3): it expresses only flat
-fallthrough (try A, else B), never this nesting — so it cannot represent the load-bearing
-Polly regime. Held as a documented promotion path for flat escalation only.
+An optional `'continue'` outcome is **not** authored now (#1032 Fork 3): it expresses only flat
+fallthrough (try A, then B), never this nesting — so it cannot represent the load-bearing Polly
+regime, which the composite handles. It is **not rejected**, though — it's a *deferred, app-opt-in*
+capability for the *different* need of flat escalation, to add (additively, backward-compatibly)
+only when a real app demonstrates it. Do **not** add it in this build.
 
 ### Page reconciliation checklist (we:src/_includes/project-webreliability.njk)
 - Flip the **'Error classification'** row ([njk:52](../src/_includes/project-webreliability.njk#L52)) from `✅ handler` to "normalized disposition output (contract) + raw classification (handler)".
