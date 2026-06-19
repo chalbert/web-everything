@@ -7,7 +7,7 @@ dateOpened: '2026-06-01'
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"
 graduatedTo: none
-codifiedIn: "docs/agent/platform-decisions.md#compose-dont-handroll"
+codifiedIn: "docs/agent/platform-decisions.md#project-protocol-bar"
 preparedDate: "2026-06-11"
 tags:
   - dropdown

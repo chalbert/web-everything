@@ -12,7 +12,7 @@ dateOpened: "2026-06-18"
 dateStarted: "2026-06-18"
 dateResolved: "2026-06-18"
 graduatedTo: none
-codifiedIn: "docs/agent/platform-decisions.md#we-fui-embed-boundary"
+codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"
 preparedDate: "2026-06-18"
 tags: [webdocs, block-explorer, adapters, polyglot]
 ---

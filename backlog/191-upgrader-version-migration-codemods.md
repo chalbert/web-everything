@@ -10,7 +10,7 @@ preparedDate: "2026-06-12"
 blockedBy: ["266", "094", "102"]
 dateResolved: "2026-06-13"
 graduatedTo: none
-codifiedIn: "docs/agent/platform-decisions.md#guard-gate"
+codifiedIn: "one-off"
 tags: [upgrader, codemod, migration, spec-versioning, breaking-change, machine-readable]
 relatedProject: webadapters
 relatedReport: reports/2026-06-12-upgrader-version-migration-codemods.md

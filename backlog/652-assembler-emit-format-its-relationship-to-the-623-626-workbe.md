@@ -8,7 +8,7 @@ dateOpened: "2026-06-14"
 dateStarted: "2026-06-15"
 dateResolved: "2026-06-15"
 graduatedTo: none
-codifiedIn: "docs/agent/platform-decisions.md#compose-dont-handroll"
+codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"
 preparedDate: "2026-06-15"
 relatedProject: webdocs
 relatedReport: reports/2026-06-15-assembler-recipe-emit-prior-art.md

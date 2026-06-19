@@ -8,7 +8,7 @@ dateOpened: "2026-06-15"
 dateStarted: "2026-06-16"
 dateResolved: "2026-06-16"
 graduatedTo: none
-codifiedIn: "docs/agent/platform-decisions.md#compose-dont-handroll"
+codifiedIn: "one-off"
 tags: [requirement-as-code, meta-schema, bdd, conformance, webcases, evergreen]
 crossRef: { url: /backlog/100-requirement-as-code/, label: "Requirement-as-code (#100)" }
 relatedReport: reports/2026-06-16-requirement-meta-schema-prior-art.md

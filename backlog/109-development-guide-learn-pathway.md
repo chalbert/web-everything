@@ -7,7 +7,7 @@ dateOpened: "2026-06-06"
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"
 graduatedTo: none
-codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"
+codifiedIn: "one-off"
 preparedDate: "2026-06-11"
 tags: [development-guide, guidance, opinionated, technical-configurator, learn-pathway, plateau-app, decision-support, philosophy, webdocs, one-source-many-views]
 relatedReport: reports/2026-06-11-development-guide-learn-pathway.md

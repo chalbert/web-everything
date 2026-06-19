@@ -9,7 +9,7 @@ dateOpened: "2026-06-17"
 dateStarted: "2026-06-17"
 dateResolved: "2026-06-17"
 graduatedTo: none
-codifiedIn: "docs/agent/platform-decisions.md#compose-dont-handroll"
+codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"
 preparedDate: "2026-06-17"
 tags: [webdocs, block-explorer, adapters, polyglot, boundary, decision]
 relatedProject: webdocs

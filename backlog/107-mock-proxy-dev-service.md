@@ -7,7 +7,7 @@ dateOpened: "2026-06-06"
 dateStarted: "2026-06-11"
 dateResolved: "2026-06-11"
 graduatedTo: none
-codifiedIn: "docs/agent/platform-decisions.md#constellation-placement"
+codifiedIn: "docs/agent/platform-decisions.md#surface-contract-not-computation"
 tags: [mocks, proxy, dev-server, contract-testing, http, plateau, tooling, dx, standard]
 relatedReport: reports/2026-06-11-mock-proxy-dev-service.md
 preparedDate: "2026-06-11"

@@ -1,9 +1,9 @@
 ---
 type: idea
 workItem: epic
-size: 13
 status: open
 dateOpened: "2026-06-19"
+relatedReport: reports/2026-06-19-backlog-split-analysis.md
 tags: []
 ---
 
