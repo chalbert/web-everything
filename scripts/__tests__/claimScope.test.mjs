@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   emptyClaimState, parseClaims, serializeClaims, pruneExpiredClaims,
   porcelainFiles, recordClaim, baselineFor, mineFiles,
-  findingFiles, classifyFinding, partitionFindings,
+  findingFiles, classifyFinding, partitionFindings, partitionLocal,
   claimedIdsFor, partitionById,
 } from '../readiness/claimScope.mjs';
 
@@ -121,6 +121,34 @@ describe('claimScope — claim-time baseline + finding attribution (#952, #949)'
       const { mine, external } = partitionById(findings, mineIds);
       expect(mine.map((f) => f.id ?? f.project)).toEqual([957, 'webdocs']);
       expect(external.map((f) => f.id)).toEqual([999]);
+    });
+  });
+
+  // #1144: check:standards --local [--files=<list>] — per-lane gating for the parallel-batch orchestrator (#1147).
+  describe('partitionLocal (file-isolation axis, #1144)', () => {
+    const mineFile = { descriptor: { file: 'backlog/100-a.md' }, message: 'mine' };
+    const otherFile = { descriptor: { file: 'backlog/200-b.md' }, message: 'other' };
+    const multiFile = { descriptor: { files: ['backlog/100-a.md', 'backlog/200-b.md'] }, message: 'multi' };
+    const pathless = { message: 'global — dup id, no owning file' }; // GLOBAL/RELATIONAL
+
+    it('--files: blocks on findings touching my files, demotes other-file; path-less stays blocking (fail-safe)', () => {
+      const fileSet = new Set(['backlog/100-a.md']);
+      const { blocking, demoted } = partitionLocal([mineFile, otherFile, multiFile, pathless], { fileSet, local: false });
+      expect(blocking.map((f) => f.message)).toEqual(['mine', 'multi', 'global — dup id, no owning file']);
+      expect(demoted.map((f) => f.message)).toEqual(['other']);
+    });
+
+    it('--local --files: also demotes the path-less global (a lane cannot cause a cross-lane invariant)', () => {
+      const fileSet = new Set(['backlog/100-a.md']);
+      const { blocking, demoted } = partitionLocal([mineFile, otherFile, pathless], { fileSet, local: true });
+      expect(blocking.map((f) => f.message)).toEqual(['mine']);
+      expect(demoted.map((f) => f.message)).toEqual(['other', 'global — dup id, no owning file']);
+    });
+
+    it('--local alone (no file list): every file-attributable finding blocks; only path-less globals demote', () => {
+      const { blocking, demoted } = partitionLocal([mineFile, otherFile, pathless], { local: true });
+      expect(blocking.map((f) => f.message)).toEqual(['mine', 'other']);
+      expect(demoted.map((f) => f.message)).toEqual(['global — dup id, no owning file']);
     });
   });
 });

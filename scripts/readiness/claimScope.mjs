@@ -193,3 +193,36 @@ export function partitionFindings(findings, mineSet) {
   }
   return { blocking, external };
 }
+
+/**
+ * Per-lane local gating (backlog #1144, consumed by the parallel-batch orchestrator #1147). Partitions
+ * findings for `check:standards --local [--files=<list>]` into `{ blocking, demoted }`:
+ *
+ *   - `fileSet` (an explicit file list — the `--files` sibling of `--scope`'s claim baseline): a finding
+ *     BLOCKS iff at least one of its files is in the set; a finding on OTHER files is demoted to a note.
+ *   - `local` (the `--local` flag): a path-less / cross-entity finding — a GLOBAL/RELATIONAL invariant
+ *     (dup ids, the blockedBy cycle walk, registry joins) with no single owning file — is demoted rather
+ *     than kept fail-safe. Rationale: a lane runs in its OWN git worktree and cannot see sibling lanes, so
+ *     those invariants only become real at MERGE, where the full no-flag gate is the authority. A lane must
+ *     not red on a global it cannot have caused.
+ *
+ * The default (no `--local`) keeps the fail-safe stance — a path-less finding stays blocking — matching
+ * `partitionFindings`. With no `fileSet` (i.e. `--local` alone), every file-attributable finding blocks and
+ * only the path-less globals are demoted. Pure; mirrors `partitionFindings` on the file-isolation axis.
+ */
+export function partitionLocal(findings, { fileSet = null, local = false } = {}) {
+  const blocking = [];
+  const demoted = [];
+  for (const f of findings) {
+    const files = findingFiles(f);
+    if (fileSet) {
+      if (files.some((x) => fileSet.has(x))) blocking.push(f);        // attributable to my files → blocks
+      else if (files.length > 0) demoted.push(f);                     // another file → note
+      else (local ? demoted : blocking).push(f);                      // path-less global → note iff --local
+    } else {
+      // `--local` with no file list: keep every file-attributable finding, demote only path-less globals.
+      (files.length > 0 ? blocking : demoted).push(f);
+    }
+  }
+  return { blocking, demoted };
+}

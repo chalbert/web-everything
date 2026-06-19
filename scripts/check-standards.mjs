@@ -7,6 +7,15 @@
  * (and humans) can't silently let documentation drift from code.
  *
  * Run: `npm run check:standards`  (exits 1 on any error; warnings don't fail)
+ *
+ * Flags (all leave the default no-flag whole-repo-strict run untouched — CI / close-out unchanged):
+ *   --json                machine-readable failure feed (#095/#196)
+ *   --scope=<session>     block only on THIS session's files vs its claim baseline (#952) — concurrent batching
+ *   --local [--files=…]   per-lane gating for the parallel-batch orchestrator (#1144/#1147): `--files=<comma|space
+ *                         list>` scopes the blocking set to findings on those files; `--local` additionally
+ *                         demotes path-less GLOBAL/RELATIONAL findings (dup ids, the blockedBy cycle walk,
+ *                         registry joins) to notes — a lane in its own worktree can't cause a cross-lane
+ *                         invariant, so those are the MERGE gate's job, not the lane's.
  */
 import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -14,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join, relative } from 'node:path';
 import { createRequire } from 'node:module';
 import { renderInventory, spliceInventory } from './gen-inventory.mjs';
-import { parseClaims, mineFiles, porcelainFiles, partitionFindings } from './readiness/claimScope.mjs';
+import { parseClaims, mineFiles, porcelainFiles, partitionFindings, partitionLocal } from './readiness/claimScope.mjs';
 import { checkDemos } from './check-demos.mjs';
 import { buildReport, source as reportSource, finding as reportFinding, section as reportSection } from './lib/buildReport.mjs';
 import { loadBlocks } from './lib/blocks-loader.cjs';
@@ -986,12 +995,37 @@ if (scopeSession) {
   }
 }
 
+// ── Local / per-lane gating (#1144, consumed by the parallel-batch orchestrator #1147) ─────────
+// `--files=<comma|space list>` scopes the BLOCKING set to findings attributable to those files — an
+// explicit-list sibling of `--scope` (which derives the set from a session's claim baseline). `--local`
+// additionally demotes path-less GLOBAL/RELATIONAL findings (dup ids, the blockedBy cycle walk, registry
+// joins) to non-failing notes: a lane runs in its OWN worktree and cannot see sibling lanes, so those
+// invariants only become real at MERGE, where the full no-flag gate is the authority. Combined,
+// `--local --files=<lane files>` blocks ONLY on the lane's own file-isolation findings. Applied AFTER
+// `--scope` so the two compose (scope demotes concurrent sessions' files; --files/--local narrows further).
+const filesArg = process.argv.find((a) => a.startsWith('--files='));
+const LOCAL_MODE = process.argv.includes('--local');
+let localNote = null;
+let list = null;
+if (filesArg || LOCAL_MODE) {
+  list = filesArg
+    ? filesArg.split('=').slice(1).join('=').split(/[\s,]+/).map((s) => s.trim()).filter(Boolean)
+    : null;
+  const fileSet = list ? new Set(list) : null;
+  const { blocking, demoted } = partitionLocal(errors, { fileSet, local: LOCAL_MODE });
+  externalErrors = [...externalErrors, ...demoted]; // demoted globals/other-file reds print as notes
+  errors.length = 0; errors.push(...blocking);
+  const scopeDesc = fileSet ? `${fileSet.size} file(s)` : 'file-attributable findings only';
+  localNote = `${LOCAL_MODE ? '--local ' : ''}${filesArg ? `--files=${list.join(',')} ` : ''}— scoped to ${scopeDesc}; ${demoted.length} finding(s) demoted to notes.`;
+}
+
 // ── Report ────────────────────────────────────────────────────────────────────
 const summary = {
   blocks: blocks.length, plugs: plugs.length, protocols: protocols.length, intents: intents.length,
   capabilities: capabilities.length, terms: semantics.length, research: research.length, backlog: backlog.length,
   errors: errors.length, warnings: warnings.length,
   ...(scopeSession ? { scope: scopeSession, externalErrors: externalErrors.length } : {}),
+  ...(filesArg || LOCAL_MODE ? { local: LOCAL_MODE, files: list ?? null, externalErrors: externalErrors.length } : {}),
 };
 
 if (JSON_MODE) {
@@ -1027,6 +1061,7 @@ if (JSON_MODE) {
   const RED = '\x1b[31m', YEL = '\x1b[33m', GRN = '\x1b[32m', CYN = '\x1b[36m', DIM = '\x1b[2m', RST = '\x1b[0m';
   console.log(`${DIM}check-standards — Web Everything${RST}`);
   if (scopeNote) console.log(`${CYN}  scope${RST} ${DIM}${scopeNote}${RST}`);
+  if (localNote) console.log(`${CYN}  local${RST} ${DIM}${localNote}${RST}`);
   for (const w of warnings) console.log(`${YEL}  warn${RST} ${w.message}`);
   for (const e of externalErrors) console.log(`${DIM}  note (external) ${e.message}${RST}`);
   for (const e of errors) console.log(`${RED} error${RST} ${e.message}`);
