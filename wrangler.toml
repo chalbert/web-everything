@@ -1,0 +1,16 @@
+# Cloudflare Pages config for the public WE site (#1137 / #1135 ratification: Cloudflare Pages + Pages Function gate).
+#
+# Pages serves the Eleventy build output (`_site/`) as the static root and runs `functions/_middleware.js`
+# in front of it (the phase-1 shared-code gate). The actual deploy is a credentialed step (see
+# functions/README.md) — this file is the committed, credential-free configuration.
+
+name = "web-everything"
+pages_build_output_dir = "_site"
+compatibility_date = "2026-06-19"
+
+# Secrets are NOT stored here — set them on the Pages project (dashboard or `wrangler pages secret put`):
+#   GATE_CODE            — the shared phase-1 entry code the splash form checks.
+#   GATE_COOKIE_SECRET   — HMAC key signing the "remember me" cookie.
+#
+# Phase-3 (per-person codes) adds a Workers KV binding here; phase-5 (login) adds a Cloudflare Access app.
+# The phase-1 deploy needs neither.
